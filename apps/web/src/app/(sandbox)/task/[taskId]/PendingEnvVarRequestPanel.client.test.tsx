@@ -39,6 +39,13 @@ const {
       key: string;
       variables: Array<{
         name: string;
+        purpose?: string;
+        credentialAccess?: {
+          operation: 'read' | 'write';
+          scope: string;
+          permissions?: string[];
+          documentationUrl?: string;
+        };
       }>;
     } | null,
   },
@@ -322,6 +329,40 @@ describe('PendingEnvVarRequestPanel', () => {
     expect(
       screen.queryByRole('button', { name: 'Save' }),
     ).not.toBeInTheDocument();
+  });
+
+  it('shows exact credential access guidance and supports legacy requests', () => {
+    requestState.data = {
+      key: 'request-guidance',
+      variables: [
+        {
+          name: 'VERCEL_TOKEN',
+          purpose: 'Deploy the preview build',
+          credentialAccess: {
+            operation: 'write',
+            scope: 'Team Acme, project storefront',
+            permissions: ['project:write', 'deployment:write'],
+            documentationUrl: 'https://vercel.com/docs/accounts/create-a-team',
+          },
+        },
+        { name: 'PORT' },
+      ],
+    };
+
+    renderPanel();
+
+    expect(screen.getByText('Deploy the preview build')).toBeInTheDocument();
+    expect(screen.getByText('Write')).toBeInTheDocument();
+    expect(
+      screen.getByText('Team Acme, project storefront'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('project:write, deployment:write'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: 'Provider documentation' }),
+    ).toHaveAttribute('href', 'https://vercel.com/docs/accounts/create-a-team');
+    expect(screen.getByPlaceholderText('Value for PORT')).toBeInTheDocument();
   });
 
   it('dismisses the request panel when the close button is clicked', () => {

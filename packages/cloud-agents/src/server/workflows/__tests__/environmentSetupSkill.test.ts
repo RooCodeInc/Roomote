@@ -93,6 +93,18 @@ describe('environment-setup guidance', () => {
     expect(skillContent).toContain(
       'do not add the secure `/setup` link yourself because the platform automatically accompanies that request with a standardized secure-entry link reply',
     );
+    expect(skillContent).toContain(
+      'include the exact read or write access and relevant resource scope',
+    );
+    expect(skillContent).toContain(
+      'research current provider documentation before including exact permission names',
+    );
+    expect(skillContent).toContain(
+      'disclose when the provider only offers broader access instead of inventing granular scopes',
+    );
+    expect(skillContent).toContain(
+      'Omit credential access metadata for noncredential variables.',
+    );
   });
 
   it('allows backend environments to complete from install and test validation', () => {

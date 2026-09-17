@@ -2,7 +2,7 @@ import {
   ACP_ENVELOPE_EVENT_TYPES,
   type TaskEnvVarRequestVariable,
   ENV_VAR_REQUEST_FULFILLED_CLIENT_MESSAGE_ID_PREFIX,
-  getRequestedDeploymentEnvVarNamesFromToolPayload,
+  getRequestedDeploymentEnvVarsFromToolPayload,
   isEnvVarRequestFulfillmentClientMessageId,
   asRecord,
   asString,
@@ -40,18 +40,18 @@ export function applyPendingTaskEnvVarEvent(
   event: PendingTaskEnvVarRequestEvent,
 ): PendingTaskEnvVarRequest | null {
   if (event.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolResult) {
-    const requestedNames = getRequestedDeploymentEnvVarNamesFromToolPayload(
+    const requestedVariables = getRequestedDeploymentEnvVarsFromToolPayload(
       event.payload,
     );
 
-    if (requestedNames.length === 0) {
+    if (requestedVariables.length === 0) {
       return pendingRequest;
     }
 
     return {
       key: getPendingTaskEnvVarRequestKey(event),
       ts: event.ts,
-      variables: requestedNames.map((name) => ({ name })),
+      variables: requestedVariables,
     };
   }
 
@@ -73,8 +73,7 @@ export function isPendingTaskEnvVarLifecycleEvent(event: {
 }): boolean {
   return (
     (event.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolResult &&
-      getRequestedDeploymentEnvVarNamesFromToolPayload(event.payload).length >
-        0) ||
+      getRequestedDeploymentEnvVarsFromToolPayload(event.payload).length > 0) ||
     (event.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt &&
       isEnvVarRequestFulfillmentClientMessageId(
         getPayloadClientMessageId(event.payload),

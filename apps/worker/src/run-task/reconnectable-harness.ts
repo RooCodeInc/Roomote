@@ -10,7 +10,7 @@ import {
   TaskEvent,
   asRecord,
   asString,
-  getRequestedDeploymentEnvVarNamesFromToolPayload,
+  getRequestedDeploymentEnvVarsFromToolPayload,
   isEnvVarRequestFulfillmentClientMessageId,
 } from '@roomote/types';
 
@@ -514,11 +514,11 @@ export class ReconnectableHarness
 
   private applyPendingEnvVarEnvelope(envelope: AcpPersistedEnvelope): void {
     if (envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolResult) {
-      const requestedNames = getRequestedDeploymentEnvVarNamesFromToolPayload(
+      const requestedVariables = getRequestedDeploymentEnvVarsFromToolPayload(
         asRecord(envelope.payload) ?? null,
       );
 
-      if (requestedNames.length === 0) {
+      if (requestedVariables.length === 0) {
         return;
       }
 
@@ -527,7 +527,7 @@ export class ReconnectableHarness
           asString(asRecord(envelope.payload)?.toolCallId) ??
           `env-var-request:${envelope.ts}`,
         ts: envelope.ts,
-        variables: requestedNames.map((name) => ({ name })),
+        variables: requestedVariables,
       };
       return;
     }

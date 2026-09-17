@@ -1390,7 +1390,10 @@ if (shouldRegisterEnvVarRequestTool()) {
       description:
         `Ask the ${PRODUCT_NAME} web dashboard for deployment environment variables without sending secret values through the transcript. ` +
         'Use this as soon as you know those variables are required, even before a command fails. ' +
-        `Only include the variable names. ${PRODUCT_NAME} will reload the running task environment after the values are saved when the task is still active.`,
+        'For credentials and tokens, specify the exact access needed: read or write, the relevant project/team/resource scope, exact provider permission names when verified, and optionally an HTTPS token-creation or documentation URL. ' +
+        'Research current provider documentation before naming permissions. Never invent permission names or imply granular tokens exist; when the provider only offers broader access, disclose that in the scope instead. ' +
+        'Omit credential access metadata for noncredential environment variables, and keep purpose concise when it adds useful context. ' +
+        `This guidance is informational and does not validate the submitted credential's actual permissions. ${PRODUCT_NAME} will reload the running task environment after the values are saved when the task is still active.`,
       inputSchema: {
         variables: createTaskEnvVarRequestBaseSchema.shape.variables,
       },
