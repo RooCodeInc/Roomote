@@ -796,7 +796,6 @@ describe('fast-agent integration broker', () => {
         name: 'add_reply_to_pull_request_comment',
         inputSchema: { type: 'object' },
       },
-      { name: 'create_gist', inputSchema: { type: 'object' } },
     ]);
 
     const integrations = await listFastAgentIntegrations({
@@ -815,17 +814,14 @@ describe('fast-agent integration broker', () => {
       'merge_pull_request',
       'add_issue_comment',
       'add_reply_to_pull_request_comment',
-      'create_gist',
     ]);
     expect(integrations[0]?.description).toContain(
       'use the native GitHub tools directly for pull request and issue edits',
     );
     expect(integrations[0]?.description).toContain(
-      'secret, link-accessible gist, not a private gist',
-    );
-    expect(integrations[0]?.description).toContain(
       'Follow the discovered native tool descriptions and schemas',
     );
+    expect(integrations[0]?.description).not.toContain('gist');
     expect(mocks.listMcpTools).toHaveBeenCalledWith({
       url: 'https://api.example.com/api/mcp-routing/github',
       headers: { Authorization: 'Bearer control-plane-token' },
