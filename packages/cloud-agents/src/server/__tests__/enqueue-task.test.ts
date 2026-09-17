@@ -263,6 +263,56 @@ describe('enqueueTask initiator stamping', () => {
     ).rejects.toThrow('linked user on the web surface');
   });
 
+  it('keeps shared and private Blank slate runs equivalent after privacy stamping', async () => {
+    const userId = await createUser();
+    const task = standardTaskInput({
+      payload: {
+        repo: NO_REPOSITORIES,
+        description: 'Compare Blank slate startup',
+      },
+    });
+    const shared = await launchFresh({
+      task,
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+    const privateRun = await launchFresh({
+      task,
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+      privacy: 'private',
+    });
+
+    const rows = await db.query.taskRuns.findMany({
+      where: inArray(taskRuns.id, [shared.id, privateRun.id]),
+      with: { task: true },
+    });
+    const byId = new Map(rows.map((row) => [row.id, row]));
+
+    expect(byId.get(shared.id)).toMatchObject({
+      status: RunStatus.Pending,
+      actingUserId: userId,
+      payload: expect.objectContaining({
+        repo: NO_REPOSITORIES,
+        description: 'Compare Blank slate startup',
+      }),
+      task: { privacy: 'shared', privateOwnerUserId: null },
+    });
+    expect(byId.get(privateRun.id)).toMatchObject({
+      status: RunStatus.Pending,
+      actingUserId: userId,
+      payload: expect.objectContaining({
+        repo: NO_REPOSITORIES,
+        description: 'Compare Blank slate startup',
+      }),
+      task: { privacy: 'private', privateOwnerUserId: userId },
+    });
+  });
+
   it.each(['slack', 'teams', 'telegram', 'discord'] as const)(
     'records %s as the authenticated user task-starting chat provider',
     async (surface) => {

@@ -31,6 +31,13 @@ import type { CredentialEgressLifecycle } from './lifecycle';
 const BOOTSTRAP_ADMISSION_DEADLINE_MS = 20 * 60_000;
 const BOOTSTRAP_POLL_MS = 500;
 
+export class CredentialEgressBootstrapRunInactiveError extends Error {
+  constructor() {
+    super('Credential egress bootstrap run is no longer active');
+    this.name = 'CredentialEgressBootstrapRunInactiveError';
+  }
+}
+
 /** Base URL every approved service is called through from this deployment's sandboxes. */
 export function resolveCredentialEgressApiProxyBaseUrl(env: {
   TRPC_URL: string;
@@ -115,7 +122,7 @@ export async function admitCredentialEgressApiProxy(
   // must still be live when the controller registers it.
   for (;;) {
     if (!(await deps.isRunActive(input.taskRun.id)))
-      throw new Error('Credential egress bootstrap run is no longer active');
+      throw new CredentialEgressBootstrapRunInactiveError();
     if (await deps.isBootstrapReady(input.taskRun.id, input.nonce)) break;
     if (deps.now() >= deadline)
       throw new Error('Credential egress bootstrap admission timed out');

@@ -47,6 +47,7 @@ import {
 } from './compute-providers/docker-sandbox-security';
 import { resolveFromWorkspaceRoot } from './repo-paths';
 import { findPersistedWorkerBootstrapRestarts } from './worker-bootstrap-restarts';
+import { CredentialEgressBootstrapRunInactiveError } from './credential-egress/api-proxy';
 
 type WorkerBootstrapExitDisposition = 'ignore' | 'restart' | 'failed';
 
@@ -595,7 +596,12 @@ export abstract class BaseController {
       `[BaseController] ❌ Error spawning ${taskRun.payloadKind} worker for task run #${taskRun.id}: ${errorMessage}`,
     );
 
-    await this.finishFailedTaskRun(taskRun, errorMessage, errorCode);
+    // Credential admission observes live run state. If it reports that another
+    // lifecycle path already settled the run, preserve that path's causal
+    // status and error instead of replacing it with this downstream symptom.
+    if (!(error instanceof CredentialEgressBootstrapRunInactiveError)) {
+      await this.finishFailedTaskRun(taskRun, errorMessage, errorCode);
+    }
 
     throw reportError;
   }

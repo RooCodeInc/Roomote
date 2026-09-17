@@ -130,6 +130,7 @@ vi.mock('../monitoring/sentry', () => ({
 
 import { BaseController } from '../BaseController';
 import { DockerBootError } from '../compute-providers/docker-sandbox-security';
+import { CredentialEgressBootstrapRunInactiveError } from '../credential-egress/api-proxy';
 
 // Create a concrete subclass for testing the abstract BaseController.
 class TestController extends BaseController {
@@ -283,6 +284,19 @@ describe('BaseController.handleSpawnTaskRunError', () => {
       status: RunStatus.Failed,
       error: 'Machine unavailable',
     });
+  });
+
+  it('preserves a run already settled before credential admission', async () => {
+    const job = makeTaskRun({ id: 42 });
+
+    await expect(
+      controller.testHandleSpawnTaskRunError(
+        job,
+        new CredentialEgressBootstrapRunInactiveError(),
+      ),
+    ).rejects.toThrow('Credential egress bootstrap run is no longer active');
+
+    expect(mockFinishRun).not.toHaveBeenCalled();
   });
 
   it('routes SnapshotEnvironment spawn failures through finishRun, which owns the snapshot pending→failed flip', async () => {
