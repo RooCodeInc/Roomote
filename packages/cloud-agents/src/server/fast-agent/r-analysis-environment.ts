@@ -2,6 +2,17 @@ import {
   R_BIOCONDUCTOR_RECIPE_CATALOG_ID,
   type EnvironmentConfig,
 } from '@roomote/types';
+import type { RoutableEnvironment } from '../available-environments';
+
+export function isConfiguredEnvironmentId(
+  environmentId: string | null | undefined,
+  environments: RoutableEnvironment[],
+): environmentId is string {
+  return Boolean(
+    environmentId &&
+    environments.some((environment) => environment.id === environmentId),
+  );
+}
 
 export function isCompatibleRAnalysisEnvironment(
   environment: { isVerified: boolean; config: EnvironmentConfig },

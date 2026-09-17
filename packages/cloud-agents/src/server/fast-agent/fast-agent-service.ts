@@ -117,8 +117,14 @@ import {
 } from './fast-agent-constants';
 import { buildFastAgentUserContentBlocks } from './fast-agent-content-blocks';
 import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
-import { inspectRAnalysisScript } from './r-analysis-preflight';
-import { isCompatibleRAnalysisEnvironment } from './r-analysis-environment';
+import {
+  inspectRAnalysisScript,
+  parseRAttachmentText,
+} from './r-analysis-preflight';
+import {
+  isCompatibleRAnalysisEnvironment,
+  isConfiguredEnvironmentId,
+} from './r-analysis-environment';
 import {
   enqueueUserPersonalizationUpdate,
   resolveFastAgentPersonalizationContext,
@@ -1766,10 +1772,7 @@ function resolveRAnalysisPreflight(input: {
   };
 } {
   const attachment = input.attachmentTexts
-    .map((text) => {
-      const match = /^Attachment:\s*([^\n]+\.R)\s*\n([\s\S]*)$/iu.exec(text);
-      return match ? { filename: match[1]!, source: match[2]! } : null;
-    })
+    .map(parseRAttachmentText)
     .find((value) => value !== null);
   if (!attachment) return {};
 
@@ -4785,11 +4788,16 @@ export async function answerFastAgentQuestion({
                     'Only deployment administrators can start environment verification.',
                 };
               }
-              if (!args.environmentId) {
+              if (
+                !isConfiguredEnvironmentId(
+                  args.environmentId,
+                  availableEnvironments,
+                )
+              ) {
                 return {
                   success: false,
                   error:
-                    'environmentId is required for environment verification.',
+                    'A configured environmentId is required for environment verification.',
                 };
               }
             }

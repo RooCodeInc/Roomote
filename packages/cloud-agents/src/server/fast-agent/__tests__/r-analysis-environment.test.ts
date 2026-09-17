@@ -8,7 +8,10 @@ import {
   type EnvironmentConfig,
 } from '@roomote/types';
 
-import { isCompatibleRAnalysisEnvironment } from '../r-analysis-environment';
+import {
+  isCompatibleRAnalysisEnvironment,
+  isConfiguredEnvironmentId,
+} from '../r-analysis-environment';
 
 const config: EnvironmentConfig = {
   name: 'R analysis',
@@ -52,5 +55,21 @@ describe('isCompatibleRAnalysisEnvironment', () => {
     expect(
       isCompatibleRAnalysisEnvironment({ isVerified: true, config }, ['edgeR']),
     ).toBe(false);
+  });
+});
+
+describe('isConfiguredEnvironmentId', () => {
+  const environments = [
+    { id: 'env-1', name: 'R analysis', repositoryNames: [] },
+  ];
+
+  it('accepts only a real configured environment id', () => {
+    expect(isConfiguredEnvironmentId('env-1', environments)).toBe(true);
+    expect(
+      isConfiguredEnvironmentId('__all_repositories__', environments),
+    ).toBe(false);
+    expect(isConfiguredEnvironmentId('__no_repositories__', environments)).toBe(
+      false,
+    );
   });
 });

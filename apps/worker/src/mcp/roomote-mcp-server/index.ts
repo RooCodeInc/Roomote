@@ -60,6 +60,7 @@ import { handleSendMessage } from './send-message.js';
 import { handleListTaskModels } from './list-models.js';
 import {
   handleCreateEnvironment,
+  handlePreviewEnvironment,
   handleRecordVerification,
   handleUpdateEnvironment,
 } from './create-environment.js';
@@ -1109,10 +1110,10 @@ roomoteMcpServer.registerTool(
   'manage_environments',
   {
     title: 'Manage Environments',
-    description: `Create or update ${PRODUCT_NAME} environments, or record an environment verification result.`,
+    description: `Preview, create, or update ${PRODUCT_NAME} environments, or record an environment verification result. Create/update require explicit user approval for the exact previewed proposal; admin authorization remains separate.`,
     inputSchema: {
       action: z
-        .enum(['create', 'update', 'record_verification'])
+        .enum(['preview', 'create', 'update', 'record_verification'])
         .describe('The environment action to perform'),
       definition: z
         .string()
@@ -1154,6 +1155,12 @@ roomoteMcpServer.registerTool(
         .describe(
           'For "record_verification" with success=false: a short, user-safe failure message. Never include secrets or full environment YAML.',
         ),
+      approvedProposalHash: z
+        .string()
+        .optional()
+        .describe(
+          'For create/update: exact proposalHash returned by preview after the user explicitly approved that proposal. A changed definition requires a new preview and approval.',
+        ),
     },
     annotations: {
       readOnlyHint: false,
@@ -1185,6 +1192,19 @@ roomoteMcpServer.registerTool(
       );
     }
 
+    if (params.action === 'preview') {
+      if (params.definition === undefined) {
+        return errorResult('definition is required for action "preview"');
+      }
+      return handlePreviewEnvironment({
+        definition: params.definition,
+        format: params.format,
+        name: params.name,
+        description: params.description,
+        environmentId: params.environmentId,
+      });
+    }
+
     if (params.definition === undefined) {
       return errorResult(
         `definition is required for action "${params.action}"`,
@@ -1199,6 +1219,7 @@ roomoteMcpServer.registerTool(
           format: params.format,
           name: params.name,
           description: params.description,
+          approvedProposalHash: params.approvedProposalHash,
         },
         config,
       );
@@ -1210,6 +1231,7 @@ roomoteMcpServer.registerTool(
         format: params.format,
         name: params.name,
         description: params.description,
+        approvedProposalHash: params.approvedProposalHash,
       },
       config,
     );
