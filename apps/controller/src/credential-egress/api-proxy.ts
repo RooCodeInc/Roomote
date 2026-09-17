@@ -134,9 +134,6 @@ export async function admitCredentialEgressApiProxy(
     provider: input.provider,
     resume: input.resume ?? false,
   });
-  if (outcome.status === 'skipped' && outcome.reason === 'run_not_eligible') {
-    throw new CredentialEgressBootstrapRunInactiveError();
-  }
   if (outcome.status !== 'registered')
     throw new Error('Credential egress admission is no longer eligible');
 

@@ -536,6 +536,27 @@ describe('finishRun', () => {
     expect(mockCleanupSandboxOidcTargetsForTaskRun).not.toHaveBeenCalled();
   });
 
+  it('runs terminal side effects when the guarded finalization wins', async () => {
+    mockFindFirstRun.mockResolvedValue(makeRun());
+    mockDbUpdateWhere.mockReturnValueOnce({
+      returning: vi.fn().mockResolvedValue([{ id: 1 }]),
+    });
+
+    await expect(
+      finishRun({
+        id: 1,
+        status: RunStatus.Failed,
+        error: 'credential admission failed',
+        preserveExistingOutcome: true,
+      }),
+    ).resolves.toEqual({ outcome: 'finalized' });
+
+    expect(mockRecordTaskRunLifecycleEvent).toHaveBeenCalledOnce();
+    expect(mockTerminateCredentialEgress).toHaveBeenCalledOnce();
+    expect(mockNotifySourceRunOnSettle).toHaveBeenCalledOnce();
+    expect(mockCleanupSandboxOidcTargetsForTaskRun).toHaveBeenCalledWith(1);
+  });
+
   it('refreshes finalized metadata on a custom automation Slack result', async () => {
     const task = {
       initiatorKind: 'automation',
