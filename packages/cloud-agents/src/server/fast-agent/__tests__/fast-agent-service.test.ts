@@ -10903,6 +10903,43 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(activity.settle).toHaveBeenCalledWith({ keepProcessing: true });
   });
 
+  it('restores processing when a message resumes a soft-stopped task', async () => {
+    mocks.getActiveTasks.mockResolvedValue([
+      { taskId: 'task-1', title: 'Checkout', status: 'running' },
+    ]);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’ll restart it with that update.',
+        });
+        await invokeTool(nativeToolNames.stopTask, {
+          taskId: 'task-1',
+          userInitiated: false,
+        });
+        await invokeTool(nativeToolNames.sendTaskMessage, {
+          taskId: 'task-1',
+          message: 'Continue with the updated requirement.',
+        });
+        return '';
+      },
+    );
+    const activity = {
+      start: vi.fn(),
+      settle: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn().mockResolvedValue(undefined),
+    };
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter: callbacks({ activity }),
+    });
+
+    expect(mocks.sendTaskMessage).toHaveBeenCalledOnce();
+    expect(activity.settle).toHaveBeenCalledWith({ keepProcessing: true });
+  });
+
   it('silently ignores optional human reaction input through the existing native tool', async () => {
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {

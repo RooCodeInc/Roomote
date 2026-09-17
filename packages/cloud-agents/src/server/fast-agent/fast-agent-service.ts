@@ -4857,8 +4857,8 @@ export async function answerFastAgentQuestion({
                   attachmentTexts,
                 })
               : args.message;
-            return await taskMessageGuard.send(taskId, args, () =>
-              sendFastAgentTaskMessage(
+            return await taskMessageGuard.send(taskId, args, async () => {
+              const result = await sendFastAgentTaskMessage(
                 { userId, apiBaseUrl },
                 {
                   taskId,
@@ -4867,8 +4867,10 @@ export async function answerFastAgentQuestion({
                     ? { images }
                     : {}),
                 },
-              ),
-            );
+              );
+              if (result.success) surfaceActiveTaskIds.add(taskId);
+              return result;
+            });
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.cancelTask: {
