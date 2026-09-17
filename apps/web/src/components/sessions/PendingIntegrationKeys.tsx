@@ -10,7 +10,7 @@ import {
   openIntegrationKeyDialog,
 } from './integration-key-dialog';
 
-export interface OpenIntegrationKeyRequest {
+interface OpenIntegrationKeyRequest {
   /** Event id of the request; a new id refetches the approvals. */
   eventId: string;
   /** The approval that request created, when the tool output named it. */
