@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto';
 
-import { buildFastAgentArtifactCreator } from '@roomote/sdk/server';
+import {
+  buildFastAgentSetupEventTurnId,
+  buildFastAgentArtifactCreator,
+  enqueueFastAgentParentEvent,
+} from '@roomote/sdk/server';
 import { buildFastAgentSetupAdapter } from '@roomote/cloud-agents/server';
 import {
   and,
@@ -204,21 +208,6 @@ async function persistSetupSessionReceipt(
   // renders this receipt, while model/OpenCode compatibility history remains
   // authoritative structured setup events only.
   return inserted.length > 0;
-}
-
-function buildSetupEventTurnId(input: {
-  sessionId: string;
-  workflowVersion: number;
-  kind: SetupPlatformEventKind;
-  fingerprint: string;
-}): string {
-  const digest = createHash('sha256')
-    .update(
-      `${input.sessionId}:v${input.workflowVersion}:${input.kind}:${input.fingerprint}`,
-    )
-    .digest('hex')
-    .slice(0, 24);
-  return `setup:${input.kind}:${digest}`;
 }
 
 function buildSetupSnapshot(input: {
@@ -526,6 +515,7 @@ function buildSetupTurnContext(
   return {
     sessionId: conversation.sessionId,
     fastConversationId: conversation.fastConversationId,
+    workflowVersion: conversation.workflowVersion,
     setupSnapshot,
     starterTaskOptions: SETUP_STARTER_TASKS.map((task) => ({
       id: task.id,
@@ -749,8 +739,36 @@ export async function scheduleSetupPlatformEvent(
 ): Promise<{ scheduled: boolean }> {
   const turn = await buildSetupPlatformEventTurn(auth, input);
   if (!turn) return { scheduled: false };
-  scheduleWebFastAgentTurn(turn);
+  await enqueueDurableWebPlatformEventTurn(turn);
   return { scheduled: true };
+}
+
+async function enqueueDurableWebPlatformEventTurn(
+  turn: Parameters<typeof scheduleWebFastAgentTurn>[0],
+): Promise<void> {
+  if (!turn.durableSessionId || !turn.setupContext || !turn.currentMessageId) {
+    throw new Error('A setup platform event requires durable turn context.');
+  }
+  await enqueueFastAgentParentEvent({
+    parent: {
+      sessionId: turn.durableSessionId,
+      conversation: turn.delivery.conversation,
+    },
+    event: {
+      type: 'human_follow_up',
+      eventId: turn.currentMessageId,
+      currentMessageId: turn.currentMessageId,
+      userId: turn.userId,
+      question: turn.question,
+      turnSource: 'platform_event',
+      platformEventKind: turn.platformEventKind ?? 'setup',
+      ...(turn.platformEventVisibility
+        ? { platformEventVisibility: turn.platformEventVisibility }
+        : {}),
+      setupSession: true,
+      setupContext: turn.setupContext,
+    },
+  });
 }
 
 async function buildSetupPlatformEventTurn(
@@ -776,7 +794,7 @@ async function buildSetupPlatformEventTurn(
   const launchTask = (
     await import('@roomote/cloud-agents/server')
   ).createFastAgentWebTaskLauncher({ userId: auth.userId });
-  const currentMessageId = buildSetupEventTurnId({
+  const currentMessageId = buildFastAgentSetupEventTurnId({
     sessionId: conversation.sessionId,
     workflowVersion: conversation.workflowVersion,
     kind: input.kind,
@@ -850,7 +868,7 @@ async function reconcileMissedInitialCapabilityOffer(
   if (!capability || !snapshot.capabilities[capability]?.canOffer) return;
 
   const fingerprint = `v${conversation.workflowVersion}:${capability}`;
-  const correctionTurnId = buildSetupEventTurnId({
+  const correctionTurnId = buildFastAgentSetupEventTurnId({
     sessionId: conversation.sessionId,
     workflowVersion: conversation.workflowVersion,
     kind: 'capability_milestone_correction',
@@ -1176,7 +1194,7 @@ export async function reconcileSetupPlatformEvents(
     },
     { conversation, setupSnapshot },
   );
-  if (turn) scheduleWebFastAgentTurn(turn);
+  if (turn) await enqueueDurableWebPlatformEventTurn(turn);
   return setupCompleted;
 }
 

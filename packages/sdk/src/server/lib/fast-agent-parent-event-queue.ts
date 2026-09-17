@@ -4,15 +4,19 @@ import { Queue } from 'bullmq';
 
 import {
   acquireFastAgentTurnLock,
+  buildFastAgentUserContentBlocks,
   findFastAgentDurableRetryScheduledError,
 } from '@roomote/cloud-agents/server';
 import {
+  allocateFastAgentConversationSequence,
   and,
   asc,
   count,
   db,
+  type DatabaseOrTransaction,
   eq,
   fastAgentParentEvents,
+  fastAgentMessages,
   gt,
   isNull,
   lt,
@@ -25,10 +29,16 @@ import {
 } from '@roomote/db/server';
 import { getRedis } from '@roomote/redis';
 import {
+  ACP_ENVELOPE_EVENT_TYPES,
+  FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY,
+  FAST_AGENT_EVENT_SEMANTICS_VERSION,
   RunStatus,
+  buildFastAgentInputSemantics,
   exitedRunStatuses,
+  parseFastAgentCapabilitySnapshot,
   type FastAgentParent,
   type FastAgentHumanFollowUpEvent,
+  type FastAgentEventSemantics,
 } from '@roomote/types';
 
 import {
@@ -45,6 +55,22 @@ export type FastAgentParentEventQueueRequest = {
   conversationId: string;
   eventKey: string;
 };
+
+export function buildFastAgentSetupEventTurnId(input: {
+  sessionId: string;
+  workflowVersion?: number;
+  kind: string;
+  fingerprint: string;
+}): string {
+  const version = input.workflowVersion
+    ? `v${input.workflowVersion}`
+    : 'legacy';
+  const digest = createHash('sha256')
+    .update(`${input.sessionId}:${version}:${input.kind}:${input.fingerprint}`)
+    .digest('hex')
+    .slice(0, 24);
+  return `setup:${input.kind}:${digest}`;
+}
 
 function buildSetupDiscoveryCompletedEvent(
   event: FastAgentHumanFollowUpEvent,
@@ -84,6 +110,69 @@ function buildSetupDiscoveryCompletedEvent(
       setupSnapshot: JSON.stringify(nextSnapshot),
     },
   };
+}
+
+async function buildSetupCapabilityCorrectionEvent(
+  event: FastAgentHumanFollowUpEvent,
+): Promise<FastAgentHumanFollowUpEvent | null> {
+  const context = event.setupContext;
+  if (!context) return null;
+  const snapshot = parseFastAgentCapabilitySnapshot(context.setupSnapshot);
+  const capability = snapshot?.recommendedNextCapability;
+  if (!capability || !snapshot.capabilities[capability]?.canOffer) return null;
+
+  const correctionTurnId = buildFastAgentSetupEventTurnId({
+    sessionId: context.sessionId,
+    ...(context.workflowVersion
+      ? { workflowVersion: context.workflowVersion }
+      : {}),
+    kind: 'capability_milestone_correction',
+    fingerprint: context.workflowVersion
+      ? `v${context.workflowVersion}:${capability}`
+      : capability,
+  });
+  const rows = await db.query.fastAgentMessages.findMany({
+    where: eq(fastAgentMessages.conversationId, context.fastConversationId),
+    columns: { eventType: true, payload: true, turnId: true },
+  });
+  const alreadyHandled = rows.some(
+    (row) =>
+      (row.eventType === ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer &&
+        row.payload?.capability === capability) ||
+      row.turnId === correctionTurnId,
+  );
+  if (alreadyHandled) return null;
+
+  return {
+    type: 'human_follow_up',
+    eventId: correctionTurnId,
+    currentMessageId: correctionTurnId,
+    userId: event.userId,
+    question: `<platform_event>${JSON.stringify({
+      type: 'capability_milestone_correction',
+      capability,
+      reason:
+        'The applicable initial capability was not presented or resolved in the previous turn.',
+    })}</platform_event>`,
+    turnSource: 'platform_event',
+    platformEventKind: 'setup',
+    platformEventVisibility: 'required',
+    setupSession: true,
+    setupContext: context,
+  };
+}
+
+async function enqueueSetupCapabilityCorrectionIfMissed(params: {
+  parent: FastAgentParent;
+  event: FastAgentHumanFollowUpEvent | null;
+}): Promise<void> {
+  if (!params.event) return;
+  const correction = await buildSetupCapabilityCorrectionEvent(params.event);
+  if (!correction) return;
+  await enqueueFastAgentParentEvent({
+    parent: params.parent,
+    event: correction,
+  });
 }
 type FastAgentPullRequestOpenedEvent = Extract<
   FastAgentParentEvent,
@@ -180,6 +269,204 @@ function wakeFastAgentParentEvent(request: FastAgentParentEventQueueRequest) {
   });
 }
 
+function parseEventDate(value: unknown, fallback: Date): Date {
+  if (typeof value !== 'string') return fallback;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? fallback : parsed;
+}
+
+function buildCanonicalEventSemantics(params: {
+  parent: FastAgentParent;
+  event: FastAgentParentEvent;
+  observedAt: Date;
+}): FastAgentEventSemantics {
+  const { event, parent, observedAt } = params;
+  const base = {
+    schemaVersion: FAST_AGENT_EVENT_SEMANTICS_VERSION,
+    observedAt: observedAt.toISOString(),
+    sourceEventId: buildEventClientMessageSeed(event),
+  } as const;
+  switch (event.type) {
+    case 'human_follow_up': {
+      // One rule decides what a Session input claims, shared with the turn
+      // that persists its own input, so admission and execution cannot
+      // disagree about the same row.
+      return buildFastAgentInputSemantics({
+        sessionId: parent.sessionId,
+        observedAt,
+        sourceEventId: base.sourceEventId,
+        platformEvent: event.turnSource === 'platform_event',
+        ...(event.turnSource === 'platform_event' &&
+        event.platformEventKind === 'setup'
+          ? {
+              setupSnapshot:
+                event.setupContext?.setupSnapshot ?? event.question,
+            }
+          : {}),
+      });
+    }
+    case 'scheduled_wakeup':
+      return {
+        ...base,
+        kind: 'historical_observation',
+        authority: 'roomote_runtime',
+        occurredAt: event.firedAt,
+        subject: { type: 'session_wakeup', id: event.wakeupId },
+        version: { scheme: 'monotonic_number', value: event.runNumber },
+      };
+    case 'automation_triggered':
+      return {
+        ...base,
+        kind: 'historical_observation',
+        authority: 'automation',
+        ...(event.launchClaimedAt ? { occurredAt: event.launchClaimedAt } : {}),
+        subject: { type: 'automation', id: event.automationId },
+      };
+    case 'child_message':
+      return {
+        ...base,
+        kind: 'historical_observation',
+        authority: 'delegated_task',
+        subject: { type: 'task_run', id: String(event.runId) },
+      };
+    case 'artifact_published':
+      return {
+        ...base,
+        kind: 'state_change',
+        authority: 'roomote_runtime',
+        subject: { type: 'artifact', id: event.artifact.id },
+        version: { scheme: 'monotonic_number', value: event.artifact.version },
+        state: `published:${event.artifact.version}`,
+      };
+    case 'task_settled':
+      return {
+        ...base,
+        kind: 'current_state_assertion',
+        authority: 'roomote_runtime',
+        subject: { type: 'task_run', id: String(event.runId) },
+        state: event.status,
+      };
+    case 'pull_request_opened':
+      return {
+        ...base,
+        // This records that a task opened or updated the pull request; it is
+        // not a claim about the PR's current status. That distinction is what
+        // keeps a merged or closed assertion authoritative even when a later
+        // task re-emits this event for the same PR, so no invented lifecycle
+        // version is needed here.
+        kind: 'state_change',
+        authority: 'source_control',
+        subject: { type: 'pull_request', id: event.pullRequest.url },
+        state: event.pullRequest.status ?? 'open',
+      };
+    case 'pull_request_feedback':
+      return {
+        ...base,
+        kind: 'historical_observation',
+        authority: 'source_control',
+        subject: { type: 'pull_request', id: event.pullRequest.url },
+        ...(event.reviewResult?.headSha
+          ? { version: { scheme: 'opaque', value: event.reviewResult.headSha } }
+          : {}),
+      };
+    case 'pull_request_status_changed':
+      return {
+        ...base,
+        kind: 'current_state_assertion',
+        authority: 'source_control',
+        subject: { type: 'pull_request', id: event.pullRequest.url },
+        state: event.status,
+      };
+    case 'pull_request_conflict_detected':
+      return {
+        ...base,
+        kind: 'current_state_assertion',
+        authority: 'source_control',
+        occurredAt: event.conflictDetectedAt,
+        observedAt: parseEventDate(
+          event.conflictDetectedAt,
+          observedAt,
+        ).toISOString(),
+        subject: { type: 'pull_request_conflict', id: event.pullRequest.url },
+        state: 'conflicting',
+      };
+  }
+}
+
+async function persistQueuedEventCanonicalInput(
+  tx: DatabaseOrTransaction,
+  params: { parent: FastAgentParent; event: FastAgentParentEvent },
+  admittedAt: Date,
+): Promise<void> {
+  const eventSeed = buildEventClientMessageSeed(params.event);
+  const turnId =
+    params.event.type === 'human_follow_up'
+      ? params.event.currentMessageId
+      : eventSeed;
+  const eventId = `${turnId}:user`;
+  const existing = await tx.query.fastAgentMessages.findFirst({
+    where: and(
+      eq(fastAgentMessages.conversationId, params.parent.sessionId),
+      eq(fastAgentMessages.eventId, eventId),
+    ),
+    columns: { id: true },
+  });
+  if (existing) return;
+  const observedAt =
+    params.event.type === 'scheduled_wakeup'
+      ? parseEventDate(params.event.firedAt, admittedAt)
+      : params.event.type === 'pull_request_conflict_detected'
+        ? parseEventDate(params.event.conflictDetectedAt, admittedAt)
+        : params.event.type === 'automation_triggered'
+          ? parseEventDate(params.event.launchClaimedAt, admittedAt)
+          : admittedAt;
+  const question =
+    params.event.type === 'human_follow_up'
+      ? params.event.question
+      : `<platform_event>${JSON.stringify(params.event)}</platform_event>`;
+  const semantics = buildCanonicalEventSemantics({
+    ...params,
+    observedAt,
+  });
+  await tx.insert(fastAgentMessages).values({
+    conversationId: params.parent.sessionId,
+    conversationSeq: await allocateFastAgentConversationSequence(
+      tx,
+      params.parent.sessionId,
+    ),
+    eventId,
+    turnId,
+    turnSeq: 0,
+    ts: observedAt.getTime(),
+    observedAt,
+    eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+    role: 'user',
+    contentBlocks: buildFastAgentUserContentBlocks(
+      question,
+      params.event.type === 'human_follow_up'
+        ? (params.event.images ?? [])
+        : [],
+    ),
+    metadata: {
+      visibleInTranscript:
+        params.event.type === 'human_follow_up' && !params.event.turnSource,
+      turnSource:
+        params.event.type === 'human_follow_up'
+          ? (params.event.turnSource ?? 'human')
+          : 'platform_event',
+      ...(params.event.type === 'human_follow_up' &&
+      params.event.platformEventKind
+        ? { platformEventKind: params.event.platformEventKind }
+        : params.event.type !== 'human_follow_up'
+          ? { platformEventKind: 'delegated_task' }
+          : {}),
+      [FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY]: semantics,
+    },
+    payload: {},
+    source: params.parent.conversation.surface,
+  });
+}
+
 /** Persist before acknowledging so child work never waits on the parent. */
 export async function enqueueFastAgentParentEvent(params: {
   parent: FastAgentParent;
@@ -187,16 +474,22 @@ export async function enqueueFastAgentParentEvent(params: {
   retryTaskStartRunId?: number;
 }): Promise<{ eventKey: string; queued: true }> {
   const eventKey = buildFastAgentParentEventKey(params);
-  await db
-    .insert(fastAgentParentEvents)
-    .values({
-      conversationId: params.parent.sessionId,
-      eventKey,
-      parent: params.parent,
-      event: params.event,
-      retryTaskStartRunId: params.retryTaskStartRunId,
-    })
-    .onConflictDoNothing({ target: fastAgentParentEvents.eventKey });
+  await db.transaction(async (tx) => {
+    const admittedAt = new Date();
+    await tx
+      .insert(fastAgentParentEvents)
+      .values({
+        conversationId: params.parent.sessionId,
+        eventKey,
+        parent: params.parent,
+        event: params.event,
+        retryTaskStartRunId: params.retryTaskStartRunId,
+        createdAt: admittedAt,
+        updatedAt: admittedAt,
+      })
+      .onConflictDoNothing({ target: fastAgentParentEvents.eventKey });
+    await persistQueuedEventCanonicalInput(tx, params, admittedAt);
+  });
 
   wakeFastAgentParentEvent({
     conversationId: params.parent.sessionId,
@@ -233,6 +526,7 @@ export async function enqueueFastAgentParentEventForRun(params: {
         event: params.event,
       })
       .onConflictDoNothing({ target: fastAgentParentEvents.eventKey });
+    await persistQueuedEventCanonicalInput(tx, params, new Date());
     return true;
   });
 
@@ -424,6 +718,10 @@ export async function drainFastAgentParentEvents(
         })
         .where(eq(fastAgentParentEvents.id, row.id));
 
+      const durableSetupEvent =
+        row.event.type === 'human_follow_up' && row.event.setupContext
+          ? row.event
+          : null;
       try {
         const retryTaskStart = await buildRetryTaskStart(
           row.retryTaskStartRunId,
@@ -433,10 +731,6 @@ export async function drainFastAgentParentEvents(
           conversationId: request.conversationId,
           eventKey: row.eventKey,
         };
-        const durableSetupEvent =
-          row.event.type === 'human_follow_up' && row.event.setupContext
-            ? row.event
-            : null;
         if (row.admission === 'inline') {
           // Bind the row to the lock the way the inline surfaces do, so a
           // process shutdown that aborts this turn before it reaches its own
@@ -492,6 +786,10 @@ export async function drainFastAgentParentEvents(
           },
           turnLock,
         );
+        await enqueueSetupCapabilityCorrectionIfMissed({
+          parent: row.parent,
+          event: durableSetupEvent,
+        });
         if (row.admission === 'inline') {
           // The resumed run settles its own row (delivered, or withdrawn
           // from replay before a terminal action), so nothing is written
@@ -523,6 +821,10 @@ export async function drainFastAgentParentEvents(
         const deliveryError =
           error instanceof FastAgentParentEventDeliveryError ? error : null;
         if (deliveryError?.replyPosted) {
+          await enqueueSetupCapabilityCorrectionIfMissed({
+            parent: row.parent,
+            event: durableSetupEvent,
+          });
           await finalizeAutomationLaunch(row.event, 'succeeded');
           await finalizeScheduledWakeup(row.event, 'succeeded');
           await markDelivered(row.id);

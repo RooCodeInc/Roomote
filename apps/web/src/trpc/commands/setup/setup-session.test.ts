@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   getStatus: vi.fn(),
   launchTask: vi.fn(),
   schedule: vi.fn(),
+  enqueue: vi.fn(),
   submit: vi.fn(),
   complete: vi.fn(),
 }));
@@ -21,6 +22,10 @@ vi.mock('@/lib/server/setup-funnel-telemetry', () => ({
 }));
 vi.mock('@roomote/sdk/server', () => ({
   buildFastAgentArtifactCreator: vi.fn(),
+  buildFastAgentSetupEventTurnId: vi.fn(
+    ({ kind, fingerprint }) => `setup:${kind}:${fingerprint}`,
+  ),
+  enqueueFastAgentParentEvent: mocks.enqueue,
   LINEAR_ORG_CONNECTION_ROLE: 'organization',
   persistFastAgentInlineHumanTurn: vi.fn().mockResolvedValue(null),
   resolveUserMcpServerConfigs: vi.fn().mockResolvedValue([]),
@@ -232,6 +237,10 @@ describe('optional setup integration discovery', () => {
       },
     }));
     mocks.complete.mockResolvedValue(true);
+    mocks.enqueue.mockImplementation(async ({ event }) => {
+      mocks.schedule(event);
+      return { eventKey: `queued:${event.eventId}`, queued: true };
+    });
   });
   afterEach(async () => {
     await db
@@ -377,7 +386,7 @@ describe('optional setup integration discovery', () => {
     ).toEqual(expect.any(String));
   });
 
-  it('launches each selected starter task once when the sandbox is ready', async () => {
+  it('queues each selected starter task once when the sandbox is ready', async () => {
     const state = await readState();
     state.setupSession!.integrationDiscoveryCompletedAt =
       '2026-01-01T00:00:00.000Z';
@@ -412,23 +421,17 @@ describe('optional setup integration discovery', () => {
       selectedIds: ['speed-up-ci', 'security-scan'],
     });
 
-    const setupTurn = mocks.schedule.mock.calls.find(([turn]) =>
-      turn.question.includes('starter_selection'),
-    )?.[0];
-    expect(setupTurn).toBeDefined();
+    const setupEvent = mocks.enqueue.mock.calls.find(([{ event }]) =>
+      event.question.includes('starter_selection'),
+    )?.[0].event;
+    expect(setupEvent).toBeDefined();
     const starterSelection = JSON.parse(
-      setupTurn!.question.replace(/<\/?platform_event>/g, ''),
+      setupEvent!.question.replace(/<\/?platform_event>/g, ''),
     ).changes.find(
       (change: { type: string }) => change.type === 'starter_selection',
     );
-    for (const task of starterSelection.starterTasks) {
-      await setupTurn!.delivery.adapter.launchTask({ prompt: task.prompt });
-    }
-    await mocks.after.mock.calls[0]![0]();
-
-    expect(mocks.launchTask).toHaveBeenCalledTimes(2);
-    expect(mocks.launchTask.mock.calls.map(([input]) => input.prompt)).toEqual(
-      SETUP_STARTER_TASKS.slice(0, 2).map((task) => task.prompt),
+    expect(starterSelection.starterTasks).toEqual(
+      SETUP_STARTER_TASKS.slice(0, 2),
     );
   });
 
@@ -1057,17 +1060,13 @@ describe('optional setup integration discovery', () => {
     );
   });
 
-  it('schedules one corrective milestone turn after an applicable offer is missed', async () => {
+  it('persists setup workflow identity for durable post-turn reconciliation', async () => {
     await reconcileSetupPlatformEvents(auth);
-    const initialTurn = mocks.schedule.mock.calls[0]![0];
-
-    await initialTurn.adapterExtensions.onTurnSettled();
-
-    expect(mocks.schedule).toHaveBeenCalledTimes(2);
-    expect(mocks.schedule.mock.calls[1]![0].question).toContain(
-      'capability_milestone_correction',
+    const initialEvent = mocks.enqueue.mock.calls[0]![0].event;
+    expect(initialEvent.question).toContain('setup_state_changed');
+    expect(initialEvent.setupContext).toEqual(
+      expect.objectContaining({ workflowVersion: expect.any(Number) }),
     );
-    expect(mocks.schedule.mock.calls[1]![0].question).toContain('integrations');
   });
 
   it('counts every selected launch call as attempted even when launches fail', async () => {

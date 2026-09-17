@@ -1,4 +1,4 @@
-import { RunStatus } from '@roomote/types';
+import { FAST_AGENT_CAPABILITY_IDS, RunStatus } from '@roomote/types';
 
 const mocks = vi.hoisted(() => {
   class DeliveryError extends Error {
@@ -25,6 +25,9 @@ const mocks = vi.hoisted(() => {
     updateWhere: vi.fn(),
     findPending: vi.fn(),
     findRun: vi.fn(),
+    findCanonical: vi.fn(),
+    findMessages: vi.fn(),
+    allocateSequence: vi.fn(),
     selectRows: vi.fn(),
     acquireLock: vi.fn(),
     releaseLock: Object.assign(vi.fn(), {
@@ -48,6 +51,7 @@ vi.mock('@roomote/redis', () => ({ getRedis: vi.fn(() => ({})) }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireLock,
+  buildFastAgentUserContentBlocks: (text: string) => [{ type: 'text', text }],
   findFastAgentDurableRetryScheduledError: (error: unknown) =>
     error instanceof Error &&
     error.name === 'FastAgentDurableRetryScheduledError'
@@ -60,6 +64,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 }));
 
 vi.mock('@roomote/db/server', () => ({
+  allocateFastAgentConversationSequence: mocks.allocateSequence,
   db: {
     insert: vi.fn(() => ({ values: mocks.insertValues })),
     transaction: mocks.transaction,
@@ -76,6 +81,10 @@ vi.mock('@roomote/db/server', () => ({
     })),
     query: {
       fastAgentParentEvents: { findFirst: mocks.findPending },
+      fastAgentMessages: {
+        findFirst: mocks.findCanonical,
+        findMany: mocks.findMessages,
+      },
       taskRuns: { findFirst: mocks.findRun },
     },
   },
@@ -106,6 +115,10 @@ vi.mock('@roomote/db/server', () => ({
     deliveredAt: 'delivered_at',
     discardedAt: 'discarded_at',
   },
+  fastAgentMessages: {
+    conversationId: 'fast_agent_messages.conversation_id',
+    eventId: 'fast_agent_messages.event_id',
+  },
   taskRuns: { id: 'task_runs.id', status: 'task_runs.status' },
 }));
 
@@ -124,6 +137,7 @@ vi.mock('./task-runs/fast-agent-startup-retry', () => ({
 
 import {
   buildFastAgentParentEventKey,
+  buildFastAgentSetupEventTurnId,
   drainFastAgentParentEvents,
   enqueueFastAgentParentEvent,
   enqueueFastAgentParentEventForRun,
@@ -186,10 +200,16 @@ describe('Fast parent event durable queue', () => {
     });
     mocks.insertOnConflict.mockResolvedValue(undefined);
     mocks.selectForUpdate.mockResolvedValue([{ status: RunStatus.Running }]);
+    mocks.findCanonical.mockResolvedValue(undefined);
+    mocks.findMessages.mockResolvedValue([]);
+    mocks.allocateSequence.mockResolvedValue(1);
     mocks.transaction.mockImplementation(
       async (callback: (tx: unknown) => unknown) =>
         callback({
           insert: vi.fn(() => ({ values: mocks.insertValues })),
+          query: {
+            fastAgentMessages: { findFirst: mocks.findCanonical },
+          },
           select: vi.fn(() => ({
             from: vi.fn(() => ({
               where: vi.fn(() => ({
@@ -223,6 +243,79 @@ describe('Fast parent event durable queue', () => {
     );
     await vi.waitFor(() => expect(errorSpy).toHaveBeenCalledOnce());
     errorSpy.mockRestore();
+  });
+
+  describe('canonical event semantics', () => {
+    function canonicalMetadata() {
+      const call = mocks.insertValues.mock.calls
+        .map(([values]) => values as { metadata?: Record<string, unknown> })
+        .find((values) => values?.metadata);
+      return call?.metadata?.fastAgentEventSemantics as
+        | {
+            kind: string;
+            authority: string;
+            version?: { scheme: string; value: unknown };
+            state?: string;
+          }
+        | undefined;
+    }
+
+    it.each([
+      ['pull_request_opened', pullRequestOpenedEvent],
+      [
+        'pull_request_status_changed',
+        {
+          type: 'pull_request_status_changed' as const,
+          taskId: 'child-task',
+          runId: 42,
+          taskUrl: 'https://roomote.example/task/child-task',
+          pullRequest: {
+            ...pullRequestOpenedEvent.pullRequest,
+            status: 'merged' as const,
+          },
+          status: 'merged' as const,
+          actorLogin: 'maintainer',
+        },
+      ],
+    ])(
+      'leaves %s unversioned so a later provider transition is never pinned',
+      async (_type, prEvent) => {
+        await enqueueFastAgentParentEvent({
+          parent,
+          event: prEvent as FastAgentParentEvent,
+        });
+
+        const semantics = canonicalMetadata();
+        expect(semantics?.authority).toBe('source_control');
+        // Providers expose no monotonic pull-request lifecycle version, so
+        // inventing one here would outrank a genuine reopen or draft return.
+        expect(semantics?.version).toBeUndefined();
+      },
+    );
+
+    it('keeps the monotonic run number a scheduled wakeup genuinely provides', async () => {
+      await enqueueFastAgentParentEvent({
+        parent,
+        event: {
+          type: 'scheduled_wakeup',
+          eventId: 'wakeup-1:3',
+          wakeupId: 'wakeup-1',
+          name: 'CI watch',
+          prompt: 'Check whether CI is green.',
+          runNumber: 3,
+          maxRuns: null,
+          firedAt: '2026-01-01T00:00:03.000Z',
+          nextRunAt: null,
+          reportPolicy: 'only_when_notable',
+          createdByUserId: 'user-1',
+        },
+      });
+
+      expect(canonicalMetadata()?.version).toEqual({
+        scheme: 'monotonic_number',
+        value: 3,
+      });
+    });
   });
 
   it('acknowledges durable admission without waiting for BullMQ', async () => {
@@ -852,6 +945,71 @@ describe('Fast parent event durable queue', () => {
         jobId: expect.any(String),
       }),
     );
+  });
+
+  it('durably reconciles a missed setup capability after recovery delivery', async () => {
+    const setupEvent = {
+      type: 'human_follow_up' as const,
+      eventId: 'setup-state-recovered',
+      currentMessageId: 'setup-state-recovered',
+      userId: 'user-1',
+      question:
+        '<platform_event>{"type":"setup_state_changed"}</platform_event>',
+      turnSource: 'platform_event' as const,
+      platformEventKind: 'setup' as const,
+      platformEventVisibility: 'required' as const,
+      setupSession: true,
+      setupContext: {
+        sessionId: parent.sessionId,
+        fastConversationId: parent.sessionId,
+        workflowVersion: 3,
+        setupSnapshot: JSON.stringify({
+          setupCompleted: false,
+          recommendedNextCapability: 'integrations',
+          capabilities: Object.fromEntries(
+            FAST_AGENT_CAPABILITY_IDS.map((capability) => [
+              capability,
+              {
+                canOffer: capability === 'integrations',
+                ready: false,
+              },
+            ]),
+          ),
+        }),
+        starterTaskOptions: [],
+      },
+    };
+    const row = pendingRow('setup-recovered', setupEvent);
+    mocks.findPending
+      .mockResolvedValueOnce(row)
+      .mockResolvedValueOnce(row)
+      .mockResolvedValueOnce(undefined);
+    mocks.findMessages.mockResolvedValueOnce([]);
+
+    await drainFastAgentParentEvents({
+      conversationId: parent.sessionId,
+      eventKey: row.eventKey,
+    });
+
+    expect(mocks.findMessages).toHaveBeenCalled();
+    const correctionTurnId = buildFastAgentSetupEventTurnId({
+      sessionId: parent.sessionId,
+      workflowVersion: 3,
+      kind: 'capability_milestone_correction',
+      fingerprint: 'v3:integrations',
+    });
+    expect(mocks.insertValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parent,
+        event: expect.objectContaining({
+          eventId: correctionTurnId,
+          currentMessageId: correctionTurnId,
+          question: expect.stringContaining('capability_milestone_correction'),
+          setupContext: expect.objectContaining({ workflowVersion: 3 }),
+        }),
+      }),
+    );
+    expect(mocks.updateWhere).toHaveBeenCalled();
   });
 
   it('leaves scheduled retries alone until their time', async () => {
