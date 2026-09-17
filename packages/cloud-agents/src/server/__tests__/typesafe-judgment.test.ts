@@ -211,13 +211,13 @@ describe('evaluateTypeSafeJudgments', () => {
     }));
     const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
       const body = JSON.parse(init.body as string) as {
-        state: { candidates: string[] };
+        state: { candidates: Record<string, string> };
       };
       return new Response(
         JSON.stringify({
           answers: Object.fromEntries(
-            body.state.candidates.map((text, index) => [
-              `c${index}`,
+            Object.entries(body.state.candidates).map(([key, text]) => [
+              key,
               { type: 'noul', noul: Number(text.split(' ')[1]) / 100 },
             ]),
           ),
