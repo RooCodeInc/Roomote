@@ -366,7 +366,7 @@ export interface McpAuthContext {
   runId?: number;
 }
 
-export interface McpProxyRequestContext {
+interface McpProxyRequestContext {
   /**
    * The tool the calling client is about to invoke, when it said so via
    * MCP_TOOL_INTENT_HEADER. Lets a proxy authorize `initialize` and
