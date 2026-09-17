@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {
+  encodeMcpToolIntent,
   formatErrorForLog,
   formatSingleLineLog,
   INTEGRATION_TOOL_LOOKUP_NO_EXPOSED_TOOLS_GUIDANCE,
@@ -10,6 +11,7 @@ import {
   INTEGRATION_TOOL_LOOKUP_PARTIALLY_UNAVAILABLE_GUIDANCE,
   INTEGRATION_TOOL_LOOKUP_TRUNCATED_GUIDANCE,
   matchIntegrationTools,
+  MCP_TOOL_INTENT_HEADER,
   parseMcpToolResult,
 } from '@roomote/types';
 import { z } from 'zod';
@@ -233,7 +235,21 @@ export async function callOnDemandIntegrationTool(
     );
   }
   try {
-    return await callTool(server, params.toolName, params.args ?? {});
+    const intent = encodeMcpToolIntent({
+      name: params.toolName,
+      arguments: params.args,
+    });
+    return await callTool(
+      {
+        ...server,
+        headers: {
+          ...server.headers,
+          ...(intent ? { [MCP_TOOL_INTENT_HEADER]: intent } : {}),
+        },
+      },
+      params.toolName,
+      params.args ?? {},
+    );
   } catch (error) {
     return errorResult(
       `${server.displayName} tool ${params.toolName} failed: ${error instanceof Error ? error.message : String(error)}`,

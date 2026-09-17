@@ -2,6 +2,8 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { decodeMcpToolIntent, MCP_TOOL_INTENT_HEADER } from '@roomote/types';
+
 import {
   callOnDemandIntegrationTool,
   findOnDemandIntegrationTools,
@@ -225,14 +227,20 @@ describe('on-demand integration tools', () => {
       callTool,
     );
     expect(result.content[0]?.text).toBe('{"matches":[]}');
-    expect(callTool).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: 'github',
-        headers: { Authorization: 'Bearer run-token' },
-      }),
-      'search_code',
-      { query: 'fast' },
-    );
+    const [server, toolName, args] = callTool.mock.calls[0] as unknown as [
+      OnDemandMcpCatalog['servers'][number],
+      string,
+      Record<string, unknown>,
+    ];
+    expect(server).toMatchObject({
+      name: 'github',
+      headers: { Authorization: 'Bearer run-token' },
+    });
+    expect(
+      decodeMcpToolIntent(server.headers?.[MCP_TOOL_INTENT_HEADER]),
+    ).toEqual({ name: 'search_code', arguments: { query: 'fast' } });
+    expect(toolName).toBe('search_code');
+    expect(args).toEqual({ query: 'fast' });
 
     const missing = parse(
       await callOnDemandIntegrationTool(
@@ -243,6 +251,36 @@ describe('on-demand integration tools', () => {
     );
     expect(missing.success).toBe(false);
     expect(callTool).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not replay a write when the transport outcome is ambiguous', async () => {
+    const callTool = vi.fn(async () => {
+      throw new Error('connection reset after request');
+    });
+
+    const result = parse(
+      await callOnDemandIntegrationTool(
+        catalog,
+        {
+          integrationId: 'github',
+          toolName: 'create_gist',
+          args: { filename: 'notes.md', content: '# Notes', public: false },
+        },
+        callTool,
+      ),
+    );
+
+    expect(result).toMatchObject({
+      success: false,
+      error: expect.stringContaining('connection reset after request'),
+    });
+    expect(callTool).toHaveBeenCalledOnce();
+    const [server] = callTool.mock.calls[0] as unknown as [
+      OnDemandMcpCatalog['servers'][number],
+    ];
+    expect(
+      decodeMcpToolIntent(server.headers?.[MCP_TOOL_INTENT_HEADER]),
+    ).toEqual({ name: 'create_gist' });
   });
 
   it('preserves an upstream MCP error result unchanged', async () => {
