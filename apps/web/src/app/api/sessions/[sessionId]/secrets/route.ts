@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { db, eq, sessions, users } from '@roomote/db/server';
+import {
+  db,
+  eq,
+  isDeploymentExperimentEnabled,
+  sessions,
+} from '@roomote/db/server';
 import { replyToFastSessionCommand } from '@/trpc/commands/fast-sessions';
 
 import {
@@ -9,7 +14,6 @@ import {
   revokeServiceCredential,
 } from '@roomote/sdk/server/service-credentials';
 import {
-  isServiceCredentialToolsExperimentEnabled,
   serviceCredentialCreateSchema,
   serviceCredentialRevokeSchema,
 } from '@roomote/types';
@@ -84,7 +88,7 @@ async function handle(
       const secret = await createServiceCredential(context, args.data);
       let resumed = false;
       try {
-        const [session, user] = await Promise.all([
+        const [session, serviceCredentialToolsEnabled] = await Promise.all([
           db.query.sessions.findFirst({
             where: eq(sessions.id, context.sessionId),
             columns: {
@@ -94,10 +98,7 @@ async function handle(
               archivedAt: true,
             },
           }),
-          db.query.users.findFirst({
-            where: eq(users.id, auth.userId),
-            columns: { metadata: true },
-          }),
+          isDeploymentExperimentEnabled('serviceCredentialTools'),
         ]);
         if (
           session?.fastConversationId &&
@@ -108,7 +109,7 @@ async function handle(
           await replyToFastSessionCommand(auth, {
             sessionId: session.fastConversationId,
             text: buildIntegrationSavedContinuation(
-              isServiceCredentialToolsExperimentEnabled(user?.metadata),
+              serviceCredentialToolsEnabled,
             ),
           });
           resumed = true;

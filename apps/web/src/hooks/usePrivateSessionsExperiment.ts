@@ -1,17 +1,10 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
-
-import { useTRPC } from '@/trpc/client';
+import { useDeploymentExperiment } from './useDeploymentExperiments';
 
 export function usePrivateSessionsExperiment() {
-  const trpc = useTRPC();
-  const experiment = useQuery(
-    trpc.miscSettings.privateSessionsExperiment.queryOptions(),
+  return useDeploymentExperiment(
+    'privateSessions',
+    'Failed to update Private Sessions.',
   );
-
-  return {
-    enabled: experiment.data === true,
-    isLoading: experiment.isPending,
-  };
 }

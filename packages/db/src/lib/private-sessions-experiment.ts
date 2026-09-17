@@ -1,46 +1,28 @@
-import { eq, sql } from 'drizzle-orm';
+import {
+  DEPLOYMENT_EXPERIMENT_METADATA_KEYS,
+  getDeploymentExperimentValues,
+} from '@roomote/feature-flags';
 
-import { db } from '../db';
-import { deploymentSettings } from '../schema';
-
-const DEFAULT_DEPLOYMENT_ID = 'default';
+import {
+  isDeploymentExperimentEnabled,
+  setDeploymentExperimentEnabled,
+} from './deployment-experiments';
 
 export const PRIVATE_SESSIONS_EXPERIMENT_METADATA_KEY =
-  'private_sessions_experiment_enabled';
+  DEPLOYMENT_EXPERIMENT_METADATA_KEYS.privateSessions;
 
 export function isPrivateSessionsExperimentEnabledInMetadata(
   metadata: unknown,
 ): boolean {
-  return (
-    Boolean(metadata) &&
-    typeof metadata === 'object' &&
-    !Array.isArray(metadata) &&
-    (metadata as Record<string, unknown>)[
-      PRIVATE_SESSIONS_EXPERIMENT_METADATA_KEY
-    ] === true
-  );
+  return getDeploymentExperimentValues(metadata).privateSessions;
 }
 
 export async function isPrivateSessionsExperimentEnabled(): Promise<boolean> {
-  const settings = await db.query.deploymentSettings.findFirst({
-    where: eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID),
-    columns: { metadata: true },
-  });
-  return isPrivateSessionsExperimentEnabledInMetadata(settings?.metadata);
+  return isDeploymentExperimentEnabled('privateSessions');
 }
 
 export async function setPrivateSessionsExperimentEnabled(
   enabled: boolean,
 ): Promise<void> {
-  const metadata = { [PRIVATE_SESSIONS_EXPERIMENT_METADATA_KEY]: enabled };
-  await db
-    .insert(deploymentSettings)
-    .values({ id: DEFAULT_DEPLOYMENT_ID, metadata, setupCompletedAt: null })
-    .onConflictDoUpdate({
-      target: deploymentSettings.id,
-      set: {
-        metadata: sql`${deploymentSettings.metadata} || ${JSON.stringify(metadata)}::jsonb`,
-        updatedAt: new Date(),
-      },
-    });
+  await setDeploymentExperimentEnabled('privateSessions', enabled);
 }

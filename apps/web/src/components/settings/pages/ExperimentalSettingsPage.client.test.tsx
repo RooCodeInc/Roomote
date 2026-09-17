@@ -4,25 +4,33 @@ const { refetchMock, state } = vi.hoisted(() => ({
   refetchMock: vi.fn(),
   state: {
     error: null as Error | null,
-    hasLoadedPreferences: true,
+    hasLoadedExperiments: true,
     isFetching: false,
-    isAdmin: false,
   },
 }));
 
-vi.mock('@/hooks/useUser', () => ({
-  useAuthorizedUser: () => ({ isAdmin: state.isAdmin }),
-}));
-
-vi.mock('@/hooks/usePersonalPreferences', () => ({
-  usePersonalPreferences: () => ({
+vi.mock('@/hooks/useDeploymentExperiments', () => ({
+  useDeploymentExperiments: () => ({
     ...state,
     refetch: refetchMock,
   }),
 }));
 
 vi.mock('@/components/settings/SettingsShell', () => ({
-  SettingsShell: ({ children }: { children: React.ReactNode }) => children,
+  SettingsShell: ({
+    adminOnly,
+    children,
+  }: {
+    adminOnly?: boolean;
+    children: React.ReactNode;
+  }) => (
+    <div
+      data-testid="experimental-settings"
+      data-admin-only={String(adminOnly)}
+    >
+      {children}
+    </div>
+  ),
 }));
 
 vi.mock('@/components/settings/PrivateSessionsExperimentalSetting', () => ({
@@ -66,32 +74,28 @@ describe('ExperimentalSettingsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     state.error = null;
-    state.hasLoadedPreferences = true;
+    state.hasLoadedExperiments = true;
     state.isFetching = false;
-    state.isAdmin = false;
   });
 
-  it('shows the deployment-wide Private Sessions control only to admins', () => {
-    const { rerender } = render(<ExperimentalSettingsPage />);
+  it('marks every experimental setting as admin-only', () => {
+    render(<ExperimentalSettingsPage />);
 
-    expect(
-      screen.queryByText('Private Sessions setting'),
-    ).not.toBeInTheDocument();
-
-    state.isAdmin = true;
-    rerender(<ExperimentalSettingsPage />);
-
+    expect(screen.getByTestId('experimental-settings')).toHaveAttribute(
+      'data-admin-only',
+      'true',
+    );
     expect(screen.getByText('Private Sessions setting')).toBeInTheDocument();
   });
 
   it('shows one retryable error instead of default-valued settings after an initial load failure', () => {
     state.error = new Error('Failed to load preferences');
-    state.hasLoadedPreferences = false;
+    state.hasLoadedExperiments = false;
 
     const { rerender } = render(<ExperimentalSettingsPage />);
 
     expect(
-      screen.getByText('Failed to load experimental preferences.'),
+      screen.getByText('Failed to load experimental settings.'),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Retry' })).toBeEnabled();
     expect(
@@ -106,7 +110,7 @@ describe('ExperimentalSettingsPage', () => {
     expect(refetchMock).toHaveBeenCalledOnce();
 
     state.error = null;
-    state.hasLoadedPreferences = true;
+    state.hasLoadedExperiments = true;
     rerender(<ExperimentalSettingsPage />);
 
     expect(screen.getByText('Home suggestions setting')).toBeInTheDocument();
@@ -116,13 +120,13 @@ describe('ExperimentalSettingsPage', () => {
     ).toBeInTheDocument();
     expect(screen.getByText('Integration keys setting')).toBeInTheDocument();
     expect(
-      screen.queryByText('Failed to load experimental preferences.'),
+      screen.queryByText('Failed to load experimental settings.'),
     ).not.toBeInTheDocument();
   });
 
   it('keeps a repeated failure actionable after the retry settles', () => {
     state.error = new Error('Failed to load preferences');
-    state.hasLoadedPreferences = false;
+    state.hasLoadedExperiments = false;
     state.isFetching = true;
 
     const { rerender } = render(<ExperimentalSettingsPage />);
@@ -147,7 +151,7 @@ describe('ExperimentalSettingsPage', () => {
     ).toBeInTheDocument();
     expect(screen.getByText('Integration keys setting')).toBeInTheDocument();
     expect(
-      screen.queryByText('Failed to load experimental preferences.'),
+      screen.queryByText('Failed to load experimental settings.'),
     ).not.toBeInTheDocument();
   });
 });

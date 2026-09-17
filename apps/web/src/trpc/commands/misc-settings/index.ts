@@ -7,9 +7,6 @@ import {
   eq,
   max,
   mcpConnections,
-  isPrivateSessionsExperimentEnabled,
-  isPrivateSessionsExperimentEnabledInMetadata,
-  setPrivateSessionsExperimentEnabled,
   repositories,
   slackInstallations,
   sql,
@@ -60,8 +57,6 @@ export type DeploymentDiagnostics = {
 export type MiscSettings = {
   /** The admin-controlled opt-out setting (default: enabled). */
   anonymousAnalyticsEnabled: boolean;
-  /** Admin-controlled deployment experiment (default: disabled). */
-  privateSessionsExperimentEnabled: boolean;
   cloudEnabled: boolean;
   /**
    * Whether this environment can send telemetry at all. False in
@@ -584,8 +579,6 @@ export async function getMiscSettingsCommand(
       metadata,
       isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
     ),
-    privateSessionsExperimentEnabled:
-      isPrivateSessionsExperimentEnabledInMetadata(metadata),
     cloudEnabled: isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
     telemetryEnvAllowed: isTelemetryEnvAllowed(),
     diagnostics,
@@ -593,10 +586,6 @@ export async function getMiscSettingsCommand(
     effectiveTimeZone: resolvedTimeZone.timeZone,
     timeZoneSource: resolvedTimeZone.source,
   };
-}
-
-export async function getPrivateSessionsExperimentCommand(): Promise<boolean> {
-  return isPrivateSessionsExperimentEnabled();
 }
 
 export async function setDeploymentTimeZoneCommand(
@@ -656,17 +645,6 @@ export async function setAnonymousAnalyticsCommand(
       .set({ metadata: nextMetadata, updatedAt: new Date() })
       .where(eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID));
   }
-
-  return getMiscSettingsCommand(auth);
-}
-
-export async function setPrivateSessionsExperimentCommand(
-  auth: UserAuthSuccess,
-  input: { enabled: boolean },
-): Promise<MiscSettings> {
-  assertAdmin(auth);
-
-  await setPrivateSessionsExperimentEnabled(input.enabled);
 
   return getMiscSettingsCommand(auth);
 }

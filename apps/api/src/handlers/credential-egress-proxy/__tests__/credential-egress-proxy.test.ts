@@ -22,6 +22,7 @@ import {
   sessionFactory,
   taskFactory,
   runFactory,
+  setDeploymentExperimentEnabled,
   registerCredentialEgressWorkload,
   terminateCredentialEgressWorkload,
   type ServiceCredentialContext,
@@ -213,10 +214,7 @@ beforeEach(async () => {
   minted.length = 0;
   ownerId = (await userFactory.create()).id;
   userIds.push(ownerId);
-  await db
-    .update(users)
-    .set({ metadata: { integration_keys_enabled: true } })
-    .where(eq(users.id, ownerId));
+  await setDeploymentExperimentEnabled('serviceCredentialTools', true);
   const row = await session(ownerId);
   sessionId = row.id;
   context = { userId: ownerId, sessionId };
@@ -585,9 +583,9 @@ it.each([
     () => db.delete(sessionTasks).where(eq(sessionTasks.sessionId, sessionId)),
   ],
   [
-    'run whose owner turned integration keys off',
+    'run whose deployment turned integration keys off',
     'session_unavailable',
-    () => db.update(users).set({ metadata: {} }).where(eq(users.id, ownerId)),
+    () => setDeploymentExperimentEnabled('serviceCredentialTools', false),
   ],
 ])('denies a %s', async (_name, reason, mutate) => {
   await mutate();

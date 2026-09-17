@@ -1,49 +1,18 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
-const { mocks, state } = vi.hoisted(() => ({
-  mocks: {
-    mutateAsync: vi.fn(),
-    refetch: vi.fn(),
-    setQueryData: vi.fn(),
-    toastError: vi.fn(),
-    toastSuccess: vi.fn(),
-  },
+const { setEnabledMock, state } = vi.hoisted(() => ({
+  setEnabledMock: vi.fn(),
   state: {
-    data: false as boolean | undefined,
-    isError: false,
-    isFetching: false,
-    isPending: false,
+    enabled: false,
+    isLoading: false,
     isUpdating: false,
   },
 }));
 
-vi.mock('@tanstack/react-query', () => ({
-  useQuery: () => ({ ...state, refetch: mocks.refetch }),
-  useMutation: () => ({
-    mutateAsync: mocks.mutateAsync,
-    isPending: state.isUpdating,
-  }),
-  useQueryClient: () => ({ setQueryData: mocks.setQueryData }),
-}));
-
-vi.mock('sonner', () => ({
-  toast: {
-    error: mocks.toastError,
-    success: mocks.toastSuccess,
-  },
-}));
-
-vi.mock('@/trpc/client', () => ({
-  useTRPC: () => ({
-    miscSettings: {
-      privateSessionsExperiment: {
-        queryKey: () => ['private-sessions-experiment'],
-        queryOptions: () => ({}),
-      },
-      setPrivateSessionsExperiment: {
-        mutationOptions: () => ({}),
-      },
-    },
+vi.mock('@/hooks/usePrivateSessionsExperiment', () => ({
+  usePrivateSessionsExperiment: () => ({
+    ...state,
+    setEnabled: setEnabledMock,
   }),
 }));
 
@@ -52,18 +21,13 @@ import { PrivateSessionsExperimentalSetting } from './PrivateSessionsExperimenta
 describe('PrivateSessionsExperimentalSetting', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    state.data = false;
-    state.isError = false;
-    state.isFetching = false;
-    state.isPending = false;
+    state.enabled = false;
+    state.isLoading = false;
     state.isUpdating = false;
   });
 
-  it('loads the saved deployment value and persists an optimistic update', async () => {
-    state.data = true;
-    mocks.mutateAsync.mockResolvedValue({
-      privateSessionsExperimentEnabled: false,
-    });
+  it('renders the shared deployment value without default-status copy', () => {
+    state.enabled = true;
     render(<PrivateSessionsExperimentalSetting />);
 
     const toggle = screen.getByRole('switch', {
@@ -72,57 +36,15 @@ describe('PrivateSessionsExperimentalSetting', () => {
     expect(toggle).toBeChecked();
     expect(screen.queryByText(/disabled by default/i)).not.toBeInTheDocument();
     fireEvent.click(toggle);
-
-    expect(mocks.setQueryData).toHaveBeenNthCalledWith(
-      1,
-      ['private-sessions-experiment'],
-      false,
-    );
-    await waitFor(() =>
-      expect(mocks.mutateAsync).toHaveBeenCalledWith({ enabled: false }),
-    );
-    expect(mocks.setQueryData).toHaveBeenLastCalledWith(
-      ['private-sessions-experiment'],
-      false,
-    );
-    expect(mocks.toastSuccess).toHaveBeenCalledWith(
-      'Private Sessions disabled',
-    );
+    expect(setEnabledMock).toHaveBeenCalledWith(false);
   });
 
-  it('restores the saved value when the update fails', async () => {
-    mocks.mutateAsync.mockRejectedValue(new Error('Save failed'));
+  it('disables the toggle while deployment settings load or update', () => {
+    state.isLoading = true;
     render(<PrivateSessionsExperimentalSetting />);
 
-    fireEvent.click(
+    expect(
       screen.getByRole('switch', { name: 'Toggle Private Sessions' }),
-    );
-
-    await waitFor(() =>
-      expect(mocks.setQueryData).toHaveBeenLastCalledWith(
-        ['private-sessions-experiment'],
-        false,
-      ),
-    );
-    expect(mocks.toastError).toHaveBeenCalledWith('Save failed');
-  });
-
-  it('shows loading and retryable error states', () => {
-    state.isPending = true;
-    const { rerender } = render(<PrivateSessionsExperimentalSetting />);
-
-    expect(
-      screen.queryByRole('switch', { name: 'Toggle Private Sessions' }),
-    ).not.toBeInTheDocument();
-
-    state.isPending = false;
-    state.isError = true;
-    rerender(<PrivateSessionsExperimentalSetting />);
-
-    expect(
-      screen.getByText('Failed to load the Private Sessions experiment.'),
-    ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
-    expect(mocks.refetch).toHaveBeenCalledOnce();
+    ).toBeDisabled();
   });
 });

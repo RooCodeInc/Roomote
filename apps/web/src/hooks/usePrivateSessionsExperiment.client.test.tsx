@@ -1,29 +1,29 @@
 import { renderHook } from '@testing-library/react';
 
-const state = vi.hoisted(() => ({ data: false, isPending: false }));
+const useDeploymentExperimentMock = vi.hoisted(() => vi.fn());
 
-vi.mock('@tanstack/react-query', () => ({
-  useQuery: () => state,
-}));
-
-vi.mock('@/trpc/client', () => ({
-  useTRPC: () => ({
-    miscSettings: {
-      privateSessionsExperiment: {
-        queryOptions: () => ({}),
-      },
-    },
-  }),
+vi.mock('./useDeploymentExperiments', () => ({
+  useDeploymentExperiment: useDeploymentExperimentMock,
 }));
 
 import { usePrivateSessionsExperiment } from './usePrivateSessionsExperiment';
 
 describe('usePrivateSessionsExperiment', () => {
-  it('reads the deployment experiment without exposing a personal setter', () => {
-    state.data = true;
+  it('uses the shared deployment experiment hook', () => {
+    const state = {
+      enabled: true,
+      isLoading: false,
+      isUpdating: false,
+      setEnabled: vi.fn(),
+    };
+    useDeploymentExperimentMock.mockReturnValue(state);
+
     const { result } = renderHook(() => usePrivateSessionsExperiment());
 
-    expect(result.current).toEqual({ enabled: true, isLoading: false });
-    expect(result.current).not.toHaveProperty('setEnabled');
+    expect(result.current).toBe(state);
+    expect(useDeploymentExperimentMock).toHaveBeenCalledWith(
+      'privateSessions',
+      'Failed to update Private Sessions.',
+    );
   });
 });

@@ -9,7 +9,6 @@ vi.mock('@tanstack/react-query', () => ({
   useQuery: () => ({
     data: {
       anonymousAnalyticsEnabled: true,
-      privateSessionsExperimentEnabled: false,
       cloudEnabled: true,
       telemetryEnvAllowed: true,
       diagnostics: { generatedAt: '', sections: [], plainText: '' },

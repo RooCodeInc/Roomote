@@ -14,7 +14,6 @@ import {
   eq,
   tasks,
   taskRuns,
-  users,
   taskFactory,
   userFactory,
   automations,
@@ -45,6 +44,7 @@ import {
   listEligibleUserTaskMemoryRuns,
   findHomeComposerPrecomputeUserForRun,
   isHomeComposerSuggestionsEnabled,
+  setDeploymentExperimentEnabled,
   seedBrainCollectorItems,
   upsertBrainCollectorItems,
   upsertBrainSyncState,
@@ -172,7 +172,9 @@ describe('private task memory exclusion', () => {
 
 describe('listRecentUserTaskMemoryRuns', () => {
   it('returns only landed user-initiated memories owned by the requested user', async () => {
-    const owner = await userFactory.create();
+    const owner = await userFactory.create({
+      metadata: { home_composer_suggestions_enabled: true },
+    });
     const otherUser = await userFactory.create();
     await db
       .insert(automations)
@@ -269,17 +271,14 @@ describe('listRecentUserTaskMemoryRuns', () => {
       },
     ]);
 
-    expect(await isHomeComposerSuggestionsEnabled(db, owner.id)).toBe(false);
+    expect(await isHomeComposerSuggestionsEnabled(db)).toBe(false);
     expect(
       await findHomeComposerPrecomputeUserForRun(db, newerOwned.id),
     ).toBeNull();
 
-    await db
-      .update(users)
-      .set({ metadata: { home_composer_suggestions_enabled: true } })
-      .where(eq(users.id, owner.id));
+    await setDeploymentExperimentEnabled('homeComposerSuggestions', true);
 
-    expect(await isHomeComposerSuggestionsEnabled(db, owner.id)).toBe(true);
+    expect(await isHomeComposerSuggestionsEnabled(db)).toBe(true);
     expect(await findHomeComposerPrecomputeUserForRun(db, newerOwned.id)).toBe(
       owner.id,
     );
@@ -298,9 +297,9 @@ describe('listRecentUserTaskMemoryRuns', () => {
     expect(
       await findHomeComposerPrecomputeUserForRun(db, pendingOwned.id),
     ).toBeNull();
-    expect(
-      await findHomeComposerPrecomputeUserForRun(db, otherOwned.id),
-    ).toBeNull();
+    expect(await findHomeComposerPrecomputeUserForRun(db, otherOwned.id)).toBe(
+      otherUser.id,
+    );
   });
 });
 

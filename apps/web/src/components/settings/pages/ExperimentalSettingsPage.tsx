@@ -7,26 +7,24 @@ import { HomeComposerSuggestionsExperimentalSetting } from '@/components/setting
 import { ServiceCredentialToolsExperimentalSetting } from '@/components/settings/ServiceCredentialToolsExperimentalSetting';
 import { PrivateSessionsExperimentalSetting } from '@/components/settings/PrivateSessionsExperimentalSetting';
 import { RetryableLoadError } from '@/components/system';
-import { usePersonalPreferences } from '@/hooks/usePersonalPreferences';
-import { useAuthorizedUser } from '@/hooks/useUser';
+import { useDeploymentExperiments } from '@/hooks/useDeploymentExperiments';
 
 export function ExperimentalSettingsPage() {
-  const { isAdmin } = useAuthorizedUser();
-  const { error, hasLoadedPreferences, isFetching, refetch } =
-    usePersonalPreferences();
+  const { error, hasLoadedExperiments, isFetching, refetch } =
+    useDeploymentExperiments();
 
   return (
-    <SettingsShell pageId="experimental">
-      {isAdmin ? <PrivateSessionsExperimentalSetting /> : null}
-      {error && !hasLoadedPreferences ? (
+    <SettingsShell pageId="experimental" adminOnly={true}>
+      {error && !hasLoadedExperiments ? (
         <RetryableLoadError
           className="border"
-          message="Failed to load experimental preferences."
+          message="Failed to load experimental settings."
           isRetrying={isFetching}
           onRetry={() => void refetch()}
         />
       ) : (
         <>
+          <PrivateSessionsExperimentalSetting />
           <HomeComposerSuggestionsExperimentalSetting />
           <ResultsExperimentalSetting />
           <SlackPeerConversationsExperimentalSetting />
