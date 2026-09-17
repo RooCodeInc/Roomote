@@ -1,4 +1,5 @@
 import type { Context } from 'hono';
+import { createHash } from 'node:crypto';
 
 import {
   and,
@@ -41,6 +42,30 @@ export const ENVIRONMENT_ADMIN_REQUIRED_ERROR =
   'Admin access is required to create or update environments.';
 export const ENVIRONMENT_APPROVAL_REQUIRED_ERROR =
   'Explicit user approval for this exact environment proposal is required.';
+
+function stableSerialize(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableSerialize).join(',')}]`;
+  return `{${Object.entries(value)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, entry]) => `${JSON.stringify(key)}:${stableSerialize(entry)}`)
+    .join(',')}}`;
+}
+
+export function getEnvironmentProposalHash(
+  config: import('@roomote/types').EnvironmentConfig,
+  environmentId?: string,
+): string {
+  return createHash('sha256')
+    .update(
+      stableSerialize({
+        action: environmentId ? 'update' : 'create',
+        environmentId: environmentId ?? null,
+        config,
+      }),
+    )
+    .digest('hex');
+}
 
 type PostgresErrorLike = {
   code?: string;
@@ -402,6 +427,8 @@ export async function createEnvironment(
       if (
         auth.authContext.tokenType === 'run' &&
         (typeof requestBody.approvedProposalHash !== 'string' ||
+          requestBody.approvedProposalHash !==
+            getEnvironmentProposalHash(config) ||
           !(await consumeEnvironmentProposalApproval(
             tx,
             auth,
