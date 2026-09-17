@@ -59,6 +59,7 @@ const mocks = vi.hoisted(() => ({
   prepareServiceCredential: vi.fn(),
   listServiceCredentialApprovals: vi.fn(),
   addRemoteMcp: vi.fn(),
+  createPlatformIssueReport: vi.fn(),
   touchSessionActivity: vi.fn(),
   getSessionForTask: vi.fn(),
   getPendingHumanFollowUp: vi.fn(),
@@ -101,6 +102,7 @@ const nativeToolNames = vi.hoisted(
       addRemoteMcp: 'add_remote_mcp',
       cancelTask: 'cancel_task',
       createArtifact: 'create_artifact',
+      reportPlatformIssue: 'report_platform_issue',
       findIntegrationTools: 'find_integration_tools',
       ignoreEvent: 'ignore_event',
       inspectImages: 'inspect_images',
@@ -139,6 +141,10 @@ vi.mock('@roomote/sdk/server/service-credentials', () => ({
 
 vi.mock('@roomote/sdk/server/add-remote-custom-mcp', () => ({
   addRemoteCustomMcpForFast: mocks.addRemoteMcp,
+}));
+
+vi.mock('@roomote/sdk/server/platform-issue-reporting', () => ({
+  createFastSessionPlatformIssueReport: mocks.createPlatformIssueReport,
 }));
 
 vi.mock('@roomote/telemetry/server', () => ({
@@ -608,6 +614,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.getDeploymentSettings.mockResolvedValue(undefined);
     mocks.listIntegrations.mockResolvedValue([]);
     mocks.callIntegration.mockResolvedValue({ matches: ['fast-agent.ts'] });
+    mocks.createPlatformIssueReport.mockResolvedValue({
+      success: true,
+      reportCreated: true,
+      report: { title: 'Runtime unavailable', summary: 'The runtime failed.' },
+    });
     mocks.sendTaskMessage.mockResolvedValue({ success: true });
     mocks.cancelTask.mockResolvedValue({ success: true });
     mocks.stopTask.mockResolvedValue({ success: true });
@@ -5147,6 +5158,70 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       contentType: 'text/markdown',
       artifactType: 'general',
     });
+  });
+
+  it('reports a platform issue with Fast Session and acting-user context', async () => {
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I found a platform-side failure.',
+        });
+        const result = await invokeTool(nativeToolNames.reportPlatformIssue, {
+          title: ' Runtime unavailable ',
+          summary: ' The runtime failed. ',
+        });
+        expect(result).toMatchObject({
+          success: true,
+          reportCreated: true,
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'The issue was reported.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.createPlatformIssueReport).toHaveBeenCalledWith({
+      fastConversationId: 'conversation-1',
+      fastEventId: '100.2:tool:1',
+      report: {
+        title: 'Runtime unavailable',
+        summary: 'The runtime failed.',
+      },
+      userId: 'user-1',
+    });
+  });
+
+  it('returns a tool failure when Session report authorization fails', async () => {
+    mocks.createPlatformIssueReport.mockRejectedValueOnce(
+      new Error('This user cannot report issues from this private Session.'),
+    );
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I found a platform-side failure.',
+        });
+        await expect(
+          invokeTool(nativeToolNames.reportPlatformIssue, {
+            title: 'Runtime unavailable',
+            summary: 'The runtime failed.',
+          }),
+        ).resolves.toMatchObject({
+          success: false,
+          error: 'This user cannot report issues from this private Session.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
   });
 
   it('posts the Fast widget preview with its Discord session link', async () => {

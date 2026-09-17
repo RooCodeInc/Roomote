@@ -155,6 +155,12 @@ export {
 } from './lib/artifacts/create-session-artifact';
 export { buildFastAgentArtifactCreator } from './lib/artifacts/fast-agent-artifact-creator';
 export {
+  buildPlatformIssueSourceUrl,
+  createFastSessionPlatformIssueReport,
+  notifyPlatformIssueReport,
+  type PlatformIssueSource,
+} from './lib/platform-issue-reporting';
+export {
   notifyFastAgentParentOnArtifact,
   type FastArtifactNotificationResult,
 } from './lib/artifacts/notify-fast-agent-parent';

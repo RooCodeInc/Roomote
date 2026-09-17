@@ -32,6 +32,7 @@ export const FAST_AGENT_NATIVE_TOOL_NAMES = {
   prepareServiceCredential: 'prepare_integration_key',
   listServiceCredentials: 'list_integration_keys',
   reviewPullRequest: 'review_pull_request',
+  reportPlatformIssue: 'report_platform_issue',
 } as const;
 
 export type FastAgentNativeToolName =
@@ -124,6 +125,10 @@ export const FAST_AGENT_NATIVE_TOOL_CATALOG = [
   {
     name: FAST_AGENT_NATIVE_TOOL_NAMES.offerCapability,
     kind: ACP_TOOL_KINDS.communication,
+  },
+  {
+    name: FAST_AGENT_NATIVE_TOOL_NAMES.reportPlatformIssue,
+    kind: ACP_TOOL_KINDS.tool,
   },
 ] as const satisfies readonly {
   name: FastAgentNativeToolName;

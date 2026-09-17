@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { ModelMessage } from 'ai';
 import { redactSecrets } from '@roomote/communication/redact-secrets';
 import { addRemoteCustomMcpForFast } from '@roomote/sdk/server/add-remote-custom-mcp';
+import { createFastSessionPlatformIssueReport } from '@roomote/sdk/server/platform-issue-reporting';
 import {
   listServiceCredentialApprovals,
   prepareServiceCredential,
@@ -47,6 +48,7 @@ import {
   parseDiscordMessagePermalink,
   parseSlackChannelPermalink,
   parseSlackMessagePermalink,
+  platformIssueReportSchema,
   type IntegrationToolCandidate,
   type DataVisualizationInput,
   CALL_INTEGRATION_TOOL_TOOL,
@@ -4260,6 +4262,7 @@ export async function answerFastAgentQuestion({
     };
     const executeNativeToolInner = async (
       call: FastAgentNativeToolCall,
+      fastEventId?: string,
     ): Promise<unknown> => {
       const recordToolFinished = diagnostics.recordNativeToolStarted(call.name);
       const instructionVersion = getInstructionVersion(call.messageId);
@@ -4535,6 +4538,23 @@ export async function answerFastAgentQuestion({
               completedTaskActions.delete(`artifact:${signature}`);
               return toolFailure(error);
             }
+          }
+
+          case FAST_AGENT_NATIVE_TOOL_NAMES.reportPlatformIssue: {
+            if (!fastEventId) {
+              return {
+                success: false,
+                error:
+                  'This platform issue report has no Session event context.',
+              };
+            }
+            const report = platformIssueReportSchema.parse(call.args);
+            return await createFastSessionPlatformIssueReport({
+              fastConversationId: session.id,
+              fastEventId,
+              report,
+              userId,
+            });
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.showWidget: {
@@ -5452,7 +5472,10 @@ export async function answerFastAgentQuestion({
           kind: getFastAgentNativeAcpKind(call.name),
         });
         try {
-          const result = await executeNativeToolInner(call);
+          const result = await executeNativeToolInner(
+            call,
+            canonicalToolEvent.canonicalEvent.eventId,
+          );
           await finishCanonicalToolEvent(
             canonicalToolEvent,
             result,

@@ -433,6 +433,20 @@ export default {
 }
 `,
 
+    [FAST_AGENT_NATIVE_TOOL_NAMES.reportPlatformIssue]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Report an admin-fixable Roomote platform, configuration, or access defect from this Session. Use this only for defects that require an admin or platform fix, not for ordinary code bugs or repository-level failures. When productive fallback work remains, describe the defect as degraded capability rather than a blocker, continue that fallback work, and do not treat this report as Session completion. Report once when the defect is clear.",
+  args: {
+    title: z.string().trim().min(1).max(200).describe("Short title for the platform defect"),
+    summary: z.string().trim().min(1).max(4000).describe("Concise summary of the defect and what is failing"),
+  },
+  execute: (args, context) => invoke("report_platform_issue", args, context),
+}
+`,
+
     [FAST_AGENT_NATIVE_TOOL_NAMES.launchTask]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"

@@ -76,6 +76,10 @@
       "import": "./src/server/lib/mcp/add-remote-custom-mcp.ts",
       "require": "./src/server/lib/mcp/add-remote-custom-mcp.ts"
     },
+    "./server/platform-issue-reporting": {
+      "import": "./src/server/lib/platform-issue-reporting.ts",
+      "require": "./src/server/lib/platform-issue-reporting.ts"
+    },
     "./server/credential-egress": {
       "import": "./src/server/lib/credential-egress.ts",
       "require": "./src/server/lib/credential-egress.ts"

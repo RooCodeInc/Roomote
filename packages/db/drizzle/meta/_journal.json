@@ -701,6 +701,13 @@
       "when": 1789663138130,
       "tag": "0099_wooden_the_spike",
       "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "7",
+      "when": 1789665900000,
+      "tag": "0100_wild_purple_man",
+      "breakpoints": true
     }
   ]
 }

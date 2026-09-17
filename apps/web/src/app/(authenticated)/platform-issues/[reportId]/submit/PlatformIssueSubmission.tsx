@@ -23,6 +23,7 @@ type PlatformIssueSubmissionProps = {
     id: string;
     title: string;
     summary: string;
+    sourceLabel: 'task' | 'Session';
     taskUrl: string;
     submittedAt: Date | null;
   };
@@ -66,7 +67,7 @@ export function PlatformIssueSubmission({
             <Button variant="outline" asChild>
               <Link href={report.taskUrl}>
                 <ArrowLeft />
-                Back to task
+                Back to {report.sourceLabel}
               </Link>
             </Button>
           </CardFooter>
@@ -102,7 +103,7 @@ export function PlatformIssueSubmission({
           </div>
           <div className="space-y-1">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Task link
+              {report.sourceLabel === 'task' ? 'Task' : 'Session'} link
             </p>
             <p className="break-all text-muted-foreground">{report.taskUrl}</p>
           </div>

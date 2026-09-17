@@ -22,6 +22,7 @@ const REPORT = {
   id: '5f55b5ee-7099-4ff2-b995-f39feb9c8eb0',
   title: 'Worker cannot start',
   summary: 'The configured worker exits before claiming the task.',
+  sourceLabel: 'task' as const,
   taskUrl: 'https://app.example.com/task/task-1',
   submittedAt: null,
 };
@@ -40,6 +41,23 @@ function renderSubmission() {
 beforeEach(() => {
   vi.clearAllMocks();
   submitMock.mockResolvedValue({ success: true, submittedAt: new Date() });
+});
+
+it('labels a Session-origin report with its Session context', () => {
+  const queryClient = new QueryClient();
+  render(
+    <QueryClientProvider client={queryClient}>
+      <PlatformIssueSubmission
+        report={{
+          ...REPORT,
+          sourceLabel: 'Session',
+          taskUrl: 'https://app.example.com/sessions/session-1',
+        }}
+      />
+    </QueryClientProvider>,
+  );
+
+  expect(screen.getByText('Session link')).toBeInTheDocument();
 });
 
 it('shows exactly what will be shared without submitting on page load', () => {
