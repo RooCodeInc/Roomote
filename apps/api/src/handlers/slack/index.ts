@@ -1,6 +1,5 @@
 import { Hono } from 'hono';
 
-import { getRedis } from '@roomote/redis';
 import { type SlackInteractivePayload, SlackNotifier } from '@roomote/slack';
 import {
   db,
@@ -11,11 +10,13 @@ import {
 
 import { apiLogger } from '../../logging.js';
 import { createSlackWebhookContext } from './context.js';
-import {
-  EVENT_DEDUP_TTL_SECONDS,
-  SLACK_EVENT_DEDUP_PREFIX,
-} from './constants.js';
 import { dispatchSlackEvent } from './dispatch/events.js';
+import {
+  claimSlackEvent,
+  completeSlackEventClaim,
+  releaseSlackEventClaim,
+  type SlackEventClaim,
+} from './event-gate.js';
 import { handleSlackInteractivePayload } from './dispatch/interactive.js';
 import {
   getSlackWebhookEventLogDetails,
@@ -164,19 +165,12 @@ slack.post('/', async (c) => {
       return c.json({ error: 'Slack installation not found' }, { status: 404 });
     }
 
+    let eventClaim: SlackEventClaim | null = null;
+
     if (eventId) {
-      const eventDedupKey = `${SLACK_EVENT_DEDUP_PREFIX}${eventId}`;
-      const redis = getRedis();
+      eventClaim = await claimSlackEvent(eventId);
 
-      const claimed = await redis.set(
-        eventDedupKey,
-        '1',
-        'EX',
-        EVENT_DEDUP_TTL_SECONDS,
-        'NX',
-      );
-
-      if (!claimed) {
+      if (!eventClaim) {
         apiLogger.debug(`🔄 Skipping duplicate Slack event: ${eventId}`);
         return c.json({ ok: true });
       }
@@ -198,6 +192,9 @@ slack.post('/', async (c) => {
       (!isTopLevelAppMessageEvent ||
         isRoomoteAuthoredSlackEvent(event, slackInstallation))
     ) {
+      if (eventClaim) {
+        await completeSlackEventClaim(eventClaim);
+      }
       return c.json({ ok: true });
     }
 
@@ -236,9 +233,23 @@ slack.post('/', async (c) => {
         event,
         context,
       });
+      if (eventClaim) {
+        await completeSlackEventClaim(eventClaim);
+      }
     } catch (error) {
       console.error(
         `❌ Failed to process ${event.type}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
+      if (eventClaim) {
+        await releaseSlackEventClaim(eventClaim).catch((releaseError) => {
+          console.error(
+            `❌ Failed to release Slack event claim ${eventId}: ${releaseError instanceof Error ? releaseError.message : String(releaseError)}`,
+          );
+        });
+      }
+      return c.json(
+        { ok: false, error: 'slack_event_processing_failed' },
+        { status: 503 },
       );
     }
   }
