@@ -70,6 +70,7 @@ describe('PrivateSessionsExperimentalSetting', () => {
       name: 'Toggle Private Sessions',
     });
     expect(toggle).toBeChecked();
+    expect(screen.queryByText(/disabled by default/i)).not.toBeInTheDocument();
     fireEvent.click(toggle);
 
     expect(mocks.setQueryData).toHaveBeenNthCalledWith(

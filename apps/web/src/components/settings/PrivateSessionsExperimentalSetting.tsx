@@ -66,7 +66,7 @@ export function PrivateSessionsExperimentalSetting() {
           />
           <p className="text-sm text-muted-foreground">
             Let members create owner-only web Sessions without writing to shared
-            memory or publishing to shared destinations. Disabled by default.
+            memory or publishing to shared destinations.
           </p>
         </div>
       )}
