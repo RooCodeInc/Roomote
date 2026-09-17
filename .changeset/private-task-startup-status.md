@@ -1,6 +1,7 @@
 ---
 '@roomote/controller': patch
 '@roomote/cloud-agents': patch
+'@roomote/sdk': patch
 '@roomote/web': patch
 ---
 

@@ -515,6 +515,27 @@ describe('finishRun', () => {
     expect(mockCleanupSandboxOidcTargetsForTaskRun).toHaveBeenCalledWith(1);
   });
 
+  it('atomically preserves an outcome settled after the initial run read', async () => {
+    mockFindFirstRun.mockResolvedValue(makeRun());
+    const returning = vi.fn().mockResolvedValue([]);
+    mockDbUpdateWhere.mockReturnValueOnce({ returning });
+
+    await expect(
+      finishRun({
+        id: 1,
+        status: RunStatus.Failed,
+        error: 'later spawn failure',
+        preserveExistingOutcome: true,
+      }),
+    ).resolves.toEqual({ outcome: 'already_settled' });
+
+    expect(returning).toHaveBeenCalledOnce();
+    expect(mockRecordTaskRunLifecycleEvent).not.toHaveBeenCalled();
+    expect(mockTerminateCredentialEgress).not.toHaveBeenCalled();
+    expect(mockNotifySourceRunOnSettle).not.toHaveBeenCalled();
+    expect(mockCleanupSandboxOidcTargetsForTaskRun).not.toHaveBeenCalled();
+  });
+
   it('refreshes finalized metadata on a custom automation Slack result', async () => {
     const task = {
       initiatorKind: 'automation',

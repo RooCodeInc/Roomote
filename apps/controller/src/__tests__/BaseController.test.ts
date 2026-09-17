@@ -283,6 +283,7 @@ describe('BaseController.handleSpawnTaskRunError', () => {
       id: 42,
       status: RunStatus.Failed,
       error: 'Machine unavailable',
+      preserveExistingOutcome: true,
     });
   });
 
@@ -325,6 +326,7 @@ describe('BaseController.handleSpawnTaskRunError', () => {
       id: 99,
       status: RunStatus.Failed,
       error: 'Snapshot failed',
+      preserveExistingOutcome: true,
     });
 
     // The environment_snapshots pending→failed transition lives inside
@@ -376,6 +378,7 @@ describe('BaseController.handleSpawnTaskRunError', () => {
       id: 7,
       status: RunStatus.Failed,
       error: 'string error',
+      preserveExistingOutcome: true,
     });
   });
 
@@ -568,6 +571,7 @@ describe('BaseController.dequeueTaskRun', () => {
       error:
         'New tasks are paused due to a billing issue. Please check billing.',
       errorCode: TaskRunErrorCode.DeploymentReadOnly,
+      preserveExistingOutcome: true,
     });
     expect(mockDbTransaction).not.toHaveBeenCalled();
   });
@@ -716,6 +720,7 @@ describe('BaseController.handleWorkerExitBeforeStart', () => {
       id: 42,
       status: RunStatus.Failed,
       error: 'Worker process exited before claiming task run (exit code 1)',
+      preserveExistingOutcome: true,
     });
   });
 
@@ -747,6 +752,7 @@ describe('BaseController.handleWorkerExitBeforeStart', () => {
       id: 42,
       status: RunStatus.Failed,
       error: expectedError,
+      preserveExistingOutcome: true,
     });
   });
 

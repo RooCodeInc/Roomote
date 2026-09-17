@@ -151,19 +151,12 @@ export async function admitCredentialEgressApiProxy(
       input.nonce,
     );
   } catch (error) {
-    const runIsInactive = await deps
-      .isRunActive(input.taskRun.id)
-      .then((active) => !active)
-      .catch(() => false);
     // Undelivered substitutes must not stay live.
     await input.lifecycle.terminate(
       input.taskRun.id,
       outcome.workload.workloadId,
       'provision_failed',
     );
-    if (runIsInactive) {
-      throw new CredentialEgressBootstrapRunInactiveError();
-    }
     throw error;
   }
   input.lifecycle.startLeaseRenewal(

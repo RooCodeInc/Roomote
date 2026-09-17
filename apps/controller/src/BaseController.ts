@@ -938,6 +938,7 @@ export abstract class BaseController {
       id: taskRun.id,
       status: RunStatus.Failed,
       error: errorMessage,
+      preserveExistingOutcome: true,
       ...(errorCode ? { errorCode } : {}),
     });
   }
