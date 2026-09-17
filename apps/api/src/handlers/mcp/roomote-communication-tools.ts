@@ -3,7 +3,12 @@ import {
   CHAT_CHANNEL_POST_TOOL_NAME,
   CHAT_CHANNELS_TOOL,
   CHAT_REACTION_EMOJI_TOOL_NAME,
+  CHAT_SELF_DIRECT_MESSAGE_TOOL_NAME,
 } from '@roomote/types';
+import {
+  hasUserDirectMessageIdentity,
+  sendUserDirectMessage,
+} from '@roomote/sdk/server';
 import { z } from 'zod';
 
 import { listCommunicationChannels } from './communication-channel-discovery';
@@ -132,6 +137,48 @@ export function registerRoomoteCommunicationTools(
       return response
         ? responseToToolResult(response)
         : toolError({ error: 'Slack reactions are unavailable.' });
+    },
+  );
+
+  server.registerTool(
+    CHAT_SELF_DIRECT_MESSAGE_TOOL_NAME,
+    {
+      title: 'Send Direct Message To Yourself',
+      description:
+        'Send an exact text direct message to the authenticated Roomote member through their linked Telegram or Slack account. Select one provider per call. If delivery fails, the error identifies the attempted provider so another provider can be tried explicitly. The recipient is always resolved from the authenticated member; arbitrary recipients are not supported.',
+      inputSchema: {
+        provider: z.enum(['telegram', 'slack']),
+        text: z.string().min(1),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+    },
+    async ({ provider, text }) => {
+      if (!(await hasUserDirectMessageIdentity(provider, actingUserId))) {
+        return toolError({
+          code: 'recipient_not_linked',
+          error: `The authenticated Roomote member does not have a linked ${provider} direct-message identity.`,
+          provider,
+        });
+      }
+
+      const delivered = await sendUserDirectMessage({
+        provider,
+        userId: actingUserId,
+        text,
+        logContext: 'roomote-mcp-self-direct-message',
+      });
+      return delivered
+        ? toMcpToolResult({ delivered: true, provider })
+        : toolError({
+            code: 'delivery_failed',
+            error: `${provider} direct-message delivery failed; no message was confirmed as sent.`,
+            provider,
+          });
     },
   );
 }

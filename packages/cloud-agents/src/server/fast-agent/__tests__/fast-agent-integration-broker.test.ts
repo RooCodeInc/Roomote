@@ -1562,7 +1562,7 @@ describe('fast-agent integration broker', () => {
       roomote: {
         url: 'https://app.example.test/mcp',
         headers: {},
-        disabledTools: ['post_to_channel'],
+        disabledTools: ['post_to_channel', 'send_direct_message_to_self'],
       },
     };
     mocks.listMcpTools.mockResolvedValue([
@@ -1578,6 +1578,7 @@ describe('fast-agent integration broker', () => {
       { name: 'list_chat_channels' },
       { name: 'post_to_channel' },
       { name: 'send_chat_reaction_emoji' },
+      { name: 'send_direct_message_to_self' },
     ]);
 
     const integrations = await listFastAgentIntegrations({

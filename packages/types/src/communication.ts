@@ -20,6 +20,7 @@ export const CHAT_CHANNELS_TOOL = {
 } as const;
 
 export const CHAT_CHANNEL_POST_TOOL_NAME = 'post_to_channel';
+export const CHAT_SELF_DIRECT_MESSAGE_TOOL_NAME = 'send_direct_message_to_self';
 export const CHAT_REACTION_EMOJI_TOOL_NAME = 'send_chat_reaction_emoji';
 
 export const CHAT_MESSAGE_CONTEXT_TOOL = {

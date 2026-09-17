@@ -1,11 +1,20 @@
 const {
+  hasUserDirectMessageIdentityMock,
   listCommunicationChannelsMock,
   maybeAddCommunicationReactionMock,
+  sendUserDirectMessageMock,
   sendCommunicationChannelPostMock,
 } = vi.hoisted(() => ({
+  hasUserDirectMessageIdentityMock: vi.fn(),
   listCommunicationChannelsMock: vi.fn(),
   maybeAddCommunicationReactionMock: vi.fn(),
+  sendUserDirectMessageMock: vi.fn(),
   sendCommunicationChannelPostMock: vi.fn(),
+}));
+
+vi.mock('@roomote/sdk/server', () => ({
+  hasUserDirectMessageIdentity: hasUserDirectMessageIdentityMock,
+  sendUserDirectMessage: sendUserDirectMessageMock,
 }));
 
 vi.mock('../communication-channel-discovery', () => ({
@@ -45,6 +54,8 @@ describe('Roomote member communication tools', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     listCommunicationChannelsMock.mockResolvedValue({ channelCount: 0 });
+    hasUserDirectMessageIdentityMock.mockResolvedValue(true);
+    sendUserDirectMessageMock.mockResolvedValue(true);
     sendCommunicationChannelPostMock.mockResolvedValue(
       Response.json({ channelId: 'C2', messageTs: '200.1' }),
     );
@@ -55,7 +66,75 @@ describe('Roomote member communication tools', () => {
       'list_chat_channels',
       'post_to_channel',
       'send_chat_reaction_emoji',
+      'send_direct_message_to_self',
     ]);
+  });
+
+  it.each(['telegram', 'slack'] as const)(
+    'sends an exact %s direct message only to the acting member',
+    async (provider) => {
+      const directMessage = registerTools().find(
+        ({ name }) => name === 'send_direct_message_to_self',
+      )!;
+      const text = 'Keep this text exactly as written.';
+
+      const result = await directMessage.handler({ provider, text });
+
+      expect(hasUserDirectMessageIdentityMock).toHaveBeenCalledWith(
+        provider,
+        'user-1',
+      );
+      expect(sendUserDirectMessageMock).toHaveBeenCalledWith({
+        provider,
+        userId: 'user-1',
+        text,
+        logContext: 'roomote-mcp-self-direct-message',
+      });
+      expect(result).toMatchObject({
+        structuredContent: { delivered: true, provider },
+      });
+    },
+  );
+
+  it('reports missing provider linkage without attempting delivery', async () => {
+    hasUserDirectMessageIdentityMock.mockResolvedValue(false);
+    const directMessage = registerTools().find(
+      ({ name }) => name === 'send_direct_message_to_self',
+    )!;
+
+    const result = await directMessage.handler({
+      provider: 'telegram',
+      text: 'Hello.',
+    });
+
+    expect(sendUserDirectMessageMock).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      isError: true,
+      structuredContent: {
+        code: 'recipient_not_linked',
+        provider: 'telegram',
+      },
+    });
+  });
+
+  it('reports an unconfirmed provider delivery as an error', async () => {
+    sendUserDirectMessageMock.mockResolvedValue(false);
+    const directMessage = registerTools().find(
+      ({ name }) => name === 'send_direct_message_to_self',
+    )!;
+
+    const result = await directMessage.handler({
+      provider: 'telegram',
+      text: 'Hello.',
+    });
+
+    expect(result).toMatchObject({
+      isError: true,
+      structuredContent: {
+        code: 'delivery_failed',
+        provider: 'telegram',
+      },
+    });
   });
 
   it('binds channel discovery and posting to the acting user and workspace', async () => {
