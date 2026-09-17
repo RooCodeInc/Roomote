@@ -104,7 +104,6 @@ type GitHubAppManifest = {
     checks: 'write';
     contents: 'write';
     deployments: 'read';
-    gists: 'write';
     issues: 'write';
     merge_queues: 'read';
     metadata: 'read';
@@ -232,7 +231,6 @@ function buildGitHubAppManifest(): GitHubAppManifest {
       checks: 'write',
       contents: 'write',
       deployments: 'read',
-      gists: 'write',
       issues: 'write',
       merge_queues: 'read',
       metadata: 'read',
@@ -872,6 +870,7 @@ export async function startAuthenticateGitHubAccountCommand(
     });
     const params = new URLSearchParams({
       client_id: clientId,
+      scope: 'read:user',
       state: signedState,
     });
 

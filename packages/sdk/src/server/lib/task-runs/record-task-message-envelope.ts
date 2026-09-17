@@ -234,20 +234,32 @@ function buildPlatformIssueTaskUrl(
   return url.toString();
 }
 
+function buildPlatformIssueSubmissionUrl(reportId: string): string {
+  return new URL(
+    `/platform-issues/${reportId}/submit`,
+    process.env.R_APP_URL,
+  ).toString();
+}
+
 function buildPlatformIssueAlertText(params: {
+  reportId: string;
   taskId: string;
   report: { title: string; summary: string };
   utmSource: CommunicationProvider;
 }): string {
   const taskUrl = buildPlatformIssueTaskUrl(params.taskId, params.utmSource);
+  const submissionUrl = buildPlatformIssueSubmissionUrl(params.reportId);
 
   return appendManagerSlackFooter(
     `Platform issue reported: *${params.report.title}*\n` +
-      `> ${params.report.summary}\n<${taskUrl}|View task>`,
+      `> ${params.report.summary}\n` +
+      `Roomote has not received this report. <${submissionUrl}|Review and send it to Roomote> if you'd like help.\n` +
+      `<${taskUrl}|View task>`,
   );
 }
 
 function buildPlatformIssueSlackAlertMessage(params: {
+  reportId: string;
   taskId: string;
   report: { title: string; summary: string };
 }) {
@@ -255,9 +267,25 @@ function buildPlatformIssueSlackAlertMessage(params: {
 
   return buildAutomationSettingsMessage(
     `Platform issue reported: *${params.report.title}*\n` +
-      `> ${params.report.summary}`,
+      `> ${params.report.summary}\n` +
+      `Roomote has not received this report. Review what will be shared, then send it to Roomote if you'd like help.`,
     PLATFORM_ISSUE_ALERTS_SETTINGS_HASH,
-    { taskUrl, slackIcon: 'triangle-alert' },
+    {
+      taskUrl,
+      slackIcon: 'triangle-alert',
+      additionalActions: [
+        {
+          type: 'button',
+          action_id: 'platform_issue_review_and_send',
+          text: {
+            type: 'plain_text',
+            text: 'Send to Roomote',
+            emoji: false,
+          },
+          url: buildPlatformIssueSubmissionUrl(params.reportId),
+        },
+      ],
+    },
   );
 }
 
@@ -276,6 +304,7 @@ async function markPlatformIssueReportPosted(reportRowId: string) {
 }
 
 async function notifyDeploymentAdminsOfPlatformIssue(params: {
+  reportId: string;
   taskId: string;
   report: { title: string; summary: string };
 }): Promise<{ complete: boolean; delivered: boolean }> {
@@ -305,6 +334,7 @@ async function notifyDeploymentAdminsOfPlatformIssue(params: {
     eligibleAdmins += 1;
     for (const provider of linkedProviders) {
       const alertText = buildPlatformIssueAlertText({
+        reportId: params.reportId,
         taskId: params.taskId,
         report: params.report,
         utmSource: provider,
@@ -312,6 +342,7 @@ async function notifyDeploymentAdminsOfPlatformIssue(params: {
       const slackMessage =
         provider === 'slack'
           ? buildPlatformIssueSlackAlertMessage({
+              reportId: params.reportId,
               taskId: params.taskId,
               report: params.report,
             })
@@ -377,6 +408,7 @@ async function maybeNotifyPlatformIssue(params: {
       channelId: discordChannelId,
       text: degradeSlackMrkdwnToMarkdown(
         buildPlatformIssueAlertText({
+          reportId: params.reportRowId,
           taskId: params.taskId,
           report: params.report,
           utmSource: 'discord',
@@ -396,6 +428,7 @@ async function maybeNotifyPlatformIssue(params: {
 
   if (!channelId) {
     const delivery = await notifyDeploymentAdminsOfPlatformIssue({
+      reportId: params.reportRowId,
       taskId: params.taskId,
       report: params.report,
     });
@@ -422,6 +455,7 @@ async function maybeNotifyPlatformIssue(params: {
 
   const slack = new SlackNotifier(slackInstallation.botAccessToken);
   const message = buildPlatformIssueSlackAlertMessage({
+    reportId: params.reportRowId,
     taskId: params.taskId,
     report: params.report,
   });
