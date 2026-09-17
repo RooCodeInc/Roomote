@@ -23,6 +23,7 @@ import {
   INFERENCE_PROVIDER_MAX_RETRIES,
   NO_REPOSITORIES,
   ROOMOTE_MCP_ID,
+  HTTP_INTEGRATIONS_MCP_ID,
   REASONING_EFFORT_VALUES,
   activeRunStatuses,
   buildInferenceProviderRecoveryPrompt,
@@ -3935,8 +3936,17 @@ export async function answerFastAgentQuestion({
               'Post an acknowledgement with send_chat_reply before this action.',
           };
 
+    const isWebIntegrationKeyRequest = (
+      call: z.infer<typeof callIntegrationToolArgsSchema>,
+    ) =>
+      conversation.surface === 'web' &&
+      call.integrationId === HTTP_INTEGRATIONS_MCP_ID &&
+      call.toolName === 'integration_request' &&
+      typeof call.args?.integrationId === 'string' &&
+      call.args.integrationId.startsWith('session:');
     const executeMcpTool = async (
       call: FastAgentMcpToolCall,
+      { acknowledgementExempt = false } = {},
     ): Promise<unknown> => {
       activeToolExecutions += 1;
       let canonicalToolEvent:
@@ -3951,9 +3961,9 @@ export async function answerFastAgentQuestion({
         turnProgressMarker += 1;
         // The acknowledgement gate runs before replay revocation: a refused
         // pre-ack call must leave the durable row recoverable.
-        const startDenial = authorizeToolStart(
-          `${call.integrationId}_${call.toolName}`,
-        );
+        const startDenial = acknowledgementExempt
+          ? null
+          : authorizeToolStart(`${call.integrationId}_${call.toolName}`);
         if (startDenial) return startDenial;
 
         if (platformEventHandling === 'present_only') {
@@ -4237,7 +4247,16 @@ export async function answerFastAgentQuestion({
         if (ownershipError) return ownershipError;
         nativeToolInvoked = true;
         turnProgressMarker += 1;
-        const startDenial = authorizeToolStart(call.name);
+        const integrationCall =
+          call.name === FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool
+            ? callIntegrationToolArgsSchema.safeParse(call.args)
+            : undefined;
+        const acknowledgementExempt =
+          integrationCall?.success === true &&
+          isWebIntegrationKeyRequest(integrationCall.data);
+        const startDenial = acknowledgementExempt
+          ? null
+          : authorizeToolStart(call.name);
         if (startDenial) return startDenial;
         // No replay withdrawal here: every call is recorded before it runs and
         // its result after, and a resumed run is handed that record, so an
@@ -5356,11 +5375,14 @@ export async function answerFastAgentQuestion({
             if (isFastAgentNativeIntegration(args.integrationId)) {
               return nativeIntegrationError(args.integrationId);
             }
-            return executeMcpTool({
-              integrationId: args.integrationId,
-              toolName: args.toolName,
-              args: args.args ?? {},
-            });
+            return executeMcpTool(
+              {
+                integrationId: args.integrationId,
+                toolName: args.toolName,
+                args: args.args ?? {},
+              },
+              { acknowledgementExempt },
+            );
           }
           case FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent: {
             ignoreEventArgsSchema.parse(call.args);

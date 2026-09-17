@@ -1925,6 +1925,84 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     },
   );
 
+  it('lets web Fast call a ready integration key before an acknowledgement without exempting operator integrations', async () => {
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: '_roomote_http_integrations',
+        name: 'HTTP integrations',
+        description: 'Broker',
+        tools: [{ name: 'integration_request' }],
+      },
+    ]);
+    mocks.callIntegration.mockResolvedValue({ status: 200, body: 'healthy' });
+    const results: unknown[] = [];
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        results.push(
+          await invokeTool(nativeToolNames.callIntegrationTool, {
+            integrationId: '_roomote_http_integrations',
+            toolName: 'integration_request',
+            args: {
+              integrationId: 'session:e9d35700-56b8-4bf0-b088-c1cb498905d9',
+              method: 'GET',
+              path: '/status',
+            },
+          }),
+        );
+        results.push(
+          await invokeTool(nativeToolNames.callIntegrationTool, {
+            integrationId: '_roomote_http_integrations',
+            toolName: 'integration_request',
+            args: {
+              integrationId: 'operator-service',
+              method: 'GET',
+              path: '/status',
+            },
+          }),
+        );
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Checked.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      conversation: { ...baseParams.conversation, surface: 'web' },
+      adapter: callbacks(),
+    });
+
+    expect(results).toEqual([
+      { success: true, result: { status: 200, body: 'healthy' } },
+      {
+        success: false,
+        error:
+          'Post an acknowledgement with send_chat_reply before this action.',
+      },
+    ]);
+    expect(mocks.callIntegration).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        sessionId: 'conversation-1',
+        userId: 'user-1',
+        humanTurn: true,
+      }),
+      expect.any(Array),
+      {
+        integrationId: '_roomote_http_integrations',
+        toolName: 'integration_request',
+        args: {
+          integrationId: 'session:e9d35700-56b8-4bf0-b088-c1cb498905d9',
+          method: 'GET',
+          path: '/status',
+        },
+      },
+    );
+  });
+
   it.each([
     [
       nativeToolNames.prepareServiceCredential,
