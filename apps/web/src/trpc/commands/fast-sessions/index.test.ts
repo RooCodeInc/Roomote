@@ -777,6 +777,7 @@ describe('startFastSessionCommand', () => {
     expect(mocks.getOrCreateSession).toHaveBeenCalledTimes(2);
     expect(mocks.getOrCreateSession).toHaveBeenCalledWith({
       userId: 'user-1',
+      userInitiated: { surface: 'web', trigger: 'message' },
       conversation: {
         surface: 'web',
         workspaceId: 'user-1',
@@ -796,6 +797,7 @@ describe('startFastSessionCommand', () => {
     expect(mocks.getOrCreateSession).toHaveBeenCalledWith({
       userId: 'user-1',
       privacy: 'private',
+      userInitiated: { surface: 'web', trigger: 'message' },
       conversation: {
         surface: 'web',
         workspaceId: 'user-1',

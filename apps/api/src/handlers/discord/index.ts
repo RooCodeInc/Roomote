@@ -865,6 +865,7 @@ async function processDiscordGatewayEvent(
     const session = await getOrCreateFastAgentSession({
       userId: senderUserId,
       conversation: fastConversation,
+      userInitiated: { surface: 'discord', trigger: 'message' },
     });
     const result = await startFastSessionGoal({
       sessionId: session.id,

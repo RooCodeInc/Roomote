@@ -1067,6 +1067,7 @@ export function startFastAgentResponse(params: {
     run: ({ onAccepted, onRejected }) =>
       processFastAgentMessage({
         ...fastAgentParams,
+        userInitiated: delegatedTaskInitiator?.kind !== 'automation',
         roomoteSlackUserId: params.slackInstallation.botUserId ?? undefined,
         peerConversationsExperimentEnabled:
           params.peerConversationsExperimentEnabled,

@@ -230,6 +230,7 @@ export async function processDiscordFastAgentMessage(
     const session = await getOrCreateFastAgentSession({
       userId: input.senderUserId,
       conversation,
+      userInitiated: { surface: 'discord', trigger: 'message' },
     });
     const humanFollowUpEvent = {
       type: 'human_follow_up' as const,

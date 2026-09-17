@@ -473,6 +473,7 @@ export async function startFastSessionCommand(
     userId: auth.userId,
     conversation,
     ...(input.privacy ? { privacy: input.privacy } : {}),
+    userInitiated: { surface: 'web', trigger: 'message' },
   });
   const settings = await resolveSessionModelSettings(session.id, input, {
     model: null,

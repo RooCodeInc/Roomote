@@ -259,6 +259,7 @@ describe('processDiscordFastAgentMessage', () => {
     expect(mocks.getSession).toHaveBeenCalledWith({
       userId: 'acting-user',
       conversation,
+      userInitiated: { surface: 'discord', trigger: 'message' },
     });
     expect(mocks.fetchHistory).toHaveBeenCalledWith({
       provider,

@@ -291,6 +291,7 @@ async function startSession(c: SessionContext): Promise<Response> {
       userId,
       conversation,
       privacy,
+      userInitiated: { surface: 'api', trigger: 'manual' },
     });
     const session = await getSessionForFastConversation(db, fastSession.id);
     const queued = await queueFastAgentSurfaceReply({

@@ -59,6 +59,7 @@ export async function processFastAgentMessage(params: {
   directedAtRoomote?: boolean;
   roomoteSlackUserId?: string;
   peerConversationsExperimentEnabled?: boolean;
+  userInitiated?: boolean;
   originSessionId?: string;
   onAccepted?: (abort: () => Promise<void>) => void;
   onRejected?: () => void;
@@ -75,6 +76,7 @@ export async function processFastAgentMessage(params: {
     directedAtRoomote = false,
     roomoteSlackUserId,
     peerConversationsExperimentEnabled = false,
+    userInitiated = true,
   } = params;
   const threadId = event.thread_ts || event.ts;
   const incomingConversation = {
@@ -149,6 +151,14 @@ export async function processFastAgentMessage(params: {
         return await getOrCreateFastAgentSession({
           userId,
           conversation: incomingConversation,
+          ...(userInitiated
+            ? {
+                userInitiated: {
+                  surface: 'slack' as const,
+                  trigger: 'message' as const,
+                },
+              }
+            : {}),
           ...(params.originSessionId
             ? { sessionId: params.originSessionId }
             : {}),
