@@ -2776,6 +2776,61 @@ describe('FastSessionTranscript', () => {
     );
   });
 
+  it('replaces the picker-created Session token instead of matching manual text', async () => {
+    const firstSessionId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+    const secondSessionId = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+    sessionMentionsState.recentIds = [firstSessionId, secondSessionId];
+    sessionMentionsState.sessions = [
+      { id: firstSessionId, title: 'First session' },
+      { id: secondSessionId, title: 'Second session' },
+    ];
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-context-duplicate-text"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('Message agent');
+    const initialPrompt = 'Manual @Sessions: First session then @Sessions';
+    fireEvent.change(input, {
+      target: {
+        value: initialPrompt,
+        selectionStart: initialPrompt.length,
+      },
+    });
+    fireEvent.keyDown(input, { key: 'ArrowDown', code: 'ArrowDown' });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+    expect(input).toHaveValue(
+      'Manual @Sessions: First session then @Sessions: First session ',
+    );
+
+    const shiftedPrompt =
+      'Please Manual @Sessions: First session then @Sessions: First session ';
+    fireEvent.change(input, {
+      target: {
+        value: shiftedPrompt,
+        selectionStart: shiftedPrompt.length,
+      },
+    });
+    const replacementPrompt = `${shiftedPrompt}and @Sessions`;
+    fireEvent.change(input, {
+      target: {
+        value: replacementPrompt,
+        selectionStart: replacementPrompt.length,
+      },
+    });
+    fireEvent.keyDown(input, { key: 'ArrowDown', code: 'ArrowDown' });
+    fireEvent.keyDown(input, { key: 'ArrowDown', code: 'ArrowDown' });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+
+    expect(input).toHaveValue(
+      'Please Manual @Sessions: First session then and @Sessions: Second session ',
+    );
+  });
+
   it('selects one recent Session with the keyboard and submits its canonical ID', async () => {
     const selectedSessionId = '44444444-4444-4444-8444-444444444444';
     sessionMentionsState.recentIds = [selectedSessionId];

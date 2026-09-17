@@ -42,6 +42,7 @@ type ActiveMention = {
 type SelectedSessionMention = {
   context: SelectedSessionContext;
   text: string;
+  range: { start: number; end: number };
 };
 
 const MAX_RECENT_SESSION_MENTIONS = 10;
@@ -135,6 +136,57 @@ function hasUnquotedMention(
   return Boolean(
     findUnquotedMentionRange(value, mentionText, allowColonBoundary),
   );
+}
+
+function hasTrackedMention(
+  value: string,
+  mention: SelectedSessionMention,
+): boolean {
+  const { start, end } = mention.range;
+  const before = value[start - 1];
+  const after = value[end];
+  const punctuation = mention.text === '@Sessions' ? '.,!?;' : '.,!?;:';
+  return (
+    value.slice(start, end) === mention.text &&
+    (start === 0 || /\s/u.test(before ?? '')) &&
+    (end === value.length ||
+      /\s/u.test(after ?? '') ||
+      punctuation.includes(after ?? '')) &&
+    !isQuotedOrCode(value, start)
+  );
+}
+
+function updateTrackedRange(
+  previousValue: string,
+  nextValue: string,
+  range: SelectedSessionMention['range'],
+): SelectedSessionMention['range'] | null {
+  let prefixLength = 0;
+  while (
+    prefixLength < previousValue.length &&
+    prefixLength < nextValue.length &&
+    previousValue[prefixLength] === nextValue[prefixLength]
+  ) {
+    prefixLength += 1;
+  }
+
+  let suffixLength = 0;
+  while (
+    suffixLength < previousValue.length - prefixLength &&
+    suffixLength < nextValue.length - prefixLength &&
+    previousValue[previousValue.length - suffixLength - 1] ===
+      nextValue[nextValue.length - suffixLength - 1]
+  ) {
+    suffixLength += 1;
+  }
+
+  const previousEditEnd = previousValue.length - suffixLength;
+  if (previousEditEnd <= range.start) {
+    const shift = nextValue.length - previousValue.length;
+    return { start: range.start + shift, end: range.end + shift };
+  }
+  if (prefixLength >= range.end) return range;
+  return null;
 }
 
 function integrationMentionText(integration: IntegrationMentionOption): string {
@@ -269,6 +321,7 @@ export function useSessionContextMentions({
       mentionText = '@Sessions';
       nextSelectedSession = {
         text: mentionText,
+        range: { start: 0, end: 0 },
         context: {
           kind: 'recent',
           sessionIds: option.sessions.map((session) => session.id),
@@ -278,6 +331,7 @@ export function useSessionContextMentions({
       mentionText = sessionMentionText(option.session);
       nextSelectedSession = {
         text: mentionText,
+        range: { start: 0, end: 0 },
         context: { kind: 'session', sessionId: option.session.id },
       };
     }
@@ -288,11 +342,9 @@ export function useSessionContextMentions({
     const previousSession = selectedSessionRef.current;
     if (nextSelectedSession) {
       if (previousSession) {
-        const previousRange = findUnquotedMentionRange(
-          value,
-          previousSession.text,
-          previousSession.text !== '@Sessions',
-        );
+        const previousRange = hasTrackedMention(value, previousSession)
+          ? previousSession.range
+          : null;
         if (
           previousRange &&
           (previousRange.end <= activeMention.start ||
@@ -313,7 +365,6 @@ export function useSessionContextMentions({
           }
         }
       }
-      selectedSessionRef.current = nextSelectedSession;
     }
 
     const insertedMention = `${mentionText} `;
@@ -322,6 +373,15 @@ export function useSessionContextMentions({
       insertedMention +
       sourceValue.slice(sourceCursor);
     const nextCursor = sourceStart + insertedMention.length;
+    if (nextSelectedSession) {
+      selectedSessionRef.current = {
+        ...nextSelectedSession,
+        range: {
+          start: sourceStart,
+          end: sourceStart + mentionText.length,
+        },
+      };
+    }
 
     onValueChange(nextValue);
     setCursor(nextCursor);
@@ -366,15 +426,19 @@ export function useSessionContextMentions({
         hasUnquotedMention(nextValue, integrationMentionText(integration)),
     );
     const selectedSession = selectedSessionRef.current;
-    if (
-      selectedSession &&
-      !hasUnquotedMention(
+    if (selectedSession) {
+      const nextRange = updateTrackedRange(
+        value,
         nextValue,
-        selectedSession.text,
-        selectedSession.text !== '@Sessions',
-      )
-    ) {
-      selectedSessionRef.current = null;
+        selectedSession.range,
+      );
+      const nextSelectedSession = nextRange
+        ? { ...selectedSession, range: nextRange }
+        : null;
+      selectedSessionRef.current =
+        nextSelectedSession && hasTrackedMention(nextValue, nextSelectedSession)
+          ? nextSelectedSession
+          : null;
     }
     onValueChange(nextValue);
     setCursor(nextCursor ?? nextValue.length);
@@ -473,12 +537,7 @@ export function useSessionContextMentions({
       messageText: string,
     ): SelectedSessionContext | undefined => {
       const selected = selectedSessionRef.current;
-      return selected &&
-        hasUnquotedMention(
-          messageText,
-          selected.text,
-          selected.text !== '@Sessions',
-        )
+      return selected && hasTrackedMention(messageText, selected)
         ? selected.context
         : undefined;
     },
