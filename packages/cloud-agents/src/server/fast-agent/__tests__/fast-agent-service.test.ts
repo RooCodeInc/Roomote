@@ -385,6 +385,7 @@ import {
   ACP_UI_TOOL_OUTPUT_MAX_CHARS,
   ALL_REPOSITORIES,
   NO_REPOSITORIES,
+  RunStatus,
 } from '@roomote/types';
 import { McpToolCallError } from '../../mcp-tool-client';
 
@@ -4091,15 +4092,61 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(activity.dispose).toHaveBeenCalledOnce();
   });
 
-  it('preserves ongoing task activity for an ignored ambient human turn', async () => {
+  it.each([RunStatus.Running, RunStatus.Idle, RunStatus.Completed])(
+    'does not emit surface activity for a peer-directed turn with a %s background task',
+    async (status) => {
+      mocks.getActiveTasks.mockResolvedValueOnce([
+        { taskId: 'task-1', status },
+      ]);
+      mocks.generateText.mockImplementationOnce(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.ignoreEvent, {
+            reason: 'The participants are talking to each other.',
+          });
+          return '';
+        },
+      );
+      const activity = {
+        start: vi.fn(),
+        settle: vi.fn().mockResolvedValue(undefined),
+        dispose: vi.fn().mockResolvedValue(undefined),
+      };
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        allowSilentAmbientReply: true,
+        peerDirectedTurn: true,
+        adapter: callbacks({ activity }),
+      });
+
+      expect(activity.start).not.toHaveBeenCalled();
+      expect(activity.settle).not.toHaveBeenCalled();
+      expect(activity.dispose).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('keeps surface activity active while a directed tool is running, then clears it', async () => {
+    let finishStop!: (result: { success: true }) => void;
     mocks.getActiveTasks.mockResolvedValueOnce([
       { taskId: 'task-1', status: 'running' },
     ]);
+    mocks.stopTask.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishStop = resolve;
+        }),
+    );
     mocks.generateText.mockImplementationOnce(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
-        await invokeTool(nativeToolNames.ignoreEvent, {
-          reason: 'The participants are talking to each other.',
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’ll stop that task.',
+        });
+        await invokeTool(nativeToolNames.stopTask, {
+          taskId: 'task-1',
+          userInitiated: true,
         });
         return '';
       },
@@ -4110,46 +4157,18 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       dispose: vi.fn().mockResolvedValue(undefined),
     };
 
-    await answerFastAgentQuestion({
+    const result = answerFastAgentQuestion({
       ...baseParams,
-      allowSilentAmbientReply: true,
       adapter: callbacks({ activity }),
     });
 
-    expect(activity.start).not.toHaveBeenCalled();
-    expect(activity.settle).toHaveBeenCalledOnce();
-    expect(activity.settle).toHaveBeenCalledWith({ keepProcessing: true });
-    expect(activity.dispose).not.toHaveBeenCalled();
-  });
-
-  it('does not preserve completed resumable task activity for an ignored ambient human turn', async () => {
-    mocks.getActiveTasks.mockResolvedValueOnce([
-      { taskId: 'task-1', status: 'completed' },
-    ]);
-    mocks.generateText.mockImplementationOnce(
-      async (_params, _session, options) => {
-        await options.onSessionReady('opencode-session-1');
-        await invokeTool(nativeToolNames.ignoreEvent, {
-          reason: 'The participants are talking to each other.',
-        });
-        return '';
-      },
-    );
-    const activity = {
-      start: vi.fn(),
-      settle: vi.fn().mockResolvedValue(undefined),
-      dispose: vi.fn().mockResolvedValue(undefined),
-    };
-
-    await answerFastAgentQuestion({
-      ...baseParams,
-      allowSilentAmbientReply: true,
-      adapter: callbacks({ activity }),
-    });
-
-    expect(activity.start).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(mocks.stopTask).toHaveBeenCalledOnce());
+    expect(activity.start).toHaveBeenCalledOnce();
     expect(activity.settle).not.toHaveBeenCalled();
-    expect(activity.dispose).toHaveBeenCalledOnce();
+    finishStop({ success: true });
+    await result;
+    expect(activity.settle).toHaveBeenCalledOnce();
+    expect(activity.settle).toHaveBeenCalledWith({ keepProcessing: false });
   });
 
   it('clears surface activity after reporting a completed resumable task', async () => {
@@ -4185,7 +4204,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(activity.dispose).not.toHaveBeenCalled();
   });
 
-  it('preserves ongoing task activity after a directed human turn', async () => {
+  it('clears orchestrator activity after a directed turn with a running background task', async () => {
     const activity = {
       start: vi.fn(),
       settle: vi.fn().mockResolvedValue(undefined),
@@ -4194,13 +4213,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
     await answerFastAgentQuestion({
       ...baseParams,
-      activeTasks: [{ taskId: 'task-1' }],
+      activeTasks: [{ taskId: 'task-1', status: RunStatus.Running }],
       adapter: callbacks({ activity }),
     });
 
     expect(activity.start).toHaveBeenCalledOnce();
     expect(activity.settle).toHaveBeenCalledOnce();
-    expect(activity.settle).toHaveBeenCalledWith({ keepProcessing: true });
+    expect(activity.settle).toHaveBeenCalledWith({ keepProcessing: false });
     expect(activity.dispose).not.toHaveBeenCalled();
   });
 
@@ -7605,7 +7624,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       // The first retry was a short in-process wait; the second left the
       // process as a park.
       expect(mocks.generateText).toHaveBeenCalledTimes(2);
-      expect(activity.settle).toHaveBeenCalledWith({ keepProcessing: true });
+      expect(activity.settle).toHaveBeenCalledWith({ keepProcessing: false });
       expect(mocks.scheduleDurableRetry).toHaveBeenCalledOnce();
       const [rowId, schedule] = mocks.scheduleDurableRetry.mock.calls[0]!;
       expect(rowId).toBe('durable-row-1');
@@ -11111,7 +11130,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(activity.settle).toHaveBeenCalledWith({ keepProcessing: false });
   });
 
-  it('keeps processing when another task remains after a soft stop', async () => {
+  it('clears orchestrator activity when another task remains after a soft stop', async () => {
     mocks.getActiveTasks.mockResolvedValue([
       { taskId: 'task-1', title: 'Checkout', status: 'running' },
       { taskId: 'task-2', title: 'Tests', status: 'running' },
@@ -11141,10 +11160,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       adapter: callbacks({ activity }),
     });
 
-    expect(activity.settle).toHaveBeenCalledWith({ keepProcessing: true });
+    expect(activity.settle).toHaveBeenCalledWith({ keepProcessing: false });
   });
 
-  it('restores processing when a message resumes a soft-stopped task', async () => {
+  it('clears orchestrator activity after resuming a soft-stopped task', async () => {
     mocks.getActiveTasks.mockResolvedValue([
       { taskId: 'task-1', title: 'Checkout', status: 'running' },
     ]);
@@ -11178,7 +11197,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
 
     expect(mocks.sendTaskMessage).toHaveBeenCalledOnce();
-    expect(activity.settle).toHaveBeenCalledWith({ keepProcessing: true });
+    expect(activity.settle).toHaveBeenCalledWith({ keepProcessing: false });
   });
 
   it('silently ignores optional human reaction input through the existing native tool', async () => {
