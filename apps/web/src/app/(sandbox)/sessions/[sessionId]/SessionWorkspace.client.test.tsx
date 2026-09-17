@@ -499,6 +499,17 @@ describe('SessionWorkspace', () => {
             ],
           },
         ],
+        artifacts: [
+          {
+            id: 'session-artifact',
+            path: 'notes/decision.md',
+            version: 1,
+            artifactType: 'general',
+            contentType: 'text/markdown',
+            size: 100,
+            createdAt: new Date('2026-01-05T00:00:00.000Z'),
+          },
+        ],
       },
     });
 
@@ -1633,18 +1644,49 @@ describe('SessionWorkspace', () => {
     );
   });
 
-  it('navigates to an empty session Artifacts panel and back', () => {
+  it('disables the Artifacts control when the gallery is empty', () => {
     renderWorkspace({ isMobile: false });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Artifacts' }));
+    const artifacts = screen.getByRole('button', { name: 'Artifacts' });
 
+    expect(artifacts).toBeDisabled();
+    fireEvent.click(artifacts);
+    expect(screen.queryByRole('heading', { name: 'Artifacts' })).toBeNull();
+  });
+
+  it('enables the Artifacts control when an artifact arrives', async () => {
+    const { queryClient } = renderWorkspace({ isMobile: false });
+    const artifacts = screen.getByRole('button', { name: 'Artifacts' });
+    expect(artifacts).toBeDisabled();
+    await waitFor(() =>
+      expect(
+        queryClient.getQueryState(['sessions', 'byId', session.id])
+          ?.fetchStatus,
+      ).toBe('idle'),
+    );
+
+    act(() => {
+      queryClient.setQueryData(['sessions', 'byId', session.id], {
+        ...session,
+        artifacts: [
+          {
+            id: 'session-artifact',
+            path: 'notes/decision.md',
+            version: 1,
+            artifactType: 'general',
+            contentType: 'text/markdown',
+            size: 100,
+            createdAt: new Date('2026-01-05T00:00:00.000Z'),
+          },
+        ],
+      });
+    });
+
+    await waitFor(() => expect(artifacts).toBeEnabled());
+    fireEvent.click(artifacts);
     expect(
-      screen.getByRole('heading', { name: 'Artifacts' }),
-    ).toBeInTheDocument();
-    expect(screen.getByText('No artifacts in this session yet.')).toBeVisible();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Close artifacts' }));
-    expect(screen.queryByText('No artifacts in this session yet.')).toBeNull();
+      screen.getByRole('button', { name: 'Open Decision from Session' }),
+    ).toBeVisible();
   });
 
   it('shows artifacts created directly by the Session', async () => {
@@ -1677,7 +1719,9 @@ describe('SessionWorkspace', () => {
       },
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Artifacts' }));
+    const artifacts = screen.getByRole('button', { name: 'Artifacts' });
+    expect(artifacts).toBeEnabled();
+    fireEvent.click(artifacts);
 
     expect(
       screen.getByRole('button', { name: 'Open Decision from Session' }),
@@ -2270,7 +2314,9 @@ describe('SessionWorkspace', () => {
       ],
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Artifacts' }));
+    const artifacts = screen.getByRole('button', { name: 'Artifacts' });
+    await waitFor(() => expect(artifacts).toBeEnabled());
+    fireEvent.click(artifacts);
 
     expect(
       await screen.findByRole('button', {

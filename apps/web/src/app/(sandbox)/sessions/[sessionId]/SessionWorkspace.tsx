@@ -820,6 +820,10 @@ export function SessionWorkspace({
   const fastTasks = currentFastTasks ?? session.taskCards ?? [];
   const taskCards = isFastTaskSource ? fastTasks : sessionTasks;
   const artifactTasks = isFastTaskSource ? fastTasks : sessionTasks;
+  const sessionArtifacts = currentSession?.artifacts ?? session.artifacts ?? [];
+  const hasSessionArtifacts =
+    getLatestSessionArtifacts(artifactTasks, session.id, sessionArtifacts)
+      .length > 0;
   const sessionPullRequests = getSessionPullRequests(sessionTasks);
   const sessionPreviewCount = getSessionPreviews(taskCards).length;
   const runningTasks = useMemo(
@@ -947,7 +951,7 @@ export function SessionWorkspace({
       <SessionArtifactsPanel
         tasks={artifactTasks}
         sessionId={session.id}
-        sessionArtifacts={session.artifacts ?? []}
+        sessionArtifacts={sessionArtifacts}
         initialSelection={requestedArtifact}
         onDeselect={clearRequestedArtifact}
         onClose={closeSessionArtifact}
@@ -1073,6 +1077,7 @@ export function SessionWorkspace({
                   tooltip="Artifacts"
                   active={utilityPanel?.kind === 'artifacts'}
                   aria-expanded={utilityPanel?.kind === 'artifacts'}
+                  disabled={!hasSessionArtifacts}
                   icon={LayoutGrid}
                   onClick={() => togglePanel('artifacts')}
                 />
