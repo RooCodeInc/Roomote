@@ -850,6 +850,9 @@ export async function continueFastAgentSurfaceReplyWithLock(
   if (!delivery) {
     return { outcome: 'unroutable' };
   }
+  // AgentMail drains own one lock across multiple ordered turns and enter
+  // through this continuation instead of the independently-acquired wrapper.
+  wakeFastAgentParentEventsOnTurnRelease(turnLock, params.sessionId);
 
   try {
     return await runFastAgentSurfaceReplyWithLock(

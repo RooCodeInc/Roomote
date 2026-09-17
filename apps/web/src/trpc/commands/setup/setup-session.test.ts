@@ -24,6 +24,7 @@ vi.mock('@roomote/sdk/server', () => ({
   LINEAR_ORG_CONNECTION_ROLE: 'organization',
   persistFastAgentInlineHumanTurn: vi.fn().mockResolvedValue(null),
   resolveUserMcpServerConfigs: vi.fn().mockResolvedValue([]),
+  wakeFastAgentParentEventsOnTurnRelease: vi.fn(),
 }));
 vi.mock('@roomote/cloud-agents/server', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/cloud-agents/server')>()),

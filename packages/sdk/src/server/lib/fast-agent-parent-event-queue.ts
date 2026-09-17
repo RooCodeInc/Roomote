@@ -46,6 +46,10 @@ import { retryFastAgentStartup } from './task-runs/fast-agent-startup-retry';
 
 export const FAST_AGENT_PARENT_EVENT_QUEUE_NAME = 'fast-agent-parent-events';
 const MAX_DIAGNOSTIC_DURATION_MS = 24 * 60 * 60 * 1_000;
+const parentEventWakeBindings = new WeakMap<
+  FastAgentTurnLockHandle,
+  Set<string>
+>();
 
 function boundedDurationMs(startedAtMs: number): number {
   return Math.min(
@@ -292,6 +296,12 @@ export function wakeFastAgentParentEventsOnTurnRelease(
   turnLock: FastAgentTurnLockHandle,
   conversationId: string,
 ): void {
+  const boundConversationIds =
+    parentEventWakeBindings.get(turnLock) ?? new Set<string>();
+  if (boundConversationIds.has(conversationId)) return;
+  boundConversationIds.add(conversationId);
+  parentEventWakeBindings.set(turnLock, boundConversationIds);
+
   const previous = turnLock.afterRelease;
   turnLock.afterRelease = async () => {
     await previous?.();
