@@ -3,6 +3,7 @@ import { createAuthToken } from '@roomote/auth';
 import {
   ALL_REPOSITORIES,
   NO_REPOSITORIES,
+  REASONING_EFFORT_VALUES,
   type ReasoningEffort,
 } from '@roomote/types';
 import { z } from 'zod';
@@ -355,9 +356,19 @@ export function createFastAgentTaskTools(
             .describe(
               'Optional exact deployment-enabled model ID. Omit it to use the deployment default',
             ),
+          reasoningEffort: z
+            .enum(REASONING_EFFORT_VALUES)
+            .optional()
+            .describe('Optional reasoning effort override'),
         })
         .strict(),
-      execute: async ({ prompt, environmentId, type, model }) =>
+      execute: async ({
+        prompt,
+        environmentId,
+        type,
+        model,
+        reasoningEffort,
+      }) =>
         callFastAgentTaskApi({
           ...context,
           method: 'POST',
@@ -375,6 +386,7 @@ export function createFastAgentTaskTools(
               : {}),
             ...(type ? { type } : {}),
             ...(model ? { model } : {}),
+            ...(reasoningEffort ? { reasoningEffort } : {}),
           },
         }),
     }),

@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 
 import { db, mcpConnections, eq } from '@roomote/db/server';
 import {
+  ClientRegistrationRejectedError,
+  describeRegistrationRefusal,
   discoverOAuthEndpoints,
   discoverOAuthProtectedResourceMetadata,
   registerOAuthClient,
@@ -41,6 +43,8 @@ import { authorize } from '@/lib/server';
 import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
 import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
 import { resolveDeploymentStaticOauthClientInformation } from '@/lib/server/deployment-static-oauth';
+import { buildRemoteMcpSetupFailedContinuation } from '@/lib/server/integration-saved-continuation';
+import { resumeFastSessionFromReplay } from '@/lib/server/mcp-oauth-replay-continuation';
 
 export const runtime = 'nodejs';
 
@@ -330,7 +334,30 @@ export async function GET(
             );
       } catch (error) {
         if (!customTarget) throw error;
+        // Only the provider's decision is a refusal; a timeout or a 5xx is
+        // rethrown so the connection stays pending and retryable.
+        if (
+          !(error instanceof ClientRegistrationRejectedError && error.isRefusal)
+        ) {
+          throw error;
+        }
         await updateAuthStatus(connectionId, 'error', false);
+        // The link came from a Session: tell that Session why authorization
+        // never started so the agent can say so and move on, instead of the
+        // human landing on a page that shows nothing.
+        if (replayToken) {
+          await resumeFastSessionFromReplay({
+            replayToken,
+            authResult,
+            connectionId,
+            mcpId: connection.mcpId,
+            text: buildRemoteMcpSetupFailedContinuation(
+              customTarget.name,
+              describeRegistrationRefusal(error),
+            ),
+            event: 'custom_mcp_registration_continuation_failed',
+          });
+        }
         return NextResponse.redirect(
           withMcpQuery(webUrl, redirectPath, 'error', 'registration_failed'),
         );

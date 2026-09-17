@@ -67,6 +67,7 @@ describe('reportToParentSession', () => {
         taskId: 'task-1',
         runId: 42,
         messageId: expect.stringMatching(/^[a-f0-9]{64}$/),
+        admittedAtMs: expect.any(Number),
         purpose: 'progress',
         message: 'The targeted tests are running.',
         imageArtifactIds: ['artifact-1'],

@@ -116,18 +116,12 @@ export async function admitSessionWakeup(
 ): Promise<AdmitSessionWakeupResult> {
   return runInTransactionIfAvailable(database, async (tx) => {
     const [conversation] = await tx
-      .select({
-        id: fastAgentConversations.id,
-        privacy: fastAgentConversations.privacy,
-      })
+      .select({ id: fastAgentConversations.id })
       .from(fastAgentConversations)
       .where(eq(fastAgentConversations.id, input.conversationId))
       .for('update');
     if (!conversation) {
       throw new Error(`Conversation ${input.conversationId} does not exist.`);
-    }
-    if (conversation.privacy === 'private') {
-      throw new Error('Wakeups are unavailable in private Sessions.');
     }
 
     const promptSignature = buildSessionWakeupPromptSignature(input.prompt);

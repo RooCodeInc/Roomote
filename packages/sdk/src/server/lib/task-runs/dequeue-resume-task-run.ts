@@ -397,7 +397,6 @@ export const dequeueResumeTaskRun = async (
       sourceControlToken = await createSourceControlTokenForTaskRun(
         result.taskRun,
         tag,
-        { readOnly: result.task.privacy === 'private' },
       );
     } catch (error) {
       await recordSnapshotResumeBootstrapEvent({

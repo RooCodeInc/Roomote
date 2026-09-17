@@ -31,6 +31,10 @@ export function formatAnalyticsDateTime(timestamp: Date) {
   return format(timestamp, 'MMM d, yyyy h:mm a');
 }
 
+export function formatPrivateAnalyticsDate(timestamp: Date) {
+  return format(timestamp, 'MMM d, yyyy');
+}
+
 export function getRequestTimeBootstrapCutoff(
   timePeriod: TimePeriodFilter | undefined,
   now: Date,

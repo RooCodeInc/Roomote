@@ -76,6 +76,9 @@ type CaptureFastAgentInferenceContextInput = {
   suppliedThreadMessageCount: number;
   threadContextAttached: boolean;
   senderContextPresent: boolean;
+  directedAtRoomote: boolean | null;
+  allowSilentAmbientReply: boolean;
+  peerDirectedTurn: boolean;
   agentContextPresent: boolean;
   inputImageCount: number;
   attachedImageCount: number;
@@ -160,6 +163,9 @@ export function captureFastAgentInferenceContext(
       supplied_thread_message_count: input.suppliedThreadMessageCount,
       thread_context_attached: input.threadContextAttached,
       sender_context_present: input.senderContextPresent,
+      directed_at_roomote: input.directedAtRoomote,
+      allow_silent_ambient_reply: input.allowSilentAmbientReply,
+      peer_directed_turn: input.peerDirectedTurn,
       agent_context_present: input.agentContextPresent,
       input_image_count: input.inputImageCount,
       attached_image_count: input.attachedImageCount,

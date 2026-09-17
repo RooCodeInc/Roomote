@@ -125,6 +125,30 @@ export const taskModelOptionSchema = z.object({
 
 export type TaskModelOption = z.infer<typeof taskModelOptionSchema>;
 
+export const MAX_CODING_MODEL_ROUTING_RULES = 20;
+export const MAX_CODING_MODEL_ROUTING_CONDITION_LENGTH = 500;
+
+export const codingModelRoutingRuleSchema = z.object({
+  modelId: z
+    .string()
+    .trim()
+    .min(1)
+    .regex(
+      TASK_MODEL_ID_PATTERN,
+      'Task model IDs must use provider/model format.',
+    ),
+  reasoningEffort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).nullable(),
+  condition: z
+    .string()
+    .trim()
+    .min(1, 'Routing conditions cannot be empty.')
+    .max(MAX_CODING_MODEL_ROUTING_CONDITION_LENGTH),
+});
+
+export type CodingModelRoutingRule = z.infer<
+  typeof codingModelRoutingRuleSchema
+>;
+
 function sortTaskModelOptionsById<T extends { id: string }>(models: T[]): T[] {
   return [...models].sort((left, right) =>
     left.id.localeCompare(right.id, undefined, {
@@ -169,6 +193,10 @@ export const taskModelSettingsSchema = z.object({
   models: z.array(taskModelOptionSchema).optional(),
   allowedModelIds: z.array(z.string().trim().min(1)),
   defaultModelId: z.string().trim().min(1),
+  codingModelRoutingRules: z
+    .array(codingModelRoutingRuleSchema)
+    .max(MAX_CODING_MODEL_ROUTING_RULES)
+    .optional(),
   /**
    * Model ids the live-catalog sync has already seen and offered. A synced
    * model an operator later deletes from `models` stays deleted because its
@@ -482,6 +510,24 @@ export function normalizeTaskModelSettings(value: unknown): TaskModelSettings {
   const defaultModelId = nextAllowedModelIds.includes(requestedDefaultModelId)
     ? requestedDefaultModelId
     : (nextAllowedModelIds[0] ?? DEFAULT_TASK_MODEL_SETTINGS.defaultModelId);
+  const codingModelRoutingRules = parsed.success
+    ? (parsed.data.codingModelRoutingRules?.flatMap((rule) => {
+        const modelId = normalizeTaskModelId(rule.modelId);
+        const model = models.find((candidate) => candidate.id === modelId);
+
+        if (!model || !nextAllowedModelIds.includes(modelId)) {
+          return [];
+        }
+
+        return [
+          {
+            modelId,
+            reasoningEffort: rule.reasoningEffort,
+            condition: rule.condition,
+          },
+        ];
+      }) ?? [])
+    : [];
 
   // An empty list is collapsed to "no baseline recorded": the sync only ever
   // records non-empty baselines (it no-ops on an empty catalog), so a
@@ -500,6 +546,7 @@ export function normalizeTaskModelSettings(value: unknown): TaskModelSettings {
     models,
     allowedModelIds: nextAllowedModelIds,
     defaultModelId,
+    ...(codingModelRoutingRules.length > 0 ? { codingModelRoutingRules } : {}),
     ...(catalogSyncedModelIds ? { catalogSyncedModelIds } : {}),
   };
 }

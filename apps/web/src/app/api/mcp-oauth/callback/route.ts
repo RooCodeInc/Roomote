@@ -7,7 +7,6 @@ import {
   mcpConnections,
   deploymentMcpEnablements,
   eq,
-  sessions,
 } from '@roomote/db/server';
 import {
   getMcpIntegration,
@@ -22,7 +21,6 @@ import {
   discoverOAuthEndpoints,
   exchangeCodeForTokens,
   consumeOAuthState,
-  consumeMcpOauthReplay,
   getMcpOauthReplay,
   storeTokens,
   getClientInformation,
@@ -39,8 +37,8 @@ import {
   buildNativeIntegrationOauthContinuation,
   buildRemoteMcpConnectedContinuation,
 } from '@/lib/server/integration-saved-continuation';
-import { replyToFastSessionCommand } from '@/trpc/commands/fast-sessions';
 import type { UserAuthSuccess } from '@/types/auth';
+import { resumeFastSessionFromReplay } from '@/lib/server/mcp-oauth-replay-continuation';
 import {
   hydrateLinearMcpConnectionAfterOauth,
   LinearReplayIdentityMismatchError,
@@ -173,28 +171,11 @@ async function continueFastSessionAfterOauth(input: {
   outcome: 'connected' | 'canceled' | 'failed';
 }) {
   if (!input.replayToken) return;
-  const replay = await consumeMcpOauthReplay(input.replayToken);
-  if (
-    !replay ||
-    replay.userId !== input.auth.userId ||
-    replay.connectionId !== input.connectionId ||
-    replay.mcpId !== input.mcpId ||
-    !replay.sessionId
-  ) {
-    return;
-  }
-  const ownerSession = await db.query.sessions.findFirst({
-    where: and(
-      eq(sessions.id, replay.sessionId),
-      eq(sessions.ownerKind, 'user'),
-      eq(sessions.ownerUserId, input.auth.userId),
-    ),
-    columns: { archivedAt: true, fastConversationId: true },
-  });
-  if (!ownerSession?.fastConversationId || ownerSession.archivedAt) return;
-
-  await replyToFastSessionCommand(input.auth, {
-    sessionId: ownerSession.fastConversationId,
+  await resumeFastSessionFromReplay({
+    replayToken: input.replayToken,
+    authResult: input.auth,
+    connectionId: input.connectionId,
+    mcpId: input.mcpId,
     text:
       input.customIntegration && input.outcome === 'connected'
         ? buildRemoteMcpConnectedContinuation(input.integrationName)
@@ -202,6 +183,7 @@ async function continueFastSessionAfterOauth(input: {
             input.integrationName,
             input.outcome,
           ),
+    event: 'mcp_oauth_continuation_failed',
   });
 }
 

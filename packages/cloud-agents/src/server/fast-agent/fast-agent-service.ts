@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { ModelMessage } from 'ai';
 import { redactSecrets } from '@roomote/communication/redact-secrets';
 import { addRemoteCustomMcpForFast } from '@roomote/sdk/server/add-remote-custom-mcp';
+import { createFastSessionPlatformIssueReport } from '@roomote/sdk/server/platform-issue-reporting';
 import {
   connectIntegrationForFast,
   listNativeIntegrationsForFast,
@@ -39,7 +40,6 @@ import {
   formatErrorForLog,
   formatSingleLineLog,
   manageWakeupsInputSchema,
-  serviceCredentialRequestSchema,
   serviceCredentialPrepareSchema,
   serviceCredentialPrepareToolSchema,
   resolveInferenceProviderRetryDelayMs,
@@ -53,6 +53,7 @@ import {
   parseDiscordMessagePermalink,
   parseSlackChannelPermalink,
   parseSlackMessagePermalink,
+  platformIssueReportSchema,
   type IntegrationToolCandidate,
   type DataVisualizationInput,
   CALL_INTEGRATION_TOOL_TOOL,
@@ -197,7 +198,6 @@ import {
 import {
   getFastAgentNativeAcpKind,
   isFastAgentNativeIntegration,
-  isFastAgentNativeToolEnabled,
 } from './fast-agent-tool-policy';
 import {
   callFastAgentIntegration,
@@ -230,7 +230,10 @@ import {
   type FastAgentPromptKind,
 } from './fast-agent-context-telemetry';
 import { RemoteFastAgentRepositorySkillSource } from './fast-agent-repository-skill-source';
-import { resolveFastAgentRoutingHint } from './fast-agent-routing-hint';
+import {
+  resolveFastAgentLaunchModelSelection,
+  resolveFastAgentRoutingHint,
+} from './fast-agent-routing-hint';
 import { FastAgentSkillStore } from './fast-agent-skill-store';
 import {
   FAST_AGENT_REACTION_INPUT_TYPE,
@@ -462,6 +465,7 @@ const launchTaskArgsSchema = z.object({
   prompt: z.string().trim().min(1),
   environmentId: z.string().trim().min(1).nullable().optional(),
   model: z.string().trim().min(1).nullable().optional(),
+  reasoningEffort: z.enum(REASONING_EFFORT_VALUES).nullable().optional(),
   includeAttachments: z.boolean().optional().default(false),
 });
 
@@ -1729,20 +1733,6 @@ function isSuccessfulChatReactionResult(
   );
 }
 
-/**
- * What the model is told when the API names why an integration-key request
- * was refused. Only reasons that carry no request values are ever named.
- */
-const INTEGRATION_REFUSAL_GUIDANCE: Readonly<Record<string, string>> = {
-  method_not_allowed:
-    'That method is not approved for this integration. Use one of its allowed methods, or prepare a new approval that includes it.',
-  credential_echo:
-    "The service's response contained the key itself, so it was withheld. Use an endpoint that does not echo request headers.",
-  credential_echo_encoded:
-    "The service's response contained the key itself, so it was withheld. Use an endpoint that does not echo request headers.",
-  path_too_long: 'The request path is too long; shorten it.',
-};
-
 const addRemoteMcpArgsSchema = z
   .object({
     name: z.string().trim().min(1).max(80),
@@ -1781,12 +1771,15 @@ export async function answerFastAgentQuestion({
   platformEventHandling = 'default',
   platformEventVisibility = 'optional',
   platformEventKind = 'delegated_task',
+  platformEventTimestampMs,
   automationReport = false,
   serviceCredentialPlatformActorUserId,
   serviceCredentialPlatformDenialReason,
   defaultImageArtifactIds = [],
   defaultCharts = [],
   allowSilentAmbientReply = false,
+  directedAtRoomote,
+  peerDirectedTurn = false,
   platformEventTranscriptPayload,
   slackRoomoteUserId,
   currentDurableHumanFollowUpEventId,
@@ -1824,6 +1817,8 @@ export async function answerFastAgentQuestion({
   platformEventHandling?: FastAgentPlatformEventHandling;
   platformEventVisibility?: FastAgentPlatformEventVisibility;
   platformEventKind?: FastAgentPlatformEventKind;
+  /** Original durable admission time for a projected platform receipt. */
+  platformEventTimestampMs?: number;
   /** The settling delegated task ran for a custom automation; its closeout is
    * the run's report and may carry launchable suggestions. */
   automationReport?: boolean;
@@ -1839,6 +1834,10 @@ export async function answerFastAgentQuestion({
   defaultCharts?: DataVisualizationInput[];
   /** True only for an unmentioned turn in a multi-human Fast conversation. */
   allowSilentAmbientReply?: boolean;
+  /** Surface-level classification; defaults to a direct human turn. */
+  directedAtRoomote?: boolean;
+  /** Surface-level classification that this turn belongs to human peers. */
+  peerDirectedTurn?: boolean;
   platformEventTranscriptPayload?: Record<string, unknown>;
   slackRoomoteUserId?: string;
   /** The durable row currently running as a fallback whole turn. Excluding it
@@ -1884,9 +1883,16 @@ export async function answerFastAgentQuestion({
     userId,
   });
   const platformEvent = turnSource === 'platform_event';
+  const resolvedDirectedAtRoomote =
+    directedAtRoomote ?? (!platformEvent && !allowSilentAmbientReply);
   const humanInput = input ?? ({ type: 'message' } as const);
   const reactionInput =
     !platformEvent && humanInput.type === FAST_AGENT_REACTION_INPUT_TYPE;
+  const resolvedPeerDirectedTurn =
+    peerDirectedTurn &&
+    allowSilentAmbientReply &&
+    !platformEvent &&
+    !reactionInput;
   const substantiveHumanInput = !platformEvent && !reactionInput;
   const currentMessageReactable = substantiveHumanInput;
   const transcriptPayload = reactionInput
@@ -2458,7 +2464,7 @@ export async function answerFastAgentQuestion({
       let batchTextBytes = 0;
       let batchFileCount = 0;
       let batchFileBytes = 0;
-      let blockedByDifferentUser = false;
+      let requiresSeparateTurn = false;
 
       for (const row of rows) {
         const parsed = fastAgentHumanFollowUpEventSchema.safeParse(row.event);
@@ -2488,7 +2494,14 @@ export async function answerFastAgentQuestion({
           // initiating user. Preserve global queue order: deliver the current
           // actor's contiguous prefix, then leave this participant and every
           // later message durable for separately authorized turns.
-          blockedByDifferentUser = true;
+          requiresSeparateTurn = true;
+          break;
+        }
+        if (followUp.peerDirectedTurn) {
+          // Native steering keeps the active turn's existing system prompt.
+          // Run peer-directed messages separately so their highest-priority
+          // startup exception is present at inference time.
+          requiresSeparateTurn = true;
           break;
         }
         if (followUp.sourceControlReplyTarget) {
@@ -2498,7 +2511,7 @@ export async function answerFastAgentQuestion({
           // Steering would inject the text into this turn's home adapter and
           // retire the row without either. Leave it and everything after it
           // durable, in order.
-          blockedByDifferentUser = true;
+          requiresSeparateTurn = true;
           break;
         }
 
@@ -2568,7 +2581,7 @@ export async function answerFastAgentQuestion({
 
       await markFastAgentHumanFollowUpsDelivered(alreadyInjectedIds);
       if (batch.length === 0) {
-        if (blockedByDifferentUser) return;
+        if (requiresSeparateTurn) return;
         continue;
       }
 
@@ -3115,7 +3128,7 @@ export async function answerFastAgentQuestion({
       await surfaceReplyStream.close();
       if (surfaceDisposed) return;
       if (surfaceActivityStarted) {
-        await adapter.activity?.settle({ keepProcessing: durableTurnDeferred });
+        await adapter.activity?.settle({ keepProcessing: false });
       } else {
         await adapter.activity?.dispose();
       }
@@ -3199,7 +3212,11 @@ export async function answerFastAgentQuestion({
         console.warn(
           `[Fast Agent] Task model options unavailable: ${formatErrorForLog(error)}`,
         );
-        return { models: [], defaultModelId: undefined };
+        return {
+          models: [],
+          defaultModelId: undefined,
+          codingModelRoutingRules: [],
+        };
       }),
       getOrCreateFastAgentSession({
         userId,
@@ -3283,6 +3300,8 @@ export async function answerFastAgentQuestion({
             environments: availableEnvironments,
             routingRules:
               agentBehaviorSettings?.workspaceRoutingSettings?.rules,
+            models: taskModelOptions.models,
+            codingModelRoutingRules: taskModelOptions.codingModelRoutingRules,
           })
         : undefined;
     const [personalizationContext, availableSkills] = await Promise.all([
@@ -3353,13 +3372,12 @@ export async function answerFastAgentQuestion({
       conversation,
       currentMessageReactable,
     });
-    availableIntegrations = availableIntegrations.filter((integration) =>
-      currentSessionPrivacy !== 'private'
-        ? integration.dataPolicy !== 'private'
-        : integration.id === BRAIN_MCP_ID ||
-          (integration.dataPolicy === 'private' &&
-            privateSessionsExperimentEnabled &&
-            currentPrivateOwnerUserId === userId),
+    availableIntegrations = availableIntegrations.filter(
+      (integration) =>
+        integration.dataPolicy !== 'private' ||
+        (currentSessionPrivacy === 'private' &&
+          privateSessionsExperimentEnabled &&
+          currentPrivateOwnerUserId === userId),
     );
     if (currentSessionPrivacy === 'private') {
       availableIntegrations = availableIntegrations
@@ -3501,7 +3519,8 @@ export async function answerFastAgentQuestion({
       {
         ...userEvent,
         turnId,
-        ts: previousAttempt?.prompt?.ts ?? Date.now(),
+        ts:
+          previousAttempt?.prompt?.ts ?? platformEventTimestampMs ?? Date.now(),
         eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
         role: 'user',
         contentBlocks: buildFastAgentUserContentBlocks(
@@ -3572,6 +3591,9 @@ export async function answerFastAgentQuestion({
             senderDisplayName?.trim() || currentUser.displayName || undefined,
           githubLogin: currentUser.githubLogin || undefined,
         };
+    const routingHint = userMessageResult?.initialHumanTurn
+      ? await routingHintRequest
+      : undefined;
     const {
       bootstrapMessages,
       turnMessages,
@@ -3593,9 +3615,7 @@ export async function answerFastAgentQuestion({
       resumedAfterInferenceRetry,
       previousAttempt,
       voiceMode,
-      routingHint: userMessageResult?.initialHumanTurn
-        ? await routingHintRequest
-        : undefined,
+      routingHint: routingHint?.context,
       skillRelevanceContext: await skillRelevanceContextPromise,
     });
     const releaseVersion = resolveRoomoteReleaseVersion(
@@ -3621,6 +3641,7 @@ export async function answerFastAgentQuestion({
       automationReport,
       retryTaskStartAvailable: Boolean(adapter.retryTaskStart),
       allowSilentAmbientReply,
+      peerDirectedTurn: resolvedPeerDirectedTurn,
       implicitAutomationOffersEnabled: !Env.R_FAST_AUTOMATION_OFFERS_DISABLED,
       releaseVersion,
       commitSha: process.env.GITHUB_SHA || process.env.VERCEL_GIT_COMMIT_SHA,
@@ -3633,6 +3654,8 @@ export async function answerFastAgentQuestion({
       globalAgentInstructions: agentBehaviorSettings?.globalAgentInstructions,
       workspaceRoutingRules:
         agentBehaviorSettings?.workspaceRoutingSettings?.rules,
+      privacy: currentSessionPrivacy,
+      codingModelRoutingRules: taskModelOptions.codingModelRoutingRules,
     });
     diagnostics.recordPromptContext({
       systemPromptChars: system.length,
@@ -3956,7 +3979,6 @@ export async function answerFastAgentQuestion({
       ...(conversation.surface === 'web'
         ? [
             FAST_AGENT_NATIVE_TOOL_NAMES.addRemoteMcp,
-            FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential,
             FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential,
             FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials,
           ]
@@ -3974,8 +3996,17 @@ export async function answerFastAgentQuestion({
               'Post an acknowledgement with send_chat_reply before this action.',
           };
 
+    const isWebIntegrationKeyRequest = (
+      call: z.infer<typeof callIntegrationToolArgsSchema>,
+    ) =>
+      conversation.surface === 'web' &&
+      call.integrationId === HTTP_INTEGRATIONS_MCP_ID &&
+      call.toolName === 'integration_request' &&
+      typeof call.args?.integrationId === 'string' &&
+      call.args.integrationId.startsWith('session:');
     const executeMcpTool = async (
       call: FastAgentMcpToolCall,
+      { acknowledgementExempt = false } = {},
     ): Promise<unknown> => {
       activeToolExecutions += 1;
       let canonicalToolEvent:
@@ -3990,9 +4021,9 @@ export async function answerFastAgentQuestion({
         turnProgressMarker += 1;
         // The acknowledgement gate runs before replay revocation: a refused
         // pre-ack call must leave the durable row recoverable.
-        const startDenial = authorizeToolStart(
-          `${call.integrationId}_${call.toolName}`,
-        );
+        const startDenial = acknowledgementExempt
+          ? null
+          : authorizeToolStart(`${call.integrationId}_${call.toolName}`);
         if (startDenial) return startDenial;
 
         if (platformEventHandling === 'present_only') {
@@ -4264,13 +4295,6 @@ export async function answerFastAgentQuestion({
       call: FastAgentNativeToolCall,
     ): Promise<unknown> => {
       try {
-        if (!isFastAgentNativeToolEnabled(call.name)) {
-          return {
-            success: false,
-            error:
-              'request_with_integration_key is unavailable in Fast mode. Launch a coding task from this Session to use the approved integration.',
-          };
-        }
         if (call.name === FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools) {
           return await describeIntegrationTools(
             findIntegrationToolsArgsSchema.parse(call.args),
@@ -4297,25 +4321,28 @@ export async function answerFastAgentQuestion({
     };
     const executeNativeToolInner = async (
       call: FastAgentNativeToolCall,
+      fastEventId?: string,
     ): Promise<unknown> => {
       const recordToolFinished = diagnostics.recordNativeToolStarted(call.name);
       const instructionVersion = getInstructionVersion(call.messageId);
 
       try {
-        if (!isFastAgentNativeToolEnabled(call.name)) {
-          return {
-            success: false,
-            error:
-              'request_with_integration_key is unavailable in Fast mode. Launch a coding task from this Session to use the approved integration.',
-          };
-        }
         const closedError = requireOpen(call.messageId);
         if (closedError) return closedError;
         const ownershipError = requireLockOwnership();
         if (ownershipError) return ownershipError;
         nativeToolInvoked = true;
         turnProgressMarker += 1;
-        const startDenial = authorizeToolStart(call.name);
+        const integrationCall =
+          call.name === FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool
+            ? callIntegrationToolArgsSchema.safeParse(call.args)
+            : undefined;
+        const acknowledgementExempt =
+          integrationCall?.success === true &&
+          isWebIntegrationKeyRequest(integrationCall.data);
+        const startDenial = acknowledgementExempt
+          ? null
+          : authorizeToolStart(call.name);
         if (startDenial) return startDenial;
         // No replay withdrawal here: every call is recorded before it runs and
         // its result after, and a resumed run is handed that record, so an
@@ -4617,6 +4644,23 @@ export async function answerFastAgentQuestion({
             }
           }
 
+          case FAST_AGENT_NATIVE_TOOL_NAMES.reportPlatformIssue: {
+            if (!fastEventId) {
+              return {
+                success: false,
+                error:
+                  'This platform issue report has no session event context.',
+              };
+            }
+            const report = platformIssueReportSchema.parse(call.args);
+            return await createFastSessionPlatformIssueReport({
+              fastConversationId: session.id,
+              fastEventId,
+              report,
+              userId,
+            });
+          }
+
           case FAST_AGENT_NATIVE_TOOL_NAMES.showWidget: {
             const args = showWidgetArgsSchema.parse(call.args);
             const result = await prepareShowWidget(args);
@@ -4657,6 +4701,14 @@ export async function answerFastAgentQuestion({
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.launchTask: {
             const args = launchTaskArgsSchema.parse(call.args);
+            const {
+              model: selectedModel,
+              reasoningEffort: selectedReasoningEffort,
+            } = resolveFastAgentLaunchModelSelection({
+              explicitModel: args.model,
+              explicitReasoningEffort: args.reasoningEffort,
+              routingHint,
+            });
             const validEnvironmentIds = new Set([
               ALL_REPOSITORIES,
               NO_REPOSITORIES,
@@ -4672,12 +4724,28 @@ export async function answerFastAgentQuestion({
               };
             }
             if (
-              args.model &&
-              !taskModelOptions.models.some((model) => model.id === args.model)
+              selectedModel &&
+              !taskModelOptions.models.some(
+                (model) => model.id === selectedModel,
+              )
             ) {
               return {
                 success: false,
-                error: `Model "${args.model}" is not enabled for new tasks. Choose an exact ID from Available Delegated Task Models.`,
+                error: `Model "${selectedModel}" is not enabled for new tasks. Choose an exact ID from Available Delegated Task Models.`,
+              };
+            }
+            const reasoningModelId =
+              selectedModel ?? taskModelOptions.defaultModelId;
+            if (
+              selectedReasoningEffort &&
+              reasoningModelId &&
+              taskModelOptions.models.find(
+                (model) => model.id === reasoningModelId,
+              )?.metadata?.supportsReasoning === false
+            ) {
+              return {
+                success: false,
+                error: `Model "${reasoningModelId}" does not support configurable reasoning effort.`,
               };
             }
             try {
@@ -4688,7 +4756,8 @@ export async function answerFastAgentQuestion({
             const signature = `launch_task:${JSON.stringify([
               args.prompt,
               args.environmentId ?? null,
-              args.model ?? null,
+              selectedModel,
+              selectedReasoningEffort,
               args.includeAttachments,
             ])}`;
             if (completedTaskActions.has(signature)) {
@@ -4759,7 +4828,8 @@ export async function answerFastAgentQuestion({
                   ? { images }
                   : {}),
                 environmentId: args.environmentId ?? null,
-                model: args.model ?? null,
+                model: selectedModel,
+                reasoningEffort: selectedReasoningEffort,
                 parentSessionId: session.id,
                 // Stable across a resumed run of this turn: a repeat of the
                 // same launch (the process died between launching and
@@ -4789,10 +4859,7 @@ export async function answerFastAgentQuestion({
             }
             if (result.success) {
               currentTasks.set(result.taskId, { taskId: result.taskId });
-              if (
-                substantiveHumanInput &&
-                currentSessionPrivacy !== 'private'
-              ) {
+              if (substantiveHumanInput) {
                 try {
                   await ensureOwnTaskFollowThroughWakeup({
                     conversationId: session.id,
@@ -4815,13 +4882,6 @@ export async function answerFastAgentQuestion({
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.reviewPullRequest: {
-            if (currentSessionPrivacy === 'private') {
-              return {
-                success: false,
-                error:
-                  'Pull request review is unavailable in private Sessions.',
-              };
-            }
             const args = reviewPullRequestArgsSchema.parse(call.args);
             const conversationTarget =
               getConversationPullRequestTarget(conversation);
@@ -4985,11 +5045,10 @@ export async function answerFastAgentQuestion({
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential:
-          case FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials:
-          case FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential: {
+          case FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials: {
             // The model only ever sees the generic message; the bounded reason
-            // goes to server logs so operators can tell a disabled experiment
-            // from a missing Session binding or a broker denial.
+            // goes to server logs so operators can distinguish a disabled
+            // experiment from a missing Session binding.
             const unavailable = (reason: string, nameReason = false) => {
               console.warn(
                 `[Fast Agent] ${call.name} unavailable (reason=${reason})`,
@@ -5035,15 +5094,10 @@ export async function answerFastAgentQuestion({
                 call.name ===
                 FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential
                   ? serviceCredentialPrepareToolSchema
-                  : call.name ===
-                      FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials
-                    ? z.object({}).strict()
-                    : serviceCredentialRequestSchema;
+                  : z.object({}).strict();
               const args = schema.safeParse(call.args);
               if (!args.success) {
-                // Argument paths are the model's own field names, never values;
-                // the JSON tool schema cannot express cross-field rules such as
-                // "GET/HEAD carry no body", so the runtime says which field failed.
+                // Argument paths are the model's own field names, never values.
                 const fields = [
                   ...new Set(
                     args.error.issues.map((issue) =>
@@ -5056,7 +5110,7 @@ export async function answerFastAgentQuestion({
                 );
                 return {
                   success: false,
-                  error: `Invalid arguments: ${fields.join(', ')}. GET and HEAD carry no body; headerPrefix is Bearer, Basic, or Token; methods must be approved for the integration.`,
+                  error: `Invalid arguments: ${fields.join(', ')}. Check the integration label, HTTPS origin, credential header, and approved methods.`,
                 };
               }
               if (!userId) return unavailable('actor_missing');
@@ -5085,68 +5139,13 @@ export async function answerFastAgentQuestion({
                 );
                 return { pending, sessionUrl: sessionUrl.toString() };
               }
-              if (
-                call.name ===
-                FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials
-              ) {
-                return {
-                  ...(await listServiceCredentialApprovals(context)),
-                  sessionUrl: sessionUrl.toString(),
-                };
-              }
-              const request = serviceCredentialRequestSchema.parse(args.data);
-              const result = await callFastAgentIntegration(
-                {
-                  userId,
-                  apiBaseUrl,
-                  sessionId: session.id,
-                  humanTurn: true,
-                },
-                availableIntegrations,
-                {
-                  integrationId: HTTP_INTEGRATIONS_MCP_ID,
-                  toolName: 'integration_request',
-                  args: {
-                    integrationId: `session:${request.secretRef}`,
-                    method: request.method,
-                    path: request.path,
-                    body: request.body,
-                    contentType: request.contentType,
-                    accept: request.accept,
-                  },
-                },
-              );
-              return { success: true, ...(result as Record<string, unknown>) };
+              return {
+                ...(await listServiceCredentialApprovals(context)),
+                sessionUrl: sessionUrl.toString(),
+              };
             } catch (error) {
-              // The broker's isError text is our own constant copy, so it is
-              // safe to classify (never to log); anything else is logged by
-              // class name only because SDK/database messages can echo bound
-              // values.
-              const named =
-                error instanceof McpToolCallError
-                  ? /\(reason: ([a-z_]+)\)$/u.exec(
-                      error.upstreamText ?? '',
-                    )?.[1]
-                  : undefined;
-              const guidance = named
-                ? INTEGRATION_REFUSAL_GUIDANCE[named]
-                : undefined;
-              if (guidance) {
-                console.warn(
-                  `[Fast Agent] ${call.name} unavailable (reason=${named})`,
-                );
-                return { success: false, error: guidance };
-              }
               return unavailable(
-                error instanceof McpToolCallError
-                  ? error.upstreamText?.startsWith(
-                      'Integration request rejected',
-                    )
-                    ? 'broker_rejected'
-                    : 'broker_unavailable'
-                  : error instanceof Error
-                    ? error.name || 'Error'
-                    : 'unknown',
+                error instanceof Error ? error.name || 'Error' : 'unknown',
               );
             }
           }
@@ -5184,12 +5183,6 @@ export async function answerFastAgentQuestion({
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups: {
-            if (currentSessionPrivacy === 'private') {
-              return {
-                success: false,
-                error: 'Wakeups are unavailable in private Sessions.',
-              };
-            }
             const args = manageWakeupsInputSchema.parse(
               normalizeManageWakeupsArgs(call.args),
             );
@@ -5540,11 +5533,14 @@ export async function answerFastAgentQuestion({
             if (isFastAgentNativeIntegration(args.integrationId)) {
               return nativeIntegrationError(args.integrationId);
             }
-            return executeMcpTool({
-              integrationId: args.integrationId,
-              toolName: args.toolName,
-              args: args.args ?? {},
-            });
+            return executeMcpTool(
+              {
+                integrationId: args.integrationId,
+                toolName: args.toolName,
+                args: args.args ?? {},
+              },
+              { acknowledgementExempt },
+            );
           }
           case FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent: {
             ignoreEventArgsSchema.parse(call.args);
@@ -5552,6 +5548,13 @@ export async function answerFastAgentQuestion({
               return {
                 success: false,
                 error: 'This platform event requires a user-visible closeout.',
+              };
+            }
+            if (steeredDirectedFollowUp) {
+              return {
+                success: false,
+                error:
+                  'A directed human follow-up requires a user-visible reply.',
               };
             }
             if (!reactionInput && !platformEvent && !allowSilentAmbientReply) {
@@ -5590,7 +5593,10 @@ export async function answerFastAgentQuestion({
           kind: getFastAgentNativeAcpKind(call.name),
         });
         try {
-          const result = await executeNativeToolInner(call);
+          const result = await executeNativeToolInner(
+            call,
+            canonicalToolEvent.canonicalEvent.eventId,
+          );
           await finishCanonicalToolEvent(
             canonicalToolEvent,
             result,
@@ -5781,6 +5787,9 @@ export async function answerFastAgentQuestion({
               currentMessageSender?.displayName ||
               currentMessageSender?.githubLogin,
             ),
+            directedAtRoomote: platformEvent ? null : resolvedDirectedAtRoomote,
+            allowSilentAmbientReply,
+            peerDirectedTurn: resolvedPeerDirectedTurn,
             agentContextPresent: Boolean(currentMessageAgentContext),
             inputImageCount: imageFiles.length,
             attachedImageCount: imageFilesForAttempt.length,

@@ -20,6 +20,7 @@ import {
 } from '@roomote/db/server';
 import { ALL_REPOSITORIES, FAST_EXECUTION } from '@roomote/types';
 export { requireFastSuggestionOriginSessionId } from './fast-suggestion-origin';
+import { resolveCustomAutomationResultVisibility } from './automation-result-visibility';
 import {
   buildTaskSuggestionMessageMetadata,
   type SlackNotifier,
@@ -74,6 +75,12 @@ async function persistFastAutomationSuggestions(params: {
   suggestions: FastAutomationSuggestion[];
   createdByUserId: string;
 }): Promise<PersistedFastAutomationSuggestion[]> {
+  const customAutomationId = /^[0-9a-f-]{36}/iu.exec(params.eventId)?.[0];
+  const resultVisibility = customAutomationId
+    ? await resolveCustomAutomationResultVisibility(customAutomationId).catch(
+        () => 'private' as const,
+      )
+    : 'private';
   return db.transaction(async (tx) => {
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext(${`fast-automation-suggestions:${params.eventId}`}))`,
@@ -130,7 +137,6 @@ async function persistFastAutomationSuggestions(params: {
         index,
       ),
     }));
-    const customAutomationId = /^[0-9a-f-]{36}/iu.exec(params.eventId)?.[0];
     const customAutomation = customAutomationId
       ? await tx.query.customAutomations.findFirst({
           where: eq(customAutomations.id, customAutomationId),
@@ -182,6 +188,7 @@ async function persistFastAutomationSuggestions(params: {
             resultAutomationName: customAutomation?.name ?? 'Custom automation',
             resultPriority: customAutomation?.resultPriority ?? 'normal',
             resultUserId: params.createdByUserId,
+            resultVisibility,
           })),
         )
         .returning({

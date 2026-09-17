@@ -170,6 +170,11 @@ function buildSettingsData(
     codingReasoningEffort?: ReasoningEffort | null;
     orchestrationReasoningEffort?: ReasoningEffort | null;
     helperReasoningEffort?: ReasoningEffort | null;
+    codingModelRoutingRules?: Array<{
+      modelId: string;
+      reasoningEffort: ReasoningEffort | null;
+      condition: string;
+    }>;
   } = {},
 ) {
   return {
@@ -293,6 +298,7 @@ function buildSettingsData(
         },
       },
     ],
+    codingModelRoutingRules: overrides.codingModelRoutingRules ?? [],
   };
 }
 
@@ -618,6 +624,104 @@ describe('ModelSettingsSection', () => {
     ).toBeInTheDocument();
     // Orchestration, helper, vision, and explore fall back to Low.
     expect(within(modelMappingSection).getAllByText('Low')).toHaveLength(4);
+  });
+
+  it('adds, saves, edits, and removes coding-model routing rules', async () => {
+    settingsData.current = buildSettingsData();
+    renderModelSettingsSection();
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Add a model routing rule',
+      }),
+    );
+    const condition = screen.getByLabelText('Routing rule 1 condition');
+    fireEvent.change(condition, {
+      target: { value: 'Routine tasks where speed matters' },
+    });
+
+    await waitFor(() => {
+      expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+    expect(updateMutateAsyncMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        codingModelRoutingRules: [
+          {
+            modelId: 'openrouter/openai/gpt-5.4',
+            reasoningEffort: 'medium',
+            condition: 'Routine tasks where speed matters',
+          },
+        ],
+      }),
+    );
+
+    updateMutateAsyncMock.mockClear();
+    fireEvent.change(condition, {
+      target: { value: 'Routine implementation tasks' },
+    });
+    await waitFor(() => {
+      expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+    expect(updateMutateAsyncMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        codingModelRoutingRules: [
+          expect.objectContaining({
+            condition: 'Routine implementation tasks',
+          }),
+        ],
+      }),
+    );
+
+    updateMutateAsyncMock.mockClear();
+    fireEvent.click(screen.getByLabelText('Remove routing rule 1'));
+    await waitFor(() => {
+      expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+    expect(updateMutateAsyncMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ codingModelRoutingRules: [] }),
+    );
+  });
+
+  it('does not show a success toast for each routing-rule condition edit', async () => {
+    settingsData.current = buildSettingsData();
+    renderModelSettingsSection();
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Add a model routing rule',
+      }),
+    );
+    const condition = screen.getByLabelText('Routing rule 1 condition');
+
+    for (const value of ['a', 'ab', 'abc']) {
+      fireEvent.change(condition, { target: { value } });
+      await waitFor(() => {
+        expect(updateMutateAsyncMock).toHaveBeenCalledTimes(value.length);
+      });
+    }
+
+    expect(toast.success).not.toHaveBeenCalledWith('Updated model settings.');
+    expect(updateMutateAsyncMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('keeps success feedback when another setting joins a routing-rule save', async () => {
+    settingsData.current = buildSettingsData();
+    renderModelSettingsSection();
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Add a model routing rule',
+      }),
+    );
+    fireEvent.change(screen.getByLabelText('Routing rule 1 condition'), {
+      target: { value: 'a' },
+    });
+    fireEvent.click(screen.getByRole('switch', { name: 'Toggle GLM 5.2' }));
+
+    await waitFor(() => {
+      expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+    expect(toast.success).toHaveBeenCalledWith('Updated model settings.');
   });
 
   it('hides the reasoning selector for models that do not support reasoning', () => {

@@ -30,10 +30,10 @@ export const FAST_AGENT_NATIVE_TOOL_NAMES = {
   stopTask: 'stop_task',
   requestUserInput: 'request_user_input',
   offerCapability: 'offer_capability',
-  requestWithServiceCredential: 'request_with_integration_key',
   prepareServiceCredential: 'prepare_integration_key',
   listServiceCredentials: 'list_integration_keys',
   reviewPullRequest: 'review_pull_request',
+  reportPlatformIssue: 'report_platform_issue',
 } as const;
 
 export type FastAgentNativeToolName =
@@ -116,10 +116,6 @@ export const FAST_AGENT_NATIVE_TOOL_CATALOG = [
   { name: FAST_AGENT_NATIVE_TOOL_NAMES.spillRead, kind: ACP_TOOL_KINDS.read },
   { name: FAST_AGENT_NATIVE_TOOL_NAMES.stopTask, kind: ACP_TOOL_KINDS.task },
   {
-    name: FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential,
-    kind: ACP_TOOL_KINDS.read,
-  },
-  {
     name: FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential,
     kind: ACP_TOOL_KINDS.tool,
   },
@@ -134,6 +130,10 @@ export const FAST_AGENT_NATIVE_TOOL_CATALOG = [
   {
     name: FAST_AGENT_NATIVE_TOOL_NAMES.offerCapability,
     kind: ACP_TOOL_KINDS.communication,
+  },
+  {
+    name: FAST_AGENT_NATIVE_TOOL_NAMES.reportPlatformIssue,
+    kind: ACP_TOOL_KINDS.tool,
   },
 ] as const satisfies readonly {
   name: FastAgentNativeToolName;

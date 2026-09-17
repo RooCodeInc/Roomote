@@ -382,6 +382,8 @@ function resolveReceiptLanguage(
       verb: byPhase('Checking', 'Checked', 'Failed to Check'),
       object: 'your integrations',
     };
+  // Historical Fast transcripts can still contain calls from before the
+  // shared HTTP broker became the only execution path.
   if (toolName === 'request_with_integration_key') {
     const method =
       typeof args?.method === 'string' ? args.method.toUpperCase() : '';

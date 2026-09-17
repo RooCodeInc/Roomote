@@ -7,9 +7,9 @@ import {
   taskPlatformIssueReports,
 } from '@roomote/db/server';
 import { submitPlatformIssueToPing } from '@roomote/telemetry/server';
+import { buildPlatformIssueSourceUrl } from '@roomote/sdk/server/platform-issue-reporting';
 
 import type { UserAuthSuccess } from '@/types';
-import { Env } from '@/lib/server/env';
 
 function requireAdmin(auth: Pick<UserAuthSuccess, 'isAdmin'>) {
   if (!auth.isAdmin) {
@@ -17,11 +17,13 @@ function requireAdmin(auth: Pick<UserAuthSuccess, 'isAdmin'>) {
   }
 }
 
-function buildTaskUrl(taskId: string): string {
-  const url = new URL(`/task/${taskId}`, Env.R_APP_URL);
-  url.searchParams.set('utm_source', 'platform_issue_submission');
-  url.searchParams.set('utm_medium', 'web');
-  return url.toString();
+function getReportSource(report: {
+  taskId: string | null;
+  sessionId: string | null;
+}) {
+  if (report.taskId) return { taskId: report.taskId } as const;
+  if (report.sessionId) return { sessionId: report.sessionId } as const;
+  throw new TRPCError({ code: 'NOT_FOUND', message: 'Report not found' });
 }
 
 export async function getPlatformIssueReportCommand(
@@ -34,6 +36,7 @@ export async function getPlatformIssueReportCommand(
     columns: {
       id: true,
       taskId: true,
+      sessionId: true,
       report: true,
       pingSubmittedAt: true,
     },
@@ -47,7 +50,11 @@ export async function getPlatformIssueReportCommand(
     id: report.id,
     title: report.report.title,
     summary: report.report.summary,
-    taskUrl: buildTaskUrl(report.taskId),
+    sourceLabel: report.taskId ? ('task' as const) : ('session' as const),
+    taskUrl: buildPlatformIssueSourceUrl(
+      getReportSource(report),
+      'platform_issue_submission',
+    ),
     submittedAt: report.pingSubmittedAt,
   };
 }
@@ -62,6 +69,7 @@ export async function submitPlatformIssueReportCommand(
     columns: {
       id: true,
       taskId: true,
+      sessionId: true,
       report: true,
       pingSubmittedAt: true,
     },
@@ -78,7 +86,10 @@ export async function submitPlatformIssueReportCommand(
     reportId: report.id,
     report: {
       ...report.report,
-      taskUrl: buildTaskUrl(report.taskId),
+      taskUrl: buildPlatformIssueSourceUrl(
+        getReportSource(report),
+        'platform_issue_submission',
+      ),
     },
   });
 

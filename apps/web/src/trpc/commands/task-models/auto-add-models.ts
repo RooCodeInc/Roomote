@@ -317,6 +317,7 @@ export function buildAutoAddedTaskModelSettings(options: {
     // Carry the catalog sync's deletion memory forward so connecting a
     // provider does not wipe it.
     catalogSyncedModelIds: persisted?.catalogSyncedModelIds,
+    codingModelRoutingRules: persisted?.codingModelRoutingRules,
   });
 
   return { taskModelSettings, addedModels };

@@ -65,6 +65,8 @@ export type FastAgentTurnLockHandle = (() => Promise<void>) & {
   /** Wakes the queue for the bound row after a shutdown release so recovery
    * does not wait for the periodic sweep. Best effort. */
   durableResume?: () => Promise<void>;
+  /** Best-effort work that may start only after Redis ownership is released. */
+  afterRelease?: () => Promise<void>;
 };
 
 /** Mark the user-visible shutdown closeout as posted and persisted (or as
@@ -277,6 +279,11 @@ export async function acquireFastAgentTurnLock(params: {
             redisReleased = true;
             clearInterval(renewalTimer);
             await release();
+            void releaseTurnLock.afterRelease?.().catch((error) => {
+              console.warn(
+                `[Fast Agent] Post-release work failed: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            });
           }
         })();
         return redisReleasePromise;

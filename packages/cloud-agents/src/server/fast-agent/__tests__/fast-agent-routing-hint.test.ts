@@ -8,7 +8,10 @@ vi.mock('../../typesafe-judgment', () => ({
 
 import { ALL_REPOSITORIES } from '@roomote/types';
 
-import { resolveFastAgentRoutingHint } from '../fast-agent-routing-hint';
+import {
+  resolveFastAgentLaunchModelSelection,
+  resolveFastAgentRoutingHint,
+} from '../fast-agent-routing-hint';
 
 const environments = [
   {
@@ -42,6 +45,15 @@ function mockChoice(choice: string, confidence: number) {
   });
 }
 
+const models = [
+  { id: 'openai/gpt-5.6', displayName: 'GPT 5.6', family: 'GPT' },
+  {
+    id: 'anthropic/claude-sonnet-5',
+    displayName: 'Claude Sonnet 5',
+    family: 'Claude',
+  },
+];
+
 describe('resolveFastAgentRoutingHint', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -56,8 +68,8 @@ describe('resolveFastAgentRoutingHint', () => {
       environments,
     });
 
-    expect(hint).toBe(
-      'Routing hint: api [id: env-api] looks like the best fit (judgment model confidence 0.82). Verify against the environments and routing rules before delegating, and ask when the request is still ambiguous.',
+    expect(hint?.context).toBe(
+      'Routing hint: api [id: env-api] looks like the best environment (judgment model confidence 0.82). Verify against the configured routing rules before delegating; explicit user model and effort choices take precedence, and ask when the request is still ambiguous.',
     );
   });
 
@@ -164,6 +176,201 @@ describe('resolveFastAgentRoutingHint', () => {
         environments: environments.slice(0, 1),
         routingRules: [{ description: 'Frontend work', target: 'env-web' }],
       }),
-    ).resolves.toContain('Routing hint: web-app [id: env-web]');
+    ).resolves.toMatchObject({
+      context: expect.stringContaining('Routing hint: web-app [id: env-web]'),
+    });
+  });
+
+  it('lets a later strongly matching rule win independent of list order', async () => {
+    mockEvaluateTypeSafeJudgments.mockResolvedValueOnce({
+      model: {
+        type: 'choice',
+        choice: 'model_rule_2',
+        confidence: 0.91,
+        probabilities: { model_rule_2: 0.91 },
+      },
+    });
+
+    await expect(
+      resolveFastAgentRoutingHint({
+        request: 'Refactor the scheduler concurrency model',
+        environments: [],
+        models,
+        codingModelRoutingRules: [
+          {
+            modelId: 'openai/gpt-5.6',
+            reasoningEffort: 'low',
+            condition: 'Routine tasks where speed matters',
+          },
+          {
+            modelId: 'anthropic/claude-sonnet-5',
+            reasoningEffort: 'high',
+            condition: 'Complex reasoning and engineering tasks',
+          },
+        ],
+      }),
+    ).resolves.toMatchObject({
+      model: 'anthropic/claude-sonnet-5',
+      reasoningEffort: 'high',
+      context: expect.stringContaining('Claude Sonnet 5'),
+    });
+
+    const modelQuestion =
+      mockEvaluateTypeSafeJudgments.mock.calls[0]![0].questions.model;
+    expect(modelQuestion.instructions).toContain(
+      'Evaluate every coding-model routing rule',
+    );
+    expect(modelQuestion.instructions).toContain('independent of list order');
+    expect(modelQuestion.instructions).toContain(
+      'single strongest matching rule only when its saved condition clearly and strongly applies',
+    );
+  });
+
+  it('keeps deployment defaults for a weak best-available model match', async () => {
+    mockEvaluateTypeSafeJudgments.mockResolvedValueOnce({
+      model: {
+        type: 'choice',
+        choice: 'model_rule_1',
+        confidence: 0.79,
+        probabilities: { model_rule_1: 0.79 },
+      },
+    });
+
+    await expect(
+      resolveFastAgentRoutingHint({
+        request: 'Update a task',
+        environments: [],
+        models,
+        codingModelRoutingRules: [
+          {
+            modelId: 'anthropic/claude-sonnet-5',
+            reasoningEffort: 'high',
+            condition: 'Complex reasoning and engineering tasks',
+          },
+        ],
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('keeps deployment defaults when similarly strong rules are ambiguous', async () => {
+    mockEvaluateTypeSafeJudgments.mockResolvedValueOnce({
+      model: {
+        type: 'choice',
+        choice: 'unclear',
+        confidence: 0.95,
+        probabilities: { unclear: 0.95 },
+      },
+    });
+
+    await expect(
+      resolveFastAgentRoutingHint({
+        request: 'Refactor a complex scheduler',
+        environments: [],
+        models,
+        codingModelRoutingRules: [
+          {
+            modelId: 'openai/gpt-5.6',
+            reasoningEffort: 'high',
+            condition: 'Complex refactors',
+          },
+          {
+            modelId: 'anthropic/claude-sonnet-5',
+            reasoningEffort: 'high',
+            condition: 'Complex engineering tasks',
+          },
+        ],
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('keeps deployment defaults when no model rule matches', async () => {
+    mockEvaluateTypeSafeJudgments.mockResolvedValueOnce({
+      model: {
+        type: 'choice',
+        choice: 'default_model',
+        confidence: 0.99,
+        probabilities: { default_model: 0.99 },
+      },
+    });
+
+    await expect(
+      resolveFastAgentRoutingHint({
+        request: 'Summarize this issue',
+        environments: [],
+        models,
+        codingModelRoutingRules: [
+          {
+            modelId: 'anthropic/claude-sonnet-5',
+            reasoningEffort: 'high',
+            condition: 'Complex reasoning and engineering tasks',
+          },
+        ],
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('ignores rules for models that are no longer enabled', async () => {
+    await expect(
+      resolveFastAgentRoutingHint({
+        request: 'Refactor the scheduler',
+        environments: [],
+        models: models.slice(0, 1),
+        codingModelRoutingRules: [
+          {
+            modelId: 'anthropic/claude-sonnet-5',
+            reasoningEffort: 'high',
+            condition: 'Complex reasoning and engineering tasks',
+          },
+        ],
+      }),
+    ).resolves.toBeUndefined();
+    expect(mockEvaluateTypeSafeJudgments).not.toHaveBeenCalled();
+  });
+});
+
+describe('resolveFastAgentLaunchModelSelection', () => {
+  const routingHint = {
+    context: 'matched rule',
+    model: 'anthropic/claude-sonnet-5',
+    reasoningEffort: 'high' as const,
+  };
+
+  it('uses a matched routing rule when launch choices are absent', () => {
+    expect(resolveFastAgentLaunchModelSelection({ routingHint })).toEqual({
+      model: 'anthropic/claude-sonnet-5',
+      reasoningEffort: 'high',
+    });
+  });
+
+  it('keeps explicit model and effort choices ahead of routing', () => {
+    expect(
+      resolveFastAgentLaunchModelSelection({
+        explicitModel: 'openai/gpt-5.6',
+        explicitReasoningEffort: 'low',
+        routingHint,
+      }),
+    ).toEqual({ model: 'openai/gpt-5.6', reasoningEffort: 'low' });
+  });
+
+  it('does not combine one explicit choice with a routing-rule choice', () => {
+    expect(
+      resolveFastAgentLaunchModelSelection({
+        explicitModel: 'openai/gpt-5.6',
+        routingHint,
+      }),
+    ).toEqual({ model: 'openai/gpt-5.6', reasoningEffort: null });
+    expect(
+      resolveFastAgentLaunchModelSelection({
+        explicitReasoningEffort: 'medium',
+        routingHint,
+      }),
+    ).toEqual({ model: null, reasoningEffort: 'medium' });
+    expect(
+      resolveFastAgentLaunchModelSelection({
+        explicitModel: null,
+        explicitReasoningEffort: null,
+        routingHint,
+      }),
+    ).toEqual({ model: null, reasoningEffort: null });
   });
 });

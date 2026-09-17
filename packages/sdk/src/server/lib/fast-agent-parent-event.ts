@@ -91,6 +91,7 @@ import {
   type SourceControlFastDiscussion,
 } from './source-control-fast-delivery';
 import { buildCustomAutomationSlackMessage } from './manager-slack';
+import { resolveCustomAutomationResultVisibility } from './automation-result-visibility';
 import {
   appendFastAutomationSuggestionInstruction,
   postFastAutomationSuggestionsToDiscord,
@@ -216,6 +217,7 @@ export type FastAgentParentEvent =
       taskId: string;
       runId: number;
       messageId: string;
+      admittedAtMs?: number;
       purpose: 'ack' | 'progress' | 'closeout' | 'clarification';
       message: string;
       imageArtifactIds?: string[];
@@ -2603,7 +2605,6 @@ export async function deliverFastAgentParentEvent(
       { replyPosted: false },
     );
   }
-
   try {
     return await deliverFastAgentParentEventWithLock(params, releaseTurnLock);
   } finally {
@@ -2789,6 +2790,9 @@ export async function deliverFastAgentParentEventWithLock(
                   : {}),
                 content: reply.message,
                 dedupeKey: `fast:${buildFastAutomationSuggestionEventId(reportEvent)}`,
+                visibility: await resolveCustomAutomationResultVisibility(
+                  automationId,
+                ).catch(() => 'private' as const),
               }).catch(() => undefined);
             }
             return baseAdapter.postReply(reply);
@@ -2832,6 +2836,12 @@ export async function deliverFastAgentParentEventWithLock(
       !humanFollowUp.input &&
       !humanFollowUp.turnSource
         ? { allowSilentAmbientReply: true }
+        : {}),
+      ...(typeof humanFollowUp?.directedAtRoomote === 'boolean'
+        ? { directedAtRoomote: humanFollowUp.directedAtRoomote }
+        : {}),
+      ...(humanFollowUp?.peerDirectedTurn === true
+        ? { peerDirectedTurn: true }
         : {}),
       ...(humanFollowUp?.attachmentTexts
         ? { attachmentTexts: humanFollowUp.attachmentTexts }
@@ -2912,6 +2922,9 @@ export async function deliverFastAgentParentEventWithLock(
           : params.event.type === 'scheduled_wakeup'
             ? 'scheduled_wakeup'
             : 'delegated_task'),
+      ...(params.event.type === 'child_message' && params.event.admittedAtMs
+        ? { platformEventTimestampMs: params.event.admittedAtMs }
+        : {}),
       automationReport:
         params.event.type === 'task_settled' &&
         Boolean(params.event.customAutomationId),

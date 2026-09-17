@@ -66,22 +66,20 @@ afterEach(async () => {
 });
 
 describe('session wakeup helpers', () => {
-  it('refuses wakeups for private Sessions before persistence', async () => {
+  it('admits wakeups for private Sessions', async () => {
     const { user, conversation } = await makeConversation('private');
-    await expect(
-      admitSessionWakeup({
-        conversationId: conversation.id,
-        createdByUserId: user.id,
-        name: 'Private follow-up',
-        prompt: 'Private canary prompt',
-        schedule: { mode: 'once', at: firstRunAt.toISOString() },
-        reportPolicy: 'always',
-        maxRuns: 1,
-        until: null,
-        nextRunAt: firstRunAt,
-      }),
-    ).rejects.toThrow('unavailable in private Sessions');
-    expect(await listSessionWakeups(conversation.id)).toEqual([]);
+    await admitSessionWakeup({
+      conversationId: conversation.id,
+      createdByUserId: user.id,
+      name: 'Private follow-up',
+      prompt: 'Private canary prompt',
+      schedule: { mode: 'once', at: firstRunAt.toISOString() },
+      reportPolicy: 'always',
+      maxRuns: 1,
+      until: null,
+      nextRunAt: firstRunAt,
+    });
+    expect(await listSessionWakeups(conversation.id)).toHaveLength(1);
   });
 
   it.each([2, 0.5, 31 / 60])(

@@ -80,7 +80,7 @@ These connections use metered API billing or a provider-managed gateway:
 | [OpenRouter](/providers/inference/openrouter) | OpenRouter API key | OpenRouter balance and key limit |
 | [Requesty](/providers/inference/requesty) | Requesty API key | Requesty organization |
 | [Together AI](/providers/inference/together-ai) | Together AI API key | Together AI account |
-| [TypeSafe](/providers/inference/typesafe) | TypeSafe API key, used only for the [judgment model](#judgment-model) | TypeSafe account |
+| <IntegrationName href="/providers/inference/typesafe" icon="typesafe" name="TypeSafe" /> | TypeSafe API key, used only for the [judgment model](#judgment-model) | TypeSafe account |
 | <IntegrationName href="/providers/inference/vercel-ai-gateway" icon="vercel" name="Vercel AI Gateway" /> | AI Gateway API key | Vercel team |
 | [xAI](/providers/inference/xai) | xAI API key | xAI API team |
 | [Z.AI](/providers/inference/zai) | Regional Z.AI platform key | Z.AI or BigModel API balance |
@@ -277,6 +277,25 @@ You do not need a separate model for every role. Set a specialized role to
 **Same as coding model** to inherit the default. Many teams start with one
 strong default model, then split out a faster orchestration or helper model, or
 a stronger review model, after they can see real usage.
+
+### Coding model routing rules
+
+Admins can add natural-language routing rules below **Coding model** in
+**Settings > Models**. Each rule chooses an enabled coding model, an optional
+reasoning level, and a condition such as `Complex migrations and architecture
+work` or `Small documentation fixes where speed matters`.
+
+When a new Fast Session delegates coding work, Roomote evaluates every saved
+rule independently of its list position. It applies only the single strongest
+clear match. An explicit model or reasoning choice in the request takes
+precedence; weak, ambiguous, failed, or unmatched decisions keep the deployment
+defaults. Rules that point to a model that is no longer enabled are ignored.
+
+Model routing is separate from [environment routing](/environments/definition#natural-language-routing-rules):
+one chooses the model and reasoning level, while the other chooses the workspace
+that contains the relevant repositories and services. To verify a rule, start a
+new Fast Session with a request that clearly matches its condition and check the
+model shown on the delegated task.
 
 ### Judgment model
 

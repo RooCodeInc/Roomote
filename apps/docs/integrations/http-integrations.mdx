@@ -17,9 +17,12 @@ integration tools remain available and should be used first.
 For a general "connect to X" request, Roomote checks the read-only built-in
 catalog first, including disconnected providers. It uses that provider's native
 setup path when present, then checks for an official remote MCP server, and uses
-HTTP integrations or an integration key only when neither applies. An explicit
-request for direct API access keeps that choice. Discovery does not start setup,
-and permission denials or pending or denied authorization are not bypassed.
+HTTP integrations or an integration key only when neither applies. An MCP that
+requires provider approval, an allowlisted client, a beta or plan, or a token
+you hold is offered as an option rather than treated as immediately connectable.
+An explicit request for direct API access keeps that choice. Discovery does not
+start setup, and permission denials or pending or denied authorization are not
+bypassed.
 
 <Warning>
   This is credential mediation, not network isolation. Agents are instructed to
