@@ -4339,6 +4339,137 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(activity.settle).toHaveBeenCalledWith({ keepProcessing: false });
   });
 
+  it('does not emit surface activity for an ignored ambient human turn', async () => {
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.ignoreEvent, {
+          reason: 'The participants are talking to each other.',
+        });
+        return '';
+      },
+    );
+    const activity = {
+      start: vi.fn(),
+      settle: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn().mockResolvedValue(undefined),
+    };
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      allowSilentAmbientReply: true,
+      adapter: callbacks({ activity }),
+    });
+
+    expect(activity.start).not.toHaveBeenCalled();
+    expect(activity.settle).not.toHaveBeenCalled();
+    expect(activity.dispose).toHaveBeenCalledOnce();
+  });
+
+  it('starts and settles deferred activity when Roomote joins an ambient turn', async () => {
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'I can help with that.',
+        });
+        return '';
+      },
+    );
+    const activity = {
+      start: vi.fn(),
+      settle: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn().mockResolvedValue(undefined),
+    };
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      allowSilentAmbientReply: true,
+      adapter: callbacks({ activity }),
+    });
+
+    expect(activity.start).toHaveBeenCalledOnce();
+    expect(activity.settle).toHaveBeenCalledOnce();
+    expect(activity.dispose).not.toHaveBeenCalled();
+    expect(activity.start.mock.invocationCallOrder[0]).toBeLessThan(
+      activity.settle.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it('starts deferred activity for a system error closeout', async () => {
+    mocks.generateText.mockRejectedValueOnce(
+      new Error(
+        "ContentFilterError: The response was blocked by the provider's content filter",
+      ),
+    );
+    const activity = {
+      start: vi.fn(),
+      settle: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn().mockResolvedValue(undefined),
+    };
+    const adapter = callbacks({ activity });
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      allowSilentAmbientReply: true,
+      adapter,
+    });
+
+    expect(adapter.postReply).toHaveBeenCalledOnce();
+    expect(activity.start).toHaveBeenCalledOnce();
+    expect(activity.settle).toHaveBeenCalledOnce();
+    expect(activity.dispose).not.toHaveBeenCalled();
+    expect(activity.start.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(adapter.postReply).mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it('disposes dormant ambient activity when the turn loses its lock', async () => {
+    const controller = new AbortController();
+    const lost = new FastAgentTurnLockLostError();
+    let finishInference!: () => void;
+    let publishLateText!: () => void;
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        publishLateText = () =>
+          options.onAssistantTextUpdated?.({
+            messageId: 'late-message',
+            partId: 'late-text',
+            text: 'Too late',
+            completed: true,
+          });
+        await new Promise<void>((resolve) => {
+          finishInference = resolve;
+        });
+        throw lost;
+      },
+    );
+    const activity = {
+      start: vi.fn(),
+      settle: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn().mockResolvedValue(undefined),
+    };
+    const result = answerFastAgentQuestion({
+      ...baseParams,
+      allowSilentAmbientReply: true,
+      adapter: callbacks({ activity }),
+      signal: controller.signal,
+    });
+    const rejected = expect(result).rejects.toBe(lost);
+    await vi.waitFor(() => expect(finishInference).toBeTypeOf('function'));
+
+    controller.abort(lost);
+
+    expect(activity.start).not.toHaveBeenCalled();
+    expect(activity.dispose).toHaveBeenCalledOnce();
+    expect(activity.settle).not.toHaveBeenCalled();
+    publishLateText();
+    expect(activity.start).not.toHaveBeenCalled();
+    finishInference();
+    await rejected;
+  });
+
   it.each(['cancel', 'shutdown', 'lost'] as const)(
     'cleans up activity on %s before stuck inference finishes',
     async (reason) => {
