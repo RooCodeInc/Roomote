@@ -61,7 +61,7 @@ const DEFAULT_MODAL_COMMAND_HOME = '/home/roomote';
 const DEFAULT_MODAL_COMMAND_PATH =
   '/home/roomote/.local/bin:/opt/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
 
-export const MODAL_GH_CLI_VERSION = '2.81.0';
+export const MODAL_GH_CLI_VERSION = '2.101.0';
 
 const MODAL_SANDBOX_CACHE_TTL_MS = 30 * 60_000;
 

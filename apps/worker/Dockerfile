@@ -14,7 +14,7 @@ ARG FFMPEG_INSTALLER_VERSION=1.1.0
 # @ffprobe-installer (not ffprobe-static, which ships no linux/arm64 binary
 # yet still reports a path for it) so amd64 and arm64 images share one recipe.
 ARG FFPROBE_INSTALLER_VERSION=2.1.2
-ARG GH_VERSION=2.81.0
+ARG GH_VERSION=2.101.0
 ARG NODE_PTY_VERSION=1.1.0
 ARG PM2_VERSION=7.0.1
 # Remotion mirrors chrome-headless-shell builds for both linux64 and
