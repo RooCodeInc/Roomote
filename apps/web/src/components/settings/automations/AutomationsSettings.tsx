@@ -127,11 +127,11 @@ import {
   Slack,
   Slider,
   Spinner,
-  Settings2,
   Switch,
   Textarea,
   TriangleAlert,
   Users,
+  Wrench,
 } from '@/components/system';
 
 type FieldErrors = Partial<
@@ -596,9 +596,15 @@ const AUTOMATION_DEFINITIONS: Record<AutomationId, AutomationDefinition> = {
   },
 };
 
-const AutomationSummaryContext = createContext<
-  Partial<Record<AutomationId, string>>
->({});
+const AutomationListContext = createContext<{
+  summaries: Partial<Record<AutomationId, string>>;
+  pendingAutomation: AutomationId | null;
+  onToggle: (automationId: AutomationId, enabled: boolean) => void;
+}>({
+  summaries: {},
+  pendingAutomation: null,
+  onToggle: () => undefined,
+});
 
 const HASH_ALIAS_TO_AUTOMATION_ID: Record<string, AutomationId> = {
   ...Object.fromEntries(
@@ -769,6 +775,7 @@ function mapSettingsToFormState(
       launchMode?: ChannelAutoStartLaunchMode | null;
       launchCriteria?: string | null;
     }>;
+    channelAutoStartEnabled: boolean;
     channelAutoStartSlackChannelNames?: Record<string, string | null>;
     managerSlackChannelId: string | null;
     managerSlackChannelName?: string | null;
@@ -887,6 +894,7 @@ function mapSettingsToFormState(
         }),
       ),
     ],
+    channelAutoStartEnabled: settings.channelAutoStartEnabled,
     managerSlackChannel:
       settings.managerSlackChannelName ?? settings.managerSlackChannelId ?? '',
     managerDiscordChannel: settings.managerDiscordChannelId ?? '',
@@ -1418,7 +1426,8 @@ function AutomationCard({
   const actionLabel = iconEnabled
     ? `Configure ${automation.label}`
     : `Set up ${automation.label}`;
-  const summaries = useContext(AutomationSummaryContext);
+  const automationList = useContext(AutomationListContext);
+  const togglePending = automationList.pendingAutomation === automation.id;
 
   if (!isAvailableMatch) {
     return null;
@@ -1437,7 +1446,8 @@ function AutomationCard({
         summary={
           <>
             <span>
-              {summaries[automation.id] ?? (iconEnabled ? 'Enabled' : 'Off')}
+              {automationList.summaries[automation.id] ??
+                (iconEnabled ? 'Enabled' : 'Off')}
             </span>
             {automation.commsBadge || automation.scmBadge ? (
               <span>
@@ -1450,17 +1460,16 @@ function AutomationCard({
           </>
         }
         enabledControl={
-          <BasicTooltip content={actionLabel}>
-            <span className="inline-flex">
-              <Switch
-                checked={iconEnabled}
-                disabled={disabled}
-                className="border-border data-[state=unchecked]:bg-muted"
-                aria-label={`${actionLabel} enabled state`}
-                onCheckedChange={() => onOpenChange(true)}
-              />
-            </span>
-          </BasicTooltip>
+          <Switch
+            checked={iconEnabled}
+            disabled={disabled || togglePending}
+            aria-busy={togglePending || undefined}
+            className="border-border data-[state=unchecked]:bg-muted"
+            aria-label={`${iconEnabled ? 'Disable' : 'Enable'} ${automation.label}`}
+            onCheckedChange={(enabled) =>
+              automationList.onToggle(automation.id, enabled)
+            }
+          />
         }
         actions={
           <>
@@ -1474,7 +1483,7 @@ function AutomationCard({
                 disabled={disabled}
                 onClick={() => onOpenChange(true)}
               >
-                <Settings2 />
+                <Wrench />
               </Button>
             </BasicTooltip>
           </>
@@ -1631,6 +1640,8 @@ export function AutomationsSettings({
   const [savingAutomation, setSavingAutomation] = useState<AutomationId | null>(
     null,
   );
+  const [togglingAutomation, setTogglingAutomation] =
+    useState<AutomationId | null>(null);
   const [openAutomationIds, setOpenAutomationIds] = useState<Set<AutomationId>>(
     () => new Set(),
   );
@@ -1639,6 +1650,8 @@ export function AutomationsSettings({
   const [automationSearch, setAutomationSearch] = useState('');
   const formStateRef = useRef<FormState | null>(null);
   const savedStateRef = useRef<FormState | null>(null);
+  const savingAutomationRef = useRef<AutomationId | null>(null);
+  const togglingAutomationRef = useRef<AutomationId | null>(null);
   const didApplyInitialHashRef = useRef(false);
 
   const connectSlack = useConnectSlack(SETTINGS_PATHS.automations, {
@@ -1746,12 +1759,28 @@ export function AutomationsSettings({
   const updateMutation = useMutation(
     trpc.automations.updateSettings.mutationOptions({
       onSuccess: (result) => {
-        const automationLabel = savingAutomation
-          ? AUTOMATION_DEFINITIONS[savingAutomation].label
+        const savedAutomation = savingAutomationRef.current;
+        const toggledAutomation = togglingAutomationRef.current;
+        const automationLabel = savedAutomation
+          ? AUTOMATION_DEFINITIONS[savedAutomation].label
           : null;
         setSavingAutomation(null);
+        setTogglingAutomation(null);
+        savingAutomationRef.current = null;
+        togglingAutomationRef.current = null;
 
         if (!result.success) {
+          if (toggledAutomation) {
+            setFormState((current) =>
+              current && savedStateRef.current
+                ? resetAutomationFields(
+                    current,
+                    savedStateRef.current,
+                    toggledAutomation,
+                  )
+                : current,
+            );
+          }
           setFieldErrors(result.fieldErrors);
           const firstFieldError = Object.values(result.fieldErrors).find(
             (message): message is string => Boolean(message),
@@ -1840,13 +1869,13 @@ export function AutomationsSettings({
           reviewer: result.reviewer,
         });
         setFormState((prev) =>
-          savingAutomation && prev
-            ? mergeAutomationFields(prev, mapped, savingAutomation)
+          savedAutomation && prev
+            ? mergeAutomationFields(prev, mapped, savedAutomation)
             : mapped,
         );
         setSavedState((prev) =>
-          savingAutomation && prev
-            ? mergeAutomationFields(prev, mapped, savingAutomation)
+          savedAutomation && prev
+            ? mergeAutomationFields(prev, mapped, savedAutomation)
             : mapped,
         );
 
@@ -1861,10 +1890,26 @@ export function AutomationsSettings({
         );
       },
       onError: (error) => {
-        const automationLabel = savingAutomation
-          ? AUTOMATION_DEFINITIONS[savingAutomation].label
+        const savedAutomation = savingAutomationRef.current;
+        const toggledAutomation = togglingAutomationRef.current;
+        const automationLabel = savedAutomation
+          ? AUTOMATION_DEFINITIONS[savedAutomation].label
           : null;
         setSavingAutomation(null);
+        setTogglingAutomation(null);
+        savingAutomationRef.current = null;
+        togglingAutomationRef.current = null;
+        if (toggledAutomation) {
+          setFormState((current) =>
+            current && savedStateRef.current
+              ? resetAutomationFields(
+                  current,
+                  savedStateRef.current,
+                  toggledAutomation,
+                )
+              : current,
+          );
+        }
         toast.error(
           automationLabel
             ? `Failed to save ${automationLabel} settings: ${error.message}`
@@ -2024,6 +2069,7 @@ export function AutomationsSettings({
 
       setFieldErrors({});
       setSavingAutomation(automationId);
+      savingAutomationRef.current = automationId;
 
       updateMutation.mutate(
         buildAutomationSettingsSaveInput(formState, savedState, automationId),
@@ -2153,9 +2199,9 @@ export function AutomationsSettings({
     formState?.callRoomoteViaEmojiEnabled ?? false;
   const conflictResolverIsEnabled =
     formState?.conflictResolverFrequency !== 'off';
-  const channelAutoStartIsEnabled = hasConfiguredChannelAutoStartRows(
-    formState?.channelAutoStartChannels,
-  );
+  const channelAutoStartIsEnabled =
+    (formState?.channelAutoStartEnabled ?? false) &&
+    hasConfiguredChannelAutoStartRows(formState?.channelAutoStartChannels);
   const availableAutoRespondChannelTemplates = useMemo(
     () =>
       getAvailableAutoRespondChannelTemplates(
@@ -2190,6 +2236,97 @@ export function AutomationsSettings({
   });
   const suggesterIsEnabled = formState?.suggesterFrequency !== 'off';
   const announcerIsEnabled = formState?.announcerFrequency !== 'off';
+  const toggleAutomation = useCallback(
+    (automationId: AutomationId, enabled: boolean) => {
+      if (!formState || !savedState || updateMutation.isPending) return;
+
+      const nextState = { ...formState };
+      switch (automationId) {
+        case 'callRoomoteViaEmoji':
+          nextState.callRoomoteViaEmojiEnabled = enabled;
+          break;
+        case 'channelAutoStart':
+          nextState.channelAutoStartEnabled = enabled;
+          break;
+        case 'reviewer':
+          nextState.reviewerEnabled = enabled;
+          break;
+        case 'managerStats':
+          nextState.managerStatsFrequency = enabled ? 'weekly' : 'off';
+          break;
+        case 'providerUsageLimit':
+          nextState.providerUsageLimitFrequency = enabled
+            ? 'every_hour'
+            : 'off';
+          break;
+        case 'sentryTriage':
+          if (enabled && !sentryConnected) {
+            toast.error(
+              'Configure Sentry in Settings > Integrations before enabling Triage Sentry Issues.',
+            );
+            return;
+          }
+          nextState.sentryTriageFrequency = enabled ? 'daily' : 'off';
+          break;
+        case 'dependabotTriage':
+          nextState.dependabotTriageFrequency = enabled ? 'daily' : 'off';
+          break;
+        case 'codeqlTriage':
+          nextState.codeqlTriageFrequency = enabled ? 'daily' : 'off';
+          break;
+        case 'conflictResolver':
+          nextState.conflictResolverFrequency = enabled ? 'every_hour' : 'off';
+          break;
+        case 'suggester':
+          nextState.suggesterFrequency = enabled ? 'daily' : 'off';
+          break;
+        case 'announcer':
+          nextState.announcerFrequency = enabled ? 'daily' : 'off';
+          break;
+        case 'platformIssueAlerts':
+          nextState.platformIssueAlertsEnabled = enabled;
+          break;
+        case 'securityAuditor':
+        case 'codeQualityAuditor': {
+          const automation = SCHEDULE_ONLY_AUTOMATIONS_BY_ID[automationId];
+          nextState[automation.frequencyField] = enabled ? 'every_hour' : 'off';
+          break;
+        }
+        case 'ciFailureTriage':
+        case 'issueFixer':
+        case 'mergeAnnouncer': {
+          const automation = SCHEDULE_ONLY_AUTOMATIONS_BY_ID[automationId];
+          const control =
+            SCHEDULE_ONLY_AUTOMATION_UI_DEFINITIONS[automationId].control;
+          nextState[automation.frequencyField] = enabled
+            ? control.kind === 'toggle'
+              ? control.enabledFrequency
+              : 'every_hour'
+            : 'off';
+          break;
+        }
+        case 'managerChannel':
+          if (enabled) {
+            toast.error('Configure an automation output destination first.');
+            return;
+          }
+          nextState.managerSlackChannel = '';
+          nextState.managerDiscordChannel = '';
+          break;
+      }
+
+      setFieldErrors({});
+      setFormState(nextState);
+      setSavingAutomation(automationId);
+      setTogglingAutomation(automationId);
+      savingAutomationRef.current = automationId;
+      togglingAutomationRef.current = automationId;
+      updateMutation.mutate(
+        buildAutomationSettingsSaveInput(nextState, savedState, automationId),
+      );
+    },
+    [formState, savedState, sentryConnected, updateMutation],
+  );
   const showChannelAutoStartSlackChannelWarning =
     shouldShowChannelAutoStartWarning({
       // Access warnings are a Slack concept (the bot must be invited);
@@ -2713,7 +2850,13 @@ export function AutomationsSettings({
             No built-in automations match your search.
           </p>
         ) : (
-          <AutomationSummaryContext.Provider value={automationSummaries}>
+          <AutomationListContext.Provider
+            value={{
+              summaries: automationSummaries,
+              pendingAutomation: togglingAutomation,
+              onToggle: toggleAutomation,
+            }}
+          >
             <AutomationCard
               automation={AUTOMATION_DEFINITIONS.callRoomoteViaEmoji}
               isAvailableMatch={visibleBuiltInAutomations.has(
@@ -4619,7 +4762,7 @@ export function AutomationsSettings({
                 })}
               </div>
             </AutomationCard>
-          </AutomationSummaryContext.Provider>
+          </AutomationListContext.Provider>
         )}
       </CustomAutomationsSection>
     </div>

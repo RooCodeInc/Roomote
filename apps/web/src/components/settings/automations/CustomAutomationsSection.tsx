@@ -52,11 +52,11 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Settings2,
   Skeleton,
   Switch,
   Textarea,
   Trash2,
+  Wrench,
   Zap,
 } from '@/components/system';
 
@@ -70,7 +70,6 @@ import {
   type AutomationDestinationProvider,
 } from './AutomationDestinationPicker';
 import {
-  AutomationListHeader,
   AutomationListRow,
   AutomationListToolbar,
   type AutomationListFilter,
@@ -1257,7 +1256,6 @@ export function CustomAutomationsSection({
       >
         <CardContent className="p-0!">
           <div role="table" aria-label="Automations">
-            <AutomationListHeader />
             <div role="rowgroup" className="divide-y divide-background">
               {initialListLoadFailed && filter !== 'built-in' ? (
                 <RetryableLoadError
@@ -1328,9 +1326,40 @@ export function CustomAutomationsSection({
                       icon={Zap}
                       name={row.name}
                       description={<p className="line-clamp-2">{row.prompt}</p>}
+                      metadata={
+                        <>
+                          <span>
+                            Created by {row.createdByName ?? 'Unknown'}
+                            {row.lastRunAt ? (
+                              <>
+                                {' · Last run '}
+                                <span
+                                  title={new Date(
+                                    row.lastRunAt,
+                                  ).toLocaleString()}
+                                >
+                                  {formatDistanceToNowCompact(
+                                    new Date(row.lastRunAt),
+                                    { addSuffix: true },
+                                  )}
+                                </span>
+                              </>
+                            ) : null}
+                          </span>
+                          {row.nextRunAt && schedulingTimeZone ? (
+                            <span
+                              className="basis-full"
+                              title={new Date(row.nextRunAt).toISOString()}
+                            >
+                              {nextRunLabel(row.nextRunAt, schedulingTimeZone)}
+                            </span>
+                          ) : null}
+                        </>
+                      }
                       enabledControl={
                         <Switch
                           aria-label={`Toggle ${row.name}`}
+                          aria-busy={toggleMutation.isPending || undefined}
                           checked={row.enabled}
                           disabled={busy}
                           className="border-border data-[state=unchecked]:bg-muted"
@@ -1362,32 +1391,6 @@ export function CustomAutomationsSection({
                             {destinationName}
                             {destinationLabel ? ` ${destinationLabel}` : ''}
                           </span>
-                          <span>
-                            Created by {row.createdByName ?? 'Unknown'}
-                            {row.lastRunAt ? (
-                              <>
-                                {' · Last run '}
-                                <span
-                                  title={new Date(
-                                    row.lastRunAt,
-                                  ).toLocaleString()}
-                                >
-                                  {formatDistanceToNowCompact(
-                                    new Date(row.lastRunAt),
-                                    { addSuffix: true },
-                                  )}
-                                </span>
-                              </>
-                            ) : null}
-                          </span>
-                          {row.nextRunAt && schedulingTimeZone ? (
-                            <span
-                              className="basis-full"
-                              title={new Date(row.nextRunAt).toISOString()}
-                            >
-                              {nextRunLabel(row.nextRunAt, schedulingTimeZone)}
-                            </span>
-                          ) : null}
                         </>
                       }
                       actions={
@@ -1405,13 +1408,13 @@ export function CustomAutomationsSection({
                               aria-label={`Configure ${row.name}`}
                               onClick={() => editAutomation(row)}
                             >
-                              <Settings2 />
+                              <Wrench />
                             </Button>
                           </BasicTooltip>
                           <BasicTooltip content="Delete">
                             <Button
                               type="button"
-                              size="sm"
+                              size="icon"
                               variant="ghost"
                               disabled={busy}
                               onClick={() => {
