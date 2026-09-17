@@ -22,7 +22,7 @@ const BASE_PACKAGES = new Set([
   'utils',
 ]);
 
-export type RAnalysisPreflight = {
+type RAnalysisPreflight = {
   packages: string[];
   unresolvedPackageExpressions: string[];
 };

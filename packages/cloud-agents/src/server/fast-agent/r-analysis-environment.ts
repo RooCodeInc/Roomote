@@ -1,19 +1,7 @@
-import { createHash } from 'node:crypto';
-
 import {
   R_BIOCONDUCTOR_RECIPE_CATALOG_ID,
   type EnvironmentConfig,
 } from '@roomote/types';
-
-export function getRAnalysisRecipeHash(packages: string[]): string {
-  return createHash('sha256')
-    .update(
-      JSON.stringify(
-        [...new Set(packages.map((name) => name.toLowerCase()))].sort(),
-      ),
-    )
-    .digest('hex');
-}
 
 export function isCompatibleRAnalysisEnvironment(
   environment: { isVerified: boolean; config: EnvironmentConfig },
