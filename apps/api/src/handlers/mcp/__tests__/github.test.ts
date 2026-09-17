@@ -1481,6 +1481,9 @@ describe('GitHub MCP proxy', () => {
               { name: 'update_pull_request' },
               { name: 'merge_pull_request' },
               { name: 'create_gist' },
+              { name: 'get_gist' },
+              { name: 'list_gists' },
+              { name: 'update_gist' },
             ],
           },
         }),
@@ -1493,7 +1496,12 @@ describe('GitHub MCP proxy', () => {
         (await response.json()).result.tools.map(
           (tool: { name: string }) => tool.name,
         ),
-      ).toEqual(['pull_request_read', 'create_gist']);
+      ).toEqual([
+        'pull_request_read',
+        'create_gist',
+        'get_gist',
+        'update_gist',
+      ]);
       expect(
         new Headers(mocks.upstream.mock.calls[0]![1].headers).get(
           'X-MCP-Readonly',
@@ -1504,6 +1512,39 @@ describe('GitHub MCP proxy', () => {
       await db.delete(tasks).where(eq(tasks.id, run.taskId));
     }
   });
+
+  it.each([
+    ['update_gist', { gist_id: 'abc123', filename: 'notes.md', content: 'v2' }],
+    ['get_gist', { gist_id: 'abc123' }],
+  ] as const)(
+    'lets a coding task %s under its human actor linked account',
+    async (name, arguments_) => {
+      const run = await runFactory.create({ actingUserId: actor.id });
+      try {
+        mocks.userToken.mockResolvedValue('actor-github-token');
+        const target = app({
+          tokenType: 'run',
+          version: 1,
+          runId: run.id,
+          userId: actor.id,
+          principal: 'user',
+        });
+        expect((await call(name, arguments_, target)).status).toBe(200);
+        expect(mocks.mint).not.toHaveBeenCalled();
+        expect(
+          new Headers(mocks.upstream.mock.calls[0]![1].headers).get(
+            'authorization',
+          ),
+        ).toBe('Bearer actor-github-token');
+        mocks.upstream.mockClear();
+        expect((await call('list_gists', {}, target)).status).toBe(403);
+        expect(mocks.upstream).not.toHaveBeenCalled();
+      } finally {
+        await db.delete(taskRuns).where(eq(taskRuns.id, run.id));
+        await db.delete(tasks).where(eq(tasks.id, run.taskId));
+      }
+    },
+  );
 
   it.each(writeCases)(
     'preserves upstream permission failures for %s without retrying or escalating credentials',

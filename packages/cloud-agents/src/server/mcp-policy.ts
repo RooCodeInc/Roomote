@@ -83,7 +83,11 @@ const ROUTER_GITHUB_ALLOWED_TOOLS = [
   'merge_pull_request',
   'add_issue_comment',
   'add_reply_to_pull_request_comment',
+  // Account gist tools run under the acting member's linked GitHub account.
+  // Listing and deleting gists are never offered.
   'create_gist',
+  'get_gist',
+  'update_gist',
 ] as const;
 
 const ROUTER_MCP_SERVER_POLICIES: Record<
