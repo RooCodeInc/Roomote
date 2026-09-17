@@ -83,11 +83,6 @@ const ROUTER_GITHUB_ALLOWED_TOOLS = [
   'merge_pull_request',
   'add_issue_comment',
   'add_reply_to_pull_request_comment',
-  // Account gist tools run under the acting member's linked GitHub account.
-  // Listing and deleting gists are never offered.
-  'create_gist',
-  'get_gist',
-  'update_gist',
 ] as const;
 
 const ROUTER_MCP_SERVER_POLICIES: Record<
@@ -120,7 +115,7 @@ const ROUTER_MCP_SERVER_POLICIES: Record<
       // in Fast is not held to either: the GitHub proxy gives them every
       // GitHub tool under a token scoped to the connected repositories.
       readonly: false,
-      toolsets: ['repos', 'pull_requests', 'issues', 'actions', 'gists'],
+      toolsets: ['repos', 'pull_requests', 'issues', 'actions'],
     },
   },
 };

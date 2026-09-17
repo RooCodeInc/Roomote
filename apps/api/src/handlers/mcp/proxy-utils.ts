@@ -379,9 +379,9 @@ interface McpProxyConfig {
    * The upstream answers every request on its own, with no MCP session.
    * Session ids are neither forwarded nor returned, so nothing upstream is
    * ever tied to the credential of an earlier request. For a proxy that
-   * chooses credentials per request (GitHub: installation token for
-   * repository tools, the member's account token for gists), a session
-   * would bind the first credential and reject the next.
+   * chooses credentials per request (for example, a GitHub installation
+   * based on the target repository), a session would bind the first
+   * credential and reject a later request routed through another one.
    */
   statelessUpstream?: boolean;
   stripToolSchemaPatterns?: boolean;

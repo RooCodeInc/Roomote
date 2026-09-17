@@ -167,7 +167,6 @@ describe('GitHub App manifest commands', () => {
         checks: 'write',
         contents: 'write',
         deployments: 'read',
-        gists: 'write',
         issues: 'write',
         merge_queues: 'read',
         metadata: 'read',
@@ -222,6 +221,7 @@ describe('GitHub App manifest commands', () => {
       setup_on_update: true,
       public: true,
     });
+    expect(manifest.default_permissions).not.toHaveProperty('gists');
   });
 
   it('prefers R_PUBLIC_URL for manifest callbacks, webhooks, and name when R_APP_URL is loopback', async () => {
@@ -617,7 +617,7 @@ describe('startAuthenticateGitHubAccountCommand', () => {
       'https://github.com/login/oauth/authorize',
     );
     expect(url.searchParams.get('client_id')).toBe('Iv1.resolved-client');
-    expect(url.searchParams.has('scope')).toBe(false);
+    expect(url.searchParams.get('scope')).toBe('read:user');
     expect(url.searchParams.get('redirect_uri')).toBe(
       'https://roomote.example.com/github/callback',
     );
