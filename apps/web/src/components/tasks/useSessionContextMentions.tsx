@@ -107,11 +107,11 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
 }
 
-function hasUnquotedMention(
+function findUnquotedMentionRange(
   value: string,
   mentionText: string,
   allowColonBoundary = true,
-): boolean {
+): { start: number; end: number } | null {
   const punctuation = allowColonBoundary ? '.,!?;:' : '.,!?;';
   const matcher = new RegExp(
     `(?:^|\\s)${escapeRegExp(mentionText)}(?=$|\\s|[${punctuation}])`,
@@ -120,9 +120,21 @@ function hasUnquotedMention(
   let match: RegExpExecArray | null;
   while ((match = matcher.exec(value))) {
     const mentionStart = match.index + (match[0].startsWith('@') ? 0 : 1);
-    if (!isQuotedOrCode(value, mentionStart)) return true;
+    if (!isQuotedOrCode(value, mentionStart)) {
+      return { start: mentionStart, end: mentionStart + mentionText.length };
+    }
   }
-  return false;
+  return null;
+}
+
+function hasUnquotedMention(
+  value: string,
+  mentionText: string,
+  allowColonBoundary = true,
+): boolean {
+  return Boolean(
+    findUnquotedMentionRange(value, mentionText, allowColonBoundary),
+  );
 }
 
 function integrationMentionText(integration: IntegrationMentionOption): string {
@@ -233,13 +245,14 @@ export function useSessionContextMentions({
         ),
       ]
     : [];
-  const options = [...sessionOptions, ...integrationOptions];
+  const options = [...integrationOptions, ...sessionOptions];
   const selectedIndex = Math.min(activeIndex, Math.max(0, options.length - 1));
   const open = Boolean(activeMention && mentionKey !== dismissedMention);
 
   const selectOption = (option: MentionOption) => {
     if (!activeMention) return;
     let mentionText: string;
+    let nextSelectedSession: SelectedSessionMention | null = null;
     if (option.kind === 'integration') {
       mentionText = integrationMentionText(option.integration);
       if (
@@ -254,7 +267,7 @@ export function useSessionContextMentions({
       }
     } else if (option.kind === 'recent-sessions') {
       mentionText = '@Sessions';
-      selectedSessionRef.current = {
+      nextSelectedSession = {
         text: mentionText,
         context: {
           kind: 'recent',
@@ -263,18 +276,52 @@ export function useSessionContextMentions({
       };
     } else {
       mentionText = sessionMentionText(option.session);
-      selectedSessionRef.current = {
+      nextSelectedSession = {
         text: mentionText,
         context: { kind: 'session', sessionId: option.session.id },
       };
     }
 
+    let sourceValue = value;
+    let sourceStart = activeMention.start;
+    let sourceCursor = cursor;
+    const previousSession = selectedSessionRef.current;
+    if (nextSelectedSession) {
+      if (previousSession) {
+        const previousRange = findUnquotedMentionRange(
+          value,
+          previousSession.text,
+          previousSession.text !== '@Sessions',
+        );
+        if (
+          previousRange &&
+          (previousRange.end <= activeMention.start ||
+            previousRange.start >= cursor)
+        ) {
+          let removalStart = previousRange.start;
+          let removalEnd = previousRange.end;
+          if (value[removalEnd] === ' ') {
+            removalEnd += 1;
+          } else if (removalStart > 0 && value[removalStart - 1] === ' ') {
+            removalStart -= 1;
+          }
+          sourceValue = value.slice(0, removalStart) + value.slice(removalEnd);
+          if (removalEnd <= activeMention.start) {
+            const removedLength = removalEnd - removalStart;
+            sourceStart -= removedLength;
+            sourceCursor -= removedLength;
+          }
+        }
+      }
+      selectedSessionRef.current = nextSelectedSession;
+    }
+
     const insertedMention = `${mentionText} `;
     const nextValue =
-      value.slice(0, activeMention.start) +
+      sourceValue.slice(0, sourceStart) +
       insertedMention +
-      value.slice(cursor);
-    const nextCursor = activeMention.start + insertedMention.length;
+      sourceValue.slice(sourceCursor);
+    const nextCursor = sourceStart + insertedMention.length;
 
     onValueChange(nextValue);
     setCursor(nextCursor);

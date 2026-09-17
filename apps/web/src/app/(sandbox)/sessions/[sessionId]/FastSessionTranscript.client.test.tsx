@@ -2662,12 +2662,17 @@ describe('FastSessionTranscript', () => {
   });
 
   it('selects an integration mention with the keyboard and submits its identity', async () => {
+    const recentSessionId = '99999999-9999-4999-8999-999999999999';
     integrationMentionsState.integrations = [
       {
         id: 'sentry',
         name: 'Sentry',
         description: 'Inspect errors and performance data.',
       },
+    ];
+    sessionMentionsState.recentIds = [recentSessionId];
+    sessionMentionsState.sessions = [
+      { id: recentSessionId, title: 'Session that should not win' },
     ];
     replyMutate.mockResolvedValue({ success: true });
 
@@ -2681,7 +2686,7 @@ describe('FastSessionTranscript', () => {
 
     const input = screen.getByPlaceholderText('Message agent');
     fireEvent.change(input, {
-      target: { value: '@sen', selectionStart: 4 },
+      target: { value: '@s', selectionStart: 2 },
     });
 
     expect(
@@ -2709,6 +2714,62 @@ describe('FastSessionTranscript', () => {
         sessionId: 'session-integration-keyboard',
         text: '@Sentry investigate the latest error',
         integrationIds: ['sentry'],
+        model: null,
+        reasoningEffort: null,
+      }),
+    );
+  });
+
+  it('replaces the previous visible Session token when selecting another Session', async () => {
+    const firstSessionId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const secondSessionId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    sessionMentionsState.recentIds = [firstSessionId, secondSessionId];
+    sessionMentionsState.sessions = [
+      { id: firstSessionId, title: 'First session' },
+      { id: secondSessionId, title: 'Second session' },
+    ];
+    replyMutate.mockResolvedValue({ success: true });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-context-replacement"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, {
+      target: { value: '@Sessions', selectionStart: 9 },
+    });
+    fireEvent.keyDown(input, { key: 'ArrowDown', code: 'ArrowDown' });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+    expect(input).toHaveValue('@Sessions: First session ');
+
+    fireEvent.change(input, {
+      target: {
+        value: '@Sessions: First session compare with @Sessions',
+        selectionStart: 47,
+      },
+    });
+    fireEvent.keyDown(input, { key: 'ArrowDown', code: 'ArrowDown' });
+    fireEvent.keyDown(input, { key: 'ArrowDown', code: 'ArrowDown' });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+    expect(input).toHaveValue('compare with @Sessions: Second session ');
+
+    fireEvent.change(input, {
+      target: {
+        value: 'compare with @Sessions: Second session now',
+        selectionStart: 42,
+      },
+    });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+
+    await waitFor(() =>
+      expect(replyMutate).toHaveBeenCalledWith({
+        sessionId: 'session-context-replacement',
+        text: 'compare with @Sessions: Second session now',
+        sessionContext: { kind: 'session', sessionId: secondSessionId },
         model: null,
         reasoningEffort: null,
       }),
