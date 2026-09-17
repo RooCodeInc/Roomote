@@ -16,15 +16,29 @@ import { decrypt } from '@roomote/db/encryption';
 import { Env, isCustomMcpDisabled } from '@roomote/env';
 import {
   MAX_CUSTOM_MCP_SERVERS,
+  PRODUCT_NAME,
   customMcpConnectionId,
   customMcpRemoteServerInputSchema,
   parseMcpJsonRpcPayload,
+  type OAuthClientInformation,
+  type OAuthClientMetadata,
   type OAuthServerMetadata,
 } from '@roomote/types';
 
-import { createMcpOauthReplay, getValidAccessToken } from './data';
+import {
+  createMcpOauthReplay,
+  getClientInformation,
+  getValidAccessToken,
+  storeClientInformation,
+  updateAuthStatus,
+} from './data';
 import { createBoundedCustomMcpFetch } from './custom-fetch';
-import { discoverOAuthEndpoints } from './oauth';
+import {
+  discoverOAuthEndpoints,
+  discoverOAuthProtectedResourceMetadata,
+  getPreferredTokenEndpointAuthMethod,
+  registerOAuthClient,
+} from './oauth';
 
 const MCP_PROTOCOL_VERSION = '2025-06-18';
 const OAUTH_REPLAY_TTL_MS = 24 * 60 * 60 * 1000;
@@ -63,6 +77,8 @@ export type AddRemoteCustomMcpResult =
       status: 'client_registration_required';
       authorizeUrl?: string;
       settingsUrl: string;
+      /** The provider's own explanation when it refused to register this deployment. */
+      reason?: string;
       reused: boolean;
     })
   | (ServerResultIdentity & {
@@ -407,6 +423,110 @@ async function prepareOAuthReplay(input: {
   return publicUrl(`/api/mcp-oauth/replay/${encodeURIComponent(token)}`);
 }
 
+const REGISTRATION_REASON_MAX_CHARS = 300;
+const CALLBACK_PATH = '/api/mcp-oauth/callback';
+
+/**
+ * The provider's own explanation of a refused client registration, in a
+ * form safe to hand to the agent: the OAuth `error_description` (or `error`)
+ * when the body is JSON, otherwise the plain text, with control characters
+ * removed and the length bounded. Undefined when there is nothing usable.
+ */
+export function describeRegistrationRefusal(
+  error: unknown,
+): string | undefined {
+  const message = error instanceof Error ? error.message : String(error);
+  const body = message.replace(/^OAuth client registration failed:\s*/, '');
+  let text = body;
+  try {
+    const parsed = JSON.parse(body) as {
+      error_description?: unknown;
+      error?: unknown;
+    } | null;
+    const detail =
+      typeof parsed?.error_description === 'string'
+        ? parsed.error_description
+        : typeof parsed?.error === 'string'
+          ? parsed.error
+          : '';
+    if (detail) text = detail;
+  } catch {
+    // Plain-text body.
+  }
+  const cleaned = text
+    .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) return undefined;
+  return cleaned.length > REGISTRATION_REASON_MAX_CHARS
+    ? `${cleaned.slice(0, REGISTRATION_REASON_MAX_CHARS - 1)}…`
+    : cleaned;
+}
+
+/**
+ * Register this deployment with the server's authorization server now, so
+ * the authorization link handed to the human is one that can succeed. A
+ * provider that only accepts approved clients refuses here, which is the
+ * fact the agent needs before suggesting the route. The initiate route
+ * reuses the stored client and skips its own registration.
+ */
+async function ensureRegisteredClient(
+  server: typeof customMcpServers.$inferSelect,
+  connectionId: string,
+  serverMetadata: OAuthServerMetadata,
+): Promise<{ ok: true } | { ok: false; reason: string | undefined }> {
+  const serverUrl = server.url;
+  if (!serverUrl) {
+    throw new Error('Remote MCP servers need a URL to register a client.');
+  }
+  const redirectUri = publicUrl(CALLBACK_PATH);
+  if (
+    await getClientInformation(connectionId, {
+      expectedRedirectUri: redirectUri,
+    })
+  ) {
+    return { ok: true };
+  }
+  const options = {
+    fetchImpl: createBoundedCustomMcpFetch(),
+    resource: serverUrl,
+  };
+  const protectedResourceMetadata =
+    await discoverOAuthProtectedResourceMetadata(serverUrl, options);
+  const requestedScope =
+    protectedResourceMetadata?.scopes_supported?.join(' ') || undefined;
+  const tokenEndpointAuthMethod =
+    getPreferredTokenEndpointAuthMethod(serverMetadata);
+  const clientMetadata: OAuthClientMetadata = {
+    client_name: `${PRODUCT_NAME} - ${server.name}`,
+    redirect_uris: [redirectUri],
+    grant_types: ['authorization_code', 'refresh_token'],
+    response_types: ['code'],
+    token_endpoint_auth_method: tokenEndpointAuthMethod,
+    ...(requestedScope ? { scope: requestedScope } : {}),
+  };
+  let registered: OAuthClientInformation;
+  try {
+    registered = await registerOAuthClient(
+      serverMetadata.registration_endpoint!,
+      clientMetadata,
+      options,
+    );
+  } catch (error) {
+    return { ok: false, reason: describeRegistrationRefusal(error) };
+  }
+  await storeClientInformation(
+    connectionId,
+    {
+      ...registered,
+      token_endpoint_auth_method:
+        registered.token_endpoint_auth_method ?? tokenEndpointAuthMethod,
+    },
+    redirectUri,
+  );
+  return { ok: true };
+}
+
 export async function prepareDeploymentCustomMcpOAuthConnection(
   serverId: string,
   options: { resetClient?: boolean } = {},
@@ -539,21 +659,43 @@ async function resultForServer(input: {
 
   const { connectionId, mcpId } =
     await prepareDeploymentCustomMcpOAuthConnection(server.id);
+  if (!server.manualClientId && !oauthServerMetadata.registration_endpoint) {
+    return {
+      status: 'client_registration_required',
+      ...serverResultIdentity(server),
+      authorizeUrl: await prepareOAuthReplay({
+        connectionId,
+        mcpId,
+        sessionId: input.sessionId,
+        userId: input.userId,
+      }),
+      settingsUrl: publicUrl(SETTINGS_PATH),
+      reused: input.reused,
+    };
+  }
+  if (!server.manualClientId) {
+    const registration = await ensureRegisteredClient(
+      server,
+      connectionId,
+      oauthServerMetadata,
+    );
+    if (!registration.ok) {
+      await updateAuthStatus(connectionId, 'error', false);
+      return {
+        status: 'client_registration_required',
+        ...serverResultIdentity(server),
+        settingsUrl: publicUrl(SETTINGS_PATH),
+        ...(registration.reason ? { reason: registration.reason } : {}),
+        reused: input.reused,
+      };
+    }
+  }
   const authorizeUrl = await prepareOAuthReplay({
     connectionId,
     mcpId,
     sessionId: input.sessionId,
     userId: input.userId,
   });
-  if (!server.manualClientId && !oauthServerMetadata.registration_endpoint) {
-    return {
-      status: 'client_registration_required',
-      ...serverResultIdentity(server),
-      authorizeUrl,
-      settingsUrl: publicUrl(SETTINGS_PATH),
-      reused: input.reused,
-    };
-  }
   return {
     status: 'authorization_required',
     ...serverResultIdentity(server),

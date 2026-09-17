@@ -18,7 +18,10 @@ vi.mock('../safe-fetch', () => ({
   createGuardedFetch: () => guardedFetchMock,
 }));
 
-import { addRemoteCustomMcpForFast } from './add-remote-custom-mcp';
+import {
+  addRemoteCustomMcpForFast,
+  describeRegistrationRefusal,
+} from './add-remote-custom-mcp';
 
 const adminId = 'add-remote-mcp-admin';
 const memberId = 'add-remote-mcp-member';
@@ -52,6 +55,50 @@ function successfulMcpFetch() {
     if (body.method === 'initialize') return initializedResponse();
     if (body.method === 'tools/list') return toolsResponse();
     return new Response(null, { status: 202 });
+  });
+}
+
+const oauthMetadata = {
+  issuer: 'https://auth.example.com',
+  authorization_endpoint: 'https://auth.example.com/authorize',
+  token_endpoint: 'https://auth.example.com/token',
+  registration_endpoint: 'https://auth.example.com/register',
+  token_endpoint_auth_methods_supported: ['none'],
+};
+
+function acceptedRegistration() {
+  return jsonResponse(
+    { client_id: 'fresh-client', token_endpoint_auth_method: 'none' },
+    201,
+  );
+}
+
+function refusedRegistration() {
+  return jsonResponse(
+    {
+      error: 'invalid_redirect_uri',
+      error_description:
+        'Redirect URI is not in the allowlist, reach out to support if you believe we should support it',
+    },
+    400,
+  );
+}
+
+/**
+ * An OAuth-protected MCP server: the resource answers 401, the authorization
+ * server publishes metadata, no protected-resource metadata, and the
+ * registration endpoint answers as the test decides.
+ */
+function oauthServerFetch(register: () => Response) {
+  return vi.fn(async (url: string) => {
+    if (url === oauthMetadata.registration_endpoint) return register();
+    if (url.includes('/.well-known/oauth-authorization-server')) {
+      return jsonResponse(oauthMetadata);
+    }
+    if (url.includes('/.well-known/oauth-protected-resource')) {
+      return new Response(null, { status: 404 });
+    }
+    return new Response(null, { status: 401 });
   });
 }
 
@@ -445,17 +492,8 @@ describe('addRemoteCustomMcpForFast', () => {
     expect(guardedFetchMock).not.toHaveBeenCalled();
   });
 
-  it('returns a replay authorization link for discoverable OAuth', async () => {
-    const metadata = {
-      issuer: 'https://auth.example.com',
-      authorization_endpoint: 'https://auth.example.com/authorize',
-      token_endpoint: 'https://auth.example.com/token',
-      registration_endpoint: 'https://auth.example.com/register',
-    };
-    guardedFetchMock
-      .mockResolvedValueOnce(new Response(null, { status: 401 }))
-      .mockResolvedValueOnce(jsonResponse(metadata))
-      .mockResolvedValueOnce(jsonResponse(metadata));
+  it('registers this deployment and returns a replay authorization link for discoverable OAuth', async () => {
+    guardedFetchMock.mockImplementation(oauthServerFetch(acceptedRegistration));
 
     const result = await addRemoteCustomMcpForFast({
       userId: adminId,
@@ -475,26 +513,61 @@ describe('addRemoteCustomMcpForFast', () => {
     expect(await db.query.customMcpServers.findFirst()).toMatchObject({
       authType: 'oauth',
     });
-    expect(await db.query.mcpConnections.findFirst()).toMatchObject({
-      userId: null,
-      authStatus: 'pending',
+    const connection = await db.query.mcpConnections.findFirst();
+    expect(connection).toMatchObject({ userId: null, authStatus: 'pending' });
+    // The registered client is stored against the public callback, so the
+    // initiate route reuses it instead of registering again.
+    expect(connection?.authConfig).toMatchObject({
+      type: 'oauth_client',
+      client_id: 'fresh-client',
+      registered_redirect_uri: expect.stringMatching(
+        /\/api\/mcp-oauth\/callback$/,
+      ),
+    });
+    const registration = guardedFetchMock.mock.calls.find(
+      ([url]) => url === oauthMetadata.registration_endpoint,
+    );
+    expect(registration).toBeDefined();
+    expect(
+      JSON.parse(String((registration![1] as { body?: string }).body)),
+    ).toMatchObject({
+      redirect_uris: [expect.stringMatching(/\/api\/mcp-oauth\/callback$/)],
+      grant_types: ['authorization_code', 'refresh_token'],
     });
     expect(await db.query.mcpOauthReplays.findFirst()).toMatchObject({
       userId: adminId,
     });
   });
 
-  it('reuses a pending OAuth link for the same Session', async () => {
-    const metadata = {
-      issuer: 'https://auth.example.com',
-      authorization_endpoint: 'https://auth.example.com/authorize',
-      token_endpoint: 'https://auth.example.com/token',
-      registration_endpoint: 'https://auth.example.com/register',
-    };
+  it('reports the provider reason and no link when registration is refused', async () => {
+    guardedFetchMock.mockImplementation(oauthServerFetch(refusedRegistration));
+
+    const result = await addRemoteCustomMcpForFast({
+      userId: adminId,
+      sessionId: crypto.randomUUID(),
+      name: 'accounting',
+      url: 'https://mcp.example.com/mcp',
+    });
+
+    expect(result).toMatchObject({
+      status: 'client_registration_required',
+      name: 'accounting',
+      settingsUrl: expect.stringContaining('/settings/integrations'),
+      reason: expect.stringContaining('not in the allowlist'),
+      reused: false,
+    });
+    expect(result).not.toHaveProperty('authorizeUrl');
+    expect(await db.query.mcpConnections.findFirst()).toMatchObject({
+      userId: null,
+      authStatus: 'error',
+      enabled: false,
+    });
+    expect(await db.query.mcpOauthReplays.findMany()).toHaveLength(0);
+  });
+
+  it('reuses a pending OAuth link and the registered client for the same Session', async () => {
     const sessionId = crypto.randomUUID();
-    guardedFetchMock
-      .mockResolvedValueOnce(new Response(null, { status: 401 }))
-      .mockResolvedValueOnce(jsonResponse(metadata));
+    guardedFetchMock.mockImplementation(oauthServerFetch(acceptedRegistration));
     const first = await addRemoteCustomMcpForFast({
       userId: adminId,
       sessionId,
@@ -516,6 +589,11 @@ describe('addRemoteCustomMcpForFast', () => {
       authorizeUrl: (first as { authorizeUrl: string }).authorizeUrl,
     });
     expect(await db.query.mcpOauthReplays.findMany()).toHaveLength(1);
+    expect(
+      guardedFetchMock.mock.calls.filter(
+        ([url]) => url === oauthMetadata.registration_endpoint,
+      ),
+    ).toHaveLength(1);
   });
 
   it('uses Settings for a 401 response without OAuth metadata', async () => {
@@ -732,5 +810,44 @@ describe('addRemoteCustomMcpForFast', () => {
     expect((result as { settingsUrl: string }).settingsUrl).toContain(
       '/settings/integrations',
     );
+  });
+});
+
+describe('describeRegistrationRefusal', () => {
+  it("prefers the provider's error_description from a JSON body", () => {
+    expect(
+      describeRegistrationRefusal(
+        new Error(
+          'OAuth client registration failed: {"error":"invalid_redirect_uri","error_description":"Redirect URI is not in the allowlist"}',
+        ),
+      ),
+    ).toBe('Redirect URI is not in the allowlist');
+  });
+
+  it('falls back to the error code, then to plain text', () => {
+    expect(
+      describeRegistrationRefusal(
+        new Error(
+          'OAuth client registration failed: {"error":"access_denied"}',
+        ),
+      ),
+    ).toBe('access_denied');
+    expect(
+      describeRegistrationRefusal(
+        new Error('OAuth client registration failed: Forbidden'),
+      ),
+    ).toBe('Forbidden');
+  });
+
+  it('strips control characters, collapses whitespace, and bounds the length', () => {
+    expect(
+      describeRegistrationRefusal(
+        new Error('line one\n\tline\u0000two   here'),
+      ),
+    ).toBe('line one line two here');
+    const long = describeRegistrationRefusal(new Error('x'.repeat(1000)));
+    expect(long).toHaveLength(300);
+    expect(long?.endsWith('…')).toBe(true);
+    expect(describeRegistrationRefusal(new Error('   '))).toBeUndefined();
   });
 });

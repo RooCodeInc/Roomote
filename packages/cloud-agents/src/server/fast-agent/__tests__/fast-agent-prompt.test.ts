@@ -786,6 +786,12 @@ describe('buildFastAgentSystemPrompt', () => {
       'A result that needs manual client registration or static headers means the MCP is not connectable by this human now',
     );
     expect(enabledPrompt).toContain(
+      "when the result carries the provider's `reason`, give it to the human in plain words",
+    );
+    expect(enabledPrompt).toContain(
+      "never characterize a provider's status (beta, unsupported, a future capability) from memory",
+    );
+    expect(enabledPrompt).toContain(
       'say in one sentence where they create that key',
     );
     expect(enabledPrompt).toContain(
@@ -2006,6 +2012,10 @@ describe('buildFastAgentSystemPrompt', () => {
       'Treat a verification tool error, network failure, or otherwise indeterminate result as unresolved',
     );
     expect(adminPrompt).toContain('do not switch to the key route');
+    expect(adminPrompt).toContain(
+      'Roomote registers this deployment with the provider before returning an authorization link',
+    );
+    expect(adminPrompt).toContain("relay the provider's `reason` when present");
     expect(adminPrompt).not.toContain(
       'a failed verification only means there is no MCP and the key route applies',
     );

@@ -576,6 +576,7 @@ export {
 
 export {
   addRemoteCustomMcpForFast,
+  describeRegistrationRefusal,
   prepareDeploymentCustomMcpOAuthConnection,
   type AddRemoteCustomMcpResult,
 } from './lib/mcp/add-remote-custom-mcp';
