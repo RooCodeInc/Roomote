@@ -19,6 +19,25 @@ describe('redirectUnauthorizedError', () => {
     );
   });
 
+  it.each(['/sign-in', '/sign-in/oauth'])(
+    'does not redirect an unauthenticated %s page back to itself',
+    (pathname) => {
+      const assign = vi.fn();
+
+      expect(
+        redirectUnauthorizedError(
+          { data: { code: 'UNAUTHORIZED' } },
+          {
+            assign,
+            pathname,
+            search: '?redirect_url=%2Fsetup',
+          },
+        ),
+      ).toBe(false);
+      expect(assign).not.toHaveBeenCalled();
+    },
+  );
+
   it.each([
     new Error('UNAUTHORIZED'),
     { data: { code: 'FORBIDDEN' } },
