@@ -74,7 +74,6 @@ const {
     }>,
   },
   sessionMentionsState: {
-    recentIds: [] as string[],
     sessions: [] as Array<{ id: string; title: string }>,
   },
   voiceStatusQuery: vi.fn(),
@@ -125,13 +124,6 @@ vi.mock('@/hooks/useUser', () => ({
     isSignedIn: authenticatedUserState.user !== null,
     authStatus:
       authenticatedUserState.user === null ? 'signed-out' : 'signed-in',
-  }),
-}));
-
-vi.mock('@/hooks/useRecentSessions', () => ({
-  useRecentSessions: () => ({
-    recentSessionIds: sessionMentionsState.recentIds,
-    recordVisit: vi.fn(),
   }),
 }));
 
@@ -186,7 +178,7 @@ vi.mock('@/trpc/client', () => ({
       reviewAction: { mutate: reviewActionMutate },
       updateModelSelection: { mutate: updateModelSelectionMutate },
     },
-    sessions: { list: { query: vi.fn() } },
+    sessions: { recentlyMessaged: { query: vi.fn() } },
     voice: {
       status: { query: voiceStatusQuery },
       recordTurn: { mutate: recordVoiceTurnMutate },
@@ -223,7 +215,7 @@ vi.mock('@tanstack/react-query', async (importOriginal) => ({
           data: { integrations: integrationMentionsState.integrations },
           isPending: false,
         }
-      : options.queryKey?.[0] === 'sessions.contextMentions'
+      : options.queryKey?.[0] === 'sessions.recentlyMessaged'
         ? {
             data: { sessions: sessionMentionsState.sessions },
             isPending: false,
@@ -369,7 +361,6 @@ beforeEach(() => {
   narrationState.enabled = false;
   composerSuggestionState.data = undefined;
   integrationMentionsState.integrations = [];
-  sessionMentionsState.recentIds = [];
   sessionMentionsState.sessions = [];
   openTaskPanel.mockReset();
   openTasksPanel.mockReset();
@@ -2670,7 +2661,6 @@ describe('FastSessionTranscript', () => {
         description: 'Inspect errors and performance data.',
       },
     ];
-    sessionMentionsState.recentIds = [recentSessionId];
     sessionMentionsState.sessions = [
       { id: recentSessionId, title: 'Session that should not win' },
     ];
@@ -2723,7 +2713,6 @@ describe('FastSessionTranscript', () => {
   it('replaces the previous visible Session token when selecting another Session', async () => {
     const firstSessionId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
     const secondSessionId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
-    sessionMentionsState.recentIds = [firstSessionId, secondSessionId];
     sessionMentionsState.sessions = [
       { id: firstSessionId, title: 'First session' },
       { id: secondSessionId, title: 'Second session' },
@@ -2779,7 +2768,6 @@ describe('FastSessionTranscript', () => {
   it('replaces the picker-created Session token instead of matching manual text', async () => {
     const firstSessionId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
     const secondSessionId = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
-    sessionMentionsState.recentIds = [firstSessionId, secondSessionId];
     sessionMentionsState.sessions = [
       { id: firstSessionId, title: 'First session' },
       { id: secondSessionId, title: 'Second session' },
@@ -2833,7 +2821,6 @@ describe('FastSessionTranscript', () => {
 
   it('selects one recent Session with the keyboard and submits its canonical ID', async () => {
     const selectedSessionId = '44444444-4444-4444-8444-444444444444';
-    sessionMentionsState.recentIds = [selectedSessionId];
     sessionMentionsState.sessions = [
       { id: selectedSessionId, title: 'Fix artifact uploads' },
     ];
@@ -2881,7 +2868,6 @@ describe('FastSessionTranscript', () => {
   it('supports touch selection for the bounded recent Sessions list', async () => {
     const firstSessionId = '55555555-5555-4555-8555-555555555555';
     const secondSessionId = '66666666-6666-4666-8666-666666666666';
-    sessionMentionsState.recentIds = [firstSessionId, secondSessionId];
     sessionMentionsState.sessions = [
       { id: secondSessionId, title: 'Second session' },
       { id: firstSessionId, title: 'First session' },
@@ -2901,7 +2887,7 @@ describe('FastSessionTranscript', () => {
       target: { value: '@Sessions', selectionStart: 9 },
     });
     const option = await screen.findByRole('option', {
-      name: /Share title and ID for 2 recently visited Sessions/,
+      name: /Share title and ID for 2 recently messaged Sessions/,
     });
     expect(
       fireEvent.pointerDown(option, {
@@ -2923,7 +2909,7 @@ describe('FastSessionTranscript', () => {
         text: '@Sessions compare these',
         sessionContext: {
           kind: 'recent',
-          sessionIds: [firstSessionId, secondSessionId],
+          sessionIds: [secondSessionId, firstSessionId],
         },
         model: null,
         reasoningEffort: null,
@@ -2933,7 +2919,6 @@ describe('FastSessionTranscript', () => {
 
   it('does not offer or submit Session context for quoted mention text', async () => {
     const selectedSessionId = '77777777-7777-4777-8777-777777777777';
-    sessionMentionsState.recentIds = [selectedSessionId];
     sessionMentionsState.sessions = [
       { id: selectedSessionId, title: 'Quoted session' },
     ];
@@ -2968,7 +2953,6 @@ describe('FastSessionTranscript', () => {
 
   it('clears a selected Session when its visible mention is removed', async () => {
     const selectedSessionId = '88888888-8888-4888-8888-888888888888';
-    sessionMentionsState.recentIds = [selectedSessionId];
     sessionMentionsState.sessions = [
       { id: selectedSessionId, title: 'Removed session' },
     ];
@@ -2988,7 +2972,7 @@ describe('FastSessionTranscript', () => {
     });
     fireEvent.click(
       await screen.findByRole('option', {
-        name: /Share title and ID for 1 recently visited Session/,
+        name: /Share title and ID for 1 recently messaged Session/,
       }),
     );
     fireEvent.change(input, {

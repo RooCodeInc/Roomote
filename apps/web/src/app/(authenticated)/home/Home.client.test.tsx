@@ -95,7 +95,7 @@ vi.mock('@/trpc/client', () => ({
     fastSessions: {
       integrationMentions: { query: vi.fn() },
     },
-    sessions: { list: { query: vi.fn() } },
+    sessions: { recentlyMessaged: { query: vi.fn() } },
   }),
   useTRPC: () => ({
     home: {

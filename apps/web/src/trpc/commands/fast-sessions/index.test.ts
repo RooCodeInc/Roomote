@@ -3,6 +3,7 @@ const mocks = vi.hoisted(() => ({
   acquireTurnLock: vi.fn(),
   answerQuestion: vi.fn(),
   listIntegrations: vi.fn(),
+  getRecentlyMessagedSessions: vi.fn(),
   getSessions: vi.fn(),
   resolveApiBaseUrl: vi.fn(),
   resolveMcpConfigs: vi.fn(),
@@ -87,6 +88,7 @@ vi.mock('@/lib/server/fast-sessions', () => ({
 }));
 
 vi.mock('@/lib/server/sessions', () => ({
+  getRecentlyMessagedSessions: mocks.getRecentlyMessagedSessions,
   getSessions: mocks.getSessions,
 }));
 
@@ -235,6 +237,7 @@ describe('setup context on ordinary Fast session input', () => {
     );
     mocks.answerQuestion.mockResolvedValue('Ready');
     mocks.listIntegrations.mockResolvedValue([]);
+    mocks.getRecentlyMessagedSessions.mockResolvedValue([]);
     mocks.getSessions.mockResolvedValue({ sessions: [], nextCursor: null });
     mocks.resolveApiBaseUrl.mockReturnValue('https://roomote.test');
     mocks.resolveMcpConfigs.mockResolvedValue({});
@@ -390,19 +393,16 @@ describe('setup context on ordinary Fast session input', () => {
     });
   });
 
-  it('preserves visit order for authorized recent Sessions and omits stale or forged IDs', async () => {
+  it('uses the server latest-message order for recent Sessions and omits stale or forged IDs', async () => {
     const recentIds = [
       '11111111-1111-4111-8111-111111111111',
       '22222222-2222-4222-8222-222222222222',
       '33333333-3333-4333-8333-333333333333',
     ];
-    mocks.getSessions.mockResolvedValue({
-      sessions: [
-        { id: recentIds[1], title: 'Second visit' },
-        { id: recentIds[0], title: 'Most recent visit' },
-      ],
-      nextCursor: null,
-    });
+    mocks.getRecentlyMessagedSessions.mockResolvedValue([
+      { id: recentIds[1], title: 'Most recent message' },
+      { id: recentIds[0], title: 'Earlier message' },
+    ]);
 
     await replyToFastSessionCommand(auth, {
       sessionId: session.id,
@@ -412,12 +412,13 @@ describe('setup context on ordinary Fast session input', () => {
     const turn = await runScheduled();
 
     expect(turn.currentMessageAgentContext).toContain(
-      'recently visited Sessions',
+      'Sessions they recently messaged',
     );
     expect(
-      turn.currentMessageAgentContext.indexOf('Most recent visit'),
-    ).toBeLessThan(turn.currentMessageAgentContext.indexOf('Second visit'));
+      turn.currentMessageAgentContext.indexOf('Most recent message'),
+    ).toBeLessThan(turn.currentMessageAgentContext.indexOf('Earlier message'));
     expect(turn.currentMessageAgentContext).not.toContain(recentIds[2]);
+    expect(mocks.getRecentlyMessagedSessions).toHaveBeenCalledWith(auth, 10);
   });
 
   it('does not infer Session context from typed or quoted mention text', async () => {
@@ -428,6 +429,7 @@ describe('setup context on ordinary Fast session input', () => {
     const turn = await runScheduled();
 
     expect(turn.currentMessageAgentContext).toBeUndefined();
+    expect(mocks.getRecentlyMessagedSessions).not.toHaveBeenCalled();
     expect(mocks.getSessions).not.toHaveBeenCalled();
   });
 

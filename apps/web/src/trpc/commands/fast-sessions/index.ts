@@ -84,7 +84,10 @@ import {
   currentEpochSeconds,
   signArtifactId,
 } from '@/lib/server/artifact-signature';
-import { getSessions } from '@/lib/server/sessions';
+import {
+  getRecentlyMessagedSessions,
+  getSessions,
+} from '@/lib/server/sessions';
 import type {
   PinnedFastSessionLaunchInput,
   SelectedSessionContextInput,
@@ -526,14 +529,25 @@ async function resolveSelectedSessionContext(
         : [selection.sessionId],
     ),
   ];
-  const { sessions: authorizedSessions } = await getSessions(auth, {
-    ids: requestedIds,
-    limit: requestedIds.length,
-  });
+  const authorizedSessions =
+    selection.kind === 'recent'
+      ? (await getRecentlyMessagedSessions(auth, 10)).filter((session) =>
+          requestedIds.includes(session.id),
+        )
+      : (
+          await getSessions(auth, {
+            ids: requestedIds,
+            limit: requestedIds.length,
+          })
+        ).sessions;
   const sessionsById = new Map(
     authorizedSessions.map((session) => [session.id, session]),
   );
-  const selectedSessions = requestedIds
+  const orderedIds =
+    selection.kind === 'recent'
+      ? authorizedSessions.map((session) => session.id)
+      : requestedIds;
+  const selectedSessions = orderedIds
     .map((id) => sessionsById.get(id))
     .filter((session): session is NonNullable<typeof session> =>
       Boolean(session),
@@ -542,7 +556,7 @@ async function resolveSelectedSessionContext(
 
   return [
     selection.kind === 'recent'
-      ? 'The user selected their recently visited Sessions as context for this message, ordered by their visit history:'
+      ? 'The user selected Sessions they recently messaged as context for this message, ordered by their latest message:'
       : 'The user selected this Session as context for this message:',
     ...selectedSessions.map(
       (session) => `- ${session.title} [canonical Session ID: ${session.id}]`,

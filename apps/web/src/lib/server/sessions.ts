@@ -777,6 +777,42 @@ export async function getSessions(auth: SessionAuth, input: SessionListInput) {
   };
 }
 
+export async function getRecentlyMessagedSessions(
+  auth: SessionAuth,
+  limit = 10,
+) {
+  const boundedLimit = Math.min(Math.max(limit, 1), 10);
+  const latestMessageAt = sql<number>`max(${fastAgentMessages.ts})`;
+  const rows = await db
+    .select({
+      id: sessions.id,
+      title: sessions.title,
+      latestMessageAt,
+    })
+    .from(sessions)
+    .innerJoin(
+      fastAgentMessages,
+      eq(fastAgentMessages.conversationId, sessions.fastConversationId),
+    )
+    .where(
+      and(
+        sessionListScope(auth),
+        eq(sessions.visibility, 'visible'),
+        isNull(sessions.archivedAt),
+        eq(fastAgentMessages.role, 'user'),
+        sql`${fastAgentMessages.metadata} ->> 'userId' = ${auth.userId}`,
+        sql`${fastAgentMessages.metadata} ->> 'turnSource' = 'human'`,
+        sql`coalesce(${fastAgentMessages.metadata} ->> 'visibleInTranscript', 'true') <> 'false'`,
+        sql`coalesce(${fastAgentMessages.metadata} ->> 'inputKind', '') <> 'reaction'`,
+      ),
+    )
+    .groupBy(sessions.id)
+    .orderBy(desc(latestMessageAt), desc(sessions.id))
+    .limit(boundedLimit);
+
+  return rows.map(({ id, title }) => ({ id, title }));
+}
+
 export async function getSessionSources(auth: SessionAuth) {
   const rows = await db
     .selectDistinct({ source: sessions.sourceSurface })

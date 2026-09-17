@@ -2,7 +2,6 @@
 
 import {
   useId,
-  useMemo,
   useRef,
   useState,
   type KeyboardEvent,
@@ -11,7 +10,6 @@ import {
 import { useQuery } from '@tanstack/react-query';
 
 import { AtSignIcon, MessagesSquare } from '@/components/system';
-import { useRecentSessions } from '@/hooks/useRecentSessions';
 import { useTRPCClient } from '@/trpc/client';
 
 type IntegrationMentionOption = {
@@ -222,7 +220,6 @@ export function useSessionContextMentions({
   textareaRef: RefObject<HTMLTextAreaElement | null>;
 }) {
   const trpcClient = useTRPCClient();
-  const { recentSessionIds } = useRecentSessions();
   const listboxId = useId();
   const [cursor, setCursor] = useState(value.length);
   const [focused, setFocused] = useState(false);
@@ -235,10 +232,6 @@ export function useSessionContextMentions({
   const mentionKey = activeMention
     ? `${activeMention.start}:${activeMention.query}`
     : null;
-  const recentIds = useMemo(
-    () => recentSessionIds.slice(0, MAX_RECENT_SESSION_MENTIONS),
-    [recentSessionIds],
-  );
   const integrationsQuery = useQuery({
     queryKey: ['fastSessions.integrationMentions', sessionId ?? null],
     queryFn: () =>
@@ -250,27 +243,16 @@ export function useSessionContextMentions({
     refetchOnWindowFocus: false,
   });
   const sessionsQuery = useQuery({
-    queryKey: ['sessions.contextMentions', recentIds],
-    queryFn: () =>
-      trpcClient.sessions.list.query({
-        ids: recentIds,
-        limit: MAX_RECENT_SESSION_MENTIONS,
-      }),
-    enabled: Boolean(activeMention && recentIds.length > 0),
+    queryKey: ['sessions.recentlyMessaged'],
+    queryFn: () => trpcClient.sessions.recentlyMessaged.query(),
+    enabled: Boolean(activeMention),
     staleTime: 60_000,
     refetchOnWindowFocus: false,
   });
-  const recentSessions = useMemo(() => {
-    const sessionsById = new Map(
-      (sessionsQuery.data?.sessions ?? []).map((session) => [
-        session.id,
-        { id: session.id, title: session.title },
-      ]),
-    );
-    return recentIds
-      .map((id) => sessionsById.get(id))
-      .filter((session): session is SessionMentionOption => Boolean(session));
-  }, [recentIds, sessionsQuery.data?.sessions]);
+  const recentSessions = (sessionsQuery.data?.sessions ?? []).slice(
+    0,
+    MAX_RECENT_SESSION_MENTIONS,
+  );
   const normalizedQuery = activeMention?.query.toLocaleLowerCase() ?? '';
   const integrationOptions: MentionOption[] = (
     integrationsQuery.data?.integrations ?? []
@@ -446,9 +428,7 @@ export function useSessionContextMentions({
     setActiveIndex(0);
   };
 
-  const isLoading =
-    integrationsQuery.isPending ||
-    (recentIds.length > 0 && sessionsQuery.isPending);
+  const isLoading = integrationsQuery.isPending || sessionsQuery.isPending;
   const isError = integrationsQuery.isError || sessionsQuery.isError;
   const inputProps = {
     'aria-autocomplete': 'list' as const,
@@ -487,7 +467,7 @@ export function useSessionContextMentions({
           const description = isIntegration
             ? option.integration.description
             : isRecent
-              ? `Share title and ID for ${option.sessions.length} recently visited Session${option.sessions.length === 1 ? '' : 's'}`
+              ? `Share title and ID for ${option.sessions.length} recently messaged Session${option.sessions.length === 1 ? '' : 's'}`
               : option.session.id;
           return (
             <button
