@@ -235,6 +235,28 @@ async function hasLinkedGitHubAccount(
   }
 }
 
+async function resolveLinkedGitHubAccessToken(
+  userId: string,
+): Promise<string | null> {
+  try {
+    return await resolveGitHubUserAccessToken(userId);
+  } catch (error) {
+    if (error instanceof GitHubUserTokenError) {
+      throw new McpProxyError(
+        error.reauthorizationRequired ? 403 : 502,
+        error.message,
+      );
+    }
+    throw error;
+  }
+}
+
+function listsAuthenticatedUsersGists(args: unknown): boolean {
+  if (!args || typeof args !== 'object') return true;
+  const username = (args as Record<string, unknown>).username;
+  return username === undefined || username === '';
+}
+
 function buildRouterGitHubHeaders(readonly: boolean): Record<string, string> {
   const constraints = getRouterMcpUpstreamConstraints(ROUTER_GITHUB_SERVER_ID);
   const headers: Record<string, string> = {};
@@ -323,18 +345,7 @@ export function createGithubMcp(options?: {
               'GitHub gist creation requires an active Roomote member',
             );
         }
-        let token: string | null;
-        try {
-          token = await resolveGitHubUserAccessToken(userId);
-        } catch (error) {
-          if (error instanceof GitHubUserTokenError) {
-            throw new McpProxyError(
-              error.reauthorizationRequired ? 403 : 502,
-              error.message,
-            );
-          }
-          throw error;
-        }
+        const token = await resolveLinkedGitHubAccessToken(userId);
         if (!token) {
           throw new McpProxyError(
             403,
@@ -345,6 +356,27 @@ export function createGithubMcp(options?: {
           authHeader: token,
           extraHeaders: buildRouterGitHubHeaders(false),
         };
+      }
+      const accountGistRead =
+        name === 'get_gist' ||
+        (name === 'list_gists' && listsAuthenticatedUsersGists(toolArguments));
+      if (accountGistRead) {
+        userId ??= await resolveActingUserId(auth);
+        const token = await resolveLinkedGitHubAccessToken(userId);
+        if (token) {
+          return {
+            authHeader: token,
+            allowedToolNames: auth.tokenType === 'auth' ? null : undefined,
+            extraHeaders: buildRouterGitHubHeaders(true),
+          };
+        }
+        if (name === 'list_gists') {
+          throw new McpProxyError(
+            403,
+            'Link your GitHub account under Settings > Linked Accounts before listing your gists.',
+          );
+        }
+        // Public gists remain readable through the installation credential.
       }
       const isMember = auth.tokenType === 'auth';
       // A coding task writes through its own checkout and `gh`. Refused
