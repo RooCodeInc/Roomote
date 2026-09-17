@@ -439,7 +439,11 @@ export function ArtifactViewerContent({
                     variant="ghost"
                     className="h-7 gap-1.5 px-2 text-sm font-medium hover:text-accent-foreground"
                   >
-                    <a href={artifact.downloadUrl} download>
+                    <a
+                      href={artifact.downloadUrl}
+                      download
+                      aria-label="Download"
+                    >
                       <Download className="size-3.5" />
                     </a>
                   </Button>
