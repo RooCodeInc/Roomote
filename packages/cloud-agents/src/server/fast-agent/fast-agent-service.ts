@@ -1776,6 +1776,8 @@ export async function answerFastAgentQuestion({
   defaultImageArtifactIds = [],
   defaultCharts = [],
   allowSilentAmbientReply = false,
+  directedAtRoomote,
+  peerDirectedTurn = false,
   platformEventTranscriptPayload,
   slackRoomoteUserId,
   currentDurableHumanFollowUpEventId,
@@ -1830,6 +1832,10 @@ export async function answerFastAgentQuestion({
   defaultCharts?: DataVisualizationInput[];
   /** True only for an unmentioned turn in a multi-human Fast conversation. */
   allowSilentAmbientReply?: boolean;
+  /** Surface-level classification; defaults to a direct human turn. */
+  directedAtRoomote?: boolean;
+  /** Surface-level classification that this turn belongs to human peers. */
+  peerDirectedTurn?: boolean;
   platformEventTranscriptPayload?: Record<string, unknown>;
   slackRoomoteUserId?: string;
   /** The durable row currently running as a fallback whole turn. Excluding it
@@ -1877,9 +1883,16 @@ export async function answerFastAgentQuestion({
     userId,
   });
   const platformEvent = turnSource === 'platform_event';
+  const resolvedDirectedAtRoomote =
+    directedAtRoomote ?? (!platformEvent && !allowSilentAmbientReply);
   const humanInput = input ?? ({ type: 'message' } as const);
   const reactionInput =
     !platformEvent && humanInput.type === FAST_AGENT_REACTION_INPUT_TYPE;
+  const resolvedPeerDirectedTurn =
+    peerDirectedTurn &&
+    allowSilentAmbientReply &&
+    !platformEvent &&
+    !reactionInput;
   const substantiveHumanInput = !platformEvent && !reactionInput;
   const currentMessageReactable = substantiveHumanInput;
   const transcriptPayload = reactionInput
@@ -2451,7 +2464,7 @@ export async function answerFastAgentQuestion({
       let batchTextBytes = 0;
       let batchFileCount = 0;
       let batchFileBytes = 0;
-      let blockedByDifferentUser = false;
+      let requiresSeparateTurn = false;
 
       for (const row of rows) {
         const parsed = fastAgentHumanFollowUpEventSchema.safeParse(row.event);
@@ -2481,7 +2494,14 @@ export async function answerFastAgentQuestion({
           // initiating user. Preserve global queue order: deliver the current
           // actor's contiguous prefix, then leave this participant and every
           // later message durable for separately authorized turns.
-          blockedByDifferentUser = true;
+          requiresSeparateTurn = true;
+          break;
+        }
+        if (followUp.peerDirectedTurn) {
+          // Native steering keeps the active turn's existing system prompt.
+          // Run peer-directed messages separately so their highest-priority
+          // startup exception is present at inference time.
+          requiresSeparateTurn = true;
           break;
         }
         if (followUp.sourceControlReplyTarget) {
@@ -2491,7 +2511,7 @@ export async function answerFastAgentQuestion({
           // Steering would inject the text into this turn's home adapter and
           // retire the row without either. Leave it and everything after it
           // durable, in order.
-          blockedByDifferentUser = true;
+          requiresSeparateTurn = true;
           break;
         }
 
@@ -2563,7 +2583,7 @@ export async function answerFastAgentQuestion({
 
       await markFastAgentHumanFollowUpsDelivered(alreadyInjectedIds);
       if (batch.length === 0) {
-        if (blockedByDifferentUser) return;
+        if (requiresSeparateTurn) return;
         continue;
       }
 
@@ -3608,6 +3628,7 @@ export async function answerFastAgentQuestion({
       automationReport,
       retryTaskStartAvailable: Boolean(adapter.retryTaskStart),
       allowSilentAmbientReply,
+      peerDirectedTurn: resolvedPeerDirectedTurn,
       implicitAutomationOffersEnabled: !Env.R_FAST_AUTOMATION_OFFERS_DISABLED,
       releaseVersion,
       commitSha: process.env.GITHUB_SHA || process.env.VERCEL_GIT_COMMIT_SHA,
@@ -5416,6 +5437,13 @@ export async function answerFastAgentQuestion({
                 error: 'This platform event requires a user-visible closeout.',
               };
             }
+            if (steeredDirectedFollowUp) {
+              return {
+                success: false,
+                error:
+                  'A directed human follow-up requires a user-visible reply.',
+              };
+            }
             if (!reactionInput && !platformEvent && !allowSilentAmbientReply) {
               return {
                 success: false,
@@ -5643,6 +5671,9 @@ export async function answerFastAgentQuestion({
               currentMessageSender?.displayName ||
               currentMessageSender?.githubLogin,
             ),
+            directedAtRoomote: platformEvent ? null : resolvedDirectedAtRoomote,
+            allowSilentAmbientReply,
+            peerDirectedTurn: resolvedPeerDirectedTurn,
             agentContextPresent: Boolean(currentMessageAgentContext),
             inputImageCount: imageFiles.length,
             attachedImageCount: imageFilesForAttempt.length,

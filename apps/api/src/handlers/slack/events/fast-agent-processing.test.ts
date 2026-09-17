@@ -404,13 +404,16 @@ describe('processFastAgentMessage', () => {
     );
     if (expected) {
       expect(call.allowSilentAmbientReply).toBe(true);
+      expect(call.peerDirectedTurn).toBe(true);
+      expect(call.directedAtRoomote).toBe(false);
       expect(call.currentMessageAgentContext).toContain(
         'Untrusted supplemental context',
       );
       expect(call.currentMessageAgentContext).toContain(
-        'unless you are addressed directly',
+        'Follow the peer-directed exception in Turn Startup',
       );
     } else {
+      expect(call.peerDirectedTurn).toBe(false);
       expect(call.allowSilentAmbientReply).toBe(false);
       expect(call.currentMessageAgentContext).toBe(
         'Existing attachment context',
@@ -444,7 +447,7 @@ describe('processFastAgentMessage', () => {
     });
   });
 
-  it('does not reconstruct the reminder from a peer mention in history', async () => {
+  it('does not reconstruct the reminder from history when the experiment is disabled', async () => {
     const slack = {
       fetchThreadMessages: vi.fn(async () => [
         { user: 'U123', text: '<@U222> what do you think?', ts: '100.003' },
@@ -466,7 +469,199 @@ describe('processFastAgentMessage', () => {
     });
     const call = mocks.answerQuestion.mock.calls[0]?.[0];
     expect(call.currentMessageAgentContext).toBeUndefined();
+    expect(call.peerDirectedTurn).toBe(false);
+    expect(call.allowSilentAmbientReply).toBe(false);
   });
+
+  it('classifies a peer mention following a Roomote reply as peer-directed', async () => {
+    const slack = {
+      fetchThreadMessages: vi.fn(async () => [
+        { user: 'U123', text: '<@UBOT> Is it private?', ts: '100.001' },
+        {
+          user: 'UBOT',
+          bot_id: 'B999',
+          text: 'The private icon appears next to the model.',
+          ts: '100.002',
+        },
+        {
+          user: 'U123',
+          text: '<@U222> oh, in both the session and the task?',
+          ts: '100.003',
+        },
+      ]),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'C123',
+        channel_type: 'channel',
+        user: 'U123',
+        text: '<@U222> oh, in both the session and the task?',
+        ts: '100.003',
+        thread_ts: '100.001',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+      roomoteSlackUserId: 'UBOT',
+      peerConversationsExperimentEnabled: true,
+    });
+
+    expect(mocks.answerQuestion.mock.calls[0]?.[0]).toMatchObject({
+      directedAtRoomote: false,
+      allowSilentAmbientReply: true,
+      peerDirectedTurn: true,
+      currentMessageAgentContext: expect.stringContaining(
+        'This message mentions another person',
+      ),
+    });
+  });
+
+  it('keeps an unmentioned apology quiet after the same sender addressed a peer', async () => {
+    const slack = {
+      fetchThreadMessages: vi.fn(async () => [
+        { user: 'U123', text: '<@UBOT> Is it private?', ts: '100.001' },
+        {
+          user: 'UBOT',
+          bot_id: 'B999',
+          text: 'The private icon appears next to the model.',
+          ts: '100.002',
+        },
+        {
+          user: 'U123',
+          text: '<@U222> (ignore this) Here is the time',
+          ts: '100.003',
+        },
+        { user: 'U123', text: 'Sorry for the ping', ts: '100.004' },
+      ]),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'C123',
+        channel_type: 'channel',
+        user: 'U123',
+        text: 'Sorry for the ping',
+        ts: '100.004',
+        thread_ts: '100.001',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+      roomoteSlackUserId: 'UBOT',
+      peerConversationsExperimentEnabled: true,
+    });
+
+    expect(mocks.answerQuestion.mock.calls[0]?.[0]).toMatchObject({
+      directedAtRoomote: false,
+      allowSilentAmbientReply: true,
+      peerDirectedTurn: true,
+      currentMessageAgentContext: expect.stringContaining(
+        'appears to continue a conversation between colleagues',
+      ),
+    });
+  });
+
+  it('keeps an unmentioned follow-up quiet when recent history addressed another human', async () => {
+    const slack = {
+      fetchThreadMessages: vi.fn(async () => [
+        { user: 'U111', text: '<@UBOT> Is it private?', ts: '100.001' },
+        {
+          user: 'U111',
+          text: '<@U222> both the session and the task',
+          ts: '100.002',
+        },
+        { user: 'U333', text: 'I agree', ts: '100.003' },
+      ]),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'C123',
+        channel_type: 'channel',
+        user: 'U333',
+        text: 'I agree',
+        ts: '100.003',
+        thread_ts: '100.001',
+      } as never,
+      slack: slack as never,
+      userId: 'user-3',
+      teamId: 'T123',
+      roomoteSlackUserId: 'UBOT',
+      peerConversationsExperimentEnabled: true,
+    });
+
+    expect(mocks.answerQuestion.mock.calls[0]?.[0]).toMatchObject({
+      directedAtRoomote: false,
+      allowSilentAmbientReply: true,
+      peerDirectedTurn: true,
+      currentMessageAgentContext: expect.stringContaining(
+        'appears to continue a conversation between colleagues',
+      ),
+    });
+  });
+
+  it.each([
+    {
+      name: 'Roomote was the last speaker',
+      history: [
+        { user: 'U123', text: '<@UBOT> Is it private?', ts: '100.001' },
+        { user: 'U123', text: '<@U222> I think so', ts: '100.002' },
+        {
+          user: 'UBOT',
+          bot_id: 'B999',
+          text: 'Yes, it is private.',
+          ts: '100.003',
+        },
+      ],
+    },
+    {
+      name: 'Roomote started the thread',
+      history: [
+        {
+          user: 'UBOT',
+          bot_id: 'B999',
+          text: 'The deployment finished.',
+          ts: '100.001',
+        },
+        { user: 'U123', text: '<@U222> It is ready', ts: '100.002' },
+      ],
+    },
+  ])(
+    'keeps a genuine Roomote follow-up response-required when $name',
+    async ({ history }) => {
+      const slack = { fetchThreadMessages: vi.fn(async () => history) };
+
+      await processFastAgentMessage({
+        event: {
+          type: 'message',
+          channel: 'C123',
+          channel_type: 'channel',
+          user: 'U123',
+          text: 'Can you continue?',
+          ts: '100.004',
+          thread_ts: '100.001',
+        } as never,
+        slack: slack as never,
+        userId: 'user-1',
+        teamId: 'T123',
+        roomoteSlackUserId: 'UBOT',
+        peerConversationsExperimentEnabled: true,
+      });
+
+      expect(mocks.answerQuestion.mock.calls[0]?.[0]).toMatchObject({
+        directedAtRoomote: false,
+        allowSilentAmbientReply: false,
+        peerDirectedTurn: false,
+      });
+      expect(
+        mocks.answerQuestion.mock.calls[0]?.[0].currentMessageAgentContext,
+      ).toBeUndefined();
+    },
+  );
 
   it('durably steers an active Fast generation instead of waiting for its lock', async () => {
     const abort = vi.fn().mockResolvedValue(undefined);
@@ -506,6 +701,7 @@ describe('processFastAgentMessage', () => {
           agentContext: expect.stringContaining(
             'Untrusted supplemental context',
           ),
+          peerDirectedTurn: true,
         }),
       }),
     );
@@ -1621,7 +1817,11 @@ describe('processFastAgentMessage', () => {
     expect(slack.addReaction).not.toHaveBeenCalled();
     expect(slack.removeReaction).not.toHaveBeenCalled();
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
-      expect.objectContaining({ question: 'Good, tired' }),
+      expect.objectContaining({
+        question: 'Good, tired',
+        directedAtRoomote: true,
+        allowSilentAmbientReply: false,
+      }),
     );
   });
 

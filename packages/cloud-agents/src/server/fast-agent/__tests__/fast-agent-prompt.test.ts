@@ -1664,9 +1664,14 @@ describe('buildFastAgentSystemPrompt', () => {
     const directedPrompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
     });
+    const peerDirectedPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      allowSilentAmbientReply: true,
+      peerDirectedTurn: true,
+    });
 
     expect(ambientPrompt).toContain(
-      'decide from the current message and recent thread whether this unmentioned multi-human turn is specifically directed at Roomote',
+      'decide from the current message and recent thread whether it is specifically directed at Roomote',
     );
     expect(ambientPrompt).toContain(
       "Respond to explicit platform mentions or commands, direct replies or answers to Roomote, requests about Roomote's work, and contextually clear follow-ups",
@@ -1692,13 +1697,33 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(ambientPrompt).toContain(
       'An eligible ambient message or optional human reaction may use `ignore_event` under its narrow rule below',
     );
+    expect(peerDirectedPrompt).toContain(
+      'The communication surface classified this turn as a colleague-to-colleague conversation',
+    );
+    expect(peerDirectedPrompt).toContain(
+      'Default to `ignore_event` without acknowledging, reacting, or taking action',
+    );
+    expect(peerDirectedPrompt).toContain(
+      'Respond only if the current message mentions Roomote or explicitly asks Roomote to act',
+    );
+    expect(peerDirectedPrompt).toContain(
+      'Except for a turn classified above as peer-directed or another eligible ambient message',
+    );
+    expect(peerDirectedPrompt).not.toContain('contextually clear follow-ups');
     expect(
-      ambientPrompt.indexOf(
-        '## Multi-Human Conversation Directedness (Highest Priority)',
+      peerDirectedPrompt.indexOf('## Turn Startup (Highest Priority)'),
+    ).toBeLessThan(
+      peerDirectedPrompt.indexOf(
+        'The communication surface classified this turn',
       ),
-    ).toBeLessThan(ambientPrompt.indexOf('## Turn Startup (Highest Priority)'));
+    );
+    expect(
+      peerDirectedPrompt.indexOf(
+        'The communication surface classified this turn',
+      ),
+    ).toBeLessThan(peerDirectedPrompt.indexOf('## All Environments'));
     expect(directedPrompt).not.toContain(
-      '## Multi-Human Conversation Directedness (Highest Priority)',
+      'classified this turn as a colleague-to-colleague conversation',
     );
     expect(directedPrompt).toContain(
       '`ignore_event` and `retry_task_start` are invalid for this human-authored turn',

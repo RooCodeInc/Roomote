@@ -1189,6 +1189,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         suppliedThreadMessageCount: 0,
         threadContextAttached: false,
         senderContextPresent: true,
+        directedAtRoomote: true,
+        allowSilentAmbientReply: false,
+        peerDirectedTurn: false,
         agentContextPresent: false,
         inputImageCount: 0,
         attachedImageCount: 0,
@@ -1290,6 +1293,29 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       sessionId: 'conversation-1',
       openCodeSessionId: 'opencode-session-1',
     });
+  });
+
+  it('records peer-directed human turn classifications with inference context', async () => {
+    await answerFastAgentQuestion({
+      ...baseParams,
+      currentMessageAgentContext: 'Peer conversation reminder',
+      directedAtRoomote: false,
+      allowSilentAmbientReply: true,
+      peerDirectedTurn: true,
+      adapter: callbacks(),
+    });
+
+    expect(mocks.captureInferenceContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        directedAtRoomote: false,
+        allowSilentAmbientReply: true,
+        peerDirectedTurn: true,
+        agentContextPresent: true,
+      }),
+    );
+    expect(mocks.generateText.mock.calls[0]?.[0].system).toContain(
+      'classified this turn as a colleague-to-colleague conversation',
+    );
   });
 
   it('uses provider behavior with canonical web Session persistence', async () => {
@@ -2569,6 +2595,14 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         expect(mocks.updateParentEventWhere).toHaveBeenCalledOnce();
       });
       expect(mocks.nativeSteer).toHaveBeenCalledOnce();
+      await expect(
+        invokeTool(nativeToolNames.ignoreEvent, {
+          reason: 'The original turn was ambient.',
+        }),
+      ).resolves.toEqual({
+        success: false,
+        error: 'A directed human follow-up requires a user-visible reply.',
+      });
 
       finishGeneration?.('Steered answer');
       await expect(resultPromise).resolves.toBe('Steered answer');
@@ -2973,6 +3007,73 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
       finishGeneration?.('Steered answer');
       await expect(resultPromise).resolves.toBe('Steered answer');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('leaves a peer-directed follow-up for a separate system-prompted turn', async () => {
+    vi.useFakeTimers();
+    try {
+      const peerDirected = {
+        id: '99999999-9999-4999-8999-999999999999',
+        createdAt: new Date('2026-08-31T12:00:00.000Z'),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: '100.10',
+          currentMessageId: '100.10',
+          userId: 'user-1',
+          question: 'Sorry for the ping',
+          directedAtRoomote: false,
+          allowSilentAmbientReply: true,
+          peerDirectedTurn: true,
+          agentContext:
+            'This turn continues a conversation between colleagues.',
+        },
+      };
+      const later = {
+        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        createdAt: new Date('2026-08-31T12:00:01.000Z'),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: '100.11',
+          currentMessageId: '100.11',
+          userId: 'user-1',
+          question: 'Do not jump ahead.',
+        },
+      };
+      mocks.getPendingHumanFollowUp.mockResolvedValue([peerDirected, later]);
+
+      let finishGeneration: ((value: string) => void) | undefined;
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          return await new Promise<string>((resolve) => {
+            finishGeneration = resolve;
+          });
+        },
+      );
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+      });
+      await vi.advanceTimersByTimeAsync(250);
+
+      expect(mocks.nativeSteer).not.toHaveBeenCalled();
+      expect(mocks.updateParentEventWhere).not.toHaveBeenCalled();
+      expect(mocks.upsertMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.objectContaining({ eventId: '100.10:user' }),
+        }),
+      );
+
+      finishGeneration?.('Original answer');
+      await expect(resultPromise).resolves.toBe('Original answer');
     } finally {
       vi.useRealTimers();
     }
