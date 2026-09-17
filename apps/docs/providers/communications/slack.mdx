@@ -272,6 +272,12 @@ chart keeps a Markdown fallback for notifications and accessibility, and the
 same structured data renders as a chart with an accessible table in the Roomote
 web transcript. No additional Slack scope is required.
 
+Roomote tasks can also send a new direct message to a linked Slack user when
+you explicitly ask them to. The target can be a Slack user ID, an `@` mention,
+or an existing Slack DM ID. For safety, the recipient must belong to the Slack
+workspace connected to the task and must have linked that Slack identity to a
+Roomote account. Channel names and channel IDs continue to post to channels.
+
 ## Local URL changes
 
 Keep the public URL stable. When it changes, update the Slack app's redirect

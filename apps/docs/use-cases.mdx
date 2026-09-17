@@ -22,6 +22,10 @@ Start with work that is scoped, visible, and easy to verify:
 - draft a plan for a larger feature
 - review a pull request for regressions
 - apply feedback from a source-control or Linear thread
+- investigate evidence in connected services such as monitoring, support, or
+  project-management tools
+- perform an exact action in a connected service when you name both the action
+  and its target
 - clean up a small maintenance item that keeps falling off the backlog
 
 A good Roomote prompt includes the desired outcome, links to the relevant
@@ -45,6 +49,13 @@ The strongest prompts usually include:
 | Investigate          | "Figure out why this test or preview is failing and show what you found."       |
 | Implement            | "Make this small change, run the relevant checks, and open a PR."               |
 | Review               | "Review this PR for regressions and call out anything risky."                   |
+| Act in a service     | "Post this update to the linked support ticket, then confirm where it was sent." |
+
+For connected-system work, Roomote uses the available integration as the source
+of truth rather than guessing from repository code. It can answer questions and
+investigate without changing the external system. Side effects such as posting
+a message, updating a ticket, or starting another task require an explicit
+action and target in your prompt.
 
 ## Who uses it
 
