@@ -202,10 +202,21 @@ describe('Fast conversation repository', () => {
     });
     await expect(
       getOrCreateFastAgentSession({
-        owner: { kind: 'user', userId: owner.id },
+        userId: owner.id,
         conversation,
       }),
-    ).rejects.toThrow('privacy does not match');
+    ).resolves.toMatchObject({
+      id: created.id,
+      privacy: 'private',
+      created: false,
+    });
+    const otherUser = await createUser();
+    await expect(
+      getOrCreateFastAgentSession({
+        userId: otherUser.id,
+        conversation,
+      }),
+    ).rejects.toThrow('private owner does not match');
     await expect(
       getOrCreateFastAgentSession({
         owner: { kind: 'user', userId: owner.id },
@@ -532,6 +543,44 @@ describe('Fast conversation repository', () => {
     await db
       .delete(sessions)
       .where(inArray(sessions.id, [origin!.id, other!.id]));
+  });
+
+  it('rejects a non-owner reusing an already bound private Session', async () => {
+    const owner = await createUser();
+    const otherUser = await createUser();
+    const created = await getOrCreateFastAgentSession({
+      userId: owner.id,
+      conversation: {
+        surface: 'web',
+        workspaceId: owner.id,
+        conversationId: crypto.randomUUID(),
+      },
+      privacy: 'private',
+    });
+    const bound = await getSessionForFastConversation(db, created.id);
+
+    await expect(
+      getOrCreateFastAgentSession({
+        userId: owner.id,
+        conversation: {
+          surface: 'web',
+          workspaceId: owner.id,
+          conversationId: crypto.randomUUID(),
+        },
+        sessionId: bound!.id,
+      }),
+    ).resolves.toMatchObject({ id: created.id, privacy: 'private' });
+    await expect(
+      getOrCreateFastAgentSession({
+        userId: otherUser.id,
+        conversation: {
+          surface: 'web',
+          workspaceId: otherUser.id,
+          conversationId: crypto.randomUUID(),
+        },
+        sessionId: bound!.id,
+      }),
+    ).rejects.toThrow('private owner does not match');
   });
 
   it('converges concurrent launches into one Session on the conversation that bound first', async () => {
