@@ -5,6 +5,8 @@ import { Queue } from 'bullmq';
 import {
   acquireFastAgentTurnLock,
   findFastAgentDurableRetryScheduledError,
+  publishFastAgentSessionRefresh,
+  type FastAgentTurnLockHandle,
 } from '@roomote/cloud-agents/server';
 import {
   and,
@@ -12,6 +14,7 @@ import {
   count,
   db,
   eq,
+  fastAgentMessages,
   fastAgentParentEvents,
   gt,
   isNull,
@@ -25,8 +28,10 @@ import {
 } from '@roomote/db/server';
 import { getRedis } from '@roomote/redis';
 import {
+  ACP_ENVELOPE_EVENT_TYPES,
   RunStatus,
   exitedRunStatuses,
+  formatSingleLineLog,
   type FastAgentParent,
   type FastAgentHumanFollowUpEvent,
 } from '@roomote/types';
@@ -40,6 +45,14 @@ import {
 import { retryFastAgentStartup } from './task-runs/fast-agent-startup-retry';
 
 export const FAST_AGENT_PARENT_EVENT_QUEUE_NAME = 'fast-agent-parent-events';
+const MAX_DIAGNOSTIC_DURATION_MS = 24 * 60 * 60 * 1_000;
+
+function boundedDurationMs(startedAtMs: number): number {
+  return Math.min(
+    MAX_DIAGNOSTIC_DURATION_MS,
+    Math.max(0, Date.now() - startedAtMs),
+  );
+}
 
 export type FastAgentParentEventQueueRequest = {
   conversationId: string;
@@ -153,6 +166,17 @@ export async function wakeFastAgentParentEventNow(
   await addWakeupJob(request);
 }
 
+async function wakeFastAgentParentEventAfterRelease(
+  request: FastAgentParentEventQueueRequest,
+): Promise<void> {
+  await getFastAgentParentEventQueue().add('deliver', request, {
+    // The ordinary wakeup may still be delayed because the parent was busy.
+    // A release-specific id creates an immediately runnable nudge without
+    // disturbing that durable fallback.
+    jobId: `${request.eventKey}-release-${Date.now()}`,
+  });
+}
+
 /**
  * Wake the queue for a durably scheduled retry once its time arrives. The
  * job id carries the scheduled time so a repeated schedule (the owner's own
@@ -186,6 +210,7 @@ export async function enqueueFastAgentParentEvent(params: {
   event: FastAgentParentEvent;
   retryTaskStartRunId?: number;
 }): Promise<{ eventKey: string; queued: true }> {
+  const admissionStartedAt = Date.now();
   const eventKey = buildFastAgentParentEventKey(params);
   await db
     .insert(fastAgentParentEvents)
@@ -198,12 +223,85 @@ export async function enqueueFastAgentParentEvent(params: {
     })
     .onConflictDoNothing({ target: fastAgentParentEvents.eventKey });
 
+  if (params.event.type === 'child_message') {
+    const admittedAtMs = params.event.admittedAtMs ?? Date.now();
+    const turnId = buildEventClientMessageSeed(params.event);
+    const eventId = `${turnId}:user`;
+    await db
+      .insert(fastAgentMessages)
+      .values({
+        conversationId: params.parent.sessionId,
+        eventId,
+        turnId,
+        turnSeq: 0,
+        ts: admittedAtMs,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+        role: 'tool',
+        contentBlocks: [{ type: 'text', text: params.event.message }],
+        metadata: {
+          visibleInTranscript: true,
+          taskReportAdmittedAtMs: admittedAtMs,
+        },
+        payload: {
+          toolName: 'receive_task_report',
+          toolCallId: eventId,
+          status: 'completed',
+          rawInput: {
+            taskId: params.event.taskId,
+            runId: params.event.runId,
+            messageId: params.event.messageId,
+            purpose: params.event.purpose,
+          },
+          output: params.event.message,
+        },
+        source: params.parent.conversation.surface,
+      })
+      .onConflictDoNothing({
+        target: [fastAgentMessages.conversationId, fastAgentMessages.eventId],
+      });
+    void publishFastAgentSessionRefresh(params.parent.sessionId, {
+      type: 'task_report_admitted',
+      eventId,
+      taskId: params.event.taskId,
+      admittedAtMs,
+    });
+  }
+
   wakeFastAgentParentEvent({
     conversationId: params.parent.sessionId,
     eventKey,
   });
 
+  console.info(
+    formatSingleLineLog('[FastAgentParentEventQueue] Event admitted.', {
+      eventKey,
+      eventType: params.event.type,
+      purpose:
+        params.event.type === 'child_message'
+          ? params.event.purpose
+          : undefined,
+      admissionDurationMs: boundedDurationMs(admissionStartedAt),
+    }),
+  );
+
   return { eventKey, queued: true };
+}
+
+/** Nudge one pending row as soon as another owner releases this parent. */
+export function wakeFastAgentParentEventsOnTurnRelease(
+  turnLock: FastAgentTurnLockHandle,
+  conversationId: string,
+): void {
+  const previous = turnLock.afterRelease;
+  turnLock.afterRelease = async () => {
+    await previous?.();
+    const row = await getNextPendingEvent(conversationId);
+    if (!row) return;
+    await wakeFastAgentParentEventAfterRelease({
+      conversationId,
+      eventKey: row.eventKey,
+    });
+  };
 }
 
 /** Serialize PR-open admission with terminal run updates on the same row. */
@@ -402,6 +500,21 @@ export async function drainFastAgentParentEvents(
   if (!turnLock) {
     throw new FastAgentParentBusyError();
   }
+
+  const queueWaitMs =
+    first.createdAt instanceof Date
+      ? boundedDurationMs(first.createdAt.getTime())
+      : undefined;
+  console.info(
+    formatSingleLineLog('[FastAgentParentEventQueue] Drain acquired.', {
+      eventKey: first.eventKey,
+      eventType: isFastAgentParentEvent(first.event)
+        ? first.event.type
+        : 'invalid',
+      queueWaitMs,
+      attempts: first.attempts,
+    }),
+  );
 
   try {
     for (;;) {

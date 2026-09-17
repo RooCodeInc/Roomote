@@ -216,6 +216,7 @@ export type FastAgentParentEvent =
       taskId: string;
       runId: number;
       messageId: string;
+      admittedAtMs?: number;
       purpose: 'ack' | 'progress' | 'closeout' | 'clarification';
       message: string;
       imageArtifactIds?: string[];
@@ -2603,7 +2604,6 @@ export async function deliverFastAgentParentEvent(
       { replyPosted: false },
     );
   }
-
   try {
     return await deliverFastAgentParentEventWithLock(params, releaseTurnLock);
   } finally {
@@ -2912,6 +2912,9 @@ export async function deliverFastAgentParentEventWithLock(
           : params.event.type === 'scheduled_wakeup'
             ? 'scheduled_wakeup'
             : 'delegated_task'),
+      ...(params.event.type === 'child_message' && params.event.admittedAtMs
+        ? { platformEventTimestampMs: params.event.admittedAtMs }
+        : {}),
       automationReport:
         params.event.type === 'task_settled' &&
         Boolean(params.event.customAutomationId),

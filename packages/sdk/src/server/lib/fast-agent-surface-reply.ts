@@ -73,6 +73,7 @@ import {
 import {
   wakeFastAgentParentEventAt,
   wakeFastAgentParentEventNow,
+  wakeFastAgentParentEventsOnTurnRelease,
 } from './fast-agent-parent-event-queue';
 import { resolveUserMcpServerConfigs } from '../routers/mcp-connections';
 import {
@@ -812,6 +813,7 @@ async function runFastAgentSurfaceReply(
     params.onRejected?.();
     return false;
   }
+  wakeFastAgentParentEventsOnTurnRelease(release, params.sessionId);
   params.onAccepted?.(() => release.abort());
 
   try {

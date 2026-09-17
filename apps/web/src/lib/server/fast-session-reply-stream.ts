@@ -6,6 +6,7 @@ import {
   type AcpMessage,
 } from '@roomote/types';
 import { getFastAgentReplyStreamChannel } from '@roomote/cloud-agents/server';
+import type { FastAgentSessionRefresh } from '@roomote/cloud-agents/server';
 import { getRedis, type Redis } from '@roomote/redis';
 
 const replyChunkEventSchema = z.object({
@@ -22,7 +23,18 @@ const replyChunkEventSchema = z.object({
   text: z.string().optional(),
 });
 
-type ChunkListener = (event: AcpMessage) => void;
+const sessionRefreshEventSchema = z
+  .object({
+    type: z.literal('task_report_admitted'),
+    eventId: z.string().min(1),
+    taskId: z.string().min(1),
+    admittedAtMs: z.number().int().nonnegative(),
+    publishedAtMs: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export type FastSessionLiveEvent = AcpMessage | FastAgentSessionRefresh;
+type ChunkListener = (event: FastSessionLiveEvent) => void;
 
 /**
  * One subscriber connection per process, shared by every open session
@@ -38,7 +50,7 @@ function getSubscriber(): Redis {
   connection.on('message', (channel: string, raw: string) => {
     const listeners = listenersByChannel.get(channel);
     if (!listeners?.size) return;
-    const event = parseFastSessionReplyChunkEvent(raw);
+    const event = parseFastSessionLiveEvent(raw);
     if (!event) return;
     for (const listener of listeners) listener(event);
   });
@@ -94,12 +106,21 @@ export async function subscribeFastSessionReplyStream(
 export function parseFastSessionReplyChunkEvent(
   raw: string,
 ): AcpMessage | undefined {
+  const event = parseFastSessionLiveEvent(raw);
+  return event && !('type' in event) ? event : undefined;
+}
+
+export function parseFastSessionLiveEvent(
+  raw: string,
+): FastSessionLiveEvent | undefined {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
     return undefined;
   }
+  const refresh = sessionRefreshEventSchema.safeParse(parsed);
+  if (refresh.success) return refresh.data;
   const event = replyChunkEventSchema.safeParse(parsed);
   if (!event.success) return undefined;
   return {

@@ -262,6 +262,7 @@ export {
   recoverPendingFastAgentParentEvents,
   wakeFastAgentParentEventAt,
   wakeFastAgentParentEventNow,
+  wakeFastAgentParentEventsOnTurnRelease,
   type FastAgentParentEventQueueRequest,
 } from './lib/fast-agent-parent-event-queue';
 export {

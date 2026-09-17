@@ -1785,6 +1785,7 @@ export async function answerFastAgentQuestion({
   platformEventHandling = 'default',
   platformEventVisibility = 'optional',
   platformEventKind = 'delegated_task',
+  platformEventTimestampMs,
   automationReport = false,
   serviceCredentialPlatformActorUserId,
   serviceCredentialPlatformDenialReason,
@@ -1828,6 +1829,8 @@ export async function answerFastAgentQuestion({
   platformEventHandling?: FastAgentPlatformEventHandling;
   platformEventVisibility?: FastAgentPlatformEventVisibility;
   platformEventKind?: FastAgentPlatformEventKind;
+  /** Original durable admission time for a projected platform receipt. */
+  platformEventTimestampMs?: number;
   /** The settling delegated task ran for a custom automation; its closeout is
    * the run's report and may carry launchable suggestions. */
   automationReport?: boolean;
@@ -3501,7 +3504,8 @@ export async function answerFastAgentQuestion({
       {
         ...userEvent,
         turnId,
-        ts: previousAttempt?.prompt?.ts ?? Date.now(),
+        ts:
+          previousAttempt?.prompt?.ts ?? platformEventTimestampMs ?? Date.now(),
         eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
         role: 'user',
         contentBlocks: buildFastAgentUserContentBlocks(
