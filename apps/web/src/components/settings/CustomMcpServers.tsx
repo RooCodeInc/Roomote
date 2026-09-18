@@ -38,8 +38,6 @@ import type { CustomMcpServerListEntry } from '@/trpc/commands/custom-mcp-server
 import { useAuthorizedUser } from '@/hooks/useUser';
 
 import type { IntegrationItem } from './integration-card';
-import { IntegrationListRow } from './integration-card';
-import { Section } from './Section';
 import { useTRPC } from '@/trpc/client';
 
 type Transport = 'remote' | 'stdio';
@@ -1158,48 +1156,4 @@ export function useCustomMcpServers(
     },
     dialogs,
   };
-}
-
-/**
- * The viewer's private MCP servers, for Personal settings. Same rows, dialogs,
- * and actions as the shared list in Settings → Integrations.
- */
-export function PersonalMcpServers() {
-  const { isEnabled, isLoading, error, items, openAddDialog, dialogs } =
-    useCustomMcpServers('owner');
-
-  if (!isEnabled) return null;
-
-  return (
-    <Section
-      icon={Plug}
-      title="Personal MCP servers"
-      action={
-        <Button variant="outline" size="sm" onClick={openAddDialog}>
-          <Plus />
-          Add personal MCP server
-        </Button>
-      }
-    >
-      {error ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
-      <div role="table" aria-label="Personal MCP servers">
-        <div role="rowgroup" className="divide-y divide-background">
-          {isLoading ? <Skeleton className="h-16 w-full" /> : null}
-          {items.map((item) => (
-            <IntegrationListRow key={item.id} item={item} stackDescription />
-          ))}
-          {!isLoading && items.length === 0 && !error ? (
-            <p className="px-4 py-3 text-sm text-muted-foreground">
-              No personal MCP servers yet.
-            </p>
-          ) : null}
-        </div>
-      </div>
-      {dialogs}
-    </Section>
-  );
 }

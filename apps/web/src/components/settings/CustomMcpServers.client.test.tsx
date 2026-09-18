@@ -29,6 +29,7 @@ type ListedServer = {
 const {
   state,
   createMock,
+  openKeyDialogMock,
   deleteMock,
   setEnabledMock,
   setVisibilityMock,
@@ -47,6 +48,7 @@ const {
       enabled: boolean;
     }[],
   },
+  openKeyDialogMock: vi.fn(),
   createMock: vi.fn(async (_input: Record<string, unknown>) => ({
     id: 'new-server',
   })),
@@ -153,7 +155,8 @@ vi.mock('@/trpc/client', () => ({
 }));
 
 import { IntegrationListRow, type IntegrationItem } from './integration-card';
-import { PersonalMcpServers, useCustomMcpServers } from './CustomMcpServers';
+import { useCustomMcpServers } from './CustomMcpServers';
+import { PersonalIntegrations } from './PersonalIntegrations';
 
 function buildServer(overrides: Partial<ListedServer> = {}): ListedServer {
   return {
@@ -592,7 +595,17 @@ describe('useCustomMcpServers', () => {
   });
 });
 
-describe('PersonalMcpServers', () => {
+vi.mock('./YourIntegrations', () => ({
+  useYourIntegrations: () => ({
+    items: [],
+    isLoading: false,
+    error: null,
+    openAddDialog: openKeyDialogMock,
+    dialogs: null,
+  }),
+}));
+
+describe('personal MCP servers in Personal settings', () => {
   afterEach(async () => {
     cleanup();
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -604,7 +617,7 @@ describe('PersonalMcpServers', () => {
     });
     return render(
       <QueryClientProvider client={queryClient}>
-        <PersonalMcpServers />
+        <PersonalIntegrations />
       </QueryClientProvider>,
     );
   }
@@ -616,13 +629,23 @@ describe('PersonalMcpServers', () => {
     state.listFails = false;
     listInputs.length = 0;
     createMock.mockClear();
+    openKeyDialogMock.mockClear();
   });
+
+  /** Opens one of the two choices behind "Add personal integration". */
+  async function chooseAddOption(name: 'Custom MCP' | 'API-key based') {
+    fireEvent.keyDown(
+      await screen.findByRole('button', { name: 'Add personal integration' }),
+      { key: 'Enter' },
+    );
+    fireEvent.click(await screen.findByRole('menuitem', { name }));
+  }
 
   it("asks only for the viewer's private servers and shows an empty state", async () => {
     renderSection();
 
     expect(
-      await screen.findByText('No personal MCP servers yet.'),
+      await screen.findByText('No personal integrations yet.'),
     ).toBeInTheDocument();
     expect(listInputs).toContainEqual({ scope: 'owner' });
     expect(listInputs).not.toContainEqual(undefined);
@@ -631,9 +654,7 @@ describe('PersonalMcpServers', () => {
   it('adds a private remote server without offering a transport or visibility choice', async () => {
     renderSection();
 
-    fireEvent.click(
-      await screen.findByRole('button', { name: 'Add personal MCP server' }),
-    );
+    await chooseAddOption('Custom MCP');
     expect(screen.queryByLabelText('Local (stdio)')).toBeNull();
     expect(screen.queryByLabelText('Everyone in this deployment')).toBeNull();
     expect(
@@ -659,9 +680,7 @@ describe('PersonalMcpServers', () => {
   it('keeps a JSON-imported server private instead of sharing it', async () => {
     renderSection();
 
-    fireEvent.click(
-      await screen.findByRole('button', { name: 'Add personal MCP server' }),
-    );
+    await chooseAddOption('Custom MCP');
     fireEvent.click(screen.getByRole('button', { name: 'Import from JSON' }));
     fireEvent.change(screen.getByLabelText('Paste a JSON config'), {
       target: {
@@ -691,14 +710,36 @@ describe('PersonalMcpServers', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'MCP servers are unavailable.',
     );
-    expect(screen.queryByText('No personal MCP servers yet.')).toBeNull();
+    expect(screen.queryByText('No personal integrations yet.')).toBeNull();
   });
 
-  it('renders nothing when the operator disabled custom MCP servers', async () => {
+  it('offers only the API-key route when the operator disabled custom MCP servers', async () => {
     state.availability = { enabled: false };
-    const { container } = renderSection();
+    state.servers = [buildServer({ visibility: 'owner' })];
+    renderSection();
 
-    await waitFor(() => expect(container).toBeEmptyDOMElement());
+    // The picker collapses to a plain button once availability resolves.
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Add personal integration' }),
+      ).not.toHaveAttribute('aria-haspopup'),
+    );
+    expect(screen.queryByText('internal-tools')).toBeNull();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Add personal integration' }),
+    );
+    expect(openKeyDialogMock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('menuitem')).toBeNull();
+  });
+
+  it('routes the API-key choice to the integration-key dialog', async () => {
+    renderSection();
+
+    await chooseAddOption('API-key based');
+
+    expect(openKeyDialogMock).toHaveBeenCalledTimes(1);
+    expect(createMock).not.toHaveBeenCalled();
   });
 
   it('lists a private server with its manage actions', async () => {

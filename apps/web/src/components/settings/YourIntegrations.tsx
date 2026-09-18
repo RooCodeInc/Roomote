@@ -23,15 +23,12 @@ import {
   KeyRound,
   Label,
   Pencil,
-  Plus,
-  Plug,
   Skeleton,
   Trash2,
 } from '@/components/system';
 
 import type { IntegrationItem } from './integration-card';
 import { IntegrationListRow } from './integration-card';
-import { Section } from './Section';
 
 const endpoint = '/api/account/integrations';
 const readOnly: CredentialEgressMethod[] = ['GET', 'HEAD'];
@@ -295,44 +292,6 @@ export function YourIntegrations() {
       ))}
       {dialogs}
     </div>
-  );
-}
-
-export function PersonalIntegrations() {
-  const { items, isLoading, error, openAddDialog, dialogs } =
-    useYourIntegrations('personal');
-
-  return (
-    <Section
-      icon={Plug}
-      title="Personal integrations"
-      action={
-        <Button variant="outline" size="sm" onClick={openAddDialog}>
-          <Plus />
-          Add personal integration
-        </Button>
-      }
-    >
-      {error ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
-      <div role="table" aria-label="Personal integrations">
-        <div role="rowgroup" className="divide-y divide-background">
-          {isLoading ? <Skeleton className="h-16 w-full" /> : null}
-          {items.map((item) => (
-            <IntegrationListRow key={item.id} item={item} stackDescription />
-          ))}
-          {!isLoading && items.length === 0 && !error ? (
-            <p className="px-4 py-3 text-sm text-muted-foreground">
-              No personal integrations yet.
-            </p>
-          ) : null}
-        </div>
-      </div>
-      {dialogs}
-    </Section>
   );
 }
 

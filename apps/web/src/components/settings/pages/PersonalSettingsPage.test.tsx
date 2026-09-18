@@ -26,11 +26,8 @@ vi.mock('@/components/settings/LinkedAccounts', () => ({
   LinkedAccounts: () => <section>Linked accounts</section>,
 }));
 
-vi.mock('@/components/settings/YourIntegrations', () => ({
+vi.mock('@/components/settings/PersonalIntegrations', () => ({
   PersonalIntegrations: () => <section>Personal integrations</section>,
-}));
-vi.mock('@/components/settings/CustomMcpServers', () => ({
-  PersonalMcpServers: () => <section>Personal MCP servers</section>,
 }));
 vi.mock('@/components/settings/BrowserNotificationsSection', () => ({
   BrowserNotificationsSection: () => <section>Browser notifications</section>,
@@ -80,12 +77,6 @@ describe('PersonalSettingsPage', () => {
     expect(
       linkedAccounts.compareDocumentPosition(personalIntegrations) &
         Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    // Private MCP servers sit with the member's other private connections.
-    expect(
-      personalIntegrations.compareDocumentPosition(
-        screen.getByText('Personal MCP servers'),
-      ) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
   });
 
