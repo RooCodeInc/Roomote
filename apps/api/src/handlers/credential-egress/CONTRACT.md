@@ -151,9 +151,9 @@ token except request-shaping ones (see `isCredentialEgressCredentialHeaderName`)
 Per request the API performs one live decision, re-joined from the database
 with nothing cached: token lookup by hash → workload active and lease
 unexpired → generation match → grant not revoked → grant not expired → owner
-not deleted and still has integration keys enabled, Session unarchived and
-still owned by the same user, grant belongs to that Session/owner, run still
-active with `actingUserId = owner`, run still attached to the Session →
+not deleted, Session unarchived and still owned by the same user, grant belongs
+to that Session/owner, run still active with `actingUserId = owner`, run still
+attached to the Session →
 approved origin still passes the deployment public-egress policy
 (`assertEgressUrlAllowed`, HTTPS) → method in the grant's `allowedMethods`.
 Method policy is literal: `HEAD` is not implied by `GET`; the default policy

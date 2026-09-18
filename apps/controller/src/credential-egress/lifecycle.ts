@@ -28,8 +28,8 @@ import { admitCredentialEgressApiProxy } from './api-proxy';
  *
  * Fail-closed rules:
  * - a provider whose capability is `unsupported` is never registered;
- * - a run whose Session owner has not enabled integration keys never
- *   registers, matching the gate on the Fast and coding-run tools;
+ * - a run without an active owner, eligible Session binding, or live grant is
+ *   never registered;
  * - a control-plane error leaves the run without substitutes, never with
  *   partially provisioned ones.
  * In every one of those cases the run gets a nonsecret lifecycle event so the
