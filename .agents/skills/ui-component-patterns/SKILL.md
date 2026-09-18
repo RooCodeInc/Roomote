@@ -233,6 +233,17 @@ above.
 </Section>
 ```
 
+### Model routing controls
+
+For Settings routing editors, keep labels concise and avoid redundant headings.
+Use direct sibling rows for consistent first/last padding rather than adding
+per-entry wrappers that interfere with list spacing. Put custom routing controls
+inside a borderless collapsible with a `text-sm` label, a leading chevron that
+rotates with `transition-transform`, and existing persisted rules collapsed by
+default. Keep the add control inside the collapsible, preserve keyboard and
+screen-reader semantics, and use responsive rows that read condition -> target
+model -> reasoning effort -> remove action from left to right.
+
 ### Settings page form architecture
 
 Settings pages use a shared form with child sections accessing via `useFormContext`:
