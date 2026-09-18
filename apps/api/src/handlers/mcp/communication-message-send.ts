@@ -73,8 +73,12 @@ export async function sendCommunicationMessage(params: {
   taskRun?: MessageTaskRun;
   destination: string;
   message: string;
+  imageArtifactIds?: string[];
 }): Promise<Response> {
   const destination = parseDestination(params.destination);
+  const images = (params.imageArtifactIds ?? []).map((artifactId) => ({
+    artifactId,
+  }));
   if (!destination) {
     return jsonResponse(
       {
@@ -87,6 +91,15 @@ export async function sendCommunicationMessage(params: {
   }
 
   if (destination.kind === 'self') {
+    if (images.length > 0) {
+      return jsonResponse(
+        {
+          code: 'attachments_not_supported',
+          error: `${destination.provider}:me currently supports text messages only.`,
+        },
+        400,
+      );
+    }
     if (
       !(await hasUserDirectMessageIdentity(
         destination.provider,
@@ -155,7 +168,7 @@ export async function sendCommunicationMessage(params: {
       parsedBody: {
         channel: currentChannel,
         text: params.message,
-        images: [],
+        images,
       },
     });
   }
@@ -181,7 +194,7 @@ export async function sendCommunicationMessage(params: {
       channel: destination.target,
       ...(destination.threadTs ? { threadTs: destination.threadTs } : {}),
       text: params.message,
-      images: [],
+      images,
     },
   });
 }

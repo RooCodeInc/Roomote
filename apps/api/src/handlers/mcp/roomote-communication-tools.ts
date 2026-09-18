@@ -66,6 +66,10 @@ export function registerRoomoteCommunicationTools(
           .string()
           .min(1)
           .describe(CHAT_MESSAGE_SEND_TOOL.inputDescriptions.message),
+        imageArtifactIds: z
+          .array(z.string().min(1))
+          .optional()
+          .describe(CHAT_MESSAGE_SEND_TOOL.inputDescriptions.imageArtifactIds),
       },
       annotations: {
         readOnlyHint: false,
@@ -74,12 +78,13 @@ export function registerRoomoteCommunicationTools(
         openWorldHint: false,
       },
     },
-    async ({ destination, message }) =>
+    async ({ destination, message, imageArtifactIds }) =>
       responseToToolResult(
         await sendCommunicationMessage({
           actingUserId,
           destination,
           message,
+          ...(imageArtifactIds ? { imageArtifactIds } : {}),
         }),
       ),
   );

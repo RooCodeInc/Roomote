@@ -148,6 +148,12 @@ communicationMcp.post('/send', async (c) => {
   const destination =
     typeof body?.destination === 'string' ? body.destination.trim() : '';
   const message = typeof body?.message === 'string' ? body.message : '';
+  const imageArtifactIds = Array.isArray(body?.imageArtifactIds)
+    ? body.imageArtifactIds.filter(
+        (artifactId): artifactId is string =>
+          typeof artifactId === 'string' && artifactId.trim().length > 0,
+      )
+    : [];
   if (!destination || !message.trim()) {
     return c.json({ error: 'destination and message are required' }, 400);
   }
@@ -157,6 +163,7 @@ communicationMcp.post('/send', async (c) => {
     taskRun,
     destination,
     message,
+    ...(imageArtifactIds.length > 0 ? { imageArtifactIds } : {}),
   });
 });
 

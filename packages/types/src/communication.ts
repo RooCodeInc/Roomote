@@ -23,11 +23,13 @@ export const CHAT_MESSAGE_SEND_TOOL = {
   name: 'send_chat_message',
   title: 'Send Chat Message',
   description:
-    'Send a new standalone Markdown message to an authorized destination. First use list_chat_destinations and pass its exact destination reference unchanged. Self destinations resolve only from the authenticated member; Slack people and channels retain workspace linkage and access checks. A trusted Slack channel reference may append :thread:<message timestamp>. Use send_chat_reply for the current conversation. Never infer or alter a destination reference.',
+    'Send a new standalone Markdown message to an authorized destination. First use list_chat_destinations and pass its exact destination reference unchanged. Self destinations resolve only from the authenticated member; Slack people and channels retain workspace linkage and access checks. A trusted Slack channel reference may append :thread:<message timestamp>. Supported destinations may also receive image artifact attachments. Use send_chat_reply for the current conversation. Never infer or alter a destination reference.',
   inputDescriptions: {
     destination:
       'Exact destination reference from list_chat_destinations, or a trusted Slack channel reference with an optional :thread:<message timestamp> suffix.',
     message: 'Markdown message to send.',
+    imageArtifactIds:
+      'Optional already-uploaded artifact IDs to attach when the destination supports images.',
   },
 } as const;
 

@@ -111,6 +111,36 @@ describe('sendCommunicationMessage', () => {
     },
   );
 
+  it('forwards uploaded artifact IDs to Slack destinations', async () => {
+    await sendCommunicationMessage({
+      actingUserId: 'user-1',
+      destination: 'slack:T1:channel:C123456789',
+      message: 'Proof attached.',
+      imageArtifactIds: ['artifact-1'],
+    });
+
+    expect(sendCommunicationChannelPostMock).toHaveBeenCalledWith({
+      taskRun: expect.anything(),
+      parsedBody: {
+        channel: 'C123456789',
+        text: 'Proof attached.',
+        images: [{ artifactId: 'artifact-1' }],
+      },
+    });
+  });
+
+  it('rejects attachments for text-only self destinations', async () => {
+    const response = await sendCommunicationMessage({
+      actingUserId: 'user-1',
+      destination: 'telegram:me',
+      message: 'Proof attached.',
+      imageArtifactIds: ['artifact-1'],
+    });
+
+    expect(response.status).toBe(400);
+    expect(sendUserDirectMessageMock).not.toHaveBeenCalled();
+  });
+
   it('allows a non-Slack current destination only when it matches task context', async () => {
     const taskRun = {
       id: 1,

@@ -788,6 +788,11 @@ describe('AcpToolDetails', () => {
   it('shows the posted text and reaction name for channel tools', () => {
     for (const [toolName, args, expected] of [
       ['post_to_channel', { text: 'Deploy done.' }, 'text: Deploy done.'],
+      [
+        'send_chat_message',
+        { destination: 'slack:T1:channel:C1', message: 'Deploy done.' },
+        'message: Deploy done.',
+      ],
       ['send_chat_reaction_emoji', { name: 'eyes' }, 'name: eyes'],
     ] as const) {
       codeBlockSpy.mockClear();

@@ -1974,6 +1974,16 @@ if (shouldRegisterChatMessageTool()) {
           .string()
           .min(1)
           .describe(CHAT_MESSAGE_SEND_TOOL.inputDescriptions.message),
+        imagePaths: z
+          .array(z.string())
+          .optional()
+          .describe(
+            'Optional workspace-relative or /tmp image file paths to upload and attach',
+          ),
+        imageArtifactIds: z
+          .array(z.string())
+          .optional()
+          .describe(CHAT_MESSAGE_SEND_TOOL.inputDescriptions.imageArtifactIds),
       },
       annotations: {
         readOnlyHint: false,
@@ -1987,6 +1997,14 @@ if (shouldRegisterChatMessageTool()) {
       if (!roomoteConfig) {
         return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
       }
+      const artifactConfig = getArtifactConfig();
+      if (!artifactConfig) {
+        return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
+      }
+      const taskId = process.env.ROOMOTE_TASK_ID;
+      if (!taskId?.trim()) {
+        return errorResult('ROOMOTE_TASK_ID environment variable not set');
+      }
 
       if (
         getChatReplySurfaceLabel() === 'Slack' &&
@@ -1998,7 +2016,11 @@ if (shouldRegisterChatMessageTool()) {
         );
       }
 
-      return handleSendChatMessage(params, roomoteConfig);
+      return handleSendChatMessage(
+        { taskId, ...params },
+        artifactConfig,
+        roomoteConfig,
+      );
     },
   );
 

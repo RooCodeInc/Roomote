@@ -209,7 +209,11 @@ export async function listChatDestinations(
 
 export async function sendChatMessage(
   config: RoomoteConfig,
-  input: { destination: string; message: string },
+  input: {
+    destination: string;
+    message: string;
+    imageArtifactIds?: string[];
+  },
 ): Promise<CommunicationSendResponse> {
   return postToCommunicationLookupEndpoint<CommunicationSendResponse>(
     config,
