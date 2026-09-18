@@ -20,7 +20,10 @@ import {
 } from '@roomote/types';
 
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from './discord-communication';
-import { listConnectedCommunicationProviders } from '../automations/destination';
+import {
+  listConnectedCommunicationProviders,
+  sendAutomationEmailReport,
+} from '../automations/destination';
 import {
   hasUserDirectMessageIdentity,
   sendUserDirectMessage,
@@ -216,6 +219,41 @@ export async function notifyPlatformIssueReport(params: {
   if (!settings.platformIssueAlertsEnabled) return;
 
   const sourceDescription = describePlatformIssueSource(params.source);
+  if (
+    settings.platformIssueEmailUserId &&
+    settings.platformIssueEmailIdentityId
+  ) {
+    try {
+      await sendAutomationEmailReport(
+        {
+          provider: 'email',
+          channelId: settings.platformIssueEmailUserId,
+          userId: settings.platformIssueEmailUserId,
+          identityId: settings.platformIssueEmailIdentityId,
+          source: 'automation_target',
+        },
+        {
+          subject: `Roomote platform issue: ${params.report.title}`,
+          conversationKey: `builtin-automation:platform_issue_alerts:${params.reportRowId}`,
+          text: degradeSlackMrkdwnToMarkdown(
+            buildPlatformIssueAlertText({
+              reportId: params.reportRowId,
+              source: params.source,
+              report: params.report,
+              utmSource: 'agentmail',
+            }),
+          ),
+          idempotencyKey: `platform-issue:${params.reportRowId}`,
+        },
+      );
+      await markPlatformIssueReportPosted(params.reportRowId);
+    } catch (error) {
+      console.warn(
+        `[platformIssueReporting] Failed explicit Email destination for ${sourceDescription}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    return;
+  }
   const discordChannelId =
     settings.platformIssueDiscordChannelId ??
     (!settings.platformIssueSlackChannelId && !settings.managerSlackChannelId

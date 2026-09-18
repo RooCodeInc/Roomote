@@ -32,6 +32,7 @@ import {
   findTeamsConversationServiceUrl,
   listConnectedCommunicationProviders,
   resolveAutomationRuntimeDestination,
+  sendAutomationEmailReport,
 } from '../automations/destination';
 
 const DEPLOYMENT_ID = 'default';
@@ -200,6 +201,8 @@ export async function recordInstalledRelease(
         destinationKey: `${destination.provider}:${destination.channelId}`,
         channelId: destination.channelId,
         serviceUrl: destination.serviceUrl ?? null,
+        recipientUserId: destination.userId ?? null,
+        emailIdentityId: destination.identityId ?? null,
       })
       .onConflictDoNothing({
         target: [
@@ -287,45 +290,70 @@ export async function drainReleaseAnnouncementDeliveries(
         });
         continue;
       }
-      const slackInstallation =
-        claim.row.provider === 'slack'
-          ? await findActiveSlackInstallationForChannel(claim.row.channelId)
-          : null;
-      if (claim.row.provider === 'slack' && !slackInstallation) {
-        throw new Error('No unambiguous active Slack installation for channel');
+      let providerMessageId: string | null = null;
+      if (claim.row.provider === 'email') {
+        if (!claim.row.recipientUserId || !claim.row.emailIdentityId) {
+          throw new Error('Email release destination is incomplete');
+        }
+        await sendAutomationEmailReport(
+          {
+            provider: 'email',
+            channelId: claim.row.recipientUserId,
+            userId: claim.row.recipientUserId,
+            identityId: claim.row.emailIdentityId,
+            source: 'automation_target',
+          },
+          {
+            subject: `Roomote ${toReleaseTag(claim.row.installedVersion)} is installed`,
+            conversationKey: `builtin-automation:release_announcements:${claim.row.id}`,
+            text,
+            idempotencyKey: `release:${claim.row.installedVersion}:${claim.row.destinationKey}`,
+          },
+        );
+      } else {
+        const slackInstallation =
+          claim.row.provider === 'slack'
+            ? await findActiveSlackInstallationForChannel(claim.row.channelId)
+            : null;
+        if (claim.row.provider === 'slack' && !slackInstallation) {
+          throw new Error(
+            'No unambiguous active Slack installation for channel',
+          );
+        }
+        const adapter = await getCommunicationProviderAdapter(
+          claim.row.provider,
+          claim.row.provider === 'slack'
+            ? { slackTeamId: slackInstallation?.teamId }
+            : {},
+        );
+        if (!adapter) {
+          throw new Error(`No active ${claim.row.provider} connection`);
+        }
+        const serviceUrl =
+          claim.row.provider === 'teams'
+            ? (claim.row.serviceUrl ??
+              (await findTeamsConversationServiceUrl(claim.row.channelId)))
+            : null;
+        if (claim.row.provider === 'teams' && !serviceUrl) {
+          throw new Error('No Teams service URL for destination');
+        }
+        const result = await adapter.postMessage({
+          channelId: claim.row.channelId,
+          text,
+          textFormat: 'markdown',
+          idempotencyKey: `release:${claim.row.installedVersion}:${claim.row.destinationKey}`,
+          ...(serviceUrl ? { serviceUrl } : {}),
+          ...(claim.row.provider === 'slack'
+            ? { blocks: [{ type: 'markdown', text }] }
+            : {}),
+        });
+        providerMessageId = result.messageId;
       }
-      const adapter = await getCommunicationProviderAdapter(
-        claim.row.provider,
-        claim.row.provider === 'slack'
-          ? { slackTeamId: slackInstallation?.teamId }
-          : {},
-      );
-      if (!adapter) {
-        throw new Error(`No active ${claim.row.provider} connection`);
-      }
-      const serviceUrl =
-        claim.row.provider === 'teams'
-          ? (claim.row.serviceUrl ??
-            (await findTeamsConversationServiceUrl(claim.row.channelId)))
-          : null;
-      if (claim.row.provider === 'teams' && !serviceUrl) {
-        throw new Error('No Teams service URL for destination');
-      }
-      const result = await adapter.postMessage({
-        channelId: claim.row.channelId,
-        text,
-        textFormat: 'markdown',
-        idempotencyKey: `release:${claim.row.installedVersion}:${claim.row.destinationKey}`,
-        ...(serviceUrl ? { serviceUrl } : {}),
-        ...(claim.row.provider === 'slack'
-          ? { blocks: [{ type: 'markdown', text }] }
-          : {}),
-      });
       await db
         .update(releaseAnnouncementDeliveries)
         .set({
           status: 'delivered',
-          providerMessageId: result.messageId,
+          providerMessageId,
           deliveredAt: new Date(),
           leaseToken: null,
           leaseExpiresAt: null,

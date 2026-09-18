@@ -430,6 +430,7 @@ import {
   updateCustomAutomationCommand,
 } from '../commands/automations';
 import {
+  automationEmailDestinationInputShape,
   mergeAnnouncerDestinationInputShape,
   releaseAnnouncementsDestinationInputShape,
 } from '../commands/automations/settings-schema';
@@ -781,6 +782,7 @@ const automationsRouter = createRouter({
           .nullable()
           .optional(),
         ...SCHEDULE_ONLY_FREQUENCY_FIELD_SHAPE,
+        ...automationEmailDestinationInputShape,
         ...mergeAnnouncerDestinationInputShape,
         ...releaseAnnouncementsDestinationInputShape,
         issueFixerInstructions: z.string().max(8_000).nullable().optional(),
