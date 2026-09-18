@@ -30,7 +30,7 @@ Roomote does not convert an existing shared Session into a private one. Start pr
 
 ## Deleting private work
 
-The Session owner can delete a private Session and its Roomote-managed descendants. Deletion removes the Session, linked tasks and runs, transcript records, Session-owned and task-owned artifact objects, audits, and Roomote's native-session reference. If an artifact upload or object-write capability is still valid, Roomote keeps the records and asks the owner to retry after it expires; this prevents a delayed upload from recreating private content after deletion. Disconnecting an integration does not automatically delete existing private Sessions.
+The Session owner can delete a private Session and its Roomote-managed descendants. Roomote first stops active linked tasks; if a task cannot be stopped safely, the Session remains intact so deletion can be retried. Deletion then removes the Session, linked tasks and runs, transcript records, Session-owned and task-owned artifact objects, audits, and Roomote's native-session reference. Roomote also schedules exact direct-memory cleanup defensively, although private Sessions are excluded from shared Memory ingestion in the first place. If an artifact upload or object-write capability is still valid, Roomote keeps the records and asks the owner to retry after it expires; this prevents a delayed upload from recreating private content after deletion. Disconnecting an integration does not automatically delete existing private Sessions.
 
 Roomote does not add a separate private memory store. Private Session content is excluded from shared memory rather than saved elsewhere.
 

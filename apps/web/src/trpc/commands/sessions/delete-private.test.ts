@@ -1,8 +1,12 @@
 import {
+  brainMemoryEvents,
+  brainPageRetirements,
   db,
   eq,
   fastAgentConversations,
+  fastAgentMemoryEvents,
   runFactory,
+  saveBrainAgentSummary,
   sessionFactory,
   sessions,
   sessionTasks,
@@ -12,8 +16,13 @@ import {
   tasks,
   userFactory,
 } from '@roomote/db/server';
-import { RunStatus } from '@roomote/types';
+import {
+  fastConversationMemorySlug,
+  RunStatus,
+  taskMemorySlug,
+} from '@roomote/types';
 import * as cloudAgents from '@roomote/cloud-agents/server';
+import * as sdk from '@roomote/sdk/server';
 import type { UserAuthSuccess } from '@/types';
 
 const mockDeleteArtifactsBatch = vi.hoisted(() => vi.fn());
@@ -22,15 +31,18 @@ vi.mock('@/lib/server/s3-client', () => ({
   deleteArtifactsBatch: mockDeleteArtifactsBatch,
 }));
 
-import { deletePrivateSessionCommand } from './index';
+import { deleteSessionCommand } from './index';
 
-describe('deletePrivateSessionCommand', () => {
+describe('deleteSessionCommand', () => {
   beforeEach(() => {
     mockDeleteArtifactsBatch.mockReset();
     mockDeleteArtifactsBatch.mockResolvedValue({ deleted: 1, errors: 0 });
   });
 
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await db.delete(brainPageRetirements);
+  });
 
   it('deletes an owned private Session and descendants but denies other users', async () => {
     const owner = await userFactory.create();
@@ -89,13 +101,13 @@ describe('deletePrivateSessionCommand', () => {
       .returning();
 
     await expect(
-      deletePrivateSessionCommand(
+      deleteSessionCommand(
         { userId: other.id, isAdmin: true } as UserAuthSuccess,
         session.id,
       ),
     ).resolves.toEqual({ deleted: false });
     await expect(
-      deletePrivateSessionCommand(
+      deleteSessionCommand(
         { userId: owner.id, isAdmin: false } as UserAuthSuccess,
         session.id,
       ),
@@ -160,11 +172,11 @@ describe('deletePrivateSessionCommand', () => {
     mockDeleteArtifactsBatch.mockResolvedValue({ deleted: 0, errors: 1 });
 
     await expect(
-      deletePrivateSessionCommand(
+      deleteSessionCommand(
         { userId: owner.id, isAdmin: false } as UserAuthSuccess,
         session.id,
       ),
-    ).rejects.toThrow('Failed to delete 1 private Session artifact object');
+    ).rejects.toThrow('Failed to delete 1 session artifact object');
     await expect(
       db.query.sessions.findFirst({ where: eq(sessions.id, session.id) }),
     ).resolves.toBeDefined();
@@ -226,7 +238,7 @@ describe('deletePrivateSessionCommand', () => {
     });
 
     await expect(
-      deletePrivateSessionCommand(
+      deleteSessionCommand(
         { userId: owner.id, isAdmin: false } as UserAuthSuccess,
         session.id,
       ),
@@ -273,7 +285,7 @@ describe('deletePrivateSessionCommand', () => {
       .returning();
 
     await expect(
-      deletePrivateSessionCommand(
+      deleteSessionCommand(
         { userId: owner.id, isAdmin: false } as UserAuthSuccess,
         session.id,
       ),
@@ -292,7 +304,7 @@ describe('deletePrivateSessionCommand', () => {
       .set({ uploadUrlExpiresAt: new Date(0) })
       .where(eq(taskArtifacts.id, artifact!.id));
     await expect(
-      deletePrivateSessionCommand(
+      deleteSessionCommand(
         { userId: owner.id, isAdmin: false } as UserAuthSuccess,
         session.id,
       ),
@@ -322,21 +334,21 @@ describe('deletePrivateSessionCommand', () => {
       .returning();
 
     const auth = { userId: owner.id, isAdmin: false } as UserAuthSuccess;
-    await expect(
-      deletePrivateSessionCommand(auth, session.id),
-    ).resolves.toMatchObject({
-      deleted: false,
-      reason: 'artifact_uploads_pending',
-    });
+    await expect(deleteSessionCommand(auth, session.id)).resolves.toMatchObject(
+      {
+        deleted: false,
+        reason: 'artifact_uploads_pending',
+      },
+    );
     expect(mockDeleteArtifactsBatch).not.toHaveBeenCalled();
 
     await db
       .update(taskArtifacts)
       .set({ uploaded: true, uploadUrlExpiresAt: new Date(0) })
       .where(eq(taskArtifacts.id, artifact!.id));
-    await expect(
-      deletePrivateSessionCommand(auth, session.id),
-    ).resolves.toEqual({ deleted: true });
+    await expect(deleteSessionCommand(auth, session.id)).resolves.toEqual({
+      deleted: true,
+    });
     expect(mockDeleteArtifactsBatch).toHaveBeenCalledWith([
       {
         sessionId: session.id,
@@ -347,7 +359,7 @@ describe('deletePrivateSessionCommand', () => {
     ]);
   });
 
-  it('does not delete private Session rows while a linked run is active', async () => {
+  it('stops an active linked run before deleting the session', async () => {
     const owner = await userFactory.create();
     const session = await sessionFactory.create({
       ownerKind: 'user',
@@ -371,21 +383,53 @@ describe('deletePrivateSessionCommand', () => {
     });
 
     const auth = { userId: owner.id, isAdmin: false } as UserAuthSuccess;
+    await expect(deleteSessionCommand(auth, session.id)).resolves.toEqual({
+      deleted: true,
+    });
     await expect(
-      deletePrivateSessionCommand(auth, session.id),
-    ).resolves.toEqual({ deleted: false, reason: 'active_runs' });
+      db.query.sessions.findFirst({ where: eq(sessions.id, session.id) }),
+    ).resolves.toBeUndefined();
+    await expect(
+      db.query.taskRuns.findFirst({ where: eq(taskRuns.id, run.id) }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('keeps the session intact when active work cannot be stopped', async () => {
+    const owner = await userFactory.create();
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+    });
+    const task = await taskFactory.create({ initiatorUserId: owner.id });
+    await db.insert(sessionTasks).values({
+      sessionId: session.id,
+      taskId: task.id,
+      origin: 'fast_delegation',
+    });
+    await runFactory.create({
+      taskId: task.id,
+      status: RunStatus.Running,
+      sandboxServerUrl: 'http://sandbox.test',
+    });
+    vi.spyOn(sdk, 'stopTaskRun').mockResolvedValueOnce({
+      success: false,
+      statusCode: 502,
+      error: 'sandbox unavailable',
+    });
+
+    await expect(
+      deleteSessionCommand(
+        { userId: owner.id, isAdmin: false } as UserAuthSuccess,
+        session.id,
+      ),
+    ).resolves.toEqual({ deleted: false, reason: 'stop_failed' });
     expect(mockDeleteArtifactsBatch).not.toHaveBeenCalled();
     await expect(
       db.query.sessions.findFirst({ where: eq(sessions.id, session.id) }),
     ).resolves.toBeDefined();
-
-    await db
-      .update(taskRuns)
-      .set({ status: RunStatus.Completed })
-      .where(eq(taskRuns.id, run.id));
     await expect(
-      deletePrivateSessionCommand(auth, session.id),
-    ).resolves.toEqual({ deleted: true });
+      db.query.tasks.findFirst({ where: eq(tasks.id, task.id) }),
+    ).resolves.toMatchObject({ deletedAt: null });
   });
 
   it('does not delete a private Session while its Fast turn is active', async () => {
@@ -413,7 +457,7 @@ describe('deletePrivateSessionCommand', () => {
     );
 
     await expect(
-      deletePrivateSessionCommand(
+      deleteSessionCommand(
         { userId: owner.id, isAdmin: false } as UserAuthSuccess,
         session.id,
       ),
@@ -422,5 +466,88 @@ describe('deletePrivateSessionCommand', () => {
       db.query.sessions.findFirst({ where: eq(sessions.id, session.id) }),
     ).resolves.toBeDefined();
     expect(mockDeleteArtifactsBatch).not.toHaveBeenCalled();
+  });
+
+  it('lets an owner delete a shared session and retires only its direct memories', async () => {
+    const owner = await userFactory.create();
+    const other = await userFactory.create();
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: owner.id,
+        privacy: 'shared',
+        surface: 'web',
+        workspaceId: owner.id,
+        conversationId: crypto.randomUUID(),
+      })
+      .returning();
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      privacy: 'shared',
+      fastConversationId: conversation!.id,
+    });
+    const task = await taskFactory.create({ initiatorUserId: owner.id });
+    await db.insert(sessionTasks).values({
+      sessionId: session.id,
+      taskId: task.id,
+      origin: 'fast_delegation',
+    });
+    const run = await runFactory.create({
+      taskId: task.id,
+      status: RunStatus.Completed,
+    });
+    await db.insert(brainMemoryEvents).values({
+      runId: run.id,
+      status: 'done',
+    });
+    await db.insert(fastAgentMemoryEvents).values({
+      conversationId: conversation!.id,
+      memory: '- direct session memory',
+      status: 'done',
+    });
+
+    await expect(
+      deleteSessionCommand(
+        { userId: other.id, isAdmin: false } as UserAuthSuccess,
+        session.id,
+      ),
+    ).resolves.toEqual({ deleted: false });
+    await expect(
+      deleteSessionCommand(
+        { userId: owner.id, isAdmin: false } as UserAuthSuccess,
+        session.id,
+      ),
+    ).resolves.toEqual({ deleted: true });
+
+    await expect(
+      db.query.sessions.findFirst({ where: eq(sessions.id, session.id) }),
+    ).resolves.toBeUndefined();
+    await expect(
+      db.query.tasks.findFirst({ where: eq(tasks.id, task.id) }),
+    ).resolves.toMatchObject({ deletedAt: expect.any(Date) });
+    await expect(
+      db.query.fastAgentConversations.findFirst({
+        where: eq(fastAgentConversations.id, conversation!.id),
+      }),
+    ).resolves.toBeUndefined();
+    const retirements = await db.select().from(brainPageRetirements);
+    expect(retirements.map(({ slug }) => slug).sort()).toEqual(
+      [
+        taskMemorySlug(task.id, run.id),
+        fastConversationMemorySlug(conversation!.id),
+      ].sort(),
+    );
+
+    await saveBrainAgentSummary(db, run.id, 'late summary');
+    await expect(
+      db.query.brainMemoryEvents.findFirst({
+        where: eq(brainMemoryEvents.runId, run.id),
+      }),
+    ).resolves.toMatchObject({
+      status: 'skipped',
+      agentSummary: null,
+      lastError: 'task deleted',
+    });
   });
 });

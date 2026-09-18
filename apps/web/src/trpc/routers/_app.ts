@@ -70,7 +70,7 @@ import {
   getSessions,
   getSessionTimeline,
   archiveSessionCommand,
-  deletePrivateSessionCommand,
+  deleteSessionCommand,
   listSessionPins,
   markSessionReadCommand,
   sessionIdInputSchema,
@@ -3305,10 +3305,10 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         archiveSessionCommand(auth, input.sessionId),
       ),
-    deletePrivate: protectedProcedure
+    delete: protectedProcedure
       .input(sessionIdInputSchema)
       .mutation(({ ctx: { auth }, input }) =>
-        deletePrivateSessionCommand(auth, input.sessionId),
+        deleteSessionCommand(auth, input.sessionId),
       ),
     unarchive: protectedProcedure
       .input(sessionIdInputSchema)

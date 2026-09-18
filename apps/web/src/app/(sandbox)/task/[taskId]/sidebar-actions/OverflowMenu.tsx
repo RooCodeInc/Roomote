@@ -158,8 +158,8 @@ function OverflowMenuBase({
             <DialogTitle>Are you sure?</DialogTitle>
             <DialogDescription>
               {canShutdown
-                ? "This will first shut down the task's machine, then permanently delete this task and all its data. This action cannot be undone."
-                : 'This will permanently delete this task and all its data. This action cannot be undone.'}
+                ? "This will first shut down the task's machine, then permanently delete the task and its artifacts and remove Brain memories saved directly from it. Independently collected Slack or pull request content and broader summaries are retained. This action cannot be undone."
+                : 'This permanently deletes the task and its artifacts and removes Brain memories saved directly from it. Independently collected Slack or pull request content and broader summaries are retained. This action cannot be undone.'}
             </DialogDescription>
           </DialogHeader>
           <div className="mt-4 flex justify-end gap-2">
