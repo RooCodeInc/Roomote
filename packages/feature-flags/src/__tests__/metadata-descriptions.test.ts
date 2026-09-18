@@ -51,6 +51,7 @@ describe('metadata descriptions', () => {
       homeComposerSuggestions: false,
       serviceCredentialTools: false,
       privateSessions: false,
+      browserNotifications: false,
     });
   });
 });

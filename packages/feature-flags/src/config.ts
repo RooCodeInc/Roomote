@@ -6,6 +6,7 @@ export const DEPLOYMENT_EXPERIMENT_IDS = [
   'homeComposerSuggestions',
   'serviceCredentialTools',
   'privateSessions',
+  'browserNotifications',
 ] as const;
 
 export type DeploymentExperimentId = (typeof DEPLOYMENT_EXPERIMENT_IDS)[number];
@@ -16,6 +17,7 @@ export const DEPLOYMENT_EXPERIMENT_METADATA_KEYS = {
   homeComposerSuggestions: 'home_composer_suggestions_enabled',
   serviceCredentialTools: 'integration_keys_enabled',
   privateSessions: 'private_sessions_experiment_enabled',
+  browserNotifications: 'browser_notifications_experiment_enabled',
 } as const satisfies Record<DeploymentExperimentId, string>;
 
 export type DeploymentExperimentValues = Record<
@@ -69,5 +71,11 @@ export const DEPLOYMENT_METADATA_BOOLEAN_CONFIG: Record<
     group: null,
     description:
       'Allow members to create owner-only private Sessions. Disabled by default; absent means disabled.',
+  },
+  [DEPLOYMENT_EXPERIMENT_METADATA_KEYS.browserNotifications]: {
+    kind: 'deployment-control',
+    group: null,
+    description:
+      'Offer desktop browser notifications while the relevant Session or task page remains open',
   },
 };

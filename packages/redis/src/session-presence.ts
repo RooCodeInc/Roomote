@@ -3,6 +3,13 @@ import type { Redis } from 'ioredis';
 import { getRedis } from './client';
 
 export const SESSION_PRESENCE_LEASE_MS = 30_000;
+export const SESSION_BROWSER_ATTENTION_LEASE_MS = 30_000;
+
+export type SessionBrowserNotificationPermission =
+  | 'granted'
+  | 'default'
+  | 'denied'
+  | 'unsupported';
 
 type SessionPresenceIdentity = {
   sessionId: string;
@@ -39,6 +46,13 @@ function sessionVoiceCallStateKey({
 
 function sessionViewersKey(sessionId: string) {
   return `session:presence:viewers:${sessionId}`;
+}
+
+function sessionBrowserAttentionKey({
+  sessionId,
+  userId,
+}: SessionPresenceIdentity) {
+  return `session:browser-attention:${sessionId}:${userId}`;
 }
 
 async function refreshLease(
@@ -141,6 +155,68 @@ export async function isSessionUserPresent(
   options: SessionPresenceOptions = {},
 ): Promise<boolean> {
   return isLeaseActive(identity, sessionPresenceKey(identity), options);
+}
+
+/** Keeps one mounted Session/task page eligible for browser attention. */
+export async function refreshSessionBrowserAttentionLease(
+  lease: SessionPresenceLease & {
+    permission: SessionBrowserNotificationPermission;
+  },
+  options: SessionPresenceOptions = {},
+): Promise<{ expiresAt: number }> {
+  const now = options.now ?? Date.now();
+  const expiresAt = now + SESSION_BROWSER_ATTENTION_LEASE_MS;
+  const redis = options.redis ?? getRedis();
+  const key = sessionBrowserAttentionKey(lease);
+  await redis
+    .multi()
+    .zadd(key, expiresAt, `${lease.clientId}:${lease.permission}`)
+    .zremrangebyscore(key, '-inf', now)
+    .pexpire(key, SESSION_BROWSER_ATTENTION_LEASE_MS * 2)
+    .exec();
+  return { expiresAt };
+}
+
+/** Best-effort release; expiry covers abrupt browser disconnects. */
+export async function disconnectSessionBrowserAttentionLease(
+  lease: SessionPresenceLease,
+  options: Pick<SessionPresenceOptions, 'redis'> = {},
+): Promise<void> {
+  const redis = options.redis ?? getRedis();
+  const key = sessionBrowserAttentionKey(lease);
+  const members = await redis.zrange(key, 0, -1);
+  const matching = members.filter((member) =>
+    member.startsWith(`${lease.clientId}:`),
+  );
+  if (matching.length > 0) await redis.zrem(key, ...matching);
+}
+
+/** Returns notification capabilities for every unexpired mounted tab. */
+export async function getSessionBrowserAttentionCapabilities(
+  identity: SessionPresenceIdentity,
+  options: SessionPresenceOptions = {},
+): Promise<Record<SessionBrowserNotificationPermission, string[]>> {
+  const now = options.now ?? Date.now();
+  const redis = options.redis ?? getRedis();
+  const key = sessionBrowserAttentionKey(identity);
+  await redis.zremrangebyscore(key, '-inf', now);
+  const members = await redis.zrangebyscore(key, `(${now}`, '+inf');
+  const result: Record<SessionBrowserNotificationPermission, string[]> = {
+    granted: [],
+    default: [],
+    denied: [],
+    unsupported: [],
+  };
+  for (const member of members) {
+    const separator = member.lastIndexOf(':');
+    if (separator < 0) continue;
+    const clientId = member.slice(0, separator);
+    const permission = member.slice(separator + 1);
+    if (permission in result) {
+      result[permission as SessionBrowserNotificationPermission].push(clientId);
+    }
+  }
+  return result;
 }
 
 /** Refreshes one browser tab's short-lived active voice-call lease. */

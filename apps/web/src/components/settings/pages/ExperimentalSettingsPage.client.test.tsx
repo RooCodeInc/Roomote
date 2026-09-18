@@ -38,6 +38,15 @@ vi.mock('@/components/settings/PrivateSessionsExperimentalSetting', () => ({
 }));
 
 vi.mock(
+  '@/components/settings/BrowserNotificationsExperimentalSetting',
+  () => ({
+    BrowserNotificationsExperimentalSetting: () => (
+      <div>Browser notifications setting</div>
+    ),
+  }),
+);
+
+vi.mock(
   '@/components/settings/HomeComposerSuggestionsExperimentalSetting',
   () => ({
     HomeComposerSuggestionsExperimentalSetting: () => (

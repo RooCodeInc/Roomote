@@ -1,12 +1,15 @@
 import type { Redis } from 'ioredis';
 
 import {
+  disconnectSessionBrowserAttentionLease,
   disconnectSessionPresence,
   disconnectSessionVoiceCall,
+  getSessionBrowserAttentionCapabilities,
   isSessionVoiceCallActive,
   isSessionUserPresent,
   listSessionPresentUserIds,
   refreshSessionPresence,
+  refreshSessionBrowserAttentionLease,
   refreshSessionVoiceCall,
   SESSION_PRESENCE_LEASE_MS,
 } from '../session-presence';
@@ -93,6 +96,10 @@ class PresenceRedis {
       .filter(([, score]) => score > Number(min.slice(1)))
       .map(([member]) => member);
   }
+
+  async zrange(key: string, _start: number, _end: number) {
+    return [...(this.sets.get(key)?.keys() ?? [])];
+  }
 }
 
 const identity = { sessionId: 'session-1', userId: 'user-1' };
@@ -102,6 +109,60 @@ describe('Session presence leases', () => {
 
   beforeEach(() => {
     redis = new PresenceRedis() as unknown as Redis;
+  });
+
+  it('tracks mounted browser tabs separately by notification permission', async () => {
+    await refreshSessionBrowserAttentionLease(
+      { ...identity, clientId: 'tab-1', permission: 'granted' },
+      { now: 1_000, redis },
+    );
+    await refreshSessionBrowserAttentionLease(
+      { ...identity, clientId: 'tab-2', permission: 'default' },
+      { now: 1_000, redis },
+    );
+
+    await expect(
+      getSessionBrowserAttentionCapabilities(identity, { now: 2_000, redis }),
+    ).resolves.toEqual({
+      granted: ['tab-1'],
+      default: ['tab-2'],
+      denied: [],
+      unsupported: [],
+    });
+    await expect(
+      isSessionUserPresent(identity, { now: 2_000, redis }),
+    ).resolves.toBe(false);
+  });
+
+  it('expires and disconnects browser attention tabs independently', async () => {
+    await refreshSessionBrowserAttentionLease(
+      { ...identity, clientId: 'tab-1', permission: 'granted' },
+      { now: 1_000, redis },
+    );
+    await refreshSessionBrowserAttentionLease(
+      { ...identity, clientId: 'tab-2', permission: 'granted' },
+      { now: 1_000, redis },
+    );
+    await disconnectSessionBrowserAttentionLease(
+      { ...identity, clientId: 'tab-1' },
+      { redis },
+    );
+    expect(
+      (
+        await getSessionBrowserAttentionCapabilities(identity, {
+          now: 2_000,
+          redis,
+        })
+      ).granted,
+    ).toEqual(['tab-2']);
+    expect(
+      (
+        await getSessionBrowserAttentionCapabilities(identity, {
+          now: 31_000,
+          redis,
+        })
+      ).granted,
+    ).toEqual([]);
   });
 
   it('lists distinct viewers across tabs and excludes expired leases at the deadline', async () => {

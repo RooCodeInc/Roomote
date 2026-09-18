@@ -32,13 +32,17 @@ export {
 export { continueDirectTaskAttentionReply } from './lib/task-runs/continue-direct-task-attention-reply';
 export {
   findSessionAttentionNotificationReply,
+  acknowledgeSessionBrowserAttention,
   hasTaskRunAttentionNotification,
+  listSessionBrowserAttentionEvents,
   notifyDirectWebTaskAttention,
   notifyFastWebSessionAttention,
   processSessionAttentionNotificationJob,
   resolveSessionAttentionFastConversation,
   type SessionAttentionKind,
+  type SessionAttentionPresentationKind,
   type SessionAttentionNotificationResult,
+  type BrowserAttentionEvent,
 } from './lib/session-attention-notification';
 export {
   SESSION_ATTENTION_NOTIFICATION_JOB,

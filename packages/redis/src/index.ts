@@ -4,13 +4,18 @@ export type { Redis } from 'ioredis';
 export { getRedis } from './client';
 export {
   disconnectSessionPresence,
+  disconnectSessionBrowserAttentionLease,
+  getSessionBrowserAttentionCapabilities,
   disconnectSessionVoiceCall,
   isSessionVoiceCallActive,
   isSessionUserPresent,
   listSessionPresentUserIds,
   refreshSessionPresence,
+  refreshSessionBrowserAttentionLease,
   refreshSessionVoiceCall,
   SESSION_PRESENCE_LEASE_MS,
+  SESSION_BROWSER_ATTENTION_LEASE_MS,
+  type SessionBrowserNotificationPermission,
 } from './session-presence';
 
 export const REDIS_KEYS = {
