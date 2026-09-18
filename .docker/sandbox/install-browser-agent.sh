@@ -736,40 +736,24 @@ ensure_shared_browser() {
 }
 
 # agent-browser remembers each session's tab by CDP target id, and the pin
-# makes that binding strict, so a command fails with `tab_gone` once the tab
-# is closed. That happens whenever the shared browser restarts (every sandbox
-# wake-up starts a new one) and when a person closes the agent's tab. A
-# navigation does not depend on the lost page, so it gets a fresh tab and one
-# retry; `tab_gone` means the first attempt never ran. Other commands keep
-# failing with agent-browser's own recovery hint, because the page they
-# expected is gone either way.
-is_navigation_command() {
-  case "$AGENT_BROWSER_COMMAND" in
-    open|goto|navigate)
-      return 0
+# makes that binding strict, so every command fails with `tab_gone` once the
+# tab is closed. That happens whenever the shared browser restarts (every
+# sandbox wake-up starts a new one) and when a person closes the agent's tab.
+# A command that starts work on a page does not depend on the lost one, so it
+# gets a fresh tab first. This runs before cookie seeding, which would hit the
+# same error. Other commands keep failing with agent-browser's own recovery
+# hint, because the page they expected is gone either way.
+ensure_session_tab() {
+  resolve_cli_paths
+
+  local probe
+  probe="$(AGENT_BROWSER_HEADED=false "$AGENT_BROWSER_BIN" "${AGENT_BROWSER_SHARED_ARGS[@]}" ${AGENT_BROWSER_PREFIX_ARGS[@]+"${AGENT_BROWSER_PREFIX_ARGS[@]}"} get url 2>&1 || true)"
+
+  case "$probe" in
+    *tab_gone*)
+      AGENT_BROWSER_HEADED=false "$AGENT_BROWSER_BIN" "${AGENT_BROWSER_SHARED_ARGS[@]}" ${AGENT_BROWSER_PREFIX_ARGS[@]+"${AGENT_BROWSER_PREFIX_ARGS[@]}"} tab new >/dev/null 2>&1 || true
       ;;
   esac
-
-  return 1
-}
-
-run_navigation_with_tab_recovery() {
-  local stdout_file stderr_file status=0
-  stdout_file="$(mktemp)"
-  stderr_file="$(mktemp)"
-
-  "$AGENT_BROWSER_BIN" "${AGENT_BROWSER_SHARED_ARGS[@]}" "${AGENT_BROWSER_FORWARD_ARGS[@]}" >"$stdout_file" 2>"$stderr_file" || status=$?
-
-  if [ "$status" -ne 0 ] && grep -q 'tab_gone' "$stdout_file" "$stderr_file"; then
-    rm -f "$stdout_file" "$stderr_file"
-    "$AGENT_BROWSER_BIN" "${AGENT_BROWSER_SHARED_ARGS[@]}" ${AGENT_BROWSER_PREFIX_ARGS[@]+"${AGENT_BROWSER_PREFIX_ARGS[@]}"} tab new >/dev/null 2>&1 || true
-    exec "$AGENT_BROWSER_BIN" "${AGENT_BROWSER_SHARED_ARGS[@]}" "${AGENT_BROWSER_FORWARD_ARGS[@]}"
-  fi
-
-  cat "$stdout_file"
-  cat "$stderr_file" >&2
-  rm -f "$stdout_file" "$stderr_file"
-  exit "$status"
 }
 
 # Commands that only observe the page stay available while a person drives.
@@ -841,6 +825,9 @@ if [ "$USE_SHARED_BROWSER" = true ]; then
   if is_input_command; then
     yield_to_human
   fi
+  if should_seed_preview_cookies; then
+    ensure_session_tab
+  fi
 else
   apply_local_preview_host_resolution_to_private_browser
 fi
@@ -855,10 +842,6 @@ fi
 
 resolve_cli_paths
 export AGENT_BROWSER_HEADED=false
-
-if [ "$USE_SHARED_BROWSER" = true ] && is_navigation_command; then
-  run_navigation_with_tab_recovery
-fi
 
 exec "$AGENT_BROWSER_BIN" ${AGENT_BROWSER_SHARED_ARGS[@]+"${AGENT_BROWSER_SHARED_ARGS[@]}"} "${AGENT_BROWSER_FORWARD_ARGS[@]}"
 EOF_WRAPPER

@@ -269,19 +269,20 @@ describe('agent-browser wrapper shared browser', () => {
     ]);
   });
 
-  it('retries a navigation in a fresh tab when the pinned tab is gone', async () => {
+  it('opens a fresh tab before a navigation when the pinned tab is gone', async () => {
     const sandbox = await createSandbox({ browserRunning: true });
 
-    const { stdout } = await sandbox.run(
-      ['--session', 'task-1', 'goto', 'https://example.com'],
-      { FAKE_TAB_GONE_ONCE: path.join(sandbox.dir, 'tab-gone') },
-    );
+    await sandbox.run(['--session', 'task-1', 'goto', 'https://example.com'], {
+      FAKE_TAB_GONE_ONCE: path.join(sandbox.dir, 'tab-gone'),
+    });
+    await sandbox.run(['--session', 'task-1', 'goto', 'https://example.org']);
 
-    expect(stdout).toContain('ok');
     expect(sandbox.calls()).toEqual([
-      `pin=1 --cdp ${sandbox.cdpPort} --session task-1 goto https://example.com`,
+      `pin=1 --cdp ${sandbox.cdpPort} --session task-1 get url`,
       `pin=1 --cdp ${sandbox.cdpPort} --session task-1 tab new`,
       `pin=1 --cdp ${sandbox.cdpPort} --session task-1 goto https://example.com`,
+      `pin=1 --cdp ${sandbox.cdpPort} --session task-1 get url`,
+      `pin=1 --cdp ${sandbox.cdpPort} --session task-1 goto https://example.org`,
     ]);
   });
 
