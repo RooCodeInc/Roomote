@@ -1330,6 +1330,18 @@ export async function updateBackgroundAgentSettingsCommand(
       continue;
     }
 
+    const destinationDescriptor = destinationDescriptors.find(
+      (descriptor) => descriptor.automationId === validation.automationId,
+    );
+    if (
+      destinationDescriptor &&
+      (fieldErrors[destinationDescriptor.slackField] ||
+        fieldErrors[destinationDescriptor.discordField] ||
+        fieldErrors[destinationDescriptor.emailField])
+    ) {
+      continue;
+    }
+
     if (
       validation.key === 'provider_usage_limit' &&
       !validation.channelId &&
