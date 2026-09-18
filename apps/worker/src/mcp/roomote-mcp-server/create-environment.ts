@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-
 import YAML from 'yaml';
 
 import {
@@ -101,15 +99,6 @@ function applyOverrides(
   };
 }
 
-function stableSerialize(value: unknown): string {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(stableSerialize).join(',')}]`;
-  return `{${Object.entries(value)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, entry]) => `${JSON.stringify(key)}:${stableSerialize(entry)}`)
-    .join(',')}}`;
-}
-
 function parseFinalDefinition(params: {
   definition: unknown;
   format?: ParseFormat;
@@ -129,11 +118,7 @@ function parseFinalDefinition(params: {
   return applyOverrides(parsedConfig.data, params);
 }
 
-export function buildEnvironmentProposal(
-  config: EnvironmentConfig,
-  environmentId?: string,
-): {
-  proposalHash: string;
+function buildEnvironmentSummary(config: EnvironmentConfig): {
   summary: {
     name: string;
     repositories: number;
@@ -154,15 +139,6 @@ export function buildEnvironmentProposal(
     ) +
     (config.analysis_recipe ? 5_400 : 0);
   return {
-    proposalHash: createHash('sha256')
-      .update(
-        stableSerialize({
-          action: environmentId ? 'update' : 'create',
-          environmentId: environmentId ?? null,
-          config,
-        }),
-      )
-      .digest('hex'),
     summary: {
       name: config.name,
       repositories: config.repositories.length,
@@ -183,21 +159,16 @@ export async function handlePreviewEnvironment(params: {
 }): Promise<ToolResult> {
   try {
     const finalConfig = parseFinalDefinition(params);
-    const proposal = buildEnvironmentProposal(
-      finalConfig,
-      params.environmentId,
-    );
+    const preview = buildEnvironmentSummary(finalConfig);
     return successResult({
-      ...proposal,
-      approvalQuestionId: `environment-approval:${proposal.proposalHash}`,
-      approvalAnswer: 'approve',
+      ...preview,
       action: params.environmentId ? 'update' : 'create',
       impact: params.environmentId
         ? 'Running tasks keep their current workspace. New tasks use this definition; runtime-affecting changes clear verification and rebuild the cached baseline.'
         : 'Creates an unverified reusable environment. A fresh task must build and verify it before it is ready for analysis.',
-      approvalRequired: true,
+      confirmationRequired: true,
       message:
-        'Explain this exact proposal, maximum configured setup time, and disruption impact to the user, then request explicit approval. Material changes require a new preview and approval.',
+        'Tell the user what this environment change will do, including its maximum configured setup time and disruption impact, then ask whether to proceed. Only create or update after the user responds affirmatively.',
     });
   } catch (error) {
     return catchError(error);
@@ -210,25 +181,12 @@ export async function handleCreateEnvironment(
     format?: ParseFormat;
     name?: string;
     description?: string;
-    approvedProposalHash?: string;
   },
   config: RoomoteConfig,
 ): Promise<ToolResult> {
   try {
     const finalConfig = parseFinalDefinition(params);
-    if (
-      buildEnvironmentProposal(finalConfig).proposalHash !==
-      params.approvedProposalHash
-    ) {
-      return errorResult(
-        'Explicit approval is required for this exact environment proposal. Preview it, explain its time and disruption impact, and request user approval before retrying.',
-      );
-    }
-
-    const result = await createEnvironment(config, {
-      config: finalConfig,
-      approvedProposalHash: params.approvedProposalHash,
-    });
+    const result = await createEnvironment(config, { config: finalConfig });
 
     return successResult({
       environmentId: result.environmentId,
@@ -247,7 +205,6 @@ export async function handleUpdateEnvironment(
     format?: ParseFormat;
     name?: string;
     description?: string;
-    approvedProposalHash?: string;
   },
   config: RoomoteConfig,
 ): Promise<ToolResult> {
@@ -258,19 +215,9 @@ export async function handleUpdateEnvironment(
     }
 
     const finalConfig = parseFinalDefinition(params);
-    if (
-      buildEnvironmentProposal(finalConfig, environmentId).proposalHash !==
-      params.approvedProposalHash
-    ) {
-      return errorResult(
-        'Explicit approval is required for this exact environment proposal. Preview it, explain its time and disruption impact, and request user approval before retrying.',
-      );
-    }
-
     const result = await updateEnvironment(config, {
       environmentId,
       config: finalConfig,
-      approvedProposalHash: params.approvedProposalHash,
     });
 
     return successResult({

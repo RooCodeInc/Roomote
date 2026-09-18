@@ -1,5 +1,4 @@
 import {
-  buildEnvironmentProposal,
   handleCreateEnvironment,
   handlePreviewEnvironment,
   handleRecordVerification,
@@ -19,15 +18,9 @@ const projectDefinition = {
   name: 'My Project',
   repositories: [{ repository: 'owner/repo' }],
 };
-const projectProposalHash =
-  buildEnvironmentProposal(projectDefinition).proposalHash;
-const projectUpdateProposalHash = buildEnvironmentProposal(
-  projectDefinition,
-  'env-existing',
-).proposalHash;
 
 describe('handlePreviewEnvironment', () => {
-  it('returns a concrete approval-bound proposal without mutating', async () => {
+  it('returns a concrete summary and asks for confirmation without mutating', async () => {
     const result = await handlePreviewEnvironment({
       definition: projectDefinition,
     });
@@ -35,21 +28,14 @@ describe('handlePreviewEnvironment', () => {
 
     expect(parsed).toMatchObject({
       success: true,
-      proposalHash: projectProposalHash,
       action: 'create',
-      approvalRequired: true,
+      confirmationRequired: true,
       summary: { name: 'My Project', repositories: 1, setupCommands: 0 },
     });
+    expect(parsed).not.toHaveProperty('proposalHash');
+    expect(parsed).not.toHaveProperty('approvalQuestionId');
+    expect(parsed.message).toContain('ask whether to proceed');
     expect(tasksApiClient.createEnvironment).not.toHaveBeenCalled();
-  });
-
-  it('changes the approval hash when the material proposal changes', () => {
-    expect(buildEnvironmentProposal(projectDefinition).proposalHash).not.toBe(
-      buildEnvironmentProposal({
-        ...projectDefinition,
-        services: ['postgres16'],
-      }).proposalHash,
-    );
   });
 });
 
@@ -75,7 +61,6 @@ repositories:
   - repository: owner/repo
 `,
         format: 'yaml',
-        approvedProposalHash: projectProposalHash,
       },
       config,
     );
@@ -105,10 +90,6 @@ repositories:
           repositories: [{ repository: 'owner/repo' }],
         },
         name: 'Renamed Project',
-        approvedProposalHash: buildEnvironmentProposal({
-          ...projectDefinition,
-          name: 'Renamed Project',
-        }).proposalHash,
       },
       config,
     );
@@ -123,7 +104,6 @@ repositories:
     );
 
     expect(tasksApiClient.createEnvironment).toHaveBeenCalledWith(config, {
-      approvedProposalHash: expect.any(String),
       config: expect.objectContaining({ name: 'Renamed Project' }),
     });
   });
@@ -156,7 +136,6 @@ repositories:
         definition: {
           ...projectDefinition,
         },
-        approvedProposalHash: projectProposalHash,
       },
       config,
     );
@@ -166,19 +145,6 @@ repositories:
 
     expect(parsed.success).toBe(false);
     expect(parsed.error).toBe('API unavailable');
-  });
-
-  it('rejects create when approval does not match the proposal', async () => {
-    const result = await handleCreateEnvironment(
-      { definition: projectDefinition, approvedProposalHash: 'stale' },
-      config,
-    );
-
-    expect(JSON.parse(result.content[0]?.text ?? '')).toMatchObject({
-      success: false,
-      error: expect.stringContaining('Explicit approval is required'),
-    });
-    expect(tasksApiClient.createEnvironment).not.toHaveBeenCalled();
   });
 });
 
@@ -205,7 +171,6 @@ repositories:
   - repository: owner/repo
 `,
         format: 'yaml',
-        approvedProposalHash: projectUpdateProposalHash,
       },
       config,
     );
@@ -217,7 +182,6 @@ repositories:
     expect(parsed.environmentId).toBe('env-existing');
     expect(tasksApiClient.updateEnvironment).toHaveBeenCalledWith(config, {
       environmentId: 'env-existing',
-      approvedProposalHash: projectUpdateProposalHash,
       config: expect.objectContaining({ name: 'My Project' }),
     });
   });
@@ -239,40 +203,6 @@ repositories:
 
     expect(parsed.success).toBe(false);
     expect(parsed.error).toBe('environmentId is required for update');
-    expect(tasksApiClient.updateEnvironment).not.toHaveBeenCalled();
-  });
-
-  it('rejects an update when the approved proposal is stale', async () => {
-    const result = await handleUpdateEnvironment(
-      {
-        environmentId: 'env-existing',
-        definition: { ...projectDefinition, services: ['postgres16'] },
-        approvedProposalHash: projectProposalHash,
-      },
-      config,
-    );
-
-    expect(JSON.parse(result.content[0]?.text ?? '')).toMatchObject({
-      success: false,
-      error: expect.stringContaining('Explicit approval is required'),
-    });
-    expect(tasksApiClient.updateEnvironment).not.toHaveBeenCalled();
-  });
-
-  it('rejects replaying approval against another environment', async () => {
-    const result = await handleUpdateEnvironment(
-      {
-        environmentId: 'env-other',
-        definition: projectDefinition,
-        approvedProposalHash: projectUpdateProposalHash,
-      },
-      config,
-    );
-
-    expect(JSON.parse(result.content[0]?.text ?? '')).toMatchObject({
-      success: false,
-      error: expect.stringContaining('Explicit approval is required'),
-    });
     expect(tasksApiClient.updateEnvironment).not.toHaveBeenCalled();
   });
 });

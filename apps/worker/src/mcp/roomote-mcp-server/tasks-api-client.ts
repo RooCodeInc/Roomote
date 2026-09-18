@@ -629,7 +629,7 @@ export async function steerMessageToTask(
  */
 export async function createEnvironment(
   config: RoomoteConfig,
-  params: { config: unknown; approvedProposalHash: string },
+  params: { config: unknown },
 ): Promise<CreateEnvironmentResponse> {
   return apiFetch(
     config,
@@ -651,7 +651,6 @@ export async function updateEnvironment(
   params: {
     environmentId: string;
     config: unknown;
-    approvedProposalHash: string;
   },
 ): Promise<UpdateEnvironmentResponse> {
   return apiFetch(
@@ -660,10 +659,7 @@ export async function updateEnvironment(
     {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        config: params.config,
-        approvedProposalHash: params.approvedProposalHash,
-      }),
+      body: JSON.stringify({ config: params.config }),
     },
     'Failed to update environment',
   );
