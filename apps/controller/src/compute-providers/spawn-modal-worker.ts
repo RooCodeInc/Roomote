@@ -486,6 +486,9 @@ export async function spawnModalWorker(
   const args = getWorkerLaunchArgs(taskRun, machine.machineId);
 
   let immediateExitDisposition: 'restart' | 'failed' | undefined;
+  let workerExitClassification:
+    | Promise<'ignore' | 'restart' | 'failed'>
+    | undefined;
 
   try {
     await updateTaskRunMachine({
@@ -555,6 +558,7 @@ export async function spawnModalWorker(
       `worker ${args.join(' ')} started on ${machine.machineId}`,
     );
 
+    const admissionAbortController = new AbortController();
     const result = await launchHostedWorker(
       buildModalWorkerEnv({
         authToken,
@@ -587,41 +591,66 @@ export async function spawnModalWorker(
           ...(onWorkerExit || computeLog
             ? {
                 onExit: async ({ exitCode }: { exitCode: number }) => {
-                  await computeLog?.append(
-                    'command',
-                    `worker exited with code ${exitCode}`,
-                  );
+                  if (onWorkerExit) {
+                    // Publish ownership before aborting admission. The launch
+                    // promise may reject on that abort before this callback's
+                    // async classifier has finished its database claim.
+                    workerExitClassification = (async () => {
+                      await computeLog?.append(
+                        'command',
+                        `worker exited with code ${exitCode}`,
+                      );
+
+                      const disposition = await onWorkerExit({ exitCode });
+
+                      if (disposition === 'ignore') {
+                        return disposition;
+                      }
+
+                      try {
+                        await cleanupModalInstance({
+                          computeClient,
+                          instanceId: machine.machineId,
+                          phase: 'worker_bootstrap_exit',
+                          error: new Error(
+                            `Detached worker exited before task run #${taskRun.id} started (exit code ${exitCode})`,
+                          ),
+                          logPrefix: 'spawnModalWorker',
+                          onMutation: recordMutation,
+                          ...mutationContext,
+                        });
+                      } catch (error) {
+                        if (disposition !== 'restart') {
+                          throw error;
+                        }
+
+                        console.error(
+                          `[spawnModalWorker] Cleanup failed after scheduling worker bootstrap restart for task run #${taskRun.id}`,
+                          error,
+                        );
+                      } finally {
+                        // The restart decision is already durable. Do not strand it if
+                        // provider cleanup fails; the new worker can still be launched
+                        // and the orphaned sandbox remains covered by orphan recovery.
+                        if (disposition === 'restart') {
+                          onWorkerRestart?.();
+                        }
+                      }
+
+                      return disposition;
+                    })();
+                  }
+
+                  // A dead detached worker cannot ever satisfy credential-egress
+                  // bootstrap. Release the admission wait before scheduling the
+                  // already-guarded replacement.
+                  admissionAbortController.abort();
 
                   if (!onWorkerExit) {
                     return;
                   }
 
-                  const disposition = await onWorkerExit({ exitCode });
-
-                  if (disposition === 'ignore') {
-                    return;
-                  }
-
-                  try {
-                    await cleanupModalInstance({
-                      computeClient,
-                      instanceId: machine.machineId,
-                      phase: 'worker_bootstrap_exit',
-                      error: new Error(
-                        `Detached worker exited before task run #${taskRun.id} started (exit code ${exitCode})`,
-                      ),
-                      logPrefix: 'spawnModalWorker',
-                      onMutation: recordMutation,
-                      ...mutationContext,
-                    });
-                  } finally {
-                    // The restart decision is already durable. Do not strand it if
-                    // provider cleanup fails; the new worker can still be launched
-                    // and the orphaned sandbox remains covered by orphan recovery.
-                    if (disposition === 'restart') {
-                      onWorkerRestart?.();
-                    }
-                  }
+                  await workerExitClassification;
                 },
               }
             : {}),
@@ -703,6 +732,7 @@ export async function spawnModalWorker(
 
         return launchResult;
       },
+      admissionAbortController.signal,
     );
 
     return {
@@ -710,6 +740,16 @@ export async function spawnModalWorker(
       ...(result.commandId ? { sandboxCmdId: result.commandId } : {}),
     };
   } catch (error) {
+    // A detached worker exit already owns classification, cleanup, and any
+    // guarded restart. Its admission wait was aborted above, so do not turn
+    // that expected unwind into a second terminal failure.
+    if (workerExitClassification) {
+      await workerExitClassification;
+      return {
+        machineId: machine.machineId,
+      };
+    }
+
     await computeLog?.append(
       'command',
       `worker launch failed: ${error instanceof Error ? error.message : String(error)}`,

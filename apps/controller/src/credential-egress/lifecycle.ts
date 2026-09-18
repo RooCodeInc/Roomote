@@ -86,7 +86,9 @@ export interface CredentialEgressLifecycleEvent {
 interface CredentialEgressApiProxyPlan {
   required: boolean;
   bootstrapEnv: Record<string, string>;
-  admit: () => Promise<CredentialEgressWorkloadRegistration | null>;
+  admit: (
+    signal?: AbortSignal,
+  ) => Promise<CredentialEgressWorkloadRegistration | null>;
 }
 
 export interface CredentialEgressLifecycleDependencies {
@@ -156,7 +158,7 @@ export class CredentialEgressLifecycle {
         [CREDENTIAL_EGRESS_WORKLOAD_ENV.BOOTSTRAP_REQUIRED]: '1',
         [CREDENTIAL_EGRESS_WORKLOAD_ENV.BOOTSTRAP_NONCE]: nonce,
       },
-      admit: async () => {
+      admit: async (signal) => {
         const workload = await admit({
           lifecycle: this,
           taskRun: { id: taskRun.id, taskId: taskRun.taskId },
@@ -166,6 +168,7 @@ export class CredentialEgressLifecycle {
           // A resumed sandbox may still hold an earlier generation's tokens;
           // rotation invalidates them.
           resume: taskRun.payloadKind === TaskPayloadKind.SnapshotResume,
+          signal,
         });
         this.logger.log(
           `[credentialEgress] Delivered Service tokens for task run #${taskRun.id} ${JSON.stringify(
