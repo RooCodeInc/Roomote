@@ -1964,7 +1964,7 @@ if (shouldRegisterChatMessageTool()) {
     CHAT_MESSAGE_SEND_TOOL.name,
     {
       title: CHAT_MESSAGE_SEND_TOOL.title,
-      description: CHAT_MESSAGE_SEND_TOOL.description,
+      description: `${CHAT_MESSAGE_SEND_TOOL.description} Worker tasks may also attach image paths or already-uploaded artifact IDs; attachment ownership is verified against the current task run.`,
       inputSchema: {
         destination: z
           .string()

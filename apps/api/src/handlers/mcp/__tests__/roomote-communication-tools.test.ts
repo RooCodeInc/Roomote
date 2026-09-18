@@ -73,6 +73,10 @@ describe('Roomote member communication tools', () => {
       tools.find(({ name }) => name === 'send_chat_message')?.config
         .description,
     ).toContain('Self destinations resolve only from the authenticated member');
+    expect(
+      tools.find(({ name }) => name === 'send_chat_message')?.config
+        .inputSchema,
+    ).not.toHaveProperty('imageArtifactIds');
   });
 
   it.each(['telegram:me', 'slack:me'])(

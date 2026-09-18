@@ -1158,7 +1158,7 @@ describe('roomote MCP tool descriptions', () => {
 
     expect(messageField.description).toBe('Markdown message to send.');
     expect(postTool.config.description).toBe(
-      'Send a new standalone Markdown message to an authorized destination. First use list_chat_destinations and pass its exact destination reference unchanged. Self destinations resolve only from the authenticated member; Slack people and channels retain workspace linkage and access checks. A trusted Slack channel reference may append :thread:<message timestamp>. Supported destinations may also receive image artifact attachments. Use send_chat_reply for the current conversation. Never infer or alter a destination reference.',
+      'Send a new standalone Markdown message to an authorized destination. First use list_chat_destinations and pass its exact destination reference unchanged. Self destinations resolve only from the authenticated member; Slack people and channels retain workspace linkage and access checks. A trusted Slack channel reference may append :thread:<message timestamp>. Use send_chat_reply for the current conversation. Never infer or alter a destination reference. Worker tasks may also attach image paths or already-uploaded artifact IDs; attachment ownership is verified against the current task run.',
     );
     expect(postTool.config.description).not.toContain(
       '<slack_modern_markdown>',
