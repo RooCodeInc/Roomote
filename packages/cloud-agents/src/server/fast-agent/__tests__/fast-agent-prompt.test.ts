@@ -814,7 +814,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'call `list_integration_keys` first, reuse pending or ready entries',
     );
     expect(enabledPrompt).toContain(
-      'Share the returned secure Session link with a service-specific label',
+      'Share the returned secure session link with a service-specific label',
     );
     expect(enabledPrompt).toContain('never ask for the key in chat');
     expect(enabledPrompt).toContain(
@@ -830,7 +830,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'If available documentation cannot verify the API origin and credential header, say those details could not be verified and do not guess',
     );
     expect(enabledPrompt).toContain(
-      'tell the human to enable Integration keys while these tools are available',
+      'tell the human to enable integration keys while these tools are available',
     );
     expect(enabledPrompt).toContain(
       'service-specific label such as "Connect Figma securely"',
@@ -1314,6 +1314,12 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'The opening acknowledgement is already visible and needs no duplicate launch reply, but it does not suppress later useful updates while work continues',
     );
+    expect(prompt).toContain(
+      'Never expose Roomote-internal Fast terminology such as "Fast session" or "Roomote Fast mode"',
+    );
+    expect(prompt).toContain(
+      'Preserve official names and capitalization for external or provider features, including ChatGPT Fast mode',
+    );
   });
 
   it('provides repository-focused coding task acknowledgement guidance', () => {
@@ -1636,7 +1642,7 @@ describe('buildFastAgentSystemPrompt', () => {
     });
     expect(truncated).toContain('  - Active repositories (149): acme/app\n');
     expect(truncated).toContain(
-      '  - 148 more active repositories are not listed here; an All repositories task can still resolve them by name.',
+      '  - 148 more active repositories are not listed here; call `list_repositories` with a name to search all of them.',
     );
 
     expect(
@@ -1689,10 +1695,19 @@ describe('buildFastAgentSystemPrompt', () => {
       'A single matching active repository is a suitable target even when no environment maps it: launch the task in All repositories and name that repository in the task prompt.',
     );
     expect(prompt).toContain(
-      'do not ask the user for a repository URL; launch an All repositories task',
+      'call `list_repositories` with the distinctive part of the name before asking anything',
     );
     expect(prompt).toContain(
-      'Ask only when several listed repositories plausibly match, including the same name listed more than once with different providers or hosts, and name the candidates.',
+      'Do not ask the user for a repository URL while source control is connected and that lookup has not been tried.',
+    );
+    expect(prompt).toContain(
+      'If the lookup itself fails, launch an All repositories task',
+    );
+    expect(prompt).toContain(
+      'the repository is not connected: say so instead of guessing',
+    );
+    expect(prompt).toContain(
+      'Ask only when several repositories plausibly match, including the same name listed more than once with different providers or hosts, and name the candidates.',
     );
     expect(
       prompt.indexOf('When the user refers to a repository by name'),
@@ -2129,7 +2144,7 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('Objective: Ship the complete release');
     expect(prompt).toContain('Continuations used: 2/5');
     expect(prompt).toContain(
-      'This goal belongs to the Fast Session, not to any delegated task',
+      'This goal belongs to the session, not to any delegated task',
     );
     expect(prompt).toContain('Use `manage_goal`');
   });
@@ -2152,6 +2167,25 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'For an official remote MCP, call `add_remote_mcp` with the documented name and HTTPS endpoint',
     );
+  });
+
+  it('lets any member add a remote MCP, shared by default and private on request', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      addRemoteMcpEnabled: true,
+    });
+
+    expect(prompt).toContain('Any member may add one.');
+    expect(prompt).toContain(
+      'It is shared with everyone in the deployment by default, like an integration key',
+    );
+    expect(prompt).toContain(
+      'pass `visibility: "owner"` only when the human asked to keep it private to them',
+    );
+    expect(prompt).toContain(
+      'A pending_owner result means a shared server someone else added is still waiting on them or an administrator: say so, share no link',
+    );
+    expect(prompt).not.toContain('Only deployment administrators');
   });
 
   it('checks the full built-in catalog before fallback setup routes', () => {

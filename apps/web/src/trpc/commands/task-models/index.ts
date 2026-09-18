@@ -68,6 +68,7 @@ import {
   upsertDeploymentEnvironmentVariables,
 } from '../environment-variables';
 import {
+  applyModelsDevMetadata,
   fetchModelsDevCatalog,
   listXaiChatModelsFromCatalog,
   lookupModelMetadataFromCatalog,
@@ -226,6 +227,7 @@ export async function getTaskModelSettingsCommand(
     chatgptConnected,
     githubCopilotConnected,
     xaiSubscriptionConnected,
+    metadataCatalog,
   ] = await Promise.all([
     getDeploymentTaskModelSettings(),
     getDeploymentRuntimeModelConfig(),
@@ -233,6 +235,9 @@ export async function getTaskModelSettingsCommand(
     isChatGptSubscriptionConnected(),
     isGitHubCopilotSubscriptionConnected(),
     isXaiSubscriptionConnected(),
+    fetchModelsDevCatalog(
+      AbortSignal.timeout(MODEL_METADATA_FETCH_TIMEOUT_MS),
+    ).catch(() => null),
   ]);
   // The Available Models list always shows the full recommended set for
   // every connected provider; entries that are not persisted yet render
@@ -262,7 +267,7 @@ export async function getTaskModelSettingsCommand(
   );
   // A provider must be connected before its models can be selected. This also
   // removes stale rows created by the old implicit OpenRouter default catalog.
-  const catalog = appendSelectedTaskModels({
+  const catalogWithoutMetadataRefresh = appendSelectedTaskModels({
     models: appendRecommendedTaskModels({
       models: getTaskModelCatalog(settings).filter((model) => {
         const providerId = getTaskModelProviderId(model.id);
@@ -270,10 +275,16 @@ export async function getTaskModelSettingsCommand(
         return providerId !== null && connectedProviderIds.has(providerId);
       }),
       connectedProviderIds,
+      metadataCatalog,
     }),
     selectedModelIds,
     connectedProviderIds,
   });
+  const catalog = metadataCatalog
+    ? catalogWithoutMetadataRefresh.map((model) =>
+        applyModelsDevMetadata(metadataCatalog, model),
+      )
+    : catalogWithoutMetadataRefresh;
 
   return {
     defaultModelId: settings.defaultModelId,
@@ -457,12 +468,19 @@ export async function autoAddConnectedSubscriptionTaskModels(
   providerId: SetupModelProviderId,
 ): Promise<number> {
   const provider = getSetupModelProvider(providerId);
-  const [chatgptConnected, githubCopilotConnected, xaiSubscriptionConnected] =
-    await Promise.all([
-      isChatGptSubscriptionConnected(),
-      isGitHubCopilotSubscriptionConnected(),
-      isXaiSubscriptionConnected(),
-    ]);
+  const [
+    chatgptConnected,
+    githubCopilotConnected,
+    xaiSubscriptionConnected,
+    metadataCatalog,
+  ] = await Promise.all([
+    isChatGptSubscriptionConnected(),
+    isGitHubCopilotSubscriptionConnected(),
+    isXaiSubscriptionConnected(),
+    fetchModelsDevCatalog(
+      AbortSignal.timeout(MODEL_METADATA_FETCH_TIMEOUT_MS),
+    ).catch(() => null),
+  ]);
 
   const addedRecommended = await db.transaction(async (tx) => {
     const [persistedEnvVarNames, persistedTaskModels] = await Promise.all([
@@ -483,6 +501,7 @@ export async function autoAddConnectedSubscriptionTaskModels(
       provider,
       persistedTaskModelSettings: persistedTaskModels,
       connectedProviderIds,
+      metadataCatalog,
     });
 
     if (!autoAdd) {
@@ -682,6 +701,9 @@ export async function saveTaskModelProviderCommand(
   }
 
   let addedRecommendedModelCount = 0;
+  const metadataCatalog = await fetchModelsDevCatalog(
+    AbortSignal.timeout(MODEL_METADATA_FETCH_TIMEOUT_MS),
+  ).catch(() => null);
 
   await db.transaction(async (tx) => {
     const [currentSetupNewState, persistedEnvVarNames, persistedTaskModels] =
@@ -739,6 +761,7 @@ export async function saveTaskModelProviderCommand(
       provider,
       persistedTaskModelSettings: persistedTaskModels,
       connectedProviderIds,
+      metadataCatalog,
     });
 
     addedRecommendedModelCount = autoAdd?.addedModels.length ?? 0;

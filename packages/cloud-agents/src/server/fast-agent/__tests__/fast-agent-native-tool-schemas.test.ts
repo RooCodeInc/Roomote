@@ -275,6 +275,27 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
       await rm(dirname(join(workDir, 'x')), { recursive: true, force: true });
   });
 
+  it('generates a read-only list_repositories schema whose arguments all accept null', () => {
+    const tool = tools.find(
+      ({ name }) => name === FAST_AGENT_NATIVE_TOOL_NAMES.listRepositories,
+    )!;
+    type Arg = { safeParse: (value: unknown) => { success: boolean } };
+    const args = tool.args as Record<'limit' | 'offset' | 'query', Arg>;
+    const schema = toOpenCodeJsonSchema(zod, tool.args!) as {
+      required?: string[];
+    };
+
+    expect(Object.keys(args).sort()).toEqual(['limit', 'offset', 'query']);
+    expect(schema.required ?? []).toEqual([]);
+    for (const arg of Object.values(args)) {
+      expect(arg.safeParse(null).success).toBe(true);
+      expect(arg.safeParse(undefined).success).toBe(true);
+    }
+    expect(args.limit.safeParse(101).success).toBe(false);
+    expect(tool.description).toContain('Read-only');
+    expect(tool.description).toContain('nextOffset');
+  });
+
   it('generates concrete nonsecret preparation and empty status schemas', async () => {
     const prepare = tools.find(
       ({ name }) =>
@@ -408,10 +429,23 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
       'registers this deployment with the provider before returning an authorization link',
     );
 
-    expect(Object.keys(tool.args!).sort()).toEqual(['name', 'url']);
+    expect(tool.description).toContain('Any member may call this.');
+    expect(tool.description).toContain(
+      "pass visibility 'owner' only when the human asked to keep it private to them",
+    );
+    expect(tool.description).toContain(
+      'A pending-owner result means a shared server someone else added is still waiting on them or an administrator',
+    );
+
+    expect(Object.keys(tool.args!).sort()).toEqual([
+      'name',
+      'url',
+      'visibility',
+    ]);
     expect(schema).toMatchObject({
       type: 'object',
       properties: {
+        visibility: { type: 'string', enum: ['owner', 'deployment'] },
         name: { type: 'string', minLength: 1, maxLength: 80 },
         url: {
           type: 'string',

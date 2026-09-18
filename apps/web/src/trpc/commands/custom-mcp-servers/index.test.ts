@@ -4,7 +4,9 @@ import {
   eq,
   inArray,
   mcpConnections,
+  personalMcpServers,
   userFactory,
+  users,
 } from '@roomote/db/server';
 import { decrypt } from '@roomote/db/encryption';
 import { customMcpConnectionId } from '@roomote/types';
@@ -27,6 +29,7 @@ import {
   listCustomMcpServerToolsCommand,
   setCustomMcpServerDisabledToolsCommand,
   setCustomMcpServerEnabledCommand,
+  setCustomMcpServerVisibilityCommand,
   updateCustomMcpServerCommand,
 } from './index';
 
@@ -54,6 +57,19 @@ const memberAuth = {
   isAdmin: false,
 } as UserAuthSuccess;
 
+const otherMemberAuth = {
+  success: true,
+  userType: 'user',
+  userId: 'custom-mcp-other-member',
+  isAdmin: false,
+} as UserAuthSuccess;
+
+const testUserIds = [
+  adminAuth.userId,
+  memberAuth.userId,
+  otherMemberAuth.userId,
+];
+
 const remoteInput = {
   transport: 'remote' as const,
   name: 'internal-tools',
@@ -63,28 +79,36 @@ const remoteInput = {
 };
 
 async function cleanup() {
-  const servers = await db
+  const shared = await db
     .select({ id: customMcpServers.id })
     .from(customMcpServers)
-    .where(eq(customMcpServers.createdByUserId, adminAuth.userId));
+    .where(inArray(customMcpServers.createdByUserId, testUserIds));
+  const personal = await db
+    .select({ id: personalMcpServers.id })
+    .from(personalMcpServers)
+    .where(inArray(personalMcpServers.ownerUserId, testUserIds));
+  const ids = [...shared, ...personal].map(({ id }) => id);
 
-  if (servers.length > 0) {
-    await db.delete(mcpConnections).where(
-      inArray(
-        mcpConnections.mcpId,
-        servers.map(({ id }) => customMcpConnectionId(id)),
-      ),
-    );
+  if (ids.length > 0) {
+    await db
+      .delete(mcpConnections)
+      .where(inArray(mcpConnections.mcpId, ids.map(customMcpConnectionId)));
   }
 
   await db
     .delete(customMcpServers)
-    .where(eq(customMcpServers.createdByUserId, adminAuth.userId));
+    .where(inArray(customMcpServers.createdByUserId, testUserIds));
+  await db
+    .delete(personalMcpServers)
+    .where(inArray(personalMcpServers.ownerUserId, testUserIds));
 }
 
 describe('custom-mcp-servers commands', () => {
   beforeAll(async () => {
-    await userFactory.create({ id: adminAuth.userId });
+    await db.delete(users).where(inArray(users.id, testUserIds));
+    for (const id of testUserIds) {
+      await userFactory.create({ id });
+    }
   });
 
   beforeEach(async () => {
@@ -93,16 +117,189 @@ describe('custom-mcp-servers commands', () => {
   });
   afterAll(cleanup);
 
-  it('rejects non-admin users on every command', async () => {
-    await expect(listCustomMcpServersCommand(memberAuth)).rejects.toThrow(
-      'Unauthorized',
-    );
+  it('keeps local (stdio) servers with administrators', async () => {
     await expect(
-      createCustomMcpServerCommand(memberAuth, remoteInput),
+      createCustomMcpServerCommand(memberAuth, {
+        transport: 'stdio',
+        name: 'local-tools',
+        stdio: { command: 'node' },
+      }),
     ).rejects.toThrow('Unauthorized');
     await expect(
-      deleteCustomMcpServerCommand(memberAuth, { id: crypto.randomUUID() }),
-    ).rejects.toThrow('Unauthorized');
+      createCustomMcpServerCommand(adminAuth, {
+        transport: 'stdio',
+        name: 'local-tools',
+        stdio: { command: 'node' },
+        visibility: 'owner',
+      }),
+    ).rejects.toThrow('cannot be personal');
+  });
+
+  describe('mirroring integration keys', () => {
+    it('lets a member add a shared server that they and admins manage', async () => {
+      const { id } = await createCustomMcpServerCommand(
+        memberAuth,
+        remoteInput,
+      );
+
+      const forCreator = await listCustomMcpServersCommand(memberAuth);
+      const forOther = await listCustomMcpServersCommand(otherMemberAuth);
+      const forAdmin = await listCustomMcpServersCommand(adminAuth);
+      expect(forCreator.find((s) => s.id === id)).toMatchObject({
+        visibility: 'deployment',
+        canManage: true,
+      });
+      expect(forOther.find((s) => s.id === id)).toMatchObject({
+        canManage: false,
+      });
+      expect(forAdmin.find((s) => s.id === id)).toMatchObject({
+        canManage: true,
+      });
+
+      await expect(
+        setCustomMcpServerEnabledCommand(otherMemberAuth, {
+          id,
+          enabled: false,
+        }),
+      ).rejects.toThrow('not found');
+      await expect(
+        deleteCustomMcpServerCommand(otherMemberAuth, { id }),
+      ).rejects.toThrow('not found');
+      await expect(
+        setCustomMcpServerEnabledCommand(adminAuth, { id, enabled: false }),
+      ).resolves.toEqual({ enabled: false });
+      await expect(
+        deleteCustomMcpServerCommand(memberAuth, { id }),
+      ).resolves.toEqual({ deleted: true });
+    });
+
+    it('keeps a personal server invisible and unmanageable to everyone else, admins included', async () => {
+      const { id } = await createCustomMcpServerCommand(memberAuth, {
+        ...remoteInput,
+        visibility: 'owner',
+      });
+
+      expect(
+        await listCustomMcpServersCommand(memberAuth, { scope: 'owner' }),
+      ).toEqual([
+        expect.objectContaining({
+          id,
+          visibility: 'owner',
+          canManage: true,
+          headerNames: ['x-api-key'],
+        }),
+      ]);
+      for (const auth of [adminAuth, otherMemberAuth]) {
+        expect(
+          await listCustomMcpServersCommand(auth, { scope: 'owner' }),
+        ).toEqual([]);
+        expect(
+          (await listCustomMcpServersCommand(auth)).some((s) => s.id === id),
+        ).toBe(false);
+        await expect(
+          setCustomMcpServerDisabledToolsCommand(auth, {
+            id,
+            disabledTools: ['x'],
+          }),
+        ).rejects.toThrow('not found');
+        await expect(
+          deleteCustomMcpServerCommand(auth, { id }),
+        ).rejects.toThrow('not found');
+      }
+
+      const stored = await db.query.personalMcpServers.findFirst({
+        where: eq(personalMcpServers.id, id),
+      });
+      expect(stored?.ownerUserId).toBe(memberAuth.userId);
+      expect(decrypt(stored!.headers!['x-api-key']!)).toBe('secret-one');
+      expect(
+        await db.query.customMcpServers.findFirst({
+          where: eq(customMcpServers.id, id),
+        }),
+      ).toBeUndefined();
+    });
+
+    it('lets two members use the same personal name', async () => {
+      await createCustomMcpServerCommand(memberAuth, {
+        ...remoteInput,
+        visibility: 'owner',
+      });
+      await expect(
+        createCustomMcpServerCommand(otherMemberAuth, {
+          ...remoteInput,
+          visibility: 'owner',
+        }),
+      ).resolves.toEqual({ id: expect.any(String) });
+      await expect(
+        createCustomMcpServerCommand(memberAuth, {
+          ...remoteInput,
+          visibility: 'owner',
+        }),
+      ).rejects.toThrow('already have a personal MCP server');
+    });
+
+    it('moves a server between private and shared with its id and connection', async () => {
+      const { id } = await createCustomMcpServerCommand(memberAuth, {
+        ...remoteInput,
+        authType: 'oauth',
+        headers: undefined,
+        visibility: 'owner',
+      });
+      await db.insert(mcpConnections).values({
+        userId: memberAuth.userId,
+        mcpId: customMcpConnectionId(id),
+        connectionRole: 'default',
+        authConfig: {},
+        enabled: true,
+        authStatus: 'authenticated',
+      });
+
+      await expect(
+        setCustomMcpServerVisibilityCommand(otherMemberAuth, {
+          id,
+          visibility: 'deployment',
+        }),
+      ).rejects.toThrow('not found');
+
+      await setCustomMcpServerVisibilityCommand(memberAuth, {
+        id,
+        visibility: 'deployment',
+      });
+      expect(
+        await db.query.personalMcpServers.findFirst({
+          where: eq(personalMcpServers.id, id),
+        }),
+      ).toBeUndefined();
+      expect(
+        await db.query.customMcpServers.findFirst({
+          where: eq(customMcpServers.id, id),
+        }),
+      ).toMatchObject({
+        createdByUserId: memberAuth.userId,
+        authType: 'oauth',
+      });
+      expect(
+        await db.query.mcpConnections.findFirst({
+          where: eq(mcpConnections.mcpId, customMcpConnectionId(id)),
+        }),
+      ).toMatchObject({ userId: null, authStatus: 'authenticated' });
+
+      // An administrator may take it private again, to the member who added it.
+      await setCustomMcpServerVisibilityCommand(adminAuth, {
+        id,
+        visibility: 'owner',
+      });
+      expect(
+        await db.query.personalMcpServers.findFirst({
+          where: eq(personalMcpServers.id, id),
+        }),
+      ).toMatchObject({ ownerUserId: memberAuth.userId });
+      expect(
+        await db.query.mcpConnections.findFirst({
+          where: eq(mcpConnections.mcpId, customMcpConnectionId(id)),
+        }),
+      ).toMatchObject({ userId: memberAuth.userId });
+    });
   });
 
   it('creates a server with encrypted header values and lists names only', async () => {

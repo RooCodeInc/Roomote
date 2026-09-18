@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -88,12 +88,16 @@ function SignedInUserMenu({
   const [releaseNotesVersion, setReleaseNotesVersion] = useState<string | null>(
     null,
   );
+  const [deploymentHost, setDeploymentHost] = useState<string | null>(null);
   const statusQuery = useQuery(
     trpc.releases.status.queryOptions(undefined, {
       staleTime: 30 * 60 * 1000,
       refetchOnWindowFocus: false,
     }),
   );
+  useEffect(() => {
+    setDeploymentHost(window.location.host || null);
+  }, []);
   const handleSignOut = async () => {
     window.localStorage.removeItem(PERSONAL_THEME_STORAGE_KEY);
     await authClient.signOut({
@@ -236,6 +240,19 @@ function SignedInUserMenu({
               </DialogDescription>
             )}
           </DialogHeader>
+
+          {deploymentHost ? (
+            <div className="text-sm">
+              <div className="text-muted-foreground">Deployment host</div>
+              <div
+                className="font-mono break-all"
+                title={deploymentHost}
+                aria-label={`Deployment host: ${deploymentHost}`}
+              >
+                {deploymentHost}
+              </div>
+            </div>
+          ) : null}
 
           <p className="max-w-54 min-h-14 md:max-w-none md:min-h-auto">
             Made with care by humans and robots.

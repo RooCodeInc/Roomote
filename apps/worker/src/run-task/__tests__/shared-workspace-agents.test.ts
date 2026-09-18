@@ -126,6 +126,9 @@ describe('on-demand repositories', () => {
     expect(content).toContain(
       'call the `clone_repository` tool with `repositoryFullName` (for example `Roomote/example-app`)',
     );
+    expect(content).toContain(
+      'The `list_repositories` tool searches those same repositories live by name or description',
+    );
     expect(content).toContain('Do not run `git clone` yourself');
     expect(content).not.toContain('Prepared repositories:');
   });

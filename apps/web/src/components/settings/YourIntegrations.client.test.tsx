@@ -1,6 +1,21 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-import { PersonalIntegrations, YourIntegrations } from './YourIntegrations';
+import { PersonalIntegrations } from './PersonalIntegrations';
+import { YourIntegrations } from './YourIntegrations';
+
+// This suite covers the API-key half of the personal section; with custom MCP
+// servers off, the section is exactly that and its Add action is a plain
+// button. The merged list and its picker are covered in PersonalIntegrations.
+vi.mock('./CustomMcpServers', () => ({
+  useCustomMcpServers: () => ({
+    isEnabled: false,
+    isLoading: false,
+    error: null,
+    items: [],
+    openAddDialog: () => {},
+    dialogs: null,
+  }),
+}));
 
 const { toastSuccessMock, toastErrorMock } = vi.hoisted(() => ({
   toastSuccessMock: vi.fn(),

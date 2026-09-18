@@ -10,8 +10,11 @@ const {
   mockConversationRows,
   mockGetSyncState,
   mockMarkFastEvent,
+  mockMarkBrainEvent,
+  mockSettleBrainEvent,
   mockSettleFastEvent,
   mockPullRequestFacts,
+  mockTaskPullRequests,
   mockReleaseFastEvents,
   mockMarkRetirement,
   mockRearmRetirement,
@@ -19,6 +22,7 @@ const {
   mockSettleRetirement,
   mockRunBrainCollectors,
   mockRequestHomeComposerPrecompute,
+  mockTaskRun,
 } = vi.hoisted(() => ({
   mockResolveConnection: vi.fn(),
   mockIsBrainEmbeddingAvailable: vi.fn(),
@@ -29,8 +33,11 @@ const {
   mockConversationRows: vi.fn(),
   mockGetSyncState: vi.fn(),
   mockMarkFastEvent: vi.fn(),
+  mockMarkBrainEvent: vi.fn(),
+  mockSettleBrainEvent: vi.fn(),
   mockSettleFastEvent: vi.fn(),
   mockPullRequestFacts: vi.fn(),
+  mockTaskPullRequests: vi.fn(),
   mockReleaseFastEvents: vi.fn(),
   mockMarkRetirement: vi.fn(),
   mockRearmRetirement: vi.fn(),
@@ -38,6 +45,7 @@ const {
   mockSettleRetirement: vi.fn(),
   mockRunBrainCollectors: vi.fn(),
   mockRequestHomeComposerPrecompute: vi.fn(),
+  mockTaskRun: vi.fn(),
 }));
 
 vi.mock('@roomote/sdk/server', async (importOriginal) => ({
@@ -56,10 +64,17 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
   return {
     ...original,
     db: {
+      query: {
+        taskRuns: {
+          findFirst: mockTaskRun,
+        },
+      },
       select: vi.fn(() => ({
         from: vi.fn(() => ({
           where: vi.fn(() => ({
             orderBy: vi.fn(() => ({ limit: mockPullRequestFacts })),
+            then: (resolve: (rows: unknown[]) => unknown) =>
+              Promise.resolve(mockTaskPullRequests()).then(resolve),
           })),
           leftJoin: vi.fn(() => ({
             where: vi.fn(() => ({ limit: mockConversationRows })),
@@ -72,6 +87,8 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
     claimPendingFastAgentMemoryEvents: mockClaimFastEvents,
     claimPendingBrainPageRetirements: mockClaimRetirements,
     markFastAgentMemoryEvent: mockMarkFastEvent,
+    markBrainMemoryEvent: mockMarkBrainEvent,
+    settleBrainMemoryEvent: mockSettleBrainEvent,
     settleFastAgentMemoryEvent: mockSettleFastEvent,
     releaseFastAgentMemoryEvents: mockReleaseFastEvents,
     markBrainPageRetirement: mockMarkRetirement,
@@ -95,16 +112,110 @@ beforeEach(() => {
   mockClaimFastEvents.mockResolvedValue([]);
   mockClaimRetirements.mockResolvedValue([]);
   mockConversationRows.mockResolvedValue([]);
+  mockTaskRun.mockResolvedValue(null);
+  mockMarkBrainEvent.mockResolvedValue(undefined);
+  mockSettleBrainEvent.mockResolvedValue('settled');
+  mockRequestHomeComposerPrecompute.mockResolvedValue(undefined);
   mockSettleFastEvent.mockResolvedValue('settled');
   mockSettleRetirement.mockResolvedValue('settled');
   mockPullRequestFacts.mockResolvedValue([]);
+  mockTaskPullRequests.mockReturnValue([]);
   mockRunBrainCollectors.mockResolvedValue({
     backfillProgressed: false,
     interrupted: false,
   });
 });
 
+describe('task memory drain classification', () => {
+  const connection = {
+    baseUrl: 'http://brain.test',
+    token: 'ingest-token',
+  };
+
+  const completedTaskRun = (payloadKind: string, taskId: string) => ({
+    id: taskId === 'snapshot-task' ? 101 : 102,
+    taskId,
+    payloadKind,
+    payload: { description: 'Ship the useful task memory.' },
+    status: 'completed',
+    completedAt: new Date('2026-09-18T04:16:00Z'),
+    task: {
+      id: taskId,
+      title: taskId === 'snapshot-task' ? 'Untitled task' : 'Ship the fix',
+      privacy: 'public',
+      deletedAt: null,
+      workflow: 'standard',
+      initiatorKind: 'user',
+      initiatorAutomation: null,
+      actorDisplayName: 'Test user',
+      initiatorUser: null,
+    },
+  });
+
+  beforeEach(() => {
+    mockResolveConnection.mockResolvedValue(connection);
+    mockIsBrainEmbeddingAvailable.mockResolvedValue(true);
+    mockGetSyncState.mockResolvedValue({ backfillCompletedAt: new Date() });
+    mockPullRequestFacts.mockResolvedValue([]);
+    mockTaskPullRequests.mockReturnValue([]);
+  });
+
+  it('settles snapshot maintenance as skipped without publishing it', async () => {
+    mockClaimEvents
+      .mockResolvedValueOnce([
+        { id: 'snapshot-event', revision: 1, attempts: 1, runId: 101 },
+      ])
+      .mockResolvedValue([]);
+    mockTaskRun.mockResolvedValue(
+      completedTaskRun(TaskPayloadKind.SnapshotEnvironment, 'snapshot-task'),
+    );
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await brainOutboxDrainJob();
+
+    expect(mockMarkBrainEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      'snapshot-event',
+      'skipped',
+      'snapshot environment maintenance task',
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mockSettleFastEvent).not.toHaveBeenCalled();
+  });
+
+  it('still publishes a completed standard task memory', async () => {
+    mockClaimEvents
+      .mockResolvedValueOnce([
+        { id: 'standard-event', revision: 1, attempts: 1, runId: 102 },
+      ])
+      .mockResolvedValue([]);
+    mockTaskRun.mockResolvedValue(
+      completedTaskRun('standard', 'standard-task'),
+    );
+    const fetchMock = vi.fn(async () => Response.json({ result: {} }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await brainOutboxDrainJob();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://brain.test/mcp',
+      expect.objectContaining({
+        method: 'POST',
+        body: expect.stringContaining('put_page'),
+      }),
+    );
+    expect(mockSettleBrainEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      'standard-event',
+      1,
+      'done',
+    );
+  });
+});
+
 import { personIdentitySlug } from '../brain-collectors/identity';
+import { TaskPayloadKind } from '@roomote/types';
 import {
   brainCollectorsJob,
   brainOutboxDrainJob,

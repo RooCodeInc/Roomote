@@ -46,6 +46,7 @@ import {
   BRAIN_PAGE_TYPES,
   type PullRequestStatus,
   RunStatus,
+  TaskPayloadKind,
   type TaskWorkflow,
   ACP_ENVELOPE_EVENT_TYPES,
   isSystemInjectedAcpPromptText,
@@ -809,7 +810,7 @@ export function requestHomeComposerPrecomputeAfterMemorySettlement(
 }
 
 /** Returns false when no pending events remained to claim. */
-async function drainOneBatch(connection: {
+export async function drainOneBatch(connection: {
   baseUrl: string;
   token: string;
 }): Promise<boolean> {
@@ -871,6 +872,16 @@ async function drainOneBatch(connection: {
             await releaseBrainMemoryEvents(db, [event.id]);
           }
 
+          return null;
+        }
+
+        if (run.payloadKind === TaskPayloadKind.SnapshotEnvironment) {
+          await markBrainMemoryEvent(
+            db,
+            event.id,
+            'skipped',
+            'snapshot environment maintenance task',
+          );
           return null;
         }
 

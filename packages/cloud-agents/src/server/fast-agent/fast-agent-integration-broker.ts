@@ -156,7 +156,7 @@ function shapeFastIntegrationTool(
   return {
     ...tool,
     description:
-      'Manage Roomote Sessions and inspect or control existing tasks. Use launch_task to start coding work from a Fast Session.',
+      'Manage Roomote sessions and inspect or control existing tasks. Use launch_task to start coding work from the current session.',
     inputSchema: {
       ...inputSchema,
       properties: {
@@ -168,7 +168,7 @@ function shapeFastIntegrationTool(
         action: {
           ...action,
           enum: actions.filter((candidate) => candidate !== 'launch'),
-          description: 'The Session or existing-task action to perform.',
+          description: 'The session or existing-task action to perform.',
         },
       },
     },
@@ -693,7 +693,7 @@ export async function callFastAgentIntegration(
     request.args.action === 'launch'
   ) {
     throw new Error(
-      'Fast Sessions must use launch_task so the child stays attached and reports settlement to its parent Session.',
+      'Sessions must use launch_task so the child stays attached and reports settlement to its parent session.',
     );
   }
 

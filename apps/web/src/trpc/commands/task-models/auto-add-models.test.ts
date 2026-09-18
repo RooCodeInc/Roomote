@@ -11,6 +11,7 @@ import {
   buildAutoAddedTaskModelSettings,
   collectConnectedTaskModelProviderIds,
 } from './auto-add-models';
+import type { ModelsDevCatalog } from './models-dev';
 
 const ANTHROPIC = getSetupModelProvider('anthropic');
 const OPENROUTER = getSetupModelProvider('openrouter');
@@ -219,7 +220,7 @@ describe('buildAutoAddedTaskModelSettings', () => {
     );
   });
 
-  it('adds the static curated list without metadata (backfilled by the refresh action)', () => {
+  it('adds the static curated list without metadata when no catalog is supplied', () => {
     const result = buildAutoAddedTaskModelSettings({
       provider: GOOGLE,
       persistedTaskModelSettings: null,
@@ -236,6 +237,38 @@ describe('buildAutoAddedTaskModelSettings', () => {
     expect(result!.taskModelSettings.defaultModelId).toBe(
       GOOGLE.defaultRoomoteModel,
     );
+  });
+
+  it('adds recommended Bedrock models with the same catalog metadata used for manual additions', () => {
+    const bedrock = getSetupModelProvider('amazon-bedrock');
+    const metadataCatalog: ModelsDevCatalog = {
+      models: {
+        'anthropic/claude-sonnet-5': {
+          name: 'Claude Sonnet 5',
+          limit: { context: 205_000 },
+          cost: { input: 1, output: 3.2 },
+        },
+      },
+      providers: {},
+      gatewayModelsByLowerSlug: {},
+    };
+
+    const result = buildAutoAddedTaskModelSettings({
+      provider: bedrock,
+      persistedTaskModelSettings: null,
+      connectedProviderIds: new Set(['amazon-bedrock', 'bedrock-mantle']),
+      metadataCatalog,
+    });
+
+    expect(
+      result?.addedModels.find(
+        (model) => model.id === 'bedrock-mantle/anthropic.claude-sonnet-5',
+      )?.metadata,
+    ).toMatchObject({
+      contextWindow: 205_000,
+      inputPricePerToken: 1 / 1_000_000,
+      outputPricePerToken: 3.2 / 1_000_000,
+    });
   });
 
   it('adds default-preset models without adding models unique to another preset', () => {
@@ -335,6 +368,33 @@ describe('appendRecommendedTaskModels', () => {
         .filter((model) => model.id !== glm.id)
         .every((model) => (model.metadata ?? null) === null),
     ).toBe(true);
+  });
+
+  it('hydrates appended recommendations when catalog metadata is available', () => {
+    const result = appendRecommendedTaskModels({
+      models: [glm],
+      connectedProviderIds: new Set(['amazon-bedrock']),
+      metadataCatalog: {
+        models: {
+          'anthropic/claude-sonnet-5': {
+            limit: { context: 205_000 },
+            cost: { input: 1, output: 3.2 },
+          },
+        },
+        providers: {},
+        gatewayModelsByLowerSlug: {},
+      },
+    });
+
+    expect(
+      result.find(
+        (model) => model.id === 'bedrock-mantle/anthropic.claude-sonnet-5',
+      )?.metadata,
+    ).toMatchObject({
+      contextWindow: 205_000,
+      inputPricePerToken: 1 / 1_000_000,
+      outputPricePerToken: 3.2 / 1_000_000,
+    });
   });
 
   it('keeps the models unchanged when nothing is connected or missing', () => {

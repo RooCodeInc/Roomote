@@ -30,7 +30,7 @@ export function startAcceptedFastAgentTurn(input: {
         settled = true;
         settleAcceptance?.({
           accepted: false,
-          reason: input.busyMessage ?? 'Fast session is busy.',
+          reason: input.busyMessage ?? 'This conversation is busy.',
         });
       },
     })
@@ -39,7 +39,7 @@ export function startAcceptedFastAgentTurn(input: {
         settled = true;
         settleAcceptance?.({
           accepted: false,
-          reason: 'Fast session did not accept the request.',
+          reason: 'Roomote did not accept the request.',
         });
       }
     })

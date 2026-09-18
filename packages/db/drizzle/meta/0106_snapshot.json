@@ -1,5 +1,5 @@
 {
-  "id": "0a301672-1102-4720-a4fd-7662b37610eb",
+  "id": "5a5b887c-dcbc-4930-867d-4c32e09afef0",
   "prevId": "9582c9ce-b314-465b-9eff-d87f139ce7f4",
   "version": "7",
   "dialect": "postgresql",
@@ -3422,12 +3422,6 @@
         "manager_discord_channel_id": {
           "name": "manager_discord_channel_id",
           "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "default_automation_target": {
-          "name": "default_automation_target",
-          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -8350,6 +8344,131 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.personal_mcp_servers": {
+      "name": "personal_mcp_servers",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "owner_user_id": {
+          "name": "owner_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "url": {
+          "name": "url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "auth_type": {
+          "name": "auth_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'none'"
+        },
+        "headers": {
+          "name": "headers",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "disabled_tools": {
+          "name": "disabled_tools",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "manual_client_id": {
+          "name": "manual_client_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "manual_client_secret": {
+          "name": "manual_client_secret",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "oauth_server_metadata": {
+          "name": "oauth_server_metadata",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "oauth_server_metadata_fetched_at": {
+          "name": "oauth_server_metadata_fetched_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "oauth_resource_indicator_disabled": {
+          "name": "oauth_resource_indicator_disabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "enabled": {
+          "name": "enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "personal_mcp_servers_owner_user_id_users_id_fk": {
+          "name": "personal_mcp_servers_owner_user_id_users_id_fk",
+          "tableFrom": "personal_mcp_servers",
+          "tableTo": "users",
+          "columnsFrom": ["owner_user_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "personal_mcp_servers_owner_name_unique": {
+          "name": "personal_mcp_servers_owner_name_unique",
+          "nullsNotDistinct": false,
+          "columns": ["owner_user_id", "name"]
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

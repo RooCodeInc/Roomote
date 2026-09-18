@@ -27,6 +27,7 @@ import {
   JUDGMENT_MODEL_SELECTIONS,
   isOpenAiCompatibleProviderId,
   customMcpServerInputSchema,
+  customMcpServerVisibilitySchema,
   isOpenAiRealtimeVoiceId,
   prActions,
   sourceControlProviderSchema,
@@ -315,6 +316,7 @@ import {
   listCustomMcpServersCommand,
   setCustomMcpServerDisabledToolsCommand,
   setCustomMcpServerEnabledCommand,
+  setCustomMcpServerVisibilityCommand,
   updateCustomMcpServerCommand,
 } from '../commands/custom-mcp-servers';
 
@@ -1947,14 +1949,35 @@ export const appRouter = createRouter({
       getCustomMcpAvailabilityCommand(),
     ),
 
-    list: protectedProcedure.query(({ ctx: { auth } }) =>
-      listCustomMcpServersCommand(auth),
-    ),
+    list: protectedProcedure
+      .input(
+        z
+          .object({ scope: customMcpServerVisibilitySchema.optional() })
+          .optional(),
+      )
+      .query(({ ctx: { auth }, input }) =>
+        listCustomMcpServersCommand(auth, input ?? {}),
+      ),
 
     create: protectedProcedure
-      .input(customMcpServerInputSchema)
+      .input(
+        customMcpServerInputSchema.and(
+          z.object({ visibility: customMcpServerVisibilitySchema.optional() }),
+        ),
+      )
       .mutation(({ ctx: { auth }, input }) =>
         createCustomMcpServerCommand(auth, input),
+      ),
+
+    setVisibility: protectedProcedure
+      .input(
+        z.object({
+          id: z.string().uuid(),
+          visibility: customMcpServerVisibilitySchema,
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        setCustomMcpServerVisibilityCommand(auth, input),
       ),
 
     update: protectedProcedure

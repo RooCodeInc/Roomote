@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import { RunStatus, TaskPayloadKind } from '@roomote/types';
@@ -151,9 +151,11 @@ const baseSession = {
   transportErrorCategory: null,
   isLoading: false,
   isSessionLoading: false,
+  isSessionFetching: false,
   isTokenLoading: false,
   prompt: null,
   refreshConnection: vi.fn(),
+  retryInitialLoad: vi.fn(),
   sessionState: 'booting',
   task: {
     title: 'Task title',
@@ -203,6 +205,55 @@ describe('SandboxPage', () => {
     renderPage();
 
     expect(screen.getByLabelText('Loading task workspace')).toBeInTheDocument();
+  });
+
+  it('offers an accessible retry only for an initial task-load error', () => {
+    const retryInitialLoad = vi.fn();
+    useTaskSessionMock.mockReturnValue({
+      ...baseSession,
+      retryInitialLoad,
+      sessionState: 'error',
+    });
+    useTaskMessageEnvelopesMock.mockReturnValue({});
+
+    renderPage();
+
+    const retry = screen.getByRole('button', { name: 'Retry' });
+    expect(retry).toBeEnabled();
+    fireEvent.click(retry);
+    expect(retryInitialLoad).toHaveBeenCalledOnce();
+  });
+
+  it('disables retry while the initial task load is fetching again', () => {
+    useTaskSessionMock.mockReturnValue({
+      ...baseSession,
+      isSessionFetching: true,
+      sessionState: 'error',
+    });
+    useTaskMessageEnvelopesMock.mockReturnValue({});
+
+    renderPage();
+
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeDisabled();
+  });
+
+  it('does not offer retry for permission-safe not-found states', () => {
+    useTaskSessionMock.mockReturnValue({
+      ...baseSession,
+      sessionState: 'not-found',
+    });
+    useTaskMessageEnvelopesMock.mockReturnValue({});
+
+    renderPage();
+
+    expect(
+      screen.getByText(
+        'This task does not exist or you do not have permission to view it.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Retry' }),
+    ).not.toBeInTheDocument();
   });
 
   it('keeps the startup surface for booting tasks with no transcript content yet', () => {

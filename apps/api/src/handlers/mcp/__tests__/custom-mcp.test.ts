@@ -52,6 +52,26 @@ vi.mock('@roomote/db/encryption', () => ({
 
 vi.mock('@roomote/sdk/server', () => ({
   getValidAccessToken: mockGetValidAccessToken,
+  // The resolver reads either table; here it serves the row the test staged,
+  // in the resolved shape the proxy consumes.
+  findCustomMcpServerById: async () => {
+    const row = (await mockFindCustomServer()) as
+      | (Record<string, unknown> & { stdio?: unknown })
+      | null
+      | undefined;
+    if (!row) return null;
+    return {
+      ...row,
+      ownerUserId: (row.ownerUserId as string | null | undefined) ?? null,
+      createdByUserId: null,
+      isStdio: Boolean(row.stdio),
+      enabled: row.enabled ?? true,
+    };
+  },
+  customMcpConnectionWhere: (server: {
+    id: string;
+    ownerUserId: string | null;
+  }) => ({ connectionFor: server.id, userId: server.ownerUserId }),
 }));
 
 import { createCustomMcpProxy } from '../custom-mcp';
@@ -279,6 +299,98 @@ describe('createCustomMcpProxy', () => {
     expect(lastUpstreamHeaders?.authorization).toBe(
       'Bearer custom-access-token',
     );
+  });
+
+  describe('personal servers', () => {
+    const OWNER = 'user-1';
+
+    function personalRow(overrides: Partial<Record<string, unknown>> = {}) {
+      return buildServerRow({
+        url: upstreamUrl(),
+        ownerUserId: OWNER,
+        ...overrides,
+      });
+    }
+
+    it('serves the owner through their own Fast token', async () => {
+      mockFindCustomServer.mockResolvedValue(personalRow());
+
+      const response = await postMcp(
+        createApp(createAuthToken()),
+        initializeRequest,
+      );
+
+      expect(response.status).toBe(200);
+      expect(lastUpstreamHeaders?.['x-api-key']).toBe('secret-one');
+    });
+
+    it('hides it from every other member without contacting the upstream', async () => {
+      mockFindCustomServer.mockResolvedValue(personalRow());
+      lastUpstreamHeaders = null;
+
+      const response = await postMcp(
+        createApp({ ...createAuthToken(), userId: 'someone-else' }),
+        initializeRequest,
+      );
+
+      expect(response.status).toBe(404);
+      expect(lastUpstreamHeaders).toBeNull();
+      expect(mockGetValidAccessToken).not.toHaveBeenCalled();
+    });
+
+    it('serves a task run only when it acts for the owner', async () => {
+      mockFindCustomServer.mockResolvedValue(personalRow());
+      mockFindTaskRun.mockResolvedValue({ actingUserId: OWNER, taskId: 't1' });
+
+      const asOwner = await postMcp(createApp(), initializeRequest);
+      expect(asOwner.status).toBe(200);
+
+      mockFindTaskRun.mockResolvedValue({
+        actingUserId: 'someone-else',
+        taskId: 't1',
+      });
+      lastUpstreamHeaders = null;
+
+      const asOther = await postMcp(createApp(), initializeRequest);
+      expect(asOther.status).toBe(404);
+      expect(lastUpstreamHeaders).toBeNull();
+    });
+
+    it("injects the owner's own OAuth connection, never the deployment one", async () => {
+      mockFindCustomServer.mockResolvedValue(
+        personalRow({ authType: 'oauth', headers: null }),
+      );
+      mockFindConnection.mockResolvedValue({ id: 'conn-owner' });
+      mockGetValidAccessToken.mockResolvedValue('owner-access-token');
+
+      const response = await postMcp(
+        createApp(createAuthToken()),
+        initializeRequest,
+      );
+
+      expect(response.status).toBe(200);
+      expect(lastUpstreamHeaders?.authorization).toBe(
+        'Bearer owner-access-token',
+      );
+      const where = JSON.stringify(mockFindConnection.mock.calls[0]?.[0]);
+      expect(where).toContain(`"userId":"${OWNER}"`);
+    });
+
+    it('points the owner at Personal settings when it needs reconnecting', async () => {
+      mockFindCustomServer.mockResolvedValue(
+        personalRow({ authType: 'oauth', headers: null }),
+      );
+      mockFindConnection.mockResolvedValue(undefined);
+
+      const response = await postMcp(
+        createApp(createAuthToken()),
+        initializeRequest,
+      );
+
+      expect(response.status).toBe(401);
+      const body = (await response.json()) as { error: { message: string } };
+      expect(body.error.message).toContain('Personal settings');
+    });
   });
 
   it('returns a reconnect error when oauth tokens are missing', async () => {

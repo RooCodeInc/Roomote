@@ -6,21 +6,24 @@ import {
   customMcpServers,
   db,
   eq,
-  isNull,
   mcpConnections,
   mcpOauthReplays,
+  personalMcpServers,
   sql,
   users,
 } from '@roomote/db/server';
 import { decrypt } from '@roomote/db/encryption';
 import { Env, isCustomMcpDisabled } from '@roomote/env';
 import {
+  DEFAULT_CUSTOM_MCP_SERVER_VISIBILITY,
   MAX_CUSTOM_MCP_SERVERS,
+  MAX_PERSONAL_MCP_SERVERS,
   PRODUCT_NAME,
   customMcpConnectionId,
   customMcpRemoteServerInputSchema,
   parseMcpJsonRpcPayload,
   type OAuthClientInformation,
+  type CustomMcpServerVisibility,
   type OAuthClientMetadata,
   type OAuthServerMetadata,
 } from '@roomote/types';
@@ -34,6 +37,13 @@ import {
 } from './data';
 import { createBoundedCustomMcpFetch } from './custom-fetch';
 import {
+  canManageCustomMcpServer,
+  customMcpConnectionWhere,
+  findCustomMcpServerById,
+  storeCustomMcpServerMetadata,
+  type ResolvedCustomMcpServer,
+} from './custom-servers';
+import {
   ClientRegistrationRejectedError,
   discoverOAuthEndpoints,
   discoverOAuthProtectedResourceMetadata,
@@ -44,11 +54,14 @@ import {
 const MCP_PROTOCOL_VERSION = '2025-06-18';
 const OAUTH_REPLAY_TTL_MS = 24 * 60 * 60 * 1000;
 const SETTINGS_PATH = '/integrations';
+const PERSONAL_SETTINGS_PATH = '/settings/personal';
 
 type RemoteMcpTool = { name: string; description: string | null };
 type ServerResultIdentity = {
   integrationId: string;
   name: string;
+  /** `owner`: private to the requesting member. `deployment`: shared with everyone. */
+  visibility: CustomMcpServerVisibility;
   usage: string;
 };
 
@@ -86,6 +99,15 @@ export type AddRemoteCustomMcpResult =
       status: 'disabled';
       settingsUrl: string;
       reused: true;
+    })
+  | (ServerResultIdentity & {
+      /**
+       * A shared server someone else added still needs setup only they or an
+       * administrator can finish. No link is returned: it would not work for
+       * this member.
+       */
+      status: 'pending_owner';
+      reused: true;
     });
 
 type RemoteMcpProbe =
@@ -97,12 +119,18 @@ function publicUrl(path: string): string {
   return new URL(path, Env.R_PUBLIC_URL ?? Env.R_APP_URL).toString();
 }
 
-function serverResultIdentity(
-  server: typeof customMcpServers.$inferSelect,
-): ServerResultIdentity {
+function settingsUrlFor(server: { ownerUserId: string | null }): string {
+  return publicUrl(server.ownerUserId ? PERSONAL_SETTINGS_PATH : SETTINGS_PATH);
+}
+
+function serverResultIdentity(server: {
+  name: string;
+  ownerUserId: string | null;
+}): ServerResultIdentity {
   return {
     integrationId: server.name,
     name: server.name,
+    visibility: server.ownerUserId ? 'owner' : 'deployment',
     usage: `Use integrationId '${server.name}' with find_integration_tools and call_integration_tool. Do not use a server UUID as the integration ID.`,
   };
 }
@@ -132,11 +160,9 @@ function normalizeFastRemoteMcpName(value: string): string {
   return truncated.endsWith('-') ? truncated.slice(0, -1) : truncated;
 }
 
-function findMatchingRemoteMcpServer(
-  servers: Array<typeof customMcpServers.$inferSelect>,
-  name: string,
-  normalizedUrl: string,
-) {
+function findMatchingRemoteMcpServer<
+  T extends { id: string; name: string; url: string | null },
+>(servers: T[], name: string, normalizedUrl: string): T | undefined {
   const nameMatch = servers.find((server) => server.name === name);
   const urlMatch = servers.find(
     (server) =>
@@ -476,7 +502,7 @@ export function describeRegistrationRefusal(
  * reuses the stored client and skips its own registration.
  */
 async function ensureRegisteredClient(
-  server: typeof customMcpServers.$inferSelect,
+  server: { name: string; url: string | null },
   connectionId: string,
   serverMetadata: OAuthServerMetadata,
 ): Promise<{ ok: true } | { ok: false; reason: string | undefined }> {
@@ -547,11 +573,25 @@ export async function prepareDeploymentCustomMcpOAuthConnection(
   serverId: string,
   options: { resetClient?: boolean } = {},
 ) {
-  const mcpId = customMcpConnectionId(serverId);
+  return prepareCustomMcpOAuthConnection(
+    { id: serverId, ownerUserId: null },
+    options,
+  );
+}
+
+/**
+ * Mint or reset the pending OAuth connection that belongs to a server: the
+ * deployment row for a shared server, the owner's own row for a personal one.
+ */
+export async function prepareCustomMcpOAuthConnection(
+  server: { id: string; ownerUserId: string | null },
+  options: { resetClient?: boolean } = {},
+) {
+  const mcpId = customMcpConnectionId(server.id);
   const [connection] = await db
     .insert(mcpConnections)
     .values({
-      userId: null,
+      userId: server.ownerUserId,
       mcpId,
       connectionRole: 'default',
       authConfig: {},
@@ -577,27 +617,37 @@ export async function prepareDeploymentCustomMcpOAuthConnection(
 }
 
 async function resultForServer(input: {
-  server: typeof customMcpServers.$inferSelect;
-  userId: string;
+  server: ResolvedCustomMcpServer;
+  actor: { userId: string; isAdmin: boolean };
   sessionId: string;
   reused: boolean;
 }): Promise<AddRemoteCustomMcpResult> {
-  const { server } = input;
-  if (!server.url) throw new Error('The matching custom MCP is not remote.');
+  const { server, actor } = input;
+  const serverUrl = server.url;
+  if (!serverUrl) throw new Error('The matching custom MCP is not remote.');
+  const identity = serverResultIdentity(server);
+  const settingsUrl = settingsUrlFor(server);
+  // Setup (headers, client registration, authorization) is for whoever may
+  // manage the server. Another member who asks for the same shared server is
+  // told it is waiting on its owner, never handed a link that cannot work.
+  const canManage = canManageCustomMcpServer(server, actor);
+  const pendingOwner = (): AddRemoteCustomMcpResult => ({
+    status: 'pending_owner',
+    ...identity,
+    reused: true,
+  });
+
   if (!server.enabled) {
-    return {
-      status: 'disabled',
-      ...serverResultIdentity(server),
-      settingsUrl: publicUrl(SETTINGS_PATH),
-      reused: true,
-    };
+    return canManage
+      ? { status: 'disabled', ...identity, settingsUrl, reused: true }
+      : pendingOwner();
   }
 
   if (server.authType === 'none') {
     return {
       status: 'connected',
-      ...serverResultIdentity(server),
-      tools: await listRemoteMcpTools(server.url),
+      ...identity,
+      tools: await listRemoteMcpTools(serverUrl),
       reused: input.reused,
     };
   }
@@ -605,9 +655,9 @@ async function resultForServer(input: {
     if (server.headers && Object.keys(server.headers).length > 0) {
       return {
         status: 'connected',
-        ...serverResultIdentity(server),
+        ...identity,
         tools: await listRemoteMcpTools(
-          server.url,
+          serverUrl,
           Object.fromEntries(
             Object.entries(server.headers).map(([name, value]) => [
               name,
@@ -618,74 +668,66 @@ async function resultForServer(input: {
         reused: input.reused,
       };
     }
+    if (!canManage) return pendingOwner();
     return {
       status: 'needs_static_headers',
-      ...serverResultIdentity(server),
-      settingsUrl: publicUrl(SETTINGS_PATH),
+      ...identity,
+      settingsUrl,
       reused: input.reused,
     };
-  }
-
-  let oauthServerMetadata = server.oauthServerMetadata;
-  if (!oauthServerMetadata) {
-    oauthServerMetadata = await discoverOAuthEndpoints(server.url, {
-      fetchImpl: createBoundedCustomMcpFetch(),
-      resource: server.url,
-    });
-    await db
-      .update(customMcpServers)
-      .set({
-        oauthServerMetadata,
-        oauthServerMetadataFetchedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(customMcpServers.id, server.id));
   }
 
   const existingConnection = await db.query.mcpConnections.findFirst({
-    where: and(
-      eq(mcpConnections.mcpId, customMcpConnectionId(server.id)),
-      isNull(mcpConnections.userId),
-    ),
+    where: customMcpConnectionWhere(server),
   });
-  if (existingConnection?.authStatus === 'error' && !server.manualClientId) {
-    return {
-      status: 'client_registration_required',
-      ...serverResultIdentity(server),
-      settingsUrl: publicUrl(SETTINGS_PATH),
-      reused: input.reused,
-    };
-  }
   if (existingConnection?.authStatus === 'authenticated') {
     const accessToken = await getValidAccessToken(
       existingConnection.id,
-      server.url,
+      serverUrl,
     );
     if (accessToken) {
       return {
         status: 'connected',
-        ...serverResultIdentity(server),
-        tools: await listRemoteMcpTools(server.url, {
+        ...identity,
+        tools: await listRemoteMcpTools(serverUrl, {
           authorization: `Bearer ${accessToken}`,
         }),
         reused: input.reused,
       };
     }
   }
+  if (!canManage) return pendingOwner();
 
-  const { connectionId, mcpId } =
-    await prepareDeploymentCustomMcpOAuthConnection(server.id);
+  let oauthServerMetadata = server.oauthServerMetadata;
+  if (!oauthServerMetadata) {
+    oauthServerMetadata = await discoverOAuthEndpoints(serverUrl, {
+      fetchImpl: createBoundedCustomMcpFetch(),
+      resource: serverUrl,
+    });
+    await storeCustomMcpServerMetadata(server, oauthServerMetadata);
+  }
+
+  if (existingConnection?.authStatus === 'error' && !server.manualClientId) {
+    return {
+      status: 'client_registration_required',
+      ...identity,
+      settingsUrl,
+      reused: input.reused,
+    };
+  }
+
+  const { connectionId, mcpId } = await prepareCustomMcpOAuthConnection(server);
   if (!server.manualClientId && !oauthServerMetadata.registration_endpoint) {
     return {
       status: 'client_registration_required',
-      ...serverResultIdentity(server),
+      ...identity,
       authorizeUrl: await prepareOAuthReplay({
         connectionId,
         mcpId,
         sessionId: input.sessionId,
-        userId: input.userId,
+        userId: actor.userId,
       }),
-      settingsUrl: publicUrl(SETTINGS_PATH),
+      settingsUrl,
       reused: input.reused,
     };
   }
@@ -699,8 +741,8 @@ async function resultForServer(input: {
       await updateAuthStatus(connectionId, 'error', false);
       return {
         status: 'client_registration_required',
-        ...serverResultIdentity(server),
-        settingsUrl: publicUrl(SETTINGS_PATH),
+        ...identity,
+        settingsUrl,
         ...(registration.reason ? { reason: registration.reason } : {}),
         reused: input.reused,
       };
@@ -710,21 +752,35 @@ async function resultForServer(input: {
     connectionId,
     mcpId,
     sessionId: input.sessionId,
-    userId: input.userId,
+    userId: actor.userId,
   });
   return {
     status: 'authorization_required',
-    ...serverResultIdentity(server),
+    ...identity,
     authorizeUrl,
     reused: input.reused,
   };
 }
 
+/** Resolve a freshly written or matched row into the shared server shape. */
+async function requireServer(id: string): Promise<ResolvedCustomMcpServer> {
+  const server = await findCustomMcpServerById(id);
+  if (!server) throw new Error('The custom MCP server could not be loaded.');
+  return server;
+}
+
+/**
+ * Add, or find again, a remote MCP server for a Fast Session. Any active
+ * member may call this, mirroring integration keys: `deployment` (the
+ * default) shares the server with everyone, `owner` keeps it private to the
+ * requesting member under Personal settings.
+ */
 export async function addRemoteCustomMcpForFast(input: {
   userId: string;
   sessionId: string;
   name: string;
   url: string;
+  visibility?: CustomMcpServerVisibility;
 }): Promise<AddRemoteCustomMcpResult> {
   if (isCustomMcpDisabled(Env.R_CUSTOM_MCP_DISABLED)) {
     throw new Error(
@@ -735,11 +791,11 @@ export async function addRemoteCustomMcpForFast(input: {
     where: eq(users.id, input.userId),
     columns: { role: true, deletedAt: true },
   });
-  if (!user || user.deletedAt || user.role !== 'admin') {
-    throw new Error(
-      'Only deployment administrators can add custom MCP servers.',
-    );
+  if (!user || user.deletedAt) {
+    throw new Error('Only active members can add custom MCP servers.');
   }
+  const actor = { userId: input.userId, isAdmin: user.role === 'admin' };
+  const visibility = input.visibility ?? DEFAULT_CUSTOM_MCP_SERVER_VISIBILITY;
 
   const parsed = customMcpRemoteServerInputSchema.parse({
     transport: 'remote',
@@ -748,6 +804,116 @@ export async function addRemoteCustomMcpForFast(input: {
     authType: 'none',
   });
   const normalizedUrl = normalizeFastRemoteMcpUrl(parsed.url);
+
+  return visibility === 'owner'
+    ? addPersonalRemoteMcp({ ...input, actor, parsed, normalizedUrl })
+    : addDeploymentRemoteMcp({ ...input, actor, parsed, normalizedUrl });
+}
+
+type AddRemoteMcpContext = {
+  sessionId: string;
+  actor: { userId: string; isAdmin: boolean };
+  parsed: { name: string };
+  normalizedUrl: string;
+};
+
+async function addPersonalRemoteMcp(
+  input: AddRemoteMcpContext,
+): Promise<AddRemoteCustomMcpResult> {
+  const { actor, parsed, normalizedUrl } = input;
+  const ownedWhere = eq(personalMcpServers.ownerUserId, actor.userId);
+  const existing = findMatchingRemoteMcpServer(
+    await db.query.personalMcpServers.findMany({ where: ownedWhere }),
+    parsed.name,
+    normalizedUrl,
+  );
+  if (existing) {
+    return resultForServer({
+      server: await requireServer(existing.id),
+      actor,
+      sessionId: input.sessionId,
+      reused: true,
+    });
+  }
+
+  const probe = await probeRemoteMcp(normalizedUrl);
+  if (probe.status === 'needs_static_headers') {
+    return {
+      status: 'needs_static_headers',
+      name: parsed.name,
+      settingsUrl: publicUrl(PERSONAL_SETTINGS_PATH),
+      reused: false,
+    };
+  }
+  const selected = await db.transaction(async (tx) => {
+    // Scope the lock to the owner: two members adding the same URL privately
+    // never wait on, or collide with, each other.
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${actor.userId}:${normalizedUrl}`}, 0))`,
+    );
+    const owned = await tx.query.personalMcpServers.findMany({
+      where: ownedWhere,
+    });
+    const lockedExisting = findMatchingRemoteMcpServer(
+      owned,
+      parsed.name,
+      normalizedUrl,
+    );
+    if (lockedExisting) {
+      return { id: lockedExisting.id, reused: true as const };
+    }
+    if (owned.length >= MAX_PERSONAL_MCP_SERVERS) {
+      throw new Error(
+        `At most ${MAX_PERSONAL_MCP_SERVERS} personal MCP servers are supported.`,
+      );
+    }
+    const [created] = await tx
+      .insert(personalMcpServers)
+      .values({
+        ownerUserId: actor.userId,
+        name: parsed.name,
+        url: normalizedUrl,
+        authType:
+          probe.status === 'oauth' ? ('oauth' as const) : ('none' as const),
+        ...(probe.status === 'oauth'
+          ? {
+              oauthServerMetadata: probe.metadata,
+              oauthServerMetadataFetchedAt: new Date(),
+            }
+          : {}),
+      })
+      .onConflictDoNothing({
+        target: [personalMcpServers.ownerUserId, personalMcpServers.name],
+      })
+      .returning({ id: personalMcpServers.id });
+    if (!created) {
+      throw new Error(
+        `You already have a personal MCP server named '${parsed.name}'.`,
+      );
+    }
+    return { id: created.id, reused: false as const };
+  });
+
+  if (!selected.reused && probe.status === 'connected') {
+    return {
+      status: 'connected',
+      ...serverResultIdentity({ name: parsed.name, ownerUserId: actor.userId }),
+      tools: probe.tools,
+      reused: false,
+    };
+  }
+  return resultForServer({
+    server: await requireServer(selected.id),
+    actor,
+    sessionId: input.sessionId,
+    reused: selected.reused,
+  });
+}
+
+async function addDeploymentRemoteMcp(
+  input: AddRemoteMcpContext,
+): Promise<AddRemoteCustomMcpResult> {
+  const { actor, parsed, normalizedUrl } = input;
   const existing = findMatchingRemoteMcpServer(
     await db.query.customMcpServers.findMany(),
     parsed.name,
@@ -755,8 +921,8 @@ export async function addRemoteCustomMcpForFast(input: {
   );
   if (existing) {
     return resultForServer({
-      server: existing,
-      userId: input.userId,
+      server: await requireServer(existing.id),
+      actor,
       sessionId: input.sessionId,
       reused: true,
     });
@@ -781,7 +947,7 @@ export async function addRemoteCustomMcpForFast(input: {
       normalizedUrl,
     );
     if (lockedExisting) {
-      return { server: lockedExisting, reused: true as const };
+      return { id: lockedExisting.id, reused: true as const };
     }
 
     const [countRow] = await tx
@@ -792,15 +958,14 @@ export async function addRemoteCustomMcpForFast(input: {
         `At most ${MAX_CUSTOM_MCP_SERVERS} custom MCP servers are supported.`,
       );
     }
-    const authType =
-      probe.status === 'oauth' ? ('oauth' as const) : ('none' as const);
     const [created] = await tx
       .insert(customMcpServers)
       .values({
         name: parsed.name,
         url: normalizedUrl,
-        authType,
-        createdByUserId: input.userId,
+        authType:
+          probe.status === 'oauth' ? ('oauth' as const) : ('none' as const),
+        createdByUserId: actor.userId,
         ...(probe.status === 'oauth'
           ? {
               oauthServerMetadata: probe.metadata,
@@ -809,36 +974,27 @@ export async function addRemoteCustomMcpForFast(input: {
           : {}),
       })
       .onConflictDoNothing({ target: [customMcpServers.name] })
-      .returning();
+      .returning({ id: customMcpServers.id });
     if (!created) {
       throw new Error(
         `A custom MCP server named '${parsed.name}' already exists.`,
       );
     }
-    return { server: created, reused: false as const };
+    return { id: created.id, reused: false as const };
   });
 
-  if (selected.reused) {
-    return resultForServer({
-      server: selected.server,
-      userId: input.userId,
-      sessionId: input.sessionId,
-      reused: true,
-    });
-  }
-
-  if (probe.status === 'connected') {
+  if (!selected.reused && probe.status === 'connected') {
     return {
       status: 'connected',
-      ...serverResultIdentity(selected.server),
+      ...serverResultIdentity({ name: parsed.name, ownerUserId: null }),
       tools: probe.tools,
       reused: false,
     };
   }
   return resultForServer({
-    server: selected.server,
-    userId: input.userId,
+    server: await requireServer(selected.id),
+    actor,
     sessionId: input.sessionId,
-    reused: false,
+    reused: selected.reused,
   });
 }

@@ -152,7 +152,7 @@ const DISCORD_HELP_MESSAGE = [
   '',
   '**Available commands**',
   '`/new request:<request>` — start a fresh task.',
-  '`/goal objective:<objective>` — keep this Session working toward an objective across multiple turns.',
+  '`/goal objective:<objective>` — keep this session working toward an objective across multiple turns.',
   '`/link code:<code>` — link this Discord account in a DM with me.',
   '`/help` — show this message.',
   '',

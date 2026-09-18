@@ -23,8 +23,10 @@ import {
   isParsableProductVersion,
   normalizeProductVersion,
   parseProductReleaseHistory,
+  RELEASE_ANNOUNCEMENTS_SETTINGS_HASH,
   toReleaseTag,
 } from '@roomote/types';
+import { buildAutomationResultBlocks } from '@roomote/slack';
 
 import { getCommunicationProviderAdapter } from './communication-providers';
 import {
@@ -34,6 +36,10 @@ import {
   sendAutomationEmailReport,
   type ResolvedAutomationDestination,
 } from '../automations/destination';
+import {
+  buildAutomationIconUrl,
+  buildManagerSlackSettingsUrl,
+} from './manager-slack';
 
 const DEPLOYMENT_ID = 'default';
 const DELIVERY_LEASE_MS = 2 * 60 * 1_000;
@@ -178,7 +184,16 @@ async function sendReleaseAnnouncement(input: {
     idempotencyKey: input.idempotencyKey,
     ...(serviceUrl ? { serviceUrl } : {}),
     ...(destination.provider === 'slack'
-      ? { blocks: [{ type: 'markdown' as const, text: input.text }] }
+      ? {
+          blocks: buildAutomationResultBlocks({
+            title: 'Announce Roomote Updates',
+            iconUrl: buildAutomationIconUrl('megaphone'),
+            configureUrl: buildManagerSlackSettingsUrl(
+              RELEASE_ANNOUNCEMENTS_SETTINGS_HASH,
+            ),
+            contentText: input.text,
+          }),
+        }
       : {}),
   });
   return result.messageId;

@@ -99,6 +99,25 @@ describe('UserMenu', () => {
     ).toBeInTheDocument();
   });
 
+  it('keeps the deployment host out of the user summary', async () => {
+    render(<UserMenu />);
+
+    await screen.findByText('About Roomote');
+    expect(
+      screen.queryByLabelText(`Deployment host: ${window.location.host}`),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows the current deployment host in About without including a path', async () => {
+    render(<UserMenu />);
+
+    fireEvent.click(screen.getByText('About Roomote'));
+
+    expect(
+      await screen.findByLabelText(`Deployment host: ${window.location.host}`),
+    ).toHaveTextContent(window.location.host);
+  });
+
   it('hides personal settings while setup is incomplete', () => {
     render(<UserMenu showPersonalSettings={false} />);
 
