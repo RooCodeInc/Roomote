@@ -111,6 +111,77 @@ describe('automation result blocks', () => {
     });
   });
 
+  it('preserves report paragraphs without spacing list items or trailing content', () => {
+    const [container] = buildAutomationResultBlocks({
+      title: 'Release report',
+      iconUrl: 'https://app.example.com/automation-icons/zap.png',
+      configureUrl: 'https://app.example.com/automations#release',
+      contentText: [
+        "## What's new",
+        '',
+        'Roomote is faster.',
+        '',
+        '## Highlights',
+        '',
+        '- Faster setup',
+        '- Better cards',
+        '',
+        'See all changes.',
+      ].join('\n'),
+    });
+
+    expect(container?.type).toBe('container');
+    if (container?.type !== 'container') return;
+    expect(container.child_blocks).toContainEqual({
+      type: 'rich_text',
+      elements: [
+        {
+          type: 'rich_text_section',
+          elements: [
+            { type: 'text', text: "What's new", style: { bold: true } },
+            { type: 'text', text: '\n\n' },
+          ],
+        },
+        {
+          type: 'rich_text_section',
+          elements: [
+            { type: 'text', text: 'Roomote is faster.' },
+            { type: 'text', text: '\n\n' },
+          ],
+        },
+        {
+          type: 'rich_text_section',
+          elements: [
+            { type: 'text', text: 'Highlights', style: { bold: true } },
+            { type: 'text', text: '\n\n' },
+          ],
+        },
+        {
+          type: 'rich_text_list',
+          style: 'bullet',
+          elements: [
+            {
+              type: 'rich_text_section',
+              elements: [{ type: 'text', text: 'Faster setup' }],
+            },
+            {
+              type: 'rich_text_section',
+              elements: [{ type: 'text', text: 'Better cards' }],
+            },
+          ],
+        },
+        {
+          type: 'rich_text_section',
+          elements: [{ type: 'text', text: '\n\n' }],
+        },
+        {
+          type: 'rich_text_section',
+          elements: [{ type: 'text', text: 'See all changes.' }],
+        },
+      ],
+    });
+  });
+
   it('leaves explicitly provided native tables unchanged', () => {
     const table = {
       type: 'table' as const,

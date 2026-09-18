@@ -196,6 +196,87 @@ describe('convertMarkdownToRichText', () => {
     });
   });
 
+  it('preserves bounded paragraph breaks when requested', () => {
+    expect(
+      convertMarkdownToRichText(
+        ['# Heading', '', 'Intro.', '', '- one', '- two', '', 'Outro.'].join(
+          '\n',
+        ),
+        { preserveParagraphs: true },
+      ),
+    ).toEqual({
+      type: 'rich_text',
+      elements: [
+        {
+          type: 'rich_text_section',
+          elements: [
+            { type: 'text', text: 'Heading', style: { bold: true } },
+            { type: 'text', text: '\n\n' },
+          ],
+        },
+        {
+          type: 'rich_text_section',
+          elements: [
+            { type: 'text', text: 'Intro.' },
+            { type: 'text', text: '\n\n' },
+          ],
+        },
+        {
+          type: 'rich_text_list',
+          style: 'bullet',
+          elements: [
+            {
+              type: 'rich_text_section',
+              elements: [{ type: 'text', text: 'one' }],
+            },
+            {
+              type: 'rich_text_section',
+              elements: [{ type: 'text', text: 'two' }],
+            },
+          ],
+        },
+        {
+          type: 'rich_text_section',
+          elements: [{ type: 'text', text: '\n\n' }],
+        },
+        {
+          type: 'rich_text_section',
+          elements: [{ type: 'text', text: 'Outro.' }],
+        },
+      ],
+    });
+  });
+
+  it('keeps code blank lines and empty input stable', () => {
+    expect(
+      convertMarkdownToRichText(
+        ['```', 'first', '', 'second', '```', '', 'after'].join('\n'),
+        { preserveParagraphs: true },
+      ).elements,
+    ).toEqual([
+      {
+        type: 'rich_text_preformatted',
+        elements: [{ type: 'text', text: 'first\n\nsecond' }],
+      },
+      {
+        type: 'rich_text_section',
+        elements: [{ type: 'text', text: '\n\n' }],
+      },
+      {
+        type: 'rich_text_section',
+        elements: [{ type: 'text', text: 'after' }],
+      },
+    ]);
+    expect(
+      convertMarkdownToRichText(' \n\n', { preserveParagraphs: true }),
+    ).toEqual({
+      type: 'rich_text',
+      elements: [
+        { type: 'rich_text_section', elements: [{ type: 'text', text: '' }] },
+      ],
+    });
+  });
+
   it('never returns an empty rich_text entity', () => {
     expect(convertMarkdownToRichText('   \n\n')).toEqual({
       type: 'rich_text',
