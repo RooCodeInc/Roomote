@@ -24,6 +24,58 @@ interface DesktopStreamSession {
   streamUrl: string;
 }
 
+/** How long to wait for the desktop service to say who holds control. */
+const PRESENCE_TIMEOUT_MS = 3_000;
+
+/**
+ * Asks the desktop service whether a viewer holds control, without taking it.
+ * Connecting to the control channel supersedes the current controller, so the
+ * panel asks first and only watches when someone else is driving. Resolves to
+ * null when the service cannot say (an older service has no such endpoint).
+ */
+function probeControlHeld(controlUrl: string): Promise<boolean | null> {
+  return new Promise((resolve) => {
+    let settled = false;
+    let socket: WebSocket | null = null;
+    const finish = (held: boolean | null) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeout);
+      try {
+        socket?.close();
+      } catch {
+        // Already closed.
+      }
+      resolve(held);
+    };
+    const timeout = window.setTimeout(() => finish(null), PRESENCE_TIMEOUT_MS);
+    try {
+      const url = new URL(controlUrl, window.location.href);
+      url.pathname = url.pathname.replace(/\/control$/, '/presence');
+      socket = new WebSocket(url.toString());
+    } catch {
+      finish(null);
+      return;
+    }
+    socket.addEventListener('message', (event) => {
+      try {
+        const message = JSON.parse(String(event.data)) as {
+          control_held?: unknown;
+        };
+        finish(
+          typeof message.control_held === 'boolean'
+            ? message.control_held
+            : null,
+        );
+      } catch {
+        finish(null);
+      }
+    });
+    socket.addEventListener('close', () => finish(null));
+    socket.addEventListener('error', () => finish(null));
+  });
+}
+
 /** How long to wait for the first decoded frame before giving up. */
 export const STREAM_START_TIMEOUT_MS = 30_000;
 
@@ -834,7 +886,12 @@ export function DesktopStreamClient({
     }, RECONNECT_DELAY_MS);
   };
 
-  const start = () => {
+  /**
+   * Starts the desktop. `watchOnly` plays the stream without claiming input
+   * control, for a viewer who opened the panel while someone else is driving;
+   * the header's Take control button claims it deliberately.
+   */
+  const start = (options: { watchOnly?: boolean } = {}) => {
     const video = videoRef.current;
     if (!video || !session) {
       return;
@@ -853,19 +910,47 @@ export function DesktopStreamClient({
         'Remote desktop did not start in time. The sandbox desktop service may not be running.',
       );
     }, STREAM_START_TIMEOUT_MS);
+    if (options.watchOnly) {
+      setControlState('taken');
+      loadStream();
+      return;
+    }
     // The control channel negotiates the screen size first; the stream loads
     // once the sandbox confirms it (or immediately if control is unavailable).
     pendingInitialPlayRef.current = true;
     connectControl(session.controlUrl);
   };
 
+  // The desktop starts on its own; there is nothing to decide when nobody
+  // else is using it. The pop-out always takes control, because it was opened
+  // to take over from the panel. The panel asks who holds control first and
+  // only watches when another viewer is driving. If the service cannot say,
+  // the Start button stays, since starting would take control blindly.
   const autoStartedRef = useRef(false);
+  const [probing, setProbing] = useState(false);
   useEffect(() => {
-    if (!standalone || !session || autoStartedRef.current) {
+    if (!session || autoStartedRef.current) {
       return;
     }
     autoStartedRef.current = true;
-    start();
+    if (standalone) {
+      start();
+      return;
+    }
+    let cancelled = false;
+    setProbing(true);
+    void probeControlHeld(session.controlUrl).then((held) => {
+      if (cancelled || unmountedRef.current) {
+        return;
+      }
+      setProbing(false);
+      if (held !== null) {
+        start({ watchOnly: held });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
     // `start` is recreated every render; the ref guards against re-running.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [standalone, session]);
@@ -952,6 +1037,19 @@ export function DesktopStreamClient({
 
   const headerActions = (
     <>
+      {controlState === 'on' && driving ? (
+        <>
+          <span
+            className="text-xs whitespace-nowrap text-muted-foreground"
+            title="The agent's page actions wait until you stop or hand back"
+          >
+            You&apos;re driving
+          </span>
+          <Button variant="outline" size="sm" onClick={handBack}>
+            Hand back
+          </Button>
+        </>
+      ) : null}
       {canTakeControl ? (
         <Button
           variant="outline"
@@ -1152,19 +1250,6 @@ export function DesktopStreamClient({
           }}
         />
 
-        {isPlaying && controlState === 'on' && driving ? (
-          <div className="absolute top-2 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded bg-zinc-950/80 py-1 pr-1 pl-2 text-xs text-zinc-200">
-            <span>You&apos;re driving. The agent waits until you stop.</span>
-            <Button
-              variant="secondary"
-              size="sm"
-              className="h-6 px-2 text-xs"
-              onClick={handBack}
-            >
-              Hand back
-            </Button>
-          </div>
-        ) : null}
         {isPlaying && controlState !== 'on' && controlState !== 'off' ? (
           <div className="pointer-events-none absolute top-2 left-2 rounded bg-zinc-950/80 px-2 py-1 text-xs text-zinc-200">
             {controlState === 'connecting'
@@ -1221,9 +1306,16 @@ export function DesktopStreamClient({
                   Click the desktop to send mouse and keyboard input.
                 </p>
               </div>
-              <Button onClick={start} disabled={!session || isStarting}>
-                {isStarting ? <Loader2 className="animate-spin" /> : <Play />}
-                {isStarting ? 'Starting...' : 'Start remote desktop'}
+              <Button
+                onClick={() => start()}
+                disabled={!session || isStarting || probing}
+              >
+                {isStarting || probing ? (
+                  <Loader2 className="animate-spin" />
+                ) : (
+                  <Play />
+                )}
+                {isStarting || probing ? 'Starting...' : 'Start remote desktop'}
               </Button>
               {sessionError ? (
                 <p role="alert" className="text-sm text-destructive">

@@ -38,6 +38,11 @@ class FakeWebSocket {
   static readonly OPEN = 1;
   static readonly CLOSED = 3;
   static instances: FakeWebSocket[] = [];
+  /**
+   * What the desktop service's presence endpoint answers. null behaves like
+   * an older service without the endpoint, which leaves the Start button.
+   */
+  static controlHeld: boolean | null = null;
 
   readonly url: string;
   readyState = FakeWebSocket.CONNECTING;
@@ -46,6 +51,20 @@ class FakeWebSocket {
 
   constructor(url: string) {
     this.url = url;
+    if (new URL(url).pathname.endsWith('/presence')) {
+      // Presence probes answer on their own and stay out of `instances`,
+      // which tests index to reach the control sockets.
+      queueMicrotask(() => {
+        if (FakeWebSocket.controlHeld === null) {
+          this.close();
+          return;
+        }
+        this.emit('message', {
+          data: JSON.stringify({ control_held: FakeWebSocket.controlHeld }),
+        } as MessageEvent);
+      });
+      return;
+    }
     FakeWebSocket.instances.push(this);
   }
 
@@ -89,6 +108,7 @@ function controlIsOn() {
 describe('DesktopStreamClient', () => {
   beforeEach(() => {
     FakeWebSocket.instances = [];
+    FakeWebSocket.controlHeld = null;
     vi.stubGlobal('WebSocket', FakeWebSocket);
     vi.stubGlobal('PointerEvent', MouseEvent);
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
@@ -687,6 +707,64 @@ describe('DesktopStreamClient', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('starts on its own and takes control when nobody is driving', async () => {
+    FakeWebSocket.controlHeld = false;
+    render(
+      <DesktopStreamClient
+        previewUrl="https://desktop.preview.test"
+        runId={123}
+        onClose={() => {}}
+      />,
+    );
+
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    expect(FakeWebSocket.instances[0]!.url).toContain('/control');
+    act(() => FakeWebSocket.instances[0]!.open());
+    await controlIsOn();
+  });
+
+  it('starts on its own but only watches while another viewer drives', async () => {
+    FakeWebSocket.controlHeld = true;
+    render(
+      <DesktopStreamClient
+        previewUrl="https://desktop.preview.test"
+        runId={123}
+        onClose={() => {}}
+      />,
+    );
+
+    const video = screen.getByLabelText('Remote desktop') as HTMLVideoElement;
+    await waitFor(() => expect(video.src).toContain('/stream.mp4'));
+    // Watching must not supersede the viewer who is driving.
+    expect(FakeWebSocket.instances).toHaveLength(0);
+    fireEvent.loadedData(video);
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Take control' }),
+    );
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    act(() => FakeWebSocket.instances[0]!.open());
+    await controlIsOn();
+  });
+
+  it('keeps the Start button when the service cannot say who holds control', async () => {
+    render(
+      <DesktopStreamClient
+        previewUrl="https://desktop.preview.test"
+        runId={123}
+        onClose={() => {}}
+      />,
+    );
+    const start = await screen.findByRole('button', {
+      name: 'Start remote desktop',
+    });
+    await waitFor(() => expect(start).toBeEnabled());
+    expect(FakeWebSocket.instances).toHaveLength(0);
+    expect(
+      (screen.getByLabelText('Remote desktop') as HTMLVideoElement).src,
+    ).toBe('');
   });
 
   it('only remaps Command on a Mac', () => {

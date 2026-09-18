@@ -1464,6 +1464,7 @@ async fn main() {
         .route("/metrics", get(metrics))
         .route("/stream.mp4", get(stream))
         .route("/control", get(control))
+        .route("/presence", get(presence))
         .route("/telemetry", post(telemetry))
         .with_state(state);
 
@@ -1594,6 +1595,36 @@ async fn control(
         // Large enough for a pasted clipboard; every other event is tiny.
         .max_message_size(MAX_CLIPBOARD_BYTES + 4 * 1024)
         .on_upgrade(move |socket| control_socket(socket, state, generation, superseded))
+}
+
+/// Answers whether a viewer holds control, without taking it. Connecting to
+/// `/control` supersedes the current controller, so a viewer that only wants
+/// to watch asks here first. It is a WebSocket because the viewer's page is
+/// on another origin and the preview proxy's sign-in redirect cannot carry
+/// CORS headers, which rules out a plain fetch.
+async fn presence(
+    websocket: WebSocketUpgrade,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Response {
+    if !has_allowed_origin(&headers, state.config.allowed_control_origin.as_deref()) {
+        return (
+            StatusCode::FORBIDDEN,
+            "presence websocket requires a same-origin request",
+        )
+            .into_response();
+    }
+    websocket
+        .max_message_size(1024)
+        .on_upgrade(move |mut socket| async move {
+            let payload = presence_payload(state.control_connected.load(Ordering::Relaxed));
+            let _ = socket.send(Message::Text(payload.into())).await;
+            let _ = socket.send(Message::Close(None)).await;
+        })
+}
+
+fn presence_payload(control_held: bool) -> String {
+    serde_json::json!({ "control_held": control_held }).to_string()
 }
 
 async fn control_socket(
@@ -2663,6 +2694,12 @@ mod tests {
         let app = window(4, 10, 10, 800, 600, false);
         let dialog = window(5, 50, 50, 300, 200, true);
         assert_eq!(windows_to_refit(&[app, dialog], previous), vec![4]);
+    }
+
+    #[test]
+    fn presence_reports_whether_control_is_held() {
+        assert_eq!(presence_payload(true), r#"{"control_held":true}"#);
+        assert_eq!(presence_payload(false), r#"{"control_held":false}"#);
     }
 
     #[test]

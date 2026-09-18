@@ -35,6 +35,10 @@ actions, so the viewer's status and the agent's behavior cannot disagree.
 `control_connected` and `control_idle_ms` are the inputs, reported for
 diagnostics.
 
+`/presence` is a WebSocket that answers `{"control_held":true|false}` and
+closes. Connecting to `/control` supersedes the current controller, so a
+viewer asks here first and only watches when someone else is driving.
+
 The control channel also carries text clipboard transfer through `xclip`:
 `paste` sets the X clipboard and presses Ctrl+V, and `clipboard_read` returns
 the X clipboard after the viewer copies or cuts.

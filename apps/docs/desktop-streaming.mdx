@@ -29,10 +29,11 @@ separate environment port for it or expose port `6080` as unauthenticated.
 Port `19222` is reserved the same way: it is the loopback DevTools endpoint of
 the shared browser described below, and an environment cannot publish it.
 
-Input control belongs to one viewer at a time. Opening the desktop takes
-control, and a newer viewer who opens it supersedes the previous one. When
-that happens the panel header shows **Take control**, and clicking it or the
-desktop takes control back. The sandbox display resizes to match the panel of
+The desktop starts as soon as you open the tab. Input control belongs to one
+viewer at a time: if nobody holds it, you get it; if another viewer is
+driving, you watch without interrupting them and the panel header shows
+**Take control**. Taking control supersedes the other viewer, who then sees
+**Take control** in turn, and clicking it or the desktop takes it back. The sandbox display resizes to match the panel of
 the viewer who holds control, so the desktop fills that panel instead of
 being letterboxed and follows it when they resize it; other viewers see the
 desktop at that size. If the stream or the control connection drops, the
@@ -65,8 +66,8 @@ cookies, and logins are shared.
   for the life of the sandbox. The agent works in its own tab and leaves tabs
   it did not open alone.
 - You always win, and there is nothing to press first. Clicking, scrolling,
-  or typing takes over: the panel shows **You're driving** and the agent's
-  page actions wait. They resume about ten seconds after you stop, or at once
+  or typing takes over: the panel header shows **You're driving** and the
+  agent's page actions wait. They resume about ten seconds after you stop, or at once
   when you select **Hand back**. The agent can still read the page and take
   screenshots in the meantime. Watching, including moving the pointer over
   the video, does not pause it. `ROOMOTE_DESKTOP_STREAM_HUMAN_IDLE_MS` sets
@@ -82,8 +83,9 @@ Tasks without a Shared Desktop keep using a private headless browser.
 
 ## Verify performance
 
-Open **Shared Desktop** and select **Start remote desktop**. The statistics
-toggle in the header overlays browser-rendered FPS, bitrate, dropped frames,
+Open **Shared Desktop**. (A **Start remote desktop** button appears only if
+the stream failed and can be retried, or the sandbox runs an older desktop
+service that cannot report who holds control.) The statistics toggle in the header overlays browser-rendered FPS, bitrate, dropped frames,
 distance from the live edge, the remote screen size, time to the first
 decoded frame, and the number of input events sent. The service's `/metrics`
 endpoint additionally reports encoder FPS, bitrate, and pointer positions for
