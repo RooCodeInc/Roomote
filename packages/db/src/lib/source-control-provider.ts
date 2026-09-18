@@ -253,6 +253,36 @@ export async function resolveWorkspaceRepositoryProviders(
   }
 }
 
+/**
+ * Whether a workspace needs source-control credentials to start. A persisted
+ * environment with no configured repositories is equivalent to a Blank slate
+ * for credential purposes, even though its task payload still carries the
+ * environment id so the worker can load the environment configuration.
+ *
+ * Missing environments fail closed toward requiring credentials; the caller's
+ * existing provider-resolution fallback remains responsible for diagnosing an
+ * invalid or incomplete workspace.
+ */
+export async function workspaceRequiresSourceControlCredentials(
+  dbOrTx: DatabaseOrTransaction,
+  workspace: TaskWorkspace,
+): Promise<boolean> {
+  if (workspace.type === 'no_repositories') {
+    return false;
+  }
+
+  if (workspace.type !== 'environment') {
+    return true;
+  }
+
+  const environment = await dbOrTx.query.environments.findFirst({
+    where: eq(environments.id, workspace.environmentId),
+    columns: { config: true },
+  });
+
+  return environment ? environment.config.repositories.length > 0 : true;
+}
+
 async function resolveWorkspaceRepositoryRows(
   dbOrTx: DatabaseOrTransaction,
   workspace: TaskWorkspace,
