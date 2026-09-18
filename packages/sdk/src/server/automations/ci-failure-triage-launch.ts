@@ -42,7 +42,9 @@ import {
 import { resolveAutomationResultSubtitle } from '../lib/automation-result-metadata';
 import {
   buildDestinationTaskPayloadFields,
+  getAutomationDestinationCommunicationProvider,
   listConnectedCommunicationProviders,
+  prepareAutomationReportDestination,
   type ResolvedAutomationDestination,
 } from './destination';
 import { resolveAutomationRepositoryDestination } from './ci-failure-triage-routing';
@@ -142,6 +144,7 @@ async function postNonSlackInvestigationAnnouncement(params: {
   destination: ResolvedAutomationDestination;
   text: string;
 }): Promise<string | null> {
+  if (params.destination.provider === 'email') return null;
   try {
     const adapter = await getCommunicationProviderAdapter(
       params.destination.provider,
@@ -215,6 +218,7 @@ async function postAnnouncementThreadReply(params: {
   text: string;
   slack?: SlackNotifier | null;
 }): Promise<void> {
+  if (params.destination.provider === 'email') return;
   try {
     if (params.destination.provider === 'slack' && params.slack) {
       await params.slack.postMessage({
@@ -376,12 +380,19 @@ export async function launchCiFailureTriageForFailedRun(
     headSha: run.headSha,
   });
 
+  const reportDestination =
+    destination.provider === 'email'
+      ? await prepareAutomationReportDestination(destination, {
+          subject: `Roomote CI failure triage: ${run.repositoryFullName}`,
+          conversationKey: `builtin-automation:ci_failure_triage:${run.provider}:${run.repositoryFullName}:${run.headSha}`,
+        })
+      : destination;
   let announcementTs: string | null = null;
   let slackNotifier: SlackNotifier | null = null;
 
-  if (destination.provider === 'slack') {
+  if (reportDestination.provider === 'slack') {
     const slackAnnouncement = await postSlackInvestigationAnnouncement({
-      destination,
+      destination: reportDestination,
       text: announcementText,
       automationLabel,
     });
@@ -389,9 +400,9 @@ export async function launchCiFailureTriageForFailedRun(
       announcementTs = slackAnnouncement.messageTs;
       slackNotifier = slackAnnouncement.slack;
     }
-  } else {
+  } else if (reportDestination.provider !== 'email') {
     announcementTs = await postNonSlackInvestigationAnnouncement({
-      destination,
+      destination: reportDestination,
       text: announcementText,
     });
   }
@@ -399,9 +410,12 @@ export async function launchCiFailureTriageForFailedRun(
   if (announcementTs) {
     try {
       await upsertBackgroundAutomationSlackThread(db, {
-        surface: destination.provider,
+        surface:
+          reportDestination.provider === 'email'
+            ? getAutomationDestinationCommunicationProvider(reportDestination)
+            : reportDestination.provider,
         automationKey: 'ci_failure_triage',
-        slackChannelId: destination.channelId,
+        slackChannelId: reportDestination.channelId,
         threadTs: announcementTs,
         summaryText: announcementText,
         postedAt: new Date(),
@@ -419,9 +433,9 @@ export async function launchCiFailureTriageForFailedRun(
     }
   }
 
-  const channelId = destination.channelId;
+  const channelId = reportDestination.channelId;
   const announcementPayloadFields = buildAnnouncementTaskPayloadFields({
-    destination,
+    destination: reportDestination,
     announcementMessageId: announcementTs,
   });
 
@@ -457,7 +471,12 @@ export async function launchCiFailureTriageForFailedRun(
                 failureEvidence: run.failureEvidence,
               },
               hasAnnouncementThread: announcementTs !== null,
-              destinationProvider: destination.provider,
+              destinationProvider:
+                reportDestination.provider === 'email'
+                  ? getAutomationDestinationCommunicationProvider(
+                      reportDestination,
+                    )
+                  : reportDestination.provider,
             }),
             ...announcementPayloadFields,
             visibleInTranscript: false,
@@ -468,7 +487,7 @@ export async function launchCiFailureTriageForFailedRun(
         surface: taskSurfaceForProvider(run.provider),
         trigger: 'webhook',
         visibility: 'hidden',
-        ...(destination.provider === 'slack' && announcementTs
+        ...(reportDestination.provider === 'slack' && announcementTs
           ? {
               channels: {
                 slackChannelId: channelId,
@@ -486,7 +505,10 @@ export async function launchCiFailureTriageForFailedRun(
     // unmentioned reply can be routed back to this automation task.
     await finalizeAutomationLaunch({
       conversation: {
-        provider: destination.provider,
+        provider:
+          reportDestination.provider === 'email'
+            ? getAutomationDestinationCommunicationProvider(reportDestination)
+            : reportDestination.provider,
         channelId,
         rootMessageId: announcementTs,
       },
@@ -501,7 +523,11 @@ export async function launchCiFailureTriageForFailedRun(
       at: new Date(),
     });
 
-    if (announcementTs && destination.provider === 'slack' && slackNotifier) {
+    if (
+      announcementTs &&
+      reportDestination.provider === 'slack' &&
+      slackNotifier
+    ) {
       const subtitle = await resolveAutomationResultSubtitle({
         taskId: launchResult.taskId,
         runId: launchResult.id,

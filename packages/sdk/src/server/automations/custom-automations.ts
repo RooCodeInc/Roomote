@@ -20,7 +20,6 @@ import {
 import {
   ALL_REPOSITORIES,
   NO_REPOSITORIES,
-  getAutomationTargetEmailIdentityId,
   isAutomationDestinationTarget,
   isConfiguredAutomationTarget,
   isBackgroundAutomationUserTargetKind,
@@ -32,6 +31,7 @@ import {
 import {
   findTeamsConversationRoute,
   listConnectedCommunicationProviders,
+  resolveAutomationEmailTarget,
   type ResolvedAutomationDestination,
 } from './destination';
 import {
@@ -61,10 +61,7 @@ import {
   isFastAgentManagedTelegramTopic,
   recordFastAgentConversationMessage,
 } from '../lib/fast-agent-provider-message';
-import {
-  canStartAgentMailConversationWithUser,
-  prepareAgentMailConversation,
-} from '../lib/agentmail/outbound';
+import { prepareAgentMailConversation } from '../lib/agentmail/outbound';
 
 const LOG_PREFIX = '[custom-automations]';
 
@@ -121,16 +118,8 @@ async function resolveDestination(
   }
 
   if (target.provider === 'email') {
-    const identityId = getAutomationTargetEmailIdentityId(target);
-    return target.targetKind === 'email_user' &&
-      identityId &&
-      (await canStartAgentMailConversationWithUser(ownerUserId, identityId))
-      ? {
-          provider: 'email',
-          userId: ownerUserId,
-          identityId,
-          source: 'automation_target',
-        }
+    return target.externalRef === ownerUserId
+      ? resolveAutomationEmailTarget(target)
       : null;
   }
 
@@ -309,6 +298,9 @@ async function buildFastAutomationConversation(params: {
   }
 
   if (destination.provider === 'email') {
+    if (!destination.userId || !destination.identityId) {
+      throw new Error('Email destination routing is incomplete.');
+    }
     // Some inboxes group unrelated messages by subject even without reply
     // headers, so give every run a distinct root subject.
     const prepared = await prepareAgentMailConversation({

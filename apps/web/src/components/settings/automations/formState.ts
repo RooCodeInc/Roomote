@@ -1,7 +1,7 @@
 import {
   AUTOMATION_DESTINATION_DESCRIPTORS,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_LIST,
-  type AutomationCapableCommunicationProvider,
+  type AutomationDestinationProvider,
   type ChannelAutoStartLaunchMode,
   type ConflictResolverMaxPrAgeDays,
   type ScheduleOnlyBackgroundAutomationFrequency,
@@ -53,12 +53,14 @@ type DestinationChannelFormFields = {
   [K in
     | (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['slackField']
     | (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['discordField']]: string;
+} & {
+  [K in (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['emailField']]?: string;
 };
 
 const DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID = Object.fromEntries(
   AUTOMATION_DESTINATION_DESCRIPTORS.map((descriptor) => [
     descriptor.automationId,
-    [descriptor.slackField, descriptor.discordField],
+    [descriptor.slackField, descriptor.discordField, descriptor.emailField],
   ]),
 ) as Record<
   (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['automationId'],
@@ -121,12 +123,10 @@ export type FormState = {
   announcerInstructions: string;
   platformIssueAlertsEnabled: boolean;
   releaseAnnouncementsEnabled?: boolean;
-  releaseAnnouncementsTargetProvider:
-    | 'none'
-    | AutomationCapableCommunicationProvider;
+  releaseAnnouncementsTargetProvider: 'none' | AutomationDestinationProvider;
   releaseAnnouncementsTargetMode: 'channel' | 'direct_message';
   releaseAnnouncementsTargetChannelId: string;
-  mergeAnnouncerTargetProvider: 'none' | AutomationCapableCommunicationProvider;
+  mergeAnnouncerTargetProvider: 'none' | AutomationDestinationProvider;
   mergeAnnouncerTargetMode: 'channel' | 'direct_message';
   mergeAnnouncerTargetChannelId: string;
 } & DestinationChannelFormFields &
@@ -356,10 +356,12 @@ function buildDestinationChannelSaveInput(formState: FormState) {
         descriptor.discordField,
         formState[descriptor.discordField].trim() || null,
       ],
+      [descriptor.emailField, formState[descriptor.emailField]?.trim() || null],
     ]),
   ) as Record<
     | (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['slackField']
-    | (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['discordField'],
+    | (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['discordField']
+    | (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['emailField'],
     string | null
   >;
 }

@@ -133,13 +133,15 @@ integration linked. Strict consent rules are enforced in code:
   Discord), broadcast-style notices go there instead of email — email is the
   fallback reach, not another copy.
 
-Custom automations can explicitly select **Email** as their report destination.
-This is opt-in, never a fallback. The picker offers the automation owner's
-account email, even when it has not been verified yet. Each run uses that exact
-selected identity for its initial message and threaded report. If membership is
-removed, the address changes, delivery is suppressed, or AgentMail is disabled
-or unconfigured, Roomote records a delivery failure and does not substitute
-another address or provider.
+Custom automations and built-in automations with a **Destination** control can
+explicitly select **Email** as their report destination. This is opt-in, never
+a fallback. Custom automations offer the owner's account email; built-in
+automations offer the account email of the admin selecting the destination,
+even when that address has not been verified yet. Each run uses that exact
+selected identity for its initial message and threaded report. If membership
+is removed, the address changes, delivery is suppressed, or AgentMail is
+disabled or unconfigured, Roomote records a delivery failure and does not
+substitute another address or provider.
 
 Replying to a Roomote-initiated email works like any other inbound message: the
 sender address must first be verified on the account and pass DMARC. Until then,

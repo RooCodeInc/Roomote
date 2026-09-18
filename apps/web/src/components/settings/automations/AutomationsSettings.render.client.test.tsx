@@ -84,11 +84,18 @@ const state = vi.hoisted(() => ({
         discordConnected: false,
         telegramConnected: false,
         teamsConnected: false,
+        emailConnected: true,
         requiresSlackReconnect: false,
         missingScopes: [],
         slackWorkspaceDomain: 'acme',
         sentryConnected: false,
       },
+      emailIdentities: [
+        {
+          id: 'verified:user-admin:account',
+          emailAddress: 'admin@example.com',
+        },
+      ],
       settings: {
         reviewer: {
           enabled: false,
@@ -761,6 +768,15 @@ describe('AutomationsSettings', () => {
     state.settingsQuery.data.capabilities.discordConnected = false;
     state.settingsQuery.data.capabilities.telegramConnected = false;
     state.settingsQuery.data.capabilities.teamsConnected = false;
+    state.settingsQuery.data.capabilities.emailConnected = true;
+    state.settingsQuery.data.emailIdentities = [
+      {
+        id: 'verified:user-admin:account',
+        emailAddress: 'admin@example.com',
+      },
+    ];
+    delete (state.settingsQuery.data.settings as Record<string, unknown>)
+      .managerStatsEmailIdentityId;
     state.discordChannelsQuery.data.channels = [];
     state.settingsQuery.data.settings.managerStatsDiscordChannelId = null;
     state.settingsQuery.data.settings.suggesterDiscordChannelId = null;
@@ -839,7 +855,7 @@ describe('AutomationsSettings', () => {
 
     expect(screen.getByRole('switch', { name: 'Enabled' })).toBeChecked();
     expect(
-      screen.getByLabelText('Post alerts to this Slack channel'),
+      screen.getByLabelText('Post alerts to this destination'),
     ).toBeInTheDocument();
     const thresholdSlider = screen.getByRole('slider', {
       name: 'Provider usage alert threshold',
@@ -923,7 +939,7 @@ describe('AutomationsSettings', () => {
       }),
     );
     expect(
-      screen.getByLabelText('Post summaries to this Slack channel'),
+      screen.getByLabelText('Post summaries to this destination'),
     ).toBeInTheDocument();
     expect(
       screen.getByText('Reports to: not configured — set a Manager Channel.'),
@@ -935,7 +951,7 @@ describe('AutomationsSettings', () => {
       }),
     );
     expect(
-      screen.getByLabelText('Post follow-up work to this Slack channel'),
+      screen.getByLabelText('Post follow-up work to this destination'),
     ).toBeInTheDocument();
     closeAutomationDialog();
     fireEvent.click(
@@ -945,12 +961,35 @@ describe('AutomationsSettings', () => {
     );
 
     expect(
-      screen.getByLabelText('Post follow-up work to this Slack channel'),
+      screen.getByLabelText('Post follow-up work to this destination'),
     ).toBeInTheDocument();
-    expect(screen.getByText('Select a Slack channel')).toBeInTheDocument();
+    expect(
+      screen.getByRole('combobox', { name: 'Destination provider' }),
+    ).toHaveTextContent('Default');
     expect(
       screen.getByText('Reports to: not configured — set a Manager Channel.'),
     ).toBeInTheDocument();
+  });
+
+  it('loads a built-in Email destination in the shared picker', async () => {
+    state.settingsQuery.data.settings.managerStatsFrequency = 'weekly' as never;
+    (
+      state.settingsQuery.data.settings as Record<string, unknown>
+    ).managerStatsEmailIdentityId = 'verified:user-admin:account';
+
+    render(<AutomationsSettings />);
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: /(?:Set up|Configure) Weekly Manager Stats/,
+      }),
+    );
+
+    expect(
+      screen.getByRole('combobox', { name: 'Destination provider' }),
+    ).toHaveTextContent('Email');
+    expect(
+      screen.getByRole('combobox', { name: 'Email address' }),
+    ).toHaveTextContent('admin@example.com · Account email');
   });
 
   it('shows a saved Discord destination and a provider-neutral placeholder when Discord is connected', async () => {
@@ -978,7 +1017,10 @@ describe('AutomationsSettings', () => {
       }),
     );
     expect(
-      screen.getByText('#automation-reports (Discord)'),
+      screen.getByRole('combobox', { name: 'Destination provider' }),
+    ).toHaveTextContent('Discord');
+    expect(
+      screen.getByRole('combobox', { name: 'Destination channel' }),
     ).toBeInTheDocument();
     closeAutomationDialog();
     fireEvent.click(
@@ -987,11 +1029,12 @@ describe('AutomationsSettings', () => {
       }),
     );
 
-    // The saved Discord channel is the selected destination.
-    // Pickers without a saved value use the provider-neutral placeholder.
-    expect(screen.getByText('Select a channel')).toBeInTheDocument();
+    // Pickers without an explicit value show the standard destination.
     expect(
-      screen.queryByText('Select a Slack channel'),
+      screen.getByRole('combobox', { name: 'Destination provider' }),
+    ).toHaveTextContent('Default');
+    expect(
+      screen.queryByRole('combobox', { name: 'Destination channel' }),
     ).not.toBeInTheDocument();
   });
 
@@ -1053,10 +1096,13 @@ describe('AutomationsSettings', () => {
     );
 
     expect(
-      screen.getByLabelText('Post alerts to this channel'),
+      screen.getByLabelText('Post alerts to this destination'),
     ).toBeInTheDocument();
     expect(
-      screen.getByText('#automation-reports (Discord)'),
+      screen.getByRole('combobox', { name: 'Destination provider' }),
+    ).toHaveTextContent('Discord');
+    expect(
+      screen.getByRole('combobox', { name: 'Destination channel' }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole('switch', { name: 'Alert on Config Errors enabled' }),
@@ -2228,8 +2274,9 @@ describe('AutomationsSettings', () => {
     });
     expect(destination).toHaveTextContent('None');
     fireEvent.click(destination);
-    expect(screen.getAllByRole('option')).toHaveLength(1);
+    expect(screen.getAllByRole('option')).toHaveLength(2);
     expect(screen.getByRole('option', { name: 'None' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Email' })).toBeInTheDocument();
   });
 
   it('preserves in-progress edits when capabilities finish loading', async () => {

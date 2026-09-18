@@ -50,6 +50,7 @@ export function AutomationDestinationPicker({
   defaultSlackChannelId = '',
   defaultDiscordChannelId = '',
   defaultEmailIdentityId = '',
+  fixedDestinationLabels = {},
   noneLabel = 'None',
   noneDescription = 'Results appear only in the task view.',
   disabled = false,
@@ -68,6 +69,7 @@ export function AutomationDestinationPicker({
   defaultSlackChannelId?: string;
   defaultDiscordChannelId?: string;
   defaultEmailIdentityId?: string;
+  fixedDestinationLabels?: Partial<Record<'teams' | 'telegram', string>>;
   noneLabel?: string;
   noneDescription?: string;
   disabled?: boolean;
@@ -209,6 +211,11 @@ export function AutomationDestinationPicker({
                   longer eligible.
                 </p>
               </div>
+            ) : (value.provider === 'teams' || value.provider === 'telegram') &&
+              fixedDestinationLabels[value.provider] ? (
+              <p className="self-center text-sm text-muted-foreground">
+                {fixedDestinationLabels[value.provider]}
+              </p>
             ) : value.mode === 'direct_message' ? (
               <p className="self-center text-sm text-muted-foreground">
                 Results are sent privately to your linked {providerLabel}{' '}

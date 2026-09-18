@@ -1,0 +1,5 @@
+ALTER TABLE "release_announcement_deliveries" DROP CONSTRAINT "release_announcement_deliveries_provider_check";--> statement-breakpoint
+ALTER TABLE "release_announcement_deliveries" ADD COLUMN "recipient_user_id" text;--> statement-breakpoint
+ALTER TABLE "release_announcement_deliveries" ADD COLUMN "email_identity_id" text;--> statement-breakpoint
+ALTER TABLE "release_announcement_deliveries" ADD CONSTRAINT "release_announcement_deliveries_recipient_user_id_users_id_fk" FOREIGN KEY ("recipient_user_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "release_announcement_deliveries" ADD CONSTRAINT "release_announcement_deliveries_provider_check" CHECK ("release_announcement_deliveries"."provider" in ('slack', 'teams', 'telegram', 'discord', 'email'));

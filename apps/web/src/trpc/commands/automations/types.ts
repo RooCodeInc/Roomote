@@ -1,6 +1,7 @@
 import type {
   AnnouncerFrequency,
-  AutomationCapableCommunicationProvider,
+  AutomationDestinationEmailField,
+  AutomationDestinationProvider,
   BackgroundAutomationKey,
   ChannelAutoStartLaunchMode,
   CommunicationProvider,
@@ -59,6 +60,7 @@ export type BackgroundAgentFieldErrorKey =
   | 'securityAuditorDiscordChannel'
   | 'codeQualityAuditorDiscordChannel'
   | 'ciFailureTriageDiscordChannel'
+  | AutomationDestinationEmailField
   | 'suggesterDiscordChannel'
   | 'announcerDiscordChannel'
   | 'platformIssueDiscordChannel'
@@ -221,6 +223,10 @@ type ScheduleOnlyAutomationInputFields = Partial<
   >
 >;
 
+type AutomationDestinationEmailInputFields = Partial<
+  Record<AutomationDestinationEmailField, string | null>
+>;
+
 export interface ResolvedChannelAutoStartRow {
   channelId: string;
   channelName: string | null;
@@ -236,7 +242,10 @@ export interface ResolvedChannelAutoStartDiscordRow {
   launchCriteria: string | null;
 }
 
-export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomationInputFields {
+export interface UpdateBackgroundAgentSettingsInput
+  extends
+    ScheduleOnlyAutomationInputFields,
+    AutomationDestinationEmailInputFields {
   savingAutomation:
     | 'callRoomoteViaEmoji'
     | 'channelAutoStart'
@@ -325,7 +334,7 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
   platformIssueSlackChannel: string | null;
   platformIssueDiscordChannel?: string | null;
   releaseAnnouncementsEnabled?: boolean;
-  releaseAnnouncementsTargetProvider?: AutomationCapableCommunicationProvider | null;
+  releaseAnnouncementsTargetProvider?: AutomationDestinationProvider | null;
   releaseAnnouncementsTargetMode?: 'channel' | 'direct_message';
   releaseAnnouncementsTargetChannelId?: string | null;
   securityAuditorSlackChannel?: string | null;
@@ -334,7 +343,7 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
   codeQualityAuditorDiscordChannel?: string | null;
   ciFailureTriageSlackChannel?: string | null;
   ciFailureTriageDiscordChannel?: string | null;
-  mergeAnnouncerTargetProvider?: AutomationCapableCommunicationProvider | null;
+  mergeAnnouncerTargetProvider?: AutomationDestinationProvider | null;
   mergeAnnouncerTargetMode?: 'channel' | 'direct_message';
   mergeAnnouncerTargetChannelId?: string | null;
 }

@@ -333,11 +333,15 @@ export const releaseAnnouncementDeliveries = pgTable(
     previousVersion: text('previous_version').notNull(),
     installedVersion: text('installed_version').notNull(),
     provider: text('provider')
-      .$type<'slack' | 'teams' | 'telegram' | 'discord'>()
+      .$type<'slack' | 'teams' | 'telegram' | 'discord' | 'email'>()
       .notNull(),
     destinationKey: text('destination_key').notNull(),
     channelId: text('channel_id').notNull(),
     serviceUrl: text('service_url'),
+    recipientUserId: text('recipient_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    emailIdentityId: text('email_identity_id'),
     status: text('status')
       .$type<'pending' | 'delivered' | 'skipped'>()
       .notNull()
@@ -367,7 +371,7 @@ export const releaseAnnouncementDeliveries = pgTable(
     ),
     check(
       'release_announcement_deliveries_provider_check',
-      sql`${table.provider} in ('slack', 'teams', 'telegram', 'discord')`,
+      sql`${table.provider} in ('slack', 'teams', 'telegram', 'discord', 'email')`,
     ),
   ],
 );

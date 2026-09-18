@@ -715,6 +715,13 @@
       "when": 1789685914217,
       "tag": "0101_sticky_prodigy",
       "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1789694681960,
+      "tag": "0102_yellow_pyro",
+      "breakpoints": true
     }
   ]
 }
