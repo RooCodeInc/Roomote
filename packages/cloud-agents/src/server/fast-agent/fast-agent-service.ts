@@ -4988,6 +4988,12 @@ export async function answerFastAgentQuestion({
               };
             }
 
+            try {
+              await adapter.assertTaskLaunch?.();
+            } catch (error) {
+              return toolFailure(error);
+            }
+
             const candidate = await createEnvironmentRecipeCandidate({
               adapter: recipeAdapter,
               request,
