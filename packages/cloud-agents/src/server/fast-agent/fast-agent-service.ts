@@ -106,6 +106,7 @@ import {
 } from '../../utils';
 import { resolveRoomoteReleaseVersion } from '../../release-version';
 import {
+  getActiveRepositoryCatalog,
   getAvailableEnvironments,
   type RoutableEnvironment,
 } from '../available-environments';
@@ -3201,6 +3202,7 @@ export async function answerFastAgentQuestion({
     }
     const [
       availableEnvironments,
+      activeRepositories,
       taskModelOptions,
       session,
       discoveredIntegrations,
@@ -3209,6 +3211,13 @@ export async function answerFastAgentQuestion({
       nativeIntegrationCatalog,
     ] = await Promise.all([
       getAvailableEnvironments(),
+      getActiveRepositoryCatalog().catch((error) => {
+        degradedContextComponents.add('repository_catalog');
+        console.warn(
+          `[Fast Agent] Active repository catalog unavailable: ${formatErrorForLog(error)}`,
+        );
+        return null;
+      }),
       getDeploymentTaskModelOptions().catch((error) => {
         degradedContextComponents.add('task_model_catalog');
         console.warn(
@@ -3627,6 +3636,7 @@ export async function answerFastAgentQuestion({
     );
     const system = buildFastAgentSystemPrompt({
       availableEnvironments,
+      activeRepositories,
       availableSkills,
       availableTaskModels: taskModelOptions.models,
       defaultTaskModelId: taskModelOptions.defaultModelId,

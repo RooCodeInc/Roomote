@@ -9,7 +9,10 @@ import {
   type WorkspaceRoutingSettings,
 } from '@roomote/types';
 
-import type { RoutableEnvironment } from '../available-environments';
+import type {
+  ActiveRepositoryCatalog,
+  RoutableEnvironment,
+} from '../available-environments';
 import type { FastAgentIntegration } from './fast-agent-integration-broker';
 import {
   FAST_AGENT_REACTION_INPUT_TYPE,
@@ -42,10 +45,35 @@ When the current input begins with the platform-generated \`<voice_mode active="
 - If you need a decision from the person, ask one clear question.`;
 }
 
+/**
+ * Active repositories are listed independently of environments: a deployment
+ * with connected source control and no environments would otherwise show the
+ * model no repository names at all.
+ */
+function formatActiveRepositoriesForPrompt(
+  activeRepositories: ActiveRepositoryCatalog | null | undefined,
+): string {
+  if (activeRepositories === undefined) return '';
+  if (activeRepositories === null) {
+    return '\n  - The active repository list could not be loaded for this turn; an All repositories task can still resolve a repository by name.';
+  }
+  if (activeRepositories.totalCount === 0) {
+    return '\n  - No active repositories are connected.';
+  }
+  const omitted =
+    activeRepositories.totalCount - activeRepositories.names.length;
+  return `\n  - Active repositories (${activeRepositories.totalCount}): ${activeRepositories.names.join(', ')}${
+    omitted > 0
+      ? `\n  - ${omitted} more active repositories are not listed here; an All repositories task can still resolve them by name.`
+      : ''
+  }`;
+}
+
 function formatRepositoriesForPrompt(
   availableEnvironments: RoutableEnvironment[],
+  activeRepositories?: ActiveRepositoryCatalog | null,
 ): string {
-  const allRepositories = `- All repositories [id: ${ALL_REPOSITORIES}]: Every active repository is available; the task checks out only the ones it needs.`;
+  const allRepositories = `- All repositories [id: ${ALL_REPOSITORIES}]: Every active repository is available; the task checks out only the ones it needs.${formatActiveRepositoriesForPrompt(activeRepositories)}`;
   const blankSlate = `- Blank slate [id: ${NO_REPOSITORIES}]: Start a sandbox with no repositories checked out; the task can still check out any active repository on demand.`;
   if (availableEnvironments.length === 0) {
     return `${blankSlate}\n${allRepositories}\n- No configured environments were found for this deployment.`;
@@ -267,6 +295,7 @@ function formatAvailableSkillsForPrompt(
 
 export function buildFastAgentSystemPrompt({
   availableEnvironments,
+  activeRepositories,
   availableSkills,
   availableTaskModels = [],
   defaultTaskModelId,
@@ -299,6 +328,9 @@ export function buildFastAgentSystemPrompt({
   codingModelRoutingRules = [],
 }: {
   availableEnvironments: RoutableEnvironment[];
+  /** Active connected repositories, mapped to an environment or not. `null`
+   * means the lookup failed; `undefined` means the caller did not try. */
+  activeRepositories?: ActiveRepositoryCatalog | null;
   /** Instance and inline environment skills already discovered for this turn.
    * `null` means discovery failed; `undefined` means the caller did not try. */
   availableSkills?: FastAgentPromptSkillCatalog | null;
@@ -458,7 +490,7 @@ ${peerDirectedStartupGuidance}${humanTurnDirectednessGuidance}- Except for a tur
 - An eligible ambient message or optional human reaction may use \`ignore_event\` under its narrow rule below. Trusted platform events follow their dedicated rules instead of this startup contract.
 
 ${privacy === 'private' ? `${buildPrivateSessionGuidance('fast')}\n\n` : ''}## All Environments
-${formatRepositoriesForPrompt(availableEnvironments)}
+${formatRepositoriesForPrompt(availableEnvironments, activeRepositories)}
 
 ${
   workspaceRoutingGuidance
@@ -699,6 +731,7 @@ ${emailCadenceGuidance}- Prefer one direct closeout over an acknowledgement foll
 - Use "launch_task" for new independent repository or workspace work when local checkout, local edits, execution, or testing is required, or a checkout is substantially more appropriate under the exploration rule above, regardless of whether the message is phrased as a question, request, or declarative feedback. Existing active tasks do not block a new independent task.
 - Choose the task environment from the work's requirements and the instance's available environments. When a configured environment clearly matches the required project, repository, or tools, pass its exact ID to \`launch_task\`.
 - Use Blank slate only when the work can be completed in a standalone sandbox without a configured environment, including when the user explicitly requests it. Instances without connected source control or configured environments can still use Blank slate for suitable work. A Blank slate request never overrides a required repository or environment, including one identified by a matching Routing Rule.
+- When the user refers to a repository by name, including loosely (a bare project name, "my fork of X", "the X repo"), resolve it against the repositories listed under All Environments before asking anything. A single matching active repository is a suitable target even when no environment maps it: launch the task in All repositories and name that repository in the task prompt. When nothing listed matches but the active repository list is truncated or could not be loaded, do not ask the user for a repository URL; launch an All repositories task with the user's wording and let it resolve the repository from its own manifest. Ask only when several listed repositories plausibly match, including the same name listed more than once with different providers or hosts, and name the candidates.
 - If the work depends on a specific repository or environment and no suitable target is available, explain what is missing and ask how to proceed. If multiple targets are plausible, ask which to use. Never silently substitute Blank slate or All repositories for a required or ambiguous target.
 - Do not use Blank slate to work around missing access or an environment failure. Handle work directly in Fast when it does not require sandbox execution.
 - For GitHub, an eligible deployment GitHub App installation with an active connected repository is required for repository operations. Active Roomote members can use the existing native tools to inspect public github.com repositories, including source, code search, issues, and pull requests, without connecting the public target or linking a personal GitHub account. Follow the discovered tool descriptions and schemas. Searches can span the connected repositories in one call; add a \`repo:owner/name\` or \`org:\` qualifier when the scope is known rather than fanning out one search per repository. Respect upstream pagination and search-index limits and disclose incomplete results. Private repository reads and repository writes still require an eligible connection to the target repository; never retry an authorization denial anonymously or through a task. For requested GitHub updates, use the discovered native GitHub tools directly: pull request and issue edits, comments, reviews, labels, branches, and small file changes do not require a coding task. Work that needs a checkout, a build, or tests to get right still belongs in a coding task. Follow their discovered descriptions, schemas, and arguments. For repository writes, read the target first, send only the requested fields, and report success only after the tool confirms it. Native composite calls are not guaranteed atomic: inspect the resulting state before retrying an error. Writes unsupported by the discovered provider API tools still require a coding task, not an authorization bypass.
