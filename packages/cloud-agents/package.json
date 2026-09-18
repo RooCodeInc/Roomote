@@ -71,7 +71,7 @@
   "dependencies": {
     "@ai-sdk/mcp": "^1.0.25",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@opencode-ai/sdk": "1.18.10",
+    "@opencode-ai/sdk": "1.18.30",
     "@roomote/ado": "workspace:^",
     "@roomote/auth": "workspace:^",
     "@roomote/bitbucket": "workspace:^",

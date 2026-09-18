@@ -81,7 +81,7 @@ export type { FastAgentNativeToolName } from './fast-agent-tool-policy';
 const FAST_AGENT_TOOL_BRIDGE_BODY_LIMIT_BYTES = 1_000_000;
 const FAST_AGENT_TOOL_BRIDGE_ERROR = 'Fast tool execution failed.';
 // Fast's restricted OpenCode config intentionally does not forward
-// `tool_output`, so OpenCode 1.18.10 receives these built-in defaults. Keep
+// `tool_output`, so OpenCode 1.18.30 receives these built-in defaults. Keep
 // takeover and descriptor validation on this single invariant.
 export const FAST_AGENT_OPENCODE_TOOL_OUTPUT_LIMITS = {
   maxBytes: 50 * 1024,
