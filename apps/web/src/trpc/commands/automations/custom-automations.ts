@@ -377,6 +377,7 @@ export async function getCustomAutomationOptionsCommand(
       ownerUserId,
       capabilities: CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
       existingTarget: automation?.target,
+      includePersonalPreference: true,
       includeSharedChannels: auth.isAdmin,
     }),
   ]);
@@ -407,12 +408,8 @@ export async function updateCustomAutomationDefaultDestinationCommand(
   >,
 ) {
   const target = buildTarget(input, auth.userId);
-  if (
-    target.provider &&
-    target.targetKind.endsWith('_channel') &&
-    !auth.isAdmin
-  ) {
-    throw new Error('Only admins can use a channel as a default destination.');
+  if (target.provider && target.targetKind.endsWith('_channel')) {
+    throw new Error('Personal defaults must use a DM or account email.');
   }
   if (input.targetProvider) {
     await assertDestinationConnected(

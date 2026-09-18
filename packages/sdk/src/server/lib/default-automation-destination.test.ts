@@ -123,6 +123,7 @@ describe('resolveDefaultAutomationTarget', () => {
       resolveDefaultAutomationTarget({
         ownerUserId: 'user-1',
         capabilities: CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
+        includePersonalPreference: true,
       }),
     ).resolves.toEqual({
       provider: 'slack',
@@ -151,6 +152,7 @@ describe('resolveDefaultAutomationTarget', () => {
       resolveDefaultAutomationTarget({
         ownerUserId: 'user-1',
         capabilities: CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
+        includePersonalPreference: true,
       }),
     ).resolves.toEqual({
       provider: 'teams',
@@ -214,6 +216,7 @@ describe('resolveDefaultAutomationTarget', () => {
       resolveDefaultAutomationTarget({
         ownerUserId: 'user-1',
         capabilities: CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
+        includePersonalPreference: true,
         includeSharedChannels: false,
       }),
     ).resolves.toEqual({
@@ -223,6 +226,33 @@ describe('resolveDefaultAutomationTarget', () => {
     });
     expect(mocks.settings).not.toHaveBeenCalled();
     expect(mocks.teamsPrimary).not.toHaveBeenCalled();
+  });
+
+  it('does not apply personal defaults unless the caller opts in', async () => {
+    mocks.settings.mockResolvedValue({
+      managerSlackChannelId: 'C12345678',
+      setupNewState: {},
+    });
+    mocks.installations.mockResolvedValue([
+      { botAccessToken: 'token', teamId: 'T123' },
+    ]);
+    mocks.membership.mockResolvedValue(true);
+    mocks.userDefaultTarget.mockResolvedValue({
+      provider: 'discord',
+      targetKind: 'discord_user',
+      externalRef: 'user-1',
+    });
+
+    await expect(
+      resolveDefaultAutomationTarget({
+        ownerUserId: 'user-1',
+        capabilities: CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
+      }),
+    ).resolves.toMatchObject({
+      provider: 'slack',
+      externalRef: 'C12345678',
+    });
+    expect(mocks.userDefaultTarget).not.toHaveBeenCalled();
   });
 
   it('uses a usable personal default before the automatic waterfall', async () => {
@@ -241,6 +271,7 @@ describe('resolveDefaultAutomationTarget', () => {
       resolveDefaultAutomationTarget({
         ownerUserId: 'user-1',
         capabilities: CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
+        includePersonalPreference: true,
       }),
     ).resolves.toEqual({
       provider: 'discord',
@@ -263,6 +294,7 @@ describe('resolveDefaultAutomationTarget', () => {
       resolveDefaultAutomationTarget({
         ownerUserId: 'user-1',
         capabilities: CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
+        includePersonalPreference: true,
         includeSharedChannels: false,
       }),
     ).resolves.toEqual({

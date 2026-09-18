@@ -34,10 +34,10 @@ vi.mock('@/components/settings/DeploymentTimeZoneSetting', () => ({
 }));
 
 vi.mock(
-  '@/components/settings/automations/PersonalAutomationDefaultSetting',
+  '@/components/settings/automations/AutomationDefaultDestinationSetting',
   () => ({
-    PersonalAutomationDefaultSetting: () => (
-      <div>Personal automation default controls</div>
+    AutomationDefaultDestinationSetting: () => (
+      <div>Automation default destination controls</div>
     ),
   }),
 );
@@ -62,7 +62,7 @@ describe('Automations page access', () => {
       screen.queryByText('Deployment timezone controls'),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByText('Personal automation default controls'),
+      screen.getByText('Automation default destination controls'),
     ).toBeInTheDocument();
   });
 
@@ -75,8 +75,8 @@ describe('Automations page access', () => {
       screen.getByText('Deployment timezone controls'),
     ).toBeInTheDocument();
     expect(
-      screen.getByText('Personal automation default controls'),
-    ).toBeInTheDocument();
+      screen.queryByText('Automation default destination controls'),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByText('Custom automation management'),
     ).not.toBeInTheDocument();

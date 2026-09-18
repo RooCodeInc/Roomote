@@ -58,6 +58,7 @@ export function ManagerChannelEditor({
   slackAppMention,
   fieldError,
   showMigrationNote,
+  alwaysEditing = false,
   onChange,
   onRefresh,
   onSave,
@@ -80,6 +81,7 @@ export function ManagerChannelEditor({
   slackAppMention: string;
   fieldError?: string;
   showMigrationNote: boolean;
+  alwaysEditing?: boolean;
   onChange: (value: ManagerChannelValue) => void;
   onRefresh: () => void;
   onSave: () => void;
@@ -151,15 +153,21 @@ export function ManagerChannelEditor({
     slackChannels,
     discordChannels,
   });
-  const showForm = !configured || isEditing || isDirty;
+  const showForm = alwaysEditing || !configured || isEditing || isDirty;
 
   useEffect(() => {
-    if (wasSaving.current && !isSaving && !isDirty && configured) {
+    if (
+      !alwaysEditing &&
+      wasSaving.current &&
+      !isSaving &&
+      !isDirty &&
+      configured
+    ) {
       setIsEditing(false);
       setIsEnteringCustomChannel(false);
     }
     wasSaving.current = isSaving;
-  }, [configured, isDirty, isSaving]);
+  }, [alwaysEditing, configured, isDirty, isSaving]);
 
   if (!showForm) {
     return (
@@ -180,10 +188,10 @@ export function ManagerChannelEditor({
 
   return (
     <div className="space-y-2">
-      <Label htmlFor="manager-channel">Default destination</Label>
+      <Label htmlFor="manager-channel">Shared channel</Label>
       <p className="text-sm text-muted-foreground">
-        Shared across the deployment for built-in automations without an
-        explicit destination. Make sure the Roomote app is added to the channel.
+        Used across the deployment by built-in automations without an explicit
+        destination. Make sure the Roomote app is added to the channel.
       </p>
       <div className="max-w-md space-y-2">
         <div className="flex items-center gap-2">
@@ -359,7 +367,7 @@ export function ManagerChannelEditor({
             </Button>
           </div>
         ) : null}
-        {configured && isEditing && !isDirty ? (
+        {!alwaysEditing && configured && isEditing && !isDirty ? (
           <Button
             variant="outline"
             size="sm"

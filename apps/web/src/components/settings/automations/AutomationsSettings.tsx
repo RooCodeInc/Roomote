@@ -79,6 +79,7 @@ import {
 import { CustomAutomationsSection } from './CustomAutomationsSection';
 import { AutomationListRow, type AutomationListFilter } from './AutomationList';
 import { AutomationDestinationPicker } from './AutomationDestinationPicker';
+import { AutomationDefaultDestinationSetting } from './AutomationDefaultDestinationSetting';
 import { AutomationAdditionalRules } from './CiFailureTriageAdditionalRules';
 import {
   buildAutomationDiscordDestinationOptions,
@@ -529,7 +530,7 @@ const AUTOMATION_DEFINITIONS: Record<AutomationId, AutomationDefinition> = {
   },
   managerChannel: {
     id: 'managerChannel',
-    label: 'Automation output',
+    label: 'Default destination',
     description:
       'Shared Slack or Discord channel for manager-facing Roomote asks, summaries, and alerts.',
     icon: Users,
@@ -1868,9 +1869,11 @@ export function AutomationsSettings({
         });
 
         toast.success(
-          automationLabel
-            ? `Saved settings for the ${automationLabel} automation.`
-            : 'Automation settings saved.',
+          savedAutomation === 'managerChannel'
+            ? 'Default destination saved.'
+            : automationLabel
+              ? `Saved settings for the ${automationLabel} automation.`
+              : 'Automation settings saved.',
         );
       },
       onError: (error) => {
@@ -1895,9 +1898,11 @@ export function AutomationsSettings({
           );
         }
         toast.error(
-          automationLabel
-            ? `Failed to save ${automationLabel} settings: ${error.message}`
-            : error.message,
+          savedAutomation === 'managerChannel'
+            ? `Failed to save the default destination: ${error.message}`
+            : automationLabel
+              ? `Failed to save ${automationLabel} settings: ${error.message}`
+              : error.message,
         );
       },
     }),
@@ -2219,6 +2224,17 @@ export function AutomationsSettings({
   const managerChannelConfigured = Boolean(
     managerSlackChannelId || managerDiscordChannelId,
   );
+  const sharedDestinationLabel = managerSlackChannelId
+    ? `Slack ${formState?.managerSlackChannel || managerSlackChannelId}`
+    : managerDiscordChannelId
+      ? `Discord ${
+          discordChannelsQuery.data?.channels.find(
+            (channel) => channel.id === managerDiscordChannelId,
+          )?.label ??
+          formState?.managerDiscordChannel ??
+          managerDiscordChannelId
+        }`
+      : null;
   const slackChannelChoices = useMemo(
     () => slackChannelsQuery.data?.channels ?? [],
     [slackChannelsQuery.data?.channels],
@@ -2945,62 +2961,71 @@ export function AutomationsSettings({
               {settingsQuery.isPending || !formState ? (
                 <Skeleton className="h-5 w-64" />
               ) : (
-                <ManagerChannelEditor
-                  value={{
-                    slackChannel: formState.managerSlackChannel,
-                    discordChannel: formState.managerDiscordChannel,
-                  }}
-                  savedSlackChannel={savedState?.managerSlackChannel ?? ''}
-                  savedSlackChannelId={managerSlackChannelId}
-                  savedDiscordChannelId={managerDiscordChannelId}
-                  slackChannels={slackChannelsQuery.data?.channels ?? []}
-                  discordChannels={discordChannelsQuery.data?.channels ?? []}
-                  slackConnected={capabilities?.slackConnected === true}
-                  discordConnected={capabilities?.discordConnected === true}
-                  channelsPending={
-                    slackChannelsQuery.isPending ||
-                    discordChannelsQuery.isPending
+                <AutomationDefaultDestinationSetting
+                  sharedDestinationLabel={sharedDestinationLabel}
+                  sharedEditor={
+                    <ManagerChannelEditor
+                      value={{
+                        slackChannel: formState.managerSlackChannel,
+                        discordChannel: formState.managerDiscordChannel,
+                      }}
+                      savedSlackChannel={savedState?.managerSlackChannel ?? ''}
+                      savedSlackChannelId={managerSlackChannelId}
+                      savedDiscordChannelId={managerDiscordChannelId}
+                      slackChannels={slackChannelsQuery.data?.channels ?? []}
+                      discordChannels={
+                        discordChannelsQuery.data?.channels ?? []
+                      }
+                      slackConnected={capabilities?.slackConnected === true}
+                      discordConnected={capabilities?.discordConnected === true}
+                      channelsPending={
+                        slackChannelsQuery.isPending ||
+                        discordChannelsQuery.isPending
+                      }
+                      channelsFetching={
+                        slackChannelsQuery.isFetching ||
+                        discordChannelsQuery.isFetching
+                      }
+                      channelsError={
+                        slackChannelsQuery.isError ||
+                        discordChannelsQuery.isError
+                      }
+                      isDirty={isDirty.managerChannel}
+                      isSaving={
+                        updateMutation.isPending &&
+                        savingAutomation === 'managerChannel'
+                      }
+                      warningChannelId={
+                        slackChannelAccessWarnings.managerSlackChannel
+                      }
+                      slackAppMention={slackAppMention}
+                      fieldError={
+                        fieldErrors.managerSlackChannel ??
+                        fieldErrors.managerDiscordChannel
+                      }
+                      showMigrationNote={showManagerChannelMigrationNote}
+                      alwaysEditing
+                      onChange={({ slackChannel, discordChannel }) =>
+                        setFormState((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                managerSlackChannel: slackChannel,
+                                managerDiscordChannel: discordChannel,
+                              }
+                            : prev,
+                        )
+                      }
+                      onRefresh={() => {
+                        void Promise.all([
+                          slackChannelsQuery.refetch(),
+                          discordChannelsQuery.refetch(),
+                        ]);
+                      }}
+                      onSave={() => saveAgent('managerChannel')}
+                      onReset={() => resetAgent('managerChannel')}
+                    />
                   }
-                  channelsFetching={
-                    slackChannelsQuery.isFetching ||
-                    discordChannelsQuery.isFetching
-                  }
-                  channelsError={
-                    slackChannelsQuery.isError || discordChannelsQuery.isError
-                  }
-                  isDirty={isDirty.managerChannel}
-                  isSaving={
-                    updateMutation.isPending &&
-                    savingAutomation === 'managerChannel'
-                  }
-                  warningChannelId={
-                    slackChannelAccessWarnings.managerSlackChannel
-                  }
-                  slackAppMention={slackAppMention}
-                  fieldError={
-                    fieldErrors.managerSlackChannel ??
-                    fieldErrors.managerDiscordChannel
-                  }
-                  showMigrationNote={showManagerChannelMigrationNote}
-                  onChange={({ slackChannel, discordChannel }) =>
-                    setFormState((prev) =>
-                      prev
-                        ? {
-                            ...prev,
-                            managerSlackChannel: slackChannel,
-                            managerDiscordChannel: discordChannel,
-                          }
-                        : prev,
-                    )
-                  }
-                  onRefresh={() => {
-                    void Promise.all([
-                      slackChannelsQuery.refetch(),
-                      discordChannelsQuery.refetch(),
-                    ]);
-                  }}
-                  onSave={() => saveAgent('managerChannel')}
-                  onReset={() => resetAgent('managerChannel')}
                 />
               )}
             </div>

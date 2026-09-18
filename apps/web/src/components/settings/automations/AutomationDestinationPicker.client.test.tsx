@@ -79,6 +79,39 @@ describe('AutomationDestinationPicker', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('keeps channel providers in personal defaults limited to DM mode', () => {
+    render(
+      <AutomationDestinationPicker
+        id="destination"
+        value={{ provider: 'slack', mode: 'direct_message', channelId: '' }}
+        availableProviders={['slack', 'email']}
+        channelProviders={[]}
+        slackOptions={slackOptions}
+        discordOptions={discordOptions}
+        emailOptions={[
+          {
+            id: 'email-1',
+            name: 'user@example.com',
+            label: 'user@example.com',
+          },
+        ]}
+        onChange={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText(
+        'Results are sent privately to your linked Slack account.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('combobox', { name: 'Slack destination type' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('combobox', { name: 'Destination channel' }),
+    ).not.toBeInTheDocument();
+  });
+
   it('shows provider-specific channel selection in channel mode', () => {
     render(
       <AutomationDestinationPicker

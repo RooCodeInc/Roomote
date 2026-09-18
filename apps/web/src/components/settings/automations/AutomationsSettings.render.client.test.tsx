@@ -368,6 +368,8 @@ vi.mock('@tanstack/react-query', () => ({
           capabilities: state.settingsQuery.data.capabilities,
           managerSlackChannelId,
           managerDiscordChannelId,
+          configuredDefaultTarget: null,
+          emailIdentities: state.settingsQuery.data.emailIdentities,
           defaultTarget:
             state.customAutomationDefaultTarget !== undefined
               ? state.customAutomationDefaultTarget
@@ -553,6 +555,9 @@ vi.mock('@/trpc/client', () => ({
         mutationOptions: (options?: Record<string, unknown>) => options ?? {},
       },
       updateCustomAutomation: {
+        mutationOptions: (options?: Record<string, unknown>) => options ?? {},
+      },
+      updateCustomAutomationDefaultDestination: {
         mutationOptions: (options?: Record<string, unknown>) => options ?? {},
       },
       deleteCustomAutomation: {
@@ -1055,15 +1060,18 @@ describe('AutomationsSettings', () => {
 
     render(<AutomationsSettings />);
 
-    const destination = await screen.findByRole('button', {
-      name: /#automation-reports \(Discord\)/,
-    });
-    expect(destination).toBeInTheDocument();
-
-    fireEvent.click(destination);
-    expect(screen.getByLabelText('Select manager channel')).toBeInTheDocument();
     expect(
-      screen.getByText(/Shared across the deployment/),
+      await screen.findByText(/Discord #automation-reports · Shared/),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    expect(screen.getByRole('tab', { name: 'Shared channel' })).toHaveAttribute(
+      'data-state',
+      'active',
+    );
+    expect(screen.getByLabelText('Select manager channel')).toBeInTheDocument();
+    expect(screen.getByText(/Used across the deployment/)).toBeInTheDocument();
+    expect(
+      screen.getByRole('tab', { name: 'Personal DM or email' }),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole('button', {

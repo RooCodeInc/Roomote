@@ -316,6 +316,7 @@ describe('custom automation ownership', () => {
     expect(mocks.resolveDefaultAutomationTarget).toHaveBeenCalledWith(
       expect.objectContaining({
         ownerUserId: 'member-1',
+        includePersonalPreference: true,
         includeSharedChannels: false,
       }),
     );
@@ -433,7 +434,17 @@ describe('custom automation ownership', () => {
         targetMode: 'channel',
         targetChannelId: 'channel-1',
       }),
-    ).rejects.toThrow('Only admins can use a channel');
+    ).rejects.toThrow('Personal defaults must use a DM or account email');
+    await expect(
+      updateCustomAutomationDefaultDestinationCommand(adminAuth, {
+        targetProvider: 'slack',
+        targetMode: 'channel',
+        targetChannelId: 'shared-channel',
+      }),
+    ).rejects.toThrow('Personal defaults must use a DM or account email');
+    expect(
+      mocks.getBackgroundAgentSettingsForDeployment,
+    ).not.toHaveBeenCalled();
   });
 
   it('clears a personal default without changing existing automations', async () => {

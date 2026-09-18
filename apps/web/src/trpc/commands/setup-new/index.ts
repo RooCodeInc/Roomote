@@ -2650,6 +2650,7 @@ async function applySetupRecommendationInTx(
       ? await resolveDefaultAutomationTarget({
           ownerUserId: existing?.createdByUserId ?? auth.userId,
           capabilities: CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
+          includePersonalPreference: true,
           includeSetupHandoff: true,
           client: tx,
         })

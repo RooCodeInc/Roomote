@@ -51,6 +51,7 @@ type DefaultAutomationTargetParams = {
   ownerUserId: string;
   capabilities: AutomationDestinationCapabilities;
   existingTarget?: OptionalAutomationTarget | null;
+  includePersonalPreference?: boolean;
   includeSharedChannels?: boolean;
   includeSetupHandoff?: boolean;
   client?: DatabaseOrTransaction;
@@ -66,6 +67,7 @@ export async function resolveDefaultAutomationTarget({
   ownerUserId,
   capabilities,
   existingTarget,
+  includePersonalPreference = false,
   includeSharedChannels = true,
   includeSetupHandoff = false,
   client = db,
@@ -80,10 +82,11 @@ export async function resolveDefaultAutomationTarget({
     return supported ? existingTarget : null;
   }
 
-  const preferredTarget = await getUserDefaultAutomationTarget(
-    ownerUserId,
-    client,
-  ).catch(() => null);
+  const preferredTarget = includePersonalPreference
+    ? await getUserDefaultAutomationTarget(ownerUserId, client).catch(
+        () => null,
+      )
+    : null;
   if (preferredTarget) {
     const resolvedPreference = await resolvePreferredTarget({
       target: preferredTarget,

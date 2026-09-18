@@ -1403,6 +1403,9 @@ describe('setup recommendation commands', () => {
         capabilities: expect.objectContaining({ email: false }),
       }),
     );
+    expect(mockResolveDefaultAutomationTarget).not.toHaveBeenCalledWith(
+      expect.objectContaining({ includePersonalPreference: true }),
+    );
     expect(mockUpsertAutomation).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ targets: [reportTarget] }),
@@ -1448,6 +1451,7 @@ describe('setup recommendation commands', () => {
     expect(mockResolveDefaultAutomationTarget).toHaveBeenCalledWith(
       expect.objectContaining({
         ownerUserId: 'setup-test-user',
+        includePersonalPreference: true,
         includeSetupHandoff: true,
       }),
     );
