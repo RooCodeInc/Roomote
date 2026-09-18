@@ -17,9 +17,8 @@ import {
   ACP_UI_TOOL_OUTPUT_MAX_CHARS,
   ALL_REPOSITORIES,
   BRAIN_MCP_ID,
-  CHAT_CHANNEL_POST_TOOL_NAME,
   CHAT_CHANNEL_MESSAGES_TOOL,
-  CHAT_CHANNELS_TOOL,
+  CHAT_DESTINATIONS_TOOL,
   CHAT_MESSAGE_CONTEXT_TOOL,
   CHAT_REACTION_EMOJI_TOOL_NAME,
   FAST_EXECUTION,
@@ -277,9 +276,6 @@ function selectFastRoomoteChannelTools(options: {
           ...integration,
           tools: integration.tools.filter(({ name }) => {
             if (name === LEGACY_SLACK_REACTION_TOOL) return false;
-            if (name === CHAT_CHANNELS_TOOL.name) {
-              return slackConversation;
-            }
             if (name === CHAT_REACTION_EMOJI_TOOL_NAME) {
               return slackConversation && options.currentMessageReactable;
             }
@@ -4133,27 +4129,20 @@ export async function answerFastAgentQuestion({
         const actorScopedIntegrationArguments =
           call.integrationId === ROOMOTE_MCP_ID &&
           conversation.surface === 'slack'
-            ? call.toolName === CHAT_CHANNELS_TOOL.name
+            ? call.toolName === CHAT_DESTINATIONS_TOOL.name
               ? {
                   ...chatScopedIntegrationArguments,
-                  slackTeamId: conversation.workspaceId,
+                  workspaceId: conversation.workspaceId,
                 }
-              : call.toolName === CHAT_CHANNEL_POST_TOOL_NAME
+              : call.toolName === CHAT_REACTION_EMOJI_TOOL_NAME
                 ? {
-                    ...chatScopedIntegrationArguments,
+                    name: call.args.name,
                     provider: 'slack',
                     slackTeamId: conversation.workspaceId,
+                    channel: conversation.replyTarget.channelId,
+                    messageId: currentMessageId ?? conversation.conversationId,
                   }
-                : call.toolName === CHAT_REACTION_EMOJI_TOOL_NAME
-                  ? {
-                      name: call.args.name,
-                      provider: 'slack',
-                      slackTeamId: conversation.workspaceId,
-                      channel: conversation.replyTarget.channelId,
-                      messageId:
-                        currentMessageId ?? conversation.conversationId,
-                    }
-                  : chatScopedIntegrationArguments
+                : chatScopedIntegrationArguments
             : chatScopedIntegrationArguments;
         const sendsChatReaction =
           call.integrationId === ROOMOTE_MCP_ID &&

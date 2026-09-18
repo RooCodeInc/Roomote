@@ -113,6 +113,7 @@ describe('opencode-server bootstrap', () => {
     roomote_send_chat_reply: false,
     roomote_report_to_parent_session: false,
     roomote_send_chat_reaction_emoji: false,
+    roomote_send_chat_message: false,
     roomote_post_to_channel: false,
     roomote_reply_to_slack_thread: false,
   };

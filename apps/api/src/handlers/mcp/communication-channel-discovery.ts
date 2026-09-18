@@ -10,6 +10,7 @@ import { SlackNotifier } from '@roomote/slack';
 import {
   createDiscordCommunicationProviderFromRuntimeCredentials,
   getCommunicationProviderAdapter,
+  hasUserDirectMessageIdentity,
 } from '@roomote/sdk/server';
 import {
   communicationProviders,
@@ -47,6 +48,24 @@ type CommunicationPlatformChannels = {
 type CommunicationChannelsPayload = {
   channelCount: number;
   platforms: CommunicationPlatformChannels[];
+};
+
+type CommunicationDestination = {
+  destination: string;
+  provider: 'slack' | 'telegram';
+  kind: 'self' | 'channel' | 'person';
+  name: string;
+  workspaceId?: string;
+  workspaceName?: string;
+};
+
+type CommunicationDestinationsPayload = {
+  destinationCount: number;
+  destinations: CommunicationDestination[];
+  limitations: Array<{
+    provider: CommunicationProvider;
+    reason: string;
+  }>;
 };
 
 const DISCORD_CHANNEL_KINDS: Record<number, string> = {
@@ -282,5 +301,79 @@ export async function listCommunicationChannels(options: {
       0,
     ),
     platforms,
+  };
+}
+
+export async function listCommunicationDestinations(options: {
+  actingUserId: string;
+  slackTeamId?: string | null;
+}): Promise<CommunicationDestinationsPayload> {
+  const actingUserId = options.actingUserId.trim();
+  const [catalog, hasSlackSelf, hasTelegramSelf] = await Promise.all([
+    listCommunicationChannels(options),
+    hasUserDirectMessageIdentity('slack', actingUserId),
+    hasUserDirectMessageIdentity('telegram', actingUserId),
+  ]);
+  const slack = catalog.platforms.find(({ provider }) => provider === 'slack');
+  const destinations: CommunicationDestination[] = [
+    ...(hasSlackSelf
+      ? [
+          {
+            destination: 'slack:me',
+            provider: 'slack' as const,
+            kind: 'self' as const,
+            name: 'Me on Slack',
+          },
+        ]
+      : []),
+    ...(hasTelegramSelf
+      ? [
+          {
+            destination: 'telegram:me',
+            provider: 'telegram' as const,
+            kind: 'self' as const,
+            name: 'Me on Telegram',
+          },
+        ]
+      : []),
+    ...(slack?.channels.flatMap((channel) =>
+      channel.workspaceId
+        ? [
+            {
+              destination: `slack:${channel.workspaceId}:channel:${channel.id}`,
+              provider: 'slack' as const,
+              kind: 'channel' as const,
+              name: channel.name,
+              workspaceId: channel.workspaceId,
+              workspaceName: channel.workspaceName,
+            },
+          ]
+        : [],
+    ) ?? []),
+    ...(slack?.directMessageRecipients?.map((recipient) => ({
+      destination: `slack:${recipient.workspaceId}:member:${recipient.id}`,
+      provider: 'slack' as const,
+      kind: 'person' as const,
+      name: recipient.name,
+      workspaceId: recipient.workspaceId,
+      workspaceName: recipient.workspaceName,
+    })) ?? []),
+  ];
+
+  return {
+    destinationCount: destinations.length,
+    destinations,
+    limitations: catalog.platforms.flatMap((platform) => {
+      if (platform.provider === 'slack') return [];
+      if (platform.limitation) {
+        return [{ provider: platform.provider, reason: platform.limitation }];
+      }
+      return [
+        {
+          provider: platform.provider,
+          reason: `${platform.platform} destinations are not available through this lookup. Only a trusted task-configured current destination may be used when the task already targets that provider.`,
+        },
+      ];
+    }),
   };
 }

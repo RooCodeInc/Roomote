@@ -4,7 +4,11 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import type { Variables } from '../../types';
 
 import { loadCommunicationLookupTaskRun } from './communication-lookup-run-context';
-import { listCommunicationChannels } from './communication-channel-discovery';
+import {
+  listCommunicationChannels,
+  listCommunicationDestinations,
+} from './communication-channel-discovery';
+import { sendCommunicationMessage } from './communication-message-send';
 import {
   lookupCommunicationChannelMessages,
   lookupCommunicationMessageContext,
@@ -88,6 +92,72 @@ communicationMcp.post('/channels', async (c) => {
   return c.json(
     await listCommunicationChannels({ actingUserId: taskRun.actingUserId }),
   );
+});
+
+communicationMcp.post('/destinations', async (c) => {
+  const { authContext } = c.get('mcpAuth');
+  if (!isRunTokenContext(authContext)) {
+    return c.json(
+      { error: 'Communication lookup is only available for task run tokens' },
+      403,
+    );
+  }
+
+  const taskRun = await loadCommunicationLookupTaskRun(authContext.runId);
+  if (!taskRun) {
+    return c.json({ error: 'Task run not found for this MCP token' }, 404);
+  }
+  if (!taskRun.actingUserId) {
+    return c.json(
+      { error: 'Communication destinations require an acting user' },
+      403,
+    );
+  }
+
+  return c.json(
+    await listCommunicationDestinations({
+      actingUserId: taskRun.actingUserId,
+    }),
+  );
+});
+
+communicationMcp.post('/send', async (c) => {
+  const { authContext } = c.get('mcpAuth');
+  if (!isRunTokenContext(authContext)) {
+    return c.json(
+      { error: 'Communication sending is only available for task run tokens' },
+      403,
+    );
+  }
+
+  const taskRun = await loadCommunicationLookupTaskRun(authContext.runId);
+  if (!taskRun) {
+    return c.json({ error: 'Task run not found for this MCP token' }, 404);
+  }
+  if (!taskRun.actingUserId) {
+    return c.json(
+      { error: 'Communication sending requires an acting user' },
+      403,
+    );
+  }
+
+  const body = (await c.req.json().catch(() => null)) as Record<
+    string,
+    unknown
+  > | null;
+  const destination =
+    typeof body?.destination === 'string' ? body.destination.trim() : '';
+  const message = typeof body?.message === 'string' ? body.message : '';
+  if (!destination || !message.trim()) {
+    return c.json({ error: 'destination and message are required' }, 400);
+  }
+
+  return sendCommunicationMessage({
+    actingUserId: taskRun.actingUserId,
+    taskRun,
+    destination,
+    message,
+  });
 });
 
 communicationMcp.post('/message_context', async (c) => {

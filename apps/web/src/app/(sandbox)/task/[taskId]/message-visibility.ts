@@ -17,7 +17,7 @@ const TOOL_CALLS_DENY_LIST_BY_SOURCE = new Map([
 ]);
 
 // Only tools whose effect is either internal or represented by dedicated UI
-// belong here. Outbound communication (`send_chat_reply`, `post_to_channel`,
+// belong here. Outbound communication (`send_chat_reply`, `send_chat_message`,
 // `send_chat_reaction_emoji`) is a consequential receipt like
 // `send_task_message`: for a delegated task reporting to its orchestrator it
 // is the entire result, so hiding it left the task transcript blank.

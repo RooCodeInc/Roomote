@@ -236,9 +236,11 @@ Roomote can read a bounded history from the current Slack channel, discover othe
 channels in the same workspace, and post standalone updates to channels where
 the Roomote app is authorized. From another session surface, such as Telegram, you
 can provide a Slack link or explicitly name Slack to read authorized context,
-then ask Roomote to post an update to an explicit workspace and destination. You
-can also ask Roomote to DM your own linked Slack account or an explicitly named
-linked member in a shared workspace. Public channels require app membership;
+then ask Roomote to send an update to an explicit workspace and destination.
+Roomote uses the same destination lookup and send action for your own linked Slack
+account, an explicitly named linked member, or an authorized Slack channel or
+thread. A self destination is always resolved from your authenticated identity;
+it is not a caller-supplied user ID. Public channels require app membership;
 private channels also require your linked Slack account to be a member, and
 direct messages to another member require workspace-scoped linked identities for
 both participants. Reactions remain scoped to the current inbound message. Roomote

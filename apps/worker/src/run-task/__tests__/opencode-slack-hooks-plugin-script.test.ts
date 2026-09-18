@@ -105,7 +105,7 @@ describe('OPENCODE_SLACK_HOOKS_PLUGIN_SCRIPT', () => {
     await hooks['tool.execute.after']({ ...input, args: {} }, output);
 
     expect(output.output.startsWith('tool output')).toBe(true);
-    expect(output.output).toContain('chat-visible ack');
+    expect(output.output).toContain('substantive update before more work');
   });
 
   it('does not append a warning when the hook allows the tool call', async () => {
@@ -314,6 +314,6 @@ describe('OPENCODE_SLACK_HOOKS_PLUGIN_SCRIPT', () => {
     ).resolves.toBeUndefined();
 
     expect(output.output.startsWith('tool output')).toBe(true);
-    expect(output.output).toContain('chat-visible ack');
+    expect(output.output).toContain('substantive update before more work');
   });
 });

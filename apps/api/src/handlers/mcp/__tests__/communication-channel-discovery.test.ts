@@ -5,6 +5,7 @@ const {
   findSlackUserMappingsMock,
   findTeamsInstallationsMock,
   getCommunicationProviderAdapterMock,
+  hasUserDirectMessageIdentityMock,
   createDiscordProviderMock,
   listPublicAccessibleChannelIdsMock,
   listPublicChannelsMock,
@@ -15,6 +16,7 @@ const {
   findSlackUserMappingsMock: vi.fn(),
   findTeamsInstallationsMock: vi.fn(),
   getCommunicationProviderAdapterMock: vi.fn(),
+  hasUserDirectMessageIdentityMock: vi.fn(),
   createDiscordProviderMock: vi.fn(),
   listPublicAccessibleChannelIdsMock: vi.fn(),
   listPublicChannelsMock: vi.fn(),
@@ -41,6 +43,7 @@ vi.mock('@roomote/sdk/server', () => ({
   createDiscordCommunicationProviderFromRuntimeCredentials:
     createDiscordProviderMock,
   getCommunicationProviderAdapter: getCommunicationProviderAdapterMock,
+  hasUserDirectMessageIdentity: hasUserDirectMessageIdentityMock,
 }));
 
 vi.mock('@roomote/slack', () => ({
@@ -49,7 +52,10 @@ vi.mock('@roomote/slack', () => ({
   },
 }));
 
-import { listCommunicationChannels } from '../communication-channel-discovery';
+import {
+  listCommunicationChannels,
+  listCommunicationDestinations,
+} from '../communication-channel-discovery';
 
 describe('listCommunicationChannels', () => {
   beforeEach(() => {
@@ -60,6 +66,7 @@ describe('listCommunicationChannels', () => {
     findDiscordInstallationsMock.mockResolvedValue([]);
     findDiscordUserMappingMock.mockResolvedValue(null);
     getCommunicationProviderAdapterMock.mockResolvedValue(null);
+    hasUserDirectMessageIdentityMock.mockResolvedValue(false);
     createDiscordProviderMock.mockResolvedValue({
       listPublicAccessibleChannelIds: listPublicAccessibleChannelIdsMock,
     });
@@ -319,5 +326,54 @@ describe('listCommunicationChannels', () => {
       ],
     });
     expect(findSlackUserMappingsMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('normalizes linked self, Slack channel, and linked-person destinations', async () => {
+    hasUserDirectMessageIdentityMock.mockImplementation(
+      async (provider: string) => provider === 'telegram',
+    );
+    findSlackInstallationsMock.mockResolvedValue([
+      { botAccessToken: 'token-1', teamId: 'T1', teamName: 'One' },
+    ]);
+    findSlackUserMappingsMock
+      .mockResolvedValueOnce([{ slackTeamId: 'T1' }])
+      .mockResolvedValueOnce([
+        {
+          slackUserId: 'U-LINKED',
+          userId: 'user-2',
+          user: { name: 'Linked Member', deletedAt: null },
+        },
+      ]);
+    listPublicChannelsMock.mockResolvedValue([
+      {
+        id: 'C1',
+        name: 'shipping',
+        isPrivate: false,
+        isMember: true,
+      },
+    ]);
+
+    await expect(
+      listCommunicationDestinations({ actingUserId: 'user-1' }),
+    ).resolves.toMatchObject({
+      destinationCount: 3,
+      destinations: [
+        {
+          destination: 'telegram:me',
+          provider: 'telegram',
+          kind: 'self',
+        },
+        {
+          destination: 'slack:T1:channel:C1',
+          provider: 'slack',
+          kind: 'channel',
+        },
+        {
+          destination: 'slack:T1:member:U-LINKED',
+          provider: 'slack',
+          kind: 'person',
+        },
+      ],
+    });
   });
 });

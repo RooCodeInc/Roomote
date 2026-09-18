@@ -8,8 +8,9 @@ import { z } from 'zod';
 import {
   CALL_INTEGRATION_TOOL_TOOL,
   FIND_INTEGRATION_TOOLS_TOOL,
-  CHAT_CHANNELS_TOOL,
+  CHAT_DESTINATIONS_TOOL,
   CHAT_CHANNEL_MESSAGES_TOOL,
+  CHAT_MESSAGE_SEND_TOOL,
   CHAT_MESSAGE_CONTEXT_TOOL,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
   CREATE_CUSTOM_SKILL_TOOL,
@@ -80,9 +81,9 @@ import {
   recordChatReplyDeliveryFailure,
   recordChatReplySatisfaction,
 } from './chat-reply-satisfaction.js';
-import { handlePostToChannel } from './post-to-channel.js';
 import { handleGetChatChannelMessages } from './get-chat-channel-messages.js';
-import { handleListChatChannels } from './list-chat-channels.js';
+import { handleListChatDestinations } from './list-chat-channels.js';
+import { handleSendChatMessage } from './send-chat-message.js';
 import { handleGetChatMessageContext } from './get-chat-message-context.js';
 import { handleSendChatReactionEmoji } from './send-chat-reaction-emoji.js';
 import { handleReportPlatformIssue } from './report-platform-issue.js';
@@ -597,7 +598,7 @@ function getChatReplySurfaceLabel():
   return process.env.ROOMOTE_SLACK_CHANNEL?.trim() ? 'Slack' : 'chat';
 }
 
-function shouldRegisterChannelPostTool(): boolean {
+function shouldRegisterChatMessageTool(): boolean {
   return !isFastAgentChild() && Boolean(process.env.ROOMOTE_TASK_ID?.trim());
 }
 
@@ -1511,10 +1512,10 @@ if (shouldRegisterAutomationWorkItemsTool()) {
 
 if (!isFastAgentChild()) {
   roomoteMcpServer.registerTool(
-    CHAT_CHANNELS_TOOL.name,
+    CHAT_DESTINATIONS_TOOL.name,
     {
-      title: CHAT_CHANNELS_TOOL.title,
-      description: CHAT_CHANNELS_TOOL.description,
+      title: CHAT_DESTINATIONS_TOOL.title,
+      description: CHAT_DESTINATIONS_TOOL.description,
       inputSchema: {},
       annotations: {
         readOnlyHint: true,
@@ -1529,7 +1530,7 @@ if (!isFastAgentChild()) {
         return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
       }
 
-      return handleListChatChannels(roomoteConfig);
+      return handleListChatDestinations(roomoteConfig);
     },
   );
 
@@ -1950,7 +1951,7 @@ function recordFailedChatDeliveryResult(
           error:
             `${typeof parsed.error === 'string' ? parsed.error : 'Chat delivery failed'}. ` +
             `Delivery to the configured chat channel is failing permanently${codeSuffix}. ` +
-            'This has been recorded as the terminal delivery outcome: do not retry this or any other posting tool. ' +
+            'This has been recorded as the terminal delivery outcome: do not retry this or any other sending tool. ' +
             'Finish the task now; the task transcript carries the result.',
         }),
       },
@@ -1958,46 +1959,21 @@ function recordFailedChatDeliveryResult(
   };
 }
 
-if (shouldRegisterChannelPostTool()) {
-  const postSurface = getChatReplySurfaceLabel();
-
+if (shouldRegisterChatMessageTool()) {
   roomoteMcpServer.registerTool(
-    'post_to_channel',
+    CHAT_MESSAGE_SEND_TOOL.name,
     {
-      title: 'Post To Channel',
-      description:
-        `${postSurface}-visible: posts a new standalone message into a ${postSurface} channel the Roomote app can access. ` +
-        'Use this only when the current user explicitly asks you to post a separate update message rather than replying in the ongoing exchange; prefer send_chat_reply for normal replies. ' +
-        'Pass a channel ID (Slack also accepts a channel name or mention, DM ID, or linked Slack user ID/mention). Cross-channel posts and DMs are subject to provider-specific authorization and target support. ' +
-        'The message text renders as Markdown. Lead with the answer or takeaway, use short paragraphs, and put each list item on its own line.',
+      title: CHAT_MESSAGE_SEND_TOOL.title,
+      description: CHAT_MESSAGE_SEND_TOOL.description,
       inputSchema: {
-        channel: z
+        destination: z
           .string()
-          .describe(
-            `${postSurface} channel ID the Roomote app can access; Slack also accepts a linked user ID or mention for DMs`,
-          ),
-        threadTs: z
+          .min(1)
+          .describe(CHAT_MESSAGE_SEND_TOOL.inputDescriptions.destination),
+        message: z
           .string()
-          .optional()
-          .describe(
-            'Optional existing thread or message ID when the target provider supports thread replies',
-          ),
-        text: z
-          .string()
-          .optional()
-          .describe('Markdown text to post. Lead with the answer or takeaway.'),
-        imagePaths: z
-          .array(z.string())
-          .optional()
-          .describe(
-            'Optional workspace-relative or /tmp image file paths to upload and attach',
-          ),
-        imageArtifactIds: z
-          .array(z.string())
-          .optional()
-          .describe(
-            'Optional already-uploaded artifact IDs for images that should be attached',
-          ),
+          .min(1)
+          .describe(CHAT_MESSAGE_SEND_TOOL.inputDescriptions.message),
       },
       annotations: {
         readOnlyHint: false,
@@ -2007,43 +1983,22 @@ if (shouldRegisterChannelPostTool()) {
       },
     },
     async (params): Promise<ToolResult> => {
-      const artifactConfig = getArtifactConfig();
-      if (!artifactConfig) {
-        return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
-      }
-
       const roomoteConfig = getRoomoteConfig();
       if (!roomoteConfig) {
         return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
       }
 
-      const taskId = process.env.ROOMOTE_TASK_ID;
-      if (!taskId?.trim()) {
-        return errorResult('ROOMOTE_TASK_ID environment variable not set');
-      }
-
       if (
-        postSurface === 'Slack' &&
+        getChatReplySurfaceLabel() === 'Slack' &&
         hasSubmittedAutomationSlackSummary &&
         process.env.ROOMOTE_TASK_TYPE === TaskPayloadKind.Scan
       ) {
         return errorResult(
-          'Automation suggestions were already submitted and posted to Slack. Do not call post_to_channel for a duplicate summary.',
+          `Automation suggestions were already submitted and posted to Slack. Do not call ${CHAT_MESSAGE_SEND_TOOL.name} for a duplicate summary.`,
         );
       }
 
-      return handlePostToChannel(
-        {
-          taskId,
-          channel: params.channel,
-          threadTs: params.threadTs,
-          text: params.text,
-          imagePaths: params.imagePaths,
-          imageArtifactIds: params.imageArtifactIds,
-        },
-        artifactConfig,
-        roomoteConfig,
-      );
+      return handleSendChatMessage(params, roomoteConfig);
     },
   );
 

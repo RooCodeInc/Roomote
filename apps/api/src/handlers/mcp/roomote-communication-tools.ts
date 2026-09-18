@@ -1,18 +1,13 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
-  CHAT_CHANNEL_POST_TOOL_NAME,
-  CHAT_CHANNELS_TOOL,
+  CHAT_DESTINATIONS_TOOL,
+  CHAT_MESSAGE_SEND_TOOL,
   CHAT_REACTION_EMOJI_TOOL_NAME,
-  CHAT_SELF_DIRECT_MESSAGE_TOOL_NAME,
 } from '@roomote/types';
-import {
-  hasUserDirectMessageIdentity,
-  sendUserDirectMessage,
-} from '@roomote/sdk/server';
 import { z } from 'zod';
 
-import { listCommunicationChannels } from './communication-channel-discovery';
-import { sendCommunicationChannelPost } from './communication-channel-posts';
+import { listCommunicationDestinations } from './communication-channel-discovery';
+import { sendCommunicationMessage } from './communication-message-send';
 import { maybeAddCommunicationReaction } from './communication-thread-replies';
 import { toolError } from './in-process-api';
 import { toMcpToolResult } from './proxy-utils';
@@ -29,15 +24,17 @@ export function registerRoomoteCommunicationTools(
   actingUserId: string,
 ): void {
   server.registerTool(
-    CHAT_CHANNELS_TOOL.name,
+    CHAT_DESTINATIONS_TOOL.name,
     {
-      title: CHAT_CHANNELS_TOOL.title,
-      description: CHAT_CHANNELS_TOOL.description,
+      title: CHAT_DESTINATIONS_TOOL.title,
+      description: CHAT_DESTINATIONS_TOOL.description,
       inputSchema: {
-        slackTeamId: z
+        workspaceId: z
           .string()
           .optional()
-          .describe('Optional Slack workspace ID to limit channel discovery.'),
+          .describe(
+            'Optional Slack workspace ID to limit channel and linked-person discovery.',
+          ),
       },
       annotations: {
         readOnlyHint: true,
@@ -46,29 +43,29 @@ export function registerRoomoteCommunicationTools(
         openWorldHint: false,
       },
     },
-    async ({ slackTeamId }) =>
+    async ({ workspaceId }) =>
       toMcpToolResult(
-        await listCommunicationChannels({ actingUserId, slackTeamId }),
+        await listCommunicationDestinations({
+          actingUserId,
+          slackTeamId: workspaceId,
+        }),
       ),
   );
 
   server.registerTool(
-    CHAT_CHANNEL_POST_TOOL_NAME,
+    CHAT_MESSAGE_SEND_TOOL.name,
     {
-      title: 'Post To Slack Destination',
-      description:
-        'Post a new standalone Markdown message to an authorized Slack channel, thread, or linked workspace member. For a direct message, use a Slack user ID returned by list_chat_channels, or a user mention or DM ID from trusted context; both the acting member and recipient must have linked accounts in that workspace. Use send_direct_message_to_self for the authenticated member or send_chat_reply for the current conversation. Never infer a recipient ID. Provider and destination access are verified before delivery.',
+      title: CHAT_MESSAGE_SEND_TOOL.title,
+      description: CHAT_MESSAGE_SEND_TOOL.description,
       inputSchema: {
-        provider: z.literal('slack'),
-        slackTeamId: z.string().min(1),
-        channel: z
+        destination: z
           .string()
           .min(1)
-          .describe(
-            'Slack channel name or ID, linked recipient user ID or mention, or existing DM ID.',
-          ),
-        threadTs: z.string().min(1).optional(),
-        text: z.string().min(1),
+          .describe(CHAT_MESSAGE_SEND_TOOL.inputDescriptions.destination),
+        message: z
+          .string()
+          .min(1)
+          .describe(CHAT_MESSAGE_SEND_TOOL.inputDescriptions.message),
       },
       annotations: {
         readOnlyHint: false,
@@ -77,24 +74,12 @@ export function registerRoomoteCommunicationTools(
         openWorldHint: false,
       },
     },
-    async ({ provider, slackTeamId, channel, threadTs, text }) =>
+    async ({ destination, message }) =>
       responseToToolResult(
-        await sendCommunicationChannelPost({
-          taskRun: {
-            id: 0,
-            taskId: `member:${actingUserId}`,
-            actingUserId,
-            payload: {
-              communicationProvider: provider,
-              communicationTeamId: slackTeamId,
-            },
-          },
-          parsedBody: {
-            channel,
-            ...(threadTs ? { threadTs } : {}),
-            text,
-            images: [],
-          },
+        await sendCommunicationMessage({
+          actingUserId,
+          destination,
+          message,
         }),
       ),
   );
@@ -142,48 +127,6 @@ export function registerRoomoteCommunicationTools(
       return response
         ? responseToToolResult(response)
         : toolError({ error: 'Slack reactions are unavailable.' });
-    },
-  );
-
-  server.registerTool(
-    CHAT_SELF_DIRECT_MESSAGE_TOOL_NAME,
-    {
-      title: 'Send Direct Message To Yourself',
-      description:
-        'Send an exact text direct message to the authenticated Roomote member through their linked Telegram or Slack account. Select one provider per call. If delivery fails, the error identifies the attempted provider so another provider can be tried explicitly. The recipient is always resolved from the authenticated member; arbitrary recipients are not supported.',
-      inputSchema: {
-        provider: z.enum(['telegram', 'slack']),
-        text: z.string().min(1),
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-        idempotentHint: false,
-        openWorldHint: false,
-      },
-    },
-    async ({ provider, text }) => {
-      if (!(await hasUserDirectMessageIdentity(provider, actingUserId))) {
-        return toolError({
-          code: 'recipient_not_linked',
-          error: `The authenticated Roomote member does not have a linked ${provider} direct-message identity.`,
-          provider,
-        });
-      }
-
-      const delivered = await sendUserDirectMessage({
-        provider,
-        userId: actingUserId,
-        text,
-        logContext: 'roomote-mcp-self-direct-message',
-      });
-      return delivered
-        ? toMcpToolResult({ delivered: true, provider })
-        : toolError({
-            code: 'delivery_failed',
-            error: `${provider} direct-message delivery failed; no message was confirmed as sent.`,
-            provider,
-          });
     },
   );
 }

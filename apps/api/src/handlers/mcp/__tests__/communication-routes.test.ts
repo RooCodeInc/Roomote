@@ -1,10 +1,22 @@
-const { listCommunicationChannelsMock, loadTaskRunMock } = vi.hoisted(() => ({
+const {
+  listCommunicationChannelsMock,
+  listCommunicationDestinationsMock,
+  loadTaskRunMock,
+  sendCommunicationMessageMock,
+} = vi.hoisted(() => ({
   listCommunicationChannelsMock: vi.fn(),
+  listCommunicationDestinationsMock: vi.fn(),
   loadTaskRunMock: vi.fn(),
+  sendCommunicationMessageMock: vi.fn(),
 }));
 
 vi.mock('../communication-channel-discovery', () => ({
   listCommunicationChannels: listCommunicationChannelsMock,
+  listCommunicationDestinations: listCommunicationDestinationsMock,
+}));
+
+vi.mock('../communication-message-send', () => ({
+  sendCommunicationMessage: sendCommunicationMessageMock,
 }));
 
 vi.mock('../communication-lookup-run-context', () => ({
@@ -62,6 +74,64 @@ describe('communication MCP channel routes', () => {
     expect(loadTaskRunMock).toHaveBeenCalledWith(42);
     expect(listCommunicationChannelsMock).toHaveBeenCalledWith({
       actingUserId: 'user-1',
+    });
+  });
+
+  it('lists normalized destinations for the task acting user', async () => {
+    loadTaskRunMock.mockResolvedValue({ actingUserId: 'user-1', payload: {} });
+    listCommunicationDestinationsMock.mockResolvedValue({
+      destinationCount: 1,
+      destinations: [{ destination: 'telegram:me' }],
+      limitations: [],
+    });
+
+    const response = await createApp({
+      tokenType: 'run',
+      runId: 42,
+      userId: 'user-1',
+      principal: 'user',
+      version: 1,
+    }).request('/communication/destinations', { method: 'POST' });
+
+    expect(response.status).toBe(200);
+    expect(listCommunicationDestinationsMock).toHaveBeenCalledWith({
+      actingUserId: 'user-1',
+    });
+  });
+
+  it('sends destination and message through the task acting user', async () => {
+    const taskRun = {
+      id: 1,
+      taskId: 'task-1',
+      actingUserId: 'user-1',
+      payload: {},
+    };
+    loadTaskRunMock.mockResolvedValue(taskRun);
+    sendCommunicationMessageMock.mockResolvedValue(
+      Response.json({ delivered: true }),
+    );
+
+    const response = await createApp({
+      tokenType: 'run',
+      runId: 42,
+      userId: 'user-1',
+      principal: 'user',
+      version: 1,
+    }).request('/communication/send', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        destination: 'telegram:me',
+        message: 'Exact message.',
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(sendCommunicationMessageMock).toHaveBeenCalledWith({
+      actingUserId: 'user-1',
+      taskRun,
+      destination: 'telegram:me',
+      message: 'Exact message.',
     });
   });
 });

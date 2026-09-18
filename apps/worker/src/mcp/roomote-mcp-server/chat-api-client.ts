@@ -4,7 +4,8 @@ import { buildApiHeaders, fetchWithTimeout } from './api-client.js';
 import { ChatDeliveryError } from './chat-delivery-error.js';
 import type {
   CommunicationChannelMessagesResponse,
-  CommunicationChannelsResponse,
+  CommunicationDestinationsResponse,
+  CommunicationSendResponse,
   CommunicationMessageContextResponse,
   RoomoteConfig,
   ChannelPostResponse,
@@ -195,14 +196,26 @@ export async function getChatMessageContext(
   );
 }
 
-export async function listChatChannels(
+export async function listChatDestinations(
   config: RoomoteConfig,
-): Promise<CommunicationChannelsResponse> {
-  return postToCommunicationLookupEndpoint<CommunicationChannelsResponse>(
+): Promise<CommunicationDestinationsResponse> {
+  return postToCommunicationLookupEndpoint<CommunicationDestinationsResponse>(
     config,
-    'channels',
+    'destinations',
     {},
-    'Failed to list chat channels',
+    'Failed to list chat destinations',
+  );
+}
+
+export async function sendChatMessage(
+  config: RoomoteConfig,
+  input: { destination: string; message: string },
+): Promise<CommunicationSendResponse> {
+  return postToCommunicationLookupEndpoint<CommunicationSendResponse>(
+    config,
+    'send',
+    input,
+    'Failed to send chat message',
   );
 }
 

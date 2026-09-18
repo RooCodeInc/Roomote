@@ -45,6 +45,7 @@ const CONSEQUENTIAL_RECEIPTS = new Set([
   'receive_task_report',
   'inspect_images',
   'send_chat_reply',
+  'send_chat_message',
   'post_to_channel',
   'send_chat_reaction_emoji',
   'save_memory',

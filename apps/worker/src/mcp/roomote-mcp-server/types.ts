@@ -144,23 +144,21 @@ export interface ChannelPostResponse {
   channelId: string;
 }
 
-export interface CommunicationChannelsResponse {
-  channelCount: number;
-  platforms: Array<{
+export type CommunicationSendResponse = Record<string, unknown>;
+
+export interface CommunicationDestinationsResponse {
+  destinationCount: number;
+  destinations: Array<{
+    destination: string;
+    provider: 'slack' | 'telegram';
+    kind: 'self' | 'channel' | 'person';
+    name: string;
+    workspaceId?: string;
+    workspaceName?: string;
+  }>;
+  limitations: Array<{
     provider: CommunicationProvider;
-    platform: string;
-    connected: boolean;
-    discoverySupported: boolean;
-    channels: Array<{
-      id: string;
-      name: string;
-      kind?: string;
-      workspaceId?: string;
-      workspaceName?: string;
-      parentId?: string;
-      nativeChannelId?: string;
-    }>;
-    limitation?: string;
+    reason: string;
   }>;
 }
 

@@ -12,15 +12,33 @@ export const communicationProviderSchema = z.enum(communicationProviders);
 
 export type CommunicationProvider = z.infer<typeof communicationProviderSchema>;
 
-export const CHAT_CHANNELS_TOOL = {
-  name: 'list_chat_channels',
-  title: 'List Chat Channels',
+export const CHAT_DESTINATIONS_TOOL = {
+  name: 'list_chat_destinations',
+  title: 'List Chat Destinations',
   description:
-    'List the communication channels Roomote is connected to or can currently discover, grouped by platform. Returns channel IDs and platform-specific workspace context so another chat tool can target the right channel. For Slack workspaces linked to the acting member, it also returns linked direct-message recipients that post_to_channel may target. Some platforms do not support channel enumeration and report that limitation explicitly.',
+    'List authorized destinations for a new standalone message. Returns exact destination references for the authenticated member on linked Slack or Telegram, linked people in shared Slack workspaces, and discoverable Slack channels. Pass a returned destination unchanged to send_chat_message. Provider limitations are reported explicitly.',
 } as const;
 
-export const CHAT_CHANNEL_POST_TOOL_NAME = 'post_to_channel';
-export const CHAT_SELF_DIRECT_MESSAGE_TOOL_NAME = 'send_direct_message_to_self';
+export const CHAT_MESSAGE_SEND_TOOL = {
+  name: 'send_chat_message',
+  title: 'Send Chat Message',
+  description:
+    'Send a new standalone Markdown message to an authorized destination. First use list_chat_destinations and pass its exact destination reference unchanged. Self destinations resolve only from the authenticated member; Slack people and channels retain workspace linkage and access checks. A trusted Slack channel reference may append :thread:<message timestamp>. Use send_chat_reply for the current conversation. Never infer or alter a destination reference.',
+  inputDescriptions: {
+    destination:
+      'Exact destination reference from list_chat_destinations, or a trusted Slack channel reference with an optional :thread:<message timestamp> suffix.',
+    message: 'Markdown message to send.',
+  },
+} as const;
+
+export const CHAT_MESSAGE_SEND_TOOL_NAME = CHAT_MESSAGE_SEND_TOOL.name;
+
+// Persisted deployment policy may still contain these names. They are not
+// registered in the model-visible catalog.
+export const LEGACY_CHAT_CHANNELS_TOOL_NAME = 'list_chat_channels';
+export const LEGACY_CHAT_CHANNEL_POST_TOOL_NAME = 'post_to_channel';
+export const LEGACY_CHAT_SELF_DIRECT_MESSAGE_TOOL_NAME =
+  'send_direct_message_to_self';
 export const CHAT_REACTION_EMOJI_TOOL_NAME = 'send_chat_reaction_emoji';
 
 export const CHAT_MESSAGE_CONTEXT_TOOL = {
