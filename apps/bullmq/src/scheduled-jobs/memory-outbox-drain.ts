@@ -14,6 +14,7 @@ export type MemoryOutboxOperations<TEvent extends MemoryOutboxEvent, TPage> = {
   claim: () => Promise<TEvent[]>;
   prepare: (event: TEvent) => Promise<PreparedMemoryPage<TPage> | null>;
   write: (page: TPage) => Promise<void>;
+  afterWrite?: (event: TEvent, page: TPage) => Promise<void>;
   mark: (
     id: string,
     status: 'pending' | 'skipped',
@@ -62,6 +63,7 @@ export async function drainMemoryOutboxBatch<
       }
 
       await operations.write(prepared.page);
+      await operations.afterWrite?.(event, prepared.page);
       const result = await operations.settle(event.id, event.revision, 'done');
       operations.onSettled(event, prepared, result);
     } catch (error) {

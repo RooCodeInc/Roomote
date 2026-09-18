@@ -72,6 +72,23 @@ moment you enabled it. Completed tasks are enqueued immediately, and each
 source drains its own deeper history in bounded background passes that resume
 after an interruption.
 
+## Deleting tasks and Sessions
+
+Deleting a Roomote task removes the Memory pages Roomote created directly for
+that task's runs. Deleting a Session first stops its active tasks, then deletes
+its associated tasks and removes both those direct task memories and any Memory
+page saved directly from the Session's conversation. If active work cannot be
+stopped safely, the Session remains intact so deletion can be retried. Roomote
+records memory cleanup durably and retries it in the background if Memory is
+temporarily unavailable. Pending ingestion and future task-history backfills
+exclude deleted tasks so those pages are not recreated.
+
+Archiving a Session is reversible and does not remove its memories. Deletion is
+also deliberately narrower than complete forgetting: it does not remove pull
+request, Slack, or other pages collected independently from their source, and
+it does not rewrite broader daily or weekly summaries that may refer to the
+deleted work.
+
 Private Slack channels and DMs are never read. Adding the Roomote bot to a
 public channel is what designates that channel as a source, so the corpus stays
 inside what your team has already made visible company-wide. Slack directory

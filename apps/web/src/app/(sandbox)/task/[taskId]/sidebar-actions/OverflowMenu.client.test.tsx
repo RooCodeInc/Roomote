@@ -262,6 +262,14 @@ describe('OverflowMenu', () => {
     expect(
       screen.getByText(/This will first shut down the task's machine/i),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Brain memories saved directly/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /Independently collected Slack or pull request content/i,
+      ),
+    ).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: 'Delete' })).toHaveLength(2);
     expect(
       screen.queryByRole('button', { name: 'Shutdown & Delete' }),

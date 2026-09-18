@@ -5842,6 +5842,36 @@ export const fastAgentMemoryEvents = pgTable(
 );
 
 /**
+ * Durable exact-page retirement requests for direct Roomote memories. Rows are
+ * retained after success as tombstones so an ingestion write that races a
+ * deletion can re-arm the same slug without widening deletion to a namespace.
+ */
+export const brainPageRetirements = pgTable(
+  'brain_page_retirements',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slug: text('slug').notNull(),
+    status: text('status')
+      .notNull()
+      .default('pending')
+      .$type<'pending' | 'processing' | 'done' | 'skipped' | 'failed'>(),
+    revision: integer('revision').notNull().default(0),
+    attempts: integer('attempts').notNull().default(0),
+    lastError: text('last_error'),
+    processedAt: timestamp('processed_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    unique('brain_page_retirements_slug_unique').on(table.slug),
+    index('brain_page_retirements_status_created_idx').on(
+      table.status,
+      table.createdAt,
+    ),
+  ],
+);
+
+/**
  * brainSyncState
  *
  * Durable per-collector sync state for Brain memory sources. `watermark`

@@ -11,6 +11,7 @@ import {
   isNull,
   sessions,
   sessionTasks,
+  enqueueTaskMemoryRetirements,
 } from '@roomote/db/server';
 
 import { deleteArtifactsBatch } from '@/lib/server';
@@ -93,6 +94,8 @@ export async function deleteTasksCommand(
       taskIds: taskIdsToDelete,
       endedAt,
     });
+
+    await enqueueTaskMemoryRetirements(tx, taskIdsToDelete);
 
     // Soft delete: queries filter isNull(tasks.deletedAt).
     const deletedTasksResult = await tx

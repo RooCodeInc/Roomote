@@ -109,6 +109,7 @@ export * from './lib/invocation-identities';
 export * from './lib/webhook-retention';
 export * from './lib/brain';
 export * from './lib/fast-agent-memory';
+export * from './lib/brain-page-retirements';
 export * from './lib/managed-access';
 export * from './lib/user-personalization';
 export * from './lib/personal-preferences';
@@ -284,6 +285,7 @@ export {
   userApiKeysRelations,
   brainMemoryEvents,
   brainMemoryEventsRelations,
+  brainPageRetirements,
   brainCollectorItems,
   brainSyncState,
 } from './schema';

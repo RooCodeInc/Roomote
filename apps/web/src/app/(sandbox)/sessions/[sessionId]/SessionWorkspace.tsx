@@ -82,6 +82,7 @@ import {
   useSandboxLayout,
 } from '../../use-sandbox-layout';
 import { NestedTaskSidePanel } from './NestedTaskSidePanel';
+import { SessionDeleteAction } from './SessionDeleteAction';
 import {
   OpenSessionArtifactViewerContext,
   OpenSessionTaskPanelContext,
@@ -176,6 +177,7 @@ type SessionTaskPreview = {
 
 export type SessionInfo = {
   id: string;
+  canDelete: boolean;
   ownerName: string | null;
   ownerEmail: string | null;
   ownerImageUrl: string | null;
@@ -1091,6 +1093,9 @@ export function SessionWorkspace({
                   icon={Info}
                   onClick={() => togglePanel('info')}
                 />
+                {session.canDelete ? (
+                  <SessionDeleteAction sessionId={session.id} />
+                ) : null}
               </SandboxSideActions>
               {!isSidebarVisible && !panelOpen ? (
                 <BasicTooltip content="Show sidebar">

@@ -1,8 +1,7 @@
 import {
   callBrainWriteTool,
-  isBrainNotReady,
-  isBrainRateLimited,
   redactBrainText,
+  retireBrainPage,
 } from '../brain-outbox-drain';
 import type {
   BrainConnection,
@@ -19,26 +18,7 @@ import type {
  * slugs, so a page that is already gone counts as retired. Backpressure keeps
  * its type so the engine ends the pass instead of burying it.
  */
-export async function retireBrainPage(
-  slug: string,
-  connection: BrainConnection,
-): Promise<void> {
-  try {
-    await callBrainWriteTool(connection, 'delete_page', { slug });
-  } catch (error) {
-    if (isBrainRateLimited(error) || isBrainNotReady(error)) {
-      throw error;
-    }
-
-    const message = error instanceof Error ? error.message : String(error);
-
-    if (/page_not_found|not[ _]found/i.test(message)) {
-      return;
-    }
-
-    throw error;
-  }
-}
+export { retireBrainPage };
 
 export async function appendBrainTimelineEvidence(
   evidence: EntityTimelineEvidence,

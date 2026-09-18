@@ -6,12 +6,17 @@ const {
   mockBackfillEvents,
   mockClaimEvents,
   mockClaimFastEvents,
+  mockClaimRetirements,
   mockConversationRows,
   mockGetSyncState,
   mockMarkFastEvent,
   mockSettleFastEvent,
   mockPullRequestFacts,
   mockReleaseFastEvents,
+  mockMarkRetirement,
+  mockRearmRetirement,
+  mockReleaseRetirements,
+  mockSettleRetirement,
   mockRunBrainCollectors,
   mockRequestHomeComposerPrecompute,
 } = vi.hoisted(() => ({
@@ -20,12 +25,17 @@ const {
   mockBackfillEvents: vi.fn(),
   mockClaimEvents: vi.fn(),
   mockClaimFastEvents: vi.fn(),
+  mockClaimRetirements: vi.fn(),
   mockConversationRows: vi.fn(),
   mockGetSyncState: vi.fn(),
   mockMarkFastEvent: vi.fn(),
   mockSettleFastEvent: vi.fn(),
   mockPullRequestFacts: vi.fn(),
   mockReleaseFastEvents: vi.fn(),
+  mockMarkRetirement: vi.fn(),
+  mockRearmRetirement: vi.fn(),
+  mockReleaseRetirements: vi.fn(),
+  mockSettleRetirement: vi.fn(),
   mockRunBrainCollectors: vi.fn(),
   mockRequestHomeComposerPrecompute: vi.fn(),
 }));
@@ -60,9 +70,14 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
     backfillBrainMemoryEvents: mockBackfillEvents,
     claimPendingBrainMemoryEvents: mockClaimEvents,
     claimPendingFastAgentMemoryEvents: mockClaimFastEvents,
+    claimPendingBrainPageRetirements: mockClaimRetirements,
     markFastAgentMemoryEvent: mockMarkFastEvent,
     settleFastAgentMemoryEvent: mockSettleFastEvent,
     releaseFastAgentMemoryEvents: mockReleaseFastEvents,
+    markBrainPageRetirement: mockMarkRetirement,
+    rearmBrainPageRetirement: mockRearmRetirement,
+    releaseBrainPageRetirements: mockReleaseRetirements,
+    settleBrainPageRetirement: mockSettleRetirement,
     getBrainSyncState: mockGetSyncState,
     upsertBrainSyncState: vi.fn(),
     deleteBrainSyncStateFamily: vi.fn(),
@@ -78,8 +93,10 @@ beforeEach(() => {
   mockGetSyncState.mockResolvedValue(null);
   mockClaimEvents.mockResolvedValue([]);
   mockClaimFastEvents.mockResolvedValue([]);
+  mockClaimRetirements.mockResolvedValue([]);
   mockConversationRows.mockResolvedValue([]);
   mockSettleFastEvent.mockResolvedValue('settled');
+  mockSettleRetirement.mockResolvedValue('settled');
   mockPullRequestFacts.mockResolvedValue([]);
   mockRunBrainCollectors.mockResolvedValue({
     backfillProgressed: false,
@@ -98,6 +115,7 @@ import {
   callBrainWriteTool,
   isBrainUnreachable,
   drainBrainHistoricalIngestion,
+  drainOneBrainRetirementBatch,
   getPullRequestFactsResumeCursor,
   isBrainNotReady,
   isBrainRateLimited,
@@ -1169,5 +1187,61 @@ describe('fast conversation memory drain', () => {
       'event-1',
       'event-2',
     ]);
+  });
+});
+
+describe('direct-memory retirement drain', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const retirement = {
+    id: 'retirement-1',
+    slug: 'tasks/task-1/runs/7',
+    revision: 2,
+    attempts: 1,
+  };
+
+  it('deletes the exact page and settles the durable request', async () => {
+    const fetchMock = vi.fn(async () => Response.json({ result: {} }));
+    vi.stubGlobal('fetch', fetchMock);
+    mockClaimRetirements.mockResolvedValueOnce([retirement]);
+
+    await drainOneBrainRetirementBatch({
+      baseUrl: 'http://brain.test',
+      token: 'ingest-token',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://brain.test/mcp',
+      expect.objectContaining({
+        body: expect.stringContaining('tasks/task-1/runs/7'),
+      }),
+    );
+    expect(mockSettleRetirement).toHaveBeenCalledWith(
+      expect.anything(),
+      'retirement-1',
+      2,
+      'done',
+      undefined,
+    );
+  });
+
+  it('keeps a failed retirement pending for retry', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('delete failed', { status: 500 })),
+    );
+    mockClaimRetirements.mockResolvedValueOnce([retirement]);
+
+    await drainOneBrainRetirementBatch({
+      baseUrl: 'http://brain.test',
+      token: 'ingest-token',
+    });
+
+    expect(mockMarkRetirement).toHaveBeenCalledWith(
+      expect.anything(),
+      'retirement-1',
+      'pending',
+      expect.stringContaining('delete failed'),
+    );
   });
 });

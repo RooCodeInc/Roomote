@@ -18,6 +18,7 @@ import {
   userFactory,
   automations,
   brainMemoryEvents,
+  brainPageRetirements,
   brainCollectorItems,
   brainSyncState,
   backfillBrainMemoryEvents,
@@ -85,6 +86,7 @@ async function makeCompletedRun(
 }
 
 afterEach(async () => {
+  await db.delete(brainPageRetirements);
   await db.delete(brainCollectorItems);
   await db.delete(brainSyncState);
   await db.delete(brainMemoryEvents);
@@ -614,6 +616,27 @@ describe('Brain collector item inventory', () => {
 });
 
 describe('maybeEnqueueBrainMemoryEvent', () => {
+  it('keeps a deleted task skipped instead of recreating pending work', async () => {
+    const run = await makeCompletedRun();
+    await db
+      .update(tasks)
+      .set({ deletedAt: new Date() })
+      .where(eq(tasks.id, run.taskId));
+
+    await maybeEnqueueBrainMemoryEvent(db, run.id);
+    await backfillBrainMemoryEvents(db);
+    expect(await requeueBrainMemoryEventsForTasks(db, [run.taskId])).toBe(0);
+    await resetBrainIngestionState(db);
+
+    await expect(
+      db.query.brainMemoryEvents.findFirst({
+        where: eq(brainMemoryEvents.runId, run.id),
+      }),
+    ).resolves.toMatchObject({
+      status: 'skipped',
+      lastError: 'task deleted',
+    });
+  });
   it('enqueues exactly one pending event per run, idempotently', async () => {
     const run = await makeCompletedRun();
 

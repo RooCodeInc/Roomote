@@ -27,6 +27,12 @@ import {
   renameBrainSyncStateFamilyPrefix,
   type BrainMemoryEventRow,
   type FastAgentMemoryEventRow,
+  type BrainPageRetirementRow,
+  claimPendingBrainPageRetirements,
+  markBrainPageRetirement,
+  rearmBrainPageRetirement,
+  releaseBrainPageRetirements,
+  settleBrainPageRetirement,
 } from '@roomote/db/server';
 import {
   parseBrainToolPayloads,
@@ -45,6 +51,8 @@ import {
   isSystemInjectedAcpPromptText,
   normalizeTranscriptUserText,
   brainNamespacePrefix,
+  fastConversationMemorySlug,
+  taskMemorySlug,
   getLinkedEnvironmentIdFromPayload,
   renderBrainFrontmatter,
 } from '@roomote/types';
@@ -261,6 +269,22 @@ export async function postToBrain(
     slug: page.slug,
     content: page.content,
   });
+}
+
+/** Idempotently soft-delete one exact Brain page. */
+export async function retireBrainPage(
+  slug: string,
+  connection: { baseUrl: string; token: string },
+): Promise<void> {
+  try {
+    await callBrainWriteTool(connection, 'delete_page', { slug });
+  } catch (error) {
+    if (isBrainRateLimited(error) || isBrainNotReady(error)) throw error;
+
+    const message = error instanceof Error ? error.message : String(error);
+    if (/page_not_found|not[ _]found/i.test(message)) return;
+    throw error;
+  }
 }
 
 /**
@@ -546,7 +570,7 @@ export function buildMemoryPage(input: {
   ].join('\n');
 
   return {
-    slug: `${brainNamespacePrefix('tasks')}${input.taskId}/runs/${input.runId}`,
+    slug: taskMemorySlug(input.taskId, input.runId),
     title: input.taskTitle,
     content: redactBrainText(content),
   };
@@ -584,6 +608,12 @@ export async function brainOutboxDrainJob(): Promise<void> {
     if (!drained) {
       break;
     }
+  }
+
+  for (let batch = 0; batch < MAX_BATCHES_PER_TICK; batch++) {
+    const drained = await drainOneBrainRetirementBatch(connection);
+
+    if (!drained) break;
   }
 }
 
@@ -807,6 +837,15 @@ async function drainOneBatch(connection: {
           return null;
         }
 
+        if (run.task.deletedAt) {
+          await markBrainMemoryEvent(db, event.id, 'skipped', 'task deleted');
+          await rearmBrainPageRetirement(
+            db,
+            taskMemorySlug(run.taskId, run.id),
+          );
+          return null;
+        }
+
         // An agent can save its memory before its run finishes (the tool call
         // is part of wrapping up), which creates this row while the run is
         // still in flight. Only a run that settled somewhere other than
@@ -891,6 +930,7 @@ async function drainOneBatch(connection: {
         };
       },
       write: (page) => postToBrain(page, connection),
+      afterWrite: (_event, page) => rearmBrainPageRetirement(db, page.slug),
       mark: (id, status, lastError) =>
         markBrainMemoryEvent(db, id, status, lastError),
       release: (ids) => releaseBrainMemoryEvents(db, ids),
@@ -970,7 +1010,7 @@ export function buildFastMemoryPage(input: {
   ].join('\n');
 
   return {
-    slug: `${brainNamespacePrefix('memories')}fast/${input.conversationId}`,
+    slug: fastConversationMemorySlug(input.conversationId),
     title,
     content: redactBrainText(content),
   };
@@ -1005,6 +1045,10 @@ async function drainOneFastMemoryBatch(connection: {
             'skipped',
             'conversation no longer exists',
           );
+          await rearmBrainPageRetirement(
+            db,
+            fastConversationMemorySlug(event.conversationId),
+          );
           return null;
         }
 
@@ -1036,6 +1080,7 @@ async function drainOneFastMemoryBatch(connection: {
         };
       },
       write: (page) => postToBrain(page, connection),
+      afterWrite: (_event, page) => rearmBrainPageRetirement(db, page.slug),
       mark: (id, status, lastError) =>
         markFastAgentMemoryEvent(db, id, status, lastError),
       release: (ids) => releaseFastAgentMemoryEvents(db, ids),
@@ -1060,6 +1105,48 @@ async function drainOneFastMemoryBatch(connection: {
       onFailure: (event, terminal, message) =>
         console.warn(
           `${LOG_PREFIX} ${terminal ? 'permanently failed' : 'will retry'} conversation ${event.conversationId} (attempt ${event.attempts}): ${message}`,
+        ),
+    },
+    MAX_ATTEMPTS,
+  );
+}
+
+/** Returns false when no pending direct-memory retirements remained. */
+export async function drainOneBrainRetirementBatch(connection: {
+  baseUrl: string;
+  token: string;
+}): Promise<boolean> {
+  return drainMemoryOutboxBatch<BrainPageRetirementRow, string>(
+    {
+      claim: () => claimPendingBrainPageRetirements(db, CLAIM_BATCH_SIZE),
+      prepare: async (retirement) => ({
+        page: retirement.slug,
+        settledMessage: `retired direct memory ${retirement.slug}`,
+        supersededMessage: `direct memory ${retirement.slug} was rewritten while retiring; retrying next tick`,
+      }),
+      write: (slug) => retireBrainPage(slug, connection),
+      mark: (id, status, lastError) =>
+        markBrainPageRetirement(db, id, status, lastError),
+      release: (ids) => releaseBrainPageRetirements(db, ids),
+      settle: (id, revision, outcome, lastError) =>
+        settleBrainPageRetirement(db, id, revision, outcome, lastError),
+      classifyBackpressure: (error) =>
+        isBrainRateLimited(error)
+          ? 'rate-limited'
+          : isBrainNotReady(error)
+            ? 'not-ready'
+            : null,
+      onSettled: (_event, prepared, result) =>
+        console.log(
+          `${LOG_PREFIX} ${result === 'settled' ? prepared.settledMessage : prepared.supersededMessage}`,
+        ),
+      onBackpressure: (kind) =>
+        console.log(
+          `${LOG_PREFIX} ${kind === 'rate-limited' ? 'rate limited by' : 'cannot reach'} the brain; pausing direct-memory retirement until next tick`,
+        ),
+      onFailure: (retirement, terminal, message) =>
+        console.warn(
+          `${LOG_PREFIX} ${terminal ? 'permanently failed' : 'will retry'} direct-memory retirement ${retirement.slug} (attempt ${retirement.attempts}): ${message}`,
         ),
     },
     MAX_ATTEMPTS,
