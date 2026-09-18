@@ -64,7 +64,7 @@ export abstract class BaseController {
 
   protected readonly HEARTBEAT_TTL_SECONDS = 600;
 
-  protected readonly SHUTDOWN_TIMEOUT_MS = 60_000;
+  protected readonly SHUTDOWN_TIMEOUT_MS: number = 60_000;
 
   /** Maximum concurrent spawns. Override in subclass if needed. */
   protected readonly MAX_CONCURRENT_SPAWNS: number = 10;
@@ -259,17 +259,20 @@ export abstract class BaseController {
       return;
     }
 
+    const shutdownDeadline = Date.now() + this.SHUTDOWN_TIMEOUT_MS;
     this.isRunning = false;
 
     console.log(
       '[BaseController] Waiting for current iteration to complete...',
     );
 
-    await this.waitForIterationComplete();
-    console.log('[BaseController] Current iteration completed');
+    if (await this.waitForIterationComplete(shutdownDeadline)) {
+      console.log('[BaseController] Current iteration completed');
+    }
 
-    await this.waitForInFlightSpawns();
-    console.log('[BaseController] All in-flight spawns completed');
+    if (await this.waitForInFlightSpawns(shutdownDeadline)) {
+      console.log('[BaseController] All in-flight spawns completed');
+    }
 
     for (const watcher of this.artifactWatchers) {
       watcher.close();
@@ -280,7 +283,9 @@ export abstract class BaseController {
     console.log('[BaseController] Teardown complete');
   }
 
-  private async waitForIterationComplete(): Promise<void> {
+  private async waitForIterationComplete(
+    shutdownDeadline: number,
+  ): Promise<boolean> {
     const iterationPromise = new Promise<void>((resolve) => {
       // Set the resolver BEFORE checking isProcessingIteration to avoid race condition.
       // If we checked first and then set the resolver, the finally block could run
@@ -293,16 +298,18 @@ export abstract class BaseController {
       }
     });
 
-    const timeoutPromise = new Promise<void>((resolve) => {
-      setTimeout(() => {
-        console.warn(
-          `[BaseController] Shutdown timeout (${this.SHUTDOWN_TIMEOUT_MS}ms) reached, proceeding with shutdown`,
-        );
-        resolve();
-      }, this.SHUTDOWN_TIMEOUT_MS);
-    });
+    const completed = await this.waitUntilShutdownDeadline(
+      iterationPromise,
+      shutdownDeadline,
+    );
 
-    await Promise.race([iterationPromise, timeoutPromise]);
+    if (!completed) {
+      console.warn(
+        `[BaseController] Shutdown deadline (${this.SHUTDOWN_TIMEOUT_MS}ms) reached while waiting for the current iteration; continuing shutdown`,
+      );
+    }
+
+    return completed;
   }
 
   protected async setup(): Promise<void> {}
@@ -426,6 +433,7 @@ export abstract class BaseController {
         `[BaseController] Worker spawn still in progress for task run #${taskRun.id} after ${Date.now() - spawnStartedAt}ms`,
       );
     }, this.LOG_INTERVAL_MS);
+    progressLogInterval.unref();
 
     const spawnPromise = this.spawnWorker(taskRun)
       .then(() => {
@@ -450,16 +458,57 @@ export abstract class BaseController {
   }
 
   /** Wait for all in-flight spawns to complete. Used during shutdown. */
-  private async waitForInFlightSpawns(): Promise<void> {
+  private async waitForInFlightSpawns(
+    shutdownDeadline: number,
+  ): Promise<boolean> {
     if (this.inFlightSpawns.size === 0) {
-      return;
+      return true;
     }
 
     console.log(
       `[BaseController] Waiting for ${this.inFlightSpawns.size} in-flight spawns to complete...`,
     );
 
-    await Promise.allSettled(this.inFlightSpawns.values());
+    const completed = await this.waitUntilShutdownDeadline(
+      Promise.allSettled(this.inFlightSpawns.values()),
+      shutdownDeadline,
+    );
+
+    if (!completed) {
+      const unfinishedRunIds = [...this.inFlightSpawns.keys()]
+        .map((runId) => `#${runId}`)
+        .join(', ');
+      console.warn(
+        `[BaseController] Shutdown deadline reached with unfinished in-flight spawns for task runs: ${unfinishedRunIds}; continuing shutdown`,
+      );
+    }
+
+    return completed;
+  }
+
+  private async waitUntilShutdownDeadline(
+    promise: Promise<unknown>,
+    shutdownDeadline: number,
+  ): Promise<boolean> {
+    const remainingMs = shutdownDeadline - Date.now();
+
+    if (remainingMs <= 0) {
+      return false;
+    }
+
+    let timeout: NodeJS.Timeout | undefined;
+    const completed = await Promise.race([
+      promise.then(() => true),
+      new Promise<false>((resolve) => {
+        timeout = setTimeout(() => resolve(false), remainingMs);
+      }),
+    ]);
+
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+
+    return completed;
   }
 
   protected async dequeueTaskRun(
