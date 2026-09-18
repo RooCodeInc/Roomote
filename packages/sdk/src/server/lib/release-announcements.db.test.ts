@@ -339,6 +339,57 @@ describe('release announcement delivery', () => {
     ).resolves.toHaveLength(0);
   });
 
+  it('uses the shared automation layout for Slack release announcements', async () => {
+    await expect(
+      sendReleaseAnnouncementTest(
+        {
+          provider: 'slack',
+          channelId: 'release-channel',
+          teamId: 'slack-team',
+          source: 'automation_target',
+        },
+        { changelogMarkdown: changelog },
+      ),
+    ).resolves.toBe('sent');
+
+    const message = mocks.postMessage.mock.calls[0]?.[0];
+    expect(message).toEqual(
+      expect.objectContaining({
+        textFormat: 'markdown',
+        blocks: [
+          expect.objectContaining({
+            type: 'context',
+            elements: expect.arrayContaining([
+              expect.objectContaining({
+                image_url: expect.stringContaining(
+                  '/automation-icons/megaphone.png',
+                ),
+                alt_text: 'Announce Roomote Updates automation icon',
+              }),
+              expect.objectContaining({
+                type: 'plain_text',
+                text: 'Announce Roomote Updates',
+              }),
+            ]),
+          }),
+          expect.objectContaining({
+            type: 'markdown',
+            text: expect.stringContaining("What's new in Roomote v1.2.0"),
+          }),
+          expect.objectContaining({
+            type: 'actions',
+            elements: expect.arrayContaining([
+              expect.objectContaining({
+                action_id: 'late_bound_automation_configure',
+                text: expect.objectContaining({ text: 'Configure' }),
+              }),
+            ]),
+          }),
+        ],
+      }),
+    );
+  });
+
   it('skips newer patch releases when selecting the sample release', async () => {
     const changelogWithPatch = `# Changelog
 
