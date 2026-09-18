@@ -1,5 +1,5 @@
 {
-  "id": "08558908-e878-4c22-825b-e26be26eca35",
+  "id": "6ba18156-0234-49f7-9773-36f2ea8d505e",
   "prevId": "5a5b887c-dcbc-4930-867d-4c32e09afef0",
   "version": "7",
   "dialect": "postgresql",
@@ -17394,6 +17394,28 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tool_call_approvals_pending_call_idx": {
+          "name": "tool_call_approvals_pending_call_idx",
+          "columns": [
+            {
+              "expression": "session_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "args_fingerprint",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "status = 'pending'",
           "concurrently": false,
           "method": "btree",
           "with": {}

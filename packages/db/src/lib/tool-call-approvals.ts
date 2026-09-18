@@ -115,7 +115,9 @@ async function requireSessionOwner(
 /**
  * Insert the pending approval, or reuse the identical open one: a repeated
  * ask for the exact same call must not stack duplicate cards or let a second
- * decision authorize a second execution.
+ * decision authorize a second execution. The partial unique index on
+ * (session, fingerprint) for pending rows makes this atomic: a concurrent
+ * identical insert conflicts and the existing row is re-read.
  */
 export async function insertToolCallApproval(
   context: { sessionId: string; userId: string },
@@ -128,18 +130,16 @@ export async function insertToolCallApproval(
 ): Promise<ToolCallApprovalMetadata> {
   return db.transaction(async (tx) => {
     const owner = await requireSessionOwner(tx, context);
+    const pendingWhere = and(
+      eq(toolCallApprovals.sessionId, context.sessionId),
+      eq(toolCallApprovals.argsFingerprint, input.argsFingerprint),
+      eq(toolCallApprovals.status, 'pending'),
+      gt(toolCallApprovals.expiresAt, sql`clock_timestamp()`),
+    );
     const [existing] = await tx
       .select()
       .from(toolCallApprovals)
-      .where(
-        and(
-          eq(toolCallApprovals.sessionId, context.sessionId),
-          eq(toolCallApprovals.requesterUserId, owner.id),
-          eq(toolCallApprovals.argsFingerprint, input.argsFingerprint),
-          eq(toolCallApprovals.status, 'pending'),
-          gt(toolCallApprovals.expiresAt, sql`clock_timestamp()`),
-        ),
-      )
+      .where(pendingWhere)
       .for('share')
       .limit(1);
     if (existing) return metadata(existing);
@@ -154,8 +154,25 @@ export async function insertToolCallApproval(
         argsSummary: redactToolCallArgs(input.argsSummary),
         expiresAt: sql`clock_timestamp() + ${TOOL_CALL_APPROVAL_WINDOW_MINUTES} * interval '1 minute'`,
       })
+      .onConflictDoNothing({
+        target: [
+          toolCallApprovals.sessionId,
+          toolCallApprovals.argsFingerprint,
+        ],
+        where: sql`status = 'pending'`,
+      })
       .returning();
-    if (!row) throw new ToolCallApprovalUnavailableError('write_failed');
+    if (!row) {
+      // Lost the race against an identical concurrent insert; the unique
+      // pending index guarantees that row is the one to reuse.
+      const [winner] = await tx
+        .select()
+        .from(toolCallApprovals)
+        .where(pendingWhere)
+        .limit(1);
+      if (!winner) throw new ToolCallApprovalUnavailableError('write_failed');
+      return metadata(winner);
+    }
     return metadata(row);
   });
 }

@@ -16,4 +16,5 @@ CREATE TABLE "tool_call_approvals" (
 ALTER TABLE "tool_call_approvals" ADD CONSTRAINT "tool_call_approvals_session_id_sessions_id_fk" FOREIGN KEY ("session_id") REFERENCES "public"."sessions"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "tool_call_approvals" ADD CONSTRAINT "tool_call_approvals_requester_user_id_users_id_fk" FOREIGN KEY ("requester_user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "tool_call_approvals" ADD CONSTRAINT "tool_call_approvals_decided_by_user_id_users_id_fk" FOREIGN KEY ("decided_by_user_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-CREATE INDEX "tool_call_approvals_session_requester_idx" ON "tool_call_approvals" USING btree ("session_id","requester_user_id","status");
+CREATE INDEX "tool_call_approvals_session_requester_idx" ON "tool_call_approvals" USING btree ("session_id","requester_user_id","status");--> statement-breakpoint
+CREATE UNIQUE INDEX "tool_call_approvals_pending_call_idx" ON "tool_call_approvals" USING btree ("session_id","args_fingerprint") WHERE status = 'pending';

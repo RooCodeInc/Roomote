@@ -4234,7 +4234,14 @@ export async function answerFastAgentQuestion({
         const sendsChatReaction =
           call.integrationId === ROOMOTE_MCP_ID &&
           call.toolName === CHAT_REACTION_EMOJI_TOOL_NAME;
-        if (requireApproval && toolApprovalsExperimentEnabled) {
+        // The approval card exists only in the web Session transcript; on
+        // chat surfaces an ask could never be answered, so the experiment
+        // stays inert there instead of stalling the turn until expiry.
+        if (
+          requireApproval &&
+          toolApprovalsExperimentEnabled &&
+          conversation.surface === 'web'
+        ) {
           const approvalDenial = await awaitToolCallApproval({
             integrationId: call.integrationId,
             toolName: call.toolName,

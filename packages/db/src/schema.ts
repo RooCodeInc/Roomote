@@ -4617,6 +4617,11 @@ export const toolCallApprovals = pgTable(
       table.requesterUserId,
       table.status,
     ),
+    // One open ask per exact call: concurrent identical inserts conflict here
+    // and reuse the existing row instead of stacking duplicate approvals.
+    uniqueIndex('tool_call_approvals_pending_call_idx')
+      .on(table.sessionId, table.argsFingerprint)
+      .where(sql`status = 'pending'`),
   ],
 );
 

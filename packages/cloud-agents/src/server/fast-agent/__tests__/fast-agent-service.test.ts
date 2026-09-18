@@ -2123,6 +2123,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       );
     }
 
+    // The approval card lives in the web Session transcript, so the
+    // approving turns run on the web surface.
+    const webParams = {
+      ...baseParams,
+      conversation: { ...baseParams.conversation, surface: 'web' as const },
+    };
+
     it('preserves existing dispatcher behavior when the experiment is disabled', async () => {
       mocks.toolApprovalsEnabled.mockResolvedValue(false);
       mocks.callIntegration.mockResolvedValue({ ok: true });
@@ -2146,7 +2153,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       mocks.callIntegration.mockResolvedValue({ ok: true });
       const results: unknown[] = [];
       turnWithWriteCall(results);
-      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+      await answerFastAgentQuestion({ ...webParams, adapter: callbacks() });
       expect(results).toEqual([{ success: true, result: { ok: true } }]);
       expect(mocks.insertToolCallApproval).toHaveBeenCalledExactlyOnceWith(
         { sessionId: 'conversation-1', userId: 'user-1' },
@@ -2170,7 +2177,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       });
       const results: unknown[] = [];
       turnWithWriteCall(results);
-      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+      await answerFastAgentQuestion({ ...webParams, adapter: callbacks() });
       expect(results).toEqual([
         { success: false, error: 'The requester rejected this tool call.' },
       ]);
@@ -2186,7 +2193,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       mocks.getToolCallApproval.mockResolvedValue(pendingApproval);
       const results: unknown[] = [];
       turnWithWriteCall(results);
-      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+      await answerFastAgentQuestion({ ...webParams, adapter: callbacks() });
       expect(results).toEqual([
         {
           success: false,
@@ -2198,6 +2205,19 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         'approval-1',
       );
       expect(mocks.callIntegration).not.toHaveBeenCalled();
+    });
+
+    it('stays inert on chat surfaces where no approval card exists', async () => {
+      // Slack/Discord turns never enter the approval poll: the web transcript
+      // is the only surface that can render the requester's card.
+      mocks.toolApprovalsEnabled.mockResolvedValue(true);
+      mocks.callIntegration.mockResolvedValue({ ok: true });
+      const results: unknown[] = [];
+      turnWithWriteCall(results);
+      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+      expect(results).toEqual([{ success: true, result: { ok: true } }]);
+      expect(mocks.insertToolCallApproval).not.toHaveBeenCalled();
+      expect(mocks.callIntegration).toHaveBeenCalledTimes(1);
     });
 
     it('fails closed when the approval no longer binds the exact call', async () => {
@@ -2213,7 +2233,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       mocks.consumeToolCallApproval.mockResolvedValue(false);
       const results: unknown[] = [];
       turnWithWriteCall(results);
-      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+      await answerFastAgentQuestion({ ...webParams, adapter: callbacks() });
       expect(results).toEqual([
         {
           success: false,

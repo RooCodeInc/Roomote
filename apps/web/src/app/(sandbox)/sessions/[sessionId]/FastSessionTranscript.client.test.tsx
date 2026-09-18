@@ -40,6 +40,24 @@ vi.mock('@/hooks/useSessionIntegrationApprovals', () => ({
   }),
 }));
 
+const toolApprovalsState: { pending: unknown[]; enabled: boolean } = {
+  pending: [],
+  enabled: false,
+};
+vi.mock('@/hooks/useDeploymentExperiments', () => ({
+  useDeploymentExperiment: () => ({
+    enabled: toolApprovalsState.enabled,
+    isLoading: false,
+    isUpdating: false,
+    setEnabled: vi.fn(),
+  }),
+}));
+vi.mock('@/hooks/useSessionToolApprovals', () => ({
+  useSessionToolApprovals: () => ({
+    data: { pending: toolApprovalsState.pending },
+  }),
+}));
+
 vi.mock('./CapabilityOfferCard', () => ({
   CapabilityOfferCard: ({ offer }: { offer: { capability: string } }) => (
     <div>Capability offer: {offer.capability}</div>

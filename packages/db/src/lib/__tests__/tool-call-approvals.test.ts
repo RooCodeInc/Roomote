@@ -126,6 +126,20 @@ describe('insertToolCallApproval', () => {
     ).toBe(1);
   });
 
+  it('serializes concurrent identical asks into one pending row', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const context = { sessionId, userId };
+    const results = await Promise.all(
+      Array.from({ length: 4 }, () => insertPending(context)),
+    );
+    const ids = new Set(results.map((result) => result.approvalId));
+    expect(ids.size).toBe(1);
+    expect(
+      (await listPendingToolCallApprovals({ sessionId, userId })).length,
+    ).toBe(1);
+  });
+
   it('treats changed arguments as a different call needing its own approval', async () => {
     const userId = await user();
     const sessionId = await ownedSession(userId);
