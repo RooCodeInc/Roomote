@@ -19,14 +19,12 @@ import {
   Activity,
   Button,
   ChevronDown,
-  Columns3,
   CornerDownLeftIcon,
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuTrigger,
   Input,
-  List,
   MessagesSquare,
   Search,
   Share2,
@@ -35,7 +33,6 @@ import {
 
 const ADVANCED_FILTERS_STORAGE_KEY =
   'roomote-sessions-advanced-filters-visible';
-const SESSIONS_VIEW_STORAGE_KEY = 'roomote-sessions-view';
 const ADVANCED_FILTER_PARAMS = [
   'repository',
   'pullRequest',
@@ -129,7 +126,6 @@ export function SessionsFilters({
   timePeriod,
   scope = 'all',
   status = 'all',
-  view = 'list',
   query = '',
   repository = null,
   pullRequest = null,
@@ -141,7 +137,6 @@ export function SessionsFilters({
   timePeriod: TimePeriodFilter;
   scope?: string;
   status?: string;
-  view?: string;
   query?: string;
   repository?: string | null;
   pullRequest?: string | null;
@@ -164,6 +159,7 @@ export function SessionsFilters({
   const updateParams = useCallback(
     (mutate: (params: URLSearchParams) => void) => {
       const params = new URLSearchParams(searchParams);
+      params.delete('view');
       mutate(params);
       params.delete('before');
       const nextQuery = params.toString();
@@ -184,18 +180,6 @@ export function SessionsFilters({
   useEffect(() => {
     if (showSearch) searchInputRef.current?.focus();
   }, [showSearch]);
-
-  useEffect(() => {
-    if (searchParams.has('view')) return;
-
-    try {
-      if (window.localStorage.getItem(SESSIONS_VIEW_STORAGE_KEY) === 'board') {
-        updateParams((params) => params.set('view', 'board'));
-      }
-    } catch {
-      // Ignore localStorage failures.
-    }
-  }, [searchParams, updateParams]);
 
   const updateNullableParam = (name: string, value: string | null) =>
     updateParams((params) => {
@@ -382,36 +366,6 @@ export function SessionsFilters({
         >
           <Search />
         </Button>
-        <div className="flex items-center rounded-lg border border-border p-0.5">
-          <Button
-            variant={view === 'list' ? 'default' : 'ghost'}
-            size="sm"
-            onClick={() => {
-              writeStoredPreference(SESSIONS_VIEW_STORAGE_KEY, 'list');
-              updateParams((params) => params.set('view', 'list'));
-            }}
-            aria-label="List view"
-            aria-pressed={view === 'list'}
-            title="List view"
-            className="rounded-r-none"
-          >
-            <List />
-          </Button>
-          <Button
-            variant={view === 'board' ? 'default' : 'ghost'}
-            size="sm"
-            onClick={() => {
-              writeStoredPreference(SESSIONS_VIEW_STORAGE_KEY, 'board');
-              updateParams((params) => params.set('view', 'board'));
-            }}
-            aria-label="Board view"
-            aria-pressed={view === 'board'}
-            title="Board view"
-            className="rounded-l-none"
-          >
-            <Columns3 />
-          </Button>
-        </div>
       </div>
     </div>
   );

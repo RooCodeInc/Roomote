@@ -143,7 +143,7 @@ describe('SessionCard', () => {
     expect(screen.getByLabelText('Unread activity')).toBeInTheDocument();
   });
 
-  it('only renders list and board indicators for attention states', () => {
+  it('only renders attention indicators for needs-input and blocked states', () => {
     const session = {
       id: 'session-4',
       title: 'Review status indicators',
@@ -236,40 +236,6 @@ describe('SessionCard', () => {
     ).toBeInTheDocument();
   });
 
-  it('removes crowded attribution and source metadata only in board view', () => {
-    render(
-      <SessionCard
-        view="board"
-        viewerUserId="user-1"
-        session={{
-          id: 'session-board',
-          title: 'Board session',
-          ownerKind: 'user',
-          ownerAutomation: null,
-          ownerName: 'Test User',
-          ownerEmail: 'test@example.com',
-          ownerImageUrl: null,
-          ownerUserId: 'user-1',
-          privacy: 'shared',
-          sourceSurface: 'slack',
-          activityAt: Date.now() / 1000,
-          cachedStatus: 'ready',
-          executionCount: 0,
-          inferenceCostMicroUsd: 0,
-          directInferenceCostMicroUsd: 0,
-          unread: false,
-          artifactCount: 0,
-          singleArtifact: null,
-          pullRequests: [],
-          tasks: [],
-        }}
-      />,
-    );
-
-    expect(screen.getByText('Test User from Slack')).toBeInTheDocument();
-    expect(screen.queryByText(/started a session/)).not.toBeInTheDocument();
-  });
-
   it('uses canonical identity for the viewer without changing other users', () => {
     const session = {
       id: 'session-identity',
@@ -304,54 +270,43 @@ describe('SessionCard', () => {
     expect(screen.getByText('Same Display Name from Web')).toBeInTheDocument();
     expect(screen.getByLabelText('Same Display Name')).toHaveTextContent('SD');
     expect(screen.queryByText('Y')).not.toBeInTheDocument();
-
-    rerender(
-      <SessionCard view="board" session={session} viewerUserId="owner-user" />,
-    );
-    expect(screen.getByText('Same Display Name from Web')).toBeInTheDocument();
-    expect(screen.getByLabelText('Same Display Name')).toHaveTextContent('SD');
-    expect(screen.queryByText('Y')).not.toBeInTheDocument();
   });
 
-  it.each(['list', 'board'] as const)(
-    'shows private and source metadata in %s view',
-    (view) => {
-      render(
-        <SessionCard
-          view={view}
-          viewerUserId="user-1"
-          session={{
-            id: `private-${view}`,
-            title: 'Private planning',
-            ownerKind: 'user',
-            ownerAutomation: null,
-            ownerName: 'Test User',
-            ownerEmail: 'test@example.com',
-            ownerImageUrl: null,
-            ownerUserId: 'user-1',
-            privacy: 'private',
-            sourceSurface: 'web',
-            activityAt: Date.now() / 1000,
-            cachedStatus: 'ready',
-            executionCount: 0,
-            inferenceCostMicroUsd: 0,
-            directInferenceCostMicroUsd: 0,
-            unread: false,
-            artifactCount: 0,
-            singleArtifact: null,
-            pullRequests: [],
-            tasks: [],
-          }}
-        />,
-      );
+  it('shows private and source metadata', () => {
+    render(
+      <SessionCard
+        viewerUserId="user-1"
+        session={{
+          id: 'private-session',
+          title: 'Private planning',
+          ownerKind: 'user',
+          ownerAutomation: null,
+          ownerName: 'Test User',
+          ownerEmail: 'test@example.com',
+          ownerImageUrl: null,
+          ownerUserId: 'user-1',
+          privacy: 'private',
+          sourceSurface: 'web',
+          activityAt: Date.now() / 1000,
+          cachedStatus: 'ready',
+          executionCount: 0,
+          inferenceCostMicroUsd: 0,
+          directInferenceCostMicroUsd: 0,
+          unread: false,
+          artifactCount: 0,
+          singleArtifact: null,
+          pullRequests: [],
+          tasks: [],
+        }}
+      />,
+    );
 
-      expect(screen.getByLabelText('Private session')).toBeInTheDocument();
-      expect(screen.getByText('Test User from Web')).toBeInTheDocument();
-      expect(
-        screen.queryByText(/started a private session/),
-      ).not.toBeInTheDocument();
-    },
-  );
+    expect(screen.getByLabelText('Private session')).toBeInTheDocument();
+    expect(screen.getByText('Test User from Web')).toBeInTheDocument();
+    expect(
+      screen.queryByText(/started a private session/),
+    ).not.toBeInTheDocument();
+  });
 
   it('omits the output metadata line when there are no PRs or artifacts', () => {
     const { container } = render(
