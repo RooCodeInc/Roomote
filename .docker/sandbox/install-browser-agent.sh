@@ -700,6 +700,7 @@ launch_shared_browser() {
   local limit=$(( SHARED_BROWSER_LAUNCH_WAIT_SECONDS * 4 ))
   while [ "$waited" -lt "$limit" ]; do
     if port_is_open "$SHARED_BROWSER_CDP_PORT"; then
+      printf '%s-%s\n' "$(date +%s)" "$$" > "${SHARED_BROWSER_STATE_DIR}/browser-id"
       return 0
     fi
     sleep 0.25
@@ -729,6 +730,36 @@ ensure_shared_browser() {
 
   exec 9>&-
   return "$status"
+}
+
+# agent-browser remembers each session's tab by CDP target id, and the pin
+# makes that binding strict. A tab cannot outlive its browser, so after the
+# shared browser restarts (every sandbox wake-up starts a new one) a session
+# that used the previous browser would fail every command with `tab_gone`.
+# Give it a fresh tab in the new browser instead.
+rebind_session_after_browser_restart() {
+  case "$AGENT_BROWSER_COMMAND" in
+    tab|close|quit|exit)
+      return 0
+      ;;
+  esac
+
+  local browser_id_file="${SHARED_BROWSER_STATE_DIR}/browser-id"
+  if [ ! -f "$browser_id_file" ]; then
+    return 0
+  fi
+
+  local browser_id session_file
+  browser_id="$(cat "$browser_id_file")"
+  session_file="${SHARED_BROWSER_STATE_DIR}/sessions/$(printf '%s' "$AGENT_BROWSER_SESSION_VALUE" | tr -c 'A-Za-z0-9._-' '_')"
+
+  if [ -f "$session_file" ] && [ "$(cat "$session_file")" != "$browser_id" ]; then
+    resolve_cli_paths
+    AGENT_BROWSER_HEADED=false "$AGENT_BROWSER_BIN" "${AGENT_BROWSER_SHARED_ARGS[@]}" ${AGENT_BROWSER_PREFIX_ARGS[@]+"${AGENT_BROWSER_PREFIX_ARGS[@]}"} tab new >/dev/null 2>&1 || true
+  fi
+
+  mkdir -p "${SHARED_BROWSER_STATE_DIR}/sessions"
+  printf '%s\n' "$browser_id" > "$session_file"
 }
 
 # Commands that only observe the page stay available while a person drives.
@@ -800,6 +831,7 @@ if [ "$USE_SHARED_BROWSER" = true ]; then
   if is_input_command; then
     yield_to_human
   fi
+  rebind_session_after_browser_restart
 else
   apply_local_preview_host_resolution_to_private_browser
 fi

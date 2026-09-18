@@ -215,6 +215,7 @@ describe('agent-browser wrapper shared browser', () => {
     };
 
     return {
+      dir,
       cdpPort,
       chromeArgsPath,
       run: (args: string[], extraEnv: NodeJS.ProcessEnv = {}) =>
@@ -255,6 +256,28 @@ describe('agent-browser wrapper shared browser', () => {
     expect(chromeArgs.at(-1)).toBe('about:blank');
     expect(sandbox.calls()).toEqual([
       `pin=1 --cdp ${sandbox.cdpPort} click @e1`,
+    ]);
+  });
+
+  it('gives a session a fresh tab after the shared browser restarts', async () => {
+    const sandbox = await createSandbox({ browserRunning: true });
+    const stateDir = path.join(sandbox.dir, 'state');
+    fs.mkdirSync(path.join(stateDir, 'sessions'), { recursive: true });
+    fs.writeFileSync(path.join(stateDir, 'browser-id'), 'second-browser\n');
+    fs.writeFileSync(
+      path.join(stateDir, 'sessions', 'task-1'),
+      'first-browser\n',
+    );
+
+    await sandbox.run(['--session', 'task-1', 'snapshot']);
+    await sandbox.run(['--session', 'task-1', 'snapshot']);
+    await sandbox.run(['--session', 'task-2', 'snapshot']);
+
+    expect(sandbox.calls()).toEqual([
+      `pin=1 --cdp ${sandbox.cdpPort} --session task-1 tab new`,
+      `pin=1 --cdp ${sandbox.cdpPort} --session task-1 snapshot`,
+      `pin=1 --cdp ${sandbox.cdpPort} --session task-1 snapshot`,
+      `pin=1 --cdp ${sandbox.cdpPort} --session task-2 snapshot`,
     ]);
   });
 
