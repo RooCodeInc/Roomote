@@ -167,6 +167,7 @@ export const MANAGER_REPORTING_AUTOMATION_KEYS = [
   'suggester',
   'announcer',
   'platform_issue_alerts',
+  'release_announcements',
 ] as const satisfies readonly BackgroundAutomationKey[];
 
 export type ManagerReportingAutomationKey =
@@ -250,7 +251,8 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
     | 'codeqlTriage'
     | ScheduleOnlyBackgroundAutomationId
     | 'announcer'
-    | 'platformIssueAlerts';
+    | 'platformIssueAlerts'
+    | 'releaseAnnouncements';
   reviewerEnabled: boolean;
   reviewerEnvironmentScope: NonNullable<PrReviewSettings['environmentScope']>;
   reviewerEnvironmentIds: string[];
@@ -322,6 +324,10 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
   platformIssueAlertsEnabled?: boolean;
   platformIssueSlackChannel: string | null;
   platformIssueDiscordChannel?: string | null;
+  releaseAnnouncementsEnabled?: boolean;
+  releaseAnnouncementsTargetProvider?: AutomationCapableCommunicationProvider | null;
+  releaseAnnouncementsTargetMode?: 'channel' | 'direct_message';
+  releaseAnnouncementsTargetChannelId?: string | null;
   securityAuditorSlackChannel?: string | null;
   securityAuditorDiscordChannel?: string | null;
   codeQualityAuditorSlackChannel?: string | null;

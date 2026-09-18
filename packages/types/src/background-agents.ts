@@ -116,6 +116,7 @@ export const USER_FACING_AUTOMATION_KEYS = [
   'manager_stats',
   'provider_usage_limit',
   'platform_issue_alerts',
+  'release_announcements',
   'sentry_triage',
   'dependabot_triage',
   'codeql_triage',

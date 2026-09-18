@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   compareProductVersions,
+  hasProductVersionMajorOrMinorChange,
   isParsableProductVersion,
   isProductVersionNewer,
   normalizeProductVersion,
@@ -62,6 +63,18 @@ describe('product-version', () => {
     expect(isProductVersionNewer('0.15.0-rc.2', '0.15.0-rc.10')).toBe(false);
     expect(isProductVersionNewer('0.14.1', '0.14.1')).toBe(false);
     expect(isProductVersionNewer(null, '0.14.1')).toBe(false);
+  });
+
+  it('detects major or minor boundary changes independently of patch', () => {
+    expect(hasProductVersionMajorOrMinorChange('1.11.0', '1.11.1')).toBe(false);
+    expect(hasProductVersionMajorOrMinorChange('1.10.5', '1.11.2')).toBe(true);
+    expect(hasProductVersionMajorOrMinorChange('1.11.9', '2.0.1')).toBe(true);
+    expect(hasProductVersionMajorOrMinorChange('1.11.0-rc.1', '1.11.0')).toBe(
+      false,
+    );
+    expect(hasProductVersionMajorOrMinorChange('develop-abc', '1.11.0')).toBe(
+      false,
+    );
   });
 
   it('toReleaseTag always prefixes v', () => {

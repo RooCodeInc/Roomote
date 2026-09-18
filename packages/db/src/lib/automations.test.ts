@@ -335,3 +335,35 @@ describe('normalizeBackgroundAgentSettings Merge announcer destination', () => {
     expect(settings.mergeAnnouncerTargetChannelId).toBeNull();
   });
 });
+
+describe('normalizeBackgroundAgentSettings release announcements', () => {
+  it('defaults enabled with the standard destination', () => {
+    const settings = normalizeBackgroundAgentSettings(null);
+
+    expect(settings.releaseAnnouncementsEnabled).toBe(true);
+    expect(settings.releaseAnnouncementsTargetProvider).toBeNull();
+    expect(settings.releaseAnnouncementsTargetMode).toBeNull();
+    expect(settings.releaseAnnouncementsTargetChannelId).toBeNull();
+  });
+
+  it('projects a provider-neutral channel target', () => {
+    const settings = normalizeBackgroundAgentSettings(null, [
+      {
+        key: 'release_announcements',
+        enabled: true,
+        settings: { optedOut: false },
+        targets: [
+          {
+            provider: 'telegram',
+            targetKind: 'telegram_chat',
+            externalRef: 'release-chat',
+          },
+        ],
+      } as unknown as Automation,
+    ]);
+
+    expect(settings.releaseAnnouncementsTargetProvider).toBe('telegram');
+    expect(settings.releaseAnnouncementsTargetMode).toBe('channel');
+    expect(settings.releaseAnnouncementsTargetChannelId).toBe('release-chat');
+  });
+});

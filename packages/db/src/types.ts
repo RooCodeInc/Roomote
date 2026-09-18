@@ -1,6 +1,7 @@
 import type {
   AnnouncerFrequency,
   AutomationScanCursor,
+  AutomationCapableCommunicationProvider,
   ChannelAutoStartLaunchMode,
   CiFailureTriageFrequency,
   CodeQualityAuditorFrequency,
@@ -539,6 +540,10 @@ export type BackgroundAgentSettings = StoredBackgroundAgentSettings & {
   platformIssueAlertsEnabled: boolean;
   platformIssueSlackChannelId: string | null;
   platformIssueDiscordChannelId: string | null;
+  releaseAnnouncementsEnabled: boolean;
+  releaseAnnouncementsTargetProvider: AutomationCapableCommunicationProvider | null;
+  releaseAnnouncementsTargetMode: 'channel' | 'direct_message' | null;
+  releaseAnnouncementsTargetChannelId: string | null;
   managerStatsFrequency: ManagerStatsFrequency;
   managerStatsSlackChannelId: string | null;
   managerStatsDiscordChannelId: string | null;

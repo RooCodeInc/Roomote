@@ -41,6 +41,7 @@ import {
   brainMaintenanceJob,
   sessionsReconcileJob,
   threadFooterRefreshJob,
+  releaseAnnouncementsJob,
 } from './scheduled-jobs';
 
 const QUEUE_NAME = 'scheduled-jobs';
@@ -237,6 +238,9 @@ async function createJobs(queue: Queue): Promise<void> {
   await queue.upsertJobScheduler(ScheduledJobName.ThreadFooterRefresh, {
     every: 30 * 1000,
   });
+  await queue.upsertJobScheduler(ScheduledJobName.ReleaseAnnouncements, {
+    every: 60 * 1000,
+  });
 
   const schedulers = await queue.getJobSchedulers();
   console.log('[createJobs] getJobSchedulers ->', schedulers);
@@ -289,6 +293,8 @@ const runJobs = async (job: ScheduledJob): Promise<void> => {
       return sessionsReconcileJob();
     case ScheduledJobName.ThreadFooterRefresh:
       return threadFooterRefreshJob();
+    case ScheduledJobName.ReleaseAnnouncements:
+      return releaseAnnouncementsJob();
     case ScheduledJobName.WebTaskInitiatorSettleNotification: {
       const data = job.data as WebTaskInitiatorSettleNotificationJob;
       const result = await notifyWebTaskInitiatorOnSettle(

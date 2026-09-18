@@ -507,6 +507,7 @@ export async function ensureAutomationRows(
         key,
         enabled:
           key === 'platform_issue_alerts' ||
+          key === 'release_announcements' ||
           key === 'provider_usage_limit' ||
           key === 'manager_stats',
         internal: isInternalAutomationKey(key),
@@ -963,7 +964,10 @@ export function normalizeBackgroundAgentSettings(
   const ciFailureTriage = automationMap.get('ci_failure_triage');
   const mergeAnnouncer = automationMap.get('merge_announcer');
   const platformIssueAlerts = automationMap.get('platform_issue_alerts');
+  const releaseAnnouncements = automationMap.get('release_announcements');
   const mergeAnnouncerTarget = getAutomationCommunicationTarget(mergeAnnouncer);
+  const releaseAnnouncementsTarget =
+    getAutomationCommunicationTarget(releaseAnnouncements);
 
   const managerSlackChannelId = row?.managerSlackChannelId ?? null;
   const managerDiscordChannelId = row?.managerDiscordChannelId ?? null;
@@ -1034,6 +1038,22 @@ export function normalizeBackgroundAgentSettings(
     // keeps legacy rows whose enabled bit was derived from channel presence on.
     platformIssueAlertsEnabled:
       getAutomationSettingBoolean(platformIssueAlerts, 'optedOut') !== true,
+    releaseAnnouncementsEnabled:
+      getAutomationSettingBoolean(releaseAnnouncements, 'optedOut') !== true,
+    releaseAnnouncementsTargetProvider:
+      releaseAnnouncementsTarget?.provider === 'sentry'
+        ? null
+        : (releaseAnnouncementsTarget?.provider ?? null),
+    releaseAnnouncementsTargetMode: releaseAnnouncementsTarget
+      ? releaseAnnouncementsTarget.targetKind.endsWith('_user')
+        ? 'direct_message'
+        : 'channel'
+      : null,
+    releaseAnnouncementsTargetChannelId:
+      releaseAnnouncementsTarget &&
+      !releaseAnnouncementsTarget.targetKind.endsWith('_user')
+        ? releaseAnnouncementsTarget.externalRef
+        : null,
 
     callRoomoteViaEmojiEnabled:
       callRoomoteViaEmoji?.enabled === true &&

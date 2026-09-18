@@ -429,7 +429,10 @@ import {
   triggerAutomationCommand,
   updateCustomAutomationCommand,
 } from '../commands/automations';
-import { mergeAnnouncerDestinationInputShape } from '../commands/automations/settings-schema';
+import {
+  mergeAnnouncerDestinationInputShape,
+  releaseAnnouncementsDestinationInputShape,
+} from '../commands/automations/settings-schema';
 import {
   actOnResultCommand,
   clearResultsCommand,
@@ -560,6 +563,7 @@ const UPDATE_SETTINGS_SAVING_AUTOMATION_VALUES = [
   ...SCHEDULE_ONLY_BACKGROUND_AUTOMATION_IDS,
   'announcer',
   'platformIssueAlerts',
+  'releaseAnnouncements',
 ] as const;
 
 const SCHEDULE_ONLY_FREQUENCY_FIELD_SHAPE = Object.fromEntries(
@@ -778,6 +782,7 @@ const automationsRouter = createRouter({
           .optional(),
         ...SCHEDULE_ONLY_FREQUENCY_FIELD_SHAPE,
         ...mergeAnnouncerDestinationInputShape,
+        ...releaseAnnouncementsDestinationInputShape,
         issueFixerInstructions: z.string().max(8_000).nullable().optional(),
         suggesterFrequency: z.enum(['off', 'daily', 'weekly']),
         suggesterSlackChannel: z.string().trim().min(1).max(160).nullable(),
@@ -820,6 +825,7 @@ const automationsRouter = createRouter({
           .max(160)
           .nullable()
           .optional(),
+        releaseAnnouncementsEnabled: z.boolean().optional(),
         securityAuditorSlackChannel: z
           .string()
           .trim()

@@ -172,6 +172,10 @@ function buildInput(
     platformIssueAlertsEnabled: true,
     platformIssueSlackChannel: null,
     platformIssueDiscordChannel: null,
+    releaseAnnouncementsEnabled: true,
+    releaseAnnouncementsTargetProvider: null,
+    releaseAnnouncementsTargetMode: 'channel',
+    releaseAnnouncementsTargetChannelId: null,
     ...overrides,
   };
 }
@@ -811,6 +815,45 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
       expect(result.settings.managerStatsFrequency).toBe('off');
     }
   }, 15_000);
+
+  it('configures and disables installed release announcements as a built-in automation', async () => {
+    await insertSlackInstallation();
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'releaseAnnouncements',
+        releaseAnnouncementsEnabled: false,
+        releaseAnnouncementsTargetProvider: 'slack',
+        releaseAnnouncementsTargetMode: 'channel',
+        releaseAnnouncementsTargetChannelId: 'C-RELEASES',
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.settings.releaseAnnouncementsEnabled).toBe(false);
+      expect(result.settings.releaseAnnouncementsTargetProvider).toBe('slack');
+      expect(result.settings.releaseAnnouncementsTargetChannelId).toBe(
+        'C-RELEASES',
+      );
+    }
+    await expect(
+      db.query.automations.findFirst({
+        where: eq(automations.key, 'release_announcements'),
+      }),
+    ).resolves.toMatchObject({
+      enabled: false,
+      settings: { optedOut: true },
+      targets: [
+        {
+          provider: 'slack',
+          targetKind: 'slack_channel',
+          externalRef: 'C-RELEASES',
+        },
+      ],
+    });
+  });
 
   it('switches a Discord manager channel to Slack and clears Discord', async () => {
     await upsertAutomation(db, {

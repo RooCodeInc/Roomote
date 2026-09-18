@@ -13,6 +13,7 @@ const jsdomSyncWorkerEntry = join(
 export default defineConfig({
   entry: {
     index: 'src/index.ts',
+    'release-announcement': 'src/release-announcement.ts',
     // JSDOM resolves this helper relative to the bundle at runtime.
     'xhr-sync-worker': jsdomSyncWorkerEntry,
   },

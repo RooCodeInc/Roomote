@@ -164,6 +164,12 @@ export {
   notifyFastAgentParentOnArtifact,
   type FastArtifactNotificationResult,
 } from './lib/artifacts/notify-fast-agent-parent';
+export {
+  buildInstalledReleaseAnnouncement,
+  drainReleaseAnnouncementDeliveries,
+  recordInstalledRelease,
+  type RecordInstalledReleaseResult,
+} from './lib/release-announcements';
 
 export {
   SLACK_ACCOUNT_LINK_EDUCATION_DELAY_MS,

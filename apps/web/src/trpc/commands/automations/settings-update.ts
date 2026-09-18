@@ -9,6 +9,7 @@ import {
   isConflictResolverMaxPrAgeDays,
   isProviderUsageLimitThreshold,
   type AutomationTarget,
+  type AutomationCapableCommunicationProvider,
   type CommunicationProvider,
   type PrReviewSettings,
   type TriggerableBackgroundAutomationKey,
@@ -258,6 +259,49 @@ function buildDestinationChannelTargets(
 // check the channel type.
 const CHANNEL_AUTO_START_DISCORD_CHANNEL_TYPES: readonly number[] = [0, 5];
 
+const COMMUNICATION_MANAGED_TARGET_KINDS = [
+  'slack_channel',
+  'slack_user',
+  'discord_channel',
+  'discord_user',
+  'teams_channel',
+  'teams_user',
+  'telegram_chat',
+  'telegram_user',
+] as const;
+
+function buildSubmittedCommunicationTarget(params: {
+  submitted: boolean;
+  provider: AutomationCapableCommunicationProvider | null;
+  mode: 'channel' | 'direct_message';
+  channelId: string;
+  userId: string;
+  connectedProviders: readonly AutomationCapableCommunicationProvider[];
+}): { target: AutomationTarget | null; error?: string } {
+  if (!params.submitted || !params.provider) return { target: null };
+  if (!params.connectedProviders.includes(params.provider)) {
+    return {
+      target: null,
+      error: `Connect ${params.provider} before saving a ${params.provider} report destination.`,
+    };
+  }
+  if (params.mode === 'channel' && !params.channelId) {
+    return { target: null, error: 'Choose a destination channel.' };
+  }
+
+  return {
+    target: {
+      provider: params.provider,
+      targetKind: getCommunicationAutomationTargetKind(
+        params.provider,
+        params.mode,
+      ),
+      externalRef:
+        params.mode === 'direct_message' ? params.userId : params.channelId,
+    },
+  };
+}
+
 type DiscordChannelResolution = {
   channelId: string | null;
   error?: {
@@ -366,6 +410,11 @@ export async function updateBackgroundAgentSettingsCommand(
       ? (input.platformIssueAlertsEnabled ??
         existingSettings.platformIssueAlertsEnabled)
       : existingSettings.platformIssueAlertsEnabled;
+  const releaseAnnouncementsEnabled =
+    input.savingAutomation === 'releaseAnnouncements'
+      ? (input.releaseAnnouncementsEnabled ??
+        existingSettings.releaseAnnouncementsEnabled)
+      : existingSettings.releaseAnnouncementsEnabled;
   const additionalRulesConfig =
     ADDITIONAL_RULES_BY_AUTOMATION[
       input.savingAutomation as keyof typeof ADDITIONAL_RULES_BY_AUTOMATION
@@ -1001,31 +1050,43 @@ export async function updateBackgroundAgentSettingsCommand(
   const mergeAnnouncerTargetMode = input.mergeAnnouncerTargetMode ?? 'channel';
   const mergeAnnouncerTargetChannelId =
     input.mergeAnnouncerTargetChannelId?.trim() ?? '';
-  let mergeAnnouncerTarget: AutomationTarget | null = null;
-
-  if (mergeAnnouncerDestinationSubmitted && mergeAnnouncerTargetProvider) {
-    const connectedProviders = await listConnectedCommunicationProviders();
-    if (!connectedProviders.includes(mergeAnnouncerTargetProvider)) {
-      fieldErrors.general = `Connect ${mergeAnnouncerTargetProvider} before saving a ${mergeAnnouncerTargetProvider} report destination.`;
-    } else if (
-      mergeAnnouncerTargetMode === 'channel' &&
-      !mergeAnnouncerTargetChannelId
-    ) {
-      fieldErrors.general = 'Choose a destination channel.';
-    } else {
-      mergeAnnouncerTarget = {
-        provider: mergeAnnouncerTargetProvider,
-        targetKind: getCommunicationAutomationTargetKind(
-          mergeAnnouncerTargetProvider,
-          mergeAnnouncerTargetMode,
-        ),
-        externalRef:
-          mergeAnnouncerTargetMode === 'direct_message'
-            ? auth.userId
-            : mergeAnnouncerTargetChannelId,
-      };
-    }
+  const releaseAnnouncementsDestinationSubmitted =
+    input.savingAutomation === 'releaseAnnouncements' &&
+    input.releaseAnnouncementsTargetProvider !== undefined;
+  const releaseAnnouncementsTargetProvider =
+    input.releaseAnnouncementsTargetProvider ?? null;
+  const releaseAnnouncementsTargetMode =
+    input.releaseAnnouncementsTargetMode ?? 'channel';
+  const releaseAnnouncementsTargetChannelId =
+    input.releaseAnnouncementsTargetChannelId?.trim() ?? '';
+  const connectedProviders =
+    mergeAnnouncerDestinationSubmitted ||
+    releaseAnnouncementsDestinationSubmitted
+      ? await listConnectedCommunicationProviders()
+      : [];
+  const mergeAnnouncerTargetResult = buildSubmittedCommunicationTarget({
+    submitted: mergeAnnouncerDestinationSubmitted,
+    provider: mergeAnnouncerTargetProvider,
+    mode: mergeAnnouncerTargetMode,
+    channelId: mergeAnnouncerTargetChannelId,
+    userId: auth.userId,
+    connectedProviders,
+  });
+  const releaseAnnouncementsTargetResult = buildSubmittedCommunicationTarget({
+    submitted: releaseAnnouncementsDestinationSubmitted,
+    provider: releaseAnnouncementsTargetProvider,
+    mode: releaseAnnouncementsTargetMode,
+    channelId: releaseAnnouncementsTargetChannelId,
+    userId: auth.userId,
+    connectedProviders,
+  });
+  const communicationTargetError =
+    mergeAnnouncerTargetResult.error ?? releaseAnnouncementsTargetResult.error;
+  if (communicationTargetError) {
+    fieldErrors.general ??= communicationTargetError;
   }
+  const mergeAnnouncerTarget = mergeAnnouncerTargetResult.target;
+  const releaseAnnouncementsTarget = releaseAnnouncementsTargetResult.target;
 
   // Manager-channel automations resolve their destination as
   // automation target -> shared manager channel. Enabling one requires a
@@ -1577,16 +1638,7 @@ export async function updateBackgroundAgentSettingsCommand(
       ...(mergeAnnouncerDestinationSubmitted
         ? {
             targets: mergeAnnouncerTarget ? [mergeAnnouncerTarget] : [],
-            managedTargetKinds: [
-              'slack_channel',
-              'slack_user',
-              'discord_channel',
-              'discord_user',
-              'teams_channel',
-              'teams_user',
-              'telegram_chat',
-              'telegram_user',
-            ] as const,
+            managedTargetKinds: COMMUNICATION_MANAGED_TARGET_KINDS,
           }
         : {}),
       updatedAt: now,
@@ -1621,6 +1673,21 @@ export async function updateBackgroundAgentSettingsCommand(
       enabled: platformIssueAlertsEnabled,
       settings: { optedOut: !platformIssueAlertsEnabled },
       ...destinationUpsertFields('platformIssueAlerts'),
+      updatedAt: now,
+    });
+
+    await upsertAutomation(tx, {
+      key: 'release_announcements',
+      enabled: releaseAnnouncementsEnabled,
+      settings: { optedOut: !releaseAnnouncementsEnabled },
+      ...(releaseAnnouncementsDestinationSubmitted
+        ? {
+            targets: releaseAnnouncementsTarget
+              ? [releaseAnnouncementsTarget]
+              : [],
+            managedTargetKinds: COMMUNICATION_MANAGED_TARGET_KINDS,
+          }
+        : {}),
       updatedAt: now,
     });
   });

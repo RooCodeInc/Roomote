@@ -361,6 +361,10 @@ docker compose --env-file .env -f docker-compose.prod.yml stop controller || tru
 docker pull "$ROOMOTE_WORKER_IMAGE"
 docker compose --env-file .env -f docker-compose.prod.yml pull
 docker compose --env-file .env -f docker-compose.prod.yml up -d --wait --wait-timeout 600
+if ! docker compose --env-file .env -f docker-compose.prod.yml exec -T bullmq \
+  /roomote/.docker/app/entrypoint.sh release-announcement; then
+  echo "warning: release announcement baseline was not recorded; the healthy deployment remains installed" >&2
+fi
 systemctl enable roomote-compose.service
 REMOTE
 

@@ -123,6 +123,7 @@ import {
   SelectValue,
   Smile,
   MessagesSquare,
+  PackageCheck,
   Skeleton,
   Slack,
   Slider,
@@ -594,6 +595,15 @@ const AUTOMATION_DEFINITIONS: Record<AutomationId, AutomationDefinition> = {
     category: 'operations',
     searchTerms: ['Slack', 'Discord'],
   },
+  releaseAnnouncements: {
+    id: 'releaseAnnouncements',
+    label: 'Announce Roomote Updates',
+    description:
+      'Post release highlights after this deployment successfully updates.',
+    icon: PackageCheck,
+    category: 'operations',
+    searchTerms: ['release', 'update', 'Slack', 'Discord'],
+  },
 };
 
 const AutomationListContext = createContext<{
@@ -652,6 +662,7 @@ const HASH_ALIAS_TO_AUTOMATION_ID: Record<string, AutomationId> = {
   announcer: 'announcer',
   'alert-on-config-errors': 'platformIssueAlerts',
   'platform-issue-alerts': 'platformIssueAlerts',
+  'release-announcements': 'releaseAnnouncements',
 };
 
 const AUTOMATION_RUN_KEYS_BY_ID: Partial<
@@ -820,6 +831,10 @@ function mapSettingsToFormState(
     platformIssueSlackChannelId: string | null;
     platformIssueSlackChannelName?: string | null;
     platformIssueDiscordChannelId: string | null;
+    releaseAnnouncementsEnabled?: boolean;
+    releaseAnnouncementsTargetProvider?: AutomationCapableCommunicationProvider | null;
+    releaseAnnouncementsTargetMode?: 'channel' | 'direct_message' | null;
+    releaseAnnouncementsTargetChannelId?: string | null;
     securityAuditorSlackChannelId: string | null;
     securityAuditorSlackChannelName?: string | null;
     securityAuditorDiscordChannelId: string | null;
@@ -958,6 +973,13 @@ function mapSettingsToFormState(
       settings.platformIssueSlackChannelId ??
       '',
     platformIssueDiscordChannel: settings.platformIssueDiscordChannelId ?? '',
+    releaseAnnouncementsEnabled: settings.releaseAnnouncementsEnabled ?? true,
+    releaseAnnouncementsTargetProvider:
+      settings.releaseAnnouncementsTargetProvider ?? 'none',
+    releaseAnnouncementsTargetMode:
+      settings.releaseAnnouncementsTargetMode ?? 'channel',
+    releaseAnnouncementsTargetChannelId:
+      settings.releaseAnnouncementsTargetChannelId ?? '',
     securityAuditorSlackChannel:
       settings.securityAuditorSlackChannelName ??
       settings.securityAuditorSlackChannelId ??
@@ -1017,6 +1039,12 @@ export function isPlatformIssueAlertsEnabled(
   formState: Pick<FormState, 'platformIssueAlertsEnabled'> | null | undefined,
 ): boolean {
   return formState?.platformIssueAlertsEnabled ?? true;
+}
+
+function isReleaseAnnouncementsEnabled(
+  formState: Pick<FormState, 'releaseAnnouncementsEnabled'> | null | undefined,
+): boolean {
+  return formState?.releaseAnnouncementsEnabled ?? true;
 }
 
 export function canSelectSentryTriageFrequency({
@@ -1836,7 +1864,10 @@ export function AutomationsSettings({
         }
 
         setFieldErrors({});
-        setSlackChannelAccessWarnings(result.slackChannelAccessWarnings);
+        setSlackChannelAccessWarnings({
+          ...EMPTY_SLACK_CHANNEL_ACCESS_WARNINGS,
+          ...result.slackChannelAccessWarnings,
+        });
         setManagerSlackChannelId(result.settings.managerSlackChannelId);
         setManagerDiscordChannelId(result.settings.managerDiscordChannelId);
         const mapped = mapSettingsToFormState({
@@ -1990,6 +2021,7 @@ export function AutomationsSettings({
         suggester: false,
         announcer: false,
         platformIssueAlerts: false,
+        releaseAnnouncements: false,
       };
     }
 
@@ -2035,6 +2067,11 @@ export function AutomationsSettings({
         formState,
         savedState,
         'platformIssueAlerts',
+      ),
+      releaseAnnouncements: isAutomationDirty(
+        formState,
+        savedState,
+        'releaseAnnouncements',
       ),
     };
   }, [formState, savedState]);
@@ -2352,6 +2389,9 @@ export function AutomationsSettings({
           break;
         case 'platformIssueAlerts':
           nextState.platformIssueAlertsEnabled = enabled;
+          break;
+        case 'releaseAnnouncements':
+          nextState.releaseAnnouncementsEnabled = enabled;
           break;
         case 'securityAuditor':
         case 'codeQualityAuditor': {
@@ -2721,6 +2761,7 @@ export function AutomationsSettings({
     suggester: suggesterIsEnabled,
     announcer: announcerIsEnabled,
     platformIssueAlerts: isPlatformIssueAlertsEnabled(formState),
+    releaseAnnouncements: isReleaseAnnouncementsEnabled(formState),
   } satisfies Record<AutomationId, boolean>;
 
   const resolvedDestinationLabel = (
@@ -2804,6 +2845,7 @@ export function AutomationsSettings({
       resolvedDestinationLabel('announcer'),
     ),
     platformIssueAlerts: `Configuration errors → ${resolvedDestinationLabel('platform_issue_alerts')}`,
+    releaseAnnouncements: `Installed updates → ${resolvedDestinationLabel('release_announcements')}`,
   } satisfies Record<AutomationId, string>;
 
   const normalizedAutomationSearch = automationSearch.trim().toLowerCase();
@@ -3036,6 +3078,94 @@ export function AutomationsSettings({
                     </div>
                   </div>
                 ) : null}
+              </div>
+            </AutomationCard>
+
+            <AutomationCard
+              automation={AUTOMATION_DEFINITIONS.releaseAnnouncements}
+              isAvailableMatch={visibleBuiltInAutomations.has(
+                'releaseAnnouncements',
+              )}
+              isOpen={openAutomationIds.has('releaseAnnouncements')}
+              onOpenChange={(open) =>
+                setAutomationOpen('releaseAnnouncements', open)
+              }
+              iconEnabled={iconEnabled.releaseAnnouncements}
+              footer={
+                <AutomationFooter
+                  isDirty={isDirty.releaseAnnouncements}
+                  isPending={
+                    updateMutation.isPending &&
+                    savingAutomation === 'releaseAnnouncements'
+                  }
+                  onSave={() => saveAgent('releaseAnnouncements')}
+                  onReset={() => resetAgent('releaseAnnouncements')}
+                />
+              }
+            >
+              <div className="space-y-5">
+                <div className="flex items-center gap-3">
+                  <Switch
+                    id="release-announcements-enabled"
+                    checked={formState?.releaseAnnouncementsEnabled ?? true}
+                    onCheckedChange={(enabled) =>
+                      setFormState((prev) =>
+                        prev
+                          ? { ...prev, releaseAnnouncementsEnabled: enabled }
+                          : prev,
+                      )
+                    }
+                    aria-label="Announce Roomote Updates enabled"
+                  />
+                  <Label
+                    htmlFor="release-announcements-enabled"
+                    className="text-sm"
+                  >
+                    Announce successfully installed Roomote updates
+                  </Label>
+                </div>
+                <AutomationDestinationPicker
+                  id="release-announcements-destination"
+                  label="Post announcements to"
+                  value={{
+                    provider: formState.releaseAnnouncementsTargetProvider,
+                    mode: formState.releaseAnnouncementsTargetMode,
+                    channelId: formState.releaseAnnouncementsTargetChannelId,
+                  }}
+                  availableProviders={communicationProviders.filter(
+                    (
+                      provider,
+                    ): provider is AutomationCapableCommunicationProvider =>
+                      provider !== 'agentmail' &&
+                      settingsQuery.data?.capabilities[
+                        `${provider}Connected` as keyof typeof settingsQuery.data.capabilities
+                      ] === true,
+                  )}
+                  slackOptions={buildSlackDestinationOptions(
+                    formState.releaseAnnouncementsTargetProvider === 'slack'
+                      ? formState.releaseAnnouncementsTargetChannelId
+                      : null,
+                  )}
+                  discordOptions={mergeAnnouncerDiscordOptions}
+                  defaultSlackChannelId={managerSlackChannelId ?? ''}
+                  defaultDiscordChannelId={managerDiscordChannelId ?? ''}
+                  noneLabel="Default"
+                  noneDescription="Uses the standard automation destination."
+                  onChange={(destination) =>
+                    setFormState((previous) =>
+                      previous && destination.provider !== 'email'
+                        ? {
+                            ...previous,
+                            releaseAnnouncementsTargetProvider:
+                              destination.provider,
+                            releaseAnnouncementsTargetMode: destination.mode,
+                            releaseAnnouncementsTargetChannelId:
+                              destination.channelId,
+                          }
+                        : previous,
+                    )
+                  }
+                />
               </div>
             </AutomationCard>
 

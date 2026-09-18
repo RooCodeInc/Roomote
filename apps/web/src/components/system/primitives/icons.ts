@@ -227,6 +227,7 @@ export {
   Zap,
   BellElectric,
   BatteryWarning,
+  PackageCheck,
 } from 'lucide-react';
 
 export type { LucideIcon } from 'lucide-react';

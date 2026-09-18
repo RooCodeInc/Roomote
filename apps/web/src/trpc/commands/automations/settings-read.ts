@@ -222,8 +222,8 @@ async function resolveAutomationDestinations(params: {
   const entries = await Promise.all(
     MANAGER_REPORTING_AUTOMATION_KEYS.map(async (key) => {
       const runtime = runtimes[key];
-      // Platform issue alerts use deployment-admin DMs as their final tail;
-      // unlike scheduled automations, they never post to a primary channel.
+      // These event-driven notifications stop at their explicit or shared
+      // manager channel instead of falling through to a primary conversation.
       const destination =
         key === 'platform_issue_alerts'
           ? runtime.destination

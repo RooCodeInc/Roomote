@@ -95,6 +95,10 @@ const baseFormState: FormState = {
   platformIssueAlertsEnabled: true,
   platformIssueSlackChannel: '',
   platformIssueDiscordChannel: '',
+  releaseAnnouncementsEnabled: true,
+  releaseAnnouncementsTargetProvider: 'none',
+  releaseAnnouncementsTargetMode: 'channel',
+  releaseAnnouncementsTargetChannelId: '',
 };
 
 describe('Automations selection helpers', () => {
