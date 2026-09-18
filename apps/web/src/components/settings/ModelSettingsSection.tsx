@@ -135,12 +135,9 @@ const EMPTY_SUGGESTION_STATE: SuggestionState = {
   highlightedIndex: -1,
 };
 
-function getBedrockRoute(modelId: string): 'Mantle' | 'Native' | null {
+function getBedrockRoute(modelId: string): 'Mantle' | null {
   if (modelId.startsWith('bedrock-mantle/')) {
     return 'Mantle';
-  }
-  if (modelId.startsWith('amazon-bedrock/')) {
-    return 'Native';
   }
   return null;
 }

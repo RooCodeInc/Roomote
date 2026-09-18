@@ -1908,7 +1908,7 @@ describe('ModelSettingsSection', () => {
 
     renderModelSettingsSection();
 
-    expect(screen.getByText('Native')).toBeInTheDocument();
+    expect(screen.queryByText('Native')).not.toBeInTheDocument();
     expect(screen.getByText('Mantle')).toBeInTheDocument();
   });
 });

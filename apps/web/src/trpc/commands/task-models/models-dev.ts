@@ -468,7 +468,7 @@ export function suggestBedrockModelsFromCatalog(options: {
     return [
       {
         slug: `${BEDROCK_NATIVE_PROVIDER_PREFIX}${trimmedSlug}`,
-        displayName: `${entry.name?.trim() || trimmedSlug} (Native)`,
+        displayName: entry.name?.trim() || trimmedSlug,
         route: 'native',
       },
     ];

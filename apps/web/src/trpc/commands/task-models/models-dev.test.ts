@@ -637,7 +637,7 @@ describe('suggestBedrockModelsFromCatalog', () => {
     ).toEqual([
       {
         slug: 'amazon-bedrock/zai.glm-5',
-        displayName: 'GLM-5 (Native)',
+        displayName: 'GLM-5',
         route: 'native',
       },
       {

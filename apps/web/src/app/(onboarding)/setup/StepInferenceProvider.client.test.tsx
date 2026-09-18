@@ -417,7 +417,7 @@ describe('StepInferenceProvider configured API key display', () => {
       suggestions: [
         {
           slug: 'amazon-bedrock/zai.glm-5',
-          displayName: 'GLM-5 (Native)',
+          displayName: 'GLM-5',
         },
       ],
     });
