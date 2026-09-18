@@ -1221,8 +1221,8 @@ export function CustomAutomationsSection({
               }}
             />
             <p className="text-xs text-muted-foreground">
-              Coordinates this automation. Delegated tasks follow coding model
-              routing or the deployment coding default.
+              Coordinates this automation. Delegated tasks follow an explicit
+              selection, coding model routing, or the deployment coding default.
             </p>
           </div>
 
