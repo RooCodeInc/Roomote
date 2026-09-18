@@ -1,16 +1,22 @@
 'use client';
 
 import {
+  createContext,
   memo,
+  useContext,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
   type KeyboardEvent,
+  type ComponentPropsWithoutRef,
 } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { BRAIN_NAMESPACES } from '@roomote/types';
+import { usePathname, useSearchParams } from 'next/navigation';
+import { visit } from 'unist-util-visit';
+import type { Link, Root } from 'mdast';
 
 import { Section } from '@/components/settings';
 import {
@@ -32,7 +38,8 @@ import type {
   BrainPageListing,
 } from '@/trpc/commands/brain';
 import { brainNamespaceColor } from './brain-presentation';
-import { Streamdown } from 'streamdown';
+import { buildMemoryHref } from './brain-navigation';
+import { Streamdown, defaultRemarkPlugins } from 'streamdown';
 
 type ListedPage = BrainPageListing['pages'][number];
 
@@ -41,6 +48,84 @@ const SEARCH_DEBOUNCE_MS = 200;
 const PREVIEW_SKELETON_DELAY_MS = 300;
 const EMPTY_PAGES: ListedPage[] = [];
 type PageEdge = 'first' | 'last';
+
+const MEMORY_LINK_MARKER = 'https://memory.roomote.invalid/';
+const MemorySelectionContext = createContext<(slug: string) => void>(() => {});
+
+function isMemorySlug(value: string): boolean {
+  return (
+    value.length <= 512 &&
+    BRAIN_NAMESPACES.some(({ prefix }) => value.startsWith(prefix)) &&
+    /^[A-Za-z0-9][A-Za-z0-9._~!$&'()*+,;=:@%/-]*$/.test(value) &&
+    value.split('/').every((part) => part && part !== '.' && part !== '..')
+  );
+}
+
+/** Preserve only canonical Memory page links through Streamdown's URL hardener. */
+function remarkMemoryLinks() {
+  return (tree: Root) => {
+    visit(tree, 'link', (node: Link) => {
+      if (isMemorySlug(node.url)) {
+        node.url = `${MEMORY_LINK_MARKER}${encodeURIComponent(node.url)}`;
+      }
+    });
+  };
+}
+
+const MEMORY_REMARK_PLUGINS = [
+  ...Object.values(defaultRemarkPlugins),
+  remarkMemoryLinks,
+];
+
+function parseMemoryLink(href: string | undefined): string | null {
+  if (!href?.startsWith(MEMORY_LINK_MARKER)) {
+    return null;
+  }
+
+  try {
+    const slug = decodeURIComponent(href.slice(MEMORY_LINK_MARKER.length));
+    return isMemorySlug(slug) ? slug : null;
+  } catch {
+    return null;
+  }
+}
+
+function MemoryLink({
+  href,
+  children,
+  node: _node,
+  ...props
+}: ComponentPropsWithoutRef<'a'> & { node?: unknown }) {
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const selectMemory = useContext(MemorySelectionContext);
+  const slug = parseMemoryLink(href);
+
+  if (slug) {
+    return (
+      <a
+        {...props}
+        href={buildMemoryHref(pathname, searchParams, slug)}
+        onClick={(event) => {
+          event.preventDefault();
+          selectMemory(slug);
+        }}
+      >
+        {children}
+      </a>
+    );
+  }
+
+  if (!href || !/^(?:https?:\/\/|\/\/|mailto:|tel:)/i.test(href)) {
+    return <>{children}</>;
+  }
+
+  return (
+    <a {...props} href={href} target="_blank" rel="noopener noreferrer">
+      {children}
+    </a>
+  );
+}
 
 /** Registry position, so the filter chips keep a stable, meaningful order. */
 function namespaceRank(id: string): number {
@@ -112,7 +197,13 @@ const PageListRow = memo(function PageListRow({
   );
 });
 
-function PagePreview({ slug }: { slug: string }) {
+function PagePreview({
+  slug,
+  onSelectMemory,
+}: {
+  slug: string;
+  onSelectMemory: (slug: string) => void;
+}) {
   const trpc = useTRPC();
   const { data, isPending } = useQuery(
     trpc.brain.getPage.queryOptions({ slug }),
@@ -162,15 +253,18 @@ function PagePreview({ slug }: { slug: string }) {
           </span>
         </div>
       </div>
-      {/*
-       * Brain memories are distilled from tasks and integrations: cross-user
-       * content, rendered strictly as text.
-       */}
+      {/* Brain memories are untrusted cross-user Markdown. */}
       <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto scroll-thin px-4">
         <div className="w-full min-w-0 max-w-2xl">
-          <Streamdown className="break-words text-sm **:data-[streamdown='heading-1']:text-xl! **:data-[streamdown='heading-2']:text-base! **:data-[streamdown='heading-3']:text-base!">
-            {data.content ?? 'This memory has no stored content.'}
-          </Streamdown>
+          <MemorySelectionContext.Provider value={onSelectMemory}>
+            <Streamdown
+              className="break-words text-sm **:data-[streamdown='heading-1']:text-xl! **:data-[streamdown='heading-2']:text-base! **:data-[streamdown='heading-3']:text-base!"
+              remarkPlugins={MEMORY_REMARK_PLUGINS}
+              components={{ a: MemoryLink }}
+            >
+              {data.content ?? 'This memory has no stored content.'}
+            </Streamdown>
+          </MemorySelectionContext.Provider>
         </div>
         {data.contentTruncated ? (
           <p className="pt-2 text-xs text-muted-foreground">
@@ -447,7 +541,10 @@ export function BrainBrowseSection({
             {/* The list and preview stack below `md`, then sit side by side. */}
             {pageList}
             <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
-              <PagePreview slug={selectedSlug} />
+              <PagePreview
+                slug={selectedSlug}
+                onSelectMemory={onSelectMemory}
+              />
             </div>
           </div>
         ) : (
