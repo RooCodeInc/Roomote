@@ -1165,6 +1165,16 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
   });
 
+  it('offers the shared run-now action for installed release announcements', async () => {
+    render(<AutomationsSettings />);
+
+    expect(
+      await screen.findByRole('button', {
+        name: 'Run Announce Roomote Updates now',
+      }),
+    ).toBeEnabled();
+  });
+
   it('shows provider support as plain text instead of badges', async () => {
     render(<AutomationsSettings />);
 

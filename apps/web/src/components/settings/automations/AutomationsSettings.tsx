@@ -3072,6 +3072,31 @@ export function AutomationsSettings({
                 setAutomationOpen('releaseAnnouncements', open)
               }
               iconEnabled={iconEnabled.releaseAnnouncements}
+              runAction={
+                <BasicTooltip
+                  content={getRunTooltip(
+                    'releaseAnnouncements',
+                    isReleaseAnnouncementsEnabled(formState),
+                  )}
+                >
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label="Run Announce Roomote Updates now"
+                    onClick={() =>
+                      triggerMutation.mutate({
+                        automationKey: 'release_announcements',
+                      })
+                    }
+                    disabled={isRunDisabled(
+                      'releaseAnnouncements',
+                      isReleaseAnnouncementsEnabled(formState),
+                    )}
+                  >
+                    <Play />
+                  </Button>
+                </BasicTooltip>
+              }
               footer={
                 <AutomationFooter
                   isDirty={isDirty.releaseAnnouncements}

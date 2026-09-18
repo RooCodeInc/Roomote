@@ -128,6 +128,7 @@ export type ActivationAutomation =
   | 'conflict_resolver'
   | 'manager_stats'
   | 'provider_usage_limit'
+  | 'release_announcements'
   | 'sentry_triage'
   | 'dependabot_triage'
   | 'codeql_triage'
