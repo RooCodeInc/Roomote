@@ -32,6 +32,7 @@ const {
   mockInArray,
   mockDesc,
   mockFindCustomServers,
+  mockFindPersonalServers,
   mockFindConnectionFirst,
   mockIsBrainEnabled,
 } = vi.hoisted(() => {
@@ -75,6 +76,9 @@ const {
     mockFindCustomServers: vi.fn<(...args: unknown[]) => Promise<unknown>>(
       async () => [],
     ),
+    mockFindPersonalServers: vi.fn<(...args: unknown[]) => Promise<unknown>>(
+      async () => [],
+    ),
     mockFindConnectionFirst: vi.fn<(...args: unknown[]) => Promise<unknown>>(
       async () => undefined,
     ),
@@ -102,7 +106,15 @@ vi.mock('@roomote/db/server', () => ({
         findMany: mockFindCustomServers,
         findFirst: vi.fn(),
       },
+      personalMcpServers: {
+        findMany: mockFindPersonalServers,
+      },
     },
+  },
+  personalMcpServers: {
+    id: 'personalServer.id',
+    ownerUserId: 'personalServer.ownerUserId',
+    enabled: 'personalServer.enabled',
   },
   customMcpServers: {
     id: 'customServer.id',
@@ -259,6 +271,7 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
     mockFindEnablements.mockResolvedValue([]);
     mockFindConnections.mockResolvedValue([]);
     mockFindCustomServers.mockResolvedValue([]);
+    mockFindPersonalServers.mockResolvedValue([]);
     mockOrderBy.mockResolvedValue([buildJoinedConnectionRow()]);
   });
 
@@ -361,6 +374,85 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
 
     expect(fast).not.toHaveProperty('exa');
     expect(codingTask.servers).not.toHaveProperty('exa');
+  });
+
+  it("delivers a member's personal servers to them and lets them win a shared name", async () => {
+    mockFindPersonalServers.mockResolvedValue([
+      {
+        id: '11111111-1111-4111-8111-111111111111',
+        ownerUserId: 'user-1',
+        name: 'intercom',
+        url: 'https://mcp.example.com/mcp',
+        authType: 'none',
+        updatedAt: new Date('2026-09-16T00:00:00.000Z'),
+      },
+    ]);
+    mockFindCustomServers.mockResolvedValue([
+      {
+        id: '22222222-2222-4222-8222-222222222222',
+        name: 'intercom',
+        url: 'https://shared.example.com/mcp',
+        stdio: null,
+        authType: 'none',
+        updatedAt: new Date('2026-09-16T00:00:00.000Z'),
+      },
+    ]);
+
+    const result = await resolveUserMcpServerConfigs({
+      userId: 'user-1',
+      apiBaseUrl: 'https://api.preview.roomote.run',
+    });
+
+    expect(result['intercom']?.url).toBe(
+      'https://api.preview.roomote.run/api/mcp/custom/11111111-1111-4111-8111-111111111111',
+    );
+    expect(mockFindPersonalServers).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks only for the servers of the human a task run is acting for', async () => {
+    mockFindTaskRun.mockResolvedValue({ actingUserId: 'acting-user' });
+
+    await createJobCaller('https://api.example.com/trpc').getMcpServerConfigs();
+
+    expect(mockFindPersonalServers).toHaveBeenCalledTimes(1);
+    expect(mockEq).toHaveBeenCalledWith(
+      'personalServer.ownerUserId',
+      'acting-user',
+    );
+    expect(mockEq).not.toHaveBeenCalledWith(
+      'personalServer.ownerUserId',
+      'owner-user',
+    );
+  });
+
+  it('skips a personal OAuth server until its owner has authorized it', async () => {
+    mockFindPersonalServers.mockResolvedValue([
+      {
+        id: '11111111-1111-4111-8111-111111111111',
+        ownerUserId: 'user-1',
+        name: 'intercom',
+        url: 'https://mcp.example.com/mcp',
+        authType: 'oauth',
+        updatedAt: new Date('2026-09-16T00:00:00.000Z'),
+      },
+    ]);
+    mockFindConnectionFirst.mockResolvedValue({ authStatus: 'pending' });
+
+    const pending = await resolveUserMcpServerConfigs({
+      userId: 'user-1',
+      apiBaseUrl: 'https://api.preview.roomote.run',
+    });
+    expect(pending['intercom']).toBeUndefined();
+
+    mockFindConnectionFirst.mockResolvedValue({
+      authStatus: 'authenticated',
+      updatedAt: new Date('2026-09-16T01:00:00.000Z'),
+    });
+    const connected = await resolveUserMcpServerConfigs({
+      userId: 'user-1',
+      apiBaseUrl: 'https://api.preview.roomote.run',
+    });
+    expect(connected['intercom']?.url).toContain('/api/mcp/custom/');
   });
 
   it('routes the seeded development fixture to the local inert adapter', async () => {

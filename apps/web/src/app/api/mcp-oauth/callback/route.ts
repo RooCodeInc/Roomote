@@ -31,6 +31,7 @@ import {
 import { authorize } from '@/lib/server';
 import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
 import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
+import { canAuthorizeCustomMcpConnection } from '@/lib/server/custom-mcp-oauth-access';
 import { logger } from '@/lib/server/logger';
 import { captureIntegrationLifecycleEvent } from '@/lib/server/integration-telemetry';
 import {
@@ -383,19 +384,28 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Custom-server connections are deployment-scoped by construction.
+    // Catalog connections are deployment-scoped (admin) or the member's own.
+    // A custom server follows its own rule: its owner for a personal one, an
+    // administrator or its creator for a deployment one.
     const requiresOrgAdmin = customTarget
-      ? true
+      ? false
       : isDeploymentScopedMcpIntegration(
           integration!,
           connection.connectionRole,
         );
     const isAdmin = authResult.isAdmin;
+    const allowed = customTarget
+      ? canAuthorizeCustomMcpConnection({
+          target: customTarget,
+          connectionUserId: connection.userId,
+          userId,
+          isAdmin,
+        })
+      : requiresOrgAdmin
+        ? isAdmin
+        : connection.userId === userId;
 
-    if (
-      (requiresOrgAdmin && !isAdmin) ||
-      (!requiresOrgAdmin && connection.userId !== userId)
-    ) {
+    if (!allowed) {
       return redirectToResult({ status: 'error', reason: 'not_found' });
     }
 
