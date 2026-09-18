@@ -183,6 +183,42 @@ describe('automation result blocks', () => {
     });
   });
 
+  it('preserves nested ordered lists in automation reports', () => {
+    const [container] = buildAutomationResultBlocks({
+      title: 'Nested report',
+      iconUrl: 'https://app.example.com/automation-icons/zap.png',
+      configureUrl: 'https://app.example.com/automations#nested',
+      contentText: ['- Parent', '  1. First child', '- Sibling'].join('\n'),
+    });
+
+    expect(container?.type).toBe('container');
+    if (container?.type !== 'container') return;
+    expect(container.child_blocks).toContainEqual({
+      type: 'rich_text',
+      elements: expect.arrayContaining([
+        expect.objectContaining({
+          type: 'rich_text_list',
+          style: 'bullet',
+          elements: [
+            expect.objectContaining({
+              elements: [{ type: 'text', text: 'Parent' }],
+            }),
+          ],
+        }),
+        expect.objectContaining({
+          type: 'rich_text_list',
+          style: 'ordered',
+          indent: 1,
+          elements: [
+            expect.objectContaining({
+              elements: [{ type: 'text', text: 'First child' }],
+            }),
+          ],
+        }),
+      ]),
+    });
+  });
+
   it('leaves explicitly provided native tables unchanged', () => {
     const table = {
       type: 'table' as const,

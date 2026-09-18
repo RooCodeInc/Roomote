@@ -289,6 +289,55 @@ describe('convertMarkdownToRichText', () => {
     });
   });
 
+  it('preserves indented ordered sublists as nested rich-text lists', () => {
+    expect(
+      convertMarkdownToRichText(
+        ['- Parent', '  1. First child', '  2. Second child', '- Sibling'].join(
+          '\n',
+        ),
+      ),
+    ).toEqual({
+      type: 'rich_text',
+      elements: [
+        {
+          type: 'rich_text_list',
+          style: 'bullet',
+          elements: [
+            {
+              type: 'rich_text_section',
+              elements: [{ type: 'text', text: 'Parent' }],
+            },
+          ],
+        },
+        {
+          type: 'rich_text_list',
+          style: 'ordered',
+          indent: 1,
+          elements: [
+            {
+              type: 'rich_text_section',
+              elements: [{ type: 'text', text: 'First child' }],
+            },
+            {
+              type: 'rich_text_section',
+              elements: [{ type: 'text', text: 'Second child' }],
+            },
+          ],
+        },
+        {
+          type: 'rich_text_list',
+          style: 'bullet',
+          elements: [
+            {
+              type: 'rich_text_section',
+              elements: [{ type: 'text', text: 'Sibling' }],
+            },
+          ],
+        },
+      ],
+    });
+  });
+
   it('keeps an indented fenced block after a list item preformatted', () => {
     expect(
       convertMarkdownToRichText(

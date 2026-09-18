@@ -213,6 +213,25 @@ const ORDERED_ITEM = /^\s*\d+[.)]\s+(.*)$/;
 const HEADING = /^\s*#{1,6}\s+(.*)$/;
 const FENCE = /^\s*```/;
 
+type SlackRichTextListStyle = 'bullet' | 'ordered';
+
+function getListStyle(line: string): SlackRichTextListStyle | null {
+  return BULLET_ITEM.test(line)
+    ? 'bullet'
+    : ORDERED_ITEM.test(line)
+      ? 'ordered'
+      : null;
+}
+
+function listIndent(line: string): number {
+  const leadingWhitespace = line.match(/^\s*/)?.[0] ?? '';
+  const columns = [...leadingWhitespace].reduce(
+    (total, character) => total + (character === '\t' ? 4 : 1),
+    0,
+  );
+  return columns < 2 ? 0 : Math.ceil(columns / 2);
+}
+
 export function convertMarkdownToRichText(
   markdown: string,
   options: SlackRichTextConversionOptions = {},
@@ -255,19 +274,20 @@ export function convertMarkdownToRichText(
       continue;
     }
 
-    const listStyle = BULLET_ITEM.test(line)
-      ? 'bullet'
-      : ORDERED_ITEM.test(line)
-        ? 'ordered'
-        : null;
+    const listStyle = getListStyle(line);
     if (listStyle) {
       const pattern = listStyle === 'bullet' ? BULLET_ITEM : ORDERED_ITEM;
+      const indent = listIndent(line);
       const items: SlackRichTextSection[] = [];
       while (index < lines.length) {
-        const item = lines[index]!.match(pattern);
-        if (!item) {
+        const itemLine = lines[index]!;
+        if (
+          getListStyle(itemLine) !== listStyle ||
+          listIndent(itemLine) !== indent
+        ) {
           break;
         }
+        const item = itemLine.match(pattern)!;
         const itemLines = [item[1] ?? ''];
         index += 1;
         while (index < lines.length) {
@@ -275,7 +295,7 @@ export function convertMarkdownToRichText(
           if (FENCE.test(continuation)) {
             break;
           }
-          if (pattern.test(continuation)) {
+          if (getListStyle(continuation)) {
             break;
           }
           if (continuation.trim().length === 0) {
@@ -283,7 +303,7 @@ export function convertMarkdownToRichText(
             while (lines[nextIndex]?.trim().length === 0) {
               nextIndex += 1;
             }
-            if (pattern.test(lines[nextIndex] ?? '')) {
+            if (getListStyle(lines[nextIndex] ?? '')) {
               break;
             }
             if (/^\s+/.test(lines[nextIndex] ?? '')) {
@@ -312,7 +332,10 @@ export function convertMarkdownToRichText(
           while (lines[nextIndex]?.trim().length === 0) {
             nextIndex += 1;
           }
-          if (pattern.test(lines[nextIndex] ?? '')) {
+          if (
+            getListStyle(lines[nextIndex] ?? '') === listStyle &&
+            listIndent(lines[nextIndex] ?? '') === indent
+          ) {
             index = nextIndex;
           }
         }
@@ -322,6 +345,7 @@ export function convertMarkdownToRichText(
         elements.push({
           type: 'rich_text_list',
           style: listStyle,
+          ...(indent > 0 ? { indent } : {}),
           elements: items,
         });
       }
