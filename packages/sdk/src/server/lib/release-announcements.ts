@@ -20,6 +20,7 @@ import {
 } from '@roomote/db/server';
 import {
   compareProductVersions,
+  hasProductVersionMajorOrMinorChange,
   isParsableProductVersion,
   normalizeProductVersion,
   parseProductReleaseHistory,
@@ -44,6 +45,7 @@ export type RecordInstalledReleaseResult =
   | 'baselined'
   | 'unchanged'
   | 'rollback_baselined'
+  | 'patch_baselined'
   | 'announcement_disabled'
   | 'no_destination'
   | 'queued';
@@ -62,7 +64,7 @@ export function buildInstalledReleaseAnnouncement(input: {
   previousVersion: string;
   installedVersion: string;
   changelogMarkdown: string;
-}): string {
+}): string | null {
   const releases = parseProductReleaseHistory(input.changelogMarkdown)
     .filter(
       (release) =>
@@ -92,9 +94,7 @@ export function buildInstalledReleaseAnnouncement(input: {
     }
   }
   if (selected.length === 0) {
-    throw new Error(
-      `No authored release highlights found for ${input.installedVersion}`,
-    );
+    return null;
   }
 
   const installedTag = toReleaseTag(input.installedVersion);
@@ -181,6 +181,11 @@ export async function recordInstalledRelease(
       })
       .where(eq(deploymentSettings.id, DEPLOYMENT_ID));
     if (comparison < 0) return 'rollback_baselined';
+    if (
+      !hasProductVersionMajorOrMinorChange(previousVersion, installedVersion)
+    ) {
+      return 'patch_baselined';
+    }
     if (!enabled) {
       return 'announcement_disabled';
     }
@@ -260,6 +265,28 @@ export async function drainReleaseAnnouncementDeliveries(
         installedVersion: claim.row.installedVersion,
         changelogMarkdown: changelog,
       });
+      if (text === null) {
+        await db
+          .update(releaseAnnouncementDeliveries)
+          .set({
+            status: 'skipped',
+            leaseToken: null,
+            leaseExpiresAt: null,
+            lastError: null,
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(releaseAnnouncementDeliveries.id, claim.row.id),
+              eq(releaseAnnouncementDeliveries.leaseToken, claim.leaseToken),
+            ),
+          );
+        await recordAutomationRunOutcome(db, {
+          key: 'release_announcements',
+          status: 'skipped',
+        });
+        continue;
+      }
       const slackInstallation =
         claim.row.provider === 'slack'
           ? await findActiveSlackInstallationForChannel(claim.row.channelId)

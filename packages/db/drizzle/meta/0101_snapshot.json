@@ -9987,7 +9987,7 @@
       "checkConstraints": {
         "release_announcement_deliveries_status_check": {
           "name": "release_announcement_deliveries_status_check",
-          "value": "\"release_announcement_deliveries\".\"status\" in ('pending', 'delivered')"
+          "value": "\"release_announcement_deliveries\".\"status\" in ('pending', 'delivered', 'skipped')"
         },
         "release_announcement_deliveries_provider_check": {
           "name": "release_announcement_deliveries_provider_check",

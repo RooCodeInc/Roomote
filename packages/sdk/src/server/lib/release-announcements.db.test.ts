@@ -125,6 +125,47 @@ describe('installed release transitions', () => {
     });
   });
 
+  it('advances patch baselines silently and announces the next minor boundary from that patch', async () => {
+    await recordInstalledRelease('1.11.0');
+    await db
+      .update(deploymentSettings)
+      .set({ managerDiscordChannelId: 'manager-channel' })
+      .where(eq(deploymentSettings.id, 'default'));
+
+    await expect(recordInstalledRelease('1.11.1')).resolves.toBe(
+      'patch_baselined',
+    );
+    await expect(
+      db.query.deploymentSettings.findFirst({
+        where: eq(deploymentSettings.id, 'default'),
+        columns: { installedReleaseVersion: true },
+      }),
+    ).resolves.toMatchObject({ installedReleaseVersion: '1.11.1' });
+    expect(
+      await db.query.releaseAnnouncementDeliveries.findMany(),
+    ).toHaveLength(0);
+
+    await expect(recordInstalledRelease('1.12.2')).resolves.toBe('queued');
+    await expect(
+      db.query.releaseAnnouncementDeliveries.findFirst(),
+    ).resolves.toMatchObject({
+      previousVersion: '1.11.1',
+      installedVersion: '1.12.2',
+    });
+  });
+
+  it('announces minor and major crossings even when the installed release is a patch', async () => {
+    await recordInstalledRelease('1.10.5');
+    await db
+      .update(deploymentSettings)
+      .set({ managerDiscordChannelId: 'manager-channel' })
+      .where(eq(deploymentSettings.id, 'default'));
+
+    await expect(recordInstalledRelease('1.11.2')).resolves.toBe('queued');
+    await db.delete(releaseAnnouncementDeliveries);
+    await expect(recordInstalledRelease('2.0.1')).resolves.toBe('queued');
+  });
+
   it('does not queue when disabled and silently resets a rollback baseline', async () => {
     await recordInstalledRelease('1.1.0');
     await db
@@ -275,5 +316,70 @@ describe('release announcement delivery', () => {
         serviceUrl: 'https://smba.example/amer/',
       }),
     );
+  });
+
+  it('terminally skips a valid release range with no authored highlights', async () => {
+    await db.insert(releaseAnnouncementDeliveries).values({
+      previousVersion: '1.1.0',
+      installedVersion: '1.2.0',
+      provider: 'discord',
+      destinationKey: 'discord:manager-channel',
+      channelId: 'manager-channel',
+    });
+    const changelogWithoutHighlights = `# Changelog
+
+## 1.2.0
+
+### Patch changes
+
+- Fixed an internal issue.
+
+## 1.1.0
+
+### Patch changes
+
+- Fixed another internal issue.
+`;
+
+    expect(
+      buildInstalledReleaseAnnouncement({
+        previousVersion: '1.1.0',
+        installedVersion: '1.2.0',
+        changelogMarkdown: changelogWithoutHighlights,
+      }),
+    ).toBeNull();
+    await expect(
+      drainReleaseAnnouncementDeliveries({
+        changelogMarkdown: changelogWithoutHighlights,
+      }),
+    ).resolves.toEqual({ delivered: 0, failed: 0 });
+    await expect(
+      db.query.releaseAnnouncementDeliveries.findFirst(),
+    ).resolves.toMatchObject({ status: 'skipped', attempts: 0 });
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+    await expect(
+      drainReleaseAnnouncementDeliveries({
+        changelogMarkdown: changelogWithoutHighlights,
+      }),
+    ).resolves.toEqual({ delivered: 0, failed: 0 });
+  });
+
+  it('keeps missing authoritative release data retryable', async () => {
+    await db.insert(releaseAnnouncementDeliveries).values({
+      previousVersion: '1.1.0',
+      installedVersion: '1.2.0',
+      provider: 'discord',
+      destinationKey: 'discord:manager-channel',
+      channelId: 'manager-channel',
+    });
+
+    await expect(
+      drainReleaseAnnouncementDeliveries({
+        changelogMarkdown: '# Changelog\n\n## 1.1.0\n',
+      }),
+    ).resolves.toEqual({ delivered: 0, failed: 1 });
+    await expect(
+      db.query.releaseAnnouncementDeliveries.findFirst(),
+    ).resolves.toMatchObject({ status: 'pending', attempts: 1 });
   });
 });

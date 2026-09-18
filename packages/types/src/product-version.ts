@@ -102,6 +102,29 @@ export function isProductVersionNewer(
   return compareProductVersions(candidate, baseline) > 0;
 }
 
+export function hasProductVersionMajorOrMinorChange(
+  left: string | null | undefined,
+  right: string | null | undefined,
+): boolean {
+  const a = normalizeProductVersion(left);
+  const b = normalizeProductVersion(right);
+  if (
+    !a ||
+    !b ||
+    !isParsableProductVersion(a) ||
+    !isParsableProductVersion(b)
+  ) {
+    return false;
+  }
+
+  const parsedA = parseProductVersion(a);
+  const parsedB = parseProductVersion(b);
+  return (
+    parsedA.segments?.[0] !== parsedB.segments?.[0] ||
+    parsedA.segments?.[1] !== parsedB.segments?.[1]
+  );
+}
+
 export function toReleaseTag(version: string): string {
   return `v${normalizeProductVersion(version) ?? version.trim()}`;
 }

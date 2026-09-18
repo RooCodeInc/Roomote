@@ -425,7 +425,7 @@ manager-facing updates and suggestions.
 | **Suggest Ideas**            | Useful coding work Roomote thinks the team could do              | Daily or weekly                             |
 | **CI Failure Triage**        | Automatic repro-and-fix tasks for failing default-branch CI runs | Immediate via webhook                       |
 | **Platform Issue Alerts**    | Configuration and access issues reported by Roomote tasks        | Immediate when an issue is reported         |
-| **Announce Roomote Updates** | Highlights after a new Roomote release is installed successfully | After a successful deployment update        |
+| **Announce Roomote Updates** | Highlights after a major or minor Roomote update installs successfully | After a qualifying deployment update     |
 | **Summarize Merged PRs**     | A digest of recently merged pull requests                        | Daily or weekly                             |
 
 Weekly Manager Stats is enabled by default on new deployments and starts
@@ -470,13 +470,18 @@ deployment workflow finishes its readiness checks for a newer installed
 release, not when a release merely becomes available. The first observation
 establishes a silent baseline, so enabling the feature or installing Roomote
 does not replay historical announcements. Restarts, retries of the same
-version, and rollbacks do not post. When an update skips releases, the message
-selects up to three authored highlights across the intervening changelog entries
-and links to the full notes for the installed release. Leave its destination on
-**Default** to use the standard automation destination, or choose a Slack,
-Microsoft Teams, Telegram, or Discord channel or direct message. Delivery
-failures remain pending for retry without reposting a destination already
-recorded as successful.
+version, and rollbacks do not post. Patch-only updates also stay silent while
+still becoming the baseline for the next comparison. An update posts when its
+installed version crosses a major or minor boundary, including a patch release
+such as `1.10.5` to `1.11.2`. When an update skips releases, the message selects
+up to three authored highlights across the intervening changelog entries and
+links to the full notes for the installed release. If that authoritative range
+has no authored highlights, Roomote silently completes the announcement instead
+of retrying it; missing or unreadable release data remains retryable. Leave its
+destination on **Default** to use the standard automation destination, or choose
+a Slack, Microsoft Teams, Telegram, or Discord channel or direct message.
+Delivery failures remain pending for retry without reposting a destination
+already recorded as successful.
 
 An alert's **Send to Roomote** action opens an admin-only confirmation page with
 the exact title, report details, and source task or Session link. Viewing the

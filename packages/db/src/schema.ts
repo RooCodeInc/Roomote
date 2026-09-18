@@ -339,7 +339,7 @@ export const releaseAnnouncementDeliveries = pgTable(
     channelId: text('channel_id').notNull(),
     serviceUrl: text('service_url'),
     status: text('status')
-      .$type<'pending' | 'delivered'>()
+      .$type<'pending' | 'delivered' | 'skipped'>()
       .notNull()
       .default('pending'),
     leaseToken: uuid('lease_token'),
@@ -363,7 +363,7 @@ export const releaseAnnouncementDeliveries = pgTable(
     ),
     check(
       'release_announcement_deliveries_status_check',
-      sql`${table.status} in ('pending', 'delivered')`,
+      sql`${table.status} in ('pending', 'delivered', 'skipped')`,
     ),
     check(
       'release_announcement_deliveries_provider_check',

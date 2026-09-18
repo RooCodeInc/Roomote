@@ -16,7 +16,7 @@ CREATE TABLE "release_announcement_deliveries" (
 	"delivered_at" timestamp,
 	"created_at" timestamp DEFAULT now() NOT NULL,
 	"updated_at" timestamp DEFAULT now() NOT NULL,
-	CONSTRAINT "release_announcement_deliveries_status_check" CHECK ("release_announcement_deliveries"."status" in ('pending', 'delivered')),
+	CONSTRAINT "release_announcement_deliveries_status_check" CHECK ("release_announcement_deliveries"."status" in ('pending', 'delivered', 'skipped')),
 	CONSTRAINT "release_announcement_deliveries_provider_check" CHECK ("release_announcement_deliveries"."provider" in ('slack', 'teams', 'telegram', 'discord'))
 );
 --> statement-breakpoint

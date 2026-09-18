@@ -1,5 +1,6 @@
 export {
   compareProductVersions,
+  hasProductVersionMajorOrMinorChange,
   isParsableProductVersion,
   isProductVersionNewer,
   normalizeProductVersion,
