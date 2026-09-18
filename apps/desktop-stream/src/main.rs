@@ -1579,22 +1579,14 @@ async fn control(
         )
             .into_response();
     }
-    // The newest viewer wins: bump the generation so any previous control
-    // session releases its held input and closes.
-    // Subscribe before publishing our generation so a newer client that
-    // connects between this point and the upgrade is not missed.
-    let superseded = state.control_generation.subscribe();
-    let mut generation = 0;
-    state.control_generation.send_modify(|current| {
-        *current += 1;
-        generation = *current;
-    });
-    state.control_connected.store(true, Ordering::Release);
-
+    // Control is claimed only once the upgrade completes (see
+    // `control_socket`). Claiming it here would let a handshake that is
+    // aborted midway (a page reload, a quick reconnect) supersede the real
+    // controller and leave the desktop marked as held with nobody holding it.
     websocket
         // Large enough for a pasted clipboard; every other event is tiny.
         .max_message_size(MAX_CLIPBOARD_BYTES + 4 * 1024)
-        .on_upgrade(move |socket| control_socket(socket, state, generation, superseded))
+        .on_upgrade(move |socket| control_socket(socket, state))
 }
 
 /// Answers whether a viewer holds control, without taking it. Connecting to
@@ -1623,18 +1615,27 @@ async fn presence(
         })
 }
 
+fn claim_control_generation(generations: &watch::Sender<u64>) -> u64 {
+    let mut generation = 0;
+    generations.send_modify(|current| {
+        *current += 1;
+        generation = *current;
+    });
+    generation
+}
+
 fn presence_payload(control_held: bool) -> String {
     serde_json::json!({ "control_held": control_held }).to_string()
 }
 
-async fn control_socket(
-    mut socket: WebSocket,
-    state: AppState,
-    generation: u64,
-    mut superseded: watch::Receiver<u64>,
-) {
+async fn control_socket(mut socket: WebSocket, state: AppState) {
+    // The newest viewer wins: bump the generation so any previous control
+    // session releases its held input and closes. Subscribe before
+    // publishing our generation so a newer client is never missed.
+    let mut superseded = state.control_generation.subscribe();
+    let generation = claim_control_generation(&state.control_generation);
     // Consume our own generation bump; anything newer means a later client
-    // already took control while this upgrade was pending.
+    // already took control in the meantime.
     if *superseded.borrow_and_update() != generation {
         let _ = socket
             .send(Message::Text(
@@ -1644,6 +1645,7 @@ async fn control_socket(
         let _ = socket.send(Message::Close(None)).await;
         return;
     }
+    state.control_connected.store(true, Ordering::Release);
     let _connection_guard = ControlConnectionGuard {
         connected: state.control_connected.clone(),
         generation,
@@ -2694,6 +2696,28 @@ mod tests {
         let app = window(4, 10, 10, 800, 600, false);
         let dialog = window(5, 50, 50, 300, 200, true);
         assert_eq!(windows_to_refit(&[app, dialog], previous), vec![4]);
+    }
+
+    #[test]
+    fn only_the_current_controller_clears_the_held_flag() {
+        let generations = watch::Sender::new(0);
+        let connected = Arc::new(AtomicBool::new(false));
+        let claim = |connected: &Arc<AtomicBool>| {
+            let generation = claim_control_generation(&generations);
+            connected.store(true, Ordering::Release);
+            ControlConnectionGuard {
+                connected: connected.clone(),
+                generation,
+                current: generations.subscribe(),
+            }
+        };
+        let first = claim(&connected);
+        let second = claim(&connected);
+        // The superseded controller leaving must not mark the desktop free.
+        drop(first);
+        assert!(connected.load(Ordering::Relaxed));
+        drop(second);
+        assert!(!connected.load(Ordering::Relaxed));
     }
 
     #[test]
