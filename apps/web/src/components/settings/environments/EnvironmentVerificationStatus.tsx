@@ -78,7 +78,12 @@ export function getEnvironmentVerificationState(
 
   // An unresolved recipe with an active verification task is still resolving
   // package versions; ordinary environments without a task are Configured.
-  if (recipe && !recipe.resolution) {
+  if (
+    recipe &&
+    !recipe.resolution &&
+    environment.verificationTaskId &&
+    environment.verificationTaskActive
+  ) {
     return 'configuring';
   }
 
@@ -98,6 +103,7 @@ export function EnvironmentVerificationBadge({
   env: EnvironmentWithMeta;
 }) {
   const state = getEnvironmentVerificationState(env);
+  const recipe = env.config?.environment_recipe;
   const { Icon, iconClassName, label } = environmentVerificationDisplay[state];
   const hasVerificationTask = Boolean(env.verificationTaskId);
   const badgeClassName = hasVerificationTask ? 'gap-1 cursor-pointer' : 'gap-1';
@@ -153,9 +159,10 @@ export function EnvironmentVerificationBadge({
           content={
             <div className="text-sm">
               {state === 'configuring'
-                ? 'Roomote is resolving this environment recipe from official repositories.'
-                : 'Roomote is checking that this environment works.'}{' '}
-              You can keep using it while this finishes.
+                ? 'Roomote is resolving this environment recipe from official repositories. It becomes available after verification succeeds.'
+                : recipe
+                  ? 'Roomote is checking that this recipe environment works. It becomes available after verification succeeds.'
+                  : 'Roomote is checking that this environment works. You can keep using it while verification finishes.'}
             </div>
           }
         >

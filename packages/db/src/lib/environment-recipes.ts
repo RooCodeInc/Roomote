@@ -1,9 +1,13 @@
-import { eq, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 
-import type { EnvironmentConfig, EnvironmentRecipe } from '@roomote/types';
+import {
+  activeRunStatuses,
+  type EnvironmentConfig,
+  type EnvironmentRecipe,
+} from '@roomote/types';
 
 import { db, type DatabaseOrTransaction } from '../db';
-import { environments } from '../schema';
+import { environments, taskRuns } from '../schema';
 import { createEnvironmentConfigVersionSnapshot } from './environment-config-versions';
 import { runInTransactionIfAvailable } from './transaction-utils';
 
@@ -57,6 +61,25 @@ export type EnsureEnvironmentRecipeCandidateResult = {
   name: string;
   created: boolean;
 };
+
+export async function getActiveRecipeVerificationTaskId(
+  dbOrTx: DatabaseOrTransaction,
+  environmentId: string,
+): Promise<string | null> {
+  const [active] = await dbOrTx
+    .select({ taskId: taskRuns.taskId })
+    .from(taskRuns)
+    .where(
+      and(
+        inArray(taskRuns.status, [...activeRunStatuses]),
+        sql`${taskRuns.payload} ->> 'verifiesEnvironmentId' = ${environmentId}`,
+      ),
+    )
+    .orderBy(desc(taskRuns.createdAt), desc(taskRuns.id))
+    .limit(1);
+
+  return active?.taskId ?? null;
+}
 
 /**
  * Create-or-reuse the environment-recipe candidate for a normalized request.
@@ -273,12 +296,13 @@ export async function markEnvironmentVerificationFailedIfCurrent(
         id: environments.id,
         isVerified: environments.isVerified,
         verificationTaskId: environments.verificationTaskId,
+        verificationError: environments.verificationError,
       })
       .from(environments)
       .where(eq(environments.id, input.environmentId))
       .for('update');
 
-    if (!current || current.isVerified) {
+    if (!current || current.isVerified || current.verificationError) {
       return { marked: false };
     }
 

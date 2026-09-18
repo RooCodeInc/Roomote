@@ -83,6 +83,8 @@ const mocks = vi.hoisted(() => ({
   updateParentEventWhere: vi.fn(),
   nativeSteer: vi.fn(),
   executeDb: vi.fn(),
+  getActiveRecipeVerificationTaskId: vi.fn(),
+  withEnvironmentVerificationRetryLock: vi.fn(),
   evaluateJudgments: vi.fn(),
   nativeExecutor: undefined as
     | ((call: {
@@ -252,6 +254,9 @@ vi.mock('@roomote/db/server', () => ({
   getSessionForFastConversation: mocks.getUnifiedSession,
   getSessionForTask: mocks.getSessionForTask,
   touchSessionActivity: mocks.touchSessionActivity,
+  getActiveRecipeVerificationTaskId: mocks.getActiveRecipeVerificationTaskId,
+  withEnvironmentVerificationRetryLock:
+    mocks.withEnvironmentVerificationRetryLock,
   getSessionGoalForConversation: mocks.getSessionGoal,
   claimSessionGoalContinuation: mocks.claimSessionGoalContinuation,
   releaseSessionGoalContinuation: mocks.releaseSessionGoalContinuation,
@@ -529,6 +534,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.mcpCapabilityAvailable = false;
     mocks.getUnifiedSession.mockResolvedValue(null);
     mocks.touchSessionActivity.mockResolvedValue(undefined);
+    mocks.getActiveRecipeVerificationTaskId.mockResolvedValue(null);
+    mocks.withEnvironmentVerificationRetryLock.mockImplementation(
+      async (_environmentId, mutation) => mutation({}),
+    );
     mocks.getSessionForTask.mockResolvedValue(null);
     mocks.privateSessionsEnabled.mockResolvedValue(true);
     mocks.deploymentExperimentEnabled.mockResolvedValue(false);
