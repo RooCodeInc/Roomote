@@ -1961,7 +1961,12 @@ describe('AutomationsSettings', () => {
     fireEvent.click(
       screen.getByRole('button', { name: 'Configure Fast daily digest' }),
     );
-    expect(screen.getByText('Delegated task model')).toBeInTheDocument();
+    expect(screen.getByText('Session model')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Coordinates this automation. Delegated tasks follow coding model routing or the deployment coding default.',
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByText('Effort')).toBeInTheDocument();
     expect(
       screen.getByRole('combobox', { name: 'Automation effort' }),

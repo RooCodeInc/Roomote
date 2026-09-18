@@ -415,6 +415,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(eventPrompt).toContain(
       `A \`${NO_REPOSITORIES}\` preference is an explicit request for sandbox execution`,
     );
+    expect(eventPrompt).toContain(
+      'The configured model controls this Session. Delegated tasks follow an explicit selection, a matching coding-model routing rule, or the deployment coding default.',
+    );
   });
 
   it('offers suggestions on an automation task-settled report only', () => {
