@@ -5,6 +5,7 @@ import type { EnvironmentRecipe } from '@roomote/types';
 import { rBioconductorControlAdapter } from '../../environment-recipes/r-bioconductor-adapter';
 import {
   type EnsureEnvironmentAvailableEnvironment,
+  launchEnvironmentRecipeVerification,
   previewEnsureEnvironment,
 } from '../ensure-environment';
 
@@ -133,5 +134,45 @@ describe('previewEnsureEnvironment', () => {
       expect(result.state).toBe('failed');
       expect(result.proposalFingerprint).toMatch(/^[0-9a-f]{64}$/);
     }
+  });
+});
+
+describe('launchEnvironmentRecipeVerification', () => {
+  it('reuses an active verification attempt without launching another task', async () => {
+    const launch = vi.fn();
+
+    const result = await launchEnvironmentRecipeVerification({
+      environmentId: 'environment-1',
+      withLock: async (_environmentId, mutation) => mutation('locked'),
+      findActiveTaskId: async () => 'active-task',
+      launch,
+    });
+
+    expect(result).toEqual({
+      success: true,
+      taskId: 'active-task',
+      alreadyActive: true,
+    });
+    expect(launch).not.toHaveBeenCalled();
+  });
+
+  it('launches a fresh attempt after the previous attempt is terminal', async () => {
+    const launch = vi.fn(async () => ({
+      success: true as const,
+      taskId: 'replacement-task',
+    }));
+
+    const result = await launchEnvironmentRecipeVerification({
+      environmentId: 'environment-1',
+      withLock: async (_environmentId, mutation) => mutation('locked'),
+      findActiveTaskId: async () => null,
+      launch,
+    });
+
+    expect(result).toEqual({
+      success: true,
+      taskId: 'replacement-task',
+    });
+    expect(launch).toHaveBeenCalledOnce();
   });
 });

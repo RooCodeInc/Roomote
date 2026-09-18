@@ -55,6 +55,48 @@ export type EnsureEnvironmentAvailableEnvironment = {
   config?: EnvironmentConfig;
 };
 
+type VerificationLaunchResult =
+  | {
+      success: true;
+      taskId: string;
+      taskUrl?: string;
+      alreadyActive?: boolean;
+    }
+  | { success: false; error: string };
+
+/**
+ * Serialize recipe verification attempts independently from candidate
+ * creation. An active attempt is reused, while a failed/completed attempt may
+ * launch a genuinely new run with its own launch idempotency key.
+ */
+export async function launchEnvironmentRecipeVerification<TLockContext>(input: {
+  environmentId: string;
+  withLock: (
+    environmentId: string,
+    mutation: (context: TLockContext) => Promise<VerificationLaunchResult>,
+  ) => Promise<VerificationLaunchResult>;
+  findActiveTaskId: (
+    context: TLockContext,
+    environmentId: string,
+  ) => Promise<string | null>;
+  launch: () => Promise<VerificationLaunchResult>;
+}): Promise<VerificationLaunchResult> {
+  return input.withLock(input.environmentId, async (context) => {
+    const activeTaskId = await input.findActiveTaskId(
+      context,
+      input.environmentId,
+    );
+    if (activeTaskId) {
+      return {
+        success: true,
+        taskId: activeTaskId,
+        alreadyActive: true,
+      };
+    }
+    return input.launch();
+  });
+}
+
 function candidateState(environment: {
   isVerified?: boolean;
   config?: EnvironmentConfig;

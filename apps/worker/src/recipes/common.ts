@@ -39,6 +39,15 @@ export interface EnvironmentRecipeWorkerAdapter {
     recipePath: string;
   }): Promise<EnvironmentRecipe | null>;
   /**
+   * Materialize persisted resolution artifacts into a fresh workspace before
+   * restore commands run. Recipe resolutions live in the environment config;
+   * task workspaces must not rely on files left behind by the resolving task.
+   */
+  materializeResolution?(input: {
+    recipe: EnvironmentRecipe;
+    recipePath: string;
+  }): Promise<void>;
+  /**
    * Optional workspace artifacts to write after a resolved recipe has been
    * restored (for example a read-only runtime runner).
    */
