@@ -896,6 +896,7 @@ async function findModelSupportingInputModality(input: {
   env: NonTaskModelRuntimeEnv;
   modality: NonTaskInputModality;
   candidates: Array<string | undefined>;
+  defaultFirstCandidateOnUnknown?: boolean;
   timeoutMs?: number | null;
 }): Promise<string | undefined> {
   const candidates = input.candidates
@@ -932,16 +933,22 @@ async function findModelSupportingInputModality(input: {
       );
     }
 
-    for (const candidate of candidates) {
+    for (const [index, candidate] of candidates.entries()) {
       const { providerID, modelID } = splitOpenCodeModelId(candidate);
       const provider = result.data.providers.find(
         (item) => item.id === providerID,
       );
       const model = provider?.models[modelID];
+      const inputCapability = model?.capabilities.input[input.modality];
 
       if (
-        model?.capabilities.input[input.modality] &&
-        model.capabilities.output.text
+        // Custom and newly released models often omit modality metadata. Let
+        // the session model try the input unless the catalog explicitly says
+        // no; helper candidates still require positive support metadata.
+        (index === 0 &&
+          input.defaultFirstCandidateOnUnknown &&
+          inputCapability !== false) ||
+        (inputCapability === true && model?.capabilities.output.text)
       ) {
         return candidate;
       }
@@ -1017,6 +1024,8 @@ export async function resolveNonTaskInputModalityDelivery(params: {
   model?: string;
   modelRole?: 'primary' | 'small' | 'orchestration';
   reasoningEffort?: ReasoningEffort;
+  /** Exclude a session model that has already rejected this modality. */
+  skipSessionModel?: boolean;
   timeoutMs?: number | null;
 }): Promise<NonTaskInputModalityDelivery> {
   const runtime = await resolveNonTaskModelRuntime(
@@ -1036,7 +1045,10 @@ export async function resolveNonTaskInputModalityDelivery(params: {
   const model = await findModelSupportingInputModality({
     env,
     modality: params.modality,
-    candidates: [sessionModel, ...helperCandidates],
+    candidates: params.skipSessionModel
+      ? helperCandidates
+      : [sessionModel, ...helperCandidates],
+    defaultFirstCandidateOnUnknown: !params.skipSessionModel,
     timeoutMs: params.timeoutMs,
   });
   if (!model) {
@@ -1061,6 +1073,23 @@ export async function resolveNonTaskInputModalityDelivery(params: {
       ? { helperReasoningEffort }
       : {}),
   };
+}
+
+export function isNonTaskImageInputUnsupportedError(error: unknown): boolean {
+  const detail = [...decodeInferenceErrorEnvelope(error, 'classification')]
+    .flatMap((value) => {
+      if (typeof value === 'string') return [value];
+      return Object.values(value).filter(
+        (candidate): candidate is string => typeof candidate === 'string',
+      );
+    })
+    .join(' ')
+    .toLowerCase();
+
+  return [
+    /(?:image(?:[_ -](?:input|url|content))?|vision|multimodal).{0,80}(?:not supported|unsupported|does not support|doesn't support|cannot be used)/u,
+    /(?:does not support|doesn't support|not supported|unsupported).{0,80}(?:image(?:[_ -](?:input|url|content))?|vision|multimodal)/u,
+  ].some((pattern) => pattern.test(detail));
 }
 
 /**

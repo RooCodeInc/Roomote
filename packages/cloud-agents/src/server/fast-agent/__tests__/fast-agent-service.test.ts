@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   generateHelperText: vi.fn(),
   generateTrackedObject: vi.fn(),
   resolveImageDelivery: vi.fn(),
+  isImageInputUnsupported: vi.fn(),
   classifyInferenceError: vi.fn(),
   invalidateSession: vi.fn(),
   runSession: vi.fn(),
@@ -275,6 +276,7 @@ vi.mock('../../non-task-provider-usage', () => ({
   generateTrackedNonTaskObject: mocks.generateTrackedObject,
   generateTrackedNonTaskText: mocks.generateHelperText,
   generateTrackedNonTaskTextInOpenCodeSession: mocks.generateText,
+  isNonTaskImageInputUnsupportedError: mocks.isImageInputUnsupported,
   resolveNonTaskInputModalityDelivery: mocks.resolveImageDelivery,
   NonTaskOpenCodePromptTimeoutError: class extends Error {
     constructor(timeoutMs: number) {
@@ -505,6 +507,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       delivery: 'direct',
       model: 'openrouter/openai/gpt-5.4',
     });
+    mocks.isImageInputUnsupported.mockReturnValue(false);
     mocks.nativeExecutor = undefined;
     mocks.mcpExecutor = undefined;
     mocks.mcpCapabilityAvailable = false;
@@ -8565,6 +8568,106 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.generateHelperText.mock.calls[0]?.[0].prompt).toContain(
       'What does the screenshot show?',
     );
+  });
+
+  it('falls back through the image helper after the main model rejects image input', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.resolveImageDelivery
+        .mockResolvedValueOnce({
+          delivery: 'direct',
+          model: 'openai-compatible-local/custom-model',
+        })
+        .mockResolvedValueOnce({
+          delivery: 'helper',
+          model: 'openai-compatible-local/custom-model',
+          helperModel: 'openrouter/google/gemini-3.8-flash',
+          helperReasoningEffort: 'low',
+        });
+      mocks.isImageInputUnsupported.mockReturnValue(true);
+      mocks.generateHelperText.mockResolvedValue(
+        'A dashboard with a red deployment error.',
+      );
+      mocks.generateText
+        .mockRejectedValueOnce(
+          Object.assign(new Error('This model does not support image input.'), {
+            data: {
+              statusCode: 400,
+              message: 'This model does not support image input.',
+            },
+          }),
+        )
+        .mockImplementationOnce(async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-2');
+          const inspection = await invokeTool(nativeToolNames.inspectImages, {
+            question: 'What does the screenshot show?',
+          });
+          expect(inspection).toMatchObject({
+            success: true,
+            observations: 'A dashboard with a red deployment error.',
+          });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'The screenshot shows a deployment error.',
+          });
+          return '';
+        });
+
+      const result = answerFastAgentQuestion({
+        ...baseParams,
+        images: ['data:image/png;base64,aGVsbG8='],
+        adapter: callbacks(),
+      });
+      result.catch(() => undefined);
+      await vi.runAllTimersAsync();
+      vi.useRealTimers();
+      await expect(result).resolves.toBe(
+        'The screenshot shows a deployment error.',
+      );
+
+      expect(mocks.generateText).toHaveBeenCalledTimes(2);
+      expect(mocks.generateText.mock.calls[0]?.[0]).toMatchObject({
+        files: [{ mime: 'image/png' }],
+      });
+      expect(mocks.generateText.mock.calls[1]?.[0]).not.toHaveProperty('files');
+      expect(mocks.generateText.mock.calls[1]?.[0].prompt).toContain(
+        'Image attachments: image-1 (image/png)',
+      );
+      expect(mocks.resolveImageDelivery).toHaveBeenLastCalledWith({
+        modality: 'image',
+        modelRole: 'orchestration',
+        skipSessionModel: true,
+      });
+      expect(mocks.generateHelperText).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not use the image helper for unrelated provider failures', async () => {
+    mocks.classifyInferenceError.mockReturnValue({
+      message: 'The inference provider rejected these credentials.',
+      reason: 'invalid_credentials',
+      retryable: false,
+    });
+    mocks.generateText.mockRejectedValue(
+      Object.assign(new Error('Invalid API key.'), {
+        data: { statusCode: 401, message: 'Invalid API key.' },
+      }),
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      images: ['data:image/png;base64,aGVsbG8='],
+      adapter: callbacks(),
+    }).catch(() => undefined);
+
+    expect(mocks.generateText).toHaveBeenCalledOnce();
+    expect(mocks.resolveImageDelivery).toHaveBeenCalledOnce();
+    expect(mocks.resolveImageDelivery).not.toHaveBeenCalledWith(
+      expect.objectContaining({ skipSessionModel: true }),
+    );
+    expect(mocks.generateHelperText).not.toHaveBeenCalled();
   });
 
   it('rejects unknown attachment IDs passed to inspect_images', async () => {

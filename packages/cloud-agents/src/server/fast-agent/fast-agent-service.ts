@@ -139,6 +139,7 @@ import {
   FAST_AGENT_SESSION_TOOL_FILTER,
   generateTrackedNonTaskText,
   generateTrackedNonTaskTextInOpenCodeSession,
+  isNonTaskImageInputUnsupportedError,
   isNonTaskOpenCodePromptTimeoutError,
   isNonTaskOpenCodeSessionNotFoundError,
   isNonTaskOpenCodeSessionValidationError,
@@ -2170,6 +2171,11 @@ export async function answerFastAgentQuestion({
   const turnImages = new Map<string, NonTaskPromptFile>();
   let imageDeliveryPromise: Promise<FastAgentImageDelivery> | undefined;
   let resolvedImageDelivery: FastAgentImageDelivery | undefined;
+  let imageHelperFallbackUsed = false;
+  let pendingImageHelperFallback: Extract<
+    NonTaskInputModalityDelivery,
+    { delivery: 'helper' }
+  > | null = null;
   const resolveImageDelivery = (): Promise<FastAgentImageDelivery> => {
     imageDeliveryPromise ??= resolveNonTaskInputModalityDelivery({
       modality: 'image',
@@ -6127,6 +6133,26 @@ export async function answerFastAgentQuestion({
                 // handler records the outcome, not a failed attempt.
                 const parked = findFastAgentDurableRetryScheduledError(error);
                 if (parked) throw parked;
+                if (
+                  imageFilesForAttempt.length > 0 &&
+                  !nativeToolInvoked &&
+                  !imageHelperFallbackUsed &&
+                  isNonTaskImageInputUnsupportedError(error)
+                ) {
+                  // The optimistic direct request proved this model is
+                  // text-only. Resolve a positively capable helper once; the
+                  // normal fresh-session retry rebuilds without image parts.
+                  const fallback = await resolveNonTaskInputModalityDelivery({
+                    modality: 'image',
+                    modelRole: FAST_AGENT_MODEL_ROLE,
+                    ...(model ? { model } : {}),
+                    ...(reasoningEffort ? { reasoningEffort } : {}),
+                    skipSessionModel: true,
+                  }).catch(() => null);
+                  if (fallback?.delivery === 'helper') {
+                    pendingImageHelperFallback = fallback;
+                  }
+                }
                 const failure = classifyNonTaskInferenceError(error);
                 const attemptStage = !resolvedInferenceModel
                   ? 'model_resolution'
@@ -6209,6 +6235,32 @@ export async function answerFastAgentQuestion({
                 return true;
               },
               prepareRetry: () => {
+                if (pendingImageHelperFallback) {
+                  const fallback = pendingImageHelperFallback;
+                  pendingImageHelperFallback = null;
+                  imageHelperFallbackUsed = true;
+                  imageDeliveryPromise = Promise.resolve(fallback);
+                  resolvedImageDelivery = fallback;
+                  diagnostics.recordImageDelivery(fallback);
+                  const fallbackInput = holdImagesForPrompt(
+                    [...imageFiles, ...injectedHumanFollowUpFiles],
+                    serializeFastAgentMessages([
+                      ...bootstrapMessages,
+                      ...injectedHumanFollowUpMessages,
+                    ]),
+                    fallback,
+                  );
+                  commitTurnImages(fallbackInput.held);
+                  openCodeSession.id = undefined;
+                  promptForAttempt = fallbackInput.text;
+                  imageFilesForAttempt = [];
+                  promptKind = 'clean_retry_bootstrap';
+                  attemptSessionPath = 'cold_rebuild';
+                  diagnostics.recordSessionPath(attemptSessionPath);
+                  promptTimeoutMs =
+                    FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS;
+                  return;
+                }
                 if (nativeToolInvoked && openCodeSession.id) {
                   promptForAttempt = FAST_AGENT_PROVIDER_RECOVERY_PROMPT;
                   imageFilesForAttempt = [];
