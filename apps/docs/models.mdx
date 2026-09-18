@@ -303,17 +303,19 @@ The judgment model is optional. Many routing and triage steps are bounded
 decisions rather than text: whether a channel message should start work, which
 skill or tool fits a request, or whether a thread reply is meant for Roomote.
 A judgment model answers these as typed questions with probabilities in one
-fast call. Roomote currently supports TypeSafe's Jev, through either route:
+fast call. Roomote currently supports TypeSafe's Jev through these routes:
 
 | Judgment model | Requires |
 | --- | --- |
 | **Jev via TypeSafe** | a [TypeSafe](/providers/inference/typesafe) API key |
+| **Jev via OpenRouter** | an [OpenRouter](/providers/inference/openrouter) API key |
 | **Jev via Vercel AI Gateway** | a [Vercel AI Gateway](/providers/inference/vercel-ai-gateway) key |
 
 Choose it under **Judgment model** in **Settings > Models**, or set
-`R_JUDGMENT_MODEL` to `typesafe`, `vercel`, or `off`. A TypeSafe key alone
-turns on **Jev via TypeSafe**. Vercel AI Gateway is used only when you select
-it, because many deployments already have that key for task inference.
+`R_JUDGMENT_MODEL` to `typesafe`, `openrouter`, `vercel`, or `off`. A TypeSafe
+key alone turns on **Jev via TypeSafe**. OpenRouter and Vercel AI Gateway are
+used only when you select them, because many deployments already have those
+keys for task inference.
 
 When a judgment model is on, Roomote asks it first for:
 
