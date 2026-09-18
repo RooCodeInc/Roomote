@@ -1,4 +1,5 @@
 import type React from 'react';
+import { StrictMode } from 'react';
 
 import {
   act,
@@ -721,6 +722,23 @@ describe('DesktopStreamClient', () => {
 
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
     expect(FakeWebSocket.instances[0]!.url).toContain('/control');
+    act(() => FakeWebSocket.instances[0]!.open());
+    await controlIsOn();
+  });
+
+  it('still starts on its own under Strict Mode double effects', async () => {
+    FakeWebSocket.controlHeld = false;
+    render(
+      <StrictMode>
+        <DesktopStreamClient
+          previewUrl="https://desktop.preview.test"
+          runId={123}
+          onClose={() => {}}
+        />
+      </StrictMode>,
+    );
+
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
     act(() => FakeWebSocket.instances[0]!.open());
     await controlIsOn();
   });

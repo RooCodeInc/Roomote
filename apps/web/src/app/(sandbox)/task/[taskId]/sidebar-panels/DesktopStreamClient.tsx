@@ -551,6 +551,9 @@ export function DesktopStreamClient({
 
   useEffect(() => {
     const video = videoRef.current;
+    // Strict Mode runs this cleanup once right after mounting; without the
+    // reset the component would think it was unmounted for good.
+    unmountedRef.current = false;
     return () => {
       unmountedRef.current = true;
       if (controlReconnectTimerRef.current !== null) {
@@ -921,6 +924,9 @@ export function DesktopStreamClient({
     connectControl(session.controlUrl);
   };
 
+  const startRef = useRef(start);
+  startRef.current = start;
+
   // The desktop starts on its own; there is nothing to decide when nobody
   // else is using it. The pop-out always takes control, because it was opened
   // to take over from the panel. The panel asks who holds control first and
@@ -937,20 +943,19 @@ export function DesktopStreamClient({
       start();
       return;
     }
-    let cancelled = false;
+    // No per-effect cancellation: the ref above already limits this to one
+    // probe, and cancelling on cleanup would strand Strict Mode's first run,
+    // whose second run is skipped by that same ref.
     setProbing(true);
     void probeControlHeld(session.controlUrl).then((held) => {
-      if (cancelled || unmountedRef.current) {
+      if (unmountedRef.current) {
         return;
       }
       setProbing(false);
       if (held !== null) {
-        start({ watchOnly: held });
+        startRef.current({ watchOnly: held });
       }
     });
-    return () => {
-      cancelled = true;
-    };
     // `start` is recreated every render; the ref guards against re-running.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [standalone, session]);
