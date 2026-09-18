@@ -263,21 +263,81 @@ export function convertMarkdownToRichText(
         : null;
     if (listStyle) {
       const pattern = listStyle === 'bullet' ? BULLET_ITEM : ORDERED_ITEM;
+      if (!options.preserveParagraphs) {
+        const items: SlackRichTextSection[] = [];
+        while (index < lines.length) {
+          const item = lines[index]!.match(pattern);
+          if (!item) break;
+          items.push(section(item[1]!, {}, options));
+          index += 1;
+        }
+        elements.push({
+          type: 'rich_text_list',
+          style: listStyle,
+          elements: items,
+        });
+        continue;
+      }
       const items: SlackRichTextSection[] = [];
       while (index < lines.length) {
         const item = lines[index]!.match(pattern);
         if (!item) {
           break;
         }
-        items.push(section(item[1]!, {}, options));
+        const itemLines = [item[1] ?? ''];
         index += 1;
+        while (index < lines.length) {
+          const continuation = lines[index]!;
+          if (pattern.test(continuation)) {
+            break;
+          }
+          if (continuation.trim().length === 0) {
+            let nextIndex = index + 1;
+            while (lines[nextIndex]?.trim().length === 0) {
+              nextIndex += 1;
+            }
+            if (pattern.test(lines[nextIndex] ?? '')) {
+              break;
+            }
+            if (/^\s+/.test(lines[nextIndex] ?? '')) {
+              itemLines.push('');
+              index = nextIndex;
+              continue;
+            }
+            break;
+          }
+          if (!/^\s+/.test(continuation)) {
+            break;
+          }
+          const value = continuation.trim();
+          if (itemLines.length === 1 && itemLines[0]?.trim().length === 0) {
+            itemLines[0] = value;
+          } else {
+            itemLines.push(value);
+          }
+          index += 1;
+        }
+        if (itemLines.some((value) => value.trim().length > 0)) {
+          items.push(section(itemLines.join('\n'), {}, options));
+        }
+        if (lines[index]?.trim().length === 0) {
+          let nextIndex = index;
+          while (lines[nextIndex]?.trim().length === 0) {
+            nextIndex += 1;
+          }
+          if (pattern.test(lines[nextIndex] ?? '')) {
+            index = nextIndex;
+          }
+        }
       }
       preservePendingParagraph();
-      elements.push({
-        type: 'rich_text_list',
-        style: listStyle,
-        elements: items,
-      });
+      if (items.length > 0) {
+        elements.push({
+          type: 'rich_text_list',
+          style: listStyle,
+          elements: items,
+        });
+      }
       continue;
     }
 

@@ -124,6 +124,7 @@ describe('automation result blocks', () => {
         '## Highlights',
         '',
         '- Faster setup',
+        '',
         '- Better cards',
         '',
         'See all changes.',

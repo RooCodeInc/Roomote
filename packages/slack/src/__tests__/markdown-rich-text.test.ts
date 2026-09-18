@@ -247,6 +247,47 @@ describe('convertMarkdownToRichText', () => {
     });
   });
 
+  it('keeps blank-line-separated bullets in one list with item paragraphs', () => {
+    expect(
+      convertMarkdownToRichText(
+        [
+          '- First line',
+          '  wrapped continuation',
+          '',
+          '  Second paragraph',
+          '',
+          '- ',
+          '',
+          '- Second item',
+        ].join('\n'),
+        { preserveParagraphs: true },
+      ),
+    ).toEqual({
+      type: 'rich_text',
+      elements: [
+        {
+          type: 'rich_text_list',
+          style: 'bullet',
+          elements: [
+            {
+              type: 'rich_text_section',
+              elements: [
+                {
+                  type: 'text',
+                  text: 'First line\nwrapped continuation\n\nSecond paragraph',
+                },
+              ],
+            },
+            {
+              type: 'rich_text_section',
+              elements: [{ type: 'text', text: 'Second item' }],
+            },
+          ],
+        },
+      ],
+    });
+  });
+
   it('keeps code blank lines and empty input stable', () => {
     expect(
       convertMarkdownToRichText(
