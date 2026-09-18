@@ -169,7 +169,7 @@ export {
   type FastArtifactNotificationResult,
 } from './lib/artifacts/notify-fast-agent-parent';
 export {
-  buildInstalledReleaseAnnouncement,
+  buildReleaseAnnouncement,
   drainReleaseAnnouncementDeliveries,
   recordInstalledRelease,
   type RecordInstalledReleaseResult,
