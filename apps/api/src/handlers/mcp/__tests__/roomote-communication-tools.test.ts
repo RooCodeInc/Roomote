@@ -33,7 +33,7 @@ import { registerRoomoteCommunicationTools } from '../roomote-communication-tool
 
 type RegisteredTool = {
   name: string;
-  config: { inputSchema?: Record<string, unknown> };
+  config: { description?: string; inputSchema?: Record<string, unknown> };
   handler: (params: Record<string, string>) => Promise<unknown>;
 };
 
@@ -68,6 +68,18 @@ describe('Roomote member communication tools', () => {
       'send_chat_reaction_emoji',
       'send_direct_message_to_self',
     ]);
+  });
+
+  it('advertises self and linked-member direct-message capabilities', () => {
+    const tools = registerTools();
+
+    expect(
+      tools.find(({ name }) => name === 'post_to_channel')?.config.description,
+    ).toContain('linked workspace member');
+    expect(
+      tools.find(({ name }) => name === 'send_direct_message_to_self')?.config
+        .description,
+    ).toContain('linked Telegram or Slack account');
   });
 
   it.each(['telegram', 'slack'] as const)(

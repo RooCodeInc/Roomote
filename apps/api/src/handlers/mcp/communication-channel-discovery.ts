@@ -3,6 +3,7 @@ import {
   discordInstallationChannels,
   discordUserMappings,
   eq,
+  slackUserMappings,
   teamsInstallations,
 } from '@roomote/db/server';
 import { SlackNotifier } from '@roomote/slack';
@@ -26,12 +27,20 @@ type DiscoveredCommunicationChannel = {
   nativeChannelId?: string;
 };
 
+type DiscoveredDirectMessageRecipient = {
+  id: string;
+  name: string;
+  workspaceId: string;
+  workspaceName?: string;
+};
+
 type CommunicationPlatformChannels = {
   provider: CommunicationProvider;
   platform: string;
   connected: boolean;
   discoverySupported: boolean;
   channels: DiscoveredCommunicationChannel[];
+  directMessageRecipients?: DiscoveredDirectMessageRecipient[];
   limitation?: string;
 };
 
@@ -48,7 +57,7 @@ const DISCORD_CHANNEL_KINDS: Record<number, string> = {
 };
 
 async function listSlackChannels(
-  _actingUserId: string | null,
+  actingUserId: string | null,
   slackTeamId: string | null,
 ): Promise<CommunicationPlatformChannels> {
   const installations = (
@@ -63,31 +72,72 @@ async function listSlackChannels(
   ).filter(
     (installation) => !slackTeamId || installation.teamId === slackTeamId,
   );
-  const channels = (
-    await Promise.all(
-      installations.map(async (installation) => {
-        const slack = new SlackNotifier(installation.botAccessToken);
-        const visibleChannels = (await slack.listPublicChannels()).filter(
-          (channel) => channel.isMember === true && channel.isPrivate === false,
-        );
+  const actingWorkspaceIds = new Set(
+    actingUserId
+      ? (
+          await db.query.slackUserMappings.findMany({
+            columns: { slackTeamId: true },
+            where: eq(slackUserMappings.userId, actingUserId),
+          })
+        ).map(({ slackTeamId }) => slackTeamId)
+      : [],
+  );
+  const destinations = await Promise.all(
+    installations.map(async (installation) => {
+      const slack = new SlackNotifier(installation.botAccessToken);
+      const [visibleChannels, linkedRecipients] = await Promise.all([
+        slack.listPublicChannels(),
+        actingWorkspaceIds.has(installation.teamId)
+          ? db.query.slackUserMappings.findMany({
+              columns: { slackUserId: true, userId: true },
+              where: eq(slackUserMappings.slackTeamId, installation.teamId),
+              with: {
+                user: { columns: { name: true, deletedAt: true } },
+              },
+            })
+          : [],
+      ]);
 
-        return visibleChannels.map((channel) => ({
-          id: channel.id,
-          name: channel.name,
-          kind: channel.isPrivate ? 'private' : 'public',
-          workspaceId: installation.teamId,
-          workspaceName: installation.teamName,
-        }));
-      }),
-    )
-  ).flat();
+      return {
+        channels: visibleChannels
+          .filter(
+            (channel) =>
+              channel.isMember === true && channel.isPrivate === false,
+          )
+          .map((channel) => ({
+            id: channel.id,
+            name: channel.name,
+            kind: channel.isPrivate ? 'private' : 'public',
+            workspaceId: installation.teamId,
+            workspaceName: installation.teamName,
+          })),
+        directMessageRecipients: linkedRecipients.flatMap((mapping) =>
+          mapping.userId !== actingUserId &&
+          mapping.user &&
+          !mapping.user.deletedAt
+            ? [
+                {
+                  id: mapping.slackUserId,
+                  name: mapping.user.name,
+                  workspaceId: installation.teamId,
+                  workspaceName: installation.teamName,
+                },
+              ]
+            : [],
+        ),
+      };
+    }),
+  );
 
   return {
     provider: 'slack',
     platform: getCommunicationProviderDisplayName('slack'),
     connected: installations.length > 0,
     discoverySupported: true,
-    channels,
+    channels: destinations.flatMap(({ channels }) => channels),
+    directMessageRecipients: destinations.flatMap(
+      ({ directMessageRecipients }) => directMessageRecipients,
+    ),
   };
 }
 

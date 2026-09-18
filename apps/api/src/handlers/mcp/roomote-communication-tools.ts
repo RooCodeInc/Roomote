@@ -55,13 +55,18 @@ export function registerRoomoteCommunicationTools(
   server.registerTool(
     CHAT_CHANNEL_POST_TOOL_NAME,
     {
-      title: 'Post To Channel',
+      title: 'Post To Slack Destination',
       description:
-        'Post a new standalone Markdown message to an accessible Slack channel. Use send_chat_reply for normal replies in the current conversation. Channel access is verified with the configured Slack installation.',
+        'Post a new standalone Markdown message to an authorized Slack channel, thread, or linked workspace member. For a direct message, use a Slack user ID returned by list_chat_channels, or a user mention or DM ID from trusted context; both the acting member and recipient must have linked accounts in that workspace. Use send_direct_message_to_self for the authenticated member or send_chat_reply for the current conversation. Never infer a recipient ID. Provider and destination access are verified before delivery.',
       inputSchema: {
         provider: z.literal('slack'),
         slackTeamId: z.string().min(1),
-        channel: z.string().min(1),
+        channel: z
+          .string()
+          .min(1)
+          .describe(
+            'Slack channel name or ID, linked recipient user ID or mention, or existing DM ID.',
+          ),
         threadTs: z.string().min(1).optional(),
         text: z.string().min(1),
       },

@@ -16,7 +16,7 @@ export const CHAT_CHANNELS_TOOL = {
   name: 'list_chat_channels',
   title: 'List Chat Channels',
   description:
-    'List the communication channels Roomote is connected to or can currently discover, grouped by platform. Returns channel IDs and platform-specific workspace context so another chat tool can target the right channel. Some platforms do not support channel enumeration and report that limitation explicitly.',
+    'List the communication channels Roomote is connected to or can currently discover, grouped by platform. Returns channel IDs and platform-specific workspace context so another chat tool can target the right channel. For Slack workspaces linked to the acting member, it also returns linked direct-message recipients that post_to_channel may target. Some platforms do not support channel enumeration and report that limitation explicitly.',
 } as const;
 
 export const CHAT_CHANNEL_POST_TOOL_NAME = 'post_to_channel';

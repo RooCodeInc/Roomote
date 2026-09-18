@@ -2268,16 +2268,22 @@ describe('buildFastAgentSystemPrompt', () => {
       'The built-in and on-demand integration catalogs and the HTTP integrations list are not the full tool inventory',
     );
     expect(prompt).toContain(
-      'use an exposed channel-posting tool for a requested channel post',
+      'use the exposed self-direct-message tool when the authenticated member explicitly asks to receive a Slack or Telegram DM',
     );
     expect(prompt).toContain(
-      "Slack's absence from an integration catalog or an empty HTTP integrations list does not make that exposed tool unavailable",
+      'use the Slack destination-posting tool for an explicitly requested channel, thread, or linked workspace member',
+    );
+    expect(prompt).toContain(
+      'Use channel discovery to obtain authorized Slack destinations and linked recipients; never infer a recipient ID',
+    );
+    expect(prompt).toContain(
+      "Slack or Telegram's absence from an integration catalog",
     );
     expect(prompt).toContain(
       'Preserve explicit requests to configure a built-in integration, remote MCP, or direct API',
     );
     expect(prompt).toContain(
-      "treat the posting tool's provider and channel permission result as authoritative",
+      "treat each communication tool's provider, linkage, and destination permission result as authoritative",
     );
     expect(prompt).toContain(
       'When a delegated worker or subagent lacks a posting tool and prepares content that the user asked to deliver, it must return the completed content to the parent instead of posting it',

@@ -2,6 +2,7 @@ const {
   findDiscordInstallationsMock,
   findDiscordUserMappingMock,
   findSlackInstallationsMock,
+  findSlackUserMappingsMock,
   findTeamsInstallationsMock,
   getCommunicationProviderAdapterMock,
   createDiscordProviderMock,
@@ -11,6 +12,7 @@ const {
   findDiscordInstallationsMock: vi.fn(),
   findDiscordUserMappingMock: vi.fn(),
   findSlackInstallationsMock: vi.fn(),
+  findSlackUserMappingsMock: vi.fn(),
   findTeamsInstallationsMock: vi.fn(),
   getCommunicationProviderAdapterMock: vi.fn(),
   createDiscordProviderMock: vi.fn(),
@@ -24,12 +26,14 @@ vi.mock('@roomote/db/server', () => ({
       discordInstallations: { findMany: findDiscordInstallationsMock },
       discordUserMappings: { findFirst: findDiscordUserMappingMock },
       slackInstallations: { findMany: findSlackInstallationsMock },
+      slackUserMappings: { findMany: findSlackUserMappingsMock },
       teamsInstallations: { findMany: findTeamsInstallationsMock },
     },
   },
   discordInstallationChannels: { isAvailable: 'isAvailable' },
   discordUserMappings: { userId: 'userId' },
   eq: vi.fn(() => 'condition'),
+  slackUserMappings: { slackTeamId: 'slackTeamId', userId: 'userId' },
   teamsInstallations: { isActive: 'isActive' },
 }));
 
@@ -51,6 +55,7 @@ describe('listCommunicationChannels', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     findSlackInstallationsMock.mockResolvedValue([]);
+    findSlackUserMappingsMock.mockResolvedValue([]);
     findTeamsInstallationsMock.mockResolvedValue([]);
     findDiscordInstallationsMock.mockResolvedValue([]);
     findDiscordUserMappingMock.mockResolvedValue(null);
@@ -139,6 +144,7 @@ describe('listCommunicationChannels', () => {
               workspaceName: 'Acme',
             },
           ],
+          directMessageRecipients: [],
         },
         {
           provider: 'teams',
@@ -271,5 +277,47 @@ describe('listCommunicationChannels', () => {
       ],
     });
     expect(listPublicChannelsMock).toHaveBeenCalledOnce();
+  });
+
+  it('lists linked Slack recipients only in workspaces linked to the acting member', async () => {
+    findSlackInstallationsMock.mockResolvedValue([
+      { botAccessToken: 'token-1', teamId: 'T1', teamName: 'One' },
+      { botAccessToken: 'token-2', teamId: 'T2', teamName: 'Two' },
+    ]);
+    findSlackUserMappingsMock
+      .mockResolvedValueOnce([{ slackTeamId: 'T1' }])
+      .mockResolvedValueOnce([
+        {
+          slackUserId: 'U-ACTOR',
+          userId: 'user-1',
+          user: { name: 'Actor', deletedAt: null },
+        },
+        {
+          slackUserId: 'U-LINKED',
+          userId: 'user-2',
+          user: { name: 'Linked Member', deletedAt: null },
+        },
+        {
+          slackUserId: 'U-DELETED',
+          userId: 'user-3',
+          user: { name: 'Deleted Member', deletedAt: new Date() },
+        },
+      ]);
+
+    const result = await listCommunicationChannels({ actingUserId: 'user-1' });
+
+    expect(
+      result.platforms.find(({ provider }) => provider === 'slack'),
+    ).toMatchObject({
+      directMessageRecipients: [
+        {
+          id: 'U-LINKED',
+          name: 'Linked Member',
+          workspaceId: 'T1',
+          workspaceName: 'One',
+        },
+      ],
+    });
+    expect(findSlackUserMappingsMock).toHaveBeenCalledTimes(2);
   });
 });

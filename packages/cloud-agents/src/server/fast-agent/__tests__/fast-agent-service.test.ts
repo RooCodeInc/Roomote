@@ -9700,86 +9700,97 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     ]);
   });
 
-  it('lets a web Fast session request an actor-scoped self DM without recipient arguments', async () => {
-    let unauthorizedRecipientResult: unknown;
-    mocks.listIntegrations.mockResolvedValue([
-      {
-        id: 'roomote',
-        name: 'Roomote',
-        description: 'Manage Roomote',
-        tools: [
-          {
-            name: 'send_direct_message_to_self',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                provider: { type: 'string', enum: ['telegram', 'slack'] },
-                text: { type: 'string' },
+  it.each(['web', 'telegram'] as const)(
+    'lets a %s Fast session request an actor-scoped self DM without recipient arguments',
+    async (surface) => {
+      let unauthorizedRecipientResult: unknown;
+      mocks.listIntegrations.mockResolvedValue([
+        {
+          id: 'roomote',
+          name: 'Roomote',
+          description: 'Manage Roomote',
+          tools: [
+            {
+              name: 'send_direct_message_to_self',
+              inputSchema: {
+                type: 'object',
+                properties: {
+                  provider: { type: 'string', enum: ['telegram', 'slack'] },
+                  text: { type: 'string' },
+                },
+                required: ['provider', 'text'],
+                additionalProperties: false,
               },
-              required: ['provider', 'text'],
-              additionalProperties: false,
             },
-          },
-        ],
-      },
-    ]);
-    mocks.callIntegration.mockResolvedValue({
-      delivered: true,
-      provider: 'telegram',
-    });
-    mocks.generateText.mockImplementation(
-      async (_params, _session, options) => {
-        await options.onSessionReady('opencode-session-1');
-        await invokeTool(nativeToolNames.sendChatReply, {
-          purpose: 'ack',
-          message: 'I’ll send that.',
-        });
-        unauthorizedRecipientResult = await invokeMcpTool(
-          'roomote',
-          'send_direct_message_to_self',
-          {
+          ],
+        },
+      ]);
+      mocks.callIntegration.mockResolvedValue({
+        delivered: true,
+        provider: 'telegram',
+      });
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+            message: 'I’ll send that.',
+          });
+          unauthorizedRecipientResult = await invokeMcpTool(
+            'roomote',
+            'send_direct_message_to_self',
+            {
+              provider: 'telegram',
+              recipientId: 'someone-else',
+              text: 'Exact message.',
+            },
+          );
+          await invokeMcpTool('roomote', 'send_direct_message_to_self', {
             provider: 'telegram',
-            recipientId: 'someone-else',
             text: 'Exact message.',
-          },
-        );
-        await invokeMcpTool('roomote', 'send_direct_message_to_self', {
-          provider: 'telegram',
-          text: 'Exact message.',
-        });
-        await invokeTool(nativeToolNames.sendChatReply, {
-          purpose: 'closeout',
-          message: 'Sent via Telegram.',
-        });
-        return '';
-      },
-    );
+          });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Sent via Telegram.',
+          });
+          return '';
+        },
+      );
 
-    await answerFastAgentQuestion({
-      ...baseParams,
-      conversation: {
-        surface: 'web',
-        workspaceId: 'user-1',
-        conversationId: 'web-session-1',
-      },
-      adapter: callbacks(),
-    });
+      await answerFastAgentQuestion({
+        ...baseParams,
+        conversation:
+          surface === 'web'
+            ? {
+                surface,
+                workspaceId: 'user-1',
+                conversationId: 'web-session-1',
+              }
+            : {
+                surface,
+                workspaceId: 'chat-1',
+                conversationId: 'notification:chat-1:user:user-1',
+                replyTarget: { channelId: 'chat-1' },
+              },
+        adapter: callbacks(),
+      });
 
-    expect(unauthorizedRecipientResult).toEqual({
-      success: false,
-      error:
-        'Unknown argument key "recipientId" for roomote tool send_direct_message_to_self. This tool accepts: provider, text.',
-    });
-    expect(mocks.callIntegration).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: 'user-1' }),
-      expect.anything(),
-      {
-        integrationId: 'roomote',
-        toolName: 'send_direct_message_to_self',
-        args: { provider: 'telegram', text: 'Exact message.' },
-      },
-    );
-  });
+      expect(unauthorizedRecipientResult).toEqual({
+        success: false,
+        error:
+          'Unknown argument key "recipientId" for roomote tool send_direct_message_to_self. This tool accepts: provider, text.',
+      });
+      expect(mocks.callIntegration).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'user-1' }),
+        expect.anything(),
+        {
+          integrationId: 'roomote',
+          toolName: 'send_direct_message_to_self',
+          args: { provider: 'telegram', text: 'Exact message.' },
+        },
+      );
+    },
+  );
 
   it('exposes an explicit Slack post from a Telegram Fast conversation', async () => {
     mocks.listIntegrations.mockResolvedValue([
