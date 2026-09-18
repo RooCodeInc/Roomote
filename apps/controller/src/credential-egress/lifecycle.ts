@@ -102,8 +102,6 @@ export interface CredentialEgressLifecycleDependencies {
   findCandidate: (runId: number) => Promise<{
     sessionId: string;
     grantCount: number;
-    /** The Session owner has integration keys enabled. */
-    experimentEnabled: boolean;
   } | null>;
   recordEvent: (event: CredentialEgressLifecycleEvent) => Promise<void>;
   logger?: Pick<Console, 'log' | 'warn' | 'error'>;
@@ -189,7 +187,7 @@ export class CredentialEgressLifecycle {
   ): Promise<boolean> {
     const candidate = await this.safeFindCandidate(runId);
     if (!candidate || candidate.grantCount === 0) return false;
-    if (!candidate.experimentEnabled || !this.admissionFor(provider)) {
+    if (!this.admissionFor(provider)) {
       await this.safeRecord({
         runId,
         eventType: 'decision',
@@ -227,22 +225,6 @@ export class CredentialEgressLifecycle {
 
     if (candidate.grantCount === 0) {
       return { status: 'skipped', reason: 'no_grants' };
-    }
-
-    if (!candidate.experimentEnabled) {
-      await record({
-        eventType: 'decision',
-        message:
-          'Service tokens are unavailable: the Session owner has not enabled integration keys, so no substitute credentials were issued to this run.',
-        details: {
-          stage: 'credential_egress',
-          status: 'disabled',
-          provider,
-          sessionId: candidate.sessionId,
-          grantCount: candidate.grantCount,
-        },
-      });
-      return { status: 'skipped', reason: 'disabled' };
     }
 
     const capability = getComputeProviderCredentialEgressCapability(provider);
