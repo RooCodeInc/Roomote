@@ -22,15 +22,15 @@ describe('destroyDockerInstance', () => {
 
     expect(runDocker).toHaveBeenCalledWith(
       ['network', 'disconnect', '-f', 'roomote-task-42', 'api123'],
-      { signal: undefined, allowFailure: true },
+      { allowFailure: true },
     );
     expect(runDocker).toHaveBeenCalledWith(
       ['network', 'disconnect', '-f', 'roomote-task-42', 'preview456'],
-      { signal: undefined, allowFailure: true },
+      { allowFailure: true },
     );
     expect(runDocker).toHaveBeenCalledWith(
       ['network', 'rm', 'roomote-task-42'],
-      { signal: undefined, allowFailure: true },
+      { allowFailure: true },
     );
 
     const calls = runDocker.mock.calls.map(([args]) => args);
@@ -50,11 +50,25 @@ describe('destroyDockerInstance', () => {
 
     expect(runDocker).toHaveBeenCalledWith(
       ['network', 'rm', 'roomote-task-43'],
-      { signal: undefined, allowFailure: true },
+      { allowFailure: true },
     );
     expect(runDocker).toHaveBeenLastCalledWith(
       ['volume', 'rm', '-f', 'roomote-worker-43-workspace'],
-      { signal: undefined, allowFailure: true },
+      { allowFailure: true },
     );
+  });
+
+  it('does not let an aborted task signal cancel sandbox teardown', async () => {
+    const signal = AbortSignal.abort();
+    const runDocker = vi.fn().mockResolvedValue('');
+
+    await destroyDockerInstance(
+      { instanceId: 'roomote-worker-44', signal },
+      runDocker,
+    );
+
+    for (const [, options] of runDocker.mock.calls) {
+      expect(options).toEqual({ allowFailure: true });
+    }
   });
 });

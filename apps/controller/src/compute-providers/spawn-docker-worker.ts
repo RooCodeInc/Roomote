@@ -9,6 +9,7 @@ import {
   portNameToSlug,
   SANDBOX_SERVER_NAMED_PORT,
   TaskRunErrorCode,
+  isExitedRunStatus,
   type NamedPort,
   credentialEgressProxyBaseUrl,
 } from '@roomote/types';
@@ -229,6 +230,14 @@ export async function spawnDockerWorker(
   const throwIfSpawnAborted = (): void => {
     config.signal?.throwIfAborted();
   };
+  const shouldRemoveTaskRun = async (taskRunId: number): Promise<boolean> => {
+    const run = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, taskRunId),
+      columns: { status: true },
+    });
+
+    return !run || isExitedRunStatus(run.status);
+  };
 
   throwIfSpawnAborted();
 
@@ -300,6 +309,7 @@ export async function spawnDockerWorker(
           controlNetwork,
           egressPolicy: config.egressPolicy,
           autoRemove: autoRemoveContainer,
+          shouldRemoveTaskRun,
         },
         runDocker,
       );
