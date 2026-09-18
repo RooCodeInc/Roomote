@@ -139,7 +139,17 @@ describe('agent-browser wrapper shared browser', () => {
 
     fs.writeFileSync(
       cliPath,
-      '#!/bin/sh\nprintf "pin=%s %s\\n" "${AGENT_BROWSER_PIN_TAB:-}" "$*" >> "$AGENT_BROWSER_TEST_CALLS"\n',
+      [
+        '#!/bin/sh',
+        'printf "pin=%s %s\\n" "${AGENT_BROWSER_PIN_TAB:-}" "$*" >> "$AGENT_BROWSER_TEST_CALLS"',
+        'if [ -n "${FAKE_TAB_GONE_ONCE:-}" ] && [ ! -f "$FAKE_TAB_GONE_ONCE" ]; then',
+        '  : > "$FAKE_TAB_GONE_ONCE"',
+        '  echo "tab_gone: bound tab is gone" >&2',
+        '  exit 1',
+        'fi',
+        'echo ok',
+        '',
+      ].join('\n'),
       { mode: 0o755 },
     );
     fs.writeFileSync(savedCliPath, cliPath);
@@ -259,25 +269,35 @@ describe('agent-browser wrapper shared browser', () => {
     ]);
   });
 
-  it('gives a session a fresh tab after the shared browser restarts', async () => {
+  it('retries a navigation in a fresh tab when the pinned tab is gone', async () => {
     const sandbox = await createSandbox({ browserRunning: true });
-    const stateDir = path.join(sandbox.dir, 'state');
-    fs.mkdirSync(path.join(stateDir, 'sessions'), { recursive: true });
-    fs.writeFileSync(path.join(stateDir, 'browser-id'), 'second-browser\n');
-    fs.writeFileSync(
-      path.join(stateDir, 'sessions', 'task-1'),
-      'first-browser\n',
+
+    const { stdout } = await sandbox.run(
+      ['--session', 'task-1', 'goto', 'https://example.com'],
+      { FAKE_TAB_GONE_ONCE: path.join(sandbox.dir, 'tab-gone') },
     );
 
-    await sandbox.run(['--session', 'task-1', 'snapshot']);
-    await sandbox.run(['--session', 'task-1', 'snapshot']);
-    await sandbox.run(['--session', 'task-2', 'snapshot']);
-
+    expect(stdout).toContain('ok');
     expect(sandbox.calls()).toEqual([
+      `pin=1 --cdp ${sandbox.cdpPort} --session task-1 goto https://example.com`,
       `pin=1 --cdp ${sandbox.cdpPort} --session task-1 tab new`,
-      `pin=1 --cdp ${sandbox.cdpPort} --session task-1 snapshot`,
-      `pin=1 --cdp ${sandbox.cdpPort} --session task-1 snapshot`,
-      `pin=1 --cdp ${sandbox.cdpPort} --session task-2 snapshot`,
+      `pin=1 --cdp ${sandbox.cdpPort} --session task-1 goto https://example.com`,
+    ]);
+  });
+
+  it('reports a gone tab to commands that depended on its page', async () => {
+    const sandbox = await createSandbox({ browserRunning: true });
+
+    await expect(
+      sandbox.run(['click', '@e1'], {
+        FAKE_TAB_GONE_ONCE: path.join(sandbox.dir, 'tab-gone'),
+      }),
+    ).rejects.toMatchObject({
+      code: 1,
+      stderr: expect.stringContaining('tab_gone'),
+    });
+    expect(sandbox.calls()).toEqual([
+      `pin=1 --cdp ${sandbox.cdpPort} click @e1`,
     ]);
   });
 
