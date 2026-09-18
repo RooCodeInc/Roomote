@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -88,12 +88,16 @@ function SignedInUserMenu({
   const [releaseNotesVersion, setReleaseNotesVersion] = useState<string | null>(
     null,
   );
+  const [deploymentHost, setDeploymentHost] = useState<string | null>(null);
   const statusQuery = useQuery(
     trpc.releases.status.queryOptions(undefined, {
       staleTime: 30 * 60 * 1000,
       refetchOnWindowFocus: false,
     }),
   );
+  useEffect(() => {
+    setDeploymentHost(window.location.host || null);
+  }, []);
   const handleSignOut = async () => {
     window.localStorage.removeItem(PERSONAL_THEME_STORAGE_KEY);
     await authClient.signOut({
@@ -169,6 +173,18 @@ function SignedInUserMenu({
                 <div className="text-sm text-muted-foreground ph-no-capture">
                   {userEmail}
                 </div>
+                {deploymentHost ? (
+                  <div className="mt-1 max-w-full text-xs text-muted-foreground">
+                    <span className="mr-1">Deployment</span>
+                    <span
+                      className="font-mono break-all"
+                      title={deploymentHost}
+                      aria-label={`Deployment host: ${deploymentHost}`}
+                    >
+                      {deploymentHost}
+                    </span>
+                  </div>
+                ) : null}
               </div>
               {showPersonalSettings ? (
                 <DropdownMenuItem asChild className="size-8 justify-center p-0">

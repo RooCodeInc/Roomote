@@ -99,6 +99,14 @@ describe('UserMenu', () => {
     ).toBeInTheDocument();
   });
 
+  it('shows the current deployment host without including a path', async () => {
+    render(<UserMenu />);
+
+    expect(
+      await screen.findByLabelText(`Deployment host: ${window.location.host}`),
+    ).toHaveTextContent(window.location.host);
+  });
+
   it('hides personal settings while setup is incomplete', () => {
     render(<UserMenu showPersonalSettings={false} />);
 
