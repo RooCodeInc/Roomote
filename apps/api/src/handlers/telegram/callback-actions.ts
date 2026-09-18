@@ -369,7 +369,7 @@ async function handleSuggestionLaunchCallback(params: {
                 onAccepted,
                 onRejected,
               }),
-            busyMessage: 'Fast mode is unavailable.',
+            busyMessage: "Roomote couldn't start a conversation right now.",
             onError: (error) => {
               apiLogger.error(
                 `[telegram] Fast suggestion response failed for work item ${params.suggestionId}: ${

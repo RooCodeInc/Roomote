@@ -251,7 +251,7 @@ async function startTeamsFastSuggestion(params: {
   if (!conversation) {
     return Promise.resolve({
       accepted: false,
-      reason: 'Fast mode is unavailable in this Teams conversation.',
+      reason: TEAMS_FAST_UNAVAILABLE_MESSAGE,
     });
   }
   const canonicalConversation = await resolveSuggestionFastConversation({
@@ -277,7 +277,7 @@ async function startTeamsFastSuggestion(params: {
         onRejected,
       });
     },
-    busyMessage: 'Fast mode is unavailable.',
+    busyMessage: TEAMS_FAST_UNAVAILABLE_MESSAGE,
     onError: (error) => {
       apiLogger.error(
         `[teams] Fast suggestion response failed: ${
@@ -1587,7 +1587,7 @@ async function launchPinnedTeamsSuggestionTask(input: {
     currentMessageId: input.queuedMessage.ts,
   });
   if (!conversation) {
-    throw new Error('Fast mode is unavailable in this Teams conversation.');
+    throw new Error(TEAMS_FAST_UNAVAILABLE_MESSAGE);
   }
   const originSessionId = await resolveSuggestionOriginSessionId(
     input.sourceTaskId,

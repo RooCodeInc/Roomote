@@ -1486,7 +1486,7 @@ describe('fast-agent integration broker', () => {
           {
             name: 'manage_tasks',
             description:
-              'Manage Roomote Sessions and inspect or control existing tasks. Use launch_task to start coding work from a Fast Session.',
+              'Manage Roomote sessions and inspect or control existing tasks. Use launch_task to start coding work from the current session.',
             inputSchema: {
               type: 'object',
               properties: {
@@ -1494,7 +1494,7 @@ describe('fast-agent integration broker', () => {
                   type: 'string',
                   enum: ['search', 'get_summary', 'cancel'],
                   description:
-                    'The Session or existing-task action to perform.',
+                    'The session or existing-task action to perform.',
                 },
                 taskId: { type: 'string' },
               },
@@ -1903,7 +1903,7 @@ describe('fast-agent integration broker', () => {
         },
       ),
     ).rejects.toThrow(
-      'Fast Sessions must use launch_task so the child stays attached and reports settlement to its parent Session.',
+      'Sessions must use launch_task so the child stays attached and reports settlement to its parent session.',
     );
     expect(mocks.callMcpTool).not.toHaveBeenCalled();
   });

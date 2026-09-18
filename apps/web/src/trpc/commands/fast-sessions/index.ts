@@ -453,12 +453,12 @@ export async function startFastSessionCommand(
     input.privacy === 'private' &&
     !(await isPrivateSessionsExperimentEnabled())
   ) {
-    throw new Error('Private Sessions are not enabled for this deployment.');
+    throw new Error('Private sessions are not enabled for this deployment.');
   }
   if (input.pinnedLaunch) {
     if (input.privacy === 'private') {
       throw new Error(
-        'Private Sessions cannot start as pinned environment tasks.',
+        'Private sessions cannot start as pinned environment tasks.',
       );
     }
     return startPinnedFastSessionLaunch(auth, {
@@ -713,11 +713,11 @@ export async function getFastSessionMessagesCommand(
 ) {
   const session = await findReadableFastSession(auth, sessionId);
   if (!session) {
-    throw new Error('Fast session not found');
+    throw new Error('Session not found');
   }
   const detail = await getFastSessionById(auth, session.id);
   if (!detail) {
-    throw new Error('Fast session not found');
+    throw new Error('Session not found');
   }
   return {
     sessionId: detail.id,
@@ -739,7 +739,7 @@ export async function updateFastSessionModelSelectionCommand(
 ): Promise<{ success: true }> {
   const session = await findAccessibleFastSession(auth, input.sessionId);
   if (!session) {
-    throw new Error('Fast session not found');
+    throw new Error('Session not found');
   }
 
   await resolveSessionModelSettings(session.id, input, {
@@ -765,7 +765,7 @@ export async function replyToFastSessionCommand(
 ): Promise<{ success: true }> {
   const session = await findAccessibleFastSession(auth, input.sessionId);
   if (!session) {
-    throw new Error('Fast session not found');
+    throw new Error('Session not found');
   }
   const { resolveSetupSessionTurnContext } =
     await import('../setup/setup-session');
@@ -825,7 +825,7 @@ export async function startFastSessionGoalCommand(
   input: { sessionId: string; objective: string; clientMessageId?: string },
 ) {
   const session = await findAccessibleFastSession(auth, input.sessionId);
-  if (!session) throw new Error('Fast session not found');
+  if (!session) throw new Error('Session not found');
   return startFastSessionGoal({
     sessionId: session.id,
     userId: auth.userId,
@@ -847,7 +847,7 @@ export async function handleFastSessionPrReviewActionCommand(
   status: 'pending' | 'resolved' | 'auto_resolved' | 'dismissed' | 'stale';
 }> {
   const session = await findAccessibleFastSession(auth, input.sessionId);
-  if (!session) throw new Error('Fast session not found');
+  if (!session) throw new Error('Session not found');
 
   return handleWebPrReviewAction({
     deliveryId: input.deliveryId,
@@ -879,7 +879,7 @@ export async function resolveFastSessionCapabilityOfferCommand(
   if (!auth.isAdmin)
     throw new Error('Only administrators can use capability cards.');
   const session = await findAccessibleFastSession(auth, input.sessionId);
-  if (!session) throw new Error('Fast session not found');
+  if (!session) throw new Error('Session not found');
   const [offer] = await db
     .select({
       eventId: fastAgentMessages.eventId,
@@ -1092,7 +1092,7 @@ export async function submitFastSessionUserInputCommand(
 ): Promise<{ success: true }> {
   const session = await findAccessibleFastSession(auth, input.sessionId);
   if (!session) {
-    throw new Error('Fast session not found');
+    throw new Error('Session not found');
   }
   const {
     reconcileSetupPlatformEvents,

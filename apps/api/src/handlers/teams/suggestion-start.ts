@@ -328,7 +328,7 @@ export async function launchClaimedTeamsSuggestion(params: {
       if (mode === 'fast') {
         const fastStart = (await params.launchFast?.(promptText)) ?? {
           accepted: false as const,
-          reason: 'Fast mode is unavailable.',
+          reason: "Roomote couldn't start a conversation right now.",
         };
         return fastStart.accepted
           ? {

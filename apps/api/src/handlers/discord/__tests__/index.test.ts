@@ -2326,7 +2326,7 @@ describe('Discord Gateway event handler', () => {
     expect(mocks.reply).toHaveBeenCalledWith(
       expect.objectContaining({
         text: expect.stringContaining(
-          'keep this Session working toward an objective across multiple turns',
+          'keep this session working toward an objective across multiple turns',
         ),
       }),
     );

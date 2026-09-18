@@ -174,7 +174,7 @@ function formatIntegrationsForPrompt(
   integrations: FastAgentIntegration[],
 ): string {
   if (integrations.length === 0) {
-    return '- No deployment MCP servers are available in fast mode.';
+    return '- No deployment MCP servers are available in this conversation.';
   }
 
   const native = integrations.filter((integration) =>
@@ -229,7 +229,7 @@ function buildIntegrationConnectionGuidance(input: {
       : '\n- Remote MCP setup is unavailable on this turn. If the human explicitly requested the MCP, report that outcome and stop. For a generic connection request, use the API-key route when available and mention the MCP in one sentence as an option.'
   }${
     input.serviceCredentialToolsEnabled && !input.platformEvent
-      ? '\n- For an explicit or established HTTPS API-key route, call `list_integration_keys` first, reuse pending or ready entries, and call `prepare_integration_key` only when none exists. Never delegate that lookup to a coding task or tell the human to enable Integration keys while these tools are available. Share the returned secure Session link with a service-specific label such as "Connect Figma securely"; never ask for the key in chat. Once ready, use the `_roomote_http_integrations` server and its `integration_request` tool with the `session:` integration id for one or a few direct calls; use a coding task only for scripts or many calls.'
+      ? '\n- For an explicit or established HTTPS API-key route, call `list_integration_keys` first, reuse pending or ready entries, and call `prepare_integration_key` only when none exists. Never delegate that lookup to a coding task or tell the human to enable integration keys while these tools are available. Share the returned secure session link with a service-specific label such as "Connect Figma securely"; never ask for the key in chat. Once ready, use the `_roomote_http_integrations` server and its `integration_request` tool with the `session:` integration id for one or a few direct calls; use a coding task only for scripts or many calls.'
       : '\n- Integration-key setup is unavailable on this turn; do not ask the human to paste a key.'
   }`;
 }
@@ -529,10 +529,10 @@ ${
 - Objective: ${sessionGoal.objective}
 - Status: ${sessionGoal.status}
 - Continuations used: ${sessionGoal.continuationsUsed}/${sessionGoal.maxContinuations}
-${sessionGoal.blockedReason ? `- Blocked reason: ${sessionGoal.blockedReason}\n` : ''}- This goal belongs to the Fast Session, not to any delegated task. Child tasks are execution units only.
+${sessionGoal.blockedReason ? `- Blocked reason: ${sessionGoal.blockedReason}\n` : ''}- This goal belongs to the session, not to any delegated task. Child tasks are execution units only.
 - Keep pursuing the complete objective across turns. Put the relevant objective and acceptance criteria in every delegated task brief.
 - Use \`manage_goal\` to inspect state, mark complete only after the entire objective is verified, mark blocked only after a concrete blocker persists across attempts, or mark canceled only when the user cancels or replaces it.
-- Do not treat one child task finishing, failing, or being canceled as automatic completion or cancellation of the Session goal.
+- Do not treat one child task finishing, failing, or being canceled as automatic completion or cancellation of the session goal.
 `
     : ''
 }
@@ -884,6 +884,6 @@ ${surface === 'slack' ? 'Do not assume Slack formatting is limited to old mrkdwn
 
 ## Capability Boundary
 - You have no local filesystem, shell, repository checkout, or arbitrary network access.
-- Deployment MCP servers are the only direct external capabilities available in fast mode beyond its native orchestration and reply tools.
+- Deployment MCP servers are the only direct external capabilities available in this conversation beyond its native orchestration and reply tools.
 - Never claim to read or modify local files. Delegate repository execution to a Roomote task.`;
 }
