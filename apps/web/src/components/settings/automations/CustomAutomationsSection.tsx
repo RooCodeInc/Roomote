@@ -896,7 +896,7 @@ export function CustomAutomationsSection({
       (requiredFieldErrors.name ? nameRef : promptRef).current?.focus();
       return;
     }
-    setFieldErrors({});
+    setFieldErrors((current) => ({ schedule: current.schedule }));
 
     if (!form.environmentId) {
       toast.error('Choose an environment.');
@@ -905,13 +905,16 @@ export function CustomAutomationsSection({
     if (form.scheduleMode === 'cron' && !effectiveResolvedCron) {
       setFieldErrors((current) => ({
         ...current,
-        schedule: resolveScheduleMutation.isPending
-          ? 'Still interpreting the schedule, try again in a moment.'
-          : 'Enter a valid schedule first.',
+        schedule:
+          current.schedule ??
+          (resolveScheduleMutation.isPending
+            ? 'Still interpreting the schedule, try again in a moment.'
+            : 'Enter a valid schedule first.'),
       }));
       cronExpressionRef.current?.focus();
       return;
     }
+    setFieldErrors({});
     if (
       form.targetProvider !== 'none' &&
       (form.targetMode === 'channel' || form.targetProvider === 'email') &&

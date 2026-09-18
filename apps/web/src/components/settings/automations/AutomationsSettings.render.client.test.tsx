@@ -12,6 +12,12 @@ const managerInstructionsPlaceholder =
   /Optional guidance for which ideas to prioritize or avoid/;
 
 const state = vi.hoisted(() => ({
+  latestScheduleOptions: null as {
+    onSuccess: (
+      result: { status: 'ambiguous'; clarification: string },
+      variables: { schedule: string },
+    ) => void;
+  } | null,
   isAdmin: true,
   catalogQueryOptions: [] as Array<{ enabled?: boolean }>,
   queriedKeys: [] as unknown[],
@@ -570,7 +576,11 @@ vi.mock('@/trpc/client', () => ({
         },
       },
       resolveCustomAutomationSchedule: {
-        mutationOptions: (options?: Record<string, unknown>) => options ?? {},
+        mutationOptions: (options?: Record<string, unknown>) => {
+          state.latestScheduleOptions =
+            options as typeof state.latestScheduleOptions;
+          return options ?? {};
+        },
       },
       updateSettings: {
         mutationOptions: (options?: Record<string, unknown>) => {
@@ -1347,6 +1357,34 @@ describe('AutomationsSettings', () => {
       screen.getByRole('switch', { name: 'Toggle Daily scan' }),
     ).not.toBeChecked();
     expect(mutations.updateSettings).not.toHaveBeenCalled();
+  });
+
+  it('preserves the resolver clarification after another submission', async () => {
+    render(<CustomAutomationsSection />);
+    fireEvent.click(screen.getByRole('button', { name: 'New' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), {
+      target: { value: 'Review' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Prompt' }), {
+      target: { value: 'Review prompt' },
+    });
+    fireEvent.click(
+      screen.getByRole('combobox', { name: 'Preferred environment' }),
+    );
+    fireEvent.click(screen.getByRole('option', { name: 'Let Roomote decide' }));
+    fireEvent.click(screen.getByRole('combobox', { name: 'Schedule' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Custom schedule' }));
+    const input = screen.getByRole('textbox', { name: 'Custom schedule' });
+    fireEvent.change(input, { target: { value: 'Every weekday' } });
+    await act(async () =>
+      state.latestScheduleOptions!.onSuccess(
+        { status: 'ambiguous', clarification: 'What time on weekdays?' },
+        { schedule: 'Every weekday' },
+      ),
+    );
+    expect(screen.getByText('What time on weekdays?')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    expect(screen.getByText('What time on weekdays?')).toBeVisible();
   });
 
   it('focuses and describes an invalid custom schedule before creating', () => {
