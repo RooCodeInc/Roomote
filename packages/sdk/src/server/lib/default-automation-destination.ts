@@ -3,6 +3,7 @@ import {
   db,
   deploymentSettings,
   eq,
+  getEffectiveDefaultAutomationTarget,
   resolveDiscordRuntimeCredentials,
   resolveTeamsBotRuntimeCredentials,
   resolveTelegramRuntimeCredentials,
@@ -13,6 +14,8 @@ import {
 import { SlackNotifier } from '@roomote/slack';
 import {
   AUTOMATION_TARGET_EMAIL_IDENTITY_KEY,
+  buildChannelAutomationTarget,
+  getAutomationTargetEmailIdentityId,
   getAutomationTargetKind,
   hasSetupChatHandoffDestination,
   isConfiguredAutomationTarget,
@@ -56,8 +59,9 @@ type DefaultAutomationTargetParams = {
 
 /**
  * Selects a persisted default report target without replacing an existing
- * explicit target. Defaults follow one shared waterfall: usable configured
- * channels, a resolvable owner DM, supported Email, then no destination.
+ * explicit target. Defaults follow the existing waterfall of a usable
+ * deployment destination, a resolvable owner DM, supported Email, then no
+ * destination.
  */
 export async function resolveDefaultAutomationTarget({
   ownerUserId,
@@ -84,6 +88,7 @@ export async function resolveDefaultAutomationTarget({
           columns: {
             managerSlackChannelId: true,
             managerDiscordChannelId: true,
+            defaultAutomationTarget: true,
             setupNewState: true,
           },
         })
@@ -91,20 +96,42 @@ export async function resolveDefaultAutomationTarget({
     : null;
 
   const channelCandidates: AutomationTarget[] = [];
-  if (settings?.managerSlackChannelId?.trim()) {
-    channelCandidates.push({
-      provider: 'slack',
-      targetKind: 'slack_channel',
-      externalRef: settings.managerSlackChannelId.trim(),
+  const configuredDefault = getEffectiveDefaultAutomationTarget(settings);
+  if (configuredDefault) {
+    const resolvedDefault = await resolveConfiguredTarget({
+      target: configuredDefault,
+      capabilities,
+      client,
     });
+    if (resolvedDefault) return resolvedDefault;
   }
-  if (settings?.managerDiscordChannelId?.trim()) {
-    channelCandidates.push({
-      provider: 'discord',
-      targetKind: 'discord_channel',
-      externalRef: settings.managerDiscordChannelId.trim(),
-    });
-  }
+  // The configured default was already tried above, so only a legacy manager
+  // channel it does not mirror is still a candidate.
+  const legacyChannelCandidates: AutomationTarget[] = [
+    ...(settings?.managerSlackChannelId?.trim()
+      ? [
+          buildChannelAutomationTarget(
+            'slack',
+            settings.managerSlackChannelId.trim(),
+          ),
+        ]
+      : []),
+    ...(settings?.managerDiscordChannelId?.trim()
+      ? [
+          buildChannelAutomationTarget(
+            'discord',
+            settings.managerDiscordChannelId.trim(),
+          ),
+        ]
+      : []),
+  ];
+  channelCandidates.push(
+    ...legacyChannelCandidates.filter(
+      (candidate) =>
+        candidate.provider !== configuredDefault?.provider ||
+        candidate.externalRef !== configuredDefault.externalRef,
+    ),
+  );
 
   if (includeSetupHandoff) {
     const state = normalizeSetupNewState(settings?.setupNewState ?? {});
@@ -220,6 +247,55 @@ export async function resolveDefaultAutomationTarget({
           externalRef: ownerUserId,
           metadata: { [AUTOMATION_TARGET_EMAIL_IDENTITY_KEY]: identity.id },
         }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveConfiguredTarget({
+  target,
+  capabilities,
+  client,
+}: {
+  target: AutomationTarget;
+  capabilities: AutomationDestinationCapabilities;
+  client: DatabaseOrTransaction;
+}): Promise<AutomationTarget | null> {
+  if (target.provider === 'email') {
+    if (!capabilities.email || target.targetKind !== 'email_user') {
+      return null;
+    }
+    const identityId = getAutomationTargetEmailIdentityId(target);
+    if (!identityId) return null;
+    const identities = await listAvailableAgentMailOutboundIdentities(
+      target.externalRef,
+    ).catch(() => []);
+    return identities.some((identity) => identity.id === identityId)
+      ? target
+      : null;
+  }
+
+  const provider = target.provider as AutomationCapableCommunicationProvider;
+  if (!capabilities.chatProviders.includes(provider)) return null;
+  if (target.targetKind === getAutomationTargetKind(provider, 'channel')) {
+    return resolveUsableChannelTarget(target, client);
+  }
+  if (
+    target.targetKind !== getAutomationTargetKind(provider, 'direct_message')
+  ) {
+    return null;
+  }
+
+  const connectedProviders: AutomationCapableCommunicationProvider[] =
+    await listConnectedCommunicationProviders().catch(() => []);
+  if (!connectedProviders.includes(provider)) return null;
+  try {
+    return (await findUserDirectMessageDestination(
+      provider,
+      target.externalRef,
+    ))
+      ? target
       : null;
   } catch {
     return null;

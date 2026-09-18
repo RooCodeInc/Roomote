@@ -100,6 +100,9 @@ export type FormState = {
   channelAutoStartEnabled: boolean;
   managerSlackChannel: string;
   managerDiscordChannel: string;
+  defaultDestinationProvider: 'none' | AutomationDestinationProvider;
+  defaultDestinationMode: 'channel' | 'direct_message';
+  defaultDestinationChannelId: string;
   managerStatsFrequency: ManagerStatsFrequency;
   providerUsageLimitFrequency: ProviderUsageLimitFrequency;
   providerUsageLimitThreshold: number;
@@ -186,6 +189,9 @@ const CHANNEL_AUTO_START_FIELDS: Array<keyof FormState> = [
 const MANAGER_CHANNEL_FIELDS: Array<keyof FormState> = [
   'managerSlackChannel',
   'managerDiscordChannel',
+  'defaultDestinationProvider',
+  'defaultDestinationMode',
+  'defaultDestinationChannelId',
 ];
 
 const MANAGER_STATS_FIELDS: Array<keyof FormState> = [
@@ -435,6 +441,13 @@ export function buildAutomationSettingsSaveInput(
       })),
     managerSlackChannel: stateToSave.managerSlackChannel.trim() || null,
     managerDiscordChannel: stateToSave.managerDiscordChannel.trim() || null,
+    defaultDestinationProvider:
+      stateToSave.defaultDestinationProvider === 'none'
+        ? null
+        : stateToSave.defaultDestinationProvider,
+    defaultDestinationMode: stateToSave.defaultDestinationMode,
+    defaultDestinationChannelId:
+      stateToSave.defaultDestinationChannelId.trim() || null,
     managerStatsFrequency: stateToSave.managerStatsFrequency,
     providerUsageLimitFrequency: stateToSave.providerUsageLimitFrequency,
     providerUsageLimitThreshold: stateToSave.providerUsageLimitThreshold,

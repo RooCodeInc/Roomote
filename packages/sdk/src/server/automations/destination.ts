@@ -13,6 +13,7 @@ import {
 } from '@roomote/db/server';
 import {
   getAutomationTargetEmailIdentityId,
+  isAutomationDestinationTarget,
   isBackgroundAutomationUserTargetKind,
   type AutomationCapableCommunicationProvider,
   type AutomationDestinationProvider,
@@ -51,6 +52,37 @@ export function getAutomationDestinationCommunicationProvider(
   destination: Pick<ResolvedAutomationDestination, 'provider'>,
 ): CommunicationProvider {
   return destination.provider === 'email' ? 'agentmail' : destination.provider;
+}
+
+/**
+ * The Email target an automation run reports to. The deployment default only
+ * applies when the automation has no explicit destination of its own, so an
+ * Email default never pulls an explicitly targeted automation off its channel.
+ */
+export function getAutomationEmailTarget(
+  runtime: Partial<
+    Pick<AutomationRuntime, 'targets' | 'defaultAutomationTarget'>
+  >,
+): AutomationTarget | null {
+  const explicitTargets = (runtime.targets ?? []).filter(
+    isAutomationDestinationTarget,
+  );
+  const explicitEmailTarget = explicitTargets.find(
+    (target) => target.provider === 'email',
+  );
+  if (explicitEmailTarget) return explicitEmailTarget;
+  return explicitTargets.length === 0 &&
+    runtime.defaultAutomationTarget?.provider === 'email'
+    ? runtime.defaultAutomationTarget
+    : null;
+}
+
+export function hasAutomationEmailTarget(
+  runtime: Partial<
+    Pick<AutomationRuntime, 'targets' | 'defaultAutomationTarget'>
+  >,
+): boolean {
+  return getAutomationEmailTarget(runtime) !== null;
 }
 
 export async function resolveAutomationEmailTarget(
@@ -190,7 +222,7 @@ export async function findTeamsConversationRoute(
  */
 export async function resolveAutomationRuntimeDestination(params: {
   runtime: Pick<AutomationRuntime, 'destination'> &
-    Partial<Pick<AutomationRuntime, 'targets'>>;
+    Partial<Pick<AutomationRuntime, 'targets' | 'defaultAutomationTarget'>>;
   slackConnected: boolean;
   /** Optional user whose DM should receive a one-off fallback report. */
   fallbackUserId?: string | null;
@@ -200,7 +232,11 @@ export async function resolveAutomationRuntimeDestination(params: {
       target.provider === 'email' && target.targetKind === 'email_user',
   );
   if (emailTarget) {
-    return resolveAutomationEmailTarget(emailTarget);
+    return resolveRuntimeTarget(
+      emailTarget,
+      'automation_target',
+      params.slackConnected,
+    );
   }
   const destination = params.runtime.destination;
   const staleSlackDestination =
@@ -229,18 +265,21 @@ export async function resolveAutomationRuntimeDestination(params: {
         target.provider === 'discord'),
   );
   if (userTarget) {
-    const directMessage = await findUserDirectMessageDestination(
-      userTarget.provider as AutomationCapableCommunicationProvider,
-      userTarget.externalRef,
+    return resolveRuntimeTarget(
+      userTarget,
+      'automation_target',
+      params.slackConnected,
     );
-    return directMessage
-      ? {
-          provider:
-            userTarget.provider as AutomationCapableCommunicationProvider,
-          ...directMessage,
-          source: 'automation_target',
-        }
-      : null;
+  }
+
+  const defaultTarget = params.runtime.defaultAutomationTarget;
+  if (defaultTarget) {
+    const resolvedDefault = await resolveRuntimeTarget(
+      defaultTarget,
+      'manager_channel',
+      params.slackConnected,
+    );
+    if (resolvedDefault) return resolvedDefault;
   }
 
   if (destination && !staleSlackDestination) {
@@ -311,6 +350,49 @@ export async function resolveAutomationRuntimeDestination(params: {
   }
 
   return null;
+}
+
+/** Resolves one concrete target, explicit or deployment default, for a run. */
+async function resolveRuntimeTarget(
+  target: AutomationTarget,
+  source: ResolvedAutomationDestination['source'],
+  slackConnected: boolean,
+): Promise<ResolvedAutomationDestination | null> {
+  if (target.provider === 'email') {
+    const destination = await resolveAutomationEmailTarget(target);
+    return destination ? { ...destination, source } : null;
+  }
+  const provider = target.provider as AutomationCapableCommunicationProvider;
+  if (isBackgroundAutomationUserTargetKind(target.targetKind)) {
+    const directMessage = await findUserDirectMessageDestination(
+      provider,
+      target.externalRef,
+    );
+    return directMessage ? { provider, ...directMessage, source } : null;
+  }
+  if (provider === 'slack') {
+    if (!slackConnected) return null;
+    const installation = await findActiveSlackInstallationForChannel(
+      target.externalRef,
+    );
+    return installation
+      ? {
+          provider,
+          channelId: target.externalRef,
+          teamId: installation.teamId,
+          source,
+        }
+      : null;
+  }
+  if (provider === 'teams') {
+    const serviceUrl = await findTeamsConversationServiceUrl(
+      target.externalRef,
+    );
+    return serviceUrl
+      ? { provider, channelId: target.externalRef, serviceUrl, source }
+      : null;
+  }
+  return { provider, channelId: target.externalRef, source };
 }
 
 /**

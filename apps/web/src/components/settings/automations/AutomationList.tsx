@@ -30,13 +30,13 @@ export function AutomationListToolbar({
   onSearchChange: (search: string) => void;
 }) {
   return (
-    <div className="flex flex-col gap-3 md:flex-row md:items-center">
+    <div className="flex flex-col gap-3 md:flex-row md:items-end">
       {leading}
       <RadioGroup
         value={filter}
         onValueChange={(value) => onFilterChange(value as AutomationListFilter)}
         aria-label="Automation type"
-        className="flex items-center gap-4 md:ml-auto"
+        className="flex items-center gap-4 md:ml-auto md:h-8"
       >
         {(
           [

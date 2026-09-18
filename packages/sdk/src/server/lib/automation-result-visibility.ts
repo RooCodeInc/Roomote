@@ -103,6 +103,11 @@ export async function resolveBackgroundAutomationResultVisibility(
     return resolveTargetsVisibility(configuredDestinations);
   }
 
+  // The deployment default can be a DM or Email, which the channel-only
+  // `runtime.destination` cannot express.
+  if (runtime.defaultAutomationTarget) {
+    return resolveTargetsVisibility([runtime.defaultAutomationTarget]);
+  }
   if (!runtime.destination) return 'shared';
   if (runtime.destination.provider !== 'slack') return 'private';
   return resolveTargetsVisibility([

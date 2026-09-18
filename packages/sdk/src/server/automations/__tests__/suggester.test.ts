@@ -68,6 +68,12 @@ vi.mock('../github-deployment-scope', () => ({
 }));
 
 vi.mock('../destination', () => ({
+  hasAutomationEmailTarget: vi.fn(
+    (runtime) =>
+      runtime.targets?.some(
+        (target: { provider?: string }) => target.provider === 'email',
+      ) || runtime.defaultAutomationTarget?.provider === 'email',
+  ),
   buildDestinationTaskPayloadFields: vi.fn(() => ({ teamId: 'T-B' })),
   listConnectedCommunicationProviders: mockListConnectedCommunicationProviders,
   resolveAutomationRuntimeDestination: mockResolveAutomationRuntimeDestination,

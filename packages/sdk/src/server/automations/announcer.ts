@@ -30,6 +30,7 @@ import {
   listConnectedCommunicationProviders,
   buildDestinationTaskPayloadFields,
   getAutomationDestinationCommunicationProvider,
+  hasAutomationEmailTarget,
   buildDestinationPromptContext,
   prepareAutomationReportDestination,
   resolveAutomationRuntimeDestination,
@@ -80,7 +81,7 @@ async function findEligibleDeployments(
   if (!(await hasAnyActiveRepository())) {
     return [];
   }
-  if (runtime.targets?.some((target) => target.provider === 'email')) {
+  if (hasAutomationEmailTarget(runtime)) {
     return [{ slackBotToken: null, slackTeamId: null }];
   }
 

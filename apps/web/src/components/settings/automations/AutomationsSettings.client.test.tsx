@@ -49,6 +49,9 @@ const baseFormState: FormState = {
   channelAutoStartChannels: [],
   managerSlackChannel: '',
   managerDiscordChannel: '',
+  defaultDestinationProvider: 'none',
+  defaultDestinationMode: 'channel',
+  defaultDestinationChannelId: '',
   managerStatsFrequency: 'off' as const,
   providerUsageLimitFrequency: 'every_hour' as const,
   providerUsageLimitThreshold: 85,
@@ -513,12 +516,15 @@ describe('Automations selection helpers', () => {
     expect(saveInput.providerUsageLimitSlackChannel).toBeNull();
   });
 
-  it('includes the Discord manager destination in the API save input', () => {
+  it('includes the concrete Discord deployment default in the API save input', () => {
     const saveInput = buildAutomationSettingsSaveInput(
       {
         ...baseFormState,
         managerSlackChannel: '',
         managerDiscordChannel: ' 123456789 ',
+        defaultDestinationProvider: 'discord',
+        defaultDestinationMode: 'channel',
+        defaultDestinationChannelId: ' 123456789 ',
       },
       baseFormState,
       'managerChannel',
@@ -526,6 +532,9 @@ describe('Automations selection helpers', () => {
 
     expect(saveInput.managerSlackChannel).toBeNull();
     expect(saveInput.managerDiscordChannel).toBe('123456789');
+    expect(saveInput.defaultDestinationProvider).toBe('discord');
+    expect(saveInput.defaultDestinationMode).toBe('channel');
+    expect(saveInput.defaultDestinationChannelId).toBe('123456789');
   });
 
   it('includes the reviewer all-author setting when saving Review Code', () => {

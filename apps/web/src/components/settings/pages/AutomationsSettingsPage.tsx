@@ -33,13 +33,7 @@ export function AutomationsSettingsPage() {
         </header>
 
         {isAdmin ? (
-          <AutomationsSettings
-            toolbarLeading={
-              <div className="md:mr-auto">
-                <DeploymentTimeZoneSetting />
-              </div>
-            }
-          />
+          <AutomationsSettings toolbarLeading={<DeploymentTimeZoneSetting />} />
         ) : (
           <CustomAutomationsSection />
         )}
