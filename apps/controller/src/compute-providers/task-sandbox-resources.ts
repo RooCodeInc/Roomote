@@ -14,6 +14,9 @@ export async function taskNeedsNestedDocker(
   taskRun: TaskRun,
   environmentConfig: EnvironmentConfig | undefined,
 ): Promise<boolean> {
+  if (taskRun.payload.preparesEnvironment) {
+    return true;
+  }
   if (environmentConfig) {
     return Boolean(
       environmentConfig.docker_projects?.length ||

@@ -134,10 +134,12 @@ function readCallBody(source: string, openParen: number): string | null {
   return null;
 }
 
-function splitFirstArgument(body: string): { first: string; rest: string } {
+function splitTopLevelArguments(body: string): string[] {
+  const arguments_: string[] = [];
   let quote: '"' | "'" | null = null;
   let escaped = false;
   let depth = 0;
+  let start = 0;
   for (let index = 0; index < body.length; index++) {
     const char = body[index]!;
     if (quote) {
@@ -149,10 +151,23 @@ function splitFirstArgument(body: string): { first: string; rest: string } {
     if (char === '"' || char === "'") quote = char;
     else if (char === '(') depth++;
     else if (char === ')') depth--;
-    else if (char === ',' && depth === 0)
-      return { first: body.slice(0, index), rest: body.slice(index + 1) };
+    else if (char === ',' && depth === 0) {
+      arguments_.push(body.slice(start, index));
+      start = index + 1;
+    }
   }
-  return { first: body, rest: '' };
+  arguments_.push(body.slice(start));
+  return arguments_;
+}
+
+function namedArgument(
+  argument: string,
+): { name: string; value: string } | null {
+  const equals = argument.indexOf('=');
+  if (equals < 0) return null;
+  const name = argument.slice(0, equals).trim();
+  if (!isPackageName(name)) return null;
+  return { name, value: argument.slice(equals + 1).trim() };
 }
 
 function normalizePackageArgument(argument: string): string {
@@ -210,10 +225,18 @@ export function inspectRAnalysisScript(source: string): RAnalysisPreflight {
     }
     const body = readCallBody(code, afterIdentifier);
     if (body === null) continue;
-    const { first, rest } = splitFirstArgument(body);
-    const packageName = normalizePackageArgument(first);
-    const characterOnly =
-      rest.includes('character.only') && rest.includes('TRUE');
+    const arguments_ = splitTopLevelArguments(body);
+    const packageArgument =
+      arguments_
+        .map((argument) => ({ argument, named: namedArgument(argument) }))
+        .find(({ named }) => named?.name === 'package')?.named?.value ??
+      arguments_.find((argument) => namedArgument(argument) === null) ??
+      '';
+    const packageName = normalizePackageArgument(packageArgument);
+    const characterOnly = arguments_.some((argument) => {
+      const named = namedArgument(argument);
+      return named?.name === 'character.only' && named.value === 'TRUE';
+    });
     if (characterOnly) {
       if (packageName) unresolved.add(packageName);
     } else if (isPackageName(packageName) && !BASE_PACKAGES.has(packageName)) {
