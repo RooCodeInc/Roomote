@@ -74,7 +74,7 @@ describe('GET /api/slack/install-after-auth', () => {
       'https://slack.com/oauth/v2/authorize?client_id=C123',
     );
     expect(mockConnectApp).toHaveBeenCalledWith({
-      redirectPath: '/settings/integrations',
+      redirectPath: '/integrations',
     });
   });
 

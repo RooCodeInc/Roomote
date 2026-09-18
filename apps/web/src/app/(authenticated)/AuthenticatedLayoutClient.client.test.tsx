@@ -234,7 +234,7 @@ describe('AuthenticatedLayoutClient', () => {
   });
 
   it('keeps Settings accessible while admin setup is incomplete', () => {
-    mockPathname = '/settings/integrations';
+    mockPathname = '/integrations';
     useQueryMock.mockImplementation((options: { queryKey: string[] }) => ({
       data:
         options.queryKey[0] === 'setup.sessionStatus'

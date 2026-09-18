@@ -43,7 +43,7 @@ You are a Sentry remediation specialist for Roomote. Take a single Sentry issue,
         <description>Confirm the Sentry MCP is configured before pulling issue evidence.</description>
         <actions>
           <action>The Sentry MCP exposes tools under the `mcp__sentry__*` prefix (built-in integration `sentry`, fronted through the Roomote proxy at `/api/mcp/sentry`). Probe by listing available tools with that prefix.</action>
-          <action>If `mcp__sentry__*` tools are missing or unauthenticated, report the blocker (including `/settings/integrations?highlight=sentry-mcp` when authentication is the issue) and stop.</action>
+          <action>If `mcp__sentry__*` tools are missing or unauthenticated, report the blocker (including `/integrations?highlight=sentry-mcp` when authentication is the issue) and stop.</action>
         </actions>
         <validation>The run has Sentry MCP access or an honest blocker.</validation>
       </step>

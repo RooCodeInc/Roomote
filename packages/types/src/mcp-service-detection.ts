@@ -95,7 +95,7 @@ export const SLACK_MCP_SETUP_SERVICES: SlackMcpSetupServiceDefinition[] = [
     name: 'Asana',
     availabilityKind: 'admin_configured',
     hostSuffixes: ['app.asana.com'],
-    deploymentSettingsPath: '/settings/integrations',
+    deploymentSettingsPath: '/integrations',
     userSettingsPath: '/settings/personal',
   },
   {
@@ -103,7 +103,7 @@ export const SLACK_MCP_SETUP_SERVICES: SlackMcpSetupServiceDefinition[] = [
     name: 'Linear',
     availabilityKind: 'linear',
     hostSuffixes: ['linear.app'],
-    deploymentSettingsPath: '/settings/integrations',
+    deploymentSettingsPath: '/integrations',
     userSettingsPath: '/settings/personal',
   },
   {
@@ -122,7 +122,7 @@ export const SLACK_MCP_SETUP_SERVICES: SlackMcpSetupServiceDefinition[] = [
       'view.monday.com',
     ],
     pathPrefixes: ['/boards/'],
-    deploymentSettingsPath: '/settings/integrations',
+    deploymentSettingsPath: '/integrations',
     userSettingsPath: '/settings/personal',
   },
   {
@@ -130,7 +130,7 @@ export const SLACK_MCP_SETUP_SERVICES: SlackMcpSetupServiceDefinition[] = [
     name: 'Notion',
     availabilityKind: 'curated_oauth',
     hostSuffixes: ['notion.so', 'notion.site'],
-    deploymentSettingsPath: '/settings/integrations',
+    deploymentSettingsPath: '/integrations',
     userSettingsPath: '/settings/personal',
   },
   {
@@ -139,7 +139,7 @@ export const SLACK_MCP_SETUP_SERVICES: SlackMcpSetupServiceDefinition[] = [
     availabilityKind: 'curated_oauth',
     hostSuffixes: ['atlassian.net'],
     pathPrefixes: ['/browse/', '/issues/', '/jira/', '/projects/', '/secure/'],
-    deploymentSettingsPath: '/settings/integrations',
+    deploymentSettingsPath: '/integrations',
     userSettingsPath: '/settings/personal',
   },
   {
@@ -147,7 +147,7 @@ export const SLACK_MCP_SETUP_SERVICES: SlackMcpSetupServiceDefinition[] = [
     name: 'Sentry',
     availabilityKind: 'curated_oauth',
     hostSuffixes: ['sentry.io'],
-    deploymentSettingsPath: '/settings/integrations',
+    deploymentSettingsPath: '/integrations',
     userSettingsPath: '/settings/personal',
     settingsTargets: {
       deployment_auth_required_admin: {
@@ -173,7 +173,7 @@ export const SLACK_MCP_SETUP_SERVICES: SlackMcpSetupServiceDefinition[] = [
     name: 'Pylon',
     availabilityKind: 'curated_oauth',
     hostSuffixes: ['app.usepylon.com'],
-    deploymentSettingsPath: '/settings/integrations',
+    deploymentSettingsPath: '/integrations',
     userSettingsPath: '/settings/personal',
   },
   {
@@ -181,7 +181,7 @@ export const SLACK_MCP_SETUP_SERVICES: SlackMcpSetupServiceDefinition[] = [
     name: 'PostHog',
     availabilityKind: 'curated_oauth',
     hostSuffixes: ['posthog.com'],
-    deploymentSettingsPath: '/settings/integrations',
+    deploymentSettingsPath: '/integrations',
     userSettingsPath: '/settings/personal',
   },
   {
@@ -189,7 +189,7 @@ export const SLACK_MCP_SETUP_SERVICES: SlackMcpSetupServiceDefinition[] = [
     name: 'Neon',
     availabilityKind: 'curated_oauth',
     hostSuffixes: ['neon.tech'],
-    deploymentSettingsPath: '/settings/integrations',
+    deploymentSettingsPath: '/integrations',
     userSettingsPath: '/settings/personal',
   },
   {
@@ -197,7 +197,7 @@ export const SLACK_MCP_SETUP_SERVICES: SlackMcpSetupServiceDefinition[] = [
     name: 'Supabase',
     availabilityKind: 'curated_oauth',
     hostSuffixes: ['supabase.com'],
-    deploymentSettingsPath: '/settings/integrations',
+    deploymentSettingsPath: '/integrations',
     userSettingsPath: '/settings/personal',
   },
   {
@@ -205,7 +205,7 @@ export const SLACK_MCP_SETUP_SERVICES: SlackMcpSetupServiceDefinition[] = [
     name: 'Better Stack',
     availabilityKind: 'curated_oauth',
     hostSuffixes: ['betterstack.com'],
-    deploymentSettingsPath: '/settings/integrations',
+    deploymentSettingsPath: '/integrations',
     userSettingsPath: '/settings/personal',
   },
   {
@@ -214,7 +214,7 @@ export const SLACK_MCP_SETUP_SERVICES: SlackMcpSetupServiceDefinition[] = [
     availabilityKind: 'curated_oauth',
     hostSuffixes: ['railway.app', 'railway.com'],
     pathPrefixes: ['/project'],
-    deploymentSettingsPath: '/settings/integrations',
+    deploymentSettingsPath: '/integrations',
     userSettingsPath: '/settings/personal',
   },
   {
@@ -237,7 +237,7 @@ export const SLACK_MCP_SETUP_SERVICES: SlackMcpSetupServiceDefinition[] = [
       '/topics',
       '/webhooks',
     ],
-    deploymentSettingsPath: '/settings/integrations',
+    deploymentSettingsPath: '/integrations',
     userSettingsPath: '/settings/personal',
   },
   {
@@ -257,7 +257,7 @@ export const SLACK_MCP_SETUP_SERVICES: SlackMcpSetupServiceDefinition[] = [
         ],
       },
     ],
-    deploymentSettingsPath: '/settings/integrations',
+    deploymentSettingsPath: '/integrations',
     userSettingsPath: '/settings/personal',
   },
   {
@@ -265,7 +265,7 @@ export const SLACK_MCP_SETUP_SERVICES: SlackMcpSetupServiceDefinition[] = [
     name: 'Braintrust',
     availabilityKind: 'curated_oauth',
     hostSuffixes: ['braintrust.dev'],
-    deploymentSettingsPath: '/settings/integrations',
+    deploymentSettingsPath: '/integrations',
     userSettingsPath: '/settings/personal',
   },
   {
@@ -273,7 +273,7 @@ export const SLACK_MCP_SETUP_SERVICES: SlackMcpSetupServiceDefinition[] = [
     name: 'Granola',
     availabilityKind: 'admin_configured',
     hostSuffixes: ['notes.granola.ai'],
-    deploymentSettingsPath: '/settings/integrations',
+    deploymentSettingsPath: '/integrations',
     userSettingsPath: '/settings/personal',
   },
   {
@@ -281,7 +281,7 @@ export const SLACK_MCP_SETUP_SERVICES: SlackMcpSetupServiceDefinition[] = [
     name: 'Exa',
     availabilityKind: 'admin_configured',
     hostSuffixes: ['dashboard.exa.ai'],
-    deploymentSettingsPath: '/settings/integrations',
+    deploymentSettingsPath: '/integrations',
     userSettingsPath: '/settings/personal',
   },
   {
@@ -289,7 +289,7 @@ export const SLACK_MCP_SETUP_SERVICES: SlackMcpSetupServiceDefinition[] = [
     name: 'Supermemory',
     availabilityKind: 'curated_oauth',
     hostSuffixes: ['app.supermemory.ai', 'console.supermemory.ai'],
-    deploymentSettingsPath: '/settings/integrations',
+    deploymentSettingsPath: '/integrations',
     userSettingsPath: '/settings/personal',
   },
   {
@@ -307,7 +307,7 @@ export const SLACK_MCP_SETUP_SERVICES: SlackMcpSetupServiceDefinition[] = [
         pathRegexes: [X_POST_PATH_REGEX, X_APP_PATH_REGEX],
       },
     ],
-    deploymentSettingsPath: '/settings/integrations',
+    deploymentSettingsPath: '/integrations',
     userSettingsPath: '/settings/personal',
   },
   {
@@ -328,7 +328,7 @@ export const SLACK_MCP_SETUP_SERVICES: SlackMcpSetupServiceDefinition[] = [
         pathRegexes: [HOMEPAGE_PATH_REGEX],
       },
     ],
-    deploymentSettingsPath: '/settings/integrations',
+    deploymentSettingsPath: '/integrations',
     userSettingsPath: '/settings/personal',
   },
 ];
