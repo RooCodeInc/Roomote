@@ -1110,7 +1110,7 @@ roomoteMcpServer.registerTool(
   'manage_environments',
   {
     title: 'Manage Environments',
-    description: `Preview, create, or update ${PRODUCT_NAME} environments, or record an environment verification result. Create/update require explicit user approval for the exact previewed proposal; admin authorization remains separate.`,
+    description: `Preview, create, or update ${PRODUCT_NAME} environments, or record an environment verification result. Before create/update, tell the user what will change and ask whether to proceed. Only perform the write after an affirmative response; admin authorization remains separate.`,
     inputSchema: {
       action: z
         .enum(['preview', 'create', 'update', 'record_verification'])
@@ -1154,12 +1154,6 @@ roomoteMcpServer.registerTool(
         .optional()
         .describe(
           'For "record_verification" with success=false: a short, user-safe failure message. Never include secrets or full environment YAML.',
-        ),
-      approvedProposalHash: z
-        .string()
-        .optional()
-        .describe(
-          'For create/update: exact proposalHash returned by preview after request_user_input recorded an approval response using the returned approvalQuestionId and approvalAnswer. The server consumes that approval once; a changed definition requires a new preview and approval.',
         ),
     },
     annotations: {
@@ -1219,7 +1213,6 @@ roomoteMcpServer.registerTool(
           format: params.format,
           name: params.name,
           description: params.description,
-          approvedProposalHash: params.approvedProposalHash,
         },
         config,
       );
@@ -1231,7 +1224,6 @@ roomoteMcpServer.registerTool(
         format: params.format,
         name: params.name,
         description: params.description,
-        approvedProposalHash: params.approvedProposalHash,
       },
       config,
     );

@@ -4,10 +4,7 @@ import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
 
 import type { Variables } from '../../../types';
 import { mcpAuthMiddleware } from '../../mcp/middleware';
-import {
-  createEnvironment,
-  getEnvironmentProposalHash,
-} from '../createEnvironment';
+import { createEnvironment } from '../createEnvironment';
 import { updateEnvironment } from '../updateEnvironment';
 
 const {
@@ -17,7 +14,6 @@ const {
   mockUsersFindFirst,
   mockCreateSnapshot,
   mockEnvironmentInsertValues,
-  mockTaskMessagesFindMany,
 } = vi.hoisted(() => ({
   mockTaskRunFindFirst: vi.fn(),
   mockRepositoriesFindMany: vi.fn().mockResolvedValue([]),
@@ -25,27 +21,12 @@ const {
   mockUsersFindFirst: vi.fn(),
   mockCreateSnapshot: vi.fn(),
   mockEnvironmentInsertValues: vi.fn(),
-  mockTaskMessagesFindMany: vi.fn().mockResolvedValue([
-    {
-      id: 'approval-message',
-      payload: {
-        resolution: 'submitted',
-        answers: {
-          'environment-approval:approved-hash': { answers: ['approve'] },
-        },
-      },
-    },
-  ]),
 }));
 
 vi.mock('@roomote/db/server', async (importOriginal) => {
   const original = await importOriginal<typeof import('@roomote/db/server')>();
 
   const tx = {
-    query: {
-      taskRuns: { findFirst: mockTaskRunFindFirst },
-      taskMessages: { findMany: mockTaskMessagesFindMany },
-    },
     insert: () => ({
       values: (values: Record<string, unknown>) => {
         mockEnvironmentInsertValues(values);
@@ -53,11 +34,6 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
           returning: async () => [{ id: 'env-new' }],
         };
       },
-    }),
-    update: () => ({
-      set: () => ({
-        where: () => ({ returning: async () => [{ id: 'approval-message' }] }),
-      }),
     }),
   };
 
@@ -115,7 +91,6 @@ const attributionConfig = {
   name: 'Attribution Test',
   repositories: [{ repository: 'acme/app' }],
 };
-const attributionProposalHash = getEnvironmentProposalHash(attributionConfig);
 
 /**
  * Requests with an invalid JSON body: reaching the 400 body validation
@@ -135,17 +110,6 @@ describe.each([
 ] as const)('%s user-context gate', (_name, method, path) => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockTaskMessagesFindMany.mockResolvedValue([
-      {
-        id: 'approval-message',
-        payload: {
-          resolution: 'submitted',
-          answers: {
-            'environment-approval:approved-hash': { answers: ['approve'] },
-          },
-        },
-      },
-    ]);
     mockUsersFindFirst.mockResolvedValue({ role: 'admin', deletedAt: null });
   });
 
@@ -298,19 +262,6 @@ describe.each([
 describe('createEnvironment attribution', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockTaskMessagesFindMany.mockResolvedValue([
-      {
-        id: 'approval-message',
-        payload: {
-          resolution: 'submitted',
-          answers: {
-            [`environment-approval:${attributionProposalHash}`]: {
-              answers: ['approve'],
-            },
-          },
-        },
-      },
-    ]);
     mockUsersFindFirst.mockResolvedValue({ role: 'admin', deletedAt: null });
     mockEnvironmentsFindFirst.mockResolvedValue(null);
     mockRepositoriesFindMany.mockResolvedValue([
@@ -322,12 +273,11 @@ describe('createEnvironment attribution', () => {
     ]);
   });
 
-  it('attributes the write to the live acting user over the mint-time claim', async () => {
-    // First lookup: live-actor resolution. Second lookup: the post-create
-    // attachEnvironmentIdToTaskRun payload sync, which can no-op.
+  it('allows the conversational write and attributes it to the live acting user', async () => {
+    // First lookup: live-actor resolution. Second lookup: verification-task
+    // attribution. Third lookup: the post-create payload sync, which can no-op.
     mockTaskRunFindFirst
       .mockResolvedValueOnce({ actingUserId: 'user-live' })
-      .mockResolvedValueOnce({ taskId: 'task-1' })
       .mockResolvedValueOnce({ taskId: 'task-1' })
       .mockResolvedValueOnce(null);
 
@@ -343,7 +293,6 @@ describe('createEnvironment attribution', () => {
       new Request('http://localhost/environments', {
         method: 'POST',
         body: JSON.stringify({
-          approvedProposalHash: attributionProposalHash,
           config: attributionConfig,
         }),
         headers: { 'content-type': 'application/json' },
@@ -358,34 +307,6 @@ describe('createEnvironment attribution', () => {
       expect.anything(),
       expect.objectContaining({ createdByUserId: 'user-live' }),
     );
-  });
-
-  it('rejects a run-token write without a trusted approval response', async () => {
-    mockTaskRunFindFirst
-      .mockResolvedValueOnce({ actingUserId: 'user-live' })
-      .mockResolvedValueOnce({ taskId: 'task-1' })
-      .mockResolvedValueOnce({ taskId: 'task-1' });
-    mockTaskMessagesFindMany.mockResolvedValueOnce([]);
-
-    const app = createApp(deploymentRunToken());
-    const response = await app.request('/environments', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        approvedProposalHash: getEnvironmentProposalHash({
-          name: 'Unapproved',
-          repositories: [],
-        }),
-        config: { name: 'Unapproved', repositories: [] },
-      }),
-    });
-
-    expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toEqual({
-      error:
-        'Explicit user approval for this exact environment proposal is required.',
-    });
-    expect(mockEnvironmentInsertValues).not.toHaveBeenCalled();
   });
 
   it('creates an environment without repository mappings', async () => {
