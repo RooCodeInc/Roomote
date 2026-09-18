@@ -140,7 +140,11 @@ export function CodingModelRoutingRulesEditor({
   };
 
   return (
-    <Collapsible open={open} onOpenChange={setOpen} className="space-y-3 pb-3">
+    <Collapsible
+      open={open}
+      onOpenChange={setOpen}
+      className={`space-y-3 ${open ? 'pb-3' : ''}`}
+    >
       <CollapsibleTrigger className="group flex cursor-pointer items-center gap-1.5 text-left text-sm text-muted-foreground hover:text-foreground">
         <ChevronDown
           className="size-4 shrink-0 transition-transform"
@@ -160,7 +164,7 @@ export function CodingModelRoutingRulesEditor({
               return (
                 <div
                   key={index}
-                  className="flex flex-col gap-2 sm:flex-row sm:items-center"
+                  className="flex flex-col gap-2 md:flex-row md:items-center"
                 >
                   <Input
                     value={rule.condition}
@@ -174,34 +178,41 @@ export function CodingModelRoutingRulesEditor({
                     placeholder="When should this model be used?"
                     className="min-w-0 flex-1"
                   />
-                  <ArrowDownIcon className="ml-8 size-4 shrink-0 self-center text-muted-foreground sm:hidden" />
-                  <ArrowRight className="hidden size-4 shrink-0 self-center text-muted-foreground sm:block" />
-                  <div className="flex min-w-0 flex-wrap items-center gap-2">
-                    <TaskModelSelect
-                      value={rule.modelId}
-                      optionGroups={optionGroups}
-                      placeholder="Select a coding model"
-                      ariaLabel={`Routing rule ${index + 1} model`}
-                      onValueChange={(modelId) =>
-                        updateRule(index, {
-                          ...rule,
-                          modelId,
-                          reasoningEffort: supportsReasoning(models, modelId)
-                            ? (rule.reasoningEffort ?? 'medium')
-                            : null,
-                        })
-                      }
-                    />
-                    {modelSupportsReasoning ? (
-                      <ReasoningEffortSelect
-                        value={rule.reasoningEffort}
-                        defaultEffort="medium"
-                        onChange={(reasoningEffort) =>
-                          updateRule(index, { ...rule, reasoningEffort })
-                        }
-                        ariaLabel={`Routing rule ${index + 1} reasoning level`}
-                      />
-                    ) : null}
+                  <ArrowDownIcon className="ml-8 size-4 shrink-0 self-start text-muted-foreground md:hidden" />
+                  <ArrowRight className="hidden size-4 shrink-0 self-center text-muted-foreground md:block" />
+                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                    <div className="flex min-w-0 flex-1 flex-nowrap items-center gap-2">
+                      <div className="min-w-0 flex-1">
+                        <TaskModelSelect
+                          value={rule.modelId}
+                          optionGroups={optionGroups}
+                          placeholder="Select a coding model"
+                          ariaLabel={`Routing rule ${index + 1} model`}
+                          onValueChange={(modelId) =>
+                            updateRule(index, {
+                              ...rule,
+                              modelId,
+                              reasoningEffort: supportsReasoning(
+                                models,
+                                modelId,
+                              )
+                                ? (rule.reasoningEffort ?? 'medium')
+                                : null,
+                            })
+                          }
+                        />
+                      </div>
+                      {modelSupportsReasoning ? (
+                        <ReasoningEffortSelect
+                          value={rule.reasoningEffort}
+                          defaultEffort="medium"
+                          onChange={(reasoningEffort) =>
+                            updateRule(index, { ...rule, reasoningEffort })
+                          }
+                          ariaLabel={`Routing rule ${index + 1} reasoning level`}
+                        />
+                      ) : null}
+                    </div>
                     <BasicTooltip content="Remove routing rule">
                       <Button
                         type="button"
