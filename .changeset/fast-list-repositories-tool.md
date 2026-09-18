@@ -2,4 +2,4 @@
 '@roomote/web': minor
 ---
 
-Fast Sessions have a read-only `list_repositories` tool that searches the deployment's active connected repositories live, by name or description, with paging. The agent uses it to resolve a loosely named repository ("my fork of X") on deployments with more repositories than the prompt lists, and to look up a repository's ID, default branch, provider, host, URL, and mapped environments, instead of asking for a repository URL.
+Agents have a read-only `list_repositories` tool that searches connected repositories live, by name or description, with paging. In Fast Sessions it covers every active repository and returns each one's ID, default branch, provider, host, URL, and mapped environments, so a loosely named repository ("my fork of X") is resolved without asking for a URL even on deployments with more repositories than the prompt lists. In task sandboxes it covers the repositories the task is authorized to check out, with their checkout state, alongside the existing `REPOSITORIES.md` index and `clone_repository` tool; it appears in sandboxes once the worker image from this release is in use.

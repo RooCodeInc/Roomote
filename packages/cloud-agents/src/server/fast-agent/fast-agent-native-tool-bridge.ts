@@ -38,8 +38,8 @@ import {
   type FastAgentSurface,
   FAST_EXECUTION,
   FAST_AGENT_CAPABILITY_IDS,
-  FAST_AGENT_LIST_REPOSITORIES_DEFAULT_LIMIT,
-  FAST_AGENT_LIST_REPOSITORIES_MAX_LIMIT,
+  LIST_REPOSITORIES_DEFAULT_LIMIT,
+  LIST_REPOSITORIES_MAX_LIMIT,
 } from '@roomote/types';
 import { z } from 'zod';
 
@@ -710,7 +710,7 @@ export default {
   args: {
     query: z.string().min(1).nullable().optional().describe("Terms to match against the repository full name or description; omit or pass null to list every active repository"),
     offset: z.number().int().nonnegative().nullable().optional().describe("Continuation offset returned as nextOffset; omit or pass null for the first page"),
-    limit: z.number().int().positive().max(${FAST_AGENT_LIST_REPOSITORIES_MAX_LIMIT}).nullable().optional().describe("Page size, default ${FAST_AGENT_LIST_REPOSITORIES_DEFAULT_LIMIT}; omit or pass null for the default"),
+    limit: z.number().int().positive().max(${LIST_REPOSITORIES_MAX_LIMIT}).nullable().optional().describe("Page size, default ${LIST_REPOSITORIES_DEFAULT_LIMIT}; omit or pass null for the default"),
   },
   execute: (args, context) => invoke("list_repositories", args, context),
 }

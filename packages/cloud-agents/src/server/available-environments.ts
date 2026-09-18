@@ -13,8 +13,8 @@ import {
   repositories,
 } from '@roomote/db/server';
 import {
-  FAST_AGENT_LIST_REPOSITORIES_DEFAULT_LIMIT,
-  FAST_AGENT_LIST_REPOSITORIES_MAX_LIMIT,
+  LIST_REPOSITORIES_DEFAULT_LIMIT,
+  LIST_REPOSITORIES_MAX_LIMIT,
 } from '@roomote/types';
 
 /** An environment the Fast Session can delegate a task to. */
@@ -189,16 +189,13 @@ function truncateRepositoryDescription(description: string | null) {
 export async function listActiveRepositories({
   query,
   offset = 0,
-  limit = FAST_AGENT_LIST_REPOSITORIES_DEFAULT_LIMIT,
+  limit = LIST_REPOSITORIES_DEFAULT_LIMIT,
 }: {
   query?: string;
   offset?: number;
   limit?: number;
 } = {}): Promise<ListedRepositoriesPage> {
-  const pageSize = Math.min(
-    Math.max(limit, 1),
-    FAST_AGENT_LIST_REPOSITORIES_MAX_LIMIT,
-  );
+  const pageSize = Math.min(Math.max(limit, 1), LIST_REPOSITORIES_MAX_LIMIT);
   const terms = (query ?? '').split(/\s+/).filter(Boolean);
   const where = and(
     eq(repositories.isActive, true),

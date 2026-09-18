@@ -1,6 +1,8 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
+import { LIST_REPOSITORIES_TOOL_NAME } from '@roomote/types';
+
 import {
   CLONE_REPOSITORY_TOOL_NAME,
   ON_DEMAND_REPOSITORIES_MANIFEST_FILE,
@@ -30,6 +32,7 @@ function formatOnDemandRepositoriesGuidance({
     'Additional repositories are checked out on demand:',
     `- This task can use ${total} ${total === 1 ? 'repository' : 'repositories'}; ${clonedCount} ${clonedCount === 1 ? 'is' : 'are'} checked out right now. \`${ON_DEMAND_REPOSITORIES_MANIFEST_FILE}\` in this directory lists every repository with its default branch and description; read it to pick the right one.`,
     `- Before reading, searching, or changing a repository that is not checked out, call the \`${CLONE_REPOSITORY_TOOL_NAME}\` tool with \`repositoryFullName\` (for example \`${example}\`). It clones the repository under this directory, returns the path, and updates \`${ON_DEMAND_REPOSITORIES_MANIFEST_FILE}\`. Large repositories can take a minute or two.`,
+    `- The \`${LIST_REPOSITORIES_TOOL_NAME}\` tool searches those same repositories live by name or description; use it when \`${ON_DEMAND_REPOSITORIES_MANIFEST_FILE}\` is long, when you only have a loose name, or when a repository may have been connected after the task started.`,
     '- Check out only the repositories the task needs. Do not run `git clone` yourself, and do not assume a repository is missing from the deployment because it has no directory here.',
   ];
 }

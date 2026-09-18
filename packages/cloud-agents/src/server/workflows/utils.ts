@@ -322,6 +322,7 @@ export function getWorkspaceInstructions(
     return `
 Note: This workspace starts with no repositories checked out (Blank slate).
 - If \`REPOSITORIES.md\` exists at the workspace root, this deployment's source control is connected: the file lists every active repository with its default branch and description, and the \`clone_repository\` tool checks one out into \`<workspace root>/<owner>/<repo>\` and returns the path. Use it before reading, searching, or changing any of those repositories, and never run \`git clone\` for them yourself
+- The \`list_repositories\` tool searches those same repositories live by name or description; use it when \`REPOSITORIES.md\` is long, when you only have a loose name, or when a repository may have been connected after the task started
 - If there is no \`REPOSITORIES.md\`, the sandbox has no source-control credentials: complete the task without repository changes and do not attempt to commit, push, or open pull requests
 - A public repository outside the deployment may be cloned with git for read-only reference, but commits, pushes, and pull requests only work for repositories checked out through \`clone_repository\`
 - Check out only the repositories the task needs, and be explicit about which repository you're working in
@@ -333,6 +334,7 @@ Note: This workspace starts with no repositories checked out (Blank slate).
 Note: This workspace gives you every active repository in the deployment, checked out on demand. Repositories are NOT cloned up front:
 - \`REPOSITORIES.md\` at the workspace root lists each repository with its default branch and description; read it to choose the right one
 - Before reading, searching, or changing a repository that has no directory yet, call the \`clone_repository\` tool with its full name (owner/repo); it clones the repository into \`<workspace root>/<owner>/<repo>\` and returns the path
+- The \`list_repositories\` tool searches those same repositories live by name or description; use it when \`REPOSITORIES.md\` is long, when you only have a loose name, or when a repository may have been connected after the task started
 - Check out only the repositories the task needs, and never run \`git clone\` yourself
 - A missing directory does not mean the repository is unavailable; check \`REPOSITORIES.md\`
 
@@ -361,6 +363,7 @@ When working with multiple repositories:
     instructions += `
 - \`REPOSITORIES.md\` at the workspace root lists the active repositories authorized for this task and their current checkout state
 - Before reading, searching, or changing a repository that is not checked out, call the \`clone_repository\` tool with its full name (owner/repo); never run \`git clone\` for those repositories yourself
+- The \`list_repositories\` tool searches those same repositories live by name or description; use it when \`REPOSITORIES.md\` is long, when you only have a loose name, or when a repository may have been connected after the task started
 - Workspace selection controls the initial checkout and tooling. Checking out another repository does not run another environment's setup commands or provision its services
 `;
   }

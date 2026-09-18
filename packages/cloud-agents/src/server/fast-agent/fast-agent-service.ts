@@ -58,7 +58,7 @@ import {
   type DataVisualizationInput,
   CALL_INTEGRATION_TOOL_TOOL,
   FIND_INTEGRATION_TOOLS_TOOL,
-  FAST_AGENT_LIST_REPOSITORIES_MAX_LIMIT,
+  LIST_REPOSITORIES_MAX_LIMIT,
 } from '@roomote/types';
 import {
   and,
@@ -540,7 +540,7 @@ const listRepositoriesArgsSchema = z.object({
     .number()
     .int()
     .positive()
-    .max(FAST_AGENT_LIST_REPOSITORIES_MAX_LIMIT)
+    .max(LIST_REPOSITORIES_MAX_LIMIT)
     .nullable()
     .optional(),
 });

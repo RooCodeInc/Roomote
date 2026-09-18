@@ -37,10 +37,6 @@ export const FAST_AGENT_NATIVE_TOOL_NAMES = {
   reportPlatformIssue: 'report_platform_issue',
 } as const;
 
-/** Page-size bounds shared by the `list_repositories` schema and its query. */
-export const FAST_AGENT_LIST_REPOSITORIES_DEFAULT_LIMIT = 50;
-export const FAST_AGENT_LIST_REPOSITORIES_MAX_LIMIT = 100;
-
 export type FastAgentNativeToolName =
   (typeof FAST_AGENT_NATIVE_TOOL_NAMES)[keyof typeof FAST_AGENT_NATIVE_TOOL_NAMES];
 
