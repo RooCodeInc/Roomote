@@ -40,6 +40,8 @@ describe('OPENCODE_SLACK_HOOKS_PLUGIN_SCRIPT', () => {
     );
     delete process.env.ROOMOTE_COMMUNICATION_PROVIDER;
     delete process.env.ROOMOTE_SLACK_CHANNEL;
+    delete process.env.ROOMOTE_FAST_AGENT_CHILD;
+    delete process.env.ROOMOTE_FAST_AGENT_CHILD_CHAT_RELAY;
   });
 
   afterEach(() => {
@@ -105,7 +107,7 @@ describe('OPENCODE_SLACK_HOOKS_PLUGIN_SCRIPT', () => {
     await hooks['tool.execute.after']({ ...input, args: {} }, output);
 
     expect(output.output.startsWith('tool output')).toBe(true);
-    expect(output.output).toContain('substantive update before more work');
+    expect(output.output).toContain('chat-visible ack');
   });
 
   it('does not append a warning when the hook allows the tool call', async () => {
@@ -314,6 +316,6 @@ describe('OPENCODE_SLACK_HOOKS_PLUGIN_SCRIPT', () => {
     ).resolves.toBeUndefined();
 
     expect(output.output.startsWith('tool output')).toBe(true);
-    expect(output.output).toContain('substantive update before more work');
+    expect(output.output).toContain('chat-visible ack');
   });
 });
