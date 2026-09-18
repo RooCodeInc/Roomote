@@ -130,6 +130,20 @@ export async function insertToolCallApproval(
 ): Promise<ToolCallApprovalMetadata> {
   return db.transaction(async (tx) => {
     const owner = await requireSessionOwner(tx, context);
+    // Expiry is lazy: a cancelled or restarted executor never marks its own
+    // ask expired. Sweep the stale pending row for this exact call first so
+    // it neither hides the fresh ask nor trips the pending uniqueness index.
+    await tx
+      .update(toolCallApprovals)
+      .set({ status: 'expired' })
+      .where(
+        and(
+          eq(toolCallApprovals.sessionId, context.sessionId),
+          eq(toolCallApprovals.argsFingerprint, input.argsFingerprint),
+          eq(toolCallApprovals.status, 'pending'),
+          sql`${toolCallApprovals.expiresAt} <= clock_timestamp()`,
+        ),
+      );
     const pendingWhere = and(
       eq(toolCallApprovals.sessionId, context.sessionId),
       eq(toolCallApprovals.argsFingerprint, input.argsFingerprint),

@@ -140,6 +140,28 @@ describe('insertToolCallApproval', () => {
     ).toBe(1);
   });
 
+  it('sweeps a stale pending row so an interrupted ask does not block the call', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const context = { sessionId, userId };
+    // A cancelled or restarted executor leaves its pending row behind with
+    // the expiry window lapsed and no one left to mark it expired.
+    const stale = await insertPending(context);
+    await db
+      .update(toolCallApprovals)
+      .set({ expiresAt: new Date(Date.now() - 1_000) })
+      .where(eq(toolCallApprovals.id, stale.approvalId));
+    const fresh = await insertPending(context);
+    expect(fresh.approvalId).not.toBe(stale.approvalId);
+    expect(fresh.status).toBe('pending');
+    expect((await getToolCallApproval(stale.approvalId))?.status).toBe(
+      'expired',
+    );
+    expect(
+      (await listPendingToolCallApprovals({ sessionId, userId })).length,
+    ).toBe(1);
+  });
+
   it('treats changed arguments as a different call needing its own approval', async () => {
     const userId = await user();
     const sessionId = await ownedSession(userId);
