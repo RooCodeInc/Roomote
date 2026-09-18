@@ -42,11 +42,15 @@ same admin, ownership, and deployment availability rules apply as in Settings.
 Credentials are never collected in chat.
 
 Most catalog integrations connect once for the whole deployment, so connecting
-one makes it available to everyone. If you ask Roomote to connect a provider
-just for yourself, it says so rather than connecting a shared integration
-quietly, and offers the routes that can stay private instead: the provider's
-own remote MCP server added under [Personal Settings](/personal-settings), or a
-personal [integration key](/integration-keys).
+one makes it available to everyone; a few connect for one person instead. If
+you ask Roomote to connect a provider just for yourself, it goes by which kind
+that provider is. A per-person integration it simply connects for you. A
+deployment-wide one it does not connect quietly: it tells you the integration
+would be shared with everyone, and offers the routes that can stay private
+instead, the provider's own remote MCP server added under
+[Personal Settings](/personal-settings) or a personal
+[integration key](/integration-keys). It connects the shared integration only
+if you say that is fine.
 
 Roomote can list the full built-in catalog and current connection status without
 starting setup. A connection starts only after you ask to connect a provider.
