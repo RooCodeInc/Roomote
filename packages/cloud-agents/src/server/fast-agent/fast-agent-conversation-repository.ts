@@ -485,13 +485,15 @@ export async function loadFastAgentTurnAttemptSummary(
   return { events, next, prompt };
 }
 
-const transcriptImageRowSelection = {
-  eventId: fastAgentMessages.eventId,
-  turnId: fastAgentMessages.turnId,
-  ts: fastAgentMessages.ts,
-  turnSeq: fastAgentMessages.turnSeq,
-  contentBlocks: fastAgentMessages.contentBlocks,
-};
+function transcriptImageRowSelection() {
+  return {
+    eventId: fastAgentMessages.eventId,
+    turnId: fastAgentMessages.turnId,
+    ts: fastAgentMessages.ts,
+    turnSeq: fastAgentMessages.turnSeq,
+    contentBlocks: fastAgentMessages.contentBlocks,
+  };
+}
 
 function transcriptImageRows(
   rows: Array<{
@@ -514,7 +516,7 @@ export async function listFastAgentTranscriptImages(
   conversationId: string,
 ): Promise<{ images: FastAgentTranscriptImage[]; truncated: boolean }> {
   const rows = await db
-    .select(transcriptImageRowSelection)
+    .select(transcriptImageRowSelection())
     .from(fastAgentMessages)
     .where(
       and(
@@ -552,7 +554,7 @@ export async function loadFastAgentTranscriptImagesById(
   }
 
   const rows = await db
-    .select(transcriptImageRowSelection)
+    .select(transcriptImageRowSelection())
     .from(fastAgentMessages)
     .where(
       and(
