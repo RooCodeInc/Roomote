@@ -16,7 +16,6 @@ import {
   ALL_REPOSITORIES,
   FAST_EXECUTION,
   NO_REPOSITORIES,
-  MAX_CUSTOM_AUTOMATIONS,
   AUTOMATION_RESULT_PRIORITY_LABELS,
   AUTOMATION_RESULT_PRIORITIES,
   type AutomationResultPriority,
@@ -746,7 +745,6 @@ export function CustomAutomationsSection({
               .includes(normalizedSearch)
           );
         });
-  const atCap = rows.length >= MAX_CUSTOM_AUTOMATIONS;
   const busy =
     createMutation.isPending ||
     updateMutation.isPending ||
@@ -1275,7 +1273,7 @@ export function CustomAutomationsSection({
       <Button
         type="button"
         size="sm"
-        disabled={busy || atCap || !capabilitiesLoaded}
+        disabled={busy || !capabilitiesLoaded}
         onClick={() => {
           const target = destinationValueFromAutomationTarget(
             optionsQuery.data?.defaultTarget ?? {},
