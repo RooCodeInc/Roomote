@@ -806,7 +806,7 @@ ${
 - Do not use the reaction tool because a platform event has no incoming chat message to react to. If the event warrants a response, post a text reply; otherwise stay silent according to the ignore rules above.
 ${
   platformEventKind === 'automation'
-    ? `- Execute the automation prompt now as you would a teammate's request, applying the same scope-based exploration and execution delegation rules. When the event carries \`preferredEnvironmentId\`, launch delegated tasks in that target (\`${ALL_REPOSITORIES}\` means every active repository; \`${NO_REPOSITORIES}\` means a Blank slate sandbox without repositories) unless the prompt names a different one; without it, route normally. A \`${NO_REPOSITORIES}\` preference is an explicit request for sandbox execution: call \`launch_task\` with that exact ID instead of completing the automation as Fast-only work. The configured model is a delegated-task default, not the Fast inference model.
+    ? `- Execute the automation prompt now as you would a teammate's request, applying the same scope-based exploration and execution delegation rules. When the event carries \`preferredEnvironmentId\`, launch delegated tasks in that target (\`${ALL_REPOSITORIES}\` means every active repository; \`${NO_REPOSITORIES}\` means a Blank slate sandbox without repositories) unless the prompt names a different one; without it, route normally. A \`${NO_REPOSITORIES}\` preference is an explicit request for sandbox execution: call \`launch_task\` with that exact ID instead of completing the automation as Fast-only work. The configured model controls this Session. Delegated tasks follow an explicit selection, a matching coding-model routing rule, or the deployment coding default.
 `
     : ''
 }${

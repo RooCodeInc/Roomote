@@ -1196,12 +1196,12 @@ export function CustomAutomationsSection({
           </div>
 
           <div className="min-w-0 flex-1 space-y-2">
-            <Label>Delegated task model</Label>
+            <Label>Session model</Label>
             <ModelSelect
               size="default"
-              ariaLabel="Automation model"
+              ariaLabel="Automation session model"
               value={form.model}
-              emptyOptionLabel="Default delegated task model"
+              emptyOptionLabel="Default session model"
               className="w-full"
               disabled={busy}
               onValueChange={(value) => {
@@ -1220,6 +1220,10 @@ export function CustomAutomationsSection({
                 }));
               }}
             />
+            <p className="text-xs text-muted-foreground">
+              Coordinates this automation. Delegated tasks follow an explicit
+              selection, coding model routing, or the deployment coding default.
+            </p>
           </div>
 
           <div className="space-y-2 sm:w-40">
