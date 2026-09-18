@@ -14,6 +14,11 @@ describe('Fast transcript images', () => {
       eventId: '1712345678.123:user',
       imageIndex: 2,
     });
+    expect(
+      parseFastAgentTranscriptImageId(
+        `image:${Buffer.from('1712345678.123:user').toString('base64url')}:2`,
+      ),
+    ).toEqual({ eventId: '1712345678.123:user', imageIndex: 2 });
     expect(parseFastAgentTranscriptImageId('image:not base64:0')).toBeNull();
   });
 

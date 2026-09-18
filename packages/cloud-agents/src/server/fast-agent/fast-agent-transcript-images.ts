@@ -31,13 +31,15 @@ export function encodeFastAgentTranscriptImageId(
   eventId: string,
   imageIndex: number,
 ): string {
-  return `image:${Buffer.from(eventId, 'utf8').toString('base64url')}:${imageIndex}`;
+  return `img_${Buffer.from(eventId, 'utf8').toString('base64url')}_${imageIndex}`;
 }
 
 export function parseFastAgentTranscriptImageId(
   id: string,
 ): { eventId: string; imageIndex: number } | null {
-  const match = /^image:([A-Za-z0-9_-]+):(\d+)$/u.exec(id);
+  const match =
+    /^img_([A-Za-z0-9_-]+)_(\d+)$/u.exec(id) ??
+    /^image:([A-Za-z0-9_-]+):(\d+)$/u.exec(id);
   if (!match?.[1] || !match[2]) return null;
 
   const imageIndex = Number(match[2]);
