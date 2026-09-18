@@ -40,6 +40,11 @@ checkout and tooling, while the sandbox can still check out other active
 repositories authorized for the task through its `REPOSITORIES.md` index. An
 additional checkout does not provision another environment's services.
 
+You can name a repository loosely ("my fork of widgets", "the billing repo")
+without setting up an environment for it. Fast sees the deployment's active
+connected repositories and can search all of them by name or description, so it
+resolves the repository itself and asks only when several plausibly match.
+
 When work needs a sandbox but no source code, ask Fast to delegate it to
 **Blank slate**. The delegated task starts with an empty workspace and clones
 nothing up front. This is useful for artifact generation, integration work, and

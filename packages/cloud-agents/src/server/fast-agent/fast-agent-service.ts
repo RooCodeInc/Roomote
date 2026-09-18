@@ -58,6 +58,7 @@ import {
   type DataVisualizationInput,
   CALL_INTEGRATION_TOOL_TOOL,
   FIND_INTEGRATION_TOOLS_TOOL,
+  FAST_AGENT_LIST_REPOSITORIES_MAX_LIMIT,
 } from '@roomote/types';
 import {
   and,
@@ -108,6 +109,7 @@ import { resolveRoomoteReleaseVersion } from '../../release-version';
 import {
   getActiveRepositoryCatalog,
   getAvailableEnvironments,
+  listActiveRepositories,
   type RoutableEnvironment,
 } from '../available-environments';
 import {
@@ -530,6 +532,18 @@ const ignoreEventArgsSchema = z.object({ reason: z.string().trim().min(1) });
 const findIntegrationToolsArgsSchema = z.object(
   FIND_INTEGRATION_TOOLS_TOOL.inputSchema,
 );
+// gpt-5.x fills every optional argument, so null means absent here.
+const listRepositoriesArgsSchema = z.object({
+  query: z.string().trim().nullable().optional(),
+  offset: z.number().int().nonnegative().nullable().optional(),
+  limit: z
+    .number()
+    .int()
+    .positive()
+    .max(FAST_AGENT_LIST_REPOSITORIES_MAX_LIMIT)
+    .nullable()
+    .optional(),
+});
 const inspectImagesArgsSchema = z.object({
   question: z.string().min(1),
   imageIds: z.array(z.string().min(1)).nullable().optional(),
@@ -3985,6 +3999,9 @@ export async function answerFastAgentQuestion({
       // A catalog lookup reads nothing external; the call it prepares for is
       // still gated on the acknowledgement.
       FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools,
+      // Resolving which connected repository the user meant is part of
+      // understanding the request; it reads only this deployment's own list.
+      FAST_AGENT_NATIVE_TOOL_NAMES.listRepositories,
       // Reading an attachment the user just sent is part of understanding
       // the request, not an action taken on their behalf.
       FAST_AGENT_NATIVE_TOOL_NAMES.inspectImages,
@@ -5539,6 +5556,18 @@ export async function answerFastAgentQuestion({
             return describeIntegrationTools(
               findIntegrationToolsArgsSchema.parse(call.args),
             );
+          }
+          case FAST_AGENT_NATIVE_TOOL_NAMES.listRepositories: {
+            const args = listRepositoriesArgsSchema.parse(call.args);
+            throwIfTurnCancelled();
+            return {
+              success: true,
+              ...(await listActiveRepositories({
+                ...(args.query ? { query: args.query } : {}),
+                ...(args.offset ? { offset: args.offset } : {}),
+                ...(args.limit ? { limit: args.limit } : {}),
+              })),
+            };
           }
           case FAST_AGENT_NATIVE_TOOL_NAMES.inspectImages: {
             return inspectTurnImages(inspectImagesArgsSchema.parse(call.args));

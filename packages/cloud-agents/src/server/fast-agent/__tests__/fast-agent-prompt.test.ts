@@ -1636,7 +1636,7 @@ describe('buildFastAgentSystemPrompt', () => {
     });
     expect(truncated).toContain('  - Active repositories (149): acme/app\n');
     expect(truncated).toContain(
-      '  - 148 more active repositories are not listed here; an All repositories task can still resolve them by name.',
+      '  - 148 more active repositories are not listed here; call `list_repositories` with a name to search all of them.',
     );
 
     expect(
@@ -1689,10 +1689,19 @@ describe('buildFastAgentSystemPrompt', () => {
       'A single matching active repository is a suitable target even when no environment maps it: launch the task in All repositories and name that repository in the task prompt.',
     );
     expect(prompt).toContain(
-      'do not ask the user for a repository URL; launch an All repositories task',
+      'call `list_repositories` with the distinctive part of the name before asking anything',
     );
     expect(prompt).toContain(
-      'Ask only when several listed repositories plausibly match, including the same name listed more than once with different providers or hosts, and name the candidates.',
+      'Do not ask the user for a repository URL while source control is connected and that lookup has not been tried.',
+    );
+    expect(prompt).toContain(
+      'If the lookup itself fails, launch an All repositories task',
+    );
+    expect(prompt).toContain(
+      'the repository is not connected: say so instead of guessing',
+    );
+    expect(prompt).toContain(
+      'Ask only when several repositories plausibly match, including the same name listed more than once with different providers or hosts, and name the candidates.',
     );
     expect(
       prompt.indexOf('When the user refers to a repository by name'),
