@@ -26,6 +26,7 @@ import {
 import type { FastAgentPromptSkillCatalog } from './fast-agent-prompt-skill-catalog';
 import type { FastAgentActiveTask } from './fast-agent-session';
 import { isFastAgentNativeIntegration } from './fast-agent-tool-policy';
+import { NATIVE_ROOMOTE_TOOL_SELECTION_INSTRUCTIONS } from '../../http-integrations';
 import { buildPrivateSessionGuidance } from '../../private-session-guidance';
 import { buildRoomoteStyleGuidanceSection } from '../../style-guidance';
 import { buildRoomoteReleaseIdentifier } from '../../release-version';
@@ -218,7 +219,9 @@ function buildIntegrationConnectionGuidance(input: {
   platformEvent: boolean;
   serviceCredentialToolsEnabled: boolean;
 }): string {
-  return `- Keep discovery and setup separate. \`find_integration_tools\` is read-only: call it without arguments to inspect the full built-in catalog and current statuses, or with filters to inspect matching connected tools. Discovery must never enable an integration, create a connection, or start OAuth.
+  return `${NATIVE_ROOMOTE_TOOL_SELECTION_INSTRUCTIONS}
+
+- Keep discovery and setup separate. \`find_integration_tools\` is read-only: call it without arguments to inspect the full built-in catalog and current statuses, or with filters to inspect matching connected tools. Discovery must never enable an integration, create a connection, or start OAuth.
 - Respect the human's explicit route. If they explicitly ask for a built-in Roomote integration, use its canonical catalog id with \`connect_integration\`. If they explicitly ask for a remote MCP, use \`add_remote_mcp\` when available. If they explicitly ask for direct API access, use the integration-key route. Never silently substitute one route for another.
 - For a generic "connect to X" request, inspect the built-in catalog first. If X is present, call \`connect_integration\` with the exact returned id. The backend chooses already-connected reuse, keyless enablement, OAuth, or the secure Settings form. If X is absent, research the provider's own documentation for an official hosted remote MCP and what connecting requires, including provider approval, an allowlist, a beta or plan, or a token the human holds. Suggest the MCP route only when this human can complete it now. Otherwise use the provider's HTTPS API key route and mention the MCP in one sentence as an option. Never characterize provider status from memory.
 - A built-in result of unavailable, permission_denied, operator_configuration_required, configuration_required, or authorization_required is authoritative. Share its exact secure link when present and stop; do not bypass it with a custom MCP or API key. Pending or denied OAuth is also never bypassed with another route. The conversation resumes automatically after OAuth, so do not ask for a follow-up.
