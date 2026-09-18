@@ -949,7 +949,7 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
     );
   });
 
-  it('skips Notion connections with a legacy OAuth config', async () => {
+  it('supports Notion connections authorized through OAuth', async () => {
     mockOrderBy.mockResolvedValue([
       buildJoinedConnectionRow({
         authConfig: {
@@ -964,10 +964,16 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
       'https://api.preview.roomote.run/trpc/mcpConnections.getMcpServerConfigs',
     ).getMcpServerConfigs();
 
-    expect(result).toEqual({ servers: httpBrokerServers() });
-    expect(consoleWarnSpy).toHaveBeenCalledWith(
-      '[getMcpServerConfigs] Missing upstream URL for OAuth-backed MCP notion, skipping',
-    );
+    expect(result).toEqual({
+      servers: {
+        ...httpBrokerServers(),
+        notion: {
+          url: 'https://api.preview.roomote.run/api/mcp/notion',
+          headers: { 'X-MCP-Client': 'Roomote' },
+        },
+      },
+    });
+    expect(consoleWarnSpy).not.toHaveBeenCalled();
   });
 
   it('uses taskRuns.actingUserId for run-token actor-scoped lookups', async () => {

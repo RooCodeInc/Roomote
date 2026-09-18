@@ -24,6 +24,25 @@ export function buildRemoteMcpConnectedContinuation(name: string): string {
   return `<${INTEGRATION_SAVED_TAG}>\n${framing}\n</${INTEGRATION_SAVED_TAG}>\nI authorized the integration, go ahead.`;
 }
 
+export function buildNativeIntegrationOauthContinuation(
+  name: string,
+  outcome: 'connected' | 'canceled' | 'failed',
+): string {
+  const framing =
+    outcome === 'connected'
+      ? `The requesting user just authorized the ${name} integration through the secure OAuth flow. This block is hidden from them. Confirm that ${name} is connected, then continue the original request automatically. Silently discover the relevant tools if needed. Never ask for another follow-up, expose OAuth details, mention internal catalog checks, or ask for credentials in chat.`
+      : outcome === 'canceled'
+        ? `The requesting user canceled authorization for the ${name} integration. This block is hidden from them. State that ${name} was not connected and continue without it only when the original request still has a useful credential-free path. Do not switch to a custom MCP or generic integration-key fallback, and never ask for credentials in chat.`
+        : `Authorization for the ${name} integration failed. This block is hidden from them. State that ${name} was not connected and that authorization can be retried. Do not claim it is connected, switch to a custom MCP or generic integration-key fallback, expose OAuth details, or ask for credentials in chat.`;
+  const visible =
+    outcome === 'connected'
+      ? `I authorized ${name}, go ahead.`
+      : outcome === 'canceled'
+        ? `I canceled ${name} authorization.`
+        : `${name} authorization failed.`;
+  return `<${INTEGRATION_SAVED_TAG}>\n${framing}\n</${INTEGRATION_SAVED_TAG}>\n${visible}`;
+}
+
 /**
  * The human turn Roomote sends into a Fast Session when the human opened a
  * custom remote MCP authorization link and the provider refused to register

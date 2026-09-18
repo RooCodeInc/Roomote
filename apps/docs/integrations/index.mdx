@@ -34,6 +34,20 @@ You will usually see one of these setup models:
   then individual users link their identity so Roomote can associate actions
   correctly
 
+You can also ask Roomote to connect any integration in this catalog from a
+Session. Roomote starts the provider's OAuth flow when the integration supports
+OAuth, opens the existing secure configuration form when an admin-managed key
+or certificate is required, and enables keyless integrations directly. The
+same admin, ownership, and deployment availability rules apply as in Settings.
+Credentials are never collected in chat.
+
+Roomote can list the full built-in catalog and current connection status without
+starting setup. A connection starts only after you ask to connect a provider.
+If you explicitly request a remote MCP server or direct API access instead,
+Roomote keeps that choice separate from the built-in integration path. A denied
+or pending authorization, unavailable integration, or permission failure is not
+silently bypassed with another connection method.
+
 ## Manage available tools
 
 Some connected integrations expose a **Manage tools** action in

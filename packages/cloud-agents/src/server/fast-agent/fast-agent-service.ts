@@ -1,8 +1,12 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { ModelMessage } from 'ai';
 import { redactSecrets } from '@roomote/communication/redact-secrets';
 import { addRemoteCustomMcpForFast } from '@roomote/sdk/server/add-remote-custom-mcp';
 import { createFastSessionPlatformIssueReport } from '@roomote/sdk/server/platform-issue-reporting';
+import {
+  connectIntegrationForFast,
+  listNativeIntegrationsForFast,
+} from '@roomote/sdk/server/connect-integration';
 import {
   listServiceCredentialApprovals,
   prepareServiceCredential,
@@ -22,6 +26,7 @@ import {
   FAST_AGENT_HUMAN_FOLLOW_UP_EVENT_TYPE,
   FAST_AGENT_MEMORY_FACT_MAX_CHARS,
   INFERENCE_PROVIDER_MAX_RETRIES,
+  MCP_INTEGRATIONS,
   NO_REPOSITORIES,
   ROOMOTE_MCP_ID,
   HTTP_INTEGRATIONS_MCP_ID,
@@ -412,27 +417,11 @@ async function setFastSessionResponding(
 
 function buildFastAgentTurnId({
   currentMessageId,
-  conversation,
-  question,
 }: {
   currentMessageId?: string;
-  conversation: FastAgentConversation;
-  question: string;
 }): string {
   if (currentMessageId) return currentMessageId;
-
-  const digest = createHash('sha256')
-    .update(
-      JSON.stringify([
-        conversation.surface,
-        conversation.workspaceId,
-        conversation.conversationId,
-        question,
-      ]),
-    )
-    .digest('hex')
-    .slice(0, 24);
-  return `fallback:${digest}`;
+  return `fallback:${randomUUID()}`;
 }
 
 function serializeFastAgentToolOutput(result: unknown): {
@@ -1751,6 +1740,13 @@ const addRemoteMcpArgsSchema = z
   })
   .strict();
 
+const nativeIntegrationIdSchema = z.enum(
+  MCP_INTEGRATIONS.map(({ id }) => id) as [string, ...string[]],
+);
+const connectIntegrationArgsSchema = z
+  .object({ integrationId: nativeIntegrationIdSchema })
+  .strict();
+
 export async function answerFastAgentQuestion({
   question,
   images = [],
@@ -1877,8 +1873,6 @@ export async function answerFastAgentQuestion({
   const chatInitiationOrder = createChatInitiationOrder();
   const turnId = buildFastAgentTurnId({
     currentMessageId,
-    conversation,
-    question,
   });
   const diagnostics = new FastAgentTurnDiagnostics({
     conversation,
@@ -2523,8 +2517,6 @@ export async function answerFastAgentQuestion({
 
         const followUpTurnId = buildFastAgentTurnId({
           currentMessageId: followUp.currentMessageId,
-          conversation,
-          question: followUp.question,
         });
         const { turnMessages } = buildFastAgentMessages({
           question: followUp.question,
@@ -3212,6 +3204,7 @@ export async function answerFastAgentQuestion({
       discoveredIntegrations,
       currentUser,
       agentBehaviorSettings,
+      nativeIntegrationCatalog,
     ] = await Promise.all([
       getAvailableEnvironments(),
       getDeploymentTaskModelOptions().catch((error) => {
@@ -3283,6 +3276,13 @@ export async function answerFastAgentQuestion({
           );
           return undefined;
         }),
+      listNativeIntegrationsForFast({ userId }).catch((error) => {
+        degradedContextComponents.add('native_integration_catalog');
+        console.warn(
+          `[Fast Agent] Built-in integration catalog unavailable: ${formatErrorForLog(error)}`,
+        );
+        return [];
+      }),
     ]);
     // The judgment model's environment pick is only useful before the Session
     // has chosen where its work runs, so it is requested for what looks like
@@ -3629,6 +3629,7 @@ export async function answerFastAgentQuestion({
       availableTaskModels: taskModelOptions.models,
       defaultTaskModelId: taskModelOptions.defaultModelId,
       availableIntegrations,
+      nativeIntegrationCatalog,
       activeTasks: resolvedActiveTasks,
       sessionGoal,
       surface: conversation.surface,
@@ -4218,17 +4219,34 @@ export async function answerFastAgentQuestion({
         onDemandIntegrations,
         args,
       );
-      if (found.unknownIntegration) {
+      const normalizedQuery = args.query?.trim().toLowerCase();
+      const catalogIntegrations = nativeIntegrationCatalog.filter(
+        (integration) => {
+          if (args.integrationId) return integration.id === args.integrationId;
+          if (!normalizedQuery || args.toolName) return !args.toolName;
+          const searchable =
+            `${integration.id} ${integration.name} ${integration.description}`.toLowerCase();
+          return normalizedQuery
+            .split(/\s+/u)
+            .every((term) => searchable.includes(term));
+        },
+      );
+      if (found.unknownIntegration && catalogIntegrations.length === 0) {
         return {
           success: false as const,
           error: `No on-demand deployment MCP server with id "${args.integrationId}" is available in fast mode.`,
         };
       }
+      const disconnectedCatalogMatch = catalogIntegrations.some(
+        (integration) => integration.status !== 'connected',
+      );
       const emptyReason =
         found.tools.length === 0
-          ? found.availableToolCount > 0
-            ? 'no_filter_match'
-            : 'no_exposed_tools'
+          ? disconnectedCatalogMatch
+            ? 'integration_not_connected'
+            : found.availableToolCount > 0
+              ? 'no_filter_match'
+              : 'no_exposed_tools'
           : undefined;
       if (found.tools.length === 0) {
         console.warn(
@@ -4250,6 +4268,9 @@ export async function answerFastAgentQuestion({
       }
       return {
         success: true as const,
+        ...(catalogIntegrations.length > 0
+          ? { integrations: catalogIntegrations }
+          : {}),
         tools: found.tools,
         availableToolCount: found.availableToolCount,
         ...(emptyReason ? { emptyReason } : {}),
@@ -4259,7 +4280,12 @@ export async function answerFastAgentQuestion({
             ? { guidance: INTEGRATION_TOOL_LOOKUP_NO_MATCH_GUIDANCE }
             : emptyReason === 'no_exposed_tools'
               ? { guidance: INTEGRATION_TOOL_LOOKUP_NO_EXPOSED_TOOLS_GUIDANCE }
-              : {}),
+              : emptyReason === 'integration_not_connected'
+                ? {
+                    guidance:
+                      'This built-in integration is known but not connected. Discovery is read-only; call connect_integration with its exact catalog id only when the human asked to connect it.',
+                  }
+                : {}),
       };
     };
     // Subagents may look up and call on-demand deployment MCP tools; every
@@ -4333,6 +4359,51 @@ export async function answerFastAgentQuestion({
           };
         }
         switch (call.name) {
+          case FAST_AGENT_NATIVE_TOOL_NAMES.connectIntegration: {
+            if (platformEvent) {
+              return {
+                success: false,
+                error:
+                  'A human must request integration setup before it can start.',
+              };
+            }
+            const args = connectIntegrationArgsSchema.parse(call.args);
+            const canonicalSession = await getSessionForFastConversation(
+              db,
+              session.id,
+            );
+            if (!canonicalSession) {
+              return {
+                success: false,
+                error: 'This Fast conversation is not attached to a Session.',
+              };
+            }
+            const result = await connectIntegrationForFast({
+              userId,
+              sessionId: canonicalSession.id,
+              integrationId: args.integrationId,
+            });
+            if (result.status === 'connected') {
+              const refreshedIntegrations = await listFastAgentIntegrations(
+                { userId, apiBaseUrl },
+                adapter.resolveMcpServerConfigs,
+              );
+              availableIntegrations.splice(
+                0,
+                availableIntegrations.length,
+                ...refreshedIntegrations,
+              );
+              onDemandIntegrations.splice(
+                0,
+                onDemandIntegrations.length,
+                ...refreshedIntegrations.filter(
+                  (integration) =>
+                    !isFastAgentNativeIntegration(integration.id),
+                ),
+              );
+            }
+            return { success: true, ...result };
+          }
           case FAST_AGENT_NATIVE_TOOL_NAMES.addRemoteMcp: {
             if (platformEvent) {
               return {

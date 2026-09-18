@@ -9,6 +9,7 @@ import {
   slackInstallations,
   resolveDiscordRuntimeCredentials,
 } from '@roomote/db/server';
+import { encrypt } from '@roomote/db/encryption';
 import {
   BRAIN_SOURCES,
   isMcpConnectionGranolaConfig,
@@ -22,6 +23,8 @@ import {
 } from '@roomote/types';
 
 import { hasBrainGithubSources } from './brain-github';
+import { NOTION_API_ORIGIN } from './notion-api';
+import { getValidAccessToken } from './mcp/data';
 import {
   findLinearDeploymentMcpConnection,
   getLinearDeploymentMetadata,
@@ -89,9 +92,18 @@ export async function findBrainSourceConnectionConfig(
       : Promise.resolve({ mcpId: source }),
   ]);
 
-  return enablement && policy.isConfig(connection?.authConfig)
-    ? connection.authConfig
-    : null;
+  if (!enablement || !connection) return null;
+  if (policy.isConfig(connection.authConfig)) return connection.authConfig;
+  if (source === 'notion') {
+    const accessToken = await getValidAccessToken(
+      connection.id,
+      NOTION_API_ORIGIN,
+    );
+    return accessToken
+      ? { type: 'notion', encryptedToken: encrypt(accessToken) }
+      : null;
+  }
+  return null;
 }
 
 const BRAIN_SOURCE_AVAILABILITY = {

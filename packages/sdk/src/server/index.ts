@@ -595,6 +595,13 @@ export {
   prepareDeploymentCustomMcpOAuthConnection,
   type AddRemoteCustomMcpResult,
 } from './lib/mcp/add-remote-custom-mcp';
+export {
+  connectIntegrationForFast,
+  listNativeIntegrationsForFast,
+  getNativeIntegrationSetupStrategy,
+  type NativeIntegrationSetupStrategy,
+  type ConnectIntegrationResult,
+} from './lib/mcp/connect-integration';
 
 export {
   LINEAR_ORG_CONNECTION_ROLE,

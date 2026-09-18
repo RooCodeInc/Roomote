@@ -21,6 +21,7 @@ import {
   discoverOAuthEndpoints,
   exchangeCodeForTokens,
   consumeOAuthState,
+  getMcpOauthReplay,
   storeTokens,
   getClientInformation,
   updateAuthStatus,
@@ -32,7 +33,11 @@ import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
 import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
 import { logger } from '@/lib/server/logger';
 import { captureIntegrationLifecycleEvent } from '@/lib/server/integration-telemetry';
-import { buildRemoteMcpConnectedContinuation } from '@/lib/server/integration-saved-continuation';
+import {
+  buildNativeIntegrationOauthContinuation,
+  buildRemoteMcpConnectedContinuation,
+} from '@/lib/server/integration-saved-continuation';
+import type { UserAuthSuccess } from '@/types/auth';
 import { resumeFastSessionFromReplay } from '@/lib/server/mcp-oauth-replay-continuation';
 import {
   hydrateLinearMcpConnectionAfterOauth,
@@ -156,6 +161,32 @@ function redirectWithMcpResult(
   return response;
 }
 
+async function continueFastSessionAfterOauth(input: {
+  auth: UserAuthSuccess;
+  replayToken: string | null | undefined;
+  connectionId: string;
+  mcpId: string;
+  integrationName: string;
+  customIntegration: boolean;
+  outcome: 'connected' | 'canceled' | 'failed';
+}) {
+  if (!input.replayToken) return;
+  await resumeFastSessionFromReplay({
+    replayToken: input.replayToken,
+    authResult: input.auth,
+    connectionId: input.connectionId,
+    mcpId: input.mcpId,
+    text:
+      input.customIntegration && input.outcome === 'connected'
+        ? buildRemoteMcpConnectedContinuation(input.integrationName)
+        : buildNativeIntegrationOauthContinuation(
+            input.integrationName,
+            input.outcome,
+          ),
+    event: 'mcp_oauth_continuation_failed',
+  });
+}
+
 export async function GET(request: NextRequest) {
   const webEnv = await bootstrapWebRuntimeEnv();
   const state = request.nextUrl.searchParams.get('state');
@@ -196,7 +227,41 @@ export async function GET(request: NextRequest) {
       try {
         const oauthState = await consumeOAuthState(state);
         if (oauthState) {
+          const connection = await db.query.mcpConnections.findFirst({
+            where: eq(mcpConnections.id, oauthState.connectionId),
+          });
+          const providerAuth = await authorize();
+          const replay = oauthState.replayToken
+            ? await getMcpOauthReplay(oauthState.replayToken)
+            : null;
+          if (
+            oauthState.replayToken &&
+            (!providerAuth.success ||
+              !connection ||
+              replay?.userId !== providerAuth.userId ||
+              replay.connectionId !== connection.id ||
+              replay.mcpId !== connection.mcpId)
+          ) {
+            return redirectToResult({
+              status: 'error',
+              reason: 'invalid_state',
+            });
+          }
           await updateAuthStatus(oauthState.connectionId, 'error');
+          const integration = connection
+            ? getMcpIntegration(connection.mcpId)
+            : null;
+          if (connection && providerAuth.success) {
+            await continueFastSessionAfterOauth({
+              auth: providerAuth,
+              replayToken: oauthState.replayToken,
+              connectionId: connection.id,
+              mcpId: connection.mcpId,
+              integrationName: integration?.name ?? 'integration',
+              customIntegration: isCustomMcpConnectionId(connection.mcpId),
+              outcome: reason === 'access_denied' ? 'canceled' : 'failed',
+            });
+          }
           return redirectToResult({ status: 'error', reason });
         }
       } catch (e) {
@@ -262,6 +327,7 @@ export async function GET(request: NextRequest) {
   let connectionId: string | undefined;
   let integrationId: string | undefined;
   let connectionRole: string | undefined;
+  let oauthReplayToken: string | null | undefined;
   let failureStage: McpOAuthCallbackStage = 'state_validation';
 
   try {
@@ -276,6 +342,7 @@ export async function GET(request: NextRequest) {
       );
       return redirectToResult({ status: 'error', reason: 'invalid_state' });
     }
+    oauthReplayToken = oauthState.replayToken;
 
     const resolvedConnectionId = oauthState.connectionId;
     connectionId = resolvedConnectionId;
@@ -308,7 +375,8 @@ export async function GET(request: NextRequest) {
 
       if (
         !integration ||
-        !isSelfServeMcpIntegration(integration) ||
+        (!isSelfServeMcpIntegration(integration) &&
+          !integration.oauthEndpoints) ||
         !integration.url
       ) {
         return redirectToResult({ status: 'error', reason: 'not_found' });
@@ -331,6 +399,18 @@ export async function GET(request: NextRequest) {
       return redirectToResult({ status: 'error', reason: 'not_found' });
     }
 
+    if (oauthState.replayToken) {
+      const replay = await getMcpOauthReplay(oauthState.replayToken);
+      if (
+        !replay ||
+        replay.userId !== userId ||
+        replay.connectionId !== resolvedConnectionId ||
+        replay.mcpId !== connection.mcpId
+      ) {
+        return redirectToResult({ status: 'error', reason: 'invalid_state' });
+      }
+    }
+
     failureStage = 'client_lookup';
     const clientInfo = await getClientInformation(resolvedConnectionId);
     if (!clientInfo) {
@@ -350,6 +430,19 @@ export async function GET(request: NextRequest) {
     const integrationResource = getMcpIntegrationOauthResource(
       integration ?? undefined,
     );
+    const integrationOauthOptions =
+      integration &&
+      (integrationResource ||
+        integration.oauthTokenRequestFormat ||
+        integration.oauthPkce === false)
+        ? {
+            ...(integrationResource ? { resource: integrationResource } : {}),
+            ...(integration.oauthTokenRequestFormat
+              ? { tokenRequestFormat: integration.oauthTokenRequestFormat }
+              : {}),
+            ...(integration.oauthPkce === false ? { usePkce: false } : {}),
+          }
+        : undefined;
     const tokens = customTarget
       ? await exchangeCodeForTokens(
           tokenEndpoint,
@@ -359,14 +452,14 @@ export async function GET(request: NextRequest) {
           redirectUri,
           customTarget.oauthOptions,
         )
-      : integrationResource
+      : integrationOauthOptions
         ? await exchangeCodeForTokens(
             tokenEndpoint,
             code,
             oauthState.codeVerifier,
             clientInfo,
             redirectUri,
-            { resource: integrationResource },
+            integrationOauthOptions,
           )
         : await exchangeCodeForTokens(
             tokenEndpoint,
@@ -442,15 +535,27 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    if (customTarget && oauthState.replayToken) {
-      await resumeFastSessionFromReplay({
+    try {
+      await continueFastSessionAfterOauth({
+        auth: authResult,
         replayToken: oauthState.replayToken,
-        authResult,
         connectionId: resolvedConnectionId,
         mcpId: connection.mcpId,
-        text: buildRemoteMcpConnectedContinuation(customTarget.name),
-        event: 'custom_mcp_oauth_continuation_failed',
+        integrationName:
+          customTarget?.name ?? integration?.name ?? 'integration',
+        customIntegration: Boolean(customTarget),
+        outcome: 'connected',
       });
+    } catch (continuationError) {
+      logger.error(
+        {
+          event: 'mcp_oauth_continuation_failed',
+          connectionId: resolvedConnectionId,
+          integrationId: connection.mcpId,
+          errorName: getErrorName(continuationError),
+        },
+        'Failed to continue the Fast Session after MCP OAuth',
+      );
     }
 
     return redirectToResult({ status: 'connected' });
@@ -481,6 +586,31 @@ export async function GET(request: NextRequest) {
             errorName: getErrorName(statusError),
           },
           'Failed to mark an MCP OAuth connection as errored',
+        );
+      }
+    }
+
+    if (connectionId && integrationId && oauthReplayToken) {
+      const integration = getMcpIntegration(integrationId);
+      try {
+        await continueFastSessionAfterOauth({
+          auth: authResult,
+          replayToken: oauthReplayToken,
+          connectionId,
+          mcpId: integrationId,
+          integrationName: integration?.name ?? 'integration',
+          customIntegration: isCustomMcpConnectionId(integrationId),
+          outcome: 'failed',
+        });
+      } catch (continuationError) {
+        logger.error(
+          {
+            event: 'mcp_oauth_failure_continuation_failed',
+            connectionId,
+            integrationId,
+            errorName: getErrorName(continuationError),
+          },
+          'Failed to continue the Fast Session after MCP OAuth failure',
         );
       }
     }

@@ -426,6 +426,33 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     );
   });
 
+  it('exposes canonical catalog connection as an explicit Session tool', () => {
+    const tool = tools.find(
+      ({ name }) => name === FAST_AGENT_NATIVE_TOOL_NAMES.connectIntegration,
+    )!;
+    const schema = toOpenCodeJsonSchema(zod, tool.args!);
+
+    expect(tool.description).toContain(
+      'selected from the read-only catalog returned by find_integration_tools',
+    );
+    expect(tool.description).toContain(
+      'Pass only the exact canonical provider id',
+    );
+    expect(Object.keys(tool.args!)).toEqual(['integrationId']);
+    expect(schema).toMatchObject({
+      type: 'object',
+      properties: {
+        integrationId: {
+          type: 'string',
+          enum: expect.arrayContaining(['notion', 'granola', 'sentry']),
+        },
+      },
+    });
+    expect(JSON.stringify(schema)).not.toMatch(
+      /secret|token|header|client[_-]?id/i,
+    );
+  });
+
   it('keeps integration-key tool descriptions aware of the remote MCP route', () => {
     const prepare = tools.find(
       ({ name }) =>
