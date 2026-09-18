@@ -8,23 +8,6 @@ import {
   type CredentialEgressMethod,
 } from './credential-egress';
 
-export const SERVICE_CREDENTIAL_TOOLS_EXPERIMENT_KEY =
-  'integration_keys_enabled' as const;
-
-/** @deprecated Retained for N-1 rollback compatibility with dormant user metadata. */
-export function isServiceCredentialToolsExperimentEnabled(
-  metadata: unknown,
-): boolean {
-  return (
-    Boolean(metadata) &&
-    typeof metadata === 'object' &&
-    !Array.isArray(metadata) &&
-    (metadata as Record<string, unknown>)[
-      SERVICE_CREDENTIAL_TOOLS_EXPERIMENT_KEY
-    ] === true
-  );
-}
-
 /** One year; an omitted lifetime keeps the integration until it is revoked. */
 export const SERVICE_CREDENTIAL_MAX_LIFETIME_HOURS = 8760;
 /** How long a prepared approval waits for the human to enter the key. */

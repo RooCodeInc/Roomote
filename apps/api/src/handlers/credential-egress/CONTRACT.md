@@ -49,8 +49,7 @@ Request (`credentialEgressWorkloadRegisterSchema`):
 - `runId`: the attached run. Eligible only if the run status is in
   `activeRunStatuses`, it is attached (`session_tasks`) to exactly one Session,
   that Session is `ownerKind = 'user'`, unarchived, and the run's
-  `actingUserId` equals the Session owner, who is not deleted and has Session
-  secret tools enabled (`integration_keys_enabled`). The owner check is
+  `actingUserId` equals the Session owner, who is not deleted. The owner check is
   made inside the minting transaction, not only in the controller's preflight.
 - `connectorIdentity`: a synthetic identity unique per registration (16–512
   printable ASCII chars), unique among active workloads. The column keeps its
@@ -133,9 +132,8 @@ and waits. The controller then registers the run through `POST /workloads`
 and publishes, bound to that nonce, the substitute-only client configuration:
 `ROOMOTE_SERVICE_BASE_URL` (one base URL shared by every approved service),
 `ROOMOTE_CREDENTIAL_EGRESS_SERVICES` (the nonsecret manifest), and one
-`ROOMOTE_SERVICE_TOKEN_<LABEL>` per grant. Delivery is gated per Session owner
-by the same `integration_keys_enabled` experiment that gates the Fast and
-coding-run tools; no deployment configuration is needed. The workload never
+`ROOMOTE_SERVICE_TOKEN_<LABEL>` per grant. No deployment configuration is
+needed. The workload never
 receives the real credential, a proxy address, or a CA bundle, and nothing
 about its networking or inference routing changes.
 
@@ -153,9 +151,9 @@ token except request-shaping ones (see `isCredentialEgressCredentialHeaderName`)
 Per request the API performs one live decision, re-joined from the database
 with nothing cached: token lookup by hash → workload active and lease
 unexpired → generation match → grant not revoked → grant not expired → owner
-not deleted and still has integration keys enabled, Session unarchived and
-still owned by the same user, grant belongs to that Session/owner, run still
-active with `actingUserId = owner`, run still attached to the Session →
+not deleted, Session unarchived and still owned by the same user, grant belongs
+to that Session/owner, run still active with `actingUserId = owner`, run still
+attached to the Session →
 approved origin still passes the deployment public-egress policy
 (`assertEgressUrlAllowed`, HTTPS) → method in the grant's `allowedMethods`.
 Method policy is literal: `HEAD` is not implied by `GET`; the default policy

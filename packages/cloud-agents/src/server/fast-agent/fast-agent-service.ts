@@ -5078,8 +5078,8 @@ export async function answerFastAgentQuestion({
           case FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential:
           case FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials: {
             // The model only ever sees the generic message; the bounded reason
-            // goes to server logs so operators can distinguish a disabled
-            // experiment from a missing Session binding.
+            // goes to server logs so operators can distinguish the missing
+            // Session or actor binding.
             const unavailable = (reason: string, nameReason = false) => {
               console.warn(
                 `[Fast Agent] ${call.name} unavailable (reason=${reason})`,
@@ -5112,7 +5112,7 @@ export async function answerFastAgentQuestion({
                 return unavailable(reason, true);
               }
               if (!currentUser.serviceCredentialToolsEnabled) {
-                return unavailable('experiment_disabled');
+                return unavailable('inactive_actor');
               }
               if (
                 platformEvent &&

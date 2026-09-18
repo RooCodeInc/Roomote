@@ -1,6 +1,4 @@
 import {
-  isServiceCredentialToolsExperimentEnabled,
-  SERVICE_CREDENTIAL_TOOLS_EXPERIMENT_KEY,
   serviceCredentialPrepareSchema,
   hasLeadingIntegrationSavedBlock,
   stripLeadingIntegrationSavedBlock,
@@ -8,29 +6,6 @@ import {
   integrationCreateSchema,
 } from './service-credentials';
 import { isCredentialEgressCredentialHeaderName } from './credential-egress';
-
-describe('integration keys experiment', () => {
-  it('uses a stable identifier and defaults off', () => {
-    expect(SERVICE_CREDENTIAL_TOOLS_EXPERIMENT_KEY).toBe(
-      'integration_keys_enabled',
-    );
-    expect(isServiceCredentialToolsExperimentEnabled(undefined)).toBe(false);
-    expect(isServiceCredentialToolsExperimentEnabled({})).toBe(false);
-  });
-
-  it('enables only for an explicit boolean true', () => {
-    expect(
-      isServiceCredentialToolsExperimentEnabled({
-        integration_keys_enabled: true,
-      }),
-    ).toBe(true);
-    expect(
-      isServiceCredentialToolsExperimentEnabled({
-        integration_keys_enabled: 'true',
-      }),
-    ).toBe(false);
-  });
-});
 
 describe('credential header names', () => {
   const prepare = (headerName: string, headerPrefix = '') =>

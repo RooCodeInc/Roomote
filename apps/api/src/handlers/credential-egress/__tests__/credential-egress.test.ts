@@ -28,7 +28,6 @@ import {
   sessionFactory,
   taskFactory,
   runFactory,
-  setDeploymentExperimentEnabled,
   hashCredentialEgressSubstitute,
   type ServiceCredentialContext,
 } from '@roomote/db/server';
@@ -239,7 +238,6 @@ beforeEach(async () => {
   minted.length = 0;
   for (let i = 0; i < 2; i++) userIds.push((await userFactory.create()).id);
   [ownerId, otherId] = userIds as [string, string];
-  await setDeploymentExperimentEnabled('serviceCredentialTools', true);
   const row = await session(ownerId);
   sessionId = row.id;
   context = { userId: ownerId, sessionId };
@@ -1075,30 +1073,4 @@ it('drives the controller flow through the typed SDK client', async () => {
   await expect(
     client.renewLease(registration.workloadId, { leaseSeconds: 300 }),
   ).rejects.toThrow(/404 workload_not_found/);
-});
-
-it('treats a deployment that turned integration keys off as ineligible everywhere', async () => {
-  const base = await registered();
-  await setDeploymentExperimentEnabled('serviceCredentialTools', false);
-  // Registration and rotation refuse inside the minting transaction.
-  expect(await register()).toMatchObject({
-    status: 409,
-    json: { error: 'run_not_eligible' },
-  });
-  // Existing substitutes stop authorizing, and the workload is no longer live.
-  expect(await authorize(authorizeBody(base))).toEqual({
-    allowed: false,
-    reason: 'session_unavailable',
-  });
-  expect(
-    (
-      await call(`/workloads/${base.registration.workloadId}/lease`, {
-        token: await createCredentialEgressControllerToken(),
-        body: {},
-      })
-    ).status,
-  ).toBe(404);
-  // Turning it back on restores the same workload without a new registration.
-  await setDeploymentExperimentEnabled('serviceCredentialTools', true);
-  expect((await authorize(authorizeBody(base))).allowed).toBe(true);
 });
