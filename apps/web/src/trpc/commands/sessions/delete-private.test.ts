@@ -432,6 +432,59 @@ describe('deleteSessionCommand', () => {
     ).resolves.toMatchObject({ deletedAt: null });
   });
 
+  it('removes artifact rows when an active run races finalization', async () => {
+    const owner = await userFactory.create();
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+    });
+    const task = await taskFactory.create({ initiatorUserId: owner.id });
+    await db.insert(sessionTasks).values({
+      sessionId: session.id,
+      taskId: task.id,
+      origin: 'fast_delegation',
+    });
+    const [artifact] = await db
+      .insert(taskArtifacts)
+      .values({
+        taskId: task.id,
+        contentType: 'text/plain',
+        path: 'deleted-before-run-race.txt',
+        version: 0,
+        size: 8,
+        uploaded: true,
+        uploadUrlExpiresAt: new Date(0),
+      })
+      .returning();
+    mockDeleteArtifactsBatch.mockImplementationOnce(async () => {
+      await runFactory.create({
+        taskId: task.id,
+        status: RunStatus.Running,
+        sandboxServerUrl: 'http://sandbox.test',
+      });
+      return { deleted: 1, errors: 0 };
+    });
+
+    await expect(
+      deleteSessionCommand(
+        { userId: owner.id, isAdmin: false } as UserAuthSuccess,
+        session.id,
+      ),
+    ).resolves.toEqual({ deleted: false, reason: 'stop_failed' });
+
+    await expect(
+      db.query.sessions.findFirst({ where: eq(sessions.id, session.id) }),
+    ).resolves.toBeDefined();
+    await expect(
+      db.query.tasks.findFirst({ where: eq(tasks.id, task.id) }),
+    ).resolves.toMatchObject({ deletedAt: null });
+    await expect(
+      db.query.taskArtifacts.findFirst({
+        where: eq(taskArtifacts.id, artifact!.id),
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   it('does not delete a private Session while its Fast turn is active', async () => {
     const owner = await userFactory.create();
     const [conversation] = await db

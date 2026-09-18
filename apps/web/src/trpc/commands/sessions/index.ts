@@ -298,6 +298,24 @@ export async function deleteSessionCommand(
         );
       }
 
+      if (deletion.artifacts.length > 0) {
+        await db
+          .delete(taskArtifacts)
+          .where(
+            or(
+              ...deletion.artifacts.map((artifact) =>
+                and(
+                  eq(taskArtifacts.id, artifact.id),
+                  eq(taskArtifacts.version, artifact.version),
+                ),
+              ),
+            ),
+          );
+        // Rows that changed version or arrived during object deletion remain
+        // visible to the final recheck and are deleted on the next loop.
+        deletion = { ...deletion, artifacts: [] };
+      }
+
       const finalized = await db.transaction(async (tx) => {
         const [session] = await tx
           .select({
