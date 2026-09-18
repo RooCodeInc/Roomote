@@ -281,6 +281,27 @@ describe('resolveAutomationRuntimeDestination', () => {
     expect(mockFindActiveSlackInstallationForChannel).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['telegram', 'telegram-chat-1'],
+    ['discord', 'discord-channel-1'],
+  ] as const)(
+    'preserves an explicit %s destination',
+    async (provider, channelId) => {
+      const destination = {
+        provider,
+        channelId,
+        source: 'automation_target' as const,
+      };
+
+      await expect(
+        resolveAutomationRuntimeDestination({
+          runtime: { destination },
+          slackConnected: true,
+        }),
+      ).resolves.toEqual(destination);
+    },
+  );
+
   it('ignores a saved slack destination after Slack disconnects and falls back', async () => {
     mockFindTeamsPrimaryConversation.mockResolvedValue({
       conversationId: '19:primary@thread.v2',

@@ -21,6 +21,7 @@ const state = vi.hoisted(() => ({
   customAutomationsLoaded: true,
   customAutomationsRefetch: vi.fn(),
   customAutomationRunPendingId: null as string | null,
+  triggerPending: false,
   customAutomationTimeZone: 'UTC' as string | undefined,
   customAutomationDefaultTarget: undefined as
     | {
@@ -305,6 +306,7 @@ const mutations = vi.hoisted(() => ({
   connectSlack: vi.fn(),
   updateSettings: vi.fn(),
   triggerAgent: vi.fn(),
+  triggerAutomation: vi.fn(),
   triggerCustomAutomation: vi.fn(),
   latestSettingsOptions: null as {
     onSuccess?: (
@@ -313,9 +315,15 @@ const mutations = vi.hoisted(() => ({
   } | null,
   latestTriggerOptions: null as {
     onSuccess?: (
-      result: { outcome: 'launched'; taskId: string },
+      result:
+        | { outcome: 'launched'; taskId: string }
+        | { outcome: 'queued' }
+        | { outcome: 'completed' }
+        | { outcome: 'skipped'; reason: string }
+        | { outcome: 'failed'; error: string },
       variables: { automationKey: string },
     ) => void;
+    onError?: (error: Error, variables: { automationKey: string }) => void;
   } | null,
   latestCustomTriggerOptions: null as {
     onSuccess?: (
@@ -477,17 +485,21 @@ vi.mock('@tanstack/react-query', () => ({
       result: NonNullable<typeof state.nextUpdateSettingsResult>,
     ) => void;
     onError?: (...args: unknown[]) => void;
-    mutationKind?: 'triggerCustomAutomation';
+    mutationKind?: 'triggerCustomAutomation' | 'triggerAutomation';
     mutationKey?: unknown[];
   }) => {
     return {
       isPending:
-        _options?.mutationKind === 'triggerCustomAutomation' &&
-        (typeof _options.mutationKey?.[1] !== 'string' ||
-          _options.mutationKey[1] === state.customAutomationRunPendingId),
+        _options?.mutationKind === 'triggerAutomation'
+          ? state.triggerPending
+          : _options?.mutationKind === 'triggerCustomAutomation' &&
+            (typeof _options.mutationKey?.[1] !== 'string' ||
+              _options.mutationKey[1] === state.customAutomationRunPendingId),
       mutate: vi.fn((variables: unknown) => {
         if (_options?.mutationKind === 'triggerCustomAutomation') {
           mutations.triggerCustomAutomation(variables);
+        } else if (_options?.mutationKind === 'triggerAutomation') {
+          mutations.triggerAutomation(variables);
         } else {
           mutations.updateSettings(variables);
         }
@@ -585,7 +597,7 @@ vi.mock('@/trpc/client', () => ({
           mutations.latestTriggerOptions =
             (options as typeof mutations.latestTriggerOptions) ?? null;
 
-          return options ?? {};
+          return { ...options, mutationKind: 'triggerAutomation' };
         },
       },
     },
@@ -761,6 +773,7 @@ describe('AutomationsSettings', () => {
     vi.clearAllMocks();
     state.nextUpdateSettingsResult = null;
     state.customAutomationRunPendingId = null;
+    state.triggerPending = false;
     mutations.latestSettingsOptions = null;
     mutations.latestTriggerOptions = null;
     mutations.latestCustomTriggerOptions = null;
@@ -1173,6 +1186,87 @@ describe('AutomationsSettings', () => {
         name: 'Run Announce Roomote Updates now',
       }),
     ).toBeEnabled();
+  });
+
+  it('disables the release announcement run action while a run is pending', async () => {
+    const { rerender } = render(<AutomationsSettings />);
+    const runButton = await screen.findByRole('button', {
+      name: 'Run Announce Roomote Updates now',
+    });
+
+    fireEvent.click(runButton);
+    expect(mutations.triggerAutomation).toHaveBeenCalledTimes(1);
+
+    state.triggerPending = true;
+    rerender(<AutomationsSettings />);
+    expect(runButton).toBeDisabled();
+    fireEvent.click(runButton);
+    expect(mutations.triggerAutomation).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    {
+      result: { outcome: 'queued' as const },
+      message: 'Announce Roomote Updates was queued to run.',
+      method: 'success' as const,
+    },
+    {
+      result: { outcome: 'completed' as const },
+      message: 'Announce Roomote Updates ran successfully.',
+      method: 'success' as const,
+    },
+    {
+      result: { outcome: 'skipped' as const, reason: 'No destination.' },
+      message: 'Announce Roomote Updates had nothing to do: No destination.',
+      method: 'info' as const,
+    },
+    {
+      result: { outcome: 'failed' as const, error: 'Delivery failed.' },
+      message: 'Announce Roomote Updates failed: Delivery failed.',
+      method: 'error' as const,
+    },
+  ])(
+    'surfaces the installed-release run outcome: $result.outcome',
+    ({ result, message, method }) => {
+      render(<AutomationsSettings />);
+
+      act(() => {
+        mutations.latestTriggerOptions?.onSuccess?.(result, {
+          automationKey: 'release_announcements',
+        });
+      });
+
+      expect(toast[method]).toHaveBeenCalledWith(message);
+    },
+  );
+
+  it('surfaces a retryable installed-release run error', () => {
+    render(<AutomationsSettings />);
+
+    act(() => {
+      mutations.latestTriggerOptions?.onError?.(
+        new Error('Temporary delivery failure.'),
+        { automationKey: 'release_announcements' },
+      );
+    });
+
+    expect(toast.error).toHaveBeenCalledWith(
+      'Failed to run Announce Roomote Updates: Temporary delivery failure.',
+    );
+  });
+
+  it('keeps the installed-release controls accessible in the compact settings row', async () => {
+    render(<AutomationsSettings />);
+
+    const runButton = await screen.findByRole('button', {
+      name: 'Run Announce Roomote Updates now',
+    });
+    expect(runButton).toHaveAttribute('aria-label');
+    expect(
+      screen.getByRole('switch', {
+        name: 'Disable Announce Roomote Updates',
+      }),
+    ).toBeInTheDocument();
   });
 
   it('shows provider support as plain text instead of badges', async () => {
