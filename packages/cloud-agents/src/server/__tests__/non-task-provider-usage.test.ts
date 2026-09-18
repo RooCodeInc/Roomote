@@ -2948,18 +2948,22 @@ describe('resolveOpenCodeSmallModel', () => {
       OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
     };
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
-      R_MODEL: 'openai-compatible-local/custom-model',
+      R_MODEL: 'vllm/custom-model',
       R_VISION_MODEL: 'openrouter/google/gemini-3.8-flash',
+      VLLM_BASE_URL: 'https://vllm.example.com/v1',
+      VLLM_API_KEY: 'secret',
     });
     configProvidersMock.mockResolvedValue({
       data: {
         providers: [
           {
-            id: 'openai-compatible-local',
+            id: 'vllm',
             models: {
               'custom-model': {
                 capabilities: {
-                  input: { text: true },
+                  // OpenCode normalizes omitted custom-provider modalities to
+                  // false, so this is unknown rather than an explicit denial.
+                  input: { text: true, image: false },
                   output: { text: true },
                 },
               },
@@ -2992,7 +2996,7 @@ describe('resolveOpenCodeSmallModel', () => {
       }),
     ).resolves.toEqual({
       delivery: 'direct',
-      model: 'openai-compatible-local/custom-model',
+      model: 'vllm/custom-model',
     });
   });
 

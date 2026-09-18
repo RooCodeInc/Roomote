@@ -11,6 +11,7 @@ import {
   resolveEffectiveModelRuntimeEnv,
 } from '@roomote/db/server';
 import {
+  getOpenAiCompatibleRuntimeConfigs,
   isReasoningEffort,
   toBedrockMantleRuntimeModelId,
   type ReasoningEffort,
@@ -910,6 +911,9 @@ async function findModelSupportingInputModality(input: {
   if (candidates.length === 0) {
     return undefined;
   }
+  const generatedOpenAiCompatibleProviderIds = new Set(
+    getOpenAiCompatibleRuntimeConfigs(candidates, input.env).keys(),
+  );
   const timeoutMs = input.timeoutMs === undefined ? 120_000 : input.timeoutMs;
   const server = await leaseOpenCodeSdkServer({
     env: input.env,
@@ -947,7 +951,8 @@ async function findModelSupportingInputModality(input: {
         // no; helper candidates still require positive support metadata.
         (index === 0 &&
           input.defaultFirstCandidateOnUnknown &&
-          inputCapability !== false) ||
+          (inputCapability !== false ||
+            generatedOpenAiCompatibleProviderIds.has(providerID))) ||
         (inputCapability === true && model?.capabilities.output.text)
       ) {
         return candidate;

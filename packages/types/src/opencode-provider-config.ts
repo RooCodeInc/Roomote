@@ -239,6 +239,7 @@ export function mergeOpenAiCompatibleProviderConfig(
   visionModel?: string,
   modelContextWindows: Readonly<Record<string, number>> = {},
   modelCosts: Readonly<Record<string, TaskModelCost>> = {},
+  options: { assumeImageSupport?: boolean } = {},
 ): Record<string, unknown> {
   let merged = providerConfig;
   const runtimeConfigs = getOpenAiCompatibleRuntimeConfigs(
@@ -324,7 +325,8 @@ export function mergeOpenAiCompatibleProviderConfig(
                 modelId,
                 {
                   name: modelId,
-                  ...(visionModel === qualifiedModelId
+                  ...(options.assumeImageSupport ||
+                  visionModel === qualifiedModelId
                     ? {
                         attachment: true,
                         modalities: {

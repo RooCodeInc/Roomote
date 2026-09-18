@@ -89,8 +89,22 @@ describe('buildOpenCodeCliEnv', () => {
             apiKey: '{env:LITELLM_API_KEY}',
           },
           models: {
-            'qwen3.6:35b-unsloth': { name: 'qwen3.6:35b-unsloth' },
-            coding: { name: 'coding' },
+            'qwen3.6:35b-unsloth': {
+              name: 'qwen3.6:35b-unsloth',
+              attachment: true,
+              modalities: {
+                input: ['text', 'image', 'video'],
+                output: ['text'],
+              },
+            },
+            coding: {
+              name: 'coding',
+              attachment: true,
+              modalities: {
+                input: ['text', 'image', 'video'],
+                output: ['text'],
+              },
+            },
           },
         },
       },

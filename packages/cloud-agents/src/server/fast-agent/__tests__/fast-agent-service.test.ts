@@ -24,7 +24,6 @@ const mocks = vi.hoisted(() => ({
   generateHelperText: vi.fn(),
   generateTrackedObject: vi.fn(),
   resolveImageDelivery: vi.fn(),
-  isImageInputUnsupported: vi.fn(),
   classifyInferenceError: vi.fn(),
   invalidateSession: vi.fn(),
   runSession: vi.fn(),
@@ -264,36 +263,41 @@ const NonTaskInputModalityUnsupportedError = vi.hoisted(
     },
 );
 
-vi.mock('../../non-task-provider-usage', () => ({
-  FAST_AGENT_SESSION_PERMISSIONS: fastAgentSessionPermissions,
-  FAST_AGENT_SESSION_TOOL_FILTER: fastAgentSessionToolFilter,
-  NON_TASK_INFERENCE_SURFACES: {
-    fastAgentImageInspection: 'fast_agent_image_inspection',
-    fastAgentQuestionAnswering: 'fast_agent',
-  },
-  NonTaskInputModalityUnsupportedError,
-  classifyNonTaskInferenceError: mocks.classifyInferenceError,
-  generateTrackedNonTaskObject: mocks.generateTrackedObject,
-  generateTrackedNonTaskText: mocks.generateHelperText,
-  generateTrackedNonTaskTextInOpenCodeSession: mocks.generateText,
-  isNonTaskImageInputUnsupportedError: mocks.isImageInputUnsupported,
-  resolveNonTaskInputModalityDelivery: mocks.resolveImageDelivery,
-  NonTaskOpenCodePromptTimeoutError: class extends Error {
-    constructor(timeoutMs: number) {
-      super(`Timed out waiting for OpenCode output after ${timeoutMs}ms.`);
-      this.name = 'NonTaskOpenCodePromptTimeoutError';
-    }
-  },
-  isNonTaskOpenCodePromptTimeoutError: (error: unknown) =>
-    error instanceof Error &&
-    error.name === 'NonTaskOpenCodePromptTimeoutError',
-  isNonTaskOpenCodeSessionNotFoundError: (error: unknown) =>
-    error instanceof Error &&
-    error.name === 'NonTaskOpenCodeSessionNotFoundError',
-  isNonTaskOpenCodeSessionValidationError: (error: unknown) =>
-    error instanceof Error &&
-    error.name === 'NonTaskOpenCodeSessionValidationError',
-}));
+vi.mock('../../non-task-provider-usage', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../non-task-provider-usage')>();
+  return {
+    FAST_AGENT_SESSION_PERMISSIONS: fastAgentSessionPermissions,
+    FAST_AGENT_SESSION_TOOL_FILTER: fastAgentSessionToolFilter,
+    NON_TASK_INFERENCE_SURFACES: {
+      fastAgentImageInspection: 'fast_agent_image_inspection',
+      fastAgentQuestionAnswering: 'fast_agent',
+    },
+    NonTaskInputModalityUnsupportedError,
+    classifyNonTaskInferenceError: mocks.classifyInferenceError,
+    generateTrackedNonTaskObject: mocks.generateTrackedObject,
+    generateTrackedNonTaskText: mocks.generateHelperText,
+    generateTrackedNonTaskTextInOpenCodeSession: mocks.generateText,
+    isNonTaskImageInputUnsupportedError:
+      actual.isNonTaskImageInputUnsupportedError,
+    resolveNonTaskInputModalityDelivery: mocks.resolveImageDelivery,
+    NonTaskOpenCodePromptTimeoutError: class extends Error {
+      constructor(timeoutMs: number) {
+        super(`Timed out waiting for OpenCode output after ${timeoutMs}ms.`);
+        this.name = 'NonTaskOpenCodePromptTimeoutError';
+      }
+    },
+    isNonTaskOpenCodePromptTimeoutError: (error: unknown) =>
+      error instanceof Error &&
+      error.name === 'NonTaskOpenCodePromptTimeoutError',
+    isNonTaskOpenCodeSessionNotFoundError: (error: unknown) =>
+      error instanceof Error &&
+      error.name === 'NonTaskOpenCodeSessionNotFoundError',
+    isNonTaskOpenCodeSessionValidationError: (error: unknown) =>
+      error instanceof Error &&
+      error.name === 'NonTaskOpenCodeSessionValidationError',
+  };
+});
 
 vi.mock('../../typesafe-judgment', () => ({
   evaluateTypeSafeJudgments: mocks.evaluateJudgments,
@@ -413,6 +417,7 @@ import {
   FastAgentDurableRetryScheduledError,
   FAST_AGENT_DURABLE_RETRY_HORIZON_MS,
   FAST_AGENT_DURABLE_RETRY_MAX_PARKS,
+  FAST_AGENT_INFERENCE_MAX_RETRIES,
   FAST_AGENT_MAX_INFERENCE_RETRIES_PER_TURN,
 } from '../fast-agent-service';
 import {
@@ -507,7 +512,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       delivery: 'direct',
       model: 'openrouter/openai/gpt-5.4',
     });
-    mocks.isImageInputUnsupported.mockReturnValue(false);
     mocks.nativeExecutor = undefined;
     mocks.mcpExecutor = undefined;
     mocks.mcpCapabilityAvailable = false;
@@ -8584,7 +8588,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           helperModel: 'openrouter/google/gemini-3.8-flash',
           helperReasoningEffort: 'low',
         });
-      mocks.isImageInputUnsupported.mockReturnValue(true);
       mocks.generateHelperText.mockResolvedValue(
         'A dashboard with a red deployment error.',
       );
@@ -8644,31 +8647,66 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
-  it('does not use the image helper for unrelated provider failures', async () => {
-    mocks.classifyInferenceError.mockReturnValue({
-      message: 'The inference provider rejected these credentials.',
-      reason: 'invalid_credentials',
-      retryable: false,
-    });
-    mocks.generateText.mockRejectedValue(
-      Object.assign(new Error('Invalid API key.'), {
+  it.each([
+    {
+      label: 'authentication',
+      error: Object.assign(new Error('Invalid API key.'), {
         data: { statusCode: 401, message: 'Invalid API key.' },
       }),
-    );
+      failure: {
+        message: 'The inference provider rejected these credentials.',
+        reason: 'invalid_credentials',
+        retryable: false,
+      },
+      attempts: 1,
+    },
+    {
+      label: 'rate limit',
+      error: new Error('429 Rate limit exceeded.'),
+      failure: {
+        message: 'The inference provider is rate limiting requests.',
+        reason: 'rate_limited',
+        retryable: true,
+      },
+      attempts: FAST_AGENT_INFERENCE_MAX_RETRIES + 1,
+    },
+    {
+      label: 'network',
+      error: new TypeError('fetch failed'),
+      failure: {
+        message: 'Roomote could not reach the inference provider endpoint.',
+        reason: 'endpoint_unreachable',
+        retryable: true,
+      },
+      attempts: 7,
+    },
+  ])(
+    'does not use the image helper for unrelated $label failures',
+    async ({ error, failure, attempts }) => {
+      vi.useFakeTimers();
+      try {
+        mocks.classifyInferenceError.mockReturnValue(failure);
+        mocks.generateText.mockRejectedValue(error);
 
-    await answerFastAgentQuestion({
-      ...baseParams,
-      images: ['data:image/png;base64,aGVsbG8='],
-      adapter: callbacks(),
-    }).catch(() => undefined);
+        const result = answerFastAgentQuestion({
+          ...baseParams,
+          images: ['data:image/png;base64,aGVsbG8='],
+          adapter: callbacks(),
+        }).catch(() => undefined);
+        await vi.runAllTimersAsync();
+        await result;
 
-    expect(mocks.generateText).toHaveBeenCalledOnce();
-    expect(mocks.resolveImageDelivery).toHaveBeenCalledOnce();
-    expect(mocks.resolveImageDelivery).not.toHaveBeenCalledWith(
-      expect.objectContaining({ skipSessionModel: true }),
-    );
-    expect(mocks.generateHelperText).not.toHaveBeenCalled();
-  });
+        expect(mocks.generateText).toHaveBeenCalledTimes(attempts);
+        expect(mocks.resolveImageDelivery).toHaveBeenCalledOnce();
+        expect(mocks.resolveImageDelivery).not.toHaveBeenCalledWith(
+          expect.objectContaining({ skipSessionModel: true }),
+        );
+        expect(mocks.generateHelperText).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it('rejects unknown attachment IDs passed to inspect_images', async () => {
     mocks.resolveImageDelivery.mockResolvedValue({
