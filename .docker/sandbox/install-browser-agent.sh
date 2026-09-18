@@ -649,6 +649,94 @@ read_json_number() {
   printf '%s' "$1" | sed -n "s/.*\"$2\":\([0-9][0-9]*\).*/\1/p"
 }
 
+# The desktop has no window manager, so a second browser window would cover
+# the first with no way to switch back. This extension keeps the shared
+# browser to one window: a page's pop-up opens as a tab (still linked to its
+# opener, so sign-in flows that report back keep working), and any other new
+# window is folded into the first one as tabs.
+write_shared_browser_extension() {
+  local extension_dir="$1"
+  mkdir -p "$extension_dir"
+
+  cat > "${extension_dir}/manifest.json" <<'EOF_EXTENSION_MANIFEST'
+{
+  "manifest_version": 3,
+  "name": "Single window",
+  "version": "1.0",
+  "description": "Keeps the shared browser in one window: pop-ups and new windows open as tabs.",
+  "permissions": ["tabs"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["open-in-tab.js"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "match_about_blank": true,
+      "match_origin_as_fallback": true,
+      "world": "MAIN"
+    }
+  ]
+}
+EOF_EXTENSION_MANIFEST
+
+  cat > "${extension_dir}/open-in-tab.js" <<'EOF_EXTENSION_OPEN'
+// Chrome opens a separate pop-up window when window.open() is given window
+// features (popup, width, height, ...). Dropping them opens a tab instead.
+// The features that change the security relationship are kept.
+(() => {
+  const nativeOpen = window.open;
+  const kept = new Set(['noopener', 'noreferrer']);
+  window.open = function open(url, target, features) {
+    const remaining = String(features ?? '')
+      .split(',')
+      .map((feature) => feature.trim())
+      .filter((feature) => kept.has(feature.split('=')[0].trim().toLowerCase()));
+    if (remaining.length > 0) {
+      return nativeOpen.call(window, url, target, remaining.join(','));
+    }
+    if (arguments.length === 0) {
+      return nativeOpen.call(window);
+    }
+    return arguments.length === 1
+      ? nativeOpen.call(window, url)
+      : nativeOpen.call(window, url, target);
+  };
+})();
+EOF_EXTENSION_OPEN
+
+  cat > "${extension_dir}/background.js" <<'EOF_EXTENSION_BACKGROUND'
+// Fold any additional normal window (Ctrl+N, "open link in new window", a
+// window opened over CDP) into the first one as tabs.
+async function foldIntoMainWindow(createdId, attempt = 0) {
+  const windows = await chrome.windows.getAll({ windowTypes: ['normal'] });
+  const main = windows
+    .filter((candidate) => candidate.id !== createdId)
+    .sort((a, b) => a.id - b.id)[0];
+  if (!main) {
+    return;
+  }
+  const tabs = await chrome.tabs.query({ windowId: createdId });
+  if (tabs.length === 0) {
+    // The window exists before its first tab is attached.
+    if (attempt < 10) {
+      setTimeout(() => foldIntoMainWindow(createdId, attempt + 1), 100);
+    }
+    return;
+  }
+  const tabIds = tabs.map((tab) => tab.id);
+  await chrome.tabs.move(tabIds, { windowId: main.id, index: -1 });
+  await chrome.tabs.update(tabIds[tabIds.length - 1], { active: true });
+}
+
+chrome.windows.onCreated.addListener((created) => {
+  if (created.type === 'normal') {
+    foldIntoMainWindow(created.id).catch(() => {});
+  }
+});
+EOF_EXTENSION_BACKGROUND
+}
+
 launch_shared_browser() {
   local profile_dir="${SHARED_BROWSER_STATE_DIR}/profile"
   mkdir -p "$profile_dir"
@@ -657,6 +745,9 @@ launch_shared_browser() {
   # process which no longer exists. Nothing owns the profile here: the launch
   # lock is held and the CDP port is closed.
   rm -f "$profile_dir"/Singleton* 2>/dev/null || true
+
+  local extension_dir="${SHARED_BROWSER_STATE_DIR}/extension"
+  write_shared_browser_extension "$extension_dir"
 
   # The DevTools endpoint listens on loopback only, is a reserved environment
   # port (it can never be published through the preview proxy), and keeps
@@ -677,6 +768,10 @@ launch_shared_browser() {
     --no-sandbox
     --test-type
     --window-position=0,0
+    "--load-extension=${extension_dir}"
+    # Chrome-branded builds ignore --load-extension unless this is set; the
+    # bundled Chrome for Testing and Chromium builds accept it either way.
+    --disable-features=DisableLoadExtensionCommandLineSwitch
   )
 
   # The display has no window manager, so the window is sized to the screen

@@ -71,6 +71,10 @@ cookies, and logins are shared.
   screenshots in the meantime. Watching, including moving the pointer over
   the video, does not pause it. `ROOMOTE_DESKTOP_STREAM_HUMAN_IDLE_MS` sets
   the ten-second window.
+- The browser stays in one window, because the desktop has no window manager
+  to switch between several. A site's pop-up (a sign-in window, for example)
+  opens as a tab and still reports back to the page that opened it, and any
+  other new window is folded into the first as tabs.
 - Recordings made by the feature demo skill use a separate headless browser so
   they start from a clean state.
 

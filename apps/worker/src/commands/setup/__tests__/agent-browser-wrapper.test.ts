@@ -6,6 +6,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import * as vm from 'node:vm';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -264,6 +265,44 @@ describe('agent-browser wrapper shared browser', () => {
     );
     expect(chromeArgs).not.toContain('--headless');
     expect(chromeArgs.at(-1)).toBe('about:blank');
+
+    // The single-window extension ships inside the wrapper.
+    const extensionArg = chromeArgs.find((arg) =>
+      arg.startsWith('--load-extension='),
+    );
+    const extensionDir = extensionArg!.slice('--load-extension='.length);
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(extensionDir, 'manifest.json'), 'utf8'),
+    );
+    expect(manifest.content_scripts[0]).toMatchObject({
+      js: ['open-in-tab.js'],
+      world: 'MAIN',
+      run_at: 'document_start',
+      all_frames: true,
+    });
+    expect(fs.existsSync(path.join(extensionDir, 'background.js'))).toBe(true);
+
+    // Pop-up features are dropped so the page opens as a tab; the features
+    // that change the opener relationship are kept.
+    const opened: unknown[][] = [];
+    const fakeWindow = {
+      open: (...args: unknown[]) => {
+        opened.push(args);
+        return null;
+      },
+    };
+    vm.runInNewContext(
+      fs.readFileSync(path.join(extensionDir, 'open-in-tab.js'), 'utf8'),
+      { window: fakeWindow },
+    );
+    fakeWindow.open('https://idp.example/login', 'login', 'popup,width=500');
+    fakeWindow.open('https://example.com', '_blank', 'noopener, width=400');
+    fakeWindow.open('https://example.com');
+    expect(opened).toEqual([
+      ['https://idp.example/login', 'login'],
+      ['https://example.com', '_blank', 'noopener'],
+      ['https://example.com'],
+    ]);
     expect(sandbox.calls()).toEqual([
       `pin=1 --cdp ${sandbox.cdpPort} click @e1`,
     ]);

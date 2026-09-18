@@ -39,7 +39,7 @@ use x11rb::{
     protocol::{
         randr::{self, ConnectionExt as RandrConnectionExt},
         xproto::{
-            BUTTON_PRESS_EVENT, BUTTON_RELEASE_EVENT, ConfigureWindowAux,
+            AtomEnum, BUTTON_PRESS_EVENT, BUTTON_RELEASE_EVENT, ConfigureWindowAux,
             ConnectionExt as XprotoConnectionExt, KEY_PRESS_EVENT, KEY_RELEASE_EVENT,
             MOTION_NOTIFY_EVENT, MapState, Window,
         },
@@ -699,6 +699,47 @@ enum InputAction {
     Button { button: u8, down: bool },
 }
 
+/// A mapped top-level window as the resize sees it.
+#[derive(Clone, Copy, Debug)]
+struct TopLevelWindow {
+    window: Window,
+    x: i16,
+    y: i16,
+    width: u16,
+    height: u16,
+    /// A dialog or helper window rather than an application's main window.
+    secondary: bool,
+}
+
+impl TopLevelWindow {
+    /// Whether the window covered (nearly) the whole screen before a resize.
+    fn filled(&self, screen: ScreenSize) -> bool {
+        self.x <= 0
+            && self.y <= 0
+            && u32::from(self.width) * 10 >= u32::from(screen.width) * 9
+            && u32::from(self.height) * 10 >= u32::from(screen.height) * 9
+    }
+}
+
+/// Which windows follow the screen to its new size. The windows that filled
+/// the old screen do, so a browser keeps filling the viewer's panel while a
+/// pop-up or dialog on top of it keeps its own size instead of covering it.
+/// When nothing filled the old screen, every main window is fitted, which
+/// maximizes an application that started at its own default size.
+fn windows_to_refit(windows: &[TopLevelWindow], previous: ScreenSize) -> Vec<Window> {
+    let main = windows.iter().filter(|window| !window.secondary);
+    let filling = main
+        .clone()
+        .filter(|window| window.filled(previous))
+        .map(|window| window.window)
+        .collect::<Vec<_>>();
+    if filling.is_empty() {
+        main.map(|window| window.window).collect()
+    } else {
+        filling
+    }
+}
+
 #[derive(Default)]
 struct HeldInputs {
     keys: HashSet<u8>,
@@ -924,18 +965,24 @@ impl X11Controller {
                 status.status
             ));
         }
+        let previous = ScreenSize {
+            width: self.width,
+            height: self.height,
+        };
         self.width = size.width;
         self.height = size.height;
-        self.fit_windows_to_screen(size);
+        self.fit_windows_to_screen(previous, size);
         Ok(())
     }
 
     /// There is no window manager on the sandbox display, so top-level
-    /// windows keep whatever size they were created with. Resize the mapped
+    /// windows keep whatever size they were created with. Resize the main
     /// ones to fill the new screen, the way a maximizing window manager
-    /// would, so the application follows the viewer's panel. Failures are
-    /// logged and ignored: the screen resize itself already succeeded.
-    fn fit_windows_to_screen(&self, size: ScreenSize) {
+    /// would, so the application follows the viewer's panel; dialogs and
+    /// smaller secondary windows keep their size (see `windows_to_refit`).
+    /// Failures are logged and ignored: the screen resize itself already
+    /// succeeded.
+    fn fit_windows_to_screen(&self, previous: ScreenSize, size: ScreenSize) {
         let tree = match self
             .connection
             .query_tree(self.root)
@@ -951,6 +998,9 @@ impl X11Controller {
                 return;
             }
         };
+        let window_type = self.intern_atom("_NET_WM_WINDOW_TYPE");
+        let normal_type = self.intern_atom("_NET_WM_WINDOW_TYPE_NORMAL");
+        let mut candidates = Vec::new();
         for window in tree.children {
             let attributes = match self
                 .connection
@@ -963,6 +1013,23 @@ impl X11Controller {
             if attributes.override_redirect || attributes.map_state != MapState::VIEWABLE {
                 continue;
             }
+            let Ok(Ok(geometry)) = self
+                .connection
+                .get_geometry(window)
+                .map(|cookie| cookie.reply())
+            else {
+                continue;
+            };
+            candidates.push(TopLevelWindow {
+                window,
+                x: geometry.x,
+                y: geometry.y,
+                width: geometry.width,
+                height: geometry.height,
+                secondary: self.is_secondary_window(window, window_type, normal_type),
+            });
+        }
+        for window in windows_to_refit(&candidates, previous) {
             let values = ConfigureWindowAux::new()
                 .x(0)
                 .y(0)
@@ -983,6 +1050,42 @@ impl X11Controller {
             }
         }
         let _ = self.connection.flush();
+    }
+
+    fn intern_atom(&self, name: &str) -> Option<u32> {
+        self.connection
+            .intern_atom(false, name.as_bytes())
+            .ok()?
+            .reply()
+            .ok()
+            .map(|reply| reply.atom)
+    }
+
+    /// A dialog or other helper window: it is transient for another window,
+    /// or declares a window type other than a normal application window.
+    fn is_secondary_window(
+        &self,
+        window: Window,
+        window_type: Option<u32>,
+        normal_type: Option<u32>,
+    ) -> bool {
+        let property = |property: u32, kind: AtomEnum| {
+            self.connection
+                .get_property(false, window, property, kind, 0, 16)
+                .ok()
+                .and_then(|cookie| cookie.reply().ok())
+        };
+        let transient = property(AtomEnum::WM_TRANSIENT_FOR.into(), AtomEnum::WINDOW)
+            .is_some_and(|reply| reply.value_len > 0);
+        if transient {
+            return true;
+        }
+        let (Some(window_type), Some(normal_type)) = (window_type, normal_type) else {
+            return false;
+        };
+        property(window_type, AtomEnum::ATOM)
+            .and_then(|reply| reply.value32().map(|types| types.collect::<Vec<_>>()))
+            .is_some_and(|types| !types.is_empty() && !types.contains(&normal_type))
     }
 
     fn apply(&mut self, event: ControlEvent) -> Result<(), String> {
@@ -2532,6 +2635,34 @@ mod tests {
             Some(Duration::from_secs(2)),
             window
         ));
+    }
+
+    #[test]
+    fn only_windows_that_filled_the_screen_follow_a_resize() {
+        let previous = ScreenSize {
+            width: 1280,
+            height: 800,
+        };
+        let window = |window, x, y, width, height, secondary| TopLevelWindow {
+            window,
+            x,
+            y,
+            width,
+            height,
+            secondary,
+        };
+        let browser = window(1, 0, 0, 1280, 800, false);
+        let popup = window(2, 200, 100, 500, 600, false);
+        let file_dialog = window(3, 0, 0, 1280, 800, true);
+        assert_eq!(
+            windows_to_refit(&[browser, popup, file_dialog], previous),
+            vec![1]
+        );
+        // Nothing filled the screen: an application at its default size is
+        // still maximized, but its dialog is not.
+        let app = window(4, 10, 10, 800, 600, false);
+        let dialog = window(5, 50, 50, 300, 200, true);
+        assert_eq!(windows_to_refit(&[app, dialog], previous), vec![4]);
     }
 
     #[test]
