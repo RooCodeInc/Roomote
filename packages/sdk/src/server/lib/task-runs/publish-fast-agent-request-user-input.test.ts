@@ -208,19 +208,42 @@ describe('publishFastAgentRequestUserInput', () => {
         channel: 'C123',
         text: 'Weekly scan needs input to continue.',
         blocks: expect.arrayContaining([
-          { type: 'markdown', text: 'Weekly scan needs input to continue.' },
           expect.objectContaining({
-            type: 'actions',
-            elements: expect.arrayContaining([
+            type: 'container',
+            title: expect.objectContaining({ text: 'Weekly scan' }),
+            icon: expect.objectContaining({
+              image_url: expect.stringContaining('/automation-icons/zap.png'),
+              alt_text: 'Weekly scan automation icon',
+            }),
+            child_blocks: expect.arrayContaining([
               expect.objectContaining({
-                action_id: 'late_bound_automation_view_session',
-                url: expect.stringContaining(`/sessions/${parent.sessionId}`),
+                type: 'rich_text',
+              }),
+              expect.objectContaining({
+                type: 'actions',
+                elements: expect.arrayContaining([
+                  expect.objectContaining({
+                    action_id: 'late_bound_automation_view_session',
+                    url: expect.stringContaining(
+                      `/sessions/${parent.sessionId}`,
+                    ),
+                  }),
+                  expect.objectContaining({
+                    action_id: 'late_bound_automation_configure',
+                    url: expect.stringContaining(
+                      '/automations#custom-automation-automation-1',
+                    ),
+                  }),
+                ]),
               }),
             ]),
           }),
         ]),
       }),
     );
+    expect(
+      JSON.stringify(mocks.postMessage.mock.calls[0]?.[0]?.blocks),
+    ).toContain('Weekly scan needs input to continue.');
     expect(mocks.bindSession).toHaveBeenCalledWith({
       owner: { kind: 'user', userId: 'u1' },
       conversation: {
