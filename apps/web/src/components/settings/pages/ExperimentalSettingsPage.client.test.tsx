@@ -46,15 +46,6 @@ vi.mock(
   }),
 );
 
-vi.mock(
-  '@/components/settings/HomeComposerSuggestionsExperimentalSetting',
-  () => ({
-    HomeComposerSuggestionsExperimentalSetting: () => (
-      <div>Home suggestions setting</div>
-    ),
-  }),
-);
-
 vi.mock('@/components/settings/ResultsExperimentalSetting', () => ({
   ResultsExperimentalSetting: () => <div>Results setting</div>,
 }));
@@ -122,7 +113,9 @@ describe('ExperimentalSettingsPage', () => {
     state.hasLoadedExperiments = true;
     rerender(<ExperimentalSettingsPage />);
 
-    expect(screen.getByText('Home suggestions setting')).toBeInTheDocument();
+    expect(
+      screen.queryByText('Home suggestions setting'),
+    ).not.toBeInTheDocument();
     expect(screen.getByText('Results setting')).toBeInTheDocument();
     expect(
       screen.getByText('Slack peer conversations setting'),
@@ -153,7 +146,9 @@ describe('ExperimentalSettingsPage', () => {
 
     render(<ExperimentalSettingsPage />);
 
-    expect(screen.getByText('Home suggestions setting')).toBeInTheDocument();
+    expect(
+      screen.queryByText('Home suggestions setting'),
+    ).not.toBeInTheDocument();
     expect(screen.getByText('Results setting')).toBeInTheDocument();
     expect(
       screen.getByText('Slack peer conversations setting'),

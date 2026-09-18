@@ -44,8 +44,6 @@ import {
   listRecentUserTaskMemoryRuns,
   listEligibleUserTaskMemoryRuns,
   findHomeComposerPrecomputeUserForRun,
-  isHomeComposerSuggestionsEnabled,
-  setDeploymentExperimentEnabled,
   seedBrainCollectorItems,
   upsertBrainCollectorItems,
   upsertBrainSyncState,
@@ -175,7 +173,7 @@ describe('private task memory exclusion', () => {
 describe('listRecentUserTaskMemoryRuns', () => {
   it('returns only landed user-initiated memories owned by the requested user', async () => {
     const owner = await userFactory.create({
-      metadata: { home_composer_suggestions_enabled: true },
+      metadata: { home_composer_suggestions_enabled: false },
     });
     const otherUser = await userFactory.create();
     await db
@@ -273,14 +271,6 @@ describe('listRecentUserTaskMemoryRuns', () => {
       },
     ]);
 
-    expect(await isHomeComposerSuggestionsEnabled(db)).toBe(false);
-    expect(
-      await findHomeComposerPrecomputeUserForRun(db, newerOwned.id),
-    ).toBeNull();
-
-    await setDeploymentExperimentEnabled('homeComposerSuggestions', true);
-
-    expect(await isHomeComposerSuggestionsEnabled(db)).toBe(true);
     expect(await findHomeComposerPrecomputeUserForRun(db, newerOwned.id)).toBe(
       owner.id,
     );
