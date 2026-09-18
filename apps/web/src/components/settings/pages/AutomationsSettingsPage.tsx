@@ -2,6 +2,7 @@
 
 import { AutomationsSettings } from '@/components/settings/automations';
 import { CustomAutomationsSection } from '@/components/settings/automations/CustomAutomationsSection';
+import { PersonalAutomationDefaultSetting } from '@/components/settings/automations/PersonalAutomationDefaultSetting';
 import { DeploymentTimeZoneSetting } from '@/components/settings/DeploymentTimeZoneSetting';
 import { useAuthorizedUser } from '@/hooks/useUser';
 import { DOCS_COOKBOOK_URL } from '@/lib/docs';
@@ -35,13 +36,16 @@ export function AutomationsSettingsPage() {
         {isAdmin ? (
           <AutomationsSettings
             toolbarLeading={
-              <div className="md:mr-auto">
+              <div className="flex flex-col gap-2 md:mr-auto">
                 <DeploymentTimeZoneSetting />
+                <PersonalAutomationDefaultSetting />
               </div>
             }
           />
         ) : (
-          <CustomAutomationsSection />
+          <CustomAutomationsSection
+            toolbarLeading={<PersonalAutomationDefaultSetting />}
+          />
         )}
       </div>
     </div>

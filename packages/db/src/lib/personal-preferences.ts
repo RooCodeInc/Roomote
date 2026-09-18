@@ -1,4 +1,5 @@
 import { and, eq, sql } from 'drizzle-orm';
+import type { AutomationTarget } from '@roomote/types';
 
 import { type DatabaseOrTransaction, db } from '../db';
 import { users } from '../schema';
@@ -13,6 +14,7 @@ export type ChatInitiationProvider = (typeof CHAT_INITIATION_PROVIDERS)[number];
 
 const LAST_CHAT_INITIATION_PROVIDER_METADATA_KEY =
   'last_chat_initiation_provider';
+const DEFAULT_AUTOMATION_TARGET_METADATA_KEY = 'default_automation_target';
 
 type StoredChatInitiationPreference = {
   provider: ChatInitiationProvider;
@@ -105,4 +107,50 @@ export async function getUserChatInitiationProvider(
   const provider = (preference as Partial<StoredChatInitiationPreference>)
     .provider;
   return isChatInitiationProvider(provider) ? provider : null;
+}
+
+export async function getUserDefaultAutomationTarget(
+  userId: string,
+  database: DatabaseOrTransaction = db,
+): Promise<AutomationTarget | null> {
+  const [user] = await database
+    .select({ metadata: users.metadata })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  const metadata = user?.metadata;
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    return null;
+  }
+
+  const target = (metadata as Record<string, unknown>)[
+    DEFAULT_AUTOMATION_TARGET_METADATA_KEY
+  ];
+  if (!target || typeof target !== 'object' || Array.isArray(target)) {
+    return null;
+  }
+
+  const candidate = target as Partial<AutomationTarget>;
+  return typeof candidate.provider === 'string' &&
+    typeof candidate.targetKind === 'string' &&
+    typeof candidate.externalRef === 'string' &&
+    candidate.externalRef.length > 0
+    ? (target as AutomationTarget)
+    : null;
+}
+
+export async function setUserDefaultAutomationTarget(
+  userId: string,
+  target: AutomationTarget | null,
+  database: DatabaseOrTransaction = db,
+): Promise<void> {
+  await database
+    .update(users)
+    .set({
+      metadata: target
+        ? sql`${users.metadata} || ${JSON.stringify({ [DEFAULT_AUTOMATION_TARGET_METADATA_KEY]: target })}::jsonb`
+        : sql`${users.metadata} - ${DEFAULT_AUTOMATION_TARGET_METADATA_KEY}`,
+      updatedAt: new Date(),
+    })
+    .where(eq(users.id, userId));
 }

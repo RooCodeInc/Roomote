@@ -24,6 +24,7 @@ export {
   listCustomAutomationsCommand,
   resolveCustomAutomationScheduleCommand,
   triggerCustomAutomationCommand,
+  updateCustomAutomationDefaultDestinationCommand,
   updateCustomAutomationCommand,
 } from './custom-automations';
 export type {

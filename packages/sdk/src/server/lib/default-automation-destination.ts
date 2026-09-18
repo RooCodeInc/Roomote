@@ -3,6 +3,7 @@ import {
   db,
   deploymentSettings,
   eq,
+  getUserDefaultAutomationTarget,
   resolveDiscordRuntimeCredentials,
   resolveTeamsBotRuntimeCredentials,
   resolveTelegramRuntimeCredentials,
@@ -13,6 +14,7 @@ import {
 import { SlackNotifier } from '@roomote/slack';
 import {
   AUTOMATION_TARGET_EMAIL_IDENTITY_KEY,
+  getAutomationTargetEmailIdentityId,
   getAutomationTargetKind,
   hasSetupChatHandoffDestination,
   isConfiguredAutomationTarget,
@@ -56,8 +58,9 @@ type DefaultAutomationTargetParams = {
 
 /**
  * Selects a persisted default report target without replacing an existing
- * explicit target. Defaults follow one shared waterfall: usable configured
- * channels, a resolvable owner DM, supported Email, then no destination.
+ * explicit target. An explicitly saved owner preference wins; otherwise
+ * defaults follow the existing waterfall of usable configured channels, a
+ * resolvable owner DM, supported Email, then no destination.
  */
 export async function resolveDefaultAutomationTarget({
   ownerUserId,
@@ -75,6 +78,20 @@ export async function resolveDefaultAutomationTarget({
             existingTarget.provider as AutomationCapableCommunicationProvider,
           );
     return supported ? existingTarget : null;
+  }
+
+  const preferredTarget = await getUserDefaultAutomationTarget(
+    ownerUserId,
+    client,
+  ).catch(() => null);
+  if (preferredTarget) {
+    const resolvedPreference = await resolvePreferredTarget({
+      target: preferredTarget,
+      ownerUserId,
+      capabilities,
+      client,
+    });
+    if (resolvedPreference) return resolvedPreference;
   }
 
   const settings = includeSharedChannels
@@ -220,6 +237,59 @@ export async function resolveDefaultAutomationTarget({
           externalRef: ownerUserId,
           metadata: { [AUTOMATION_TARGET_EMAIL_IDENTITY_KEY]: identity.id },
         }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+async function resolvePreferredTarget({
+  target,
+  ownerUserId,
+  capabilities,
+  client,
+}: {
+  target: AutomationTarget;
+  ownerUserId: string;
+  capabilities: AutomationDestinationCapabilities;
+  client: DatabaseOrTransaction;
+}): Promise<AutomationTarget | null> {
+  if (target.provider === 'email') {
+    if (
+      !capabilities.email ||
+      target.targetKind !== 'email_user' ||
+      target.externalRef !== ownerUserId
+    ) {
+      return null;
+    }
+    const identityId = getAutomationTargetEmailIdentityId(target);
+    if (!identityId) return null;
+    const identities = await listAvailableAgentMailOutboundIdentities(
+      ownerUserId,
+    ).catch(() => []);
+    return identities.some((identity) => identity.id === identityId)
+      ? target
+      : null;
+  }
+
+  const provider = target.provider as AutomationCapableCommunicationProvider;
+  if (!capabilities.chatProviders.includes(provider)) return null;
+  if (target.targetKind === getAutomationTargetKind(provider, 'channel')) {
+    return resolveUsableChannelTarget(target, client);
+  }
+  if (
+    target.targetKind !== getAutomationTargetKind(provider, 'direct_message') ||
+    target.externalRef !== ownerUserId
+  ) {
+    return null;
+  }
+
+  const connectedProviders: AutomationCapableCommunicationProvider[] =
+    await listConnectedCommunicationProviders().catch(() => []);
+  if (!connectedProviders.includes(provider)) return null;
+  try {
+    return (await findUserDirectMessageDestination(provider, ownerUserId))
+      ? target
       : null;
   } catch {
     return null;

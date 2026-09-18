@@ -17,12 +17,30 @@ vi.mock('@/components/settings/automations', () => ({
 }));
 
 vi.mock('@/components/settings/automations/CustomAutomationsSection', () => ({
-  CustomAutomationsSection: () => <div>Custom automation management</div>,
+  CustomAutomationsSection: ({
+    toolbarLeading,
+  }: {
+    toolbarLeading?: ReactNode;
+  }) => (
+    <>
+      {toolbarLeading}
+      <div>Custom automation management</div>
+    </>
+  ),
 }));
 
 vi.mock('@/components/settings/DeploymentTimeZoneSetting', () => ({
   DeploymentTimeZoneSetting: () => <div>Deployment timezone controls</div>,
 }));
+
+vi.mock(
+  '@/components/settings/automations/PersonalAutomationDefaultSetting',
+  () => ({
+    PersonalAutomationDefaultSetting: () => (
+      <div>Personal automation default controls</div>
+    ),
+  }),
+);
 
 import AutomationsPage from '@/app/(authenticated)/automations/page';
 
@@ -43,6 +61,9 @@ describe('Automations page access', () => {
     expect(
       screen.queryByText('Deployment timezone controls'),
     ).not.toBeInTheDocument();
+    expect(
+      screen.getByText('Personal automation default controls'),
+    ).toBeInTheDocument();
   });
 
   it('preserves the full view and deployment timezone controls for admins', () => {
@@ -52,6 +73,9 @@ describe('Automations page access', () => {
     expect(screen.getByText('Full automation settings')).toBeInTheDocument();
     expect(
       screen.getByText('Deployment timezone controls'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('Personal automation default controls'),
     ).toBeInTheDocument();
     expect(
       screen.queryByText('Custom automation management'),

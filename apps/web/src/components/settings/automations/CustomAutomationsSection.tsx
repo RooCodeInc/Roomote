@@ -16,14 +16,11 @@ import {
   ALL_REPOSITORIES,
   FAST_EXECUTION,
   NO_REPOSITORIES,
-  getAutomationTargetEmailIdentityId,
-  isBackgroundAutomationUserTargetKind,
   MAX_CUSTOM_AUTOMATIONS,
   AUTOMATION_RESULT_PRIORITY_LABELS,
   AUTOMATION_RESULT_PRIORITIES,
   type AutomationResultPriority,
   type CustomAutomationScheduleMode,
-  type OptionalAutomationTarget,
   type ReasoningEffort,
 } from '@roomote/types';
 
@@ -68,6 +65,7 @@ import { useAuthorizedUser } from '@/hooks/useUser';
 import {
   AutomationDestinationPicker,
   type AutomationDestinationProvider,
+  destinationValueFromAutomationTarget,
 } from './AutomationDestinationPicker';
 import {
   AutomationListRow,
@@ -295,42 +293,8 @@ function CustomAutomationRunButton({
   );
 }
 
-function targetFromAutomationTarget(target: OptionalAutomationTarget): {
-  provider: CustomAutomationFormState['targetProvider'];
-  mode: CustomAutomationFormState['targetMode'];
-  channelId: string;
-} {
-  if (!target.provider || !target.externalRef) {
-    return {
-      provider: 'none',
-      mode: 'channel',
-      channelId: '',
-    };
-  }
-
-  const provider =
-    target.provider === 'discord' ||
-    target.provider === 'teams' ||
-    target.provider === 'telegram' ||
-    target.provider === 'email'
-      ? target.provider
-      : 'slack';
-  return {
-    provider,
-    mode: isBackgroundAutomationUserTargetKind(target.targetKind)
-      ? 'direct_message'
-      : 'channel',
-    channelId:
-      target.provider === 'email'
-        ? (getAutomationTargetEmailIdentityId(target) ?? '')
-        : isBackgroundAutomationUserTargetKind(target.targetKind)
-          ? ''
-          : (target.externalRef ?? ''),
-  };
-}
-
 function targetFromRow(row: CustomAutomationListItem) {
-  return targetFromAutomationTarget(row.target);
+  return destinationValueFromAutomationTarget(row.target);
 }
 
 function formFromRow(
@@ -1275,7 +1239,7 @@ export function CustomAutomationsSection({
         size="sm"
         disabled={busy || atCap || !capabilitiesLoaded}
         onClick={() => {
-          const target = targetFromAutomationTarget(
+          const target = destinationValueFromAutomationTarget(
             optionsQuery.data?.defaultTarget ?? {},
           );
           setIsCreating(true);

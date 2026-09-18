@@ -164,7 +164,7 @@ export function ManagerChannelEditor({
   if (!showForm) {
     return (
       <p className="text-sm text-muted-foreground">
-        Posting manager-facing updates to{' '}
+        Default destination:{' '}
         <Button
           type="button"
           variant="link"
@@ -180,11 +180,10 @@ export function ManagerChannelEditor({
 
   return (
     <div className="space-y-2">
-      <Label htmlFor="manager-channel">
-        Where should Roomote post manager-facing updates?
-      </Label>
+      <Label htmlFor="manager-channel">Default destination</Label>
       <p className="text-sm text-muted-foreground">
-        Make sure the Roomote app is added to the channel.
+        Shared across the deployment for built-in automations without an
+        explicit destination. Make sure the Roomote app is added to the channel.
       </p>
       <div className="max-w-md space-y-2">
         <div className="flex items-center gap-2">
@@ -323,8 +322,8 @@ export function ManagerChannelEditor({
         <Alert variant="light">
           <AlertDescription>
             Some older automations still point at different Slack channels. Pick
-            the shared Manager Channel here to migrate future manager-facing
-            posts onto one destination.
+            the shared default here to migrate future manager-facing posts onto
+            one destination.
           </AlertDescription>
         </Alert>
       ) : null}

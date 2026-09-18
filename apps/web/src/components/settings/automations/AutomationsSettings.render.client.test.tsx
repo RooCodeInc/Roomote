@@ -1055,11 +1055,6 @@ describe('AutomationsSettings', () => {
 
     render(<AutomationsSettings />);
 
-    fireEvent.click(
-      await screen.findByRole('button', {
-        name: /(?:Set up|Configure) Automation output/,
-      }),
-    );
     const destination = await screen.findByRole('button', {
       name: /#automation-reports \(Discord\)/,
     });
@@ -1068,8 +1063,13 @@ describe('AutomationsSettings', () => {
     fireEvent.click(destination);
     expect(screen.getByLabelText('Select manager channel')).toBeInTheDocument();
     expect(
-      screen.getByText('Make sure the Roomote app is added to the channel.'),
+      screen.getByText(/Shared across the deployment/),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', {
+        name: /(?:Set up|Configure) Automation output/,
+      }),
+    ).not.toBeInTheDocument();
   });
 
   it('offers the platform issue alerts destination picker with a saved Discord channel selected', async () => {
