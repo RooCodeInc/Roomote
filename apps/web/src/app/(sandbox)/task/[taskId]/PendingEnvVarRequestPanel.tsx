@@ -13,7 +13,7 @@ import {
 
 import { useEnvVars } from '@/hooks/environment-variables';
 import { useAuthorizedUser } from '@/hooks/useUser';
-import type { TaskMessageEnvelope } from '@/types';
+import type { TaskMessageEnvelope, TaskMessageEnvelopePage } from '@/types';
 import { useTRPC, useTRPCClient } from '@/trpc/client';
 
 import {
@@ -34,10 +34,10 @@ import {
   useSandboxClient,
   useTaskEnvVarRequest,
 } from './hooks';
+import { updateTaskMessageEnvelopePage } from './hooks/use-task-message-envelopes';
 
 interface PendingEnvVarRequestPanelProps {
   taskId: string;
-  onVisibleRequestKeyChange?: (requestKey: string | null) => void;
 }
 
 const SAFE_FOLLOW_UP_PROMPT =
@@ -100,7 +100,6 @@ function createHiddenEnvVarFulfillmentMessage({
 
 export function PendingEnvVarRequestPanel({
   taskId,
-  onVisibleRequestKeyChange,
 }: PendingEnvVarRequestPanelProps) {
   const { isAdmin } = useAuthorizedUser();
   const client = useSandboxClient();
@@ -122,10 +121,6 @@ export function PendingEnvVarRequestPanel({
 
   const visibleRequest =
     request && request.key !== dismissedRequestKey ? request : null;
-
-  useEffect(() => {
-    onVisibleRequestKeyChange?.(visibleRequest?.key ?? null);
-  }, [onVisibleRequestKeyChange, visibleRequest?.key]);
 
   useEffect(() => {
     if (!visibleRequest) {
@@ -174,9 +169,12 @@ export function PendingEnvVarRequestPanel({
     const message = createHiddenEnvVarFulfillmentMessage({ taskId, event });
 
     appendAcpEvent(event);
-    queryClient.setQueryData<TaskMessageEnvelope[] | undefined>(
+    queryClient.setQueryData<TaskMessageEnvelopePage | undefined>(
       trpc.tasks.messageEnvelopes.queryKey({ taskId }),
-      (current) => (current ? [...current, message] : current),
+      (current) =>
+        updateTaskMessageEnvelopePage(current, (messages) =>
+          messages ? [...messages, message] : messages,
+        ),
     );
   };
 

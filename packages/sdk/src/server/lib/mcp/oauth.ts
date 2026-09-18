@@ -69,6 +69,7 @@ export interface OAuthRequestOptions {
       method?: string;
       headers?: Record<string, string>;
       body?: string;
+      signal?: AbortSignal;
     },
   ) => Promise<Response>;
   /**
@@ -77,6 +78,24 @@ export interface OAuthRequestOptions {
    * per-server opt-out exists because some servers reject unknown params.
    */
   resource?: string;
+  tokenRequestFormat?: 'form' | 'json';
+  usePkce?: boolean;
+}
+
+function serializeTokenRequest(
+  body: URLSearchParams,
+  options?: OAuthRequestOptions,
+): { body: string; contentType: string } {
+  if (options?.tokenRequestFormat === 'json') {
+    return {
+      body: JSON.stringify(Object.fromEntries(body)),
+      contentType: 'application/json',
+    };
+  }
+  return {
+    body: body.toString(),
+    contentType: 'application/x-www-form-urlencoded',
+  };
 }
 
 function resolveFetch(options?: OAuthRequestOptions) {
@@ -292,6 +311,33 @@ export async function discoverOAuthEndpoints(
 /**
  * Register OAuth client dynamically (RFC 7591)
  */
+/**
+ * The authorization server answered the registration request with an error
+ * status. A 4xx other than 408 or 429 is the server's decision about this
+ * client (refused redirect URI, closed registration); anything else is
+ * transient and worth retrying later.
+ */
+export class ClientRegistrationRejectedError extends Error {
+  readonly status: number;
+  readonly body: string;
+
+  constructor(status: number, body: string) {
+    super(`OAuth client registration failed: ${body}`);
+    this.name = 'ClientRegistrationRejectedError';
+    this.status = status;
+    this.body = body;
+  }
+
+  get isRefusal(): boolean {
+    return (
+      this.status >= 400 &&
+      this.status < 500 &&
+      this.status !== 408 &&
+      this.status !== 429
+    );
+  }
+}
+
 export async function registerOAuthClient(
   registrationEndpoint: string,
   metadata: OAuthClientMetadata,
@@ -306,8 +352,10 @@ export async function registerOAuthClient(
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`OAuth client registration failed: ${errorText}`);
+    throw new ClientRegistrationRejectedError(
+      response.status,
+      await response.text(),
+    );
   }
 
   const clientInfo: OAuthClientInformation = await response.json();
@@ -463,22 +511,24 @@ export async function exchangeCodeForTokens(
     grant_type: 'authorization_code',
     code,
     redirect_uri: redirectUri,
-    code_verifier: codeVerifier,
   });
+  if (options?.usePkce !== false) {
+    body.append('code_verifier', codeVerifier);
+  }
 
   if (options?.resource) {
     body.append('resource', options.resource);
   }
 
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/x-www-form-urlencoded',
-  };
+  const headers: Record<string, string> = {};
   applyTokenEndpointClientAuthentication(body, headers, clientInfo);
+  const serialized = serializeTokenRequest(body, options);
+  headers['Content-Type'] = serialized.contentType;
 
   const response = await resolveFetch(options)(tokenEndpoint, {
     method: 'POST',
     headers,
-    body: body.toString(),
+    body: serialized.body,
   });
 
   if (!response.ok) {
@@ -516,15 +566,15 @@ export async function refreshOAuthToken(
     body.append('resource', options.resource);
   }
 
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/x-www-form-urlencoded',
-  };
+  const headers: Record<string, string> = {};
   applyTokenEndpointClientAuthentication(body, headers, clientInfo);
+  const serialized = serializeTokenRequest(body, options);
+  headers['Content-Type'] = serialized.contentType;
 
   const response = await resolveFetch(options)(tokenEndpoint, {
     method: 'POST',
     headers,
-    body: body.toString(),
+    body: serialized.body,
   });
 
   if (!response.ok) {

@@ -386,6 +386,8 @@ describe('Notion page mapping', () => {
       scanStartedAt: '2026-08-15T00:00:00.000Z',
       traverse: { afterItemId: '', pending: [] },
     });
+    // The handed-off traversal keeps the fast continuation loop open.
+    expect(result.historicalPending).toBe(true);
   });
 
   it('refreshes a page that moved during the sweep instead of tombstoning it', async () => {
@@ -561,6 +563,8 @@ describe('Notion traversal discovery', () => {
     expect(cursor.mode).toBe('traverse');
     expect(cursor.traverse!.pending.length).toBeGreaterThan(0);
     expect(cursor.traverse!.afterItemId).toBe(parents[24]!.itemId);
+    // An unfinished walk asks the engine to continue it in the fast loop.
+    expect(result.historicalPending).toBe(true);
   });
 
   it('queries data sources behind child databases', async () => {
@@ -1008,5 +1012,7 @@ describe('Notion traversal discovery', () => {
     expect(JSON.parse(result.stateUpdates![0]!.cursor as string)).toMatchObject(
       { mode: 'idle', lastSweepAt: '2026-08-27T00:00:00.000Z' },
     );
+    // A settled scan releases the fast continuation loop.
+    expect(result.historicalPending).toBe(false);
   });
 });

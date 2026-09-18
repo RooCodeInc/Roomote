@@ -23,6 +23,7 @@ import {
   stripOpenCodeModelReasoningOptions,
   toBedrockMantleRuntimeModelId,
   type OpenRouterVariantModelAlias,
+  type ReasoningEffort,
 } from '@roomote/types';
 
 import {
@@ -35,6 +36,7 @@ import {
 } from '../opencode-prompt-subagents';
 import { OPENCODE_IDENTITY_PLUGIN_SCRIPT } from '../opencode-identity-plugin';
 import { FAST_AGENT_SUBAGENT_TOOL_FILTER } from './fast-agent/fast-agent-tool-policy';
+import { seedOpenCodePluginDependenciesForEnv } from './opencode-plugin-seed';
 
 const ESCAPE_CHARACTER = String.fromCharCode(27);
 const BELL_CHARACTER = String.fromCharCode(7);
@@ -55,6 +57,7 @@ const OPENCODE_SDK_SERVER_READY_FETCH_TIMEOUT_MS = 1_000;
 
 function buildModelBackedOpenCodeConfigContent(
   env: NodeJS.ProcessEnv = process.env,
+  options: NonTaskOpenCodeRuntimeOptions = {},
 ): string | undefined {
   const rawModel = env.R_MODEL?.trim();
 
@@ -134,6 +137,19 @@ function buildModelBackedOpenCodeConfigContent(
     );
   }
 
+  if (options.reasoningOverride) {
+    const overrideModel = collectOpenRouterVariantModelAlias(
+      variantAliases,
+      toBedrockMantleRuntimeModelId(options.reasoningOverride.model),
+    );
+    providerReasoningConfig = mergeOpenCodeModelReasoningOptions(
+      providerReasoningConfig,
+      overrideModel,
+      options.reasoningOverride.effort,
+      { overrideExisting: true },
+    );
+  }
+
   const providerModelConfig =
     env[CHATGPT_FAST_MODE_ENV_VAR_NAME]?.trim() === '1'
       ? mergeOpenCodeChatGptFastModeOptions(providerReasoningConfig, [
@@ -199,6 +215,9 @@ export const NON_TASK_TOOL_PERMISSION_DENIALS = {
   external_directory: 'deny',
   todowrite: 'deny',
   question: 'deny',
+  // OpenCode's built-in fetch executes on this control-plane host and only
+  // validates the URL scheme. Keep it denied until requests are isolated or
+  // every DNS resolution and redirect hop is constrained to public networks.
   webfetch: 'deny',
   websearch: 'deny',
   lsp: 'deny',
@@ -225,6 +244,7 @@ const PROMPT_ONLY_SUBAGENTS = {
 type NonTaskOpenCodeRuntimeOptions = {
   preserveReasoning?: boolean;
   promptOnlySubagents?: boolean;
+  reasoningOverride?: { model: string; effort: ReasoningEffort };
 };
 
 let openCodeIdentityPluginUrl: string | undefined;
@@ -252,6 +272,7 @@ function buildRestrictedNonTaskConfig(
   }
 
   return {
+    subagent_depth: 2,
     agent: PROMPT_ONLY_SUBAGENTS,
     plugin: [getOpenCodeIdentityPluginUrl()],
     permission: { ...NON_TASK_TOOL_PERMISSION_DENIALS, task: 'allow' },
@@ -424,13 +445,22 @@ function mergeBedrockRegistrationsIntoConfigContent(
 function mergeReasoningIntoConfigContent(
   configContent: string,
   env: NodeJS.ProcessEnv,
+  reasoningOverride?: { model: string; effort: ReasoningEffort },
 ): string {
-  const rawModel = env.R_MODEL?.trim();
-  const reasoningEffort = normalizeOptionalReasoningEffort(
-    env.R_MODEL_REASONING_EFFORT?.trim(),
-  );
-
-  if (!rawModel || !reasoningEffort || isTaskModelIdDisabled(rawModel)) {
+  const roleModels = [
+    [env.R_MODEL?.trim(), env.R_MODEL_REASONING_EFFORT?.trim()],
+    [env.R_SMALL_MODEL?.trim(), env.R_SMALL_MODEL_REASONING_EFFORT?.trim()],
+    [env.R_VISION_MODEL?.trim(), env.R_VISION_MODEL_REASONING_EFFORT?.trim()],
+  ] as const;
+  if (
+    !reasoningOverride &&
+    !roleModels.some(
+      ([model, effort]) =>
+        model &&
+        normalizeOptionalReasoningEffort(effort) &&
+        !isTaskModelIdDisabled(model),
+    )
+  ) {
     return configContent;
   }
 
@@ -453,18 +483,35 @@ function mergeReasoningIntoConfigContent(
         ? (config.provider as Record<string, unknown>)
         : {};
     const variantAliases = new Map<string, OpenRouterVariantModelAlias>();
-    const model = collectOpenRouterVariantModelAlias(
-      variantAliases,
-      toBedrockMantleRuntimeModelId(rawModel),
-    );
-    const provider = mergeOpenRouterVariantAliasModels(
-      mergeOpenCodeModelReasoningOptions(
-        existingProvider,
+    let provider = existingProvider;
+    for (const [rawModel, rawEffort] of roleModels) {
+      const reasoningEffort = normalizeOptionalReasoningEffort(rawEffort);
+      if (!rawModel || !reasoningEffort || isTaskModelIdDisabled(rawModel)) {
+        continue;
+      }
+      const model = collectOpenRouterVariantModelAlias(
+        variantAliases,
+        toBedrockMantleRuntimeModelId(rawModel),
+      );
+      provider = mergeOpenCodeModelReasoningOptions(
+        provider,
         model,
         reasoningEffort,
-      ),
-      variantAliases,
-    );
+      );
+    }
+    if (reasoningOverride) {
+      const overrideModel = collectOpenRouterVariantModelAlias(
+        variantAliases,
+        toBedrockMantleRuntimeModelId(reasoningOverride.model),
+      );
+      provider = mergeOpenCodeModelReasoningOptions(
+        provider,
+        overrideModel,
+        reasoningOverride.effort,
+        { overrideExisting: true },
+      );
+    }
+    provider = mergeOpenRouterVariantAliasModels(provider, variantAliases);
 
     return JSON.stringify({ ...config, provider });
   } catch {
@@ -515,7 +562,10 @@ export function buildOpenCodeCliEnv(
   }
 
   if (!env.OPENCODE_CONFIG_CONTENT) {
-    const modelBackedConfigContent = buildModelBackedOpenCodeConfigContent(env);
+    const modelBackedConfigContent = buildModelBackedOpenCodeConfigContent(
+      env,
+      options,
+    );
 
     if (modelBackedConfigContent) {
       env.OPENCODE_CONFIG_CONTENT = modelBackedConfigContent;
@@ -534,6 +584,7 @@ export function buildOpenCodeCliEnv(
       env.OPENCODE_CONFIG_CONTENT = mergeReasoningIntoConfigContent(
         env.OPENCODE_CONFIG_CONTENT,
         env,
+        options.reasoningOverride,
       );
     }
   }
@@ -824,8 +875,22 @@ async function startManagedOpenCodeSdkServer(
     `--hostname=${OPENCODE_SDK_SERVER_HOSTNAME}`,
     `--port=${port}`,
   ]);
+  const env = buildOpenCodeCliEnv(extraEnv, options);
+  // OpenCode blocks its first request on an `@opencode-ai/plugin` registry
+  // install into each config directory it loads; a fresh container after a
+  // deploy paid that in full (minutes, or a 300s timeout). Copy the
+  // image-baked install into place first so that check no-ops.
+  try {
+    seedOpenCodePluginDependenciesForEnv(env);
+  } catch (error) {
+    console.warn(
+      `[OpenCode] Failed to seed plugin dependencies before starting the SDK server: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
   const proc = spawn(command.command, command.args, {
-    env: buildOpenCodeCliEnv(extraEnv, options),
+    env,
     stdio: ['ignore', 'pipe', 'pipe'],
     // Own process group, so shutdown can signal the entire tree (shell
     // wrappers included) via the negative pid.
@@ -920,6 +985,7 @@ class OpenCodeSdkServerPool {
     ephemeral?: boolean;
     preserveReasoning?: boolean;
     promptOnlySubagents?: boolean;
+    reasoningOverride?: { model: string; effort: ReasoningEffort };
     startTimeoutMs: number;
     useConfiguredServer?: boolean;
   }): Promise<OpenCodeSdkServerLease> {
@@ -940,6 +1006,7 @@ class OpenCodeSdkServerPool {
     const cacheKey = buildOpenCodeSdkServerCacheKey(params.env, {
       preserveReasoning: params.preserveReasoning,
       promptOnlySubagents: params.promptOnlySubagents,
+      reasoningOverride: params.reasoningOverride,
     });
     const cached = this.cache.get(cacheKey);
 
@@ -956,6 +1023,7 @@ class OpenCodeSdkServerPool {
         {
           preserveReasoning: params.preserveReasoning,
           promptOnlySubagents: params.promptOnlySubagents,
+          reasoningOverride: params.reasoningOverride,
         },
       )
         .then((server) => this.cacheStartedServer(cacheKey, server))
@@ -1095,6 +1163,8 @@ export function leaseOpenCodeSdkServer(params: {
   preserveReasoning?: boolean;
   /** Expose Roomote's controlled prompt-only subagents to Fast sessions. */
   promptOnlySubagents?: boolean;
+  /** Override reasoning only for the model selected by this request. */
+  reasoningOverride?: { model: string; effort: ReasoningEffort };
   startTimeoutMs: number;
   /**
    * Whether an operator-supplied OpenCode server may serve the request.

@@ -170,10 +170,6 @@ export function selectLatestWorkerReleaseFromList(
       continue;
     }
 
-    if (channel === 'stable' && release.prerelease) {
-      continue;
-    }
-
     tags.push(release.tag_name);
   }
 

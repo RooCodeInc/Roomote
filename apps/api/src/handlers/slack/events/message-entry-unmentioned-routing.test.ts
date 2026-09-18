@@ -5,19 +5,29 @@ const {
   hasPendingRoutingConfirmationMock,
   findRoomoteOwnedSlackThreadMock,
   markSlackThreadExplicitMentionRequiredMock,
-  getSlackThreadReplyFooterMessageTsMock,
-  hasFastAgentSessionMock,
+  acquireRootBindingLockMock,
+  releaseRootBindingLockMock,
+  getFastAgentSessionOwnerMock,
+  peerConversationsExperimentEnabledMock,
   findActiveSlackTaskRunMock,
   findCompletedSlackTaskRunWithSnapshotMock,
+  evaluateTypeSafeJudgmentsMock,
 } = vi.hoisted(() => ({
   fetchThreadMessagesMock: vi.fn(),
   hasPendingRoutingConfirmationMock: vi.fn(),
   findRoomoteOwnedSlackThreadMock: vi.fn(),
   markSlackThreadExplicitMentionRequiredMock: vi.fn(),
-  getSlackThreadReplyFooterMessageTsMock: vi.fn(),
-  hasFastAgentSessionMock: vi.fn(),
+  acquireRootBindingLockMock: vi.fn(),
+  releaseRootBindingLockMock: vi.fn(),
+  getFastAgentSessionOwnerMock: vi.fn(),
+  peerConversationsExperimentEnabledMock: vi.fn(),
   findActiveSlackTaskRunMock: vi.fn(),
   findCompletedSlackTaskRunWithSnapshotMock: vi.fn(),
+  evaluateTypeSafeJudgmentsMock: vi.fn(),
+}));
+
+vi.mock('@roomote/cloud-agents/server/typesafe-judgment', () => ({
+  evaluateTypeSafeJudgments: evaluateTypeSafeJudgmentsMock,
 }));
 
 vi.mock('@roomote/env', () => ({
@@ -26,7 +36,7 @@ vi.mock('@roomote/env', () => ({
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   ROUTING_AUTO_CONFIRM_TIMEOUT_MS: 0,
-  hasFastAgentSession: hasFastAgentSessionMock,
+  getFastAgentSessionOwner: getFastAgentSessionOwnerMock,
 }));
 
 vi.mock('@roomote/cloud-agents', () => ({
@@ -36,11 +46,11 @@ vi.mock('@roomote/cloud-agents', () => ({
 
 vi.mock('@roomote/slack', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/slack')>()),
+  acquireSlackFastRootBindingLock: acquireRootBindingLockMock,
   createFastAgentSlackLiveTaskLauncher: vi.fn(() => vi.fn()),
   hasPendingRoutingConfirmation: hasPendingRoutingConfirmationMock,
   markSlackThreadExplicitMentionRequired:
     markSlackThreadExplicitMentionRequiredMock,
-  getSlackThreadReplyFooterMessageTs: getSlackThreadReplyFooterMessageTsMock,
   findActiveSlackTaskRun: findActiveSlackTaskRunMock,
   findCompletedSlackTaskRunWithSnapshot:
     findCompletedSlackTaskRunWithSnapshotMock,
@@ -67,6 +77,7 @@ vi.mock('@roomote/redis', async (importOriginal) => ({
 vi.mock('@roomote/db/server', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/db/server')>()),
   db: {},
+  isDeploymentExperimentEnabled: peerConversationsExperimentEnabledMock,
 }));
 
 const THREAD_TS = '100.000';
@@ -110,6 +121,14 @@ async function routeDecision(event: never) {
   });
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((promiseResolve) => {
+    resolve = promiseResolve;
+  });
+  return { promise, resolve };
+}
+
 describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -119,18 +138,24 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
       slackUserId: 'U111',
     });
     markSlackThreadExplicitMentionRequiredMock.mockResolvedValue(undefined);
-    getSlackThreadReplyFooterMessageTsMock.mockResolvedValue(null);
-    hasFastAgentSessionMock.mockResolvedValue(false);
+    acquireRootBindingLockMock.mockResolvedValue(releaseRootBindingLockMock);
+    releaseRootBindingLockMock.mockResolvedValue(undefined);
+    getFastAgentSessionOwnerMock.mockResolvedValue(null);
+    peerConversationsExperimentEnabledMock.mockResolvedValue(false);
     findActiveSlackTaskRunMock.mockResolvedValue(null);
     findCompletedSlackTaskRunWithSnapshotMock.mockResolvedValue(null);
     fetchThreadMessagesMock.mockResolvedValue([]);
+    evaluateTypeSafeJudgmentsMock.mockResolvedValue(null);
   });
 
   it('routes an unmentioned reply in an existing fast-agent thread', async () => {
-    hasFastAgentSessionMock.mockResolvedValue(true);
+    getFastAgentSessionOwnerMock.mockResolvedValue({
+      kind: 'user',
+      userId: 'owner-user-id',
+    });
     findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
     fetchThreadMessagesMock.mockResolvedValue([
-      humanMessage('U111', THREAD_TS, '<@UBOT> !fast hi'),
+      humanMessage('U111', THREAD_TS, '<@UBOT> hi'),
       botMessage('101.000', 'Hi there.'),
     ]);
 
@@ -143,7 +168,7 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
         }),
       ),
     ).resolves.toMatchObject({ shouldRoute: true });
-    expect(hasFastAgentSessionMock).toHaveBeenCalledWith({
+    expect(getFastAgentSessionOwnerMock).toHaveBeenCalledWith({
       surface: 'slack',
       workspaceId: 'T123',
       conversationId: THREAD_TS,
@@ -152,11 +177,47 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
     expect(findRoomoteOwnedSlackThreadMock).not.toHaveBeenCalled();
   }, 15_000);
 
-  it("routes Matt when he joins Dan's existing fast-agent conversation", async () => {
-    hasFastAgentSessionMock.mockResolvedValue(true);
+  it('waits for delayed root binding before classifying an automatic reply', async () => {
+    const bindingLock = createDeferred<() => Promise<void>>();
+    acquireRootBindingLockMock.mockReturnValueOnce(bindingLock.promise);
+    getFastAgentSessionOwnerMock.mockResolvedValue({
+      kind: 'user',
+      userId: 'owner-user-id',
+    });
     findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
     fetchThreadMessagesMock.mockResolvedValue([
-      humanMessage('UDAN', THREAD_TS, '<@UBOT> !fast hi'),
+      botMessage(THREAD_TS, 'Automation result'),
+    ]);
+
+    const decision = routeDecision(
+      threadReplyEvent({
+        user: 'U111',
+        ts: '102.000',
+        text: 'Can you follow up?',
+      }),
+    );
+
+    await vi.waitFor(() => {
+      expect(acquireRootBindingLockMock).toHaveBeenCalledWith({
+        teamId: 'T123',
+        channelId: 'C123',
+      });
+    });
+    expect(getFastAgentSessionOwnerMock).not.toHaveBeenCalled();
+
+    bindingLock.resolve(releaseRootBindingLockMock);
+    await expect(decision).resolves.toMatchObject({ shouldRoute: true });
+    expect(getFastAgentSessionOwnerMock).toHaveBeenCalledOnce();
+  });
+
+  it("routes Matt when he joins Dan's existing fast-agent conversation", async () => {
+    getFastAgentSessionOwnerMock.mockResolvedValue({
+      kind: 'user',
+      userId: 'owner-user-id',
+    });
+    findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
+    fetchThreadMessagesMock.mockResolvedValue([
+      humanMessage('UDAN', THREAD_TS, '<@UBOT> hi'),
       botMessage('101.000', 'Hi Dan.'),
     ]);
 
@@ -172,10 +233,13 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
   });
 
   it('routes a new participant after the original participant speaks again in a fast-agent thread', async () => {
-    hasFastAgentSessionMock.mockResolvedValue(true);
+    getFastAgentSessionOwnerMock.mockResolvedValue({
+      kind: 'user',
+      userId: 'owner-user-id',
+    });
     findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
     fetchThreadMessagesMock.mockResolvedValue([
-      humanMessage('U111', THREAD_TS, '<@UBOT> !fast hi'),
+      humanMessage('U111', THREAD_TS, '<@UBOT> hi'),
       botMessage('101.000', 'Hi there.'),
       humanMessage('U111', '102.000', 'One more detail'),
     ]);
@@ -191,11 +255,15 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
     ).resolves.toMatchObject({ shouldRoute: true });
   });
 
-  it('keeps a reply silent when the previous participant addressed the sender', async () => {
-    hasFastAgentSessionMock.mockResolvedValue(true);
+  it('admits a reply after a peer mention in an established Fast thread', async () => {
+    getFastAgentSessionOwnerMock.mockResolvedValue({
+      kind: 'user',
+      userId: 'owner-user-id',
+    });
+    peerConversationsExperimentEnabledMock.mockResolvedValue(true);
     findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
     fetchThreadMessagesMock.mockResolvedValue([
-      humanMessage('U111', THREAD_TS, '<@UBOT> !fast hi'),
+      humanMessage('U111', THREAD_TS, '<@UBOT> hi'),
       botMessage('101.000', 'Hi there.'),
       humanMessage('U111', '102.000', '<@U222> what do you think?'),
     ]);
@@ -208,18 +276,44 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
           text: 'I agree',
         }),
       ),
+    ).resolves.toEqual({
+      shouldRoute: true,
+      peerConversationsExperimentEnabled: true,
+    });
+    expect(markSlackThreadExplicitMentionRequiredMock).not.toHaveBeenCalled();
+    expect(peerConversationsExperimentEnabledMock).toHaveBeenCalledWith(
+      'slackPeerConversations',
+    );
+  });
+
+  it('keeps the peer-mention cutoff when the deployment has not enabled the experiment', async () => {
+    getFastAgentSessionOwnerMock.mockResolvedValue({
+      kind: 'user',
+      userId: 'owner-user-id',
+    });
+
+    await expect(
+      routeDecision(
+        threadReplyEvent({
+          user: 'participant-user-id',
+          ts: '102.000',
+          text: '<@U333> what do you think?',
+        }),
+      ),
     ).resolves.toEqual({ shouldRoute: false });
-    expect(markSlackThreadExplicitMentionRequiredMock).toHaveBeenCalledWith(
-      'C123',
-      THREAD_TS,
+    expect(peerConversationsExperimentEnabledMock).toHaveBeenCalledWith(
+      'slackPeerConversations',
     );
   });
 
   it('keeps routing after the sender mentions themself in a fast-agent thread', async () => {
-    hasFastAgentSessionMock.mockResolvedValue(true);
+    getFastAgentSessionOwnerMock.mockResolvedValue({
+      kind: 'user',
+      userId: 'owner-user-id',
+    });
     findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
     fetchThreadMessagesMock.mockResolvedValue([
-      humanMessage('U111', THREAD_TS, '<@UBOT> !fast hi'),
+      humanMessage('U111', THREAD_TS, '<@UBOT> hi'),
       botMessage('101.000', 'Hi there.'),
       humanMessage('U111', '102.000', '<@U111> note to self'),
     ]);
@@ -236,8 +330,12 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
     expect(markSlackThreadExplicitMentionRequiredMock).not.toHaveBeenCalled();
   });
 
-  it('keeps a peer-directed reply silent in an existing fast-agent thread', async () => {
-    hasFastAgentSessionMock.mockResolvedValue(true);
+  it('admits a peer-directed reply in an existing fast-agent thread', async () => {
+    getFastAgentSessionOwnerMock.mockResolvedValue({
+      kind: 'user',
+      userId: 'owner-user-id',
+    });
+    peerConversationsExperimentEnabledMock.mockResolvedValue(true);
     findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
 
     await expect(
@@ -248,15 +346,43 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
           text: '<@U333> what do you think?',
         }),
       ),
-    ).resolves.toEqual({ shouldRoute: false });
+    ).resolves.toEqual({
+      shouldRoute: true,
+      peerConversationsExperimentEnabled: true,
+    });
     expect(fetchThreadMessagesMock).not.toHaveBeenCalled();
   });
 
+  it('continues admitting the side discussion and plain-name resumption without a bot reply', async () => {
+    getFastAgentSessionOwnerMock.mockResolvedValue({
+      kind: 'user',
+      userId: 'owner-user-id',
+    });
+    peerConversationsExperimentEnabledMock.mockResolvedValue(true);
+    for (const [user, ts, text] of [
+      ['U111', '102.000', '<@U222> what do you think?'],
+      ['U222', '103.000', 'Not really'],
+      ['U111', '104.000', 'I prefer consistency'],
+      ['U222', '105.000', 'Roomote, please summarize'],
+    ] as const) {
+      await expect(
+        routeDecision(threadReplyEvent({ user, ts, text })),
+      ).resolves.toEqual({
+        shouldRoute: true,
+        peerConversationsExperimentEnabled: true,
+      });
+    }
+    expect(findRoomoteOwnedSlackThreadMock).not.toHaveBeenCalled();
+  });
+
   it('keeps routing between participants in a fast-agent thread', async () => {
-    hasFastAgentSessionMock.mockResolvedValue(true);
+    getFastAgentSessionOwnerMock.mockResolvedValue({
+      kind: 'user',
+      userId: 'owner-user-id',
+    });
     findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
     fetchThreadMessagesMock.mockResolvedValue([
-      humanMessage('U111', THREAD_TS, '<@UBOT> !fast hi'),
+      humanMessage('U111', THREAD_TS, '<@UBOT> hi'),
       botMessage('101.000', 'Hi there.'),
       humanMessage('U222', '102.000', 'I think that is probably right'),
     ]);
@@ -347,6 +473,43 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
       'C123',
       THREAD_TS,
     );
+  });
+
+  it('routes an interjected reply the judgment model confidently gives to Roomote', async () => {
+    evaluateTypeSafeJudgmentsMock.mockResolvedValue({
+      addressee: {
+        type: 'choice',
+        choice: 'roomote',
+        confidence: 0.95,
+        probabilities: { roomote: 0.95, participant: 0.03, unclear: 0.02 },
+      },
+    });
+    fetchThreadMessagesMock.mockResolvedValue([
+      humanMessage('U111', THREAD_TS, '<@UBOT> please fix the bug'),
+      botMessage('101.000', 'I opened a PR with the fix.'),
+      humanMessage('U222', '102.000', 'nice, looks good'),
+    ]);
+
+    await expect(
+      routeDecision(
+        threadReplyEvent({
+          user: 'U111',
+          ts: '103.000',
+          text: 'can you also add a unit test?',
+        }),
+      ),
+    ).resolves.toMatchObject({ shouldRoute: true });
+    expect(evaluateTypeSafeJudgmentsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        state: expect.objectContaining({
+          reply: {
+            author: 'reply author',
+            text: 'can you also add a unit test?',
+          },
+        }),
+      }),
+    );
+    expect(markSlackThreadExplicitMentionRequiredMock).not.toHaveBeenCalled();
   });
 
   it('requires a mention when somebody else was mentioned since the bot last spoke', async () => {

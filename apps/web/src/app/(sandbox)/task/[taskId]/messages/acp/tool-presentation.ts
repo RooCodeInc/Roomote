@@ -32,21 +32,26 @@ export type ToolIconKey =
   | 'task'
   | 'message'
   | 'memory'
+  | 'book-heart'
   | 'artifact'
   | 'widget'
   | 'roomote'
   | 'video'
   | 'target'
+  | 'list'
   | 'list-checks'
   | 'pull-request'
   | 'environment'
   | 'alert'
   | 'messages'
+  | 'stopwatch'
   | 'tool';
 
 type ToolPresentationPhase = 'running' | 'completed' | 'failed';
 
 type ToolData = AcpToolCallPayload | AcpToolResultPayload;
+
+type ToolArguments = Record<string, unknown>;
 
 interface ResolvedToolPresentation {
   identity: {
@@ -77,6 +82,7 @@ const LIST_TOOL_NAMES = new Set([
   'list_dir',
   'list_directory',
   'list_files',
+  'list_repositories',
   'list_skills',
 ]);
 const READ_TOOL_NAMES = new Set([
@@ -84,30 +90,36 @@ const READ_TOOL_NAMES = new Set([
   'read_file',
   'spill_read',
   'load_skill',
+  'inspect_images',
 ]);
 const TASK_TOOL_NAMES = new Set([
   'launch_task',
+  'review_pull_request',
   'retry_task_start',
   'cancel_task',
   'send_task_message',
 ]);
 const COMMUNICATION_TOOL_NAMES = new Set([
+  'report_to_parent_session',
+  'receive_task_report',
   'send_chat_reply',
   'send_chat_reaction',
   'send_chat_reaction_emoji',
-  'add_reaction_to_slack_message',
   'post_to_channel',
   'ignore_event',
 ]);
 const TOOL_ICON_OVERRIDES: Readonly<Partial<Record<string, ToolIconKey>>> = {
   manage_custom_automations: 'task',
+  manage_wakeups: 'stopwatch',
   get_about_me: 'roomote',
   describe_video: 'video',
+  request_user_input: 'list',
   manage_goal: 'target',
   manage_tasks: 'list-checks',
   manage_source_control: 'pull-request',
   manage_environments: 'environment',
   save_task_memory: 'memory',
+  update_personalization: 'book-heart',
   request_environment_variables: 'terminal',
   report_platform_issue: 'alert',
   submit_automation_work_items: 'task',
@@ -148,6 +160,7 @@ export function resolveToolPresentation(
         : 'completed';
   const category = resolveToolCategory({
     kind,
+    isMcp: data.isMcp,
     toolName,
     serverName,
     isExecute: data.isExecute,
@@ -159,15 +172,37 @@ export function resolveToolPresentation(
     providerKind === 'mcp' && serverName
       ? getMcpIntegration(serverName)
       : undefined;
-  const displayName = toolName
-    ? formatToolIdentifier(toolName)
-    : sanitizeSandboxPathString(data.title ?? 'Tool');
+  const displayName =
+    toolName === 'manage_wakeups'
+      ? 'Timer'
+      : toolName
+        ? formatToolIdentifier(toolName)
+        : 'Tool';
   const providerLabel =
-    integration?.name ??
-    (serverName ? formatToolIdentifier(serverName) : undefined);
-  const receipt = resolveReceiptLanguage(toolName, phase);
-  const verb = receipt?.verb ?? (phase === 'running' ? 'Using' : 'Used');
-  const object = receipt?.object ?? displayName;
+    serverName === 'roomote' || serverName === 'gbrain'
+      ? undefined
+      : (integration?.name ??
+        (serverName ? formatToolIdentifier(serverName) : undefined));
+  const receipt = resolveReceiptLanguage(
+    toolName,
+    phase,
+    readToolArguments(data),
+    readToolResult(data),
+    category,
+    serverName,
+    providerKind === 'native'
+      ? (toolName ?? kind ?? (category === 'read' ? 'read' : null))
+      : null,
+  );
+  const verb =
+    receipt?.verb ??
+    (phase === 'running'
+      ? 'Running'
+      : phase === 'failed'
+        ? 'Failed'
+        : 'Completed');
+  const object =
+    receipt?.object ?? (toolName ? `${displayName} call` : 'tool call');
 
   return {
     identity: { providerKind, serverName, toolName },
@@ -191,6 +226,7 @@ export function resolveToolPresentation(
 
 function resolveToolCategory(input: {
   kind: string | null;
+  isMcp: boolean;
   toolName: string | null;
   serverName: string | null;
   isExecute: boolean;
@@ -204,6 +240,13 @@ function resolveToolCategory(input: {
     input.isExecute
   )
     return 'execute';
+  if (
+    input.kind === 'memory' ||
+    input.serverName === 'gbrain' ||
+    input.toolName === 'save_memory' ||
+    input.toolName === 'save_task_memory'
+  )
+    return 'memory';
   if (
     input.kind === 'read' ||
     input.isRead ||
@@ -220,7 +263,11 @@ function resolveToolCategory(input: {
     (input.toolName && LIST_TOOL_NAMES.has(input.toolName))
   )
     return 'list';
-  if (input.kind === 'edit') return 'edit';
+  if (
+    input.kind === 'edit' ||
+    (!input.isMcp && (input.toolName ?? input.kind) === 'apply_patch')
+  )
+    return 'edit';
   if (
     input.kind === 'task' ||
     (input.toolName && TASK_TOOL_NAMES.has(input.toolName))
@@ -231,12 +278,6 @@ function resolveToolCategory(input: {
     (input.toolName && COMMUNICATION_TOOL_NAMES.has(input.toolName))
   )
     return 'communication';
-  if (
-    input.kind === 'memory' ||
-    input.serverName === 'gbrain' ||
-    input.toolName === 'save_memory'
-  )
-    return 'memory';
   if (input.kind === 'artifact' || input.toolName === 'manage_artifacts')
     return 'artifact';
   if (input.kind === 'widget' || input.toolName === 'show_widget')
@@ -279,6 +320,11 @@ function resolveToolGroupKey(input: {
 function resolveReceiptLanguage(
   toolName: string | null,
   phase: ToolPresentationPhase,
+  args: ToolArguments | null,
+  result: ToolArguments | null,
+  category: ToolPresentationCategory,
+  serverName: string | null,
+  nativeToolName: string | null,
 ): { verb: string; object: string } | null {
   const byPhase = (running: string, completed: string, failed: string) =>
     phase === 'running' ? running : phase === 'failed' ? failed : completed;
@@ -286,29 +332,410 @@ function resolveReceiptLanguage(
   if (toolName === 'launch_task')
     return {
       verb: byPhase('Starting', 'Started', 'Failed to Start'),
-      object: 'Coding Task',
+      object: 'coding task',
+    };
+  if (toolName === 'prepare_integration_key') {
+    const label = typeof args?.label === 'string' ? args.label.trim() : '';
+    return {
+      verb: byPhase('Requesting', 'Requested', 'Failed to Request'),
+      object: label ? `a key for ${label}` : 'an integration key',
+    };
+  }
+  if (toolName === 'add_remote_mcp') {
+    const requestedName = stringArgument(args, 'name') ?? 'a remote MCP';
+    const resultName = stringArgument(result, 'name') ?? requestedName;
+    const remoteMcp =
+      resultName === 'a remote MCP' ? resultName : `remote MCP ${resultName}`;
+    if (phase === 'running') return { verb: 'Adding', object: remoteMcp };
+    if (phase === 'failed') {
+      return { verb: 'Failed to Add', object: remoteMcp };
+    }
+
+    const status = stringArgument(result, 'status');
+    if (status === 'connected') {
+      const toolCount = Array.isArray(result?.tools)
+        ? ` (${result.tools.length} tools)`
+        : '';
+      return {
+        verb: result?.reused === true ? 'Found' : 'Added',
+        object: `${remoteMcp}${toolCount}`,
+      };
+    }
+    if (status === 'oauth' || status === 'authorization_required') {
+      return { verb: 'Prepared', object: `${remoteMcp} for authorization` };
+    }
+    if (status === 'disabled') {
+      return { verb: 'Found', object: `${remoteMcp} (disabled)` };
+    }
+    if (
+      status === 'needs_static_headers' ||
+      status === 'client_registration_required'
+    ) {
+      return {
+        verb: 'Checked',
+        object: `${remoteMcp}, needs setup in Settings`,
+      };
+    }
+    return { verb: 'Checked', object: remoteMcp };
+  }
+  if (toolName === 'list_integration_keys')
+    return {
+      verb: byPhase('Checking', 'Checked', 'Failed to Check'),
+      object: 'your integrations',
+    };
+  // Historical Fast transcripts can still contain calls from before the
+  // shared HTTP broker became the only execution path.
+  if (toolName === 'request_with_integration_key') {
+    const method =
+      typeof args?.method === 'string' ? args.method.toUpperCase() : '';
+    const path = typeof args?.path === 'string' ? args.path : '';
+    const status =
+      phase !== 'running' && typeof result?.status === 'number'
+        ? ` (${result.status})`
+        : '';
+    return {
+      verb: byPhase('Calling', 'Called', 'Failed to Call'),
+      object:
+        method && path
+          ? `${method} ${path}${status}`
+          : `an integration${status}`,
+    };
+  }
+  if (toolName === 'review_pull_request')
+    return {
+      verb: byPhase('Starting', 'Started', 'Failed to Start'),
+      object: 'code review',
     };
   if (toolName === 'cancel_task')
     return {
       verb: byPhase('Cancelling', 'Cancelled', 'Failed to Cancel'),
-      object: 'Task',
+      object: 'task',
     };
   if (toolName === 'retry_task_start')
     return {
       verb: byPhase('Retrying', 'Retried', 'Failed to Retry'),
-      object: 'Task',
+      object: 'task',
     };
   if (toolName === 'send_task_message')
     return {
       verb: byPhase('Sending', 'Sent', 'Failed to Send'),
-      object: 'Task Message',
+      object: 'message to task',
     };
-  if (toolName === 'save_memory')
+  if (toolName === 'send_chat_reply')
     return {
-      verb: byPhase('Saving', 'Saved', 'Failed to Save'),
-      object: 'Memory',
+      verb: byPhase('Sending', 'Sent', 'Failed to Send'),
+      object: 'chat reply',
+    };
+  if (toolName === 'update_personalization')
+    return {
+      verb: byPhase('Updating', 'Personalization', 'Failed to update'),
+      object: byPhase('personalization', 'updated', 'personalization'),
+    };
+  if (toolName === 'request_user_input')
+    return {
+      verb: byPhase('Asking for', 'Asked for', 'Failed to Ask for'),
+      object: 'human guidance',
+    };
+  if (toolName === 'report_to_parent_session')
+    return {
+      verb: byPhase('Sending', 'Sent', 'Failed to Send'),
+      object: 'report to Session',
+    };
+  if (toolName === 'receive_task_report')
+    return {
+      verb: byPhase('Receiving', 'Received', 'Failed to Receive'),
+      object: 'task report',
+    };
+  if (toolName === 'report_to_voice')
+    return {
+      verb: byPhase('Reporting', 'Reported', 'Failed to Report'),
+      object: 'result to voice',
+    };
+  if (toolName === 'post_to_channel')
+    return {
+      verb: byPhase('Posting', 'Posted', 'Failed to Post'),
+      object: 'message to channel',
+    };
+  if (
+    toolName === 'send_chat_reaction' ||
+    toolName === 'send_chat_reaction_emoji'
+  )
+    return {
+      verb: byPhase('Adding', 'Added', 'Failed to Add'),
+      object: 'chat reaction',
+    };
+  if (
+    toolName === 'save_memory' ||
+    (toolName === 'save_task_memory' && serverName === 'roomote')
+  )
+    return {
+      verb: byPhase('Adding', 'Added', 'Failed to Add'),
+      object: memoryObject(args, toolName),
+    };
+  if (category === 'memory' && (toolName === 'query' || toolName === 'search'))
+    return {
+      verb: byPhase('Searching', 'Searched', 'Failed to Search'),
+      object: 'my memory',
+    };
+  if (category === 'memory' && toolName === 'entity')
+    return {
+      verb: byPhase('Looking Up', 'Looked Up', 'Failed to Look Up'),
+      object: 'a memory',
+    };
+  if (category === 'memory' && toolName === 'get_page')
+    return {
+      verb: byPhase('Reading', 'Read', 'Failed to Read'),
+      object: 'a memory',
+    };
+  if (category === 'memory' && toolName === 'list_pages')
+    return {
+      verb: byPhase('Listing', 'Listed', 'Failed to List'),
+      object: 'memories',
+    };
+  if (category === 'memory' && toolName === 'synthesize')
+    return {
+      verb: byPhase('Summarizing', 'Summarized', 'Failed to Summarize'),
+      object: 'my memory',
+    };
+  if (category === 'memory' && toolName === 'recall')
+    return {
+      verb: byPhase('Recalling From', 'Recalled From', 'Failed to Recall From'),
+      object: 'my memory',
+    };
+  if (toolName === 'manage_tasks' && serverName === 'roomote')
+    return manageTasksReceipt(args, phase);
+  if (toolName === 'manage_wakeups')
+    return manageWakeupsReceipt(args, result, phase);
+  if (toolName === 'find_integration_tools')
+    return {
+      verb: byPhase('Searching', 'Searched', 'Failed to Search'),
+      object: 'integration tools',
+    };
+  if (toolName === 'inspect_images')
+    return {
+      verb: byPhase('Inspecting', 'Inspected', 'Failed to Inspect'),
+      object: 'Images',
+    };
+  if (nativeToolName === 'skill' || nativeToolName === 'load_skill') {
+    const name = humanReadableSkillName(args) ?? humanReadableSkillName(result);
+    return {
+      verb: byPhase('Loading', 'Loaded', 'Failed to Load'),
+      object: name ? `skill ${name}` : 'skill',
+    };
+  }
+  if (nativeToolName === 'apply_patch' || nativeToolName === 'edit') {
+    const paths = new Set<string>();
+    if (
+      nativeToolName === 'apply_patch' &&
+      typeof args?.patchText === 'string'
+    ) {
+      // Only operation headers in the input identify files, never result prose
+      // or prefixed hunk contents. A move names the destination of one edit.
+      for (const match of args.patchText.matchAll(
+        /^\*\*\* (Add|Update|Delete) File: ([^\r\n]+)(?:\r?\n\*\*\* Move to: ([^\r\n]+))?/gm,
+      )) {
+        const path = (
+          match[1] === 'Update' ? (match[3] ?? match[2]!) : match[2]!
+        ).trim();
+        if (path) paths.add(path);
+      }
+    }
+    const path = paths.values().next().value;
+    return {
+      verb: byPhase('Editing', 'Edited', 'Failed to Edit'),
+      object:
+        paths.size > 1
+          ? `${paths.size} files`
+          : path
+            ? (stringArgument({ path }, 'path', true) ?? '')
+            : nativeToolName === 'edit'
+              ? (stringArgument(args, 'filePath', true) ??
+                stringArgument(args, 'file_path', true) ??
+                stringArgument(args, 'path', true) ??
+                '')
+              : '',
+    };
+  }
+  if (
+    nativeToolName === 'read' ||
+    nativeToolName === 'read_file' ||
+    nativeToolName === 'spill_read' ||
+    (toolName === null && nativeToolName !== null && category === 'read')
+  )
+    return {
+      verb: byPhase('Reading', 'Read', 'Failed to Read'),
+      object:
+        stringArgument(args, 'filePath', true) ??
+        stringArgument(args, 'file_path', true) ??
+        stringArgument(args, 'path', true) ??
+        'file',
     };
   return null;
+}
+
+function humanReadableSkillName(args: ToolArguments | null): string | null {
+  const name = stringArgument(args, 'name');
+  return name && !/^instance:[0-9a-f-]{36}$/i.test(name) ? name : null;
+}
+
+export function readToolArguments(data: ToolData): ToolArguments | null {
+  const rawInput = (data as unknown as Record<string, unknown>).rawInput;
+  if (!rawInput || typeof rawInput !== 'object' || Array.isArray(rawInput)) {
+    return null;
+  }
+
+  const input = rawInput as ToolArguments;
+  const nested = input.arguments;
+  return nested && typeof nested === 'object' && !Array.isArray(nested)
+    ? (nested as ToolArguments)
+    : input;
+}
+
+function readToolResult(data: ToolData): ToolArguments | null {
+  if (!('output' in data) || typeof data.output !== 'string') return null;
+  try {
+    const result = JSON.parse(data.output) as unknown;
+    return result && typeof result === 'object' && !Array.isArray(result)
+      ? (result as ToolArguments)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function stringArgument(
+  args: ToolArguments | null,
+  key: string,
+  sanitizePath = false,
+): string | null {
+  const value = args?.[key];
+  if (typeof value !== 'string') return null;
+
+  const normalizedValue = (
+    sanitizePath ? sanitizeSandboxPathString(value) : value
+  )
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!normalizedValue) return null;
+  return normalizedValue.length > 80
+    ? `${normalizedValue.slice(0, 77).trimEnd()}...`
+    : normalizedValue;
+}
+
+function memoryObject(
+  args: ToolArguments | null,
+  toolName: 'save_memory' | 'save_task_memory',
+): string {
+  const subject = stringArgument(
+    args,
+    toolName === 'save_memory' ? 'memory' : 'outcome',
+  );
+  return subject ? `a memory about ${subject}` : 'a memory';
+}
+
+function manageTasksReceipt(
+  args: ToolArguments | null,
+  phase: ToolPresentationPhase,
+): { verb: string; object: string } | null {
+  const action = stringArgument(args, 'action');
+  const target = stringArgument(args, 'sessionId') ? 'session' : 'task';
+  const byPhase = (running: string, completed: string, failed: string) =>
+    phase === 'running' ? running : phase === 'failed' ? failed : completed;
+
+  const receipts: Record<string, { verb: string; object: string }> = {
+    start: {
+      verb: byPhase('Starting', 'Started', 'Failed to Start'),
+      object: 'session',
+    },
+    search: {
+      verb: byPhase('Searching', 'Searched', 'Failed to Search'),
+      object: 'sessions',
+    },
+    get_summary: {
+      verb: byPhase(
+        'Waiting to hear from',
+        'Heard back from',
+        'Failed to hear from',
+      ),
+      object: 'task',
+    },
+    get_messages: {
+      verb: byPhase('Checking', 'Checked', 'Failed to Check'),
+      object: `recent ${target} messages`,
+    },
+    send_message: {
+      verb: byPhase('Sending', 'Sent', 'Failed to Send'),
+      object: `message to ${target}`,
+    },
+    search_tasks: {
+      verb: byPhase('Searching', 'Searched', 'Failed to Search'),
+      object: 'tasks',
+    },
+    get_compute_logs: {
+      verb: byPhase('Getting', 'Received', 'Failed to Get'),
+      object: 'logs from task',
+    },
+    launch: {
+      verb: byPhase('Starting', 'Started', 'Failed to Start'),
+      object: 'task',
+    },
+    cancel: {
+      verb: byPhase('Cancelling', 'Cancelled', 'Failed to Cancel'),
+      object: 'task',
+    },
+    list_environments: {
+      verb: byPhase('Listing', 'Listed', 'Failed to List'),
+      object: 'environments',
+    },
+    list_models: {
+      verb: byPhase('Listing', 'Listed', 'Failed to List'),
+      object: 'models',
+    },
+    update_models: {
+      verb: byPhase('Updating', 'Updated', 'Failed to Update'),
+      object: 'task model',
+    },
+  };
+
+  return action ? (receipts[action] ?? null) : null;
+}
+
+function manageWakeupsReceipt(
+  args: ToolArguments | null,
+  result: ToolArguments | null,
+  phase: ToolPresentationPhase,
+): { verb: string; object: string } {
+  const action = stringArgument(args, 'action');
+  const byPhase = (running: string, completed: string, failed: string) =>
+    phase === 'running' ? running : phase === 'failed' ? failed : completed;
+  const receipts: Record<string, { verb: string; object: string }> = {
+    create: {
+      verb:
+        phase === 'completed' && result?.duplicate === true
+          ? 'Reused'
+          : byPhase('Creating', 'Created', 'Failed to Create'),
+      object: 'timer',
+    },
+    list: {
+      verb: byPhase('Listing', 'Listed', 'Failed to List'),
+      object: 'timers',
+    },
+    get: {
+      verb: byPhase('Fetching', 'Fetched', 'Failed to Fetch'),
+      object: 'timer',
+    },
+    cancel: {
+      verb: byPhase('Canceling', 'Canceled', 'Failed to Cancel'),
+      object: 'timer',
+    },
+  };
+
+  return (
+    (action ? receipts[action] : undefined) ?? {
+      verb: byPhase('Updating', 'Updated', 'Failed to Update'),
+      object: 'timers',
+    }
+  );
 }
 
 export function summarizeToolGroup(
@@ -339,7 +766,7 @@ export function summarizeToolGroup(
   if (category === 'edit')
     return {
       action: 'Edited',
-      objectSummary: `${count} ${count === 1 ? 'file' : 'files'}`,
+      objectSummary: `${count} ${count === 1 ? 'edit' : 'edits'}`,
     };
 
   const label = displayName.toLowerCase();

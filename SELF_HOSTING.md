@@ -9,7 +9,7 @@ below.
 
 | Mode                       | Command                            | Use case                                                                                                     |
 | -------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| One-command install        | `curl get.roomote.dev \| bash`     | Fresh server, guided browser setup, published images (start here)                                            |
+| One-command install        | `curl get.roomote.dev \| sudo bash` | Fresh server, guided browser setup, published images (start here)                                            |
 | Local development          | `pnpm dev`                         | Fast source edits with PM2-managed local services                                                            |
 | Single-host production     | `docker compose ... up -d --build` | Put web, API, controller, queues, preview proxy, and Caddy on one host                                       |
 | Railway (PaaS)             | Railway template                   | Managed platform deploy with hosted sandboxes; see [deploy/railway](deploy/railway/README.md)                |
@@ -27,7 +27,7 @@ SSH into a fresh Ubuntu or Debian server (x86_64 or arm64, 4 GB+ RAM recommended
 run:
 
 ```sh
-curl -fsSL https://get.roomote.dev | bash
+curl -fsSL https://get.roomote.dev | sudo bash
 ```
 
 Prefer to read what you are about to run as root? Download, inspect, then run
@@ -41,11 +41,12 @@ sudo bash install.sh
 
 The installer brings up the full production stack from published GHCR images
 and prints a setup link like
-`https://roomote.203-0-113-7.sslip.io/setup?token=...`. Open it in a browser
-and the setup wizard walks through everything else: sign-in provider, GitHub
-App (created for you via GitHub's manifest flow), model provider and API key,
-Slack, repositories, and a first task. Nothing else needs to be edited on the
-server.
+`https://roomote.203-0-113-7.sslip.io/setup?token=...`. Open it in a browser to
+configure sign-in and inference. Roomote then continues in a persistent setup
+conversation: source control is optional, integrations are offered after that
+decision, and repository-based starter work and automations appear only after
+repositories synchronize. A sandbox provider is required only when selected
+coding work needs to launch. Nothing else needs to be edited on the server.
 
 What the script does:
 
@@ -62,7 +63,7 @@ For production, bring your own domain instead of the sslip.io default (sslip
 domains share public Let's Encrypt rate limits and are tied to the host IP):
 
 ```sh
-curl -fsSL https://get.roomote.dev | bash -s -- --domain roomote.example.com
+curl -fsSL https://get.roomote.dev | sudo bash -s -- --domain roomote.example.com
 ```
 
 Point `<domain>` and `*.<domain>` A records at the server first; the installer
@@ -134,7 +135,7 @@ reaches Roomote, use Caddy's internal certificates instead of requesting
 Let's Encrypt certificates:
 
 ```sh
-curl -fsSL https://get.roomote.dev | bash -s -- \
+curl -fsSL https://get.roomote.dev | sudo bash -s -- \
   --domain roomote.internal \
   --tls-mode internal
 ```

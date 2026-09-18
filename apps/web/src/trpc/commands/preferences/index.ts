@@ -1,4 +1,15 @@
-import { and, db, eq, isNull, sql, users } from '@roomote/db/server';
+import {
+  and,
+  db,
+  eq,
+  getUserPersonalization,
+  isNull,
+  sql,
+  updateUserPersonalization,
+  UserPersonalizationConflictError,
+  users,
+} from '@roomote/db/server';
+import { TRPCError } from '@trpc/server';
 import { headers } from 'next/headers';
 
 import type { UserAuthSuccess } from '@/types';
@@ -20,6 +31,8 @@ function normalizeMetadata(value: unknown): UserMetadataRecord {
 
   return { ...(value as UserMetadataRecord) };
 }
+
+const VOICE_CONSENT_METADATA_KEY = 'voice_consent_accepted';
 
 function normalizePersonalPreferences(
   metadata: UserMetadataRecord,
@@ -107,6 +120,45 @@ export async function acceptCookieConsentCommand(
   return existingUser.cookieConsentedAt;
 }
 
+export async function getVoiceConsentCommand(
+  auth: UserAuthSuccess,
+): Promise<boolean> {
+  const storedUser = await db.query.users.findFirst({
+    where: eq(users.id, auth.userId),
+    columns: { metadata: true },
+  });
+
+  return (
+    normalizeMetadata(storedUser?.metadata)[VOICE_CONSENT_METADATA_KEY] === true
+  );
+}
+
+export async function acceptVoiceConsentCommand(
+  auth: UserAuthSuccess,
+): Promise<boolean> {
+  if (!auth.cloudEnabled) {
+    throw new Error('Voice consent is only available on Roomote Cloud.');
+  }
+
+  const [updatedUser] = await db
+    .update(users)
+    .set({
+      metadata: sql`${users.metadata} || ${JSON.stringify({ [VOICE_CONSENT_METADATA_KEY]: true })}::jsonb`,
+      lastSyncAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(eq(users.id, auth.userId))
+    .returning({ metadata: users.metadata });
+
+  if (!updatedUser) {
+    throw new Error('Unable to record voice consent for the active user.');
+  }
+
+  return (
+    normalizeMetadata(updatedUser.metadata)[VOICE_CONSENT_METADATA_KEY] === true
+  );
+}
+
 export async function updatePersonalPreferencesCommand(
   auth: UserAuthSuccess,
   input: PersonalPreferencesUpdate,
@@ -144,4 +196,40 @@ export async function updatePersonalPreferencesCommand(
   }
 
   return normalizePersonalPreferences(normalizeMetadata(updatedUser.metadata));
+}
+
+export async function getUserPersonalizationCommand(auth: UserAuthSuccess) {
+  const settings = await getUserPersonalization(auth.userId);
+  return {
+    instructions: settings.instructions,
+    learnFromConversations: settings.learnFromConversations,
+    version: settings.version,
+  };
+}
+
+export async function updateUserPersonalizationCommand(
+  auth: UserAuthSuccess,
+  input: {
+    expectedVersion: number;
+    instructions?: string;
+    learnFromConversations?: boolean;
+    reset?: boolean;
+  },
+) {
+  try {
+    const settings = await updateUserPersonalization({
+      userId: auth.userId,
+      ...input,
+    });
+    return {
+      instructions: settings.instructions,
+      learnFromConversations: settings.learnFromConversations,
+      version: settings.version,
+    };
+  } catch (error) {
+    if (error instanceof UserPersonalizationConflictError) {
+      throw new TRPCError({ code: 'CONFLICT', message: error.message });
+    }
+    throw error;
+  }
 }

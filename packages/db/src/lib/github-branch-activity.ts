@@ -255,6 +255,7 @@ export async function findReusableGitHubPrFollowUpOwner({
   branchName,
   sourceControlProvider = 'github',
   host,
+  repositoryId,
   fastAgentConversation,
 }: {
   repoFullName: string;
@@ -262,6 +263,13 @@ export async function findReusableGitHubPrFollowUpOwner({
   branchName: string;
   sourceControlProvider?: SourceControlProvider;
   host?: string | null;
+  /**
+   * When set, the linkage-row match requires this exact repositories-row FK.
+   * Unlike the host predicate (which tolerates legacy null-host rows), this
+   * pins the lookup to one connected repository, so a same-named repository
+   * on another self-managed instance can never match.
+   */
+  repositoryId?: string | null;
   fastAgentConversation?: Pick<
     FastAgentConversation,
     'surface' | 'workspaceId' | 'conversationId'
@@ -292,6 +300,9 @@ export async function findReusableGitHubPrFollowUpOwner({
         ...(host
           ? [or(eq(taskPullRequests.host, host), isNull(taskPullRequests.host))]
           : []),
+        ...(repositoryId
+          ? [eq(taskPullRequests.repositoryId, repositoryId)]
+          : []),
       ),
     )
     .orderBy(desc(taskRuns.createdAt), desc(taskRuns.id));
@@ -309,6 +320,13 @@ export async function findReusableGitHubPrFollowUpOwner({
   // would match payloads that stamped an empty `branch`/`headRef` and hand
   // ownership to an unrelated task.
   if (!branchName) {
+    return null;
+  }
+
+  // The payload-branch fallback cannot be pinned to a repositories row, so a
+  // caller that demands the exact-repository match gets no fallback: an
+  // unstamped legacy payload on another instance must never satisfy it.
+  if (repositoryId) {
     return null;
   }
 
@@ -446,11 +464,17 @@ export async function findActiveGitHubPrReviewTask({
   prNumber,
   headSha,
   sourceControlProvider,
+  host,
 }: {
   repoFullName: string;
   prNumber: number;
   headSha: string;
   sourceControlProvider?: SourceControlProvider;
+  /**
+   * When given, only review rows on this host (or legacy rows with no host)
+   * match, so a same-named PR on another self-hosted instance never does.
+   */
+  host?: string | null;
 }): Promise<ActiveGitHubBranchWork | null> {
   const reviewRows = await db
     .select(ACTIVE_WORK_COLUMNS)
@@ -466,6 +490,9 @@ export async function findActiveGitHubPrReviewTask({
         eq(taskPullRequests.prSha, headSha),
         ...(sourceControlProvider
           ? [eq(taskPullRequests.sourceControlProvider, sourceControlProvider)]
+          : []),
+        ...(host
+          ? [or(eq(taskPullRequests.host, host), isNull(taskPullRequests.host))]
           : []),
       ),
     )

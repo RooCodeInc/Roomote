@@ -9,6 +9,9 @@ let linkedMcpIds: string[] = [];
 let orgHasLinear = false;
 let userHasLinkedLinear = false;
 let hasEnabledAutomations = true;
+let environments: unknown[] = [{}];
+let environmentsPending = false;
+let environmentsSuccess = true;
 
 const {
   mockPush,
@@ -16,12 +19,14 @@ const {
   mockAuthenticateSlack,
   mockAuthenticateGitHub,
   mockAuthenticateLinear,
+  mockStartDelegationSession,
 } = vi.hoisted(() => ({
   mockPush: vi.fn(),
   mockReplace: vi.fn(),
   mockAuthenticateSlack: vi.fn(),
   mockAuthenticateGitHub: vi.fn(),
   mockAuthenticateLinear: vi.fn(),
+  mockStartDelegationSession: vi.fn(),
 }));
 
 vi.mock('next/navigation', () => ({
@@ -33,6 +38,21 @@ vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
 vi.mock('@/hooks/useUser', () => ({
   useAuthorizedUser: () => ({ isAdmin }),
+}));
+
+vi.mock('@/hooks/environments', () => ({
+  useEnvironments: () => ({
+    data: environments,
+    isPending: environmentsPending,
+    isSuccess: environmentsSuccess,
+  }),
+}));
+
+vi.mock('@/hooks/task-runs', () => ({
+  useFastSessionLauncher: () => ({
+    isPending: false,
+    startFastSession: mockStartDelegationSession,
+  }),
 }));
 
 vi.mock('@/hooks/mcp-connections', () => ({
@@ -165,8 +185,82 @@ beforeEach(() => {
   orgHasLinear = false;
   userHasLinkedLinear = false;
   hasEnabledAutomations = true;
+  environments = [{}];
+  environmentsPending = false;
+  environmentsSuccess = true;
   localStorage.clear();
   vi.clearAllMocks();
+});
+
+it('prioritizes delegation discovery and starts its interview directly', () => {
+  environments = [];
+  hasEnabledAutomations = false;
+
+  render(<OnboardingCard />);
+
+  expect(
+    screen.getByText('Find something to take off your plate'),
+  ).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Explore' }));
+  expect(mockStartDelegationSession).toHaveBeenCalledWith({
+    text: '$explore-delegation Find something to take off my plate.',
+  });
+});
+
+it('prioritizes environment setup and persists its dismissal', () => {
+  environments = [];
+  hasEnabledAutomations = false;
+
+  render(<OnboardingCard />);
+
+  dismissCard();
+
+  expect(
+    screen.getByText(
+      'Create an environment to get live previews, faster startup and better verification',
+    ),
+  ).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+  expect(mockPush).toHaveBeenCalledWith('/settings/environments/new');
+
+  dismissCard();
+  expect(
+    screen.getByText("Put your team's work on autopilot with automations"),
+  ).toBeInTheDocument();
+  expect(localStorage.getItem('OnboardingCardsDismissedByOrg')).toContain(
+    'create-environment',
+  );
+});
+
+it('offers environment setup only to admins after environments load', () => {
+  environments = [];
+  environmentsPending = true;
+  environmentsSuccess = false;
+
+  const { rerender } = render(<OnboardingCard />);
+  dismissCard();
+  expect(
+    screen.queryByRole('button', { name: 'Create' }),
+  ).not.toBeInTheDocument();
+
+  environmentsPending = false;
+  environmentsSuccess = false;
+  rerender(<OnboardingCard />);
+  expect(
+    screen.queryByRole('button', { name: 'Create' }),
+  ).not.toBeInTheDocument();
+
+  environmentsSuccess = true;
+  rerender(<OnboardingCard />);
+  expect(screen.getByRole('button', { name: 'Create' })).toBeInTheDocument();
+
+  isAdmin = false;
+  rerender(<OnboardingCard />);
+  expect(
+    screen.queryByRole('button', { name: 'Create' }),
+  ).not.toBeInTheDocument();
 });
 
 it('prioritizes automations and opens the automations page', () => {
@@ -182,6 +276,7 @@ it('prioritizes automations and opens the automations page', () => {
   ];
 
   render(<OnboardingCard />);
+  dismissCard();
   expect(
     screen.getByText("Put your team's work on autopilot with automations"),
   ).toBeInTheDocument();
@@ -216,6 +311,7 @@ it('prioritizes communication accounts before source-control accounts', () => {
   ];
 
   render(<OnboardingCard />);
+  dismissCard();
   expect(screen.getByText('Link your Slack account')).toBeInTheDocument();
   dismissCard();
   expect(screen.getByText('Link your Discord account')).toBeInTheDocument();
@@ -235,6 +331,7 @@ it('does not offer Slack installation, but links an installed Slack account', ()
   ];
 
   render(<OnboardingCard />);
+  dismissCard();
   expect(
     screen.queryByText(/Chat with Roomote on Slack/),
   ).not.toBeInTheDocument();
@@ -245,6 +342,7 @@ it('does not offer Slack installation, but links an installed Slack account', ()
 
 it('uses the requested admin integration setup order', () => {
   render(<OnboardingCard />);
+  dismissCard();
 
   for (const name of [
     'Notion',
@@ -267,11 +365,10 @@ it('uses the requested admin integration setup order', () => {
 
 it('opens the highlighted integration settings for admin setup', () => {
   render(<OnboardingCard />);
+  dismissCard();
 
   fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
-  expect(mockPush).toHaveBeenCalledWith(
-    '/settings/integrations?highlight=notion',
-  );
+  expect(mockPush).toHaveBeenCalledWith('/integrations?highlight=notion');
 });
 
 it('does not offer deployment-scoped Notion setup to non-admins', () => {
@@ -279,6 +376,7 @@ it('does not offer deployment-scoped Notion setup to non-admins', () => {
   enabledMcpIds = ['notion'];
 
   render(<OnboardingCard />);
+  dismissCard();
   expect(
     screen.queryByText('Link your Notion account'),
   ).not.toBeInTheDocument();
@@ -298,6 +396,7 @@ it('starts Slack linking directly', () => {
     },
   ];
   render(<OnboardingCard />);
+  dismissCard();
 
   fireEvent.click(screen.getByRole('button', { name: 'Link' }));
   expect(mockAuthenticateSlack).toHaveBeenCalledWith('/', expect.any(Object));
@@ -314,6 +413,7 @@ it('opens the Discord account-link dialog directly', () => {
     },
   ];
   render(<OnboardingCard />);
+  dismissCard();
 
   fireEvent.click(screen.getByRole('button', { name: 'Link' }));
   expect(screen.getByText('Discord link flow')).toBeInTheDocument();

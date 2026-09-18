@@ -17,6 +17,7 @@ const read = (path) => readFileSync(join(root, path), 'utf8');
 const catalog = JSON.parse(read('deploy/deployment-catalog.json'));
 const installer = read('deploy/install.sh');
 const deployer = read('deploy/scripts/deploy.sh');
+const upgradeCompatibility = read('deploy/ci/upgrade-compatibility.sh');
 const productionEnvExample = read('.env.production.example');
 
 function fail(message) {
@@ -26,6 +27,13 @@ function fail(message) {
 function assert(condition, message) {
   if (!condition) fail(message);
 }
+
+assert(
+  installer.includes('--no-setup-url') &&
+    installer.includes("print_setup_url='false'") &&
+    installer.includes('sudo roomote setup-url'),
+  'installer: automated installs must be able to suppress the tokenized setup URL',
+);
 
 assert(
   installer.includes('preview_domain="$domain"') &&
@@ -88,6 +96,57 @@ assert(
     digitalOceanTerraform.includes('var.domain == var.dns_zone'),
   'DigitalOcean Terraform: zone-apex domains must map to "@"/"*" record names',
 );
+assert(
+  upgradeCompatibility.includes('COMPOSE_PROFILES=local-postgres,brain') &&
+    upgradeCompatibility.includes('bullmq gbrain preview-proxy'),
+  'upgrade compatibility: the Brain profile must boot gbrain explicitly',
+);
+assert(
+  upgradeCompatibility.includes(
+    'postgres_port="${DEPLOYMENT_CI_POSTGRES_PORT:-0}"',
+  ) &&
+    upgradeCompatibility.includes(
+      'postgres_endpoint="$(compose port postgres 5432)"',
+    ) &&
+    upgradeCompatibility.includes("'' | *[!0-9]*)") &&
+    upgradeCompatibility.includes(
+      'DATABASE_URL="postgres://postgres:roomote-postgres-password@127.0.0.1:$postgres_port/roomote"',
+    ),
+  'upgrade compatibility: Docker must allocate the default host Postgres port',
+);
+assert(
+  upgradeCompatibility.includes('trap finish EXIT') &&
+    upgradeCompatibility.includes('compose ps --all') &&
+    upgradeCompatibility.includes('Required service logs:') &&
+    upgradeCompatibility.includes(
+      'postgres redis minio minio-init docker-proxy db-migrate api web controller bullmq gbrain preview-proxy',
+    ),
+  'upgrade compatibility: startup failures must report Compose state and service logs',
+);
+assert(
+  upgradeCompatibility.includes("'session-goal-ownership-cutover'") &&
+    upgradeCompatibility.includes(
+      "'Goal Mode moved from unused task-owned columns to Session-owned storage'",
+    ) &&
+    upgradeCompatibility.includes(
+      "WHERE boundary.name = 'session-goal-ownership-cutover'",
+    ) &&
+    [
+      'goal_objective',
+      'goal_status',
+      'goal_max_continuations',
+      'goal_continuations_used',
+      'goal_blocked_reason',
+      'goal_completed_at',
+      'goal_last_continuation_id',
+      'goal_continuation_ids',
+      'goal_generation_ids',
+      'goal_blocker_candidate_reason',
+      'goal_blocker_candidate_count',
+      'goal_blocker_last_continuation_used',
+    ].every((column) => upgradeCompatibility.includes(`'${column}'`)),
+  'upgrade compatibility: Session goal cutover must exempt only the complete legacy task-goal shape',
+);
 
 function commandText(command) {
   if (Array.isArray(command)) return command.join(' ');
@@ -116,6 +175,7 @@ const composeEnv = {
   DEFAULT_COMPUTE_PROVIDER: 'docker',
   DOCKER_WORKER_IMAGE: 'roomote-worker:deployment-ci',
   ENCRYPTION_KEY: 'deployment-ci-encryption-key',
+  GBRAIN_IMAGE: '',
   IMAGE_NAMESPACE: 'roomote',
   IMAGE_REGISTRY: 'localhost',
   JOB_AUTH_PRIVATE_KEY: 'deployment-ci-job-private-key',
@@ -228,6 +288,38 @@ function validateComposeShape(shape) {
           `${shape.name}: ${serviceName} must receive PREVIEW_PROXY_SUBDOMAIN_SUFFIX`,
         );
       }
+    }
+
+    if (shape.name === 'installer-production') {
+      const expectedGbrainImage = `${composeEnv.IMAGE_REGISTRY}/${composeEnv.IMAGE_NAMESPACE}/roomote-gbrain:${composeEnv.ROOMOTE_VERSION}`;
+      assert(
+        config.services.gbrain?.image === expectedGbrainImage,
+        `installer-production: gbrain must default to matching release image ${expectedGbrainImage}`,
+      );
+
+      const overrideImage = 'registry.example/roomote/gbrain:operator-pinned';
+      const overrideConfig = JSON.parse(
+        execFileSync('docker', args, {
+          cwd: root,
+          env: { ...composeEnv, GBRAIN_IMAGE: overrideImage },
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+        }),
+      );
+      assert(
+        overrideConfig.services.gbrain?.image === overrideImage,
+        'installer-production: explicit GBRAIN_IMAGE must override the matching release default',
+      );
+      assert(
+        config.services.gbrain?.healthcheck?.test?.length,
+        'installer-production: gbrain must have a healthcheck for upgrade validation',
+      );
+      assert(
+        config.services.gbrain?.depends_on?.postgres?.condition ===
+          'service_healthy' &&
+          config.services.gbrain?.depends_on?.postgres?.required === false,
+        'installer-production: gbrain must wait for optional local Postgres health',
+      );
     }
 
     if (
@@ -578,7 +670,6 @@ const imageLocations = {
     'deploy/railway/template.yaml',
     'render.yaml',
   ],
-  minioClient: ['docker-compose.yml', 'deploy/compose/docker-compose.prod.yml'],
   caddy: [
     'docker-compose.yml',
     'docker-compose.production.yml',
@@ -596,6 +687,24 @@ for (const [imageName, locations] of Object.entries(imageLocations)) {
   }
 }
 
+// The substring check above only proves the catalog image appears somewhere
+// in each file. The compose stacks also run minio-init, which bootstraps the
+// artifact bucket with the mc bundled in the minio image; pin both services
+// to exactly the catalog image so an edit cannot leave minio-init on a
+// different or unpinned client.
+for (const location of [
+  'docker-compose.yml',
+  'deploy/compose/docker-compose.prod.yml',
+]) {
+  const compose = YAML.parse(read(location));
+  for (const service of ['minio', 'minio-init']) {
+    assert(
+      compose.services?.[service]?.image === catalog.criticalImages.minio,
+      `${location}: ${service} must use the catalog minio image`,
+    );
+  }
+}
+
 for (const script of [
   'deploy/install.sh',
   'deploy/host/roomote',
@@ -609,6 +718,7 @@ for (const script of [
   'deploy/scripts/upgrade.sh',
   'deploy/ci/deployment-smoke.sh',
   'deploy/ci/upgrade-compatibility.sh',
+  'deploy/host/tests/backup-brain-probe.sh',
   'deploy/host/tests/backup-restore.integration.sh',
   'deploy/host/tests/upgrade-failed-pull.sh',
   '.docker/gbrain/entrypoint.sh',
@@ -631,6 +741,56 @@ for (const directory of ['.github/workflows', '.github/actions']) {
       );
     }
   }
+}
+
+// The published roomote-minio image and the sandbox MinIO bootstrap must build
+// the same binary: one set of upstream pins (release, module version, Go
+// checksum-database sums, per-arch binary SHA-256), read from both files and
+// compared literally.
+{
+  const dockerfile = read('.docker/minio/Dockerfile');
+  const sandbox = read('apps/api/scripts/setup-sandbox-minio.ts');
+  const dockerArg = (name) => {
+    const match = dockerfile.match(new RegExp(`^ARG ${name}=(\\S+)$`, 'm'));
+    assert(match, `.docker/minio/Dockerfile: missing ARG ${name}`);
+    return match[1];
+  };
+  const sandboxConst = (name) => {
+    const match = sandbox.match(
+      new RegExp(`^const ${name} = '([^']+)';$`, 'm'),
+    );
+    assert(match, `setup-sandbox-minio.ts: missing const ${name}`);
+    return match[1];
+  };
+  const sandboxSha = (arch) => {
+    const match = sandbox.match(
+      new RegExp(
+        `${arch}: \\{\\s*goarch: '[a-z0-9]+',\\s*sha256: '([0-9a-f]{64})'`,
+      ),
+    );
+    assert(match, `setup-sandbox-minio.ts: missing ${arch} sha256`);
+    return match[1];
+  };
+  for (const [arg, value] of [
+    ['MINIO_RELEASE', sandboxConst('release')],
+    ['MINIO_MODULE_VERSION', sandboxConst('sourceVersion')],
+    ['MINIO_MODULE_SUM', sandboxConst('sourceSum')],
+    ['MINIO_GOMOD_SUM', sandboxConst('sourceGoModSum')],
+    ['MINIO_SHA256_AMD64', sandboxSha('x64')],
+    ['MINIO_SHA256_ARM64', sandboxSha('arm64')],
+  ]) {
+    assert(
+      dockerArg(arg) === value,
+      `.docker/minio/Dockerfile: ${arg} must match apps/api/scripts/setup-sandbox-minio.ts (${value})`,
+    );
+  }
+  // The Go toolchain the sandbox script asserts is the one the image builds with.
+  const goVersion = sandbox.match(/go version go([0-9.]+) linux/)?.[1];
+  assert(goVersion, 'setup-sandbox-minio.ts: missing pinned Go version');
+  assert(
+    dockerArg('GO_IMAGE').startsWith(`golang:${goVersion}-`),
+    `.docker/minio/Dockerfile: GO_IMAGE must be golang:${goVersion}-* to reproduce the sandbox build`,
+  );
 }
 
 console.log('deployment artifacts match the shared catalog');

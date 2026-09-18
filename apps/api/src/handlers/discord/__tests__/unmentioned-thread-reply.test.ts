@@ -2,6 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { DiscordMessage } from '@roomote/communication/discord-event';
 
+const { evaluateTypeSafeJudgmentsMock } = vi.hoisted(() => ({
+  evaluateTypeSafeJudgmentsMock: vi.fn(),
+}));
+
+vi.mock('@roomote/cloud-agents/server/typesafe-judgment', () => ({
+  evaluateTypeSafeJudgments: evaluateTypeSafeJudgmentsMock,
+}));
+
 import { shouldRouteUnmentionedDiscordThreadReplyToAgent } from '../unmentioned-thread-reply.js';
 import type { DiscordThreadHistoryMessage } from '../thread-context.js';
 
@@ -64,7 +72,9 @@ async function routeDecision(
     mappedUserId?: string | null;
     ownedThreadUserId?: string | null;
     isRoomoteThread?: boolean;
+    isAutomationReportThread?: boolean;
     isOpenConversationThread?: boolean;
+    peerConversationsExperimentEnabled?: boolean;
     botUserId?: string;
   } = {},
 ) {
@@ -82,6 +92,9 @@ async function routeDecision(
         ? 'roomote-user-1'
         : options.ownedThreadUserId,
     isOpenConversationThread: options.isOpenConversationThread,
+    peerConversationsExperimentEnabled:
+      options.peerConversationsExperimentEnabled,
+    isAutomationReportThread: options.isAutomationReportThread,
     fetchThreadMessages: fetchThreadMessagesMock,
   });
 }
@@ -90,6 +103,7 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     fetchThreadMessagesMock.mockResolvedValue(null);
+    evaluateTypeSafeJudgmentsMock.mockResolvedValue(null);
   });
 
   it('routes an unmentioned reply directly after the bot last spoke', async () => {
@@ -104,6 +118,37 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
 
     await expect(routeDecision(threadReplyMessage({}))).resolves.toBe(true);
   });
+
+  it('routes a linked first-time reply to a bot-authored automation report', async () => {
+    fetchThreadMessagesMock.mockResolvedValue([botHistory(THREAD_ROOT_ID)]);
+
+    await expect(
+      routeDecision(threadReplyMessage({}), {
+        ownedThreadUserId: null,
+        isAutomationReportThread: true,
+      }),
+    ).resolves.toBe(true);
+  });
+
+  it.each([
+    humanHistory('300', USER_2, 'interesting report'),
+    humanHistory('300', USER_1, `cc <@${USER_3}> for visibility`),
+  ])(
+    'keeps automation report interjection and chatter guards for $text',
+    async (interjection) => {
+      fetchThreadMessagesMock.mockResolvedValue([
+        botHistory(THREAD_ROOT_ID),
+        interjection,
+      ]);
+
+      await expect(
+        routeDecision(threadReplyMessage({}), {
+          ownedThreadUserId: null,
+          isAutomationReportThread: true,
+        }),
+      ).resolves.toBe(false);
+    },
+  );
 
   it("routes Matt when he joins Dan's open fast-agent thread", async () => {
     fetchThreadMessagesMock.mockResolvedValue([
@@ -182,6 +227,42 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
     ]);
 
     await expect(routeDecision(threadReplyMessage({}))).resolves.toBe(false);
+  });
+
+  it('routes an interjected reply the judgment model confidently gives to Roomote', async () => {
+    evaluateTypeSafeJudgmentsMock.mockResolvedValue({
+      addressee: {
+        type: 'choice',
+        choice: 'roomote',
+        confidence: 0.95,
+        probabilities: { roomote: 0.95, participant: 0.03, unclear: 0.02 },
+      },
+    });
+    fetchThreadMessagesMock.mockResolvedValue([
+      humanHistory(
+        THREAD_ROOT_ID,
+        USER_1,
+        `<@${BOT_USER_ID}> please fix the bug`,
+      ),
+      botHistory('200'),
+      humanHistory('300', USER_2, 'interesting thread'),
+    ]);
+
+    await expect(
+      routeDecision(
+        threadReplyMessage({ content: 'can you also add a unit test?' }),
+      ),
+    ).resolves.toBe(true);
+    expect(evaluateTypeSafeJudgmentsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        state: expect.objectContaining({
+          reply: {
+            author: 'reply author',
+            text: 'can you also add a unit test?',
+          },
+        }),
+      }),
+    );
   });
 
   it('requires a mention when somebody else was mentioned since the bot last spoke', async () => {
@@ -323,6 +404,32 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
     ).resolves.toBe(false);
   });
 
+  it('routes peer discussion in an opted-in open Fast conversation', async () => {
+    await expect(
+      routeDecision(
+        threadReplyMessage({
+          content: `hey <@${USER_3}> look at this`,
+          mentions: [{ id: USER_3, username: 'grace' }],
+        }),
+        {
+          isOpenConversationThread: true,
+          peerConversationsExperimentEnabled: true,
+        },
+      ),
+    ).resolves.toBe(true);
+    expect(fetchThreadMessagesMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps subsequent ambient turns in the opted-in Fast conversation', async () => {
+    await expect(
+      routeDecision(threadReplyMessage({ content: 'I agree' }), {
+        isOpenConversationThread: true,
+        peerConversationsExperimentEnabled: true,
+      }),
+    ).resolves.toBe(true);
+    expect(fetchThreadMessagesMock).not.toHaveBeenCalled();
+  });
+
   it('does not route a forwarded snapshot that mentions someone else', async () => {
     fetchThreadMessagesMock.mockResolvedValue([
       humanHistory(
@@ -396,7 +503,11 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
     ]);
 
     await expect(
-      routeDecision(threadReplyMessage({}), { isRoomoteThread: false }),
+      routeDecision(threadReplyMessage({}), {
+        isRoomoteThread: false,
+        isOpenConversationThread: true,
+        peerConversationsExperimentEnabled: true,
+      }),
     ).resolves.toBe(false);
   });
 });

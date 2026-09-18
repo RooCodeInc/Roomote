@@ -8,7 +8,6 @@ const {
   mockBuildDestinationTaskPayloadFields,
   mockIsRunDue,
   mockResolveSlackWorkspaceTimezone,
-  mockPostScheduledTriageRoutingDebug,
 } = vi.hoisted(() => ({
   mockDbSelect: vi.fn(),
   mockGetAutomationRuntime: vi.fn(),
@@ -19,7 +18,6 @@ const {
   mockBuildDestinationTaskPayloadFields: vi.fn(),
   mockIsRunDue: vi.fn(),
   mockResolveSlackWorkspaceTimezone: vi.fn(),
-  mockPostScheduledTriageRoutingDebug: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -57,10 +55,6 @@ vi.mock('../custom-automation-schedule', () => ({
   })),
 }));
 
-vi.mock('../triage-routing-debug', () => ({
-  postScheduledTriageRoutingDebug: mockPostScheduledTriageRoutingDebug,
-}));
-
 import { TaskPayloadKind } from '@roomote/types';
 
 import { createScheduledTriageJob } from '../scheduled-triage-runner';
@@ -93,7 +87,6 @@ describe('createScheduledTriageJob', () => {
     mockBuildDestinationTaskPayloadFields.mockReturnValue({});
     mockIsRunDue.mockReturnValue(true);
     mockResolveSlackWorkspaceTimezone.mockResolvedValue('UTC');
-    mockPostScheduledTriageRoutingDebug.mockResolvedValue(undefined);
     mockRecordAutomationRunOutcome.mockResolvedValue(undefined);
   });
 
@@ -147,5 +140,63 @@ describe('createScheduledTriageJob', () => {
     expect(mockEnqueueTask).not.toHaveBeenCalled();
     expect(result.launchedTaskId).toBeNull();
     expect(result.skippedReason).toBe('No scan payloads to launch.');
+  });
+
+  it('skips A before scheduling or outcomes so the owning installation B can run', async () => {
+    const chain = {
+      from: () => chain,
+      where: async () => [
+        { botAccessToken: 'xoxb-a', teamId: 'T-A' },
+        { botAccessToken: 'xoxb-b', teamId: 'T-B' },
+      ],
+    };
+    mockDbSelect.mockReturnValue(chain);
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'slack',
+      channelId: 'C123MANAGER',
+      teamId: 'T-B',
+      source: 'manager_channel',
+    });
+    mockBuildDestinationTaskPayloadFields.mockReturnValue({ teamId: 'T-B' });
+    mockIsRunDue.mockImplementation(
+      () => mockRecordAutomationRunOutcome.mock.calls.length === 0,
+    );
+    mockEnqueueTask.mockResolvedValue({ taskId: 'owner-task' });
+    const buildScanTask = vi.fn(
+      async ({
+        deployment,
+      }: Parameters<
+        Parameters<typeof createScheduledTriageJob>[0]['buildScanTask']
+      >[0]) => {
+        if (deployment.slackTeamId !== 'T-B')
+          throw new Error('Wrong installation');
+        return {
+          kind: 'scan' as const,
+          payloads: [{ repo: '__all_repositories__' }],
+        };
+      },
+    );
+    const result = await createScheduledTriageJob({
+      automationKey: 'sentry_triage',
+      buildScanTask,
+    })();
+    expect(mockIsRunDue).toHaveBeenCalledTimes(1);
+    expect(buildScanTask).toHaveBeenCalledTimes(1);
+    expect(mockEnqueueTask).toHaveBeenCalledTimes(1);
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: {
+          type: TaskPayloadKind.Scan,
+          payload: { repo: '__all_repositories__', teamId: 'T-B' },
+        },
+      }),
+    );
+    expect(mockRecordAutomationRunOutcome).toHaveBeenCalledTimes(1);
+    expect(mockRecordAutomationRunOutcome).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ status: 'succeeded' }),
+    );
+    expect(result.launchedTaskId).toBe('owner-task');
+    expect(result.errors).toEqual([]);
   });
 });

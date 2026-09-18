@@ -23,10 +23,7 @@ import type { DiscordEventCommunicationMetadata } from '@roomote/communication/d
 import { getRedis } from '@roomote/redis';
 
 import { buildCommunicationTaskThreadName } from '../tasks/communication-task-thread.js';
-import {
-  replaceOrPostDiscordMessage,
-  type DiscordMessageToReplace,
-} from './replies.js';
+import {} from './replies.js';
 import {
   discordTaskAcknowledgementText,
   discordTaskButtons,
@@ -238,9 +235,7 @@ async function rememberPendingTaskThread(
   );
 }
 
-export async function forgetPendingTaskThread(
-  sourceEventId: string,
-): Promise<void> {
+async function forgetPendingTaskThread(sourceEventId: string): Promise<void> {
   await getRedis().del(pendingTaskThreadKey(sourceEventId));
 }
 
@@ -284,7 +279,7 @@ async function alignProvisionalTaskThreadName(input: {
  * thread — or when the triggering message is already gone. Those callers keep
  * the detached task thread that the launch creates.
  */
-export async function reserveDiscordAnchoredThread(input: {
+async function reserveDiscordAnchoredThread(input: {
   provider: DiscordCommunicationProvider;
   queuedMessage: QueuedCommunicationMessage;
   metadata: DiscordEventCommunicationMetadata;
@@ -375,18 +370,6 @@ export async function launchDiscordTask(input: {
     taskId: string;
     taskUrl?: string;
   }) => Promise<void>;
-  /**
-   * An already-posted message to turn into the acknowledgement instead of
-   * posting a new one — a routing card sitting in the task thread becomes the
-   * started message rather than being followed by an identical one. Only pass
-   * a message that lives where the acknowledgement would have gone.
-   */
-  replaceMessage?: DiscordMessageToReplace;
-  /**
-   * Router free-form kickoff sentence (Slack parity). When set and normalizable,
-   * it becomes the Discord acknowledgement text instead of the static template.
-   */
-  kickoffMessage?: string | null;
   /**
    * True only when a pre-enqueue MESSAGE_CREATE 👀 reaction succeeded on the
    * origin message. Worker onStart cleanup keys off this so failed soft-acks
@@ -599,7 +582,6 @@ export async function launchDiscordTask(input: {
     text: discordTaskAcknowledgementText({
       workspaceDisplayName: input.workspace.workspaceDisplayName,
       taskUrl,
-      ...(input.kickoffMessage ? { kickoffMessage: input.kickoffMessage } : {}),
     }),
     buttons: discordTaskButtons({ runId: launchResult.id, taskUrl }),
   };
@@ -607,17 +589,11 @@ export async function launchDiscordTask(input: {
   // be edited, so the task is acknowledged either way.
   const acknowledgement = beforeEnqueueKickoff
     ? null
-    : input.replaceMessage
-      ? await replaceOrPostDiscordMessage({
-          provider: input.provider,
-          replace: input.replaceMessage,
-          ...acknowledgementMessage,
-        })
-      : await input.provider.postMessage({
-          channelId: communicationChannelId,
-          ...(communicationThreadId ? { threadId: communicationThreadId } : {}),
-          ...acknowledgementMessage,
-        });
+    : await input.provider.postMessage({
+        channelId: communicationChannelId,
+        ...(communicationThreadId ? { threadId: communicationThreadId } : {}),
+        ...acknowledgementMessage,
+      });
 
   // Interaction launches (`/new`) have no MESSAGE_CREATE origin. Persist the
   // acknowledgement message so terminal/cancel reactions have a valid target.

@@ -31,6 +31,7 @@ export type OpenCodeProviderErrorRecovery = {
 // client-side before or instead of an HTTP response.
 const TERMINAL_ERROR_NAMES = new Set(['contextoverflowerror']);
 const POLICY_ERROR_NAMES = new Set(['contentfiltererror']);
+const CONNECTION_RESET_MESSAGE = 'connection reset by server';
 
 // Client errors are terminal because replaying the same request cannot
 // succeed, except timeouts (408) and rate limits (429) which are transient.
@@ -132,6 +133,12 @@ function hasErrorName(values: unknown[], names: Set<string>): boolean {
 
 export function isOpenCodeContextOverflowError(error: unknown): boolean {
   return hasErrorName(collectProviderErrorValues(error), TERMINAL_ERROR_NAMES);
+}
+
+export function isOpenCodeRetryableTransportError(error: unknown): boolean {
+  return collectProviderErrorValues(error).some(
+    (value) => normalizeIdentifier(value) === CONNECTION_RESET_MESSAGE,
+  );
 }
 
 function isExplicitlyTerminal(values: unknown[]): boolean {

@@ -7,6 +7,7 @@ import {
   eq,
   findPrReviewAutoPreference,
   retireCanonicalPrReviewActionsForDestination,
+  retireCanonicalPrReviewActionsForPullRequest,
   slackInstallations,
   upsertPrReviewAutoPreference,
 } from '@roomote/db/server';
@@ -15,6 +16,11 @@ import {
   buildResolvedSlackPrReviewMessageBlocks,
   SlackNotifier,
 } from '@roomote/slack';
+import {
+  getThreadReplyFooterRecord,
+  setThreadReplyFooterRecord,
+  withThreadReplyFooterLock,
+} from '@roomote/communication';
 import type { SourceControlProvider } from '@roomote/types';
 
 import { getCommunicationProviderAdapter } from '../communication-providers';
@@ -360,9 +366,24 @@ async function retireLegacyPrReviewActionsForContext(
   return retired;
 }
 
+/**
+ * The subset of a pending action needed to strip controls from its posted
+ * message. Retirement must not depend on task linkage: the originating task
+ * can be deleted (which nulls the delivery's task id) while the message and
+ * its buttons remain live.
+ */
+export type RetirablePrReviewActionMessage = Pick<
+  PendingPrReviewAction,
+  'provider' | 'slackTeamId' | 'channelId' | 'threadId' | 'messageId'
+> & {
+  /** Telegram callback text used only when no managed footer record exists. */
+  messageText?: string;
+};
+
 /** Removes controls from superseded review offers without failing delivery. */
 export async function retirePrReviewActionMessagesBestEffort(
-  pendingActions: PendingPrReviewAction[],
+  pendingActions: RetirablePrReviewActionMessage[],
+  options?: { resolution?: string },
 ): Promise<void> {
   for (const pending of pendingActions) {
     if (!pending.messageId) continue;
@@ -391,10 +412,7 @@ export async function retirePrReviewActionMessagesBestEffort(
           channel: pending.channelId,
           ts: pending.messageId,
           message: {
-            blocks: buildResolvedSlackPrReviewMessageBlocks(
-              blocks,
-              'Superseded by newer review feedback.',
-            ),
+            blocks: buildResolvedSlackPrReviewMessageBlocks(blocks),
           },
         });
         continue;
@@ -420,9 +438,61 @@ export async function retirePrReviewActionMessagesBestEffort(
         pending.provider === 'telegram' &&
         adapter.provider === 'telegram'
       ) {
-        await adapter.editMessageReplyMarkup({
-          channelId: pending.channelId,
-          messageId: pending.messageId,
+        const footerThreadId = pending.threadId ?? 'root';
+        const messageId = pending.messageId;
+        await withThreadReplyFooterLock({
+          lockKey: `telegram:thread_reply_footer_lock:${pending.channelId}:${footerThreadId}`,
+          fn: async (assertLock, lock) => {
+            const footer = await getThreadReplyFooterRecord(
+              'telegram',
+              pending.channelId,
+              footerThreadId,
+            );
+            const matchingFooter =
+              footer?.messageId === messageId ? footer : null;
+            await assertLock();
+            if (matchingFooter) {
+              const { buttons: _buttons, ...withoutButtons } = matchingFooter;
+              const nextFooter = options?.resolution
+                ? {
+                    ...withoutButtons,
+                    textWithoutFooter: [
+                      withoutButtons.textWithoutFooter,
+                      `_${options.resolution}_`,
+                    ]
+                      .filter(Boolean)
+                      .join('\n\n'),
+                  }
+                : withoutButtons;
+              await setThreadReplyFooterRecord(
+                'telegram',
+                pending.channelId,
+                footerThreadId,
+                nextFooter,
+                { keepTtl: true, lock },
+              );
+            }
+            const originalText =
+              matchingFooter?.textWithoutFooter ?? pending.messageText;
+            if (options?.resolution && originalText !== undefined) {
+              await adapter.editMessageText({
+                channelId: pending.channelId,
+                messageId,
+                text: [originalText, `_${options.resolution}_`]
+                  .filter(Boolean)
+                  .join('\n\n'),
+                textFormat: 'markdown',
+                ...(matchingFooter?.refresh
+                  ? { footerText: matchingFooter.refresh.footerText }
+                  : {}),
+              });
+              return;
+            }
+            await adapter.editMessageReplyMarkup({
+              channelId: pending.channelId,
+              messageId,
+            });
+          },
         });
       }
     } catch (error) {
@@ -433,6 +503,38 @@ export async function retirePrReviewActionMessagesBestEffort(
       );
     }
   }
+}
+
+export async function retirePendingPrReviewActionsForPullRequest(input: {
+  sourceControlProvider: SourceControlProvider;
+  repository: string;
+  prNumber: number;
+  currentHeadSha: string;
+}): Promise<void> {
+  // Only offers that posted controls carry a follow-up prompt; text-only
+  // messages have nothing to retire.
+  const pending = (
+    await retireCanonicalPrReviewActionsForPullRequest(input)
+  ).flatMap((action) =>
+    action?.provider &&
+    action.provider !== 'teams' &&
+    action.channelId &&
+    action.followUpPrompt
+      ? [
+          {
+            provider: action.provider,
+            ...(action.provider === 'slack' && action.slackTeamId
+              ? { slackTeamId: action.slackTeamId }
+              : {}),
+            channelId: action.channelId,
+            threadId: action.threadId,
+            messageId: action.messageId,
+          } satisfies RetirablePrReviewActionMessage,
+        ]
+      : [],
+  );
+
+  await retirePrReviewActionMessagesBestEffort(pending);
 }
 
 export async function claimPendingPrReviewAction(

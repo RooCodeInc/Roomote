@@ -109,7 +109,7 @@ export function PullRequestsList({ enabled }: PullRequestsListProps) {
     }),
   );
 
-  const pullRequests = pullRequestsQuery.data;
+  const pullRequests = pullRequestsQuery.data?.pullRequests;
   const filteredPullRequests = useMemo(
     () =>
       (pullRequests ?? []).filter((pr) =>

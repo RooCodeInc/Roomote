@@ -1,8 +1,12 @@
+import { randomUUID } from 'node:crypto';
+
 import type { Context } from 'hono';
 
 import {
   DeploymentReadOnlyError,
   enqueueTask,
+  launchPinnedFastSessionTask,
+  refreshFastAgentSessionTitle,
   resolveRequestedWorkKindDecision,
 } from '@roomote/cloud-agents/server';
 import {
@@ -13,13 +17,12 @@ import {
   inArray,
   repositories,
   resolveWorkspaceRepositoryProviders,
-  taskRuns,
 } from '@roomote/db/server';
 import {
   ADMIN_REQUIRED_LAUNCH_TYPES,
   ALL_REPOSITORIES,
+  NO_REPOSITORIES,
   buildTaskTypePromptAndWorkspacePayload,
-  type ComputeProvider,
   getEnvironmentRepositoryInstallationError,
   type StandardTask,
   type SuggestedTasksTask,
@@ -32,17 +35,26 @@ import {
 } from '@roomote/types';
 
 import type { Variables } from '../../types';
-import type { McpAuth } from '../mcp/middleware';
+import { resolveMcpTaskOrSessionUserId, type McpAuth } from '../mcp/middleware';
+import { handlePrReviewLaunch } from './launchPrReview';
 import { getMembershipRole } from './membership';
 import { logHandlerError } from '../utils';
 
 function normalizeRepositoryFullNames(body: TaskLaunchRequest): string[] {
+  if (body.repo === NO_REPOSITORIES) {
+    return [];
+  }
+
   return [
     ...new Set(
       [
         ...(body.repositoryFullNames ?? []),
         ...(body.selectedRepositories ?? []),
-        body.repo && body.repo !== ALL_REPOSITORIES ? body.repo : null,
+        body.repo &&
+        body.repo !== ALL_REPOSITORIES &&
+        body.repo !== NO_REPOSITORIES
+          ? body.repo
+          : null,
       ].filter((value): value is string => Boolean(value)),
     ),
   ];
@@ -127,25 +139,6 @@ async function resolveLaunchSourceControlProvider({
   return undefined;
 }
 
-async function resolveLaunchComputeProvider({
-  requestedProvider,
-  auth,
-}: {
-  requestedProvider: ComputeProvider | undefined;
-  auth: McpAuth;
-}): Promise<ComputeProvider | undefined> {
-  if (requestedProvider || !('runId' in auth.authContext)) {
-    return requestedProvider;
-  }
-
-  const sourceRun = await db.query.taskRuns.findFirst({
-    where: eq(taskRuns.id, auth.authContext.runId),
-    columns: { vendor: true },
-  });
-
-  return sourceRun?.vendor ?? undefined;
-}
-
 /**
  * POST /api/tasks
  *
@@ -154,7 +147,19 @@ async function resolveLaunchComputeProvider({
 export async function launchTask(
   c: Context<{ Variables: Variables & { mcpAuth: McpAuth } }>,
 ): Promise<Response> {
-  const auth = c.get('mcpAuth');
+  const requestAuth = c.get('mcpAuth');
+
+  if (requestAuth.authContext.tokenType === 'run') {
+    return c.json(
+      { error: 'Task-originated task launches are not allowed' },
+      403,
+    );
+  }
+
+  const auth = {
+    ...requestAuth,
+    userId: await resolveMcpTaskOrSessionUserId(requestAuth),
+  };
 
   if (!auth.userId) {
     return c.json({ error: 'User context required' }, 403);
@@ -214,6 +219,17 @@ export async function launchTask(
       return c.json({ error: 'Unauthorized' }, 403);
     }
 
+    // The review pipeline has its own target resolution (a PR, not a prompt
+    // and workspace), so it branches before the standard launch machinery.
+    if (requestedType === 'pr-review') {
+      return await handlePrReviewLaunch(
+        c,
+        { userId: auth.userId },
+        body,
+        harnessSelection.harnessModelOverrides,
+      );
+    }
+
     const repositoryValidationError = shouldValidateRepositorySelection
       ? await validateSelectedRepositories(repositoryFullNames, {
           requireSingleInstallation: requestedType === 'environment-definition',
@@ -227,15 +243,19 @@ export async function launchTask(
       );
     }
 
-    if (body.environmentId) {
+    let environmentName: string | undefined;
+
+    if (body.environmentId && body.repo !== NO_REPOSITORIES) {
       const environment = await db.query.environments.findFirst({
         where: eq(environments.id, body.environmentId),
-        columns: { id: true },
+        columns: { id: true, name: true },
       });
 
       if (!environment) {
         return c.json({ error: 'Environment not found' }, 404);
       }
+
+      environmentName = environment.name;
     }
 
     const taskTypePayload = buildTaskTypePromptAndWorkspacePayload({
@@ -257,22 +277,26 @@ export async function launchTask(
           ? false
           : taskTypePayload.visibleInTranscript;
 
-    const workspacePayload = body.environmentId
-      ? {
-          repo:
-            body.repo ??
-            repositoryFullNames[0] ??
-            taskTypePayload.workspacePayload.repo,
-          environmentId: body.environmentId,
-        }
-      : taskTypePayload.workspacePayload;
+    const workspacePayload =
+      body.repo === NO_REPOSITORIES
+        ? { repo: NO_REPOSITORIES }
+        : body.environmentId
+          ? {
+              repo:
+                body.repo ??
+                repositoryFullNames[0] ??
+                taskTypePayload.workspacePayload.repo,
+              environmentId: body.environmentId,
+            }
+          : taskTypePayload.workspacePayload;
 
     let sourceControlProvider: SourceControlProvider | undefined;
 
     try {
       sourceControlProvider = await resolveLaunchSourceControlProvider({
         repositoryFullNames,
-        environmentId: body.environmentId,
+        environmentId:
+          body.repo === NO_REPOSITORIES ? undefined : body.environmentId,
       });
     } catch (error) {
       return c.json(
@@ -305,34 +329,10 @@ export async function launchTask(
         requestedType === 'standard' ? body.bootstrap?.skill : undefined,
       userId: auth.userId,
     });
-    const computeProvider = await resolveLaunchComputeProvider({
-      requestedProvider: body.computeProvider,
-      auth,
-    });
-
-    // A settle notification needs a durable pointer back to the launching
-    // run, so the opt-in only takes effect on run-token launches.
-    const notifySourceRunOnSettle =
-      requestedType === 'standard' &&
-      body.notifyOnSettle === true &&
-      'runId' in auth.authContext;
-
     const taskBase = {
       harness: harnessSelection.harness ?? body.harness,
-      computeProvider,
+      computeProvider: body.computeProvider,
       requestedWorkKindDecision,
-      ...((requestedType === 'environment-definition' ||
-        notifySourceRunOnSettle) &&
-      'runId' in auth.authContext
-        ? { sourceRunId: auth.authContext.runId }
-        : {}),
-      // Run-token launches carry the parent pointer for read-only
-      // source-context inheritance, without widening sourceRunId semantics.
-      ...('runId' in auth.authContext &&
-      (requestedType === 'standard' ||
-        requestedType === 'environment-definition')
-        ? { communicationContextSourceRunId: auth.authContext.runId }
-        : {}),
     };
 
     const task: StandardTask | SuggestedTasksTask =
@@ -353,30 +353,54 @@ export async function launchTask(
               ...basePayload,
               bootstrap:
                 requestedType === 'standard' ? body.bootstrap : undefined,
-              ...(notifySourceRunOnSettle
-                ? { notifySourceRunOnSettle: true }
-                : {}),
             },
           };
 
     // A human explicitly asked for this launch via the API, so the human is
     // the initiator even for the hidden scan branch (the old automation stamp
     // made the requesting human invisible).
+    if (task.type === TaskPayloadKind.StandardTask) {
+      const launch = await launchPinnedFastSessionTask({
+        userId: auth.userId,
+        fastConversationId: null,
+        launchId: body.launchId ?? randomUUID(),
+        prompt: taskTypePayload.taskPrompt,
+        task,
+        surface: 'api',
+        trigger: 'manual',
+        initiator: { kind: 'user', userId: auth.userId },
+        kickoffMessage: environmentName
+          ? `Started a task in ${environmentName}.`
+          : 'Started a task.',
+      });
+
+      // No Fast turn runs for a pinned launch, so title the Session from the
+      // recorded request without holding the response.
+      void refreshFastAgentSessionTitle({
+        sessionId: launch.fastConversationId,
+        userId: auth.userId,
+      }).catch((error: unknown) => {
+        logHandlerError('launchTask:refreshSessionTitle', error);
+      });
+
+      return c.json({
+        success: true,
+        runId: launch.runId,
+        taskId: launch.taskId,
+        sessionId: launch.sessionId,
+      });
+    }
+
     const launchResult = await enqueueTask(
       {
         task,
         initiator: { kind: 'user', userId: auth.userId },
-        workflow: task.type === TaskPayloadKind.Scan ? 'scan' : 'standard',
+        workflow: 'scan',
         surface: 'api',
         trigger: 'manual',
-        ...(task.type === TaskPayloadKind.Scan
-          ? { visibility: 'hidden' as const }
-          : {}),
+        visibility: 'hidden',
       },
-      {
-        launchClass:
-          task.type === TaskPayloadKind.Scan ? 'automation' : 'human',
-      },
+      { launchClass: 'automation' },
     );
 
     return c.json({

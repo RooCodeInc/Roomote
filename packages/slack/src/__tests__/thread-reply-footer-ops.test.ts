@@ -22,6 +22,10 @@ vi.mock('@roomote/env', () => ({
 
 vi.mock('@roomote/redis', () => ({
   getRedis: () => ({
+    get: async (key: string) =>
+      [...mockRedisSet.mock.calls]
+        .reverse()
+        .find((call) => call[0] === key)?.[1] ?? null,
     set: mockRedisSet,
     eval: mockRedisEval,
   }),
@@ -40,7 +44,9 @@ vi.mock('../thread-footer', () => ({
 import {
   isSlackThreadReplyFooterBlock,
   postSlackThreadMessageWithStickyFooter,
+  postSlackRootMessageWithFooterText,
   removeSlackThreadReplyFooter,
+  updateSlackThreadMessageWithFooterText,
 } from '../thread-reply-footer-ops';
 
 describe('thread-reply-footer-ops', () => {
@@ -49,14 +55,13 @@ describe('thread-reply-footer-ops', () => {
     mockRedisSet.mockResolvedValue('OK');
     mockRedisEval.mockResolvedValue(1);
     mockGetFooterTs.mockResolvedValue('111.000');
-    mockSetFooterTs.mockResolvedValue(undefined);
+    mockSetFooterTs.mockResolvedValue(true);
     mockResolveFooterContext.mockResolvedValue({
       linkedPrs: [{ prNumber: 7, prUrl: 'https://github.com/o/r/pull/7' }],
       livePreviewUrl: null,
-      explicitMentionRequired: false,
     });
     mockBuildFooterText.mockReturnValue(
-      '_Working on <https://github.com/o/r/pull/7|PR #7>, reply or use the <https://app.example.com/task/t1|web app>._',
+      'Reply anytime · <https://github.com/o/r/pull/7|PR #7> · <https://app.example.com/task/t1|Open in Roomote>',
     );
   });
 
@@ -75,7 +80,31 @@ describe('thread-reply-footer-ops', () => {
         elements: [
           {
             type: 'mrkdwn',
-            text: '_Working on <https://example.com|PR #1>, reply or use the <https://app|web app>._',
+            text: 'Reply anytime · 0 tasks running · <https://app|Open in Roomote>',
+          },
+        ],
+      }),
+    ).toBe(false);
+
+    expect(
+      isSlackThreadReplyFooterBlock({
+        type: 'context',
+        elements: [
+          {
+            type: 'mrkdwn',
+            text: 'Reply anytime · 1 task running · <https://app|Open in Roomote>',
+          },
+        ],
+      }),
+    ).toBe(true);
+
+    expect(
+      isSlackThreadReplyFooterBlock({
+        type: 'context',
+        elements: [
+          {
+            type: 'mrkdwn',
+            text: 'Reply anytime · 2 tasks running · <https://example.com|PR #1> · <https://app|Open in Roomote>',
           },
         ],
       }),
@@ -141,7 +170,9 @@ describe('thread-reply-footer-ops', () => {
         },
       }),
     );
-    expect(mockSetFooterTs).toHaveBeenCalledWith('C1', '100.000', '222.000');
+    expect(mockSetFooterTs).toHaveBeenCalledWith('C1', '100.000', '222.000', {
+      lock: expect.any(Object),
+    });
 
     mockBuildFooterText.mockClear();
     slack.postMessage.mockClear();
@@ -160,6 +191,168 @@ describe('thread-reply-footer-ops', () => {
         linkedPrs: [],
         livePreviewUrl: null,
       }),
+    );
+  });
+
+  it('registers a new root so a later footer relocation can clear it', async () => {
+    mockGetFooterTs
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce('100.000');
+    const slack = {
+      postMessage: vi
+        .fn()
+        .mockResolvedValueOnce('100.000')
+        .mockResolvedValueOnce('200.000'),
+      getMessageBlocks: vi.fn().mockResolvedValue([
+        { type: 'markdown', text: 'root body' },
+        {
+          type: 'context',
+          block_id: 'roomote_thread_reply_footer',
+          elements: [{ type: 'mrkdwn', text: 'footer' }],
+        },
+      ]),
+      updateMessage: vi.fn().mockResolvedValue(true),
+    };
+    await postSlackRootMessageWithFooterText({
+      slack,
+      channel: 'D1',
+      text: 'root body',
+      bodyBlocks: [{ type: 'markdown', text: 'root body' }],
+      footerText: 'footer',
+    });
+    await postSlackThreadMessageWithStickyFooter({
+      slack,
+      channel: 'D1',
+      threadTs: '100.000',
+      taskId: 'task-1',
+      text: 'later body',
+    });
+
+    expect(mockSetFooterTs).toHaveBeenNthCalledWith(
+      1,
+      'D1',
+      '100.000',
+      '100.000',
+      { lock: expect.any(Object) },
+    );
+    expect(slack.updateMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ ts: '100.000' }),
+    );
+  });
+
+  it('rewrites an existing message into the footer carrier and strips the previous one', async () => {
+    const slack = {
+      getMessageBlocks: vi.fn().mockResolvedValue([
+        { type: 'section', text: { type: 'mrkdwn', text: 'old body' } },
+        {
+          type: 'context',
+          block_id: 'roomote_thread_reply_footer',
+          elements: [{ type: 'mrkdwn', text: 'old footer' }],
+        },
+      ]),
+      updateMessage: vi.fn().mockResolvedValue(true),
+    };
+
+    await expect(
+      updateSlackThreadMessageWithFooterText({
+        slack,
+        channel: 'C1',
+        threadTs: '100.000',
+        messageTs: '333.000',
+        text: 'final reply',
+        bodyBlocks: [{ type: 'markdown', text: 'final reply' }],
+        footerText: 'footer',
+      }),
+    ).resolves.toBe(true);
+
+    expect(slack.updateMessage).toHaveBeenNthCalledWith(1, {
+      channel: 'C1',
+      ts: '333.000',
+      message: {
+        text: 'final reply',
+        blocks: [
+          { type: 'markdown', text: 'final reply' },
+          expect.objectContaining({
+            type: 'context',
+            block_id: 'roomote_thread_reply_footer',
+          }),
+        ],
+      },
+    });
+    // The prior carrier loses its footer and the pointer moves.
+    expect(slack.updateMessage).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ ts: '111.000' }),
+    );
+    expect(mockSetFooterTs).toHaveBeenCalledWith('C1', '100.000', '333.000', {
+      lock: expect.any(Object),
+    });
+  });
+
+  it('preserves awake preview, zero status and Session navigation in reply-only posts', async () => {
+    const context = {
+      linkedPrs: [{ prNumber: 7, prUrl: 'https://github.com/o/r/pull/7' }],
+      livePreviewUrl: 'https://preview.example.com',
+      runningTasks: { count: 0, url: 'https://app.example.com/tasks' },
+      webAppUrl: 'https://app.example.com/sessions/owner',
+    };
+    mockResolveFooterContext.mockResolvedValue(context);
+    mockGetFooterTs.mockResolvedValue(null);
+    await postSlackThreadMessageWithStickyFooter({
+      slack: {
+        postMessage: vi.fn().mockResolvedValue('222.000'),
+        getMessageBlocks: vi.fn(),
+        updateMessage: vi.fn(),
+      },
+      channel: 'C1',
+      threadTs: '100.000',
+      taskId: 'task-1',
+      text: 'PR merged',
+      footerStyle: 'reply-only',
+    });
+    expect(mockBuildFooterText).toHaveBeenCalledWith({
+      ...context,
+      taskUrl: expect.stringContaining('/task/task-1?'),
+      linkedPrs: [],
+    });
+  });
+
+  it('takes the footer back off a rewritten message when the pointer cannot be saved', async () => {
+    mockGetFooterTs.mockResolvedValue(null);
+    mockSetFooterTs.mockRejectedValue(new Error('redis down'));
+    const slack = {
+      getMessageBlocks: vi.fn().mockResolvedValue([
+        { type: 'markdown', text: 'final reply' },
+        {
+          type: 'context',
+          block_id: 'roomote_thread_reply_footer',
+          elements: [{ type: 'mrkdwn', text: 'footer' }],
+        },
+      ]),
+      updateMessage: vi.fn().mockResolvedValue(true),
+    };
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await expect(
+      updateSlackThreadMessageWithFooterText({
+        slack,
+        channel: 'C1',
+        threadTs: '100.000',
+        messageTs: '333.000',
+        text: 'final reply',
+        bodyBlocks: [{ type: 'markdown', text: 'final reply' }],
+        footerText: 'footer',
+      }),
+    ).resolves.toBe(true);
+
+    expect(slack.updateMessage).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        ts: '333.000',
+        message: { blocks: [{ type: 'markdown', text: 'final reply' }] },
+      }),
+    );
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to persist latest footer message ts'),
     );
   });
 

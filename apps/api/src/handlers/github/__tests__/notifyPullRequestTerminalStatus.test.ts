@@ -101,7 +101,7 @@ vi.mock('@roomote/db/server', () => ({
 import { db, desc, taskRuns } from '@roomote/db/server';
 import {
   notifyPullRequestTerminalStatus,
-  SLACK_PR_CLOSED_REACTION_EMOJI,
+  PR_CLOSED_REACTION_EMOJI,
 } from '../notifyPullRequestTerminalStatus';
 
 const mockedGithubFind = vi.mocked(db.query.githubInstallations.findFirst);
@@ -269,9 +269,9 @@ describe('notifyPullRequestTerminalStatus', () => {
     expect(mockAddReaction).toHaveBeenCalledWith({
       channel: 'C123',
       timestamp: 'thread-ts-1',
-      name: SLACK_PR_CLOSED_REACTION_EMOJI,
+      name: PR_CLOSED_REACTION_EMOJI,
     });
-    expect(SLACK_PR_CLOSED_REACTION_EMOJI).toBe('-1');
+    expect(PR_CLOSED_REACTION_EMOJI).toBe('file_cabinet');
   });
 
   it('delivers a direct task-run Slack binding for a non-Fast task', async () => {
@@ -305,7 +305,7 @@ describe('notifyPullRequestTerminalStatus', () => {
     expect(mockAddReaction).toHaveBeenCalledWith({
       channel: 'CSHARED',
       timestamp: 'shared-thread-ts',
-      name: SLACK_PR_CLOSED_REACTION_EMOJI,
+      name: PR_CLOSED_REACTION_EMOJI,
     });
   });
 
@@ -564,6 +564,23 @@ describe('notifyPullRequestTerminalStatus', () => {
       channelId: 'thread-9',
       messageId: 'origin-fallback',
       name: 'white_check_mark',
+    });
+  });
+
+  it('uses the neutral file-cabinet reaction when a PR is closed on Discord', async () => {
+    mockedGithubFind.mockResolvedValue({ id: 1 } as any);
+    mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
+    mockedTaskRunsFind.mockResolvedValue([{ payload: discordPayload }] as any);
+
+    await notifyPullRequestTerminalStatus({
+      ...baseParams,
+      status: 'closed',
+    });
+
+    expect(mockAddReaction).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      messageId: 'origin-msg-1',
+      name: PR_CLOSED_REACTION_EMOJI,
     });
   });
 

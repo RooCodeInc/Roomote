@@ -236,7 +236,7 @@ describe('RoomoteBrokerClient', () => {
     });
 
     expect(result).toEqual({
-      commandId: undefined,
+      commandId: 'exec-1',
       exitCode: 3,
       stdout: 'hello world',
       stderr: 'warn',
@@ -264,14 +264,37 @@ describe('RoomoteBrokerClient', () => {
     });
 
     expect(result).toEqual({
-      commandId: undefined,
+      commandId: 'exec-1',
       exitCode: 1,
       stdout: undefined,
       stderr: 'boom',
     });
   });
 
-  it('returns a running detached command and delivers onExit from the stream', async () => {
+  it('delivers stderr before rejecting a failed detached startup', async () => {
+    const { client } = harness(() =>
+      ndjsonResponse([
+        { type: 'started', execId: 'exec-failed' },
+        { type: 'stderr', data: 'worker import failed\n' },
+        { type: 'error', message: 'exec stream failed' },
+      ]),
+    );
+    const outputs: { stream: string; data: string }[] = [];
+
+    await expect(
+      client.runCommand({
+        instanceId: 'sb-1',
+        cmd: 'worker',
+        detached: true,
+        onOutput: (event) => outputs.push(event),
+      }),
+    ).rejects.toThrow('exec stream failed');
+    expect(outputs).toEqual([
+      { stream: 'stderr', data: 'worker import failed\n' },
+    ]);
+  });
+
+  it('returns a running detached command and delivers output and onExit from the stream', async () => {
     let releaseTail!: () => void;
     const tail = new Promise<void>((resolve) => {
       releaseTail = resolve;
@@ -286,7 +309,22 @@ describe('RoomoteBrokerClient', () => {
               `${JSON.stringify({ type: 'started', execId: 'exec-1' })}\n`,
             ),
           );
+          controller.enqueue(
+            encoder.encode(
+              `${JSON.stringify({ type: 'stdout', data: 'worker booting\n' })}\n`,
+            ),
+          );
           await tail;
+          controller.enqueue(
+            encoder.encode(
+              `${JSON.stringify({ type: 'stdout', data: 'worker ready\n' })}\n`,
+            ),
+          );
+          controller.enqueue(
+            encoder.encode(
+              `${JSON.stringify({ type: 'stderr', data: 'worker warning\n' })}\n`,
+            ),
+          );
           controller.enqueue(
             encoder.encode(
               `${JSON.stringify({ type: 'exit', exitCode: 7 })}\n`,
@@ -299,6 +337,8 @@ describe('RoomoteBrokerClient', () => {
     });
 
     const exitCodes: number[] = [];
+    const outputs: { stream: string; data: string }[] = [];
+    const launchAbortController = new AbortController();
     let resolveExit!: () => void;
     const exitSeen = new Promise<void>((resolve) => {
       resolveExit = resolve;
@@ -308,16 +348,24 @@ describe('RoomoteBrokerClient', () => {
       instanceId: 'sb-1',
       cmd: 'worker',
       detached: true,
+      signal: launchAbortController.signal,
+      onOutput: (event) => outputs.push(event),
       onExit: ({ exitCode }) => {
         exitCodes.push(exitCode);
         resolveExit();
       },
     });
 
-    expect(result).toEqual({ commandId: undefined, exitCode: null });
+    expect(result).toEqual({ commandId: 'exec-1', exitCode: null });
+    launchAbortController.abort();
     releaseTail();
     await exitSeen;
     expect(exitCodes).toEqual([7]);
+    expect(outputs).toEqual([
+      { stream: 'stdout', data: 'worker booting\n' },
+      { stream: 'stdout', data: 'worker ready\n' },
+      { stream: 'stderr', data: 'worker warning\n' },
+    ]);
   });
 
   it('recovers onExit via polling when started arrives late and the stream drops', async () => {
@@ -371,6 +419,69 @@ describe('RoomoteBrokerClient', () => {
       await vi.advanceTimersByTimeAsync(31_000);
 
       expect(exitCodes).toEqual([5]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('delivers broker errors that arrive after detached startup', async () => {
+    vi.useFakeTimers();
+    try {
+      const encoder = new TextEncoder();
+      let releaseError!: () => void;
+      const errorReady = new Promise<void>((resolve) => {
+        releaseError = resolve;
+      });
+      const { client } = harness((request) => {
+        if (request.path.endsWith('/exec')) {
+          return new Response(
+            new ReadableStream<Uint8Array>({
+              async start(controller) {
+                controller.enqueue(
+                  encoder.encode(
+                    `${JSON.stringify({ type: 'started', execId: 'exec-error' })}\n`,
+                  ),
+                );
+                await errorReady;
+                controller.enqueue(
+                  encoder.encode(
+                    `${JSON.stringify({ type: 'error', message: 'worker startup failed' })}\n`,
+                  ),
+                );
+                controller.close();
+              },
+            }),
+            { status: 200 },
+          );
+        }
+
+        return jsonResponse({ status: 'exited', exitCode: 1 });
+      });
+      const outputs: { stream: string; data: string }[] = [];
+      const exitCodes: number[] = [];
+      const resultPromise = client.runCommand({
+        instanceId: 'sb-1',
+        cmd: 'worker',
+        detached: true,
+        onOutput: (event) => outputs.push(event),
+        onExit: ({ exitCode }) => {
+          exitCodes.push(exitCode);
+        },
+      });
+
+      await vi.advanceTimersByTimeAsync(1_100);
+      await expect(resultPromise).resolves.toEqual({
+        commandId: 'exec-error',
+        exitCode: null,
+      });
+      releaseError();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(outputs).toContainEqual({
+        stream: 'stderr',
+        data: 'Broker exec error: worker startup failed\n',
+      });
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect(exitCodes).toEqual([1]);
     } finally {
       vi.useRealTimers();
     }

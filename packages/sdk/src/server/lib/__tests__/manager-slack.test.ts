@@ -85,6 +85,7 @@ describe('manager slack helpers', () => {
       automationName: 'Weekly scan',
       text: 'Found two regressions.',
       sessionId: 'session-1',
+      taskUrl: 'https://app.example.com/task/task-1',
     });
 
     expect(message.text).toBe('Found two regressions.');
@@ -116,6 +117,32 @@ describe('manager slack helpers', () => {
         ],
       }),
     ]);
+  });
+
+  it('keeps task navigation for custom automation reports without a Session', () => {
+    const message = buildCustomAutomationSlackMessage({
+      automationId: 'automation-1',
+      automationName: 'Weekly scan',
+      text: 'Found two regressions.',
+      taskUrl: 'https://app.example.com/task/task-1',
+    });
+
+    expect(message.blocks).toContainEqual(
+      expect.objectContaining({
+        type: 'container',
+        child_blocks: expect.arrayContaining([
+          expect.objectContaining({
+            type: 'actions',
+            elements: expect.arrayContaining([
+              expect.objectContaining({
+                action_id: 'late_bound_automation_view_task',
+                url: 'https://app.example.com/task/task-1',
+              }),
+            ]),
+          }),
+        ]),
+      }),
+    );
   });
 
   it('preserves custom automation Markdown without entity escaping', () => {

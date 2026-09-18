@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import {
   AZURE_CAPABILITIES as AZURE_CAPABILITIES_VALUE,
+  SANDBOX_TIMEOUT_MS,
   type ComputeProvider,
 } from '@roomote/types';
 
@@ -239,6 +240,7 @@ export class AzureClient implements ComputeProviderClient {
         input.signal,
       );
       if (existing) {
+        await this.refreshLifecyclePolicy(existing, input.signal);
         const domains = await this.ensurePorts(
           existing.id,
           input.ports ?? [],
@@ -650,19 +652,27 @@ export class AzureClient implements ComputeProviderClient {
       }
     }
 
-    // Ports do NOT persist through snapshot/restore (measured) — re-add.
-    const domains = await this.ensurePorts(
-      created.id,
-      input.ports ?? [],
-      input.signal,
-    );
+    try {
+      // Restore inherits the snapshot's lifecycle; the create endpoint does
+      // not accept overrides. Refresh before handing the clone to a worker.
+      await this.refreshLifecyclePolicy(created, input.signal);
+      // Ports do NOT persist through snapshot/restore (measured) — re-add.
+      const domains = await this.ensurePorts(
+        created.id,
+        input.ports ?? [],
+        input.signal,
+      );
 
-    return {
-      instanceId: created.id,
-      status: 'running',
-      sourceSnapshotId: input.sourceSnapshotId,
-      ...(Object.keys(domains).length > 0 ? { domains } : {}),
-    };
+      return {
+        instanceId: created.id,
+        status: 'running',
+        sourceSnapshotId: input.sourceSnapshotId,
+        ...(Object.keys(domains).length > 0 ? { domains } : {}),
+      };
+    } catch (error) {
+      await this.cleanupSandboxAfterFailure(created.id);
+      throw error;
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -676,10 +686,30 @@ export class AzureClient implements ComputeProviderClient {
 
     const usageObservation = await this.readUsageObservation(input.instanceId);
 
-    await this.request('POST', `${this.sandboxPath(input.instanceId)}/stop`, {
-      signal: input.signal,
-      abortMessage: `Suspending Azure sandbox ${input.instanceId} was aborted`,
-    });
+    try {
+      await this.request('POST', `${this.sandboxPath(input.instanceId)}/stop`, {
+        signal: input.signal,
+        abortMessage: `Suspending Azure sandbox ${input.instanceId} was aborted`,
+      });
+    } catch (error) {
+      if (
+        !(error instanceof AzureDataPlaneError) ||
+        error.status !== 409 ||
+        error.code !== 'SandboxNotRunning'
+      ) {
+        throw error;
+      }
+      // A concurrent stop may already have succeeded. Confirm it rather
+      // than treating every conflict as success: preview APIs can also
+      // reject stop while GET still reports Running.
+      const current = await this.getSandbox(input.instanceId, input.signal);
+      if (
+        this.mapState(current.state) !== 'stopped' &&
+        current.state !== 'Stopping'
+      ) {
+        throw error;
+      }
+    }
     await this.waitForState(
       input.instanceId,
       ['Stopped', 'Suspended', 'Idle'],
@@ -700,6 +730,9 @@ export class AzureClient implements ComputeProviderClient {
     // No-op when already Running (double-wake race): resuming a Running
     // sandbox is rejected by the service.
     const current = await this.getSandbox(input.resumeHandle, input.signal);
+    // Retained sandboxes may predate the idle backstop. Install it before
+    // resuming so a failed policy update cannot wake an unprotected sandbox.
+    await this.refreshLifecyclePolicy(current, input.signal);
     if (current.state !== 'Running') {
       await this.request(
         'POST',
@@ -711,12 +744,6 @@ export class AzureClient implements ComputeProviderClient {
       );
       await this.waitForState(input.resumeHandle, ['Running'], input.signal);
     }
-
-    // NOTE: no lifecycle refresh here. Measured semantics (2026-07-30):
-    // auto-delete is a suspension-anchored TTL (stoppedAt + interval,
-    // laggy sweeper) and never fires on Running sandboxes, and each
-    // suspension re-anchors stoppedAt — so every Roomote standby cycle gets
-    // a fresh TTL window with no action needed from the adapter.
 
     // Ports persist through stop/resume (measured); ensure anyway so callers
     // always get domains back.
@@ -777,8 +804,6 @@ export class AzureClient implements ComputeProviderClient {
         }
       : { id: this.config.diskImage };
 
-    const autoSuspendSeconds = this.config.autoSuspendSeconds ?? 0;
-
     // ACA tiers cap BOTH memory (cores × 2Gi) and disk (cores × 20Gi) at
     // the CPU anchor (verified live: 400 InvalidResourceTier past either).
     // Scale CPU up to fit the requested memory rather than failing —
@@ -808,28 +833,7 @@ export class AzureClient implements ComputeProviderClient {
         memory: `${memoryMiB}Mi`,
         ...(diskSize ? { disk: diskSize } : {}),
       },
-      lifecycle: {
-        autoSuspendPolicy: {
-          enabled: autoSuspendSeconds > 0,
-          interval: autoSuspendSeconds,
-          mode: 'Memory',
-        },
-        // Measured (2026-07-30): auto-delete fires only on suspended
-        // sandboxes, at stoppedAt + interval. Make it a long backstop
-        // (>= standby retention) rather than the task timeout — the
-        // Roomote-side timeout is enforced by the worker/sleep-check.
-        ...(this.config.timeoutMs
-          ? {
-              autoDeletePolicy: {
-                enabled: true,
-                deleteIntervalInSeconds: Math.ceil(
-                  Math.max(this.config.timeoutMs, AUTO_DELETE_BACKSTOP_MS) /
-                    1_000,
-                ),
-              },
-            }
-          : {}),
-      },
+      lifecycle: this.buildLifecyclePolicy(),
       // Default Partial inspection: no rules configured means no TLS
       // resigning at all (clean trust stores, SSH allowed). See AzureConfig.
       egressPolicy: {
@@ -838,6 +842,53 @@ export class AzureClient implements ComputeProviderClient {
       },
       ...(options.labels ? { labels: options.labels } : {}),
     };
+  }
+
+  private buildLifecyclePolicy(): NonNullable<AzureSandbox['lifecycle']> {
+    // Auto-delete never limits running time. Use a provider-side idle
+    // backstop too, including when the controller/database is unavailable.
+    // Detached worker activity is not necessarily Azure API activity, so
+    // allow the full task timeout before automatically preserving its state.
+    const timeoutMs = this.config.timeoutMs ?? SANDBOX_TIMEOUT_MS;
+    const autoSuspendSeconds =
+      this.config.autoSuspendSeconds ?? Math.ceil(timeoutMs / 1_000);
+    if (
+      !Number.isFinite(timeoutMs) ||
+      timeoutMs <= 0 ||
+      !Number.isSafeInteger(autoSuspendSeconds) ||
+      autoSuspendSeconds < 0
+    ) {
+      throw new Error(
+        'Azure requires a positive timeout and a non-negative integer auto-suspend interval',
+      );
+    }
+    return {
+      autoSuspendPolicy: {
+        enabled: autoSuspendSeconds > 0,
+        interval: autoSuspendSeconds,
+        mode: 'Memory',
+      },
+      ...(this.config.timeoutMs
+        ? {
+            autoDeletePolicy: {
+              enabled: true,
+              deleteIntervalInSeconds: Math.ceil(
+                Math.max(timeoutMs, AUTO_DELETE_BACKSTOP_MS) / 1_000,
+              ),
+            },
+          }
+        : {}),
+    };
+  }
+
+  private async refreshLifecyclePolicy(
+    sandbox: AzureSandbox,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    await this.request('POST', `${this.sandboxPath(sandbox.id)}/lifecycle`, {
+      body: { ...sandbox.lifecycle, ...this.buildLifecyclePolicy() },
+      signal,
+    });
   }
 
   /**

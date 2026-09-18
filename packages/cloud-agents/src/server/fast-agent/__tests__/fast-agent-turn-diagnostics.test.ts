@@ -1,3 +1,7 @@
+const captureEvent = vi.hoisted(() => vi.fn());
+
+vi.mock('@roomote/telemetry/server', () => ({ captureEvent }));
+
 import { FastAgentTurnDiagnostics } from '../fast-agent-turn-diagnostics';
 
 const conversation = {
@@ -78,6 +82,125 @@ describe('FastAgentTurnDiagnostics', () => {
     expect(logMessage).toContain('sessionPath="cold_rebuild"');
     expect(logMessage).toContain('openCodeSessionId="opencode-session-1"');
     expect(logMessage).toContain('recoveredAfterOpenCodeProviderRetry=true');
+  });
+
+  it('reports OpenCode setup phases, model requests, and token totals', () => {
+    let currentTime = 2_000;
+    const { diagnostics, logger } = createTestDiagnostics(() => currentTime);
+
+    diagnostics.recordPromptContext({
+      systemPromptChars: 12_345,
+      environmentCount: 3,
+      integrationCount: 2,
+      integrationToolCount: 41,
+      activeTaskCount: 1,
+    });
+    diagnostics.markInferenceQueued();
+    diagnostics.markInferenceSetupStarted();
+    currentTime = 2_500;
+    diagnostics.markInferenceStarted();
+    diagnostics.recordInferenceSetupTiming({
+      serverLeaseMs: 400,
+      sessionCreateMs: 60,
+      eventSubscribeMs: 15,
+      totalMs: 500,
+    });
+    // A retry attempt's setup must not overwrite the first attempt's spawn.
+    diagnostics.recordInferenceSetupTiming({ serverLeaseMs: 1, totalMs: 2 });
+    diagnostics.recordAssistantMessageStarted();
+    currentTime = 8_500;
+    const firstMessage = {
+      id: 'msg-1',
+      sessionId: 'ses-1',
+      createdAtMs: 2_500,
+      completedAtMs: 8_500,
+      tokens: {
+        input: 9_000,
+        output: 200,
+        reasoning: 700,
+        cacheRead: 3_000,
+        cacheWrite: 0,
+      },
+    };
+    diagnostics.recordAssistantMessageCompleted(firstMessage);
+    diagnostics.recordVisibleReply();
+    diagnostics.recordAssistantMessageStarted();
+    currentTime = 15_000;
+    diagnostics.recordAssistantMessageCompleted({
+      id: 'msg-2',
+      sessionId: 'ses-1',
+      createdAtMs: 8_600,
+      completedAtMs: 15_000,
+      tokens: {
+        input: 12_500,
+        output: 20,
+        reasoning: 300,
+        cacheRead: 0,
+        cacheWrite: 0,
+      },
+    });
+    // The final prompt result repeats the last message; count it once.
+    diagnostics.recordAssistantMessageCompleted({
+      id: 'msg-2',
+      sessionId: 'ses-1',
+      createdAtMs: 8_600,
+      completedAtMs: 15_000,
+      tokens: firstMessage.tokens,
+    });
+    diagnostics.recordCloseoutAbort();
+    diagnostics.markInferenceFinished();
+    diagnostics.finish();
+
+    const logMessage = logger.info.mock.calls[0]?.[0] as string;
+    expect(logMessage).toContain('abortedAfterCloseout=true');
+    expect(logMessage).toContain('openCodeServerLeaseMs=400');
+    expect(logMessage).toContain('openCodeSessionCreateMs=60');
+    expect(logMessage).toContain('openCodeEventSubscribeMs=15');
+    expect(logMessage).toContain('openCodeSetupMs=500');
+    expect(logMessage).not.toContain('openCodeSessionValidateMs');
+    expect(logMessage).toContain('modelRequestCount=2');
+    expect(logMessage).toContain('completedModelRequestCount=2');
+    expect(logMessage).toContain('firstModelResponseDurationMs=6000');
+    expect(logMessage).toContain('postReplyInferenceDurationMs=6500');
+    expect(logMessage).toContain('inputTokens=21500');
+    expect(logMessage).toContain('cacheReadTokens=3000');
+    expect(logMessage).toContain('outputTokens=220');
+    expect(logMessage).toContain('reasoningTokens=1000');
+    expect(logMessage).toContain('maxContextTokens=12500');
+    expect(logMessage).toContain('systemPromptChars=12345');
+    expect(logMessage).toContain('integrationToolCount=41');
+    expect(logMessage).toContain('environmentCount=3');
+    expect(logMessage).toContain('activeTaskCount=1');
+
+    // Telemetry carries the same set so the event can back the same
+    // analysis as the log line.
+    expect(captureEvent).toHaveBeenCalledWith(
+      'fast_turn_settled',
+      expect.objectContaining({
+        properties: expect.objectContaining({
+          model_request_count: 2,
+          completed_model_request_count: 2,
+          first_model_response_duration_ms: 6_000,
+          post_reply_inference_duration_ms: 6_500,
+          input_tokens: 21_500,
+          cache_read_tokens: 3_000,
+          cache_write_tokens: 0,
+          output_tokens: 220,
+          reasoning_tokens: 1_000,
+          max_context_tokens: 12_500,
+          system_prompt_chars: 12_345,
+          environment_count: 3,
+          integration_count: 2,
+          integration_tool_count: 41,
+          active_task_count: 1,
+          opencode_server_lease_ms: 400,
+          opencode_session_validate_ms: null,
+          opencode_session_create_ms: 60,
+          opencode_event_subscribe_ms: 15,
+          opencode_setup_ms: 500,
+        }),
+      }),
+    );
   });
 
   it('records bounded redacted context for each failed inference attempt', () => {

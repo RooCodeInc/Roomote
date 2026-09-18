@@ -38,11 +38,10 @@ const mocks = vi.hoisted(() => ({
   removeReaction: vi.fn(),
   createDirectMessage: vi.fn(),
   createThreadFromMessage: vi.fn(),
+  createTaskThread: vi.fn(),
+  fetchRepliedTo: vi.fn(),
   postMessage: vi.fn(),
   channelAutoStart: vi.fn(),
-  findPendingRoutingReply: vi.fn(),
-  hasPendingRouteCallback: vi.fn(),
-  handleRoutingReply: vi.fn(),
   attachOutOfBand: vi.fn(),
   releaseOutOfBand: vi.fn(),
   redisSet: vi.fn(),
@@ -51,10 +50,10 @@ const mocks = vi.hoisted(() => ({
   redisGetdel: vi.fn(),
   redisDel: vi.fn(),
   buildContinuation: vi.fn(),
-  releaseContinuation: vi.fn(),
   markThreadHistoryDelivered: vi.fn(),
   fetchThreadHistory: vi.fn(),
   shouldRouteUnmentioned: vi.fn(),
+  mentionsPeer: vi.fn(),
   enqueueGatewayEvent: vi.fn(),
   callViaEmojiConfig: vi.fn(),
   appendAccountLinkHelpText: vi.fn(async (message: string) => message),
@@ -62,11 +61,14 @@ const mocks = vi.hoisted(() => ({
   acquireFastTurnLock: vi.fn(),
   answerFast: vi.fn(),
   hasFastSession: vi.fn(),
+  getFastSessionOwner: vi.fn(),
+  peerConversationsEnabled: vi.fn(),
   findFastMessageSession: vi.fn(),
   findFastReplySession: vi.fn(),
   isFastProviderMessage: vi.fn(),
   recordProviderMessage: vi.fn(),
   queueFastSurfaceReply: vi.fn(),
+  admitHumanFollowUp: vi.fn(),
 }));
 
 vi.mock('../../account-link-help.js', () => ({
@@ -78,6 +80,7 @@ vi.mock('@roomote/redis', async (importOriginal) => {
   return {
     ...actual,
     getRedis: () => ({
+      zadd: async () => 1,
       set: mocks.redisSet,
       eval: mocks.redisEval,
       get: mocks.redisGet,
@@ -104,6 +107,10 @@ vi.mock('../provider.js', () => {
 });
 
 vi.mock('@roomote/sdk/server', () => ({
+  findSessionAttentionNotificationReply: vi.fn(async () => ({
+    status: 'none',
+  })),
+  resolveSessionAttentionFastConversation: vi.fn(async () => null),
   findDiscordMappedUserId: mocks.findMappedUserId,
   findDiscordInstallationByGuildId: mocks.findInstallation,
   consumeDiscordLinkCode: mocks.consumeLinkCode,
@@ -117,7 +124,15 @@ vi.mock('@roomote/sdk/server', () => ({
   isFastAgentProviderMessage: mocks.isFastProviderMessage,
   recordFastAgentConversationMessageBestEffort: mocks.recordProviderMessage,
   queueFastAgentSurfaceReply: mocks.queueFastSurfaceReply,
+  startFastSessionGoal: mocks.startGoal,
+  admitFastAgentHumanFollowUp: mocks.admitHumanFollowUp,
+  persistFastAgentInlineHumanTurn: vi.fn(async () => null),
+  wakeFastAgentParentEventNow: vi.fn(async () => undefined),
+  wakeFastAgentParentEventsOnTurnRelease: vi.fn(),
   resolveUserMcpServerConfigs: vi.fn(async () => ({})),
+}));
+vi.mock('../../tasks/continue-session-attention-reply', () => ({
+  continueSessionAttentionReply: vi.fn(async () => false),
 }));
 
 vi.mock('@roomote/sdk/server/communication', () => ({
@@ -138,15 +153,17 @@ vi.mock('../channel-auto-start.js', () => ({
   maybeHandleDiscordChannelAutoStart: mocks.channelAutoStart,
 }));
 
-vi.mock('../routing-confirmation.js', () => ({
-  findDiscordPendingRoutingReply: mocks.findPendingRoutingReply,
-  hasPendingDiscordRouteCallback: mocks.hasPendingRouteCallback,
-  handleDiscordRoutingReply: mocks.handleRoutingReply,
-}));
-
 vi.mock('@roomote/communication/messages', () => ({
   queueCommunicationMessageOnce: mocks.queueMessage,
   setLatestInboundMessageId: mocks.setLatestInbound,
+}));
+
+vi.mock('@roomote/communication', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/communication')>()),
+  resolveFastSessionReplyFooterContext: vi.fn(async () => ({
+    linkedPrs: [],
+    livePreviewUrl: null,
+  })),
 }));
 
 vi.mock('../../tasks/acting-user-sync.js', () => ({
@@ -155,12 +172,13 @@ vi.mock('../../tasks/acting-user-sync.js', () => ({
 
 vi.mock('../thread-context.js', () => ({
   buildDiscordContinuationPrompt: mocks.buildContinuation,
+  fetchDiscordRepliedToMessageBestEffort: mocks.fetchRepliedTo,
   fetchDiscordThreadHistoryBestEffort: mocks.fetchThreadHistory,
-  releaseDiscordContinuationClaim: mocks.releaseContinuation,
   markDiscordThreadHistoryDelivered: mocks.markThreadHistoryDelivered,
 }));
 
 vi.mock('../unmentioned-thread-reply.js', () => ({
+  mentionsDiscordUserOtherThanBotOrUser: mocks.mentionsPeer,
   shouldRouteUnmentionedDiscordThreadReplyToAgent: mocks.shouldRouteUnmentioned,
 }));
 
@@ -170,10 +188,6 @@ vi.mock('../../call-roomote-via-emoji.js', () => ({
 
 vi.mock('../task-orchestration.js', () => ({
   startNewDiscordTask: mocks.startNewTask,
-}));
-
-vi.mock('../goal-command.js', () => ({
-  startDiscordTaskGoal: mocks.startGoal,
 }));
 
 vi.mock('../replies.js', () => ({ replyToDiscordEvent: mocks.reply }));
@@ -193,9 +207,15 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   resolveApiBaseUrl: () => 'https://roomote.example.com',
   getTaskUrl: mocks.getTaskUrl,
   hasFastAgentSession: mocks.hasFastSession,
+  getFastAgentSessionOwner: mocks.getFastSessionOwner,
   getOrCreateFastAgentSession: vi
     .fn()
     .mockResolvedValue({ id: 'fast-session-1' }),
+}));
+
+vi.mock('@roomote/db/server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/db/server')>()),
+  isDeploymentExperimentEnabled: mocks.peerConversationsEnabled,
 }));
 
 import { discord, discordGatewayEventProcessingTimeout } from '../index.js';
@@ -211,6 +231,7 @@ const provider = {
   removeReaction: mocks.removeReaction,
   createDirectMessage: mocks.createDirectMessage,
   createThreadFromMessage: mocks.createThreadFromMessage,
+  createTaskThread: mocks.createTaskThread,
   postMessage: mocks.postMessage,
 };
 
@@ -325,12 +346,19 @@ describe('Discord Gateway event handler', () => {
       status: 'started',
       launchResult: { id: 17, taskId: 'task-17' },
     });
-    mocks.startGoal.mockResolvedValue({ success: true });
+    mocks.startGoal.mockResolvedValue({ success: true, goal: {} });
     mocks.acquireFastTurnLock.mockResolvedValue(
       vi.fn().mockResolvedValue(undefined),
     );
+    mocks.admitHumanFollowUp.mockResolvedValue({
+      kind: 'turn',
+      turnLock: vi.fn().mockResolvedValue(undefined),
+    });
     mocks.answerFast.mockResolvedValue('A quick answer');
     mocks.hasFastSession.mockResolvedValue(false);
+    mocks.getFastSessionOwner.mockResolvedValue(null);
+    mocks.peerConversationsEnabled.mockResolvedValue(false);
+    mocks.mentionsPeer.mockReturnValue(false);
     mocks.findFastMessageSession.mockResolvedValue(null);
     mocks.findFastReplySession.mockResolvedValue(null);
     mocks.isFastProviderMessage.mockResolvedValue(false);
@@ -346,17 +374,29 @@ describe('Discord Gateway event handler', () => {
       messageId: 'message-1',
     });
     mocks.postMessage.mockResolvedValue({ messageId: 'dm-msg-1' });
-    mocks.redisSet.mockResolvedValue('OK');
-    mocks.redisEval.mockResolvedValue(1);
-    mocks.redisGet.mockResolvedValue(null);
+    const redisState = new Map<string, string>();
+    mocks.redisSet.mockImplementation(
+      async (key: string, value: string, ...args: unknown[]) => {
+        if (args.includes('NX') && redisState.has(key)) return null;
+        redisState.set(key, value);
+        return 'OK';
+      },
+    );
+    mocks.redisEval.mockImplementation(
+      async (script: string, _count: number, key: string, owner: string) => {
+        if (redisState.get(key) !== owner) return 0;
+        if (script.includes("'del'")) redisState.delete(key);
+        return 1;
+      },
+    );
+    mocks.redisGet.mockImplementation(
+      async (key: string) => redisState.get(key) ?? null,
+    );
     mocks.redisGetdel.mockResolvedValue(null);
     mocks.redisDel.mockResolvedValue(1);
     mocks.component.mockResolvedValue('handled');
     mocks.suggestionReaction.mockResolvedValue(false);
     mocks.channelAutoStart.mockResolvedValue(false);
-    mocks.findPendingRoutingReply.mockResolvedValue(null);
-    mocks.hasPendingRouteCallback.mockResolvedValue(null);
-    mocks.handleRoutingReply.mockResolvedValue(false);
     mocks.attachOutOfBand.mockImplementation(
       async ({ message }: { message: Record<string, unknown> }) => ({
         message,
@@ -379,7 +419,6 @@ describe('Discord Gateway event handler', () => {
         channelId: 'thread-1',
       }),
     );
-    mocks.releaseContinuation.mockResolvedValue(undefined);
     mocks.markThreadHistoryDelivered.mockResolvedValue(undefined);
     mocks.fetchThreadHistory.mockResolvedValue([]);
     mocks.shouldRouteUnmentioned.mockResolvedValue(true);
@@ -390,58 +429,6 @@ describe('Discord Gateway event handler', () => {
 
   afterEach(() => {
     delete process.env.R_DISCORD_GATEWAY_SECRET;
-  });
-
-  it('treats an unmentioned task-thread message as a pending routing reply', async () => {
-    mocks.getChannel.mockResolvedValue({
-      id: 'thread-1',
-      name: 'Fix the flaky tests',
-      type: 11,
-      guildId: 'guild-1',
-      parentId: 'channel-1',
-    });
-    mocks.findPendingRoutingReply.mockResolvedValue({
-      pendingRouteId: 'pending-route-1',
-    });
-    mocks.handleRoutingReply.mockResolvedValue(true);
-
-    const response = await postEvent(
-      envelope(
-        attachmentMessage({
-          channel_id: 'thread-1',
-          guild_id: 'guild-1',
-          channel: {
-            id: 'thread-1',
-            type: 11,
-            guild_id: 'guild-1',
-            parent_id: 'channel-1',
-          },
-        }),
-      ),
-    );
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      ok: true,
-      routingReplyHandled: true,
-    });
-    expect(mocks.handleRoutingReply).toHaveBeenCalledWith(
-      expect.objectContaining({
-        pendingRouteId: 'pending-route-1',
-        queuedMessage: expect.objectContaining({ text: 'Image: context.png' }),
-      }),
-    );
-    expect(mocks.addReaction).toHaveBeenCalledWith({
-      channelId: 'thread-1',
-      messageId: 'message-1',
-      name: '👀',
-    });
-    expect(mocks.removeReaction).toHaveBeenCalledWith({
-      channelId: 'thread-1',
-      messageId: 'message-1',
-      name: 'eyes',
-    });
-    expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 
   it('routes a configured reaction into the fast agent in a thread anchored on the reacted-on message', async () => {
@@ -517,7 +504,6 @@ describe('Discord Gateway event handler', () => {
         text: expect.stringContaining('A quick answer'),
       }),
     );
-    expect(mocks.startNewTask).not.toHaveBeenCalled();
     expect(mocks.queueMessage).not.toHaveBeenCalled();
     expect(mocks.queueFastSurfaceReply).not.toHaveBeenCalled();
   });
@@ -560,7 +546,6 @@ describe('Discord Gateway event handler', () => {
     expect(mocks.answerFast).toHaveBeenCalledWith(
       expect.objectContaining({ question: 'Act on this' }),
     );
-    expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 
   it('starts an exactly tracked suggestion before configured emoji routing', async () => {
@@ -909,37 +894,81 @@ describe('Discord Gateway event handler', () => {
     },
   );
 
-  it('launches a linked DM attachment request through the Discord task orchestrator', async () => {
+  it('enters Fast for a linked DM attachment request with the attachment as context', async () => {
     const response = await postEvent(envelope(attachmentMessage()));
 
     expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      fastAnswered: true,
+      fastDefaulted: true,
+    });
     expect(mocks.completeEvent).toHaveBeenCalledWith({
       eventType: 'MESSAGE_CREATE',
       eventId: 'message-1',
       token: 'claim-token',
     });
-    expect(mocks.addReaction).toHaveBeenCalledWith({
-      channelId: 'dm-1',
-      messageId: 'message-1',
-      name: '👀',
-    });
-    expect(mocks.startNewTask).toHaveBeenCalledWith(
+    expect(mocks.answerFast).toHaveBeenCalledWith(
       expect.objectContaining({
-        requesterDiscordUserId: 'discord-user-1',
-        launchOwnerUserId: 'roomote-user-1',
-        intakeAckPinned: true,
-        queuedMessage: expect.objectContaining({
-          provider: 'discord',
-          text: 'Image: context.png',
-          userId: 'roomote-user-1',
+        question: expect.stringContaining('Image: context.png'),
+        userId: 'roomote-user-1',
+        conversation: expect.objectContaining({
+          surface: 'discord',
+          conversationId: 'dm-1',
         }),
-        metadata: {
-          communicationProvider: 'discord',
-          communicationChannelId: 'dm-1',
-          communicationMessageId: 'message-1',
-          // A real channel message carries an anchor for its task thread.
-          communicationAnchorMessageId: 'message-1',
-        },
+      }),
+    );
+  });
+
+  it('includes the replied-to channel message as Fast context for reply mentions', async () => {
+    mocks.getChannel.mockResolvedValue({
+      id: 'channel-1',
+      guildId: 'guild-1',
+      name: 'general',
+      type: 0,
+    });
+    mocks.createThreadFromMessage.mockResolvedValue({
+      channelId: 'thread-2',
+      parentChannelId: 'channel-1',
+      name: 'Fix the flaky tests',
+      kind: 'thread',
+    });
+    mocks.fetchRepliedTo.mockResolvedValue({
+      id: 'message-parent',
+      user: 'alice',
+      username: 'Alice',
+      text: 'Deploy failed on main',
+      attachments: [],
+    });
+    const response = await postEvent(
+      envelope(
+        message({
+          id: 'message-2',
+          channel_id: 'channel-1',
+          guild_id: 'guild-1',
+          content: '<@bot-1> look into this',
+          mentions: [{ id: 'bot-1', username: 'roomote' }],
+          message_reference: {
+            message_id: 'message-parent',
+            channel_id: 'channel-1',
+          },
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.fetchRepliedTo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'channel-1',
+        messageId: 'message-parent',
+      }),
+    );
+    expect(mocks.answerFast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: 'look into this',
+        currentMessageAgentContext: expect.stringContaining(
+          'Deploy failed on main',
+        ),
       }),
     );
   });
@@ -970,11 +999,10 @@ describe('Discord Gateway event handler', () => {
       expect.objectContaining({
         replyToMessageId: 'message-1',
         text: expect.stringMatching(
-          /^A quick answer\n\n-# Reply or use the \[web app\]\(.*\/sessions\/fast-session-1.*\)\.$/,
+          /^A quick answer\n\n-# Reply anytime · \[Open in Roomote\]\(.*\/sessions\/fast-session-1\?utm_source=discord&utm_medium=link&utm_campaign=discord.fast_reply\)$/,
         ),
       }),
     );
-    expect(mocks.startNewTask).not.toHaveBeenCalled();
     expect(mocks.queueMessage).not.toHaveBeenCalled();
   });
 
@@ -1027,7 +1055,6 @@ describe('Discord Gateway event handler', () => {
         }),
       }),
     );
-    expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 
   it('passes the model-authored Fast kickoff through the Discord enqueue gate', async () => {
@@ -1088,18 +1115,16 @@ describe('Discord Gateway event handler', () => {
     });
   });
 
-  it('serializes complete Fast turns before the next Discord message enters the agent', async () => {
-    let grantSecondLock!: (release: () => Promise<void>) => void;
-    const secondLock = new Promise<() => Promise<void>>((resolve) => {
-      grantSecondLock = resolve;
-    });
-    const releaseSecondLock = vi.fn().mockResolvedValue(undefined);
-    const releaseFirstLock = vi.fn(async () => {
-      grantSecondLock(releaseSecondLock);
-    });
+  it('durably steers the active Fast turn when the next Discord message arrives', async () => {
+    const releaseFirstLock = vi.fn().mockResolvedValue(undefined);
+    const abortSteer = vi.fn().mockResolvedValue(undefined);
     mocks.acquireFastTurnLock
       .mockResolvedValueOnce(releaseFirstLock)
-      .mockImplementationOnce(async () => secondLock);
+      .mockResolvedValueOnce(null);
+    mocks.admitHumanFollowUp.mockResolvedValue({
+      kind: 'steered',
+      abort: abortSteer,
+    });
 
     let finishFirstTurn!: (response: string) => void;
     const firstTurn = new Promise<string>((resolve) => {
@@ -1122,9 +1147,7 @@ describe('Discord Gateway event handler', () => {
         }),
       ),
     );
-    await vi.waitFor(() =>
-      expect(mocks.acquireFastTurnLock).toHaveBeenCalledTimes(2),
-    );
+    await vi.waitFor(() => expect(mocks.admitHumanFollowUp).toHaveBeenCalled());
     expect(mocks.answerFast).toHaveBeenCalledOnce();
     expect(mocks.acquireFastTurnLock).toHaveBeenNthCalledWith(1, {
       conversation: {
@@ -1133,6 +1156,7 @@ describe('Discord Gateway event handler', () => {
         conversationId: 'dm-1',
         replyTarget: { channelId: 'dm-1' },
       },
+      maxWaitMs: 0,
     });
     expect(mocks.acquireFastTurnLock).toHaveBeenNthCalledWith(2, {
       conversation: {
@@ -1141,22 +1165,28 @@ describe('Discord Gateway event handler', () => {
         conversationId: 'dm-1',
         replyTarget: { channelId: 'dm-1' },
       },
+      maxWaitMs: 0,
     });
+    expect(mocks.admitHumanFollowUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          eventId: 'message-concurrent-2',
+          question: 'Send it another message',
+          type: 'human_follow_up',
+        }),
+      }),
+    );
 
+    expect((await secondResponse).status).toBe(200);
     finishFirstTurn('First answer');
     expect((await firstResponse).status).toBe(200);
-    expect((await secondResponse).status).toBe(200);
 
     expect(mocks.answerFast).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({ question: 'Launch it' }),
     );
-    expect(mocks.answerFast).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({ question: 'Send it another message' }),
-    );
+    expect(mocks.answerFast).toHaveBeenCalledOnce();
     expect(releaseFirstLock).toHaveBeenCalledOnce();
-    expect(releaseSecondLock).toHaveBeenCalledOnce();
   });
 
   it('gives defaulted Discord Fast mode the active task for thread continuation', async () => {
@@ -1173,41 +1203,6 @@ describe('Discord Gateway event handler', () => {
       expect.objectContaining({ activeTasks: [{ taskId: 'task-23' }] }),
     );
     expect(mocks.queueMessage).not.toHaveBeenCalled();
-  });
-
-  it('forwards message_reference into startNewDiscordTask for channel reply mentions', async () => {
-    mocks.getChannel.mockResolvedValue({
-      id: 'channel-1',
-      guildId: 'guild-1',
-      name: 'general',
-      type: 0,
-    });
-    const response = await postEvent(
-      envelope(
-        attachmentMessage({
-          id: 'message-2',
-          channel_id: 'channel-1',
-          guild_id: 'guild-1',
-          content: '<@bot-1>',
-          mentions: [{ id: 'bot-1', username: 'roomote' }],
-          message_reference: {
-            message_id: 'message-parent',
-            channel_id: 'channel-1',
-          },
-        }),
-      ),
-    );
-
-    expect(response.status).toBe(200);
-    expect(mocks.startNewTask).toHaveBeenCalledWith(
-      expect.objectContaining({
-        replyToMessageId: 'message-parent',
-        replyToChannelId: 'channel-1',
-        queuedMessage: expect.objectContaining({
-          ts: 'message-2',
-        }),
-      }),
-    );
   });
 
   it('treats an unmentioned reply to an announcer report root as a task entry', async () => {
@@ -1250,128 +1245,115 @@ describe('Discord Gateway event handler', () => {
         isAutomationReportThread: true,
       }),
     );
-    expect(mocks.startNewTask).toHaveBeenCalledWith(
-      expect.objectContaining({ replyToMessageId: 'announcer-root' }),
-    );
+    expect(mocks.answerFast).toHaveBeenCalled();
   });
 
-  it('routes an exact active announcer root ahead of a newer run in the channel', async () => {
-    mocks.getChannel.mockResolvedValue({
-      id: 'channel-1',
-      guildId: 'guild-1',
-      name: 'general',
-      type: 0,
-    });
-    mocks.findAutomationReportRun.mockResolvedValue({
-      id: 11,
-      status: 'running',
-      taskId: 'announcer-task-one',
-      userId: 'roomote-user-1',
-    });
-    mocks.findActiveRun.mockResolvedValue({
-      id: 22,
-      status: 'running',
-      taskId: 'announcer-task-two',
+  describe('unmentioned automation report thread replies', () => {
+    beforeEach(() => {
+      mocks.getChannel.mockResolvedValue({
+        id: 'announcer-root',
+        guildId: 'guild-1',
+        parentId: 'channel-1',
+        name: 'automation-report',
+        type: 11,
+      });
+      mocks.findAutomationReportRun.mockImplementation(async (input) =>
+        input.provider === 'discord' &&
+        input.channelId === 'channel-1' &&
+        input.messageId === 'announcer-root'
+          ? { id: 11, taskId: 'announcer-task', userId: null }
+          : null,
+      );
     });
 
-    const response = await postEvent(
-      envelope(
-        attachmentMessage({
-          id: 'message-2',
-          channel_id: 'channel-1',
-          guild_id: 'guild-1',
-          content: '<@bot-1>',
-          mentions: [{ id: 'bot-1', username: 'roomote' }],
-          message_reference: {
-            message_id: 'announcer-root-one',
-            channel_id: 'channel-1',
-          },
-        }),
-      ),
+    it.each([undefined, 'later-message'])(
+      'resolves the immutable report root with reply reference %s',
+      async (replyToMessageId) => {
+        const response = await postEvent(
+          envelope(
+            message({
+              channel_id: 'announcer-root',
+              guild_id: 'guild-1',
+              content: 'Please explain the report',
+              ...(replyToMessageId
+                ? {
+                    message_reference: {
+                      message_id: replyToMessageId,
+                      channel_id: 'announcer-root',
+                    },
+                  }
+                : {}),
+            }),
+          ),
+        );
+
+        expect(response.status).toBe(200);
+        expect(mocks.findAutomationReportRun).toHaveBeenCalledExactlyOnceWith({
+          provider: 'discord',
+          channelId: 'channel-1',
+          messageId: 'announcer-root',
+        });
+        expect(mocks.shouldRouteUnmentioned).toHaveBeenCalledWith(
+          expect.objectContaining({
+            isRoomoteThread: true,
+            ownedThreadUserId: null,
+            isAutomationReportThread: true,
+          }),
+        );
+        expect(mocks.answerFast).toHaveBeenCalledOnce();
+        expect(mocks.answerFast).toHaveBeenCalledWith(
+          expect.objectContaining({ question: 'Please explain the report' }),
+        );
+      },
     );
 
-    expect(response.status).toBe(200);
-    expect(mocks.queueMessage).toHaveBeenCalledWith(
-      'discord',
-      11,
-      expect.objectContaining({ text: 'Image: context.png' }),
-    );
-    expect(mocks.findActiveRun).not.toHaveBeenCalled();
+    it.each([
+      ['unknown thread', 'not_task_entry'],
+      ['unlinked sender', 'discord_sender_not_linked_unmentioned'],
+      ['chatter', 'discord_unmentioned_requires_mention'],
+    ])('ignores %s without starting work', async (scenario, ignored) => {
+      if (scenario === 'unknown thread') {
+        mocks.findAutomationReportRun.mockResolvedValue(null);
+      } else if (scenario === 'unlinked sender') {
+        mocks.findMappedUserId.mockResolvedValue(null);
+      } else {
+        mocks.shouldRouteUnmentioned.mockResolvedValue(false);
+      }
+
+      const response = await postEvent(
+        envelope(
+          message({
+            channel_id: 'announcer-root',
+            guild_id: 'guild-1',
+            content: 'Please explain the report',
+          }),
+        ),
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({ ok: true, ignored });
+      expect(mocks.findAutomationReportRun).toHaveBeenCalledWith({
+        provider: 'discord',
+        channelId: 'channel-1',
+        messageId: 'announcer-root',
+      });
+      if (scenario === 'chatter') {
+        expect(mocks.shouldRouteUnmentioned).toHaveBeenCalledWith(
+          expect.objectContaining({ isAutomationReportThread: true }),
+        );
+      } else {
+        expect(mocks.shouldRouteUnmentioned).not.toHaveBeenCalled();
+      }
+      expect(mocks.answerFast).not.toHaveBeenCalled();
+      expect(mocks.queueMessage).not.toHaveBeenCalled();
+      expect(mocks.startNewTask).not.toHaveBeenCalled();
+      expect(mocks.resumeTask).not.toHaveBeenCalled();
+      expect(mocks.reply).not.toHaveBeenCalled();
+      expect(mocks.createDirectMessage).not.toHaveBeenCalled();
+    });
   });
 
-  it('resumes an exact announcer root snapshot ahead of a newer run in the channel', async () => {
-    mocks.getChannel.mockResolvedValue({
-      id: 'channel-1',
-      guildId: 'guild-1',
-      name: 'general',
-      type: 0,
-    });
-    const reportRun = {
-      id: 11,
-      status: 'completed',
-      taskId: 'announcer-task-one',
-      payload: {},
-      port: null,
-      snapshotId: 'snapshot-one',
-      snapshotCreatedAt: new Date(),
-    };
-    mocks.findAutomationReportRun.mockResolvedValue(reportRun);
-    mocks.findActiveRun.mockResolvedValue({
-      id: 22,
-      status: 'running',
-      taskId: 'announcer-task-two',
-    });
-    mocks.resumeTask.mockResolvedValue({ id: 12, taskId: 'task-resumed' });
-
-    const response = await postEvent(
-      envelope(
-        attachmentMessage({
-          id: 'message-2',
-          channel_id: 'channel-1',
-          guild_id: 'guild-1',
-          content: '<@bot-1>',
-          mentions: [{ id: 'bot-1', username: 'roomote' }],
-          message_reference: {
-            message_id: 'announcer-root-one',
-            channel_id: 'channel-1',
-          },
-        }),
-      ),
-    );
-
-    expect(response.status).toBe(200);
-    expect(mocks.resumeTask).toHaveBeenCalledWith(
-      expect.objectContaining({ completedRun: reportRun }),
-    );
-    expect(mocks.findActiveRun).not.toHaveBeenCalled();
-    expect(mocks.findCompletedRun).not.toHaveBeenCalled();
-  });
-
-  it('still launches when the initial eyes reaction fails', async () => {
-    mocks.addReaction.mockRejectedValueOnce(new Error('rate limited'));
-
-    const response = await postEvent(envelope(attachmentMessage()));
-
-    expect(response.status).toBe(200);
-    expect(mocks.addReaction).toHaveBeenCalledWith({
-      channelId: 'dm-1',
-      messageId: 'message-1',
-      name: '👀',
-    });
-    expect(mocks.startNewTask).toHaveBeenCalledTimes(1);
-    const startArgs = mocks.startNewTask.mock.calls.at(-1)?.[0] as {
-      intakeAckPinned?: boolean;
-    };
-    expect(startArgs.intakeAckPinned).toBeUndefined();
-    await expect(response.json()).resolves.toEqual(
-      expect.objectContaining({
-        ok: true,
-        status: 'started',
-      }),
-    );
-  });
-
-  it('treats an attachment-only DM as a task entry and passes safe image data', async () => {
+  it('treats an attachment-only DM as a Fast entry and passes safe image data', async () => {
     const attachment = {
       id: 'attachment-1',
       filename: 'screen.png',
@@ -1391,166 +1373,17 @@ describe('Discord Gateway event handler', () => {
 
     expect(response.status).toBe(200);
     expect(mocks.processAttachments).toHaveBeenCalledWith([attachment]);
-    expect(mocks.startNewTask).toHaveBeenCalledWith(
+    expect(mocks.answerFast).toHaveBeenCalledWith(
       expect.objectContaining({
-        queuedMessage: expect.objectContaining({
-          text: 'Image: screen.png',
-          images: ['data:image/png;base64,aW1n'],
-        }),
+        images: ['data:image/png;base64,aW1n'],
       }),
     );
-    expect(JSON.stringify(mocks.startNewTask.mock.calls)).not.toContain(
+    expect(JSON.stringify(mocks.answerFast.mock.calls)).not.toContain(
       'cdn.discordapp.com',
     );
-    expect(JSON.stringify(mocks.startNewTask.mock.calls)).not.toContain(
+    expect(JSON.stringify(mocks.answerFast.mock.calls)).not.toContain(
       'never-exposed-token',
     );
-  });
-
-  it('queues an attachment-only message in an active Discord task thread with full thread context', async () => {
-    mocks.getChannel.mockResolvedValue({
-      id: 'thread-1',
-      guildId: 'guild-1',
-      parentId: 'channel-1',
-      name: 'Fix tests',
-      type: 11,
-    });
-    mocks.findActiveRun.mockResolvedValue({
-      id: 23,
-      taskId: 'task-23',
-      actingUserId: 'roomote-user-1',
-    });
-
-    const response = await postEvent(
-      envelope(
-        attachmentMessage({
-          channel_id: 'thread-1',
-          guild_id: 'guild-1',
-        }),
-      ),
-    );
-
-    expect(response.status).toBe(200);
-    expect(mocks.buildContinuation).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channelId: 'thread-1',
-        botUserId: 'bot-1',
-        queuedMessage: expect.objectContaining({
-          text: 'Image: context.png',
-        }),
-      }),
-    );
-    expect(mocks.attachOutOfBand).toHaveBeenCalledWith(
-      expect.objectContaining({
-        taskId: 'task-23',
-        provider: 'discord',
-        message: expect.objectContaining({
-          text: 'Image: context.png',
-          formattedPrompt: expect.stringContaining('<thread_context>'),
-        }),
-      }),
-    );
-    expect(mocks.queueMessage).toHaveBeenCalledWith(
-      'discord',
-      23,
-      expect.objectContaining({
-        text: 'Image: context.png',
-        formattedPrompt: expect.stringContaining('<thread_context>'),
-        turnPolicy: { reactionsAllowed: true },
-      }),
-    );
-    expect(mocks.setLatestInbound).toHaveBeenCalledWith(
-      'discord',
-      23,
-      'message-1',
-    );
-    // Slack only platform-acks the first intake message; follow-ups stay silent.
-    expect(mocks.addReaction).not.toHaveBeenCalled();
-    expect(mocks.startNewTask).not.toHaveBeenCalled();
-  });
-
-  it('forwards message_reference into continuation prompts for active follow-ups', async () => {
-    mocks.getChannel.mockResolvedValue({
-      id: 'thread-1',
-      guildId: 'guild-1',
-      parentId: 'channel-1',
-      name: 'Fix tests',
-      type: 11,
-    });
-    mocks.findActiveRun.mockResolvedValue({
-      id: 23,
-      taskId: 'task-23',
-      actingUserId: 'roomote-user-1',
-    });
-
-    const response = await postEvent(
-      envelope(
-        attachmentMessage({
-          channel_id: 'thread-1',
-          guild_id: 'guild-1',
-          message_reference: {
-            message_id: 'earlier-1',
-            channel_id: 'thread-1',
-          },
-        }),
-      ),
-    );
-
-    expect(response.status).toBe(200);
-    expect(mocks.buildContinuation).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channelId: 'thread-1',
-        replyToMessageId: 'earlier-1',
-        replyToChannelId: 'thread-1',
-        queuedMessage: expect.objectContaining({
-          text: 'Image: context.png',
-        }),
-      }),
-    );
-  });
-
-  it('releases claimed out-of-band context when the queue duplicates', async () => {
-    mocks.getChannel.mockResolvedValue({
-      id: 'thread-1',
-      guildId: 'guild-1',
-      parentId: 'channel-1',
-      name: 'Fix tests',
-      type: 11,
-    });
-    mocks.findActiveRun.mockResolvedValue({
-      id: 23,
-      taskId: 'task-23',
-      actingUserId: 'roomote-user-1',
-    });
-    mocks.attachOutOfBand.mockResolvedValue({
-      message: {
-        text: 'yes fix those',
-        user: 'matt',
-        ts: 'message-1',
-        formattedPrompt:
-          '<out_of_band_context>\nnotice\n</out_of_band_context>',
-      },
-      claim: { messageIds: ['oob-1'] },
-    });
-    mocks.queueMessage.mockResolvedValue(false);
-
-    const response = await postEvent(
-      envelope(
-        attachmentMessage({
-          channel_id: 'thread-1',
-          guild_id: 'guild-1',
-        }),
-      ),
-    );
-
-    expect(response.status).toBe(200);
-    expect(mocks.releaseOutOfBand).toHaveBeenCalledWith({
-      messageIds: ['oob-1'],
-    });
-    expect(mocks.releaseContinuation).toHaveBeenCalledWith({
-      channelId: 'thread-1',
-      claimedMessageIds: ['100'],
-    });
   });
 
   it('does not redeliver a DM launch request as a follow-up after task creation', async () => {
@@ -1562,10 +1395,7 @@ describe('Discord Gateway event handler', () => {
 
     expect(response.status).toBe(200);
     expect(mocks.queueMessage).not.toHaveBeenCalled();
-    expect(mocks.startNewTask).not.toHaveBeenCalled();
-    expect(mocks.reply).toHaveBeenCalledWith(
-      expect.objectContaining({ text: expect.stringContaining('task-23') }),
-    );
+    expect(mocks.answerFast).toHaveBeenCalledOnce();
   });
 
   it('ignores unmentioned task-thread follow-ups that Slack-style gating rejects', async () => {
@@ -1603,7 +1433,6 @@ describe('Discord Gateway event handler', () => {
     );
     expect(mocks.shouldRouteUnmentioned).toHaveBeenCalled();
     expect(mocks.queueMessage).not.toHaveBeenCalled();
-    expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 
   it("lets Matt join Dan's existing fast-agent thread and receive a response", async () => {
@@ -1652,6 +1481,88 @@ describe('Discord Gateway event handler', () => {
     );
   });
 
+  it('uses the deployment experiment for an owner-bound Discord Fast thread', async () => {
+    mocks.getChannel.mockResolvedValue({
+      id: 'thread-1',
+      guildId: 'guild-1',
+      parentId: 'channel-1',
+      name: 'fast-thread',
+      type: 11,
+    });
+    mocks.findMappedUserId.mockResolvedValue('roomote-user-peer');
+    mocks.hasFastSession.mockResolvedValue(true);
+    mocks.getFastSessionOwner.mockResolvedValue({
+      kind: 'user',
+      userId: 'roomote-user-owner',
+    });
+    mocks.peerConversationsEnabled.mockResolvedValue(true);
+    mocks.mentionsPeer.mockReturnValue(true);
+    mocks.shouldRouteUnmentioned.mockResolvedValue(true);
+
+    const response = await postEvent(
+      envelope(
+        message({
+          channel_id: 'thread-1',
+          guild_id: 'guild-1',
+          content: '<@discord-user-grace> what do you think?',
+          author: { id: 'discord-user-peer', username: 'matt' },
+          mentions: [{ id: 'discord-user-grace', username: 'grace' }],
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.peerConversationsEnabled).toHaveBeenCalledWith(
+      'slackPeerConversations',
+    );
+    expect(mocks.shouldRouteUnmentioned).toHaveBeenCalledWith(
+      expect.objectContaining({ peerConversationsExperimentEnabled: true }),
+    );
+    expect(mocks.answerFast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowSilentAmbientReply: true,
+        currentMessageAgentContext: expect.stringContaining(
+          'This message mentions another person and might not be for you',
+        ),
+      }),
+    );
+  });
+
+  it('does not enable peer conversations without an owner-bound Discord Fast thread', async () => {
+    mocks.getChannel.mockResolvedValue({
+      id: 'thread-1',
+      guildId: 'guild-1',
+      parentId: 'channel-1',
+      name: 'fast-thread',
+      type: 11,
+    });
+    mocks.findMappedUserId.mockResolvedValue('roomote-user-peer');
+    mocks.hasFastSession.mockResolvedValue(true);
+    mocks.getFastSessionOwner.mockResolvedValue(null);
+    mocks.peerConversationsEnabled.mockResolvedValue(true);
+    mocks.mentionsPeer.mockReturnValue(true);
+    mocks.shouldRouteUnmentioned.mockResolvedValue(false);
+
+    const response = await postEvent(
+      envelope(
+        message({
+          channel_id: 'thread-1',
+          guild_id: 'guild-1',
+          content: '<@discord-user-grace> what do you think?',
+          author: { id: 'discord-user-peer', username: 'matt' },
+          mentions: [{ id: 'discord-user-grace', username: 'grace' }],
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.peerConversationsEnabled).not.toHaveBeenCalled();
+    expect(mocks.shouldRouteUnmentioned).toHaveBeenCalledWith(
+      expect.objectContaining({ peerConversationsExperimentEnabled: false }),
+    );
+    expect(mocks.answerFast).not.toHaveBeenCalled();
+  });
+
   it('continues an existing fast-agent DM without Fast mode being the default', async () => {
     mocks.hasFastSession.mockResolvedValue(true);
 
@@ -1684,7 +1595,6 @@ describe('Discord Gateway event handler', () => {
         },
       }),
     );
-    expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 
   it('continues the Fast session bound to a Discord DM report reply', async () => {
@@ -1717,6 +1627,7 @@ describe('Discord Gateway event handler', () => {
       workspaceId: 'dm',
       channelId: 'dm-1',
       replyToMessageId: 'fast-report-1',
+      userId: 'roomote-user-1',
     });
     expect(mocks.answerFast).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1728,7 +1639,6 @@ describe('Discord Gateway event handler', () => {
       }),
     );
     expect(mocks.findAutomationReportRun).not.toHaveBeenCalled();
-    expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 
   it('requires a response for a native reply to Roomote in a shared Fast thread', async () => {
@@ -1844,7 +1754,6 @@ describe('Discord Gateway event handler', () => {
       ignored: 'discord_fast_session_user_mismatch',
     });
     expect(mocks.answerFast).not.toHaveBeenCalled();
-    expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 
   it('does not fall through when a Discord Fast message is replayed from another route', async () => {
@@ -1859,7 +1768,6 @@ describe('Discord Gateway event handler', () => {
       ignored: 'discord_fast_session_route_mismatch',
     });
     expect(mocks.findAutomationReportRun).not.toHaveBeenCalled();
-    expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 
   it('nudges an unlinked mentioned user without launching work', async () => {
@@ -1913,7 +1821,6 @@ describe('Discord Gateway event handler', () => {
         replyToMessageId: 'message-1',
       }),
     );
-    expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 
   it('skips the duplicate link DM when one went out recently and still acks in channel', async () => {
@@ -1948,7 +1855,6 @@ describe('Discord Gateway event handler', () => {
         replyToMessageId: 'message-1',
       }),
     );
-    expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 
   it('waits for an in-flight link DM before acknowledging it as sent', async () => {
@@ -2116,7 +2022,6 @@ describe('Discord Gateway event handler', () => {
     expect(mocks.reply.mock.calls[0]?.[0]?.text).toContain(
       'Ask an admin for an invite.',
     );
-    expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 
   it('returns 503 for a transient account-link DM failure so the Gateway can retry', async () => {
@@ -2154,7 +2059,6 @@ describe('Discord Gateway event handler', () => {
       'discord:account-link-dm:discord-user-1',
     );
     expect(mocks.reply).not.toHaveBeenCalled();
-    expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 
   it('does not public-fallback on a non-blocked Discord 403 when opening the account-link DM', async () => {
@@ -2195,7 +2099,6 @@ describe('Discord Gateway event handler', () => {
     );
     expect(mocks.reply).not.toHaveBeenCalled();
     expect(mocks.postMessage).not.toHaveBeenCalled();
-    expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 
   it('keeps the full link prompt in the existing DM for unlinked DM senders', async () => {
@@ -2219,7 +2122,6 @@ describe('Discord Gateway event handler', () => {
     expect(mocks.reply.mock.calls[0]?.[0]?.text).toMatch(
       /\[Settings → Personal → Linked Accounts\]\([^)]+\/settings\/personal\)/,
     );
-    expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 
   it('DMs the link prompt and acks through the interaction for an unlinked guild /new', async () => {
@@ -2265,7 +2167,6 @@ describe('Discord Gateway event handler', () => {
         text: 'I sent you a DM to link your Discord account.',
       }),
     );
-    expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 
   it('ignores unlinked task-thread messages without a bot mention', async () => {
@@ -2303,7 +2204,6 @@ describe('Discord Gateway event handler', () => {
     );
     expect(mocks.reply).not.toHaveBeenCalled();
     expect(mocks.queueMessage).not.toHaveBeenCalled();
-    expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 
   it('lets channel auto-start consume a message before mention gating', async () => {
@@ -2333,7 +2233,6 @@ describe('Discord Gateway event handler', () => {
       expect.objectContaining({ botUserId: 'bot-1' }),
     );
     // Consumed entirely by auto-start: no mention gating, no reply, no launch.
-    expect(mocks.startNewTask).not.toHaveBeenCalled();
     expect(mocks.reply).not.toHaveBeenCalled();
   });
 
@@ -2427,13 +2326,13 @@ describe('Discord Gateway event handler', () => {
     expect(mocks.reply).toHaveBeenCalledWith(
       expect.objectContaining({
         text: expect.stringContaining(
-          'keep working toward an objective across multiple turns',
+          'keep this session working toward an objective across multiple turns',
         ),
       }),
     );
   });
 
-  it('uses /new to start fresh even when the DM has an active task', async () => {
+  it('uses /new to send a fresh request into the DM conversation even when it has an active task', async () => {
     mocks.findActiveRun.mockResolvedValue({ id: 23 });
     const interaction = {
       id: 'interaction-new',
@@ -2456,23 +2355,108 @@ describe('Discord Gateway event handler', () => {
     );
 
     expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      fastAnswered: true,
+      fastStartedNew: true,
+    });
     expect(mocks.findActiveRun).not.toHaveBeenCalled();
     expect(mocks.queueMessage).not.toHaveBeenCalled();
-    // Interaction ids are not reaction targets; eyes belong to message launches
-    // or the post-launch acknowledgement path.
     expect(mocks.addReaction).not.toHaveBeenCalled();
-    expect(mocks.startNewTask).toHaveBeenCalledWith(
+    // A DM keeps one conversation, so no thread is opened.
+    expect(mocks.createTaskThread).not.toHaveBeenCalled();
+    expect(mocks.answerFast).toHaveBeenCalledWith(
       expect.objectContaining({
-        queuedMessage: expect.objectContaining({
-          text: 'Build a fresh dashboard',
-        }),
-        interaction: { interaction, interactionDeferred: true },
-        forceNewThread: true,
+        question: 'Build a fresh dashboard',
+        userId: 'roomote-user-1',
       }),
     );
   });
 
-  it('uses /goal to enable Goal Mode on the active task', async () => {
+  it('uses /new in a server channel to open a fresh conversation in its own thread', async () => {
+    mocks.getChannel.mockImplementation(async (channelId: string) =>
+      channelId === 'thread-new'
+        ? {
+            id: 'thread-new',
+            guildId: 'guild-1',
+            name: 'Build a fresh dashboard',
+            type: 11,
+            parentId: 'channel-1',
+          }
+        : { id: 'channel-1', guildId: 'guild-1', name: 'general', type: 0 },
+    );
+    mocks.createTaskThread.mockResolvedValue({
+      channelId: 'thread-new',
+      parentChannelId: 'channel-1',
+      name: 'Build a fresh dashboard',
+      kind: 'thread',
+    });
+    const interaction = {
+      id: 'interaction-new',
+      application_id: 'app-1',
+      type: 2,
+      token: 'interaction-token',
+      channel_id: 'channel-1',
+      guild_id: 'guild-1',
+      member: { user: { id: 'discord-user-1', username: 'matt' } },
+      data: {
+        name: 'new',
+        type: 1,
+        options: [
+          { name: 'request', type: 3, value: 'Build a fresh dashboard' },
+        ],
+      },
+    };
+
+    const response = await postEvent(
+      envelope(interaction, 'INTERACTION_CREATE'),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.createTaskThread).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'channel-1',
+        initialText: expect.stringContaining('Build a fresh dashboard'),
+      }),
+    );
+    // The slash command is acknowledged with a public pointer (the Gateway
+    // defers /new publicly); the answer itself lands in the new thread, not
+    // the invoking channel.
+    expect(mocks.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        interaction: { interaction, interactionDeferred: true },
+        text: 'Started a new conversation in <#thread-new>.',
+      }),
+    );
+    expect(mocks.reply).not.toHaveBeenCalledWith(
+      expect.objectContaining({ ephemeral: true }),
+    );
+    expect(mocks.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: expect.objectContaining({ channelId: 'thread-new' }),
+        text: expect.stringContaining('A quick answer'),
+      }),
+    );
+    expect(mocks.reply).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        interaction: expect.anything(),
+        text: expect.stringContaining('A quick answer'),
+      }),
+    );
+    expect(mocks.answerFast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: 'Build a fresh dashboard',
+        conversation: expect.objectContaining({
+          surface: 'discord',
+          workspaceId: 'guild-1',
+          conversationId: 'thread-new',
+          replyTarget: { channelId: 'channel-1', threadId: 'thread-new' },
+        }),
+      }),
+    );
+  });
+
+  it('uses /goal to start a Fast Session goal', async () => {
     mocks.findActiveRun.mockResolvedValue({
       id: 23,
       taskId: 'task-23',
@@ -2498,22 +2482,22 @@ describe('Discord Gateway event handler', () => {
 
     expect(response.status).toBe(200);
     expect(mocks.startGoal).toHaveBeenCalledWith({
-      taskId: 'task-23',
+      sessionId: 'fast-session-1',
       userId: 'roomote-user-1',
+      senderDisplayName: 'matt',
       objective: 'Ship the release',
-      clientMessageId: 'interaction-goal',
+      currentMessageId: 'interaction-goal',
     });
-    expect(mocks.startNewTask).not.toHaveBeenCalled();
     expect(mocks.reply).toHaveBeenCalledWith(
       expect.objectContaining({
         interaction: { interaction, interactionDeferred: true },
-        text: 'Goal Mode enabled.',
+        text: 'Pursuing goal: Ship the release',
         ephemeral: true,
       }),
     );
   });
 
-  it('does not create a task when /goal has no active task', async () => {
+  it('starts a Session goal without requiring an active child task', async () => {
     const interaction = {
       id: 'interaction-goal',
       application_id: 'app-1',
@@ -2533,11 +2517,12 @@ describe('Discord Gateway event handler', () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.startGoal).not.toHaveBeenCalled();
-    expect(mocks.startNewTask).not.toHaveBeenCalled();
+    expect(mocks.startGoal).toHaveBeenCalledWith(
+      expect.objectContaining({ objective: 'Ship the release' }),
+    );
     expect(mocks.reply).toHaveBeenCalledWith(
       expect.objectContaining({
-        text: expect.stringContaining('active Roomote task'),
+        text: 'Pursuing goal: Ship the release',
         ephemeral: true,
       }),
     );
@@ -2564,119 +2549,19 @@ describe('Discord Gateway event handler', () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.startNewTask).toHaveBeenCalledWith(
+    // Match Slack: stay in the tagged thread. Only `/new` opens a sibling.
+    expect(mocks.createThreadFromMessage).not.toHaveBeenCalled();
+    expect(mocks.answerFast).toHaveBeenCalledWith(
       expect.objectContaining({
-        channel: expect.objectContaining({
-          channelId: 'discussion-thread',
-          parentChannelId: 'channel-1',
-          isThread: true,
-        }),
-        // Match Slack: stay in the tagged thread. Only `/new` forces a sibling.
-        forceNewThread: false,
-      }),
-    );
-  });
-
-  it('resumes a completed thread snapshot when a linked user follows up', async () => {
-    mocks.getChannel.mockResolvedValue({
-      id: 'thread-1',
-      guildId: 'guild-1',
-      parentId: 'channel-1',
-      name: 'Completed task',
-      type: 11,
-    });
-    const completedRun = {
-      id: 31,
-      payload: {},
-      port: null,
-      snapshotId: 'snapshot-1',
-    };
-    mocks.findCompletedRun.mockResolvedValue(completedRun);
-    mocks.resumeTask.mockResolvedValue({ id: 32, taskId: 'task-32' });
-
-    const response = await postEvent(
-      envelope(
-        attachmentMessage({
-          channel_id: 'thread-1',
-          guild_id: 'guild-1',
-        }),
-      ),
-    );
-
-    expect(response.status).toBe(200);
-    expect(mocks.buildContinuation).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channelId: 'thread-1',
-        botUserId: 'bot-1',
-        queuedMessage: expect.objectContaining({
-          text: 'Image: context.png',
+        conversation: expect.objectContaining({
+          conversationId: 'discussion-thread',
+          replyTarget: {
+            channelId: 'channel-1',
+            threadId: 'discussion-thread',
+          },
         }),
       }),
     );
-    expect(mocks.addReaction).toHaveBeenCalledWith({
-      channelId: 'thread-1',
-      messageId: 'message-1',
-      name: '👀',
-    });
-    expect(mocks.resumeTask).toHaveBeenCalledWith(
-      expect.objectContaining({
-        provider: 'discord',
-        completedRun,
-        channelId: 'channel-1',
-        threadId: 'thread-1',
-        guildId: 'guild-1',
-        preservePayloadFlags: ['discordTaskThread'],
-        discordWakeAckReaction: {
-          channelId: 'thread-1',
-          messageId: 'message-1',
-          intakeAckPinned: true,
-        },
-        queuedMessage: expect.objectContaining({
-          text: 'Image: context.png',
-          formattedPrompt: expect.stringContaining('<thread_context>'),
-        }),
-      }),
-    );
-    expect(mocks.reply).not.toHaveBeenCalled();
-    expect(mocks.startNewTask).not.toHaveBeenCalled();
-  });
-
-  it('clears wake eyes when snapshot resume fails after pinning', async () => {
-    mocks.getChannel.mockResolvedValue({
-      id: 'thread-1',
-      guildId: 'guild-1',
-      parentId: 'channel-1',
-      name: 'Completed task',
-      type: 11,
-    });
-    mocks.findCompletedRun.mockResolvedValue({
-      id: 31,
-      payload: {},
-      port: null,
-      snapshotId: 'snapshot-1',
-    });
-    mocks.resumeTask.mockRejectedValueOnce(new Error('enqueue failed'));
-
-    const response = await postEvent(
-      envelope(
-        attachmentMessage({
-          channel_id: 'thread-1',
-          guild_id: 'guild-1',
-        }),
-      ),
-    );
-
-    expect(response.status).toBe(500);
-    expect(mocks.addReaction).toHaveBeenCalledWith({
-      channelId: 'thread-1',
-      messageId: 'message-1',
-      name: '👀',
-    });
-    expect(mocks.removeReaction).toHaveBeenCalledWith({
-      channelId: 'thread-1',
-      messageId: 'message-1',
-      name: 'eyes',
-    });
   });
 
   it('links a Discord user with a one-shot /link code', async () => {
@@ -2773,16 +2658,10 @@ describe('Discord Gateway event handler', () => {
     );
 
     expect(linkedResponse.status).toBe(200);
-    expect(mocks.startNewTask).toHaveBeenCalledWith(
+    expect(mocks.answerFast).toHaveBeenCalledWith(
       expect.objectContaining({
-        requesterDiscordUserId: 'discord-user-1',
-        launchOwnerUserId: 'roomote-user-1',
-        queuedMessage: expect.objectContaining({
-          text: 'Image: context.png',
-          ts: 'message-1',
-          userId: 'roomote-user-1',
-        }),
-        channel: expect.objectContaining({ channelId: 'channel-1' }),
+        userId: 'roomote-user-1',
+        question: expect.stringContaining('Image: context.png'),
       }),
     );
     expect(mocks.reply).toHaveBeenLastCalledWith(
@@ -2799,7 +2678,7 @@ describe('Discord Gateway event handler', () => {
     mocks.consumeLinkCode.mockResolvedValue('roomote-user-1');
     mocks.findMappedUserId.mockResolvedValue('roomote-user-1');
     mocks.redisGetdel.mockResolvedValue(JSON.stringify(originalEvent));
-    mocks.startNewTask.mockRejectedValue(new Error('launch failed'));
+    mocks.answerFast.mockRejectedValue(new Error('launch failed'));
     const interaction = {
       id: 'interaction-link',
       application_id: 'app-1',
@@ -2879,7 +2758,6 @@ describe('Discord Gateway event handler', () => {
         event: expect.objectContaining(originalEvent),
       }),
     );
-    expect(mocks.startNewTask).not.toHaveBeenCalled();
     expect(mocks.reply).toHaveBeenLastCalledWith(
       expect.objectContaining({
         text: expect.stringContaining(
@@ -2973,7 +2851,6 @@ describe('Discord Gateway event handler', () => {
         currentMessageId: 'message-target',
       }),
     );
-    expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 
   it('requires /link in a DM without consuming the one-shot code', async () => {
@@ -3043,65 +2920,5 @@ describe('Discord Gateway event handler', () => {
       interactionDeferred: true,
       channel: expect.objectContaining({ channelId: 'dm-1' }),
     });
-  });
-
-  it('acknowledges a routing interaction whose pending state expired', async () => {
-    mocks.hasPendingRouteCallback.mockResolvedValue(false);
-    const interaction = {
-      id: 'interaction-route-expired',
-      application_id: 'app-1',
-      type: 3,
-      token: 'interaction-token',
-      channel_id: 'channel-1',
-      member: {
-        user: { id: 'discord-user-1', username: 'matt' },
-      },
-      data: {
-        custom_id: 'discord:route:abcdefghijkl:0',
-        component_type: 2,
-      },
-    };
-
-    const response = await postEvent(
-      envelope(interaction, 'INTERACTION_CREATE'),
-    );
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      ok: true,
-      ignored: 'expired_routing_interaction',
-    });
-    expect(mocks.resolveProvider).not.toHaveBeenCalled();
-    expect(mocks.getChannel).not.toHaveBeenCalled();
-    expect(mocks.component).not.toHaveBeenCalled();
-    expect(mocks.completeEvent).toHaveBeenCalledWith({
-      eventType: 'INTERACTION_CREATE',
-      eventId: 'interaction-route-expired',
-      token: 'claim-token',
-    });
-    expect(mocks.releaseEvent).not.toHaveBeenCalled();
-  });
-
-  it('dispatches a routing interaction while its pending state exists', async () => {
-    mocks.hasPendingRouteCallback.mockResolvedValue(true);
-    const interaction = {
-      id: 'interaction-route-live',
-      application_id: 'app-1',
-      type: 3,
-      token: 'interaction-token',
-      channel_id: 'dm-1',
-      user: { id: 'discord-user-1', username: 'matt' },
-      data: {
-        custom_id: 'discord:route:abcdefghijkl:0',
-        component_type: 2,
-      },
-    };
-
-    const response = await postEvent(
-      envelope(interaction, 'INTERACTION_CREATE'),
-    );
-
-    expect(response.status).toBe(200);
-    expect(mocks.component).toHaveBeenCalledOnce();
   });
 });

@@ -3,8 +3,25 @@ import * as os from 'node:os';
 import { configureAuthClientEnv } from '@roomote/auth/client';
 import {
   DEFAULT_MODEL_PROVIDER_ENV_KEYS,
+  isCredentialEgressWorkloadEnvKey,
   parseModelProviderEnvKeys,
+  SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
+  CREDENTIAL_EGRESS_SERVICE_TOKEN_ENV_PREFIX,
+  CREDENTIAL_EGRESS_WORKLOAD_ENV,
+  type CredentialEgressWorkloadServiceManifestEntry,
 } from '@roomote/types';
+
+/**
+ * Session-egress delivery captured from the launcher: substitute tokens, the
+ * nonsecret service manifest, and the API proxy base URL. Never a real
+ * credential.
+ */
+interface WorkerCredentialEgressConfig {
+  baseUrl: string;
+  services: CredentialEgressWorkloadServiceManifestEntry[];
+  /** `ROOMOTE_SERVICE_TOKEN_<LABEL_SLUG>` -> `rses_…` */
+  tokens: Record<string, string>;
+}
 
 /**
  * Worker infrastructure secrets. NEVER passed to child processes.
@@ -20,6 +37,10 @@ interface WorkerConfig {
   previewAuthPublicKey?: string;
   previewAuthCookieName?: string;
   appEnv?: string;
+  sandboxOpenRouterApiKey?: string;
+  credentialEgress?: WorkerCredentialEgressConfig;
+  credentialEgressBootstrapRequired?: boolean;
+  credentialEgressBootstrapNonce?: string;
 }
 
 const PRESET_SYSTEM_ENV: Record<string, string> = {
@@ -58,6 +79,7 @@ const BLOCKED_USER_FACING_ENV_KEYS = new Set([
   'PREVIEW_AUTH_COOKIE_NAME',
   'PREVIEW_PROXY_BASE_URL',
   'PREVIEW_PROXY_SUBDOMAIN_SUFFIX',
+  SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
 ]);
 const MODEL_RUNTIME_ENV_KEYS = [
   'R_MODEL',
@@ -213,6 +235,10 @@ export class WorkerEnv {
     }
 
     const workerConfig: WorkerConfig = {
+      credentialEgressBootstrapRequired:
+        processEnv[CREDENTIAL_EGRESS_WORKLOAD_ENV.BOOTSTRAP_REQUIRED] === '1',
+      credentialEgressBootstrapNonce:
+        processEnv[CREDENTIAL_EGRESS_WORKLOAD_ENV.BOOTSTRAP_NONCE],
       authToken: processEnv.AUTH_TOKEN!,
       trpcUrl: processEnv.TRPC_URL!,
       jobAuthPublicKey: processEnv.JOB_AUTH_PUBLIC_KEY,
@@ -222,6 +248,9 @@ export class WorkerEnv {
       previewAuthCookieName: processEnv.PREVIEW_AUTH_COOKIE_NAME,
       roomoteAppUrl: processEnv.R_APP_URL!,
       appEnv: processEnv.R_APP_ENV ?? processEnv.APP_ENV,
+      sandboxOpenRouterApiKey:
+        processEnv[SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME],
+      credentialEgress: captureCredentialEgressConfig(processEnv),
     };
 
     const env = new WorkerEnv({
@@ -246,6 +275,7 @@ export class WorkerEnv {
       'JOB_AUTH_PUBLIC_KEY',
       'PREVIEW_PROXY_BASE_URL',
       'PREVIEW_PROXY_SUBDOMAIN_SUFFIX',
+      SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
     ];
 
     for (const key of workerSecretKeys) {
@@ -254,6 +284,15 @@ export class WorkerEnv {
 
     for (const key of WORKER_INTERNAL_CONFIG_KEYS) {
       delete processEnv[key];
+    }
+
+    // Substitute tokens and proxy settings are re-derived per context by
+    // buildCredentialEgressClientEnv(); the raw delivery must not linger in the
+    // worker's own process env where nested tooling could inherit it.
+    for (const key of Object.keys(processEnv)) {
+      if (isCredentialEgressWorkloadEnvKey(key)) {
+        delete processEnv[key];
+      }
     }
 
     // Important: worker code must not import @roomote/env directly. The only
@@ -361,6 +400,10 @@ export class WorkerEnv {
     return { ...this.runtimeEnv };
   }
 
+  getUserEnv(): Record<string, string> {
+    return { ...this.userEnv };
+  }
+
   /** Set a single system base var. */
   setSystemBase(key: string, value: string): void {
     this.systemBase[key] = value;
@@ -403,4 +446,91 @@ export class WorkerEnv {
   get appEnv(): string | undefined {
     return this.workerConfig.appEnv;
   }
+
+  get sandboxOpenRouterApiKey(): string | undefined {
+    return this.workerConfig.sandboxOpenRouterApiKey;
+  }
+
+  /** Nonsecret view of the services this run may call through the gateway. */
+  get credentialEgressServices(): CredentialEgressWorkloadServiceManifestEntry[] {
+    return [...(this.workerConfig.credentialEgress?.services ?? [])];
+  }
+
+  get credentialEgressBootstrapRequired(): boolean {
+    return this.workerConfig.credentialEgressBootstrapRequired === true;
+  }
+
+  /** Whether a Session-egress delivery has been accepted for this run. */
+  get credentialEgressMode(): 'api_proxy' | undefined {
+    return this.workerConfig.credentialEgress ? 'api_proxy' : undefined;
+  }
+
+  get credentialEgressBootstrapNonce(): string {
+    if (!this.workerConfig.credentialEgressBootstrapNonce)
+      throw new Error('Credential egress bootstrap identity missing');
+    return this.workerConfig.credentialEgressBootstrapNonce;
+  }
+
+  acceptCredentialEgressDelivery(environment: Record<string, string>): void {
+    const config = captureCredentialEgressConfig(environment);
+    if (!config)
+      throw new Error('Credential egress client configuration unavailable');
+    this.workerConfig.credentialEgress = config;
+  }
+
+  /**
+   * Ordinary-client configuration for task processes: the API proxy base
+   * URL, the manifest, and one `ROOMOTE_SERVICE_TOKEN_*` per approved
+   * service. Empty when the run has no Session-egress workload. Values here
+   * are substitutes; the API swaps them for the real credential outside the
+   * sandbox. No proxy or trust settings change: clients call the base URL
+   * over the same route the worker already uses for the API.
+   */
+  buildCredentialEgressClientEnv(): Record<string, string> {
+    const config = this.workerConfig.credentialEgress;
+    if (!config) {
+      return {};
+    }
+    return {
+      [CREDENTIAL_EGRESS_WORKLOAD_ENV.BASE_URL]: config.baseUrl,
+      ...config.tokens,
+      [CREDENTIAL_EGRESS_WORKLOAD_ENV.SERVICES]: JSON.stringify(
+        config.services,
+      ),
+    };
+  }
+}
+
+function captureCredentialEgressConfig(
+  processEnv: NodeJS.ProcessEnv,
+): WorkerCredentialEgressConfig | undefined {
+  const baseUrl = processEnv[CREDENTIAL_EGRESS_WORKLOAD_ENV.BASE_URL]?.trim();
+  if (!baseUrl || !/^https?:\/\//.test(baseUrl)) {
+    return undefined;
+  }
+
+  const tokens: Record<string, string> = {};
+  for (const [key, value] of Object.entries(processEnv)) {
+    if (!key.startsWith(CREDENTIAL_EGRESS_SERVICE_TOKEN_ENV_PREFIX)) continue;
+    // Only substitutes are ever accepted from the launcher; anything else
+    // in this slot is a wiring bug and must not reach task processes.
+    if (typeof value === 'string' && /^rses_[A-Za-z0-9_-]+$/.test(value)) {
+      tokens[key] = value;
+    }
+  }
+
+  let services: CredentialEgressWorkloadServiceManifestEntry[] = [];
+  const manifest = processEnv[CREDENTIAL_EGRESS_WORKLOAD_ENV.SERVICES];
+  if (manifest) {
+    try {
+      const parsed: unknown = JSON.parse(manifest);
+      if (Array.isArray(parsed)) {
+        services = parsed as CredentialEgressWorkloadServiceManifestEntry[];
+      }
+    } catch {
+      // A malformed manifest only loses the nonsecret listing.
+    }
+  }
+
+  return { baseUrl, services, tokens };
 }

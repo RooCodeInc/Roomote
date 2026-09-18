@@ -24,7 +24,7 @@ function readAppendix(skillContent: string, appendixName: string) {
   return skillContent.slice(startIndex, endIndex);
 }
 
-function expectAppendixIgnoresCi(
+function expectAppendixAvoidsCiBookkeeping(
   appendix: string,
   summaryTitleMarker: string,
   reviewInstruction: string,
@@ -33,9 +33,6 @@ function expectAppendixIgnoresCi(
   expect(appendix).toContain(summaryTitleMarker);
   expect(appendix).toContain(reviewInstruction);
   expect(appendix).toContain(commentInstruction);
-  expect(appendix).not.toContain(
-    'gh pr checks [PR_NUMBER] --repo [owner]/[repo]',
-  );
   expect(appendix).not.toContain('latest fetched CI state');
   expect(appendix).not.toContain('Do not wait for CI');
   expect(appendix).not.toContain('pending_check');
@@ -130,12 +127,12 @@ describe('review-code GitHub workflow paths', () => {
     );
   });
 
-  it('keeps every GitHub PR review path focused on code findings instead of CI state', () => {
+  it('keeps every GitHub PR review path focused on code findings without owning CI orchestration', () => {
     for (const appendixName of [
       'review-github-pr',
       'review-github-pr-with-approval',
     ]) {
-      expectAppendixIgnoresCi(
+      expectAppendixAvoidsCiBookkeeping(
         readAppendix(skillContent, appendixName),
         '<title>Update the canonical summary comment</title>',
         'Review the diff in context first before publishing the review findings.',
@@ -147,13 +144,48 @@ describe('review-code GitHub workflow paths', () => {
       'sync-github-pr-review',
       'sync-github-pr-review-with-approval',
     ]) {
-      expectAppendixIgnoresCi(
+      expectAppendixAvoidsCiBookkeeping(
         readAppendix(skillContent, appendixName),
         '<title>Refresh the canonical summary comment</title>',
         'Review the delta in context first before publishing the review findings.',
         'For each net-new finding, check the fetched review threads for an existing thread anchored on the same file and overlapping lines.',
       );
     }
+  });
+
+  it('leaves repository validation suites to CI while allowing ad hoc probes', () => {
+    expect(skillContent).toContain(
+      'Use the diff, surrounding code, and current-commit CI results as the primary evidence.',
+    );
+    expect(skillContent).toContain(
+      'CI is responsible for running all existing repository test, lint, typecheck, and build suites.',
+    );
+    expect(skillContent).toContain(
+      "When CI state matters, actively inspect the current commit's checks with available repository or provider commands; do not require CI status to be injected into task context.",
+    );
+    expect(skillContent).toContain(
+      'If CI is pending, continue the review in parallel and leave repository validation to CI.',
+    );
+    expect(skillContent).toContain(
+      'If CI has passed for the current commit, trust it by default.',
+    );
+    expect(skillContent).toContain(
+      'Treat CI failure alerts received after the review begins as new evidence: inspect the reported failure and incorporate any actionable issue into the review.',
+    );
+    expect(skillContent).toContain(
+      'Do not execute existing repository test, lint, typecheck, or build suites during Review Code, including targeted invocations of individual tests from those suites.',
+    );
+    expect(skillContent).toContain(
+      "You may create and run a small one-off code change or ad hoc probe when useful to verify one specific behavior or review hypothesis, but keep it separate from the repository's validation suites and do not leave probe changes in the reviewed diff.",
+    );
+    expect(skillContent).toContain(
+      'Still identify weak coverage, suspicious caching, stale expectations, or other concrete reasons the current-commit CI result may not be trustworthy.',
+    );
+    expect(skillContent).toContain(
+      'Report those limitations or use the smallest ad hoc probe that resolves the uncertainty; do not run an existing repository validation command in response.',
+    );
+    expect(skillContent).not.toContain('Run only small targeted tests');
+    expect(skillContent).not.toContain('smallest targeted check');
   });
 
   it('keeps code-only summary inventory, task handoff, and sync anchor recovery in the shared skill', () => {
@@ -415,7 +447,7 @@ describe('review-code GitHub workflow paths', () => {
     expect(skillContent).not.toContain('summary-carried on all providers');
   });
 
-  it('removes CI and check-state language from the shared skill contract', () => {
+  it('keeps CI results out of the review finding inventory and summary bookkeeping', () => {
     expect(skillContent).not.toContain(
       'If unresolved findings remain after combining the published code findings with the latest fetched CI state',
     );
@@ -448,9 +480,6 @@ describe('review-code GitHub workflow paths', () => {
     );
     expect(skillContent).not.toContain(
       '<finding_kind>code_finding|check|pending_check</finding_kind>',
-    );
-    expect(skillContent).not.toContain(
-      'gh pr checks [PR_NUMBER] --repo [owner]/[repo]',
     );
     expect(skillContent).not.toContain('latest fetched CI state');
     expect(skillContent).not.toContain('Do not wait for CI');

@@ -10,6 +10,7 @@ import {
   SANDBOX_SERVER_NAMED_PORT,
   TaskRunErrorCode,
   type NamedPort,
+  credentialEgressProxyBaseUrl,
 } from '@roomote/types';
 import { Env, resolveAppEnv } from '@roomote/env';
 import {
@@ -33,6 +34,7 @@ import {
   updateTaskRunMachine,
 } from '../utils';
 import { resolveFromWorkspaceRoot } from '../repo-paths';
+import type { CredentialEgressLifecycle } from '../credential-egress/lifecycle';
 import {
   attachDockerEgressPolicy,
   buildDockerTaskDaemonResourceArgs,
@@ -138,6 +140,8 @@ export async function spawnDockerWorker(
     localWorkerReleasePath?: string;
     deploymentSlug?: string;
     signal?: AbortSignal;
+    /** Session-egress registration/rotation; omitted in unit paths that do not exercise it. */
+    credentialEgress?: CredentialEgressLifecycle;
   },
 ): Promise<{ containerId: string }> {
   if (taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment) {
@@ -254,7 +258,6 @@ export async function spawnDockerWorker(
   );
 
   let containerId = '';
-
   const startContainer = async (diskLimit?: string): Promise<string> =>
     (
       await runDocker([
@@ -476,6 +479,15 @@ export async function spawnDockerWorker(
       trpcUrl: process.env.TRPC_URL ?? Env.TRPC_URL,
       controlNetwork,
     });
+    // Substitutes are used through the API proxy at the same address the
+    // worker already reaches the API on (the `api` alias on a control
+    // network, or the container-reachable API URL); a public proxy hostname
+    // is not assumed reachable from a task network.
+    const credentialEgressPlan = await config.credentialEgress?.planApiProxy({
+      taskRun,
+      provider: 'docker',
+      baseUrl: credentialEgressProxyBaseUrl(workerTrpcUrl),
+    });
     const workerEnv = buildDockerWorkerEnv({
       authToken,
       sandboxExpiresAtMs: Date.now() + config.dockerTimeoutMs,
@@ -516,6 +528,9 @@ export async function spawnDockerWorker(
           DOCKER_HOST: 'tcp://127.0.0.1:2375',
           DOCKER_TLS_CERTDIR: '',
         }),
+        // Bootstrap runs with ordinary connectivity but without any usable
+        // substitutes. Only the controller can publish verified admission.
+        ...credentialEgressPlan?.bootstrapEnv,
       },
     });
 
@@ -538,6 +553,11 @@ export async function spawnDockerWorker(
 
     await assertDetachedWorkerStarted(containerName, taskRun.id, config.signal);
 
+    // The worker is waiting on the bootstrap nonce after its ordinary
+    // bootstrap; an admission failure fails the spawn rather than leaving a
+    // worker that expected substitutes without them.
+    const credentialEgressWorkload = await credentialEgressPlan?.admit();
+
     console.log(
       `[spawnDockerWorker] Docker worker launched for task run #${taskRun.id} ${JSON.stringify(
         {
@@ -545,6 +565,13 @@ export async function spawnDockerWorker(
           containerId,
           trpcUrl: sanitizeDockerWorkerTrpcUrlForLog(workerTrpcUrl),
           envKeys: Object.keys(workerEnv).sort(),
+          credentialEgress: credentialEgressWorkload
+            ? {
+                workloadId: credentialEgressWorkload.workloadId,
+                generation: credentialEgressWorkload.generation,
+                substituteCount: credentialEgressWorkload.substitutes.length,
+              }
+            : null,
         },
       )}`,
     );

@@ -20,7 +20,7 @@ type FastAgentOpenCodeSessionRunInput<T> = {
   conversationId: string;
   persistedSessionId?: string | null;
   prompt: string;
-  bootstrapPrompt: string;
+  bootstrapPrompt: string | (() => string);
   execute: (
     session: NonTaskOpenCodeSession,
     selectedPrompt: string,
@@ -80,6 +80,10 @@ export class FastAgentOpenCodeSessionManager {
     onPathSelected,
   }: FastAgentOpenCodeSessionRunInput<T>): Promise<T> {
     const entry = this.acquire(conversationId);
+    const resolveBootstrapPrompt = () =>
+      typeof bootstrapPrompt === 'function'
+        ? bootstrapPrompt()
+        : bootstrapPrompt;
     const generationAtAcquire = entry.generation;
     const previous = entry.tail;
     let release!: () => void;
@@ -127,7 +131,7 @@ export class FastAgentOpenCodeSessionManager {
 
       try {
         return await executeAndInvalidateOnFailure(
-          entry.session.id ? prompt : bootstrapPrompt,
+          entry.session.id ? prompt : resolveBootstrapPrompt(),
           { path, validateSession },
         );
       } catch (error) {
@@ -136,7 +140,7 @@ export class FastAgentOpenCodeSessionManager {
         }
 
         onPathSelected?.('fallback_rebuild');
-        return await executeAndInvalidateOnFailure(bootstrapPrompt, {
+        return await executeAndInvalidateOnFailure(resolveBootstrapPrompt(), {
           path: 'fallback_rebuild',
           validateSession: false,
         });

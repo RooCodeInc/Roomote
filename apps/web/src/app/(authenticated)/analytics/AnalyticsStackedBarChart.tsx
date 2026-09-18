@@ -3,8 +3,9 @@
 import { useMemo, useState, type SyntheticEvent } from 'react';
 import {
   Bar,
-  BarChart,
   CartesianGrid,
+  ComposedChart,
+  Line,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -16,6 +17,7 @@ import type {
   AnalyticsDimension,
   AnalyticsGranularity,
   AnalyticsMetric,
+  AnalyticsSeries,
 } from '@/types';
 import { cn } from '@/lib/utils';
 import { formatInferenceCost, formatTokens } from '@/lib/formatters';
@@ -28,6 +30,7 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
+  RetryableLoadError,
   Skeleton,
 } from '@/components/system';
 
@@ -171,16 +174,126 @@ function AnalyticsTooltip({
   label,
   viewBy,
   metric,
+  series,
 }: {
   active?: boolean;
   hoveredSeriesKey: string | null;
-  payload?: Array<{ name: string; value: number; color: string }>;
+  payload?: Array<{
+    name: string;
+    value: number;
+    color: string;
+    unit?: string;
+    payload?: {
+      tokenSegments?: Record<string, number>;
+    };
+  }>;
   label?: string;
   viewBy: AnalyticsDimension;
   metric: AnalyticsMetric;
+  series: AnalyticsSeries[];
 }) {
   if (!active || !payload || payload.length === 0) {
     return null;
+  }
+
+  if (metric === 'cost') {
+    const groupedItems = new Map<
+      string,
+      { name: string; cost: number; tokens: number; color: string }
+    >();
+    for (const item of payload) {
+      if (item.unit === 'tokens') {
+        continue;
+      }
+
+      const current = groupedItems.get(item.name) ?? {
+        name: item.name,
+        cost: 0,
+        tokens: 0,
+        color: item.color,
+      };
+      current.cost += item.value;
+      groupedItems.set(item.name, current);
+    }
+    const tokenSegments = payload.find((item) => item.payload?.tokenSegments)
+      ?.payload?.tokenSegments;
+    const costItems = series
+      .map((item, index) => {
+        const costItem = groupedItems.get(item.label);
+        return {
+          name: item.label,
+          cost: costItem?.cost ?? 0,
+          tokens: tokenSegments?.[item.key] ?? 0,
+          color: costItem?.color ?? getSeriesColor({ index }),
+        };
+      })
+      .filter((item) => item.cost > 0 || item.tokens > 0)
+      .sort((left, right) =>
+        compareTooltipLabels(viewBy, left.name, right.name),
+      );
+    const totalCost = costItems.reduce((sum, item) => sum + item.cost, 0);
+    const totalTokens = costItems.reduce((sum, item) => sum + item.tokens, 0);
+
+    return (
+      <div
+        className="min-w-64 max-w-80 rounded-2xl border border-border/80 bg-popover/95 p-3 text-popover-foreground shadow-xl backdrop-blur"
+        onClick={stopTooltipEventPropagation}
+        onMouseDown={stopTooltipEventPropagation}
+        onMouseEnter={stopTooltipEventPropagation}
+        onMouseMove={stopTooltipEventPropagation}
+        onMouseUp={stopTooltipEventPropagation}
+        onPointerDown={stopTooltipEventPropagation}
+        onPointerEnter={stopTooltipEventPropagation}
+        onPointerMove={stopTooltipEventPropagation}
+        onPointerUp={stopTooltipEventPropagation}
+      >
+        <div className="mb-3 text-sm font-medium text-foreground">{label}</div>
+        <div className="space-y-3">
+          <div className="max-h-64 space-y-2 overflow-y-auto scroll-thin pr-1">
+            {costItems.map((item) => (
+              <div
+                key={item.name}
+                className={cn(
+                  'flex items-center justify-between gap-4 text-sm',
+                  item.name === hoveredSeriesKey &&
+                    'font-semibold text-foreground',
+                )}
+              >
+                <div className="flex min-w-0 items-center gap-2 text-muted-foreground">
+                  <span
+                    className="size-2.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: item.color }}
+                  />
+                  <span className="truncate">{item.name}</span>
+                </div>
+                <div className="shrink-0 text-right tabular-nums text-foreground">
+                  <div>
+                    {formatMetricValue(item.cost, 'cost')}
+                    {totalCost > 0 ? (
+                      <span className="ml-2 text-xs text-muted-foreground/90">
+                        {Math.round((item.cost / totalCost) * 100)}%
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {formatTokens(item.tokens)} tokens
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="flex items-center justify-between border-t border-border/60 pt-2 text-sm">
+            <span className="text-muted-foreground">Total</span>
+            <div className="text-right font-medium text-foreground">
+              <div>{formatMetricValue(totalCost, 'cost')}</div>
+              <div className="text-xs font-normal text-muted-foreground">
+                {formatTokens(totalTokens)} tokens
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   const items = payload
@@ -258,12 +371,15 @@ type AnalyticsStackedBarChartProps = {
   granularity: AnalyticsGranularity;
   isLoading: boolean;
   isError: boolean;
+  isRetrying: boolean;
+  onRetry: () => void;
   onResetFilters: () => void;
   onSelectSegment: (selection: {
     bucketKey: string;
     bucketLabel: string;
     seriesKey: string;
     seriesLabel: string;
+    metric: AnalyticsMetric;
   }) => void;
 };
 
@@ -273,6 +389,8 @@ export function AnalyticsStackedBarChart({
   granularity,
   isLoading,
   isError,
+  isRetrying,
+  onRetry,
   onResetFilters,
   onSelectSegment,
 }: AnalyticsStackedBarChartProps) {
@@ -285,10 +403,12 @@ export function AnalyticsStackedBarChart({
     }
 
     return chart.buckets.map((bucket) => {
-      const entry: Record<string, string | number> = {
+      const entry: Record<string, string | number | Record<string, number>> = {
         bucketKey: bucket.key,
         label: bucket.label,
         total: bucket.total,
+        tokenTotal: bucket.tokenTotal ?? 0,
+        tokenSegments: bucket.tokenSegments ?? {},
       };
 
       for (const series of chart.series) {
@@ -300,7 +420,14 @@ export function AnalyticsStackedBarChart({
   }, [chart]);
 
   const metric = chart?.metric ?? 'tasks';
-  const yAxisWidth = isMobile ? 36 : metric === 'cost' ? 72 : 64;
+  const isCostChart = chart?.object === 'costs';
+  const yAxisWidth = isMobile
+    ? isCostChart
+      ? 48
+      : 36
+    : metric === 'cost'
+      ? 72
+      : 64;
   const chartMargin = {
     top: 8,
     right: 8,
@@ -326,14 +453,12 @@ export function AnalyticsStackedBarChart({
 
   if (isError) {
     return (
-      <Empty className="min-h-[320px] rounded-[24px] bg-background/20 md:min-h-[420px]">
-        <EmptyHeader>
-          <EmptyTitle>Unable to load analytics</EmptyTitle>
-          <EmptyDescription>
-            Please refresh the page and try again.
-          </EmptyDescription>
-        </EmptyHeader>
-      </Empty>
+      <RetryableLoadError
+        className="min-h-[320px] border md:min-h-[420px]"
+        message="Failed to load analytics."
+        isRetrying={isRetrying}
+        onRetry={onRetry}
+      />
     );
   }
 
@@ -345,7 +470,7 @@ export function AnalyticsStackedBarChart({
     <div className="space-y-4">
       <div className="h-[320px] md:h-[420px]">
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart
+          <ComposedChart
             data={chartData}
             accessibilityLayer={false}
             className="outline-none [&_*:focus]:outline-none [&_*:focus-visible]:outline-none"
@@ -366,6 +491,7 @@ export function AnalyticsStackedBarChart({
               tick={{ fill: 'var(--color-muted-foreground)', fontSize: 11 }}
             />
             <YAxis
+              yAxisId={isCostChart ? 'cost' : undefined}
               tickLine={false}
               axisLine={false}
               width={yAxisWidth}
@@ -385,6 +511,30 @@ export function AnalyticsStackedBarChart({
                     }
               }
             />
+            {isCostChart ? (
+              <YAxis
+                yAxisId="tokens"
+                orientation="right"
+                tickLine={false}
+                axisLine={false}
+                width={isMobile ? 44 : 64}
+                tick={{ fill: 'var(--color-muted-foreground)', fontSize: 11 }}
+                tickFormatter={(value) => formatTokens(Number(value))}
+                label={
+                  isMobile
+                    ? undefined
+                    : {
+                        value: 'Tokens',
+                        angle: 90,
+                        position: 'insideRight',
+                        fill: 'var(--color-muted-foreground)',
+                        fontSize: 13,
+                        fontWeight: 500,
+                        dx: -8,
+                      }
+                }
+              />
+            ) : null}
             <Tooltip
               cursor={{ fill: 'var(--color-muted)', opacity: 0.12 }}
               wrapperStyle={{ pointerEvents: 'auto', outline: 'none' }}
@@ -393,6 +543,7 @@ export function AnalyticsStackedBarChart({
                   hoveredSeriesKey={hoveredSeriesKey}
                   viewBy={chart.viewBy}
                   metric={metric}
+                  series={chart.series}
                 />
               }
             />
@@ -401,7 +552,9 @@ export function AnalyticsStackedBarChart({
                 key={series.key}
                 dataKey={series.key}
                 name={series.label}
-                stackId="analytics"
+                unit={isCostChart ? 'cost' : undefined}
+                yAxisId={isCostChart ? 'cost' : undefined}
+                stackId={isCostChart ? 'cost' : 'analytics'}
                 onMouseOver={() => setHoveredSeriesKey(series.label)}
                 onMouseLeave={() => setHoveredSeriesKey(null)}
                 onClick={(data) => {
@@ -423,6 +576,7 @@ export function AnalyticsStackedBarChart({
                     bucketLabel,
                     seriesKey: series.key,
                     seriesLabel: series.label,
+                    metric,
                   });
                 }}
                 radius={[0, 0, 0, 0]}
@@ -433,7 +587,21 @@ export function AnalyticsStackedBarChart({
                 className="cursor-pointer"
               />
             ))}
-          </BarChart>
+            {isCostChart ? (
+              <Line
+                type="linear"
+                dataKey="tokenTotal"
+                name="Total tokens"
+                unit="tokens"
+                yAxisId="tokens"
+                stroke="var(--color-foreground)"
+                strokeWidth={3}
+                connectNulls
+                dot={{ r: 3 }}
+                activeDot={{ r: 5 }}
+              />
+            ) : null}
+          </ComposedChart>
         </ResponsiveContainer>
       </div>
     </div>

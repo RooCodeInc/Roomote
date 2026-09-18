@@ -6,6 +6,8 @@ import {
   desc,
   eq,
   fastAgentConversations,
+  getDeploymentTaskModelOptions,
+  getBackgroundAgentSettingsForDeployment,
   getCustomAutomationById,
   listCustomAutomations,
   inArray,
@@ -13,38 +15,59 @@ import {
   type CustomAutomation,
 } from '@roomote/db/server';
 import {
+  CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
   listConnectedCommunicationProviders,
+  listAvailableAgentMailOutboundIdentities,
+  resolveDefaultAutomationTarget,
+  getCustomAutomationNextRunAt,
   resolveCustomAutomationSchedule,
   resolveDeploymentTimeZone,
   runCustomAutomationNow,
+  canStartAgentMailConversationWithUser,
   validateCronExpression,
   type AutomationRunNowResult,
 } from '@roomote/sdk/server';
 import {
   ALL_REPOSITORIES,
+  AUTOMATION_TARGET_EMAIL_IDENTITY_KEY,
   FAST_EXECUTION,
-  getCommunicationAutomationTargetKind,
+  NO_REPOSITORIES,
+  getAutomationTargetEmailIdentityId,
+  getAutomationTargetKind,
   isScheduleOnlyBackgroundAutomationFrequency,
   type AutomationTarget,
   type BackgroundAutomationProvider,
   type CustomAutomationScheduleMode,
   type OptionalAutomationTarget,
+  type ReasoningEffort,
+  type AutomationResultPriority,
 } from '@roomote/types';
 import { captureActivationCustomAutomationChanged } from '@roomote/telemetry/server';
 import { toActivationAutomationDestinationProvider } from '@roomote/telemetry';
 
 import type { UserAuthSuccess } from '@/types';
 
-import { assertAdmin } from './feature-gates';
+async function getOwnedAutomation(auth: UserAuthSuccess, id: string) {
+  const automation = await getCustomAutomationById(id);
+  if (
+    !automation ||
+    (!auth.isAdmin && automation.createdByUserId !== auth.userId)
+  ) {
+    throw new Error('Custom automation was not found.');
+  }
+  return automation;
+}
 
 export type CustomAutomationListItem = {
   id: string;
   name: string;
   prompt: string;
   enabled: boolean;
+  resultPriority?: AutomationResultPriority;
   scheduleMode: CustomAutomationScheduleMode;
   cronExpression: string | null;
   model: string | null;
+  reasoningEffort: ReasoningEffort | null;
   executionMode: 'sandbox_task' | 'fast';
   environmentId: string | null;
   target: OptionalAutomationTarget;
@@ -57,6 +80,7 @@ export type CustomAutomationListItem = {
   createdAt: Date;
   updatedAt: Date;
   latestFastResult: string | null;
+  nextRunAt: Date | null;
 };
 
 function latestAssistantText(
@@ -88,13 +112,16 @@ export type CustomAutomationWriteInput = {
   name: string;
   prompt: string;
   enabled: boolean;
+  resultPriority?: AutomationResultPriority;
   scheduleMode: string;
   cronExpression?: string | null;
   /** Provider/model launch override, or null for the deployment default. */
   model?: string | null;
+  /** Reasoning override for the selected model, or null for its default. */
+  reasoningEffort?: ReasoningEffort | null;
   environmentId: string;
   /** Omitted when the automation has no report destination. */
-  targetProvider?: 'slack' | 'discord' | 'teams' | 'telegram';
+  targetProvider?: 'slack' | 'discord' | 'teams' | 'telegram' | 'email';
   targetMode?: 'channel' | 'direct_message';
   targetChannelId?: string;
 };
@@ -104,6 +131,7 @@ function toListItem(
     createdByUser?: { name: string; email: string } | null;
   },
   latestFastResult: string | null = null,
+  scheduleContext?: Awaited<ReturnType<typeof resolveDeploymentTimeZone>>,
 ): CustomAutomationListItem {
   const scheduleMode =
     row.scheduleMode === 'cron'
@@ -117,16 +145,20 @@ function toListItem(
     name: row.name,
     prompt: row.prompt,
     enabled: row.enabled,
+    resultPriority: row.resultPriority,
     scheduleMode,
     cronExpression: row.cronExpression,
     model: row.model,
+    reasoningEffort: row.reasoningEffort,
     executionMode: row.executionMode,
     environmentId:
       row.executionMode === 'fast'
         ? FAST_EXECUTION
         : row.allRepositories
           ? ALL_REPOSITORIES
-          : row.environmentId,
+          : row.noRepositories
+            ? NO_REPOSITORIES
+            : row.environmentId,
     target: row.target,
     lastRunAt: row.lastRunAt,
     lastSucceededAt: row.lastSucceededAt,
@@ -137,6 +169,16 @@ function toListItem(
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     latestFastResult,
+    nextRunAt: scheduleContext
+      ? getCustomAutomationNextRunAt({
+          enabled: row.enabled,
+          scheduleMode,
+          cronExpression: row.cronExpression,
+          timeZone: scheduleContext.timeZone,
+          timeZoneUpdatedAt: scheduleContext.updatedAt,
+          lastRunAt: row.lastRunAt,
+        })
+      : null,
   };
 }
 
@@ -146,6 +188,23 @@ function buildTarget(
 ): OptionalAutomationTarget {
   if (!input.targetProvider) {
     return {};
+  }
+  if (input.targetProvider === 'email') {
+    if (input.targetMode === 'channel') {
+      throw new Error('Email destinations must use direct message mode.');
+    }
+    const identityId = input.targetChannelId?.trim();
+    if (!identityId) {
+      throw new Error('Choose an account Email identity.');
+    }
+    // Email keeps the direct-message shape (externalRef = owner) and pins the
+    // selected identity in metadata.
+    return {
+      provider: 'email',
+      targetKind: getAutomationTargetKind('email', 'direct_message'),
+      externalRef: ownerUserId,
+      metadata: { [AUTOMATION_TARGET_EMAIL_IDENTITY_KEY]: identityId },
+    };
   }
   const directMessage = input.targetMode === 'direct_message';
   const externalRef = directMessage
@@ -160,7 +219,7 @@ function buildTarget(
   const provider = input.targetProvider as BackgroundAutomationProvider;
   const target: AutomationTarget = {
     provider,
-    targetKind: getCommunicationAutomationTargetKind(
+    targetKind: getAutomationTargetKind(
       input.targetProvider,
       directMessage ? 'direct_message' : 'channel',
     ),
@@ -168,6 +227,19 @@ function buildTarget(
   };
 
   return target;
+}
+
+function isSameDestination(
+  left: OptionalAutomationTarget,
+  right: OptionalAutomationTarget,
+): boolean {
+  return (
+    left.provider === right.provider &&
+    left.targetKind === right.targetKind &&
+    left.externalRef === right.externalRef &&
+    getAutomationTargetEmailIdentityId(left) ===
+      getAutomationTargetEmailIdentityId(right)
+  );
 }
 
 function assertScheduleMode(
@@ -181,7 +253,23 @@ function assertScheduleMode(
 
 async function assertDestinationConnected(
   provider: NonNullable<CustomAutomationWriteInput['targetProvider']>,
+  ownerUserId: string,
+  emailIdentityId?: string,
 ): Promise<void> {
+  if (provider === 'email') {
+    if (
+      !emailIdentityId ||
+      !(await canStartAgentMailConversationWithUser(
+        ownerUserId,
+        emailIdentityId,
+      ))
+    ) {
+      throw new Error(
+        'Choose your current account Email address and ask an admin to configure AgentMail before saving this destination.',
+      );
+    }
+    return;
+  }
   const connected = await listConnectedCommunicationProviders();
   if (!connected.includes(provider)) {
     throw new Error(
@@ -190,11 +278,39 @@ async function assertDestinationConnected(
   }
 }
 
+async function assertAutomationModelSelection(
+  model: string | null | undefined,
+  reasoningEffort: ReasoningEffort | null | undefined,
+): Promise<void> {
+  if (!model) {
+    if (reasoningEffort) {
+      throw new Error('Reasoning effort requires a model override.');
+    }
+    return;
+  }
+
+  const { models } = await getDeploymentTaskModelOptions();
+  const option = models.find((candidate) => candidate.id === model);
+  if (!option) {
+    throw new Error(`Model "${model}" is not enabled for new tasks.`);
+  }
+  if (reasoningEffort && option.metadata?.supportsReasoning === false) {
+    throw new Error(
+      `Model "${model}" does not support configurable reasoning effort.`,
+    );
+  }
+}
+
 export async function listCustomAutomationsCommand(
   auth: UserAuthSuccess,
 ): Promise<CustomAutomationListItem[]> {
-  assertAdmin(auth);
-  const rows = await listCustomAutomations();
+  const [allRows, scheduleContext] = await Promise.all([
+    listCustomAutomations(),
+    resolveDeploymentTimeZone(),
+  ]);
+  const rows = allRows.filter(
+    (row) => auth.isAdmin || row.createdByUserId === auth.userId,
+  );
   const automationIds = rows.map((row) => row.id);
   const conversations = automationIds.length
     ? await db
@@ -223,34 +339,83 @@ export async function listCustomAutomationsCommand(
     );
   }
   return rows.map((row) =>
-    toListItem(row, latestByAutomation.get(row.id) ?? null),
+    toListItem(row, latestByAutomation.get(row.id) ?? null, scheduleContext),
   );
+}
+
+export async function getCustomAutomationOptionsCommand(
+  auth: UserAuthSuccess,
+  input: { automationId?: string } = {},
+) {
+  // Email identities belong to the automation owner (runs execute as the
+  // creator), so editing someone else's automation lists the owner's
+  // identities rather than the viewer's.
+  const automation = input.automationId
+    ? await getOwnedAutomation(auth, input.automationId)
+    : null;
+  const ownerUserId = automation?.createdByUserId ?? auth.userId;
+  const [providers, emailIdentities, { timeZone }, settings, defaultTarget] =
+    await Promise.all([
+      listConnectedCommunicationProviders(),
+      listAvailableAgentMailOutboundIdentities(ownerUserId),
+      resolveDeploymentTimeZone(),
+      auth.isAdmin ? getBackgroundAgentSettingsForDeployment() : null,
+      resolveDefaultAutomationTarget({
+        ownerUserId,
+        capabilities: CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
+        existingTarget: automation?.target,
+        includeSharedChannels: auth.isAdmin,
+      }),
+    ]);
+
+  return {
+    capabilities: {
+      slackConnected: providers.includes('slack'),
+      discordConnected: providers.includes('discord'),
+      telegramConnected: providers.includes('telegram'),
+      teamsConnected: providers.includes('teams'),
+      emailConnected: emailIdentities.length > 0,
+    },
+    emailIdentities,
+    // Channel catalogs are bot-scoped, not evidence of a member's access.
+    managerSlackChannelId: settings?.managerSlackChannelId ?? null,
+    managerDiscordChannelId: settings?.managerDiscordChannelId ?? null,
+    defaultTarget,
+    effectiveTimeZone: timeZone,
+  };
 }
 
 export async function createCustomAutomationCommand(
   auth: UserAuthSuccess,
   input: CustomAutomationWriteInput,
 ): Promise<CustomAutomationListItem> {
-  assertAdmin(auth);
   assertScheduleMode(input.scheduleMode);
+  const scheduleContext = await resolveDeploymentTimeZone();
   const cronExpression =
     input.scheduleMode === 'cron'
       ? validateCronExpression(
           input.cronExpression ?? '',
-          (await resolveDeploymentTimeZone()).timeZone,
+          scheduleContext.timeZone,
         )
       : null;
   if (input.targetProvider) {
-    await assertDestinationConnected(input.targetProvider);
+    await assertDestinationConnected(
+      input.targetProvider,
+      auth.userId,
+      input.targetChannelId,
+    );
   }
+  await assertAutomationModelSelection(input.model, input.reasoningEffort);
 
   const created = await createCustomAutomation({
     name: input.name,
     prompt: input.prompt,
     enabled: input.enabled,
+    resultPriority: input.resultPriority ?? 'normal',
     scheduleMode: input.scheduleMode,
     cronExpression,
     model: input.model ?? null,
+    reasoningEffort: input.reasoningEffort ?? null,
     environmentId: input.environmentId,
     target: buildTarget(input, auth.userId),
     createdByUserId: auth.userId,
@@ -261,55 +426,61 @@ export async function createCustomAutomationCommand(
     input.targetProvider ?? null,
   );
 
-  return toListItem(created);
+  return toListItem(created, null, scheduleContext);
 }
 
 export async function updateCustomAutomationCommand(
   auth: UserAuthSuccess,
   input: CustomAutomationWriteInput & { id: string },
 ): Promise<CustomAutomationListItem> {
-  assertAdmin(auth);
+  const existing = await getOwnedAutomation(auth, input.id);
   assertScheduleMode(input.scheduleMode);
+  const scheduleContext = await resolveDeploymentTimeZone();
   const cronExpression =
     input.scheduleMode === 'cron'
       ? validateCronExpression(
           input.cronExpression ?? '',
-          (await resolveDeploymentTimeZone()).timeZone,
+          scheduleContext.timeZone,
         )
       : null;
-  if (input.targetProvider) {
-    await assertDestinationConnected(input.targetProvider);
+  const ownerUserId = existing.createdByUserId ?? auth.userId;
+  const target = buildTarget(input, ownerUserId);
+  // The form and the list-row toggle resend the whole record, so a stale
+  // destination is re-validated only when the destination actually changes;
+  // otherwise disabling or renaming an automation would be blocked.
+  if (input.targetProvider && !isSameDestination(target, existing.target)) {
+    if (input.targetProvider === 'email' && !existing.createdByUserId) {
+      throw new Error('Automation owner is not configured.');
+    }
+    await assertDestinationConnected(
+      input.targetProvider,
+      ownerUserId,
+      input.targetChannelId,
+    );
   }
-
-  const existing = await getCustomAutomationById(input.id);
-  if (!existing) {
-    throw new Error('Custom automation was not found.');
-  }
+  await assertAutomationModelSelection(input.model, input.reasoningEffort);
 
   const updated = await updateCustomAutomation(input.id, {
     name: input.name,
     prompt: input.prompt,
     enabled: input.enabled,
+    resultPriority: input.resultPriority ?? existing.resultPriority,
     scheduleMode: input.scheduleMode,
     cronExpression,
     model: input.model ?? null,
+    reasoningEffort: input.reasoningEffort ?? null,
     environmentId: input.environmentId,
-    target: buildTarget(input, existing.createdByUserId ?? auth.userId),
+    target,
   });
 
-  return toListItem(updated);
+  return toListItem(updated, null, scheduleContext);
 }
 
 export async function deleteCustomAutomationCommand(
   auth: UserAuthSuccess,
   input: { id: string },
 ): Promise<{ success: true }> {
-  assertAdmin(auth);
-
-  const existing = await getCustomAutomationById(input.id);
-  if (!existing) {
-    throw new Error('Custom automation was not found.');
-  }
+  const existing = await getOwnedAutomation(auth, input.id);
 
   await deleteCustomAutomation(input.id);
   void captureActivationCustomAutomationChanged(
@@ -323,7 +494,7 @@ export async function triggerCustomAutomationCommand(
   auth: UserAuthSuccess,
   input: { id: string },
 ): Promise<AutomationRunNowResult> {
-  assertAdmin(auth);
+  await getOwnedAutomation(auth, input.id);
   return runCustomAutomationNow(input.id);
 }
 
@@ -331,7 +502,6 @@ export async function resolveCustomAutomationScheduleCommand(
   auth: UserAuthSuccess,
   input: { schedule: string },
 ) {
-  assertAdmin(auth);
   return resolveCustomAutomationSchedule({
     schedule: input.schedule,
     userId: auth.userId,

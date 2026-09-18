@@ -1,6 +1,8 @@
 import type {
   AnnouncerFrequency,
   AutomationScanCursor,
+  AutomationDestinationDescriptorItem,
+  AutomationDestinationProvider,
   ChannelAutoStartLaunchMode,
   CiFailureTriageFrequency,
   CodeQualityAuditorFrequency,
@@ -56,7 +58,6 @@ import type {
   discordGatewaySessions,
   teamsInstallations,
   teamsUserMappings,
-  slackFastIntegrationCalls,
   linearPendingSelections,
   environmentVariables,
   environments,
@@ -64,6 +65,8 @@ import type {
   environmentRepositoryMappings,
   automations,
   customAutomations,
+  automationResults,
+  sessionWakeups,
   trackedMessages,
 } from './schema';
 
@@ -324,18 +327,6 @@ export type CreateFastAgentProviderMessage = Omit<
 >;
 
 /**
- * slackFastIntegrationCalls
- */
-
-export type SlackFastIntegrationCall =
-  typeof slackFastIntegrationCalls.$inferSelect;
-
-export type CreateSlackFastIntegrationCall = Omit<
-  typeof slackFastIntegrationCalls.$inferInsert,
-  Generated
->;
-
-/**
  * slackInstallations
  */
 
@@ -514,93 +505,109 @@ export type ChannelAutoStartChannelSettings = {
   launchCriteria: string | null;
 };
 
-export type BackgroundAgentSettings = StoredBackgroundAgentSettings & {
-  callRoomoteViaEmojiEnabled: boolean;
-  callRoomoteViaEmojiName: string | null;
-  callRoomoteViaEmojiInstructions: string | null;
-  channelAutoStartSlackChannels: ChannelAutoStartChannelSettings[];
-  channelAutoStartDiscordChannels: ChannelAutoStartChannelSettings[];
-  channelAutoStartEnabled: boolean;
-  channelAutoStartSlackChannelIds: string[];
-  channelAutoStartDiscordChannelIds: string[];
-  channelAutoStartInstructions: string | null;
-  reviewCodeSettings: PrReviewSettings;
-  reviewCodeInstructions: string | null;
-  conflictResolverFrequency: ConflictResolverFrequency;
-  conflictResolverLabel: string;
-  conflictResolverInstructions: string | null;
-  conflictResolverMaxPrAgeDays: ConflictResolverMaxPrAgeDays;
-  conflictResolverLastRunAt: Date | null;
-  suggesterFrequency: SuggesterFrequency;
-  suggesterSlackChannelId: string | null;
-  suggesterDiscordChannelId: string | null;
-  /** Primary Telegram chat id when Suggest Ideas posts to a sticky topic. */
-  suggesterTelegramChatId: string | null;
-  /** Primary Teams conversation id when Suggest Ideas posts to Teams. */
-  suggesterTeamsChannelId: string | null;
-  suggesterInstructions: string | null;
-  suggesterLastRunAt: Date | null;
-  announcerFrequency: AnnouncerFrequency;
-  announcerSlackChannelId: string | null;
-  announcerDiscordChannelId: string | null;
-  announcerInstructions: string | null;
-  announcerLastRunAt: Date | null;
-  platformIssueAlertsEnabled: boolean;
-  platformIssueSlackChannelId: string | null;
-  platformIssueDiscordChannelId: string | null;
-  managerStatsFrequency: ManagerStatsFrequency;
-  managerStatsSlackChannelId: string | null;
-  managerStatsDiscordChannelId: string | null;
-  managerStatsLastRunAt: Date | null;
-  providerUsageLimitFrequency: ProviderUsageLimitFrequency;
-  providerUsageLimitThreshold: ProviderUsageLimitThreshold;
-  providerUsageLimitSlackChannelId: string | null;
-  providerUsageLimitDiscordChannelId: string | null;
-  providerUsageLimitLastRunAt: Date | null;
-  sentryTriageFrequency: SentryTriageFrequency;
-  sentryTriageSlackChannelId: string | null;
-  sentryTriageDiscordChannelId: string | null;
-  sentryTriageProjectSlugs: string | null;
-  sentryTriageLastRunAt: Date | null;
-  dependabotTriageFrequency: DependabotTriageFrequency;
-  dependabotTriageSlackChannelId: string | null;
-  dependabotTriageDiscordChannelId: string | null;
-  dependabotTriageLastRunAt: Date | null;
-  codeqlTriageFrequency: CodeqlTriageFrequency;
-  codeqlTriageSlackChannelId: string | null;
-  codeqlTriageDiscordChannelId: string | null;
-  codeqlTriageLastRunAt: Date | null;
-  issueFixerFrequency: IssueFixerFrequency;
-  issueFixerInstructions: string | null;
-  issueFixerLastRunAt: Date | null;
-  issueFixerScanCursor?: CiFailureTriageScanCursor | null;
-  securityAuditorFrequency: SecurityAuditorFrequency;
-  securityAuditorSlackChannelId: string | null;
-  securityAuditorDiscordChannelId: string | null;
-  securityAuditorLastRunAt: Date | null;
-  securityAuditorScanCursor?: SecurityAuditorScanCursor | null;
-  codeQualityAuditorFrequency: CodeQualityAuditorFrequency;
-  codeQualityAuditorSlackChannelId: string | null;
-  codeQualityAuditorDiscordChannelId: string | null;
-  codeQualityAuditorLastRunAt: Date | null;
-  codeQualityAuditorScanCursor?: CodeQualityAuditorScanCursor | null;
-  ciFailureTriageFrequency: CiFailureTriageFrequency;
-  ciFailureTriageSlackChannelId: string | null;
-  ciFailureTriageDiscordChannelId: string | null;
-  ciFailureTriageLastRunAt: Date | null;
-  ciFailureTriageScanCursor?: CiFailureTriageScanCursor | null;
-  mergeAnnouncerFrequency: MergeAnnouncerFrequency;
-  mergeAnnouncerLastRunAt: Date | null;
-  mergeAnnouncerScanCursor?: CiFailureTriageScanCursor | null;
-  mergeAnnouncerTargetProvider:
-    | 'slack'
-    | 'teams'
-    | 'telegram'
-    | 'discord'
+type BuiltInAutomationEmailSettings = {
+  [K in AutomationDestinationDescriptorItem['emailSettingsKey']]: string | null;
+} & {
+  [K in AutomationDestinationDescriptorItem['emailUserSettingsKey']]:
+    | string
     | null;
-  mergeAnnouncerTargetMode: 'channel' | 'direct_message' | null;
-  mergeAnnouncerTargetChannelId: string | null;
 };
+
+export type BackgroundAgentSettings = StoredBackgroundAgentSettings &
+  BuiltInAutomationEmailSettings & {
+    callRoomoteViaEmojiEnabled: boolean;
+    callRoomoteViaEmojiName: string | null;
+    callRoomoteViaEmojiInstructions: string | null;
+    channelAutoStartSlackChannels: ChannelAutoStartChannelSettings[];
+    channelAutoStartDiscordChannels: ChannelAutoStartChannelSettings[];
+    channelAutoStartEnabled: boolean;
+    channelAutoStartSlackChannelIds: string[];
+    channelAutoStartDiscordChannelIds: string[];
+    channelAutoStartInstructions: string | null;
+    reviewCodeSettings: PrReviewSettings;
+    reviewCodeInstructions: string | null;
+    conflictResolverFrequency: ConflictResolverFrequency;
+    conflictResolverLabel: string;
+    conflictResolverInstructions: string | null;
+    conflictResolverMaxPrAgeDays: ConflictResolverMaxPrAgeDays;
+    conflictResolverLastRunAt: Date | null;
+    suggesterFrequency: SuggesterFrequency;
+    suggesterSlackChannelId: string | null;
+    suggesterDiscordChannelId: string | null;
+    /** Primary Telegram chat id when Suggest Ideas posts to a sticky topic. */
+    suggesterTelegramChatId: string | null;
+    /** Primary Teams conversation id when Suggest Ideas posts to Teams. */
+    suggesterTeamsChannelId: string | null;
+    suggesterInstructions: string | null;
+    suggesterAdditionalRules?: string;
+    suggesterLastRunAt: Date | null;
+    announcerFrequency: AnnouncerFrequency;
+    announcerSlackChannelId: string | null;
+    announcerDiscordChannelId: string | null;
+    announcerInstructions: string | null;
+    announcerAdditionalRules?: string;
+    announcerLastRunAt: Date | null;
+    platformIssueAlertsEnabled: boolean;
+    platformIssueSlackChannelId: string | null;
+    platformIssueDiscordChannelId: string | null;
+    releaseAnnouncementsEnabled: boolean;
+    releaseAnnouncementsTargetProvider: AutomationDestinationProvider | null;
+    releaseAnnouncementsTargetMode: 'channel' | 'direct_message' | null;
+    releaseAnnouncementsTargetChannelId: string | null;
+    releaseAnnouncementsTargetUserId: string | null;
+    managerStatsFrequency: ManagerStatsFrequency;
+    managerStatsSlackChannelId: string | null;
+    managerStatsDiscordChannelId: string | null;
+    managerStatsLastRunAt: Date | null;
+    providerUsageLimitFrequency: ProviderUsageLimitFrequency;
+    providerUsageLimitThreshold: ProviderUsageLimitThreshold;
+    providerUsageLimitSlackChannelId: string | null;
+    providerUsageLimitDiscordChannelId: string | null;
+    providerUsageLimitLastRunAt: Date | null;
+    sentryTriageFrequency: SentryTriageFrequency;
+    sentryTriageSlackChannelId: string | null;
+    sentryTriageDiscordChannelId: string | null;
+    sentryTriageProjectSlugs: string | null;
+    sentryTriageLastRunAt: Date | null;
+    dependabotTriageFrequency: DependabotTriageFrequency;
+    dependabotTriageSlackChannelId: string | null;
+    dependabotTriageDiscordChannelId: string | null;
+    dependabotTriageLastRunAt: Date | null;
+    codeqlTriageFrequency: CodeqlTriageFrequency;
+    codeqlTriageSlackChannelId: string | null;
+    codeqlTriageDiscordChannelId: string | null;
+    codeqlTriageLastRunAt: Date | null;
+    issueFixerFrequency: IssueFixerFrequency;
+    issueFixerInstructions: string | null;
+    issueFixerLastRunAt: Date | null;
+    issueFixerScanCursor?: CiFailureTriageScanCursor | null;
+    securityAuditorFrequency: SecurityAuditorFrequency;
+    securityAuditorSlackChannelId: string | null;
+    securityAuditorDiscordChannelId: string | null;
+    securityAuditorLastRunAt: Date | null;
+    securityAuditorScanCursor?: SecurityAuditorScanCursor | null;
+    securityAuditorAdditionalRules?: string;
+    codeQualityAuditorFrequency: CodeQualityAuditorFrequency;
+    codeQualityAuditorSlackChannelId: string | null;
+    codeQualityAuditorDiscordChannelId: string | null;
+    codeQualityAuditorLastRunAt: Date | null;
+    codeQualityAuditorScanCursor?: CodeQualityAuditorScanCursor | null;
+    codeQualityAuditorAdditionalRules?: string;
+    ciFailureTriageFrequency: CiFailureTriageFrequency;
+    ciFailureTriageSlackChannelId: string | null;
+    ciFailureTriageDiscordChannelId: string | null;
+    ciFailureTriageAdditionalRules?: string;
+    ciFailureTriageLastRunAt: Date | null;
+    ciFailureTriageScanCursor?: CiFailureTriageScanCursor | null;
+    mergeAnnouncerFrequency: MergeAnnouncerFrequency;
+    mergeAnnouncerLastRunAt: Date | null;
+    mergeAnnouncerScanCursor?: CiFailureTriageScanCursor | null;
+    mergeAnnouncerTargetProvider: AutomationDestinationProvider | null;
+    mergeAnnouncerTargetMode: 'channel' | 'direct_message' | null;
+    mergeAnnouncerTargetChannelId: string | null;
+    mergeAnnouncerTargetUserId: string | null;
+    mergeAnnouncerAdditionalRules?: string;
+  };
 
 export type SecurityAuditorScanCursor = AutomationScanCursor;
 
@@ -624,5 +631,22 @@ export type CustomAutomation = typeof customAutomations.$inferSelect;
 
 export type CreateCustomAutomation = Omit<
   typeof customAutomations.$inferInsert,
+  Timestamp
+>;
+
+export type AutomationResult = typeof automationResults.$inferSelect;
+export type CreateAutomationResult = Omit<
+  typeof automationResults.$inferInsert,
+  Timestamp
+>;
+
+/**
+ * session_wakeups
+ */
+
+export type SessionWakeup = typeof sessionWakeups.$inferSelect;
+
+export type CreateSessionWakeup = Omit<
+  typeof sessionWakeups.$inferInsert,
   Timestamp
 >;

@@ -7,6 +7,7 @@ import { and, db, desc, eq, isNull, taskRuns, tasks } from '@roomote/db/server';
 import { RunStatus, TaskPayloadKind } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
+import { requireTaskAccess } from '@/lib/server/custom-automation-task-access';
 
 type RetryFailedTaskStartResult =
   | { success: true; runId: number; taskId: string }
@@ -21,6 +22,7 @@ export async function retryFailedTaskStartCommand(
   input: { taskId: string; runId?: number },
 ): Promise<RetryFailedTaskStartResult> {
   try {
+    await requireTaskAccess(auth, input.taskId);
     const task = await db.query.tasks.findFirst({
       where: and(eq(tasks.id, input.taskId), isNull(tasks.deletedAt)),
       columns: { id: true },

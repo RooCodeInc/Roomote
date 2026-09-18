@@ -1,3 +1,5 @@
+import { getFastAgentParentFromPayload } from '@roomote/types';
+
 /**
  * Payload-derived fallback for the Linear session id. Channel bindings live
  * on the task row and are exposed by the SDK dequeue/resume responses as
@@ -32,4 +34,17 @@ export function getLinearSessionIdFromResumePayload(
   }
 
   return null;
+}
+
+/**
+ * The Linear agent session a task was delegated from, when its Fast parent
+ * conversation is a Linear session. Such children carry no Linear payload
+ * of their own; the parent binding is what routes their activity and
+ * answers.
+ */
+export function getLinearFastParentSessionId(payload: unknown): string | null {
+  const parent = getFastAgentParentFromPayload(payload);
+  return parent?.conversation.surface === 'linear'
+    ? parent.conversation.replyTarget.channelId
+    : null;
 }

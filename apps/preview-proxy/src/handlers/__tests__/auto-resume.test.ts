@@ -5,7 +5,16 @@ import {
   createMockResolvedRequest,
 } from '../../__tests__/fixtures';
 
-const { mockFindExistingResume, mockEnqueueTask } = vi.hoisted(() => ({
+const {
+  MockSnapshotResumeAlreadyExistsError,
+  mockFindExistingResume,
+  mockEnqueueTask,
+} = vi.hoisted(() => ({
+  MockSnapshotResumeAlreadyExistsError: class extends Error {
+    constructor(readonly existingRunId: number) {
+      super(`Snapshot resume run ${existingRunId} already exists.`);
+    }
+  },
   mockFindExistingResume: vi.fn(),
   mockEnqueueTask: vi.fn(),
 }));
@@ -22,6 +31,7 @@ vi.mock('../../lib/db', () => ({
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: mockEnqueueTask,
+  SnapshotResumeAlreadyExistsError: MockSnapshotResumeAlreadyExistsError,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -137,6 +147,28 @@ describe('triggerAutoResume', () => {
         actingUserId: 'viewer-user',
       }),
     );
+  });
+
+  it('returns the winning run when a concurrent resume is created first', async () => {
+    const resolution = createMockResolvedRequest({
+      status: 'resumable',
+      snapshotId: 'snap-preview-race',
+      taskRun: createMockTaskRun({
+        id: 45,
+        payload: { repo: 'owner/repo' },
+      }),
+    });
+    mockEnqueueTask.mockRejectedValue(
+      new MockSnapshotResumeAlreadyExistsError(101),
+    );
+
+    await expect(
+      triggerAutoResume(resolution, {
+        userId: 'viewer-user',
+        tokenType: 'pt',
+        version: 1,
+      }),
+    ).resolves.toEqual({ success: true, newRunId: 101 });
   });
 
   it('preserves Discord reply context when creating a snapshot resume run', async () => {

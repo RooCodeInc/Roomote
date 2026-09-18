@@ -48,6 +48,7 @@ import {
   Popover,
   PopoverContent,
   PopoverTrigger,
+  RetryableLoadError,
   Skeleton,
 } from '@/components/system';
 import { Loading } from '@/components/layout';
@@ -124,11 +125,17 @@ export function Environments() {
           ) : undefined
         }
       >
-        {!environments.data || environments.data.length === 0 ? (
+        {environments.isError && environments.data === undefined ? (
+          <RetryableLoadError
+            className="border"
+            message="Failed to load environments."
+            isRetrying={environments.isFetching}
+            onRetry={() => void environments.refetch()}
+          />
+        ) : !environments.data || environments.data.length === 0 ? (
           <p>
             <TriangleAlert className="inline size-4 mr-2" />
-            Roomote can only verify its work when running with an environment.
-            Add your first now.
+            Environments help Roomote verify its work. Add your first now.
           </p>
         ) : (
           <div className="space-y-4 divide-y -mb-2">

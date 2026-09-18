@@ -11,9 +11,7 @@ export default async function SetupPage({
 }: {
   searchParams: Promise<{
     authProvider?: string;
-    computeProvider?: string;
     modelProvider?: string;
-    sourceControlProvider?: string;
     step?: string;
   }>;
 }) {
@@ -21,9 +19,7 @@ export default async function SetupPage({
   const setupDocsStep = getSetupDocsStep(params.step ?? null);
   const docsPath = getSetupDocsPath(setupDocsStep, {
     authProvider: params.authProvider,
-    computeProvider: params.computeProvider,
     modelProvider: params.modelProvider,
-    sourceControlProvider: params.sourceControlProvider,
   });
   const docsPage = docsPath ? await getDocsPage(docsPath) : null;
   const { content } = docsPage

@@ -34,6 +34,7 @@ export type AnalyticsRow = {
   id: string;
   timestamp: Date;
   value: number;
+  tokens?: number;
   dimensions: Partial<Record<AnalyticsDimension, AnalyticsDimensionValue>>;
   details: AnalyticsDetailsRow;
   meta?: {

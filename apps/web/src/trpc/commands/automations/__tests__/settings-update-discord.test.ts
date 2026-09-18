@@ -5,24 +5,66 @@ import {
   discordInstallationChannels,
   discordInstallations,
   eq,
+  ensureAutomationRows,
   getBackgroundAgentSettingsForDeployment,
+  inArray,
   slackInstallations,
   upsertAutomation,
   users,
+  repositoryFactory,
+  repositories,
 } from '@roomote/db/server';
-import type { BackgroundAutomationKey } from '@roomote/types';
+import {
+  USER_FACING_AUTOMATION_KEYS,
+  type BackgroundAutomationKey,
+} from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
+import { registerExclusiveAutomationSettingsDatabaseLock } from '@/testing/exclusive-automation-settings-database-lock';
 
 import { updateBackgroundAgentSettingsCommand } from '../settings-update';
 import { mergeAnnouncerDestinationInputSchema } from '../settings-schema';
+import { getBackgroundAgentSettingsCommand } from '../settings-read';
+import { triggerAutomationCommand } from '../trigger-agent';
 import type { UpdateBackgroundAgentSettingsInput } from '../types';
 
 const mockCaptureActivationAutomationChanged = vi.hoisted(() => vi.fn());
+const mockResolveRules = vi.hoisted(() => vi.fn());
+vi.mock('@roomote/cloud-agents/server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/cloud-agents/server')>()),
+  generateTrackedNonTaskObject: mockResolveRules,
+}));
+const mockRunAutomationNow = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({ outcome: 'completed' }),
+);
+const mockResolveAutomationRepositoryDestination = vi.hoisted(() => vi.fn());
+const mockResolveAutomationRuntimeDestination = vi.hoisted(() => vi.fn());
+const mockCanStartAgentMailConversationWithUser = vi.hoisted(() => vi.fn());
+vi.mock('@roomote/sdk/server', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@roomote/sdk/server')>();
+  mockResolveAutomationRepositoryDestination.mockImplementation(
+    actual.resolveAutomationRepositoryDestination,
+  );
+  mockResolveAutomationRuntimeDestination.mockImplementation(
+    actual.resolveAutomationRuntimeDestination,
+  );
+  return {
+    ...actual,
+    runAutomationNow: mockRunAutomationNow,
+    resolveAutomationRepositoryDestination:
+      mockResolveAutomationRepositoryDestination,
+    resolveAutomationRuntimeDestination:
+      mockResolveAutomationRuntimeDestination,
+    canStartAgentMailConversationWithUser:
+      mockCanStartAgentMailConversationWithUser,
+  };
+});
 
 vi.mock('@roomote/telemetry/server', () => ({
   captureActivationAutomationChanged: mockCaptureActivationAutomationChanged,
 }));
+
+registerExclusiveAutomationSettingsDatabaseLock();
 
 // Keep the test hermetic: the command constructs a SlackNotifier whenever a
 // Slack installation exists and probes channel membership/names after saving.
@@ -59,7 +101,6 @@ const adminAuth: UserAuthSuccess = {
   name: 'Admin',
   primaryEmail: 'admin@example.com',
   isAdmin: true,
-  featureFlags: {},
   anonymousAnalyticsEnabled: false,
   cloudEnabled: false,
   cookieConsentedAt: null,
@@ -134,6 +175,10 @@ function buildInput(
     platformIssueAlertsEnabled: true,
     platformIssueSlackChannel: null,
     platformIssueDiscordChannel: null,
+    releaseAnnouncementsEnabled: true,
+    releaseAnnouncementsTargetProvider: null,
+    releaseAnnouncementsTargetMode: 'channel',
+    releaseAnnouncementsTargetChannelId: null,
     ...overrides,
   };
 }
@@ -168,7 +213,7 @@ async function insertAvailableDiscordChannel(params: {
   });
 }
 
-async function insertSlackInstallation() {
+async function insertAdminUser() {
   await db.insert(users).values({
     id: 'user-admin',
     name: 'Admin',
@@ -176,7 +221,10 @@ async function insertSlackInstallation() {
     imageUrl: '',
     entity: {},
   });
+}
 
+async function insertSlackInstallation() {
+  await insertAdminUser();
   await db.insert(slackInstallations).values({
     teamId: 'T123',
     teamName: 'Acme',
@@ -204,16 +252,138 @@ async function getAutomationTargets(key: BackgroundAutomationKey) {
 }
 
 describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
+  const createdRepositoryIds: string[] = [];
+  afterEach(async () => {
+    for (const id of createdRepositoryIds.splice(0))
+      await db.delete(repositories).where(eq(repositories.id, id));
+  });
   beforeEach(async () => {
     mockCaptureActivationAutomationChanged.mockClear();
-    await db.delete(automations);
+    mockRunAutomationNow.mockClear();
+    mockResolveAutomationRepositoryDestination.mockClear();
+    mockResolveAutomationRuntimeDestination.mockClear();
+    mockCanStartAgentMailConversationWithUser.mockClear();
+    mockResolveRules.mockReset();
+    mockCanStartAgentMailConversationWithUser.mockResolvedValue(true);
+    // Internal automation rows are referenced by other suites' task fixtures.
+    await db
+      .delete(automations)
+      .where(inArray(automations.key, USER_FACING_AUTOMATION_KEYS));
+    await ensureAutomationRows();
+    await db
+      .update(automations)
+      .set({ enabled: false, schedule: { mode: 'off' } })
+      .where(inArray(automations.key, USER_FACING_AUTOMATION_KEYS));
+    await upsertAutomation(db, {
+      key: 'platform_issue_alerts',
+      enabled: true,
+    });
     await db.delete(deploymentSettings);
     await db.delete(discordInstallations);
     await db.delete(slackInstallations);
     await db.delete(users).where(eq(users.id, adminAuth.userId));
   });
 
+  it('saves and reloads an exact owner-bound Email destination', async () => {
+    const identityId = 'verified:user-admin:opaque';
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'managerStats',
+        managerStatsFrequency: 'weekly',
+        managerStatsSlackChannel: null,
+        managerStatsDiscordChannel: null,
+        managerStatsEmailIdentityId: identityId,
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(mockCanStartAgentMailConversationWithUser).toHaveBeenCalledWith(
+      adminAuth.userId,
+      identityId,
+    );
+    const automation = await db.query.automations.findFirst({
+      where: eq(automations.key, 'manager_stats'),
+    });
+    expect(automation?.targets).toEqual([
+      {
+        provider: 'email',
+        targetKind: 'email_user',
+        externalRef: adminAuth.userId,
+        metadata: { emailIdentityId: identityId },
+      },
+    ]);
+    const settings = await getBackgroundAgentSettingsForDeployment();
+    expect(settings.managerStatsEmailIdentityId).toBe(identityId);
+    expect(settings.managerStatsEmailUserId).toBe(adminAuth.userId);
+  });
+
+  it('preserves an unchanged unavailable Email destination without substitution', async () => {
+    const identityId = 'verified:user-admin:old';
+    await upsertAutomation(db, {
+      key: 'provider_usage_limit',
+      enabled: true,
+      schedule: { mode: 'every_hour' },
+      targets: [
+        {
+          provider: 'email',
+          targetKind: 'email_user',
+          externalRef: adminAuth.userId,
+          metadata: { emailIdentityId: identityId },
+        },
+      ],
+    });
+    mockCanStartAgentMailConversationWithUser.mockResolvedValue(false);
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'providerUsageLimit',
+        providerUsageLimitFrequency: 'every_hour',
+        providerUsageLimitThreshold: 80,
+        providerUsageLimitEmailIdentityId: identityId,
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(mockCanStartAgentMailConversationWithUser).not.toHaveBeenCalled();
+    const automation = await db.query.automations.findFirst({
+      where: eq(automations.key, 'provider_usage_limit'),
+    });
+    expect(automation?.targets).toContainEqual({
+      provider: 'email',
+      targetKind: 'email_user',
+      externalRef: adminAuth.userId,
+      metadata: { emailIdentityId: identityId },
+    });
+  });
+
+  it('rejects a newly selected unavailable Email identity', async () => {
+    mockCanStartAgentMailConversationWithUser.mockResolvedValue(false);
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'managerStats',
+        managerStatsFrequency: 'weekly',
+        managerStatsEmailIdentityId: 'verified:user-admin:missing',
+      }),
+    );
+
+    expect(result).toEqual({
+      success: false,
+      fieldErrors: {
+        managerStatsEmailIdentityId:
+          'This Email destination is no longer available.',
+      },
+    });
+  });
+
   it('tracks a built-in automation when its enabled state changes', async () => {
+    await upsertAutomation(db, {
+      key: 'manager_stats',
+      enabled: false,
+      schedule: { mode: 'weekly' },
+    });
     await insertAvailableDiscordChannel({
       guildId: 'guild-1',
       channelId: 'channel-1',
@@ -236,7 +406,327 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
     );
   });
 
+  it('persists and preserves Additional rules for a non-CI eligible automation', async () => {
+    await insertSlackInstallation();
+    const repo = await repositoryFactory.create({
+      fullName: 'acme/suggestions',
+      sourceControlProvider: 'gitlab',
+      linkedByUserId: adminAuth.userId,
+    });
+    createdRepositoryIds.push(repo.id);
+    mockResolveRules.mockResolvedValue({
+      object: {
+        status: 'resolved',
+        repositoryIds: [repo.id],
+        destinations: [],
+        instructions: 'Prioritize reliability work.',
+        clarification: null,
+      },
+    });
+    const text = 'Only suggest work for suggestions. Prioritize reliability.';
+
+    const saved = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'suggester',
+        suggesterAdditionalRules: text,
+      }),
+    );
+    expect(saved.success).toBe(true);
+    expect(saved.success && saved.settings.suggesterAdditionalRules).toBe(text);
+
+    await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({ savingAutomation: 'suggester' }),
+    );
+    expect(
+      (await getBackgroundAgentSettingsForDeployment())
+        .suggesterAdditionalRules,
+    ).toBe(text);
+
+    await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'suggester',
+        suggesterAdditionalRules: '',
+      }),
+    );
+    expect(
+      (await getBackgroundAgentSettingsForDeployment())
+        .suggesterAdditionalRules,
+    ).toBe('');
+  });
+
+  it('runs an eligible automation with only a rules-based destination', async () => {
+    mockResolveAutomationRuntimeDestination.mockResolvedValueOnce(null);
+    await insertAdminUser();
+    await insertAvailableDiscordChannel({
+      guildId: 'guild-rules',
+      channelId: 'channel-rules',
+      channelName: 'suggestions',
+    });
+    const repo = await repositoryFactory.create({
+      fullName: 'acme/routed-suggestions',
+      sourceControlProvider: 'gitlab',
+      linkedByUserId: adminAuth.userId,
+    });
+    createdRepositoryIds.push(repo.id);
+    const text = 'Send routed-suggestions reports to the suggestions channel.';
+    await upsertAutomation(db, {
+      key: 'suggester',
+      enabled: true,
+      schedule: { mode: 'daily' },
+      settings: {
+        additionalRules: text,
+        compiledRules: {
+          text,
+          repositoryIds: [repo.id],
+          destinations: [
+            {
+              repositoryId: repo.id,
+              target: {
+                provider: 'discord',
+                externalRef: 'channel-rules',
+                workspaceId: 'guild-rules',
+              },
+            },
+          ],
+          instructions: '',
+        },
+      },
+    });
+    mockResolveAutomationRepositoryDestination.mockResolvedValueOnce({
+      provider: 'discord',
+      channelId: 'channel-rules',
+      source: 'automation_target',
+    });
+
+    await triggerAutomationCommand(adminAuth, { automationKey: 'suggester' });
+
+    expect(mockRunAutomationNow).toHaveBeenCalledWith('suggester', {});
+  });
+
+  it('roundtrips CI rules, preserves unrelated/omitted-field saves, and clears to all explicitly', async () => {
+    await insertSlackInstallation();
+    const repo = await repositoryFactory.create({
+      sourceControlProvider: 'gitlab',
+      linkedByUserId: adminAuth.userId,
+    });
+    createdRepositoryIds.push(repo.id);
+    const text = 'Only triage the backend repository.';
+    mockResolveRules.mockResolvedValue({
+      object: {
+        status: 'resolved',
+        repositoryIds: [repo.id],
+        destinations: [],
+        instructions: '',
+        clarification: null,
+      },
+    });
+    await upsertAutomation(db, {
+      key: 'ci_failure_triage',
+      enabled: false,
+      settings: { preserved: true },
+    });
+    const saved = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'ciFailureTriage',
+        ciFailureTriageFrequency: 'daily',
+        ciFailureTriageAdditionalRules: text,
+        ciFailureTriageSlackChannel: 'C123LEGACY',
+      }),
+    );
+    expect(saved.success).toBe(true);
+    if (!saved.success) throw new Error(JSON.stringify(saved.fieldErrors));
+    expect(saved.settings.ciFailureTriageAdditionalRules).toEqual(text);
+    const read = await getBackgroundAgentSettingsCommand(adminAuth);
+    expect(read.settings.ciFailureTriageAdditionalRules).toEqual(text);
+    expect(read.resolvedDestinations.ci_failure_triage).not.toBeNull();
+    await triggerAutomationCommand(adminAuth, {
+      automationKey: 'ci_failure_triage',
+    });
+    expect(mockRunAutomationNow).toHaveBeenCalledWith('ci_failure_triage', {});
+    await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'announcer',
+        ciFailureTriageAdditionalRules: null,
+      }),
+    );
+    expect(
+      (await getBackgroundAgentSettingsForDeployment())
+        .ciFailureTriageAdditionalRules,
+    ).toEqual(text);
+    await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({ savingAutomation: 'ciFailureTriage' }),
+    );
+    expect(
+      (await getBackgroundAgentSettingsForDeployment())
+        .ciFailureTriageAdditionalRules,
+    ).toEqual(text);
+    mockResolveRules.mockResolvedValue({
+      object: {
+        status: 'resolved',
+        repositoryIds: [],
+        destinations: [],
+        instructions: '',
+        clarification: null,
+      },
+    });
+    const empty = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'ciFailureTriage',
+        ciFailureTriageFrequency: 'daily',
+        ciFailureTriageAdditionalRules: 'Do not triage any repositories.',
+        ciFailureTriageSlackChannel: 'C123LEGACY',
+      }),
+    );
+    expect(empty.success).toBe(true);
+    expect(
+      (await getBackgroundAgentSettingsForDeployment())
+        .ciFailureTriageAdditionalRules,
+    ).toEqual('Do not triage any repositories.');
+    mockRunAutomationNow.mockClear();
+    await expect(
+      triggerAutomationCommand(adminAuth, {
+        automationKey: 'ci_failure_triage',
+      }),
+    ).rejects.toThrow('Select at least one active repository');
+    expect(mockRunAutomationNow).not.toHaveBeenCalled();
+    await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'ciFailureTriage',
+        ciFailureTriageAdditionalRules: '',
+      }),
+    );
+    expect(
+      (await getBackgroundAgentSettingsForDeployment())
+        .ciFailureTriageAdditionalRules,
+    ).toBe('');
+    expect(
+      (
+        await db.query.automations.findFirst({
+          where: eq(automations.key, 'ci_failure_triage'),
+        })
+      )?.settings,
+    ).toEqual({ preserved: true });
+    await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'ciFailureTriage',
+        ciFailureTriageFrequency: 'daily',
+        ciFailureTriageSlackChannel: 'C123LEGACY',
+      }),
+    );
+    await triggerAutomationCommand(adminAuth, {
+      automationKey: 'ci_failure_triage',
+    });
+    expect(mockRunAutomationNow).toHaveBeenCalledWith('ci_failure_triage', {
+      destination: expect.objectContaining({ channelId: 'C123LEGACY' }),
+    });
+  });
+
+  it.each(['unavailable', 'ambiguous', 'malformed'])(
+    'preserves saved CI rules, destination and enabled state on %s model failure',
+    async (failure) => {
+      const settings = {
+        additionalRules: 'Keep reports short.',
+        compiledRules: {
+          text: 'Keep reports short.',
+          repositoryIds: null,
+          destinations: [],
+          instructions: 'Keep reports short.',
+        },
+      };
+      await upsertAutomation(db, {
+        key: 'ci_failure_triage',
+        enabled: true,
+        schedule: { mode: 'daily' },
+        settings,
+      });
+      const before = await db.query.automations.findFirst({
+        where: eq(automations.key, 'ci_failure_triage'),
+      });
+      if (failure === 'unavailable')
+        mockResolveRules.mockRejectedValueOnce(new Error('Model unavailable'));
+      else
+        mockResolveRules.mockResolvedValueOnce({
+          object:
+            failure === 'ambiguous'
+              ? {
+                  status: 'ambiguous',
+                  repositoryIds: null,
+                  destinations: [],
+                  instructions: '',
+                  clarification: 'Which repository?',
+                }
+              : { status: 'resolved', repositoryIds: 'all' },
+        });
+      const result = await updateBackgroundAgentSettingsCommand(
+        adminAuth,
+        buildInput({
+          savingAutomation: 'ciFailureTriage',
+          ciFailureTriageAdditionalRules: 'Only triage backend.',
+        }),
+      );
+      expect(result.success).toBe(false);
+      expect(
+        await db.query.automations.findFirst({
+          where: eq(automations.key, 'ci_failure_triage'),
+        }),
+      ).toEqual(before);
+    },
+  );
+
+  it('rejects missing, inactive, and overlapping CI repositories without changing persisted scope', async () => {
+    await insertSlackInstallation();
+    const repo = await repositoryFactory.create({
+      sourceControlProvider: 'gitlab',
+      linkedByUserId: adminAuth.userId,
+      isActive: false,
+    });
+    createdRepositoryIds.push(repo.id);
+    for (const repositoryIds of [
+      [repo.id],
+      ['10000000-0000-4000-8000-000000000001'],
+      [repo.id, repo.id],
+    ]) {
+      mockResolveRules.mockResolvedValue({
+        object: {
+          status: 'resolved',
+          repositoryIds,
+          destinations: [],
+          instructions: '',
+          clarification: null,
+        },
+      });
+      const result = await updateBackgroundAgentSettingsCommand(
+        adminAuth,
+        buildInput({
+          savingAutomation: 'ciFailureTriage',
+          ciFailureTriageAdditionalRules: 'Only triage backend.',
+        }),
+      );
+      expect(result.success).toBe(false);
+      if (result.success) throw new Error('Expected validation failure');
+      expect(result.fieldErrors.ciFailureTriageAdditionalRules).toBeTruthy();
+    }
+    expect(
+      (await getBackgroundAgentSettingsForDeployment())
+        .ciFailureTriageAdditionalRules,
+    ).toBe('');
+  });
+
   it('does not track a built-in automation when its enabled state is unchanged', async () => {
+    await upsertAutomation(db, {
+      key: 'manager_stats',
+      enabled: false,
+      schedule: { mode: 'weekly' },
+    });
     const result = await updateBackgroundAgentSettingsCommand(
       adminAuth,
       buildInput({ savingAutomation: 'managerStats' }),
@@ -327,6 +817,11 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
   });
 
   it('disables provider usage alerts without requiring a Slack channel', async () => {
+    await upsertAutomation(db, {
+      key: 'provider_usage_limit',
+      enabled: true,
+      schedule: { mode: 'every_hour' },
+    });
     const result = await updateBackgroundAgentSettingsCommand(
       adminAuth,
       buildInput({
@@ -420,7 +915,86 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
     }
   }, 15_000);
 
+  it('configures and disables installed release announcements as a built-in automation', async () => {
+    await insertSlackInstallation();
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'releaseAnnouncements',
+        releaseAnnouncementsEnabled: false,
+        releaseAnnouncementsTargetProvider: 'slack',
+        releaseAnnouncementsTargetMode: 'channel',
+        releaseAnnouncementsTargetChannelId: 'C-RELEASES',
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.settings.releaseAnnouncementsEnabled).toBe(false);
+      expect(result.settings.releaseAnnouncementsTargetProvider).toBe('slack');
+      expect(result.settings.releaseAnnouncementsTargetChannelId).toBe(
+        'C-RELEASES',
+      );
+    }
+    await expect(
+      db.query.automations.findFirst({
+        where: eq(automations.key, 'release_announcements'),
+      }),
+    ).resolves.toMatchObject({
+      enabled: false,
+      settings: { optedOut: true },
+      targets: [
+        {
+          provider: 'slack',
+          targetKind: 'slack_channel',
+          externalRef: 'C-RELEASES',
+        },
+      ],
+    });
+    expect(mockCaptureActivationAutomationChanged).toHaveBeenCalledWith(
+      'disabled',
+      'release_announcements',
+    );
+  });
+
+  it('manually tests release announcements with the normal saved destination', async () => {
+    await insertAvailableDiscordChannel({
+      guildId: 'guild-1',
+      channelId: 'D-RELEASES',
+      channelName: 'releases',
+    });
+    await upsertAutomation(db, {
+      key: 'release_announcements',
+      enabled: true,
+      settings: { optedOut: false },
+      targets: [
+        {
+          provider: 'discord',
+          targetKind: 'discord_channel',
+          externalRef: 'D-RELEASES',
+        },
+      ],
+    });
+
+    await triggerAutomationCommand(adminAuth, {
+      automationKey: 'release_announcements',
+    });
+
+    expect(mockRunAutomationNow).toHaveBeenCalledWith('release_announcements', {
+      destination: expect.objectContaining({
+        provider: 'discord',
+        channelId: 'D-RELEASES',
+      }),
+    });
+  });
+
   it('switches a Discord manager channel to Slack and clears Discord', async () => {
+    await upsertAutomation(db, {
+      key: 'manager_stats',
+      enabled: false,
+      schedule: { mode: 'weekly' },
+    });
     await insertSlackInstallation();
     await db.insert(deploymentSettings).values({
       id: 'default',
@@ -1214,7 +1788,10 @@ async function getAutomationTargetsWithMetadata(key: BackgroundAutomationKey) {
 
 describe('updateBackgroundAgentSettingsCommand Discord channel auto-start', () => {
   beforeEach(async () => {
-    await db.delete(automations);
+    // Internal automation rows are referenced by other suites' task fixtures.
+    await db
+      .delete(automations)
+      .where(inArray(automations.key, USER_FACING_AUTOMATION_KEYS));
     await db.delete(deploymentSettings);
     await db.delete(discordInstallations);
     await db.delete(slackInstallations);
@@ -1222,6 +1799,12 @@ describe('updateBackgroundAgentSettingsCommand Discord channel auto-start', () =
   });
 
   it('writes discord auto-respond targets alongside Slack ones with merged order', async () => {
+    await expect(
+      db.query.automations.findFirst({
+        where: eq(automations.key, 'slack_channel_auto_start'),
+      }),
+    ).resolves.toBeUndefined();
+
     await insertAvailableDiscordChannel({
       guildId: 'guild-1',
       channelId: 'D111',
@@ -1285,6 +1868,67 @@ describe('updateBackgroundAgentSettingsCommand Discord channel auto-start', () =
       },
     ]);
     expect(result.settings.channelAutoStartEnabled).toBe(true);
+  }, 15_000);
+
+  it('preserves disabled auto-respond state and channels for legacy updates', async () => {
+    await insertAvailableDiscordChannel({
+      guildId: 'guild-1',
+      channelId: 'D111',
+      channelName: 'bugs',
+    });
+    const channels = [
+      {
+        channelId: 'D111',
+        instructions: 'Keep the existing routing.',
+        launchMode: 'always_start' as const,
+        launchCriteria: null,
+      },
+    ];
+
+    await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'channelAutoStart',
+        channelAutoStartSlackChannels: [],
+        channelAutoStartDiscordChannels: channels,
+      }),
+    );
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'channelAutoStart',
+        channelAutoStartEnabled: false,
+        channelAutoStartSlackChannels: [],
+        channelAutoStartDiscordChannels: channels,
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error('unreachable');
+    expect(result.settings.channelAutoStartEnabled).toBe(false);
+    expect(result.settings.channelAutoStartDiscordChannels).toEqual(channels);
+
+    const legacyResult = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'channelAutoStart',
+        channelAutoStartSlackChannels: [],
+        channelAutoStartDiscordChannels: channels,
+      }),
+    );
+    expect(legacyResult.success).toBe(true);
+    if (!legacyResult.success) throw new Error('unreachable');
+    expect(legacyResult.settings.channelAutoStartEnabled).toBe(false);
+    expect(legacyResult.settings.channelAutoStartDiscordChannels).toEqual(
+      channels,
+    );
+    expect(await getAutomationTargets('slack_channel_auto_start')).toEqual([
+      {
+        provider: 'discord',
+        targetKind: 'discord_channel',
+        externalRef: 'D111',
+      },
+    ]);
   }, 15_000);
 
   it('supports discord-only auto-respond without a Slack installation', async () => {

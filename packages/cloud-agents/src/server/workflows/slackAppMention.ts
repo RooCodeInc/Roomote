@@ -115,16 +115,16 @@ export function buildSlackMessageInstructions({
     <rule>Sending an \`ack\` or \`progress\` reply does not end your turn. Once that reply lands, keep working in the same turn: continue tool calls, edits, validation, and delivery from where you left off. Do not treat a progress reply as a stopping point or wait for another user message to resume. A \`clarification\` reply behaves the same way while you can still make real progress without the answer.</rule>
     <rule>The turn ends on a \`closeout\` reply, on a \`clarification\` whose answer the next step genuinely depends on, or on an explicit user instruction to pause or stop. A blocking clarification is a real stopping point: wait for the answer rather than proceeding on a guess, and do not follow it with a separate "waiting on your answer" message.</rule>
     <rule>Outside those cases, a reply that describes what you are about to do next is a \`progress\` reply, and you must actually do it in the same turn instead of stopping there. When implementation, validation, proof, or delivery work is still owed and nothing is blocking it, announcing the next step is not a substitute for taking it.</rule>
-    <rule>Use \`send_chat_reaction_emoji\` for lightweight acknowledgements, confirmations, or emoji-only answers only when the latest directed user turn came from Slack and the prompt-provided \`<slack_turn_policy>\` block allows reactions, especially when \`prefer_emoji_ack="true"\`. Use \`send_chat_reply\` when the answer needs words or when the latest user turn did not come from Slack. When the user explicitly wants a reaction added to a different known Slack message, use \`add_reaction_to_slack_message\` for that other-message reaction.</rule>
-    <rule>When using \`send_chat_reaction_emoji\`, choose the reaction that best matches the intent instead of treating \`eyes\` as the default. Reserve \`eyes\` for "taking a look" or active investigation, use \`thumbsup\` for acknowledgement, agreement, or go-ahead, use \`white_check_mark\` for completed work, and prefer another reaction when it fits the interaction better.</rule>
+    <rule>Use \`send_chat_reaction_emoji\` for lightweight acknowledgements, confirmations, or emoji-only answers only when the latest directed user turn came from Slack and the prompt-provided \`<slack_turn_policy>\` block allows reactions, especially when \`prefer_emoji_ack="true"\`. Use \`send_chat_reply\` when the answer needs words or when the latest user turn did not come from Slack.</rule>
+    <rule>When using \`send_chat_reaction_emoji\`, choose a reaction that communicates something beyond working status: use \`thumbsup\` for acknowledgement, agreement, or go-ahead, use \`white_check_mark\` for completed work, and prefer another reaction when it fits the interaction better. Do not use \`eyes\` as an automatic processing or working-status acknowledgement; platform-managed suggestion acceptance may still use it when work continues in a different thread.</rule>
     <rule>Keep Slack-visible replies in the originating thread by default, even when the context references a customer message, linked feedback thread, or another Slack channel.</rule>
     <rule>Use \`post_to_channel\` only when the current user explicitly asks you to send or relay an update to a different channel or thread. Do not use it to answer third parties just because another conversation appears in context.</rule>
     <rule>When a blocker, delivery update, input request, useful progress update, or closeout would otherwise leave the Slack thread hanging, post the concise Slack lifecycle reply before finalizing.</rule>
     ${slackProofDeliveryInstructions}
     <rule>When sharing screenshots or screencast links with \`send_chat_reply\`, and the environment instructions expose configured external preview URLs, include the most relevant preview link in the Slack text. Prefer the matching port for the proved surface, or the primary port when one relevant match is not explicit. Do not share raw machine hosts instead of those configured preview URLs.</rule>
     <rule>Do not add a separate sentence telling the user to use the task UI; the Slack thread reply tool already appends the standard footer.</rule>
-    <rule>When reactions are allowed and the latest directed user turn itself came from Slack, using \`send_chat_reaction_emoji\` on that current Slack message counts as answering that Slack turn. When the latest user turn did not come from Slack, \`send_chat_reaction_emoji\` does not count as satisfying the turn. When the user explicitly asks for a reaction on a different known Slack message, \`add_reaction_to_slack_message\` counts only when it targets that requested message.</rule>
-    <rule>Every new Slack user turn that you answer still needs its own fresh Slack-visible satisfaction tool call. A prior turn's \`send_chat_reply\`, \`send_chat_reaction_emoji\`, or \`add_reaction_to_slack_message\` call on a different message does not satisfy a later turn. A reaction only counts for the turn it actually answers.</rule>
+    <rule>When reactions are allowed and the latest directed user turn itself came from Slack, using \`send_chat_reaction_emoji\` on that current Slack message counts as answering that Slack turn. When the latest user turn did not come from Slack, \`send_chat_reaction_emoji\` does not count as satisfying the turn.</rule>
+    <rule>Every new Slack user turn that you answer still needs its own fresh Slack-visible satisfaction tool call. A prior turn's \`send_chat_reply\` or \`send_chat_reaction_emoji\` call does not satisfy a later turn. A reaction only counts for the turn it actually answers.</rule>
   </slack_response_delivery>
 
   ${
@@ -229,6 +229,38 @@ export function buildChatProviderMessageInstructions(
 
 export function buildTeamsMessageInstructions(): string {
   return buildChatProviderMessageInstructions('teams');
+}
+
+/**
+ * Email cadence differs deliberately from the chat providers: every reply
+ * lands in someone's inbox and spends the deployment's daily send quota, so
+ * the default is roughly two emails per task (an acknowledgement and the
+ * result), batched updates, and no reactions or play-by-play.
+ */
+export function buildAgentMailMessageInstructions(): string {
+  return `
+<email_message_instructions>
+  <email_input_format>
+    <context>This task originates from an email thread. Incoming follow-ups arrive as provider-neutral chat message blocks containing the sender's new message text with quoted history already stripped.</context>
+    <rule>When present, a \`<thread_context>...</thread_context>\` block contains earlier messages from the email thread for conversational context. Treat it as background, not as the latest instruction.</rule>
+  </email_input_format>
+
+  <email_cadence>
+    <context>Email is a low-frequency surface, not chat. Every \`send_chat_reply\` becomes a new email in the recipient's inbox.</context>
+    <rule>Aim for two emails per task: one brief acknowledgement that work has started (with the task link), then one reply carrying the result. Send nothing in between unless the work is genuinely blocked on the user's input.</rule>
+    <rule>Never send progress updates, phase transitions, heartbeat messages, or internal-milestone narration over email. Task UI commentary covers those.</rule>
+    <rule>Batch related content into one reply instead of sending several small emails in a burst.</rule>
+    <rule>Emoji reactions are not available on email; never attempt \`send_chat_reaction_emoji\`.</rule>
+    <rule>Questions are acceptable email: when the next step genuinely depends on the user's answer, one clear reply asking the question (or \`request_user_input\` for structured/private input, paired with a brief reply saying work is paused) is correct.</rule>
+    <rule>The closeout reply leads with the answer or result, links the PR or task where relevant, and reads as a complete, self-contained email: the recipient may open it hours later without surrounding context.</rule>
+  </email_cadence>
+
+  <email_message_style>
+    <rule>Write like a considerate colleague's email: a short opening line with the outcome, then only the detail the reader needs. Standard Markdown renders as formatted email HTML.</rule>
+    <rule>Do not include greetings/signatures boilerplate; the thread carries identity. Keep subject continuity by replying in-thread (automatic).</rule>
+  </email_message_style>
+</email_message_instructions>
+`.trim();
 }
 
 function formatWorkspaceReadinessContext({

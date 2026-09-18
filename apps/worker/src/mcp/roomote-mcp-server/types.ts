@@ -3,7 +3,7 @@ import type {
   SourceControlProvider,
   TaskArtifactType,
   TaskModelOption,
-  TaskGoal,
+  RoomoteTranscriptMessagesResponse,
 } from '@roomote/types';
 
 export interface ArtifactConfig {
@@ -20,18 +20,6 @@ export interface RoomoteConfig {
   authBypassHeaderName?: string;
   authBypassHeaderValue?: string;
 }
-
-export type TaskGoalWire = Omit<TaskGoal, 'completedAt'> & {
-  completedAt: string | null;
-};
-
-export interface TaskGoalResponse {
-  goal: TaskGoalWire | null;
-}
-
-export type TaskGoalMutationResponse =
-  | { updated: true; goal: TaskGoalWire }
-  | { updated: false; reason: string; goal: TaskGoalWire | null };
 
 export interface TaskSearchResult {
   id: string;
@@ -56,6 +44,7 @@ export interface TaskSearchResponse {
 export interface TaskSummaryResponse {
   id: string;
   title: string | null;
+  summary?: string | null;
   mode: string | null;
   completed: boolean;
   repositoryName: string | null;
@@ -67,6 +56,15 @@ export interface TaskSummaryResponse {
   environmentSetupState: string | null;
   linkedEnvironmentId: string | null;
   linkedEnvironmentName: string | null;
+  imageArtifacts?: Array<{
+    id: string;
+    path: string;
+    version: number;
+    artifactType: string;
+    contentType: string;
+    viewUrl: string;
+  }>;
+  videoArtifacts?: TaskSummaryResponse['imageArtifacts'];
 }
 
 export interface TaskComputeLog {
@@ -117,13 +115,6 @@ export interface SourceControlIssueResponse {
   number: number;
   warnings: string[];
   [key: string]: unknown;
-}
-
-export interface LaunchTaskResponse {
-  success: boolean;
-  runId?: number;
-  taskId?: string;
-  error?: string;
 }
 
 export interface CreateEnvironmentResponse {
@@ -222,22 +213,7 @@ export interface CommunicationChannelMessagesResponse {
   messages: CommunicationLookupMessage[];
 }
 
-export interface TaskMessage {
-  id: string;
-  taskId: string;
-  ts: number;
-  eventType: string;
-  role: 'user' | 'assistant' | 'system' | 'tool' | null;
-  text: string | null;
-  images: string[];
-  metadata: Record<string, unknown> | null;
-  visibleInTranscript?: boolean;
-}
-
-export interface TaskMessagesResponse {
-  messages: TaskMessage[];
-  returned: number;
-}
+export type TaskMessagesResponse = RoomoteTranscriptMessagesResponse;
 
 export interface SendMessageResponse {
   success: boolean;
@@ -280,22 +256,6 @@ export interface SubmitAutomationWorkItemsResponse {
 export interface StopTaskResponse {
   success: boolean;
   error?: string;
-}
-
-interface RepoInfo {
-  id: number;
-  fullName: string;
-}
-
-export interface EnvironmentInfo {
-  id: string;
-  name: string;
-  description: string | null;
-  repositories: RepoInfo[];
-}
-
-export interface ListEnvironmentsResponse {
-  environments: EnvironmentInfo[];
 }
 
 export interface ListTaskModelsResponse {

@@ -229,7 +229,7 @@ export function McpToolManagementDialog({
       <DialogContent size="xl">
         <DialogHeader>
           <DialogTitle>
-            Manage {integrationName ?? 'integration'} tools
+            Manage tools for {integrationName ?? 'integration'}
           </DialogTitle>
           <DialogDescription>
             Enable or disable MCP tools for this integration.

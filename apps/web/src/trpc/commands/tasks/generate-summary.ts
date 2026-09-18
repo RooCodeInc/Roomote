@@ -11,6 +11,7 @@ import type { UserAuthSuccess, TaskMessageEnvelope } from '@/types';
 import { getUserDisplayName } from '@/lib/user-display-name';
 
 import { getTaskMessageEnvelopes } from '@/lib/server';
+import { requireTaskAccess } from '@/lib/server/custom-automation-task-access';
 
 // Maximum number of messages to include in the summary prompt.
 const MAX_MESSAGES = 100;
@@ -288,6 +289,7 @@ export async function generateTaskSummaryCommand(
   auth: UserAuthSuccess,
   input: { taskId: string },
 ): Promise<TaskSummaryResult> {
+  await requireTaskAccess(auth, input.taskId);
   let messageCount = 0;
 
   try {

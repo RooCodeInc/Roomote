@@ -21,6 +21,7 @@ vi.mock('@roomote/ado', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  isCiFailureTriageRepositoryEnabled: vi.fn().mockResolvedValue(true),
   launchCiFailureTriageForFailedRun: (...args: unknown[]) =>
     mockLaunchCiFailureTriageForFailedRun(...args),
 }));
@@ -45,6 +46,7 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 import { handleAdoBuild } from '../handleBuild';
+import { isCiFailureTriageRepositoryEnabled } from '@roomote/sdk/server';
 
 function buildPayload(
   overrides: {
@@ -93,6 +95,12 @@ function buildPayload(
 }
 
 describe('handleAdoBuild', () => {
+  it('gates excluded repositories before fetching failure evidence', async () => {
+    vi.mocked(isCiFailureTriageRepositoryEnabled).mockResolvedValueOnce(false);
+    expect((await handleAdoBuild(buildPayload())).message).toContain('outside');
+    expect(mockGetAdoBuildFailureEvidence).not.toHaveBeenCalled();
+    expect(mockLaunchCiFailureTriageForFailedRun).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     mockDbFindMany.mockResolvedValue([

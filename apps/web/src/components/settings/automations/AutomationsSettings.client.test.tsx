@@ -45,6 +45,7 @@ const baseFormState: FormState = {
   conflictResolverMaxPrAgeDays: 7 as const,
   conflictResolverLabel: 'roomote:auto-resolve-conflicts',
   conflictResolverInstructions: '',
+  channelAutoStartEnabled: false,
   channelAutoStartChannels: [],
   managerSlackChannel: '',
   managerDiscordChannel: '',
@@ -94,9 +95,31 @@ const baseFormState: FormState = {
   platformIssueAlertsEnabled: true,
   platformIssueSlackChannel: '',
   platformIssueDiscordChannel: '',
+  releaseAnnouncementsEnabled: true,
+  releaseAnnouncementsTargetProvider: 'none',
+  releaseAnnouncementsTargetMode: 'channel',
+  releaseAnnouncementsTargetChannelId: '',
 };
 
 describe('Automations selection helpers', () => {
+  it('saves and clears CI rules while preserving unrelated card values', () => {
+    const scoped = {
+      ...baseFormState,
+      ciFailureTriageAdditionalRules: 'Only triage backend.',
+    };
+    expect(
+      buildAutomationSettingsSaveInput(scoped, baseFormState, 'ciFailureTriage')
+        .ciFailureTriageAdditionalRules,
+    ).toEqual('Only triage backend.');
+    expect(
+      buildAutomationSettingsSaveInput(baseFormState, scoped, 'ciFailureTriage')
+        .ciFailureTriageAdditionalRules,
+    ).toBe('');
+    expect(
+      buildAutomationSettingsSaveInput(scoped, baseFormState, 'announcer')
+        .ciFailureTriageAdditionalRules,
+    ).toBe('');
+  });
   it('saves Merge announcer through the standard provider/mode destination fields', () => {
     const input = buildAutomationSettingsSaveInput(
       {

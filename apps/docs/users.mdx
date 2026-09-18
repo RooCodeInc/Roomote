@@ -60,6 +60,17 @@ Operators can also configure an email allowlist for a self-hosted deployment.
 When that allowlist is active, a user still needs to pass the normal sign-in
 rules and have an allowed email address.
 
+## Staying signed in
+
+Web sign-in sessions last 30 days from sign-in or the last renewal. While you
+use the web app, eligible browser requests renew both the session and its
+cookie, at most once every 24 hours. Simply leaving a sleeping or closed browser
+open does not renew a session. After the session expires, sign in again.
+
+Signing out, removal by an admin, and password resets still revoke sessions.
+Clearing browser cookies or rotating the deployment's session-signing secret
+also requires signing in again. Sign out when using a shared device.
+
 ## License and seats
 
 A Roomote deployment is free for up to 10 users. Every registered user
@@ -147,8 +158,15 @@ through an allowed organization sign-in path.
 
 ## Password reset flow
 
-Roomote uses admin-created password reset links for email/password accounts.
-There is no public self-serve "forgot password" email flow.
+When the Email (AgentMail) communications provider is enabled and configured,
+email/password users can select **Forgot your password? Reset it** on the sign-in
+form. Roomote always shows the same confirmation, whether or not the address
+belongs to an active email/password account. If it does, AgentMail sends a reset
+link to that address.
+
+If AgentMail is disabled or is missing its API key or inbox configuration, the
+sign-in form keeps the admin-assisted fallback. Admin-created reset links remain
+available regardless of AgentMail configuration.
 
 To reset a user's password:
 
@@ -158,9 +176,9 @@ To reset a user's password:
 4. Create the reset link.
 5. Send the link to the user through your preferred secure channel.
 
-Reset links expire after one hour. When the user opens the link, they choose a
-new password on the Roomote reset page and then sign in again. Existing
-sessions are revoked after the password is reset.
+Self-service and admin-created reset links expire after one hour. When the user
+opens the link, they choose a new password on the Roomote reset page and then
+sign in again. Existing sessions are revoked after the password is reset.
 
 The reset action is only available for users who have an email/password
 credential. If a user signs in only through Slack, Microsoft, or another OAuth

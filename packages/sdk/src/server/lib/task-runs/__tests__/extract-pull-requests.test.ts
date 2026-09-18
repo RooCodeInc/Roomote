@@ -352,6 +352,16 @@ describe('parsePRsFromGhPrCheckoutToolResult', () => {
     ]);
   });
 
+  it('does not treat the all-repositories launch target as a repository', () => {
+    const result = parsePRsFromGhPrCheckoutToolResult({
+      command: 'gh pr checkout 2228',
+      fallbackRepository: '__all_repositories__',
+      output: "Switched to branch 'feature/release-roomote-1-3-0'",
+    });
+
+    expect(result).toEqual([]);
+  });
+
   it('prefers an explicit short repo flag over the fallback repository', () => {
     const result = parsePRsFromGhPrCheckoutToolResult({
       command: 'gh pr checkout 2696 -R other/repo --force',

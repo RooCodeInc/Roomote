@@ -19,11 +19,23 @@ import {
 } from '@/lib/server/fast-sessions';
 import { getSessionByIdCommand } from '@/trpc/commands/sessions';
 import { WorkspaceHeader } from '@/components/layout';
-import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
+import { SessionViewers } from '@/components/sessions/SessionViewers';
+import { ServiceCredentials } from '@/components/sessions/ServiceCredentials';
+import { PrivateSessionIcon } from '@/components/sessions/PrivateSessionIcon';
 
+import { hasVoiceAutostartFlag } from '@/lib/voice-autostart';
 import { FastSessionTranscript } from './FastSessionTranscript';
-import { SessionWorkspace, type SessionInfo } from './SessionWorkspace';
+import { SessionTaskTimeline } from './SessionTaskTimeline';
+import {
+  SessionHeaderPullRequests,
+  SessionWorkspace,
+  type SessionInfo,
+} from './SessionWorkspace';
 import { SessionReadTracker } from './SessionReadTracker';
+import {
+  SESSION_HEADER_CONTENT_CLASS_NAME,
+  SESSION_HEADER_TITLE_CLASS_NAME,
+} from './session-header-layout';
 
 const getSessionPageData = cache(async (sessionId: string) => {
   const authorizedUser = await authorize();
@@ -58,6 +70,7 @@ const getSessionPageData = cache(async (sessionId: string) => {
 
 type SessionDetailPageProps = {
   params: Promise<{ sessionId: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
 export async function generateMetadata({
@@ -80,14 +93,24 @@ export async function generateMetadata({
 
 export default async function SessionDetailPage({
   params,
+  searchParams,
 }: SessionDetailPageProps) {
   const { sessionId } = await params;
-  const { authorizedUser, unifiedSession, session } =
-    await getSessionPageData(sessionId);
+  const sessionPageDataPromise = getSessionPageData(sessionId);
+  const modelEnvPromise: Promise<Record<string, string>> =
+    resolveEffectiveModelRuntimeEnv().catch(() => ({}));
+  const [
+    { authorizedUser, unifiedSession, session },
+    modelEnv,
+    resolvedParams,
+  ] = await Promise.all([
+    sessionPageDataPromise,
+    modelEnvPromise,
+    searchParams,
+  ]);
+  const autoStartVoice = hasVoiceAutostartFlag(resolvedParams);
   // The chip's "default" must reflect what Fast actually runs with: the
   // deployment's orchestration model, not the task launch default.
-  const modelEnv: Record<string, string> =
-    await resolveEffectiveModelRuntimeEnv().catch(() => ({}));
   const defaultModelId =
     modelEnv.R_ORCHESTRATION_MODEL || modelEnv.R_MODEL || null;
   const rawDefaultEffort = modelEnv.R_ORCHESTRATION_MODEL_REASONING_EFFORT;
@@ -100,47 +123,112 @@ export default async function SessionDetailPage({
   if (unifiedSession) {
     const sessionInfo: SessionInfo = {
       id: unifiedSession.id,
+      canDelete:
+        unifiedSession.privacy === 'private'
+          ? unifiedSession.privateOwnerUserId === authorizedUser.userId
+          : authorizedUser.isAdmin ||
+            unifiedSession.ownerUserId === authorizedUser.userId,
       ownerName: unifiedSession.ownerName,
       ownerEmail: unifiedSession.ownerEmail,
       ownerImageUrl: unifiedSession.ownerImageUrl,
+      privacy: unifiedSession.privacy,
       surface: unifiedSession.sourceSurface,
       model: session?.model ?? defaultModelId,
       reasoningEffort: session?.reasoningEffort ?? defaultReasoningEffort,
       inferenceCostMicroUsd: unifiedSession.inferenceCostMicroUsd,
+      inferenceCostBreakdown: {
+        directInferenceCostMicroUsd: unifiedSession.directInferenceCostMicroUsd,
+        tasks: unifiedSession.tasks.map((task) => ({
+          taskId: task.taskId,
+          title: task.title,
+          inferenceCostMicroUsd: task.inferenceCostMicroUsd,
+        })),
+      },
       createdAt: unifiedSession.createdAt,
       status: unifiedSession.status,
+      goal: unifiedSession.goal,
       tasks: unifiedSession.tasks,
+      artifacts: unifiedSession.artifacts,
     };
     return (
       <SessionWorkspace session={sessionInfo}>
         <SessionReadTracker sessionId={unifiedSession.id} />
         <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col rounded-r-3xl bg-background">
           {session ? (
-            <FastSessionTranscript
-              sessionId={session.id}
-              initialMessages={session.messages}
-              hasOlderMessages={session.hasOlderMessages}
-              canReply
-              initialTitle={unifiedSession.title}
-              fallbackTitle={unifiedSession.title}
-              sessionModel={session.model}
-              sessionReasoningEffort={session.reasoningEffort}
-              defaultModelId={defaultModelId}
-              defaultReasoningEffort={defaultReasoningEffort}
-              headerExtras={
-                <SessionStatusBadge status={unifiedSession.status} />
-              }
-            />
+            <div className="flex min-h-0 flex-1">
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                <FastSessionTranscript
+                  sessionId={session.id}
+                  secretSessionId={
+                    unifiedSession.ownerUserId === authorizedUser.userId
+                      ? unifiedSession.id
+                      : undefined
+                  }
+                  initialMessages={session.messages}
+                  hasOlderMessages={session.hasOlderMessages}
+                  canReply
+                  initialTitle={unifiedSession.title}
+                  fallbackTitle={unifiedSession.title}
+                  sessionModel={session.model}
+                  sessionReasoningEffort={session.reasoningEffort}
+                  defaultModelId={defaultModelId}
+                  defaultReasoningEffort={defaultReasoningEffort}
+                  autoStartVoice={autoStartVoice}
+                  privateSession={unifiedSession.privacy === 'private'}
+                  sessionGoal={unifiedSession.goal}
+                  {...(unifiedSession.ownerUserId
+                    ? {
+                        owner: {
+                          userId: unifiedSession.ownerUserId,
+                          name: unifiedSession.ownerName,
+                          email: unifiedSession.ownerEmail,
+                          imageUrl: unifiedSession.ownerImageUrl,
+                        },
+                      }
+                    : {})}
+                  headerExtras={
+                    <SessionHeaderPullRequests key="session-pull-requests" />
+                  }
+                  headerActions={
+                    <SessionViewers
+                      key="session-viewers"
+                      sessionId={unifiedSession.id}
+                    />
+                  }
+                />
+              </div>
+            </div>
           ) : (
-            <WorkspaceHeader
-              className="py-4"
-              contentClassName="flex-row items-center gap-3"
-            >
-              <h1 className="min-w-0 flex-1 truncate text-sm font-medium">
-                {unifiedSession.title}
-              </h1>
-              <SessionStatusBadge status={unifiedSession.status} />
-            </WorkspaceHeader>
+            <>
+              <WorkspaceHeader
+                className="py-4"
+                contentClassName={`${SESSION_HEADER_CONTENT_CLASS_NAME} !flex-nowrap`}
+                actions={
+                  <>
+                    {unifiedSession.ownerUserId === authorizedUser.userId ? (
+                      <ServiceCredentials sessionId={unifiedSession.id} />
+                    ) : null}
+                    <SessionViewers sessionId={unifiedSession.id} />
+                  </>
+                }
+              >
+                <div className="flex min-w-0 flex-1 flex-col gap-1">
+                  <h1 className={SESSION_HEADER_TITLE_CLASS_NAME}>
+                    {unifiedSession.title}
+                  </h1>
+                  <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-2 text-xs text-muted-foreground">
+                    {unifiedSession.privacy === 'private' ? (
+                      <PrivateSessionIcon className="text-accent-foreground" />
+                    ) : null}
+                    <SessionHeaderPullRequests />
+                  </div>
+                </div>
+              </WorkspaceHeader>
+              <SessionTaskTimeline
+                sessionId={unifiedSession.id}
+                initialTasks={unifiedSession.tasks}
+              />
+            </>
           )}
         </div>
       </SessionWorkspace>
@@ -148,20 +236,37 @@ export default async function SessionDetailPage({
   }
   if (!session) notFound();
 
+  const fastTasks =
+    (await getFastSessionTasks(authorizedUser, session.id)) ?? [];
+  const directInferenceCostMicroUsd =
+    session.directInferenceCostMicroUsd ?? session.inferenceCostMicroUsd ?? 0;
+  const inferenceCostMicroUsd = fastTasks.reduce(
+    (total, task) => total + task.inferenceCostMicroUsd,
+    directInferenceCostMicroUsd,
+  );
+
   const sessionInfo: SessionInfo = {
     id: session.id,
+    canDelete: false,
     ownerName: session.ownerName,
     ownerEmail: session.ownerEmail,
     ownerImageUrl: session.ownerImageUrl,
+    privacy: session.privacy,
     surface: session.surface,
     model: session.model ?? defaultModelId,
     reasoningEffort: session.reasoningEffort ?? defaultReasoningEffort,
-    inferenceCostMicroUsd: session.inferenceCostMicroUsd,
+    inferenceCostMicroUsd,
+    inferenceCostBreakdown: {
+      directInferenceCostMicroUsd,
+      tasks: fastTasks,
+    },
     createdAt: session.createdAt,
     status: null,
+    goal: null,
     tasks: [],
+    artifacts: [],
     taskSource: 'fast',
-    taskCards: (await getFastSessionTasks(authorizedUser, session.id)) ?? [],
+    taskCards: fastTasks,
   };
   const initialUserMessage = session.messages.find(
     (message) => message.role === 'user',
@@ -184,6 +289,18 @@ export default async function SessionDetailPage({
           sessionReasoningEffort={session.reasoningEffort}
           defaultModelId={defaultModelId}
           defaultReasoningEffort={defaultReasoningEffort}
+          autoStartVoice={autoStartVoice}
+          privateSession={session.privacy === 'private'}
+          {...(session.userId
+            ? {
+                owner: {
+                  userId: session.userId,
+                  name: session.ownerName,
+                  email: session.ownerEmail,
+                  imageUrl: session.ownerImageUrl,
+                },
+              }
+            : {})}
         />
       </div>
     </SessionWorkspace>

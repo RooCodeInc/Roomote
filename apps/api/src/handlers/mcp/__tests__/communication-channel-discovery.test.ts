@@ -181,6 +181,15 @@ describe('listCommunicationChannels', () => {
             },
           ],
         },
+        {
+          provider: 'agentmail',
+          platform: 'Email',
+          connected: false,
+          discoverySupported: false,
+          channels: [],
+          limitation:
+            'Email runs through a single Roomote inbox and conversations are inbound-initiated; there are no enumerable channels.',
+        },
       ],
     });
   });
@@ -228,5 +237,39 @@ describe('listCommunicationChannels', () => {
       result.platforms.find(({ provider }) => provider === 'discord'),
     ).toMatchObject({ channels: [] });
     expect(createDiscordProviderMock).not.toHaveBeenCalled();
+  });
+
+  it('limits Slack discovery to the originating workspace when provided', async () => {
+    findSlackInstallationsMock.mockResolvedValue([
+      { botAccessToken: 'token-1', teamId: 'T1', teamName: 'One' },
+      { botAccessToken: 'token-2', teamId: 'T2', teamName: 'Two' },
+    ]);
+    listPublicChannelsMock.mockResolvedValue([
+      {
+        id: 'C1',
+        name: 'shipping',
+        isPrivate: false,
+        isMember: true,
+      },
+    ]);
+
+    const result = await listCommunicationChannels({
+      actingUserId: 'user-1',
+      slackTeamId: 'T2',
+    });
+
+    expect(
+      result.platforms.find(({ provider }) => provider === 'slack'),
+    ).toMatchObject({
+      connected: true,
+      channels: [
+        expect.objectContaining({
+          id: 'C1',
+          workspaceId: 'T2',
+          workspaceName: 'Two',
+        }),
+      ],
+    });
+    expect(listPublicChannelsMock).toHaveBeenCalledOnce();
   });
 });

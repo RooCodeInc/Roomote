@@ -9,7 +9,15 @@ const {
   mockUpsertPreference,
   mockFindPreference,
   mockRetireCanonical,
+  mockRetireCanonicalForPullRequest,
   mockAttachCanonical,
+  mockGetCommunicationProviderAdapter,
+  mockSlackInstallation,
+  mockSlackBlocks,
+  mockSlackUpdate,
+  mockGetThreadReplyFooterRecord,
+  mockSetThreadReplyFooterRecord,
+  mockWithThreadReplyFooterLock,
 } = vi.hoisted(() => {
   const mockUpdateReturning = vi.fn();
   const mockUpdateWhere = vi.fn(() => ({ returning: mockUpdateReturning }));
@@ -25,9 +33,40 @@ const {
     mockUpsertPreference: vi.fn(),
     mockFindPreference: vi.fn(),
     mockRetireCanonical: vi.fn(),
+    mockRetireCanonicalForPullRequest: vi.fn(),
     mockAttachCanonical: vi.fn(),
+    mockGetCommunicationProviderAdapter: vi.fn(),
+    mockSlackInstallation: vi.fn(),
+    mockSlackBlocks: vi.fn(),
+    mockSlackUpdate: vi.fn(),
+    mockGetThreadReplyFooterRecord: vi.fn(),
+    mockSetThreadReplyFooterRecord: vi.fn(),
+    mockWithThreadReplyFooterLock: vi.fn(),
   };
 });
+
+vi.mock('@roomote/communication', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/communication')>()),
+  getThreadReplyFooterRecord: (...args: unknown[]) =>
+    mockGetThreadReplyFooterRecord(...args),
+  setThreadReplyFooterRecord: (...args: unknown[]) =>
+    mockSetThreadReplyFooterRecord(...args),
+  withThreadReplyFooterLock: (...args: unknown[]) =>
+    mockWithThreadReplyFooterLock(...args),
+}));
+
+vi.mock('@roomote/slack', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/slack')>()),
+  SlackNotifier: class {
+    getMessageBlocks = mockSlackBlocks;
+    updateMessage = mockSlackUpdate;
+  },
+}));
+
+vi.mock('../../communication-providers', () => ({
+  getCommunicationProviderAdapter: (...args: unknown[]) =>
+    mockGetCommunicationProviderAdapter(...args),
+}));
 
 vi.mock('@roomote/redis', () => ({
   getRedis: () => ({
@@ -50,6 +89,8 @@ vi.mock('@roomote/db/server', async () => {
     claimCanonicalPrReviewAction: vi.fn().mockResolvedValue(null),
     retireCanonicalPrReviewActionsForDestination: (...args: unknown[]) =>
       mockRetireCanonical(...args),
+    retireCanonicalPrReviewActionsForPullRequest: (...args: unknown[]) =>
+      mockRetireCanonicalForPullRequest(...args),
     upsertPrReviewAutoPreference: (...args: unknown[]) =>
       mockUpsertPreference(...args),
     findPrReviewAutoPreference: (...args: unknown[]) =>
@@ -58,6 +99,7 @@ vi.mock('@roomote/db/server', async () => {
       update: mockUpdate,
       query: {
         slackInstallations: {
+          findFirst: mockSlackInstallation,
           findMany: (...args: unknown[]) =>
             mockFindManySlackInstallations(...args),
         },
@@ -75,6 +117,8 @@ import {
   claimPendingPrReviewAction,
   claimPendingPrReviewActionsForThread,
   enableAutoHandlePrReviewFeedback,
+  retirePendingPrReviewActionsForPullRequest,
+  retirePrReviewActionMessagesBestEffort,
   setPendingPrReviewAction,
   findAutoHandlePrReviewFeedbackPreference,
 } from '../pr-review-action';
@@ -90,7 +134,19 @@ describe('PR review action state', () => {
     mockUpsertPreference.mockResolvedValue(undefined);
     mockFindPreference.mockResolvedValue(null);
     mockRetireCanonical.mockResolvedValue([]);
+    mockRetireCanonicalForPullRequest.mockResolvedValue([]);
     mockAttachCanonical.mockResolvedValue(false);
+    mockGetCommunicationProviderAdapter.mockResolvedValue(null);
+    mockGetThreadReplyFooterRecord.mockResolvedValue(null);
+    mockSetThreadReplyFooterRecord.mockResolvedValue(true);
+    mockWithThreadReplyFooterLock.mockImplementation(
+      async ({
+        fn,
+      }: {
+        fn: (assertLock: () => Promise<void>, lock: object) => unknown;
+      }) =>
+        fn(async () => undefined, { key: 'footer-lock', ownerId: 'owner-1' }),
+    );
   });
 
   it('creates and orders each nonce atomically without overwriting retries', async () => {
@@ -403,6 +459,114 @@ describe('PR review action state', () => {
       'pr-review-action:thread:slack:T2:C-shared:111.222',
       'pr-review-action:',
     );
+  });
+
+  it('retires canonical offers for older heads when a PR receives a commit', async () => {
+    await retirePendingPrReviewActionsForPullRequest({
+      sourceControlProvider: 'github',
+      repository: 'owner/repo',
+      prNumber: 42,
+      currentHeadSha: 'new-head',
+    });
+
+    expect(mockRetireCanonicalForPullRequest).toHaveBeenCalledWith({
+      sourceControlProvider: 'github',
+      repository: 'owner/repo',
+      prNumber: 42,
+      currentHeadSha: 'new-head',
+    });
+  });
+
+  it('retires a superseded chat message even when its task link is gone', async () => {
+    const editMessageReplyMarkup = vi.fn().mockResolvedValue(undefined);
+    mockGetThreadReplyFooterRecord.mockResolvedValue({
+      messageId: '456',
+      textWithoutFooter: 'Review feedback.',
+      buttons: [[{ text: 'Resolve', callbackData: 'prr:y:nonce' }]],
+      refresh: {
+        footerText: 'Reply anytime',
+        channelId: 'chat-1',
+      },
+    });
+    mockGetCommunicationProviderAdapter.mockResolvedValue({
+      provider: 'telegram',
+      editMessageReplyMarkup,
+    });
+    mockRetireCanonicalForPullRequest.mockResolvedValue([
+      {
+        deliveryId: '33333333-3333-4333-8333-333333333333',
+        destinationKind: 'task',
+        status: 'dismissed',
+        provider: 'telegram',
+        slackTeamId: null,
+        taskId: null,
+        sourceControlProvider: 'github',
+        host: null,
+        repositoryId: null,
+        repository: 'owner/repo',
+        prNumber: 42,
+        prUrl: 'https://github.com/owner/repo/pull/42',
+        channelId: 'chat-1',
+        threadId: null,
+        followUpPrompt: 'Resolve the review feedback.',
+        messageId: '456',
+        destinationKey: 'task-1',
+      },
+    ]);
+
+    await retirePendingPrReviewActionsForPullRequest({
+      sourceControlProvider: 'github',
+      repository: 'owner/repo',
+      prNumber: 42,
+      currentHeadSha: 'new-head',
+    });
+
+    expect(editMessageReplyMarkup).toHaveBeenCalledWith({
+      channelId: 'chat-1',
+      messageId: '456',
+    });
+    expect(mockSetThreadReplyFooterRecord).toHaveBeenCalledWith(
+      'telegram',
+      'chat-1',
+      'root',
+      {
+        messageId: '456',
+        textWithoutFooter: 'Review feedback.',
+        refresh: {
+          footerText: 'Reply anytime',
+          channelId: 'chat-1',
+        },
+      },
+      {
+        keepTtl: true,
+        lock: { key: 'footer-lock', ownerId: 'owner-1' },
+      },
+    );
+  });
+
+  it('retires superseded Slack controls without adding a notice', async () => {
+    const summary = { type: 'markdown', text: 'Review findings.' };
+    mockSlackInstallation.mockResolvedValue({ botAccessToken: 'test-token' });
+    mockSlackBlocks.mockResolvedValue([
+      summary,
+      { type: 'actions', block_id: 'pr_review_action', elements: [] },
+    ]);
+
+    await retirePrReviewActionMessagesBestEffort([
+      {
+        provider: 'slack',
+        slackTeamId: 'T1',
+        channelId: 'C1',
+        threadId: '1.0',
+        messageId: '2.0',
+      },
+    ]);
+
+    expect(mockSlackUpdate).toHaveBeenCalledWith({
+      channel: 'C1',
+      ts: '2.0',
+      message: { blocks: [summary] },
+    });
   });
 
   it('fails when auto-handling cannot be persisted to the linked PR', async () => {

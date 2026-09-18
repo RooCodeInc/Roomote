@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { basename } from 'node:path';
 import {
   ARTIFACT_RAW_URL_MAX_AGE_SECONDS,
   currentEpochSeconds,
@@ -6,9 +7,10 @@ import {
 
 import {
   getUploadedArtifactById,
-  getArtifactObject,
+  getOwnedArtifactObject,
   verifyArtifactSignature,
 } from '@/lib/server';
+import { authorize } from '@/lib/server/auth-context';
 
 export const runtime = 'nodejs';
 
@@ -68,8 +70,23 @@ export async function GET(
     return NextResponse.json({ error: 'Artifact not found' }, { status: 404 });
   }
 
-  // Only serve explicitly allowlisted content types publicly
-  if (!ALLOWED_PUBLIC_CONTENT_TYPES.has(artifact.contentType)) {
+  if (artifact.privacy === 'private') {
+    const auth = await authorize();
+    if (!auth.success) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    if (auth.userId !== artifact.privateOwnerUserId) {
+      return NextResponse.json(
+        { error: 'Artifact not found' },
+        { status: 404 },
+      );
+    }
+  }
+
+  const download = request.nextUrl.searchParams.get('download') === '1';
+  // Inline public responses stay limited to browser-safe media. Authenticated
+  // private downloads may serve the owner's other artifact types as files.
+  if (!download && !ALLOWED_PUBLIC_CONTENT_TYPES.has(artifact.contentType)) {
     return NextResponse.json(
       { error: 'Only allowlisted artifact types can be served publicly' },
       { status: 403 },
@@ -79,8 +96,10 @@ export async function GET(
   // Fetch the object from S3
   let s3Response;
   try {
-    s3Response = await getArtifactObject(
-      artifact.taskId,
+    s3Response = await getOwnedArtifactObject(
+      artifact.taskId
+        ? { taskId: artifact.taskId }
+        : { sessionId: artifact.sessionId! },
       artifact.id,
       artifact.path,
       artifact.version,
@@ -112,10 +131,19 @@ export async function GET(
 
   const headers = new Headers({
     'Content-Type': artifact.contentType,
-    'Cache-Control': `public, max-age=${cacheMaxAge}, immutable`,
+    'Cache-Control':
+      artifact.privacy === 'private'
+        ? 'private, no-store'
+        : `public, max-age=${cacheMaxAge}, immutable`,
     'X-Content-Type-Options': 'nosniff',
     'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'",
   });
+  if (download) {
+    headers.set(
+      'Content-Disposition',
+      `attachment; filename="${basename(artifact.path).replaceAll('"', '')}"`,
+    );
+  }
 
   if (s3Response.ContentLength !== undefined) {
     headers.set('Content-Length', String(s3Response.ContentLength));

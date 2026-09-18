@@ -1,6 +1,7 @@
 import pMap from 'p-map';
 
 import {
+  buildFastAgentSessionAttachment,
   type TaskPayload,
   DEFAULT_PR_REVIEW_SETTINGS,
   type PrReviewSettings,
@@ -19,7 +20,10 @@ import {
   isNull,
   sql,
 } from '@roomote/db/server';
-import { enqueueTask } from '@roomote/cloud-agents/server';
+import {
+  enqueueTask,
+  getPrOriginFastAgentParent,
+} from '@roomote/cloud-agents/server';
 import {
   recordPrStatusChangeInTaskHistory,
   updateTaskPrStatus,
@@ -27,7 +31,10 @@ import {
 
 import type { WebhookResponse } from '../../types';
 import { scheduleNotifyPullRequestTerminalStatus } from '../github/notifyPullRequestTerminalStatus';
-import { scheduleSourceControlPullRequestFactSync } from '../pull-request-fact-sync';
+import {
+  scheduleSourceControlPullRequestFactSync,
+  toValidDate,
+} from '../pull-request-fact-sync';
 import { pickHostScopedRepository, toHostFromUrl } from '../utils';
 import {
   getAdoAutomationTargets,
@@ -234,6 +241,16 @@ export async function handleAdoPullRequest(
     pullRequest,
   });
 
+  const host = toHostFromUrl(
+    pullRequest._links?.web?.href ??
+      payload.resourceContainers?.account?.baseUrl ??
+      payload.resourceContainers?.collection?.baseUrl ??
+      pullRequest.repository.webUrl ??
+      pullRequest.repository.remoteUrl ??
+      pullRequest.repository.url ??
+      '',
+  );
+
   if (pullRequest.status === 'abandoned') {
     if (payload.eventType !== 'git.pullrequest.updated') {
       return {
@@ -247,6 +264,7 @@ export async function handleAdoPullRequest(
       repoFullName,
       pullRequest.pullRequestId,
       'closed',
+      { host },
     );
 
     scheduleAdoPullRequestFactSync(payload, repoFullName, 'closed');
@@ -289,11 +307,13 @@ export async function handleAdoPullRequest(
       };
     }
 
+    const mergedAt = toValidDate(pullRequest.closedDate);
     await updateTaskPrStatus(
       'ado',
       repoFullName,
       pullRequest.pullRequestId,
       'merged',
+      { host, ...(mergedAt ? { mergedAt } : {}) },
     );
 
     scheduleAdoPullRequestFactSync(payload, repoFullName, 'merged');
@@ -338,6 +358,7 @@ export async function handleAdoPullRequest(
       repoFullName,
       pullRequest.pullRequestId,
       pullRequest.isDraft ? 'draft' : 'open',
+      { host },
     );
   }
 
@@ -418,8 +439,25 @@ export async function handleAdoPullRequest(
   const prAuthorName = getAdoIdentityName(pullRequest.createdBy);
   const prAuthorId = pullRequest.createdBy?.id?.trim() || prAuthorName;
 
-  const enqueued = await pMap(targets, async (target) =>
-    enqueueTask(
+  const enqueued = await pMap(targets, async (target) => {
+    // A PR opened by a session-delegated task pulls its review into that
+    // same session, so the review shows up as a task there instead of
+    // spawning an unrelated one.
+    const reviewBranch = branchName;
+    const originParent = reviewBranch
+      ? await getPrOriginFastAgentParent({
+          repository: repoFullName,
+          prNumber: pullRequest.pullRequestId,
+          branchName: reviewBranch,
+          sourceControlProvider: 'ado',
+          repositoryId: target.repo.id,
+          // Legacy repository rows may lack a host; fall back to the
+          // webhook's own host so a same-named repository on another
+          // instance can never supply this review's session.
+          host: target.repo.host ?? toHostFromUrl(prUrl),
+        }).catch(() => null)
+      : null;
+    return enqueueTask(
       {
         task: {
           type: taskType,
@@ -431,6 +469,9 @@ export async function handleAdoPullRequest(
             // Legacy rows without a recorded host omit the field.
             ...(target.repo.host
               ? { sourceControlHost: target.repo.host }
+              : {}),
+            ...(originParent
+              ? buildFastAgentSessionAttachment(originParent)
               : {}),
             prNumber: pullRequest.pullRequestId,
             prTitle: pullRequest.title,
@@ -472,8 +513,8 @@ export async function handleAdoPullRequest(
       {
         launchClass: 'automation',
       },
-    ),
-  );
+    );
+  });
 
   return {
     status: 'ok',

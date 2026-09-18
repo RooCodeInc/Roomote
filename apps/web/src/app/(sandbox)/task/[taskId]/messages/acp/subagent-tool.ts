@@ -26,21 +26,16 @@ export function isSubagentToolMessage(
  * stable payload shape, not on the live-only `subagentActivity` field: that
  * field is streamed but never persisted, so any rule that depends on it
  * hides the row again after a transcript rebuild (page refresh) until the
- * next live update arrives. Subagent messages bound to receiver threads are
- * excluded — those surface through the active-subtasks list instead of an
- * inline row.
+ * next live update arrives. Thread-bound rows (`receiverThreadIds` set to the
+ * child session) stay visible too: the harness binds every spawn row once the
+ * child session is known, and the transcript nests that child's activity under
+ * the row, so hiding it would drop the whole subagent from the default view.
  */
 export function isSubagentSpawnRowMessage(
   msg: AcpUiMessage,
 ): msg is AcpToolCallUiMessage | AcpToolResultUiMessage {
-  if (
-    (msg.kind !== 'tool_call' && msg.kind !== 'tool_result') ||
-    msg.data.kind !== 'subagent'
-  ) {
-    return false;
-  }
-
-  const receiverThreadIds = msg.data.receiverThreadIds;
-
-  return !Array.isArray(receiverThreadIds) || receiverThreadIds.length === 0;
+  return (
+    (msg.kind === 'tool_call' || msg.kind === 'tool_result') &&
+    msg.data.kind === 'subagent'
+  );
 }

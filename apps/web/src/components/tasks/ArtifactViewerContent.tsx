@@ -1,30 +1,31 @@
 'use client';
 
-import Link from 'next/link';
-import { useEffect, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { usePathname, useRouter } from 'next/navigation';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { Streamdown, defaultRemarkPlugins } from 'streamdown';
 import remarkBreaks from 'remark-breaks';
 import type { BundledLanguage } from 'shiki';
 import { toast } from 'sonner';
 
-import {
-  ALL_REPOSITORIES,
-  DEFAULT_MANAGED_DEPLOYMENT_ACCESS,
-  type TaskPayload,
-} from '@roomote/types';
-
 import type { ArtifactWithContent } from '@/types';
 
-import { useTRPC } from '@/trpc/client';
+import { useTRPC, useTRPCClient } from '@/trpc/client';
 
-import { humanizeFilename } from '@/lib';
-import { getTaskLaunchDisabledReason } from '@/lib/managed-access';
+import {
+  getArtifactViewUrl,
+  getSessionArtifactViewUrl,
+} from '@/lib/artifact-view-urls';
 import { cn } from '@/lib/utils';
-
-import { useAuthorizedUser } from '@/hooks/useUser';
-import { useTask } from '@/hooks/tasks';
-import { useCreateStandardTaskRun } from '@/hooks/task-runs';
+import {
+  getTabularArtifactFormat,
+  isHtmlArtifact,
+  isMarkdownArtifact,
+} from '@/lib/artifact-types';
+import {
+  parseTabularArtifact,
+  TABULAR_PREVIEW_LIMITS,
+} from '@/lib/tabular-artifacts';
 
 import {
   Download,
@@ -37,7 +38,14 @@ import {
   Switch,
   Label,
   BasicTooltip,
+  Loader2Icon,
   MediaViewerImage,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from '@/components/system';
 import {
   CodeBlock,
@@ -46,8 +54,6 @@ import {
   remarkArtifactLinks,
   streamdownPlugins,
 } from '@/components/ai-elements';
-
-import { BuildArtifactConfirmDialog } from './BuildArtifactConfirmDialog';
 
 const extensionToLanguage: Record<string, BundledLanguage> = {
   json: 'json',
@@ -116,91 +122,185 @@ function getLanguageFromPath(path: string): BundledLanguage {
   return extensionToLanguage[ext] ?? ('plaintext' as BundledLanguage);
 }
 
-function isHtmlArtifact(contentType: string, path: string): boolean {
-  const normalizedContentType =
-    contentType.split(';', 1)[0]?.trim().toLowerCase() ?? '';
-  const extension = path.split('.').pop()?.toLowerCase();
-
-  return (
-    normalizedContentType === 'text/html' ||
-    normalizedContentType === 'application/xhtml+xml' ||
-    extension === 'html' ||
-    extension === 'htm' ||
-    extension === 'xhtml'
-  );
-}
-
-/**
- * Build the prompt for a "Build this plan" task that implements a plan artifact.
- *
- * The plan content is embedded directly into the new task's prompt instead of
- * asking the new task to download it via `manage_artifacts`. The artifact
- * download/metadata endpoints allow cross-task reads for visible tasks, so
- * the new task could fetch it, but embedding makes the build deterministic
- * (exact content at creation time) and avoids depending on a download step.
- */
-export function buildArtifactPlanDescription({
-  artifactPath,
-  artifactVersion,
-  artifactContent,
-}: {
-  artifactPath: string;
-  artifactVersion: number;
-  artifactContent?: string | null;
-}): string {
-  const humanizedName = humanizeFilename(artifactPath);
-  const planContent = artifactContent ?? '';
-
-  return `Build the plan from ${humanizedName} (v${artifactVersion}).
-
-The full plan content is included below. Implement it according to its specifications.
-
----
-${planContent}
----`;
-}
-
 interface ArtifactViewerContentProps {
   artifact: ArtifactWithContent | null;
-  taskId: string;
+  owner?: { taskId: string } | { sessionId: string };
+  taskId?: string;
   onVersionChange?: (version: number) => void;
   className?: string;
   showToolbar?: boolean;
+  isLoading?: boolean;
+  emptyMessage?: string;
+  firstRowIsHeader?: boolean;
+  onFirstRowIsHeaderChange?: (checked: boolean) => void;
+}
+
+function TabularArtifactPreview({
+  content,
+  format,
+  firstRowIsHeader,
+}: {
+  content: string;
+  format: 'csv' | 'tsv';
+  firstRowIsHeader: boolean;
+}) {
+  const preview = useMemo(
+    () => parseTabularArtifact(content, format),
+    [content, format],
+  );
+  const hasLimit =
+    preview.rowsTruncated || preview.columnsTruncated || preview.cellsTruncated;
+  const headerRow = firstRowIsHeader ? preview.rows[0] : undefined;
+  const dataRows = firstRowIsHeader ? preview.rows.slice(1) : preview.rows;
+
+  if (preview.rows.length === 0) {
+    return (
+      <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
+        This table is empty. Source view is still available.
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-w-0 p-3 sm:p-4">
+      {(hasLimit || preview.malformed) && (
+        <div
+          className="mb-3 rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
+          role="status"
+        >
+          {hasLimit && (
+            <span>
+              Preview is limited to {TABULAR_PREVIEW_LIMITS.rows} rows,{' '}
+              {TABULAR_PREVIEW_LIMITS.columns} columns, and{' '}
+              {TABULAR_PREVIEW_LIMITS.cellCharacters.toLocaleString()}{' '}
+              characters per cell. Source view contains the full loaded content.
+            </span>
+          )}{' '}
+          {preview.malformed && (
+            <span>
+              Malformed quoted data was found; the available values are shown
+              below.
+            </span>
+          )}
+        </div>
+      )}
+      <div className="min-w-0 overflow-x-auto">
+        <Table className="w-max min-w-full border-separate border-spacing-0 font-mono text-xs">
+          <caption className="sr-only">
+            {format === 'csv' ? 'CSV' : 'TSV'} preview. The first artifact row
+            is{' '}
+            {firstRowIsHeader ? 'shown as column headings.' : 'shown as data.'}
+          </caption>
+          <TableHeader>
+            <TableRow>
+              <TableHead
+                scope="col"
+                className="sticky left-0 z-20 border-r bg-muted/95 text-right"
+              >
+                Row
+              </TableHead>
+              {Array.from({ length: preview.columnCount }, (_, index) => (
+                <TableHead key={index} scope="col" className="bg-muted/95">
+                  {headerRow ? (headerRow[index] ?? '') : `Column ${index + 1}`}
+                </TableHead>
+              ))}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {dataRows.map((row, rowIndex) => (
+              <TableRow key={rowIndex}>
+                <TableHead
+                  scope="row"
+                  className="sticky left-0 z-10 border-r bg-background text-right align-top text-muted-foreground"
+                >
+                  {rowIndex + (firstRowIsHeader ? 2 : 1)}
+                </TableHead>
+                {Array.from(
+                  { length: preview.columnCount },
+                  (_, columnIndex) => (
+                    <TableCell
+                      key={columnIndex}
+                      className="max-w-96 min-w-24 whitespace-pre-wrap break-words align-top"
+                    >
+                      {row[columnIndex] ?? ''}
+                    </TableCell>
+                  ),
+                )}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </div>
+  );
 }
 
 export function ArtifactViewerContent({
   artifact,
-  taskId,
+  owner,
+  taskId: taskIdProp,
   onVersionChange,
   className,
   showToolbar = true,
+  isLoading = false,
+  emptyMessage = 'Select an artifact to inspect it here.',
+  firstRowIsHeader: controlledFirstRowIsHeader,
+  onFirstRowIsHeaderChange,
 }: ArtifactViewerContentProps) {
+  const artifactOwner = owner ?? { taskId: taskIdProp! };
+  const taskId = 'taskId' in artifactOwner ? artifactOwner.taskId : undefined;
   const trpc = useTRPC();
-  const { data: task } = useTask(taskId, false);
-  const { managedAccess = DEFAULT_MANAGED_DEPLOYMENT_ACCESS } =
-    useAuthorizedUser();
+  const trpcClient = useTRPCClient();
+  const pathname = usePathname();
+  const router = useRouter();
   const [isRaw, setIsRaw] = useState(false);
+  const [localFirstRowIsHeader, setLocalFirstRowIsHeader] = useState(false);
+  const firstRowIsHeader = controlledFirstRowIsHeader ?? localFirstRowIsHeader;
+  const setFirstRowIsHeader =
+    onFirstRowIsHeaderChange ?? setLocalFirstRowIsHeader;
   const [isCopied, setIsCopied] = useState(false);
   const [isUrlCopied, setIsUrlCopied] = useState(false);
   const [isRawUrlCopied, setIsRawUrlCopied] = useState(false);
-  const [isBuildDialogOpen, setIsBuildDialogOpen] = useState(false);
-  const artifactTitle = artifact ? humanizeFilename(artifact.path) : '';
+  const sendBuildMessage = useMutation({
+    mutationFn: async () => {
+      if (!artifact) return;
 
-  const createTaskRun = useCreateStandardTaskRun({
-    onSuccess: (result, variables) => {
-      if (result.success) {
-        const startedArtifactTitle = humanizeFilename(
-          variables.sourceArtifactPath ?? '',
+      const sessionId = taskId
+        ? (
+            await trpcClient.sessions.forTask.query({
+              taskId,
+            })
+          )?.sessionId
+        : 'sessionId' in artifactOwner
+          ? artifactOwner.sessionId
+          : null;
+      if (!sessionId) {
+        throw new Error(
+          'The task that created this artifact is not attached to a Session.',
         );
-        toast.success(`Building ${startedArtifactTitle}.`, {
-          action: (
-            <Button asChild size="sm">
-              <Link href={`/task/${result.taskId}`}>View task</Link>
-            </Button>
-          ),
-        });
-      } else {
-        toast.error(result.error);
+      }
+
+      const buildRequest = taskId
+        ? `Build this ${getArtifactViewUrl(
+            window.location.origin,
+            taskId,
+            artifact.path,
+            artifact.version,
+          )}`
+        : `Build the ${artifact.path} artifact (v${artifact.version}) created in this Session.`;
+      await trpcClient.fastSessions.reply.mutate({
+        sessionId,
+        text: buildRequest,
+      });
+      return sessionId;
+    },
+    onSuccess: (sessionId) => {
+      if (!sessionId) return;
+
+      toast.success('Sent to Session.');
+      const sessionPath = `/sessions/${sessionId}`;
+      if (pathname !== sessionPath) {
+        router.push(sessionPath);
       }
     },
     onError: (error) => toast.error(error.message),
@@ -210,7 +310,7 @@ export function ArtifactViewerContent({
 
   const { data: versions = [] } = useQuery({
     ...trpc.artifacts.versions.queryOptions({
-      taskId,
+      ...artifactOwner,
       path: artifact?.path || '',
     }),
     refetchInterval: artifact ? 3000 : false,
@@ -222,6 +322,7 @@ export function ArtifactViewerContent({
 
   useEffect(() => {
     setIsRaw(false);
+    setLocalFirstRowIsHeader(false);
   }, [artifact?.path, artifact?.version]);
 
   const latestVersion = versions[0]?.version;
@@ -236,81 +337,37 @@ export function ArtifactViewerContent({
     }
   }, [artifact, latestVersion, onVersionChange]);
 
-  if (!artifact) {
-    return (
-      <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
-        Select an artifact to inspect it here.
-      </div>
-    );
-  }
-
-  const isHTML = isHtmlArtifact(artifact.contentType, artifact.path);
+  const isHTML = artifact
+    ? isHtmlArtifact(artifact.contentType, artifact.path)
+    : false;
   const isMarkdown =
-    !isHTML &&
-    (artifact.contentType.includes('markdown') ||
-      artifact.path.endsWith('.md'));
-  const isImage = artifact.contentType.startsWith('image/');
-  const isVideo = artifact.contentType.startsWith('video/');
-  const isPDF = artifact.contentType === 'application/pdf';
+    !!artifact && isMarkdownArtifact(artifact.contentType, artifact.path);
+  const tabularFormat = artifact
+    ? getTabularArtifactFormat(artifact.contentType, artifact.path)
+    : null;
+  const isTabular = tabularFormat !== null;
+  const isImage = artifact?.contentType.startsWith('image/') ?? false;
+  const isVideo = artifact?.contentType.startsWith('video/') ?? false;
+  const isPDF = artifact?.contentType === 'application/pdf';
   const isText =
     !isHTML &&
     !isMarkdown &&
+    !isTabular &&
     !isImage &&
     !isVideo &&
     !isPDF &&
-    !!artifact.content;
-  const language = getLanguageFromPath(artifact.path);
+    !!artifact?.content;
+  const language = getLanguageFromPath(artifact?.path ?? '');
 
   const canRender =
     isText ||
-    (isHTML && artifact.content) ||
-    (isMarkdown && artifact.content) ||
-    ((isImage || isVideo || isPDF) && artifact.downloadUrl);
-
-  const taskPayload = task?.taskRun?.payload as TaskPayload | undefined;
-  // Build requires the fetched plan content so the new task's prompt isn't
-  // silently empty. Content is only fetched for text artifacts within the
-  // preview byte cap (see getArtifactByPathCommand), so a plan larger than
-  // that cap has no content to embed and must not be buildable from here.
-  const canCreateTaskFromArtifact = isMarkdown && Boolean(artifact.content);
-  const taskLaunchDisabledReason = getTaskLaunchDisabledReason(managedAccess);
-
-  const handleCreateBuildTask = (values: {
-    repo: string;
-    branch?: string;
-    environmentId?: string;
-    modelId: string;
-  }) => {
-    if (taskLaunchDisabledReason) {
-      toast.error(taskLaunchDisabledReason);
-      return;
-    }
-
-    const description = buildArtifactPlanDescription({
-      artifactPath: artifact.path,
-      artifactVersion: artifact.version,
-      artifactContent: artifact.content,
-    });
-
-    toast.info(`Starting new task to build ${artifactTitle}`);
-    createTaskRun.mutate({
-      model: values.modelId,
-      sourceTaskId: taskId,
-      sourceArtifactId: artifact.id,
-      sourceArtifactPath: artifact.path,
-      sourceArtifactVersion: artifact.version,
-      payload: {
-        repo: values.environmentId ? ALL_REPOSITORIES : values.repo,
-        branch: values.branch,
-        environmentId: values.environmentId,
-        description,
-      },
-    });
-    setIsBuildDialogOpen(false);
-  };
+    (isTabular && artifact?.content !== undefined) ||
+    (isHTML && artifact?.content) ||
+    (isMarkdown && artifact?.content) ||
+    ((isImage || isVideo || isPDF) && artifact?.downloadUrl);
 
   const handleCopyToClipboard = async () => {
-    if (!artifact.content) return;
+    if (!artifact?.content) return;
 
     await navigator.clipboard.writeText(artifact.content);
     setIsCopied(true);
@@ -319,7 +376,22 @@ export function ArtifactViewerContent({
   };
 
   const handleCopyUrl = async () => {
-    const url = `${window.location.origin}/task/${taskId}/artifacts/${artifact.path}?v=${artifact.version}`;
+    if (!artifact) return;
+
+    const url =
+      'taskId' in artifactOwner
+        ? getArtifactViewUrl(
+            window.location.origin,
+            artifactOwner.taskId,
+            artifact.path,
+            artifact.version,
+          )
+        : getSessionArtifactViewUrl(
+            window.location.origin,
+            artifactOwner.sessionId,
+            artifact.path,
+            artifact.version,
+          );
     await navigator.clipboard.writeText(url);
     setIsUrlCopied(true);
     toast.success('URL copied to clipboard');
@@ -327,7 +399,7 @@ export function ArtifactViewerContent({
   };
 
   const handleCopyRawUrl = async () => {
-    if (!artifact.rawUrl) return;
+    if (!artifact?.rawUrl) return;
     const url = `${window.location.origin}${artifact.rawUrl}`;
     await navigator.clipboard.writeText(url);
     setIsRawUrlCopied(true);
@@ -346,18 +418,13 @@ export function ArtifactViewerContent({
         {showToolbar && (
           <div className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-background px-3 py-2">
             <div className="flex min-w-0 items-center gap-2">
-              {canCreateTaskFromArtifact && (
-                <BasicTooltip
-                  content={taskLaunchDisabledReason ?? 'Build this artifact'}
-                >
+              {isMarkdown && (
+                <BasicTooltip content="Build this artifact">
                   <Button
                     variant="ghost"
                     className="h-7 gap-1.5 px-2 text-sm font-medium hover:text-accent-foreground"
-                    onClick={() => setIsBuildDialogOpen(true)}
-                    disabled={
-                      createTaskRun.isPending ||
-                      Boolean(taskLaunchDisabledReason)
-                    }
+                    onClick={() => sendBuildMessage.mutate()}
+                    disabled={sendBuildMessage.isPending}
                   >
                     <Hammer className="size-3.5" />
                     <span className="text-xs">Build this</span>
@@ -365,16 +432,31 @@ export function ArtifactViewerContent({
                 </BasicTooltip>
               )}
 
-              {canRender && (
+              {artifact?.downloadUrl ? (
                 <BasicTooltip content="Download">
                   <Button
                     asChild
                     variant="ghost"
                     className="h-7 gap-1.5 px-2 text-sm font-medium hover:text-accent-foreground"
                   >
-                    <a href={artifact.downloadUrl} download>
+                    <a
+                      href={artifact.downloadUrl}
+                      download
+                      aria-label="Download"
+                    >
                       <Download className="size-3.5" />
                     </a>
+                  </Button>
+                </BasicTooltip>
+              ) : (
+                <BasicTooltip content="Download">
+                  <Button
+                    variant="ghost"
+                    className="h-7 gap-1.5 px-2 text-sm font-medium hover:text-accent-foreground"
+                    disabled
+                    aria-label="Download"
+                  >
+                    <Download className="size-3.5" />
                   </Button>
                 </BasicTooltip>
               )}
@@ -400,6 +482,8 @@ export function ArtifactViewerContent({
                   variant="ghost"
                   className="h-7 gap-1.5 px-2 text-sm font-medium hover:text-accent-foreground"
                   onClick={handleCopyUrl}
+                  disabled={!artifact}
+                  aria-label="Copy URL"
                 >
                   {isUrlCopied ? (
                     <Check className="size-3.5" />
@@ -409,7 +493,7 @@ export function ArtifactViewerContent({
                 </Button>
               </BasicTooltip>
 
-              {artifact.rawUrl && (
+              {artifact?.rawUrl && (
                 <BasicTooltip content="Copy public image URL">
                   <Button
                     variant="ghost"
@@ -460,22 +544,73 @@ export function ArtifactViewerContent({
                   </Label>
                 </div>
               )}
+              {canRender && isTabular && (
+                <>
+                  <div className="flex items-center gap-2">
+                    <Label
+                      htmlFor="tabular-header-row"
+                      className="cursor-pointer text-xs"
+                    >
+                      First row is a header
+                    </Label>
+                    <Switch
+                      id="tabular-header-row"
+                      checked={firstRowIsHeader}
+                      onCheckedChange={setFirstRowIsHeader}
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Label
+                      htmlFor="tabular-source-mode"
+                      className="cursor-pointer text-xs"
+                    >
+                      Preview
+                    </Label>
+                    <Switch
+                      id="tabular-source-mode"
+                      checked={isRaw}
+                      onCheckedChange={setIsRaw}
+                    />
+                    <Label
+                      htmlFor="tabular-source-mode"
+                      className="cursor-pointer text-xs"
+                    >
+                      Source
+                    </Label>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         )}
 
         <div
           className={cn(
-            'ph-no-capture flex-1 min-h-0 bg-card overflow-y-auto h-full',
-            (isMarkdown && !isRaw) || (isHTML && !isRaw) || isPDF || isVideo
+            'ph-no-capture flex-1 min-h-0 bg-background overflow-y-auto h-full',
+            (isMarkdown && !isRaw) ||
+              (isHTML && !isRaw) ||
+              (isTabular && !isRaw) ||
+              isPDF ||
+              isVideo
               ? 'overflow-x-hidden'
               : 'overflow-x-auto',
           )}
         >
-          {canRender ? (
+          {isLoading ? (
+            <div
+              className="flex h-full items-center justify-center"
+              aria-label="Loading artifact"
+            >
+              <Loader2Icon className="size-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : !artifact ? (
+            <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
+              {emptyMessage}
+            </div>
+          ) : canRender ? (
             <>
               {isMarkdown && !isRaw && artifact.content && (
-                <div className="max-w-3xl p-6 text-sm">
+                <div className="mx-auto w-full max-w-4xl p-6 text-sm">
                   <Streamdown
                     className="size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
                     remarkPlugins={[
@@ -505,9 +640,25 @@ export function ArtifactViewerContent({
                 />
               )}
 
-              {((isMarkdown && isRaw) || (isHTML && isRaw) || isText) &&
+              {tabularFormat && !isRaw && artifact.content !== undefined && (
+                <TabularArtifactPreview
+                  content={artifact.content}
+                  format={tabularFormat}
+                  firstRowIsHeader={firstRowIsHeader}
+                />
+              )}
+
+              {((isMarkdown && isRaw) ||
+                (isHTML && isRaw) ||
+                (isTabular && isRaw) ||
+                isText) &&
                 artifact.content && (
-                  <div className="min-w-0 overflow-x-auto p-2 text-sm leading-relaxed text-foreground">
+                  <div
+                    className={cn(
+                      'min-w-0 overflow-x-auto p-2 text-sm leading-relaxed text-foreground',
+                      isText && 'mx-auto w-full max-w-4xl',
+                    )}
+                  >
                     <CodeBlock
                       code={artifact.content}
                       language={language}
@@ -520,6 +671,7 @@ export function ArtifactViewerContent({
                 <MediaViewerImage
                   src={artifact.downloadUrl}
                   alt={artifact.path}
+                  viewportClassName="bg-background"
                 />
               )}
 
@@ -532,7 +684,7 @@ export function ArtifactViewerContent({
               )}
 
               {isVideo && (
-                <div className="flex h-full w-full min-w-0 items-center justify-center bg-zinc-800 p-4">
+                <div className="flex h-full w-full min-w-0 items-center justify-center bg-background p-4">
                   <video
                     src={artifact.downloadUrl}
                     controls
@@ -559,19 +711,6 @@ export function ArtifactViewerContent({
           )}
         </div>
       </div>
-
-      <BuildArtifactConfirmDialog
-        open={isBuildDialogOpen}
-        onOpenChange={setIsBuildDialogOpen}
-        artifactName={artifactTitle}
-        artifactVersion={artifact.version}
-        taskRepository={taskPayload?.repo || task?.repositoryName || undefined}
-        taskBranch={taskPayload?.branch}
-        taskEnvironmentId={taskPayload?.environmentId}
-        onConfirm={handleCreateBuildTask}
-        isPending={createTaskRun.isPending}
-        taskLaunchDisabledReason={taskLaunchDisabledReason}
-      />
     </>
   );
 }

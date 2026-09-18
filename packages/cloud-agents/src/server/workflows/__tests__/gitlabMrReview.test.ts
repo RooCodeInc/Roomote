@@ -49,6 +49,12 @@ const adoPayload = {
   prUrl: 'https://dev.azure.com/acme/Platform/_git/backend/pullrequest/42',
 };
 
+const bitbucketPayload = {
+  ...basePayload,
+  sourceControlProvider: 'bitbucket' as const,
+  prUrl: 'https://bitbucket.org/acme/backend/pull-requests/42',
+};
+
 describe('GitLab MR review workflows', () => {
   beforeEach(() => {
     mockFetchPr.mockReset();
@@ -173,5 +179,41 @@ describe('GitLab MR review workflows', () => {
     );
     expect(result.prompt).toContain('Do not use GitHub-only CLI commands');
     expect(result.prompt).toContain('Check backward compatibility.');
+  });
+
+  it('builds initial Bitbucket PR review prompts without fetching GitHub PR details', async () => {
+    const result = await githubPrReview({
+      taskSpec: {
+        type: TaskPayloadKind.GithubPrReview,
+        payload: bitbucketPayload,
+      } as GithubPullRequestReviewOpenTask,
+      gitHubToken: 'unused',
+      taskRunUrl: 'https://roomote.example/task/1',
+    });
+
+    expect(mockFetchPr).not.toHaveBeenCalled();
+    expect(result.harnessInstructions).toContain(
+      'Bitbucket pull request surface',
+    );
+    expect(result.prompt).toContain('source_control_provider');
+    expect(result.prompt).toContain('bitbucket');
+    expect(result.prompt).toContain('Do not use GitHub-only CLI commands');
+  });
+
+  it('builds Bitbucket PR sync review prompts without fetching GitHub PR details', async () => {
+    const result = await githubPrReviewSync({
+      taskSpec: {
+        type: TaskPayloadKind.GithubPrReviewSync,
+        payload: bitbucketPayload,
+      } as GithubPullRequestReviewSyncTask,
+      gitHubToken: 'unused',
+      taskRunUrl: 'https://roomote.example/task/1',
+    });
+
+    expect(mockFetchPr).not.toHaveBeenCalled();
+    expect(result.prompt).toContain(
+      'Review the new Bitbucket pull request changes',
+    );
+    expect(result.prompt).toContain('Do not use GitHub-only CLI commands');
   });
 });

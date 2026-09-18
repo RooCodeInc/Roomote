@@ -1,38 +1,13 @@
-import type {
-  TelegramMessage,
-  TelegramUpdateCommunicationMetadata,
-} from '@roomote/communication/telegram-update';
-import { Env } from '@roomote/env';
-import { ALL_REPOSITORIES } from '@roomote/types';
-import {
-  buildTelegramRoutingContext,
-  getTaskUrl,
-  routeTask,
-} from '@roomote/cloud-agents/server';
+import type { TelegramUpdateCommunicationMetadata } from '@roomote/communication/telegram-update';
+import { getTaskUrl } from '@roomote/cloud-agents/server';
 
 import type { CompletedTelegramTaskRun } from './task-run-lookup.js';
-import { maybeRequestTelegramRoutingConfirmation } from './routing-confirmation.js';
-import {
-  postTelegramMessageBestEffort,
-  telegramPrivateTopicsEnabledBestEffort,
-} from './replies.js';
-import {
-  launchTelegramTask,
-  resolveTelegramWorkspace,
-  shouldCreateTelegramTaskTopic,
-} from './task-launch.js';
+import { postTelegramMessageBestEffort } from './replies.js';
 import type {
   QueuedTelegramCommunicationMessage,
   TelegramConversationRef,
-  TelegramWorkspaceSelection,
 } from './types.js';
 import { resumeCommunicationTaskFromSnapshot } from '@roomote/sdk/server/communication';
-
-function cleanOptionalString(value: string | undefined): string | undefined {
-  const trimmed = value?.trim();
-
-  return trimmed ? trimmed : undefined;
-}
 
 export async function resumeTelegramTaskFromSnapshot(input: {
   completedRun: CompletedTelegramTaskRun;
@@ -66,119 +41,4 @@ export async function replyToTelegramSnapshotResume(input: {
       },
     })}`,
   });
-}
-
-export async function startNewTelegramTask(input: {
-  message: TelegramMessage;
-  launchOwnerUserId: string;
-  queuedMessage: QueuedTelegramCommunicationMessage;
-  metadata: TelegramUpdateCommunicationMetadata;
-  /**
-   * Launch without the routing-confirmation card. Used when the user already
-   * expressed explicit intent (for example a suggestion button click).
-   */
-  skipRoutingConfirmation?: boolean;
-  /** Start a new task topic even when the command came from an older topic. */
-  forceNewTopic?: boolean;
-  workspaceOverride?: TelegramWorkspaceSelection;
-}) {
-  const needsPrivateTopicCapability =
-    input.message.chat.type.toLowerCase() === 'private' &&
-    (!input.metadata.communicationThreadId || input.forceNewTopic === true);
-  const createTopicForTask = shouldCreateTelegramTaskTopic({
-    chatType: input.message.chat.type,
-    isForum: input.message.chat.is_forum,
-    privateTopicsEnabled: needsPrivateTopicCapability
-      ? await telegramPrivateTopicsEnabledBestEffort()
-      : false,
-    threadId: input.metadata.communicationThreadId,
-    forceNewTopic: input.forceNewTopic,
-  });
-  const routingContext = await buildTelegramRoutingContext({
-    userId: input.launchOwnerUserId,
-    taskDescription: input.queuedMessage.text,
-    chatName:
-      cleanOptionalString(input.message.chat.title) ??
-      cleanOptionalString(input.message.chat.username) ??
-      input.queuedMessage.channel,
-    threadMessages: [
-      {
-        user: input.queuedMessage.user,
-        text: input.queuedMessage.text,
-      },
-    ],
-    ...(input.queuedMessage.images?.length
-      ? { images: input.queuedMessage.images }
-      : {}),
-    apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
-  });
-  const routingDecision = await routeTask(routingContext);
-
-  if (
-    routingDecision.status === 'platform_answer' &&
-    !input.workspaceOverride
-  ) {
-    await postTelegramMessageBestEffort({
-      chatId: input.metadata.communicationChannelId,
-      threadId: input.metadata.communicationThreadId,
-      replyToMessageId: input.metadata.communicationMessageId,
-      text: routingDecision.result.answer,
-      textFormat: 'markdown',
-    });
-
-    return {
-      status: 'replied_inline' as const,
-      routingDecision,
-    };
-  }
-
-  if (
-    !input.skipRoutingConfirmation &&
-    routingDecision.status !== 'platform_answer'
-  ) {
-    const confirmation = await maybeRequestTelegramRoutingConfirmation({
-      routingDecision,
-      routingContext,
-      launchOwnerUserId: input.launchOwnerUserId,
-      queuedMessage: input.queuedMessage,
-      metadata: input.metadata,
-      createTopicForTask,
-    });
-
-    if (confirmation) {
-      return {
-        status: 'confirmation_pending' as const,
-        routingDecision,
-        pendingRouteId: confirmation.pendingRouteId,
-      };
-    }
-  }
-
-  const workspace =
-    input.workspaceOverride ??
-    (routingDecision.status === 'routed'
-      ? await resolveTelegramWorkspace(routingDecision.result.workspace)
-      : {
-          repoForPayload: ALL_REPOSITORIES,
-          workspaceDisplayName: 'all repos',
-        });
-
-  if (!workspace) {
-    throw new Error('Telegram task routing selected an unavailable workspace.');
-  }
-
-  const launchResult = await launchTelegramTask({
-    launchOwnerUserId: input.launchOwnerUserId,
-    queuedMessage: input.queuedMessage,
-    metadata: input.metadata,
-    workspace,
-    createTopicForTask,
-  });
-
-  return {
-    status: 'started' as const,
-    launchResult,
-    routingDecision,
-    workspace,
-  };
 }

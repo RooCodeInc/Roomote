@@ -59,9 +59,11 @@ function BoardTaskCard({ task }: { task: Task }) {
     PRODUCT_NAME;
   const activityAt = task.activityAt ?? task.timestamp;
   const activityDate = new Date(activityAt * 1000);
-  const people = task.user
-    ? [task.user, ...task.participants]
-    : task.participants;
+  const isAutomation = task.attributionKind === 'automation';
+  const people =
+    !isAutomation && task.user
+      ? [task.user, ...task.participants]
+      : task.participants;
   const visiblePeople = people.slice(0, 3);
   const hiddenPeopleCount = Math.max(people.length - visiblePeople.length, 0);
 
@@ -89,12 +91,6 @@ function BoardTaskCard({ task }: { task: Task }) {
       <div className="text-base font-semibold leading-snug -mt-1">
         {stripMarkdown(stripHtmlTags(task.title))}
       </div>
-      {getTaskBoardColumn(task) === 'blocked' && task.goalBlockedReason && (
-        <p className="line-clamp-2 text-xs text-destructive">
-          {task.goalBlockedReason}
-        </p>
-      )}
-
       <div className="flex items-center gap-3 text-xs text-muted-foreground">
         {(task.taskRun.payload.environmentId ||
           task.taskRun.payload.repo ||
@@ -122,6 +118,19 @@ function BoardTaskCard({ task }: { task: Task }) {
           className="relative z-20 ml-auto flex shrink-0 items-center -space-x-2"
           aria-label={`${people.length || 1} task participant${people.length === 1 ? '' : 's'}`}
         >
+          {isAutomation ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="flex size-6 items-center justify-center overflow-clip rounded-full border border-border bg-white ring-2 ring-card dark:bg-muted">
+                  <TaskAutomationIcon
+                    automationKey={task.initiatorAutomation}
+                    className="size-5"
+                  />
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>{actorName}</TooltipContent>
+            </Tooltip>
+          ) : null}
           {visiblePeople.map((person) => {
             const displayName = getUserDisplayName(person) ?? person.email;
 
@@ -141,18 +150,11 @@ function BoardTaskCard({ task }: { task: Task }) {
               </Tooltip>
             );
           })}
-          {visiblePeople.length === 0 && (
+          {visiblePeople.length === 0 && !isAutomation && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className="flex size-6 items-center justify-center rounded-full border border-border bg-muted ring-2 ring-card">
-                  {task.attributionKind === 'automation' ? (
-                    <TaskAutomationIcon
-                      automationKey={task.initiatorAutomation}
-                      className="size-3 text-muted-foreground"
-                    />
-                  ) : (
-                    <MessageSquareText className="size-3 text-muted-foreground" />
-                  )}
+                  <MessageSquareText className="size-3 text-muted-foreground" />
                 </span>
               </TooltipTrigger>
               <TooltipContent>{actorName}</TooltipContent>

@@ -231,27 +231,41 @@ describe('maybeNotifySourceThreadOfTerminalProviderError', () => {
     });
   });
 
-  it('posts the provider error into the originating Slack thread', async () => {
-    mockFindFirstRun.mockResolvedValue(
-      makeRun(
-        { payloadKind: TaskPayloadKind.SlackAppMention },
-        { slackChannelId: 'C123', slackThreadTs: '111.222' },
-      ),
-    );
+  it.each([
+    [PROVIDER_ERROR, PROVIDER_ERROR],
+    [
+      'The provider returned an error: The usage limit has been reached',
+      'The provider returned an error: The usage limit has been reached',
+    ],
+    [
+      'The provider returned an error: <quota> & <!channel> exhausted',
+      'The provider returned an error: &lt;quota&gt; &amp; &lt;!channel&gt; exhausted',
+    ],
+  ])(
+    'posts a compact Slack warning for %s',
+    async (errorSummary, escapedError) => {
+      mockFindFirstRun.mockResolvedValue(
+        makeRun(
+          { payloadKind: TaskPayloadKind.SlackAppMention },
+          { slackChannelId: 'C123', slackThreadTs: '111.222' },
+        ),
+      );
 
-    await notify(makeEnvelope());
+      await notify(makeEnvelope({ errorSummary }));
 
-    expect(mockSlackPostMessage).toHaveBeenCalledTimes(1);
-    const [call] = mockSlackPostMessage.mock.calls;
-    expect(call?.[0]).toMatchObject({
-      channel: 'C123',
-      thread_ts: '111.222',
-    });
-    expect(call?.[0].text).toContain('provider error');
-    expect(call?.[0].text).toContain(
-      'Our servers are currently overloaded. Please try again later.',
-    );
-  });
+      expect(mockSlackPostMessage).toHaveBeenCalledTimes(1);
+      const [call] = mockSlackPostMessage.mock.calls;
+      const text = `:warning: ${escapedError}`;
+      expect(call?.[0]).toEqual({
+        channel: 'C123',
+        thread_ts: '111.222',
+        text,
+        blocks: [{ type: 'section', text: { type: 'mrkdwn', text } }],
+        unfurl_links: false,
+        unfurl_media: false,
+      });
+    },
+  );
 
   it('leaves the Slack started message and its Cancel button alone', async () => {
     mockFindFirstRun.mockResolvedValue(
@@ -277,6 +291,7 @@ describe('maybeNotifySourceThreadOfTerminalProviderError', () => {
     expect(mockDiscordPostMessage.mock.calls[0]?.[0]).toMatchObject({
       channelId: 'discord-channel',
       threadId: 'discord-thread',
+      text: `I hit a provider error and had to stop partway through this turn. The task is still here -- reply and I'll pick it back up.\n\n**Error details:** ${PROVIDER_ERROR}\n\n[Open the task](https://example.com/task)`,
       textFormat: 'markdown',
     });
     expect(mockSlackPostMessage).not.toHaveBeenCalled();
@@ -291,6 +306,7 @@ describe('maybeNotifySourceThreadOfTerminalProviderError', () => {
     expect(mockTelegramPostMessage.mock.calls[0]?.[0]).toMatchObject({
       channelId: '12345',
       threadId: '99',
+      text: `I hit a provider error and had to stop partway through this turn. The task is still here -- reply and I'll pick it back up.\n\n**Error details:** ${PROVIDER_ERROR}\n\n[Open the task](https://example.com/task)`,
       textFormat: 'markdown',
     });
   });
@@ -305,6 +321,7 @@ describe('maybeNotifySourceThreadOfTerminalProviderError', () => {
       channelId: 'teams-conversation',
       serviceUrl: 'https://smba.example.com',
       replyToMessageId: 'teams-root',
+      text: `I hit a provider error and had to stop partway through this turn. The task is still here -- reply and I'll pick it back up.\n\n**Error details:** ${PROVIDER_ERROR}\n\n[Open the task](https://example.com/task)`,
       textFormat: 'markdown',
     });
   });

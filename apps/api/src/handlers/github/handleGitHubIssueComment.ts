@@ -1,10 +1,14 @@
-import { getTaskUrl } from '@roomote/cloud-agents/server';
+import type { FastAgentActiveTask } from '@roomote/cloud-agents/server';
+import { findReusableGitHubIssueTaskOwner } from '@roomote/db/server';
 import { getInstallationOctokit } from '@roomote/github';
+import {
+  startSourceControlFastSessionTurn,
+  type SourceControlFastDiscussion,
+} from '@roomote/sdk/server';
 import { PRODUCT_NAME } from '@roomote/types';
 
 import type { WebhookResponse } from '../../types';
 import { buildSourceControlAccountLinkRequiredMessage } from '../source-control-account-linking';
-import { orchestrateIssueMention } from '../shared/issue-mention-orchestration';
 import { getGitHubAutomationTargets } from './getGitHubAutomationTargets';
 import { isMention } from './isMention';
 import {
@@ -40,6 +44,9 @@ type IssueMentionPayload = {
   mentionBody?: string;
 };
 
+const FAST_UNAVAILABLE_COMMENT =
+  "I saw the mention, but I couldn't start a conversation right now. Please try again in a moment.";
+
 async function postIssueComment({
   installationId,
   repositoryFullName,
@@ -74,59 +81,101 @@ async function postIssueComment({
   }
 }
 
-function tryBuildTaskLink({
-  taskId,
-  campaign,
+async function acknowledgeIssueMentionBestEffort({
+  installationId,
+  repositoryFullName,
+  commentId,
 }: {
-  taskId: string;
-  campaign: string;
-}): string | null {
+  installationId: number;
+  repositoryFullName: string;
+  commentId: number | undefined;
+}): Promise<void> {
+  const [owner, repo] = repositoryFullName.split('/');
+  if (!owner || !repo || commentId === undefined) {
+    return;
+  }
   try {
-    return getTaskUrl({
-      taskId,
-      utm: {
-        source: 'github-comment',
-        campaign,
-      },
+    const octokit = await getInstallationOctokit({ installationId });
+    await octokit.rest.reactions.createForIssueComment({
+      owner,
+      repo,
+      comment_id: commentId,
+      content: 'eyes',
     });
   } catch (error) {
     console.warn(
-      `[handleGitHubIssueComment] failed to build task link: ${
+      `[handleGitHubIssueComment] failed to acknowledge mention on ${repositoryFullName}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
-    return null;
   }
-}
-
-function formatStartedReply(taskLink: string | null): string {
-  if (taskLink) {
-    return `I'm on it. I started a task for this issue, and I'll keep updates here.\n\n[See task](${taskLink})`;
-  }
-
-  return `I'm on it. I started a task for this issue, and I'll keep updates here.`;
-}
-
-function formatFollowUpReply(taskLink: string | null): string {
-  if (taskLink) {
-    return `I'm on it. I routed this request into the existing task for this issue so follow-up work stays on one Roomote thread, and I'll keep updates here.\n\n[See task](${taskLink})`;
-  }
-
-  return `I'm on it. I routed this request into the existing task for this issue so follow-up work stays on one Roomote thread, and I'll keep updates here.`;
 }
 
 function buildGateMissComment(): string {
   return `I saw the mention, but I could not start work on this issue with the current ${PRODUCT_NAME} GitHub setup.`;
 }
 
-function buildStartFailedComment(): string {
-  return `I saw the mention, but I could not start a task for this issue right now. Please try again in a moment.`;
+function formatQuotedText(text: string): string {
+  return text
+    .trim()
+    .split('\n')
+    .map((line) => `> ${line}`)
+    .join('\n');
 }
 
 /**
- * Handle @mentions on plain GitHub issues (not pull requests).
- * Starts a standard task against the issue's repository, or continues an
- * existing task already linked to the same issue.
+ * What the Session reads with an issue mention: the issue, the comment that
+ * mentioned Roomote (or the issue body when the mention is in it), and any
+ * linked pull requests or issues.
+ */
+function buildIssueMentionContext({
+  repositoryFullName,
+  issueNumber,
+  issueTitle,
+  issueBody,
+  issueUrl,
+  issueAuthorLogin,
+  commenterLogin,
+  commentBody,
+  mentionIsIssueBody,
+  linkedReferencesSection,
+}: {
+  repositoryFullName: string;
+  issueNumber: number;
+  issueTitle: string;
+  issueBody: string | null;
+  issueUrl: string;
+  issueAuthorLogin: string | null;
+  commenterLogin: string;
+  commentBody: string;
+  mentionIsIssueBody: boolean;
+  linkedReferencesSection?: string;
+}): string {
+  const author = issueAuthorLogin ? `@${issueAuthorLogin}` : 'an unknown user';
+  return [
+    `<github_issue url="${issueUrl}">`,
+    `Repository: ${repositoryFullName}`,
+    `Issue: #${issueNumber} - ${issueTitle}`,
+    `Author: ${author}`,
+    ...(issueBody?.trim() && !mentionIsIssueBody
+      ? ['', 'Body (context only):', formatQuotedText(issueBody)]
+      : []),
+    '</github_issue>',
+    '<triggering_comment>',
+    mentionIsIssueBody
+      ? `${commenterLogin} mentioned Roomote in the issue body:`
+      : `${commenterLogin} mentioned Roomote in a comment on the issue:`,
+    formatQuotedText(commentBody),
+    '</triggering_comment>',
+    ...(linkedReferencesSection ? [linkedReferencesSection] : []),
+    'This conversation is a GitHub issue discussion. Your replies post as comments on the issue, so keep them concise. Delegated tasks run in the environment mapped to this repository and link the issue.',
+  ].join('\n');
+}
+
+/**
+ * Every @mention on an issue enters the issue's Fast Session. The Session
+ * reads the issue, replies as a comment, and delegates work when the request
+ * needs a task.
  */
 export async function handleGitHubIssueComment(
   eventPayload: IssueMentionPayload,
@@ -204,47 +253,73 @@ export async function handleGitHubIssueComment(
     return { status: 'ok', message: 'account_link_required' };
   }
 
+  await acknowledgeIssueMentionBestEffort({
+    installationId: githubInstallationId,
+    repositoryFullName,
+    commentId: eventPayload.comment?.id,
+  });
+
   const issueUrl =
     issue.html_url ??
     `https://github.com/${repositoryFullName}/issues/${issueNumber}`;
   const issueTitle = issue.title ?? `Issue #${issueNumber}`;
-  const issueBody = issue.body ?? null;
-  const commenterUserId = target.properties.userId;
-  const issueAuthorLogin = issue.user?.login ?? null;
-  const linkedReferences = await fetchGitHubLinkedReferences({
-    installationId: githubInstallationId,
-    repositoryFullName,
-    issueOrPrNumber: issueNumber,
-  });
-  const linkedReferencesSection =
-    formatGitHubLinkedReferencesSection(linkedReferences);
-
-  return orchestrateIssueMention({
+  const discussion: SourceControlFastDiscussion = {
     provider: 'github',
-    logPrefix: '[handleGitHubIssueComment]',
-    repositoryId: target.repo.id,
+    host: target.repo.host ?? 'github.com',
     repositoryFullName,
-    issueNumber,
-    issueTitle,
-    issueBody,
-    issueUrl,
-    commentBody,
-    commenterLogin: sender.login,
-    commenterUserId,
-    githubLogin: target.properties.githubLogin ?? undefined,
-    githubUserId: target.properties.githubUserId ?? undefined,
-    followUpCommenterDisplayName: target.properties.githubLogin ?? sender.login,
-    retrySandboxBoot: true,
-    providerDisplayName: 'GitHub',
-    issueBodySource: 'github_issue_body',
-    issueBodyContextLabel: `Issue body (context only, authored by ${
-      issueAuthorLogin ? `@${issueAuthorLogin}` : 'an unknown user'
-    }):`,
-    linkedReferencesSection,
-    postComment: (body) => postIssueComment({ ...replyTarget, body }),
-    formatFollowUpReply,
-    formatStartedReply,
-    formatStartFailed: buildStartFailedComment,
-    tryBuildTaskLink,
+    kind: 'issues',
+    number: issueNumber,
+  };
+  const [linkedReferences, existingOwner] = await Promise.all([
+    fetchGitHubLinkedReferences({
+      installationId: githubInstallationId,
+      repositoryFullName,
+      issueOrPrNumber: issueNumber,
+    }),
+    findReusableGitHubIssueTaskOwner({
+      repoFullName: repositoryFullName,
+      issueNumber,
+      // Scoped to this instance so a same-named issue task on another
+      // self-hosted host never surfaces here.
+      host: discussion.host,
+    }).catch(() => null),
+  ]);
+  const activeTasks: FastAgentActiveTask[] = existingOwner?.taskId
+    ? [{ taskId: existingOwner.taskId, status: existingOwner.status }]
+    : [];
+
+  const started = await startSourceControlFastSessionTurn({
+    discussion,
+    userId: target.properties.userId,
+    senderDisplayName: sender.login,
+    question: commentBody,
+    agentContext: buildIssueMentionContext({
+      repositoryFullName,
+      issueNumber,
+      issueTitle,
+      issueBody: issue.body ?? null,
+      issueUrl,
+      issueAuthorLogin: issue.user?.login ?? null,
+      commenterLogin: sender.login,
+      commentBody,
+      mentionIsIssueBody: eventPayload.mentionBody !== undefined,
+      linkedReferencesSection:
+        formatGitHubLinkedReferencesSection(linkedReferences),
+    }),
+    currentMessageId: eventPayload.comment
+      ? `github:comment:${eventPayload.comment.id}`
+      : `github:issue:${repositoryFullName}#${issueNumber}`,
+    activeTasks,
   });
+
+  if (started.status !== 'queued') {
+    await postIssueComment({ ...replyTarget, body: FAST_UNAVAILABLE_COMMENT });
+    return { status: 'error', message: 'fast_unavailable' };
+  }
+
+  return {
+    status: 'ok',
+    message: 'fast_session_queued',
+    metadata: { fastConversationId: started.fastConversationId },
+  };
 }

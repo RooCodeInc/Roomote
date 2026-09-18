@@ -20,6 +20,7 @@ export { triggerAutomationCommand } from './trigger-agent';
 export {
   createCustomAutomationCommand,
   deleteCustomAutomationCommand,
+  getCustomAutomationOptionsCommand,
   listCustomAutomationsCommand,
   resolveCustomAutomationScheduleCommand,
   triggerCustomAutomationCommand,

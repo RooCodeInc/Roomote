@@ -44,7 +44,7 @@
           "type": "app_mention",
           "channel": "C123ABC456",
           "user": "UGRACE",
-          "text": "<@BROOMOTE> !fast In one short paragraph: what is idempotency in API design?",
+          "text": "<@BROOMOTE> In one short paragraph: what is idempotency in API design?",
           "ts": "$TS1",
           "channel_type": "channel"
         }
@@ -59,7 +59,7 @@
           "type": "app_mention",
           "channel": "C123ABC456",
           "user": "UGRACE",
-          "text": "<@BROOMOTE> !fast In one short paragraph: what is idempotency in API design?",
+          "text": "<@BROOMOTE> In one short paragraph: what is idempotency in API design?",
           "ts": "$TS1",
           "channel_type": "channel"
         }

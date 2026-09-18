@@ -57,6 +57,68 @@ describe('Telegram task topic launch', () => {
     rememberTelegramImplicitTopicMock.mockResolvedValue(undefined);
   });
 
+  it('stamps the owning Fast Session onto the task and runs the kickoff gate', async () => {
+    const beforeEnqueue = vi.fn().mockResolvedValue(undefined);
+    enqueueTaskMock.mockImplementation(
+      async (
+        _input: unknown,
+        options: {
+          beforeEnqueue?: (taskRun: {
+            id: number;
+            taskId: string;
+          }) => Promise<void>;
+        },
+      ) => {
+        await options.beforeEnqueue?.({ id: 7, taskId: 'task-1' });
+        return { id: 7, taskId: 'task-1' };
+      },
+    );
+
+    await launchTelegramTask({
+      launchOwnerUserId: 'user-1',
+      queuedMessage: {
+        provider: 'telegram',
+        text: 'Fix the flaky test',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: '100',
+        channel: '555',
+      },
+      metadata: {
+        communicationProvider: 'telegram',
+        communicationChannelId: '555',
+        communicationMessageId: '100',
+      },
+      workspace: { repoForPayload: 'acme/app', workspaceDisplayName: 'App' },
+      fastAgentParent: {
+        sessionId: '66666666-6666-4666-8666-666666666666',
+        conversation: {
+          surface: 'telegram',
+          workspaceId: '555',
+          conversationId: '555:user:user-1',
+          replyTarget: { channelId: '555' },
+        },
+      },
+      beforeEnqueue,
+    });
+
+    expect(beforeEnqueue).toHaveBeenCalledWith({ id: 7, taskId: 'task-1' });
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            reportConsumer: 'orchestrator',
+            fastAgentSessionId: '66666666-6666-4666-8666-666666666666',
+            fastAgentParent: expect.objectContaining({
+              sessionId: '66666666-6666-4666-8666-666666666666',
+            }),
+          }),
+        }),
+      }),
+      expect.objectContaining({ beforeEnqueue }),
+    );
+  });
+
   it('uses a newly created topic as the task conversation', async () => {
     createTelegramForumTopicBestEffortMock.mockResolvedValue({
       threadId: '77',

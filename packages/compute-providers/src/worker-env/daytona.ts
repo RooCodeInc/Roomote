@@ -12,7 +12,6 @@ export function buildDaytonaWorkerEnv({
   snapshotName,
 }: BuildWorkerEnvOptions & {
   deploymentSlug?: string;
-  environmentId?: string;
   snapshotName: string;
 }): Record<string, string> {
   return {
@@ -20,6 +19,7 @@ export function buildDaytonaWorkerEnv({
       authToken,
       sandboxExpiresAtMs,
       extraEnv,
+      environmentId,
     }),
     ...buildWorkerContextEnv({
       provider: 'daytona',

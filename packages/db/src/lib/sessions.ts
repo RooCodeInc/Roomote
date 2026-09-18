@@ -1,13 +1,15 @@
 import { and, desc, eq, isNull, or, sql } from 'drizzle-orm';
 
-import type { TaskGoalStatus, TaskState } from '@roomote/types';
+import type { SessionGoalStatus, TaskState } from '@roomote/types';
 
 import type { DatabaseOrTransaction } from '../db';
 import {
   sessionParticipants,
+  sessionGoals,
   sessions,
   sessionTasks,
   fastAgentConversations,
+  fastAgentMessages,
   taskRuns,
   tasks,
   type SessionStatus,
@@ -19,15 +21,18 @@ import { runInTransactionIfAvailable } from './transaction-utils';
 
 export type SessionStatusInput = {
   conversationResponding: boolean;
+  /** True when the linked Fast conversation awaits structured user input. */
+  conversationPendingInput?: boolean;
+  goalStatus?: SessionGoalStatus | null;
   tasks: Array<{
     state: TaskState;
     taskPhase: string | null;
-    goalStatus: TaskGoalStatus | null;
   }>;
 };
 
 export function deriveSessionStatus(input: SessionStatusInput): SessionStatus {
   if (
+    input.conversationPendingInput ||
     input.tasks.some(
       (task) =>
         task.state === 'active' && task.taskPhase === 'waiting_for_user_input',
@@ -38,23 +43,64 @@ export function deriveSessionStatus(input: SessionStatusInput): SessionStatus {
 
   if (
     input.conversationResponding ||
+    input.goalStatus === 'active' ||
     input.tasks.some((task) => task.state === 'active')
   ) {
     return 'active';
   }
 
   if (
-    input.tasks.some(
-      (task) =>
-        task.state === 'failed' ||
-        task.goalStatus === 'blocked' ||
-        task.goalStatus === 'budget_limited',
-    )
+    input.tasks.some((task) => task.state === 'failed') ||
+    input.goalStatus === 'blocked' ||
+    input.goalStatus === 'budget_limited'
   ) {
     return 'blocked';
   }
 
   return 'ready';
+}
+
+/**
+ * True when the linked Fast conversation's most recent structured input
+ * request (`request_user_input`) has no matching response event yet. A newer
+ * request supersedes an older resolved one, so only the latest request is
+ * checked.
+ */
+export async function hasFastConversationPendingUserInput(
+  dbOrTx: DatabaseOrTransaction,
+  fastConversationId: string,
+): Promise<boolean> {
+  const [latestRequest] = await dbOrTx
+    .select({
+      requestId: sql<string>`(${fastAgentMessages.payload}->>'requestId')`,
+    })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, fastConversationId),
+        sql`${fastAgentMessages.eventType} = 'roomote_runtime.request_user_input'`,
+      ),
+    )
+    .orderBy(desc(fastAgentMessages.ts), desc(fastAgentMessages.createdAt))
+    .limit(1);
+
+  if (!latestRequest?.requestId) {
+    return false;
+  }
+
+  const [response] = await dbOrTx
+    .select({ exists: sql<number>`1` })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, fastConversationId),
+        sql`${fastAgentMessages.eventType} = 'roomote_runtime.request_user_input_response'`,
+        sql`(${fastAgentMessages.payload}->>'requestId') = ${latestRequest.requestId}`,
+      ),
+    )
+    .limit(1);
+
+  return !response;
 }
 
 export function isSessionConversationResponding(
@@ -113,7 +159,6 @@ async function refreshLockedSession(
       .selectDistinctOn([tasks.id], {
         state: tasks.state,
         taskPhase: taskRuns.taskPhase,
-        goalStatus: tasks.goalStatus,
       })
       .from(sessionTasks)
       .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
@@ -126,10 +171,24 @@ async function refreshLockedSession(
       )
       .orderBy(tasks.id, desc(taskRuns.id));
 
+    const goal = await tx.query.sessionGoals.findFirst({
+      where: eq(sessionGoals.sessionId, lockedSession.id),
+      columns: { status: true },
+    });
+
+    const conversationPendingInput = lockedSession.fastConversationId
+      ? await hasFastConversationPendingUserInput(
+          tx,
+          lockedSession.fastConversationId,
+        )
+      : false;
+
     cachedStatus = deriveSessionStatus({
       conversationResponding: isSessionConversationResponding({
         respondingUntil,
       }),
+      conversationPendingInput,
+      goalStatus: goal?.status ?? null,
       tasks: linkedTasks,
     });
   }
@@ -175,6 +234,9 @@ export async function ensureSessionForFastConversation(
     .select({
       id: fastAgentConversations.id,
       userId: fastAgentConversations.userId,
+      ownerAutomation: fastAgentConversations.ownerAutomation,
+      privacy: fastAgentConversations.privacy,
+      privateOwnerUserId: fastAgentConversations.privateOwnerUserId,
       surface: fastAgentConversations.surface,
       title: fastAgentConversations.title,
       titleEditedByUserAt: fastAgentConversations.titleEditedByUserAt,
@@ -201,8 +263,11 @@ export async function ensureSessionForFastConversation(
       title: conversation.title?.trim() || 'New session',
       titleEditedByUserAt: conversation.titleEditedByUserAt,
       llmTitleCheckpoint: conversation.llmTitleCheckpoint,
-      ownerKind: 'user',
+      ownerKind: conversation.ownerAutomation ? 'automation' : 'user',
       ownerUserId: conversation.userId,
+      ownerAutomation: conversation.ownerAutomation,
+      privacy: conversation.privacy,
+      privateOwnerUserId: conversation.privateOwnerUserId,
       sourceSurface: conversation.surface,
       sourceTrigger:
         conversation.surface === 'automation' ? 'schedule' : 'message',
@@ -222,38 +287,41 @@ export async function ensureSessionForFastConversation(
     );
   }
 
-  await tx
-    .insert(sessionParticipants)
-    .values({
-      sessionId: session.id,
-      userId: conversation.userId,
-      role: 'owner',
-    })
-    .onConflictDoNothing();
+  if (conversation.userId) {
+    await tx
+      .insert(sessionParticipants)
+      .values({
+        sessionId: session.id,
+        userId: conversation.userId,
+        role: 'owner',
+      })
+      .onConflictDoNothing();
+  }
 
   return session;
 }
 
 /**
- * Ensures a visible task has one canonical Session inside the caller's
+ * Ensures every task has one canonical Session inside the caller's
  * transaction. The tables are additive and ignored by N-1 application code.
  */
 export async function ensureSessionForTask(
   tx: DatabaseOrTransaction,
   input: EnsureSessionForTaskInput,
-): Promise<Session | null> {
+): Promise<Session> {
   const [task] = await tx
     .select({
       id: tasks.id,
       title: tasks.title,
       state: tasks.state,
-      goalStatus: tasks.goalStatus,
       initiatorKind: tasks.initiatorKind,
       initiatorUserId: tasks.initiatorUserId,
       initiatorAutomation: tasks.initiatorAutomation,
       surface: tasks.surface,
       trigger: tasks.trigger,
       visibility: tasks.visibility,
+      privacy: tasks.privacy,
+      privateOwnerUserId: tasks.privateOwnerUserId,
       activityAt: tasks.activityAt,
     })
     .from(tasks)
@@ -264,13 +332,15 @@ export async function ensureSessionForTask(
     throw new Error(`Task ${input.taskId} does not exist.`);
   }
 
-  if (task.visibility !== 'visible') {
-    return null;
-  }
-
   const existing = await getSessionForTask(tx, task.id);
   if (existing) {
-    return existing;
+    if (
+      existing.privacy !== task.privacy ||
+      existing.privateOwnerUserId !== task.privateOwnerUserId
+    ) {
+      throw new Error(`Task ${task.id} privacy does not match its Session.`);
+    }
+    return promoteSessionForVisibleTask(tx, existing, task.visibility);
   }
 
   // Callers may pass a raw payload conversation id that was never persisted
@@ -279,12 +349,23 @@ export async function ensureSessionForTask(
   let fastConversationId = input.fastConversationId ?? null;
   if (fastConversationId) {
     const [conversation] = await tx
-      .select({ id: fastAgentConversations.id })
+      .select({
+        id: fastAgentConversations.id,
+        privacy: fastAgentConversations.privacy,
+        privateOwnerUserId: fastAgentConversations.privateOwnerUserId,
+      })
       .from(fastAgentConversations)
       .where(eq(fastAgentConversations.id, fastConversationId))
       .limit(1);
     if (!conversation) {
       fastConversationId = null;
+    } else if (
+      conversation.privacy !== task.privacy ||
+      conversation.privateOwnerUserId !== task.privateOwnerUserId
+    ) {
+      throw new Error(
+        `Task ${task.id} privacy does not match Fast conversation ${conversation.id}.`,
+      );
     }
   }
 
@@ -318,6 +399,8 @@ export async function ensureSessionForTask(
       .values({
         title: task.title,
         ...owner,
+        privacy: task.privacy,
+        privateOwnerUserId: task.privateOwnerUserId,
         sourceSurface: task.surface,
         sourceTrigger: task.trigger,
         fastConversationId,
@@ -329,7 +412,6 @@ export async function ensureSessionForTask(
             {
               state: task.state,
               taskPhase: null,
-              goalStatus: task.goalStatus,
             },
           ],
         }),
@@ -369,6 +451,7 @@ export async function ensureSessionForTask(
       await tx.delete(sessions).where(eq(sessions.id, session.id));
     }
 
+    await promoteSessionForVisibleTask(tx, canonical, task.visibility);
     return touchSessionActivity(tx, canonical.id, task.activityAt);
   }
 
@@ -383,7 +466,79 @@ export async function ensureSessionForTask(
       .onConflictDoNothing();
   }
 
+  await promoteSessionForVisibleTask(tx, session, task.visibility);
   return touchSessionActivity(tx, session.id, task.activityAt);
+}
+
+async function promoteSessionForVisibleTask(
+  tx: DatabaseOrTransaction,
+  session: Session,
+  taskVisibility: Session['visibility'],
+): Promise<Session> {
+  if (taskVisibility !== 'visible' || session.visibility === 'visible') {
+    return session;
+  }
+
+  const [updated] = await tx
+    .update(sessions)
+    .set({ visibility: 'visible', updatedAt: new Date() })
+    .where(eq(sessions.id, session.id))
+    .returning();
+
+  if (!updated) {
+    throw new Error(`Session ${session.id} does not exist.`);
+  }
+  return updated;
+}
+
+/**
+ * Binds a Fast conversation to a Session that has none yet, so a launch can
+ * land in the Session that produced the request instead of opening a new
+ * one. An explicit conversation bind makes the Session visible. Returns null
+ * when the Session is missing or already has a
+ * conversation; the caller then keeps the conversation's own Session.
+ */
+export async function attachFastConversationToSession(
+  tx: DatabaseOrTransaction,
+  input: { sessionId: string; fastConversationId: string },
+): Promise<Session | null> {
+  const [pair] = await tx
+    .select({
+      sessionPrivacy: sessions.privacy,
+      sessionOwner: sessions.privateOwnerUserId,
+      conversationPrivacy: fastAgentConversations.privacy,
+      conversationOwner: fastAgentConversations.privateOwnerUserId,
+    })
+    .from(sessions)
+    .innerJoin(
+      fastAgentConversations,
+      eq(fastAgentConversations.id, input.fastConversationId),
+    )
+    .where(eq(sessions.id, input.sessionId))
+    .limit(1);
+  if (
+    !pair ||
+    pair.sessionPrivacy !== pair.conversationPrivacy ||
+    pair.sessionOwner !== pair.conversationOwner
+  ) {
+    return null;
+  }
+  const [updated] = await tx
+    .update(sessions)
+    .set({
+      fastConversationId: input.fastConversationId,
+      visibility: 'visible',
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(sessions.id, input.sessionId),
+        isNull(sessions.fastConversationId),
+      ),
+    )
+    .returning();
+
+  return updated ?? null;
 }
 
 export async function getSessionForTask(
@@ -400,6 +555,34 @@ export async function getSessionForTask(
   return session?.session ?? null;
 }
 
+/**
+ * Returns the trusted human principals durably attached to a task.
+ *
+ * The immutable task initiator is authoritative for direct human launches.
+ * Automation-delegated tasks instead retain their run-as human through the
+ * canonical Session owner, without misclassifying the automation as a user.
+ */
+export async function getTaskHumanOwnerUserIds(
+  tx: DatabaseOrTransaction,
+  taskId: string,
+): Promise<string[]> {
+  const [task] = await tx
+    .select({ initiatorUserId: tasks.initiatorUserId })
+    .from(tasks)
+    .where(eq(tasks.id, taskId))
+    .limit(1);
+  const session = await getSessionForTask(tx, taskId);
+
+  return [
+    ...new Set(
+      [
+        task?.initiatorUserId,
+        session?.ownerKind === 'user' ? session.ownerUserId : null,
+      ].filter((userId): userId is string => Boolean(userId)),
+    ),
+  ];
+}
+
 export async function getSessionForFastConversation(
   tx: DatabaseOrTransaction,
   fastConversationId: string,
@@ -407,12 +590,7 @@ export async function getSessionForFastConversation(
   const [session] = await tx
     .select()
     .from(sessions)
-    .where(
-      and(
-        eq(sessions.fastConversationId, fastConversationId),
-        eq(sessions.visibility, 'visible'),
-      ),
-    )
+    .where(eq(sessions.fastConversationId, fastConversationId))
     .limit(1);
 
   return session ?? null;

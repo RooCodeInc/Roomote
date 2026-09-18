@@ -48,13 +48,15 @@ function CollapsibleIconTrigger({
     <span className={cn('relative size-3 shrink-0', className)}>
       <ChevronUp
         className={cn(
-          'absolute size-3 transition-all opacity-0 -top-4 group-data-[state=open]:opacity-100 group-data-[state=open]:top-0',
+          'absolute size-3 transition-all opacity-0 -top-4',
+          'group-data-[state=open]/collapsible-icon-trigger:opacity-100 group-data-[state=open]/collapsible-icon-trigger:top-0',
           iconClassName,
         )}
       />
       <Icon
         className={cn(
-          'absolute size-3 transition-all opacity-100 top-0 group-data-[state=open]:opacity-0 group-data-[state=open]:top-4',
+          'absolute size-3 transition-all opacity-100 top-0',
+          'group-data-[state=open]/collapsible-icon-trigger:opacity-0 group-data-[state=open]/collapsible-icon-trigger:top-4',
           iconClassName,
         )}
       />

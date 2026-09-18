@@ -20,6 +20,7 @@ import {
   DEV_LOGIN_INFERENCE_API_KEY_PLACEHOLDER,
   normalizeDeploymentModelConfig,
 } from '@roomote/types';
+import { registerExclusiveAutomationSettingsDatabaseLock } from '@/testing/exclusive-automation-settings-database-lock';
 
 const { envMock, mockBootstrapWebRuntimeEnv, mockIsWebServerBindExposed } =
   vi.hoisted(() => ({
@@ -50,6 +51,8 @@ vi.mock('@/lib/server/env', async () => ({
 }));
 
 import { GET } from './route';
+
+registerExclusiveAutomationSettingsDatabaseLock();
 
 function getSetCookieHeaders(response: Response): string[] {
   const headers = response.headers as Headers & {
@@ -91,8 +94,20 @@ async function deleteDevLoginRows() {
     );
   await db
     .delete(authUsers)
-    .where(eq(authUsers.email, envMock.WEB_DEV_LOGIN_EMAIL));
-  await db.delete(users).where(eq(users.email, envMock.WEB_DEV_LOGIN_EMAIL));
+    .where(
+      inArray(authUsers.email, [
+        envMock.WEB_DEV_LOGIN_EMAIL,
+        'local+onboarding@roomote.dev',
+      ]),
+    );
+  await db
+    .delete(users)
+    .where(
+      inArray(users.email, [
+        envMock.WEB_DEV_LOGIN_EMAIL,
+        'local+onboarding@roomote.dev',
+      ]),
+    );
   await db
     .delete(deploymentSettings)
     .where(eq(deploymentSettings.id, 'default'));
@@ -168,6 +183,45 @@ describe('GET /auth/dev-login', () => {
       emailVerified: true,
       name: 'Local Admin',
     });
+  });
+
+  it('creates an isolated incomplete-onboarding identity', async () => {
+    const response = await GET(
+      new NextRequest(
+        'http://localhost:3000/auth/dev-login?scenario=onboarding',
+        { headers: { 'user-agent': 'roomote-dev-login-test' } },
+      ),
+    );
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get('location')).toBe(
+      'http://localhost:3000/onboarding',
+    );
+    const user = await db.query.users.findFirst({
+      where: eq(users.email, 'local+onboarding@roomote.dev'),
+    });
+    expect(user).toMatchObject({
+      name: 'Onboarding Admin',
+      role: 'admin',
+      onboardingCompletedAt: null,
+    });
+
+    await db
+      .update(users)
+      .set({ onboardingCompletedAt: new Date() })
+      .where(eq(users.id, user!.id));
+    await GET(
+      new NextRequest(
+        'http://localhost:3000/auth/dev-login?scenario=onboarding',
+        { headers: { 'user-agent': 'roomote-dev-login-test' } },
+      ),
+    );
+
+    expect(
+      await db.query.users.findFirst({
+        where: eq(users.email, 'local+onboarding@roomote.dev'),
+      }),
+    ).toMatchObject({ onboardingCompletedAt: null });
   });
 
   it('satisfies inference setup with an intentionally invalid saved key when configuration is empty', async () => {

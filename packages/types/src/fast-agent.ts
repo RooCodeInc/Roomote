@@ -1,16 +1,37 @@
 import { z } from 'zod';
 
+import { BACKGROUND_AUTOMATION_KEYS } from './background-agents';
+
 export const fastAgentSurfaces = [
   'slack',
   'discord',
   'teams',
   'telegram',
+  'agentmail',
+  'linear',
+  'github',
+  'gitlab',
+  'bitbucket',
+  'ado',
+  'gitea',
   'automation',
   'web',
 ] as const;
 export const fastAgentSurfaceSchema = z.enum(fastAgentSurfaces);
 
 export type FastAgentSurface = z.infer<typeof fastAgentSurfaceSchema>;
+
+export const fastAgentConversationOwnerSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('user'), userId: z.string().min(1) }),
+  z.object({
+    kind: z.literal('automation'),
+    automationKey: z.enum(BACKGROUND_AUTOMATION_KEYS),
+  }),
+]);
+
+export type FastAgentConversationOwner = z.infer<
+  typeof fastAgentConversationOwnerSchema
+>;
 
 export const fastAgentReplyTargetSchema = z.object({
   channelId: z.string().min(1),
@@ -31,9 +52,7 @@ export const fastAgentConversationSchema = z.discriminatedUnion('surface', [
   z.object({
     surface: z.literal('slack'),
     ...fastAgentConversationIdentitySchema,
-    replyTarget: fastAgentReplyTargetSchema.extend({
-      threadId: z.string().min(1),
-    }),
+    replyTarget: fastAgentReplyTargetSchema,
   }),
   z.object({
     surface: z.literal('discord'),
@@ -52,6 +71,59 @@ export const fastAgentConversationSchema = z.discriminatedUnion('surface', [
     replyTarget: fastAgentReplyTargetSchema,
   }),
   z.object({
+    surface: z.literal('agentmail'),
+    /**
+     * conversationId is the internal agentmail_conversations id, not the
+     * provider thread id: forwarded threads fork into a second conversation
+     * on the same provider thread, and the fork must be a distinct identity.
+     * The durable reply route (anchor, recipient) lives on the conversation
+     * row; replyTarget carries the inbox as channelId for display/context.
+     */
+    ...fastAgentConversationIdentitySchema,
+    replyTarget: fastAgentReplyTargetSchema,
+  }),
+  z.object({
+    surface: z.literal('linear'),
+    ...fastAgentConversationIdentitySchema,
+    /**
+     * A Linear agent session. `workspaceId` is the Linear organization,
+     * `conversationId` and `replyTarget.channelId` are the agent session id;
+     * replies post as agent-session response activities.
+     */
+    replyTarget: fastAgentReplyTargetSchema,
+  }),
+  /**
+   * Source-control surfaces: a pull request or issue discussion.
+   * `workspaceId` is `<host>/<owner>/<repo>`, `conversationId` and
+   * `replyTarget.channelId` are `pull/<number>` or `issues/<number>`, and
+   * `replyTarget.threadId` is the review comment a reply threads under.
+   */
+  z.object({
+    surface: z.literal('github'),
+    ...fastAgentConversationIdentitySchema,
+    replyTarget: fastAgentReplyTargetSchema,
+  }),
+  z.object({
+    surface: z.literal('gitlab'),
+    ...fastAgentConversationIdentitySchema,
+    replyTarget: fastAgentReplyTargetSchema,
+  }),
+  z.object({
+    surface: z.literal('bitbucket'),
+    ...fastAgentConversationIdentitySchema,
+    replyTarget: fastAgentReplyTargetSchema,
+  }),
+  z.object({
+    surface: z.literal('ado'),
+    ...fastAgentConversationIdentitySchema,
+    replyTarget: fastAgentReplyTargetSchema,
+  }),
+  z.object({
+    surface: z.literal('gitea'),
+    ...fastAgentConversationIdentitySchema,
+    replyTarget: fastAgentReplyTargetSchema,
+  }),
+  z.object({
     surface: z.literal('automation'),
     ...fastAgentConversationIdentitySchema,
   }),
@@ -63,9 +135,33 @@ export const fastAgentConversationSchema = z.discriminatedUnion('surface', [
 
 export type FastAgentConversation = z.infer<typeof fastAgentConversationSchema>;
 
+export const fastAgentSourceControlSurfaces = [
+  'github',
+  'gitlab',
+  'bitbucket',
+  'ado',
+  'gitea',
+] as const;
+
+export type FastAgentSourceControlSurface =
+  (typeof fastAgentSourceControlSurfaces)[number];
+
+export type FastAgentSourceControlConversation = Extract<
+  FastAgentConversation,
+  { surface: FastAgentSourceControlSurface }
+>;
+
+export function isFastAgentSourceControlConversation(
+  conversation: FastAgentConversation,
+): conversation is FastAgentSourceControlConversation {
+  return (fastAgentSourceControlSurfaces as readonly string[]).includes(
+    conversation.surface,
+  );
+}
+
 export type FastAgentCommunicationConversation = Extract<
   FastAgentConversation,
-  { surface: 'slack' | 'discord' | 'teams' | 'telegram' }
+  { surface: 'slack' | 'discord' | 'teams' | 'telegram' | 'agentmail' }
 >;
 
 export function isFastAgentCommunicationConversation(
@@ -75,7 +171,8 @@ export function isFastAgentCommunicationConversation(
     conversation.surface === 'slack' ||
     conversation.surface === 'discord' ||
     conversation.surface === 'teams' ||
-    conversation.surface === 'telegram'
+    conversation.surface === 'telegram' ||
+    conversation.surface === 'agentmail'
   );
 }
 
@@ -86,14 +183,169 @@ export const fastAgentParentSchema = z.object({
 
 export type FastAgentParent = z.infer<typeof fastAgentParentSchema>;
 
+export const FAST_AGENT_HUMAN_FOLLOW_UP_EVENT_TYPE = 'human_follow_up' as const;
+
+/**
+ * A pull request or issue discussion a queued human turn should also answer
+ * in, when the message was posted there but the Session lives on another
+ * surface (the Slack thread or web Session whose task opened the pull
+ * request). Mirrors the sdk's SourceControlFastDiscussion.
+ */
+export const fastAgentSourceControlReplyTargetSchema = z.object({
+  provider: z.enum(fastAgentSourceControlSurfaces),
+  host: z.string().min(1),
+  repositoryFullName: z.string().min(1),
+  kind: z.enum(['pull', 'issues']),
+  number: z.number().int().positive(),
+  reviewCommentId: z.string().min(1).optional(),
+  replyCommentId: z.string().min(1).optional(),
+  /** Public page of the discussion, for attribution on the home surface. */
+  url: z.string().min(1).optional(),
+});
+
+export type FastAgentSourceControlReplyTarget = z.infer<
+  typeof fastAgentSourceControlReplyTargetSchema
+>;
+
+/** An emoji reaction a chat surface delivered as Fast human input. */
+export const fastAgentReactionExternalInputSchema = z.object({
+  type: z.literal('reaction_added'),
+  provider: z.enum(['slack', 'discord', 'teams', 'telegram']),
+  reactions: z.array(
+    z.object({ name: z.string().min(1), id: z.string().optional() }),
+  ),
+  reactor: z.object({
+    externalUserId: z.string().min(1),
+    displayName: z.string().optional(),
+  }),
+  message: z.object({
+    workspaceId: z.string().min(1),
+    channelId: z.string().min(1),
+    messageId: z.string().min(1),
+    threadId: z.string().optional(),
+    text: z.string().optional(),
+  }),
+  eventId: z.string().min(1),
+});
+
+export type FastAgentReactionExternalInput = z.infer<
+  typeof fastAgentReactionExternalInputSchema
+>;
+
+export const fastAgentPlatformEventKindSchema = z.enum([
+  'delegated_task',
+  'automation',
+  'setup',
+  'input_response',
+  'scheduled_wakeup',
+]);
+
+export const fastAgentPlatformEventVisibilitySchema = z.enum([
+  'optional',
+  'required',
+]);
+
+export const fastAgentSetupTurnContextSchema = z.object({
+  sessionId: z.string().min(1),
+  fastConversationId: z.string().min(1),
+  setupSnapshot: z.string().min(1),
+  starterTaskOptions: z.array(
+    z.object({
+      id: z.string().min(1),
+      label: z.string().min(1),
+      description: z.string(),
+    }),
+  ),
+});
+
+export type FastAgentSetupTurnContext = z.infer<
+  typeof fastAgentSetupTurnContextSchema
+>;
+
+export const fastAgentHumanFollowUpEventSchema = z.object({
+  type: z.literal(FAST_AGENT_HUMAN_FOLLOW_UP_EVENT_TYPE),
+  eventId: z.string().min(1),
+  currentMessageId: z.string().min(1),
+  userId: z.string().min(1),
+  question: z.string().min(1),
+  images: z.array(z.string()).optional(),
+  attachmentTexts: z.array(z.string()).optional(),
+  senderDisplayName: z.string().min(1).optional(),
+  senderExternalId: z.string().min(1).optional(),
+  /**
+   * Whether the surface classified the message as addressed to Roomote (a
+   * mention, a DM, a reply to it) rather than ambient conversation between
+   * people. This is context about directedness, not permission to stay silent.
+   */
+  directedAtRoomote: z.boolean().optional(),
+  /**
+   * Explicit surface decision that this turn may end without a visible reply.
+   * Absent and false both require a response, including for older durable rows.
+   */
+  allowSilentAmbientReply: z.boolean().optional(),
+  /** The surface classified this turn as conversation between human peers. */
+  peerDirectedTurn: z.boolean().optional(),
+  /**
+   * Surface context the model reads with the message (the pull request a
+   * mention is on, for example). Persisted so a queued or resumed turn keeps
+   * the context the inline turn would have had.
+   */
+  agentContext: z.string().min(1).optional(),
+  /** Tasks the Session may steer on this turn beyond the ones it delegated. */
+  activeTasks: z
+    .array(
+      z.object({
+        taskId: z.string().min(1),
+        title: z.string().optional(),
+        status: z.string().optional(),
+      }),
+    )
+    .optional(),
+  /** Per-turn reply route for an explicit cross-surface notification reply. */
+  deliveryConversation: fastAgentConversationSchema.optional(),
+  /**
+   * Set when the message came from a source-control discussion that another
+   * Session owns through a task: the answer posts there as well as on the
+   * Session's home surface.
+   */
+  sourceControlReplyTarget: fastAgentSourceControlReplyTargetSchema.optional(),
+  /**
+   * Set when the human input was an emoji reaction rather than a message, so
+   * a run that resumes the turn keeps reaction semantics.
+   */
+  input: z
+    .object({
+      type: z.literal('reaction'),
+      externalInput: fastAgentReactionExternalInputSchema,
+    })
+    .optional(),
+  /**
+   * Set for platform events admitted through the human turn path (web setup
+   * kickoffs and input responses), so a run that resumes the turn keeps
+   * their framing instead of treating the event text as a human message.
+   */
+  turnSource: z.literal('platform_event').optional(),
+  platformEventKind: fastAgentPlatformEventKindSchema.optional(),
+  platformEventVisibility: fastAgentPlatformEventVisibilitySchema.optional(),
+  setupSession: z.boolean().optional(),
+  /**
+   * Set when the message was spoken on a voice call. The reply is returned
+   * to the call for the voice to report rather than shown as a chat reply,
+   * so a resumed run must keep that framing.
+   */
+  voiceMode: z.boolean().optional(),
+  /** Serializable setup context used to rebuild trusted setup capabilities
+   * when an admitted web turn resumes in another process. */
+  setupContext: fastAgentSetupTurnContextSchema.optional(),
+});
+
+export type FastAgentHumanFollowUpEvent = z.infer<
+  typeof fastAgentHumanFollowUpEventSchema
+>;
+
 export type TaskReportConsumer = 'direct-user' | 'orchestrator';
 
-export const taskReportConsumerSchema = z
-  .enum(['direct-user', 'orchestrator', 'fast-orchestrator'])
-  .transform(
-    (consumer): TaskReportConsumer =>
-      consumer === 'fast-orchestrator' ? 'orchestrator' : consumer,
-  );
+export const taskReportConsumerSchema = z.enum(['direct-user', 'orchestrator']);
 
 /**
  * A delegated Fast child keeps its parent's coordinates for lifecycle routing,
@@ -109,6 +361,23 @@ export function buildFastAgentChildTaskMetadata(parent: FastAgentParent): {
   return {
     communicationContextInherited: true,
     reportConsumer: 'orchestrator',
+    fastAgentSessionId: parent.sessionId,
+    fastAgentParent: parent,
+  };
+}
+
+/**
+ * Session linkage without orchestrator report ownership: the task shows up in
+ * the parent Fast session (session_tasks + the fast task list) and can emit
+ * parent events, but keeps its own workflow's report and communication
+ * behavior. Used for review-pipeline tasks attached to the session whose
+ * delegated work opened the reviewed PR.
+ */
+export function buildFastAgentSessionAttachment(parent: FastAgentParent): {
+  fastAgentSessionId: string;
+  fastAgentParent: FastAgentParent;
+} {
+  return {
     fastAgentSessionId: parent.sessionId,
     fastAgentParent: parent,
   };
@@ -140,9 +409,5 @@ export function getTaskReportConsumerFromPayload(
     }
   }
 
-  // Existing orchestrator-owned tasks still need the report contract when
-  // they resume or settle after an upgrade.
-  return getFastAgentParentFromPayload(payload)
-    ? 'orchestrator'
-    : 'direct-user';
+  return 'direct-user';
 }

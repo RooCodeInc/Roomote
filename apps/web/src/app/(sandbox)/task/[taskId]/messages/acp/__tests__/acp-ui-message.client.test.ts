@@ -3,6 +3,33 @@ import { type AcpOutputEvent, ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 import { toAcpUiMessage } from '../../../hooks/services/acp-protocol-service';
 
 describe('toAcpUiMessage', () => {
+  it('preserves validated charts from persisted assistant content blocks', () => {
+    const chart = {
+      type: 'data_visualization' as const,
+      title: 'Traffic sources',
+      chart: {
+        type: 'pie' as const,
+        segments: [{ label: 'Search', value: 65 }],
+      },
+    };
+    const message = toAcpUiMessage({
+      id: 'assistant-chart-1',
+      ts: 12344,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      kind: 'text',
+      text: 'Search accounts for most visits.',
+      role: 'assistant',
+      contentBlocks: [
+        { type: 'text', text: 'Search accounts for most visits.' },
+        chart,
+      ],
+      metadata: null,
+      payload: {},
+    });
+
+    expect(message.charts).toEqual([chart]);
+  });
+
   it('maps ACP user_prompt output to a user text message', () => {
     const message = toAcpUiMessage({
       id: 'user-prompt-1',

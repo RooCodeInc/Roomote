@@ -4,6 +4,7 @@ import {
   chunkDiscordMessage,
   getLatestInboundMessageId,
   getLatestUserMessageForReplyQuote,
+  postTextThreadReplyWithFooter,
   type DiscordCommunicationProvider,
   type TelegramCommunicationProvider,
 } from '@roomote/communication';
@@ -21,13 +22,16 @@ import {
   getCommunicationMessageIdFromTaskPayload,
   getCommunicationProviderFromTaskPayload,
   getCommunicationServiceUrlFromTaskPayload,
+  getCommunicationTeamIdFromTaskPayload,
   getCommunicationThreadIdFromTaskPayload,
 } from '@roomote/types';
 import {
   createDiscordCommunicationProviderFromRuntimeCredentials as createDiscordCommunicationProvider,
   createTeamsCommunicationProviderFromRuntimeCredentials as createTeamsCommunicationProvider,
   createTelegramCommunicationProviderFromRuntimeCredentials as createTelegramCommunicationProvider,
+  getCommunicationProviderAdapter,
 } from '@roomote/sdk/server';
+import { createHash } from 'node:crypto';
 
 import { THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE } from './chat-reply-helpers';
 import {
@@ -43,18 +47,18 @@ const LOG_CONTEXT = 'communicationThreadReplies';
 const TEAMS_THREAD_REPLY_FOOTER_LOCK_PREFIX = 'teams:thread_reply_footer_lock:';
 const DISCORD_THREAD_REPLY_FOOTER_LOCK_PREFIX =
   'discord:thread_reply_footer_lock:';
-const DISCORD_THREAD_REPLY_QUOTE_MAX_LENGTH = 280;
+const MARKDOWN_THREAD_REPLY_QUOTE_MAX_LENGTH = 280;
 
 // Telegram clears a chat action after ~5s; re-send inside that window so the
 // "typing…" indicator spans the whole reply delivery (chunks, photo fetch,
 // message delivery) instead of lapsing partway through.
 const TELEGRAM_TYPING_HEARTBEAT_MS = 4_000;
 
-function normalizeDiscordQuoteText(text: string): string {
+function normalizeMarkdownQuoteText(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
 
-function escapeDiscordMarkdownText(text: string): string {
+function escapeMarkdownQuoteText(text: string): string {
   return text
     .replaceAll('\\', '\\\\')
     .replaceAll('*', '\\*')
@@ -65,30 +69,30 @@ function escapeDiscordMarkdownText(text: string): string {
     .replaceAll('>', '\\>');
 }
 
-function truncateDiscordQuoteText(text: string): string {
-  if (text.length <= DISCORD_THREAD_REPLY_QUOTE_MAX_LENGTH) {
+function truncateMarkdownQuoteText(text: string): string {
+  if (text.length <= MARKDOWN_THREAD_REPLY_QUOTE_MAX_LENGTH) {
     return text;
   }
 
-  return `${text.slice(0, DISCORD_THREAD_REPLY_QUOTE_MAX_LENGTH).trimEnd()}...`;
+  return `${text.slice(0, MARKDOWN_THREAD_REPLY_QUOTE_MAX_LENGTH).trimEnd()}...`;
 }
 
-function buildDiscordThreadReplyQuote(params: {
+function buildMarkdownThreadReplyQuote(params: {
   username: string;
   text: string;
 }): string | null {
-  const username = escapeDiscordMarkdownText(
-    normalizeDiscordQuoteText(params.username),
+  const username = escapeMarkdownQuoteText(
+    normalizeMarkdownQuoteText(params.username),
   );
-  const text = escapeDiscordMarkdownText(
-    truncateDiscordQuoteText(normalizeDiscordQuoteText(params.text)),
+  const text = escapeMarkdownQuoteText(
+    truncateMarkdownQuoteText(normalizeMarkdownQuoteText(params.text)),
   );
 
   if (!username || !text) {
     return null;
   }
 
-  // Discord markdown blockquote — matches Slack's ">*name:* text" shape.
+  // Provider-rendered Markdown blockquote matching Slack's ">*name:* text".
   return `> **${username}:** ${text}`;
 }
 
@@ -108,13 +112,16 @@ function getDiscordFooterlessFinalChunk(params: {
     : finalChunk;
 }
 
-async function peekDiscordThreadReplyQuote(params: { runId: number }): Promise<{
+async function peekMarkdownThreadReplyQuote(params: {
+  provider: 'discord' | 'telegram';
+  runId: number;
+}): Promise<{
   pendingUserMessage: { id: string; text: string; userName: string };
   quote: string;
 } | null> {
   try {
     const latestUserMessage = await getLatestUserMessageForReplyQuote(
-      'discord',
+      params.provider,
       params.runId,
     );
 
@@ -122,7 +129,7 @@ async function peekDiscordThreadReplyQuote(params: { runId: number }): Promise<{
       return null;
     }
 
-    const quote = buildDiscordThreadReplyQuote({
+    const quote = buildMarkdownThreadReplyQuote({
       username: latestUserMessage.userName,
       text: latestUserMessage.text,
     });
@@ -137,7 +144,7 @@ async function peekDiscordThreadReplyQuote(params: { runId: number }): Promise<{
     };
   } catch (error) {
     console.error(
-      `[${LOG_CONTEXT}] Failed to build Discord reply quote: ${
+      `[${LOG_CONTEXT}] Failed to build ${params.provider} reply quote: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -401,6 +408,7 @@ async function sendTeamsThreadReply(params: {
         postReplyWithFooter: async () => ({
           ...(await postTeamsReply()),
           textWithoutFooter: text ?? '',
+          refresh: { footerText, channelId, serviceUrl },
           ...(images.length > 0 ? { images } : {}),
         }),
         clearPreviousFooter: async (previousFooterRecord) => {
@@ -497,9 +505,17 @@ async function sendTelegramThreadReply(params: {
     );
   }
 
-  // Prefer the most recent inbound user message id so the reply quotes the
-  // latest user message rather than the original launch message. Falls back
-  // to the launch communicationMessageId when no follow-up has arrived.
+  const pendingQuote = await peekMarkdownThreadReplyQuote({
+    provider: 'telegram',
+    runId: params.taskRun.id,
+  });
+  const textWithQuote = pendingQuote
+    ? [pendingQuote.quote, text].filter(Boolean).join('\n\n')
+    : text;
+
+  // Preserve the provider-neutral reply target for routing/bookkeeping. The
+  // Telegram adapter intentionally omits native reply metadata; web follow-up
+  // quotes are rendered explicitly through textWithQuote above.
   let replyToMessageId = messageId;
   try {
     const latestInboundMessageId = await getLatestInboundMessageId(
@@ -527,14 +543,39 @@ async function sendTelegramThreadReply(params: {
 
   let reply;
   try {
-    reply = await provider.postMessage({
+    const footerText = await buildCommunicationThreadReplyFooterTextBestEffort({
+      provider: 'telegram',
+      providerLabel: 'Telegram',
+      taskRun: params.taskRun,
+      logContext: LOG_CONTEXT,
+    });
+    const input = {
       channelId,
       ...(threadId ? { threadId } : {}),
       replyToMessageId: replyToMessageId ?? undefined,
-      ...(text ? { text } : {}),
-      textFormat: 'markdown',
+      ...(textWithQuote ? { text: textWithQuote } : {}),
+      textFormat: 'markdown' as const,
       images,
-    });
+    };
+    reply = footerText
+      ? await postTextThreadReplyWithFooter({ provider, input, footerText })
+      : await provider.postMessage(input);
+
+    if (pendingQuote) {
+      try {
+        await clearLatestUserMessageForReplyQuoteIfId(
+          'telegram',
+          params.taskRun.id,
+          pendingQuote.pendingUserMessage.id,
+        );
+      } catch (error) {
+        console.error(
+          `[${LOG_CONTEXT}] Failed to clear Telegram reply quote for task run ${params.taskRun.id}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
   } finally {
     stopTyping();
   }
@@ -552,6 +593,104 @@ async function sendTelegramThreadReply(params: {
   return new Response(JSON.stringify({ messageTs: reply.messageId }), {
     headers: { 'content-type': 'application/json' },
   });
+}
+
+/**
+ * Email replies must be delivered at most once per logical reply. The worker
+ * mints a clientSendId per tool invocation and every HTTP retry of that call
+ * carries it, so the key is stable across the whole logical send without
+ * depending on mutable route state; a fresh tool call (including an agent's
+ * own deliberate retry) is a new send. The text digest is only the legacy
+ * fallback for callers that predate clientSendId.
+ */
+function buildAgentMailThreadReplyIdempotencyKey(params: {
+  conversationId: string;
+  runId: number;
+  text: string;
+  clientSendId?: string;
+}): string {
+  const sendId =
+    params.clientSendId ??
+    createHash('sha256').update(params.text).digest('hex').slice(0, 16);
+  return `agentmail:${params.conversationId}:${params.runId}-${sendId}:thread-reply`;
+}
+
+async function sendAgentMailThreadReply(params: {
+  taskRun: CommunicationReplyTaskRun;
+  parsedBody: ParsedThreadReplyBody;
+}): Promise<Response> {
+  const channelId = getCommunicationChannelFromTaskPayload(
+    params.taskRun.payload,
+  );
+  // For email tasks the payload thread id is the INTERNAL AgentMail
+  // conversation id; the adapter resolves the actual reply anchor and
+  // recipient from the durable conversation row at send time.
+  const conversationId = getCommunicationThreadIdFromTaskPayload(
+    params.taskRun.payload,
+  );
+
+  if (!channelId || !conversationId) {
+    return new Response(
+      JSON.stringify({
+        error:
+          'Email thread reply is only available for jobs with an email conversation context',
+      }),
+      { status: 403 },
+    );
+  }
+
+  const provider = await getCommunicationProviderAdapter('agentmail');
+  if (!provider) {
+    return new Response(
+      JSON.stringify({
+        error: 'AgentMail credentials are not configured for outbound replies',
+      }),
+      { status: 503 },
+    );
+  }
+
+  const text = params.parsedBody.text?.trim();
+  if (!text) {
+    return new Response(
+      JSON.stringify({
+        error:
+          'Email thread replies require text; image attachments are not supported over email yet',
+      }),
+      { status: 400 },
+    );
+  }
+
+  // Email is not live: no typing heartbeat, no reactions, and no managed
+  // footer edits (a sent email cannot be updated). The reply text is already
+  // composed by the worker; delivery only needs the durable conversation
+  // route plus an Idempotency-Key so retries never double-send.
+  const reply = await provider.postMessage({
+    channelId,
+    threadId: conversationId,
+    text,
+    textFormat: 'markdown',
+    idempotencyKey: buildAgentMailThreadReplyIdempotencyKey({
+      conversationId,
+      runId: params.taskRun.id,
+      text,
+      ...(params.parsedBody.clientSendId
+        ? { clientSendId: params.parsedBody.clientSendId }
+        : {}),
+    }),
+  });
+
+  return new Response(
+    JSON.stringify({
+      messageTs: reply.messageId,
+      ...(params.parsedBody.images.length > 0
+        ? {
+            warning:
+              'Email replies do not support image attachments yet; the reply was sent without them.',
+          }
+        : {}),
+    }),
+    { headers: { 'content-type': 'application/json' } },
+  );
 }
 
 async function sendDiscordThreadReply(params: {
@@ -601,7 +740,8 @@ async function sendDiscordThreadReply(params: {
     );
   }
 
-  const pendingQuote = await peekDiscordThreadReplyQuote({
+  const pendingQuote = await peekMarkdownThreadReplyQuote({
+    provider: 'discord',
     runId: params.taskRun.id,
   });
   const textWithQuote =
@@ -665,6 +805,7 @@ async function sendDiscordThreadReply(params: {
             ...posted,
             messageId: posted.lastTextMessageId ?? posted.messageId,
             textWithoutFooter: footerlessFinalChunk,
+            refresh: { footerText, channelId: footerMessageChannelId },
           };
         },
         clearPreviousFooter: async (previousFooterRecord) => {
@@ -909,6 +1050,72 @@ async function addTeamsReaction(params: {
   }
 }
 
+/**
+ * Email has no reactions. Report the limitation gracefully (mirroring the
+ * UnsupportedCommunicationOperationError shape other providers surface)
+ * instead of erroring at the provider.
+ */
+function addAgentMailReaction(): Response {
+  return new Response(
+    JSON.stringify({
+      error:
+        'AgentMail does not support reactions. Email has no reactions; send a reply instead.',
+    }),
+    { status: 400 },
+  );
+}
+
+async function addSlackReaction(params: {
+  taskRun: { id: number; payload: unknown };
+  parsedBody: { channel: string; messageTs: string; name: string };
+}): Promise<Response> {
+  const channelId = getCommunicationChannelFromTaskPayload(
+    params.taskRun.payload,
+  );
+  if (!channelId || params.parsedBody.channel !== channelId) {
+    return new Response(
+      JSON.stringify({
+        error:
+          'Slack reactions are only available for the channel this session was launched from',
+      }),
+      { status: 403 },
+    );
+  }
+  const provider = await getCommunicationProviderAdapter('slack', {
+    slackTeamId: getCommunicationTeamIdFromTaskPayload(params.taskRun.payload),
+  });
+  if (!provider || provider.provider !== 'slack') {
+    return new Response(
+      JSON.stringify({
+        error: 'No active Slack installation found for this workspace',
+      }),
+      { status: 404 },
+    );
+  }
+  try {
+    const result = await provider.addReaction({
+      channelId,
+      messageId: params.parsedBody.messageTs,
+      name: params.parsedBody.name,
+    });
+    return new Response(
+      JSON.stringify({
+        channelId: result.channelId,
+        messageTs: result.messageId,
+        name: result.name,
+      }),
+      { headers: { 'content-type': 'application/json' } },
+    );
+  } catch (error) {
+    return new Response(
+      JSON.stringify({
+        error: `Slack reaction failed: ${error instanceof Error ? error.message : String(error)}`,
+      }),
+      { status: 502 },
+    );
+  }
+}
+
 export async function maybeSendCommunicationThreadReply(params: {
   taskRun: CommunicationReplyTaskRun;
   parsedBody: ParsedThreadReplyBody;
@@ -924,6 +1131,8 @@ export async function maybeSendCommunicationThreadReply(params: {
       return sendTelegramThreadReply(params);
     case 'discord':
       return sendDiscordThreadReply(params);
+    case 'agentmail':
+      return sendAgentMailThreadReply(params);
     default:
       return null;
   }
@@ -934,12 +1143,16 @@ export async function maybeAddCommunicationReaction(params: {
   parsedBody: { channel: string; messageTs: string; name: string };
 }): Promise<Response | null> {
   switch (getCommunicationProviderFromTaskPayload(params.taskRun.payload)) {
+    case 'slack':
+      return addSlackReaction(params);
     case 'teams':
       return addTeamsReaction(params);
     case 'telegram':
       return addTelegramReaction(params);
     case 'discord':
       return addDiscordReaction(params);
+    case 'agentmail':
+      return addAgentMailReaction();
     default:
       return null;
   }

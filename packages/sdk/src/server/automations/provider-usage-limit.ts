@@ -1,12 +1,14 @@
 import { createHash } from 'node:crypto';
 
 import {
+  and,
   db,
   desc,
   eq,
   getAutomationRuntime,
   getProviderUsageLimitSnapshots,
   recordAutomationRunOutcome,
+  recordBackgroundAutomationResult,
   slackInstallations,
   type ProviderUsageLimitSnapshot,
 } from '@roomote/db/server';
@@ -21,6 +23,7 @@ import {
 } from '@roomote/types';
 
 import { getCommunicationProviderAdapter } from '../lib/communication-providers';
+import { resolveBackgroundAutomationResultVisibility } from '../lib/automation-result-visibility';
 import {
   buildAutomationIconUrl,
   buildManagerSlackSettingsUrl,
@@ -29,6 +32,7 @@ import {
 } from '../lib/manager-slack';
 import {
   resolveAutomationRuntimeDestination,
+  sendAutomationEmailReport,
   type ResolvedAutomationDestination,
 } from './destination';
 import {
@@ -58,13 +62,14 @@ type UsageLimitCommunicationAdapter = Awaited<
 
 type ProviderUsageLimitDependencies = {
   getRuntime: typeof getAutomationRuntime;
-  getSlackBotToken: () => Promise<string | null>;
+  getSlackBotToken: (teamId?: string) => Promise<string | null>;
   getSnapshots: () => Promise<ProviderUsageLimitSnapshot[]>;
   getRedisClient: () => UsageLimitRedis;
   createNotifier: (token: string) => UsageLimitNotifier;
   resolveDestination: typeof resolveAutomationRuntimeDestination;
   getCommunicationAdapter: typeof getCommunicationProviderAdapter;
   recordOutcome: typeof recordAutomationRunOutcome;
+  recordResult: typeof recordBackgroundAutomationResult;
   now: () => Date;
 };
 
@@ -78,12 +83,16 @@ const defaultDependencies: ProviderUsageLimitDependencies = {
   getCommunicationAdapter: getCommunicationProviderAdapter,
   recordOutcome: (executor, params) =>
     recordAutomationRunOutcome(executor, params),
+  recordResult: (params) => recordBackgroundAutomationResult(params),
   now: () => new Date(),
 };
 
-async function getActiveSlackBotToken(): Promise<string | null> {
+async function getActiveSlackBotToken(teamId?: string): Promise<string | null> {
   const installation = await db.query.slackInstallations.findFirst({
-    where: eq(slackInstallations.isActive, true),
+    where: and(
+      eq(slackInstallations.isActive, true),
+      ...(teamId ? [eq(slackInstallations.teamId, teamId)] : []),
+    ),
     orderBy: [desc(slackInstallations.updatedAt)],
     columns: { botAccessToken: true },
   });
@@ -241,13 +250,12 @@ function buildProviderUsageLimitAlertBlock(
   snapshot: ProviderUsageLimitSnapshot,
 ): SlackBlock {
   const percent = Math.round(snapshot.usedPercent * 10) / 10;
-  const usage = formatUsage(snapshot, percent);
 
   return buildAutomationResultBlocks({
     title: 'Inference Provider Usage Alert',
     subtitle: {
       type: 'mrkdwn',
-      text: `${snapshot.providerName} is at ${percent}% (${usage})`,
+      text: `${snapshot.providerName} is at ${percent}%`,
     },
     iconUrl: buildAutomationIconUrl('battery-warning'),
     configureUrl: buildManagerSlackSettingsUrl(
@@ -328,7 +336,7 @@ export async function providerUsageLimitJob(
   }
 
   const now = dependencies.now();
-  const slackBotToken = await dependencies.getSlackBotToken();
+  let slackBotToken = await dependencies.getSlackBotToken();
   const destination =
     opts.destination ??
     (await dependencies.resolveDestination({
@@ -339,6 +347,10 @@ export async function providerUsageLimitJob(
     result.skippedReason =
       'Provider usage limit alert channel is not configured.';
     return result;
+  }
+
+  if (destination.provider === 'slack' && destination.teamId) {
+    slackBotToken = await dependencies.getSlackBotToken(destination.teamId);
   }
 
   if (destination.provider === 'slack' && !slackBotToken) {
@@ -387,9 +399,28 @@ export async function providerUsageLimitJob(
 
   try {
     if (alerts.length > 0) {
-      if (destination.provider === 'slack') {
+      const message = buildProviderUsageLimitWarningMessage({ alerts });
+      if (destination.provider === 'email') {
+        await sendAutomationEmailReport(destination, {
+          subject: 'Roomote inference provider usage alert',
+          conversationKey: `builtin-automation:provider_usage_limit:${now.toISOString()}`,
+          text: degradeSlackMrkdwnToMarkdown(
+            formatProviderUsageLimitWarningText({ alerts }),
+          ),
+          idempotencyKey: `provider-usage-limit:${now.toISOString()}`,
+          buttons: [
+            [
+              {
+                text: 'Automation settings',
+                url: buildManagerSlackSettingsUrl(
+                  PROVIDER_USAGE_LIMIT_SETTINGS_HASH,
+                ),
+              },
+            ],
+          ],
+        });
+      } else if (destination.provider === 'slack') {
         const notifier = dependencies.createNotifier(slackBotToken!);
-        const message = buildProviderUsageLimitWarningMessage({ alerts });
         const messageTs = await notifier.postMessage({
           channel: destination.channelId,
           ...message,
@@ -414,6 +445,20 @@ export async function providerUsageLimitJob(
           alerts,
         });
       }
+      await dependencies
+        .recordResult({
+          automationKey: 'provider_usage_limit',
+          content: message.text,
+          dedupeKey: `provider-usage-limit:${now.toISOString()}`,
+          visibility: await resolveBackgroundAutomationResultVisibility(
+            'provider_usage_limit',
+          ).catch(() => 'private' as const),
+        })
+        .catch((error) => {
+          console.warn(
+            `${LOG_PREFIX} Failed to record result: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        });
     }
 
     await dependencies.recordOutcome(db, {

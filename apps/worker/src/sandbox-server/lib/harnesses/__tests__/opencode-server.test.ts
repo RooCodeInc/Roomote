@@ -26,6 +26,7 @@ import {
 } from '../opencode-server/harness';
 import type {
   OpenCodeGlobalEvent,
+  OpenCodeMessageInfo,
   OpenCodeSessionMessage,
 } from '../opencode-server/types';
 
@@ -431,72 +432,16 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
-  it('adds trusted goal generation context without changing the visible prompt', async () => {
-    const { client, harness } = createHarness();
-    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
-    harness.subscribeRuntimePersistedEnvelope((envelope) =>
-      persistedEnvelopes.push(envelope),
-    );
-
-    try {
-      await connectHarness(harness, client);
-
-      expect(
-        harness.sendCommand({
-          commandName: TaskCommandName.StartNewTask,
-          data: {
-            text: 'Finish the replacement goal.',
-            goalContext: {
-              objective: 'Finish the replacement goal.',
-              generation: 'goal-generation:replacement',
-              status: 'active',
-              maxContinuations: 5,
-              continuationsUsed: 0,
-              blockedReason: null,
-              completedAt: null,
-            },
-            visibleInTranscript: true,
-          },
-        }),
-      ).toBe(true);
-
-      await vi.waitFor(() => {
-        expect(client.promptAsync).toHaveBeenCalledTimes(1);
-      });
-      expect(client.promptAsync.mock.calls[0]?.[0]).toMatchObject({
-        request: {
-          parts: [
-            {
-              type: 'text',
-              text: expect.stringContaining('<task_goal enabled="true">'),
-            },
-          ],
-        },
-      });
-      const agentPrompt = client.promptAsync.mock.calls[0]?.[0] as
-        | { request?: { parts?: Array<{ type: string; text?: string }> } }
-        | undefined;
-      const agentPromptText = agentPrompt?.request?.parts?.[0]?.text;
-      expect(agentPromptText).toContain('goal-generation:replacement');
-      expect(agentPromptText).toContain('Goal Mode is enabled for this turn');
-      expect(agentPromptText).not.toContain('/goal');
-      expect(
-        persistedEnvelopes.find(
-          (envelope) =>
-            envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
-        )?.payload.text,
-      ).toBe('Finish the replacement goal.');
-    } finally {
-      harness.dispose();
-    }
-  });
-
-  it('records inference usage for completed child-session (subagent) assistant messages', async () => {
+  it('persists linked child-session assistant messages and records their usage', async () => {
     const { client, harness } = createHarness();
     const inferenceUsageEvents: HarnessInferenceUsageEvent[] = [];
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
 
     harness.subscribeRuntimeInferenceUsage((event) =>
       inferenceUsageEvents.push(event),
+    );
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
     );
 
     try {
@@ -516,7 +461,30 @@ describe('OpenCodeServerHarness', () => {
         expect(client.promptAsync).toHaveBeenCalledTimes(1);
       });
 
-      const childAssistantInfo = {
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'prt_task_1',
+            sessionID: 'ses_1',
+            messageID: 'msg_1',
+            type: 'tool',
+            tool: 'task',
+            callID: 'call_task_1',
+            state: {
+              status: 'running',
+              input: {
+                description: 'Explore the code',
+                prompt: 'Inspect the implementation.',
+                subagent_type: 'explore',
+              },
+              metadata: { sessionId: 'ses_child_1' },
+            },
+          },
+        },
+      });
+
+      const childAssistantInfo: OpenCodeMessageInfo = {
         id: 'msg_child_1',
         sessionID: 'ses_child_1',
         role: 'assistant',
@@ -538,6 +506,18 @@ describe('OpenCodeServerHarness', () => {
           },
         },
       };
+      client.message.mockResolvedValue({
+        info: childAssistantInfo,
+        parts: [
+          {
+            id: 'prt_child_text_1',
+            sessionID: 'ses_child_1',
+            messageID: 'msg_child_1',
+            type: 'text',
+            text: 'Child investigation complete.',
+          },
+        ],
+      });
 
       // Incomplete child assistant messages are ignored.
       await client.emit({
@@ -581,8 +561,26 @@ describe('OpenCodeServerHarness', () => {
           messageCompletedAt: new Date(20),
         },
       ]);
-      // Child-session usage never reaches the main-session transcript fetch.
-      expect(client.message).not.toHaveBeenCalled();
+      expect(client.message).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: 'ses_child_1',
+          messageId: 'msg_child_1',
+        }),
+      );
+      expect(persistedEnvelopes).toContainEqual(
+        expect.objectContaining({
+          eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+          contentBlocks: [
+            { type: 'text', text: 'Child investigation complete.' },
+          ],
+          metadata: expect.objectContaining({
+            sessionId: 'ses_child_1',
+            parentSessionId: 'ses_1',
+            agentType: 'explore',
+            isSubagent: true,
+          }),
+        }),
+      );
     } finally {
       harness.dispose();
     }
@@ -3199,8 +3197,11 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
-  it('terminates an OpenCode retry loop after its structured attempt budget without a message', async () => {
-    const { client, harness } = createHarness();
+  it('hands an exhausted OpenCode connection reset retry to bounded Roomote recovery', async () => {
+    vi.useFakeTimers();
+    const { client, harness } = createHarness(undefined, {
+      providerErrorBaseDelayMs: 1_000,
+    });
     const taskEvents: TaskEvent[] = [];
     const persistedEnvelopes: AcpPersistedEnvelope[] = [];
 
@@ -3236,7 +3237,6 @@ describe('OpenCodeServerHarness', () => {
         }),
       ).toBe(true);
 
-      // The decision uses the structured attempt count, not the provider prose.
       await client.emit({
         type: 'session.status',
         properties: {
@@ -3244,6 +3244,7 @@ describe('OpenCodeServerHarness', () => {
           status: {
             type: 'retry',
             attempt: 3,
+            message: 'Connection reset by server',
             next: Date.now() + 2_000,
           },
         },
@@ -3257,20 +3258,40 @@ describe('OpenCodeServerHarness', () => {
         taskEvents.some(
           (event) => event.eventName === TaskEventName.TaskAborted,
         ),
-      ).toBe(true);
-      expect(harness.getQueuedMessages()).toEqual([]);
+      ).toBe(false);
+      expect(
+        harness.getQueuedMessages().map((message) => message.text),
+      ).toEqual(['Queued follow-up.']);
       expect(client.promptAsync).toHaveBeenCalledTimes(1);
       expect(
         persistedEnvelopes.some(
           (envelope) =>
             envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
             String(envelope.payload.text ?? '').includes(
-              'Provider retry limit exceeded.',
-            ),
+              'Connection reset by server',
+            ) &&
+            String(envelope.payload.text ?? '').includes('Retrying in 1s') &&
+            asRecord(envelope.payload.providerRetryNotice)?.kind ===
+              'provider_error',
         ),
       ).toBe(true);
+
+      await client.emit({
+        type: 'session.error',
+        properties: {
+          sessionID: 'ses_1',
+          error: { name: 'MessageAbortedError', data: { message: 'Aborted' } },
+        },
+      });
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(client.promptAsync).toHaveBeenCalledTimes(2);
     } finally {
       harness.dispose();
+      vi.useRealTimers();
     }
   });
 
@@ -3388,6 +3409,398 @@ describe('OpenCodeServerHarness', () => {
       expect(
         harness.getQueuedMessages().map((message) => message.text),
       ).toEqual(['Queued follow-up.']);
+    } finally {
+      harness.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('retries a turn that went idle with a provider-interrupted tool call', async () => {
+    vi.useFakeTimers();
+    const { client, harness } = createHarness();
+    const taskEvents: TaskEvent[] = [];
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+
+    harness.subscribe((event) => taskEvents.push(event));
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    const emitApplyPatchPart = (state: Record<string, unknown>) =>
+      client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'prt_patch_1',
+            sessionID: 'ses_1',
+            messageID: 'msg_1',
+            type: 'tool',
+            tool: 'apply_patch',
+            callID: 'call_patch_1',
+            state: {
+              input: { patchText: '*** Begin Patch' },
+              ...state,
+            },
+          },
+        },
+      });
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: { text: 'Scaffold the project.', visibleInTranscript: true },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      await emitApplyPatchPart({ status: 'running' });
+      // The provider closed the stream mid-call. OpenCode's runtime treats
+      // that as end of stream: it marks the pending tool interrupted and the
+      // session goes idle with no session.error.
+      await emitApplyPatchPart({
+        status: 'error',
+        error: 'Tool execution aborted',
+        metadata: { interrupted: true },
+      });
+      client.message.mockResolvedValueOnce(
+        createFinalAssistantMessage({ text: '' }),
+      );
+      await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: 'msg_1',
+            sessionID: 'ses_1',
+            role: 'assistant',
+            time: { completed: 1 },
+          },
+        },
+      });
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskCompleted,
+        ),
+      ).toBe(false);
+      expect(
+        persistedEnvelopes.some(
+          (envelope) =>
+            envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+            String(envelope.payload.text ?? '').includes(
+              'the provider stream was interrupted',
+            ) &&
+            String(envelope.payload.text ?? '').includes('Retrying in 5s') &&
+            asRecord(envelope.payload.providerRetryNotice)?.kind ===
+              'provider_error',
+        ),
+      ).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      expect(client.promptAsync.mock.calls[1]?.[0]).toMatchObject({
+        request: {
+          parts: [
+            {
+              type: 'text',
+              text: expect.stringContaining(
+                'Continue. The previous model request failed due to a provider error',
+              ),
+            },
+          ],
+        },
+      });
+
+      // The retried turn completes normally.
+      client.message.mockResolvedValueOnce(
+        createFinalAssistantMessage({ messageId: 'msg_2', text: 'Done.' }),
+      );
+      await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: 'msg_2',
+            sessionID: 'ses_1',
+            role: 'assistant',
+            time: { completed: 2 },
+          },
+        },
+      });
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+
+      await vi.waitFor(() => {
+        expect(
+          taskEvents.some(
+            (event) => event.eventName === TaskEventName.TaskCompleted,
+          ),
+        ).toBe(true);
+      });
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskAborted,
+        ),
+      ).toBe(false);
+    } finally {
+      harness.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not retry tool calls interrupted by a user cancel', async () => {
+    vi.useFakeTimers();
+    const { client, harness } = createHarness();
+    const taskEvents: TaskEvent[] = [];
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+
+    harness.subscribe((event) => taskEvents.push(event));
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    const emitBashPart = (state: Record<string, unknown>) =>
+      client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'prt_bash_1',
+            sessionID: 'ses_1',
+            messageID: 'msg_1',
+            type: 'tool',
+            tool: 'bash',
+            callID: 'call_bash_1',
+            state: { input: { command: 'sleep 60' }, ...state },
+          },
+        },
+      });
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: { text: 'Run something slow.', visibleInTranscript: true },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      await emitBashPart({ status: 'running' });
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.CancelTask,
+          data: { cancelledBy: { name: 'Tester', source: 'web' } },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(
+          taskEvents.some(
+            (event) => event.eventName === TaskEventName.TaskAborted,
+          ),
+        ).toBe(true);
+      });
+
+      await emitBashPart({
+        status: 'error',
+        error: 'Tool execution aborted',
+        metadata: { interrupted: true },
+      });
+      await client.emit({
+        type: 'session.error',
+        properties: {
+          sessionID: 'ses_1',
+          error: { name: 'MessageAbortedError', data: { message: 'Aborted' } },
+        },
+      });
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      expect(
+        persistedEnvelopes.some(
+          (envelope) => envelope.payload.providerRetryNotice !== undefined,
+        ),
+      ).toBe(false);
+    } finally {
+      harness.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('ignores tool calls interrupted by a queued replay but still recovers the replayed turn', async () => {
+    vi.useFakeTimers();
+    const { client, harness } = createHarness();
+    const taskEvents: TaskEvent[] = [];
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+
+    harness.subscribe((event) => taskEvents.push(event));
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    const userMessageIdOfPrompt = (callIndex: number): string =>
+      (
+        client.promptAsync.mock.calls[callIndex]?.[0] as {
+          request: { messageID: string };
+        }
+      ).request.messageID;
+    const emitToolPart = (
+      messageID: string,
+      callID: string,
+      state: Record<string, unknown>,
+    ) =>
+      client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: `prt_${callID}`,
+            sessionID: 'ses_1',
+            messageID,
+            type: 'tool',
+            tool: 'bash',
+            callID,
+            state: { input: { command: 'sleep 60' }, ...state },
+          },
+        },
+      });
+    const interrupted = {
+      status: 'error',
+      error: 'Tool execution aborted',
+      metadata: { interrupted: true },
+    };
+
+    try {
+      await connectHarness(harness, client);
+
+      harness.sendCommand({
+        commandName: TaskCommandName.StartNewTask,
+        data: { text: 'Start work.', visibleInTranscript: true },
+      });
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+      await client.emit({
+        type: 'session.status',
+        properties: { sessionID: 'ses_1', status: { type: 'busy' } },
+      });
+
+      const firstUserMessageId = userMessageIdOfPrompt(0);
+      const oldAssistantMessageId = `${firstUserMessageId}1`;
+      await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: oldAssistantMessageId,
+            sessionID: 'ses_1',
+            role: 'assistant',
+            parentID: firstUserMessageId,
+            time: { created: 1 },
+          },
+        },
+      });
+      await emitToolPart(oldAssistantMessageId, 'call_old', {
+        status: 'running',
+      });
+
+      // Native injection fails, so the steer aborts the turn and replays.
+      client.promptAsync.mockRejectedValueOnce(new Error('injection refused'));
+      harness.sendCommand({
+        commandName: TaskCommandName.SendMessage,
+        data: {
+          text: 'Steer to this instead.',
+          autoSteerWhenQueued: true,
+          visibleInTranscript: true,
+        },
+      });
+      await vi.waitFor(() => {
+        expect(client.abort).toHaveBeenCalledTimes(1);
+        expect(client.promptAsync).toHaveBeenCalledTimes(3);
+      });
+
+      // The superseded turn's tool is reported interrupted only after the
+      // replayed prompt is already running; it must not count against the
+      // new turn.
+      await emitToolPart(oldAssistantMessageId, 'call_old', interrupted);
+      await client.emit({
+        type: 'session.error',
+        properties: {
+          sessionID: 'ses_1',
+          error: { name: 'MessageAbortedError', data: { message: 'Aborted' } },
+        },
+      });
+
+      // The replayed turn then loses its own tool call to a provider cutoff.
+      const replayedUserMessageId = userMessageIdOfPrompt(2);
+      const newAssistantMessageId = `${replayedUserMessageId}1`;
+      await emitToolPart(newAssistantMessageId, 'call_new', {
+        status: 'running',
+      });
+      await emitToolPart(newAssistantMessageId, 'call_new', interrupted);
+      client.message.mockResolvedValueOnce(
+        createFinalAssistantMessage({
+          messageId: newAssistantMessageId,
+          text: '',
+        }),
+      );
+      await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: newAssistantMessageId,
+            sessionID: 'ses_1',
+            role: 'assistant',
+            time: { completed: 2 },
+          },
+        },
+      });
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskCompleted,
+        ),
+      ).toBe(false);
+      const notices = persistedEnvelopes.filter(
+        (envelope) =>
+          asRecord(envelope.payload.providerRetryNotice)?.kind ===
+          'provider_error',
+      );
+      expect(notices).toHaveLength(1);
+      expect(String(notices[0]?.payload.text ?? '')).toContain(
+        'before 1 tool call finished',
+      );
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(client.promptAsync).toHaveBeenCalledTimes(4);
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskAborted,
+        ),
+      ).toBe(false);
     } finally {
       harness.dispose();
       vi.useRealTimers();
@@ -5528,6 +5941,122 @@ describe('OpenCodeServerHarness', () => {
       harness.dispose();
     }
   });
+
+  it.each(['completed', 'error'] as const)(
+    'preserves canonical tool identity from running through %s events',
+    async (terminalStatus) => {
+      const { client, harness } = createHarness(undefined, {
+        mcpServerNames: ['roomote'],
+      });
+      const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+      const runtimeOutputEvents: AcpMessage[] = [];
+      harness.subscribeRuntimePersistedEnvelope((envelope) =>
+        persistedEnvelopes.push(envelope),
+      );
+      harness.subscribeRuntimeOutput((event) =>
+        runtimeOutputEvents.push(event),
+      );
+
+      const cases = [
+        { tool: 'read', input: { filePath: 'src/app.ts' } },
+        {
+          tool: 'apply_patch',
+          input: { patchText: '*** Delete File: old.ts' },
+        },
+        { tool: 'skill', input: { name: 'capture-visual-proof' } },
+        { tool: 'bash', input: { command: 'git diff' } },
+        { tool: 'custom_formatter', input: { path: 'src/app.ts' } },
+        { tool: 'mcp:roomote/get_task', input: { taskId: 'task_1' } },
+        { tool: 'roomote_send_chat_reply', input: { message: 'hello' } },
+      ];
+
+      try {
+        await connectHarness(harness, client);
+        for (const { tool, input } of cases) {
+          const callId = `call_${tool}`;
+          for (const status of ['running', terminalStatus] as const) {
+            await client.emit({
+              type: 'message.part.updated',
+              properties: {
+                part: {
+                  id: `part_${tool}`,
+                  sessionID: 'ses_1',
+                  messageID: 'msg_1',
+                  type: 'tool',
+                  callID: callId,
+                  tool,
+                  state: {
+                    status,
+                    input,
+                    title:
+                      status === 'running'
+                        ? 'roomote_send_chat_reply'
+                        : 'Result prose',
+                    ...(status === 'completed'
+                      ? { output: 'Success. Updated files.' }
+                      : {}),
+                    ...(status === 'error' ? { error: 'Tool failed' } : {}),
+                  },
+                },
+              },
+            });
+          }
+
+          const mcpToolName =
+            tool === 'mcp:roomote/get_task'
+              ? 'get_task'
+              : tool === 'roomote_send_chat_reply'
+                ? 'send_chat_reply'
+                : null;
+          const identity = {
+            toolName: mcpToolName ?? tool,
+            isMcp: mcpToolName !== null,
+            mcpToolName,
+            mcpServerName: mcpToolName ? 'roomote' : null,
+            rawInput: input,
+          };
+          const calls = persistedEnvelopes.filter(
+            (event) =>
+              event.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolCall &&
+              event.payload.toolCallId === callId,
+          );
+          const updates = runtimeOutputEvents.filter(
+            (event) =>
+              event.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolCallUpdate &&
+              event.payload.toolCallId === callId,
+          );
+          const results = persistedEnvelopes.filter(
+            (event) =>
+              event.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolResult &&
+              event.payload.toolCallId === callId,
+          );
+          expect(calls).toHaveLength(1);
+          expect(updates.length).toBeGreaterThan(0);
+          expect(results).toHaveLength(1);
+          for (const event of [...calls, ...updates, ...results]) {
+            expect(event.payload).toMatchObject(identity);
+            expect(event.payload.serverName ?? null).toBe(
+              mcpToolName ? 'roomote' : null,
+            );
+          }
+          expect(calls[0]?.payload).toMatchObject({
+            status: 'in_progress',
+            title: 'roomote_send_chat_reply',
+          });
+          expect(results[0]?.payload).toMatchObject({
+            status: terminalStatus === 'error' ? 'failed' : 'completed',
+            title: 'Result prose',
+            output:
+              terminalStatus === 'error'
+                ? 'Tool failed'
+                : 'Success. Updated files.',
+          });
+        }
+      } finally {
+        harness.dispose();
+      }
+    },
+  );
 
   it('normalizes OpenCode read, search, and MCP tool categories', async () => {
     const { client, harness } = createHarness(undefined, {

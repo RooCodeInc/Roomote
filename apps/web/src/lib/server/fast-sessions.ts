@@ -1,5 +1,11 @@
 import {
+  ACP_ENVELOPE_EVENT_TYPES,
   ACP_UI_TOOL_OUTPUT_MAX_CHARS,
+  extractAutomationTriggeredPromptText,
+  extractAcpMessageText,
+  getTextFromContentBlocks,
+  hasLeadingIntegrationSavedBlock,
+  stripLeadingIntegrationSavedBlock,
   parsePrReviewActionOffer,
   type PrReviewActionOfferStatus,
   sanitizeEnvelopeFields,
@@ -10,28 +16,55 @@ import {
   db,
   desc,
   eq,
-  exists,
   fastAgentConversations,
   fastAgentMessages,
   llmUsageEvents,
   inArray,
   isNull,
   or,
+  privateFastSessionAccess,
   sessions,
   sql,
+  taskArtifacts,
   taskRuns,
   tasks,
   users,
 } from '@roomote/db/server';
 import type { FastAgentMessage } from '@roomote/db';
+import { getRetryableFailedStartRunIds } from '@roomote/cloud-agents/server';
 
 import type { UserAuthSuccess } from '@/types';
+import { getTaskMessageReference } from '@/lib/task-message-reference';
+import { currentEpochSeconds, signArtifactId } from './artifact-signature';
+import { COMPOSER_SUGGESTION_HISTORY_LIMIT } from './composer-suggestion-history';
+import { customAutomationFastSessionAccess } from './custom-automation-session-access';
+import {
+  buildSessionTaskPreviews,
+  getSessionPreviewProxyConfig,
+  type SessionTaskPreview,
+} from './session-task-previews';
 
 type FastSessionAuth = Pick<UserAuthSuccess, 'userId' | 'isAdmin'>;
 
 type FastSessionTaskSummary = {
   taskId: string;
   title: string;
+  inferenceCostMicroUsd: number;
+  artifacts: Array<{
+    id: string;
+    path: string;
+    version: number;
+    artifactType: string;
+    contentType: string;
+    size: number;
+    createdAt: Date;
+  }>;
+  previews: SessionTaskPreview[];
+  latestRun: {
+    status: (typeof taskRuns.$inferSelect)['status'];
+    taskPhase: (typeof taskRuns.$inferSelect)['taskPhase'];
+    canRetryFailedStart: boolean;
+  };
 };
 
 export type FastSessionMessage = Pick<
@@ -50,7 +83,178 @@ export type FastSessionMessage = Pick<
   | 'nativeSessionId'
   | 'nativeMessageId'
   | 'createdAt'
->;
+> & {
+  userName?: string | null;
+  userEmail?: string | null;
+  userImageUrl?: string | null;
+};
+
+const fastSessionMessageSelection = {
+  id: fastAgentMessages.id,
+  eventId: fastAgentMessages.eventId,
+  turnId: fastAgentMessages.turnId,
+  turnSeq: fastAgentMessages.turnSeq,
+  ts: fastAgentMessages.ts,
+  eventType: fastAgentMessages.eventType,
+  role: fastAgentMessages.role,
+  contentBlocks: fastAgentMessages.contentBlocks,
+  metadata: fastAgentMessages.metadata,
+  payload: fastAgentMessages.payload,
+  source: fastAgentMessages.source,
+  nativeSessionId: fastAgentMessages.nativeSessionId,
+  nativeMessageId: fastAgentMessages.nativeMessageId,
+  createdAt: fastAgentMessages.createdAt,
+  userName: sql<
+    string | null
+  >`coalesce(${fastAgentMessages.metadata} ->> 'userName', ${users.name})`,
+  userEmail: sql<
+    string | null
+  >`coalesce(${fastAgentMessages.metadata} ->> 'userEmail', ${users.email})`,
+  userImageUrl: sql<
+    string | null
+  >`coalesce(${fastAgentMessages.metadata} ->> 'userImageUrl', ${users.imageUrl})`,
+};
+
+const fastSessionMessageUserJoin = sql`${users.id}::text = ${fastAgentMessages.metadata} ->> 'userId'`;
+
+const fastSessionTranscriptVisibilityWhere = sql`(
+  coalesce(${fastAgentMessages.metadata} ->> 'visibleInTranscript', 'true') <> 'false'
+  or (
+    ${fastAgentMessages.eventType} = ${ACP_ENVELOPE_EVENT_TYPES.UserPrompt}
+    and ${fastAgentMessages.metadata} ->> 'platformEventKind' = 'automation'
+  )
+  or (
+    ${fastAgentMessages.eventType} = ${ACP_ENVELOPE_EVENT_TYPES.UserPrompt}
+    and ${fastAgentMessages.metadata} ->> 'turnSource' = 'platform_event'
+    and ${fastAgentMessages.metadata} ->> 'platformEventKind' = 'delegated_task'
+  )
+)`;
+
+/** Signed raw URLs are bucketed so a polling transcript stays byte-stable. */
+const REPLY_IMAGE_SIGNATURE_WINDOW_SECONDS = 60 * 60;
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+
+/**
+ * The reply schema only requires strings, and web turns have no surface-side
+ * artifact lookup, so a model-authored id can be anything. Keep only
+ * UUID-shaped ids: `task_artifacts.id` is a uuid column and a malformed value
+ * would make Postgres reject the whole lookup instead of dropping that id.
+ */
+function readReplyImageArtifactIds(payload: unknown): string[] {
+  const ids = (payload as { imageArtifactIds?: unknown } | null)
+    ?.imageArtifactIds;
+  return Array.isArray(ids)
+    ? ids.filter(
+        (id): id is string => typeof id === 'string' && UUID_PATTERN.test(id),
+      )
+    : [];
+}
+
+/**
+ * Fast replies reference the images they attach by artifact id (chat
+ * surfaces post the files themselves). The web transcript renders
+ * `payload.images` URLs, so resolve the ids here to signed raw URLs. Only
+ * uploaded image artifacts from this Session's own tasks (or the Session
+ * itself) qualify; anything else is dropped rather than signed.
+ */
+async function attachFastSessionReplyImages<
+  T extends Pick<FastSessionMessage, 'payload'>,
+>(sessionId: string, messages: T[]): Promise<T[]> {
+  const requestedIds = new Set(
+    messages.flatMap((message) => readReplyImageArtifactIds(message.payload)),
+  );
+  if (requestedIds.size === 0) {
+    return messages;
+  }
+
+  const [conversation] = await db
+    .select({
+      legacyConversationIds: fastAgentConversations.legacyConversationIds,
+    })
+    .from(fastAgentConversations)
+    .where(eq(fastAgentConversations.id, sessionId))
+    .limit(1);
+  const lookupIds = [sessionId, ...(conversation?.legacyConversationIds ?? [])];
+
+  const allowed = await db
+    .select({
+      id: taskArtifacts.id,
+      taskId: taskArtifacts.taskId,
+      sessionId: taskArtifacts.sessionId,
+      path: taskArtifacts.path,
+      version: taskArtifacts.version,
+    })
+    .from(taskArtifacts)
+    .where(
+      and(
+        inArray(taskArtifacts.id, [...requestedIds]),
+        eq(taskArtifacts.uploaded, true),
+        sql`${taskArtifacts.contentType} like 'image/%'`,
+        or(
+          inArray(
+            taskArtifacts.taskId,
+            db
+              .select({ taskId: taskRuns.taskId })
+              .from(taskRuns)
+              .where(inArray(taskRuns.fastAgentSessionId, lookupIds)),
+          ),
+          inArray(
+            taskArtifacts.sessionId,
+            db
+              .select({ id: sessions.id })
+              .from(sessions)
+              .where(inArray(sessions.fastConversationId, lookupIds)),
+          ),
+        ),
+      ),
+    );
+  const allowedById = new Map(allowed.map((row) => [row.id, row]));
+  if (allowedById.size === 0) {
+    return messages;
+  }
+
+  const signatureTimestamp =
+    Math.floor(currentEpochSeconds() / REPLY_IMAGE_SIGNATURE_WINDOW_SECONDS) *
+    REPLY_IMAGE_SIGNATURE_WINDOW_SECONDS;
+
+  return messages.map((message) => {
+    // `imageArtifacts` carries the owner/path/version alongside each URL so
+    // the transcript can open the image in the artifact viewer.
+    const imageArtifacts = readReplyImageArtifactIds(message.payload).flatMap(
+      (id) => {
+        const artifact = allowedById.get(id);
+        if (!artifact) return [];
+        const owner = artifact.taskId
+          ? { taskId: artifact.taskId }
+          : artifact.sessionId
+            ? { sessionId: artifact.sessionId }
+            : null;
+        if (!owner) return [];
+        return [
+          {
+            url: `/api/artifacts/${id}/raw?sig=${signArtifactId(id, signatureTimestamp)}&ts=${signatureTimestamp}`,
+            owner,
+            path: artifact.path,
+            version: artifact.version,
+          },
+        ];
+      },
+    );
+    if (imageArtifacts.length === 0) {
+      return message;
+    }
+    return {
+      ...message,
+      payload: {
+        ...((message.payload as Record<string, unknown> | null) ?? {}),
+        images: imageArtifacts.map((artifact) => artifact.url),
+        imageArtifacts,
+      },
+    };
+  });
+}
 
 export function buildFastSessionPrReviewDestinationKey(session: {
   surface: string;
@@ -110,9 +314,11 @@ const FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT = 1000;
 const fastSessionSelection = {
   id: fastAgentConversations.id,
   userId: fastAgentConversations.userId,
+  ownerAutomation: fastAgentConversations.ownerAutomation,
   ownerName: users.name,
   ownerEmail: users.email,
   ownerImageUrl: users.imageUrl,
+  privacy: fastAgentConversations.privacy,
   title: fastAgentConversations.title,
   model: fastAgentConversations.model,
   reasoningEffort: fastAgentConversations.reasoningEffort,
@@ -133,39 +339,36 @@ const fastSessionSelection = {
 };
 
 function fastSessionScope(auth: FastSessionAuth) {
-  if (auth.isAdmin) {
-    return undefined;
-  }
-
-  // Shared-surface conversations (e.g. Slack channels/threads) are stamped
-  // with the first participant's userId, but every participant's prompts are
-  // persisted with their own userId in the message metadata — so a session is
-  // visible to its owner and to anyone who spoke in it.
-  return or(
-    eq(fastAgentConversations.userId, auth.userId),
-    exists(
-      db
-        .select({ one: sql`1` })
-        .from(fastAgentMessages)
-        .where(
-          and(
-            eq(fastAgentMessages.conversationId, fastAgentConversations.id),
-            sql`${fastAgentMessages.metadata} ->> 'userId' = ${auth.userId}`,
-          ),
-        ),
-    ),
-  );
+  // Ordinary conversations remain deployment-collaborative by ID.
+  return customAutomationFastSessionAccess(auth);
 }
 
-/** Light session lookup with the same visibility scope as the list/detail. */
+/** Action lookup: custom automation ownership remains required. */
 export async function findAccessibleFastSession(
   auth: FastSessionAuth,
   sessionId: string,
+) {
+  return findFastSession(sessionId, fastSessionScope(auth));
+}
+
+/** Shared direct links stay collaborative; private reads require the owner. */
+export async function findReadableFastSession(
+  auth: FastSessionAuth,
+  sessionId: string,
+) {
+  if (!auth.userId) return null;
+  return findFastSession(sessionId, privateFastSessionAccess(auth));
+}
+
+async function findFastSession(
+  sessionId: string,
+  accessCondition?: ReturnType<typeof fastSessionScope>,
 ) {
   const [session] = await db
     .select({
       id: fastAgentConversations.id,
       userId: fastAgentConversations.userId,
+      ownerAutomation: fastAgentConversations.ownerAutomation,
       title: fastAgentConversations.title,
       surface: fastAgentConversations.surface,
       workspaceId: fastAgentConversations.workspaceId,
@@ -174,8 +377,18 @@ export async function findAccessibleFastSession(
       reasoningEffort: fastAgentConversations.reasoningEffort,
     })
     .from(fastAgentConversations)
+    .leftJoin(
+      sessions,
+      eq(sessions.fastConversationId, fastAgentConversations.id),
+    )
     .where(
-      and(eq(fastAgentConversations.id, sessionId), fastSessionScope(auth)),
+      and(
+        or(
+          eq(fastAgentConversations.id, sessionId),
+          eq(sessions.id, sessionId),
+        ),
+        accessCondition,
+      ),
     )
     .limit(1);
 
@@ -202,7 +415,7 @@ export async function getFastSessionTasks(
   auth: FastSessionAuth,
   sessionId: string,
 ): Promise<FastSessionTaskSummary[] | null> {
-  const session = await findAccessibleFastSession(auth, sessionId);
+  const session = await findReadableFastSession(auth, sessionId);
   if (!session) return null;
 
   const [conversation] = await db
@@ -222,6 +435,19 @@ export async function getFastSessionTasks(
         taskId: taskRuns.taskId,
         title: tasks.title,
         latestRunId: taskRuns.id,
+        status: taskRuns.status,
+        taskPhase: taskRuns.taskPhase,
+        payloadKind: taskRuns.payloadKind,
+        payload: taskRuns.payload,
+        machineDomain: taskRuns.machineDomain,
+        machineDomains: taskRuns.machineDomains,
+        initialPaths: taskRuns.initialPaths,
+        primaryPortName: taskRuns.primaryPortName,
+        sleepRequestedAt: taskRuns.sleepRequestedAt,
+        snapshotRequestedAt: taskRuns.snapshotRequestedAt,
+        snapshotCreatedAt: taskRuns.snapshotCreatedAt,
+        snapshotFailedAt: taskRuns.snapshotFailedAt,
+        snapshotId: taskRuns.snapshotId,
       })
       .from(taskRuns)
       .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
@@ -234,22 +460,142 @@ export async function getFastSessionTasks(
       .orderBy(taskRuns.taskId, desc(taskRuns.id)),
   );
 
-  return db
+  const rows = await db
     .with(latestRunPerTask)
     .select({
       taskId: latestRunPerTask.taskId,
       title: latestRunPerTask.title,
+      latestRunId: latestRunPerTask.latestRunId,
+      status: latestRunPerTask.status,
+      taskPhase: latestRunPerTask.taskPhase,
+      payloadKind: latestRunPerTask.payloadKind,
+      payload: latestRunPerTask.payload,
+      machineDomain: latestRunPerTask.machineDomain,
+      machineDomains: latestRunPerTask.machineDomains,
+      initialPaths: latestRunPerTask.initialPaths,
+      primaryPortName: latestRunPerTask.primaryPortName,
+      sleepRequestedAt: latestRunPerTask.sleepRequestedAt,
+      snapshotRequestedAt: latestRunPerTask.snapshotRequestedAt,
+      snapshotCreatedAt: latestRunPerTask.snapshotCreatedAt,
+      snapshotFailedAt: latestRunPerTask.snapshotFailedAt,
+      snapshotId: latestRunPerTask.snapshotId,
+      inferenceCostMicroUsd: sql<number>`coalesce(sum(${llmUsageEvents.costMicroUsd}), 0)::bigint`,
     })
     .from(latestRunPerTask)
+    .leftJoin(
+      llmUsageEvents,
+      eq(llmUsageEvents.taskId, latestRunPerTask.taskId),
+    )
+    .groupBy(
+      latestRunPerTask.taskId,
+      latestRunPerTask.title,
+      latestRunPerTask.latestRunId,
+      latestRunPerTask.status,
+      latestRunPerTask.taskPhase,
+      latestRunPerTask.payloadKind,
+      latestRunPerTask.payload,
+      latestRunPerTask.machineDomain,
+      latestRunPerTask.machineDomains,
+      latestRunPerTask.initialPaths,
+      latestRunPerTask.primaryPortName,
+      latestRunPerTask.sleepRequestedAt,
+      latestRunPerTask.snapshotRequestedAt,
+      latestRunPerTask.snapshotCreatedAt,
+      latestRunPerTask.snapshotFailedAt,
+      latestRunPerTask.snapshotId,
+    )
     .orderBy(desc(latestRunPerTask.latestRunId));
+
+  const retryableFailedStartRunIds = await getRetryableFailedStartRunIds(
+    rows.map((row) => ({
+      id: row.latestRunId,
+      status: row.status,
+      payloadKind: row.payloadKind,
+      payload: row.payload,
+    })),
+  );
+  const taskIds = rows.map((row) => row.taskId);
+  const previewConfig = taskIds.length
+    ? await getSessionPreviewProxyConfig()
+    : null;
+  const artifactRows = taskIds.length
+    ? await db
+        .select({
+          taskId: taskArtifacts.taskId,
+          id: taskArtifacts.id,
+          path: taskArtifacts.path,
+          version: taskArtifacts.version,
+          artifactType: taskArtifacts.artifactType,
+          contentType: taskArtifacts.contentType,
+          size: taskArtifacts.size,
+          createdAt: taskArtifacts.createdAt,
+        })
+        .from(taskArtifacts)
+        .where(
+          and(
+            inArray(taskArtifacts.taskId, taskIds),
+            eq(taskArtifacts.uploaded, true),
+          ),
+        )
+        .orderBy(desc(taskArtifacts.createdAt))
+    : [];
+
+  return rows.map((row) => ({
+    taskId: row.taskId,
+    title: row.title,
+    inferenceCostMicroUsd: Number(row.inferenceCostMicroUsd),
+    artifacts: artifactRows
+      .filter((artifact) => artifact.taskId === row.taskId)
+      .map(({ taskId: _taskId, ...artifact }) => artifact),
+    previews: previewConfig
+      ? buildSessionTaskPreviews(
+          row.taskId,
+          { ...row, id: row.latestRunId },
+          previewConfig,
+        )
+      : [],
+    latestRun: {
+      status: row.status,
+      taskPhase: row.taskPhase,
+      canRetryFailedStart: retryableFailedStartRunIds.has(row.latestRunId),
+    },
+  }));
 }
 
-function sanitizeFastSessionMessageRow<
+async function attachFastSessionTaskTitles(messages: FastSessionMessage[]) {
+  const references = messages.map((message) =>
+    getTaskMessageReference(message.payload),
+  );
+  const taskIds = [
+    ...new Set(references.flatMap((ref) => (ref?.taskId ? [ref.taskId] : []))),
+  ];
+  if (!taskIds.length) return messages;
+
+  // Match task-by-ID access: this database is org-scoped; deleted tasks are hidden.
+  const rows = await db
+    .select({ id: tasks.id, title: tasks.title })
+    .from(tasks)
+    .where(and(inArray(tasks.id, taskIds), isNull(tasks.deletedAt)));
+  const titles = new Map(rows.map((task) => [task.id, task.title]));
+  return messages.map((message, index) => {
+    const taskId = references[index]?.taskId;
+    if (!taskId) return message;
+    return {
+      ...message,
+      payload: {
+        ...message.payload,
+        taskTitle: titles.get(taskId)?.trim() || null,
+      },
+    };
+  });
+}
+
+function prepareFastSessionMessageRow<
   T extends Pick<
     FastSessionMessage,
-    'eventType' | 'contentBlocks' | 'metadata' | 'payload'
+    'eventId' | 'role' | 'eventType' | 'contentBlocks' | 'metadata' | 'payload'
   >,
->(row: T): T {
+>(row: T): T | null {
   const sanitized = sanitizeEnvelopeFields(
     row.eventType,
     row.contentBlocks,
@@ -257,6 +603,110 @@ function sanitizeFastSessionMessageRow<
     (row.payload as Record<string, unknown> | null) ?? null,
     { maxOutputChars: ACP_UI_TOOL_OUTPUT_MAX_CHARS },
   );
+
+  if (
+    row.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt &&
+    sanitized.metadata?.visibleInTranscript !== false
+  ) {
+    // The turn Roomote sends after the owner saves an integration key starts
+    // with one `<integration_saved>` block; the transcript shows only the text
+    // after it. Only that exact leading envelope is recognized, so a block
+    // quoted or pasted anywhere else in a human message stays as written.
+    const text = getTextFromContentBlocks(sanitized.contentBlocks) ?? '';
+    if (hasLeadingIntegrationSavedBlock(text)) {
+      return {
+        ...row,
+        contentBlocks: [
+          { type: 'text', text: stripLeadingIntegrationSavedBlock(text) },
+          ...sanitized.contentBlocks.filter((block) => block.type !== 'text'),
+        ],
+        metadata: sanitized.metadata,
+        payload: sanitized.payload ?? {},
+      };
+    }
+  }
+
+  if (sanitized.metadata?.visibleInTranscript === false) {
+    if (
+      row.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt &&
+      sanitized.metadata.turnSource === 'platform_event' &&
+      sanitized.metadata.platformEventKind === 'delegated_task'
+    ) {
+      // Project only the literal child report, never the internal event wrapper
+      // or arbitrary event fields. The persisted model input stays hidden.
+      const match = /^<platform_event>(.*)<\/platform_event>$/su.exec(
+        (getTextFromContentBlocks(sanitized.contentBlocks) ?? '').trim(),
+      );
+      if (!match?.[1]) return null;
+      let event: Record<string, unknown> | null;
+      try {
+        event = JSON.parse(match[1]) as Record<string, unknown> | null;
+      } catch {
+        return null;
+      }
+      if (
+        event?.type !== 'child_message' ||
+        typeof event.taskId !== 'string' ||
+        !event.taskId.trim() ||
+        typeof event.runId !== 'number' ||
+        !Number.isSafeInteger(event.runId) ||
+        event.runId <= 0 ||
+        typeof event.messageId !== 'string' ||
+        !event.messageId.trim() ||
+        typeof event.purpose !== 'string' ||
+        !['ack', 'progress', 'closeout', 'clarification'].includes(
+          event.purpose,
+        ) ||
+        typeof event.message !== 'string' ||
+        !event.message.trim()
+      ) {
+        return null;
+      }
+      const receipt = sanitizeEnvelopeFields(
+        ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+        [{ type: 'text', text: event.message }],
+        { visibleInTranscript: true, toolCallId: row.eventId },
+        {
+          toolName: 'receive_task_report',
+          toolCallId: row.eventId,
+          status: 'completed',
+          rawInput: {
+            taskId: event.taskId,
+            runId: event.runId,
+            messageId: event.messageId,
+            purpose: event.purpose,
+          },
+          output: event.message,
+        },
+        { maxOutputChars: ACP_UI_TOOL_OUTPUT_MAX_CHARS },
+      );
+      return {
+        ...row,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+        role: 'tool',
+        contentBlocks: receipt.contentBlocks,
+        metadata: receipt.metadata,
+        payload: receipt.payload ?? {},
+      };
+    }
+    const prompt = extractAutomationTriggeredPromptText(
+      getTextFromContentBlocks(sanitized.contentBlocks) ?? '',
+    );
+    if (
+      row.eventType !== ACP_ENVELOPE_EVENT_TYPES.UserPrompt ||
+      sanitized.metadata.platformEventKind !== 'automation' ||
+      !prompt
+    ) {
+      return null;
+    }
+
+    return {
+      ...row,
+      contentBlocks: [{ type: 'text', text: prompt }],
+      metadata: { ...sanitized.metadata, visibleInTranscript: true },
+      payload: {},
+    };
+  }
 
   return {
     ...row,
@@ -280,30 +730,18 @@ export async function getFastSessionMessagesSince(
 }> {
   const rows = await db
     .select({
-      id: fastAgentMessages.id,
-      eventId: fastAgentMessages.eventId,
-      turnId: fastAgentMessages.turnId,
-      turnSeq: fastAgentMessages.turnSeq,
-      ts: fastAgentMessages.ts,
-      eventType: fastAgentMessages.eventType,
-      role: fastAgentMessages.role,
-      contentBlocks: fastAgentMessages.contentBlocks,
-      metadata: fastAgentMessages.metadata,
-      payload: fastAgentMessages.payload,
-      source: fastAgentMessages.source,
-      nativeSessionId: fastAgentMessages.nativeSessionId,
-      nativeMessageId: fastAgentMessages.nativeMessageId,
-      createdAt: fastAgentMessages.createdAt,
+      ...fastSessionMessageSelection,
       // Millisecond Dates truncate Postgres microsecond timestamps, which
       // would replay the newest row on every poll — keep the cursor as a
       // fractional epoch-millisecond float instead.
       updatedAtMs: sql<number>`extract(epoch from ${fastAgentMessages.updatedAt}) * 1000`,
     })
     .from(fastAgentMessages)
+    .leftJoin(users, fastSessionMessageUserJoin)
     .where(
       and(
         eq(fastAgentMessages.conversationId, sessionId),
-        sql`coalesce(${fastAgentMessages.metadata} ->> 'visibleInTranscript', 'true') <> 'false'`,
+        fastSessionTranscriptVisibilityWhere,
         sql`extract(epoch from ${fastAgentMessages.updatedAt}) * 1000 > ${sinceMs}`,
       ),
     )
@@ -315,52 +753,49 @@ export async function getFastSessionMessagesSince(
     );
 
   let cursor = sinceMs;
-  const messages = rows.map(({ updatedAtMs, ...row }) => {
-    cursor = Math.max(cursor, Number(updatedAtMs));
-    return sanitizeFastSessionMessageRow(row);
-  });
+  const messages = await attachFastSessionReplyImages(
+    sessionId,
+    rows.flatMap(({ updatedAtMs, ...row }) => {
+      cursor = Math.max(cursor, Number(updatedAtMs));
+      const prepared = prepareFastSessionMessageRow(row);
+      return prepared ? [prepared] : [];
+    }),
+  );
 
-  return { messages, cursor };
+  return { messages: await attachFastSessionTaskTitles(messages), cursor };
 }
 
-export async function getFastSessionById(
-  auth: FastSessionAuth,
+/**
+ * The newest persisted user/assistant conversation reduced to the minimal
+ * shape the composer-suggestion prompt is built from. Bounded in SQL so long
+ * sessions never load their full transcript; tool events never leave the DB.
+ */
+export async function getFastSessionSuggestableMessages(
   sessionId: string,
-) {
-  const [session] = await db
-    .select(fastSessionSelection)
-    .from(fastAgentConversations)
-    .innerJoin(users, eq(fastAgentConversations.userId, users.id))
-    .where(
-      and(eq(fastAgentConversations.id, sessionId), fastSessionScope(auth)),
-    )
-    .limit(1);
-
-  if (!session) {
-    return null;
-  }
-
+): Promise<
+  Array<{
+    id: string;
+    eventType: string;
+    role: string | null;
+    text: string | null;
+  }>
+> {
   const rows = await db
     .select({
       id: fastAgentMessages.id,
-      eventId: fastAgentMessages.eventId,
-      turnId: fastAgentMessages.turnId,
-      turnSeq: fastAgentMessages.turnSeq,
-      ts: fastAgentMessages.ts,
       eventType: fastAgentMessages.eventType,
       role: fastAgentMessages.role,
       contentBlocks: fastAgentMessages.contentBlocks,
-      metadata: fastAgentMessages.metadata,
       payload: fastAgentMessages.payload,
-      source: fastAgentMessages.source,
-      nativeSessionId: fastAgentMessages.nativeSessionId,
-      nativeMessageId: fastAgentMessages.nativeMessageId,
-      createdAt: fastAgentMessages.createdAt,
     })
     .from(fastAgentMessages)
     .where(
       and(
-        eq(fastAgentMessages.conversationId, session.id),
+        eq(fastAgentMessages.conversationId, sessionId),
+        inArray(fastAgentMessages.eventType, [
+          ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+          ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        ]),
         sql`coalesce(${fastAgentMessages.metadata} ->> 'visibleInTranscript', 'true') <> 'false'`,
       ),
     )
@@ -370,7 +805,80 @@ export async function getFastSessionById(
       desc(fastAgentMessages.createdAt),
       desc(fastAgentMessages.id),
     )
-    .limit(FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT + 1);
+    .limit(COMPOSER_SUGGESTION_HISTORY_LIMIT);
+
+  return rows.reverse().map((row) => ({
+    id: row.id,
+    eventType: row.eventType,
+    role: row.role,
+    text: visibleSuggestableText(
+      extractAcpMessageText(
+        row.contentBlocks,
+        (row.payload as Record<string, unknown> | null) ?? null,
+      ) ?? null,
+    ),
+  }));
+}
+
+export async function getFastSessionById(
+  auth: FastSessionAuth,
+  sessionId: string,
+) {
+  if (!auth.userId) return null;
+  const [session] = await db
+    .select(fastSessionSelection)
+    .from(fastAgentConversations)
+    .leftJoin(users, eq(fastAgentConversations.userId, users.id))
+    .where(
+      and(
+        eq(fastAgentConversations.id, sessionId),
+        privateFastSessionAccess(auth),
+      ),
+    )
+    .limit(1);
+
+  if (!session) {
+    return null;
+  }
+
+  const rows: FastSessionMessage[] = [];
+  let before: ReturnType<typeof sql> | undefined;
+  // Hidden platform events can fail projection; count only validated rows
+  // toward the window, without loading an unbounded backlog into memory.
+  while (rows.length <= FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT) {
+    const batch = await db
+      .select({
+        ...fastSessionMessageSelection,
+        // Preserve Postgres microseconds for keyset ties instead of a JS Date.
+        cursorCreatedAt: sql<string>`${fastAgentMessages.createdAt}::text`,
+      })
+      .from(fastAgentMessages)
+      .leftJoin(users, fastSessionMessageUserJoin)
+      .where(
+        and(
+          eq(fastAgentMessages.conversationId, session.id),
+          fastSessionTranscriptVisibilityWhere,
+          before,
+        ),
+      )
+      .orderBy(
+        desc(fastAgentMessages.ts),
+        desc(fastAgentMessages.turnSeq),
+        desc(fastAgentMessages.createdAt),
+        desc(fastAgentMessages.id),
+      )
+      .limit(FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT + 1);
+
+    for (const { cursorCreatedAt: _cursorCreatedAt, ...row } of batch) {
+      const prepared = prepareFastSessionMessageRow(row);
+      if (prepared) rows.push(prepared);
+      if (rows.length > FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT) break;
+    }
+    if (batch.length <= FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT) break;
+    const last = batch[batch.length - 1]!;
+    before = sql`(${fastAgentMessages.ts}, ${fastAgentMessages.turnSeq}, ${fastAgentMessages.createdAt}, ${fastAgentMessages.id})
+      < (${last.ts}, ${last.turnSeq}, ${last.cursorCreatedAt}::timestamp, ${last.id}::uuid)`;
+  }
 
   const hasOlderMessages = rows.length > FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT;
   let windowed = rows.slice(0, FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT);
@@ -389,36 +897,46 @@ export async function getFastSessionById(
     }
   }
 
-  // Sanitize at the read boundary, matching the task transcript path: the DB
-  // stores full payloads, but oversized tool output is truncated before it is
-  // serialized into the RSC payload.
-  const messages = windowed
-    .reverse()
-    .map((row): FastSessionMessage => sanitizeFastSessionMessageRow(row));
+  const messages = await attachFastSessionReplyImages(
+    session.id,
+    await attachFastSessionTaskTitles(windowed.reverse()),
+  );
 
   // Fast usage events carry the OpenCode session id; a conversation can span
   // several (cold rebuilds), so sum across every session id the transcript
   // references plus the current one.
-  const [usage] = await db
+  const [directUsage] = await db
     .select({
       costMicroUsd: sql<number>`coalesce(sum(${llmUsageEvents.costMicroUsd}), 0)::bigint`,
     })
     .from(llmUsageEvents)
     .where(
-      sql`${llmUsageEvents.harnessSessionId} in (
-        select distinct ${fastAgentMessages.nativeSessionId}
-        from ${fastAgentMessages}
-        where ${fastAgentMessages.conversationId} = ${session.id}
-          and ${fastAgentMessages.nativeSessionId} is not null
-        union
-        select ${session.openCodeSessionId}::text
-      )`,
+      and(
+        isNull(llmUsageEvents.taskId),
+        sql`${llmUsageEvents.harnessSessionId} in (
+          select distinct ${fastAgentMessages.nativeSessionId}
+          from ${fastAgentMessages}
+          where ${fastAgentMessages.conversationId} = ${session.id}
+            and ${fastAgentMessages.nativeSessionId} is not null
+          union
+          select ${session.openCodeSessionId}::text
+        )`,
+      ),
     );
+
+  const directInferenceCostMicroUsd = Number(directUsage?.costMicroUsd ?? 0);
 
   return {
     ...session,
     messages,
     hasOlderMessages,
-    inferenceCostMicroUsd: Number(usage?.costMicroUsd ?? 0),
+    directInferenceCostMicroUsd,
+    inferenceCostMicroUsd: directInferenceCostMicroUsd,
   };
+}
+
+function visibleSuggestableText(text: string | null): string | null {
+  return text && hasLeadingIntegrationSavedBlock(text)
+    ? stripLeadingIntegrationSavedBlock(text)
+    : text;
 }

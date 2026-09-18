@@ -25,3 +25,9 @@ export const DEFAULT_PERSONAL_PREFERENCES: PersonalPreferences = {
   mindReaderMode: false,
   narrationMode: false,
 };
+
+export interface UserPersonalizationSettings {
+  instructions: string;
+  learnFromConversations: boolean;
+  version: number;
+}

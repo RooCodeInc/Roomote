@@ -34,6 +34,7 @@ import {
 
 import { generateClientUuid } from '@/lib/client-uuid';
 import { cn } from '@/lib/utils';
+import { useIsMobile } from '@/hooks/useIsMobile';
 
 import {
   DropdownMenu,
@@ -261,9 +262,11 @@ type PromptInputProps = Omit<ComponentProps<'form'>, 'onSubmit' | 'onError'> & {
   onSubmit: (
     message: PromptInputMessage,
     event: FormEvent<HTMLFormElement>,
-  ) => void | Promise<void>;
+  ) => boolean | void | Promise<boolean | void>;
   /** When false, the text input and attachments are NOT cleared after a successful submit. Default true. */
   clearOnSubmit?: boolean;
+  /** Restore focus to the composer after a successful submit unless the user interacts outside it. */
+  keepFocusOnSubmit?: boolean;
 };
 
 export const PromptInput = ({
@@ -281,6 +284,7 @@ export const PromptInput = ({
   onError,
   onSubmit,
   clearOnSubmit = true,
+  keepFocusOnSubmit = false,
   children,
   ...props
 }: PromptInputProps) => {
@@ -293,6 +297,7 @@ export const PromptInput = ({
   // Refs.
   const inputRef = useRef<HTMLInputElement | null>(null);
   const formRef = useRef<HTMLFormElement | null>(null);
+  const submitFocusCleanupRef = useRef<(() => void) | null>(null);
 
   // Local attachments (only used when no provider).
   const [items, setItems] = useState<(FileUIPart & { id: string })[]>([]);
@@ -591,6 +596,8 @@ export const PromptInput = ({
 
   useEffect(
     () => () => {
+      submitFocusCleanupRef.current?.();
+
       if (!usingProvider) {
         for (const f of filesRef.current) {
           if (f.url) {
@@ -662,6 +669,71 @@ export const PromptInput = ({
     event.preventDefault();
 
     const form = event.currentTarget;
+    const submitter = (event.nativeEvent as SubmitEvent).submitter;
+    let shouldRestoreFocus =
+      keepFocusOnSubmit &&
+      (form.contains(document.activeElement) ||
+        (submitter != null && form.contains(submitter)));
+    let focusFrame: number | null = null;
+
+    submitFocusCleanupRef.current?.();
+
+    const cancelFocusForOutsideInteraction = (interactionEvent: Event) => {
+      if (
+        shouldRestoreFocus &&
+        interactionEvent.target instanceof Node &&
+        !form.contains(interactionEvent.target)
+      ) {
+        shouldRestoreFocus = false;
+      }
+    };
+
+    const cleanupSubmitFocus = () => {
+      document.removeEventListener(
+        'pointerdown',
+        cancelFocusForOutsideInteraction,
+        true,
+      );
+      document.removeEventListener(
+        'focusin',
+        cancelFocusForOutsideInteraction,
+        true,
+      );
+      if (focusFrame !== null) cancelAnimationFrame(focusFrame);
+      shouldRestoreFocus = false;
+      if (submitFocusCleanupRef.current === cleanupSubmitFocus) {
+        submitFocusCleanupRef.current = null;
+      }
+    };
+
+    if (shouldRestoreFocus) {
+      document.addEventListener(
+        'pointerdown',
+        cancelFocusForOutsideInteraction,
+        true,
+      );
+      document.addEventListener(
+        'focusin',
+        cancelFocusForOutsideInteraction,
+        true,
+      );
+      submitFocusCleanupRef.current = cleanupSubmitFocus;
+    }
+
+    const finishSubmit = (succeeded: boolean) => {
+      if (!succeeded || !shouldRestoreFocus) {
+        cleanupSubmitFocus();
+        return;
+      }
+
+      focusFrame = requestAnimationFrame(() => {
+        focusFrame = null;
+        if (shouldRestoreFocus) {
+          form.querySelector<HTMLTextAreaElement>('textarea')?.focus();
+        }
+        cleanupSubmitFocus();
+      });
+    };
 
     const text = usingProvider
       ? controller.textInput.value
@@ -699,22 +771,26 @@ export const PromptInput = ({
           // Handle both sync and async onSubmit.
           if (result instanceof Promise) {
             result
-              .then(() => {
-                if (clearOnSubmit) clearAll();
+              .then((succeeded) => {
+                if (succeeded !== false && clearOnSubmit) clearAll();
+                finishSubmit(succeeded !== false);
               })
               .catch(() => {
                 // Don't clear on error - user may want to retry.
+                finishSubmit(false);
               });
-          } else if (clearOnSubmit) {
-            // Sync function completed without throwing, clear inputs.
-            clearAll();
+          } else {
+            if (result !== false && clearOnSubmit) clearAll();
+            finishSubmit(result !== false);
           }
         } catch {
           // Don't clear on error - user may want to retry.
+          finishSubmit(false);
         }
       })
       .catch(() => {
         // Don't clear on error - user may want to retry.
+        finishSubmit(false);
       });
   };
 
@@ -788,6 +864,7 @@ export const PromptInputTextarea = ({
   onChange,
   onKeyDown,
   className,
+  enterKeyHint,
   name,
   placeholder,
   submitWithMetaKey,
@@ -797,6 +874,7 @@ export const PromptInputTextarea = ({
   const textareaId = useId().replace(/:/g, '');
   const controller = useOptionalPromptInputController();
   const attachments = usePromptInputAttachments();
+  const isMobile = useIsMobile();
   const [isComposing, setIsComposing] = useState(false);
   const internalRef = useRef<HTMLTextAreaElement>(null);
 
@@ -839,11 +917,24 @@ export const PromptInputTextarea = ({
   }, [controlledValue, autoResize]);
 
   const handleKeyDown: KeyboardEventHandler<HTMLTextAreaElement> = (e) => {
+    // Mobile keyboards use Enter for multiline input, including on callers
+    // that otherwise intercept plain Enter before the shared submit logic.
+    if (e.key === 'Enter' && isMobile) {
+      return;
+    }
+
     // Call the external onKeyDown handler first.
     onKeyDown?.(e);
 
     // If the external handler prevented default, don't run internal logic.
     if (e.defaultPrevented) {
+      return;
+    }
+
+    if (e.key === 'Escape' && !isComposing && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      e.stopPropagation();
+      e.currentTarget.blur();
       return;
     }
 
@@ -940,6 +1031,9 @@ export const PromptInputTextarea = ({
         className,
       )}
       data-op-ignore="true"
+      enterKeyHint={
+        enterKeyHint ?? (isMobile || submitWithMetaKey ? 'enter' : 'send')
+      }
       id={id ?? `prompt-input-textarea-${textareaId}`}
       name={name ?? 'message'}
       onCompositionEnd={() => setIsComposing(false)}
@@ -1052,6 +1146,7 @@ export const PromptInputActionMenuContent = ({
 type PromptInputSubmitProps = ComponentProps<typeof InputGroupButton> & {
   status?: ChatStatus;
   onStop?: () => void;
+  tooltip?: string;
 };
 
 export const PromptInputSubmit = ({
@@ -1062,6 +1157,7 @@ export const PromptInputSubmit = ({
   onStop,
   onClick,
   children,
+  tooltip = 'Send (Enter)',
   ...props
 }: PromptInputSubmitProps) => {
   const isGenerating = status === 'submitted' || status === 'streaming';
@@ -1086,12 +1182,12 @@ export const PromptInputSubmit = ({
   };
 
   return (
-    <BasicTooltip content="Send (Cmd/Ctrl + Enter)">
+    <BasicTooltip content={tooltip}>
       <InputGroupButton
         aria-label={isGenerating ? 'Stop' : 'Submit'}
         className={cn(
           'rounded-full transition-colors',
-          isGenerating && 'bg-red-500/30 text-red-600 hover:bg-red-500/50',
+          isGenerating && 'bg-chart-4/30 text-chart-4 hover:bg-chart-4/50',
           className,
         )}
         onClick={handleClick}

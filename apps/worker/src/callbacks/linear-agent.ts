@@ -1,4 +1,8 @@
-import { type TaskPayload, TaskPayloadKind } from '@roomote/types';
+import {
+  getTaskReportConsumerFromPayload,
+  type TaskPayload,
+  TaskPayloadKind,
+} from '@roomote/types';
 import type {
   AgentSessionPlanStep,
   AgentSessionPlanStepStatus,
@@ -12,7 +16,10 @@ import type {
 } from '../run-task';
 import { captureWorkerException } from '../monitoring/sentry';
 
-import { getLinearSessionIdFromResumePayload } from '../run-task/linear-resume-payload';
+import {
+  getLinearFastParentSessionId,
+  getLinearSessionIdFromResumePayload,
+} from '../run-task/linear-resume-payload';
 
 import { getCallbackEventKey } from './utils';
 import {
@@ -119,6 +126,13 @@ function getLinearSessionId(taskRun: TaskRun): string {
     return sessionId;
   }
 
+  // A task delegated from a Linear Fast Session carries the agent session as
+  // its parent conversation.
+  const parentSessionId = getLinearFastParentSessionId(taskRun.payload);
+  if (parentSessionId) {
+    return parentSessionId;
+  }
+
   // For SnapshotResume runs with Linear metadata, the session id rides along
   // with the queued Linear follow-up messages in the payload.
   const resumeSessionId = getLinearSessionIdFromResumePayload(taskRun.payload);
@@ -128,6 +142,24 @@ function getLinearSessionId(taskRun: TaskRun): string {
   }
 
   throw new Error('Task run has no Linear session ID');
+}
+
+/**
+ * Live activity for a task a Linear Fast Session delegated: thoughts,
+ * actions, plan updates, and questions stream into the agent session the
+ * way a direct Linear task's do. The final response stays with the Session,
+ * which reports the settled outcome itself.
+ */
+export function getLinearSessionActivityStreamCallbacks(
+  taskRun: TaskRun,
+): RunTaskCallbacks {
+  if (
+    taskRun.payloadKind === TaskPayloadKind.LinearAgentSession ||
+    !getLinearFastParentSessionId(taskRun.payload)
+  ) {
+    return {};
+  }
+  return linearAgentCallbacks;
 }
 
 export const linearAgentCallbacks: RunTaskCallbacks = {
@@ -216,7 +248,13 @@ export const linearAgentCallbacks: RunTaskCallbacks = {
 
     if (event.type === 'completion') {
       try {
-        await sdk.linearSessions.emitResponse(sessionId, event.text);
+        // A delegated child's outcome is reported by its Fast Session; a
+        // second response here would duplicate it.
+        if (
+          getTaskReportConsumerFromPayload(taskRun.payload) !== 'orchestrator'
+        ) {
+          await sdk.linearSessions.emitResponse(sessionId, event.text);
+        }
         context.isCompleted = true;
       } catch (error) {
         reportLinearCallbackError(

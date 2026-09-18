@@ -5,35 +5,36 @@ const {
   addReactionMock,
   answerCallbackQueryMock,
   authUsersFindFirstMock,
-  buildTelegramRoutingContextMock,
-  classifyFollowUpMock,
   taskRunsFindFirstMock,
   consumeLinkCodeMock,
   createForumTopicMock,
+  describeVideoAttachmentMock,
   downloadFileMock,
   restoreLinkCodeMock,
   editMessageReplyMarkupMock,
   editMessageTextMock,
   enqueueTaskMock,
+  extractPromptTextAttachmentsMock,
   environmentsFindFirstMock,
   envMock,
   getAvailableEnvironmentsMock,
   getBotInfoMock,
-  getRoutingAutoConfirmDelayMsMock,
   getTaskUrlMock,
   insertMock,
   insertOnConflictDoNothingMock,
   insertValuesMock,
   postMessageMock,
   queueCommunicationMessageMock,
+  queueCommunicationMessageOnceMock,
   redisDelMock,
   redisGetMock,
   redisGetdelMock,
+  redisEvalMock,
   redisSetMock,
-  resolveRoutingFollowUpMock,
-  routeTaskMock,
   setLatestInboundMessageIdMock,
+  startFastSessionGoalMock,
   setTrustedRunActingUserMock,
+  setTrustedRunActingUserOnSuccessMock,
   stopTaskRunMock,
   updateMock,
   updateReturningMock,
@@ -46,24 +47,31 @@ const {
   findFastReplySessionMock,
   getFastSessionMock,
   isFastProviderMessageMock,
+  recordFastConversationMessageMock,
+  transcribeAudioAttachmentMock,
+  claimPendingPrReviewActionMock,
+  completePendingPrReviewActionDispatchMock,
+  dispatchPrReviewFollowUpMock,
+  enableAutoHandlePrReviewFeedbackMock,
+  retirePrReviewActionMessagesBestEffortMock,
+  retireTelegramRequestUserInputPromptBestEffortMock,
 } = vi.hoisted(() => ({
   addReactionMock: vi.fn(),
   answerCallbackQueryMock: vi.fn(),
   authUsersFindFirstMock: vi.fn(),
-  buildTelegramRoutingContextMock: vi.fn(),
-  classifyFollowUpMock: vi.fn(),
   taskRunsFindFirstMock: vi.fn(),
   consumeLinkCodeMock: vi.fn(),
   createForumTopicMock: vi.fn(),
+  describeVideoAttachmentMock: vi.fn(),
   downloadFileMock: vi.fn(),
   restoreLinkCodeMock: vi.fn(),
   editMessageReplyMarkupMock: vi.fn(),
   editMessageTextMock: vi.fn(),
   enqueueTaskMock: vi.fn(),
+  extractPromptTextAttachmentsMock: vi.fn(),
   environmentsFindFirstMock: vi.fn(),
   getAvailableEnvironmentsMock: vi.fn(),
   getBotInfoMock: vi.fn(),
-  getRoutingAutoConfirmDelayMsMock: vi.fn(),
   envMock: {
     R_APP_URL: 'https://app.example.com',
     R_TELEGRAM_BOT_TOKEN: 'bot-token' as string | undefined,
@@ -76,14 +84,16 @@ const {
   insertValuesMock: vi.fn(),
   postMessageMock: vi.fn(),
   queueCommunicationMessageMock: vi.fn(),
+  queueCommunicationMessageOnceMock: vi.fn(),
   redisDelMock: vi.fn(),
   redisGetMock: vi.fn(),
   redisGetdelMock: vi.fn(),
+  redisEvalMock: vi.fn(),
   redisSetMock: vi.fn(),
-  resolveRoutingFollowUpMock: vi.fn(),
-  routeTaskMock: vi.fn(),
   setLatestInboundMessageIdMock: vi.fn(),
+  startFastSessionGoalMock: vi.fn(),
   setTrustedRunActingUserMock: vi.fn(),
+  setTrustedRunActingUserOnSuccessMock: vi.fn(),
   stopTaskRunMock: vi.fn(),
   updateMock: vi.fn(),
   updateReturningMock: vi.fn(),
@@ -96,6 +106,14 @@ const {
   findFastReplySessionMock: vi.fn(),
   getFastSessionMock: vi.fn(),
   isFastProviderMessageMock: vi.fn(),
+  recordFastConversationMessageMock: vi.fn(),
+  transcribeAudioAttachmentMock: vi.fn(),
+  claimPendingPrReviewActionMock: vi.fn(),
+  completePendingPrReviewActionDispatchMock: vi.fn(),
+  dispatchPrReviewFollowUpMock: vi.fn(),
+  enableAutoHandlePrReviewFeedbackMock: vi.fn(),
+  retirePrReviewActionMessagesBestEffortMock: vi.fn(),
+  retireTelegramRequestUserInputPromptBestEffortMock: vi.fn(),
 }));
 
 vi.mock('@roomote/env', () => ({
@@ -112,6 +130,7 @@ vi.mock('@roomote/redis', () => ({
     del: redisDelMock,
     get: redisGetMock,
     getdel: redisGetdelMock,
+    eval: redisEvalMock,
   })),
 }));
 
@@ -119,6 +138,7 @@ vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...conditions: unknown[]) => ({ and: conditions })),
   asc: vi.fn((column: unknown) => ({ asc: column })),
   setTrustedRunActingUser: setTrustedRunActingUserMock,
+  setTrustedRunActingUserOnSuccess: setTrustedRunActingUserOnSuccessMock,
   authUsers: {
     id: 'authUserId',
   },
@@ -136,8 +156,26 @@ vi.mock('@roomote/db/server', () => ({
     result: 'result',
   },
   tasks: {
+    deletedAt: 'tasks.deletedAt',
     id: 'tasks.id',
     initiatorUserId: 'tasks.initiatorUserId',
+    state: 'tasks.state',
+  },
+  fastAgentConversations: {
+    currentReplyChannelId: 'fastAgentConversations.currentReplyChannelId',
+    currentReplyThreadId: 'fastAgentConversations.currentReplyThreadId',
+    id: 'fastAgentConversations.id',
+    surface: 'fastAgentConversations.surface',
+    userId: 'fastAgentConversations.userId',
+    workspaceId: 'fastAgentConversations.workspaceId',
+  },
+  sessions: {
+    fastConversationId: 'sessions.fastConversationId',
+    id: 'sessions.id',
+  },
+  sessionTasks: {
+    sessionId: 'sessionTasks.sessionId',
+    taskId: 'sessionTasks.taskId',
   },
   db: {
     insert: insertMock,
@@ -255,10 +293,15 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('@roomote/communication/messages', () => ({
   queueCommunicationMessage: queueCommunicationMessageMock,
+  queueCommunicationMessageOnce: queueCommunicationMessageOnceMock,
   setLatestInboundMessageId: setLatestInboundMessageIdMock,
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  findSessionAttentionNotificationReply: vi.fn(async () => ({
+    status: 'none',
+  })),
+  resolveSessionAttentionFastConversation: vi.fn(async () => null),
   continueFastAgentSurfaceReply: continueFastReplyMock,
   createTelegramCommunicationProviderFromRuntimeCredentials: vi.fn(async () =>
     envMock.R_TELEGRAM_BOT_TOKEN
@@ -284,11 +327,23 @@ vi.mock('@roomote/sdk/server', () => ({
   findFastAgentSessionForProviderReply: findFastReplySessionMock,
   isFastAgentProviderMessage: isFastProviderMessageMock,
   queueFastAgentSurfaceReply: queueFastReplyMock,
+  startFastSessionGoal: startFastSessionGoalMock,
+  recordFastAgentConversationMessageBestEffort:
+    recordFastConversationMessageMock,
   TELEGRAM_PRIMARY_CHAT_ENV_VAR_NAME: 'TELEGRAM_PRIMARY_CHAT_ID',
-  claimPendingPrReviewAction: vi.fn(async () => null),
+  claimPendingPrReviewAction: claimPendingPrReviewActionMock,
   claimPendingPrReviewActionsForThread: vi.fn(async () => []),
-  dispatchPrReviewFollowUp: vi.fn(),
-  enableAutoHandlePrReviewFeedback: vi.fn(),
+  completePendingPrReviewActionDispatch:
+    completePendingPrReviewActionDispatchMock,
+  dispatchPrReviewFollowUp: dispatchPrReviewFollowUpMock,
+  enableAutoHandlePrReviewFeedback: enableAutoHandlePrReviewFeedbackMock,
+  retirePrReviewActionMessagesBestEffort:
+    retirePrReviewActionMessagesBestEffortMock,
+  retireTelegramRequestUserInputPromptBestEffort:
+    retireTelegramRequestUserInputPromptBestEffortMock,
+}));
+vi.mock('../../tasks/continue-session-attention-reply', () => ({
+  continueSessionAttentionReply: vi.fn(async () => false),
 }));
 
 vi.mock('@roomote/communication/telegram-provider', () => ({
@@ -311,19 +366,31 @@ vi.mock('../../tasks/task-stop.js', () => ({
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
+  AUDIO_TRANSCRIPTION_MAX_SIZE_BYTES: 20 * 1024 * 1024,
   buildFastAgentReactionExternalInputQuestion: vi.fn(
     (input: unknown) =>
       `<external_input>${JSON.stringify(input)}</external_input>`,
   ),
-  buildTelegramRoutingContext: buildTelegramRoutingContextMock,
-  classifyFollowUp: classifyFollowUpMock,
+  describeVideoAttachment: describeVideoAttachmentMock,
   enqueueTask: enqueueTaskMock,
+  extractPromptTextAttachments: extractPromptTextAttachmentsMock,
+  formatAudioAttachmentWarning: (filename: string, reason: string) =>
+    `[Audio attachment ${filename} ${reason}.]`,
+  formatAudioTranscriptionResult: (
+    filename: string,
+    result: { transcript?: string },
+  ) => `Audio attachment transcript: ${filename}\n${result.transcript ?? ''}`,
   getAvailableEnvironments: getAvailableEnvironmentsMock,
-  getRoutingAutoConfirmDelayMs: getRoutingAutoConfirmDelayMsMock,
   getTaskUrl: getTaskUrlMock,
   getOrCreateFastAgentSession: getFastSessionMock,
-  resolveRoutingFollowUp: resolveRoutingFollowUpMock,
-  routeTask: routeTaskMock,
+  isVideoAgentSupportedMimeType: (mimeType: string) =>
+    ['video/mp4', 'video/quicktime', 'video/webm', 'video/mpeg'].includes(
+      mimeType,
+    ),
+  resolveAudioTranscriptionMimeType: ({ mimeType }: { mimeType?: string }) =>
+    mimeType?.startsWith('audio/') ? mimeType : null,
+  transcribeAudioAttachment: transcribeAudioAttachmentMock,
+  VIDEO_AGENT_MAX_VIDEO_SIZE_BYTES: 20 * 1024 * 1024,
 }));
 
 import { telegram } from '../index';
@@ -400,6 +467,15 @@ describe('Telegram webhook handler', () => {
       filePath: 'photos/example.jpg',
       contentType: 'image/jpeg',
     });
+    describeVideoAttachmentMock.mockResolvedValue('The video shows an error.');
+    extractPromptTextAttachmentsMock.mockResolvedValue({
+      attachmentTexts: ['Attachment: notes.txt\nDeployment failed.'],
+      warnings: [],
+    });
+    transcribeAudioAttachmentMock.mockResolvedValue({
+      status: 'transcribed',
+      transcript: 'Run the focused tests.',
+    });
     taskRunsFindFirstMock.mockReset();
     telegramMappingsFindFirstMock.mockReset();
     consumeLinkCodeMock.mockReset();
@@ -407,7 +483,7 @@ describe('Telegram webhook handler', () => {
     queueFastReplyMock.mockResolvedValue(true);
     findFastMessageSessionMock.mockResolvedValue(null);
     findFastReplySessionMock.mockResolvedValue(null);
-    getFastSessionMock.mockRejectedValue(new Error('Fast unavailable'));
+    getFastSessionMock.mockResolvedValue({ id: 'fast-session-default' });
     isFastProviderMessageMock.mockResolvedValue(false);
 
     envMock.R_APP_URL = 'https://app.example.com';
@@ -418,11 +494,15 @@ describe('Telegram webhook handler', () => {
     redisDelMock.mockResolvedValue(1);
     redisGetMock.mockResolvedValue(null);
     redisGetdelMock.mockResolvedValue(null);
+    redisEvalMock.mockResolvedValue(1);
     environmentsFindFirstMock.mockResolvedValue(undefined);
     getAvailableEnvironmentsMock.mockResolvedValue([]);
-    getRoutingAutoConfirmDelayMsMock.mockReturnValue(30_000);
     editMessageTextMock.mockResolvedValue(undefined);
     setLatestInboundMessageIdMock.mockResolvedValue(undefined);
+    setTrustedRunActingUserOnSuccessMock.mockImplementation(
+      async ({ operation }) => operation(),
+    );
+    startFastSessionGoalMock.mockResolvedValue({ success: true, goal: {} });
     authUsersFindFirstMock.mockResolvedValue(null);
     usersFindFirstMock.mockResolvedValue(null);
     taskRunsFindFirstMock.mockResolvedValue(null);
@@ -445,52 +525,144 @@ describe('Telegram webhook handler', () => {
     });
     updateReturningMock.mockResolvedValue([]);
     queueCommunicationMessageMock.mockResolvedValue(undefined);
-    buildTelegramRoutingContextMock.mockResolvedValue({ context: true });
-    classifyFollowUpMock.mockResolvedValue({
-      intent: 'correct',
-      reasoning: 'Treat as a correction',
-    });
-    resolveRoutingFollowUpMock.mockImplementation(
-      async (input: {
-        suggestion: Record<string, unknown> | null;
-        userResponse: string;
-        userId?: string | null;
-        correctionMessage?: { user: string; text: string };
-        buildCorrectionContext: () => Promise<Record<string, unknown>>;
-      }) => {
-        const classification = await classifyFollowUpMock({
-          suggestedWorkspace:
-            input.suggestion?.workspaceDisplayName ?? 'the workspace picker',
-          userResponse: input.userResponse,
-          userId: input.userId,
-        });
-        if (classification.intent !== 'correct') {
-          return { intent: classification.intent };
-        }
-        const context = await input.buildCorrectionContext();
-        return {
-          intent: 'correct',
-          routingDecision: await routeTaskMock({
-            ...context,
-            ...(input.suggestion
-              ? { previousSuggestion: input.suggestion }
-              : {}),
-          }),
-        };
-      },
-    );
-    routeTaskMock.mockResolvedValue({
-      status: 'routed',
-      result: {
-        workspace: { type: 'all_repositories' },
-        reasoning: 'all repos',
-      },
-    });
+    queueCommunicationMessageOnceMock.mockResolvedValue(true);
     enqueueTaskMock.mockResolvedValue({
       id: 88,
       taskId: 'task-new',
     });
     postMessageMock.mockResolvedValue({ messageId: 'telegram-response' });
+    claimPendingPrReviewActionMock.mockResolvedValue(null);
+    completePendingPrReviewActionDispatchMock.mockResolvedValue(undefined);
+    dispatchPrReviewFollowUpMock.mockResolvedValue({
+      outcome: 'queued',
+      runId: 42,
+    });
+    enableAutoHandlePrReviewFeedbackMock.mockResolvedValue(undefined);
+    retirePrReviewActionMessagesBestEffortMock.mockResolvedValue(undefined);
+    retireTelegramRequestUserInputPromptBestEffortMock.mockResolvedValue(
+      undefined,
+    );
+  });
+
+  it('logs receipt and an explicit terminal reason without message content', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+
+    const response = await postTelegramUpdate({ update_id: 901 });
+
+    expect(response.status).toBe(200);
+    const logs = info.mock.calls.map(([message]) => String(message));
+    const terminal = logs
+      .map((message) => JSON.parse(message))
+      .find((entry) => entry.event === 'communication_webhook_terminal');
+    expect(terminal).toMatchObject({
+      provider: 'telegram',
+      updateId: 901,
+      externalEventId: '901',
+      outcome: 'skipped',
+      reason: 'unsupported_update',
+      status: 200,
+    });
+    expect(logs.join('\n')).not.toContain('continue the task');
+    info.mockRestore();
+  });
+
+  it('logs provider acceptance for outbound replies without reply content', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    mockTelegramLinkedSender();
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({ message: { text: '/help' } }),
+    );
+
+    expect(response.status).toBe(200);
+    const logs = info.mock.calls.map(([message]) => String(message));
+    const delivery = logs
+      .map((message) => JSON.parse(message))
+      .find((entry) => entry.event === 'communication_delivery_terminal');
+    expect(delivery).toMatchObject({
+      provider: 'telegram',
+      channelId: '222',
+      messageId: 'telegram-response',
+      outcome: 'accepted',
+      reason: 'provider_message_created',
+    });
+    expect(logs.join('\n')).not.toContain('Available commands');
+    info.mockRestore();
+  });
+
+  it('resolves Auto-resolve in the original Telegram offer without another reply', async () => {
+    mockTelegramLinkedSender('linked-user-1');
+    claimPendingPrReviewActionMock.mockResolvedValueOnce({
+      nonce: 'review-action-1',
+      provider: 'telegram',
+      taskId: 'task-1',
+      repository: 'acme/web',
+      prNumber: 42,
+      prUrl: 'https://github.com/acme/web/pull/42',
+      channelId: '222',
+      threadId: '7',
+      followUpPrompt: 'Resolve the review feedback.',
+      messageId: '777',
+    });
+
+    const response = await postTelegramUpdate({
+      update_id: 905,
+      callback_query: {
+        id: 'cb-review-auto',
+        from: { id: 111, first_name: 'Ada' },
+        data: 'prr:a:review-action-1',
+        message: {
+          message_id: 777,
+          message_thread_id: 7,
+          chat: { id: 222, type: 'supergroup' },
+          text: 'Review feedback: add a regression test.',
+        },
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(retirePrReviewActionMessagesBestEffortMock).toHaveBeenNthCalledWith(
+      1,
+      [
+        {
+          provider: 'telegram',
+          channelId: '222',
+          threadId: '7',
+          messageId: '777',
+        },
+      ],
+    );
+    expect(editMessageReplyMarkupMock).not.toHaveBeenCalled();
+    expect(dispatchPrReviewFollowUpMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'telegram',
+        taskId: 'task-1',
+        followUpPrompt: 'Resolve the review feedback.',
+      }),
+    );
+    expect(enableAutoHandlePrReviewFeedbackMock).toHaveBeenCalledWith({
+      taskId: 'task-1',
+      repository: 'acme/web',
+      prNumber: 42,
+      userId: 'linked-user-1',
+    });
+    expect(retirePrReviewActionMessagesBestEffortMock).toHaveBeenNthCalledWith(
+      2,
+      [
+        {
+          provider: 'telegram',
+          channelId: '222',
+          threadId: '7',
+          messageId: '777',
+          messageText: 'Review feedback: add a regression test.',
+        },
+      ],
+      {
+        resolution:
+          'OK, Ada. Future review feedback on this PR will get resolved automatically.',
+      },
+    );
+    expect(postMessageMock).not.toHaveBeenCalled();
   });
 
   it('queues a new reaction on the owner’s bound Fast message', async () => {
@@ -628,7 +800,92 @@ describe('Telegram webhook handler', () => {
     expect(enqueueTaskMock).not.toHaveBeenCalled();
   });
 
-  it('uses Fast for a linked Telegram direct message', async () => {
+  it('ignores private Telegram service messages without nudging the sender', async () => {
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          text: undefined,
+          forum_topic_closed: {},
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      ignored: 'unsupported_update',
+    });
+    expect(telegramMappingsFindFirstMock).not.toHaveBeenCalled();
+    expect(postMessageMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['bot-authored', { id: 999, is_bot: true, first_name: 'Roomote' }],
+    ['senderless', undefined],
+  ])('ignores %s private task-entry messages', async (_label, from) => {
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({ message: { from } }),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      ignored: 'unsupported_update',
+    });
+    expect(telegramMappingsFindFirstMock).not.toHaveBeenCalled();
+    expect(postMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('applies the private task-entry guard to edited messages', async () => {
+    const response = await postTelegramUpdate({
+      update_id: 127,
+      edited_message: {
+        message_id: 456,
+        date: 1,
+        from: { id: 111, first_name: 'Ada' },
+        chat: { id: 222, type: 'private', first_name: 'Ada' },
+        forum_topic_closed: {},
+      },
+    });
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      ignored: 'unsupported_update',
+    });
+    expect(telegramMappingsFindFirstMock).not.toHaveBeenCalled();
+    expect(postMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('durably marks the first Fast session in an implicit New Chat topic', async () => {
+    mockTelegramLinkedSender('mapped-user-1');
+    redisGetdelMock.mockResolvedValueOnce('1');
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          text: 'Investigate the failing deployment',
+          message_thread_id: 77,
+          is_topic_message: true,
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      fastAnswered: true,
+      fastDefaulted: true,
+    });
+    expect(recordFastConversationMessageMock).toHaveBeenCalledWith({
+      sessionId: 'fast-session-default',
+      conversation: {
+        surface: 'telegram',
+        workspaceId: '222',
+        conversationId: '77:user:mapped-user-1',
+        replyTarget: { channelId: '222', threadId: '77' },
+      },
+      messageId: '77',
+    });
+  });
+
+  it('uses Fast for a linked Telegram direct message without an automatic reaction', async () => {
     mockTelegramLinkedSender('mapped-user-1');
     getFastSessionMock.mockResolvedValueOnce({
       id: '11111111-1111-4111-8111-111111111111',
@@ -643,6 +900,7 @@ describe('Telegram webhook handler', () => {
     });
     expect(getFastSessionMock).toHaveBeenCalledWith({
       userId: 'mapped-user-1',
+      userInitiated: { surface: 'telegram', trigger: 'message' },
       conversation: {
         surface: 'telegram',
         workspaceId: '222',
@@ -657,10 +915,12 @@ describe('Telegram webhook handler', () => {
       question: 'continue the task',
       currentMessageId: '456',
     });
+    expect(addReactionMock).not.toHaveBeenCalled();
     expect(enqueueTaskMock).not.toHaveBeenCalled();
   });
 
-  it('continues a Telegram Fast reply before ordinary task routing', async () => {
+  it('continues a Telegram Fast reply without an automatic reaction', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
     mockTelegramLinkedSender('mapped-user-1');
     findFastReplySessionMock.mockResolvedValueOnce({
       id: '22222222-2222-4222-8222-222222222222',
@@ -698,15 +958,103 @@ describe('Telegram webhook handler', () => {
       replyToMessageId: '400',
       userId: 'mapped-user-1',
     });
-    expect(continueFastReplyMock).toHaveBeenCalledWith(
+    expect(queueFastReplyMock).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: '22222222-2222-4222-8222-222222222222',
         userId: 'mapped-user-1',
         question: 'continue the task',
+        agentContext:
+          'The person is replying to this Telegram message:\n{"message_id":"400","author":"Telegram user","content":"Fast answer"}',
       }),
     );
+    expect(addReactionMock).not.toHaveBeenCalled();
     expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
     expect(enqueueTaskMock).not.toHaveBeenCalled();
+    const operationalEvents = info.mock.calls
+      .map(([message]) => JSON.parse(String(message)))
+      .filter((entry) => entry.event === 'communication_dispatch_terminal');
+    expect(operationalEvents).toContainEqual(
+      expect.objectContaining({
+        sessionId: '22222222-2222-4222-8222-222222222222',
+        outcome: 'dispatched',
+        reason: 'fast_session_reply_queued',
+      }),
+    );
+    info.mockRestore();
+  });
+
+  it('continues a canonical web Session from a later Telegram reply', async () => {
+    mockTelegramLinkedSender('mapped-user-1');
+    findFastReplySessionMock.mockResolvedValueOnce({
+      id: '22222222-2222-4222-8222-222222222222',
+      userId: 'mapped-user-1',
+      conversation: {
+        surface: 'web',
+        workspaceId: 'web',
+        conversationId: 'web-session-1',
+      },
+    });
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          reply_to_message: {
+            message_id: 401,
+            date: 1,
+            text: 'Later Fast answer',
+            chat: { id: 222, type: 'private' },
+          },
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      fastAnswered: true,
+      fastContinued: true,
+    });
+    expect(queueFastReplyMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: '22222222-2222-4222-8222-222222222222',
+        deliveryConversation: {
+          surface: 'telegram',
+          workspaceId: '222',
+          conversationId: 'notification:222:user:mapped-user-1',
+          replyTarget: { channelId: '222' },
+        },
+      }),
+    );
+  });
+
+  it('does not acknowledge a Telegram Fast reply when durable admission fails', async () => {
+    mockTelegramLinkedSender('mapped-user-1');
+    findFastReplySessionMock.mockResolvedValueOnce({
+      id: '22222222-2222-4222-8222-222222222222',
+      userId: 'mapped-user-1',
+      conversation: {
+        surface: 'telegram',
+        workspaceId: '222',
+        conversationId: '222:user:mapped-user-1',
+        replyTarget: { channelId: '222' },
+      },
+    });
+    queueFastReplyMock.mockRejectedValueOnce(new Error('database unavailable'));
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          reply_to_message: {
+            message_id: 400,
+            date: 1,
+            text: 'Fast answer',
+            chat: { id: 222, type: 'private' },
+          },
+        },
+      }),
+    );
+
+    expect(response.status).toBe(500);
+    expect(addReactionMock).not.toHaveBeenCalled();
+    expect(redisDelMock).toHaveBeenCalledWith('telegram:update:123');
   });
 
   it('fails closed when a Telegram reply targets a Fast message on another route', async () => {
@@ -737,6 +1085,7 @@ describe('Telegram webhook handler', () => {
       workspaceId: '222',
       channelId: '222',
     });
+    expect(redisDelMock).not.toHaveBeenCalled();
     expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
     expect(enqueueTaskMock).not.toHaveBeenCalled();
   });
@@ -778,6 +1127,195 @@ describe('Telegram webhook handler', () => {
     expect(enqueueTaskMock).not.toHaveBeenCalled();
   });
 
+  it('passes Telegram image documents to a new Fast session as images', async () => {
+    mockTelegramLinkedSender('mapped-user-1');
+    downloadFileMock.mockResolvedValueOnce({
+      bytes: new Uint8Array([1, 2, 3]),
+      filePath: 'documents/failure.png',
+      contentType: 'application/octet-stream',
+    });
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          text: undefined,
+          caption: 'Inspect the uncompressed screenshot',
+          document: {
+            file_id: 'screenshot-file',
+            file_unique_id: 'screenshot-1',
+            file_name: 'failure.png',
+            mime_type: 'application/octet-stream',
+          },
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      fastAnswered: true,
+      fastDefaulted: true,
+    });
+    expect(continueFastReplyMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: 'Inspect the uncompressed screenshot',
+        images: ['data:image/png;base64,AQID'],
+      }),
+    );
+  });
+
+  it('passes extracted Telegram documents to a new Fast session', async () => {
+    mockTelegramLinkedSender('mapped-user-1');
+    downloadFileMock.mockResolvedValueOnce({
+      bytes: new TextEncoder().encode('Deployment failed.'),
+      filePath: 'documents/notes.txt',
+      contentType: 'text/plain',
+    });
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          text: undefined,
+          caption: 'Diagnose this log',
+          document: {
+            file_id: 'document-file',
+            file_unique_id: 'document-1',
+            file_name: 'notes.txt',
+            mime_type: 'text/plain',
+          },
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      fastAnswered: true,
+      fastDefaulted: true,
+    });
+    expect(continueFastReplyMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question:
+          'Diagnose this log\n\nAttachment: notes.txt\nDeployment failed.',
+        attachmentTexts: ['Attachment: notes.txt\nDeployment failed.'],
+      }),
+    );
+  });
+
+  it.each([
+    [
+      'audio',
+      {
+        audio: {
+          file_id: 'audio-file',
+          file_unique_id: 'audio-1',
+          duration: 3,
+          file_name: 'request.mp3',
+          mime_type: 'audio/mpeg',
+        },
+      },
+    ],
+    [
+      'voice note',
+      {
+        voice: {
+          file_id: 'voice-file',
+          file_unique_id: 'voice-1',
+          duration: 3,
+          mime_type: 'audio/ogg',
+        },
+      },
+    ],
+  ])(
+    'passes transcribed Telegram %s to a new Fast session',
+    async (_, message) => {
+      mockTelegramLinkedSender('mapped-user-1');
+
+      const response = await postTelegramUpdate(
+        createTelegramUpdate({ message: { text: undefined, ...message } }),
+      );
+
+      await expect(response.json()).resolves.toMatchObject({
+        fastAnswered: true,
+        fastDefaulted: true,
+      });
+      expect(continueFastReplyMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          attachmentTexts: [expect.stringContaining('Run the focused tests.')],
+        }),
+      );
+    },
+  );
+
+  it('passes bounded Telegram video descriptions to a new Fast session', async () => {
+    mockTelegramLinkedSender('mapped-user-1');
+    downloadFileMock.mockResolvedValueOnce({
+      bytes: new Uint8Array([1, 2, 3]),
+      filePath: 'videos/repro.mp4',
+      contentType: 'video/mp4',
+    });
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          text: undefined,
+          caption: 'Review this recording',
+          document: {
+            file_id: 'video-file',
+            file_unique_id: 'video-1',
+            file_name: 'repro.mp4',
+            mime_type: 'video/mp4',
+          },
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      fastAnswered: true,
+      fastDefaulted: true,
+    });
+    expect(downloadFileMock).toHaveBeenCalledWith(
+      'video-file',
+      20 * 1024 * 1024,
+    );
+    expect(continueFastReplyMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: expect.stringContaining('The video shows an error.'),
+        attachmentTexts: [
+          'Video attachment description: repro.mp4\nThe video shows an error.',
+        ],
+      }),
+    );
+  });
+
+  it('keeps unsupported Telegram documents out of new Fast attachment context', async () => {
+    mockTelegramLinkedSender('mapped-user-1');
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          text: undefined,
+          caption: 'Use this file',
+          document: {
+            file_id: 'archive-file',
+            file_unique_id: 'archive-1',
+            file_name: 'bundle.zip',
+            mime_type: 'application/zip',
+          },
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      fastAnswered: true,
+      fastDefaulted: true,
+    });
+    expect(downloadFileMock).not.toHaveBeenCalled();
+    expect(continueFastReplyMock).toHaveBeenCalledWith({
+      sessionId: 'fast-session-default',
+      userId: 'mapped-user-1',
+      senderDisplayName: 'Ada Lovelace',
+      question: 'Use this file',
+      currentMessageId: '456',
+    });
+  });
+
   it('uses a user-scoped Fast session for a Telegram group topic mention', async () => {
     mockTelegramLinkedSender('mapped-user-1');
     getFastSessionMock.mockResolvedValueOnce({
@@ -801,6 +1339,7 @@ describe('Telegram webhook handler', () => {
     });
     expect(getFastSessionMock).toHaveBeenCalledWith({
       userId: 'mapped-user-1',
+      userInitiated: { surface: 'telegram', trigger: 'message' },
       conversation: {
         surface: 'telegram',
         workspaceId: '-1007',
@@ -844,7 +1383,7 @@ describe('Telegram webhook handler', () => {
       threadId: '77',
       userId: 'mapped-user-1',
     });
-    expect(continueFastReplyMock).toHaveBeenCalledWith(
+    expect(queueFastReplyMock).toHaveBeenCalledWith(
       expect.objectContaining({ question: 'keep going' }),
     );
   });
@@ -906,7 +1445,6 @@ describe('Telegram webhook handler', () => {
       reason: 'telegram_sender_not_linked',
     });
     expect(enqueueTaskMock).not.toHaveBeenCalled();
-    expect(routeTaskMock).not.toHaveBeenCalled();
     expect(postMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
         channelId: '-1007',
@@ -1034,7 +1572,6 @@ describe('Telegram webhook handler', () => {
       linkNudged: true,
     });
     expect(enqueueTaskMock).not.toHaveBeenCalled();
-    expect(routeTaskMock).not.toHaveBeenCalled();
     expect(postMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
         channelId: '222',
@@ -1084,14 +1621,18 @@ describe('Telegram webhook handler', () => {
       runId: 77,
     });
     expect(response.status).toBe(200);
-    expect(queueCommunicationMessageMock).toHaveBeenCalledWith('telegram', 77, {
-      provider: 'telegram',
-      text: 'continue the task',
-      user: 'Ada Lovelace',
-      userId: 'launch-owner-1',
-      ts: '456',
-      channel: '222',
-    });
+    expect(queueCommunicationMessageOnceMock).toHaveBeenCalledWith(
+      'telegram',
+      77,
+      {
+        provider: 'telegram',
+        text: 'continue the task',
+        user: 'Ada Lovelace',
+        userId: 'launch-owner-1',
+        ts: '456',
+        channel: '222',
+      },
+    );
     expect(setLatestInboundMessageIdMock).toHaveBeenCalledWith(
       'telegram',
       77,
@@ -1101,7 +1642,245 @@ describe('Telegram webhook handler', () => {
       runId: 77,
       userId: 'launch-owner-1',
     });
+    expect(redisDelMock).not.toHaveBeenCalled();
     expect(getFastSessionMock).not.toHaveBeenCalled();
+  });
+
+  it('starts a Fast Session goal and acknowledges the objective literally', async () => {
+    mockTelegramLinkedSender();
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          text: '/goal ship_the *release*',
+          entities: [{ type: 'bot_command', offset: 0, length: 5 }],
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      goalStarted: true,
+      sessionId: 'fast-session-default',
+    });
+    expect(startFastSessionGoalMock).toHaveBeenCalledWith({
+      sessionId: 'fast-session-default',
+      userId: 'launch-owner-1',
+      senderDisplayName: 'Ada Lovelace',
+      objective: 'ship_the *release*',
+      currentMessageId: '456',
+    });
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'Pursuing goal: ship_the *release*',
+        textFormat: 'plain',
+      }),
+    );
+    expect(queueCommunicationMessageOnceMock).not.toHaveBeenCalled();
+    expect(continueFastReplyMock).not.toHaveBeenCalled();
+  });
+
+  it('starts a Fast Session goal without requiring a child task', async () => {
+    mockTelegramLinkedSender();
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          text: '/goal finish the secure flow',
+          entities: [{ type: 'bot_command', offset: 0, length: 5 }],
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      goalStarted: true,
+      sessionId: 'fast-session-default',
+    });
+    expect(startFastSessionGoalMock).toHaveBeenCalledWith({
+      sessionId: 'fast-session-default',
+      userId: 'launch-owner-1',
+      senderDisplayName: 'Ada Lovelace',
+      objective: 'finish the secure flow',
+      currentMessageId: '456',
+    });
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'Pursuing goal: finish the secure flow',
+        textFormat: 'plain',
+      }),
+    );
+    expect(queueFastReplyMock).not.toHaveBeenCalled();
+  });
+
+  it('marks an implicit topic as managed before starting its Session goal', async () => {
+    mockTelegramLinkedSender('mapped-user-1');
+    redisGetdelMock.mockResolvedValueOnce('1');
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          text: '/goal investigate the deployment',
+          entities: [{ type: 'bot_command', offset: 0, length: 5 }],
+          message_thread_id: 77,
+          is_topic_message: true,
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      goalStarted: true,
+      sessionId: 'fast-session-default',
+    });
+    expect(recordFastConversationMessageMock).toHaveBeenCalledWith({
+      sessionId: 'fast-session-default',
+      conversation: {
+        surface: 'telegram',
+        workspaceId: '222',
+        conversationId: '77:user:mapped-user-1',
+        replyTarget: { channelId: '222', threadId: '77' },
+      },
+      messageId: '77',
+    });
+    expect(
+      recordFastConversationMessageMock.mock.invocationCallOrder[0],
+    ).toBeLessThan(startFastSessionGoalMock.mock.invocationCallOrder[0]!);
+  });
+
+  it('starts a group /goal on the Fast Session bound to the replied-to message', async () => {
+    mockTelegramLinkedSender('mapped-user-1');
+    findFastReplySessionMock.mockResolvedValueOnce({
+      id: '22222222-2222-4222-8222-222222222222',
+      userId: 'mapped-user-1',
+      conversation: {
+        surface: 'telegram',
+        workspaceId: '-1007',
+        conversationId: '400:user:mapped-user-1',
+        replyTarget: { channelId: '-1007' },
+      },
+    });
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          chat: { id: -1007, type: 'group', title: 'Engineering' },
+          text: '/goal@roomote_bot ship the release',
+          entities: [{ type: 'bot_command', offset: 0, length: 17 }],
+          reply_to_message: {
+            message_id: 400,
+            date: 1,
+            text: 'Fast answer',
+            chat: { id: -1007, type: 'group' },
+          },
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      goalStarted: true,
+      sessionId: '22222222-2222-4222-8222-222222222222',
+    });
+    expect(findFastReplySessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'telegram',
+        replyToMessageId: '400',
+        userId: 'mapped-user-1',
+      }),
+    );
+    expect(getFastSessionMock).not.toHaveBeenCalled();
+    expect(startFastSessionGoalMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: '22222222-2222-4222-8222-222222222222',
+        objective: 'ship the release',
+      }),
+    );
+  });
+
+  it('shows /goal usage when the objective is missing', async () => {
+    mockTelegramLinkedSender();
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          text: '/goal',
+          entities: [{ type: 'bot_command', offset: 0, length: 5 }],
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      goalStarted: false,
+      reason: 'missing_objective',
+    });
+    expect(startFastSessionGoalMock).not.toHaveBeenCalled();
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({ text: expect.stringContaining('/goal ship') }),
+    );
+  });
+
+  it('does not require /goal to target an active child task', async () => {
+    mockTelegramLinkedSender();
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          text: '/goal ship the release',
+          entities: [{ type: 'bot_command', offset: 0, length: 5 }],
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      goalStarted: true,
+      sessionId: 'fast-session-default',
+    });
+    expect(startFastSessionGoalMock).toHaveBeenCalledWith(
+      expect.objectContaining({ objective: 'ship the release' }),
+    );
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'Pursuing goal: ship the release' }),
+    );
+  });
+
+  it('releases the update claim when active-run queueing fails', async () => {
+    mockTelegramLinkedSender();
+    taskRunsFindFirstMock.mockResolvedValueOnce({
+      id: 77,
+      status: 'running',
+      machineId: 'machine-1',
+      taskId: 'task-1',
+      payload: {},
+    });
+    queueCommunicationMessageOnceMock.mockRejectedValueOnce(
+      new Error('database unavailable'),
+    );
+
+    const response = await postTelegramUpdate(createTelegramUpdate());
+
+    expect(response.status).toBe(500);
+    expect(redisDelMock).toHaveBeenCalledWith('telegram:update:123');
+  });
+
+  it('acks a retried active-run update already queued by message id', async () => {
+    mockTelegramLinkedSender();
+    taskRunsFindFirstMock.mockResolvedValueOnce({
+      id: 77,
+      status: 'running',
+      machineId: 'machine-1',
+      taskId: 'task-1',
+      payload: {},
+    });
+    queueCommunicationMessageOnceMock.mockResolvedValueOnce(false);
+
+    const response = await postTelegramUpdate(createTelegramUpdate());
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      queued: true,
+      runId: 77,
+    });
+    expect(queueCommunicationMessageOnceMock).toHaveBeenCalledTimes(1);
   });
 
   it('queues a captioned photo as an active-run follow-up', async () => {
@@ -1136,7 +1915,7 @@ describe('Telegram webhook handler', () => {
       queued: true,
       runId: 77,
     });
-    expect(queueCommunicationMessageMock).toHaveBeenCalledWith(
+    expect(queueCommunicationMessageOnceMock).toHaveBeenCalledWith(
       'telegram',
       77,
       expect.objectContaining({
@@ -1146,12 +1925,143 @@ describe('Telegram webhook handler', () => {
     );
   });
 
-  it('starts new Telegram tasks as the linked sender', async () => {
-    mockTelegramLinkedSender('launch-owner-2');
-    createForumTopicMock.mockResolvedValueOnce({
-      messageThreadId: '77',
-      name: 'please check this',
+  it('submits an image-only message as custom input and queues its image', async () => {
+    mockTelegramLinkedSender();
+    taskRunsFindFirstMock.mockResolvedValueOnce({
+      id: 77,
+      status: 'running',
+      machineId: 'machine-1',
+      taskId: 'task-1',
+      payload: {},
     });
+    redisGetMock.mockResolvedValueOnce(
+      JSON.stringify({
+        requestId: 'request-1',
+        runId: 77,
+        taskId: 'task-1',
+        provider: 'telegram',
+        conversationId: '222',
+        questions: [
+          {
+            id: 'answer',
+            header: 'Answer',
+            question: 'What should I use?',
+            options: [],
+            isOther: true,
+            isSecret: false,
+          },
+        ],
+        status: 'pending',
+        promptMessageId: '900',
+        currentQuestionIndex: 0,
+        answers: {},
+        createdAt: 1,
+      }),
+    );
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          text: undefined,
+          photo: [
+            {
+              file_id: 'photo-large',
+              file_unique_id: 'photo-1',
+              width: 1280,
+              height: 720,
+            },
+          ],
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      queued: true,
+      runId: 77,
+      requestUserInput: true,
+    });
+    expect(queueCommunicationMessageOnceMock).toHaveBeenCalledWith(
+      'telegram',
+      77,
+      expect.objectContaining({
+        text: 'Image attachment',
+        images: ['data:image/jpeg;base64,AQID'],
+      }),
+    );
+    expect(redisEvalMock).toHaveBeenCalled();
+    expect(editMessageTextMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: '222',
+        messageId: '900',
+        textFormat: 'markdown',
+        buttons: [],
+      }),
+    );
+  });
+
+  it('does not let a losing image answer replace the winning actor or image', async () => {
+    mockTelegramLinkedSender('losing-user');
+    taskRunsFindFirstMock.mockResolvedValueOnce({
+      id: 77,
+      status: 'running',
+      machineId: 'machine-1',
+      taskId: 'task-1',
+      payload: {},
+    });
+    redisGetMock.mockResolvedValueOnce(
+      JSON.stringify({
+        requestId: 'request-1',
+        runId: 77,
+        taskId: 'task-1',
+        provider: 'telegram',
+        conversationId: '222',
+        questions: [
+          {
+            id: 'answer',
+            header: 'Answer',
+            question: 'What should I use?',
+            options: [],
+            isOther: true,
+            isSecret: false,
+          },
+        ],
+        status: 'pending',
+        promptMessageId: '900',
+        currentQuestionIndex: 0,
+        answers: {},
+        createdAt: 1,
+      }),
+    );
+    redisEvalMock.mockResolvedValueOnce(0);
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        update_id: 124,
+        message: {
+          text: undefined,
+          photo: [
+            {
+              file_id: 'photo-large',
+              file_unique_id: 'photo-2',
+              width: 1280,
+              height: 720,
+            },
+          ],
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      requestUserInput: true,
+    });
+    expect(queueCommunicationMessageOnceMock).not.toHaveBeenCalled();
+    expect(setTrustedRunActingUserMock).not.toHaveBeenCalled();
+  });
+
+  it('answers a /start request in Fast as the linked sender', async () => {
+    mockTelegramLinkedSender('launch-owner-2');
     taskRunsFindFirstMock
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(null);
@@ -1167,108 +2077,49 @@ describe('Telegram webhook handler', () => {
 
     await expect(response.json()).resolves.toEqual({
       ok: true,
-      started: true,
-      runId: 88,
+      fastAnswered: true,
+      fastDefaulted: true,
     });
-    expect(response.status).toBe(200);
-    expect(buildTelegramRoutingContextMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userId: 'launch-owner-2',
-        taskDescription: 'please check this',
-      }),
-    );
-    expect(enqueueTaskMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        task: expect.objectContaining({
-          type: 'standard',
-          payload: expect.objectContaining({
-            repo: '__all_repositories__',
-            description: 'please check this',
-            communicationProvider: 'telegram',
-            communicationChannelId: '222',
-            communicationThreadId: '77',
-            communicationMessageId: 'telegram-response',
-          }),
-        }),
-        initiator: { kind: 'user', userId: 'launch-owner-2' },
-        workflow: 'standard',
+    expect(getFastSessionMock).toHaveBeenCalledWith({
+      userId: 'launch-owner-2',
+      userInitiated: { surface: 'telegram', trigger: 'message' },
+      conversation: {
         surface: 'telegram',
-        trigger: 'message',
-      }),
-      expect.objectContaining({
-        launchClass: 'human',
-      }),
-    );
-    expect(postMessageMock).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({
-        channelId: '222',
-        threadId: '77',
-        text: 'Task request from Ada Lovelace:\n\nplease check this',
-      }),
-    );
-    expect(postMessageMock).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        channelId: '222',
-        threadId: '77',
-        replyToMessageId: 'telegram-response',
-        text: expect.stringContaining('Started a task'),
-      }),
-    );
-    const postedCall = postMessageMock.mock.calls[1]![0] as {
-      text: string;
-      buttons?: { text: string; url?: string; callbackData?: string }[][];
-    };
-    expect(postedCall.text).not.toContain(
-      'https://app.example.com/task/task-new',
-    );
-    expect(postedCall.buttons).toEqual([
-      [{ text: 'Follow Task', url: 'https://app.example.com/task/task-new' }],
-      [
-        {
-          text: '✖️ Cancel task',
-          callbackData: expect.any(String),
-        },
-      ],
-    ]);
-  });
-
-  it('replies inline when Telegram routing returns a platform answer', async () => {
-    mockTelegramLinkedSender('launch-owner-3');
-    taskRunsFindFirstMock
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(null);
-    routeTaskMock.mockResolvedValueOnce({
-      status: 'platform_answer',
-      result: {
-        answer: 'Try opening the task in the web app instead.',
+        workspaceId: '222',
+        conversationId: '222:user:launch-owner-2',
+        replyTarget: { channelId: '222' },
       },
     });
-
-    const response = await postTelegramUpdate(
-      createTelegramUpdate({
-        message: {
-          text: '/start help',
-          entities: [{ type: 'bot_command', offset: 0, length: 6 }],
-        },
+    expect(continueFastReplyMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'fast-session-default',
+        userId: 'launch-owner-2',
+        question: 'please check this',
       }),
     );
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
+  });
+
+  it('replies with an error when the Fast session cannot be started', async () => {
+    mockTelegramLinkedSender('launch-owner-2');
+    getFastSessionMock.mockRejectedValueOnce(new Error('Fast unavailable'));
+
+    const response = await postTelegramUpdate(createTelegramUpdate());
 
     await expect(response.json()).resolves.toEqual({
       ok: true,
       queued: false,
-      repliedInline: true,
+      fastUnavailable: true,
     });
-    expect(response.status).toBe(200);
-    expect(enqueueTaskMock).not.toHaveBeenCalled();
     expect(postMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
         channelId: '222',
         replyToMessageId: '456',
-        text: 'Try opening the task in the web app instead.',
+        text: expect.stringContaining("couldn't start a conversation"),
       }),
     );
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
+    expect(continueFastReplyMock).not.toHaveBeenCalled();
   });
 
   it('resumes a completed Telegram snapshot before starting a new task', async () => {
@@ -1348,6 +2199,11 @@ describe('Telegram webhook handler', () => {
         text: expect.stringContaining('Reconnected this Telegram chat'),
       }),
     );
+    expect(addReactionMock).toHaveBeenCalledExactlyOnceWith({
+      channelId: '222',
+      messageId: '456',
+      name: 'eyes',
+    });
   });
 
   it('does not silently resume a completed task from a user-owned forum topic', async () => {
@@ -1389,7 +2245,7 @@ describe('Telegram webhook handler', () => {
     expect(enqueueTaskMock).not.toHaveBeenCalled();
   });
 
-  it('starts a task for a reply to the exact announcer report root', async () => {
+  it('answers a reply to the exact announcer report root in Fast', async () => {
     mockTelegramLinkedSender('launch-owner-report');
     taskRunsFindFirstMock
       .mockResolvedValueOnce({
@@ -1412,20 +2268,16 @@ describe('Telegram webhook handler', () => {
 
     await expect(response.json()).resolves.toEqual({
       ok: true,
-      started: true,
-      runId: 88,
+      fastAnswered: true,
+      fastDefaulted: true,
     });
-    expect(enqueueTaskMock).toHaveBeenCalledWith(
+    expect(continueFastReplyMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        task: expect.objectContaining({
-          payload: expect.objectContaining({
-            communicationMessageId: '456',
-            description: 'Can you explain the release impact?',
-          }),
-        }),
+        question: 'Can you explain the release impact?',
+        currentMessageId: '456',
       }),
-      expect.anything(),
     );
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
   });
 
   it('routes a reply to its exact active announcer root instead of a newer run in the chat', async () => {
@@ -1448,7 +2300,13 @@ describe('Telegram webhook handler', () => {
       createTelegramUpdate({
         message: {
           text: 'Follow up on the first report',
-          reply_to_message: { message_id: 900, date: 1, chat: { id: 222 } },
+          reply_to_message: {
+            message_id: 900,
+            date: 1,
+            text: 'Earlier release report',
+            from: { id: 999, is_bot: true, first_name: 'Roomote' },
+            chat: { id: 222 },
+          },
         },
       }),
     );
@@ -1458,10 +2316,14 @@ describe('Telegram webhook handler', () => {
       queued: true,
       runId: 55,
     });
-    expect(queueCommunicationMessageMock).toHaveBeenCalledWith(
+    expect(queueCommunicationMessageOnceMock).toHaveBeenCalledWith(
       'telegram',
       55,
-      expect.objectContaining({ text: 'Follow up on the first report' }),
+      expect.objectContaining({
+        text: 'Follow up on the first report',
+        agentContext:
+          'The person is replying to this Telegram message:\n{"message_id":"900","author":"Roomote","content":"Earlier release report"}',
+      }),
     );
     expect(taskRunsFindFirstMock).toHaveBeenCalledTimes(1);
   });
@@ -1517,7 +2379,7 @@ describe('Telegram webhook handler', () => {
     expect(taskRunsFindFirstMock).toHaveBeenCalledTimes(1);
   });
 
-  it('/new bypasses a resumable snapshot and starts a fresh task', async () => {
+  it('/new bypasses a resumable snapshot and starts a fresh conversation', async () => {
     mockTelegramLinkedSender('launch-owner-5');
     // First findFirst: active-run lookup (none). Second findFirst: completed
     // snapshot lookup would normally resume, but /new skips it entirely.
@@ -1545,41 +2407,39 @@ describe('Telegram webhook handler', () => {
 
     await expect(response.json()).resolves.toEqual({
       ok: true,
-      started: true,
-      runId: 88,
+      fastAnswered: true,
+      fastStartedNew: true,
     });
     expect(response.status).toBe(200);
-    // A fresh StandardTask is enqueued, not a snapshot.resume.
-    expect(enqueueTaskMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        task: expect.objectContaining({
-          type: 'standard',
-          payload: expect.objectContaining({
-            description: 'fix the flaky auth test',
-            communicationProvider: 'telegram',
-            communicationChannelId: '222',
-            communicationMessageId: '456',
-          }),
-        }),
-        initiator: { kind: 'user', userId: 'launch-owner-5' },
-        workflow: 'standard',
+    // A plain private chat keeps one conversation, so the request joins it.
+    expect(getFastSessionMock).toHaveBeenCalledWith({
+      userId: 'launch-owner-5',
+      userInitiated: { surface: 'telegram', trigger: 'message' },
+      conversation: {
         surface: 'telegram',
-        trigger: 'message',
-      }),
-      expect.objectContaining({ launchClass: 'human' }),
+        workspaceId: '222',
+        conversationId: '222:user:launch-owner-5',
+        replyTarget: { channelId: '222' },
+      },
+    });
+    expect(continueFastReplyMock).toHaveBeenCalledWith(
+      expect.objectContaining({ question: 'fix the flaky auth test' }),
     );
-    expect(routeTaskMock).toHaveBeenCalled();
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
     expect(findFastReplySessionMock).not.toHaveBeenCalled();
-    expect(getFastSessionMock).not.toHaveBeenCalled();
   });
 
-  it('replies with a usage hint for a bare /new with no description', async () => {
-    mockTelegramLinkedSender('launch-owner-7');
+  it('/new opens a fresh conversation in a new topic when Telegram supports it', async () => {
+    mockTelegramLinkedSender('launch-owner-5');
+    createForumTopicMock.mockResolvedValueOnce({
+      messageThreadId: '77',
+      name: 'fix the flaky auth test',
+    });
 
     const response = await postTelegramUpdate(
       createTelegramUpdate({
         message: {
-          text: '/new',
+          text: '/new fix the flaky auth test',
           entities: [{ type: 'bot_command', offset: 0, length: 4 }],
         },
       }),
@@ -1587,21 +2447,63 @@ describe('Telegram webhook handler', () => {
 
     await expect(response.json()).resolves.toEqual({
       ok: true,
-      queued: false,
-      repliedInline: true,
+      fastAnswered: true,
+      fastStartedNew: true,
     });
-    expect(enqueueTaskMock).not.toHaveBeenCalled();
-    expect(routeTaskMock).not.toHaveBeenCalled();
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: '222',
+        threadId: '77',
+        text: 'Request from Ada Lovelace:\n\nfix the flaky auth test',
+      }),
+    );
     expect(postMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
         channelId: '222',
         replyToMessageId: '456',
-        text: expect.stringContaining('`/new fix the flaky auth test`'),
+        text: expect.stringContaining('in a new topic'),
       }),
     );
+    expect(getFastSessionMock).toHaveBeenCalledWith({
+      userId: 'launch-owner-5',
+      userInitiated: { surface: 'telegram', trigger: 'message' },
+      conversation: {
+        surface: 'telegram',
+        workspaceId: '222',
+        conversationId: '77:user:launch-owner-5',
+        replyTarget: { channelId: '222', threadId: '77' },
+      },
+    });
+    expect(continueFastReplyMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: 'fix the flaky auth test',
+        currentMessageId: 'telegram-response',
+      }),
+    );
+    expect(recordFastConversationMessageMock).toHaveBeenNthCalledWith(1, {
+      sessionId: 'fast-session-default',
+      conversation: {
+        surface: 'telegram',
+        workspaceId: '222',
+        conversationId: '77:user:launch-owner-5',
+        replyTarget: { channelId: '222', threadId: '77' },
+      },
+      messageId: '77',
+    });
+    expect(recordFastConversationMessageMock).toHaveBeenNthCalledWith(2, {
+      sessionId: 'fast-session-default',
+      conversation: {
+        surface: 'telegram',
+        workspaceId: '222',
+        conversationId: '77:user:launch-owner-5',
+        replyTarget: { channelId: '222', threadId: '77' },
+      },
+      messageId: 'telegram-response',
+    });
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
   });
 
-  it('refuses /new while a task is already running in the chat', async () => {
+  it('/new starts a fresh conversation even while a task is running in the chat', async () => {
     mockTelegramLinkedSender('launch-owner-8');
     taskRunsFindFirstMock.mockResolvedValueOnce({
       id: 77,
@@ -1622,35 +2524,23 @@ describe('Telegram webhook handler', () => {
 
     await expect(response.json()).resolves.toEqual({
       ok: true,
-      queued: false,
-      repliedInline: true,
+      fastAnswered: true,
+      fastStartedNew: true,
     });
-    expect(enqueueTaskMock).not.toHaveBeenCalled();
-    expect(routeTaskMock).not.toHaveBeenCalled();
     expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
-    expect(postMessageMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channelId: '222',
-        replyToMessageId: '456',
-        text: expect.stringContaining('already running'),
-      }),
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
+    expect(continueFastReplyMock).toHaveBeenCalledWith(
+      expect.objectContaining({ question: 'start over' }),
     );
   });
 
-  it('echoes the /new request in the active-task refusal', async () => {
-    mockTelegramLinkedSender('launch-owner-8');
-    taskRunsFindFirstMock.mockResolvedValueOnce({
-      id: 77,
-      status: 'running',
-      machineId: 'machine-1',
-      taskId: 'task-1',
-      payload: {},
-    });
+  it('replies with a usage hint for a bare /new with no description', async () => {
+    mockTelegramLinkedSender('launch-owner-7');
 
     const response = await postTelegramUpdate(
       createTelegramUpdate({
         message: {
-          text: '/new update the README instead',
+          text: '/new',
           entities: [{ type: 'bot_command', offset: 0, length: 4 }],
         },
       }),
@@ -1661,9 +2551,12 @@ describe('Telegram webhook handler', () => {
       queued: false,
       repliedInline: true,
     });
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
     expect(postMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        text: expect.stringContaining('/new update the README instead'),
+        channelId: '222',
+        replyToMessageId: '456',
+        text: expect.stringContaining('`/new fix the flaky auth test`'),
       }),
     );
   });
@@ -1692,7 +2585,7 @@ describe('Telegram webhook handler', () => {
       queued: true,
       runId: 77,
     });
-    expect(queueCommunicationMessageMock).toHaveBeenCalledWith(
+    expect(queueCommunicationMessageOnceMock).toHaveBeenCalledWith(
       'telegram',
       77,
       expect.objectContaining({
@@ -1705,7 +2598,7 @@ describe('Telegram webhook handler', () => {
     expect(enqueueTaskMock).not.toHaveBeenCalled();
   });
 
-  it('starts a fresh task for a mention-prefixed /new in a group', async () => {
+  it('starts a fresh conversation for a mention-prefixed /new in a group', async () => {
     mockTelegramLinkedSender('launch-owner-10');
     taskRunsFindFirstMock.mockResolvedValueOnce(null);
 
@@ -1724,20 +2617,24 @@ describe('Telegram webhook handler', () => {
 
     await expect(response.json()).resolves.toEqual({
       ok: true,
-      started: true,
-      runId: 88,
+      fastAnswered: true,
+      fastStartedNew: true,
     });
-    expect(enqueueTaskMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        task: expect.objectContaining({
-          type: 'standard',
-          payload: expect.objectContaining({
-            description: 'fix the tests',
-          }),
-        }),
-      }),
-      expect.objectContaining({ launchClass: 'human' }),
+    // A group without topics anchors the conversation on the command message.
+    expect(getFastSessionMock).toHaveBeenCalledWith({
+      userId: 'launch-owner-10',
+      userInitiated: { surface: 'telegram', trigger: 'message' },
+      conversation: {
+        surface: 'telegram',
+        workspaceId: '-1007',
+        conversationId: '456:user:launch-owner-10',
+        replyTarget: { channelId: '-1007' },
+      },
+    });
+    expect(continueFastReplyMock).toHaveBeenCalledWith(
+      expect.objectContaining({ question: 'fix the tests' }),
     );
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
   });
 
   it('welcomes bare /start commands without launching a task', async () => {
@@ -1768,8 +2665,37 @@ describe('Telegram webhook handler', () => {
     const welcomeText = postMessageMock.mock.calls[0]?.[0].text as string;
     expect(welcomeText).toContain('*Available commands*');
     expect(welcomeText).toContain('`/start`');
+    expect(welcomeText).toContain('`/help`');
     expect(welcomeText).toContain('`/new <request>`');
+    expect(welcomeText).toContain('`/goal <objective>`');
     expect(welcomeText).not.toContain('`/start <request>`');
+  });
+
+  it('answers /help without launching a task', async () => {
+    mockTelegramLinkedSender();
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          text: '/help',
+          entities: [{ type: 'bot_command', offset: 0, length: 5 }],
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      welcomed: true,
+    });
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
+    expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: '222',
+        text: expect.stringContaining('*Available commands*'),
+        textFormat: 'markdown',
+      }),
+    );
   });
 
   it('welcomes bare /start commands from an unlinked sender', async () => {
@@ -2023,7 +2949,7 @@ describe('Telegram webhook handler', () => {
       runId: 55,
     });
     expect(consumeLinkCodeMock).not.toHaveBeenCalled();
-    expect(queueCommunicationMessageMock).toHaveBeenCalledWith(
+    expect(queueCommunicationMessageOnceMock).toHaveBeenCalledWith(
       'telegram',
       55,
       expect.objectContaining({ text: 'link-abc123DEF456ghi7' }),
@@ -2047,7 +2973,7 @@ describe('Telegram webhook handler', () => {
       queued: true,
       runId: 55,
     });
-    expect(queueCommunicationMessageMock).toHaveBeenCalledWith(
+    expect(queueCommunicationMessageOnceMock).toHaveBeenCalledWith(
       'telegram',
       55,
       expect.objectContaining({ userId: 'linked-user-9' }),
@@ -2245,646 +3171,6 @@ describe('Telegram webhook handler', () => {
     expect(stopTaskRunMock).not.toHaveBeenCalled();
     expect(answerCallbackQueryMock).toHaveBeenCalledWith(
       expect.objectContaining({ callbackQueryId: 'cb-3' }),
-    );
-  });
-
-  it('posts a routing confirmation with workspace options when the router is unsure', async () => {
-    mockTelegramLinkedSender('launch-owner-20');
-    getAvailableEnvironmentsMock.mockResolvedValue([
-      { id: 'env-1', name: 'Web App', repositoryNames: ['org/web'] },
-      { id: 'env-2', name: 'API', repositoryNames: ['org/api'] },
-    ]);
-    routeTaskMock.mockResolvedValueOnce({
-      status: 'routed',
-      result: {
-        workspace: { type: 'environment', id: 'env-1', name: 'Web App' },
-        reasoning: 'weak guess',
-        debug: { confidence: 0.6 },
-      },
-    });
-
-    const response = await postTelegramUpdate(
-      createTelegramUpdate({ message: { text: 'fix the login bug' } }),
-    );
-
-    await expect(response.json()).resolves.toEqual({
-      ok: true,
-      queued: false,
-      confirmationPending: true,
-    });
-    expect(enqueueTaskMock).not.toHaveBeenCalled();
-    expect(postMessageMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channelId: '222',
-        text: 'Planning to run this in **Web App** — starting in ~30s.',
-        // Compact Yes/Nope card — the workspace list only appears after Nope.
-        buttons: [
-          [
-            expect.objectContaining({
-              text: '✅ Yes',
-              callbackData: expect.stringMatching(/^route_ok:[\w-]+$/),
-            }),
-            expect.objectContaining({
-              text: '✖️ Nope',
-              callbackData: expect.stringMatching(/^route_alt:[\w-]+$/),
-            }),
-          ],
-        ],
-      }),
-    );
-    // The pending decision is stashed in Redis for the button callbacks.
-    expect(redisSetMock).toHaveBeenCalledWith(
-      expect.stringMatching(/^telegram:pending_route:[\w-]+$/),
-      expect.stringContaining('"launchOwnerUserId":"launch-owner-20"'),
-      'EX',
-      expect.any(Number),
-    );
-  });
-
-  it('accepts a normal reply to confirm the pending route without replacing the task text', async () => {
-    mockTelegramLinkedSender('launch-owner-20');
-    classifyFollowUpMock.mockResolvedValueOnce({
-      intent: 'confirm',
-      reasoning: 'The user agreed',
-    });
-    const pendingRouteId = 'pendingRoute1';
-    const pending = JSON.stringify({
-      launchOwnerUserId: 'launch-owner-20',
-      queuedMessage: {
-        provider: 'telegram',
-        text: 'fix the login bug',
-        user: 'Ada Lovelace',
-        userId: 'launch-owner-20',
-        ts: '455',
-        channel: '222',
-      },
-      metadata: {
-        communicationProvider: 'telegram',
-        communicationChannelId: '222',
-        communicationMessageId: '455',
-      },
-      routingContext: {
-        taskDescription: 'fix the login bug',
-        source: {
-          type: 'telegram',
-          chatName: 'Ada',
-          threadMessages: [{ user: 'Ada Lovelace', text: 'fix the login bug' }],
-        },
-        availableEnvironments: [],
-      },
-      options: [
-        {
-          label: 'Web App',
-          workspace: { type: 'environment', id: 'env-1', name: 'Web App' },
-        },
-      ],
-      suggestedIndex: 0,
-      confirmMessageId: '990',
-    });
-    redisGetMock
-      .mockResolvedValueOnce(pendingRouteId)
-      .mockResolvedValueOnce(pending)
-      .mockResolvedValueOnce(pendingRouteId);
-    redisGetdelMock.mockResolvedValueOnce(pending);
-    environmentsFindFirstMock.mockResolvedValueOnce({
-      id: 'env-1',
-      name: 'Web App',
-      config: { repositories: [{ repository: 'org/web' }] },
-    });
-
-    const response = await postTelegramUpdate(
-      createTelegramUpdate({ message: { text: 'yes' } }),
-    );
-
-    await expect(response.json()).resolves.toEqual({
-      ok: true,
-      queued: false,
-      routingReplyHandled: true,
-    });
-    expect(classifyFollowUpMock).toHaveBeenCalledWith({
-      suggestedWorkspace: 'Web App',
-      userResponse: 'yes',
-      userId: 'launch-owner-20',
-    });
-    expect(enqueueTaskMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        task: expect.objectContaining({
-          payload: expect.objectContaining({
-            description: 'fix the login bug',
-            environmentId: 'env-1',
-          }),
-        }),
-      }),
-      { launchClass: 'human' },
-    );
-    expect(enqueueTaskMock).not.toHaveBeenCalledWith(
-      expect.objectContaining({
-        task: expect.objectContaining({
-          payload: expect.objectContaining({ description: 'yes' }),
-        }),
-      }),
-      expect.anything(),
-    );
-  });
-
-  it('re-routes a pending task from a normal correction reply and launches the original request', async () => {
-    mockTelegramLinkedSender('launch-owner-20');
-    classifyFollowUpMock.mockResolvedValueOnce({
-      intent: 'correct',
-      reasoning: 'The user named a different workspace',
-    });
-    getRoutingAutoConfirmDelayMsMock.mockReturnValueOnce(0);
-    getAvailableEnvironmentsMock.mockResolvedValueOnce([
-      { id: 'env-1', name: 'Web App', repositoryNames: ['org/web'] },
-      { id: 'env-2', name: 'API', repositoryNames: ['org/api'] },
-    ]);
-    routeTaskMock.mockResolvedValueOnce({
-      status: 'routed',
-      result: {
-        workspace: { type: 'environment', id: 'env-2', name: 'API' },
-        reasoning: 'Explicit correction',
-        debug: { confidence: 0.99 },
-      },
-    });
-    const pendingRouteId = 'pendingRoute2';
-    const pending = JSON.stringify({
-      launchOwnerUserId: 'launch-owner-20',
-      queuedMessage: {
-        provider: 'telegram',
-        text: 'fix the login bug',
-        user: 'Ada Lovelace',
-        userId: 'launch-owner-20',
-        ts: '455',
-        channel: '222',
-      },
-      metadata: {
-        communicationProvider: 'telegram',
-        communicationChannelId: '222',
-        communicationMessageId: '455',
-      },
-      routingContext: {
-        taskDescription: 'fix the login bug',
-        source: {
-          type: 'telegram',
-          chatName: 'Ada',
-          threadMessages: [{ user: 'Ada Lovelace', text: 'fix the login bug' }],
-        },
-        availableEnvironments: [
-          { id: 'env-1', name: 'Web App', repositoryNames: ['org/web'] },
-          { id: 'env-2', name: 'API', repositoryNames: ['org/api'] },
-        ],
-      },
-      options: [
-        {
-          label: 'Web App',
-          workspace: { type: 'environment', id: 'env-1', name: 'Web App' },
-        },
-      ],
-      suggestedIndex: 0,
-      confirmMessageId: '990',
-    });
-    redisGetMock
-      .mockResolvedValueOnce(pendingRouteId)
-      .mockResolvedValueOnce(pending)
-      .mockResolvedValueOnce(pendingRouteId);
-    redisGetdelMock.mockResolvedValueOnce(pending);
-    environmentsFindFirstMock.mockResolvedValueOnce({
-      id: 'env-2',
-      name: 'API',
-      config: { repositories: [{ repository: 'org/api' }] },
-    });
-
-    const response = await postTelegramUpdate(
-      createTelegramUpdate({ message: { text: 'use API instead' } }),
-    );
-
-    await expect(response.json()).resolves.toEqual({
-      ok: true,
-      queued: false,
-      routingReplyHandled: true,
-    });
-    expect(routeTaskMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        taskDescription: 'use API instead',
-        previousSuggestion: {
-          workspaceValue: 'env-1',
-          workspaceDisplayName: 'Web App',
-        },
-      }),
-    );
-    expect(enqueueTaskMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        task: expect.objectContaining({
-          payload: expect.objectContaining({
-            description: 'fix the login bug',
-            environmentId: 'env-2',
-          }),
-        }),
-      }),
-      { launchClass: 'human' },
-    );
-  });
-
-  it('asks for a workspace instead of defaulting to all repos when routing falls back', async () => {
-    mockTelegramLinkedSender('launch-owner-21');
-    getAvailableEnvironmentsMock.mockResolvedValue([
-      { id: 'env-1', name: 'Web App', repositoryNames: ['org/web'] },
-    ]);
-    routeTaskMock.mockResolvedValueOnce({
-      status: 'fallback',
-      reason: 'router timeout',
-    });
-
-    const response = await postTelegramUpdate(
-      createTelegramUpdate({ message: { text: 'fix the login bug' } }),
-    );
-
-    await expect(response.json()).resolves.toEqual({
-      ok: true,
-      queued: false,
-      confirmationPending: true,
-    });
-    expect(enqueueTaskMock).not.toHaveBeenCalled();
-    expect(postMessageMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        text: expect.stringContaining('could not confidently pick a workspace'),
-        buttons: [
-          [expect.objectContaining({ text: 'Web App' })],
-          [expect.objectContaining({ text: 'All repositories' })],
-          [expect.objectContaining({ text: '✖️ Never mind' })],
-        ],
-      }),
-    );
-  });
-
-  it('launches immediately from a captioned photo when routing confidence is high', async () => {
-    mockTelegramLinkedSender('launch-owner-22');
-    getRoutingAutoConfirmDelayMsMock.mockReturnValueOnce(0);
-    getAvailableEnvironmentsMock.mockResolvedValue([
-      { id: 'env-1', name: 'Web App', repositoryNames: ['org/web'] },
-      { id: 'env-2', name: 'API', repositoryNames: ['org/api'] },
-    ]);
-    environmentsFindFirstMock.mockResolvedValueOnce({
-      id: 'env-1',
-      name: 'Web App',
-      config: { repositories: [{ repository: 'org/web' }] },
-    });
-    routeTaskMock.mockResolvedValueOnce({
-      status: 'routed',
-      result: {
-        workspace: { type: 'environment', id: 'env-1', name: 'Web App' },
-        reasoning: 'clear match',
-        debug: { confidence: 0.98 },
-      },
-    });
-
-    const response = await postTelegramUpdate(
-      createTelegramUpdate({
-        message: {
-          text: undefined,
-          caption: 'fix the login bug',
-          photo: [
-            {
-              file_id: 'photo-large',
-              file_unique_id: 'photo-1',
-              width: 1280,
-              height: 720,
-            },
-          ],
-        },
-      }),
-    );
-
-    await expect(response.json()).resolves.toEqual({
-      ok: true,
-      started: true,
-      runId: 88,
-    });
-    expect(buildTelegramRoutingContextMock).toHaveBeenCalledWith(
-      expect.objectContaining({ images: ['data:image/jpeg;base64,AQID'] }),
-    );
-    expect(enqueueTaskMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        task: expect.objectContaining({
-          payload: expect.objectContaining({
-            repo: 'org/web',
-            environmentId: 'env-1',
-            images: ['data:image/jpeg;base64,AQID'],
-          }),
-        }),
-      }),
-      { launchClass: 'human' },
-    );
-    expect(postMessageMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        text: "Started a task in Web App here because I couldn't create a new Telegram topic. If this keeps happening, check Threaded Mode or the bot's Manage Topics permission.",
-      }),
-    );
-  });
-
-  it('launches the suggested workspace when the confirmation OK button is clicked', async () => {
-    mockTelegramLinkedSender('launch-owner-23');
-    const pending = JSON.stringify({
-      launchOwnerUserId: 'launch-owner-23',
-      queuedMessage: {
-        provider: 'telegram',
-        text: 'fix the login bug',
-        user: 'Ada Lovelace',
-        userId: 'launch-owner-23',
-        ts: '456',
-        channel: '222',
-      },
-      metadata: {
-        communicationProvider: 'telegram',
-        communicationChannelId: '222',
-        communicationMessageId: '456',
-      },
-      options: [
-        {
-          label: 'Web App',
-          workspace: { type: 'environment', id: 'env-1', name: 'Web App' },
-        },
-        { label: 'All repositories', workspace: { type: 'all_repositories' } },
-      ],
-      suggestedIndex: 0,
-      confirmMessageId: '990',
-    });
-    redisGetMock.mockResolvedValue(pending);
-    redisGetdelMock.mockResolvedValue(pending);
-    environmentsFindFirstMock.mockResolvedValueOnce({
-      id: 'env-1',
-      name: 'Web App',
-      config: { repositories: [{ repository: 'org/web' }] },
-    });
-
-    const response = await postTelegramUpdate({
-      update_id: 910,
-      callback_query: {
-        id: 'cb-10',
-        from: { id: 111, first_name: 'Ada' },
-        data: 'route_ok:abc123XYZ789',
-        message: {
-          message_id: 990,
-          chat: { id: 222, type: 'private' },
-        },
-      },
-    });
-
-    expect(response.status).toBe(200);
-    expect(redisGetdelMock).toHaveBeenCalledWith(
-      'telegram:pending_route:abc123XYZ789',
-    );
-    expect(enqueueTaskMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        initiator: { kind: 'user', userId: 'launch-owner-23' },
-        task: expect.objectContaining({
-          payload: expect.objectContaining({
-            repo: 'org/web',
-            environmentId: 'env-1',
-            description: 'fix the login bug',
-          }),
-        }),
-      }),
-      { launchClass: 'human' },
-    );
-    expect(answerCallbackQueryMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        callbackQueryId: 'cb-10',
-        text: 'Starting in Web App.',
-      }),
-    );
-    // The card is finalized in place: text swapped, keyboard removed.
-    expect(editMessageTextMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channelId: '222',
-        messageId: '990',
-        text: 'Starting in **Web App**.',
-      }),
-    );
-  });
-
-  it('swaps the card into the workspace picker when Nope is clicked', async () => {
-    mockTelegramLinkedSender('launch-owner-26');
-    const pending = JSON.stringify({
-      launchOwnerUserId: 'launch-owner-26',
-      queuedMessage: {
-        provider: 'telegram',
-        text: 'fix the login bug',
-        user: 'Ada Lovelace',
-        userId: 'launch-owner-26',
-        ts: '456',
-        channel: '222',
-      },
-      metadata: {
-        communicationProvider: 'telegram',
-        communicationChannelId: '222',
-        communicationMessageId: '456',
-      },
-      options: [
-        {
-          label: 'Web App',
-          workspace: { type: 'environment', id: 'env-1', name: 'Web App' },
-        },
-        { label: 'All repositories', workspace: { type: 'all_repositories' } },
-      ],
-      suggestedIndex: 0,
-      confirmMessageId: '995',
-    });
-    redisGetMock.mockResolvedValue(pending);
-    redisGetdelMock.mockResolvedValue(pending);
-
-    const response = await postTelegramUpdate({
-      update_id: 914,
-      callback_query: {
-        id: 'cb-14',
-        from: { id: 111, first_name: 'Ada' },
-        data: 'route_alt:abc123XYZ789',
-        message: {
-          message_id: 995,
-          chat: { id: 222, type: 'private' },
-        },
-      },
-    });
-
-    expect(response.status).toBe(200);
-    expect(enqueueTaskMock).not.toHaveBeenCalled();
-    // Same message becomes the picker, keyed by a fresh pending-route id so
-    // the old auto-confirm timer can never fire the suggestion.
-    expect(editMessageTextMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channelId: '222',
-        messageId: '995',
-        text: 'Okay — where should I run this?',
-        buttons: [
-          [
-            expect.objectContaining({
-              text: 'Web App',
-              callbackData: expect.stringMatching(/^route_pick:[\w-]+:0$/),
-            }),
-          ],
-          [
-            expect.objectContaining({
-              text: 'All repositories',
-              callbackData: expect.stringMatching(/^route_pick:[\w-]+:1$/),
-            }),
-          ],
-          [
-            expect.objectContaining({
-              text: '✖️ Never mind',
-              callbackData: expect.stringMatching(/^route_no:[\w-]+$/),
-            }),
-          ],
-        ],
-      }),
-    );
-    const editCall = editMessageTextMock.mock.calls[0]![0] as {
-      buttons: Array<Array<{ callbackData: string }>>;
-    };
-    expect(editCall.buttons[0]![0]!.callbackData).not.toContain('abc123XYZ789');
-    // The picker state was re-stored under the new id.
-    expect(redisSetMock).toHaveBeenCalledWith(
-      expect.stringMatching(/^telegram:pending_route:[\w-]+$/),
-      expect.stringContaining('"suggestedIndex":null'),
-      'EX',
-      expect.any(Number),
-    );
-  });
-
-  it('rejects confirmation clicks from someone other than the requester without consuming the choice', async () => {
-    mockTelegramLinkedSender('someone-else');
-    redisGetMock.mockResolvedValue(
-      JSON.stringify({
-        launchOwnerUserId: 'launch-owner-24',
-        queuedMessage: {
-          provider: 'telegram',
-          text: 'fix it',
-          user: 'Ada',
-          userId: 'launch-owner-24',
-          ts: '456',
-          channel: '222',
-        },
-        metadata: {
-          communicationProvider: 'telegram',
-          communicationChannelId: '222',
-          communicationMessageId: '456',
-        },
-        options: [
-          {
-            label: 'All repositories',
-            workspace: { type: 'all_repositories' },
-          },
-        ],
-        suggestedIndex: 0,
-      }),
-    );
-
-    const response = await postTelegramUpdate({
-      update_id: 911,
-      callback_query: {
-        id: 'cb-11',
-        from: { id: 999, first_name: 'Mallory' },
-        data: 'route_ok:abc123XYZ789',
-        message: {
-          message_id: 991,
-          chat: { id: 222, type: 'private' },
-        },
-      },
-    });
-
-    expect(response.status).toBe(200);
-    expect(redisGetdelMock).not.toHaveBeenCalledWith(
-      'telegram:pending_route:abc123XYZ789',
-    );
-    expect(enqueueTaskMock).not.toHaveBeenCalled();
-    expect(answerCallbackQueryMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        callbackQueryId: 'cb-11',
-        text: 'Only the requester can choose a workspace for this task.',
-      }),
-    );
-  });
-
-  it('acknowledges expired confirmation clicks and clears the stale buttons', async () => {
-    redisGetMock.mockResolvedValue(null);
-
-    const response = await postTelegramUpdate({
-      update_id: 912,
-      callback_query: {
-        id: 'cb-12',
-        from: { id: 111, first_name: 'Ada' },
-        data: 'route_pick:abc123XYZ789:1',
-        message: {
-          message_id: 992,
-          chat: { id: 222, type: 'private' },
-        },
-      },
-    });
-
-    expect(response.status).toBe(200);
-    expect(enqueueTaskMock).not.toHaveBeenCalled();
-    expect(answerCallbackQueryMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        callbackQueryId: 'cb-12',
-        text: 'This choice expired — send the request again.',
-      }),
-    );
-    expect(editMessageReplyMarkupMock).toHaveBeenCalledWith(
-      expect.objectContaining({ channelId: '222', messageId: '992' }),
-    );
-  });
-
-  it('dismisses the confirmation without launching when Never mind is clicked', async () => {
-    mockTelegramLinkedSender('launch-owner-25');
-    const pending = JSON.stringify({
-      launchOwnerUserId: 'launch-owner-25',
-      queuedMessage: {
-        provider: 'telegram',
-        text: 'fix it',
-        user: 'Ada',
-        userId: 'launch-owner-25',
-        ts: '456',
-        channel: '222',
-      },
-      metadata: {
-        communicationProvider: 'telegram',
-        communicationChannelId: '222',
-        communicationMessageId: '456',
-      },
-      options: [
-        { label: 'All repositories', workspace: { type: 'all_repositories' } },
-      ],
-      suggestedIndex: 0,
-    });
-    redisGetMock.mockResolvedValue(pending);
-    redisGetdelMock.mockResolvedValue(pending);
-
-    const response = await postTelegramUpdate({
-      update_id: 913,
-      callback_query: {
-        id: 'cb-13',
-        from: { id: 111, first_name: 'Ada' },
-        data: 'route_no:abc123XYZ789',
-        message: {
-          message_id: 993,
-          chat: { id: 222, type: 'private' },
-        },
-      },
-    });
-
-    expect(response.status).toBe(200);
-    expect(enqueueTaskMock).not.toHaveBeenCalled();
-    expect(answerCallbackQueryMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        callbackQueryId: 'cb-13',
-        text: 'Okay — not starting a task.',
-      }),
-    );
-    expect(editMessageTextMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channelId: '222',
-        messageId: '993',
-        text: 'Okay — not starting a task.',
-      }),
     );
   });
 });

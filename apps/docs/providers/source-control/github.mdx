@@ -10,14 +10,16 @@ push branches, and work with pull requests.
 
 Use `<public-url>` below for your stable public Roomote URL.
 
-## Fast path
+## Session path
 
-Open `/setup`, choose GitHub, and click **Create GitHub App**. Roomote sends
-GitHub a manifest with the callback, webhook, permissions, and events
-preconfigured. After GitHub redirects back, Roomote saves the generated app ID,
-app slug, OAuth client credentials, webhook secret, and private key, then sends
-you to install the app on repositories. You pick the account or organization
-to install on during that install step.
+Open `/setup` and complete the short account and inference bootstrap. In the
+setup conversation, choose GitHub in the source-control card, open its
+configuration dialog, and click **Create GitHub App**. Roomote sends GitHub a
+manifest with the callback, webhook, permissions, and events preconfigured.
+After GitHub redirects back, Roomote saves the generated app ID, app slug,
+OAuth client credentials, webhook secret, and private key, then sends you to
+install the app on repositories. You pick the account or organization to
+install on during that install step.
 
 By default the app is created on your personal GitHub account and marked as
 installable on any account, so you can install it on any organization you
@@ -137,8 +139,8 @@ manifest, confirm it is enabled under the app's **Permissions & events** page
 
 ## Save credentials
 
-Copy these values into the `/setup` manual form, deployment env vars, or your
-local `.env.local`:
+Copy these values into the source-control card's configuration dialog,
+deployment env vars, or your local `.env.local`:
 
 ```sh
 R_GITHUB_APP_ID=<app-id>
@@ -160,6 +162,11 @@ R_GITHUB_ADDITIONAL_APP_SLUGS=roomote-community,roomote-reviewer
 Roomote treats only the primary slug and this comma-separated allowlist as
 managed bot identities. Do not add unrelated GitHub Apps.
 
+Roomote can use the GitHub App's Actions access to inspect workflow runs, jobs, and
+logs when it explains a CI failure. That diagnostic path is read-only even
+though the app keeps broader Actions and Workflows permissions for normal task
+and automation workflows.
+
 Generate a private key from the app's **Private keys** section. GitHub
 downloads a `.pem` file. Convert it to an escaped single-line value before
 saving it in an env var:
@@ -169,8 +176,8 @@ awk 'NF {sub(/\r/, ""); printf "%s\\n",$0;}' ~/Downloads/<your-key>.private-key.
 ```
 
 Install the GitHub App on the repositories Roomote should use. Then sign in,
-complete the GitHub step in `/setup`, and confirm repository sync sees the
-expected repositories.
+complete the GitHub card in the setup conversation, and confirm repository
+sync sees the expected repositories.
 
 To replace a saved GitHub App, open **Settings > Source Control** and select
 **Remove**. Roomote removes the saved deployment credentials and disconnects
@@ -181,7 +188,96 @@ If you add Organization projects permission to an existing app, an organization
 owner must approve the updated permission before Roomote can manage project
 items.
 
+## Public GitHub reads
+
+An eligible deployment GitHub App installation with an active connected
+repository is required to mint the scoped installation token used by the GitHub
+tools, including public reads. With that connection, active
+Roomote members can inspect any public `github.com` repository in a session without
+connecting the public target or linking a personal GitHub account. The same
+reads are available in coding tasks, including automated tasks without a human
+driver. No clone or personal access token is needed.
+
+Use the existing GitHub tools for files and directories, code search, issues,
+and pull requests. Tool discovery supplies their native descriptions and
+argument schemas. Searches use GitHub's own query syntax; adding a
+`repo:owner/name` or `org:` qualifier, for example
+`Hello repo:octocat/Hello-World`, keeps results focused. GitHub's tool
+availability, permissions, rate limits, pagination, and search-index limits
+apply; partial or empty search results are not proof of absence.
+
+Native reads of unconnected repositories are limited to 2 MiB of response
+bytes and a 15-second upstream deadline, including JSON or SSE body reads.
+Oversized, timed-out, or failed reads are not retried through another path.
+These additional limits do not apply to connected repository calls.
+
+Unconnected reads use the token of the deployment's first installation, which
+covers the repositories connected on that installation. GitHub denies private
+repositories outside that token's scope.
+Private reads and all writes still require an eligible connection to the
+target repository. Connected access keeps its existing authorization; Roomote
+does not retry lookup or authorization failures through another credential.
+The coding-task GitHub MCP remains read-only; writes use the existing
+authorized coding-task source-control workflow. Other source-control providers
+are unchanged.
+
+## Multiple installations and searches
+
+GitHub tool discovery supports multiple installations of the configured GitHub
+App. Connected repository reads and supported writes use the installation
+connected to the requested active repository, with one token covering every
+repository connected on that installation. Suspended
+installations, inactive or disconnected repositories, and installations of a
+different app are not eligible. Personal GitHub account linkage is not required
+for these deployment-connected tools; coding-run tokens remain read-only on this
+MCP path.
+
+Identify the repository with `owner` and `repo` for repository tools. Code,
+pull request, and repository searches accept GitHub's query syntax as written,
+including searches that span several repositories. Each call runs under one
+installation's credential, covering every repository connected on that
+installation plus public repositories: the installation that owns the
+repository named by `owner`/`repo` or a `repo:owner/name` qualifier, otherwise
+the deployment's first installation. With more than one installation, scope a
+search to the organization or repository you mean so it runs under the right
+one.
+
 ## Daily GitHub management
+
+Roomote can use GitHub's native tools directly, without starting a coding task:
+pull request and issue edits, comments, replies and reactions, reviews, labels,
+branches, and small file changes. Their discovered descriptions and schemas
+define the supported arguments. These actions use the deployment GitHub App,
+require an active Roomote member, and run under a token that reaches only the
+repositories connected on that installation, the same boundary a coding task
+has. What the token may do there is set by the App's permissions on GitHub. No
+personal GitHub OAuth connection is required. Ask for the specific change and
+identify the repository and target issue, pull request, or comment. Every call
+appears in the Session transcript with its inputs and result.
+
+For example, ask Roomote to:
+
+- mark PR #42 in `example/repo` ready for review
+- request a review from `octocat` on that PR
+- merge PR #42 after its required checks and reviews pass
+- add a thumbs-up reaction to an existing comment, providing its GitHub URL
+
+Retargeting a pull request's base to an existing branch does not write a branch
+or change files. A merge requires an explicit request from the current human
+message. Roomote reads the pull request immediately before the merge, binds the
+request to the current head SHA when the native schema supports it, leaves
+branch protections and merge permissions to GitHub, and reads the pull request
+again before reporting success or retrying an ambiguous result. Work that needs a
+checkout, a build, or tests to get right still belongs in a coding task, which
+also remains read-only on this GitHub tool path and writes through its own
+checkout instead.
+[GitLab](/providers/source-control/gitlab#native-gitlab-api-tools-for-sessions)
+and [Bitbucket Cloud](/providers/source-control/bitbucket#api-first-work-in-sessions)
+have their own supported session operations and limits.
+
+Native updates that combine several actions are not guaranteed to be atomic.
+After an error, Roomote inspects the resulting state before retrying so an action
+that already succeeded is not blindly repeated.
 
 Roomote tasks can manage routine repository work through the GitHub App
 installation. Requests default to the repository mapped to the task:
@@ -190,6 +286,14 @@ installation. Requests default to the repository mapped to the task:
 - create, update, delete, and report progress for milestones; assign issues to milestones
 - list accessible GitHub Projects V2, inspect an issue or pull request's Status,
   and update an existing project item's single-select Status field
+
+An environment-backed task can also push branches and create or update pull
+requests in another active GitHub repository connected to the same GitHub App
+installation, even when that repository is not part of the environment
+workspace. This write access does not automatically add the repository to the
+prepared workspace. Roomote rejects inactive repositories, repositories
+connected through another provider, and repositories that belong to a different
+GitHub App installation.
 
 Read-only requests, creations, and additive label actions run directly. Before
 editing, replacing, assigning, clearing, moving, or deleting an item, Roomote
@@ -210,20 +314,45 @@ issue-search URL, but it does not represent that URL as a saved GitHub view.
 Once the app is installed and an environment maps the repository:
 
 - mention `@roomote` (or your deployment's GitHub App slug) in a pull request
-  comment to start PR review or follow-up work
+  comment, review comment, or review to talk to Roomote about that pull request
 - mention the same handle in a GitHub issue comment, or in a new issue body, to
-  start a standard task against that repository
+  talk to Roomote about that issue
 - link your GitHub account under Settings -> Linked Accounts so Roomote can
-  attribute the task to you
+  run the conversation as you
 
-Issue mentions use the environment mapped to the repository. Map the repository
-to an environment before mentioning Roomote on issues.
+Each pull request or issue is a Roomote Session. Roomote reads the discussion,
+answers as a comment when no workspace is needed, and otherwise starts a task
+on the pull request's branch (or the issue's repository) and reports back in
+the same discussion. Mention it again to redirect it, ask a follow-up, or
+steer a running task. Replies to a review comment stay in that review thread.
+Ask for a review in the mention (for example `@roomote review this`) and
+Roomote runs the Review Code automation's structured review on the current
+head, posts the findings on the pull request, and reports back in the same
+discussion.
 
-When a task delegated from a Fast session in Slack or Discord opens a pull
-request, actionable review feedback returns to that same session. Use
-**Resolve these issues** to address the current feedback, **Auto-resolve on this
-PR** to handle later actionable feedback automatically, or **Dismiss** to take
-no action.
+To request a fresh review through GitHub, use **Re-run** on the Roomote code
+review check for the pull request's current head. Roomote ignores rerun events
+for stale commits and checks that were not created by the configured Roomote
+GitHub App.
+
+Roomote only responds to comments that `@mention` it, including replies inside
+a review thread it opened, so people can discuss a finding among themselves
+without summoning it. On a pull request that a Roomote task opened, replies in
+its review threads are collected as review feedback for the owning Session,
+described below.
+
+A pull request that a Roomote task opened already belongs to the Session that
+started the work, for example the Slack thread where the task was requested.
+Mentions on that pull request join that Session instead of opening a second
+one: Roomote answers on the pull request and in the Session's home surface,
+and any work it delegates runs on the pull request's branch from the same
+Session.
+
+When a Roomote task opens a pull request, actionable review feedback returns to
+the owning session and appears in both session and standard web task transcripts.
+Use **Resolve these issues** to address the current feedback, **Auto-resolve on
+this PR** to handle later actionable feedback automatically, or **Dismiss** to
+take no action.
 
 Failed GitHub checks also return to every Roomote task linked to the pull
 request and to the conversation that started the work. Roomote consolidates a

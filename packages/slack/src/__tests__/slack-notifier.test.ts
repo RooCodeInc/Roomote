@@ -4,18 +4,21 @@ import type { SlackFile, WorkObjectMetadata, WorkObjectUnfurl } from '../types';
 import { SlackNotifier } from '../slack-notifier';
 import { Env } from '@roomote/env';
 
-const { apiCallMock, chatUnfurlMock, WebClientMock } = vi.hoisted(() => ({
-  apiCallMock: vi.fn(),
-  chatUnfurlMock: vi.fn(),
-  WebClientMock: vi.fn().mockImplementation(function () {
-    return {
-      apiCall: apiCallMock,
-      chat: {
-        unfurl: chatUnfurlMock,
-      },
-    };
-  }),
-}));
+const { apiCallMock, chatUnfurlMock, chatStopStreamMock, WebClientMock } =
+  vi.hoisted(() => ({
+    apiCallMock: vi.fn(),
+    chatUnfurlMock: vi.fn(),
+    chatStopStreamMock: vi.fn(),
+    WebClientMock: vi.fn().mockImplementation(function () {
+      return {
+        apiCall: apiCallMock,
+        chat: {
+          unfurl: chatUnfurlMock,
+          stopStream: chatStopStreamMock,
+        },
+      };
+    }),
+  }));
 
 type GlobalWithFetchMock = {
   fetch: ReturnType<typeof vi.fn>;
@@ -49,6 +52,61 @@ describe('SlackNotifier', () => {
     }
 
     process.env.SLACK_API_BASE_URL = originalBaseUrl;
+  });
+
+  describe('getWorkspaceIdentity', () => {
+    it('returns the authenticated team id and workspace domain', async () => {
+      getGlobalWithFetch().fetch.mockResolvedValue(
+        Response.json({
+          ok: true,
+          team_id: 'T123',
+          user_id: 'U123',
+          bot_id: 'B123',
+          url: 'https://Roomote-Dev.slack.com/',
+        }),
+      );
+
+      await expect(notifier.getWorkspaceIdentity()).resolves.toEqual({
+        teamId: 'T123',
+        teamDomain: 'roomote-dev',
+      });
+    });
+
+    it('fails closed when auth.test omits a workspace domain', async () => {
+      getGlobalWithFetch().fetch.mockResolvedValue(
+        Response.json({
+          ok: true,
+          team_id: 'T123',
+          user_id: 'U123',
+          bot_id: 'B123',
+        }),
+      );
+
+      await expect(notifier.getWorkspaceIdentity()).resolves.toBeNull();
+    });
+  });
+
+  describe('stopMessageStream', () => {
+    it('passes explicit processing to Slack without changing unspecified caller defaults', async () => {
+      chatStopStreamMock.mockResolvedValue({ ok: true });
+      await expect(
+        notifier.stopMessageStream({
+          channel: 'C123',
+          ts: '100.001',
+          sessionStatus: 'processing',
+        }),
+      ).resolves.toBe(true);
+      expect(chatStopStreamMock).toHaveBeenLastCalledWith({
+        channel: 'C123',
+        ts: '100.001',
+        session_status: 'processing',
+      });
+      await notifier.stopMessageStream({ channel: 'C123', ts: '100.001' });
+      expect(chatStopStreamMock).toHaveBeenLastCalledWith({
+        channel: 'C123',
+        ts: '100.001',
+      });
+    });
   });
 
   describe('setAgentSessionStatus', () => {
@@ -99,13 +157,30 @@ describe('SlackNotifier', () => {
           threadTs: '100.001',
           title: 'Investigate Slack agent status',
         }),
-      ).resolves.toBe(true);
+      ).resolves.toEqual({ ok: true });
 
       expect(apiCallMock).toHaveBeenCalledWith('agents.sessions.rename', {
         channel_id: 'C123',
         thread_ts: '100.001',
         title: 'Investigate Slack agent status',
       });
+    });
+
+    it('exposes invalid title rejections from Slack platform errors', async () => {
+      apiCallMock.mockRejectedValue(
+        Object.assign(new Error('An API error occurred: invalid_name'), {
+          code: 'slack_webapi_platform_error',
+          data: { ok: false, error: 'invalid_name' },
+        }),
+      );
+
+      await expect(
+        notifier.renameAgentSession({
+          channel: 'C123',
+          threadTs: '100.001',
+          title: 'Invalid title',
+        }),
+      ).resolves.toEqual({ ok: false, error: 'invalid_name' });
     });
   });
 
@@ -826,6 +901,21 @@ describe('SlackNotifier', () => {
       });
 
       expect(result).toBe(false);
+    });
+
+    it('treats an existing reaction as a successful acknowledgement', async () => {
+      getGlobalWithFetch().fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ ok: false, error: 'already_reacted' }),
+      });
+
+      const result = await notifier.addReaction({
+        channel: 'C123',
+        timestamp: '123.000',
+        name: 'eyes',
+      });
+
+      expect(result).toBe(true);
     });
   });
 
@@ -1560,8 +1650,12 @@ describe('SlackNotifier', () => {
           }),
         }),
       );
+      const attachmentContext =
+        'Slack attachment:\nText:\nForwarded body lives here';
       expect(message).toEqual({
-        text: 'Ship it',
+        text: `Ship it\n\n${attachmentContext}`,
+        authoredText: 'Ship it',
+        agentContext: attachmentContext,
         ts: '123.456',
         thread_ts: '120.000',
         user: 'U123',
@@ -2805,6 +2899,14 @@ describe('SlackNotifier', () => {
           ok: true,
           json: async () => ({
             ok: true,
+            messages: [],
+            response_metadata: {},
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            ok: true,
             messages: [
               {
                 user: 'U123',
@@ -2833,16 +2935,21 @@ describe('SlackNotifier', () => {
       expect(getUsersInfoSpy).toHaveBeenCalled();
       expect(getGlobalWithFetch().fetch).toHaveBeenNthCalledWith(
         1,
-        'https://slack.com/api/conversations.history?channel=C123&limit=200&inclusive=true&latest=113.000',
+        'https://slack.com/api/conversations.history?channel=C123&limit=200&inclusive=true&oldest=110.000&latest=113.000',
         expect.objectContaining({ method: 'GET' }),
       );
       expect(getGlobalWithFetch().fetch).toHaveBeenNthCalledWith(
         2,
-        'https://slack.com/api/conversations.history?channel=C123&limit=200&inclusive=true&latest=113.000&cursor=cursor-1',
+        'https://slack.com/api/conversations.history?channel=C123&limit=200&inclusive=true&oldest=110.000&latest=113.000&cursor=cursor-1',
         expect.objectContaining({ method: 'GET' }),
       );
       expect(getGlobalWithFetch().fetch).toHaveBeenNthCalledWith(
         3,
+        'https://slack.com/api/conversations.history?channel=C123&limit=200&inclusive=true&latest=110.000',
+        expect.objectContaining({ method: 'GET' }),
+      );
+      expect(getGlobalWithFetch().fetch).toHaveBeenNthCalledWith(
+        4,
         'https://slack.com/api/conversations.replies?channel=C123&ts=111.000&oldest=110.000&latest=113.000&inclusive=true',
         expect.objectContaining({ method: 'GET' }),
       );
@@ -2905,9 +3012,7 @@ describe('SlackNotifier', () => {
                 type: 'message',
               },
             ],
-            response_metadata: {
-              next_cursor: 'cursor-1',
-            },
+            response_metadata: {},
           }),
         })
         .mockResolvedValueOnce({
@@ -2960,12 +3065,12 @@ describe('SlackNotifier', () => {
       expect(getUsersInfoSpy).toHaveBeenCalled();
       expect(getGlobalWithFetch().fetch).toHaveBeenNthCalledWith(
         1,
-        'https://slack.com/api/conversations.history?channel=C123&limit=200&inclusive=true&latest=113.000',
+        'https://slack.com/api/conversations.history?channel=C123&limit=200&inclusive=true&oldest=110.000&latest=113.000',
         expect.objectContaining({ method: 'GET' }),
       );
       expect(getGlobalWithFetch().fetch).toHaveBeenNthCalledWith(
         2,
-        'https://slack.com/api/conversations.history?channel=C123&limit=200&inclusive=true&latest=113.000&cursor=cursor-1',
+        'https://slack.com/api/conversations.history?channel=C123&limit=200&inclusive=true&latest=110.000',
         expect.objectContaining({ method: 'GET' }),
       );
       expect(getGlobalWithFetch().fetch).toHaveBeenNthCalledWith(
@@ -3045,6 +3150,14 @@ describe('SlackNotifier', () => {
           ok: true,
           json: async () => ({
             ok: true,
+            messages: [],
+            response_metadata: {},
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            ok: true,
             messages: [
               {
                 user: 'U234',
@@ -3071,9 +3184,9 @@ describe('SlackNotifier', () => {
       });
 
       expect(getUsersInfoSpy).toHaveBeenCalled();
-      expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(2);
+      expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(3);
       expect(getGlobalWithFetch().fetch).toHaveBeenNthCalledWith(
-        2,
+        3,
         'https://slack.com/api/conversations.replies?channel=C123&ts=111.000&oldest=110.000&latest=113.000&inclusive=true',
         expect.objectContaining({ method: 'GET' }),
       );
@@ -3098,6 +3211,179 @@ describe('SlackNotifier', () => {
           text: 'latest top-level',
           ts: '113.000',
         }),
+      ]);
+    });
+
+    it('passes oldest through to Slack instead of paging the whole channel', async () => {
+      vi.spyOn(
+        SlackNotifier.prototype as unknown as {
+          getUsersInfo(userIds: string[]): Promise<Map<string, string>>;
+        },
+        'getUsersInfo',
+      ).mockResolvedValue(new Map([['U123', 'Alice']]));
+
+      getGlobalWithFetch().fetch = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            ok: true,
+            messages: [
+              {
+                user: 'U123',
+                text: 'in window',
+                ts: '111.000',
+                type: 'message',
+              },
+            ],
+            response_metadata: {},
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            ok: true,
+            messages: [
+              {
+                user: 'U123',
+                text: 'ancient',
+                ts: '5.000',
+                type: 'message',
+              },
+            ],
+            response_metadata: {},
+          }),
+        });
+
+      const messages = await notifier.fetchChannelMessages({
+        channel: 'C123',
+        oldest: '110.000',
+      });
+
+      expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(2);
+      expect(getGlobalWithFetch().fetch).toHaveBeenNthCalledWith(
+        1,
+        'https://slack.com/api/conversations.history?channel=C123&limit=200&inclusive=true&oldest=110.000',
+        expect.objectContaining({ method: 'GET' }),
+      );
+      expect(getGlobalWithFetch().fetch).toHaveBeenNthCalledWith(
+        2,
+        'https://slack.com/api/conversations.history?channel=C123&limit=200&inclusive=true&latest=110.000',
+        expect.objectContaining({ method: 'GET' }),
+      );
+      expect(messages).toEqual([
+        expect.objectContaining({ text: 'in window', ts: '111.000' }),
+      ]);
+    });
+
+    it('returns the bounded result when the stale thread root lookback fails', async () => {
+      vi.spyOn(
+        SlackNotifier.prototype as unknown as {
+          getUsersInfo(userIds: string[]): Promise<Map<string, string>>;
+        },
+        'getUsersInfo',
+      ).mockResolvedValue(new Map([['U123', 'Alice']]));
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      getGlobalWithFetch().fetch = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            ok: true,
+            messages: [
+              {
+                user: 'U123',
+                text: 'in window',
+                ts: '111.000',
+                type: 'message',
+              },
+            ],
+            response_metadata: {},
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            ok: false,
+            error: 'ratelimited',
+          }),
+        });
+
+      const messages = await notifier.fetchChannelMessages({
+        channel: 'C123',
+        oldest: '110.000',
+      });
+
+      expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(2);
+      expect(messages).toEqual([
+        expect.objectContaining({ text: 'in window', ts: '111.000' }),
+      ]);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Skipping stale thread root lookback'),
+      );
+      warnSpy.mockRestore();
+    });
+
+    it('caps the stale thread root lookback instead of paging the whole channel', async () => {
+      vi.spyOn(
+        SlackNotifier.prototype as unknown as {
+          getUsersInfo(userIds: string[]): Promise<Map<string, string>>;
+        },
+        'getUsersInfo',
+      ).mockResolvedValue(new Map([['U123', 'Alice']]));
+
+      let requestCount = 0;
+
+      getGlobalWithFetch().fetch = vi.fn().mockImplementation(async () => {
+        requestCount += 1;
+
+        if (requestCount === 1) {
+          return {
+            ok: true,
+            json: async () => ({
+              ok: true,
+              messages: [
+                {
+                  user: 'U123',
+                  text: 'in window',
+                  ts: '111.000',
+                  type: 'message',
+                },
+              ],
+              response_metadata: {},
+            }),
+          };
+        }
+
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            messages: [
+              {
+                user: 'U123',
+                text: `stale page ${requestCount}`,
+                ts: `${100 - requestCount}.000`,
+                type: 'message',
+              },
+            ],
+            response_metadata: {
+              next_cursor: `cursor-${requestCount}`,
+            },
+          }),
+        };
+      });
+
+      const messages = await notifier.fetchChannelMessages({
+        channel: 'C123',
+        oldest: '110.000',
+      });
+
+      // One bounded history page plus five lookback pages.
+      expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(6);
+      expect(messages).toEqual([
+        expect.objectContaining({ text: 'in window', ts: '111.000' }),
       ]);
     });
 
@@ -3194,6 +3480,65 @@ describe('SlackNotifier', () => {
       expect(getUsersInfoSpy).toHaveBeenCalledWith(['U123', 'U456']);
       expect(output).toBe('Hi @Alice and @Alice plus @Bob.');
     });
+
+    it('replaces the installed Roomote app mention without fetching user info', async () => {
+      notifier = new SlackNotifier(token, {
+        botUserId: 'UROOMOTE',
+        botName: 'Roomote',
+      });
+      const getUsersInfoSpy = vi.spyOn(
+        SlackNotifier.prototype as unknown as {
+          getUsersInfo(userIds: string[]): Promise<Map<string, string>>;
+        },
+        'getUsersInfo',
+      );
+
+      const output = await notifier.replaceMentionsWithNames(
+        '<@UROOMOTE> please inspect this',
+      );
+
+      expect(output).toBe('@Roomote please inspect this');
+      expect(getUsersInfoSpy).not.toHaveBeenCalled();
+    });
+
+    it('uses installation metadata for Roomote while resolving user mentions normally', async () => {
+      notifier = new SlackNotifier(token, {
+        botUserId: 'UROOMOTE',
+        appName: 'Roomote',
+      });
+      const getUsersInfoSpy = vi
+        .spyOn(
+          SlackNotifier.prototype as unknown as {
+            getUsersInfo(userIds: string[]): Promise<Map<string, string>>;
+          },
+          'getUsersInfo',
+        )
+        .mockResolvedValue(new Map([['U123', 'Alice']]));
+
+      const output = await notifier.replaceMentionsWithNames(
+        '<@U123> tagged <@UROOMOTE>',
+      );
+
+      expect(getUsersInfoSpy).toHaveBeenCalledWith(['U123']);
+      expect(output).toBe('@Alice tagged @Roomote');
+    });
+
+    it('falls back to user info when installation metadata has no readable bot name', async () => {
+      notifier = new SlackNotifier(token, { botUserId: 'UROOMOTE' });
+      const getUsersInfoSpy = vi
+        .spyOn(
+          SlackNotifier.prototype as unknown as {
+            getUsersInfo(userIds: string[]): Promise<Map<string, string>>;
+          },
+          'getUsersInfo',
+        )
+        .mockResolvedValue(new Map([['UROOMOTE', 'Roomote']]));
+
+      const output = await notifier.replaceMentionsWithNames('<@UROOMOTE>');
+
+      expect(getUsersInfoSpy).toHaveBeenCalledWith(['UROOMOTE']);
+      expect(output).toBe('@Roomote');
+    });
   });
 
   describe('normalizeIncomingText', () => {
@@ -3207,6 +3552,18 @@ describe('SlackNotifier', () => {
       );
 
       expect(output).toBe('Hi @Alice [Example](https://example.com/path)');
+    });
+
+    it('keeps raw mention tokens when preserveMentions is set', async () => {
+      const replaceSpy = vi.spyOn(notifier, 'replaceMentionsWithNames');
+
+      const output = await notifier.normalizeIncomingText(
+        'Hi <@U123> <https://example.com/path|Example>',
+        { preserveMentions: true },
+      );
+
+      expect(output).toBe('Hi <@U123> [Example](https://example.com/path)');
+      expect(replaceSpy).not.toHaveBeenCalled();
     });
   });
 

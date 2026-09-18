@@ -102,9 +102,9 @@ export function AgentGuidanceSection() {
     <Section icon={ScrollText} title="Shared Agent Guidance" footer={footer}>
       <div className="space-y-3">
         <p>
-          Instructions included in the context of all tasks, irrespective of
-          environment or repo. Think of it like a global AGENTS.MD file across
-          all of Roomote.
+          Instructions included in the context of all sessions and tasks,
+          irrespective of environment or repo. Think of it like a global
+          AGENTS.MD file across all of Roomote.
         </p>
         {settingsQuery.isPending ? (
           <div className="space-y-3">

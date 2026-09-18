@@ -51,6 +51,7 @@ export const ACTIVATION_SETUP_MILESTONES = [
   'comms_authed',
   'source_control_configured',
   'source_control_authed',
+  'integrations_decided',
   'inference_configured',
   'sandbox_configured',
 ] as const;
@@ -127,6 +128,7 @@ export type ActivationAutomation =
   | 'conflict_resolver'
   | 'manager_stats'
   | 'provider_usage_limit'
+  | 'release_announcements'
   | 'sentry_triage'
   | 'dependabot_triage'
   | 'codeql_triage'
@@ -150,7 +152,8 @@ export type ActivationAutomationDestinationProvider =
   | 'slack'
   | 'discord'
   | 'teams'
-  | 'telegram';
+  | 'telegram'
+  | 'email';
 
 export function toActivationAutomationDestinationProvider(
   provider: string | null | undefined,
@@ -158,7 +161,8 @@ export function toActivationAutomationDestinationProvider(
   return provider === 'slack' ||
     provider === 'discord' ||
     provider === 'teams' ||
-    provider === 'telegram'
+    provider === 'telegram' ||
+    provider === 'email'
     ? provider
     : null;
 }
@@ -183,22 +187,34 @@ export interface PingEvent {
 
 export interface PingEventsRequest {
   instanceId: string;
-  appVersion?: string;
+  appVersion: string;
   sentAt: string;
   events: PingEvent[];
 }
 
 export interface PingInstanceReportRequest {
   instanceId: string;
-  appVersion?: string;
+  appVersion: string;
   cloud: boolean;
   sentAt: string;
   report: Record<string, unknown>;
 }
 
+export interface PingPlatformIssueSubmission {
+  reportId: string;
+  instanceId: string;
+  appVersion: string;
+  submittedAt: string;
+  report: {
+    title: string;
+    summary: string;
+    taskUrl: string;
+  };
+}
+
 export interface PingVersionCheckRequest {
   instanceId: string;
-  appVersion?: string;
+  appVersion: string;
 }
 
 export interface PingVersionCheckResponse {

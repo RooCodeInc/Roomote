@@ -13,10 +13,14 @@ import {
 import type { Variables } from '../../types';
 
 import { asanaMcp } from './asana';
+import { bitbucketMcp } from './bitbucket';
+import { adoMergeMcp, giteaMergeMcp } from './native-provider-merge';
 import { communicationMcp } from './communication';
 import { environmentsRouter } from '../environments';
 import { customAutomationsRouter } from '../custom-automations';
+import { customSkillsRouter } from '../custom-skills';
 import { tasksRouter } from '../tasks';
+import { sessionsRouter } from '../sessions';
 import { createCustomMcpProxy } from './custom-mcp';
 import { createGbrainMcpProxy } from './gbrain';
 import { createIntegrationMcpProxy } from './integration-mcp';
@@ -29,8 +33,14 @@ import { notionMcp } from './notion';
 import { slackMcp } from './slack';
 import { snowflakeMcp } from './snowflake';
 import { vercelMcp } from './vercel';
+import { createHttpIntegrationsMcp } from './http-integrations';
+import { developmentFixturesMcp } from './development-fixtures';
+import { publicUrlFetchRoute } from './public-url-fetch-route';
 
 export const mcp = new Hono<{ Variables: Variables }>();
+
+// integration keys are live; the operator flag controls only manifest integrations.
+mcp.route('/http-integrations', createHttpIntegrationsMcp());
 
 const requireCuratedIntegrations: MiddlewareHandler<{
   Variables: Variables;
@@ -62,6 +72,9 @@ const requireCustomMcp: MiddlewareHandler<{
 
 mcp.use('/custom/*', requireCustomMcp);
 mcp.route('/custom/:serverId', createCustomMcpProxy());
+mcp.route('/development-fixtures', developmentFixturesMcp);
+mcp.use('/public-url-fetch', mcpAuthMiddleware);
+mcp.route('/public-url-fetch', publicUrlFetchRoute);
 
 // Brain (deployment-hosted gbrain): a native-mode catalog
 // integration with a custom handler, like snowflake/grafana below. The
@@ -70,6 +83,15 @@ mcp.route('/custom/:serverId', createCustomMcpProxy());
 mcp.route('/gbrain', createGbrainMcpProxy({ allowAuthTokens: true }));
 
 mcp.route('/asana', asanaMcp);
+mcp.use('/bitbucket', requireCuratedIntegrations);
+mcp.use('/bitbucket/*', requireCuratedIntegrations);
+mcp.use('/ado', requireCuratedIntegrations);
+mcp.use('/ado/*', requireCuratedIntegrations);
+mcp.use('/gitea', requireCuratedIntegrations);
+mcp.use('/gitea/*', requireCuratedIntegrations);
+mcp.route('/bitbucket', bitbucketMcp);
+mcp.route('/ado', adoMergeMcp);
+mcp.route('/gitea', giteaMergeMcp);
 mcp.route('/granola', granolaMcp);
 mcp.route('/grafana', grafanaMcp);
 mcp.route('/linear', createLinearMcp({ allowAuthTokens: true }));
@@ -103,13 +125,19 @@ mcp.use('/communication/*', mcpAuthMiddleware);
 mcp.use('/communication', mcpAuthMiddleware);
 mcp.use('/tasks/*', mcpAuthMiddleware);
 mcp.use('/tasks', mcpAuthMiddleware);
+mcp.use('/sessions/*', mcpAuthMiddleware);
+mcp.use('/sessions', mcpAuthMiddleware);
 mcp.use('/environments/*', mcpAuthMiddleware);
 mcp.use('/environments', mcpAuthMiddleware);
 mcp.use('/custom-automations/*', mcpAuthMiddleware);
 mcp.use('/custom-automations', mcpAuthMiddleware);
+mcp.use('/custom-skills/*', mcpAuthMiddleware);
+mcp.use('/custom-skills', mcpAuthMiddleware);
 
 mcp.route('/slack', slackMcp);
 mcp.route('/communication', communicationMcp);
 mcp.route('/tasks', tasksRouter);
+mcp.route('/sessions', sessionsRouter);
 mcp.route('/environments', environmentsRouter);
 mcp.route('/custom-automations', customAutomationsRouter);
+mcp.route('/custom-skills', customSkillsRouter);

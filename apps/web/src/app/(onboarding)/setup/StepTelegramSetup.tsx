@@ -72,6 +72,17 @@ export function StepTelegramSetup({
       onError: (error) => toast.error(error.message),
     }),
   );
+  const repair = useMutation(
+    trpc.comms.repairTelegram.mutationOptions({
+      onSuccess: async () => {
+        toast.success('Telegram connection repaired');
+        await queryClient.invalidateQueries({
+          queryKey: trpc.comms.status.queryKey(),
+        });
+      },
+      onError: (error) => toast.error(error.message),
+    }),
+  );
   const isConfigured = credentialsSaved || provider?.setupSatisfied === true;
   useEffect(() => {
     if (
@@ -150,6 +161,24 @@ export function StepTelegramSetup({
             Open the bot and send the prefilled link command so Telegram lets
             Roomote message you and tasks are attributed to your account.
           </p>
+          {provider.telegramWebhook &&
+          provider.telegramWebhook.status !== 'connected' ? (
+            <div className="flex items-center justify-between gap-4 rounded-md border border-amber-600/30 bg-amber-500/10 p-3 text-sm">
+              <p>
+                {provider.telegramWebhook.lastErrorMessage ??
+                  'Telegram is configured, but its webhook is not connected.'}
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={repair.isPending}
+                onClick={() => repair.mutate()}
+              >
+                {repair.isPending ? 'Repairing...' : 'Repair'}
+              </Button>
+            </div>
+          ) : null}
           <TelegramLinkAccountStep pollUntilLinked autoGenerate />
         </div>
       ) : status.isError ? (

@@ -1,6 +1,7 @@
 const mocks = vi.hoisted(() => ({
   findTaskRun: vi.fn(),
   renderSlackLiveTaskCard: vi.fn(),
+  renderTelegramLiveTaskStream: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -17,6 +18,10 @@ vi.mock('@roomote/slack', () => ({
   renderSlackLiveTaskCard: mocks.renderSlackLiveTaskCard,
 }));
 
+vi.mock('../../telegram-live-task-stream', () => ({
+  renderTelegramLiveTaskStream: mocks.renderTelegramLiveTaskStream,
+}));
+
 import { renderSlackLiveTaskCardForRun } from '../slack-live-task-stream';
 
 describe('renderSlackLiveTaskCardForRun', () => {
@@ -24,26 +29,53 @@ describe('renderSlackLiveTaskCardForRun', () => {
     vi.clearAllMocks();
     mocks.findTaskRun.mockResolvedValue({
       taskId: 'task-1',
+      payload: { communicationProvider: 'slack' },
       task: { title: 'Generated title' },
     });
     mocks.renderSlackLiveTaskCard.mockResolvedValue({
       card: true,
       updated: true,
     });
+    mocks.renderTelegramLiveTaskStream.mockResolvedValue({
+      card: true,
+      updated: true,
+    });
+  });
+
+  it('routes Telegram live messages through the Telegram control-plane renderer', async () => {
+    mocks.findTaskRun.mockResolvedValue({
+      taskId: 'task-1',
+      payload: { communicationProvider: 'telegram' },
+      task: { title: 'Generated title' },
+    });
+
+    await renderSlackLiveTaskCardForRun(42, {
+      status: 'in_progress',
+      details: 'Running the tests.',
+    });
+
+    expect(mocks.renderTelegramLiveTaskStream).toHaveBeenCalledWith({
+      taskId: 'task-1',
+      status: 'in_progress',
+      details: 'Running the tests.',
+    });
+    expect(mocks.renderSlackLiveTaskCard).not.toHaveBeenCalled();
   });
 
   it("renders the run's own task card with the generated title", async () => {
     await expect(
       renderSlackLiveTaskCardForRun(42, {
         status: 'complete',
-        message: 'Ready for review.',
+        details: 'Running the tests.',
+        output: 'Ready for review.',
       }),
     ).resolves.toEqual({ card: true, updated: true });
 
     expect(mocks.renderSlackLiveTaskCard).toHaveBeenCalledWith({
       taskId: 'task-1',
       status: 'complete',
-      message: 'Ready for review.',
+      details: 'Running the tests.',
+      output: 'Ready for review.',
       taskTitle: 'Generated title',
     });
   });

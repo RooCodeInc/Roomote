@@ -5,7 +5,24 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { useState } from 'react';
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
+
+const { mobileViewport } = vi.hoisted(() => ({
+  mobileViewport: { value: false },
+}));
+
+vi.mock('@/hooks/useIsMobile', () => ({
+  useIsMobile: () => mobileViewport.value,
+}));
 
 import {
   PromptInput,
@@ -50,6 +67,10 @@ function createClipboardStringItem(type: string): DataTransferItem {
 }
 
 describe('PromptInput', () => {
+  beforeEach(() => {
+    mobileViewport.value = false;
+  });
+
   beforeAll(() => {
     Object.defineProperty(URL, 'createObjectURL', {
       configurable: true,
@@ -111,6 +132,44 @@ describe('PromptInput', () => {
     expect(textarea).toHaveAttribute('data-op-ignore', 'true');
     expect(textarea).toHaveAttribute('id');
     expect(textarea.getAttribute('id')).toMatch(/^prompt-input-textarea-/);
+  });
+
+  it('releases prompt focus when Escape is pressed', () => {
+    render(
+      <PromptInput onSubmit={() => {}}>
+        <PromptInputBody>
+          <PromptInputTextarea aria-label="Prompt" />
+        </PromptInputBody>
+      </PromptInput>,
+    );
+    const textarea = screen.getByLabelText('Prompt');
+
+    textarea.focus();
+    expect(textarea).toHaveFocus();
+
+    fireEvent.keyDown(textarea, { key: 'Escape', code: 'Escape' });
+
+    expect(textarea).not.toHaveFocus();
+    expect(document.body).toHaveFocus();
+  });
+
+  it('keeps prompt focus when an external handler consumes Escape', () => {
+    render(
+      <PromptInput onSubmit={() => {}}>
+        <PromptInputBody>
+          <PromptInputTextarea
+            aria-label="Prompt"
+            onKeyDown={(event) => event.preventDefault()}
+          />
+        </PromptInputBody>
+      </PromptInput>,
+    );
+    const textarea = screen.getByLabelText('Prompt');
+
+    textarea.focus();
+    fireEvent.keyDown(textarea, { key: 'Escape', code: 'Escape' });
+
+    expect(textarea).toHaveFocus();
   });
 
   it('accepts attachments that match extension-based filters', () => {
@@ -262,6 +321,7 @@ describe('PromptInput', () => {
 
     const textarea = screen.getByLabelText('Prompt');
 
+    expect(textarea).toHaveAttribute('enterkeyhint', 'send');
     fireEvent.change(textarea, { target: { value: 'Wake up and continue' } });
     fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter' });
 
@@ -272,6 +332,63 @@ describe('PromptInput', () => {
         files: [],
       });
     });
+  });
+
+  it('leaves mobile Enter to insert a newline without submitting', () => {
+    mobileViewport.value = true;
+    const onSubmit = vi.fn();
+    const onKeyDown = vi.fn();
+
+    render(
+      <PromptInput clearOnSubmit={false} onSubmit={onSubmit}>
+        <PromptInputBody>
+          <PromptInputTextarea aria-label="Prompt" onKeyDown={onKeyDown} />
+        </PromptInputBody>
+        <button type="submit">Send</button>
+      </PromptInput>,
+    );
+
+    const textarea = screen.getByLabelText('Prompt');
+    const enter = createEvent.keyDown(textarea, {
+      key: 'Enter',
+      code: 'Enter',
+    });
+
+    expect(textarea).toHaveAttribute('enterkeyhint', 'enter');
+    fireEvent.change(textarea, { target: { value: 'First line' } });
+    fireEvent(textarea, enter);
+
+    expect(enter.defaultPrevented).toBe(false);
+    expect(onKeyDown).not.toHaveBeenCalled();
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    fireEvent.change(textarea, { target: { value: 'First line\n' } });
+    expect(textarea).toHaveValue('First line\n');
+  });
+
+  it('leaves desktop Shift+Enter to insert a newline without submitting', () => {
+    const onSubmit = vi.fn();
+
+    render(
+      <PromptInput clearOnSubmit={false} onSubmit={onSubmit}>
+        <PromptInputBody>
+          <PromptInputTextarea aria-label="Prompt" />
+        </PromptInputBody>
+        <button type="submit">Send</button>
+      </PromptInput>,
+    );
+
+    const textarea = screen.getByLabelText('Prompt');
+    const shiftEnter = createEvent.keyDown(textarea, {
+      key: 'Enter',
+      code: 'Enter',
+      shiftKey: true,
+    });
+
+    fireEvent(textarea, shiftEnter);
+
+    expect(shiftEnter.defaultPrevented).toBe(false);
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 
   it('requires Cmd/Ctrl+Enter when submitWithMetaKey is enabled', () => {
@@ -305,5 +422,96 @@ describe('PromptInput', () => {
         files: [],
       });
     });
+  });
+
+  it.each(['keyboard', 'button'] as const)(
+    'restores composer focus after a successful %s submit',
+    async (submissionMethod) => {
+      let resolveSubmit: (() => void) | undefined;
+      const onSubmit = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveSubmit = resolve;
+          }),
+      );
+
+      function FocusHarness() {
+        const [submitting, setSubmitting] = useState(false);
+
+        return (
+          <PromptInput
+            keepFocusOnSubmit
+            onSubmit={async () => {
+              setSubmitting(true);
+              try {
+                await onSubmit();
+              } finally {
+                setSubmitting(false);
+              }
+            }}
+          >
+            <PromptInputBody>
+              <PromptInputTextarea aria-label="Prompt" disabled={submitting} />
+            </PromptInputBody>
+            <button type="submit">Send</button>
+          </PromptInput>
+        );
+      }
+
+      render(<FocusHarness />);
+
+      const textarea = screen.getByLabelText('Prompt');
+      textarea.focus();
+      fireEvent.change(textarea, { target: { value: 'Continue' } });
+
+      if (submissionMethod === 'keyboard') {
+        fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter' });
+      } else {
+        fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+      }
+
+      await waitFor(() => expect(textarea).toBeDisabled());
+      resolveSubmit?.();
+
+      await waitFor(() => {
+        expect(textarea).not.toBeDisabled();
+        expect(textarea).toHaveFocus();
+      });
+    },
+  );
+
+  it('does not restore composer focus after an outside interaction while submitting', async () => {
+    let resolveSubmit: (() => void) | undefined;
+
+    render(
+      <>
+        <PromptInput
+          keepFocusOnSubmit
+          onSubmit={() =>
+            new Promise<void>((resolve) => {
+              resolveSubmit = resolve;
+            })
+          }
+        >
+          <PromptInputBody>
+            <PromptInputTextarea aria-label="Prompt" />
+          </PromptInputBody>
+          <button type="submit">Send</button>
+        </PromptInput>
+        <button type="button">Other control</button>
+      </>,
+    );
+
+    const textarea = screen.getByLabelText('Prompt');
+    textarea.focus();
+    fireEvent.change(textarea, { target: { value: 'Continue' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter' });
+
+    const otherControl = screen.getByRole('button', { name: 'Other control' });
+    fireEvent.pointerDown(otherControl);
+    otherControl.focus();
+    resolveSubmit?.();
+
+    await waitFor(() => expect(otherControl).toHaveFocus());
   });
 });

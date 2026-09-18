@@ -5,6 +5,7 @@ export const TASK_SOURCE_ORDER: readonly string[] = [
   'Teams',
   'Telegram',
   'Discord',
+  'Email',
   'GitHub',
   'GitLab',
   'Gitea',
@@ -29,6 +30,8 @@ export function getTaskSurfaceLabel(
       return 'Telegram';
     case 'discord':
       return 'Discord';
+    case 'agentmail':
+      return 'Email';
     case 'github':
       return 'GitHub';
     case 'gitlab':

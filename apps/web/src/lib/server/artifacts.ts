@@ -1,5 +1,20 @@
-import { db, taskArtifacts, tasks, eq, and, desc } from '@roomote/db/server';
-import type { TaskArtifactType } from '@roomote/types';
+import {
+  db,
+  taskArtifacts,
+  tasks,
+  sessions,
+  eq,
+  and,
+  desc,
+  getTaskArtifactByPath,
+  getSessionArtifactByPath,
+} from '@roomote/db/server';
+import {
+  type TaskArtifactType,
+  validateTaskArtifactPath,
+} from '@roomote/types';
+import { canReadTask } from './custom-automation-task-access';
+import { findReadableSession } from './sessions';
 
 function withTypedArtifactType<T extends { artifactType: string }>(
   artifact: T,
@@ -21,18 +36,29 @@ type ArtifactAuth = {
   isAdmin: boolean;
 };
 
+async function canReadSessionArtifacts(auth: ArtifactAuth, sessionId: string) {
+  if (!auth.userId) return false;
+  return Boolean(
+    await findReadableSession(
+      { userId: auth.userId, isAdmin: auth.isAdmin },
+      sessionId,
+    ),
+  );
+}
+
 /**
  * Get an artifact by its ID.
  */
 export async function getArtifactById({
   taskId,
   artifactId,
-  auth: _auth,
+  auth,
 }: {
   taskId: string;
   artifactId: string;
   auth: ArtifactAuth;
 }) {
+  if (!(await canReadTask(auth, taskId))) return null;
   const result = await db
     .select()
     .from(taskArtifacts)
@@ -53,44 +79,68 @@ export async function getArtifactById({
 
 /**
  * Get an artifact by task ID and path.
- * If version is not specified, returns the latest version.
+ * If version is not specified, returns the latest uploaded version.
  */
 export async function getArtifactByPath({
   taskId,
   path,
   version,
-  auth: _auth,
+  auth,
 }: {
   taskId: string;
   path: string;
   version?: number;
   auth: ArtifactAuth;
 }) {
-  const whereConditions = [
-    eq(taskArtifacts.taskId, taskId),
-    eq(taskArtifacts.path, path),
-  ];
+  if (!(await canReadTask(auth, taskId))) return null;
+  const artifact = await getTaskArtifactByPath({ taskId, path, version });
+  return artifact
+    ? { ...withTypedArtifactType(artifact), privacy: artifact.task.privacy }
+    : null;
+}
 
-  // If version is specified, filter by that version
-  if (version !== undefined) {
-    whereConditions.push(eq(taskArtifacts.version, version));
-  }
+export async function getArtifactBySessionPath({
+  sessionId,
+  path,
+  version,
+  auth,
+}: {
+  sessionId: string;
+  path: string;
+  version?: number;
+  auth: ArtifactAuth;
+}) {
+  if (!(await canReadSessionArtifacts(auth, sessionId))) return null;
+  const artifact = await getSessionArtifactByPath({ sessionId, path, version });
+  return artifact ? withTypedArtifactType(artifact) : null;
+}
 
-  const result = await db
-    .select()
+export async function getArtifactVersionsBySessionPath({
+  sessionId,
+  path,
+  auth,
+}: {
+  sessionId: string;
+  path: string;
+  auth: ArtifactAuth;
+}) {
+  if (!(await canReadSessionArtifacts(auth, sessionId))) return [];
+  return db
+    .select({
+      id: taskArtifacts.id,
+      version: taskArtifacts.version,
+      size: taskArtifacts.size,
+      createdAt: taskArtifacts.createdAt,
+    })
     .from(taskArtifacts)
-    .innerJoin(tasks, eq(taskArtifacts.taskId, tasks.id))
-    .where(and(...whereConditions))
-    .orderBy(desc(taskArtifacts.version))
-    .limit(1);
-
-  if (result.length === 0) return null;
-
-  const row = result[0]!;
-  return {
-    ...withTypedArtifactType(row.task_artifacts),
-    task: row.tasks,
-  };
+    .where(
+      and(
+        eq(taskArtifacts.sessionId, sessionId),
+        eq(taskArtifacts.path, path),
+        eq(taskArtifacts.uploaded, true),
+      ),
+    )
+    .orderBy(desc(taskArtifacts.version));
 }
 
 /**
@@ -100,12 +150,13 @@ export async function getArtifactByPath({
 export async function getArtifactVersionsByPath({
   taskId,
   path,
-  auth: _auth,
+  auth,
 }: {
   taskId: string;
   path: string;
   auth: ArtifactAuth;
 }) {
+  if (!(await canReadTask(auth, taskId))) return [];
   const result = await db
     .select({
       id: taskArtifacts.id,
@@ -132,13 +183,14 @@ export async function getArtifactVersionsByPath({
  */
 export async function getArtifactsForTask({
   taskId,
-  auth: _auth,
+  auth,
   uploadedOnly = true,
 }: {
   taskId: string;
   auth: ArtifactAuth;
   uploadedOnly?: boolean;
 }) {
+  if (!(await canReadTask(auth, taskId))) return [];
   const artifactConditions = [eq(taskArtifacts.taskId, taskId)];
 
   if (uploadedOnly) {
@@ -154,6 +206,7 @@ export async function getArtifactsForTask({
       contentType: taskArtifacts.contentType,
       size: taskArtifacts.size,
       createdAt: taskArtifacts.createdAt,
+      privacy: tasks.privacy,
     })
     .from(taskArtifacts)
     .innerJoin(tasks, eq(taskArtifacts.taskId, tasks.id))
@@ -166,60 +219,46 @@ export async function getArtifactsForTask({
  * Get an artifact by ID without auth checks (for public raw endpoint).
  * Only returns artifacts that have been uploaded.
  */
-export async function getUploadedArtifactById(artifactId: string) {
-  const result = await db
-    .select()
+export async function getUploadedArtifactById(artifactId: string): Promise<
+  | (typeof taskArtifacts.$inferSelect & {
+      privacy?: 'shared' | 'private';
+      privateOwnerUserId?: string | null;
+    })
+  | null
+> {
+  const [row] = await db
+    .select({
+      artifact: taskArtifacts,
+      taskPrivacy: tasks.privacy,
+      taskPrivateOwnerUserId: tasks.privateOwnerUserId,
+      sessionPrivacy: sessions.privacy,
+      sessionPrivateOwnerUserId: sessions.privateOwnerUserId,
+    })
     .from(taskArtifacts)
+    .leftJoin(tasks, eq(taskArtifacts.taskId, tasks.id))
+    .leftJoin(sessions, eq(taskArtifacts.sessionId, sessions.id))
     .where(
       and(eq(taskArtifacts.id, artifactId), eq(taskArtifacts.uploaded, true)),
     )
     .limit(1);
 
-  if (result.length === 0) return null;
-  return result[0]!;
+  if (!row) return null;
+  return {
+    ...row.artifact,
+    privacy: row.taskPrivacy ?? row.sessionPrivacy ?? 'shared',
+    privateOwnerUserId:
+      row.taskPrivateOwnerUserId ?? row.sessionPrivateOwnerUserId,
+  };
 }
 
-const MAX_PATH_LENGTH = 255;
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
 
 export function validateArtifactPath(path: string): {
   valid: boolean;
   error?: string;
 } {
-  if (!path || path.trim() === '') {
-    return { valid: false, error: 'Path cannot be empty' };
-  }
-
-  if (path.length > MAX_PATH_LENGTH) {
-    return {
-      valid: false,
-      error: `Path too long (max ${MAX_PATH_LENGTH} chars)`,
-    };
-  }
-
-  // Check for path traversal attempts
-  // Match ".." only when it's a path segment (preceded/followed by / or \ or at boundaries)
-  // This allows valid filenames like "file..name.txt" while blocking "../", "..\", etc.
-  const pathTraversalPattern = /(?:^|[/\\])\.\.(?:$|[/\\])/;
-
-  if (pathTraversalPattern.test(path)) {
-    return { valid: false, error: 'Invalid path: path traversal detected' };
-  }
-
-  // Check for absolute paths (should be relative)
-  if (path.startsWith('/')) {
-    return {
-      valid: false,
-      error: 'Invalid path: must be relative to workspace',
-    };
-  }
-
-  // Check for null bytes (security)
-  if (path.includes('\0')) {
-    return { valid: false, error: 'Invalid path: contains null byte' };
-  }
-
-  return { valid: true };
+  const error = validateTaskArtifactPath(path);
+  return error ? { valid: false, error } : { valid: true };
 }
 
 export function validateArtifactSize(size: number): {

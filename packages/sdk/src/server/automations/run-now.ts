@@ -10,6 +10,7 @@ import { issueFixerJob } from './issue-fixer';
 import { managerStatsJob } from './manager-stats';
 import { mergeAnnouncerJob } from './merge-announcer';
 import { providerUsageLimitJob } from './provider-usage-limit';
+import { releaseAnnouncementsJob } from './release-announcements';
 import { securityAuditorJob } from './security-auditor';
 import { sentryTriageJob } from './sentry-triage';
 import { suggesterJob } from './suggester';
@@ -28,6 +29,7 @@ const AUTOMATION_RUNNERS: Record<
   announcer: announcerJob,
   manager_stats: managerStatsJob,
   provider_usage_limit: providerUsageLimitJob,
+  release_announcements: releaseAnnouncementsJob,
   sentry_triage: sentryTriageJob,
   dependabot_triage: dependabotTriageJob,
   codeql_triage: codeqlTriageJob,
@@ -76,6 +78,10 @@ export async function runAutomationNow(
 
   if (result.skippedReason) {
     return { outcome: 'skipped', reason: result.skippedReason };
+  }
+
+  if (result.queued) {
+    return { outcome: 'queued' };
   }
 
   if (result.completed) {

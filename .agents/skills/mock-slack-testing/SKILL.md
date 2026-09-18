@@ -104,7 +104,7 @@ curl -s -X POST http://127.0.0.1:3012/mock/events \
       "type": "app_mention",
       "channel": "C123ABC456",
       "user": "UGRACE",
-      "text": "<@BROOMOTE> !fast what file handles Slack mentions?",
+      "text": "<@BROOMOTE> what file handles Slack mentions?",
       "ts": "1710000000.000200",
       "channel_type": "channel"
     }
@@ -157,7 +157,7 @@ curl -s http://127.0.0.1:3012/mock/state | jq '.createdManifests'
 
 See `references/scenarios.md` for the full catalog. Common picks:
 
-- **`app-mention-fast`** — `@roomote !fast ...` inline Q&A without a cloud job
+- **`app-mention-fast`** — an ordinary `@roomote ...` inline Q&A without a cloud job
 - **`app-mention-standard`** — normal Slack task kickoff that creates a cloud job
 - **`url-verification`** — webhook handshake validation
 - **`outbound-thread-reply`** — worker/API posts back into a Slack thread

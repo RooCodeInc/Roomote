@@ -3,6 +3,7 @@
 const {
   mockCompleteGithubPrReviewCheckFromSummary,
   mockEnqueuePrReviewNotification,
+  mockMarkRoomotePullRequestReadyAfterCleanReview,
   mockStartPrReviewNotificationCycle,
 } = vi.hoisted(() => ({
   mockCompleteGithubPrReviewCheckFromSummary: vi
@@ -11,6 +12,9 @@ const {
   mockEnqueuePrReviewNotification: vi.fn().mockResolvedValue({
     notifiedTaskCount: 1,
   }),
+  mockMarkRoomotePullRequestReadyAfterCleanReview: vi
+    .fn()
+    .mockResolvedValue('review_not_clean'),
   mockStartPrReviewNotificationCycle: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -30,6 +34,8 @@ vi.mock('@roomote/sdk/server', () => ({
   completeGithubPrReviewCheckFromSummary:
     mockCompleteGithubPrReviewCheckFromSummary,
   enqueuePrReviewNotification: mockEnqueuePrReviewNotification,
+  markRoomotePullRequestReadyAfterCleanReview:
+    mockMarkRoomotePullRequestReadyAfterCleanReview,
   startPrReviewNotificationCycle: mockStartPrReviewNotificationCycle,
 }));
 
@@ -508,8 +514,11 @@ describe('queuePrReviewActivityNotification', () => {
     });
   });
 
-  it('enqueues qualifying events', () => {
-    queuePrReviewActivityNotification(reviewPayload({ state: 'approved' }));
+  it('enqueues qualifying events with the webhook delivery correlation', async () => {
+    await queuePrReviewActivityNotification(
+      reviewPayload({ state: 'approved' }),
+      'github-delivery-1',
+    );
 
     expect(mockEnqueuePrReviewNotification).toHaveBeenCalledWith({
       repository: 'owner/repo',
@@ -519,6 +528,7 @@ describe('queuePrReviewActivityNotification', () => {
       event: {
         kind: 'review',
         providerEventId: 'github-review:1000',
+        sourceDeliveryId: 'github-delivery-1',
         authorLogin: 'alice',
         reviewHeadSha,
         batchId: 'github-review:1000',
@@ -535,6 +545,36 @@ describe('queuePrReviewActivityNotification', () => {
     );
 
     expect(mockEnqueuePrReviewNotification).not.toHaveBeenCalled();
+  });
+
+  it('logs the explicit trust decision for a filtered external bot', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+
+    await queuePrReviewActivityNotification(
+      reviewPayload({
+        login: 'untrusted-reviewer[bot]',
+        userType: 'Bot',
+      }),
+      'github-delivery-2',
+    );
+
+    const events = info.mock.calls
+      .map(([message]) =>
+        typeof message === 'string' ? JSON.parse(message) : null,
+      )
+      .filter(Boolean);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        event: 'source_control_review_admission',
+        deliveryId: 'github-delivery-2',
+        repository: 'owner/repo',
+        prNumber: 42,
+        reviewId: 1000,
+        outcome: 'skipped',
+        reason: 'external_bot_not_trusted',
+      }),
+    );
+    info.mockRestore();
   });
 
   it('passes Roomote-authored activity to the shared coordinator', async () => {
@@ -652,7 +692,9 @@ function summaryPayload({
 
 describe('buildPrReviewSummaryNotification', () => {
   it('builds a review_summary event from a terminal Roomote summary comment on create', () => {
-    const notification = buildPrReviewSummaryNotification(summaryPayload());
+    const notification = buildPrReviewSummaryNotification(summaryPayload(), {
+      deliveryId: 'github-summary-delivery-1',
+    });
 
     expect(notification?.input).toEqual({
       repository: 'owner/repo',
@@ -662,6 +704,7 @@ describe('buildPrReviewSummaryNotification', () => {
       event: {
         kind: 'review_summary',
         providerEventId: 'github-review-summary:99:2026-08-10T19:30:00.000Z',
+        sourceDeliveryId: 'github-summary-delivery-1',
         authorLogin: 'roomote[bot]',
         reviewHeadSha,
         reviewTaskId: 'x',
@@ -924,6 +967,32 @@ describe('queuePrReviewSummaryNotification', () => {
       taskId: 'x',
       reviewHeadSha,
       reviewSummaryBody: TERMINAL_SUMMARY_BODY,
+    });
+  });
+
+  it('reconciles a terminal summary rewrite without notifying the completed task', async () => {
+    const cleanBody = TERMINAL_SUMMARY_BODY.replace(
+      '1 minor doc note; no blocking issues.',
+      '**All 1 issue addressed.**',
+    ).replace('- [ ] Update the doc comment', '- [x] Update the doc comment');
+
+    await queuePrReviewSummaryNotification(
+      summaryPayload({
+        body: cleanBody,
+        previousBody: TERMINAL_SUMMARY_BODY,
+      }),
+    );
+
+    expect(mockEnqueuePrReviewNotification).not.toHaveBeenCalled();
+    expect(mockStartPrReviewNotificationCycle).not.toHaveBeenCalled();
+    expect(mockCompleteGithubPrReviewCheckFromSummary).toHaveBeenCalledWith({
+      installationId: 1,
+      repository: 'owner/repo',
+      prNumber: 42,
+      taskId: 'x',
+      reviewHeadSha,
+      reviewSummaryBody: cleanBody,
+      allowCompletedCheckUpdate: true,
     });
   });
 

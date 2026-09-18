@@ -11,24 +11,26 @@ import {
   isNull,
   sessions,
   sessionTasks,
+  enqueueTaskMemoryRetirements,
 } from '@roomote/db/server';
 
 import { deleteArtifactsBatch } from '@/lib/server';
 
 import type { UserAuthSuccess } from '@/types';
+import { customAutomationTaskAccess } from '@/lib/server/custom-automation-task-access';
 
 export async function deleteTasksCommand(
   auth: UserAuthSuccess,
   input: { taskIds: string[] },
 ) {
-  // Any deployment member can delete tasks; deletion is a soft delete
+  // Ordinary tasks remain collaborative; deletion is a soft delete
   // (tasks.deletedAt) so satellites and artifact cleanup can still read the
   // rows.
-  void auth;
 
   const whereConditions = [
     inArray(tasks.id, input.taskIds),
     isNull(tasks.deletedAt),
+    customAutomationTaskAccess(auth),
   ];
 
   const result = await db.transaction(async (tx) => {
@@ -62,7 +64,7 @@ export async function deleteTasksCommand(
       try {
         s3Result = await deleteArtifactsBatch(
           artifactsToDelete.map((artifact) => ({
-            taskId: artifact.taskId,
+            taskId: artifact.taskId!,
             artifactId: artifact.id,
             path: artifact.path,
             version: artifact.version,
@@ -92,6 +94,8 @@ export async function deleteTasksCommand(
       taskIds: taskIdsToDelete,
       endedAt,
     });
+
+    await enqueueTaskMemoryRetirements(tx, taskIdsToDelete);
 
     // Soft delete: queries filter isNull(tasks.deletedAt).
     const deletedTasksResult = await tx

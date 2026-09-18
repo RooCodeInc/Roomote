@@ -226,6 +226,32 @@ function normalizeContentBlocks(blocks: SlackBlock[]): SlackBlock[] {
   return normalized;
 }
 
+function buildAutomationResultContainer(params: {
+  title: string;
+  iconUrl: string;
+  subtitle?: { type: string; text: string };
+  index: number;
+  childBlocks: SlackBlock[];
+}): SlackBlock {
+  return {
+    type: 'container',
+    width: 'full',
+    block_id:
+      params.index === 0
+        ? AUTOMATION_RESULT_CONTAINER_BLOCK_ID
+        : `${AUTOMATION_RESULT_CONTAINER_BLOCK_ID}_${params.index + 1}`,
+    title: { type: 'plain_text', text: params.title, emoji: false },
+    ...(params.subtitle ? { subtitle: params.subtitle } : {}),
+    icon: {
+      type: 'image',
+      image_url: params.iconUrl,
+      alt_text: `${params.title} automation icon`,
+    },
+    has_header_divider: true,
+    child_blocks: params.childBlocks,
+  };
+}
+
 export function formatAutomationResultSubtitle(params: {
   trigger: string;
   model: string;
@@ -245,7 +271,12 @@ export function formatAutomationResultSubtitle(params: {
   ]
     .filter((part): part is string => part !== null)
     .join(' ');
-  const price = `$${(Math.max(0, params.costMicroUsd) / 1_000_000).toFixed(2)}`;
+  const price = `$${Number(
+    (Math.max(0, params.costMicroUsd) / 1_000_000).toFixed(2),
+  ).toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 
   return `${params.trigger} · ${params.model} · ${price} · ${duration}`;
 }
@@ -317,11 +348,47 @@ export function buildAutomationResultBlocks(params: {
       ),
   );
 
-  const groups: SlackBlock[][] = [];
+  const groups: Array<SlackBlock[] | SlackBlock> = [];
+  let lastTopLevelIndex = -1;
+  for (let index = contentBlocks.length - 1; index >= 0; index -= 1) {
+    if (contentBlocks[index]?.type === 'data_visualization') {
+      lastTopLevelIndex = index;
+      break;
+    }
+  }
+  let remainingBlocks = contentBlocks.slice(0, lastTopLevelIndex + 1);
+  let pendingContainerBlocks: SlackBlock[] = [];
+
+  const flushPendingContainerBlocks = () => {
+    while (pendingContainerBlocks.length > 0) {
+      groups.push(pendingContainerBlocks.slice(0, MAX_CONTAINER_CHILDREN));
+      pendingContainerBlocks = pendingContainerBlocks.slice(
+        MAX_CONTAINER_CHILDREN,
+      );
+    }
+  };
+
+  for (const block of remainingBlocks) {
+    if (block.type === 'data_visualization') {
+      flushPendingContainerBlocks();
+      groups.push(block);
+    } else {
+      pendingContainerBlocks.push(block);
+    }
+  }
+  flushPendingContainerBlocks();
+
+  remainingBlocks = contentBlocks.slice(lastTopLevelIndex + 1);
   const finalContentCapacity = MAX_CONTAINER_CHILDREN - actionGroups.length;
-  const maxContentBlocks =
-    (MAX_MESSAGE_BLOCKS - 1) * MAX_CONTAINER_CHILDREN + finalContentCapacity;
-  let remainingBlocks = contentBlocks.slice(0, maxContentBlocks);
+  if (groups.length >= MAX_MESSAGE_BLOCKS) {
+    groups.length = MAX_MESSAGE_BLOCKS - 1;
+    remainingBlocks = [];
+  } else {
+    const availableContainers = MAX_MESSAGE_BLOCKS - groups.length;
+    const maxRemainingBlocks =
+      (availableContainers - 1) * MAX_CONTAINER_CHILDREN + finalContentCapacity;
+    remainingBlocks = remainingBlocks.slice(0, maxRemainingBlocks);
+  }
   while (remainingBlocks.length > finalContentCapacity) {
     const leadingCount = Math.min(
       MAX_CONTAINER_CHILDREN,
@@ -330,35 +397,44 @@ export function buildAutomationResultBlocks(params: {
     groups.push(remainingBlocks.slice(0, leadingCount));
     remainingBlocks = remainingBlocks.slice(leadingCount);
   }
-  groups.push(remainingBlocks);
+  groups.push([
+    ...remainingBlocks,
+    ...actionGroups.map((elements, actionIndex) => ({
+      type: 'actions' as const,
+      block_id:
+        actionIndex === 0
+          ? AUTOMATION_RESULT_ACTIONS_BLOCK_ID
+          : `${AUTOMATION_RESULT_ACTIONS_BLOCK_ID}_${actionIndex + 1}`,
+      elements,
+    })),
+  ]);
 
-  return groups.map((group, index) => ({
-    type: 'container',
-    width: 'full',
-    block_id:
-      index === 0
-        ? AUTOMATION_RESULT_CONTAINER_BLOCK_ID
-        : `${AUTOMATION_RESULT_CONTAINER_BLOCK_ID}_${index + 1}`,
-    title: { type: 'plain_text', text: params.title, emoji: false },
-    ...(params.subtitle ? { subtitle: params.subtitle } : {}),
-    icon: {
-      type: 'image',
-      image_url: params.iconUrl,
-      alt_text: `${params.title} automation icon`,
-    },
-    has_header_divider: true,
-    child_blocks: [
-      ...group,
-      ...(index === groups.length - 1
-        ? actionGroups.map((elements, actionIndex) => ({
+  const boundedGroups =
+    groups.length <= MAX_MESSAGE_BLOCKS
+      ? groups
+      : [
+          ...groups.slice(0, MAX_MESSAGE_BLOCKS - 1),
+          actionGroups.map((elements, actionIndex) => ({
             type: 'actions' as const,
             block_id:
               actionIndex === 0
                 ? AUTOMATION_RESULT_ACTIONS_BLOCK_ID
                 : `${AUTOMATION_RESULT_ACTIONS_BLOCK_ID}_${actionIndex + 1}`,
             elements,
-          }))
-        : []),
-    ],
-  }));
+          })),
+        ];
+
+  let containerIndex = 0;
+  return boundedGroups.map((group) => {
+    if (!Array.isArray(group)) return group;
+    const container = buildAutomationResultContainer({
+      title: params.title,
+      iconUrl: params.iconUrl,
+      subtitle: params.subtitle,
+      index: containerIndex,
+      childBlocks: group,
+    });
+    containerIndex += 1;
+    return container;
+  });
 }

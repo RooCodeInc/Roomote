@@ -27,7 +27,25 @@ export function normalizeSourceControlOAuthReturnTarget(
 }
 
 function isSetupPath(path: string): boolean {
-  return path === '/setup' || path.startsWith('/setup?');
+  if (path === '/setup' || path.startsWith('/setup?')) return true;
+  const url = new URL(path, 'https://roomote.invalid');
+  return (
+    /^\/sessions\/[0-9a-f-]+$/i.test(url.pathname) &&
+    url.searchParams.get('setup') === 'source-control'
+  );
+}
+
+export function buildSetupSessionSourceControlReturnTarget(input: {
+  sessionId: string;
+  provider?: string | null;
+}): string {
+  const url = new URL(
+    `/sessions/${input.sessionId}`,
+    'https://roomote.invalid',
+  );
+  url.searchParams.set('setup', 'source-control');
+  if (input.provider) url.searchParams.set('provider', input.provider);
+  return `${url.pathname}${url.search}`;
 }
 
 export function resolveSourceControlOAuthReturnTarget({
@@ -58,9 +76,13 @@ export function addSourceControlOAuthResult(
   target: string,
   provider: SourceControlOAuthProvider,
   result: 'connected' | 'error',
+  reason?: string | null,
 ): string {
   const url = new URL(target, 'https://roomote.invalid');
   url.searchParams.set(provider, result);
+  if (result === 'error' && reason) {
+    url.searchParams.set('reason', reason.slice(0, 500));
+  }
 
   if (isSetupOAuthReturnTarget(target)) {
     url.searchParams.set('sync', '1');

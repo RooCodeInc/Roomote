@@ -1,8 +1,8 @@
 import {
   AUTOMATION_DESTINATION_DESCRIPTORS,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_LIST,
+  type AutomationDestinationProvider,
   type ChannelAutoStartLaunchMode,
-  type CommunicationProvider,
   type ConflictResolverMaxPrAgeDays,
   type ScheduleOnlyBackgroundAutomationFrequency,
   type ScheduleOnlyBackgroundAutomationFrequencyField,
@@ -53,12 +53,14 @@ type DestinationChannelFormFields = {
   [K in
     | (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['slackField']
     | (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['discordField']]: string;
+} & {
+  [K in (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['emailField']]?: string;
 };
 
 const DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID = Object.fromEntries(
   AUTOMATION_DESTINATION_DESCRIPTORS.map((descriptor) => [
     descriptor.automationId,
-    [descriptor.slackField, descriptor.discordField],
+    [descriptor.slackField, descriptor.discordField, descriptor.emailField],
   ]),
 ) as Record<
   (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['automationId'],
@@ -66,6 +68,12 @@ const DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID = Object.fromEntries(
 >;
 
 export type FormState = {
+  ciFailureTriageAdditionalRules?: string;
+  suggesterAdditionalRules?: string;
+  announcerAdditionalRules?: string;
+  securityAuditorAdditionalRules?: string;
+  codeQualityAuditorAdditionalRules?: string;
+  mergeAnnouncerAdditionalRules?: string;
   callRoomoteViaEmojiEnabled: boolean;
   callRoomoteViaEmojiName: string;
   callRoomoteViaEmojiInstructions: string;
@@ -89,6 +97,7 @@ export type FormState = {
   issueFixerInstructions: string;
   /** Merged, provider-tagged auto-respond rows (Slack and Discord). */
   channelAutoStartChannels: ChannelAutoStartFormRow[];
+  channelAutoStartEnabled: boolean;
   managerSlackChannel: string;
   managerDiscordChannel: string;
   managerStatsFrequency: ManagerStatsFrequency;
@@ -113,7 +122,11 @@ export type FormState = {
   announcerFrequency: AnnouncerFrequency;
   announcerInstructions: string;
   platformIssueAlertsEnabled: boolean;
-  mergeAnnouncerTargetProvider: 'none' | CommunicationProvider;
+  releaseAnnouncementsEnabled?: boolean;
+  releaseAnnouncementsTargetProvider: 'none' | AutomationDestinationProvider;
+  releaseAnnouncementsTargetMode: 'channel' | 'direct_message';
+  releaseAnnouncementsTargetChannelId: string;
+  mergeAnnouncerTargetProvider: 'none' | AutomationDestinationProvider;
   mergeAnnouncerTargetMode: 'channel' | 'direct_message';
   mergeAnnouncerTargetChannelId: string;
 } & DestinationChannelFormFields &
@@ -133,7 +146,8 @@ export type AutomationId =
   | 'conflictResolver'
   | 'suggester'
   | 'announcer'
-  | 'platformIssueAlerts';
+  | 'platformIssueAlerts'
+  | 'releaseAnnouncements';
 
 const REVIEWER_FIELDS: Array<keyof FormState> = [
   'reviewerEnabled',
@@ -165,6 +179,7 @@ const CONFLICT_RESOLVER_FIELDS: Array<keyof FormState> = [
 ];
 
 const CHANNEL_AUTO_START_FIELDS: Array<keyof FormState> = [
+  'channelAutoStartEnabled',
   'channelAutoStartChannels',
 ];
 
@@ -206,12 +221,14 @@ const SUGGESTER_FIELDS: Array<keyof FormState> = [
   'suggesterUseTelegram',
   'suggesterUseTeams',
   'suggesterInstructions',
+  'suggesterAdditionalRules',
 ];
 
 const ANNOUNCER_FIELDS: Array<keyof FormState> = [
   'announcerFrequency',
   ...DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID.announcer,
   'announcerInstructions',
+  'announcerAdditionalRules',
 ];
 
 const PLATFORM_ISSUE_ALERT_FIELDS: Array<keyof FormState> = [
@@ -219,11 +236,27 @@ const PLATFORM_ISSUE_ALERT_FIELDS: Array<keyof FormState> = [
   ...DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID.platformIssueAlerts,
 ];
 
+const RELEASE_ANNOUNCEMENT_FIELDS: Array<keyof FormState> = [
+  'releaseAnnouncementsEnabled',
+  'releaseAnnouncementsTargetProvider',
+  'releaseAnnouncementsTargetMode',
+  'releaseAnnouncementsTargetChannelId',
+];
+
 const SCHEDULE_ONLY_AUTOMATION_FIELDS = Object.fromEntries(
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_LIST.map((automation) => [
     automation.id,
     [
       automation.frequencyField,
+      ...(automation.id === 'ciFailureTriage'
+        ? (['ciFailureTriageAdditionalRules'] as const)
+        : []),
+      ...(automation.id === 'securityAuditor'
+        ? (['securityAuditorAdditionalRules'] as const)
+        : []),
+      ...(automation.id === 'codeQualityAuditor'
+        ? (['codeQualityAuditorAdditionalRules'] as const)
+        : []),
       ...(DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID[
         automation.id as keyof typeof DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID
       ] ?? []),
@@ -235,6 +268,7 @@ const SCHEDULE_ONLY_AUTOMATION_FIELDS = Object.fromEntries(
             'mergeAnnouncerTargetProvider',
             'mergeAnnouncerTargetMode',
             'mergeAnnouncerTargetChannelId',
+            'mergeAnnouncerAdditionalRules',
           ] as const)
         : []),
     ],
@@ -256,6 +290,7 @@ const AUTOMATION_FIELDS: Record<AutomationId, Array<keyof FormState>> = {
   suggester: SUGGESTER_FIELDS,
   announcer: ANNOUNCER_FIELDS,
   platformIssueAlerts: PLATFORM_ISSUE_ALERT_FIELDS,
+  releaseAnnouncements: RELEASE_ANNOUNCEMENT_FIELDS,
 };
 
 export function isAutomationDirty(
@@ -321,10 +356,12 @@ function buildDestinationChannelSaveInput(formState: FormState) {
         descriptor.discordField,
         formState[descriptor.discordField].trim() || null,
       ],
+      [descriptor.emailField, formState[descriptor.emailField]?.trim() || null],
     ]),
   ) as Record<
     | (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['slackField']
-    | (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['discordField'],
+    | (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['discordField']
+    | (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['emailField'],
     string | null
   >;
 }
@@ -342,6 +379,16 @@ export function buildAutomationSettingsSaveInput(
 
   return {
     savingAutomation: automationId,
+    ciFailureTriageAdditionalRules:
+      stateToSave.ciFailureTriageAdditionalRules ?? '',
+    suggesterAdditionalRules: stateToSave.suggesterAdditionalRules ?? '',
+    announcerAdditionalRules: stateToSave.announcerAdditionalRules ?? '',
+    securityAuditorAdditionalRules:
+      stateToSave.securityAuditorAdditionalRules ?? '',
+    codeQualityAuditorAdditionalRules:
+      stateToSave.codeQualityAuditorAdditionalRules ?? '',
+    mergeAnnouncerAdditionalRules:
+      stateToSave.mergeAnnouncerAdditionalRules ?? '',
     callRoomoteViaEmojiEnabled: stateToSave.callRoomoteViaEmojiEnabled,
     callRoomoteViaEmojiName: stateToSave.callRoomoteViaEmojiName.trim() || null,
     callRoomoteViaEmojiInstructions:
@@ -375,6 +422,7 @@ export function buildAutomationSettingsSaveInput(
         launchMode: row.launchMode,
         launchCriteria: row.launchCriteria.trim() || null,
       })),
+    channelAutoStartEnabled: stateToSave.channelAutoStartEnabled,
     // Always sent (even empty) — only legacy clients omit it, which the API
     // treats as "preserve the persisted Discord rows".
     channelAutoStartDiscordChannels: stateToSave.channelAutoStartChannels
@@ -411,6 +459,15 @@ export function buildAutomationSettingsSaveInput(
     announcerFrequency: stateToSave.announcerFrequency,
     announcerInstructions: stateToSave.announcerInstructions.trim() || null,
     platformIssueAlertsEnabled: stateToSave.platformIssueAlertsEnabled,
+    releaseAnnouncementsEnabled:
+      stateToSave.releaseAnnouncementsEnabled ?? true,
+    releaseAnnouncementsTargetProvider:
+      stateToSave.releaseAnnouncementsTargetProvider === 'none'
+        ? null
+        : stateToSave.releaseAnnouncementsTargetProvider,
+    releaseAnnouncementsTargetMode: stateToSave.releaseAnnouncementsTargetMode,
+    releaseAnnouncementsTargetChannelId:
+      stateToSave.releaseAnnouncementsTargetChannelId.trim() || null,
     ...buildDestinationChannelSaveInput(stateToSave),
   };
 }

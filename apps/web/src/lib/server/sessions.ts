@@ -11,14 +11,18 @@ import {
   fastAgentConversations,
   fastAgentMessages,
   gte,
+  getSessionGoal,
   gt,
   ilike,
   inArray,
   isNotNull,
   isNull,
+  like,
   llmUsageEvents,
   lt,
   or,
+  privateSessionAccess,
+  repositories,
   sessionParticipants,
   sessionPins,
   sessions,
@@ -31,12 +35,25 @@ import {
   tasks,
   users,
 } from '@roomote/db/server';
-import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
+import {
+  ACP_ENVELOPE_EVENT_TYPES,
+  LINEAR_SESSION_ACTOR_PREFIX,
+  type BackgroundAutomationKey,
+} from '@roomote/types';
 import { syncFastAgentSlackTitleBestEffort } from '@roomote/sdk/server';
+import { getRetryableFailedStartRunIds } from '@roomote/cloud-agents/server';
 
 import type { UserAuthSuccess } from '@/types';
+import { parseCreatorFilterValue } from '@/lib/task-creator-filter';
+import { getSessionPullRequests } from '@/lib/session-pull-requests';
+import { parsePullRequestFilterValue } from '@/lib/pull-request-filter';
 
 import { getFastSessionById } from './fast-sessions';
+import { customAutomationSessionAccess } from './custom-automation-session-access';
+import {
+  buildSessionTaskPreviews,
+  getSessionPreviewProxyConfig,
+} from './session-task-previews';
 
 type SessionAuth = Pick<UserAuthSuccess, 'userId' | 'isAdmin'>;
 export type SessionScope = 'all' | 'tasks' | 'reviews' | 'automations';
@@ -52,6 +69,7 @@ type SessionListInput = {
   period?: number | 'all';
   q?: string | null;
   ids?: string[];
+  ownedOnly?: boolean;
   before?: string | null;
   limit?: number;
 };
@@ -63,30 +81,52 @@ const SEARCH_SNIPPET_CONTEXT_CHARS = 60;
 const SEARCH_SNIPPET_LENGTH = 180;
 
 function sessionScope(auth: SessionAuth) {
-  if (auth.isAdmin) return undefined;
+  // Ordinary Sessions remain deployment-collaborative by ID.
+  return customAutomationSessionAccess(auth);
+}
+
+// The /sessions listing mirrors the /tasks listing instead: admins see every
+// Session, other users see the Sessions they own, participate in, or spoke in.
+function sessionListScope(auth: SessionAuth) {
+  if (auth.isAdmin) return sessionScope(auth);
+  return and(
+    sessionScope(auth),
+    or(
+      eq(sessions.ownerUserId, auth.userId),
+      // The access scope above resolves the human owner of custom runs.
+      eq(sessions.ownerAutomation, 'custom_automation'),
+      exists(
+        db
+          .select({ one: sql`1` })
+          .from(sessionParticipants)
+          .where(
+            and(
+              eq(sessionParticipants.sessionId, sessions.id),
+              eq(sessionParticipants.userId, auth.userId),
+            ),
+          ),
+      ),
+      exists(
+        db
+          .select({ one: sql`1` })
+          .from(fastAgentMessages)
+          .where(
+            and(
+              eq(fastAgentMessages.conversationId, sessions.fastConversationId),
+              sql`${fastAgentMessages.metadata} ->> 'userId' = ${auth.userId}`,
+            ),
+          ),
+      ),
+    ),
+  );
+}
+
+function sessionOwnerScope(auth: SessionAuth) {
   return or(
     eq(sessions.ownerUserId, auth.userId),
-    exists(
-      db
-        .select({ one: sql`1` })
-        .from(sessionParticipants)
-        .where(
-          and(
-            eq(sessionParticipants.sessionId, sessions.id),
-            eq(sessionParticipants.userId, auth.userId),
-          ),
-        ),
-    ),
-    exists(
-      db
-        .select({ one: sql`1` })
-        .from(fastAgentMessages)
-        .where(
-          and(
-            eq(fastAgentMessages.conversationId, sessions.fastConversationId),
-            sql`${fastAgentMessages.metadata} ->> 'userId' = ${auth.userId}`,
-          ),
-        ),
+    and(
+      eq(sessions.ownerAutomation, 'custom_automation'),
+      customAutomationSessionAccess({ ...auth, isAdmin: false }),
     ),
   );
 }
@@ -112,7 +152,9 @@ function decodeCursor(cursor?: string | null) {
     : null;
 }
 
-function taskExistsCondition(condition?: ReturnType<typeof eq>) {
+function taskExistsCondition(
+  condition?: ReturnType<typeof eq> | ReturnType<typeof and>,
+) {
   return exists(
     db
       .select({ one: sql`1` })
@@ -126,6 +168,43 @@ function taskExistsCondition(condition?: ReturnType<typeof eq>) {
         ),
       ),
   );
+}
+
+function sessionCreatorCondition(value: string) {
+  const creator = parseCreatorFilterValue(value);
+
+  switch (creator.kind) {
+    case 'automation':
+      return creator.externalId
+        ? taskExistsCondition(
+            and(
+              eq(
+                tasks.initiatorAutomation,
+                creator.key as BackgroundAutomationKey,
+              ),
+              eq(tasks.actorExternalId, creator.externalId),
+            ),
+          )
+        : eq(sessions.ownerAutomation, creator.key as BackgroundAutomationKey);
+    case 'external':
+      return taskExistsCondition(
+        and(
+          eq(tasks.initiatorKind, 'user'),
+          isNull(tasks.initiatorUserId),
+          eq(tasks.actorExternalId, creator.externalId),
+        ),
+      );
+    case 'linearAgent':
+      return taskExistsCondition(
+        and(
+          eq(tasks.initiatorKind, 'user'),
+          isNull(tasks.initiatorUserId),
+          like(tasks.actorExternalId, `${LINEAR_SESSION_ACTOR_PREFIX}%`),
+        ),
+      );
+    case 'user':
+      return eq(sessions.ownerUserId, creator.userId);
+  }
 }
 
 function buildSessionSearch(query: string | null | undefined) {
@@ -235,7 +314,7 @@ async function getSessionSearchSnippets(
   if (sessionIds.length === 0 || !search?.searchTranscripts) {
     return new Map<string, string>();
   }
-  const accessCondition = sessionScope(auth) ?? sql`true`;
+  const accessCondition = sessionListScope(auth) ?? sql`true`;
 
   // Keep context retrieval page-bounded so it reuses relationship indexes
   // instead of repeating the global transcript scan used to find matches.
@@ -331,15 +410,22 @@ function listConditions(
   const cursor = decodeCursor(input.before);
   const scope = input.scope ?? 'all';
   const period = input.period ?? 'all';
-  const pullRequestNumber = Number(input.pullRequest);
+  const pullRequest = input.pullRequest
+    ? parsePullRequestFilterValue(input.pullRequest)
+    : null;
 
   return and(
-    sessionScope(auth),
+    sessionListScope(auth),
+    input.ownedOnly ? sessionOwnerScope(auth) : undefined,
     eq(sessions.visibility, 'visible'),
     isNull(sessions.archivedAt),
     input.ids ? inArray(sessions.id, input.ids) : undefined,
-    input.status ? eq(sessions.cachedStatus, input.status) : undefined,
-    input.user ? eq(sessions.ownerUserId, input.user) : undefined,
+    input.status === 'ready'
+      ? or(eq(sessions.cachedStatus, 'ready'), isNull(sessions.cachedStatus))
+      : input.status
+        ? eq(sessions.cachedStatus, input.status)
+        : undefined,
+    input.user ? sessionCreatorCondition(input.user) : undefined,
     input.source
       ? eq(sessions.sourceSurface, input.source as never)
       : undefined,
@@ -381,19 +467,55 @@ function listConditions(
       ? taskExistsCondition(eq(tasks.repositoryName, input.repository))
       : undefined,
     input.model ? taskExistsCondition(eq(tasks.model, input.model)) : undefined,
-    input.pullRequest && Number.isFinite(pullRequestNumber)
+    pullRequest
       ? exists(
           db
             .select({ one: sql`1` })
             .from(sessionTasks)
+            .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
             .innerJoin(
               taskPullRequests,
               eq(taskPullRequests.taskId, sessionTasks.taskId),
             )
+            .leftJoin(
+              repositories,
+              eq(repositories.id, taskPullRequests.repositoryId),
+            )
             .where(
               and(
                 eq(sessionTasks.sessionId, sessions.id),
-                eq(taskPullRequests.prNumber, pullRequestNumber),
+                isNull(tasks.deletedAt),
+                eq(taskPullRequests.repository, pullRequest.repository),
+                eq(taskPullRequests.prNumber, pullRequest.number),
+                pullRequest.provider
+                  ? eq(
+                      taskPullRequests.sourceControlProvider,
+                      pullRequest.provider,
+                    )
+                  : undefined,
+                pullRequest.repositoryId
+                  ? or(
+                      eq(
+                        taskPullRequests.repositoryId,
+                        pullRequest.repositoryId,
+                      ),
+                      and(
+                        isNull(taskPullRequests.host),
+                        isNull(taskPullRequests.repositoryId),
+                      ),
+                    )
+                  : pullRequest.host
+                    ? or(
+                        eq(
+                          sql`coalesce(${taskPullRequests.host}, ${repositories.host})`,
+                          pullRequest.host,
+                        ),
+                        and(
+                          isNull(taskPullRequests.host),
+                          isNull(taskPullRequests.repositoryId),
+                        ),
+                      )
+                    : undefined,
               ),
             ),
         )
@@ -410,6 +532,8 @@ const baseSelection = {
   ownerKind: sessions.ownerKind,
   ownerUserId: sessions.ownerUserId,
   ownerAutomation: sessions.ownerAutomation,
+  privacy: sessions.privacy,
+  privateOwnerUserId: sessions.privateOwnerUserId,
   ownerName: users.name,
   ownerEmail: users.email,
   ownerImageUrl: users.imageUrl,
@@ -447,6 +571,14 @@ type HydratedLinkedTask = {
   repositoryName: string | null;
   model: string | null;
   activityAt: number;
+  inferenceCostMicroUsd?: number;
+};
+
+type SessionListArtifact = {
+  sessionId: string;
+  taskId: string | null;
+  path: string;
+  version: number;
 };
 
 async function hydrateSessionRows(
@@ -467,12 +599,15 @@ async function hydrateSessionRows(
   const ids = rows.map((row) => row.id);
   const [
     linkedTasks,
+    linkedPullRequests,
     participants,
-    usage,
-    legacyTaskUsage,
-    legacyFastUsage,
+    directSessionUsage,
+    attachedTaskUsage,
+    legacyFastDirectUsage,
     externalFastActivity,
     pins,
+    linkedTaskArtifacts,
+    directSessionArtifacts,
   ] = await Promise.all([
     options.preloadedLinkedTasks ??
       db
@@ -493,6 +628,23 @@ async function hydrateSessionRows(
         ),
     db
       .select({
+        sessionId: sessionTasks.sessionId,
+        url: taskPullRequests.prUrl,
+        number: taskPullRequests.prNumber,
+        repository: taskPullRequests.repository,
+        status: taskPullRequests.status,
+      })
+      .from(sessionTasks)
+      .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
+      .innerJoin(
+        taskPullRequests,
+        eq(taskPullRequests.taskId, sessionTasks.taskId),
+      )
+      .where(
+        and(inArray(sessionTasks.sessionId, ids), isNull(tasks.deletedAt)),
+      ),
+    db
+      .select({
         sessionId: sessionParticipants.sessionId,
         userId: sessionParticipants.userId,
         role: sessionParticipants.role,
@@ -507,22 +659,24 @@ async function hydrateSessionRows(
         costMicroUsd: sql<number>`coalesce(sum(${llmUsageEvents.costMicroUsd}), 0)::bigint`,
       })
       .from(llmUsageEvents)
-      .where(inArray(llmUsageEvents.sessionId, ids))
+      .where(
+        and(
+          inArray(llmUsageEvents.sessionId, ids),
+          isNull(llmUsageEvents.taskId),
+        ),
+      )
       .groupBy(llmUsageEvents.sessionId),
     db
       .select({
         sessionId: sessionTasks.sessionId,
+        taskId: sessionTasks.taskId,
         costMicroUsd: sql<number>`coalesce(sum(${llmUsageEvents.costMicroUsd}), 0)::bigint`,
       })
       .from(sessionTasks)
+      .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
       .innerJoin(llmUsageEvents, eq(llmUsageEvents.taskId, sessionTasks.taskId))
-      .where(
-        and(
-          inArray(sessionTasks.sessionId, ids),
-          isNull(llmUsageEvents.sessionId),
-        ),
-      )
-      .groupBy(sessionTasks.sessionId),
+      .where(and(inArray(sessionTasks.sessionId, ids), isNull(tasks.deletedAt)))
+      .groupBy(sessionTasks.sessionId, sessionTasks.taskId),
     db
       .select({
         sessionId: sessions.id,
@@ -530,11 +684,17 @@ async function hydrateSessionRows(
           select coalesce(sum(legacy_usage.cost_micro_usd), 0)::bigint
           from task_inference_usage_events legacy_usage
           where legacy_usage.session_id is null
+            and legacy_usage.task_id is null
             and legacy_usage.harness_session_id in (
               select distinct ${fastAgentMessages.nativeSessionId}
               from ${fastAgentMessages}
               where ${fastAgentMessages.conversationId} = ${sessions.fastConversationId}
                 and ${fastAgentMessages.nativeSessionId} is not null
+              union
+              select ${fastAgentConversations.openCodeSessionId}
+              from ${fastAgentConversations}
+              where ${fastAgentConversations.id} = ${sessions.fastConversationId}
+                and ${fastAgentConversations.openCodeSessionId} is not null
             )
         )`,
       })
@@ -568,9 +728,66 @@ async function hydrateSessionRows(
           inArray(sessionPins.sessionId, ids),
         ),
       ),
+    db
+      .selectDistinctOn(
+        [sessionTasks.sessionId, taskArtifacts.taskId, taskArtifacts.path],
+        {
+          sessionId: sessionTasks.sessionId,
+          taskId: taskArtifacts.taskId,
+          path: taskArtifacts.path,
+          version: taskArtifacts.version,
+        },
+      )
+      .from(sessionTasks)
+      .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
+      .innerJoin(taskArtifacts, eq(taskArtifacts.taskId, sessionTasks.taskId))
+      .where(
+        and(
+          inArray(sessionTasks.sessionId, ids),
+          isNull(tasks.deletedAt),
+          eq(taskArtifacts.uploaded, true),
+        ),
+      )
+      .orderBy(
+        sessionTasks.sessionId,
+        taskArtifacts.taskId,
+        taskArtifacts.path,
+        desc(taskArtifacts.version),
+      ),
+    db
+      .selectDistinctOn([taskArtifacts.sessionId, taskArtifacts.path], {
+        sessionId: taskArtifacts.sessionId,
+        taskId: taskArtifacts.taskId,
+        path: taskArtifacts.path,
+        version: taskArtifacts.version,
+      })
+      .from(taskArtifacts)
+      .where(
+        and(
+          inArray(taskArtifacts.sessionId, ids),
+          eq(taskArtifacts.uploaded, true),
+        ),
+      )
+      .orderBy(
+        taskArtifacts.sessionId,
+        taskArtifacts.path,
+        desc(taskArtifacts.version),
+      ),
   ]);
 
   const pinned = new Set(pins.map((pin) => pin.sessionId));
+  const artifactsBySession = new Map<string, SessionListArtifact[]>();
+  for (const artifact of [...linkedTaskArtifacts, ...directSessionArtifacts]) {
+    if (!artifact.sessionId) continue;
+    const sessionArtifacts = artifactsBySession.get(artifact.sessionId) ?? [];
+    sessionArtifacts.push({
+      sessionId: artifact.sessionId,
+      taskId: artifact.taskId,
+      path: artifact.path,
+      version: artifact.version,
+    });
+    artifactsBySession.set(artifact.sessionId, sessionArtifacts);
+  }
   return rows.map((row) => {
     const tasksForSession = linkedTasks.filter(
       (task) => task.sessionId === row.id,
@@ -592,23 +809,51 @@ async function hydrateSessionRows(
           ?.eventAt ?? 0,
       ),
     );
+    const directInferenceCostMicroUsd =
+      Number(
+        directSessionUsage.find((event) => event.sessionId === row.id)
+          ?.costMicroUsd ?? 0,
+      ) +
+      Number(
+        legacyFastDirectUsage.find((event) => event.sessionId === row.id)
+          ?.costMicroUsd ?? 0,
+      );
+    const tasksWithUsage = tasksForSession.map((task) => ({
+      ...task,
+      inferenceCostMicroUsd: Number(
+        attachedTaskUsage.find((event) => event.taskId === task.taskId)
+          ?.costMicroUsd ?? 0,
+      ),
+    }));
+    const taskInferenceCostMicroUsd = tasksWithUsage.reduce(
+      (total, task) => total + task.inferenceCostMicroUsd,
+      0,
+    );
+    const sessionArtifacts = artifactsBySession.get(row.id) ?? [];
     return {
       ...row,
-      tasks: tasksForSession,
+      tasks: tasksWithUsage,
+      pullRequests: getSessionPullRequests([
+        {
+          pullRequests: linkedPullRequests
+            .filter((pullRequest) => pullRequest.sessionId === row.id)
+            .map(({ sessionId: _sessionId, ...pullRequest }) => pullRequest),
+        },
+      ]),
       executionCount: tasksForSession.length,
       participants: sessionParticipantsRows,
+      directInferenceCostMicroUsd,
       inferenceCostMicroUsd:
-        Number(
-          usage.find((event) => event.sessionId === row.id)?.costMicroUsd ?? 0,
-        ) +
-        Number(
-          legacyTaskUsage.find((event) => event.sessionId === row.id)
-            ?.costMicroUsd ?? 0,
-        ) +
-        Number(
-          legacyFastUsage.find((event) => event.sessionId === row.id)
-            ?.costMicroUsd ?? 0,
-        ),
+        directInferenceCostMicroUsd + taskInferenceCostMicroUsd,
+      artifactCount: sessionArtifacts.length,
+      singleArtifact:
+        sessionArtifacts.length === 1
+          ? {
+              taskId: sessionArtifacts[0]!.taskId,
+              path: sessionArtifacts[0]!.path,
+              version: sessionArtifacts[0]!.version,
+            }
+          : null,
       unread: latestExternalEventAt > Number(cursor?.lastReadEventAt ?? 0),
       pinned: pinned.has(row.id),
     };
@@ -652,6 +897,22 @@ export async function getSessions(auth: SessionAuth, input: SessionListInput) {
   };
 }
 
+export async function getSessionSources(auth: SessionAuth) {
+  const rows = await db
+    .selectDistinct({ source: sessions.sourceSurface })
+    .from(sessions)
+    .where(
+      and(
+        sessionListScope(auth),
+        eq(sessions.visibility, 'visible'),
+        isNull(sessions.archivedAt),
+      ),
+    )
+    .orderBy(asc(sessions.sourceSurface));
+
+  return rows.map(({ source }) => source);
+}
+
 export async function findAccessibleSession(
   auth: SessionAuth,
   sessionId: string,
@@ -665,7 +926,30 @@ export async function findAccessibleSession(
   return session ?? null;
 }
 
-async function findAccessibleSessionByFastConversationId(
+/** Direct-link reads remain collaborative for shared Sessions. */
+export async function findReadableSession(
+  auth: SessionAuth,
+  sessionId: string,
+) {
+  if (!auth.userId) return null;
+  const [session] = await db
+    .select(baseSelection)
+    .from(sessions)
+    .leftJoin(users, eq(users.id, sessions.ownerUserId))
+    .where(
+      and(
+        or(
+          eq(sessions.id, sessionId),
+          eq(sessions.fastConversationId, sessionId),
+        ),
+        privateSessionAccess(auth),
+      ),
+    )
+    .limit(1);
+  return session ?? null;
+}
+
+export async function findAccessibleSessionByFastConversationId(
   auth: SessionAuth,
   fastConversationId: string,
 ) {
@@ -693,7 +977,6 @@ async function getSessionTasks(sessionId: string) {
       title: tasks.title,
       workflow: tasks.workflow,
       state: tasks.state,
-      goalStatus: tasks.goalStatus,
       repositoryName: tasks.repositoryName,
       model: tasks.model,
       activityAt: tasks.activityAt,
@@ -701,14 +984,16 @@ async function getSessionTasks(sessionId: string) {
     .from(sessionTasks)
     .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
     .where(and(eq(sessionTasks.sessionId, sessionId), isNull(tasks.deletedAt)))
-    .orderBy(sessionTasks.attachedAt);
+    // attachedAt ties are common (tasks attached in one statement share a
+    // timestamp), so break them deterministically.
+    .orderBy(sessionTasks.attachedAt, sessionTasks.taskId);
 
   if (linked.length === 0) return [];
 
   // Four batched lookups regardless of task count; the per-task N+1 version
   // multiplied badly under the session workspace's polling.
   const taskIds = linked.map((task) => task.taskId);
-  const [latestRuns, artifactRows, pullRequestRows, usageRows] =
+  const [latestRuns, artifactRows, pullRequestRows, usageRows, previewConfig] =
     await Promise.all([
       db
         .selectDistinctOn([taskRuns.taskId], {
@@ -716,8 +1001,19 @@ async function getSessionTasks(sessionId: string) {
           id: taskRuns.id,
           status: taskRuns.status,
           taskPhase: taskRuns.taskPhase,
+          payloadKind: taskRuns.payloadKind,
+          payload: taskRuns.payload,
           error: taskRuns.error,
           result: taskRuns.result,
+          machineDomain: taskRuns.machineDomain,
+          machineDomains: taskRuns.machineDomains,
+          initialPaths: taskRuns.initialPaths,
+          primaryPortName: taskRuns.primaryPortName,
+          sleepRequestedAt: taskRuns.sleepRequestedAt,
+          snapshotRequestedAt: taskRuns.snapshotRequestedAt,
+          snapshotCreatedAt: taskRuns.snapshotCreatedAt,
+          snapshotFailedAt: taskRuns.snapshotFailedAt,
+          snapshotId: taskRuns.snapshotId,
         })
         .from(taskRuns)
         .where(inArray(taskRuns.taskId, taskIds))
@@ -730,6 +1026,8 @@ async function getSessionTasks(sessionId: string) {
           artifactType: taskArtifacts.artifactType,
           contentType: taskArtifacts.contentType,
           size: taskArtifacts.size,
+          version: taskArtifacts.version,
+          createdAt: taskArtifacts.createdAt,
         })
         .from(taskArtifacts)
         .where(
@@ -759,9 +1057,12 @@ async function getSessionTasks(sessionId: string) {
         .from(llmUsageEvents)
         .where(inArray(llmUsageEvents.taskId, taskIds))
         .groupBy(llmUsageEvents.taskId),
+      getSessionPreviewProxyConfig(),
     ]);
 
   const latestRunByTask = new Map(latestRuns.map((run) => [run.taskId, run]));
+  const retryableFailedStartRunIds =
+    await getRetryableFailedStartRunIds(latestRuns);
   const usageByTask = new Map(
     usageRows.map((row) => [row.taskId, Number(row.costMicroUsd)]),
   );
@@ -773,6 +1074,7 @@ async function getSessionTasks(sessionId: string) {
           id: latestRunRow.id,
           status: latestRunRow.status,
           taskPhase: latestRunRow.taskPhase,
+          canRetryFailedStart: retryableFailedStartRunIds.has(latestRunRow.id),
           error: latestRunRow.error,
           result: latestRunRow.result,
         }
@@ -793,6 +1095,11 @@ async function getSessionTasks(sessionId: string) {
       latestRun,
       latestOutput,
       inferenceCostMicroUsd: usageByTask.get(task.taskId) ?? 0,
+      previews: buildSessionTaskPreviews(
+        task.taskId,
+        latestRunRow,
+        previewConfig,
+      ),
       artifacts: artifactRows
         .filter((artifact) => artifact.taskId === task.taskId)
         .map(({ taskId: _taskId, ...artifact }) => artifact),
@@ -803,14 +1110,37 @@ async function getSessionTasks(sessionId: string) {
   });
 }
 
+async function getSessionArtifacts(sessionId: string) {
+  return db
+    .select({
+      id: taskArtifacts.id,
+      path: taskArtifacts.path,
+      artifactType: taskArtifacts.artifactType,
+      contentType: taskArtifacts.contentType,
+      size: taskArtifacts.size,
+      version: taskArtifacts.version,
+      createdAt: taskArtifacts.createdAt,
+    })
+    .from(taskArtifacts)
+    .where(
+      and(
+        eq(taskArtifacts.sessionId, sessionId),
+        eq(taskArtifacts.uploaded, true),
+      ),
+    )
+    .orderBy(desc(taskArtifacts.createdAt));
+}
+
 export async function getSessionById(auth: SessionAuth, sessionId: string) {
-  const session =
-    (await findAccessibleSession(auth, sessionId)) ??
-    (await findAccessibleSessionByFastConversationId(auth, sessionId));
+  const session = await findReadableSession(auth, sessionId);
   if (!session) return null;
   // Fetch the task rollups once and feed them into hydration; this endpoint
   // is polled, so the duplicate linked-tasks join was pure waste.
-  const sessionTaskDetails = await getSessionTasks(session.id);
+  const [sessionTaskDetails, artifacts, goal] = await Promise.all([
+    getSessionTasks(session.id),
+    getSessionArtifacts(session.id),
+    getSessionGoal(session.id),
+  ]);
   const [hydrated] = await hydrateSessionRows(auth, [session], {
     preloadedLinkedTasks: sessionTaskDetails.map((task) => ({
       sessionId: session.id,
@@ -828,20 +1158,32 @@ export async function getSessionById(auth: SessionAuth, sessionId: string) {
     tasks: sessionTaskDetails.map((task) => ({
       state: task.state,
       taskPhase: task.latestRun?.taskPhase ?? null,
-      goalStatus: task.goalStatus,
     })),
+    goalStatus: goal?.status ?? null,
   });
-  return { ...hydrated!, tasks: sessionTaskDetails, status: liveStatus };
+  return {
+    ...hydrated!,
+    tasks: sessionTaskDetails,
+    artifacts,
+    goal,
+    status: liveStatus,
+  };
 }
 
 export async function getSessionTimeline(
   auth: SessionAuth,
   sessionId: string,
-  since = 0,
+  cursor?: number | { at: number; seenIdsAtTimestamp: string[] },
 ) {
-  const session = await findAccessibleSession(auth, sessionId);
+  const session = await findReadableSession(auth, sessionId);
   if (!session) return null;
-  const taskRows = await getSessionTasks(sessionId);
+  const legacySince = typeof cursor === 'number' ? cursor : null;
+  const after =
+    typeof cursor === 'number'
+      ? { at: cursor, seenIdsAtTimestamp: [] }
+      : (cursor ?? { at: 0, seenIdsAtTimestamp: [] });
+  const seenIdsAtTimestamp = new Set(after.seenIdsAtTimestamp);
+  const taskRows = await getSessionTasks(session.id);
   const fast = session.fastConversationId
     ? await getFastSessionById(auth, session.fastConversationId)
     : null;
@@ -850,7 +1192,6 @@ export async function getSessionTimeline(
     title: task.title,
     workflow: task.workflow,
     state: task.state,
-    goalStatus: task.goalStatus,
     repositoryName: task.repositoryName,
     activityAt: task.activityAt,
     attachedAt: task.attachedAt,
@@ -881,11 +1222,36 @@ export async function getSessionTimeline(
       },
     ]),
   ]
-    .filter((event) => event.at > since)
+    .filter(
+      (event) =>
+        event.at > after.at ||
+        (legacySince === null &&
+          event.at === after.at &&
+          !seenIdsAtTimestamp.has(event.id)),
+    )
     .sort(
       (left, right) => left.at - right.at || left.id.localeCompare(right.id),
     );
-  return { events, cursor: events.at(-1)?.at ?? since };
+  const last = events.at(-1);
+  const nextAt = last?.at ?? after.at;
+  const nextSeenIds = new Set(
+    nextAt === after.at ? after.seenIdsAtTimestamp : [],
+  );
+  for (const event of events) {
+    if (event.at === nextAt) nextSeenIds.add(event.id);
+  }
+  if (legacySince !== null) {
+    return { events, cursor: nextAt };
+  }
+  return {
+    events,
+    cursor: {
+      at: nextAt,
+      seenIdsAtTimestamp: [...nextSeenIds].sort((left, right) =>
+        left.localeCompare(right),
+      ),
+    },
+  };
 }
 
 /**
@@ -936,11 +1302,12 @@ export async function getLatestExternalSessionEvent(
 }
 
 export async function getSessionForTask(auth: SessionAuth, taskId: string) {
+  if (!auth.userId) return null;
   const [row] = await db
     .select({ sessionId: sessions.id, title: sessions.title })
     .from(sessionTasks)
     .innerJoin(sessions, eq(sessions.id, sessionTasks.sessionId))
-    .where(and(eq(sessionTasks.taskId, taskId), sessionScope(auth)))
+    .where(and(eq(sessionTasks.taskId, taskId), privateSessionAccess(auth)))
     .limit(1);
   return row ?? null;
 }
@@ -964,6 +1331,7 @@ export async function updateSessionMetadata(
       .where(
         and(
           eq(sessions.id, sessionId),
+          privateSessionAccess(auth),
           auth.isAdmin ? undefined : eq(sessions.ownerUserId, auth.userId),
         ),
       )

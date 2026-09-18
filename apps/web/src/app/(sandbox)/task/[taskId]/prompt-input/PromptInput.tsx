@@ -8,8 +8,10 @@ import {
   useRef,
   useState,
 } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
+
+import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 
 import {
   preparePromptAttachments,
@@ -17,7 +19,12 @@ import {
 } from '@/lib/prompt-attachments';
 
 import { useUser } from '@/hooks/useUser';
+import {
+  SUGGESTION_MIN_HISTORY_MESSAGES,
+  useGhostSuggestion,
+} from '@/hooks/useGhostSuggestion';
 import { useVoiceDictation } from '@/hooks/useVoiceDictation';
+import { useAutoFocusOnce } from '@/hooks/useAutoFocusOnce';
 import { useTRPC, useTRPCClient } from '@/trpc/client';
 
 import {
@@ -46,6 +53,7 @@ import {
   useSandboxReadOnly,
   useSandboxTaskPhase,
 } from '../hooks/SandboxProvider';
+import { useTaskMessageEnvelopes } from '../hooks/use-task-message-envelopes';
 import type { TaskRunDetail } from '@/lib/server/task-runs';
 import { TaskToolsButton } from '../sidebar-actions/TaskToolsButton';
 import { shouldShowTaskToolsActions } from '../sidebar-actions/utils';
@@ -63,6 +71,11 @@ import { TaskStatus } from './TaskStatus';
 const DRAFT_SAVE_DEBOUNCE_MS = 1_000;
 const KEEPALIVE_TOUCH_THROTTLE_MS = 10_000;
 const SANDBOX_CANCEL_TIMEOUT_MS = 10_000;
+
+const SUGGESTION_HISTORY_EVENT_TYPES = new Set<string>([
+  ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+  ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+]);
 
 export interface PromptInputHandle {
   focus: () => void;
@@ -82,6 +95,7 @@ interface PromptInputProps {
   showInputMenu?: boolean;
   placeholder?: string;
   hasTransportError?: boolean;
+  autoFocus?: boolean;
 }
 
 export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
@@ -98,6 +112,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
       showInputMenu = true,
       placeholder: placeholderProp,
       hasTransportError = false,
+      autoFocus = false,
     },
     ref,
   ) {
@@ -117,12 +132,60 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
     const { user } = useUser();
     const pendingUserInputState = useOptionalPendingUserInputRequestState();
     const [prompt, setPrompt] = useState(initialPrompt);
+    const [isTextareaFocused, setIsTextareaFocused] = useState(false);
     const [sending, setSending] = useState(false);
     const cancellingRef = useRef(false);
     const steeringQueuedMessageRef = useRef(false);
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
     const runId = taskRun?.id;
     const taskId = taskRun?.taskId;
+    const taskHistory = useTaskMessageEnvelopes(taskId, {
+      enabled: Boolean(taskId) && connected && !readOnly,
+    }).data;
+    const historyMessageCount =
+      taskHistory?.reduce(
+        (count, message) =>
+          SUGGESTION_HISTORY_EVENT_TYPES.has(message.eventType) &&
+          message.visibleInTranscript !== false &&
+          message.text?.trim()
+            ? count + 1
+            : count,
+        0,
+      ) ?? 0;
+    // Use the latest persisted assistant timestamp rather than a count so the
+    // revision remains monotonic when the bounded transcript window advances.
+    const historyRevision =
+      taskHistory?.reduce(
+        (latestTs, message) =>
+          message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+          message.text?.trim()
+            ? Math.max(latestTs, message.ts)
+            : latestTs,
+        0,
+      ) ?? 0;
+
+    // Suggestions exist only while the agent is waiting for the human: an
+    // assistant message landing mid-turn advances the revision, and without
+    // this gate each one would generate and surface a premature suggestion
+    // while the agent is still working.
+    const isAwaitingHuman = taskPhase === 'waiting_for_prompt';
+
+    const composerSuggestionQuery = useQuery(
+      trpc.tasks.composerSuggestion.queryOptions(
+        { taskId: taskId ?? '', historyRevision },
+        {
+          enabled:
+            Boolean(taskId) &&
+            connected &&
+            !readOnly &&
+            isAwaitingHuman &&
+            historyMessageCount >= SUGGESTION_MIN_HISTORY_MESSAGES,
+          staleTime: Number.POSITIVE_INFINITY,
+          refetchOnWindowFocus: false,
+        },
+      ),
+    );
+    const suggestion = composerSuggestionQuery.data?.suggestion?.trim() || null;
 
     const draftSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
       null,
@@ -145,6 +208,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
     );
 
     const isTaskRunning = taskPhase === 'running';
+    useAutoFocusOnce(textareaRef, autoFocus && connected && !sending);
     const canSteerQueuedMessages =
       isSteerablePhase(taskPhase) &&
       (taskPhase !== 'waiting_for_prompt' || connected);
@@ -266,6 +330,26 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
         flushDraft({ force: true });
       }
     }, [runId, flushDraft]);
+
+    const {
+      ghostSuggestion,
+      suggestionHintId,
+      acceptGhostSuggestion,
+      consumeSuggestion,
+      handleSuggestionKeyDown,
+      handleSuggestionPointerDown,
+    } = useGhostSuggestion({
+      suggestion,
+      active: !prompt && !sending && isAwaitingHuman,
+      surface: 'task',
+      onAccept: (text) => {
+        applyPromptChange(text);
+        requestAnimationFrame(() => {
+          const textarea = textareaRef.current;
+          focusTextarea(textarea ? textarea.value.length : undefined);
+        });
+      },
+    });
 
     const updatePrompt = useCallback(
       (
@@ -394,13 +478,15 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
         const result = await trpcClient.taskRuns.cancel.mutate({
           taskId,
           runId,
+          terminate: false,
         });
 
         if (!result.success) {
-          throw new Error(result.error);
+          toast.error(result.error);
         }
       } catch (err) {
         console.error('[sandbox] cancelTask fallback error:', err);
+        toast.error('Failed to stop task. Please try again.');
       } finally {
         cancellingRef.current = false;
       }
@@ -410,10 +496,6 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
       async (message: PromptInputMessage) => {
         const text = message.text.trim();
         const hasAttachments = (message.files?.length ?? 0) > 0;
-        const goalCommandMatch = /^\/goal(?:\s+([\s\S]*))?$/i.exec(text);
-        const goalObjective = goalCommandMatch
-          ? (goalCommandMatch[1] ?? '').trim()
-          : null;
         // Keyed off the live pending request rather than the task phase:
         // the phase can report running while the turn is still blocked on
         // the question, and a message here must answer it, not steer.
@@ -427,21 +509,15 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
           !taskRun?.taskId ||
           sending
         ) {
-          return;
+          return false;
         }
 
-        if (
-          !shouldAnswerPendingFreeText &&
-          goalObjective !== null &&
-          (!goalObjective || hasAttachments)
-        ) {
-          toast.error(
-            hasAttachments
-              ? 'Goal Mode does not support attachments.'
-              : 'Describe the goal after /goal.',
-          );
-          return;
+        if (!shouldAnswerPendingFreeText && /^\/goal(?:\s|$)/i.test(text)) {
+          toast.error('Start Goal Mode from the Session conversation.');
+          return false;
         }
+
+        consumeSuggestion();
 
         handlePromptChange('');
         setSending(true);
@@ -459,11 +535,11 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
               handleMessageSent();
             }
 
-            return;
+            return answered;
           }
 
           const preparedPrompt = await preparePromptAttachments({
-            text: goalObjective ?? text,
+            text,
             attachments: message.files,
           });
 
@@ -480,35 +556,19 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
           });
           optimisticClientMessageId = clientMessageId;
 
-          if (goalObjective !== null) {
-            const started = await trpcClient.taskRuns.startGoal.mutate({
-              taskId: taskRun.taskId,
-              goal: { objective: goalObjective },
-              clientMessageId,
-              userImageUrl,
-            });
-
-            if (!started.success) {
-              throw new Error(started.error);
-            }
-          } else {
-            await trpcClient.sandboxSession.sendPrompt.mutate({
-              taskId: taskRun.taskId,
-              prompt: preparedPrompt.text,
-              images: preparedPrompt.images,
-              source: 'web',
-              clientMessageId,
-              userImageUrl,
-              autoSteerWhenQueued: true,
-            });
-          }
-
-          if (goalObjective !== null) {
-            toast.success('Goal Mode enabled');
-          }
+          await trpcClient.sandboxSession.sendPrompt.mutate({
+            taskId: taskRun.taskId,
+            prompt: preparedPrompt.text,
+            images: preparedPrompt.images,
+            source: 'web',
+            clientMessageId,
+            userImageUrl,
+            autoSteerWhenQueued: true,
+          });
 
           handleMessageSent();
         } catch (err) {
+          handlePromptChange(text);
           if (optimisticClientMessageId) {
             const failedClientMessageId = optimisticClientMessageId;
 
@@ -524,6 +584,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
           toast.error(
             err instanceof Error ? err.message : 'Failed to send message.',
           );
+          throw err;
         } finally {
           setSending(false);
         }
@@ -532,6 +593,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
         client,
         pendingUserInputState,
         sending,
+        consumeSuggestion,
         handlePromptChange,
         scrollToBottom,
         handleMessageSent,
@@ -622,19 +684,6 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
         );
     }, [applyPromptChange, focusTextarea]);
 
-    // Re-focus the textarea after a message is sent. We use an effect rather
-    // than focusing in handleSubmit because the inner PromptInput component
-    // calls form.reset() *after* handleSubmit's promise resolves, which would
-    // steal focus away from a synchronous .focus() call.
-    const wasSendingRef = useRef(false);
-    useEffect(() => {
-      if (wasSendingRef.current && !sending) {
-        // Delay one frame so the inner form.reset() completes first.
-        requestAnimationFrame(() => focusTextarea());
-      }
-      wasSendingRef.current = sending;
-    }, [sending, focusTextarea]);
-
     // Auto-focus the textarea when recording stops so the user can immediately
     // press Enter / Cmd+Enter to send the dictated text.
     const wasRecordingRef = useRef(false);
@@ -651,6 +700,10 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
 
     const handleTextareaKeyDown = useCallback(
       (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if (handleSuggestionKeyDown(event)) {
+          return;
+        }
+
         const submitButton = event.currentTarget.form?.querySelector(
           'button[type="submit"]',
         ) as HTMLButtonElement | null;
@@ -702,6 +755,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
       [
         canSteerQueuedMessages,
         client,
+        handleSuggestionKeyDown,
         prompt,
         readOnly,
         steerableQueuedMessages,
@@ -713,19 +767,50 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
         <PromptInputRoot
           onSubmit={handleSubmit}
           accept={ROOMOTE_FILE_ATTACHMENT_ACCEPT}
+          keepFocusOnSubmit
           multiple
         >
           <AttachmentsDisplay />
           <PromptInputBody>
-            <PromptInputTextarea
-              ref={textareaRef}
-              value={prompt}
-              onChange={handleChange}
-              onBlur={() => flushDraft()}
-              onKeyDown={handleTextareaKeyDown}
-              placeholder={placeholder}
-              disabled={!connected || sending}
-            />
+            <div className="flex items-start">
+              <PromptInputTextarea
+                className="min-w-0 flex-1"
+                ref={textareaRef}
+                value={prompt}
+                onChange={handleChange}
+                onFocus={() => setIsTextareaFocused(true)}
+                onBlur={() => {
+                  setIsTextareaFocused(false);
+                  flushDraft();
+                }}
+                onKeyDown={handleTextareaKeyDown}
+                placeholder={ghostSuggestion ?? placeholder}
+                aria-describedby={
+                  ghostSuggestion ? suggestionHintId : undefined
+                }
+                disabled={!connected || sending}
+              />
+              {ghostSuggestion && (
+                <>
+                  <span id={suggestionHintId} className="sr-only">
+                    Suggested message: {ghostSuggestion}. Press Tab to accept or
+                    Escape to dismiss.
+                  </span>
+                  {isTextareaFocused && (
+                    <button
+                      type="button"
+                      aria-label="Insert suggested message"
+                      onPointerDown={handleSuggestionPointerDown}
+                      onClick={acceptGhostSuggestion}
+                      className="mt-4 mr-4 shrink-0 whitespace-nowrap rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground/70 transition-colors hover:bg-muted hover:text-muted-foreground"
+                    >
+                      <span className="md:hidden">Accept</span>
+                      <span className="hidden md:inline">Tab to accept</span>
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
           </PromptInputBody>
           <PromptInputFooter className="pt-0 pb-4 px-4">
             <PromptInputTools>

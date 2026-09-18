@@ -1,33 +1,41 @@
 'use client';
 
 import {
+  useCallback,
   memo,
   useEffect,
+  useLayoutEffect,
   useMemo,
+  useRef,
   useState,
   type MutableRefObject,
 } from 'react';
-import type { ScrollToBottom } from 'use-stick-to-bottom';
+import {
+  useStickToBottomContext,
+  type ScrollToBottom,
+} from 'use-stick-to-bottom';
 
 import {
   Conversation,
   ConversationContent,
   ConversationScrollButton,
-  Message,
-  MessageContent,
-  Shimmer,
 } from '@/components/ai-elements';
 import {
   MessageUiOptionsProvider,
   type MessageUiOptions,
 } from '@/components/ai-elements/message-ui-options';
+import {
+  SlackMentionProvider,
+  type SlackMentionScope,
+} from '@/components/ai-elements/slack-mention-context';
 import { useNarrationMode } from '@/hooks/useNarrationMode';
 import { useMindReaderMode } from '@/hooks/useMindReaderMode';
-import { Lightbulb, Skeleton } from '@/components/system';
+import { Button, Skeleton } from '@/components/system';
 import { cn } from '@/lib/utils';
 
 import {
   useSandboxMessages,
+  useSandboxHistoryControls,
   useSandboxHistoryReady,
   useSandboxTaskPhase,
   type TaskSession,
@@ -38,6 +46,7 @@ import { SleepWakeMessages } from './messages/index';
 import {
   AcpTextMessage,
   AcpTranscriptBlockList,
+  AcpWorkingMessage,
   hasVisibleAssistantOutput,
   useAcpTranscriptBlocks,
 } from './messages/acp';
@@ -63,8 +72,9 @@ interface MessagesProps {
 }
 
 const NARRATION_WORKING_REVEAL_DELAY_MS = 700;
+const OLDER_HISTORY_TRIGGER_PX = 800;
 
-function NarrationWorkingReasoningMessage() {
+function DelayedWorkingMessage() {
   const [isVisible, setIsVisible] = useState(false);
 
   useEffect(() => {
@@ -77,18 +87,7 @@ function NarrationWorkingReasoningMessage() {
 
   if (!isVisible) return null;
 
-  return (
-    <Message from="assistant" className="chat-reasoning-message">
-      <MessageContent>
-        <div className="flex items-center gap-2 text-sm font-light text-muted-foreground">
-          <Lightbulb className="size-4" />
-          <Shimmer direction="rl" duration={1}>
-            Thinking...
-          </Shimmer>
-        </div>
-      </MessageContent>
-    </Message>
-  );
+  return <AcpWorkingMessage />;
 }
 
 function TranscriptSkeleton() {
@@ -102,6 +101,153 @@ function TranscriptSkeleton() {
         <Skeleton className="ml-auto h-4 w-16" />
         <Skeleton className="ml-auto h-16 w-3/4 rounded-2xl" />
       </div>
+    </div>
+  );
+}
+
+function TranscriptHistoryControls({
+  oldestMessageId,
+}: {
+  oldestMessageId: string | undefined;
+}) {
+  const {
+    isError,
+    isRetrying,
+    retry,
+    hasOlderMessages,
+    isFetchingOlderMessages,
+    olderMessagesError,
+    fetchOlderMessages,
+  } = useSandboxHistoryControls();
+  const { scrollRef, stopScroll } = useStickToBottomContext();
+  const pendingScrollAdjustmentRef = useRef<{
+    scrollHeight: number;
+    scrollTop: number;
+  } | null>(null);
+  const automaticLoadArmedRef = useRef(true);
+  const loadInFlightRef = useRef(false);
+
+  useLayoutEffect(() => {
+    const pending = pendingScrollAdjustmentRef.current;
+    const scrollElement = scrollRef.current;
+    if (!pending || !scrollElement) return;
+
+    scrollElement.scrollTop =
+      pending.scrollTop + (scrollElement.scrollHeight - pending.scrollHeight);
+    pendingScrollAdjustmentRef.current = null;
+  }, [oldestMessageId, scrollRef]);
+
+  const loadOlder = useCallback(async () => {
+    if (
+      !hasOlderMessages ||
+      isFetchingOlderMessages ||
+      loadInFlightRef.current
+    ) {
+      return;
+    }
+
+    automaticLoadArmedRef.current = false;
+    loadInFlightRef.current = true;
+    const scrollElement = scrollRef.current;
+    if (scrollElement) {
+      stopScroll();
+      pendingScrollAdjustmentRef.current = {
+        scrollHeight: scrollElement.scrollHeight,
+        scrollTop: scrollElement.scrollTop,
+      };
+    }
+
+    try {
+      const loaded = await fetchOlderMessages();
+      if (!loaded) {
+        pendingScrollAdjustmentRef.current = null;
+      }
+    } finally {
+      loadInFlightRef.current = false;
+    }
+  }, [
+    fetchOlderMessages,
+    hasOlderMessages,
+    isFetchingOlderMessages,
+    scrollRef,
+    stopScroll,
+  ]);
+
+  useEffect(() => {
+    const scrollElement = scrollRef.current;
+    if (!scrollElement) return;
+
+    const handleScroll = () => {
+      if (scrollElement.scrollTop > OLDER_HISTORY_TRIGGER_PX) {
+        automaticLoadArmedRef.current = true;
+        return;
+      }
+
+      if (
+        automaticLoadArmedRef.current &&
+        !isError &&
+        hasOlderMessages &&
+        !isFetchingOlderMessages &&
+        !olderMessagesError
+      ) {
+        void loadOlder();
+      }
+    };
+
+    scrollElement.addEventListener('scroll', handleScroll, { passive: true });
+    return () => scrollElement.removeEventListener('scroll', handleScroll);
+  }, [
+    hasOlderMessages,
+    isError,
+    isFetchingOlderMessages,
+    loadOlder,
+    olderMessagesError,
+    scrollRef,
+  ]);
+
+  if (isError) {
+    return (
+      <div className="mb-4 flex items-center justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm">
+        <span>Conversation history could not be loaded.</span>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={isRetrying}
+          onClick={() => void retry()}
+        >
+          {isRetrying ? 'Retrying...' : 'Retry'}
+        </Button>
+      </div>
+    );
+  }
+
+  if (!isFetchingOlderMessages && !olderMessagesError) {
+    return null;
+  }
+
+  return (
+    <div className="mb-4 flex flex-col items-center gap-2">
+      {isFetchingOlderMessages ? (
+        <p className="text-xs text-muted-foreground" role="status">
+          Loading older messages...
+        </p>
+      ) : null}
+      {olderMessagesError ? (
+        <>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => void loadOlder()}
+          >
+            Retry loading older messages
+          </Button>
+          <p className="text-xs text-destructive">
+            Older messages could not be loaded.
+          </p>
+        </>
+      ) : null}
     </div>
   );
 }
@@ -155,40 +301,47 @@ const MessagesBase = ({
     showInternalMessages,
     hasLeadingTextBoundary: shouldRenderSessionPrompt,
     resetKey: session.taskId,
+    isWorking: taskPhase === 'running',
   });
-  const shouldShowNarrationWorkingReasoning =
-    resolvedMessageUiOptions.displayMode === 'narration' &&
-    taskPhase === 'running' &&
-    !hasVisibleAssistantOutput(renderBlocks);
+  const shouldShowWorking =
+    taskPhase === 'running' && !hasVisibleAssistantOutput(renderBlocks);
+
+  const slackMentionScope = useMemo<SlackMentionScope>(
+    () => ({ kind: 'task', taskId: session.taskId }),
+    [session.taskId],
+  );
 
   return (
     <MessageUiOptionsProvider value={resolvedMessageUiOptions}>
-      <Conversation
-        className="min-h-0 flex-1"
-        initial={hasAnchor ? false : initialScrollBehavior}
-      >
-        <ConversationContent
-          className={cn('ph-no-capture', conversationClassName)}
+      <SlackMentionProvider scope={slackMentionScope}>
+        <Conversation
+          className="min-h-0 flex-1"
+          initial={hasAnchor ? false : initialScrollBehavior}
         >
-          {shouldRenderSessionPrompt && sessionPrompt && (
-            <AcpTextMessage msg={sessionPrompt} />
-          )}
-          {!historyReady && <TranscriptSkeleton />}
-          <AcpTranscriptBlockList
-            blocks={renderBlocks}
-            showInternalMessages={showInternalMessages}
-            onSuppress={suppressMessage}
-          />
-          {session.taskRun && <SleepWakeMessages taskRun={session.taskRun} />}
-          {shouldShowNarrationWorkingReasoning && (
-            <NarrationWorkingReasoningMessage />
-          )}
-          {footer}
-        </ConversationContent>
-        <ConversationScrollButton />
-        {scrollRef && <ScrollBridge handleRef={scrollRef} />}
-        <ScrollToHash messages={messages} />
-      </Conversation>
+          <ConversationContent
+            className={cn('ph-no-capture', conversationClassName)}
+          >
+            {shouldRenderSessionPrompt && sessionPrompt && (
+              <AcpTextMessage msg={sessionPrompt} />
+            )}
+            {!historyReady && <TranscriptSkeleton />}
+            {historyReady && (
+              <TranscriptHistoryControls oldestMessageId={messages[0]?.id} />
+            )}
+            <AcpTranscriptBlockList
+              blocks={renderBlocks}
+              showInternalMessages={showInternalMessages}
+              onSuppress={suppressMessage}
+            />
+            {session.taskRun && <SleepWakeMessages taskRun={session.taskRun} />}
+            {shouldShowWorking && <DelayedWorkingMessage />}
+            {footer}
+          </ConversationContent>
+          <ConversationScrollButton />
+          {scrollRef && <ScrollBridge handleRef={scrollRef} />}
+          <ScrollToHash messages={messages} />
+        </Conversation>
+      </SlackMentionProvider>
     </MessageUiOptionsProvider>
   );
 };

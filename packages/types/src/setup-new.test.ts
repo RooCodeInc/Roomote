@@ -18,3 +18,158 @@ describe('normalizeSetupNewState', () => {
     expect(state.selectedModelId).toBeNull();
   });
 });
+
+import {
+  createSetupNewSetupSession,
+  normalizeSetupNewSetupSession,
+} from './setup-new';
+
+describe('setup-session metadata', () => {
+  it('adds pending discovery only to new sessions and preserves continuation on resume', () => {
+    const session = createSetupNewSetupSession({ sessionId: 'session' });
+    expect(
+      normalizeSetupNewSetupSession(session)?.integrationDiscoveryCompletedAt,
+    ).toBeNull();
+    expect(
+      normalizeSetupNewSetupSession(session)?.sourceControlSkippedAt,
+    ).toBeNull();
+    const completedAt = '2026-09-09T12:00:00.000Z';
+    expect(
+      normalizeSetupNewSetupSession({
+        ...session,
+        integrationDiscoveryCompletedAt: completedAt,
+      })?.integrationDiscoveryCompletedAt,
+    ).toBe(completedAt);
+    const { integrationDiscoveryCompletedAt: _, ...legacy } = session;
+    expect(normalizeSetupNewSetupSession(legacy)).not.toHaveProperty(
+      'integrationDiscoveryCompletedAt',
+    );
+    const { sourceControlSkippedAt: __, ...olderSession } = session;
+    expect(normalizeSetupNewSetupSession(olderSession)).not.toHaveProperty(
+      'sourceControlSkippedAt',
+    );
+  });
+  it('normalizes state without setup-session metadata to null', () => {
+    const state = normalizeSetupNewState({});
+
+    expect(state.setupSession).toBeNull();
+  });
+
+  it('preserves a valid persisted setup session', () => {
+    const session = createSetupNewSetupSession({
+      sessionId: '11111111-1111-4111-8111-111111111111',
+      startedAt: '2026-08-29T00:00:00.000Z',
+    });
+    const state = normalizeSetupNewState({
+      setupSession: {
+        ...session,
+        starterTaskSelection: {
+          requestId: 'request-1',
+          taskIds: ['speed-up-ci', 'address-todos', 'not-real'],
+          selectedAt: '2026-08-29T00:01:00.000Z',
+        },
+      },
+    } as Partial<SetupNewState>);
+
+    expect(state.setupSession?.sessionId).toBe(session.sessionId);
+    expect(state.setupSession?.startedAt).toBe(session.startedAt);
+    expect(state.setupSession?.starterTaskSelection).toEqual({
+      requestId: 'request-1',
+      taskIds: ['speed-up-ci', 'address-todos'],
+      selectedAt: '2026-08-29T00:01:00.000Z',
+    });
+  });
+
+  it('preserves empty starter selections and source-control declines', () => {
+    const selectedAt = '2026-08-29T00:01:00.000Z';
+    const sourceControlSkippedAt = '2026-08-29T00:00:30.000Z';
+    const normalized = normalizeSetupNewSetupSession({
+      workflowVersion: 1,
+      sessionId: 'abc',
+      startedAt: '2026-08-29T00:00:00.000Z',
+      sourceControlSkippedAt,
+      starterTaskSelection: {
+        requestId: 'request-1',
+        taskIds: [],
+        selectedAt,
+      },
+    });
+
+    expect(normalized).toMatchObject({
+      sourceControlSkippedAt,
+      starterTaskSelection: {
+        requestId: 'request-1',
+        taskIds: [],
+        selectedAt,
+      },
+    });
+    const session = createSetupNewSetupSession({
+      sessionId: '11111111-1111-4111-8111-111111111111',
+      startedAt: '2026-08-29T00:00:00.000Z',
+    });
+
+    expect(
+      normalizeSetupNewSetupSession({
+        ...session,
+        starterTaskSelection: {
+          requestId: 'manual-request',
+          taskIds: [],
+          selectedAt: '2026-08-29T00:01:00.000Z',
+        },
+      })?.starterTaskSelection,
+    ).toEqual({
+      requestId: 'manual-request',
+      taskIds: [],
+      selectedAt: '2026-08-29T00:01:00.000Z',
+    });
+    expect(
+      normalizeSetupNewSetupSession({
+        ...session,
+        starterTaskSelection: {
+          requestId: 'invalid-request',
+          taskIds: ['not-real'],
+          selectedAt: '2026-08-29T00:01:00.000Z',
+        },
+      })?.starterTaskSelection,
+    ).toBeNull();
+  });
+
+  it('keeps a valid session with no starter selection', () => {
+    const normalized = normalizeSetupNewSetupSession({
+      sessionId: 'abc',
+      startedAt: '2026-08-29T00:00:00.000Z',
+      starterTaskSelection: null,
+    });
+
+    expect(normalized).toEqual({
+      workflowVersion: 1,
+      sessionId: 'abc',
+      startedAt: '2026-08-29T00:00:00.000Z',
+      starterTaskSelection: null,
+    });
+  });
+
+  it('preserves a persisted workflow version for in-progress sessions', () => {
+    const normalized = normalizeSetupNewSetupSession({
+      workflowVersion: 2,
+      sessionId: 'abc',
+      startedAt: '2026-08-29T00:00:00.000Z',
+      starterTaskSelection: null,
+    });
+
+    expect(normalized?.workflowVersion).toBe(2);
+  });
+
+  it('returns null for malformed or partially written setup session values', () => {
+    expect(normalizeSetupNewSetupSession(null)).toBeNull();
+    expect(
+      normalizeSetupNewSetupSession({ sessionId: 'only-session' }),
+    ).toBeNull();
+    expect(normalizeSetupNewSetupSession('garbage')).toBeNull();
+    expect(
+      normalizeSetupNewState({
+        setupSession: { sessionId: 'missing-started-at' },
+      } as unknown as Partial<SetupNewState>).setupSession,
+    ).toBeNull();
+  });
+});

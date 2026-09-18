@@ -16,16 +16,22 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 vi.mock('../../lib/manager-slack', () => ({
-  buildAutomationSettingsMessage: (text: string, hash: string) => ({
+  buildAutomationSettingsMessage: (
+    text: string,
+    hash: string,
+    options?: { contentBlocks?: unknown[] },
+  ) => ({
     text: text.trim(),
     blocks: [
-      {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: text.trim(),
+      ...(options?.contentBlocks ?? [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: text.trim(),
+          },
         },
-      },
+      ]),
       {
         type: 'context',
         elements: [
@@ -60,7 +66,10 @@ vi.mock('../custom-automation-schedule', () => ({
   })),
 }));
 
-import { formatManagerStatsMessage } from '../manager-stats';
+import {
+  formatManagerStatsMessage,
+  hasManagerStatsActivity,
+} from '../manager-stats';
 
 const stats = {
   activeUsers: 3,
@@ -83,6 +92,15 @@ const stats = {
       label: 'Ada Lovelace',
       pullRequestCount: 3,
     },
+  ],
+  dailyPullRequestActivity: [
+    { label: 'Sep 4', createdPullRequests: 0, mergedPullRequests: 1 },
+    { label: 'Sep 5', createdPullRequests: 2, mergedPullRequests: 0 },
+    { label: 'Sep 6', createdPullRequests: 0, mergedPullRequests: 0 },
+    { label: 'Sep 7', createdPullRequests: 1, mergedPullRequests: 1 },
+    { label: 'Sep 8', createdPullRequests: 0, mergedPullRequests: 0 },
+    { label: 'Sep 9', createdPullRequests: 3, mergedPullRequests: 2 },
+    { label: 'Sep 10', createdPullRequests: 1, mergedPullRequests: 0 },
   ],
 };
 
@@ -174,5 +192,55 @@ describe('formatManagerStatsMessage', () => {
         },
       ],
     });
+  });
+
+  it('includes a native daily PR activity line chart without axis titles', () => {
+    const message = formatManagerStatsMessage({ stats });
+
+    expect(message.blocks).toContainEqual({
+      type: 'data_visualization',
+      title: 'Daily PR activity',
+      chart: {
+        type: 'line',
+        series: [
+          {
+            name: 'Created PRs',
+            data: stats.dailyPullRequestActivity.map((day) => ({
+              label: day.label,
+              value: day.createdPullRequests,
+            })),
+          },
+          {
+            name: 'Merged PRs',
+            data: stats.dailyPullRequestActivity.map((day) => ({
+              label: day.label,
+              value: day.mergedPullRequests,
+            })),
+          },
+        ],
+        axis_config: {
+          categories: stats.dailyPullRequestActivity.map((day) => day.label),
+        },
+      },
+    });
+  });
+});
+
+describe('hasManagerStatsActivity', () => {
+  it('keeps a report with only an older PR merged during the window', () => {
+    expect(
+      hasManagerStatsActivity({
+        ...stats,
+        activeUsers: 0,
+        totalPullRequests: 0,
+        dailyPullRequestActivity: stats.dailyPullRequestActivity.map(
+          (day, index) => ({
+            ...day,
+            createdPullRequests: 0,
+            mergedPullRequests: index === 0 ? 1 : 0,
+          }),
+        ),
+      }),
+    ).toBe(true);
   });
 });

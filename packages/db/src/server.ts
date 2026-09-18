@@ -36,11 +36,13 @@ export { alias } from 'drizzle-orm/pg-core';
 
 export * from './index';
 export * from './db';
+export * from './lib/artifacts';
 
 export * from './lib/map-raw-row';
 export * from './lib/legacy-task-inference-usage';
 export * from './lib/llm-usage';
 export * from './lib/deployment-auth-keypairs';
+export * from './lib/migration-readiness';
 export * from './lib/environment-variables';
 export * from './lib/task-id';
 export * from './lib/task-activity-timestamp';
@@ -52,12 +54,18 @@ export * from './lib/tracked-suggestion-cards';
 export * from './lib/task-start-parallel-counts';
 export * from './lib/tasks';
 export * from './lib/sessions';
-export * from './lib/task-goals';
+export * from './lib/service-credentials';
+export * from './lib/credential-egress';
+export * from './lib/session-goals';
 export * from './lib/source-control-provider';
 export * from './lib/sync-task-state';
 export * from './lib/cancel-task-run';
 export * from './lib/automations';
+export * from './lib/automation-results';
 export * from './lib/custom-automations';
+export * from './lib/custom-automation-access';
+export * from './lib/custom-skills';
+export * from './lib/session-wakeups';
 export * from './lib/background-automation-slack-threads';
 export * from './lib/task-run-events';
 export * from './lib/declarative-environments';
@@ -77,13 +85,15 @@ export * from './lib/preview-runtime-config';
 export * from './lib/out-of-band-task-messages';
 export * from './lib/record-task-kickoff-message';
 export * from './lib/slack-runtime-credentials';
+export * from './lib/slack-installations';
 export * from './lib/teams-runtime-credentials';
 export * from './lib/telegram-runtime-credentials';
+export * from './lib/agentmail-runtime-credentials';
 export * from './lib/discord-runtime-credentials';
-export * from './lib/router-debug-settings';
-export * from './lib/slack-fast-integration-calls';
 export * from './lib/pr-action-settings';
 export * from './lib/github-mention-settings';
+export * from './lib/judgment-model-settings';
+export * from './lib/pr-ready-after-clean-review-settings';
 export * from './lib/account-link-help-settings';
 export * from './lib/setup-qualification';
 export * from './lib/repositories';
@@ -99,12 +109,22 @@ export * from './lib/invocation-identities';
 export * from './lib/webhook-retention';
 export * from './lib/brain';
 export * from './lib/fast-agent-memory';
+export * from './lib/brain-page-retirements';
 export * from './lib/managed-access';
+export * from './lib/user-personalization';
+export * from './lib/personal-preferences';
+export * from './lib/deployment-experiments';
+export * from './lib/private-sessions-experiment';
+export * from './fixtures/development-fixtures';
 
 export {
   users,
+  userPersonalizations,
+  userPersonalizationRelations,
+  instanceSkills,
   userRelations,
   deploymentSettings,
+  releaseAnnouncementDeliveries,
   licenseUsageObservations,
   invites,
   authUsers,
@@ -122,9 +142,17 @@ export {
   taskPins,
   taskPinsRelations,
   sessions,
+  sessionGoals,
   sessionsRelations,
   sessionTasks,
   sessionTasksRelations,
+  serviceCredentials,
+  serviceCredentialApprovals,
+  serviceCredentialAudit,
+  credentialEgressWorkloads,
+  credentialEgressSubstitutes,
+  credentialEgressAudit,
+  credentialEgressRevocations,
   sessionParticipants,
   sessionParticipantsRelations,
   sessionPins,
@@ -181,6 +209,15 @@ export {
   notionDirectoryUsers,
   telegramUserMappings,
   telegramUserMappingsRelations,
+  agentmailUserMappings,
+  agentmailUserMappingsRelations,
+  agentmailConversations,
+  agentmailConversationParticipants,
+  agentmailConversationParticipantsRelations,
+  agentmailWebhookEvents,
+  agentmailInboundTurns,
+  agentmailReplyVerificationProofs,
+  agentmailSuppressions,
   discordInstallations,
   discordInstallationsRelations,
   discordInstallationChannels,
@@ -200,20 +237,23 @@ export {
   fastAgentMessagesRelations,
   fastAgentParentEvents,
   fastAgentParentEventsRelations,
+  sessionWakeups,
+  sessionWakeupsRelations,
   fastAgentProviderMessages,
   fastAgentProviderMessagesRelations,
+  sessionAttentionNotifications,
+  sessionAttentionNotificationMessages,
   fastAgentPrFeedbackDeliveries,
   fastAgentPrFeedbackDeliveriesRelations,
   slackConversationMessages,
   slackConversationMessagesRelations,
-  slackFastIntegrationCalls,
-  slackFastIntegrationCallsRelations,
   linearPendingSelections,
   linearPendingSelectionsRelations,
   automations,
   automationsRelations,
   customAutomations,
   customAutomationsRelations,
+  automationResults,
   trackedMessages,
   trackedMessagesRelations,
   environmentVariables,
@@ -245,6 +285,7 @@ export {
   userApiKeysRelations,
   brainMemoryEvents,
   brainMemoryEventsRelations,
+  brainPageRetirements,
   brainCollectorItems,
   brainSyncState,
 } from './schema';

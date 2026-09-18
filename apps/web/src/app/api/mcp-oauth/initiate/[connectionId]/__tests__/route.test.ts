@@ -10,6 +10,7 @@ const {
   getMcpIntegrationAuthorizationParametersMock,
   getMcpIntegrationMock,
   getMcpIntegrationOauthEndpointsMock,
+  getMcpIntegrationOauthResourceMock,
   getMcpIntegrationOauthScopeModeMock,
   getMcpIntegrationOauthScopeSeparatorMock,
   getMcpIntegrationOauthScopesMock,
@@ -18,10 +19,29 @@ const {
   isSelfServeMcpIntegrationMock,
   mcpConnectionsFindFirstMock,
   registerOAuthClientMock,
+  resolveCustomMcpAuthTargetMock,
+  ensureCustomMcpServerMetadataMock,
   resolveDeploymentStaticOauthClientInformationMock,
   storeClientInformationMock,
   storeOAuthStateWithIdMock,
+  updateAuthStatusMock,
+  describeRegistrationRefusalMock,
+  resumeFastSessionFromReplayMock,
+  MockRegistrationError,
 } = vi.hoisted(() => ({
+  describeRegistrationRefusalMock: vi.fn(),
+  resumeFastSessionFromReplayMock: vi.fn(),
+  MockRegistrationError: class extends Error {
+    constructor(
+      readonly status: number,
+      readonly body: string,
+    ) {
+      super(`OAuth client registration failed: ${body}`);
+    }
+    get isRefusal() {
+      return this.status >= 400 && this.status < 500;
+    }
+  },
   authorizeMock: vi.fn(),
   bootstrapWebRuntimeEnvMock: vi.fn(),
   discoverOAuthEndpointsMock: vi.fn(),
@@ -33,6 +53,7 @@ const {
   getMcpIntegrationAuthorizationParametersMock: vi.fn(),
   getMcpIntegrationMock: vi.fn(),
   getMcpIntegrationOauthEndpointsMock: vi.fn(),
+  getMcpIntegrationOauthResourceMock: vi.fn(),
   getMcpIntegrationOauthScopeModeMock: vi.fn(),
   getMcpIntegrationOauthScopeSeparatorMock: vi.fn(),
   getMcpIntegrationOauthScopesMock: vi.fn(),
@@ -41,9 +62,12 @@ const {
   isSelfServeMcpIntegrationMock: vi.fn(),
   mcpConnectionsFindFirstMock: vi.fn(),
   registerOAuthClientMock: vi.fn(),
+  resolveCustomMcpAuthTargetMock: vi.fn(),
+  ensureCustomMcpServerMetadataMock: vi.fn(),
   resolveDeploymentStaticOauthClientInformationMock: vi.fn(),
   storeClientInformationMock: vi.fn(),
   storeOAuthStateWithIdMock: vi.fn(),
+  updateAuthStatusMock: vi.fn(),
 }));
 
 vi.mock('@/lib/server', () => ({
@@ -71,7 +95,13 @@ vi.mock('@roomote/db/server', () => ({
   eq: vi.fn((column: string, value: string) => ({ column, value })),
 }));
 
+vi.mock('@/lib/server/mcp-oauth-replay-continuation', () => ({
+  resumeFastSessionFromReplay: resumeFastSessionFromReplayMock,
+}));
+
 vi.mock('@roomote/sdk/server', () => ({
+  ClientRegistrationRejectedError: MockRegistrationError,
+  describeRegistrationRefusal: describeRegistrationRefusalMock,
   discoverOAuthEndpoints: discoverOAuthEndpointsMock,
   discoverOAuthProtectedResourceMetadata:
     discoverOAuthProtectedResourceMetadataMock,
@@ -83,14 +113,17 @@ vi.mock('@roomote/sdk/server', () => ({
   storeOAuthStateWithId: storeOAuthStateWithIdMock,
   storeClientInformation: storeClientInformationMock,
   getClientInformation: getClientInformationMock,
-  resolveCustomMcpAuthTarget: vi.fn(async () => null),
-  ensureCustomMcpServerMetadata: vi.fn(),
+  resolveCustomMcpAuthTarget: resolveCustomMcpAuthTargetMock,
+  ensureCustomMcpServerMetadata: ensureCustomMcpServerMetadataMock,
+  updateAuthStatus: updateAuthStatusMock,
 }));
 
 vi.mock('@roomote/types', () => ({
+  INTEGRATION_SAVED_TAG: 'integration_saved',
   getMcpIntegrationAuthorizationParameters:
     getMcpIntegrationAuthorizationParametersMock,
   getMcpIntegrationOauthEndpoints: getMcpIntegrationOauthEndpointsMock,
+  getMcpIntegrationOauthResource: getMcpIntegrationOauthResourceMock,
   getMcpIntegrationOauthScopeMode: getMcpIntegrationOauthScopeModeMock,
   getMcpIntegrationOauthScopeSeparator:
     getMcpIntegrationOauthScopeSeparatorMock,
@@ -151,6 +184,7 @@ describe('GET /api/mcp-oauth/initiate/[connectionId]', () => {
     getMcpIntegrationOauthScopesMock.mockReturnValue(undefined);
     getMcpIntegrationOauthScopeModeMock.mockReturnValue(undefined);
     getMcpIntegrationOauthEndpointsMock.mockReturnValue(undefined);
+    getMcpIntegrationOauthResourceMock.mockReturnValue(undefined);
     getMcpIntegrationOauthScopeSeparatorMock.mockReturnValue(' ');
     getMcpIntegrationAuthorizationParametersMock.mockReturnValue([]);
     generateCodeVerifierMock.mockReturnValue('verifier-value');
@@ -164,6 +198,222 @@ describe('GET /api/mcp-oauth/initiate/[connectionId]', () => {
       client_id: 'fresh-client',
     });
     storeClientInformationMock.mockResolvedValue(undefined);
+    resolveCustomMcpAuthTargetMock.mockResolvedValue(null);
+    updateAuthStatusMock.mockResolvedValue(undefined);
+  });
+
+  it('starts a deployment Notion OAuth flow with the provider parameters', async () => {
+    mcpConnectionsFindFirstMock.mockResolvedValue({
+      id: 'conn-notion-1',
+      mcpId: 'notion',
+      userId: null,
+      connectionRole: 'default',
+    });
+    getMcpIntegrationMock.mockReturnValue({
+      id: 'notion',
+      name: 'Notion',
+      url: 'https://api.notion.com',
+      oauthEndpoints: {
+        authorizationEndpoint: 'https://api.notion.com/v1/oauth/authorize',
+        tokenEndpoint: 'https://api.notion.com/v1/oauth/token',
+      },
+      oauthPkce: false,
+    });
+    getMcpIntegrationOauthEndpointsMock.mockReturnValue({
+      authorizationEndpoint: 'https://api.notion.com/v1/oauth/authorize',
+      tokenEndpoint: 'https://api.notion.com/v1/oauth/token',
+    });
+    getMcpIntegrationAuthorizationParametersMock.mockReturnValue([
+      { name: 'owner', value: 'user' },
+    ]);
+    isSelfServeMcpIntegrationMock.mockReturnValue(false);
+    isDeploymentScopedMcpIntegrationMock.mockReturnValue(true);
+    resolveDeploymentStaticOauthClientInformationMock.mockResolvedValue({
+      client_id: 'notion-client',
+      client_secret: 'notion-secret',
+      token_endpoint_auth_method: 'client_secret_basic',
+    });
+
+    const response = await GET(
+      buildRequest('/api/mcp-oauth/initiate/conn-notion-1'),
+      { params: Promise.resolve({ connectionId: 'conn-notion-1' }) },
+    );
+    const location = new URL(response.headers.get('location')!);
+
+    expect(location.origin + location.pathname).toBe(
+      'https://api.notion.com/v1/oauth/authorize',
+    );
+    expect(location.searchParams.get('client_id')).toBe('notion-client');
+    expect(location.searchParams.get('owner')).toBe('user');
+    expect(location.searchParams.get('redirect_uri')).toBe(PUBLIC_CALLBACK);
+    expect(location.searchParams.has('code_challenge')).toBe(false);
+  });
+
+  it('marks a custom connection errored when dynamic registration is refused', async () => {
+    mcpConnectionsFindFirstMock.mockResolvedValue({
+      id: CONNECTION_ID,
+      mcpId: 'custom:server-1',
+      userId: null,
+      connectionRole: 'default',
+    });
+    getMcpIntegrationMock.mockReturnValue(undefined);
+    resolveCustomMcpAuthTargetMock.mockResolvedValue({
+      serverId: 'server-1',
+      name: 'accounting',
+      url: 'https://mcp.example.com/mcp',
+      manualClient: null,
+      oauthOptions: { resource: 'https://mcp.example.com/mcp' },
+    });
+    ensureCustomMcpServerMetadataMock.mockResolvedValue({
+      authorization_endpoint: 'https://auth.example.com/authorize',
+      token_endpoint: 'https://auth.example.com/token',
+      registration_endpoint: 'https://auth.example.com/register',
+    });
+    getClientInformationMock.mockResolvedValue(undefined);
+    registerOAuthClientMock.mockRejectedValue(
+      new MockRegistrationError(400, 'registration denied'),
+    );
+
+    const response = await GET(buildRequest(), {
+      params: Promise.resolve({ connectionId: CONNECTION_ID }),
+    });
+
+    expect(response.headers.get('location')).toBe(
+      'https://customer.example/settings?mcp=error&reason=registration_failed',
+    );
+    expect(updateAuthStatusMock).toHaveBeenCalledWith(
+      CONNECTION_ID,
+      'error',
+      false,
+    );
+    expect(storeOAuthStateWithIdMock).not.toHaveBeenCalled();
+  });
+
+  it('tells the requesting Session why registration was refused', async () => {
+    mcpConnectionsFindFirstMock.mockResolvedValue({
+      id: CONNECTION_ID,
+      mcpId: 'custom:server-1',
+      userId: null,
+      connectionRole: 'default',
+    });
+    getMcpIntegrationMock.mockReturnValue(undefined);
+    resolveCustomMcpAuthTargetMock.mockResolvedValue({
+      serverId: 'server-1',
+      name: 'intercom',
+      url: 'https://mcp.example.com/mcp',
+      manualClient: null,
+      oauthOptions: { resource: 'https://mcp.example.com/mcp' },
+    });
+    ensureCustomMcpServerMetadataMock.mockResolvedValue({
+      authorization_endpoint: 'https://auth.example.com/authorize',
+      token_endpoint: 'https://auth.example.com/token',
+      registration_endpoint: 'https://auth.example.com/register',
+    });
+    getClientInformationMock.mockResolvedValue(undefined);
+    registerOAuthClientMock.mockRejectedValue(
+      new MockRegistrationError(400, 'registration denied'),
+    );
+    describeRegistrationRefusalMock.mockReturnValue(
+      'Redirect URI is not in the allowlist',
+    );
+    resumeFastSessionFromReplayMock.mockResolvedValue(true);
+
+    const response = await GET(
+      buildRequest(
+        `/api/mcp-oauth/initiate/${CONNECTION_ID}?redirectTo=%2Fsessions%2Fs1&replayToken=replay-1`,
+      ),
+      { params: Promise.resolve({ connectionId: CONNECTION_ID }) },
+    );
+
+    expect(response.headers.get('location')).toBe(
+      'https://customer.example/sessions/s1?mcp=error&reason=registration_failed',
+    );
+    expect(resumeFastSessionFromReplayMock).toHaveBeenCalledTimes(1);
+    const call = resumeFastSessionFromReplayMock.mock.calls[0]![0] as {
+      replayToken: string;
+      connectionId: string;
+      mcpId: string;
+      text: string;
+    };
+    expect(call).toMatchObject({
+      replayToken: 'replay-1',
+      connectionId: CONNECTION_ID,
+      mcpId: 'custom:server-1',
+    });
+    expect(call.text).toContain("'intercom'");
+    expect(call.text).toContain('Redirect URI is not in the allowlist');
+    expect(call.text).toContain("The authorization didn't go through.");
+  });
+
+  it('does not touch the Session when a refused registration carries no replay token', async () => {
+    mcpConnectionsFindFirstMock.mockResolvedValue({
+      id: CONNECTION_ID,
+      mcpId: 'custom:server-1',
+      userId: null,
+      connectionRole: 'default',
+    });
+    getMcpIntegrationMock.mockReturnValue(undefined);
+    resolveCustomMcpAuthTargetMock.mockResolvedValue({
+      serverId: 'server-1',
+      name: 'intercom',
+      url: 'https://mcp.example.com/mcp',
+      manualClient: null,
+      oauthOptions: { resource: 'https://mcp.example.com/mcp' },
+    });
+    ensureCustomMcpServerMetadataMock.mockResolvedValue({
+      authorization_endpoint: 'https://auth.example.com/authorize',
+      token_endpoint: 'https://auth.example.com/token',
+      registration_endpoint: 'https://auth.example.com/register',
+    });
+    getClientInformationMock.mockResolvedValue(undefined);
+    registerOAuthClientMock.mockRejectedValue(
+      new MockRegistrationError(400, 'registration denied'),
+    );
+
+    await GET(buildRequest(), {
+      params: Promise.resolve({ connectionId: CONNECTION_ID }),
+    });
+
+    expect(resumeFastSessionFromReplayMock).not.toHaveBeenCalled();
+  });
+
+  it('leaves a custom connection pending when registration fails transiently', async () => {
+    mcpConnectionsFindFirstMock.mockResolvedValue({
+      id: CONNECTION_ID,
+      mcpId: 'custom:server-1',
+      userId: null,
+      connectionRole: 'default',
+    });
+    getMcpIntegrationMock.mockReturnValue(undefined);
+    resolveCustomMcpAuthTargetMock.mockResolvedValue({
+      serverId: 'server-1',
+      name: 'accounting',
+      url: 'https://mcp.example.com/mcp',
+      manualClient: null,
+      oauthOptions: { resource: 'https://mcp.example.com/mcp' },
+    });
+    ensureCustomMcpServerMetadataMock.mockResolvedValue({
+      authorization_endpoint: 'https://auth.example.com/authorize',
+      token_endpoint: 'https://auth.example.com/token',
+      registration_endpoint: 'https://auth.example.com/register',
+    });
+    getClientInformationMock.mockResolvedValue(undefined);
+    registerOAuthClientMock.mockRejectedValue(
+      new MockRegistrationError(503, 'upstream down'),
+    );
+
+    const response = await GET(
+      buildRequest(
+        `/api/mcp-oauth/initiate/${CONNECTION_ID}?replayToken=replay-1`,
+      ),
+      { params: Promise.resolve({ connectionId: CONNECTION_ID }) },
+    );
+
+    expect(response.headers.get('location')).toBe(
+      'https://customer.example/settings?mcp=error',
+    );
+    expect(updateAuthStatusMock).not.toHaveBeenCalled();
+    expect(resumeFastSessionFromReplayMock).not.toHaveBeenCalled();
   });
 
   it('builds redirect_uri from R_PUBLIC_URL when set with loopback R_APP_URL', async () => {
@@ -266,6 +516,9 @@ describe('GET /api/mcp-oauth/initiate/[connectionId]', () => {
       'boards:read',
       'updates:read',
     ]);
+    getMcpIntegrationOauthResourceMock.mockReturnValue(
+      'https://mcp.monday.com/mcp',
+    );
 
     const response = await GET(buildRequest(), {
       params: Promise.resolve({ connectionId: CONNECTION_ID }),
@@ -276,6 +529,9 @@ describe('GET /api/mcp-oauth/initiate/[connectionId]', () => {
       expect.objectContaining({ scope: 'boards:read updates:read' }),
     );
     const authUrl = new URL(response.headers.get('location')!);
+    expect(authUrl.searchParams.get('resource')).toBe(
+      'https://mcp.monday.com/mcp',
+    );
     expect(authUrl.searchParams.get('scope')).toBe('boards:read updates:read');
     expect(authUrl.searchParams.get('scope')).not.toContain('boards:write');
   });

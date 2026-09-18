@@ -99,6 +99,13 @@ export async function authorizeRunToken(
         })
       : undefined;
 
+    if (tokenContext.userId && (!user || user.deletedAt != null)) {
+      return {
+        success: false,
+        error: 'Unauthorized: User has been removed',
+      };
+    }
+
     const response: Pick<
       RunAuthTokenSuccess,
       'success' | 'userType' | 'runId' | 'userId' | 'name' | 'primaryEmail'

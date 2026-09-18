@@ -8,6 +8,7 @@ import {
   getSourceControlTokenEnvVars,
   portNameToSlug,
   PRODUCT_NAME,
+  TASK_MODEL_ROLE_DESCRIPTORS,
   type SourceControlTokenMetadata,
 } from '@roomote/types';
 import { type TaskRun } from '@roomote/sdk/client';
@@ -29,6 +30,33 @@ const ENV_VARS_END = `# END ${PRODUCT_NAME} environment variables`;
 
 /** POSIX-compliant env var name: letters, digits, underscores; must not start with a digit. */
 const VALID_ENV_VAR_NAME = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+
+export const INHERITED_MODEL_RUNTIME_ENV_VAR_NAMES: ReadonlySet<string> =
+  new Set([
+    ...Object.values(TASK_MODEL_ROLE_DESCRIPTORS).flatMap((descriptor) => [
+      descriptor.modelEnvVar,
+      descriptor.reasoningEnvVar,
+      `ROOMOTE_${descriptor.modelEnvVar.slice(2)}`,
+      `ROOMOTE_${descriptor.reasoningEnvVar.slice(2)}`,
+    ]),
+    'R_MODEL_ENV_KEYS',
+    'ROOMOTE_MODEL_ENV_KEYS',
+  ]);
+
+export function buildEnvironmentShellEnvVars(
+  envVars: Record<string, string>,
+  explicitEnvVarNames: Iterable<string> = [],
+): Record<string, string> {
+  const explicitNames = new Set(explicitEnvVarNames);
+
+  return Object.fromEntries(
+    Object.entries(envVars).filter(
+      ([name]) =>
+        explicitNames.has(name) ||
+        !INHERITED_MODEL_RUNTIME_ENV_VAR_NAMES.has(name),
+    ),
+  );
+}
 
 /**
  * Returns true when `name` is a safe POSIX environment variable name.
@@ -187,6 +215,8 @@ export async function injectEnvVars(
     previewProxySubdomainSuffix?: string;
     sourceControlToken?: SourceControlTokenMetadata;
     syncSourceControlTokenFiles?: boolean;
+    omitInheritedModelRuntimeEnvFromShell?: boolean;
+    explicitShellEnvVars?: Record<string, string>;
   },
 ): Promise<void> {
   const identity = resolvePreviewIdentity(taskRun);
@@ -268,5 +298,12 @@ export async function injectEnvVars(
     );
   }
 
-  writeBashrc(envVars);
+  writeBashrc(
+    options?.omitInheritedModelRuntimeEnvFromShell
+      ? buildEnvironmentShellEnvVars(
+          { ...envVars, ...options.explicitShellEnvVars },
+          Object.keys(options.explicitShellEnvVars ?? {}),
+        )
+      : envVars,
+  );
 }

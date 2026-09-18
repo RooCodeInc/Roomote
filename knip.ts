@@ -74,15 +74,11 @@ const config: KnipConfig = {
       project: ['src/**/*.ts'],
     },
     'packages/cloud-agents': {
-      entry: ['evals/router/**/*.ts'],
       project: ['src/**/*.ts'],
       // The feature-demo skill bundles a standalone Remotion render project
       // that runs from a sandbox work dir, not from this package's graph.
       ignore: ['src/server/workflows/skills/standard/feature-demo/**'],
-      ignoreBinaries: [
-        'evals/router/promptfooconfig.ts',
-        'evals/router/promptfooconfig.followup.ts',
-      ],
+      ignoreBinaries: [],
     },
     'packages/communication': {
       project: ['src/**/*.ts'],

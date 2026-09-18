@@ -92,6 +92,7 @@ vi.mock('@/components/system', () => ({
   House: Icon,
   Lightbulb: Icon,
   Rows4: Icon,
+  NotepadText: Icon,
   Ghost: Icon,
   Settings: Icon,
   HelpCircle: Icon,
@@ -264,7 +265,29 @@ describe('CommandPalette', () => {
         ].includes(label ?? ''),
       );
 
-    expect(navItems).toEqual(['New Task', 'Sessions', 'Settings', 'Help']);
+    expect(navItems).toEqual([
+      'New Task',
+      'Sessions',
+      'Automations',
+      'Settings',
+      'Help',
+    ]);
+  });
+
+  it('lets members find and open recurring automations without analytics access', () => {
+    render(<CommandPalette />);
+
+    const automations = screen.getByRole('button', { name: 'Automations' });
+    expect(automations).toHaveAttribute(
+      'data-keywords',
+      'recurring scheduled prompts',
+    );
+    expect(
+      screen.queryByRole('button', { name: 'Analytics' }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(automations);
+    expect(setOpen).toHaveBeenCalledWith(false);
+    expect(push).toHaveBeenCalledWith('/automations');
   });
 
   it('lets admins find and open recurring automations', () => {

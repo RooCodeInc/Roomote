@@ -8,6 +8,7 @@ import {
 
 describe('Linear static OAuth configuration', () => {
   const linear = getMcpIntegration('linear');
+  const notion = getMcpIntegration('notion');
 
   it('pairs and resolves the configured client credentials', () => {
     expect(getStaticOauthEnvPartnerKey('R_LINEAR_CLIENT_ID')).toBe(
@@ -55,8 +56,27 @@ describe('Linear static OAuth configuration', () => {
   });
 
   it('reports that integrations without static credentials need no setup', () => {
-    expect(getStaticOauthReadiness({}, getMcpIntegration('notion')!)).toBe(
+    expect(getStaticOauthReadiness({}, getMcpIntegration('jira')!)).toBe(
       'not_required',
     );
+  });
+
+  it('resolves Notion public-connection credentials with basic authentication', () => {
+    expect(getStaticOauthEnvPartnerKey('R_NOTION_CLIENT_ID')).toBe(
+      'R_NOTION_CLIENT_SECRET',
+    );
+    expect(
+      resolveStaticOauthClientInformation(
+        {
+          R_NOTION_CLIENT_ID: 'notion-client',
+          R_NOTION_CLIENT_SECRET: 'notion-secret',
+        },
+        notion!,
+      ),
+    ).toEqual({
+      client_id: 'notion-client',
+      client_secret: 'notion-secret',
+      token_endpoint_auth_method: 'client_secret_basic',
+    });
   });
 });

@@ -6,7 +6,7 @@ import {
   getCommunicationProviderFromTaskPayload,
   getCommunicationServiceUrlFromTaskPayload,
   getCommunicationThreadIdFromTaskPayload,
-  getEnvironmentDefinitionIdFromPayload,
+  getFastAgentParentFromPayload,
   getTriggerableBackgroundAutomationDescriptorByKey,
   getTriggerableBackgroundAutomationSettingsHash,
   parseConflictResolutionSummary,
@@ -20,6 +20,7 @@ import {
   TASK_STARTUP_FAILURE_TEXT,
 } from '@roomote/communication/chat-messages';
 import { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
+import { createAgentMailCommunicationProviderFromRuntimeCredentials } from '../agentmail-communication';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from '../teams-communication';
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from '../telegram-communication';
 import { Env, isBrainConfigured } from '@roomote/env';
@@ -41,6 +42,7 @@ import {
   slackInstallations,
   slackUserMappings,
   syncTaskStateFromRuns,
+  terminateCredentialEgressWorkloadsForRun,
   updatePendingEnvironmentSnapshot,
   asc,
   eq,
@@ -61,6 +63,7 @@ import {
   createTaskRunGitHubToken,
   createIssueComment,
   deleteReaction,
+  fetchIssueCommentWithToken,
   getCheckRun,
   updateCheckRun,
 } from '@roomote/github';
@@ -74,7 +77,9 @@ import {
 import { cleanupSandboxOidcTargetsForTaskRun } from '../sandbox-oidc';
 import { notifySourceRunOnSettle } from './notify-source-run-on-settle';
 import { notifyFastAgentParentOnSettle } from './notify-fast-agent-parent-on-settle';
-import { settleSlackLiveTaskCardOnExit } from './settle-slack-live-task-card-on-exit';
+import { notifyWebTaskInitiatorOnSettle } from './notify-web-task-initiator-on-settle';
+import { enqueueWebTaskInitiatorSettleNotification } from './enqueue-web-task-initiator-settle-notification';
+import { settleLiveTaskMessageOnExit } from './settle-live-task-message-on-exit';
 import { refreshTaskTitleOnCompletion } from './record-task-message-envelope';
 import { getRedis } from '@roomote/redis';
 import { resolveSlackTaskRunRouting } from './slack-task-run-routing';
@@ -84,7 +89,6 @@ import {
 } from './github-pr-review-check';
 import {
   SlackNotifier,
-  buildTaskFailedMessage,
   getSlackStartedMessageTs,
   refreshAutomationRootFooter,
   SLACK_RUNTIME_FAILURE_TEXT,
@@ -361,6 +365,21 @@ export const finishRun = async ({
     if (status === RunStatus.Completed) {
       await maybeEnqueueBrainMemoryForCompletedRun(tx, id);
     }
+
+    // A Session-egress workload never outlives its run: retire every
+    // substitute and publish the revocation in the same transaction as the
+    // terminal status. Idle keeps the sandbox (and its workload) alive.
+    if (status !== RunStatus.Idle) {
+      await terminateCredentialEgressWorkloadsForRun(
+        id,
+        status === RunStatus.Completed
+          ? 'completed'
+          : status === RunStatus.Failed
+            ? 'failed'
+            : 'stopped',
+        tx,
+      );
+    }
   });
 
   if (status !== RunStatus.Idle) {
@@ -409,10 +428,18 @@ export const finishRun = async ({
     status,
     run.task.title,
   );
-  // Detached: this can hold the parent's turn lock through a full
-  // orchestrator turn, and settle callers (tRPC finish, controller, queue
-  // jobs) must not block on it. The delivery claim keeps it idempotent.
-  void notifyFastAgentParentOnSettle(
+  if (status !== RunStatus.Idle) {
+    const notification = await notifyWebTaskInitiatorOnSettle(run, status);
+    if (notification === 'failed') {
+      await enqueueWebTaskInitiatorSettleNotification({
+        runId: run.id,
+        taskId: run.taskId,
+        status,
+      });
+    }
+  }
+  const fastAgentParent = getFastAgentParentFromPayload(run.payload);
+  const parentSettleNotification = notifyFastAgentParentOnSettle(
     {
       ...run,
       error: sanitizedError ?? run.error,
@@ -421,9 +448,22 @@ export const finishRun = async ({
     status,
     run.task.title,
   );
+  const awaitAgentMailFailureAdmission =
+    status === RunStatus.Failed &&
+    getCommunicationProviderFromTaskPayload(run.payload) === 'agentmail' &&
+    Boolean(fastAgentParent);
+  // Most settles remain detached because parent processing must not block the
+  // child. Email failures await only durable event admission so the child can
+  // provide the existing idempotent fallback if that database write fails.
+  const agentMailParentAdmissionFailed = awaitAgentMailFailureAdmission
+    ? (await parentSettleNotification) === 'failed'
+    : false;
+  if (!awaitAgentMailFailureAdmission) {
+    void parentSettleNotification;
+  }
   // The worker settles its own card on exit; this covers runs finalized
   // here without one (reaper, failed bootstrap). Never throws.
-  void settleSlackLiveTaskCardOnExit(run, status, run.task.title);
+  void settleLiveTaskMessageOnExit(run, status, run.task.title);
 
   // Anonymous analytics (no-op unless enabled): terminal task outcome with
   // non-identifying routing facts only.
@@ -558,22 +598,17 @@ export const finishRun = async ({
     }
   }
 
-  const linkedEnvironmentDefinitionId =
-    status === RunStatus.Idle && run.taskPhase === 'waiting_for_prompt'
-      ? await resolveSetupCompletionEnvironmentDefinitionId(run)
-      : null;
-
   if (
-    (status === RunStatus.Completed ||
-      linkedEnvironmentDefinitionId !== null) &&
-    (payloadKind === TaskPayloadKind.SlackAppMention ||
-      payloadKind === TaskPayloadKind.SnapshotResume)
+    status === RunStatus.Failed &&
+    !task.slackThreadTs &&
+    getCommunicationProviderFromTaskPayload(run.payload) === 'agentmail' &&
+    (!fastAgentParent || agentMailParentAdmissionFailed)
   ) {
     try {
-      await cleanupSlackSetupCompletion(run);
+      await sendAgentMailFailureNotification(run, channelProviderError);
     } catch (err) {
       console.error(
-        `[finishRun] Failed to clean up Slack setup completion UI for run ${id}: ${
+        `[finishRun] Failed to send email failure notification for run ${id}: ${
           err instanceof Error ? err.message : String(err)
         }`,
       );
@@ -823,9 +858,15 @@ async function cleanupGithubPrReviewArtifacts(
       // a real agent completion (it only patches comments still showing an
       // in-progress status line).
       if (status !== RunStatus.Idle) {
-        let reviewSummary: { finalized: boolean; body?: string } = {
-          finalized: false,
-        };
+        let reviewSummary: {
+          finalized: boolean;
+          body?: string;
+          fetchFailed?: boolean;
+          commentId?: number;
+        } = { finalized: false };
+        // GitHub would not return the summary comment even on retry; the
+        // review's result exists but cannot be read right now.
+        let summaryUnreadable = false;
 
         try {
           releaseLifecycleLock.signal.throwIfAborted();
@@ -862,6 +903,33 @@ async function cleanupGithubPrReviewArtifacts(
           });
           releaseLifecycleLock.signal.throwIfAborted();
 
+          // The finalizer reads the summary through the gh CLI. A transient
+          // GitHub failure there used to be indistinguishable from a review
+          // that never published anything, and the check reported "result
+          // unavailable" for a review that had in fact passed. Read it again
+          // over REST before deciding anything.
+          if (
+            reviewSummary.fetchFailed &&
+            status === RunStatus.Completed &&
+            reviewSummary.commentId
+          ) {
+            const read = await readReviewSummaryWithRetry({
+              token,
+              owner,
+              repo,
+              commentId: reviewSummary.commentId,
+              runId: run.id,
+              signal: releaseLifecycleLock.signal,
+            });
+            if (read.outcome === 'read') {
+              reviewSummary = { finalized: false, body: read.body };
+            } else if (read.outcome === 'unreadable') {
+              summaryUnreadable = true;
+            }
+            // A missing comment (deleted, or a stale id) is a real absence of
+            // a review result and keeps the failing check.
+          }
+
           if (reviewSummary.finalized) {
             console.log(
               `[finishRun] Finalized stale PR review summary comment for run ${run.id} on ${prRow.repository}#${prRow.prNumber}`,
@@ -879,19 +947,38 @@ async function cleanupGithubPrReviewArtifacts(
           try {
             releaseLifecycleLock.signal.throwIfAborted();
             token ??= await createTaskRunGitHubToken(run);
-            const checkResult = getGithubPrReviewCheckResult({
-              runStatus: status,
-              reviewSummaryBody: reviewSummary.body,
-              safetyNetFinalized: reviewSummary.finalized,
-              expectedHeadSha:
-                'latestObservedHeadSha' in run.payload &&
-                typeof run.payload.latestObservedHeadSha === 'string'
-                  ? run.payload.latestObservedHeadSha
-                  : 'headSha' in run.payload &&
-                      typeof run.payload.headSha === 'string'
-                    ? run.payload.headSha
-                    : undefined,
-            });
+            const checkResult: {
+              conclusion: 'success' | 'failure' | 'cancelled' | 'neutral';
+              title: string;
+              summary: string;
+            } = summaryUnreadable
+              ? {
+                  // Not a failure of the review: the run completed and its
+                  // summary comment exists, GitHub just would not serve it.
+                  // A failure here would block merges on a GitHub hiccup.
+                  conclusion: 'neutral',
+                  title: 'Roomote review result could not be read',
+                  summary:
+                    'The review finished, but GitHub did not return the review summary comment while this check was being finalized. Open the Roomote summary comment on the pull request for the result.',
+                }
+              : getGithubPrReviewCheckResult({
+                  runStatus: status,
+                  reviewSummaryBody: reviewSummary.body,
+                  safetyNetFinalized: reviewSummary.finalized,
+                  expectedHeadSha:
+                    'latestObservedHeadSha' in run.payload &&
+                    typeof run.payload.latestObservedHeadSha === 'string'
+                      ? run.payload.latestObservedHeadSha
+                      : 'headSha' in run.payload &&
+                          typeof run.payload.headSha === 'string'
+                        ? run.payload.headSha
+                        : undefined,
+                });
+            if (summaryUnreadable) {
+              console.error(
+                `[finishRun] Completing PR review check for run ${run.id} on ${prRow.repository}#${prRow.prNumber} as neutral: the review summary comment could not be read`,
+              );
+            }
             const taskUrl = getTaskUrl({
               taskId: run.taskId,
               utm: {
@@ -935,6 +1022,78 @@ async function cleanupGithubPrReviewArtifacts(
       await releaseLifecycleLock();
     }
   }
+}
+
+const REVIEW_SUMMARY_READ_ATTEMPTS = 3;
+const REVIEW_SUMMARY_READ_BASE_DELAY_MS = 500;
+
+/**
+ * REST fallback for the review summary comment after the gh CLI read failed.
+ * Bounded retries with backoff cover the transient GitHub errors that were
+ * turning passed reviews into "review result unavailable" checks. A 404 is
+ * not transient: the summary comment was deleted or the stored id is stale,
+ * and the check keeps failing because there is no result to inspect.
+ */
+async function readReviewSummaryWithRetry(input: {
+  token: string;
+  owner: string;
+  repo: string;
+  commentId: number;
+  runId: number;
+  signal: AbortSignal;
+}): Promise<
+  | { outcome: 'read'; body: string }
+  | { outcome: 'missing' }
+  | { outcome: 'unreadable' }
+> {
+  for (let attempt = 1; attempt <= REVIEW_SUMMARY_READ_ATTEMPTS; attempt++) {
+    input.signal.throwIfAborted();
+    try {
+      const { data } = await fetchIssueCommentWithToken(input.token, {
+        owner: input.owner,
+        repo: input.repo,
+        comment_id: input.commentId,
+        request: { signal: input.signal },
+      });
+      return data.body
+        ? { outcome: 'read', body: data.body }
+        : { outcome: 'missing' };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (isMissingCommentError(error)) {
+        // GitHub answered and the comment is gone: no amount of retrying
+        // brings back a review result, and the check must keep failing.
+        console.error(
+          `[finishRun] Review summary comment ${input.commentId} for run ${input.runId} no longer exists: ${message}`,
+        );
+        return { outcome: 'missing' };
+      }
+      if (input.signal.aborted || attempt === REVIEW_SUMMARY_READ_ATTEMPTS) {
+        console.error(
+          `[finishRun] Review summary comment ${input.commentId} for run ${input.runId} could not be read after ${attempt} attempt(s): ${message}`,
+        );
+        return { outcome: 'unreadable' };
+      }
+      const delayMs = REVIEW_SUMMARY_READ_BASE_DELAY_MS * 2 ** (attempt - 1);
+      console.warn(
+        `[finishRun] Review summary comment ${input.commentId} for run ${input.runId} read attempt ${attempt}/${REVIEW_SUMMARY_READ_ATTEMPTS} failed; retrying in ${delayMs}ms: ${message}`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  return { outcome: 'unreadable' };
+}
+
+/**
+ * GitHub's definitive "this comment does not exist" answers. Everything else
+ * (network, 429, 5xx, aborted request) is treated as transient.
+ */
+function isMissingCommentError(error: unknown): boolean {
+  const status =
+    error && typeof error === 'object' && 'status' in error
+      ? (error as { status?: unknown }).status
+      : undefined;
+  return status === 404 || status === 410;
 }
 
 function getRuntimeTaskId(run: TaskRun): string | null {
@@ -1080,6 +1239,64 @@ async function sendTelegramFailureNotification(
   );
 }
 
+/**
+ * Post the terminal failure result back into the originating email
+ * conversation when an email-launched run fails. Mirrors the Telegram path:
+ * same result-text composition (failure text, error details, task link), no
+ * reactions, no typing indicators, no topic-name updates. The adapter
+ * resolves the actual reply anchor and recipient from the durable
+ * agentmail_conversations row; the payload thread id is the INTERNAL
+ * conversation id. The Idempotency-Key is stable per run so a finish-run
+ * retry can never double-send the email.
+ */
+async function sendAgentMailFailureNotification(
+  run: FinishedRun,
+  error?: string,
+): Promise<void> {
+  const provider =
+    await createAgentMailCommunicationProviderFromRuntimeCredentials();
+  if (!provider) {
+    console.warn(
+      `[finishRun] AgentMail credentials are not configured, skipping email failure notification for run ${run.id}`,
+    );
+    return;
+  }
+
+  const channelId = getCommunicationChannelFromTaskPayload(run.payload);
+  const conversationId = getCommunicationThreadIdFromTaskPayload(run.payload);
+  if (!channelId || !conversationId) {
+    console.warn(
+      `[finishRun] Missing email conversation metadata for run ${run.id}, skipping email failure notification`,
+    );
+    return;
+  }
+
+  const failureText = hasReachedTaskRuntime(run)
+    ? TASK_RUNTIME_FAILURE_TEXT
+    : TASK_STARTUP_FAILURE_TEXT;
+  const taskUrl = getTaskUrl({
+    taskId: run.taskId,
+    utm: { campaign: run.payloadKind, source: 'agentmail' },
+  });
+  const text = [
+    failureText,
+    error ? `**Error details:** ${error}` : null,
+    taskUrl ? formatMarkdownLink('Open the task', taskUrl) : null,
+  ]
+    .filter((part): part is string => part !== null)
+    .join('\n\n');
+
+  await provider.postMessage({
+    channelId,
+    threadId: conversationId,
+    text,
+    textFormat: 'markdown',
+    idempotencyKey: `agentmail:${conversationId}:finish-run:${run.id}`,
+  });
+
+  console.log(`[finishRun] Sent email failure notification for run ${run.id}`);
+}
+
 async function sendDiscordFailureNotification(
   run: FinishedRun,
   error?: string,
@@ -1175,15 +1392,7 @@ async function sendSlackFailureNotification(
         utm: { campaign: run.payloadKind, source: 'slack' },
       });
 
-  // Remove the cancel button from the started message.
   const slackStartedMessageTs = await getSlackStartedMessageTs(run.id);
-  if (slackStartedMessageTs && task.slackThreadTs) {
-    await slack.removeCancelButton({
-      channel,
-      messageTs: slackStartedMessageTs,
-      threadTs: task.slackThreadTs,
-    });
-  }
 
   if (!isSetupOnboarding) {
     const threadReplyTs = threadTs ?? task.slackThreadTs!;
@@ -1196,15 +1405,12 @@ async function sendSlackFailureNotification(
       ? `\n\n*Error details:* ${escapedError}`
       : '';
 
-    const failureMessage =
-      run.payloadKind === TaskPayloadKind.SlackAppMention
-        ? buildTaskFailedMessage({
-            runId: run.id,
-            messageText: `${retryableFailureText}${failureDetails}`,
-          })
-        : {
-            text: `${restartFailureText}${failureDetails}`,
-          };
+    const failureMessage = {
+      text:
+        run.payloadKind === TaskPayloadKind.SlackAppMention
+          ? `${retryableFailureText}${failureDetails}`
+          : `${restartFailureText}${failureDetails}`,
+    };
 
     const shouldUpdateStartedMessage =
       slackStartedMessageTs != null && !runtimeAlreadyStarted;
@@ -1502,77 +1708,6 @@ async function maybeSendSlackQuestionChannelInvite(
         ),
       ),
     );
-}
-
-async function cleanupSlackSetupCompletion(run: FinishedRun) {
-  const { channel, threadTs, route } = await resolveSlackTaskRunRouting(run);
-
-  if (route.kind !== 'setup-onboarding' || !threadTs || !channel) {
-    return;
-  }
-
-  const slackInstallation = await db.query.slackInstallations.findFirst({
-    where: and(eq(slackInstallations.isActive, true)),
-  });
-
-  if (!slackInstallation) {
-    return;
-  }
-
-  const slackStartedMessageTs = await getSlackStartedMessageTs(run.id);
-
-  if (!slackStartedMessageTs) {
-    return;
-  }
-
-  const slack = new SlackNotifier(slackInstallation.botAccessToken);
-  await slack.removeCancelButton({
-    channel,
-    messageTs: slackStartedMessageTs,
-    threadTs,
-  });
-}
-
-/**
- * Setup-onboarding resumes carry the environment definition id somewhere in
- * the payloads of the task's run chain. Instead of walking sourceRunId links,
- * scan the sibling runs of the task from newest to oldest.
- */
-async function resolveSetupCompletionEnvironmentDefinitionId(
-  run: Pick<FinishedRun, 'id' | 'payload' | 'taskId'>,
-): Promise<string | null> {
-  const environmentDefinitionId = getEnvironmentDefinitionIdFromPayload(
-    run.payload,
-  );
-
-  if (environmentDefinitionId) {
-    return environmentDefinitionId;
-  }
-
-  const siblingRuns = await db.query.taskRuns.findMany({
-    columns: {
-      id: true,
-      payload: true,
-    },
-    where: eq(taskRuns.taskId, run.taskId),
-    orderBy: [asc(taskRuns.id)],
-  });
-
-  for (const siblingRun of siblingRuns) {
-    if (siblingRun.id === run.id) {
-      continue;
-    }
-
-    const fromSibling = getEnvironmentDefinitionIdFromPayload(
-      siblingRun.payload,
-    );
-
-    if (fromSibling) {
-      return fromSibling;
-    }
-  }
-
-  return null;
 }
 
 function buildSlackWebPathUrl(webPath: string, campaign: string): string {

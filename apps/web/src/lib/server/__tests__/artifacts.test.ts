@@ -1,4 +1,187 @@
-import { validateArtifactPath, validateArtifactSize } from '../artifacts';
+import {
+  db,
+  sessionFactory,
+  taskArtifacts,
+  taskFactory,
+  userFactory,
+} from '@roomote/db/server';
+
+import {
+  getArtifactByPath,
+  getArtifactBySessionPath,
+  getArtifactVersionsBySessionPath,
+  validateArtifactPath,
+  validateArtifactSize,
+} from '../artifacts';
+
+describe.each(['task', 'session'] as const)(
+  '%s artifact path lookup',
+  (scope) => {
+    let ownerId: string;
+    const path = 'reports/result.pdf';
+    const auth = { userId: '', isAdmin: false };
+
+    function lookup(artifactPath = path, version?: number) {
+      return scope === 'task'
+        ? getArtifactByPath({
+            taskId: ownerId,
+            path: artifactPath,
+            version,
+            auth,
+          })
+        : getArtifactBySessionPath({
+            sessionId: ownerId,
+            path: artifactPath,
+            version,
+            auth,
+          });
+    }
+
+    beforeEach(async () => {
+      auth.userId = (await userFactory.create()).id;
+      ownerId =
+        scope === 'task'
+          ? (await taskFactory.create()).id
+          : (await sessionFactory.create()).id;
+      const owner =
+        scope === 'task' ? { taskId: ownerId } : { sessionId: ownerId };
+      await db.insert(taskArtifacts).values(
+        [1, 2, 3].map((version) => ({
+          ...owner,
+          path,
+          version,
+          uploaded: version < 3,
+          contentType: 'application/pdf',
+          size: 100,
+        })),
+      );
+    });
+
+    it('returns the latest uploaded version when a newer upload is incomplete', async () => {
+      await expect(lookup()).resolves.toMatchObject({
+        path,
+        version: 2,
+        uploaded: true,
+      });
+    });
+
+    it('retains exact version lookups, including incomplete upload metadata', async () => {
+      for (const version of [1, 2, 3]) {
+        await expect(lookup(path, version)).resolves.toMatchObject({
+          path,
+          version,
+          uploaded: version < 3,
+        });
+      }
+      await expect(lookup(path, 4)).resolves.toBeNull();
+    });
+
+    it('returns no latest artifact when every version is incomplete', async () => {
+      const incompletePath = 'reports/incomplete.pdf';
+      const owner =
+        scope === 'task' ? { taskId: ownerId } : { sessionId: ownerId };
+      await db.insert(taskArtifacts).values(
+        [1, 2].map((version) => ({
+          ...owner,
+          path: incompletePath,
+          version,
+          uploaded: false,
+          contentType: 'application/pdf',
+          size: 100,
+        })),
+      );
+
+      await expect(lookup(incompletePath)).resolves.toBeNull();
+    });
+  },
+);
+
+describe('Session artifact helper authorization', () => {
+  const path = 'reports/private.pdf';
+  let sessionId: string;
+
+  beforeEach(async () => {
+    sessionId = (await sessionFactory.create()).id;
+    await db.insert(taskArtifacts).values(
+      [1, 2, 3].map((version) => ({
+        sessionId,
+        path,
+        version,
+        uploaded: version < 3,
+        contentType: 'application/pdf',
+        size: 100,
+      })),
+    );
+  });
+
+  it('rejects path and version reads without a human user', async () => {
+    const auth = { userId: null, isAdmin: false };
+
+    await expect(
+      getArtifactBySessionPath({ sessionId, path, auth }),
+    ).resolves.toBeNull();
+    await expect(
+      getArtifactVersionsBySessionPath({ sessionId, path, auth }),
+    ).resolves.toEqual([]);
+  });
+
+  it('returns uploaded versions, latest first, for an authorized member', async () => {
+    const auth = { userId: (await userFactory.create()).id, isAdmin: false };
+
+    await expect(
+      getArtifactVersionsBySessionPath({ sessionId, path, auth }),
+    ).resolves.toMatchObject([{ version: 2 }, { version: 1 }]);
+    await expect(
+      getArtifactBySessionPath({ sessionId, path, auth }),
+    ).resolves.toMatchObject({ path, version: 2, uploaded: true });
+  });
+
+  it('keeps private Session artifact metadata owner-only, including for admins', async () => {
+    const owner = await userFactory.create();
+    const other = await userFactory.create();
+    const privateSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+    });
+    await db.insert(taskArtifacts).values({
+      sessionId: privateSession.id,
+      path,
+      version: 1,
+      uploaded: true,
+      contentType: 'application/pdf',
+      size: 100,
+    });
+
+    await expect(
+      getArtifactBySessionPath({
+        sessionId: privateSession.id,
+        path,
+        auth: { userId: owner.id, isAdmin: false },
+      }),
+    ).resolves.toMatchObject({ version: 1 });
+    for (const auth of [
+      { userId: other.id, isAdmin: false },
+      { userId: other.id, isAdmin: true },
+    ]) {
+      await expect(
+        getArtifactBySessionPath({
+          sessionId: privateSession.id,
+          path,
+          auth,
+        }),
+      ).resolves.toBeNull();
+      await expect(
+        getArtifactVersionsBySessionPath({
+          sessionId: privateSession.id,
+          path,
+          auth,
+        }),
+      ).resolves.toEqual([]);
+    }
+  });
+});
 
 describe('validateArtifactPath', () => {
   it('should accept valid paths', () => {
@@ -55,13 +238,18 @@ describe('validateArtifactPath', () => {
     });
   });
 
-  it('should reject paths starting with /', () => {
-    const maliciousPaths = ['/etc/passwd', '/root/secret.txt', '/file.txt'];
+  it('should reject absolute paths', () => {
+    const maliciousPaths = [
+      '/etc/passwd',
+      '/root/secret.txt',
+      '/file.txt',
+      'C:\\Users\\roomote\\secret.txt',
+    ];
 
     maliciousPaths.forEach((path) => {
       const result = validateArtifactPath(path);
       expect(result.valid).toBe(false);
-      expect(result.error).toBe('Invalid path: must be relative to workspace');
+      expect(result.error).toBe('Invalid path: absolute paths are not allowed');
     });
   });
 
@@ -71,7 +259,7 @@ describe('validateArtifactPath', () => {
     maliciousPaths.forEach((path) => {
       const result = validateArtifactPath(path);
       expect(result.valid).toBe(false);
-      expect(result.error).toBe('Invalid path: contains null byte');
+      expect(result.error).toBe('Invalid path: null byte detected');
     });
   });
 

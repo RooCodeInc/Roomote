@@ -60,10 +60,12 @@ const dialogSizes = {
 function DialogContent({
   className,
   children,
+  overlayClassName,
   showCloseButton = true,
   size = 'md',
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
+  overlayClassName?: string;
   showCloseButton?: boolean;
   size?: keyof typeof dialogSizes;
 }) {
@@ -71,7 +73,7 @@ function DialogContent({
 
   return (
     <DialogPortal data-slot="dialog-portal">
-      <DialogOverlay />
+      <DialogOverlay className={overlayClassName} />
       <DialogPrimitive.Content
         ref={contentRef}
         onPointerDownOutside={(e) => {

@@ -9,7 +9,7 @@ set -euo pipefail
 #   1. Worker image builds (Dockerfiles) to prebake browser automation.
 #   2. Worker setup compatibility fallbacks on older Linux images.
 
-AGENT_BROWSER_VERSION="${AGENT_BROWSER_VERSION:-0.33.2}"
+AGENT_BROWSER_VERSION="${AGENT_BROWSER_VERSION:-0.37.0}"
 AGENT_BROWSER_INSTALL_ROOT="${AGENT_BROWSER_INSTALL_ROOT:-/opt/agent-browser}"
 AGENT_BROWSER_EXECUTABLE_PATH="${AGENT_BROWSER_EXECUTABLE_PATH:-${AGENT_BROWSER_INSTALL_ROOT}/chrome}"
 AGENT_BROWSER_SAVED_CLI_PATH="${AGENT_BROWSER_SAVED_CLI_PATH:-${AGENT_BROWSER_INSTALL_ROOT}/.cli-path}"
@@ -427,6 +427,19 @@ should_seed_preview_cookies() {
   return 1
 }
 
+is_informational_invocation() {
+  local arg
+  for arg in "${AGENT_BROWSER_EXEC_ARGS[@]}"; do
+    case "$arg" in
+      --help|-h|--version|-V)
+        return 0
+        ;;
+    esac
+  done
+
+  return 1
+}
+
 should_clear_seed_cache() {
   case "$AGENT_BROWSER_COMMAND" in
     close|quit|exit)
@@ -547,7 +560,7 @@ collect_cli_browser_args "$@"
 parse_cli_context "${AGENT_BROWSER_EXEC_ARGS[@]}"
 configure_local_preview_host_resolution
 
-if should_seed_preview_cookies; then
+if ! is_informational_invocation && should_seed_preview_cookies; then
   seed_preview_cookies
 fi
 
@@ -651,8 +664,6 @@ main() {
     ln -sf "$browser_binary_path" "$AGENT_BROWSER_EXECUTABLE_PATH"
     printf '%s\n' "$AGENT_BROWSER_VERSION" > "$AGENT_BROWSER_INSTALL_MARKER"
   fi
-
-  real_cli_path="$(find_real_agent_browser_cli_path)"
 
   if [ -z "$real_cli_path" ]; then
     echo "agent-browser install: failed to resolve real CLI after install/repair" >&2

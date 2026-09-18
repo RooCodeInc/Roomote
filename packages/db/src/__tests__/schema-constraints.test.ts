@@ -303,6 +303,34 @@ describe('sessions CHECK and uniqueness constraints', () => {
   });
 });
 
+describe('Fast conversation owner constraints', () => {
+  it('requires exactly one user or automation owner', async () => {
+    await expectConstraintViolation(
+      db.insert(fastAgentConversations).values({
+        userId: null,
+        ownerAutomation: null,
+        surface: 'automation',
+        workspaceId: randomUUID(),
+        conversationId: randomUUID(),
+      }),
+      'fast_agent_conversations_owner_shape_check',
+    );
+
+    const user = await userFactory.create();
+    createdUserIds.push(user.id);
+    await expectConstraintViolation(
+      db.insert(fastAgentConversations).values({
+        userId: user.id,
+        ownerAutomation: 'custom_automation',
+        surface: 'automation',
+        workspaceId: randomUUID(),
+        conversationId: randomUUID(),
+      }),
+      'fast_agent_conversations_owner_shape_check',
+    );
+  });
+});
+
 describe('task_runs classification CHECK constraints', () => {
   it('accepts every run kind and harness', async () => {
     for (const kind of RUN_KINDS) {

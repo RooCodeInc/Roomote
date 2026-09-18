@@ -1,6 +1,10 @@
 import { and, db, eq, tasks, taskFactory } from '../../server';
 
-import { createTaskWithRetry, isVisibleTask } from '../tasks';
+import {
+  createTaskWithRetry,
+  isVisibleTask,
+  touchTaskActivity,
+} from '../tasks';
 
 function makePkCollisionError() {
   const error = new Error(
@@ -214,6 +218,23 @@ describe('createTaskWithRetry', () => {
     });
 
     expect(result.id).toBe('ok-id');
+  });
+});
+
+describe('touchTaskActivity', () => {
+  it('updates activity monotonically', async () => {
+    const task = await taskFactory.create({ activityAt: 200 });
+
+    await touchTaskActivity(db, task.id, 300);
+    await touchTaskActivity(db, task.id, 250);
+
+    const [updated] = await db
+      .select({ activityAt: tasks.activityAt })
+      .from(tasks)
+      .where(eq(tasks.id, task.id));
+    expect(updated?.activityAt).toBe(300);
+
+    await db.delete(tasks).where(eq(tasks.id, task.id));
   });
 });
 

@@ -2,7 +2,12 @@ import { callTRPCProcedure } from '@trpc/server';
 
 import { logger } from '@/lib/server/logger';
 
-import { createRouter, protectedProcedure, publicProcedure } from '../init';
+import {
+  createContext,
+  createRouter,
+  protectedProcedure,
+  publicProcedure,
+} from '../init';
 
 vi.mock('@/lib/server/logger', () => ({
   logger: {
@@ -74,6 +79,15 @@ describe('procedure timing wiring', () => {
     expect(infoMock).toHaveBeenCalledWith(
       '[procedure-timing] procedure=ping ms=0 ok=true',
     );
+  });
+
+  it('keeps server-caller contexts read-only unless the HTTP route opts in', async () => {
+    await createContext();
+    expect(authorizeMock).toHaveBeenLastCalledWith(undefined);
+    await createContext({ allowSessionRefresh: true });
+    expect(authorizeMock).toHaveBeenLastCalledWith({
+      allowSessionRefresh: true,
+    });
   });
 
   it('times failing procedures without changing the error', async () => {

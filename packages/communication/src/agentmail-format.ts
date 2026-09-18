@@ -1,0 +1,494 @@
+/**
+ * AgentMail email body formatting helpers.
+ *
+ * Converts the agent-authored markdown used across Roomote chat surfaces into
+ * a conservative HTML email body plus a plain-text alternative. All source
+ * text is HTML-escaped first — raw HTML never passes through, so an email
+ * body can never carry injected markup.
+ */
+
+/**
+ * Email size limits are generous, so no chunking — just a defensive cap so a
+ * runaway agent reply cannot produce a multi-megabyte email.
+ */
+export const AGENTMAIL_MAX_TEXT_LENGTH = 100_000;
+
+const TRUNCATION_SUFFIX = '\n\n[message truncated]';
+const AGENTMAIL_FOOTER_PREFIX = ':::roomote-footer ';
+
+export function formatAgentMailFooterMarkdown(text: string): string {
+  return `${AGENTMAIL_FOOTER_PREFIX}${text}`;
+}
+
+function truncateAgentMailMarkdown(markdown: string): string {
+  if (markdown.length <= AGENTMAIL_MAX_TEXT_LENGTH) {
+    return markdown;
+  }
+
+  const finalLineStart = markdown.lastIndexOf('\n') + 1;
+  const footer = markdown.slice(finalLineStart);
+
+  if (footer.startsWith(AGENTMAIL_FOOTER_PREFIX)) {
+    const separator = '\n\n';
+    const bodyLength =
+      AGENTMAIL_MAX_TEXT_LENGTH -
+      TRUNCATION_SUFFIX.length -
+      separator.length -
+      footer.length;
+
+    if (bodyLength >= 0) {
+      return (
+        markdown.slice(0, bodyLength) + TRUNCATION_SUFFIX + separator + footer
+      );
+    }
+  }
+
+  return (
+    markdown.slice(0, AGENTMAIL_MAX_TEXT_LENGTH - TRUNCATION_SUFFIX.length) +
+    TRUNCATION_SUFFIX
+  );
+}
+
+export function escapeAgentMailHtml(text: string): string {
+  return text
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+}
+
+/**
+ * Only link protocols that are safe in an email client. Anything else
+ * (javascript:, data:, file:, …) stays literal escaped text.
+ */
+const SAFE_LINK_PATTERN = /^(https?:\/\/|mailto:)/i;
+
+function replaceMarkdownLinks(
+  text: string,
+  render: (label: string, url: string, source: string) => string,
+): string {
+  const parts: string[] = [];
+  let labelStart = -1;
+  let unchangedStart = 0;
+  let index = 0;
+
+  while (index < text.length) {
+    const character = text[index];
+
+    if (character === '\n') {
+      labelStart = -1;
+    } else if (character === '[' && labelStart === -1) {
+      labelStart = index;
+    } else if (character === ']') {
+      if (
+        labelStart !== -1 &&
+        index > labelStart + 1 &&
+        text[index + 1] === '('
+      ) {
+        const urlStart = index + 2;
+        let urlEnd = urlStart;
+
+        while (
+          urlEnd < text.length &&
+          text[urlEnd] !== ')' &&
+          !/\s/.test(text[urlEnd] ?? '')
+        ) {
+          urlEnd += 1;
+        }
+
+        if (urlEnd > urlStart && text[urlEnd] === ')') {
+          const source = text.slice(labelStart, urlEnd + 1);
+          parts.push(
+            text.slice(unchangedStart, labelStart),
+            render(
+              text.slice(labelStart + 1, index),
+              text.slice(urlStart, urlEnd),
+              source,
+            ),
+          );
+          index = urlEnd + 1;
+          unchangedStart = index;
+          labelStart = -1;
+          continue;
+        }
+
+        if (urlEnd === text.length) {
+          break;
+        }
+
+        index = urlEnd;
+        labelStart = -1;
+        continue;
+      }
+
+      labelStart = -1;
+    }
+
+    index += 1;
+  }
+
+  if (parts.length === 0) {
+    return text;
+  }
+
+  parts.push(text.slice(unchangedStart));
+  return parts.join('');
+}
+
+function convertInlineMarkdown(escaped: string): string {
+  return (
+    replaceMarkdownLinks(escaped, (label, url, source) =>
+      SAFE_LINK_PATTERN.test(url) ? `<a href="${url}">${label}</a>` : source,
+    )
+      // Links first so their URLs are not touched by emphasis rules. The
+      // text was already escaped, so `&` inside URLs appears as `&amp;`,
+      // which is the correct encoding for an href attribute.
+      .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/(?<![\w*])\*([^*\n]+)\*(?![\w*])/g, '<em>$1</em>')
+      // Underscore italics only when they wrap a whole line, so snake_case
+      // identifiers inside prose are never touched.
+      .replace(/^_([^_\n](?:[^\n]*[^_\n])?)_$/gm, '<em>$1</em>')
+  );
+}
+
+function convertInlineText(line: string): string {
+  const escaped = escapeAgentMailHtml(line);
+
+  // Convert inline code spans before emphasis so their contents stay
+  // verbatim, then apply emphasis/link conversion outside <code> spans only.
+  return escaped
+    .replace(/`([^`\n]+)`/g, '<code>$1</code>')
+    .split(/(<code>[^<]*<\/code>)/g)
+    .map((part) =>
+      part.startsWith('<code>') ? part : convertInlineMarkdown(part),
+    )
+    .join('');
+}
+
+type MarkdownSegment =
+  | { kind: 'text'; content: string }
+  | { kind: 'code'; content: string; language?: string };
+
+function splitCodeFences(markdown: string): MarkdownSegment[] {
+  const segments: MarkdownSegment[] = [];
+  const fencePattern = /^```([^\n`]*)\n([\s\S]*?)^```[ \t]*$/gm;
+  let lastIndex = 0;
+
+  for (const match of markdown.matchAll(fencePattern)) {
+    const index = match.index ?? 0;
+
+    if (index > lastIndex) {
+      segments.push({
+        kind: 'text',
+        content: markdown.slice(lastIndex, index),
+      });
+    }
+
+    segments.push({
+      kind: 'code',
+      content: match[2] ?? '',
+      ...(match[1]?.trim() ? { language: match[1].trim() } : {}),
+    });
+    lastIndex = index + match[0].length;
+  }
+
+  if (lastIndex < markdown.length) {
+    segments.push({ kind: 'text', content: markdown.slice(lastIndex) });
+  }
+
+  return segments;
+}
+
+type MarkdownBlock =
+  | { kind: 'heading'; level: number; text: string }
+  | { kind: 'blockquote'; lines: string[] }
+  | { kind: 'unordered-list'; items: string[] }
+  | { kind: 'ordered-list'; items: string[] }
+  | { kind: 'footer'; text: string }
+  | { kind: 'paragraph'; lines: string[] };
+
+const UNORDERED_ITEM_PATTERN = /^[-*+]\s+(.*)$/;
+const ORDERED_ITEM_PATTERN = /^\d+[.)]\s+(.*)$/;
+const BLOCKQUOTE_PATTERN = /^>\s?(.*)$/;
+
+function parseHeading(line: string): { level: number; text: string } | null {
+  let level = 0;
+  while (level < 6 && line[level] === '#') level += 1;
+  if (level === 0 || (line[level] !== ' ' && line[level] !== '\t')) return null;
+  let textStart = level;
+  while (line[textStart] === ' ' || line[textStart] === '\t') textStart += 1;
+  return { level, text: line.slice(textStart) };
+}
+
+function splitBlocks(
+  text: string,
+  recognizeFinalFooter = false,
+): MarkdownBlock[] {
+  const blocks: MarkdownBlock[] = [];
+  let current: MarkdownBlock | null = null;
+  const lines = text.split('\n');
+
+  const flush = () => {
+    if (current) {
+      blocks.push(current);
+      current = null;
+    }
+  };
+
+  for (const [index, line] of lines.entries()) {
+    if (!line.trim()) {
+      flush();
+      continue;
+    }
+
+    const heading = parseHeading(line);
+
+    if (
+      recognizeFinalFooter &&
+      index === lines.length - 1 &&
+      line.startsWith(AGENTMAIL_FOOTER_PREFIX)
+    ) {
+      flush();
+      blocks.push({
+        kind: 'footer',
+        text: line.slice(AGENTMAIL_FOOTER_PREFIX.length),
+      });
+      continue;
+    }
+
+    if (heading) {
+      flush();
+      blocks.push({
+        kind: 'heading',
+        level: heading.level,
+        text: heading.text,
+      });
+      continue;
+    }
+
+    const blockquote = BLOCKQUOTE_PATTERN.exec(line);
+
+    if (blockquote) {
+      if (current?.kind === 'blockquote') {
+        current.lines.push(blockquote[1] ?? '');
+      } else {
+        flush();
+        current = { kind: 'blockquote', lines: [blockquote[1] ?? ''] };
+      }
+      continue;
+    }
+
+    const unordered = UNORDERED_ITEM_PATTERN.exec(line);
+
+    if (unordered) {
+      if (current?.kind === 'unordered-list') {
+        current.items.push(unordered[1] ?? '');
+      } else {
+        flush();
+        current = { kind: 'unordered-list', items: [unordered[1] ?? ''] };
+      }
+      continue;
+    }
+
+    const ordered = ORDERED_ITEM_PATTERN.exec(line);
+
+    if (ordered) {
+      if (current?.kind === 'ordered-list') {
+        current.items.push(ordered[1] ?? '');
+      } else {
+        flush();
+        current = { kind: 'ordered-list', items: [ordered[1] ?? ''] };
+      }
+      continue;
+    }
+
+    if (current?.kind === 'paragraph') {
+      current.lines.push(line);
+    } else {
+      flush();
+      current = { kind: 'paragraph', lines: [line] };
+    }
+  }
+
+  flush();
+
+  return blocks;
+}
+
+/** Headings render one size down (h3–h5) to stay email-friendly. */
+function headingTag(level: number): string {
+  return level <= 1 ? 'h3' : level === 2 ? 'h4' : 'h5';
+}
+
+function renderBlock(block: MarkdownBlock): string {
+  switch (block.kind) {
+    case 'heading': {
+      const tag = headingTag(block.level);
+
+      return `<${tag}>${convertInlineText(block.text)}</${tag}>`;
+    }
+    case 'blockquote':
+      return `<blockquote><p>${block.lines
+        .map((line) => convertInlineText(line))
+        .join('<br />')}</p></blockquote>`;
+    case 'unordered-list':
+      return `<ul>${block.items
+        .map((item) => `<li>${convertInlineText(item)}</li>`)
+        .join('')}</ul>`;
+    case 'ordered-list':
+      return `<ol>${block.items
+        .map((item) => `<li>${convertInlineText(item)}</li>`)
+        .join('')}</ol>`;
+    case 'footer':
+      return `<p style="font-size:0.875em">${convertInlineText(block.text)}</p>`;
+    case 'paragraph':
+      return `<p>${block.lines
+        .map((line) => convertInlineText(line))
+        .join('<br />')}</p>`;
+  }
+}
+
+/**
+ * Convert Roomote markdown to a conservative HTML email body. Supports
+ * paragraphs, bold, italic, inline code, fenced code blocks, safe links
+ * (http/https/mailto only), unordered/ordered lists, headings (rendered
+ * h3–h5), blockquotes, and line breaks. Everything else passes through as
+ * escaped text.
+ */
+export function renderAgentMailHtml(markdown: string): string {
+  const segments = splitCodeFences(truncateAgentMailMarkdown(markdown));
+
+  return segments
+    .map((segment, index) => {
+      if (segment.kind === 'code') {
+        const escaped = escapeAgentMailHtml(segment.content.replace(/\n$/, ''));
+
+        return segment.language
+          ? `<pre><code class="language-${escapeAgentMailHtml(segment.language)}">${escaped}</code></pre>`
+          : `<pre><code>${escaped}</code></pre>`;
+      }
+
+      return splitBlocks(segment.content, index === segments.length - 1)
+        .map(renderBlock)
+        .join('');
+    })
+    .join('');
+}
+
+function stripInlineMarkdown(text: string): string {
+  return replaceMarkdownLinks(text, (label, url) => `${label} (${url})`)
+    .replace(/\*\*([^*\n]+)\*\*/g, '$1')
+    .replace(/(?<![\w*])\*([^*\n]+)\*(?![\w*])/g, '$1')
+    .replace(/^_([^_\n](?:[^\n]*[^_\n])?)_$/gm, '$1')
+    .replace(/~~([^~\n]+)~~/g, '$1')
+    .replace(/`([^`\n]+)`/g, '$1');
+}
+
+/**
+ * Strip markdown down to readable plain text for the email's text/plain
+ * alternative. Links render as "label (url)"; list markers and blockquote
+ * text stay readable as-is.
+ */
+export function renderAgentMailPlainText(markdown: string): string {
+  const segments = splitCodeFences(truncateAgentMailMarkdown(markdown));
+
+  return segments
+    .map((segment, index) => {
+      if (segment.kind === 'code') {
+        return segment.content.replace(/\n$/, '');
+      }
+
+      return segment.content
+        .split('\n')
+        .map((line, lineIndex, lines) => {
+          if (
+            index === segments.length - 1 &&
+            lineIndex === lines.length - 1 &&
+            line.startsWith(AGENTMAIL_FOOTER_PREFIX)
+          ) {
+            return `--\n${stripInlineMarkdown(line.slice(AGENTMAIL_FOOTER_PREFIX.length))}`;
+          }
+
+          const heading = parseHeading(line);
+          const blockquote = BLOCKQUOTE_PATTERN.exec(line);
+          const source = heading?.text ?? blockquote?.[1] ?? line;
+
+          return stripInlineMarkdown(source);
+        })
+        .join('\n');
+    })
+    .join('\n')
+    .trim();
+}
+
+/**
+ * Build the HTML body plus plain-text alternative for one outbound email.
+ * The HTML is wrapped in a minimal `<div>` — email clients supply the
+ * surrounding `<html>`/`<head>` themselves.
+ */
+export function buildAgentMailEmailBody(markdown: string): {
+  html: string;
+  text: string;
+} {
+  const truncated = truncateAgentMailMarkdown(markdown);
+
+  return {
+    html: `<div>${renderAgentMailHtml(truncated)}</div>`,
+    text: renderAgentMailPlainText(truncated),
+  };
+}
+
+export type AgentMailEmailButton = {
+  text: string;
+  url: string;
+};
+
+const AGENTMAIL_BUTTON_STYLE = [
+  'display:inline-block',
+  'padding:8px 16px',
+  'margin:4px 8px 4px 0',
+  'border:1px solid #c4c9d4',
+  'border-radius:6px',
+  'text-decoration:none',
+  'color:#1b2430',
+  'background:#f4f6f9',
+  'font-family:inherit',
+].join(';');
+
+/**
+ * Render action buttons for an outbound email: button-styled anchors in the
+ * HTML body and a `label: url` list in the plain-text alternative. Email has
+ * no callback intake, so only URL buttons render; callback-only buttons are
+ * the caller's mistake and are skipped.
+ */
+export function buildAgentMailButtonSections(rows: AgentMailEmailButton[][]): {
+  html: string;
+  text: string;
+} {
+  const usableRows = rows
+    .map((row) => row.filter((button) => button.text.trim() && button.url))
+    .filter((row) => row.length > 0);
+
+  if (usableRows.length === 0) {
+    return { html: '', text: '' };
+  }
+
+  const html = usableRows
+    .map(
+      (row) =>
+        `<div>${row
+          .map(
+            (button) =>
+              `<a href="${escapeAgentMailHtml(button.url)}" style="${AGENTMAIL_BUTTON_STYLE}">${escapeAgentMailHtml(button.text)}</a>`,
+          )
+          .join('')}</div>`,
+    )
+    .join('');
+
+  const text = usableRows
+    .flat()
+    .map((button) => `${button.text}: ${button.url}`)
+    .join('\n');
+
+  return { html, text };
+}

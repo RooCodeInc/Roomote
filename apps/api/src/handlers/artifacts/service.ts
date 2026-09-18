@@ -6,8 +6,12 @@ import {
   and,
   asc,
   desc,
+  getTaskArtifactByPath,
 } from '@roomote/db/server';
-import type { TaskArtifactType } from '@roomote/types';
+import {
+  type TaskArtifactType,
+  validateTaskArtifactPath,
+} from '@roomote/types';
 
 type ArtifactAuthContext = Record<string, never>;
 
@@ -45,32 +49,7 @@ export async function getArtifactByPath(input: {
   version?: number;
   auth: ArtifactAuthContext;
 }) {
-  const whereConditions = [
-    eq(taskArtifacts.taskId, input.taskId),
-    eq(taskArtifacts.path, input.path),
-  ];
-
-  if (input.version !== undefined) {
-    whereConditions.push(eq(taskArtifacts.version, input.version));
-  }
-
-  const result = await db
-    .select()
-    .from(taskArtifacts)
-    .innerJoin(tasks, eq(taskArtifacts.taskId, tasks.id))
-    .where(and(...whereConditions))
-    .orderBy(desc(taskArtifacts.version))
-    .limit(1);
-
-  if (result.length === 0) {
-    return null;
-  }
-
-  const row = result[0]!;
-  return {
-    ...row.task_artifacts,
-    task: row.tasks,
-  };
+  return getTaskArtifactByPath(input);
 }
 
 /**
@@ -121,42 +100,14 @@ export async function verifyTaskAccessForArtifact(
   return result.length > 0;
 }
 
-const MAX_PATH_LENGTH = 255;
 const MAX_FILE_SIZE = 100 * 1024 * 1024;
 
 export function validateArtifactPath(path: string): {
   valid: boolean;
   error?: string;
 } {
-  if (!path || path.trim() === '') {
-    return { valid: false, error: 'Path cannot be empty' };
-  }
-
-  if (path.length > MAX_PATH_LENGTH) {
-    return {
-      valid: false,
-      error: `Path too long (max ${MAX_PATH_LENGTH} chars)`,
-    };
-  }
-
-  const pathTraversalPattern = /(?:^|[/\\])\.\.(?:$|[/\\])/;
-
-  if (pathTraversalPattern.test(path)) {
-    return { valid: false, error: 'Invalid path: path traversal detected' };
-  }
-
-  if (path.startsWith('/')) {
-    return {
-      valid: false,
-      error: 'Invalid path: must be relative to workspace',
-    };
-  }
-
-  if (path.includes('\0')) {
-    return { valid: false, error: 'Invalid path: contains null byte' };
-  }
-
-  return { valid: true };
+  const error = validateTaskArtifactPath(path);
+  return error ? { valid: false, error } : { valid: true };
 }
 
 export function validateArtifactSize(size: number): {

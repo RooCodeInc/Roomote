@@ -5,7 +5,13 @@ import type {
 
 type CommunicationPromptMessage = Pick<
   QueuedCommunicationMessage,
-  'channel' | 'text' | 'threadTs' | 'ts' | 'user' | 'turnPolicy'
+  | 'agentContext'
+  | 'channel'
+  | 'text'
+  | 'threadTs'
+  | 'ts'
+  | 'user'
+  | 'turnPolicy'
 >;
 
 function escapeCommunicationPromptContent(value: string): string {
@@ -62,7 +68,11 @@ export function wrapCommunicationMessage(
     );
   }
 
-  const body = `<communication_message ${attributes.join(' ')}>\n${escapeCommunicationPromptContent(message.text.trim())}\n</communication_message>`;
+  const messageBlock = `<communication_message ${attributes.join(' ')}>\n${escapeCommunicationPromptContent(message.text.trim())}\n</communication_message>`;
+  const agentContext = message.agentContext?.trim();
+  const body = agentContext
+    ? `<current_message_context>\n${escapeCommunicationPromptContent(agentContext)}\n</current_message_context>\n\n${messageBlock}`
+    : messageBlock;
 
   if (!message.turnPolicy) {
     return body;

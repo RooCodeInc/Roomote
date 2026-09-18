@@ -376,14 +376,15 @@ export interface AzureConfig {
     clientSecret: string;
   };
   /**
-   * Maximum sandbox lifetime in milliseconds, enforced provider-side via the
-   * sandbox auto-delete lifecycle policy.
+   * Roomote task timeout in milliseconds. Also sets the default Azure idle
+   * auto-suspend interval (five hours when omitted), not a provider-enforced
+   * wall-clock lifetime. Auto-delete only starts after suspension.
    */
   timeoutMs?: number;
   /**
-   * Idle auto-suspend interval in seconds. Defaults to 0 (disabled): Roomote
-   * drives suspend/resume explicitly via standby and idle workers must not
-   * suspend underneath the controller.
+   * Idle auto-suspend interval in seconds. Defaults to timeoutMs rounded up
+   * to seconds, or five hours. This fallback preserves memory and disk when
+   * Roomote cleanup is unavailable. Set 0 only to explicitly disable it.
    */
   autoSuspendSeconds?: number;
   /**

@@ -25,7 +25,8 @@ import {
 import type { Variables } from './types';
 import { resolveApiCorsOrigin } from './cors';
 import { createSingleLineWarnLogger } from './logging';
-import { captureApiException } from './monitoring/sentry';
+import { captureApiException, flushApiSentry } from './monitoring/sentry';
+import { installApiGracefulShutdown } from './graceful-shutdown';
 import {
   requestObservabilityMiddleware,
   routePolicyMiddleware,
@@ -34,6 +35,7 @@ import {
 import {
   apiHealth,
   apiLiveness,
+  bullmqHealth,
   controllerHealth,
   github,
   gitlab,
@@ -44,9 +46,13 @@ import {
   linear,
   teams,
   telegram,
+  agentmail,
   discord,
   cloudDeploymentAccess,
   brainInference,
+  credentialEgress,
+  credentialEgressProxy,
+  credentialEgressProxyHostAlias,
   inference,
   tts,
   mcp,
@@ -76,6 +82,12 @@ const PUBLIC_OIDC_PATHS = new Set([
 const SELF_AUTHENTICATING_WEBHOOK_PATHS = new Set([
   '/api/webhooks/teams',
   '/api/webhooks/telegram',
+  '/api/webhooks/agentmail',
+  // Signed one-click answer links from question emails authenticate via
+  // their own token; see handlers/agentmail.
+  '/api/webhooks/agentmail/answer',
+  // Signed List-Unsubscribe links/one-click posts, same token trust model.
+  '/api/webhooks/agentmail/unsubscribe',
   '/api/internal/discord/events',
   '/api/internal/discord/events/process',
   '/api/internal/cloud/deployment-access',
@@ -160,6 +172,20 @@ export function createApiApp(): ApiApp {
   // Uncomment this to enable verbose per-request logging.
   // app.use(logger());
 
+  // A deployment may serve the credential egress proxy at the root of its own
+  // hostname so host-only SDK clients need no path prefix. The alias
+  // re-dispatches through the app, so the request still passes observability,
+  // token handling, route policy, and rate limits exactly once before it
+  // reaches the same route as `/api/credential-egress`.
+  if (Env.R_CREDENTIAL_EGRESS_PROXY_HOST)
+    app.use(
+      '*',
+      credentialEgressProxyHostAlias(
+        (request) => app.fetch(request),
+        Env.R_CREDENTIAL_EGRESS_PROXY_HOST,
+      ),
+    );
+
   app.use('*', requestObservabilityMiddleware);
 
   const corsOptions = {
@@ -200,6 +226,7 @@ export function createApiApp(): ApiApp {
   app.route('/health/api', apiHealth);
   app.route('/health/liveness', apiLiveness);
   app.route('/health/controller', controllerHealth);
+  app.route('/health/bullmq', bullmqHealth);
 
   app.route('/api/webhooks/github', github);
   app.route('/api/webhooks/gitlab', gitlab);
@@ -210,10 +237,13 @@ export function createApiApp(): ApiApp {
   app.route('/api/webhooks/linear', linear);
   app.route('/api/webhooks/teams', teams);
   app.route('/api/webhooks/telegram', telegram);
+  app.route('/api/webhooks/agentmail', agentmail);
   app.route('/api/internal/discord', discord);
   app.route('/api/internal/cloud', cloudDeploymentAccess);
   app.route('/api/inference', inference);
   app.route('/api/brain/inference', brainInference);
+  app.route('/api/internal/credential-egress', credentialEgress);
+  app.route('/api/credential-egress', credentialEgressProxy);
   app.route('/api/tts', tts);
   app.route('/api/mcp', mcp);
   app.route('/api/mcp-routing', mcpRouting);
@@ -280,6 +310,7 @@ export async function startApiServer({
   const app = createApiApp();
   const server = createAdaptorServer({ fetch: app.fetch });
   const address = await listen(server, { port, hostname });
+  installApiGracefulShutdown(server, { flushSentry: flushApiSentry });
 
   if (Env.NODE_ENV === 'development') {
     showRoutes(app);

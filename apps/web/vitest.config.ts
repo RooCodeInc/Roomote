@@ -36,6 +36,15 @@ export default defineConfig({
       },
       {
         extends: true,
+        resolve: {
+          alias: {
+            // The node export disables registration effects, even in jsdom.
+            'react-resizable-panels': resolve(
+              __dirname,
+              'node_modules/react-resizable-panels/dist/react-resizable-panels.browser.development.esm.js',
+            ),
+          },
+        },
         test: {
           name: 'client',
           include: [

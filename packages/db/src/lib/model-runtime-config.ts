@@ -18,6 +18,7 @@ import {
   isSettingsOnlyProviderEnvVar,
   normalizeDeploymentModelConfig,
   normalizeOptionalReasoningEffort,
+  normalizeTaskModelSettings,
   parseModelProviderEnvKeys,
   ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
   ROOMOTE_INFERENCE_PROVIDER_ID,
@@ -29,6 +30,7 @@ import {
   XAI_OPENCODE_PROVIDER_ID,
   type TaskModelRole,
   type TaskModelOption,
+  type CodingModelRoutingRule,
 } from '@roomote/types';
 
 import { decryptSecrets } from '../encryption';
@@ -124,15 +126,26 @@ async function loadPersistedRuntimeModelConfig(
     catalogModels: getTaskModelCatalog(deployment?.taskModelSettings),
     enabledCatalogModels: getEnabledTaskModels(deployment?.taskModelSettings),
     defaultModelId: getDefaultTaskModelId(deployment?.taskModelSettings),
+    codingModelRoutingRules: normalizeTaskModelSettings(
+      deployment?.taskModelSettings,
+    ).codingModelRoutingRules,
   };
 }
 
 export async function getDeploymentTaskModelOptions(
   executor: DatabaseOrTransaction = db,
-): Promise<{ models: TaskModelOption[]; defaultModelId: string }> {
-  const { enabledCatalogModels, defaultModelId } =
+): Promise<{
+  models: TaskModelOption[];
+  defaultModelId: string;
+  codingModelRoutingRules: CodingModelRoutingRule[];
+}> {
+  const { enabledCatalogModels, defaultModelId, codingModelRoutingRules } =
     await loadPersistedRuntimeModelConfig(executor);
-  return { models: enabledCatalogModels, defaultModelId };
+  return {
+    models: enabledCatalogModels,
+    defaultModelId,
+    codingModelRoutingRules: codingModelRoutingRules ?? [],
+  };
 }
 
 function normalizeConfiguredValue(
@@ -408,7 +421,7 @@ async function resolveModelRuntimeEnv(
   const executor = options.executor ?? db;
   const [
     persistedEnvVars,
-    { runtimeModelConfig, catalogModels, enabledCatalogModels },
+    { runtimeModelConfig, catalogModels, enabledCatalogModels, defaultModelId },
   ] = await Promise.all([
     resolveEffectiveDeploymentEnvVars({
       deploymentEnvVars: options.deploymentEnvVars,
@@ -445,7 +458,10 @@ async function resolveModelRuntimeEnv(
           runtimeOverrideModelConfig[descriptor.modelConfigKey] ??
             normalizeConfiguredValue(
               persistedRuntimeModelConfig[descriptor.modelConfigKey],
-            ),
+            ) ??
+            (descriptor.modelFallback === 'deployment-default'
+              ? defaultModelId
+              : undefined),
         ),
       ];
     }),

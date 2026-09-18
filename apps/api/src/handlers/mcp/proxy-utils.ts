@@ -9,7 +9,7 @@ import {
   isUserToken,
   parseMcpJsonRpcPayload,
 } from '@roomote/types';
-import { db, eq, taskRuns } from '@roomote/db/server';
+import { db, eq, getTaskHumanOwnerUserIds, taskRuns } from '@roomote/db/server';
 import { Agent } from 'undici';
 import {
   assertEgressUrlAllowed,
@@ -81,8 +81,10 @@ export function toMcpToolResult<T extends Record<string, unknown>>(payload: T) {
  * MCPs execute as the most recent human who launched or replied to the task.
  * That live actor is stored on `task_runs.actingUserId` rather than inferred
  * from `task_messages`, because transcript persistence is async and may lag
- * behind the turn that is about to make MCP calls. The token's own userId is
- * mint-time attribution and deliberately plays no role here.
+ * behind the turn that is about to make MCP calls. Automation runs without a
+ * live actor fall back to the trusted human owner on their canonical Session.
+ * The token's own userId is mint-time attribution and deliberately plays no
+ * role here.
  *
  * Since this column selects whose credentials MCP calls run as, it is written
  * only by trusted server-side actors (web steer, follow-up delivery). Job
@@ -111,7 +113,7 @@ export async function resolveActingUserId(
   }
 
   const taskRun = await db.query.taskRuns.findFirst({
-    columns: { actingUserId: true },
+    columns: { actingUserId: true, taskId: true },
     where: eq(taskRuns.id, auth.runId),
   });
 
@@ -119,7 +121,10 @@ export async function resolveActingUserId(
     throw new McpProxyError(404, 'Task run not found for this MCP token');
   }
 
-  const actingUserId = taskRun.actingUserId;
+  const [ownerUserId] = taskRun.actingUserId
+    ? []
+    : await getTaskHumanOwnerUserIds(db, taskRun.taskId);
+  const actingUserId = taskRun.actingUserId ?? ownerUserId;
 
   if (!hasRealTaskRunUser(actingUserId)) {
     // Deployment-service-principal jobs have no human actor. Callers that
@@ -154,7 +159,7 @@ export async function resolveActingUserIdOrNull(
   }
 
   const taskRun = await db.query.taskRuns.findFirst({
-    columns: { actingUserId: true },
+    columns: { actingUserId: true, taskId: true },
     where: eq(taskRuns.id, auth.runId),
   });
 
@@ -163,6 +168,42 @@ export async function resolveActingUserIdOrNull(
   }
 
   return taskRun.actingUserId ?? null;
+}
+
+/**
+ * Resolve the live actor or durable task owner for operations that explicitly
+ * create follow-on task or Session work. Admin mutation routes must keep using
+ * resolveActingUserIdOrNull so automation ownership does not grant authority.
+ */
+export async function resolveTaskOrSessionUserIdOrNull(
+  auth: McpAuthContext,
+): Promise<string | null> {
+  if (auth.tokenType !== 'run') {
+    return auth.userId;
+  }
+
+  if (!auth.runId) {
+    throw new McpProxyError(
+      403,
+      'MCP proxy requires a task run token with a task run id',
+    );
+  }
+
+  const taskRun = await db.query.taskRuns.findFirst({
+    columns: { actingUserId: true, taskId: true },
+    where: eq(taskRuns.id, auth.runId),
+  });
+
+  if (!taskRun) {
+    throw new McpProxyError(404, 'Task run not found for this MCP token');
+  }
+
+  if (taskRun.actingUserId) {
+    return taskRun.actingUserId;
+  }
+
+  const [ownerUserId] = await getTaskHumanOwnerUserIds(db, taskRun.taskId);
+  return ownerUserId ?? null;
 }
 
 /**
@@ -295,6 +336,9 @@ interface ResolvedCredentials {
   /** `null` for upstreams that take no Authorization header. */
   authHeader: string | null;
   extraHeaders?: Record<string, string>;
+  /** Bound the native operation, including streamed response consumption. */
+  timeoutMs?: number;
+  maxResponseBodyBytes?: number;
   /**
    * Per-request allowlist override. `null` explicitly removes a static
    * allowlist, while `undefined` keeps the proxy's configured default.
@@ -326,10 +370,20 @@ interface McpProxyConfig {
   resolveCredentials: (
     auth: McpAuthContext,
     routeParams: Record<string, string>,
+    request: unknown,
   ) => Promise<ResolvedCredentials>;
   allowAuthTokens?: boolean;
   validateTaskRunToken?: (auth: RunTokenContext) => Promise<Response | null>;
   allowedToolNames?: readonly string[];
+  /**
+   * The upstream answers every request on its own, with no MCP session.
+   * Session ids are neither forwarded nor returned, so nothing upstream is
+   * ever tied to the credential of an earlier request. For a proxy that
+   * chooses credentials per request (for example, a GitHub installation
+   * based on the target repository), a session would bind the first
+   * credential and reject a later request routed through another one.
+   */
+  statelessUpstream?: boolean;
   stripToolSchemaPatterns?: boolean;
   timeoutMs?: number;
   /**
@@ -341,6 +395,50 @@ interface McpProxyConfig {
   guardUpstreamEgress?: { allowedPrivateCidrs?: string };
   /** Reject request bodies larger than this many bytes (413). */
   maxRequestBodyBytes?: number;
+  /**
+   * Rewrite a successful `tools/call` result before the client sees it;
+   * resolve `undefined` to pass it through. Applied only where the proxy
+   * already holds the whole JSON-RPC response (JSON bodies and single-response
+   * SSE replies). A throw is treated as `undefined`.
+   */
+  transformToolCallResult?: ToolCallResultTransform;
+}
+
+type ToolCallResultTransform = (call: {
+  toolName: string;
+  arguments: unknown;
+  result: unknown;
+}) => Promise<unknown>;
+
+async function applyToolCallResultTransform(
+  transform: ToolCallResultTransform | undefined,
+  request: unknown,
+  response: unknown,
+): Promise<unknown> {
+  const toolName = getToolCallName(request);
+
+  if (
+    !transform ||
+    !toolName ||
+    !response ||
+    typeof response !== 'object' ||
+    !('result' in response)
+  ) {
+    return undefined;
+  }
+
+  try {
+    const result = await transform({
+      toolName,
+      arguments: (request as { params?: { arguments?: unknown } }).params
+        ?.arguments,
+      result: response.result,
+    });
+
+    return result === undefined ? undefined : { ...response, result };
+  } catch {
+    return undefined;
+  }
 }
 
 export class McpProxyError extends Error {
@@ -718,10 +816,18 @@ export function createMcpProxy(config: McpProxyConfig) {
     allowAuthTokens = false,
     validateTaskRunToken = verifyTaskRunTokenTargetExists,
     allowedToolNames,
+    statelessUpstream = false,
     stripToolSchemaPatterns: shouldStripToolSchemaPatterns = false,
     guardUpstreamEgress,
     maxRequestBodyBytes,
+    transformToolCallResult,
   } = config;
+
+  const buildResponseHeaders = (upstreamHeaders: Headers): Headers => {
+    const headers = buildProxyResponseHeaders(upstreamHeaders);
+    if (statelessUpstream) headers.delete('mcp-session-id');
+    return headers;
+  };
 
   // Guarded dispatchers pin connections to DNS answers vetted against the
   // private-range blocklist; constructed once per proxy, shared by requests.
@@ -870,7 +976,7 @@ export function createMcpProxy(config: McpProxyConfig) {
     let credentials: ResolvedCredentials;
 
     try {
-      credentials = await resolveCredentials(auth, c.req.param());
+      credentials = await resolveCredentials(auth, c.req.param(), parsedBody);
     } catch (error) {
       console.warn(
         formatSingleLineLog(`${logPrefix} Failed to resolve credentials`, {
@@ -981,6 +1087,7 @@ export function createMcpProxy(config: McpProxyConfig) {
         c.req.raw.headers,
         method,
       );
+      if (statelessUpstream) proxyHeaders.delete('mcp-session-id');
 
       if (credentials.extraHeaders) {
         for (const [key, value] of Object.entries(credentials.extraHeaders)) {
@@ -991,12 +1098,18 @@ export function createMcpProxy(config: McpProxyConfig) {
       const isLongLivedStreamableTransportRequest =
         method === 'GET' || method === 'POST';
 
-      const signal = isLongLivedStreamableTransportRequest
-        ? c.req.raw.signal
-        : AbortSignal.any([
-            AbortSignal.timeout(timeoutMs),
-            ...(c.req.raw.signal ? [c.req.raw.signal] : []),
-          ]);
+      const signal =
+        credentials.timeoutMs !== undefined
+          ? AbortSignal.any([
+              AbortSignal.timeout(credentials.timeoutMs),
+              c.req.raw.signal,
+            ])
+          : isLongLivedStreamableTransportRequest
+            ? c.req.raw.signal
+            : AbortSignal.any([
+                AbortSignal.timeout(timeoutMs),
+                ...(c.req.raw.signal ? [c.req.raw.signal] : []),
+              ]);
 
       const upstreamRequestInit = {
         method,
@@ -1052,6 +1165,66 @@ export function createMcpProxy(config: McpProxyConfig) {
       const elapsedMs = Date.now() - startedAt;
       const contentType = upstreamResponse.headers.get('content-type');
 
+      if (credentials.maxResponseBodyBytes !== undefined) {
+        const maxBytes = credentials.maxResponseBodyBytes;
+        const sizeError = new Error(
+          `${name} MCP response exceeds the size limit`,
+        );
+        if (Number(upstreamResponse.headers.get('content-length')) > maxBytes) {
+          void upstreamResponse.body?.cancel().catch(() => {});
+          throw sizeError;
+        }
+        if (upstreamResponse.body) {
+          const reader = upstreamResponse.body.getReader();
+          let bytes = 0;
+          let settled = false;
+          let abort: () => void;
+          const finish = () => {
+            settled = true;
+            signal.removeEventListener('abort', abort);
+            // Cancellation must not wait for a stalled upstream to settle.
+            void reader.cancel().catch(() => {});
+          };
+          const body = new ReadableStream<Uint8Array>(
+            {
+              start(controller) {
+                abort = () => {
+                  if (settled) return;
+                  finish();
+                  controller.error(signal.reason);
+                };
+                signal.addEventListener('abort', abort, { once: true });
+                if (signal.aborted) abort();
+              },
+              async pull(controller) {
+                try {
+                  const { done, value } = await reader.read();
+                  if (settled) return;
+                  if (done) {
+                    finish();
+                    controller.close();
+                  } else {
+                    bytes += value.byteLength;
+                    if (bytes > maxBytes) throw sizeError;
+                    controller.enqueue(value);
+                  }
+                } catch (error) {
+                  if (settled) return;
+                  finish();
+                  controller.error(error);
+                }
+              },
+              cancel: finish,
+            },
+            { highWaterMark: 0 },
+          );
+          upstreamResponse = new Response(body, {
+            status: upstreamResponse.status,
+            headers: upstreamResponse.headers,
+          });
+        }
+      }
+
       if (!upstreamResponse.ok) {
         console.warn(
           formatSingleLineLog(`${logPrefix} Upstream returned non-OK status`, {
@@ -1093,7 +1266,7 @@ export function createMcpProxy(config: McpProxyConfig) {
               stripToolSchemaPatterns: shouldStripToolSchemaPatterns,
             },
           );
-          const headers = buildProxyResponseHeaders(upstreamResponse.headers);
+          const headers = buildResponseHeaders(upstreamResponse.headers);
           headers.set('content-type', 'application/json');
 
           upstreamResponse.body?.cancel().catch(() => {});
@@ -1108,10 +1281,28 @@ export function createMcpProxy(config: McpProxyConfig) {
       }
 
       if (method === 'POST' && isJsonResponse(contentType)) {
-        return new Response(await upstreamResponse.text(), {
-          status: upstreamResponse.status,
-          headers: buildProxyResponseHeaders(upstreamResponse.headers),
-        });
+        const text = await upstreamResponse.text();
+        let transformed: unknown;
+
+        if (transformToolCallResult && upstreamResponse.ok) {
+          try {
+            transformed = await applyToolCallResultTransform(
+              transformToolCallResult,
+              parsedBody,
+              JSON.parse(text),
+            );
+          } catch {
+            // Not a JSON-RPC body we can rewrite; forward it untouched.
+          }
+        }
+
+        return new Response(
+          transformed === undefined ? text : JSON.stringify(transformed),
+          {
+            status: upstreamResponse.status,
+            headers: buildResponseHeaders(upstreamResponse.headers),
+          },
+        );
       }
 
       // Some Streamable HTTP MCP servers (e.g. X) answer a POST request with an
@@ -1132,7 +1323,9 @@ export function createMcpProxy(config: McpProxyConfig) {
         contentType?.includes('text/event-stream') &&
         getJsonRpcRequestId(parsedBody) !== null &&
         !Array.isArray(parsedBody)
-          ? upstreamResponse.clone().body
+          ? credentials.maxResponseBodyBytes !== undefined
+            ? upstreamResponse.body
+            : upstreamResponse.clone().body
           : null;
 
       if (sseResponseBody) {
@@ -1146,17 +1339,34 @@ export function createMcpProxy(config: McpProxyConfig) {
             // the upstream connection instead of leaving it open.
             upstreamResponse.body?.cancel().catch(() => {});
 
-            const headers = buildProxyResponseHeaders(upstreamResponse.headers);
+            const transformed = await applyToolCallResultTransform(
+              transformToolCallResult,
+              parsedBody,
+              response,
+            );
+            const headers = buildResponseHeaders(upstreamResponse.headers);
             headers.set('content-type', 'application/json');
 
-            return new Response(JSON.stringify(response), {
+            return new Response(JSON.stringify(transformed ?? response), {
               status: upstreamResponse.status,
               headers,
             });
           }
-        } catch {
+        } catch (error) {
+          if (credentials.maxResponseBodyBytes !== undefined) throw error;
           // Fall through to streaming the raw upstream response.
         }
+        if (credentials.maxResponseBodyBytes !== undefined)
+          throw new Error(
+            'No matching JSON-RPC response in upstream SSE stream',
+          );
+      }
+
+      if (credentials.maxResponseBodyBytes !== undefined) {
+        return new Response(await upstreamResponse.text(), {
+          status: upstreamResponse.status,
+          headers: buildResponseHeaders(upstreamResponse.headers),
+        });
       }
 
       return new Response(
@@ -1182,7 +1392,7 @@ export function createMcpProxy(config: McpProxyConfig) {
         }),
         {
           status: upstreamResponse.status,
-          headers: buildProxyResponseHeaders(upstreamResponse.headers),
+          headers: buildResponseHeaders(upstreamResponse.headers),
         },
       );
     } catch (error) {

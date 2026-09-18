@@ -4,6 +4,9 @@ import { useMemo } from 'react';
 import { Image, FileText, VideoIcon } from '@/components/system';
 
 import { humanizeFilename } from '@/lib';
+import { isMarkdownArtifact, isTabularArtifact } from '@/lib/artifact-types';
+import { MarkdownArtifactPreview } from '@/components/tasks/MarkdownArtifactPreview';
+import { TabularArtifactPreview } from '@/components/tasks/TabularArtifactPreview';
 
 import type { TaskSession, TaskArtifact } from '../../hooks';
 import type { ArtifactGroup } from '../../sidebar-actions/types';
@@ -40,6 +43,26 @@ export function ArtifactList({ session }: ArtifactListProps) {
     () =>
       artifactGroups.filter((g) => !isScreenshotGroup(g) && !isVideoGroup(g)),
     [artifactGroups],
+  );
+
+  const previewGroups = useMemo(
+    () =>
+      otherGroups.filter(
+        (group) =>
+          isMarkdownArtifact(group.latest.contentType, group.latest.path) ||
+          isTabularArtifact(group.latest.contentType, group.latest.path),
+      ),
+    [otherGroups],
+  );
+
+  const fileGroups = useMemo(
+    () =>
+      otherGroups.filter(
+        (group) =>
+          !isMarkdownArtifact(group.latest.contentType, group.latest.path) &&
+          !isTabularArtifact(group.latest.contentType, group.latest.path),
+      ),
+    [otherGroups],
   );
 
   const videoGroups = useMemo(
@@ -155,13 +178,56 @@ export function ArtifactList({ session }: ArtifactListProps) {
             )}
 
             {otherGroups.length > 0 && (
-              <div>
-                {(screenshotGroups.length > 0 || videoGroups.length > 0) && (
-                  <h3 className="px-3 pb-1 pt-2 text-xs font-medium text-muted-foreground">
-                    Files
-                  </h3>
-                )}
-                {otherGroups.map((group) => (
+              <div className="@container">
+                <h3 className="px-3 pb-2 pt-2 text-xs font-medium text-muted-foreground">
+                  Files
+                </h3>
+                {previewGroups.length > 0 ? (
+                  <div className="grid grid-cols-2 gap-4 px-1 pb-2 @[500px]:grid-cols-3">
+                    {previewGroups.map((group) => (
+                      <button
+                        key={group.path}
+                        type="button"
+                        onClick={() =>
+                          openArtifactDetail(
+                            group.latest.path,
+                            group.latest.version,
+                          )
+                        }
+                        className="group block min-w-0 cursor-pointer overflow-hidden rounded-lg border bg-card text-left transition-opacity hover:opacity-70"
+                      >
+                        {isMarkdownArtifact(
+                          group.latest.contentType,
+                          group.latest.path,
+                        ) ? (
+                          <MarkdownArtifactPreview
+                            owner={{ taskId: session.taskId }}
+                            path={group.latest.path}
+                            version={group.latest.version}
+                          />
+                        ) : (
+                          <TabularArtifactPreview
+                            owner={{ taskId: session.taskId }}
+                            path={group.latest.path}
+                            version={group.latest.version}
+                          />
+                        )}
+                        <span className="block border-t px-2 py-1.5 text-center">
+                          <span className="block truncate text-xs font-medium">
+                            {humanizeFilename(group.latest.path)}
+                            {group.olderVersions.length > 0
+                              ? ` (v${group.latest.version})`
+                              : ''}
+                          </span>
+                          <span className="block truncate font-mono text-xs text-muted-foreground">
+                            {group.latest.path}
+                          </span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                {fileGroups.map((group) => (
                   <button
                     key={group.path}
                     type="button"

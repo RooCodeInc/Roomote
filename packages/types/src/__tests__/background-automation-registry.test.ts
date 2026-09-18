@@ -4,9 +4,25 @@ import {
   getTriggerableBackgroundAutomationDescriptorByKey,
   getTriggerableBackgroundAutomationSettingsHash,
   isTriggerableBackgroundAutomationKey,
+  TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS,
 } from '../background-automation-registry';
 
 describe('background automation registry', () => {
+  it('explicitly limits Additional rules to repository-scoped communication outputs', () => {
+    expect(
+      TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS.filter(
+        (descriptor) => 'additionalRules' in descriptor,
+      ).map((descriptor) => descriptor.automationKey),
+    ).toEqual([
+      'suggester',
+      'announcer',
+      'security_auditor',
+      'code_quality_auditor',
+      'ci_failure_triage',
+      'merge_announcer',
+    ]);
+  });
+
   it('keys descriptors by the canonical snake_case automation key', () => {
     const codeQualityAuditor =
       getTriggerableBackgroundAutomationDescriptorByKey('code_quality_auditor');
@@ -113,6 +129,29 @@ describe('background automation registry', () => {
     ).toBe('provider-usage-limit');
   });
 
+  it('registers installed release announcements for manual cross-provider tests', () => {
+    expect(
+      getTriggerableBackgroundAutomationDescriptorByKey(
+        'release_announcements',
+      ),
+    ).toMatchObject({
+      label: 'Announce Roomote Updates',
+      slackIcon: 'megaphone',
+      scheduleModes: [],
+      usesManagerChannel: true,
+      supportedCommunicationProviders: [
+        'slack',
+        'teams',
+        'telegram',
+        'discord',
+      ],
+      supportedSourceControlProviders: [],
+    });
+    expect(
+      getTriggerableBackgroundAutomationSettingsHash('release_announcements'),
+    ).toBe('release-announcements');
+  });
+
   it('allows Teams, Telegram, and Discord destinations for CI failure triage Run now', () => {
     const descriptor =
       getTriggerableBackgroundAutomationDescriptorByKey('ci_failure_triage');
@@ -145,12 +184,16 @@ describe('background automation registry', () => {
   });
 
   it('registers Merge announcer as a provider-neutral push automation with cross-provider delivery', () => {
+    expect(
+      getTriggerableBackgroundAutomationDescriptorByKey('announcer')?.slackIcon,
+    ).toBe('git-merge');
+
     const descriptor =
       getTriggerableBackgroundAutomationDescriptorByKey('merge_announcer');
 
     expect(descriptor).toMatchObject({
       label: 'Merge announcer',
-      slackIcon: 'git-commit-vertical',
+      slackIcon: 'git-merge',
       scheduleModes: ['off', 'daily'],
       usesManagerChannel: true,
       supportedCommunicationProviders: [

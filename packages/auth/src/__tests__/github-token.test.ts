@@ -31,8 +31,8 @@ const {
     mockCreateInstallationAccessToken,
     mockEnv: {
       NODE_ENV: 'development',
-      R_GITHUB_APP_ID: 'default-app-id',
-      R_GITHUB_APP_PRIVATE_KEY: 'default-private-key',
+      R_GITHUB_APP_ID: 'default-app-id' as string | undefined,
+      R_GITHUB_APP_PRIVATE_KEY: 'default-private-key' as string | undefined,
     },
     mockFindActiveInstallations: vi.fn(),
     mockFindInstallation: vi.fn(),
@@ -167,6 +167,21 @@ describe('resolveRuntimeGitHubAppCredentials', () => {
     await expect(resolveRuntimeGitHubAppCredentials()).rejects.toThrow(
       'GitHub App credentials are not configured.',
     );
+  });
+
+  it('fails clearly when GitHub App credentials are undefined at runtime', async () => {
+    mockEnv.R_GITHUB_APP_ID = undefined;
+    mockEnv.R_GITHUB_APP_PRIVATE_KEY = undefined;
+
+    await expect(resolveRuntimeGitHubAppCredentials()).rejects.toThrow(
+      'GitHub App credentials are not configured.',
+    );
+  });
+
+  it('propagates deployment lookup errors instead of treating them as missing config', async () => {
+    const error = new Error('Deployment database unavailable');
+    mockResolveDeploymentEnvVar.mockRejectedValue(error);
+    await expect(resolveRuntimeGitHubAppCredentials()).rejects.toBe(error);
   });
 });
 

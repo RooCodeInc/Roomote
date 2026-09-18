@@ -1,6 +1,6 @@
 export const DISCORD_DESTINATION_OPTION_PREFIX = 'discord:';
 
-export type SlackChannelOption = {
+type SlackChannelOption = {
   id: string;
   name: string;
   label: string;

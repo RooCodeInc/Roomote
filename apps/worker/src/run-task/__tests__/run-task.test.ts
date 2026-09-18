@@ -2,15 +2,13 @@ import { EventEmitter } from 'node:events';
 
 const {
   activateSkillsFolderMock,
+  listInstanceSkillsMock,
   awaitSubprocessMock,
   buildSandboxInstructionMock,
   taskRunsDoneMock,
   taskRunsActivateSlackReplyTargetMock,
   taskRunsClearActiveSlackReplyTargetMock,
-  taskRunsGetGoalMock,
-  taskRunsClaimGoalContinuationMock,
   taskRunsRecordEventMock,
-  taskRunsReleaseGoalContinuationMock,
   taskRunsStampMilestoneMock,
   taskRunsSyncActingUserIdMock,
   taskRunsSetHarnessSessionIdMock,
@@ -41,6 +39,7 @@ const {
   installZeroCliMock,
 } = vi.hoisted(() => ({
   activateSkillsFolderMock: vi.fn(() => false),
+  listInstanceSkillsMock: vi.fn().mockResolvedValue([]),
   awaitSubprocessMock: vi.fn().mockResolvedValue(undefined),
   buildSandboxInstructionMock: vi.fn(() => undefined),
   taskRunsDoneMock: vi.fn().mockResolvedValue(undefined),
@@ -51,10 +50,7 @@ const {
     reactionsAllowed: false,
   }),
   taskRunsClearActiveSlackReplyTargetMock: vi.fn().mockResolvedValue(undefined),
-  taskRunsGetGoalMock: vi.fn().mockResolvedValue(null),
-  taskRunsClaimGoalContinuationMock: vi.fn(),
   taskRunsRecordEventMock: vi.fn().mockResolvedValue(undefined),
-  taskRunsReleaseGoalContinuationMock: vi.fn().mockResolvedValue(true),
   taskRunsStampMilestoneMock: vi.fn().mockResolvedValue(undefined),
   taskRunsSyncActingUserIdMock: vi
     .fn()
@@ -143,7 +139,12 @@ vi.mock('@roomote/auth/client', () => ({
   validateToken: vi.fn(),
 }));
 
+vi.mock('../../monitoring/worker-release-metadata', () => ({
+  resolveWorkerReleaseMetadata: vi.fn(() => ({})),
+}));
+
 vi.mock('@roomote/cloud-agents', () => ({
+  FAST_ONLY_PACKAGED_SKILL_INVOCATIONS: ['doctor'],
   PACKAGED_WORKFLOW_PHASE_SKILL_INVOCATIONS: [
     'capture-visual-proof',
     'create-draft-pr',
@@ -163,15 +164,13 @@ vi.mock('@roomote/cloud-agents', () => ({
 }));
 
 vi.mock('@roomote/sdk/client', () => ({
+  instanceSkills: { listForRuntime: listInstanceSkillsMock },
   sdk: {
     taskRuns: {
       activateSlackReplyTarget: taskRunsActivateSlackReplyTargetMock,
       clearActiveSlackReplyTarget: taskRunsClearActiveSlackReplyTargetMock,
       done: taskRunsDoneMock,
-      getGoal: taskRunsGetGoalMock,
-      claimGoalContinuation: taskRunsClaimGoalContinuationMock,
       recordEvent: taskRunsRecordEventMock,
-      releaseGoalContinuation: taskRunsReleaseGoalContinuationMock,
       stampMilestone: taskRunsStampMilestoneMock,
       setHarnessSessionId: taskRunsSetHarnessSessionIdMock,
       syncActingUserId: taskRunsSyncActingUserIdMock,
@@ -286,8 +285,10 @@ vi.mock('../actor-mismatch-notice', () => ({
   createActorMismatchSkipNotifier: vi.fn(() => actorMismatchSkipNotifierMock),
 }));
 
+import { buildRoomoteSystemPrompt } from '@roomote/cloud-agents';
 import { RunStatus, TaskPayloadKind } from '@roomote/types';
 
+import { resolveWorkerReleaseMetadata } from '../../monitoring/worker-release-metadata';
 import type { HarnessManagerCallbacks } from '../../sandbox-server/lib/harness-manager';
 import { getDefaultKeepaliveMs } from '../completion';
 import { runTask } from '../run-task';
@@ -296,6 +297,7 @@ import type { EnvironmentSetupSettledOutcome } from '../types';
 describe('runTask', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    listInstanceSkillsMock.mockReset().mockResolvedValue([]);
     harnessManagerInstances.length = 0;
     existsSyncMock.mockReset();
     existsSyncMock.mockReturnValue(false);
@@ -349,23 +351,6 @@ describe('runTask', () => {
     });
     taskRunsStampMilestoneMock.mockReset();
     taskRunsStampMilestoneMock.mockResolvedValue(undefined);
-    taskRunsClaimGoalContinuationMock.mockReset();
-    taskRunsGetGoalMock.mockReset();
-    taskRunsGetGoalMock.mockResolvedValue(null);
-    taskRunsClaimGoalContinuationMock.mockResolvedValue({
-      updated: true,
-      goal: {
-        objective: 'Complete the goal',
-        generation: 'goal-generation:continuation',
-        status: 'active',
-        maxContinuations: 5,
-        continuationsUsed: 1,
-        blockedReason: null,
-        completedAt: null,
-      },
-    });
-    taskRunsReleaseGoalContinuationMock.mockReset();
-    taskRunsReleaseGoalContinuationMock.mockResolvedValue(true);
     taskRunsSyncActingUserIdMock.mockReset();
     taskRunsSyncActingUserIdMock.mockImplementation(
       async ({ newUserId }: { newUserId: string }) => ({
@@ -379,7 +364,18 @@ describe('runTask', () => {
     syncRuntimeGitAuthorMock.mockResolvedValue(undefined);
   });
 
-  it('delivers the Roomote system prompt through OpenCode developer instructions', async () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('delivers the Roomote system prompt with worker release identity rather than task environment identity', async () => {
+    vi.stubEnv('ROOMOTE_RELEASE_APP_ENV', 'preview');
+    vi.stubEnv('R_APP_ENV', 'development');
+    vi.stubEnv('GITHUB_SHA', 'task-repository-commit');
+    vi.mocked(resolveWorkerReleaseMetadata).mockReturnValueOnce({
+      workerCommit: 'worker-release-commit',
+    });
+
     await runTask({
       taskRun: {
         id: 150,
@@ -389,7 +385,11 @@ describe('runTask', () => {
         payload: {},
         result: null,
       } as never,
-      envVars: {},
+      envVars: {
+        GITHUB_SHA: 'task-environment-commit',
+        R_APP_ENV: 'production',
+        ROOMOTE_RELEASE_APP_ENV: 'production',
+      },
       workspacePath: '/tmp/workspace',
       prompt: '',
       harnessInstructions: undefined,
@@ -416,6 +416,14 @@ describe('runTask', () => {
       } as never,
     });
 
+    expect(resolveWorkerReleaseMetadata).toHaveBeenCalledWith();
+    expect(buildRoomoteSystemPrompt).toHaveBeenCalledWith(
+      '0.40.2',
+      expect.objectContaining({
+        commitSha: 'worker-release-commit',
+        appEnv: 'preview',
+      }),
+    );
     expect(createHarnessMock.mock.calls[0]?.[0]).toEqual(
       expect.not.objectContaining({
         systemPromptContent: expect.anything(),
@@ -1745,8 +1753,8 @@ describe('runTask', () => {
     expect(proofConfigCall).toBeUndefined();
     expect(createHarnessMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        runtimeEnv: expect.objectContaining({
-          ROOMOTE_PROOF_BROWSER_TARGET: 'http://localhost:3000/auth/dev-login',
+        runtimeEnv: expect.not.objectContaining({
+          ROOMOTE_PROOF_BROWSER_TARGET: expect.any(String),
         }),
       }),
     );
@@ -2677,124 +2685,6 @@ describe('runTask', () => {
     );
   });
 
-  it('continues a goal enabled after the runtime starts', async () => {
-    await runTask({
-      taskRun: {
-        id: 407,
-        taskId: 'task-407',
-        payloadKind: TaskPayloadKind.StandardTask,
-        harness: 'opencode-server',
-        payload: {},
-        result: null,
-      } as never,
-      envVars: {},
-      workspacePath: '/tmp/workspace',
-      prompt: 'do work',
-      harnessInstructions: undefined,
-      agentInstructions: undefined,
-      environmentConfig: undefined,
-      callbacks: {},
-      context: {},
-      logger: {
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-        log: vi.fn(),
-      } as never,
-      workerEnv: {
-        buildUserFacingEnv: vi.fn(() => ({})),
-        roomoteAppUrl: 'http://localhost:3000',
-        trpcUrl: 'http://localhost:3001',
-        authToken: 'auth-token',
-        appEnv: 'test',
-        setRuntimeEnv: vi.fn(),
-      } as never,
-    });
-
-    const manager = harnessManagerInstances[0]!;
-    const decision =
-      manager.callbacks?.onBeforeTaskCompletion?.('completion-race');
-
-    await expect(decision).resolves.toMatchObject({
-      disposition: 'continue',
-      prompt: {
-        goalContext: expect.objectContaining({
-          objective: 'Complete the goal',
-          generation: 'goal-generation:continuation',
-        }),
-        source: 'goal-continuation',
-        clientMessageId: 'goal-continuation:completion-race',
-      },
-    });
-    expect(manager.sendFollowUpPrompt).not.toHaveBeenCalled();
-  });
-
-  it('includes the latest active goal on integration follow-up delivery', async () => {
-    taskRunsGetGoalMock.mockResolvedValue({
-      objective: 'Complete the active goal',
-      generation: 'goal-generation:integration',
-      status: 'active',
-      maxContinuations: 5,
-      continuationsUsed: 2,
-      blockedReason: null,
-      completedAt: null,
-    });
-
-    await runTask({
-      taskRun: {
-        id: 408,
-        taskId: 'task-408',
-        payloadKind: TaskPayloadKind.StandardTask,
-        harness: 'opencode-server',
-        payload: {},
-        result: null,
-      } as never,
-      envVars: {},
-      workspacePath: '/tmp/workspace',
-      prompt: 'do work',
-      harnessInstructions: undefined,
-      agentInstructions: undefined,
-      environmentConfig: undefined,
-      callbacks: {},
-      context: {},
-      logger: {
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-        log: vi.fn(),
-      } as never,
-      workerEnv: {
-        buildUserFacingEnv: vi.fn(() => ({})),
-        roomoteAppUrl: 'http://localhost:3000',
-        trpcUrl: 'http://localhost:3001',
-        authToken: 'auth-token',
-        appEnv: 'test',
-        setRuntimeEnv: vi.fn(),
-      } as never,
-    });
-
-    const pollingOptions = startPollingMock.mock.calls.at(-1)?.[0];
-    await expect(
-      pollingOptions?.sendPrompt({
-        prompt: '<discord_message>Continue.</discord_message>',
-        source: 'discord',
-      }),
-    ).resolves.toBe(true);
-    expect(taskRunsGetGoalMock).toHaveBeenCalledWith({ runId: 408 });
-    expect(
-      harnessManagerInstances.at(-1)?.sendFollowUpPrompt,
-    ).toHaveBeenCalledWith(
-      expect.objectContaining({
-        prompt: '<discord_message>Continue.</discord_message>',
-        source: 'discord',
-        goalContext: expect.objectContaining({
-          generation: 'goal-generation:integration',
-          status: 'active',
-        }),
-      }),
-    );
-  });
-
   describe('background environment setup settled notices', () => {
     type SettledListener = (outcome: EnvironmentSetupSettledOutcome) => void;
 
@@ -2877,24 +2767,15 @@ describe('runTask', () => {
     });
 
     it('does not duplicate a settled notice across concurrent state events', async () => {
-      let resolveGoalLookup!: (value: null) => void;
-      taskRunsGetGoalMock.mockImplementationOnce(
-        () =>
-          new Promise<null>((resolve) => {
-            resolveGoalLookup = resolve;
-          }),
-      );
       const { manager, settledListener } = await runTaskWithBackgroundSetup();
 
       manager.emit('taskStateEvent', 'taskStarted');
       settledListener!({ status: 'fulfilled', warningMessages: [] });
       manager.emit('stateChange', 'running', {});
-      resolveGoalLookup(null);
 
       await vi.waitFor(() => {
         expect(environmentSetupNoticeCalls(manager)).toHaveLength(1);
       });
-      expect(taskRunsGetGoalMock).toHaveBeenCalledTimes(1);
     });
 
     it('restores a settled notice when the harness rejects delivery', async () => {
@@ -3534,6 +3415,88 @@ describe('runTask', () => {
     );
   });
 
+  it('assembles automatic Docker startup guidance into developer instructions', async () => {
+    const { buildSandboxInstruction } = await vi.importActual<
+      typeof import('../sandbox-instruction')
+    >('../sandbox-instruction');
+    buildSandboxInstructionMock.mockImplementationOnce(
+      buildSandboxInstruction as never,
+    );
+
+    await runTask({
+      taskRun: {
+        id: 1516,
+        taskId: 'task-1516',
+        payloadKind: TaskPayloadKind.StandardTask,
+        harness: 'opencode-server',
+        payload: {},
+        result: null,
+      } as never,
+      envVars: {},
+      workspacePath: '/tmp/workspace',
+      prompt: '',
+      harnessInstructions: undefined,
+      agentInstructions: undefined,
+      workspaceReadinessWarnings: [
+        'Environment setup is still running in the background. Docker projects may still be building or waiting for health checks, and repository setup commands may still be installing dependencies or preparing services.',
+      ],
+      environmentConfig: {
+        name: 'Docker environment',
+        repositories: [{ repository: 'owner/repo' }],
+        docker_projects: [
+          {
+            type: 'compose',
+            name: 'app',
+            repository: 'owner/repo',
+            files: ['compose.yaml'],
+          },
+        ],
+      },
+      backgroundEnvironmentSetup: {
+        hasPendingBackgroundSetup: true,
+        onSettled: vi.fn(),
+      },
+      callbacks: {},
+      context: {},
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        log: vi.fn(),
+      } as never,
+      harnessSessionId: undefined,
+      workerEnv: {
+        authToken: 'cloud-token',
+        roomoteAppUrl: 'https://api.example.test',
+        trpcUrl: 'https://web.example.test',
+        buildUserFacingEnv: vi.fn(() => ({
+          HOME: '/tmp/home',
+          PATH: '/usr/bin',
+        })),
+      } as never,
+    });
+
+    const developerInstructions = createHarnessMock.mock.calls[0]?.[0]
+      ?.developerInstructionsContent as string;
+
+    expect(developerInstructions).toContain('<environment-instructions>');
+    expect(developerInstructions).toContain(
+      'Environment setup from this configuration runs automatically in the background',
+    );
+    expect(developerInstructions).toContain(
+      'Roomote automatically starts configured Docker projects with Docker Compose during environment setup.',
+    );
+    expect(developerInstructions).toContain(
+      'Do not run `docker compose up`, build the projects, or start Docker yourself.',
+    );
+    expect(developerInstructions).toContain(
+      '- app: `/tmp/roomote-docker-projects/roomote-app.log`',
+    );
+    expect(developerInstructions).not.toContain(
+      'were already executed before your task started',
+    );
+  });
+
   it('keeps org-wide instructions in the parent startup prompt only', async () => {
     buildSandboxInstructionMock.mockReturnValue('Sandbox details' as never);
 
@@ -4114,7 +4077,9 @@ describe('runTask', () => {
         payload: {},
         result: null,
       } as never,
-      envVars: {},
+      envVars: {
+        SANDBOX_OPENROUTER_API_KEY: 'dequeued-sandbox-key',
+      },
       workspacePath: '/tmp/workspace',
       prompt: '',
       harnessInstructions: undefined,
@@ -4138,6 +4103,7 @@ describe('runTask', () => {
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
           PATH: '/usr/bin',
+          SANDBOX_OPENROUTER_API_KEY: 'worker-runtime-sandbox-key',
         })),
         buildOpenCodeHarnessEnv: vi.fn(() => ({
           R_MODEL: 'openrouter/openai/gpt-5.4',
@@ -4177,7 +4143,95 @@ describe('runTask', () => {
     expect(
       createHarnessMock.mock.calls.at(-1)?.[0]?.runtimeEnv,
     ).not.toHaveProperty('R_VISION_MODEL');
+    expect(
+      createHarnessMock.mock.calls.at(-1)?.[0]?.runtimeEnv,
+    ).not.toHaveProperty('SANDBOX_OPENROUTER_API_KEY');
   });
+
+  it.each([undefined, 'resumed-session'])(
+    'refreshes instance skills before activation on each run (session %s)',
+    async (harnessSessionId) => {
+      const logger = {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        log: vi.fn(),
+      };
+      const options = {
+        taskRun: {
+          id: 156,
+          taskId: 'task-156',
+          payloadKind: harnessSessionId
+            ? TaskPayloadKind.SnapshotResume
+            : TaskPayloadKind.StandardTask,
+          harness: 'opencode-server',
+          payload: {},
+          result: null,
+        } as never,
+        envVars: {},
+        workspacePath: '/tmp/workspace',
+        prompt: '',
+        harnessInstructions: undefined,
+        environmentConfig: undefined,
+        callbacks: {},
+        context: {},
+        logger: logger as never,
+        harnessSessionId,
+        workerEnv: {
+          authToken: 'cloud-token',
+          roomoteAppUrl: 'https://api.example.test',
+          trpcUrl: 'https://web.example.test',
+          buildUserFacingEnv: vi.fn(() => ({
+            HOME: '/tmp/home',
+            PATH: '/usr/bin',
+          })),
+        } as never,
+      };
+      const definitions = [
+        {
+          name: 'current-skill',
+          description: 'Current skill',
+          content: 'Current instructions',
+        },
+      ];
+      listInstanceSkillsMock.mockImplementationOnce(async () => {
+        expect(activateSkillsFolderMock).not.toHaveBeenCalled();
+        expect(createHarnessMock).not.toHaveBeenCalled();
+        return definitions;
+      });
+
+      await runTask(options);
+      expect(listInstanceSkillsMock).toHaveBeenCalledExactlyOnceWith();
+      expect(activateSkillsFolderMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ instanceSkills: definitions }),
+      );
+
+      listInstanceSkillsMock.mockResolvedValueOnce([]);
+      await runTask(options);
+      expect(listInstanceSkillsMock).toHaveBeenCalledTimes(2);
+      expect(activateSkillsFolderMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ instanceSkills: [] }),
+      );
+
+      activateSkillsFolderMock.mockClear();
+      createHarnessMock.mockClear();
+      listInstanceSkillsMock.mockRejectedValueOnce(
+        new Error('private-token upstream body'),
+      );
+      await expect(runTask(options)).rejects.toThrow(
+        'Failed to fetch instance skills; task startup stopped.',
+      );
+      expect(activateSkillsFolderMock).not.toHaveBeenCalled();
+      expect(createHarnessMock).not.toHaveBeenCalled();
+      expect(
+        JSON.stringify([
+          logger.info.mock.calls,
+          logger.warn.mock.calls,
+          logger.error.mock.calls,
+        ]),
+      ).not.toContain('private-token');
+    },
+  );
 
   it('isolates the task runtime HOME while keeping packaged skill sourcing on the worker HOME', async () => {
     buildSandboxInstructionMock.mockReturnValue(undefined as never);
@@ -4222,7 +4276,7 @@ describe('runTask', () => {
       expect.objectContaining({
         homeDir: '/tmp/workspace/.roomote-runtime-home',
         sourceHomeDir: '/tmp/home',
-        excludeSkillNames: ['zero'],
+        excludeSkillNames: ['doctor', 'zero'],
       }),
     );
     expect(createHarnessMock).toHaveBeenCalledWith(

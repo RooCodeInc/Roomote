@@ -10,12 +10,14 @@ const {
   mockFindEnablement,
   mockGetValidAccessToken,
   mockDecrypt,
+  mockGetTaskHumanOwnerUserIds,
 } = vi.hoisted(() => ({
   mockFindTaskRun: vi.fn(),
   mockFindConnection: vi.fn(),
   mockFindEnablement: vi.fn(),
   mockGetValidAccessToken: vi.fn(),
   mockDecrypt: vi.fn(),
+  mockGetTaskHumanOwnerUserIds: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -27,6 +29,7 @@ vi.mock('@roomote/db/server', () => ({
     },
   },
   taskRuns: { id: 'id' },
+  getTaskHumanOwnerUserIds: mockGetTaskHumanOwnerUserIds,
   mcpConnections: {
     mcpId: 'mcpId',
     enabled: 'enabled',
@@ -152,6 +155,7 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
       disabledTools: null,
     });
     mockGetValidAccessToken.mockResolvedValue('valid-access-token');
+    mockGetTaskHumanOwnerUserIds.mockResolvedValue([]);
   });
 
   it('serves a deployment-scoped integration on a run with no human actor', async () => {
@@ -290,6 +294,71 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
 
     expect(response.status).toBe(404);
     expect(body.error.message).toContain('valid credentials');
+  });
+
+  it('forwards the decrypted Exa API key only as x-api-key', async () => {
+    mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
+    mockFindConnection.mockResolvedValue({
+      id: 'conn-exa',
+      userId: null,
+      authConfig: { type: 'exa', encryptedApiKey: 'encrypted-key' },
+    });
+    mockDecrypt.mockReturnValue('exa-api-key');
+    const fetchMock = stubUpstreamFetch();
+
+    const response = await postMcp(
+      createApp('exa', createRunToken()),
+      createInitializeRequest(1),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockDecrypt).toHaveBeenCalledWith('encrypted-key');
+    expect(mockGetValidAccessToken).not.toHaveBeenCalled();
+
+    const upstreamHeaders = fetchMock.mock.calls[0]?.[1]?.headers as Headers;
+    expect(upstreamHeaders.get('x-api-key')).toBe('exa-api-key');
+    expect(upstreamHeaders.get('authorization')).toBeNull();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      'https://mcp.exa.ai/mcp?tools=web_search_exa,web_fetch_exa,web_search_advanced_exa,agent_run',
+    );
+  });
+
+  it('uses Exa keyless tools without requiring a connection', async () => {
+    mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
+    mockFindConnection.mockResolvedValue(null);
+    const fetchMock = stubUpstreamFetch();
+
+    const response = await postMcp(
+      createApp('exa', createRunToken()),
+      createInitializeRequest(1),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockDecrypt).not.toHaveBeenCalled();
+    expect(mockGetValidAccessToken).not.toHaveBeenCalled();
+    const upstreamHeaders = fetchMock.mock.calls[0]?.[1]?.headers as Headers;
+    expect(upstreamHeaders.get('x-api-key')).toBeNull();
+    expect(upstreamHeaders.get('authorization')).toBeNull();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      'https://mcp.exa.ai/mcp?tools=web_search_exa,web_fetch_exa,web_search_advanced_exa',
+    );
+  });
+
+  it('rejects Exa proxy calls while the integration is disabled', async () => {
+    mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
+    mockFindConnection.mockResolvedValue(null);
+    mockFindEnablement.mockResolvedValue(null);
+    const fetchMock = stubUpstreamFetch();
+
+    const response = await postMcp(
+      createApp('exa', createRunToken()),
+      createInitializeRequest(1),
+    );
+    const body = (await response.json()) as JsonRpcErrorBody;
+
+    expect(response.status).toBe(404);
+    expect(body.error.message).toContain('not enabled');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('normalizes an SSE-framed tool-call reply into a JSON response', async () => {

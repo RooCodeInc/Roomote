@@ -3,7 +3,6 @@ import {
   type AuthTokenContext,
   type RunTokenContext,
   type RequestedWorkKind,
-  type TaskGoal,
   RunStatus,
   TaskPayloadKind,
   taskSpecSchema,
@@ -38,6 +37,10 @@ import {
 } from './dequeue-helpers';
 import { resolveSlackTaskRunRouting } from './slack-task-run-routing';
 import { markGithubPrReviewCheckInProgress } from './github-pr-review-check';
+import {
+  appendPrivateTaskPersonalization,
+  getPrivateTaskPersonalizationInstructions,
+} from './task-personalization';
 
 /**
  * Task-level launch context returned alongside the run. The worker previously
@@ -47,6 +50,10 @@ import { markGithubPrReviewCheckInProgress } from './github-pr-review-check';
 export type DequeuedTaskContext = {
   id: string;
   title: string;
+  surface: Task['surface'];
+  initiatorUserId: string | null;
+  privacy: Task['privacy'];
+  privateOwnerUserId: string | null;
   /** The initial task prompt (tasks.prompt); per-attempt prompt is top-level. */
   prompt: string | null;
   harnessInstructions: string | null;
@@ -56,13 +63,16 @@ export type DequeuedTaskContext = {
   linearSessionId: string | null;
   linearIssueId: string | null;
   linearOrganizationId: string | null;
-  goal: TaskGoal | null;
 };
 
 export function buildDequeuedTaskContext(task: Task): DequeuedTaskContext {
   return {
     id: task.id,
     title: task.title,
+    surface: task.surface,
+    initiatorUserId: task.initiatorUserId ?? null,
+    privacy: task.privacy,
+    privateOwnerUserId: task.privateOwnerUserId ?? null,
     prompt: task.prompt ?? null,
     harnessInstructions: task.harnessInstructions ?? null,
     requestedWorkKind: task.requestedWorkKind,
@@ -71,20 +81,6 @@ export function buildDequeuedTaskContext(task: Task): DequeuedTaskContext {
     linearSessionId: task.linearSessionId ?? null,
     linearIssueId: task.linearIssueId ?? null,
     linearOrganizationId: task.linearOrganizationId ?? null,
-    goal:
-      task.goalObjective &&
-      task.goalStatus &&
-      task.goalMaxContinuations !== null
-        ? {
-            objective: task.goalObjective,
-            generation: task.goalLastContinuationId,
-            status: task.goalStatus,
-            maxContinuations: task.goalMaxContinuations,
-            continuationsUsed: task.goalContinuationsUsed,
-            blockedReason: task.goalBlockedReason,
-            completedAt: task.goalCompletedAt,
-          }
-        : null,
   };
 }
 
@@ -440,25 +436,47 @@ export const dequeueTaskRun = async (
     const sourceControlProvider = resolveSourceControlProviderFromPayload(
       txResult.taskRun.payload,
     );
-    const sourceControlToken = await recordBootstrapPhase({
-      runId: txResult.taskRun.id,
-      taskId: txResult.taskRun.taskId,
-      label: 'createSourceControlToken',
-      details: {
-        payloadKind: txResult.taskRun.payloadKind,
-        provider: sourceControlProvider,
-      },
-      classifyResult: (token) =>
-        token
-          ? undefined
-          : {
-              outcome: 'failed',
-              error:
-                'Source control token creation exhausted retries and returned no token.',
-            },
-      fn: async () =>
-        await createSourceControlTokenForTaskRun(txResult.taskRun, tag),
-    });
+    let sourceControlToken;
+    try {
+      sourceControlToken = await recordBootstrapPhase({
+        runId: txResult.taskRun.id,
+        taskId: txResult.taskRun.taskId,
+        label: 'createSourceControlToken',
+        details: {
+          payloadKind: txResult.taskRun.payloadKind,
+          provider: sourceControlProvider,
+        },
+        classifyResult: (token) =>
+          token
+            ? undefined
+            : {
+                outcome: 'failed',
+                error:
+                  'Source control token creation exhausted retries and returned no token.',
+              },
+        fn: async () =>
+          await createSourceControlTokenForTaskRun(txResult.taskRun, tag),
+      });
+    } catch (error) {
+      await recordTaskRunLifecycleEventSafe({
+        runId: txResult.taskRun.id,
+        taskId: txResult.taskRun.taskId,
+        eventType: 'failed',
+        message: `Source control token creation failed for task run #${txResult.taskRun.id}.`,
+        details: {
+          reason: 'source_control_token_creation_failed',
+          payloadKind: txResult.taskRun.payloadKind,
+          provider: sourceControlProvider,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+      await cancelAndReleaseTaskRun(
+        txResult.taskRun,
+        'Failed to create source control token.',
+        tag,
+      );
+      return undefined;
+    }
 
     if (!sourceControlToken) {
       await recordTaskRunLifecycleEventSafe({
@@ -568,6 +586,9 @@ export const dequeueTaskRun = async (
         fn: async () =>
           await fetchResolvedRuntimeEnvVars(txResult.envVars, {
             sourceControlProvider: txResult.sourceControlProviders,
+            includeSandboxOpenRouterApiKey: Boolean(
+              txResult.taskRun.payload.environmentId,
+            ),
           }),
       });
     } catch (error) {
@@ -637,6 +658,15 @@ export const dequeueTaskRun = async (
       await cancelAndReleaseTaskRun(result.taskRun, message, tag);
       return undefined;
     }
+
+    result.harnessInstructions = appendPrivateTaskPersonalization(
+      result.harnessInstructions,
+      await getPrivateTaskPersonalizationInstructions({
+        actingUserId: result.taskRun.actingUserId,
+        initiatorKind: txResult.task.initiatorKind,
+        payloadKind: result.taskRun.payloadKind,
+      }),
+    );
 
     const { error: _, ...rest } = result;
     return rest;

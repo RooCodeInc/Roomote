@@ -1,5 +1,9 @@
 import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 
+vi.mock('@/lib/server/custom-automation-task-access', () => ({
+  requireTaskAccess: vi.fn().mockResolvedValue(undefined),
+}));
+
 import type { UserAuthSuccess, TaskMessageEnvelope } from '@/types';
 
 const {

@@ -1,51 +1,196 @@
 import {
   db,
+  taskRuns,
   taskPullRequests,
   tasks,
   and,
   eq,
   isNull,
+  inArray,
   ne,
   or,
+  reconcileAutomationResultAcceptance,
+  requeueBrainMemoryEventsForTasks,
   syncTaskStateFromRuns,
 } from '@roomote/db/server';
 import { captureActivationPrMerged } from '@roomote/telemetry/server';
-import type { PullRequestStatus, SourceControlProvider } from '@roomote/types';
+import {
+  activeRunStatuses,
+  RunStatus,
+  type PullRequestStatus,
+  type SourceControlProvider,
+  type TaskState,
+} from '@roomote/types';
 
-/**
- * Updates the status of all `task_pull_requests` rows matching the given
- * provider, repository, and PR number. This is a no-op when no matching rows
- * exist (e.g. the PR was not created by a Roomote task).
- */
+import { enqueueTaskSleep } from '../task-runs/enqueue-sleep';
+
+const MERGED_PR_TASK_IDLE_SECONDS = 5 * 60;
+
+type MergedPrTaskSleepInput = {
+  state: TaskState;
+  activityAt: number;
+  activeRuns: Array<{ id: number; status: RunStatus }>;
+};
+
+export function selectMergedPrTaskRunToSleep(
+  input: MergedPrTaskSleepInput,
+  nowSeconds = Math.floor(Date.now() / 1_000),
+): number | null {
+  if (
+    input.state !== 'active' ||
+    input.activityAt > nowSeconds - MERGED_PR_TASK_IDLE_SECONDS ||
+    input.activeRuns.length !== 1 ||
+    input.activeRuns[0]?.status !== RunStatus.Idle
+  ) {
+    return null;
+  }
+
+  return input.activeRuns[0].id;
+}
+
+async function sleepMergedPrOriginatingTask(taskId: string): Promise<void> {
+  const [task] = await db
+    .select({ state: tasks.state, activityAt: tasks.activityAt })
+    .from(tasks)
+    .where(eq(tasks.id, taskId))
+    .limit(1);
+
+  if (!task) return;
+
+  const activeRuns = await db
+    .select({ id: taskRuns.id, status: taskRuns.status })
+    .from(taskRuns)
+    .where(
+      and(
+        eq(taskRuns.taskId, taskId),
+        inArray(taskRuns.status, [...activeRunStatuses]),
+      ),
+    );
+  const runId = selectMergedPrTaskRunToSleep({ ...task, activeRuns });
+
+  if (runId !== null) {
+    await enqueueTaskSleep({
+      runId,
+      triggerPath: 'merged_pr',
+      expectedTaskActivityAt: task.activityAt,
+    });
+  }
+}
+
+function normalizeHost(host: string | null | undefined): string | null {
+  if (!host?.trim()) return null;
+  try {
+    const url = new URL(`https://${host.trim()}`);
+    if (
+      url.username ||
+      url.password ||
+      url.pathname !== '/' ||
+      url.search ||
+      url.hash
+    ) {
+      return null;
+    }
+    return url.host.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+/** Update only associations bound to the event's source-control instance. */
 export async function updateTaskPrStatus(
   provider: SourceControlProvider,
   repository: string,
   prNumber: number,
   status: PullRequestStatus,
+  scope: {
+    host: string | null | undefined;
+    repositoryId?: string;
+    mergedAt?: Date | null;
+  },
 ): Promise<void> {
+  const host = normalizeHost(scope?.host);
+  if (!host && !scope?.repositoryId) return;
+  const mergedAt =
+    status === 'merged' &&
+    scope.mergedAt &&
+    !Number.isNaN(scope.mergedAt.getTime())
+      ? scope.mergedAt
+      : null;
+
   const matchingPullRequest = and(
     eq(taskPullRequests.sourceControlProvider, provider),
     eq(taskPullRequests.repository, repository),
     eq(taskPullRequests.prNumber, prNumber),
   );
-  const matchingStatus = and(
-    matchingPullRequest,
-    ...(status === 'merged'
-      ? [
-          or(
-            isNull(taskPullRequests.status),
-            ne(taskPullRequests.status, 'merged'),
-          ),
-        ]
-      : []),
-  );
+  const { updated, originatingTaskId } = await db.transaction(async (tx) => {
+    const candidates = await tx.query.taskPullRequests.findMany({
+      where: matchingPullRequest,
+      columns: { id: true, host: true, repositoryId: true, prUrl: true },
+      with: { repository: { columns: { host: true } } },
+    });
+    const ids = candidates
+      .filter((row) => {
+        if (
+          scope.repositoryId &&
+          row.repositoryId &&
+          row.repositoryId !== scope.repositoryId
+        ) {
+          return false;
+        }
+        // Legacy associations may predate host/repositoryId. Their persisted
+        // repository or absolute PR URL can still identify the instance; an
+        // unknown instance must never fall back to name/number-only matching.
+        let rowHost = normalizeHost(row.host ?? row.repository?.host);
+        if (row.host == null && row.repository?.host == null) {
+          try {
+            const url = new URL(row.prUrl);
+            if (url.protocol === 'https:' || url.protocol === 'http:') {
+              rowHost = normalizeHost(url.host);
+            }
+          } catch {
+            // No usable persisted URL provenance.
+          }
+        }
+        if (host && rowHost) return host === rowHost;
+        return Boolean(
+          scope.repositoryId && row.repositoryId === scope.repositoryId,
+        );
+      })
+      .map((row) => row.id);
+    if (ids.length === 0) return { updated: [], originatingTaskId: null };
 
-  const updated = await db.transaction(async (tx) => {
+    const scopedPullRequest = and(
+      matchingPullRequest,
+      inArray(taskPullRequests.id, ids),
+    );
+    // Replayed terminal statuses must not requeue the same memories again.
+    const matchingStatus = and(
+      scopedPullRequest,
+      ...(status === 'merged' || status === 'closed'
+        ? [
+            or(
+              isNull(taskPullRequests.status),
+              ne(taskPullRequests.status, status),
+              ...(status === 'merged' && mergedAt
+                ? [isNull(taskPullRequests.mergedAt)]
+                : []),
+            ),
+          ]
+        : []),
+    );
+    let originatingTaskId: string | null = null;
+    let linkedTasks: Array<{
+      taskId: string;
+      createdByRoomote: boolean;
+    }> = [];
     if (status === 'merged') {
-      const linkedTasks = await tx
-        .select({ taskId: taskPullRequests.taskId })
+      linkedTasks = await tx
+        .select({
+          taskId: taskPullRequests.taskId,
+          createdByRoomote: taskPullRequests.createdByRoomote,
+        })
         .from(taskPullRequests)
-        .where(matchingPullRequest);
+        .where(scopedPullRequest);
 
       for (const taskId of [
         ...new Set(linkedTasks.map((row) => row.taskId)),
@@ -54,19 +199,55 @@ export async function updateTaskPrStatus(
         // still derive active, so legitimate follow-up tasks stay open.
         await syncTaskStateFromRuns(tx, taskId);
       }
+
+      originatingTaskId =
+        linkedTasks.find(({ createdByRoomote }) => createdByRoomote)?.taskId ??
+        null;
     }
 
     const updatedRows = await tx
       .update(taskPullRequests)
-      .set({ status, updatedAt: new Date() })
+      .set({ status, ...(mergedAt ? { mergedAt } : {}), updatedAt: new Date() })
       .where(matchingStatus)
       .returning({
         taskId: taskPullRequests.taskId,
         createdByRoomote: taskPullRequests.createdByRoomote,
       });
 
-    return updatedRows;
+    if (status === 'merged' && mergedAt) {
+      for (const taskId of [
+        ...new Set(linkedTasks.map((row) => row.taskId)),
+      ].sort()) {
+        await reconcileAutomationResultAcceptance(taskId, tx);
+      }
+    }
+
+    return { updated: updatedRows, originatingTaskId };
   });
+
+  if (status === 'merged' && originatingTaskId) {
+    void sleepMergedPrOriginatingTask(originatingTaskId).catch((error) => {
+      console.error(
+        `[updateTaskPrStatus] Failed to enqueue merged-PR sleep for task ${originatingTaskId}:`,
+        error,
+      );
+    });
+  }
+
+  if ((status === 'merged' || status === 'closed') && updated.length > 0) {
+    // The task's memory pages were written at completion, before anyone knew
+    // whether the work would ship. Re-ingest them so recall carries the
+    // outcome. Best-effort: a Memory hiccup must not fail the webhook.
+    const taskIds = [...new Set(updated.map((row) => row.taskId))].sort();
+    try {
+      await requeueBrainMemoryEventsForTasks(db, taskIds);
+    } catch (error) {
+      console.error(
+        `[updateTaskPrStatus] Failed to requeue memories for ${taskIds.join(', ')} after ${status} PR:`,
+        error,
+      );
+    }
+  }
 
   if (status !== 'merged' || updated.length === 0) {
     return;

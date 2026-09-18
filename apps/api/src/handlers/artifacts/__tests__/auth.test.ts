@@ -3,10 +3,15 @@ import {
   verifyArtifactRouteTaskReadAccess,
 } from '../auth';
 
+vi.mock('../../custom-automation-history-access', () => ({
+  customAutomationHistoryAccess: vi.fn(() => undefined),
+}));
+
 const {
   andMock,
   eqMock,
   isVisibleTaskMock,
+  privateTaskAccessMock,
   mockTaskRunFindFirst,
   mockFindTaskRunByRunTokenClaims,
   mockTaskFindFirst,
@@ -14,6 +19,7 @@ const {
   andMock: vi.fn((...args) => ({ type: 'and', args })),
   eqMock: vi.fn((...args) => ({ type: 'eq', args })),
   isVisibleTaskMock: vi.fn((column) => ({ type: 'isVisibleTask', column })),
+  privateTaskAccessMock: vi.fn((auth) => ({ type: 'privateTaskAccess', auth })),
   mockTaskRunFindFirst: vi.fn(),
   mockFindTaskRunByRunTokenClaims: vi.fn(),
   mockTaskFindFirst: vi.fn(),
@@ -34,6 +40,7 @@ vi.mock('@roomote/db/server', () => ({
   },
   eq: eqMock,
   isVisibleTask: isVisibleTaskMock,
+  privateTaskAccess: privateTaskAccessMock,
   tasks: { id: 'tasks.id' },
 }));
 
@@ -45,12 +52,15 @@ const auth = {
   userId: 'user-1',
   runId: 42,
   tokenType: 'run' as const,
+  principal: 'user' as const,
+  version: 1,
 };
 
 beforeEach(() => {
   vi.clearAllMocks();
   mockFindTaskRunByRunTokenClaims.mockResolvedValue({ id: 42 });
   mockTaskRunFindFirst.mockResolvedValue({ taskId: 'task-own' });
+  mockTaskFindFirst.mockResolvedValue({ id: 'task-own' });
 });
 
 describe('verifyArtifactRouteTaskBinding', () => {
@@ -84,11 +94,12 @@ describe('verifyArtifactRouteTaskBinding', () => {
 });
 
 describe('verifyArtifactRouteTaskReadAccess', () => {
-  it('allows the task that owns the calling task run without a task lookup', async () => {
+  it('checks own-task history access without requiring public visibility', async () => {
     const result = await verifyArtifactRouteTaskReadAccess('task-own', auth);
 
     expect(result).toEqual({ ok: true });
-    expect(mockTaskFindFirst).not.toHaveBeenCalled();
+    expect(mockTaskFindFirst).toHaveBeenCalled();
+    expect(isVisibleTaskMock).not.toHaveBeenCalled();
   });
 
   it('allows cross-task reads for other visible tasks', async () => {

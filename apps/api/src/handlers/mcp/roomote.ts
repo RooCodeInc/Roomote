@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { NullableOptionalsMcpServer } from '@roomote/cloud-agents/mcp-nullable-optionals';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import {
   and,
@@ -53,6 +53,9 @@ import type { McpAuth } from './middleware';
 import { resolveAboutMeVersion } from './about-me-version';
 import { registerRoomoteMemberTools } from './roomote-member-tools';
 import { registerRoomoteCustomAutomationsTool } from './roomote-custom-automations-tool';
+import { registerRoomoteCustomSkillsTool } from './roomote-custom-skills-tool';
+import { registerRoomoteCommunicationTools } from './roomote-communication-tools';
+import { registerRoomotePublicUrlFetchTool } from './roomote-public-url-fetch';
 
 const ROOMOTE_MCP_SERVER_INFO = {
   name: 'roomote-router-mcp',
@@ -397,14 +400,19 @@ function createRoomoteMcpServer(
   toolAuth: McpAuth,
   registerMemberTools: boolean,
 ) {
-  const server = new McpServer(ROOMOTE_MCP_SERVER_INFO, {
+  const server = new NullableOptionalsMcpServer(ROOMOTE_MCP_SERVER_INFO, {
     instructions: `Use get_about_me for Roomote platform, integration, and getting-started context. Use ${CHAT_MESSAGE_CONTEXT_TOOL.name} for surrounding context from the task communication channel or a referenced Slack/Discord message. Use ${CHAT_CHANNEL_MESSAGES_TOOL.name} for readable history from the task communication channel or an explicitly linked channel.`,
   });
 
   if (registerMemberTools) {
     registerRoomoteMemberTools(server, toolAuth);
+    if (actingUserId) {
+      registerRoomoteCommunicationTools(server, actingUserId);
+    }
   }
   registerRoomoteCustomAutomationsTool(server, toolAuth);
+  registerRoomoteCustomSkillsTool(server, toolAuth);
+  registerRoomotePublicUrlFetchTool(server);
 
   server.registerTool(
     'get_about_me',

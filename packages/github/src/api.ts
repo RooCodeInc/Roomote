@@ -15,6 +15,7 @@ import {
   DEFAULT_SOURCE_CONTROL_PROVIDER,
   filterRepositoryNamesForSourceControlProvider,
   normalizePemEnvValue,
+  resolveRepositoryNamesForSourceControlProviderFromPayload,
 } from '@roomote/types';
 import {
   type GitHubInstallation,
@@ -24,6 +25,7 @@ import {
   githubPendingInstallations,
   githubInstallations,
   environments,
+  environmentRepositoryMappings,
   repositories,
   and,
   eq,
@@ -45,29 +47,39 @@ async function resolveTokenOptionsForRepositoryNames({
   repositoryNames,
   missingMessagePrefix,
   spanningMessagePrefix,
+  repositoryRows,
 }: {
   taskRun: TaskRun;
   repositoryNames: string[];
   missingMessagePrefix: string;
   spanningMessagePrefix: string;
-}): Promise<CreateGitHubTokenOptions> {
+  repositoryRows?: Repository[];
+}): Promise<
+  Extract<CreateGitHubTokenOptions, { type: 'installationId' }> & {
+    installationId: string;
+  }
+> {
   const uniqueRepositoryNames = [
     ...new Set(
-      filterRepositoryNamesForSourceControlProvider(
-        taskRun.payload,
-        repositoryNames.filter(Boolean),
-        DEFAULT_SOURCE_CONTROL_PROVIDER,
-      ),
+      repositoryRows
+        ? repositoryNames
+        : filterRepositoryNamesForSourceControlProvider(
+            taskRun.payload,
+            repositoryNames.filter(Boolean),
+            DEFAULT_SOURCE_CONTROL_PROVIDER,
+          ),
     ),
   ];
 
-  const selectedRepoRows = await db.query.repositories.findMany({
-    where: and(
-      eq(repositories.sourceControlProvider, DEFAULT_SOURCE_CONTROL_PROVIDER),
-      eq(repositories.isActive, true),
-      inArray(repositories.fullName, uniqueRepositoryNames),
-    ),
-  });
+  const selectedRepoRows =
+    repositoryRows ??
+    (await db.query.repositories.findMany({
+      where: and(
+        eq(repositories.sourceControlProvider, DEFAULT_SOURCE_CONTROL_PROVIDER),
+        eq(repositories.isActive, true),
+        inArray(repositories.fullName, uniqueRepositoryNames),
+      ),
+    }));
 
   const foundRepositories = new Set(
     selectedRepoRows.map((repository) => repository.fullName),
@@ -185,32 +197,99 @@ type Checks = RestEndpointMethodTypes['checks'];
  * Authentication
  */
 
+export async function resolveTaskRunEnvironmentGitHubRepositories(
+  taskRun: TaskRun,
+): Promise<Repository[] | null> {
+  if (!taskRun.payload.environmentId) return null;
+  const environment = await db.query.environments.findFirst({
+    where: eq(environments.id, taskRun.payload.environmentId),
+  });
+  if (!environment) {
+    throw new Error(
+      `Environment not found for task run ${taskRun.id}: ${taskRun.payload.environmentId}`,
+    );
+  }
+  if (environment.config.repositories.length === 0) return null;
+
+  // Repository mappings retain provider identity even when providers share a name.
+  const mappings = await db.query.environmentRepositoryMappings.findMany({
+    where: eq(environmentRepositoryMappings.environmentId, environment.id),
+    with: { repository: true },
+  });
+  const repositoryRows = mappings
+    .map(({ repository }) => repository)
+    .filter(
+      (repository) =>
+        repository.isActive &&
+        repository.sourceControlProvider === DEFAULT_SOURCE_CONTROL_PROVIDER,
+    );
+  if (repositoryRows.length === 0) return null;
+
+  const options = await resolveTokenOptionsForRepositoryNames({
+    taskRun,
+    repositoryNames: repositoryRows.map((row) => row.fullName),
+    repositoryRows,
+    missingMessagePrefix: 'Environment repositories not found',
+    spanningMessagePrefix: 'Environment repositories',
+  });
+  return db.query.repositories.findMany({
+    where: and(
+      eq(repositories.sourceControlProvider, DEFAULT_SOURCE_CONTROL_PROVIDER),
+      eq(repositories.isActive, true),
+      eq(repositories.installationId, options.installationId),
+    ),
+  });
+}
+
 async function resolveTaskRunGitHubTokenOptions(
   taskRun: TaskRun,
 ): Promise<CreateGitHubTokenOptions> {
-  if (taskRun.payload.environmentId) {
-    const environment = await db.query.environments.findFirst({
-      where: eq(environments.id, taskRun.payload.environmentId),
-    });
-
-    if (!environment) {
-      throw new Error(
-        `Environment not found for task run ${taskRun.id}: ${taskRun.payload.environmentId}`,
-      );
-    }
-
-    const environmentRepositories = environment.config.repositories.map(
-      (repository) => repository.repository,
+  const stampedRepositories =
+    resolveRepositoryNamesForSourceControlProviderFromPayload(
+      taskRun.payload,
+      DEFAULT_SOURCE_CONTROL_PROVIDER,
     );
+  const repositoryRows =
+    await resolveTaskRunEnvironmentGitHubRepositories(taskRun);
 
-    if (environmentRepositories.length > 0) {
-      return resolveTokenOptionsForRepositoryNames({
-        taskRun,
-        repositoryNames: environmentRepositories,
-        missingMessagePrefix: 'Environment repositories not found',
-        spanningMessagePrefix: 'Environment repositories',
-      });
-    }
+  // Legacy environment payloads only stamped their initially prepared
+  // repositories, so retain the same-installation expansion for those runs.
+  // New checkout-scope stamps include every advertised GitHub repository. If
+  // one falls outside the environment installation, resolve the full stamp so
+  // token creation fails closed instead of advertising an unusable checkout.
+  const environmentRepositoryNames = new Set(
+    repositoryRows?.map((repository) => repository.fullName) ?? [],
+  );
+  if (
+    stampedRepositories?.some(
+      (repository) => !environmentRepositoryNames.has(repository),
+    )
+  ) {
+    return resolveTokenOptionsForRepositoryNames({
+      taskRun,
+      repositoryNames: stampedRepositories,
+      missingMessagePrefix: 'Stamped repositories not found',
+      spanningMessagePrefix: 'Stamped repositories',
+    });
+  }
+
+  if (repositoryRows !== null) {
+    return resolveTokenOptionsForRepositoryNames({
+      taskRun,
+      repositoryNames: repositoryRows.map((row) => row.fullName),
+      repositoryRows,
+      missingMessagePrefix: 'Environment repositories not found',
+      spanningMessagePrefix: 'Environment repositories',
+    });
+  }
+
+  if (stampedRepositories && stampedRepositories.length > 0) {
+    return resolveTokenOptionsForRepositoryNames({
+      taskRun,
+      repositoryNames: stampedRepositories,
+      missingMessagePrefix: 'Stamped repositories not found',
+      spanningMessagePrefix: 'Stamped repositories',
+    });
   }
 
   const selectedRepositories = Array.isArray(
@@ -2145,6 +2224,20 @@ export function createIssueComment(
   params: CreateIssueComment['parameters'],
 ): Promise<CreateIssueComment['response']> {
   return getOctokit(token).issues.createComment(params);
+}
+
+type GetIssueCommentByToken = Issues['getComment'];
+
+/**
+ * Read one issue comment with an already-minted token, the same way
+ * updateIssueComment writes one. Used as the REST fallback when the `gh`
+ * CLI read of a review summary fails.
+ */
+export function fetchIssueCommentWithToken(
+  token: string,
+  params: GetIssueCommentByToken['parameters'],
+): Promise<GetIssueCommentByToken['response']> {
+  return getOctokit(token).issues.getComment(params);
 }
 
 type UpdateIssueComment = Issues['updateComment'];

@@ -4,13 +4,13 @@ import {
   taskRuns,
   eq,
   and,
-  gt,
   inArray,
   isNull,
   isNotNull,
   desc,
+  isSnapshotResumableCondition,
 } from '@roomote/db/server';
-import { RunStatus, SANDBOX_SNAPSHOT_EXPIRY_MS } from '@roomote/types';
+import { RunStatus } from '@roomote/types';
 
 import { slackDebug } from './logging';
 import type { SlackTaskRunLookupScope } from './find-active-slack-task-run';
@@ -39,9 +39,6 @@ export async function findCompletedSlackTaskRunWithSnapshot(
   slackDebug(
     `[findCompletedSlackTaskRunWithSnapshot] Searching for completed task run with snapshot for thread ${slackThreadTs}`,
   );
-
-  // Only consider snapshots that haven't expired yet (7-day TTL).
-  const snapshotCutoff = new Date(Date.now() - SANDBOX_SNAPSHOT_EXPIRY_MS);
 
   const [completedRun] = await db
     .select({
@@ -76,7 +73,7 @@ export async function findCompletedSlackTaskRunWithSnapshot(
         isNull(taskRuns.snapshotFailedAt),
         isNull(taskRuns.canceledAt),
         isNull(tasks.deletedAt),
-        gt(taskRuns.snapshotCreatedAt, snapshotCutoff),
+        isSnapshotResumableCondition(taskRuns),
       ),
     )
     .orderBy(desc(taskRuns.createdAt))

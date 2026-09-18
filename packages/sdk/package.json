@@ -44,9 +44,17 @@
       "import": "./src/server/lib/automation-recommendations.ts",
       "require": "./src/server/lib/automation-recommendations.ts"
     },
+    "./server/automation-result-visibility": {
+      "import": "./src/server/lib/automation-result-visibility.ts",
+      "require": "./src/server/lib/automation-result-visibility.ts"
+    },
     "./server/telegram-primary-chat": {
       "import": "./src/server/lib/telegram-primary-chat.ts",
       "require": "./src/server/lib/telegram-primary-chat.ts"
+    },
+    "./server/agentmail-outbound": {
+      "import": "./src/server/lib/agentmail/outbound.ts",
+      "require": "./src/server/lib/agentmail/outbound.ts"
     },
     "./server/discord-persistence": {
       "import": "./src/server/lib/discord-persistence.ts",
@@ -60,9 +68,33 @@
       "import": "./src/server/lib/safe-fetch.ts",
       "require": "./src/server/lib/safe-fetch.ts"
     },
+    "./server/service-credentials": {
+      "import": "./src/server/lib/service-credentials.ts",
+      "require": "./src/server/lib/service-credentials.ts"
+    },
+    "./server/add-remote-custom-mcp": {
+      "import": "./src/server/lib/mcp/add-remote-custom-mcp.ts",
+      "require": "./src/server/lib/mcp/add-remote-custom-mcp.ts"
+    },
+    "./server/connect-integration": {
+      "import": "./src/server/lib/mcp/connect-integration.ts",
+      "require": "./src/server/lib/mcp/connect-integration.ts"
+    },
+    "./server/platform-issue-reporting": {
+      "import": "./src/server/lib/platform-issue-reporting.ts",
+      "require": "./src/server/lib/platform-issue-reporting.ts"
+    },
+    "./server/credential-egress": {
+      "import": "./src/server/lib/credential-egress.ts",
+      "require": "./src/server/lib/credential-egress.ts"
+    },
     "./server/notion-api": {
       "import": "./src/server/lib/notion-api.ts",
       "require": "./src/server/lib/notion-api.ts"
+    },
+    "./server/mcp-data": {
+      "import": "./src/server/lib/mcp/data.ts",
+      "require": "./src/server/lib/mcp/data.ts"
     },
     "./server/rippling-api": {
       "import": "./src/server/lib/rippling-api.ts",
@@ -78,6 +110,7 @@
     "clean": "rimraf .turbo"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "3.1000.0",
     "@roomote/ado": "workspace:^",
     "@roomote/auth": "workspace:^",
     "@roomote/bitbucket": "workspace:^",
@@ -86,7 +119,6 @@
     "@roomote/compute-providers": "workspace:^",
     "@roomote/db": "workspace:^",
     "@roomote/env": "workspace:*",
-    "@roomote/feature-flags": "workspace:^",
     "@roomote/gitea": "workspace:^",
     "@roomote/github": "workspace:^",
     "@roomote/gitlab": "workspace:^",
@@ -99,13 +131,16 @@
     "@trpc/server": "^11.15.0",
     "bullmq": "^5.78.0",
     "cron-parser": "5.6.1",
+    "htmlparser2": "8.0.2",
     "superjson": "^2.2.6",
+    "turndown": "7.2.0",
     "undici": "^7.29.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {
     "@roomote/config-typescript": "workspace:^",
     "@types/node": "^24.10.13",
+    "@types/turndown": "5.0.5",
     "vitest": "^4.1.1"
   }
 }

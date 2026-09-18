@@ -29,7 +29,7 @@ const handler = async (req: Request) => {
       const contextStartedAt = performance.now();
 
       try {
-        return await createContext();
+        return await createContext({ allowSessionRefresh: true });
       } finally {
         authMs = performance.now() - contextStartedAt;
       }

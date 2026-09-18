@@ -4,14 +4,19 @@ const {
   mockFindFirstTaskRun,
   mockFindFirstTaskPullRequest,
   mockFindFirstSlackInstallation,
+  mockGetSessionForFastConversation,
   mockConsumePending,
   mockRequeuePending,
+  mockRetrySupersededPrReviewAction,
   mockSchedule,
   mockPrepareDelivery,
   mockPrepareCanonical,
   mockBeginCanonicalPrompt,
   mockBeginCanonicalWebPrompt,
   mockBeginCanonicalWebAutoDispatch,
+  mockDispatchCanonicalAutoFollowUp,
+  mockReadLivePullRequestState,
+  mockDbUpdate,
   mockReleaseCanonicalWebAutoDispatch,
   mockBeginCanonicalAutoDispatch,
   mockCompleteCanonicalAutoDispatch,
@@ -31,20 +36,30 @@ const {
   mockIsDurable,
   mockMigrateLegacy,
   mockRenewLease,
+  mockUpdateFastAgentPrReviewOfferStatus,
+  mockUpdateTaskPrReviewOfferStatus,
+  mockGetCanonicalPrReviewAction,
   mockEq,
   MockPrReviewNotificationRateLimitError,
 } = vi.hoisted(() => ({
   mockFindFirstTaskRun: vi.fn(),
   mockFindFirstTaskPullRequest: vi.fn(),
   mockFindFirstSlackInstallation: vi.fn(),
+  mockGetSessionForFastConversation: vi.fn(),
   mockConsumePending: vi.fn(),
   mockRequeuePending: vi.fn(),
+  mockRetrySupersededPrReviewAction: vi.fn(),
   mockSchedule: vi.fn(),
   mockPrepareDelivery: vi.fn(),
   mockPrepareCanonical: vi.fn(),
   mockBeginCanonicalPrompt: vi.fn(),
   mockBeginCanonicalWebPrompt: vi.fn(),
   mockBeginCanonicalWebAutoDispatch: vi.fn(),
+  mockDispatchCanonicalAutoFollowUp: vi.fn(),
+  mockReadLivePullRequestState: vi.fn(),
+  mockDbUpdate: vi.fn(() => ({
+    set: () => ({ where: () => Promise.resolve([]) }),
+  })),
   mockReleaseCanonicalWebAutoDispatch: vi.fn(),
   mockBeginCanonicalAutoDispatch: vi.fn(),
   mockCompleteCanonicalAutoDispatch: vi.fn(),
@@ -64,6 +79,9 @@ const {
   mockIsDurable: vi.fn(),
   mockMigrateLegacy: vi.fn(),
   mockRenewLease: vi.fn(),
+  mockUpdateFastAgentPrReviewOfferStatus: vi.fn(),
+  mockUpdateTaskPrReviewOfferStatus: vi.fn(),
+  mockGetCanonicalPrReviewAction: vi.fn(),
   mockEq: vi.fn((...args: unknown[]) => ({ eq: args })),
   MockPrReviewNotificationRateLimitError: class extends Error {
     constructor(readonly retryAfterMs: number) {
@@ -74,6 +92,7 @@ const {
 
 vi.mock('@roomote/db/server', () => ({
   db: {
+    update: () => mockDbUpdate(),
     query: {
       taskRuns: {
         findFirst: (...args: unknown[]) => mockFindFirstTaskRun(...args),
@@ -81,6 +100,12 @@ vi.mock('@roomote/db/server', () => ({
       taskPullRequests: {
         findFirst: (...args: unknown[]) =>
           mockFindFirstTaskPullRequest(...args),
+        // The job lists links and picks the instance itself; tests keep
+        // describing one link (or an explicit list) through the same mock.
+        findMany: async (...args: unknown[]) => {
+          const links = await mockFindFirstTaskPullRequest(...args);
+          return Array.isArray(links) ? links : links ? [links] : [];
+        },
       },
       slackInstallations: {
         findFirst: (...args: unknown[]) =>
@@ -91,8 +116,17 @@ vi.mock('@roomote/db/server', () => ({
   and: vi.fn(() => 'and-condition'),
   eq: mockEq,
   desc: vi.fn(() => 'desc-order'),
+  getCanonicalPrReviewAction: (...args: unknown[]) =>
+    mockGetCanonicalPrReviewAction(...args),
+  getSessionForFastConversation: (...args: unknown[]) =>
+    mockGetSessionForFastConversation(...args),
+  isSessionConversationResponding: (session: {
+    respondingUntil: Date | null;
+  }) =>
+    session.respondingUntil !== null && session.respondingUntil > new Date(),
   taskRuns: { taskId: 'taskId', createdAt: 'createdAt' },
   taskPullRequests: {
+    id: 'id',
     taskId: 'taskId',
     repository: 'repository',
     prNumber: 'prNumber',
@@ -158,6 +192,7 @@ vi.mock('@roomote/sdk/server', () => ({
     eventsTriaged: 0,
     triageInvoked: false,
     triageCacheHit: false,
+    triageJudgmentSkipped: false,
     triageInputChars: 0,
     triageInputTokenEstimate: 0,
   }),
@@ -178,6 +213,7 @@ vi.mock('@roomote/sdk/server', () => ({
     .passthrough(),
   consumePendingPrReviewActivity: mockConsumePending,
   requeuePendingPrReviewActivity: mockRequeuePending,
+  retrySupersededPrReviewAction: mockRetrySupersededPrReviewAction,
   schedulePrReviewNotificationJob: mockSchedule,
   getCommunicationProviderAdapter: vi.fn(
     async (provider: 'slack' | 'teams' | 'telegram' | 'discord') =>
@@ -193,7 +229,10 @@ vi.mock('@roomote/sdk/server', () => ({
   beginCanonicalPrReviewPrompt: mockBeginCanonicalPrompt,
   beginCanonicalPrReviewWebPrompt: mockBeginCanonicalWebPrompt,
   beginCanonicalPrReviewWebAutoDispatch: mockBeginCanonicalWebAutoDispatch,
+  dispatchCanonicalPrReviewAutoFollowUp: mockDispatchCanonicalAutoFollowUp,
   releaseCanonicalPrReviewWebAutoDispatch: mockReleaseCanonicalWebAutoDispatch,
+  readLivePullRequestStateForNotification: (...args: unknown[]) =>
+    mockReadLivePullRequestState(...args),
   beginCanonicalPrReviewAutoDispatch: mockBeginCanonicalAutoDispatch,
   completeCanonicalPrReviewAutoDispatch: mockCompleteCanonicalAutoDispatch,
   recordPrReviewNotificationDeliveryBestEffort: mockRecordDelivery,
@@ -209,6 +248,8 @@ vi.mock('@roomote/sdk/server', () => ({
   migrateLegacyPrReviewNotificationRequest: mockMigrateLegacy,
   attachPendingPrReviewActionMessageWithRetirement:
     mockAttachPendingPrReviewActionMessage,
+  updateFastAgentPrReviewOfferStatus: mockUpdateFastAgentPrReviewOfferStatus,
+  updateTaskPrReviewOfferStatus: mockUpdateTaskPrReviewOfferStatus,
 }));
 
 import type { Job } from 'bullmq';
@@ -238,12 +279,30 @@ describe('prReviewNotificationJob', () => {
     mockIsDurable.mockReturnValue(true);
     mockMigrateLegacy.mockResolvedValue(0);
     mockRenewLease.mockResolvedValue(true);
+    mockRetrySupersededPrReviewAction.mockResolvedValue(false);
     mockPrepareCanonical.mockResolvedValue(true);
     mockBeginCanonicalPrompt.mockResolvedValue(true);
     mockBeginCanonicalWebPrompt.mockResolvedValue(true);
     mockBeginCanonicalWebAutoDispatch.mockResolvedValue(true);
     mockReleaseCanonicalWebAutoDispatch.mockResolvedValue(true);
     mockBeginCanonicalAutoDispatch.mockResolvedValue(true);
+    mockDispatchCanonicalAutoFollowUp.mockImplementation(async (input) => {
+      const began = input.route
+        ? await mockBeginCanonicalAutoDispatch({
+            request: input.request,
+            followUpPrompt: input.followUpPrompt,
+            targetTaskId: input.targetTaskId,
+            actingUserId: input.actingUserId,
+            route: input.route,
+          })
+        : await mockBeginCanonicalWebAutoDispatch({
+            request: input.request,
+            followUpPrompt: input.followUpPrompt,
+            targetTaskId: input.targetTaskId,
+            actingUserId: input.actingUserId,
+          });
+      return began ? mockDispatchFollowUp(input.dispatchInput) : null;
+    });
     mockCompleteCanonicalAutoDispatch.mockResolvedValue(true);
 
     mockFindFirstTaskRun.mockResolvedValue({
@@ -265,6 +324,7 @@ describe('prReviewNotificationJob', () => {
       status: 'open',
       autoHandleFeedbackByUserId: null,
     });
+    mockGetSessionForFastConversation.mockResolvedValue(null);
     mockFindFirstSlackInstallation.mockResolvedValue({
       botAccessToken: 'xoxb-token',
     });
@@ -286,6 +346,9 @@ describe('prReviewNotificationJob', () => {
       superseded: [],
     });
     mockRetirePrReviewActionMessages.mockResolvedValue(undefined);
+    mockUpdateFastAgentPrReviewOfferStatus.mockResolvedValue(undefined);
+    mockUpdateTaskPrReviewOfferStatus.mockResolvedValue(undefined);
+    mockGetCanonicalPrReviewAction.mockResolvedValue({ status: 'dismissed' });
     mockFindAutoHandlePrReviewFeedbackPreference.mockResolvedValue(null);
     mockStickyFooterPost.mockResolvedValue('999.888');
     mockPostMessage.mockResolvedValue({
@@ -435,7 +498,30 @@ describe('prReviewNotificationJob', () => {
     expect(mockSchedule).not.toHaveBeenCalled();
   });
 
+  it('logs a finalized missing provider message id as non-retryable', async () => {
+    const error = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    mockStickyFooterPost.mockResolvedValue(null);
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    const deliveryEvents = error.mock.calls
+      .map(([message]) => JSON.parse(String(message)))
+      .filter((entry) => entry.event === 'source_control_review_delivery');
+    expect(deliveryEvents).toContainEqual(
+      expect.objectContaining({
+        outcome: 'failed',
+        reason: 'provider_message_id_missing',
+        retryable: false,
+      }),
+    );
+    expect(mockFinalize).toHaveBeenCalled();
+    error.mockRestore();
+  });
+
   it('passes triaged feedback to the Fast parent event path', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     mockFindFirstTaskRun.mockResolvedValue({
       id: 1,
       taskId: 'task-1',
@@ -515,8 +601,25 @@ describe('prReviewNotificationJob', () => {
       runId: 1,
       taskId: 'task-1',
       route: null,
-      text: 'Alice requested changes on owner/repo#42.\nWant me to take a look?',
+      text: 'Alice requested changes on owner/repo#42.',
     });
+    const deliveryEvents = log.mock.calls
+      .map(([message]) => {
+        try {
+          return JSON.parse(String(message));
+        } catch {
+          return null;
+        }
+      })
+      .filter((entry) => entry?.event === 'source_control_review_delivery');
+    expect(deliveryEvents).toContainEqual(
+      expect.objectContaining({
+        outcome: 'delivered',
+        reason: 'fast_parent_notified',
+        retryable: false,
+      }),
+    );
+    log.mockRestore();
   });
 
   it('notifies the Fast parent before auto-dispatching opted-in feedback', async () => {
@@ -581,6 +684,60 @@ describe('prReviewNotificationJob', () => {
     );
     expect(mockSetPendingPrReviewAction).not.toHaveBeenCalled();
     expect(mockStickyFooterPost).not.toHaveBeenCalled();
+  });
+
+  it('auto-dispatches opted-in feedback through a Telegram Fast parent', async () => {
+    mockFindFirstTaskRun.mockResolvedValue({
+      id: 1,
+      taskId: 'task-1',
+      payload: {
+        fastAgentParent: {
+          sessionId: '11111111-1111-4111-8111-111111111111',
+          conversation: {
+            surface: 'telegram',
+            workspaceId: '12345',
+            conversationId: '12345:77',
+            replyTarget: { channelId: '12345', threadId: '77' },
+          },
+        },
+      },
+      status: RunStatus.Idle,
+      taskPhase: 'waiting_for_prompt',
+      workerHeartbeatAt: new Date(),
+    });
+    mockFindFirstTaskPullRequest.mockResolvedValue({
+      sourceControlProvider: 'github',
+      host: 'github.com',
+      repository: 'owner/repo',
+      prNumber: 42,
+      prTitle: 'PR title',
+      prUrl: 'https://github.com/owner/repo/pull/42',
+      status: 'open',
+      autoHandleFeedbackByUserId: 'user-9',
+    });
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: null,
+      text: 'Alice requested changes on owner/repo#42.',
+      followUpQuestion: 'Want me to take a look?',
+      followUpPrompt: 'Address the review feedback on owner/repo#42.',
+    });
+    mockDispatchFollowUp.mockResolvedValue({ outcome: 'resumed', runId: 12 });
+    mockNotifyFastAgentParent.mockResolvedValue(true);
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    expect(mockNotifyFastAgentParent.mock.calls[0]?.[0]).not.toHaveProperty(
+      'suggestedActionPrompt',
+    );
+    expect(mockDispatchFollowUp).toHaveBeenCalledWith({
+      provider: 'telegram',
+      taskId: 'task-1',
+      channelId: '12345',
+      threadId: '77',
+      followUpPrompt: 'Address the review feedback on owner/repo#42.',
+      actingUserId: 'user-9',
+    });
   });
 
   it('does not auto-dispatch when Fast-parent delivery fails', async () => {
@@ -665,7 +822,7 @@ describe('prReviewNotificationJob', () => {
       runId: 1,
       taskId: 'task-1',
       route: null,
-      text: 'Alice requested changes on owner/repo#42.\nWant me to take a look?',
+      text: 'Alice requested changes on owner/repo#42.',
     });
     expect(mockFinalize).toHaveBeenCalled();
   });
@@ -746,7 +903,7 @@ describe('prReviewNotificationJob', () => {
     );
 
     const postedCall = mockStickyFooterPost.mock.calls[0]?.[0];
-    expect(postedCall.text).toBe('formatted-message\nWant me to take a look?');
+    expect(postedCall.text).toBe('formatted-message');
     const blocks = postedCall.blocks as Array<Record<string, unknown>>;
     expect(blocks).toEqual([
       expect.objectContaining({
@@ -754,17 +911,13 @@ describe('prReviewNotificationJob', () => {
         text: 'formatted-message',
       }),
       expect.objectContaining({
-        block_id: 'pr_review_action_question',
-        text: expect.objectContaining({ text: 'Want me to take a look?' }),
-      }),
-      expect.objectContaining({
         type: 'actions',
         block_id: 'pr_review_action',
       }),
     ]);
-    // Both buttons carry the stored nonce so the click handler can claim it.
+    // All buttons carry the stored nonce so the click handler can claim it.
     const storedNonce = mockSetPendingPrReviewAction.mock.calls[0]?.[0]?.nonce;
-    const actionsBlock = blocks[2] as {
+    const actionsBlock = blocks[1] as {
       elements: Array<{ action_id: string; value: string }>;
     };
     expect(actionsBlock.elements.map((element) => element.action_id)).toEqual([
@@ -784,12 +937,130 @@ describe('prReviewNotificationJob', () => {
     );
     expect(mockRetirePrReviewActionMessages).toHaveBeenCalledWith([superseded]);
 
-    // The task-history record carries the question as trailing text.
+    // Newly recorded history contains only the summary, not the action question.
     expect(mockRecordDelivery).toHaveBeenCalledWith(
       expect.objectContaining({
-        text: 'formatted-message\nWant me to take a look?',
+        text: 'formatted-message',
       }),
     );
+  });
+
+  it('delivers superseded pre-post feedback without actionable controls', async () => {
+    const deliveryId = '77777777-7777-4777-8777-777777777777';
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: {
+        provider: 'slack',
+        slackTeamId: 'T123',
+        channelId: 'C123',
+        threadId: '111.222',
+      },
+      text: 'Review feedback remains.',
+      followUpQuestion: 'Resolve it?',
+      followUpPrompt: 'Resolve the review feedback.',
+    });
+
+    await prReviewNotificationJob(
+      makeJob({
+        ownershipVersion: 'canonical',
+        deliveryId,
+        notificationUnitId: '88888888-8888-4888-8888-888888888888',
+        deliveryState: 'prepared',
+        reviewActionSuperseded: true,
+        destinationKey: 'task-1',
+        dispatchKey: `pr-review-delivery:${deliveryId}`,
+        deliveryIds: [deliveryId],
+        leaseToken: '99999999-9999-4999-8999-999999999999',
+        events,
+      }) as never,
+    );
+
+    expect(mockBeginCanonicalPrompt).not.toHaveBeenCalled();
+    expect(mockSetPendingPrReviewAction).not.toHaveBeenCalled();
+    expect(mockStickyFooterPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'Review feedback remains.',
+        blocks: [{ type: 'markdown', text: 'Review feedback remains.' }],
+      }),
+    );
+    expect(mockRecordDelivery).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'Review feedback remains.' }),
+    );
+    expect(mockFinalize).toHaveBeenCalled();
+  });
+
+  it('immediately retries a pre-post action fenced during delivery', async () => {
+    const deliveryId = '67676767-6767-4767-8767-676767676767';
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: {
+        provider: 'slack',
+        slackTeamId: 'T123',
+        channelId: 'C123',
+        threadId: '111.222',
+      },
+      text: 'Review feedback remains.',
+      followUpQuestion: 'Resolve it?',
+      followUpPrompt: 'Resolve the review feedback.',
+    });
+    mockBeginCanonicalPrompt.mockResolvedValue(false);
+    mockRetrySupersededPrReviewAction.mockResolvedValue(true);
+    const job = makeJob({
+      ownershipVersion: 'canonical',
+      deliveryId,
+      notificationUnitId: '68686868-6868-4868-8868-686868686868',
+      deliveryState: 'claimed',
+      destinationKey: 'task-1',
+      dispatchKey: `pr-review-delivery:${deliveryId}`,
+      deliveryIds: [deliveryId],
+      leaseToken: '69696969-6969-4969-8969-696969696969',
+      events,
+    });
+
+    await prReviewNotificationJob(job as never);
+
+    expect(mockRetrySupersededPrReviewAction).toHaveBeenCalledWith(job.data);
+    expect(mockStickyFooterPost).not.toHaveBeenCalled();
+    expect(mockRecordDelivery).not.toHaveBeenCalled();
+  });
+
+  it('retires a canonical Slack prompt that loses its posting fence', async () => {
+    const deliveryId = '77777777-7777-4777-8777-777777777777';
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: {
+        provider: 'slack',
+        slackTeamId: 'T123',
+        channelId: 'C123',
+        threadId: '111.222',
+      },
+      text: 'Old review feedback.',
+      followUpQuestion: 'Resolve it?',
+      followUpPrompt: 'Resolve the old review feedback.',
+    });
+    mockAttachPendingPrReviewActionMessage.mockResolvedValue({
+      attached: false,
+      superseded: [],
+    });
+
+    await expect(
+      prReviewNotificationJob(
+        makeJob({
+          ownershipVersion: 'canonical',
+          deliveryId,
+          notificationUnitId: '88888888-8888-4888-8888-888888888888',
+          deliveryState: 'claimed',
+          destinationKey: 'task-1',
+          dispatchKey: `pr-review-delivery:${deliveryId}`,
+          deliveryIds: [deliveryId],
+          leaseToken: '99999999-9999-4999-8999-999999999999',
+          events,
+        }) as never,
+      ),
+    ).rejects.toThrow('Canonical PR review prompt lost its posting fence');
+    expect(mockRetirePrReviewActionMessages).toHaveBeenCalledWith([
+      expect.objectContaining({ nonce: deliveryId, messageId: '999.888' }),
+    ]);
   });
 
   it('posts callback buttons and stores the pending offer for Telegram routes', async () => {
@@ -819,13 +1090,15 @@ describe('prReviewNotificationJob', () => {
     const storedNonce = mockSetPendingPrReviewAction.mock.calls[0]?.[0]?.nonce;
     expect(mockTelegramPostMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        text: 'formatted-message\nWant me to take a look?',
+        text: 'formatted-message',
         buttons: [
           [
             expect.objectContaining({
               text: 'Resolve these issues',
               callbackData: `prr:y:${storedNonce}`,
             }),
+          ],
+          [
             expect.objectContaining({
               text: 'Auto-resolve on this PR',
               callbackData: `prr:a:${storedNonce}`,
@@ -863,6 +1136,24 @@ describe('prReviewNotificationJob', () => {
     await prReviewNotificationJob(makeJob() as never);
 
     const storedNonce = mockSetPendingPrReviewAction.mock.calls[0]?.[0]?.nonce;
+    expect(mockDiscordPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'formatted-message',
+        buttons: [
+          [
+            {
+              text: 'Resolve these issues',
+              callbackData: `prr:y:${storedNonce}`,
+            },
+            {
+              text: 'Auto-resolve on this PR',
+              callbackData: `prr:a:${storedNonce}`,
+            },
+            { text: 'Dismiss', callbackData: `prr:d:${storedNonce}` },
+          ],
+        ],
+      }),
+    );
     expect(mockAttachPendingPrReviewActionMessage).toHaveBeenCalledWith(
       storedNonce,
       'message-with-actions',
@@ -872,7 +1163,7 @@ describe('prReviewNotificationJob', () => {
     );
   });
 
-  it('keeps Teams routes on the plain trailing-question text', async () => {
+  it('posts only the summary for Teams routes without adding controls', async () => {
     mockPrepareDelivery.mockResolvedValue({
       post: true,
       route: {
@@ -891,7 +1182,7 @@ describe('prReviewNotificationJob', () => {
     expect(mockSetPendingPrReviewAction).not.toHaveBeenCalled();
     expect(mockTeamsPostMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        text: 'formatted-message\nWant me to take a look?',
+        text: 'formatted-message',
       }),
     );
     expect(mockTeamsPostMessage.mock.calls[0]?.[0]?.buttons).toBeUndefined();
@@ -942,7 +1233,149 @@ describe('prReviewNotificationJob', () => {
     );
   });
 
-  it('auto-dispatches repeated feedback delivered through a different linked task', async () => {
+  it('suppresses stale feedback instead of auto-dispatching when the provider says the PR is merged', async () => {
+    // The persisted link still says open (the merge webhook was missed), but
+    // the provider says merged. Nothing is posted and nothing is resumed.
+    mockFindFirstTaskPullRequest.mockResolvedValue({
+      id: 'link-1',
+      status: 'open',
+      host: 'github.com',
+      autoHandleFeedbackByUserId: 'user-9',
+    });
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: { provider: 'slack', channelId: 'C123', threadId: '111.222' },
+      text: 'formatted-message',
+      followUpQuestion: 'Want me to take a look?',
+      followUpPrompt: 'Address the review feedback on owner/repo#42.',
+    });
+    mockReadLivePullRequestState.mockResolvedValue('merged');
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    expect(mockReadLivePullRequestState).toHaveBeenCalledWith({
+      provider: 'github',
+      host: 'github.com',
+      repository: 'owner/repo',
+      prNumber: 42,
+    });
+    expect(mockDispatchFollowUp).not.toHaveBeenCalled();
+    expect(mockStickyFooterPost).not.toHaveBeenCalled();
+    expect(mockNotifyFastAgentParent).not.toHaveBeenCalled();
+    // Only the resolved link row is corrected, never every link that shares
+    // the task/provider/repository/number across hosts.
+    expect(mockDbUpdate).toHaveBeenCalledTimes(1);
+    expect(mockEq).toHaveBeenCalledWith('id', 'link-1');
+    expect(mockFinalize).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: 'task-1' }),
+      'suppressed',
+    );
+  });
+
+  it('checks the link for the host the notification names, not a same-name PR elsewhere', async () => {
+    mockFindFirstTaskPullRequest.mockResolvedValue([
+      {
+        id: 'link-github',
+        status: 'merged',
+        host: 'github.com',
+        repositoryId: 'repo-github',
+        autoHandleFeedbackByUserId: 'user-9',
+      },
+      {
+        id: 'link-gitea',
+        status: 'open',
+        host: 'gitea.example.com',
+        repositoryId: 'repo-gitea',
+        autoHandleFeedbackByUserId: 'user-9',
+      },
+    ]);
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: { provider: 'slack', channelId: 'C123', threadId: '111.222' },
+      text: 'formatted-message',
+      followUpQuestion: 'Want me to take a look?',
+      followUpPrompt: 'Address the review feedback on owner/repo#42.',
+    });
+    mockReadLivePullRequestState.mockResolvedValue('open');
+    mockDispatchFollowUp.mockResolvedValue({ outcome: 'resumed', runId: 12 });
+
+    await prReviewNotificationJob(
+      makeJob({
+        sourceControlProvider: 'gitea',
+        host: 'gitea.example.com',
+        repositoryId: 'repo-gitea',
+      }) as never,
+    );
+
+    // The merged GitHub link did not suppress the Gitea delivery, and the
+    // live read was scoped to the Gitea host.
+    expect(mockReadLivePullRequestState).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: 'gitea', host: 'gitea.example.com' }),
+    );
+    expect(mockDispatchFollowUp).toHaveBeenCalled();
+  });
+
+  it('auto-dispatches when the live PR state cannot be read', async () => {
+    mockFindFirstTaskPullRequest.mockResolvedValue({
+      status: 'open',
+      autoHandleFeedbackByUserId: 'user-9',
+    });
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: { provider: 'slack', channelId: 'C123', threadId: '111.222' },
+      text: 'formatted-message',
+      followUpQuestion: 'Want me to take a look?',
+      followUpPrompt: 'Address the review feedback on owner/repo#42.',
+    });
+    mockReadLivePullRequestState.mockResolvedValue(null);
+    mockDispatchFollowUp.mockResolvedValue({ outcome: 'resumed', runId: 12 });
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    expect(mockDispatchFollowUp).toHaveBeenCalled();
+  });
+
+  it('fences a reclaimed automatic dispatch before remediation starts', async () => {
+    const deliveryId = '56565656-5656-4656-8656-565656565656';
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: {
+        provider: 'slack',
+        slackTeamId: 'T123',
+        channelId: 'C123',
+        threadId: '111.222',
+      },
+      text: 'Review feedback remains.',
+      followUpQuestion: 'Resolve it?',
+      followUpPrompt: 'Resolve the review feedback.',
+    });
+    mockFindAutoHandlePrReviewFeedbackPreference.mockResolvedValue({
+      taskId: 'task-1',
+      userId: 'user-1',
+      destinationKey: 'task-1',
+    });
+    mockBeginCanonicalAutoDispatch.mockResolvedValue(false);
+    mockRetrySupersededPrReviewAction.mockResolvedValue(true);
+    const job = makeJob({
+      ownershipVersion: 'canonical',
+      deliveryId,
+      notificationUnitId: '57575757-5757-4757-8757-575757575757',
+      deliveryState: 'auto_dispatch_pending',
+      destinationKey: 'task-1',
+      dispatchKey: `pr-review-delivery:${deliveryId}`,
+      deliveryIds: [deliveryId],
+      leaseToken: '58585858-5858-4858-8858-585858585858',
+      events,
+    });
+
+    await prReviewNotificationJob(job as never);
+
+    expect(mockBeginCanonicalAutoDispatch).toHaveBeenCalledTimes(1);
+    expect(mockRetrySupersededPrReviewAction).toHaveBeenCalledWith(job.data);
+    expect(mockDispatchFollowUp).not.toHaveBeenCalled();
+  });
+
+  it('keeps repeated review and CI cycles on auto-dispatch while a prior cycle retries', async () => {
     mockFindFirstTaskRun.mockResolvedValue({
       id: 1,
       payload: {
@@ -966,14 +1399,31 @@ describe('prReviewNotificationJob', () => {
       taskId: 'parent-task',
       userId: 'user-9',
     });
-    mockConsumePending.mockResolvedValue([
-      {
-        kind: 'review_summary',
-        reviewTaskId: 'review-task',
-        reviewHeadSha: 'new-green-head',
-        summary: 'The same review finding remains unresolved.',
-      },
-    ]);
+    mockConsumePending
+      .mockResolvedValueOnce([
+        {
+          kind: 'review_summary',
+          reviewTaskId: 'review-task',
+          reviewHeadSha: 'new-green-head',
+          summary: 'The same review finding remains unresolved.',
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          kind: 'review_summary',
+          reviewTaskId: 'review-task',
+          reviewHeadSha: 'new-green-head',
+          summary: 'The same review finding remains unresolved.',
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          kind: 'check_run',
+          providerEventId: 'check-run-1',
+          checkName: 'Roomote code review',
+          summary: 'One issue remains outstanding.',
+        },
+      ]);
     mockPrepareDelivery.mockResolvedValue({
       post: true,
       text: 'The same review finding remains unresolved.',
@@ -982,11 +1432,12 @@ describe('prReviewNotificationJob', () => {
     });
     mockDispatchFollowUp
       .mockResolvedValueOnce({ outcome: 'unavailable' })
-      .mockResolvedValueOnce({ outcome: 'resumed', runId: 12 });
+      .mockResolvedValueOnce({ outcome: 'resumed', runId: 12 })
+      .mockResolvedValueOnce({ outcome: 'queued', runId: 13 });
     mockNotifyFastAgentParent
       .mockResolvedValueOnce(true)
       .mockResolvedValueOnce(true)
-      .mockResolvedValueOnce(false);
+      .mockResolvedValueOnce(true);
 
     await prReviewNotificationJob(
       makeJob({
@@ -1018,9 +1469,9 @@ describe('prReviewNotificationJob', () => {
         taskId: 'duplicate-linked-review-task',
         events: [
           {
-            kind: 'review_summary',
-            reviewTaskId: 'review-task',
-            reviewHeadSha: 'new-green-head',
+            kind: 'check_run',
+            providerEventId: 'check-run-1',
+            checkName: 'Roomote code review',
           },
         ],
       }) as never,
@@ -1043,7 +1494,7 @@ describe('prReviewNotificationJob', () => {
         actingUserId: 'user-9',
       }),
     );
-    expect(mockDispatchFollowUp).toHaveBeenCalledTimes(2);
+    expect(mockDispatchFollowUp).toHaveBeenCalledTimes(3);
     expect(mockSchedule).toHaveBeenCalledWith({
       request: expect.objectContaining({
         taskId: 'linked-review-task',
@@ -1324,6 +1775,68 @@ describe('prReviewNotificationJob', () => {
     expect(mockPostMessage).not.toHaveBeenCalled();
   });
 
+  it('posts Fast feedback while the child task runs and its parent Session is idle', async () => {
+    mockFindFirstTaskRun.mockResolvedValue({
+      id: 1,
+      payload: {
+        fastAgentParent: {
+          sessionId: '11111111-1111-4111-8111-111111111111',
+          conversation: {
+            surface: 'slack',
+            workspaceId: 'T123',
+            conversationId: 'C123:111.222',
+            replyTarget: { channelId: 'C123', threadId: '111.222' },
+          },
+        },
+      },
+      status: RunStatus.Running,
+      taskPhase: 'running',
+      workerHeartbeatAt: new Date(),
+    });
+    mockGetSessionForFastConversation.mockResolvedValue({
+      respondingUntil: null,
+    });
+    mockNotifyFastAgentParent.mockResolvedValue(true);
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    expect(mockSchedule).not.toHaveBeenCalled();
+    expect(mockConsumePending).toHaveBeenCalled();
+    expect(mockNotifyFastAgentParent).toHaveBeenCalled();
+  });
+
+  it('defers Fast feedback while its parent Session is responding', async () => {
+    mockFindFirstTaskRun.mockResolvedValue({
+      id: 1,
+      payload: {
+        fastAgentParent: {
+          sessionId: '11111111-1111-4111-8111-111111111111',
+          conversation: {
+            surface: 'slack',
+            workspaceId: 'T123',
+            conversationId: 'C123:111.222',
+            replyTarget: { channelId: 'C123', threadId: '111.222' },
+          },
+        },
+      },
+      status: RunStatus.Idle,
+      taskPhase: 'waiting_for_prompt',
+      workerHeartbeatAt: new Date(),
+    });
+    mockGetSessionForFastConversation.mockResolvedValue({
+      respondingUntil: new Date(Date.now() + 60_000),
+    });
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    expect(mockSchedule).toHaveBeenCalledWith({
+      request: expect.objectContaining({ deferrals: 1 }),
+      delayMs: 5000,
+    });
+    expect(mockConsumePending).not.toHaveBeenCalled();
+    expect(mockNotifyFastAgentParent).not.toHaveBeenCalled();
+  });
+
   it('defers during follow-up turns on a live sandbox before the cap', async () => {
     mockFindFirstTaskRun.mockResolvedValue({
       id: 1,
@@ -1478,13 +1991,25 @@ describe('prReviewNotificationJob', () => {
   });
 
   it('records review feedback to task history when the task has no conversation routing', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     mockPrepareDelivery.mockResolvedValue({
       post: true,
       route: null,
       text: 'I reviewed owner/repo#42 on GitHub and found no issues.',
     });
 
-    await prReviewNotificationJob(makeJob() as never);
+    await prReviewNotificationJob(
+      makeJob({
+        events: [
+          {
+            kind: 'review',
+            authorLogin: 'alice',
+            providerEventId: 'github-review:5212618392',
+            sourceDeliveryId: 'github-delivery-3',
+          },
+        ],
+      }) as never,
+    );
 
     expect(mockPostMessage).not.toHaveBeenCalled();
     expect(mockRecordDelivery).toHaveBeenCalledWith({
@@ -1493,6 +2018,27 @@ describe('prReviewNotificationJob', () => {
       route: null,
       text: 'I reviewed owner/repo#42 on GitHub and found no issues.',
     });
+    const operationalEvents = log.mock.calls
+      .map(([message]) => {
+        try {
+          return JSON.parse(String(message));
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+    expect(operationalEvents).toContainEqual(
+      expect.objectContaining({
+        event: 'source_control_review_routing',
+        deliveryId: 'github-delivery-3',
+        externalEventId: 'github-review:5212618392',
+        reviewId: 5212618392,
+        taskId: 'task-1',
+        outcome: 'no_route',
+        reason: 'task_history_only',
+      }),
+    );
+    log.mockRestore();
   });
 
   it('publishes an actionable canonical offer for a web-only standard task', async () => {
@@ -1527,6 +2073,7 @@ describe('prReviewNotificationJob', () => {
           deliveryId,
           question: 'Would you like me to resolve these issues?',
         },
+        text: 'Review feedback remains.',
       }),
     );
     expect(mockAttachPendingPrReviewActionMessage).toHaveBeenCalledWith(
@@ -1535,6 +2082,70 @@ describe('prReviewNotificationJob', () => {
       { leaseToken },
     );
     expect(mockFinalize).not.toHaveBeenCalled();
+  });
+
+  it('dismisses a persisted web offer that loses its publish fence', async () => {
+    const deliveryId = '11111111-1111-4111-8111-111111111111';
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: null,
+      text: 'Review feedback remains.',
+      followUpQuestion: 'Would you like me to resolve these issues?',
+      followUpPrompt: 'Resolve the review feedback.',
+    });
+    mockAttachPendingPrReviewActionMessage.mockResolvedValue({
+      attached: false,
+      superseded: [],
+    });
+
+    await expect(
+      prReviewNotificationJob(
+        makeJob({
+          ownershipVersion: 'canonical',
+          deliveryId,
+          deliveryState: 'claimed',
+          deliveryIds: [deliveryId],
+          leaseToken: '22222222-2222-4222-8222-222222222222',
+        }) as never,
+      ),
+    ).rejects.toThrow('Canonical web task review offer lost its publish fence');
+    expect(mockUpdateTaskPrReviewOfferStatus).toHaveBeenCalledWith({
+      taskId: 'task-1',
+      deliveryIds: [deliveryId],
+      status: 'dismissed',
+    });
+  });
+
+  it('keeps a web offer live when its publish fence was re-leased rather than superseded', async () => {
+    const deliveryId = '11111111-1111-4111-8111-111111111112';
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: null,
+      text: 'Review feedback remains.',
+      followUpQuestion: 'Would you like me to resolve these issues?',
+      followUpPrompt: 'Resolve the review feedback.',
+    });
+    mockAttachPendingPrReviewActionMessage.mockResolvedValue({
+      attached: false,
+      superseded: [],
+    });
+    mockGetCanonicalPrReviewAction.mockResolvedValue({
+      status: 'awaiting_user_action',
+    });
+
+    await expect(
+      prReviewNotificationJob(
+        makeJob({
+          ownershipVersion: 'canonical',
+          deliveryId,
+          deliveryState: 'claimed',
+          deliveryIds: [deliveryId],
+          leaseToken: '22222222-2222-4222-8222-222222222223',
+        }) as never,
+      ),
+    ).rejects.toThrow('Canonical web task review offer lost its publish fence');
+    expect(mockGetCanonicalPrReviewAction).toHaveBeenCalledWith(deliveryId);
+    expect(mockUpdateTaskPrReviewOfferStatus).not.toHaveBeenCalled();
   });
 
   it('skips without posting when the notification is not worth sending', async () => {
@@ -1589,6 +2200,54 @@ describe('prReviewNotificationJob', () => {
       countDeferral: false,
     });
     expect(mockRequeuePending).not.toHaveBeenCalled();
+  });
+
+  it.each([0, 1, 2])(
+    'retains a canonical preparation claim only while queue retries remain (prior failures: %s)',
+    async (attemptsMade) => {
+      mockPrepareDelivery.mockRejectedValue(new Error('model unavailable'));
+      const job = {
+        ...makeJob({
+          ownershipVersion: 'canonical',
+          deliveryId: '11111111-1111-4111-8111-111111111111',
+          deliveryState: 'claimed',
+          deliveryIds: ['11111111-1111-4111-8111-111111111111'],
+          leaseToken: '22222222-2222-4222-8222-222222222222',
+          events,
+        }),
+        attemptsMade,
+        opts: { attempts: 3 },
+      };
+
+      await expect(prReviewNotificationJob(job as never)).rejects.toThrow(
+        'model unavailable',
+      );
+      expect(mockRequeuePending).toHaveBeenCalledTimes(
+        attemptsMade === 2 ? 1 : 0,
+      );
+      expect(mockPostMessage).not.toHaveBeenCalled();
+    },
+  );
+
+  it('releases a canonical claim when its preparation transition fails despite remaining retries', async () => {
+    mockPrepareCanonical.mockRejectedValue(new Error('transition failed'));
+    const job = {
+      ...makeJob({
+        ownershipVersion: 'canonical',
+        deliveryId: '11111111-1111-4111-8111-111111111111',
+        deliveryState: 'claimed',
+        deliveryIds: ['11111111-1111-4111-8111-111111111111'],
+        leaseToken: '22222222-2222-4222-8222-222222222222',
+        events,
+      }),
+      attemptsMade: 0,
+      opts: { attempts: 3 },
+    };
+
+    await expect(prReviewNotificationJob(job as never)).rejects.toThrow(
+      'transition failed',
+    );
+    expect(mockRequeuePending).toHaveBeenCalledOnce();
   });
 
   it('uses the canonical delivery id as the sole interactive action owner', async () => {
@@ -1694,6 +2353,59 @@ describe('prReviewNotificationJob', () => {
       { leaseToken },
     );
     expect(mockFinalize).not.toHaveBeenCalled();
+  });
+
+  it('dismisses a persisted Fast-session offer that loses its publish fence', async () => {
+    const deliveryId = '77777777-7777-4777-8777-777777777777';
+    mockFindFirstTaskRun.mockResolvedValue({
+      id: 1,
+      taskId: 'task-1',
+      payload: {
+        fastAgentParent: {
+          sessionId: '99999999-9999-4999-8999-999999999999',
+          conversation: {
+            surface: 'web',
+            workspaceId: 'user-1',
+            conversationId: 'session-1',
+          },
+        },
+      },
+      status: RunStatus.Idle,
+      taskPhase: 'waiting_for_prompt',
+      workerHeartbeatAt: new Date(),
+    });
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: null,
+      text: 'Review feedback remains.',
+      followUpQuestion: 'Resolve it?',
+      followUpPrompt: 'Resolve the review feedback.',
+    });
+    mockNotifyFastAgentParent.mockResolvedValue(true);
+    mockAttachPendingPrReviewActionMessage.mockResolvedValue({
+      attached: false,
+      superseded: [],
+    });
+
+    await expect(
+      prReviewNotificationJob(
+        makeJob({
+          ownershipVersion: 'canonical',
+          deliveryId,
+          notificationUnitId: '88888888-8888-4888-8888-888888888888',
+          deliveryState: 'claimed',
+          destinationKey: '["web","user-1","session-1"]',
+          dispatchKey: `pr-review-delivery:${deliveryId}`,
+          deliveryIds: [deliveryId],
+          leaseToken: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          events,
+        }) as never,
+      ),
+    ).rejects.toThrow('Canonical Fast web review offer lost its publish fence');
+    expect(mockUpdateFastAgentPrReviewOfferStatus).toHaveBeenCalledWith({
+      deliveryIds: [deliveryId],
+      status: 'dismissed',
+    });
   });
 
   it('auto-dispatches opted-in feedback for a web Fast parent', async () => {
@@ -1803,22 +2515,22 @@ describe('prReviewNotificationJob', () => {
     mockNotifyFastAgentParent.mockResolvedValue(true);
     mockDispatchFollowUp.mockResolvedValue({ outcome: 'unavailable' });
 
-    await prReviewNotificationJob(
-      makeJob({
-        ownershipVersion: 'canonical',
-        deliveryId,
-        notificationUnitId: '12121212-1212-4212-8212-121212121212',
-        deliveryState: 'auto_dispatch_pending',
-        targetTaskId: 'task-1',
-        actingUserId: 'user-1',
-        destinationKey,
-        dispatchKey: `pr-review-delivery:${deliveryId}`,
-        deliveryIds: [deliveryId],
-        leaseToken,
-        deferrals: 3,
-        events,
-      }) as never,
-    );
+    const job = makeJob({
+      ownershipVersion: 'canonical',
+      deliveryId,
+      notificationUnitId: '12121212-1212-4212-8212-121212121212',
+      deliveryState: 'auto_dispatch_pending',
+      targetTaskId: 'task-1',
+      actingUserId: 'user-1',
+      destinationKey,
+      dispatchKey: `pr-review-delivery:${deliveryId}`,
+      deliveryIds: [deliveryId],
+      leaseToken,
+      deferrals: 3,
+      events,
+    });
+
+    await prReviewNotificationJob(job as never);
 
     expect(mockReleaseCanonicalWebAutoDispatch).toHaveBeenCalledWith(
       expect.objectContaining({ deliveryId }),
@@ -1841,6 +2553,18 @@ describe('prReviewNotificationJob', () => {
       { leaseToken },
     );
     expect(mockFinalize).not.toHaveBeenCalled();
+
+    mockAttachPendingPrReviewActionMessage.mockResolvedValueOnce({
+      attached: false,
+      superseded: [],
+    });
+    await expect(prReviewNotificationJob(job as never)).rejects.toThrow(
+      'Canonical Fast web review fallback lost its publish fence',
+    );
+    expect(mockUpdateFastAgentPrReviewOfferStatus).toHaveBeenCalledWith({
+      deliveryIds: [deliveryId],
+      status: 'dismissed',
+    });
   });
 
   it('reuses the canonical dispatch key for automatic follow-up retries', async () => {

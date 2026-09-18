@@ -10,7 +10,10 @@ describe('startAcceptedFastAgentTurn', () => {
         run: async ({ onRejected }) => onRejected(),
         onError: vi.fn(),
       }),
-    ).resolves.toEqual({ accepted: false, reason: 'Fast session is busy.' });
+    ).resolves.toEqual({
+      accepted: false,
+      reason: 'This conversation is busy.',
+    });
   });
 
   it('rejects startup failures before acceptance', async () => {
@@ -35,7 +38,7 @@ describe('startAcceptedFastAgentTurn', () => {
       }),
     ).resolves.toEqual({
       accepted: false,
-      reason: 'Fast session did not accept the request.',
+      reason: 'Roomote did not accept the request.',
     });
   });
 
@@ -60,7 +63,6 @@ describe('resolveFastAgentEntryMode', () => {
   it('uses Fast for an available configured default', () => {
     expect(
       resolveFastAgentEntryMode({
-        explicitInvocation: false,
         userDefaultEnabled: true,
         fastAvailable: true,
       }),
@@ -70,9 +72,16 @@ describe('resolveFastAgentEntryMode', () => {
   it('keeps coding behavior when Fast is unavailable', () => {
     expect(
       resolveFastAgentEntryMode({
-        explicitInvocation: false,
         userDefaultEnabled: true,
         fastAvailable: false,
+      }),
+    ).toBeNull();
+  });
+
+  it('keeps coding behavior when Fast is not the configured default', () => {
+    expect(
+      resolveFastAgentEntryMode({
+        userDefaultEnabled: false,
       }),
     ).toBeNull();
   });

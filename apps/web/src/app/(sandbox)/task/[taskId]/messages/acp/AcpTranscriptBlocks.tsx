@@ -30,6 +30,8 @@ export function useAcpTranscriptBlocks({
   hasLeadingTextBoundary,
   keepDelegatedTasksVisible = false,
   resetKey,
+  activityResetKey = resetKey,
+  isWorking = false,
 }: {
   messages: AcpUiMessage[];
   artifacts: TaskSession['artifacts'];
@@ -40,14 +42,23 @@ export function useAcpTranscriptBlocks({
   hasLeadingTextBoundary: boolean;
   keepDelegatedTasksVisible?: boolean;
   resetKey: string;
+  activityResetKey?: string;
+  isWorking?: boolean;
 }) {
   const [suppressedMessageIds, setSuppressedMessageIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [liveActivityIds, setLiveActivityIds] = useState<Set<string>>(
     () => new Set(),
   );
 
   useEffect(() => {
     setSuppressedMessageIds(new Set());
   }, [resetKey]);
+
+  useEffect(() => {
+    setLiveActivityIds(new Set());
+  }, [activityResetKey]);
 
   const suppressMessage = useCallback((messageId: string) => {
     setSuppressedMessageIds((previous) => {
@@ -69,42 +80,68 @@ export function useAcpTranscriptBlocks({
       suppressedMessageIds,
     });
 
-    return buildAcpActivityRenderBlocks(blocks, {
+    const activityBlocks = buildAcpActivityRenderBlocks(blocks, {
       artifacts,
       displayMode,
       hasLeadingTextBoundary,
       keepDelegatedTasksVisible,
+      collapseSettledActivityIds: liveActivityIds,
+      isWorking,
     });
+
+    return activityBlocks;
   }, [
     artifacts,
     displayMode,
     hasLeadingTextBoundary,
     initialPrompt,
+    isWorking,
     keepDelegatedTasksVisible,
+    liveActivityIds,
     messages,
     shouldHideFirstMessage,
     showInternalMessages,
     suppressedMessageIds,
   ]);
 
+  useEffect(() => {
+    const liveIds = renderBlocks
+      .flatMap((block) =>
+        block.kind === 'activity_group' && block.live ? [block.id] : [],
+      )
+      .filter((id) => !liveActivityIds.has(id));
+    if (liveIds.length === 0) return;
+
+    setLiveActivityIds((previous) => new Set([...previous, ...liveIds]));
+  }, [liveActivityIds, renderBlocks]);
+
   return { renderBlocks, suppressMessage };
+}
+
+export function hasLiveActivity(blocks: AcpConversationRenderBlock[]): boolean {
+  return blocks.some((block) => block.kind === 'activity_group' && block.live);
 }
 
 export function hasVisibleAssistantOutput(
   blocks: AcpConversationRenderBlock[],
 ): boolean {
-  return blocks.some((block) => {
+  for (let index = blocks.length - 1; index >= 0; index -= 1) {
+    const block = blocks[index]!;
     if (block.kind === 'activity_group') {
-      return hasVisibleAssistantOutput(block.blocks);
+      return true;
     }
 
-    if (block.kind === 'tool_group') return false;
-    if (block.msg.role === 'assistant') return true;
+    if (block.kind === 'tool_group') return true;
+    if (block.msg.role === 'user') return false;
+    if (block.msg.role === 'assistant' || block.msg.role === 'tool')
+      return true;
 
-    return block.childBlocks
-      ? hasVisibleAssistantOutput(block.childBlocks)
-      : false;
-  });
+    if (block.childBlocks && hasVisibleAssistantOutput(block.childBlocks)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 export function AcpTranscriptBlockList({
@@ -112,11 +149,13 @@ export function AcpTranscriptBlockList({
   showInternalMessages,
   onSuppress,
   onOpenDelegatedTask,
+  renderMessage,
 }: {
   blocks: AcpConversationRenderBlock[];
   showInternalMessages: boolean;
   onSuppress: (messageId: string) => void;
   onOpenDelegatedTask?: (taskId: string) => void;
+  renderMessage?: (message: AcpUiMessage) => React.ReactNode | undefined;
 }) {
   function renderNestedBlocks(nestedBlocks: AcpRenderBlock[]) {
     return nestedBlocks.map((block) => (
@@ -159,14 +198,16 @@ export function AcpTranscriptBlockList({
       ) : null;
 
     if (block.kind === 'activity_group') {
+      const nestedBlocks = withoutToolBlocks(block.blocks);
       const content = (
         <AcpActivityGroupMessage
           group={block}
-          anchorIds={collectBlockAnchorIds(block.blocks, [
+          showSubagentPayload={showInternalMessages}
+          anchorIds={collectBlockAnchorIds(nestedBlocks, [
             messageAnchorId(block.ts),
           ])}
         >
-          {renderNestedBlocks(block.blocks)}
+          {renderNestedBlocks(nestedBlocks)}
         </AcpActivityGroupMessage>
       );
 
@@ -198,18 +239,22 @@ export function AcpTranscriptBlockList({
       });
     }
 
-    const content = (
-      <AcpMessageItem
-        msg={block.msg}
-        onSuppress={onSuppress}
-        showSubagentPayload={showInternalMessages}
-        onOpenDelegatedTask={onOpenDelegatedTask}
-      >
-        {block.childBlocks?.length
-          ? renderNestedBlocks(block.childBlocks)
-          : null}
-      </AcpMessageItem>
-    );
+    const override = renderMessage?.(block.msg);
+    const content =
+      override !== undefined ? (
+        override
+      ) : (
+        <AcpMessageItem
+          msg={block.msg}
+          onSuppress={onSuppress}
+          showSubagentPayload={showInternalMessages}
+          onOpenDelegatedTask={onOpenDelegatedTask}
+        >
+          {block.childBlocks?.length
+            ? renderNestedBlocks(block.childBlocks)
+            : null}
+        </AcpMessageItem>
+      );
 
     return wrapRenderedBlock({
       content,
@@ -232,6 +277,24 @@ export function AcpTranscriptBlockList({
       {renderRenderBlock(block, false)}
     </Fragment>
   ));
+}
+
+function withoutToolBlocks(blocks: AcpRenderBlock[]): AcpRenderBlock[] {
+  return blocks.flatMap((block) => {
+    if (block.kind === 'tool_group') return [];
+    if (block.msg.kind === 'tool_call' || block.msg.kind === 'tool_result') {
+      return withoutToolBlocks(block.childBlocks ?? []);
+    }
+
+    if (!block.childBlocks) return [block];
+
+    return [
+      {
+        ...block,
+        childBlocks: withoutToolBlocks(block.childBlocks),
+      },
+    ];
+  });
 }
 
 function DebugTimestamp({

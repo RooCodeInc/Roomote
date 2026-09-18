@@ -1,7 +1,16 @@
-import { db, webhooks as webhooksTable, eq } from '@roomote/db/server';
+import {
+  and,
+  db,
+  webhooks as webhooksTable,
+  eq,
+  isNull,
+} from '@roomote/db/server';
 
 import type { WebhookResponse } from '../../types';
 import { redactWebhookPayload } from '../webhook-payload-redaction';
+
+const UNKNOWN_HANDLER_OUTCOME_ERROR =
+  'Webhook handler outcome is unknown because a redelivery found its durable claim nonterminal; the handler was not replayed';
 
 /**
  * Escape newline and carriage return characters to prevent log injection attacks.
@@ -73,6 +82,36 @@ export async function recordLinearWebhook<T>(
 
   // Skip only if there was a conflict (not if there was a DB error)
   if (!hadInsertError && insertedRecord === undefined) {
+    // A nonterminal duplicate can be in progress or missing its final audit update.
+    // Never replay it; the original handler can still overwrite this unknown result.
+    try {
+      const [recovered] = await db
+        .update(webhooksTable)
+        .set({
+          failedAt: new Date(),
+          error: UNKNOWN_HANDLER_OUTCOME_ERROR,
+        })
+        .where(
+          and(
+            eq(webhooksTable.provider, 'linear'),
+            eq(webhooksTable.deliveryId, webhookId),
+            isNull(webhooksTable.succeededAt),
+            isNull(webhooksTable.failedAt),
+          ),
+        )
+        .returning({ id: webhooksTable.id });
+
+      if (recovered) {
+        console.warn(
+          `[recordLinearWebhook] Finalized unclassified webhook ${escapeForLog(webhookId)} without replaying its handler`,
+        );
+      }
+    } catch (recoveryError) {
+      console.error(
+        `[recordLinearWebhook] Failed to finalize unclassified webhook ${escapeForLog(webhookId)}:`,
+        recoveryError instanceof Error ? recoveryError.message : recoveryError,
+      );
+    }
     return;
   }
 

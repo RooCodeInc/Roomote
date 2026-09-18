@@ -4,7 +4,6 @@ import {
   getTaskComputeLogs,
   getTaskMessages,
   getTaskSummary,
-  launchTask,
   cancelTask,
   listTaskModels,
   stopTask,
@@ -12,8 +11,13 @@ import {
   createEnvironment,
   updateEnvironment,
   submitTaskSuggestions,
-  getTaskGoal,
-  updateTaskGoal,
+  getSessionMessages,
+  getSessionUpdates,
+  getSessionSummary,
+  searchSessions,
+  sendMessageToSession,
+  startSession,
+  getTaskUpdates,
 } from '../tasks-api-client.js';
 import type { RoomoteConfig } from '../types.js';
 
@@ -22,48 +26,104 @@ const config: RoomoteConfig = {
   platformApiUrl: 'https://test-api.example.com',
 };
 
-describe('task goal API', () => {
+describe('session API', () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it('reads and updates a goal through the bounded platform API client', async () => {
+  it('starts and inspects sessions through the session endpoints', async () => {
     global.fetch = vi
       .fn()
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ goal: null }),
+        json: async () => ({ sessionId: 'session-1', queued: true }),
       })
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ updated: true, goal: {} }),
+        json: async () => ({ sessions: [], nextCursor: null }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ id: 'session-1', tasks: [] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ sessionId: 'session-1', messages: [] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ success: true }),
       });
 
-    await getTaskGoal(config, 42);
-    await updateTaskGoal(config, 42, {
-      action: 'complete',
-      generation: 'goal-generation:current',
+    await startSession(config, 'Investigate this');
+    await searchSessions(config, {
+      query: 'investigate',
+      status: 'active',
+      limit: 10,
     });
+    await getSessionSummary(config, 'session-1');
+    await getSessionMessages(config, 'session-1', 25);
+    await sendMessageToSession(config, 'session-1', 'Continue');
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
-      'https://test-api.example.com/api/mcp/tasks/runs/42/goal',
+      'https://test-api.example.com/api/mcp/sessions',
       expect.objectContaining({
-        headers: expect.objectContaining({
-          Authorization: 'Bearer test-token',
-        }),
-        signal: expect.any(AbortSignal),
+        method: 'POST',
+        body: JSON.stringify({ message: 'Investigate this' }),
       }),
     );
     expect(fetch).toHaveBeenNthCalledWith(
       2,
-      'https://test-api.example.com/api/mcp/tasks/runs/42/goal',
+      'https://test-api.example.com/api/mcp/sessions?query=investigate&status=active&limit=10',
+      expect.any(Object),
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      3,
+      'https://test-api.example.com/api/mcp/sessions/session-1/summary',
+      expect.any(Object),
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      4,
+      'https://test-api.example.com/api/mcp/sessions/session-1/messages?limit=25',
+      expect.any(Object),
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      5,
+      'https://test-api.example.com/api/mcp/sessions/session-1/send_message',
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({
-          action: 'complete',
-          generation: 'goal-generation:current',
-        }),
-        signal: expect.any(AbortSignal),
+        body: JSON.stringify({ message: 'Continue' }),
       }),
+    );
+  });
+});
+
+describe('relay updates API', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('forwards opaque cursors for Session and direct task updates', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ narrative: [], nextCursor: 'next' }),
+    });
+
+    await getSessionUpdates(config, 'session-1', {
+      limit: 5,
+      cursor: 'session cursor',
+    });
+    await getTaskUpdates(config, 'task-1', {
+      limit: 7,
+      cursor: 'task cursor',
+    });
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      'https://test-api.example.com/api/mcp/sessions/session-1/updates?limit=5&cursor=session+cursor',
+      expect.any(Object),
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      'https://test-api.example.com/api/mcp/tasks/task-1/updates?limit=7&cursor=task+cursor',
+      expect.any(Object),
     );
   });
 });
@@ -454,122 +514,6 @@ describe('getTaskMessages', () => {
 
     await expect(getTaskMessages(config, 'task-bad')).rejects.toThrow(
       'Failed to get task messages: 404 Task not found',
-    );
-  });
-});
-
-describe('launchTask', () => {
-  afterEach(() => vi.restoreAllMocks());
-
-  it('should call POST /api/mcp/tasks and return result', async () => {
-    const mockResponse = {
-      success: true,
-      runId: 99,
-      taskId: 'task-new',
-    };
-
-    global.fetch = vi.fn().mockResolvedValueOnce({
-      ok: true,
-      json: async () => mockResponse,
-    });
-
-    const result = await launchTask(config, {
-      prompt: 'Fix the tests',
-      repo: '__all_repositories__',
-      environmentId: '10b031ec-b728-4d8f-a9a0-1ed4aa500511',
-      type: 'standard',
-    });
-
-    expect(result.success).toBe(true);
-    expect(result.runId).toBe(99);
-    expect(result.taskId).toBe('task-new');
-
-    const fetchCall = vi.mocked(fetch).mock.calls[0];
-    expect(fetchCall?.[0]).toBe('https://test-api.example.com/api/mcp/tasks');
-    expect(fetchCall?.[1]?.method).toBe('POST');
-
-    const body = JSON.parse(fetchCall?.[1]?.body as string);
-    expect(body.prompt).toBe('Fix the tests');
-    expect(body.repo).toBe('__all_repositories__');
-    expect(body.environmentId).toBe('10b031ec-b728-4d8f-a9a0-1ed4aa500511');
-    expect(body.type).toBe('standard');
-  });
-
-  it('sends a minimal standard launch payload for implicit standard-workflow tasks', async () => {
-    const mockResponse = {
-      success: true,
-      runId: 100,
-      taskId: 'task-standard',
-    };
-
-    global.fetch = vi.fn().mockResolvedValueOnce({
-      ok: true,
-      json: async () => mockResponse,
-    });
-
-    const result = await launchTask(config, {
-      prompt: 'Investigate this',
-      type: 'standard',
-    });
-
-    expect(result.success).toBe(true);
-
-    const fetchCall = vi.mocked(fetch).mock.calls[0];
-    const body = JSON.parse(fetchCall?.[1]?.body as string);
-    expect(body.prompt).toBe('Investigate this');
-    expect(body.type).toBe('standard');
-  });
-
-  it('passes extended programmatic launch fields through unchanged', async () => {
-    const mockResponse = {
-      success: true,
-      runId: 101,
-      taskId: 'task-env-def',
-    };
-
-    global.fetch = vi.fn().mockResolvedValueOnce({
-      ok: true,
-      json: async () => mockResponse,
-    });
-
-    await launchTask(config, {
-      type: 'environment-definition',
-      repositoryFullNames: ['acme/web', 'acme/api'],
-      setupGuidance: 'Start the API and worker services.',
-      hidden: true,
-      computeProvider: 'modal',
-      harness: 'opencode-server',
-      bootstrap: {
-        skill: 'plan-repo-implementation',
-        interactiveMode: true,
-      },
-    });
-
-    const fetchCall = vi.mocked(fetch).mock.calls[0];
-    const body = JSON.parse(fetchCall?.[1]?.body as string);
-    expect(body).toMatchObject({
-      type: 'environment-definition',
-      repositoryFullNames: ['acme/web', 'acme/api'],
-      setupGuidance: 'Start the API and worker services.',
-      hidden: true,
-      computeProvider: 'modal',
-      harness: 'opencode-server',
-      bootstrap: {
-        skill: 'plan-repo-implementation',
-        interactiveMode: true,
-      },
-    });
-  });
-
-  it('should throw on non-ok response', async () => {
-    global.fetch = vi.fn().mockResolvedValueOnce({
-      ok: false,
-      status: 403,
-      text: async () => JSON.stringify({ error: 'Forbidden' }),
-    });
-
-    await expect(launchTask(config, { prompt: 'b' })).rejects.toThrow(
-      'Failed to launch task: 403 Forbidden',
     );
   });
 });

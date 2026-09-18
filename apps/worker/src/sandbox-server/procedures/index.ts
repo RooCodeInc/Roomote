@@ -16,6 +16,8 @@ export { reloadDeploymentEnvVars } from './reloadDeploymentEnvVars';
 export { applyTaskModelSettings } from './applyTaskModelSettings';
 export { scrubSnapshotSecrets } from './scrubSnapshotSecrets';
 export { restoreScrubbedCredentials } from './restoreScrubbedCredentials';
+export { prepareRepository } from './prepareRepository';
+export { listRepositories } from './listRepositories';
 
 // Queries
 export { getRuntimeState } from './getRuntimeState';

@@ -2,7 +2,6 @@ import { Message, MessageContent } from '@/components/ai-elements';
 
 import { messageAnchorId } from '../message-anchor';
 import type { AcpTodoSectionUiMessage } from './types';
-import { SquareDashed } from 'lucide-react';
 
 interface AcpTodoSectionMessageProps {
   msg: AcpTodoSectionUiMessage;
@@ -15,7 +14,6 @@ export function AcpTodoSectionMessage({ msg }: AcpTodoSectionMessageProps) {
       <MessageContent id={anchorId} className="cursor-default">
         <div className="flex min-w-0 items-center gap-2 text-muted-foreground">
           <p className="min-w-0 truncate text-sm font-medium">
-            <SquareDashed className="inline size-3 mr-2" />
             <span className="font-light">Starting on </span>
             {msg.data.content}
           </p>

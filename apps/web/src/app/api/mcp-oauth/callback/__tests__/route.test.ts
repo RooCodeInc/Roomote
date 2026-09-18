@@ -4,18 +4,22 @@ const {
   authorizeMock,
   bootstrapWebRuntimeEnvMock,
   consumeOAuthStateMock,
+  consumeMcpOauthReplayMock,
   discoverOAuthEndpointsMock,
   exchangeCodeForTokensMock,
   getClientInformationMock,
+  getMcpOauthReplayMock,
   getMcpIntegrationMock,
   getMcpIntegrationDefaultDisabledToolsMock,
   getMcpIntegrationOauthEndpointsMock,
+  getMcpIntegrationOauthResourceMock,
   hydrateLinearMcpConnectionAfterOauthMock,
   isDeploymentScopedMcpIntegrationMock,
   isSelfServeMcpIntegrationMock,
   loggerErrorMock,
   loggerWarnMock,
   mcpConnectionsFindFirstMock,
+  sessionsFindFirstMock,
   deploymentEnablementInsertReturningMock,
   deploymentEnablementOnConflictMock,
   deploymentEnablementUpdateReturningMock,
@@ -23,22 +27,29 @@ const {
   storeTokensMock,
   updateAuthStatusMock,
   captureEventMock,
+  replyToFastSessionMock,
+  resolveCustomMcpAuthTargetMock,
+  ensureCustomMcpServerMetadataMock,
 } = vi.hoisted(() => ({
   authorizeMock: vi.fn(),
   bootstrapWebRuntimeEnvMock: vi.fn(),
   consumeOAuthStateMock: vi.fn(),
+  consumeMcpOauthReplayMock: vi.fn(),
   discoverOAuthEndpointsMock: vi.fn(),
   exchangeCodeForTokensMock: vi.fn(),
   getClientInformationMock: vi.fn(),
+  getMcpOauthReplayMock: vi.fn(),
   getMcpIntegrationMock: vi.fn(),
   getMcpIntegrationDefaultDisabledToolsMock: vi.fn(),
   getMcpIntegrationOauthEndpointsMock: vi.fn(),
+  getMcpIntegrationOauthResourceMock: vi.fn(),
   hydrateLinearMcpConnectionAfterOauthMock: vi.fn(),
   isDeploymentScopedMcpIntegrationMock: vi.fn(),
   isSelfServeMcpIntegrationMock: vi.fn(),
   loggerErrorMock: vi.fn(),
   loggerWarnMock: vi.fn(),
   mcpConnectionsFindFirstMock: vi.fn(),
+  sessionsFindFirstMock: vi.fn(),
   deploymentEnablementInsertReturningMock: vi.fn(),
   deploymentEnablementOnConflictMock: vi.fn(),
   deploymentEnablementUpdateReturningMock: vi.fn(),
@@ -46,6 +57,9 @@ const {
   storeTokensMock: vi.fn(),
   updateAuthStatusMock: vi.fn(),
   captureEventMock: vi.fn(),
+  replyToFastSessionMock: vi.fn(),
+  resolveCustomMcpAuthTargetMock: vi.fn(),
+  ensureCustomMcpServerMetadataMock: vi.fn(),
 }));
 
 vi.mock('@roomote/telemetry/server', () => ({
@@ -73,12 +87,24 @@ vi.mock('@/lib/server/logger', () => ({
   },
 }));
 
+vi.mock('@/trpc/commands/fast-sessions', () => ({
+  replyToFastSessionCommand: replyToFastSessionMock,
+}));
+
+vi.mock('@/lib/server/integration-saved-continuation', () => ({
+  buildRemoteMcpConnectedContinuation: (name: string) =>
+    `<integration_saved>${name}</integration_saved>`,
+  buildNativeIntegrationOauthContinuation: (name: string, outcome: string) =>
+    `<integration_saved>${name}:${outcome}</integration_saved>`,
+}));
+
 vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
       mcpConnections: {
         findFirst: mcpConnectionsFindFirstMock,
       },
+      sessions: { findFirst: sessionsFindFirstMock },
     },
     update: vi.fn(() => ({
       set: vi.fn(() => ({
@@ -92,6 +118,11 @@ vi.mock('@roomote/db/server', () => ({
     })),
   },
   mcpConnections: { id: 'mcp_connections.id' },
+  sessions: {
+    id: 'sessions.id',
+    ownerKind: 'sessions.owner_kind',
+    ownerUserId: 'sessions.owner_user_id',
+  },
   deploymentMcpEnablements: { mcpId: 'deployment_mcp_enablements.mcp_id' },
   and: vi.fn((...conditions: unknown[]) => conditions),
   eq: vi.fn((column: string, value: string | boolean) => ({ column, value })),
@@ -101,11 +132,13 @@ vi.mock('@roomote/sdk/server', () => ({
   discoverOAuthEndpoints: discoverOAuthEndpointsMock,
   exchangeCodeForTokens: exchangeCodeForTokensMock,
   consumeOAuthState: consumeOAuthStateMock,
+  consumeMcpOauthReplay: consumeMcpOauthReplayMock,
   storeTokens: storeTokensMock,
   getClientInformation: getClientInformationMock,
+  getMcpOauthReplay: getMcpOauthReplayMock,
   updateAuthStatus: updateAuthStatusMock,
-  resolveCustomMcpAuthTarget: vi.fn(async () => null),
-  ensureCustomMcpServerMetadata: vi.fn(),
+  resolveCustomMcpAuthTarget: resolveCustomMcpAuthTargetMock,
+  ensureCustomMcpServerMetadata: ensureCustomMcpServerMetadataMock,
 }));
 
 vi.mock('@roomote/types', () => ({
@@ -113,6 +146,7 @@ vi.mock('@roomote/types', () => ({
   getMcpIntegrationDefaultDisabledTools:
     getMcpIntegrationDefaultDisabledToolsMock,
   getMcpIntegrationOauthEndpoints: getMcpIntegrationOauthEndpointsMock,
+  getMcpIntegrationOauthResource: getMcpIntegrationOauthResourceMock,
   isDeploymentScopedMcpIntegration: isDeploymentScopedMcpIntegrationMock,
   isSelfServeMcpIntegration: isSelfServeMcpIntegrationMock,
   isCustomMcpConnectionId: (mcpId: string) => mcpId.startsWith('custom:'),
@@ -175,11 +209,13 @@ describe('GET /api/mcp-oauth/callback', () => {
       authorizationEndpoint: 'https://linear.app/oauth/authorize',
       tokenEndpoint: 'https://api.linear.app/oauth/token',
     });
+    getMcpIntegrationOauthResourceMock.mockReturnValue(undefined);
     isSelfServeMcpIntegrationMock.mockReturnValue(true);
     isDeploymentScopedMcpIntegrationMock.mockReturnValue(false);
     getClientInformationMock.mockResolvedValue({
       client_id: 'client-1',
     });
+    getMcpOauthReplayMock.mockResolvedValue(null);
     discoverOAuthEndpointsMock.mockResolvedValue({
       authorization_endpoint: 'https://mcp.linear.app/authorize',
       token_endpoint: 'https://mcp.linear.app/token',
@@ -189,7 +225,152 @@ describe('GET /api/mcp-oauth/callback', () => {
       refresh_token: 'refresh-token',
     });
     storeTokensMock.mockResolvedValue(undefined);
+    consumeMcpOauthReplayMock.mockResolvedValue(null);
+    resolveCustomMcpAuthTargetMock.mockResolvedValue(null);
+    ensureCustomMcpServerMetadataMock.mockResolvedValue({
+      token_endpoint: 'https://auth.example.com/token',
+    });
+    sessionsFindFirstMock.mockResolvedValue(undefined);
+    replyToFastSessionMock.mockResolvedValue({ success: true });
     hydrateLinearMcpConnectionAfterOauthMock.mockResolvedValue(undefined);
+  });
+
+  it('completes native Notion OAuth and resumes the owning Session', async () => {
+    consumeOAuthStateMock.mockResolvedValue({
+      connectionId: 'conn-notion-1',
+      codeVerifier: 'unused-verifier',
+      replayToken: 'replay-notion',
+    });
+    mcpConnectionsFindFirstMock.mockResolvedValue({
+      id: 'conn-notion-1',
+      mcpId: 'notion',
+      userId: null,
+      connectionRole: 'default',
+    });
+    getMcpIntegrationMock.mockReturnValue({
+      id: 'notion',
+      name: 'Notion',
+      url: 'https://api.notion.com',
+      oauthEndpoints: {
+        authorizationEndpoint: 'https://api.notion.com/v1/oauth/authorize',
+        tokenEndpoint: 'https://api.notion.com/v1/oauth/token',
+      },
+      oauthTokenRequestFormat: 'json',
+      oauthPkce: false,
+    });
+    getMcpIntegrationOauthEndpointsMock.mockReturnValue({
+      authorizationEndpoint: 'https://api.notion.com/v1/oauth/authorize',
+      tokenEndpoint: 'https://api.notion.com/v1/oauth/token',
+    });
+    isSelfServeMcpIntegrationMock.mockReturnValue(false);
+    isDeploymentScopedMcpIntegrationMock.mockReturnValue(true);
+    getMcpOauthReplayMock.mockResolvedValue({
+      userId: 'user-1',
+      connectionId: 'conn-notion-1',
+      mcpId: 'notion',
+      sessionId: 'session-1',
+    });
+    consumeMcpOauthReplayMock.mockResolvedValue({
+      userId: 'user-1',
+      connectionId: 'conn-notion-1',
+      mcpId: 'notion',
+      sessionId: 'session-1',
+    });
+    sessionsFindFirstMock.mockResolvedValue({
+      archivedAt: null,
+      fastConversationId: 'conversation-1',
+    });
+
+    const response = await GET(buildRequest('?code=notion-code&state=state-1'));
+
+    expect(response.headers.get('location')).toBe(
+      'https://customer.example/settings?mcp=connected',
+    );
+    expect(exchangeCodeForTokensMock).toHaveBeenCalledWith(
+      'https://api.notion.com/v1/oauth/token',
+      'notion-code',
+      'unused-verifier',
+      { client_id: 'client-1' },
+      PUBLIC_CALLBACK,
+      { tokenRequestFormat: 'json', usePkce: false },
+    );
+    expect(storeTokensMock).toHaveBeenCalled();
+    expect(replyToFastSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1' }),
+      {
+        sessionId: 'conversation-1',
+        text: '<integration_saved>Notion:connected</integration_saved>',
+      },
+    );
+  });
+
+  it('marks canceled native authorization as failed and resumes the Session', async () => {
+    consumeOAuthStateMock.mockResolvedValue({
+      connectionId: 'conn-notion-1',
+      codeVerifier: 'unused-verifier',
+      replayToken: 'replay-notion',
+    });
+    mcpConnectionsFindFirstMock.mockResolvedValue({
+      id: 'conn-notion-1',
+      mcpId: 'notion',
+      userId: null,
+      connectionRole: 'default',
+    });
+    getMcpIntegrationMock.mockReturnValue({ id: 'notion', name: 'Notion' });
+    getMcpOauthReplayMock.mockResolvedValue({
+      userId: 'user-1',
+      connectionId: 'conn-notion-1',
+      mcpId: 'notion',
+      sessionId: 'session-1',
+    });
+    consumeMcpOauthReplayMock.mockResolvedValue({
+      userId: 'user-1',
+      connectionId: 'conn-notion-1',
+      mcpId: 'notion',
+      sessionId: 'session-1',
+    });
+    sessionsFindFirstMock.mockResolvedValue({
+      archivedAt: null,
+      fastConversationId: 'conversation-1',
+    });
+
+    const response = await GET(
+      buildRequest('?error=access_denied&state=state-1'),
+    );
+
+    expect(response.headers.get('location')).toBe(
+      'https://customer.example/settings?mcp=error&reason=access_denied',
+    );
+    expect(updateAuthStatusMock).toHaveBeenCalledWith('conn-notion-1', 'error');
+    expect(replyToFastSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1' }),
+      {
+        sessionId: 'conversation-1',
+        text: '<integration_saved>Notion:canceled</integration_saved>',
+      },
+    );
+  });
+
+  it('rejects a Session OAuth callback after the signed-in requester changes', async () => {
+    consumeOAuthStateMock.mockResolvedValue({
+      connectionId: CONNECTION_ID,
+      codeVerifier: 'verifier-1',
+      replayToken: 'replay-linear',
+    });
+    getMcpOauthReplayMock.mockResolvedValue({
+      userId: 'different-user',
+      connectionId: CONNECTION_ID,
+      mcpId: 'linear',
+      sessionId: 'session-1',
+    });
+
+    const response = await GET(buildRequest('?code=auth-code&state=state-1'));
+
+    expect(response.headers.get('location')).toBe(
+      'https://customer.example/settings?mcp=error&reason=invalid_state',
+    );
+    expect(exchangeCodeForTokensMock).not.toHaveBeenCalled();
+    expect(storeTokensMock).not.toHaveBeenCalled();
   });
 
   it('exchanges tokens with redirect_uri from R_PUBLIC_URL and redirects there', async () => {
@@ -211,6 +392,39 @@ describe('GET /api/mcp-oauth/callback', () => {
       userId: 'user-1',
       properties: { integration_id: 'linear' },
     });
+  });
+
+  it('includes the monday.com MCP resource in the token exchange', async () => {
+    mcpConnectionsFindFirstMock.mockResolvedValue({
+      id: CONNECTION_ID,
+      mcpId: 'monday',
+      userId: 'user-1',
+      connectionRole: 'default',
+    });
+    getMcpIntegrationMock.mockReturnValue({
+      id: 'monday',
+      name: 'monday.com',
+      url: 'https://mcp.monday.com/mcp',
+    });
+    getMcpIntegrationOauthEndpointsMock.mockReturnValue(undefined);
+    getMcpIntegrationOauthResourceMock.mockReturnValue(
+      'https://mcp.monday.com/mcp',
+    );
+    discoverOAuthEndpointsMock.mockResolvedValue({
+      authorization_endpoint: 'https://auth.monday.com/oauth2/authorize',
+      token_endpoint: 'https://auth.monday.com/oauth_ms/oauth/token',
+    });
+
+    await GET(buildRequest('?code=auth-code&state=state-1'));
+
+    expect(exchangeCodeForTokensMock).toHaveBeenCalledWith(
+      'https://auth.monday.com/oauth_ms/oauth/token',
+      'auth-code',
+      'verifier-1',
+      { client_id: 'client-1' },
+      PUBLIC_CALLBACK,
+      { resource: 'https://mcp.monday.com/mcp' },
+    );
   });
 
   it('rejects a pending callback when integrations become disabled', async () => {
@@ -434,6 +648,27 @@ describe('GET /api/mcp-oauth/callback', () => {
   });
 
   it('surfaces token exchange failures with a safe reason and stage', async () => {
+    consumeOAuthStateMock.mockResolvedValue({
+      connectionId: CONNECTION_ID,
+      codeVerifier: 'verifier-1',
+      replayToken: 'replay-linear',
+    });
+    getMcpOauthReplayMock.mockResolvedValue({
+      userId: 'user-1',
+      connectionId: CONNECTION_ID,
+      mcpId: 'linear',
+      sessionId: 'session-1',
+    });
+    consumeMcpOauthReplayMock.mockResolvedValue({
+      userId: 'user-1',
+      connectionId: CONNECTION_ID,
+      mcpId: 'linear',
+      sessionId: 'session-1',
+    });
+    sessionsFindFirstMock.mockResolvedValue({
+      archivedAt: null,
+      fastConversationId: 'conversation-1',
+    });
     exchangeCodeForTokensMock.mockRejectedValueOnce(
       new Error('provider response omitted'),
     );
@@ -459,6 +694,13 @@ describe('GET /api/mcp-oauth/callback', () => {
       'provider response omitted',
     );
     expect(captureEventMock).not.toHaveBeenCalled();
+    expect(replyToFastSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1' }),
+      {
+        sessionId: 'conversation-1',
+        text: '<integration_saved>Linear:failed</integration_saved>',
+      },
+    );
   });
 
   it('does not store Linear tokens when identity metadata validation fails', async () => {
@@ -496,5 +738,65 @@ describe('GET /api/mcp-oauth/callback', () => {
     );
     expect(storeTokensMock).not.toHaveBeenCalled();
     expect(updateAuthStatusMock).not.toHaveBeenCalled();
+  });
+
+  it('continues the owning Fast Session after custom OAuth without a page visit', async () => {
+    const replayToken = 'custom-replay';
+    const sessionId = 'session-1';
+    const encodedRedirect = Buffer.from(`/sessions/${sessionId}`).toString(
+      'base64url',
+    );
+    consumeOAuthStateMock.mockResolvedValue({
+      connectionId: CONNECTION_ID,
+      codeVerifier: 'verifier-1',
+      replayToken,
+    });
+    mcpConnectionsFindFirstMock.mockResolvedValue({
+      id: CONNECTION_ID,
+      mcpId: 'custom:server-1',
+      userId: null,
+      connectionRole: 'default',
+    });
+    resolveCustomMcpAuthTargetMock.mockResolvedValue({
+      serverId: 'server-1',
+      name: 'accounting',
+      url: 'https://mcp.example.com/mcp',
+      oauthOptions: { resource: 'https://mcp.example.com/mcp' },
+    });
+    getMcpIntegrationMock.mockReturnValue(undefined);
+    getMcpOauthReplayMock.mockResolvedValue({
+      userId: 'user-1',
+      connectionId: CONNECTION_ID,
+      mcpId: 'custom:server-1',
+      sessionId,
+    });
+    consumeMcpOauthReplayMock
+      .mockResolvedValueOnce({
+        userId: 'user-1',
+        connectionId: CONNECTION_ID,
+        mcpId: 'custom:server-1',
+        sessionId,
+      })
+      .mockResolvedValueOnce(null);
+    sessionsFindFirstMock.mockResolvedValue({
+      archivedAt: null,
+      fastConversationId: 'fast-conversation-1',
+    });
+
+    const query = `?code=auth-code&state=state-1~${encodedRedirect}`;
+    const response = await GET(buildRequest(query));
+    await GET(buildRequest(query));
+
+    expect(response.headers.get('location')).toBe(
+      `https://customer.example/sessions/${sessionId}?mcp=connected`,
+    );
+    expect(replyToFastSessionMock).toHaveBeenCalledTimes(1);
+    expect(replyToFastSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1', isAdmin: true }),
+      {
+        sessionId: 'fast-conversation-1',
+        text: '<integration_saved>accounting</integration_saved>',
+      },
+    );
   });
 });

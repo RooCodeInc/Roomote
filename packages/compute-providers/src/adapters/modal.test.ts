@@ -751,9 +751,20 @@ describe('ModalClient', () => {
       resolveExit = resolve;
     });
     const onExit = vi.fn().mockResolvedValue(undefined);
+    const onOutput = vi.fn();
+    let stdoutController!: ReadableStreamDefaultController<string>;
+    let stderrController!: ReadableStreamDefaultController<string>;
     const execMock = vi.fn().mockResolvedValue({
-      stdout: new ReadableStream<string>({ start: () => undefined }),
-      stderr: new ReadableStream<string>({ start: () => undefined }),
+      stdout: new ReadableStream<string>({
+        start: (controller) => {
+          stdoutController = controller;
+        },
+      }),
+      stderr: new ReadableStream<string>({
+        start: (controller) => {
+          stderrController = controller;
+        },
+      }),
       wait: vi.fn().mockReturnValue(waitPromise),
     });
 
@@ -773,6 +784,7 @@ describe('ModalClient', () => {
       cmd: 'worker',
       args: ['run', '123'],
       detached: true,
+      onOutput,
       onExit,
     });
 
@@ -780,6 +792,19 @@ describe('ModalClient', () => {
     await expect(launchPromise).resolves.toEqual({
       commandId: undefined,
       exitCode: null,
+    });
+
+    stdoutController.enqueue('worker ready\n');
+    stderrController.enqueue('worker warning\n');
+    await vi.waitFor(() => {
+      expect(onOutput).toHaveBeenCalledWith({
+        stream: 'stdout',
+        data: 'worker ready\n',
+      });
+      expect(onOutput).toHaveBeenCalledWith({
+        stream: 'stderr',
+        data: 'worker warning\n',
+      });
     });
 
     resolveExit(1);

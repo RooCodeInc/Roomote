@@ -11,6 +11,7 @@ import {
 } from '@roomote/types';
 
 import {
+  SandboxHistoryControlsContext,
   SandboxHistoryReadyContext,
   SandboxStoreContext,
 } from './SandboxProvider';
@@ -111,12 +112,23 @@ export function HistoricalSandboxProvider({
   }, [store, history.data, taskStatus, taskPhase]);
 
   const isPending = history.isPending;
+  const historyControls = {
+    isError: history.isError,
+    isRetrying: history.isFetching ?? history.isPending ?? false,
+    retry: history.refetch ?? (async () => undefined),
+    hasOlderMessages: history.hasOlderMessages ?? false,
+    isFetchingOlderMessages: history.isFetchingOlderMessages ?? false,
+    olderMessagesError: history.olderMessagesError ?? null,
+    fetchOlderMessages: history.fetchOlderMessages ?? (async () => false),
+  };
 
   return (
-    <SandboxHistoryReadyContext.Provider value={!isPending || !taskId}>
-      <SandboxStoreContext.Provider value={store}>
-        {children}
-      </SandboxStoreContext.Provider>
-    </SandboxHistoryReadyContext.Provider>
+    <SandboxHistoryControlsContext.Provider value={historyControls}>
+      <SandboxHistoryReadyContext.Provider value={!isPending || !taskId}>
+        <SandboxStoreContext.Provider value={store}>
+          {children}
+        </SandboxStoreContext.Provider>
+      </SandboxHistoryReadyContext.Provider>
+    </SandboxHistoryControlsContext.Provider>
   );
 }

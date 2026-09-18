@@ -113,8 +113,8 @@ services:
     notes: Provides `${{Redis.REDIS_URL}}`. Prefer the private-network URL.
 
   minio:
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
-    service_name: minio # rename from the default "minio/minio" — the slash breaks ${{minio.*}} references
+    image: ghcr.io/roocodeinc/roomote-minio:RELEASE.2025-10-15T17-29-55Z-f8ecd739@sha256:6e66a6df1e33ad3414c6cc29866bf06fec9d4e3cc7fc3897b9ef01d737d28c98
+    service_name: minio # rename from the image-derived default — a slash in the name breaks ${{minio.*}} references
     start_command: minio server /data --console-address :9001
     volume: /data
     public_domain: http proxy port 9000 # S3 API; presigned artifact URLs use this domain
@@ -299,6 +299,8 @@ services:
     public_domain: no
     env:
       <<: *app_service_env
+      # Optional capped OpenRouter key mapped into nested Roomote deployments.
+      SANDBOX_OPENROUTER_API_KEY: ''
       # The worker release archive is baked into the app image; the
       # controller uploads it into hosted sandboxes at spawn time.
       # The version-less name works because the controller reads the release

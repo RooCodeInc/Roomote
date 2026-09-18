@@ -1,11 +1,25 @@
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import * as suggestionLaunch from '../../tasks/suggestion-launch.js';
+import * as suggestionStart from '../suggestion-start.js';
+import type { FastAgentConversation } from '@roomote/types';
+import { findSessionAttentionNotificationReply } from '@roomote/sdk/server';
+import { continueSessionAttentionReply } from '../../tasks/continue-session-attention-reply.js';
+
+vi.mock('../../tasks/suggestion-launch.js', async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import('../../tasks/suggestion-launch.js')
+  >()),
+  resolveSuggestionFastConversation: vi.fn(
+    async ({ conversation }: { conversation: FastAgentConversation }) =>
+      conversation,
+  ),
+}));
 
 const {
   authAccountsFindFirstMock,
   authAccountsFindManyMock,
   authUsersFindFirstMock,
-  buildTeamsRoutingContextMock,
   enqueueTaskMock,
   envMock,
   fetchMessageImageDataUrlsMock,
@@ -21,12 +35,15 @@ const {
   postMessageMock,
   processImageAttachmentsMock,
   redisEvalMock,
+  redisDelMock,
   redisGetMock,
   queueCommunicationMessageMock,
+  queueCommunicationMessageOnceMock,
   redisSetMock,
-  routeTaskMock,
   launchClaimedTeamsSuggestionMock,
+  launchPinnedMock,
   resolveAndClaimTeamsSuggestionReactionMock,
+  getSessionForTaskMock,
   setTrustedRunActingUserMock,
   shouldRouteUnmentionedReplyMock,
   teamsInstallationsTable,
@@ -46,11 +63,12 @@ const {
   findTeamsConversationRouteMock,
   getFastSessionMock,
   isFastProviderMessageMock,
+  finalizeWorkItemMock,
+  releaseWorkItemMock,
 } = vi.hoisted(() => ({
   authAccountsFindFirstMock: vi.fn(),
   authAccountsFindManyMock: vi.fn(),
   authUsersFindFirstMock: vi.fn(),
-  buildTeamsRoutingContextMock: vi.fn(),
   enqueueTaskMock: vi.fn(),
   envMock: {
     R_TEAMS_BOT_APP_ID: 'bot-app-id' as string | undefined,
@@ -80,12 +98,15 @@ const {
   postMessageMock: vi.fn(),
   processImageAttachmentsMock: vi.fn(),
   redisEvalMock: vi.fn(),
+  redisDelMock: vi.fn(),
   redisGetMock: vi.fn(),
   queueCommunicationMessageMock: vi.fn(),
+  queueCommunicationMessageOnceMock: vi.fn(),
   redisSetMock: vi.fn(),
-  routeTaskMock: vi.fn(),
   launchClaimedTeamsSuggestionMock: vi.fn(),
+  launchPinnedMock: vi.fn(),
   resolveAndClaimTeamsSuggestionReactionMock: vi.fn(),
+  getSessionForTaskMock: vi.fn(),
   setTrustedRunActingUserMock: vi.fn(),
   shouldRouteUnmentionedReplyMock: vi.fn(),
   teamsInstallationsTable: {
@@ -111,6 +132,8 @@ const {
   findTeamsConversationRouteMock: vi.fn(),
   getFastSessionMock: vi.fn(),
   isFastProviderMessageMock: vi.fn(),
+  finalizeWorkItemMock: vi.fn(),
+  releaseWorkItemMock: vi.fn(),
 }));
 
 vi.mock('@roomote/env', () => ({
@@ -120,6 +143,7 @@ vi.mock('@roomote/env', () => ({
 vi.mock('@roomote/redis', () => ({
   getRedis: vi.fn(() => ({
     eval: redisEvalMock,
+    del: redisDelMock,
     get: redisGetMock,
     set: redisSetMock,
   })),
@@ -137,8 +161,11 @@ vi.mock('../suggestion-start.js', () => ({
 }));
 
 vi.mock('@roomote/db/server', () => ({
+  finalizeWorkItemLaunched: finalizeWorkItemMock,
+  releaseWorkItemClaim: releaseWorkItemMock,
   and: vi.fn((...conditions: unknown[]) => ({ and: conditions })),
   setTrustedRunActingUser: setTrustedRunActingUserMock,
+  getSessionForTask: getSessionForTaskMock,
   claimPendingOutOfBandTaskMessages: claimPendingOutOfBandMock,
   releaseClaimedOutOfBandTaskMessages: releaseClaimedOutOfBandMock,
   resolveTeamsBotRuntimeCredentials: vi.fn(async () => ({
@@ -265,6 +292,7 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('@roomote/communication/messages', () => ({
   queueCommunicationMessage: queueCommunicationMessageMock,
+  queueCommunicationMessageOnce: queueCommunicationMessageOnceMock,
 }));
 
 vi.mock('@roomote/communication/teams-provider', () => ({
@@ -279,6 +307,10 @@ vi.mock('@roomote/communication/teams-provider', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  findSessionAttentionNotificationReply: vi.fn(async () => ({
+    status: 'none',
+  })),
+  resolveSessionAttentionFastConversation: vi.fn(async () => null),
   continueFastAgentSurfaceReply: continueFastReplyMock,
   createTeamsCommunicationProviderFromRuntimeCredentials: vi.fn(async () =>
     envMock.R_TEAMS_BOT_APP_ID && envMock.R_TEAMS_BOT_APP_PASSWORD
@@ -296,17 +328,19 @@ vi.mock('@roomote/sdk/server', () => ({
   isFastAgentProviderMessage: isFastProviderMessageMock,
   queueFastAgentSurfaceReply: queueFastReplyMock,
 }));
+vi.mock('../../tasks/continue-session-attention-reply', () => ({
+  continueSessionAttentionReply: vi.fn(async () => false),
+}));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   buildFastAgentReactionExternalInputQuestion: vi.fn(
     (input: unknown) =>
       `<external_input>${JSON.stringify(input)}</external_input>`,
   ),
-  buildTeamsRoutingContext: buildTeamsRoutingContextMock,
   enqueueTask: enqueueTaskMock,
   getOrCreateFastAgentSession: getFastSessionMock,
   getTaskUrl: getTaskUrlMock,
-  routeTask: routeTaskMock,
+  launchPinnedFastSessionTask: launchPinnedMock,
 }));
 
 vi.mock('../bot-framework-auth.js', () => ({
@@ -403,20 +437,40 @@ describe('Teams webhook handler', () => {
       payload: {},
     });
     queueCommunicationMessageMock.mockResolvedValue(undefined);
+    queueCommunicationMessageOnceMock.mockResolvedValue(true);
     claimPendingOutOfBandMock.mockResolvedValue([]);
     releaseClaimedOutOfBandMock.mockResolvedValue(undefined);
-    buildTeamsRoutingContextMock.mockResolvedValue({ context: true });
-    routeTaskMock.mockResolvedValue({
-      status: 'routed',
-      result: {
-        workspace: { type: 'all_repositories' },
-        reasoning: 'all repos',
-      },
-    });
     enqueueTaskMock.mockResolvedValue({
       id: 88,
       taskId: 'task-new',
     });
+    // The pinned-launch primitive runs the surface launcher inside a Session.
+    launchPinnedMock.mockImplementation(
+      async (input: {
+        launchId: string;
+        conversation: unknown;
+        launch: (context: {
+          parent: { sessionId: string; conversation: unknown };
+          launchIdempotencyKey: string;
+          postKickoff: () => Promise<void>;
+        }) => Promise<
+          { success: true; taskId: string } | { success: false; error: string }
+        >;
+      }) => {
+        const result = await input.launch({
+          parent: { sessionId: 'fast-1', conversation: input.conversation },
+          launchIdempotencyKey: `pinned-launch:${input.launchId}`,
+          postKickoff: async () => {},
+        });
+        if (!result.success) throw new Error(result.error);
+        return {
+          sessionId: 'session-1',
+          fastConversationId: 'fast-1',
+          taskId: result.taskId,
+          runId: 88,
+        };
+      },
+    );
     postDirectMessageMock.mockResolvedValue({ messageId: 'dm-response' });
     postMessageMock.mockResolvedValue({ messageId: 'activity-response' });
     fetchMessageImageDataUrlsMock.mockResolvedValue([]);
@@ -503,7 +557,7 @@ describe('Teams webhook handler', () => {
     });
 
     expect(response.status).toBe(200);
-    expect(queueCommunicationMessageMock).toHaveBeenCalledWith(
+    expect(queueCommunicationMessageOnceMock).toHaveBeenCalledWith(
       'teams',
       77,
       expect.objectContaining({
@@ -571,6 +625,372 @@ describe('Teams webhook handler', () => {
     expect(callViaEmojiConfigMock).not.toHaveBeenCalled();
     expect(queueFastReplyMock).not.toHaveBeenCalled();
   });
+
+  it('launches a pinned suggestion through the owning Fast Session without a model turn', async () => {
+    const resolveOrigin = vi
+      .spyOn(suggestionLaunch, 'resolveSuggestionOriginSessionId')
+      .mockResolvedValueOnce('session-origin');
+    trackedSuggestionMessageFindFirstMock.mockResolvedValue({
+      workItemId: 'suggestion-1',
+    });
+    teamsUserMappingFindFirstMock.mockResolvedValue({
+      userId: 'mapped-user-1',
+    });
+    resolveAndClaimTeamsSuggestionReactionMock.mockResolvedValue({
+      outcome: 'claimed',
+      suggestion: {
+        id: 'suggestion-1',
+        title: 'Fix the flaky test',
+        brief: 'Remove the timing race.',
+        investigationContext: null,
+        targetRepositoryFullName: 'acme/app',
+        targetEnvironmentId: null,
+        sourceTaskId: 'scan-task-1',
+        originSessionId: 'session-card',
+        launchClaimedAt: new Date('2026-08-07T00:00:00.000Z'),
+      },
+    });
+    getSessionForTaskMock.mockResolvedValue({ id: 'session-origin' });
+    // The kickoff gate must run inside the enqueue, before the child becomes
+    // runnable; model both sides so the wiring is exercised, not assumed.
+    const postKickoff = vi.fn().mockResolvedValue(undefined);
+    launchPinnedMock.mockImplementationOnce(
+      async (input: {
+        launchId: string;
+        conversation: unknown;
+        launch: (context: {
+          parent: { sessionId: string; conversation: unknown };
+          launchIdempotencyKey: string;
+          postKickoff: () => Promise<void>;
+        }) => Promise<
+          { success: true; taskId: string } | { success: false; error: string }
+        >;
+      }) => {
+        const result = await input.launch({
+          parent: { sessionId: 'fast-1', conversation: input.conversation },
+          launchIdempotencyKey: `pinned-launch:${input.launchId}`,
+          postKickoff,
+        });
+        if (!result.success) throw new Error(result.error);
+        return {
+          sessionId: 'session-1',
+          fastConversationId: 'fast-1',
+          taskId: result.taskId,
+          runId: 88,
+        };
+      },
+    );
+    enqueueTaskMock.mockImplementationOnce(
+      async (
+        _input: unknown,
+        options: {
+          beforeEnqueue?: (taskRun: {
+            id: number;
+            taskId: string;
+          }) => Promise<void>;
+        },
+      ) => {
+        await options.beforeEnqueue?.({ id: 88, taskId: 'task-new' });
+        return { id: 88, taskId: 'task-new' };
+      },
+    );
+    // Drive the real launcher the way launchClaimedTeamsSuggestion would.
+    launchClaimedTeamsSuggestionMock.mockImplementationOnce(
+      async (params: {
+        launchTask: (
+          promptText: string,
+          target: { kind: string },
+        ) => Promise<{ launchResult: { id: number } }>;
+      }) => {
+        const launch = await params.launchTask('Fix the flaky test', {
+          kind: 'legacy_pinned',
+        });
+        return { result: 'started', runId: launch.launchResult.id };
+      },
+    );
+
+    const response = await createApp().request('/teams', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer valid-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(
+        createTeamsActivity({
+          type: 'messageReaction',
+          id: 'suggestion-reaction-2',
+          text: undefined,
+          entities: undefined,
+          replyToId: 'suggestion-card-1',
+          reactionsAdded: [{ type: 'like' }],
+        }),
+      ),
+    });
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      started: true,
+      runId: 88,
+    });
+    expect(launchPinnedMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'mapped-user-1',
+        surface: 'teams',
+        prompt: 'Fix the flaky test',
+        originSessionId: 'session-origin',
+        conversation: expect.objectContaining({
+          surface: 'teams',
+          workspaceId: 'tenant-1',
+        }),
+        kickoffMessage: 'Started a task in acme/app.',
+      }),
+    );
+    expect(resolveOrigin).toHaveBeenCalledWith('scan-task-1', 'session-card');
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        initiator: { kind: 'user', userId: 'mapped-user-1' },
+        surface: 'teams',
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            repo: 'acme/app',
+            description: 'Fix the flaky test',
+            reportConsumer: 'orchestrator',
+            fastAgentSessionId: 'fast-1',
+          }),
+        }),
+      }),
+      expect.objectContaining({ beforeEnqueue: expect.any(Function) }),
+    );
+    // The Session transcript kickoff ran inside the launch gate, and the
+    // Teams acknowledgement was posted after the enqueue.
+    expect(postKickoff).toHaveBeenCalledOnce();
+    expect(postKickoff.mock.invocationCallOrder[0]).toBeLessThan(
+      postMessageMock.mock.invocationCallOrder[0]!,
+    );
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: '19:conversation@thread.v2',
+        text: expect.stringContaining('Started a task in acme/app'),
+      }),
+    );
+    expect(continueFastReplyMock).not.toHaveBeenCalled();
+  });
+
+  it('starts a Fast-targeted suggestion in the personal chat’s shared Fast session', async () => {
+    trackedSuggestionMessageFindFirstMock.mockResolvedValue({
+      workItemId: 'suggestion-1',
+    });
+    teamsUserMappingFindFirstMock.mockResolvedValue({
+      userId: 'mapped-user-1',
+    });
+    resolveAndClaimTeamsSuggestionReactionMock.mockResolvedValue({
+      outcome: 'claimed',
+      suggestion: {
+        id: 'suggestion-1',
+        title: 'Fix the flaky test',
+        brief: 'Remove the timing race.',
+        investigationContext: null,
+        targetRepositoryFullName: '__fast__',
+        targetEnvironmentId: null,
+        launchTarget: '__fast__',
+        launchClaimedAt: new Date('2026-08-07T00:00:00.000Z'),
+      },
+    });
+    const abort = vi.fn();
+    continueFastReplyMock.mockImplementation(
+      async ({ onAccepted }: { onAccepted?: (abort: unknown) => void }) => {
+        onAccepted?.(abort);
+        return true;
+      },
+    );
+    launchClaimedTeamsSuggestionMock.mockImplementation(
+      async ({
+        launchFast,
+      }: {
+        launchFast: (prompt: string) => Promise<{ accepted: boolean }>;
+      }) => {
+        const fastStart = await launchFast('Fix the flaky test');
+        expect(fastStart).toEqual({ accepted: true, abort });
+        return { result: 'started', runId: null };
+      },
+    );
+
+    const response = await createApp().request('/teams', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer valid-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(
+        createTeamsActivity({
+          type: 'messageReaction',
+          id: 'suggestion-reaction-1',
+          text: undefined,
+          entities: undefined,
+          replyToId: 'suggestion-card-1',
+          reactionsAdded: [{ type: 'like' }],
+          conversation: {
+            id: 'a:personal-conversation',
+            tenantId: 'tenant-1',
+            conversationType: 'personal',
+          },
+        }),
+      ),
+    });
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      started: true,
+      runId: null,
+    });
+    // Same identity as the default personal-chat Fast path, so the user's
+    // next DM continues this session instead of orphaning it.
+    expect(getFastSessionMock).toHaveBeenCalledWith({
+      userId: 'mapped-user-1',
+      userInitiated: { surface: 'teams', trigger: 'message' },
+      conversation: {
+        surface: 'teams',
+        workspaceId: 'tenant-1',
+        conversationId: 'a:personal-conversation:user:mapped-user-1',
+        replyTarget: { channelId: 'a:personal-conversation' },
+      },
+    });
+    expect(continueFastReplyMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: 'Fix the flaky test',
+        currentMessageId: 'suggestion-reaction-1',
+      }),
+    );
+  });
+
+  it.each(['reaction', 'numbered text'] as const)(
+    'dispatches a taskless router suggestion from %s in its canonical Fast conversation',
+    async (path) => {
+      const resolveOrigin = vi
+        .spyOn(suggestionLaunch, 'resolveSuggestionOriginSessionId')
+        .mockResolvedValueOnce('session-origin');
+      const canonicalConversation = {
+        surface: 'teams' as const,
+        workspaceId: 'tenant-1',
+        conversationId: 'original-report:user:report-owner',
+        replyTarget: {
+          channelId: '19:original-channel@thread.v2',
+          threadId: 'original-report',
+        },
+      };
+      const resolveConversation = vi
+        .spyOn(suggestionLaunch, 'resolveSuggestionFastConversation')
+        .mockResolvedValueOnce(canonicalConversation);
+      const suggestion = {
+        id: 'suggestion-router',
+        title: 'Investigate the report',
+        brief: 'Follow up on the findings.',
+        investigationContext: null,
+        targetRepositoryFullName: null,
+        targetEnvironmentId: null,
+        usesRouterLaunch: true,
+        sourceTaskId: null,
+        originSessionId: 'session-card',
+        launchClaimedAt: new Date('2026-08-07T00:00:00.000Z'),
+      };
+      teamsUserMappingFindFirstMock.mockResolvedValue({
+        userId: 'mapped-user-1',
+      });
+      findFirstMock.mockResolvedValue(null);
+      if (path === 'reaction') {
+        trackedSuggestionMessageFindFirstMock.mockResolvedValue({
+          workItemId: suggestion.id,
+        });
+        resolveAndClaimTeamsSuggestionReactionMock.mockResolvedValue({
+          outcome: 'claimed',
+          suggestion,
+        });
+      } else {
+        vi.mocked(
+          suggestionStart.parseTeamsSuggestionStartText,
+        ).mockReturnValueOnce(1);
+        vi.mocked(
+          suggestionStart.resolveAndClaimTeamsSuggestionStart,
+        ).mockResolvedValueOnce({ outcome: 'claimed', suggestion });
+      }
+      const actual = await vi.importActual<
+        typeof import('../suggestion-start.js')
+      >('../suggestion-start.js');
+      launchClaimedTeamsSuggestionMock.mockImplementationOnce(
+        actual.launchClaimedTeamsSuggestion,
+      );
+      finalizeWorkItemMock.mockResolvedValueOnce(true);
+      const abort = vi.fn();
+      getFastSessionMock.mockImplementationOnce(async ({ conversation }) => {
+        expect(conversation).toEqual(canonicalConversation);
+        return { id: 'fast-original', conversation: canonicalConversation };
+      });
+      continueFastReplyMock.mockImplementationOnce(async ({ onAccepted }) => {
+        onAccepted(abort);
+        return true;
+      });
+      const response = await createApp().request('/teams', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer valid-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(
+          createTeamsActivity({
+            id: 'new-interaction',
+            replyToId: 'clicked-card',
+            ...(path === 'reaction'
+              ? {
+                  type: 'messageReaction',
+                  text: undefined,
+                  entities: undefined,
+                  reactionsAdded: [{ type: 'like' }],
+                }
+              : { text: '<at>Roomote</at> start idea 1' }),
+          }),
+        ),
+      });
+      await expect(response.json()).resolves.toEqual({
+        ok: true,
+        started: true,
+        runId: null,
+      });
+      expect(resolveOrigin).toHaveBeenCalledWith(null, 'session-card');
+      expect(resolveConversation).toHaveBeenCalledWith({
+        userId: 'mapped-user-1',
+        originSessionId: 'session-origin',
+        conversation: expect.objectContaining({
+          conversationId: 'clicked-card:user:mapped-user-1',
+          replyTarget: {
+            channelId: '19:conversation@thread.v2',
+            threadId: 'clicked-card',
+          },
+        }),
+      });
+      expect(getFastSessionMock).toHaveBeenCalledWith({
+        userId: 'mapped-user-1',
+        userInitiated: { surface: 'teams', trigger: 'message' },
+        conversation: canonicalConversation,
+      });
+      expect(continueFastReplyMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: 'fast-original',
+          userId: 'mapped-user-1',
+          currentMessageId: 'new-interaction',
+          question: expect.stringContaining('Investigate the report'),
+        }),
+      );
+      expect(finalizeWorkItemMock).toHaveBeenCalledWith(expect.anything(), {
+        id: suggestion.id,
+        taskId: null,
+        claimedAt: suggestion.launchClaimedAt,
+      });
+      expect(releaseWorkItemMock).not.toHaveBeenCalled();
+      expect(abort).not.toHaveBeenCalled();
+      expect(launchPinnedMock).not.toHaveBeenCalled();
+      expect(enqueueTaskMock).not.toHaveBeenCalled();
+    },
+  );
 
   it('queues a native reaction on the owner’s bound Fast message', async () => {
     teamsUserMappingFindFirstMock.mockResolvedValue({
@@ -807,19 +1227,69 @@ describe('Teams webhook handler', () => {
       'NX',
     );
     expect(findFirstMock).toHaveBeenCalled();
-    expect(queueCommunicationMessageMock).toHaveBeenCalledWith('teams', 77, {
-      provider: 'teams',
-      text: 'continue',
-      user: 'Ada Lovelace',
-      userId: 'mapped-user-1',
-      ts: 'activity-2',
-      channel: '19:conversation@thread.v2',
-      threadTs: 'activity-root',
-    });
+    expect(queueCommunicationMessageOnceMock).toHaveBeenCalledWith(
+      'teams',
+      77,
+      {
+        provider: 'teams',
+        text: 'continue',
+        user: 'Ada Lovelace',
+        userId: 'mapped-user-1',
+        ts: 'activity-2',
+        channel: '19:conversation@thread.v2',
+        threadTs: 'activity-root',
+      },
+    );
     expect(setTrustedRunActingUserMock).toHaveBeenCalledWith({
       runId: 77,
       userId: 'mapped-user-1',
     });
+    expect(redisDelMock).not.toHaveBeenCalled();
+  });
+
+  it('releases the activity claim when active-run queueing fails', async () => {
+    teamsUserMappingFindFirstMock.mockResolvedValueOnce({
+      userId: 'mapped-user-1',
+    });
+    queueCommunicationMessageOnceMock.mockRejectedValueOnce(
+      new Error('database unavailable'),
+    );
+
+    const response = await createApp().request('/teams', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer bot-framework-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(createTeamsActivity()),
+    });
+
+    expect(response.status).toBe(500);
+    expect(redisDelMock).toHaveBeenCalledWith('teams:activity:activity-2');
+  });
+
+  it('acks a retried active-run activity already queued by message id', async () => {
+    teamsUserMappingFindFirstMock.mockResolvedValueOnce({
+      userId: 'mapped-user-1',
+    });
+    queueCommunicationMessageOnceMock.mockResolvedValueOnce(false);
+
+    const response = await createApp().request('/teams', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer bot-framework-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(createTeamsActivity()),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      queued: true,
+      runId: 77,
+    });
+    expect(queueCommunicationMessageOnceMock).toHaveBeenCalledTimes(1);
   });
 
   it('continues the bound Fast session before ordinary Teams task routing', async () => {
@@ -875,7 +1345,7 @@ describe('Teams webhook handler', () => {
       '19:conversation@thread.v2',
       'tenant-1',
     );
-    expect(continueFastReplyMock).toHaveBeenCalledWith(
+    expect(queueFastReplyMock).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: '11111111-1111-4111-8111-111111111111',
         userId: 'mapped-user-1',
@@ -980,6 +1450,7 @@ describe('Teams webhook handler', () => {
       queued: false,
       reason: 'fast_session_installation_unavailable',
     });
+    expect(redisDelMock).not.toHaveBeenCalled();
     expect(continueFastReplyMock).not.toHaveBeenCalled();
     expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
   });
@@ -1015,15 +1486,19 @@ describe('Teams webhook handler', () => {
       runId: 77,
     });
     expect(enqueueTaskMock).not.toHaveBeenCalled();
-    expect(queueCommunicationMessageMock).toHaveBeenCalledWith('teams', 77, {
-      provider: 'teams',
-      text: 'keep going',
-      user: 'Ada Lovelace',
-      userId: 'mapped-user-1',
-      ts: 'activity-followup',
-      channel: '19:conversation@thread.v2;messageid=activity-root',
-      threadTs: 'activity-root',
-    });
+    expect(queueCommunicationMessageOnceMock).toHaveBeenCalledWith(
+      'teams',
+      77,
+      {
+        provider: 'teams',
+        text: 'keep going',
+        user: 'Ada Lovelace',
+        userId: 'mapped-user-1',
+        ts: 'activity-followup',
+        channel: '19:conversation@thread.v2;messageid=activity-root',
+        threadTs: 'activity-root',
+      },
+    );
   });
 
   it('ignores bot-authored Teams message activities before queueing or launching', async () => {
@@ -1106,13 +1581,54 @@ describe('Teams webhook handler', () => {
       ],
       { serviceUrl: 'https://smba.trafficmanager.net/amer/' },
     );
-    expect(queueCommunicationMessageMock).toHaveBeenCalledWith(
+    expect(queueCommunicationMessageOnceMock).toHaveBeenCalledWith(
       'teams',
       77,
       expect.objectContaining({
         images: ['data:image/png;base64,abc123'],
       }),
     );
+  });
+
+  it('does not acknowledge a Teams Fast reply when durable admission fails', async () => {
+    teamsUserMappingFindFirstMock.mockResolvedValueOnce({
+      userId: 'mapped-user-1',
+    });
+    findFastReplySessionMock.mockResolvedValue({
+      id: '11111111-1111-4111-8111-111111111111',
+      userId: 'mapped-user-1',
+      conversation: {
+        surface: 'teams',
+        workspaceId: 'tenant-1',
+        conversationId: 'automation-run-1',
+        replyTarget: {
+          channelId: '19:conversation@thread.v2',
+          threadId: 'activity-root',
+        },
+      },
+    });
+    queueFastReplyMock.mockRejectedValueOnce(new Error('database unavailable'));
+
+    const response = await createApp().request('/teams', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer bot-framework-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(
+        createTeamsActivity({
+          conversation: {
+            id: '19:conversation@thread.v2;messageid=activity-root',
+            tenantId: 'tenant-1',
+            conversationType: 'channel',
+          },
+          replyToId: 'fast-report-1',
+        }),
+      ),
+    });
+
+    expect(response.status).toBe(500);
+    expect(redisDelMock).toHaveBeenCalledWith('teams:activity:activity-2');
   });
 
   it('queues image-only Teams attachments for matching active task runs', async () => {
@@ -1144,7 +1660,7 @@ describe('Teams webhook handler', () => {
       queued: true,
       runId: 77,
     });
-    expect(queueCommunicationMessageMock).toHaveBeenCalledWith(
+    expect(queueCommunicationMessageOnceMock).toHaveBeenCalledWith(
       'teams',
       77,
       expect.objectContaining({
@@ -1194,7 +1710,7 @@ describe('Teams webhook handler', () => {
         threadId: 'activity-root',
       }),
     );
-    expect(queueCommunicationMessageMock).toHaveBeenCalledWith(
+    expect(queueCommunicationMessageOnceMock).toHaveBeenCalledWith(
       'teams',
       77,
       expect.objectContaining({
@@ -1244,15 +1760,19 @@ describe('Teams webhook handler', () => {
         }),
       }),
     );
-    expect(queueCommunicationMessageMock).toHaveBeenCalledWith('teams', 77, {
-      provider: 'teams',
-      text: 'continue',
-      user: 'Ada Lovelace',
-      userId: 'microsoft-user-1',
-      ts: 'activity-2',
-      channel: '19:conversation@thread.v2',
-      threadTs: 'activity-root',
-    });
+    expect(queueCommunicationMessageOnceMock).toHaveBeenCalledWith(
+      'teams',
+      77,
+      {
+        provider: 'teams',
+        text: 'continue',
+        user: 'Ada Lovelace',
+        userId: 'microsoft-user-1',
+        ts: 'activity-2',
+        channel: '19:conversation@thread.v2',
+        threadTs: 'activity-root',
+      },
+    );
     expect(setTrustedRunActingUserMock).toHaveBeenCalledWith({
       runId: 77,
       userId: 'microsoft-user-1',
@@ -1288,7 +1808,7 @@ describe('Teams webhook handler', () => {
       runId: 77,
     });
     expect(authAccountsFindManyMock).not.toHaveBeenCalled();
-    expect(queueCommunicationMessageMock).toHaveBeenCalledWith(
+    expect(queueCommunicationMessageOnceMock).toHaveBeenCalledWith(
       'teams',
       77,
       expect.objectContaining({
@@ -1333,7 +1853,7 @@ describe('Teams webhook handler', () => {
     expect(insertOnConflictDoNothingMock).toHaveBeenCalledWith({
       target: 'userId',
     });
-    expect(queueCommunicationMessageMock).toHaveBeenCalledWith(
+    expect(queueCommunicationMessageOnceMock).toHaveBeenCalledWith(
       'teams',
       77,
       expect.objectContaining({
@@ -1406,6 +1926,7 @@ describe('Teams webhook handler', () => {
     });
     expect(getFastSessionMock).toHaveBeenCalledWith({
       userId: 'mapped-user-1',
+      userInitiated: { surface: 'teams', trigger: 'message' },
       conversation: {
         surface: 'teams',
         workspaceId: 'tenant-1',
@@ -1426,7 +1947,7 @@ describe('Teams webhook handler', () => {
     expect(enqueueTaskMock).not.toHaveBeenCalled();
   });
 
-  it('falls back to normal Teams task routing when Fast session setup fails', async () => {
+  it('replies with an error when Fast session setup fails', async () => {
     findFirstMock.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
     teamsUserMappingFindFirstMock.mockResolvedValueOnce({
       userId: 'mapped-user-1',
@@ -1444,11 +1965,16 @@ describe('Teams webhook handler', () => {
 
     await expect(response.json()).resolves.toEqual({
       ok: true,
-      started: true,
-      runId: 88,
+      queued: false,
+      fastUnavailable: true,
     });
-    expect(buildTeamsRoutingContextMock).toHaveBeenCalled();
-    expect(enqueueTaskMock).toHaveBeenCalled();
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining("couldn't start a conversation"),
+      }),
+    );
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
+    expect(continueFastReplyMock).not.toHaveBeenCalled();
   });
 
   it('starts Fast with Teams image attachments', async () => {
@@ -1555,8 +2081,6 @@ describe('Teams webhook handler', () => {
       reason: 'account_link_required',
     });
     expect(response.status).toBe(200);
-    expect(buildTeamsRoutingContextMock).not.toHaveBeenCalled();
-    expect(routeTaskMock).not.toHaveBeenCalled();
     expect(enqueueTaskMock).not.toHaveBeenCalled();
     expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
     expect(findFirstMock).toHaveBeenCalledTimes(1);
@@ -1661,6 +2185,12 @@ describe('Teams webhook handler', () => {
       userId: 'mapped-user-1',
     });
     findFirstMock.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+    continueFastReplyMock.mockImplementationOnce(
+      async ({ onAccepted }: { onAccepted?: (abort: unknown) => void }) => {
+        onAccepted?.(vi.fn());
+        return true;
+      },
+    );
 
     const response = await createApp().request('/teams/auth/resume', {
       method: 'POST',
@@ -1670,10 +2200,7 @@ describe('Teams webhook handler', () => {
 
     await expect(response.json()).resolves.toEqual({
       success: true,
-      status: 'started',
-      runId: 88,
-      taskId: 'task-new',
-      taskUrl: 'https://app.example.com/task/task-new',
+      status: 'fast',
     });
     expect(response.status).toBe(200);
     expect(redisGetMock).toHaveBeenCalledWith('teams:auth:teams-auth-token-1');
@@ -1682,27 +2209,28 @@ describe('Teams webhook handler', () => {
       1,
       'teams:auth:teams-auth-token-1',
     );
-    expect(enqueueTaskMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        task: expect.objectContaining({
-          type: 'standard',
-          payload: expect.objectContaining({
-            description: 'run the tests',
-            images: ['data:image/png;base64,abc123'],
-            communicationProvider: 'teams',
-            communicationChannelId: '19:conversation@thread.v2',
-            communicationThreadId: 'activity-root',
-          }),
-        }),
-        initiator: { kind: 'user', userId: 'mapped-user-1' },
-        workflow: 'standard',
+    expect(getFastSessionMock).toHaveBeenCalledWith({
+      userId: 'mapped-user-1',
+      userInitiated: { surface: 'teams', trigger: 'message' },
+      conversation: {
         surface: 'teams',
-        trigger: 'message',
-      }),
+        workspaceId: 'tenant-1',
+        conversationId: 'activity-root:user:mapped-user-1',
+        replyTarget: {
+          channelId: '19:conversation@thread.v2',
+          threadId: 'activity-root',
+        },
+      },
+    });
+    expect(continueFastReplyMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        launchClass: 'human',
+        userId: 'mapped-user-1',
+        question: 'run the tests',
+        images: ['data:image/png;base64,abc123'],
+        currentMessageId: 'pending-activity-1',
       }),
     );
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
     expect(processImageAttachmentsMock).toHaveBeenCalledWith(
       [
         {
@@ -1772,6 +2300,7 @@ describe('Teams webhook handler', () => {
     });
     expect(getFastSessionMock).toHaveBeenCalledWith({
       userId: 'mapped-user-1',
+      userInitiated: { surface: 'teams', trigger: 'message' },
       conversation: {
         surface: 'teams',
         workspaceId: 'tenant-1',
@@ -1780,6 +2309,66 @@ describe('Teams webhook handler', () => {
       },
     });
     expect(enqueueTaskMock).not.toHaveBeenCalled();
+    expect(findSessionAttentionNotificationReply).toHaveBeenCalledWith({
+      provider: 'teams',
+      workspaceId: 'tenant-1',
+      channelId: 'a:personal-conversation',
+      userId: 'mapped-user-1',
+    });
+  });
+
+  it('continues the latest personal-chat attention notification when explicitly requested', async () => {
+    findFirstMock.mockResolvedValue(null);
+    teamsUserMappingFindFirstMock.mockResolvedValueOnce({
+      userId: 'mapped-user-1',
+    });
+    vi.mocked(findSessionAttentionNotificationReply).mockResolvedValueOnce({
+      status: 'owned',
+      attention: {
+        sessionId: 'session-1',
+        taskId: null,
+        runId: null,
+        kind: 'result_ready',
+      },
+    });
+    vi.mocked(continueSessionAttentionReply).mockResolvedValueOnce(true);
+
+    const response = await createApp().request('/teams', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer bot-framework-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(
+        createTeamsActivity({
+          id: 'personal-attention-1',
+          text: 'continue: show me the result',
+          entities: [],
+          replyToId: undefined,
+          conversation: {
+            id: 'a:personal-conversation',
+            tenantId: 'tenant-1',
+            conversationType: 'personal',
+          },
+        }),
+      ),
+    });
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      fastAnswered: true,
+      fastContinued: true,
+    });
+    expect(findSessionAttentionNotificationReply).toHaveBeenCalledWith({
+      provider: 'teams',
+      workspaceId: 'tenant-1',
+      channelId: 'a:personal-conversation',
+      userId: 'mapped-user-1',
+      allowLatestChannelMatch: true,
+    });
+    expect(continueSessionAttentionReply).toHaveBeenCalledWith(
+      expect.objectContaining({ question: 'show me the result' }),
+    );
   });
 
   it('ignores channel messages without a bot mention when no active task run exists', async () => {

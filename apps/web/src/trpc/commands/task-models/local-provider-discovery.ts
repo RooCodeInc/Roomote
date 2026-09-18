@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 import {
   SETUP_MODEL_PROVIDER_CATALOG,
   buildTaskModelOption,
@@ -14,6 +16,24 @@ import { getPersistedEnvironmentVariableValues } from '../environment-variables'
 import { mergeMetadata } from './models-dev';
 
 const LOCAL_PROVIDER_REQUEST_TIMEOUT_MS = 15_000;
+
+const qualificationChunkSchema = z.object({
+  choices: z.array(
+    z.object({
+      index: z.number().int().nonnegative().optional(),
+      delta: z.object({
+        tool_calls: z
+          .array(
+            z.object({
+              index: z.number().int().nonnegative().optional(),
+              function: z.object({ name: z.string().optional() }).optional(),
+            }),
+          )
+          .optional(),
+      }),
+    }),
+  ),
+});
 
 const LOCAL_ENDPOINT_PROVIDER_CATALOG = SETUP_MODEL_PROVIDER_CATALOG.filter(
   (
@@ -96,6 +116,15 @@ type LocalProviderDiscoveryResult = {
   modelCount: number;
   recommendedModels: TaskModelLookupResult[];
   error: string | null;
+  failureReason:
+    | 'invalid_credentials'
+    | 'insufficient_credits'
+    | 'invalid_endpoint'
+    | 'endpoint_not_found'
+    | 'rate_limited'
+    | 'provider_unavailable'
+    | 'endpoint_unreachable'
+    | null;
 };
 
 function isLocalTaskModelProviderId(
@@ -212,6 +241,9 @@ function getLocalProviderError(
   if (response.status === 401 || response.status === 403) {
     return `${label} rejected the API key. Check the saved credentials.`;
   }
+  if (response.status === 402) {
+    return `${label} does not have enough credits or quota.`;
+  }
   if (response.status === 404) {
     return `${label} did not recognize this endpoint. Check the endpoint URL and API compatibility.`;
   }
@@ -222,6 +254,24 @@ function getLocalProviderError(
     return `${label} returned a server error (${response.status}). Check that the provider is healthy.`;
   }
   return `${label} returned HTTP ${response.status}.`;
+}
+
+function getLocalProviderFailureReason(
+  response: Response,
+): Exclude<LocalProviderDiscoveryResult['failureReason'], null> {
+  if (response.status === 401 || response.status === 403) {
+    return 'invalid_credentials';
+  }
+  if (response.status === 402) {
+    return 'insufficient_credits';
+  }
+  if (response.status === 404) {
+    return 'endpoint_not_found';
+  }
+  if (response.status === 429) {
+    return 'rate_limited';
+  }
+  return 'provider_unavailable';
 }
 
 function getLocalProviderNetworkError(provider: LocalTaskModelProviderId) {
@@ -351,6 +401,12 @@ async function fetchLocalProviderModels(
   const paths =
     provider === 'ollama' ? ['/api/tags', '/v1/models'] : ['/v1/models'];
   let lastError: string | null = null;
+  let lastFailureReason: LocalProviderDiscoveryResult['failureReason'] = null;
+  let blockingError: string | null = null;
+  let blockingFailureReason: Extract<
+    LocalProviderDiscoveryResult['failureReason'],
+    'invalid_credentials' | 'insufficient_credits'
+  > | null = null;
 
   for (const path of paths) {
     try {
@@ -363,6 +419,14 @@ async function fetchLocalProviderModels(
       );
       if (!response.ok) {
         lastError = getLocalProviderError(provider, response);
+        lastFailureReason = getLocalProviderFailureReason(response);
+        if (
+          lastFailureReason === 'invalid_credentials' ||
+          lastFailureReason === 'insufficient_credits'
+        ) {
+          blockingError = lastError;
+          blockingFailureReason = lastFailureReason;
+        }
         continue;
       }
 
@@ -423,9 +487,11 @@ async function fetchLocalProviderModels(
         modelCount: models.length,
         recommendedModels: getRecommendedLocalProviderModels(models),
         error: null,
+        failureReason: null,
       };
     } catch {
       lastError = getLocalProviderNetworkError(provider);
+      lastFailureReason = 'endpoint_unreachable';
     }
   }
 
@@ -433,7 +499,9 @@ async function fetchLocalProviderModels(
     models: [],
     modelCount: 0,
     recommendedModels: [],
-    error: lastError ?? getLocalProviderNetworkError(provider),
+    error: blockingError ?? lastError ?? getLocalProviderNetworkError(provider),
+    failureReason:
+      blockingFailureReason ?? lastFailureReason ?? 'endpoint_unreachable',
   };
 }
 
@@ -451,6 +519,7 @@ export async function discoverProviderModels(
       modelCount: 0,
       recommendedModels: [],
       error: 'Save a valid endpoint URL before discovering models.',
+      failureReason: 'invalid_endpoint',
     };
   }
 
@@ -492,10 +561,7 @@ export async function qualifyProviderModel(
           model: modelId.replace(`${input.provider}/`, ''),
           messages: [{ role: 'user', content: 'Reply with pong.' }],
           stream: true,
-          tool_choice: {
-            type: 'function',
-            function: { name: 'ping' },
-          },
+          tool_choice: 'required',
           tools: [
             {
               type: 'function',
@@ -548,10 +614,37 @@ export async function qualifyProviderModel(
       reader.releaseLock();
     }
 
-    if (
-      !streamText.includes('"tool_calls"') ||
-      !streamText.includes('"ping"')
-    ) {
+    const toolNames = new Map<string, string>();
+    for (const event of streamText.split(/\r?\n\r?\n/)) {
+      const data = event
+        .split(/\r?\n/)
+        .filter((line) => line.startsWith('data:'))
+        .map((line) => line.slice(5).trimStart())
+        .join('\n');
+      if (!data || data.trim() === '[DONE]') continue;
+
+      let payload: unknown;
+      try {
+        payload = JSON.parse(data);
+      } catch {
+        continue;
+      }
+      const chunk = qualificationChunkSchema.safeParse(payload);
+      if (!chunk.success) continue;
+
+      chunk.data.choices.forEach((choice, choiceOffset) => {
+        choice.delta.tool_calls?.forEach((call, callOffset) => {
+          const key = `${choice.index ?? choiceOffset}:${call.index ?? callOffset}`;
+          // Function names may arrive in fragments across streamed deltas.
+          toolNames.set(
+            key,
+            (toolNames.get(key) ?? '') + (call.function?.name ?? ''),
+          );
+        });
+      });
+    }
+
+    if (![...toolNames.values()].includes('ping')) {
       return {
         success: false,
         error:

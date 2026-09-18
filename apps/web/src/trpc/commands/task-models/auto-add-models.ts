@@ -15,6 +15,8 @@ import {
   type TaskModelSettings,
 } from '@roomote/types';
 
+import { applyModelsDevMetadata, type ModelsDevCatalog } from './models-dev';
+
 function deriveDisplayNameFromModelId(modelId: string): string {
   return modelId.split('/').at(-1) || modelId;
 }
@@ -62,13 +64,14 @@ export function collectConnectedTaskModelProviderIds(options: {
 /**
  * Appends every connected provider's recommended models to the model
  * catalog, so the Available Models list always shows the full curated set
- * for connected providers. Appended entries carry no metadata (the refresh
- * action backfills it once they are persisted) and callers keep them
- * disabled until an operator enables them.
+ * for connected providers. When the models.dev catalog is available, appended
+ * entries use the same metadata lookup as manually added models. Callers keep
+ * them disabled until an operator enables them.
  */
 export function appendRecommendedTaskModels(options: {
   models: readonly TaskModelOption[];
   connectedProviderIds: ReadonlySet<string>;
+  metadataCatalog?: ModelsDevCatalog | null;
 }): TaskModelOption[] {
   const modelIds = new Set(options.models.map((model) => model.id));
   const appendedModels: TaskModelOption[] = [];
@@ -85,12 +88,15 @@ export function appendRecommendedTaskModels(options: {
         continue;
       }
 
-      const model = buildTaskModelOption({
+      const modelWithoutMetadata = buildTaskModelOption({
         id: modelId,
         displayName: suggestion.displayName,
         family: suggestion.family,
         metadata: null,
       });
+      const model = options.metadataCatalog
+        ? applyModelsDevMetadata(options.metadataCatalog, modelWithoutMetadata)
+        : modelWithoutMetadata;
 
       modelIds.add(model.id);
       appendedModels.push(model);
@@ -169,8 +175,8 @@ function sortTaskModelOptionsById(
  * (`suggestedTaskModels` in the setup provider catalog), so the seeded set
  * only changes with a release. The provider's `defaultRoomoteModel` is
  * always included so the setup wizard's runtime coding-model reset resolves
- * to a listed model. Models are added without metadata; the settings page's
- * metadata refresh action backfills context, pricing, and reasoning support.
+ * to a listed model. Catalog metadata is best-effort; the settings page's
+ * refresh action can backfill context, pricing, and reasoning support later.
  *
  * Returns null when nothing should change: the current model list already
  * has models for this provider (re-saving credentials must not resurrect
@@ -188,6 +194,7 @@ export function buildAutoAddedTaskModelSettings(options: {
    * to these providers so the seeded list only contains usable models.
    */
   connectedProviderIds: ReadonlySet<string>;
+  metadataCatalog?: ModelsDevCatalog | null;
 }): {
   taskModelSettings: TaskModelSettings;
   addedModels: TaskModelOption[];
@@ -272,12 +279,15 @@ export function buildAutoAddedTaskModelSettings(options: {
       continue;
     }
 
-    const model = buildTaskModelOption({
+    const modelWithoutMetadata = buildTaskModelOption({
       id: modelId,
       displayName:
         candidate.displayName || deriveDisplayNameFromModelId(modelId),
       family: candidate.family,
     });
+    const model = options.metadataCatalog
+      ? applyModelsDevMetadata(options.metadataCatalog, modelWithoutMetadata)
+      : modelWithoutMetadata;
 
     modelsById.set(model.id, model);
     addedModels.push(model);
@@ -317,6 +327,7 @@ export function buildAutoAddedTaskModelSettings(options: {
     // Carry the catalog sync's deletion memory forward so connecting a
     // provider does not wipe it.
     catalogSyncedModelIds: persisted?.catalogSyncedModelIds,
+    codingModelRoutingRules: persisted?.codingModelRoutingRules,
   });
 
   return { taskModelSettings, addedModels };

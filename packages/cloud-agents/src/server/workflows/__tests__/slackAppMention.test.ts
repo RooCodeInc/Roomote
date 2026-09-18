@@ -221,7 +221,7 @@ describe('slackAppMention', () => {
       'Use `send_chat_reaction_emoji` for lightweight acknowledgements, confirmations, or emoji-only answers only when the latest directed user turn came from Slack and the prompt-provided `<slack_turn_policy>` block allows reactions, especially when `prefer_emoji_ack="true"`.',
     );
     expect(result.harnessInstructions).toContain(
-      'When using `send_chat_reaction_emoji`, choose the reaction that best matches the intent instead of treating `eyes` as the default. Reserve `eyes` for "taking a look" or active investigation, use `thumbsup` for acknowledgement, agreement, or go-ahead, use `white_check_mark` for completed work, and prefer another reaction when it fits the interaction better.',
+      'When using `send_chat_reaction_emoji`, choose a reaction that communicates something beyond working status: use `thumbsup` for acknowledgement, agreement, or go-ahead, use `white_check_mark` for completed work, and prefer another reaction when it fits the interaction better. Do not use `eyes` as an automatic processing or working-status acknowledgement; platform-managed suggestion acceptance may still use it when work continues in a different thread.',
     );
     expect(result.harnessInstructions).toContain(
       'At the beginning of a Slack turn, do not use `request_user_input` unless the next step is still genuinely blocked after using thread context and available tools to resolve the question.',
@@ -251,10 +251,10 @@ describe('slackAppMention', () => {
       'Do not add a separate sentence telling the user to use the task UI; the Slack thread reply tool already appends the standard footer.',
     );
     expect(result.harnessInstructions).toContain(
-      'When reactions are allowed and the latest directed user turn itself came from Slack, using `send_chat_reaction_emoji` on that current Slack message counts as answering that Slack turn. When the latest user turn did not come from Slack, `send_chat_reaction_emoji` does not count as satisfying the turn. When the user explicitly asks for a reaction on a different known Slack message, `add_reaction_to_slack_message` counts only when it targets that requested message.',
+      'When reactions are allowed and the latest directed user turn itself came from Slack, using `send_chat_reaction_emoji` on that current Slack message counts as answering that Slack turn. When the latest user turn did not come from Slack, `send_chat_reaction_emoji` does not count as satisfying the turn.',
     );
     expect(result.harnessInstructions).toContain(
-      "Every new Slack user turn that you answer still needs its own fresh Slack-visible satisfaction tool call. A prior turn's `send_chat_reply`, `send_chat_reaction_emoji`, or `add_reaction_to_slack_message` call on a different message does not satisfy a later turn. A reaction only counts for the turn it actually answers.",
+      "Every new Slack user turn that you answer still needs its own fresh Slack-visible satisfaction tool call. A prior turn's `send_chat_reply` or `send_chat_reaction_emoji` call does not satisfy a later turn. A reaction only counts for the turn it actually answers.",
     );
     expect(result.harnessInstructions).not.toContain(
       'Because this run originated from Slack, apply these Slack thread obligations before top-level workflow routing.',

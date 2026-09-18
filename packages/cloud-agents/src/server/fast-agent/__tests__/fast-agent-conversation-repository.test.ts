@@ -1,22 +1,48 @@
+const { captureEvent } = vi.hoisted(() => ({
+  captureEvent: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('@roomote/telemetry/server', () => ({ captureEvent }));
+
 import {
   and,
   db,
   eq,
+  createChatInitiationOrder,
   fastAgentConversations,
   fastAgentMessages,
+  fastAgentParentEvents,
+  getSessionForFastConversation,
+  getUserChatInitiationProvider,
   inArray,
   sessions,
+  recordUserChatInitiationProvider,
   userFactory,
   users,
 } from '@roomote/db/server';
+import type { FastAgentConversation, FastAgentSurface } from '@roomote/types';
 
 import {
   fastAgentConversationRepository,
+  findFastAgentActiveInferenceRetryNotice,
+  findFastAgentUnresolvedRequest,
+  loadFastAgentTurnAttemptSummary,
   INTERRUPTED_INFERENCE_RETRY_MESSAGE,
+  scheduleFastAgentDurableTurnRetry,
+  markFastAgentDurableTurnDelivered,
+  releaseFastAgentDurableTurnClaim,
+  renewFastAgentDurableTurnClaim,
+  revokeFastAgentDurableTurnReplay,
+  markFastAgentInferenceRetryNoticeInterruption,
   reconcileExpiredFastAgentInferenceRetryNotices,
   reconcileFastAgentInferenceRetryNotices,
+  renewFastSessionRespondingLease,
 } from '../fast-agent-conversation-repository';
-import { hasFastAgentSession } from '../fast-agent-session';
+import { FAST_AGENT_REACTION_INPUT_TYPE } from '../fast-agent-conversation';
+import {
+  getOrCreateFastAgentSession,
+  hasFastAgentSession,
+} from '../fast-agent-session';
 
 const createdUserIds: string[] = [];
 
@@ -37,12 +63,308 @@ const slackConversation = {
 };
 
 afterEach(async () => {
+  captureEvent.mockClear();
   for (const userId of createdUserIds.splice(0)) {
     await db.delete(users).where(eq(users.id, userId));
   }
 });
 
 describe('Fast conversation repository', () => {
+  it.each([
+    'web',
+    'slack',
+    'teams',
+    'telegram',
+    'discord',
+    'agentmail',
+    'linear',
+    'github',
+    'gitlab',
+    'bitbucket',
+    'ado',
+    'gitea',
+  ] as const)(
+    'captures one user-started Session creation for the %s origin',
+    async (surface: Exclude<FastAgentSurface, 'automation'>) => {
+      const user = await createUser();
+      const userId = user.id;
+      const identity = {
+        surface,
+        workspaceId: `${surface}-telemetry-workspace`,
+        conversationId: crypto.randomUUID(),
+      };
+      const conversation = (
+        surface === 'web'
+          ? identity
+          : {
+              ...identity,
+              replyTarget: { channelId: `${surface}-telemetry-channel` },
+            }
+      ) as FastAgentConversation;
+
+      const created = await getOrCreateFastAgentSession({
+        userId,
+        conversation,
+        userInitiated: { surface, trigger: 'message' },
+      });
+      expect(created.created).toBe(true);
+      expect(captureEvent).toHaveBeenCalledTimes(1);
+      expect(captureEvent).toHaveBeenCalledWith('session_created', {
+        userId,
+        properties: {
+          surface,
+          trigger: 'message',
+          outcome: 'created',
+        },
+      });
+
+      const reused = await getOrCreateFastAgentSession({
+        userId,
+        conversation,
+        userInitiated: { surface, trigger: 'message' },
+      });
+      expect(reused.created).toBe(false);
+      expect(captureEvent).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('does not capture platform-created or automation-owned Sessions', async () => {
+    const user = await createUser();
+    const userId = user.id;
+    await getOrCreateFastAgentSession({
+      userId,
+      conversation: {
+        surface: 'web',
+        workspaceId: userId,
+        conversationId: crypto.randomUUID(),
+      },
+    });
+    await getOrCreateFastAgentSession({
+      owner: { kind: 'automation', automationKey: 'custom_automation' },
+      conversation: {
+        surface: 'automation',
+        workspaceId: 'automation-telemetry-workspace',
+        conversationId: crypto.randomUUID(),
+      },
+      userInitiated: { surface: 'system', trigger: 'schedule' },
+    });
+
+    expect(captureEvent).not.toHaveBeenCalled();
+  });
+
+  it('creates private web conversations with an immutable matching owner', async () => {
+    const owner = await createUser();
+    const conversation = {
+      surface: 'web' as const,
+      workspaceId: owner.id,
+      conversationId: crypto.randomUUID(),
+    };
+
+    const created = await getOrCreateFastAgentSession({
+      owner: { kind: 'user', userId: owner.id },
+      conversation,
+      privacy: 'private',
+    });
+    expect(created).toMatchObject({ privacy: 'private', created: true });
+    await fastAgentConversationRepository.appendVisibleMessages({
+      conversationId: created.id,
+      messages: [
+        { role: 'user', content: 'Private question' },
+        { role: 'assistant', content: 'Private answer' },
+      ],
+    });
+    await expect(
+      getSessionForFastConversation(db, created.id),
+    ).resolves.toMatchObject({
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+    });
+    await expect(
+      fastAgentConversationRepository.findById({ id: created.id }),
+    ).resolves.toMatchObject({
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+      compatibilityMessages: [
+        { role: 'user', content: 'Private question' },
+        { role: 'assistant', content: 'Private answer' },
+      ],
+    });
+    await expect(
+      getOrCreateFastAgentSession({
+        owner: { kind: 'user', userId: owner.id },
+        conversation,
+        privacy: 'private',
+      }),
+    ).resolves.toMatchObject({
+      id: created.id,
+      privacy: 'private',
+      created: false,
+    });
+    await expect(
+      getOrCreateFastAgentSession({
+        userId: owner.id,
+        conversation,
+      }),
+    ).resolves.toMatchObject({
+      id: created.id,
+      privacy: 'private',
+      created: false,
+    });
+    const otherUser = await createUser();
+    await expect(
+      getOrCreateFastAgentSession({
+        userId: otherUser.id,
+        conversation,
+      }),
+    ).rejects.toThrow('private owner does not match');
+    await expect(
+      getOrCreateFastAgentSession({
+        owner: { kind: 'user', userId: owner.id },
+        conversation: {
+          ...slackConversation,
+          conversationId: crypto.randomUUID(),
+        },
+        privacy: 'private',
+      }),
+    ).rejects.toThrow('user-owned web conversation');
+  });
+
+  it.each(['slack', 'teams', 'telegram', 'discord'] as const)(
+    'records %s when a human chat turn creates a Session',
+    async (surface) => {
+      const user = await createUser();
+      const conversation = {
+        surface,
+        workspaceId: `${surface}-workspace`,
+        conversationId: crypto.randomUUID(),
+        replyTarget: { channelId: `${surface}-channel` },
+      };
+
+      await getOrCreateFastAgentSession({
+        userId: user.id,
+        conversation,
+        chatInitiationOrder: createChatInitiationOrder(),
+      });
+
+      await expect(getUserChatInitiationProvider(user.id)).resolves.toBe(
+        surface,
+      );
+    },
+  );
+
+  it('does not overwrite the preference for an existing Session turn', async () => {
+    const user = await createUser();
+    const conversation = {
+      ...slackConversation,
+      conversationId: crypto.randomUUID(),
+    };
+    await getOrCreateFastAgentSession({
+      userId: user.id,
+      conversation,
+    });
+    await recordUserChatInitiationProvider(
+      user.id,
+      'discord',
+      createChatInitiationOrder(),
+    );
+
+    const reused = await getOrCreateFastAgentSession({
+      userId: user.id,
+      conversation,
+      chatInitiationOrder: createChatInitiationOrder(),
+    });
+
+    expect(reused.created).toBe(false);
+    await expect(getUserChatInitiationProvider(user.id)).resolves.toBe(
+      'discord',
+    );
+  });
+
+  it('does not record an automated chat-surface Session', async () => {
+    const user = await createUser();
+    await recordUserChatInitiationProvider(
+      user.id,
+      'telegram',
+      createChatInitiationOrder(),
+    );
+
+    await getOrCreateFastAgentSession({
+      userId: user.id,
+      conversation: {
+        ...slackConversation,
+        conversationId: crypto.randomUUID(),
+      },
+    });
+
+    await expect(getUserChatInitiationProvider(user.id)).resolves.toBe(
+      'telegram',
+    );
+  });
+
+  it('does not let a delayed older initiation overwrite a newer preference', async () => {
+    const user = await createUser();
+    const initiatedAt = '2026-09-15T15:30:00.000Z';
+
+    await recordUserChatInitiationProvider(user.id, 'discord', {
+      initiatedAt,
+      order: '200',
+    });
+    await recordUserChatInitiationProvider(user.id, 'slack', {
+      initiatedAt,
+      order: '100',
+    });
+
+    await expect(getUserChatInitiationProvider(user.id)).resolves.toBe(
+      'discord',
+    );
+  });
+
+  it.each([true, false])(
+    'seeds model settings only on insert (initial overrides: %s)',
+    async (withOverrides) => {
+      const user = await createUser();
+      const conversation = {
+        surface: 'automation' as const,
+        workspaceId: 'model-settings-test',
+        conversationId: crypto.randomUUID(),
+      };
+      const expected = {
+        model: withOverrides ? 'openai/gpt-5.6' : null,
+        reasoningEffort: withOverrides ? 'high' : null,
+      };
+      const created = await getOrCreateFastAgentSession({
+        userId: user.id,
+        conversation,
+        ...(withOverrides
+          ? {
+              initialModel: 'openai/gpt-5.6',
+              initialReasoningEffort: 'high' as const,
+            }
+          : {}),
+      });
+      expect(created).toMatchObject({ created: true, ...expected });
+
+      const reused = await getOrCreateFastAgentSession({
+        userId: user.id,
+        conversation,
+        initialModel: 'anthropic/claude-sonnet-5',
+        initialReasoningEffort: 'low',
+      });
+      expect(reused).toMatchObject({
+        id: created.id,
+        created: false,
+        ...expected,
+      });
+      await expect(
+        fastAgentConversationRepository.findById({ id: created.id }),
+      ).resolves.toMatchObject(expected);
+      const row = await db.query.fastAgentConversations.findFirst({
+        where: eq(fastAgentConversations.id, created.id),
+      });
+      expect(row).toMatchObject(expected);
+    },
+  );
+
   it('persists a channel-less automation conversation', async () => {
     const user = await createUser();
     const conversation = {
@@ -54,6 +376,7 @@ describe('Fast conversation repository', () => {
     const session = await fastAgentConversationRepository.getOrCreate({
       userId: user.id,
       conversation,
+      initialTitle: 'Weekly product update',
     });
     const stored = await fastAgentConversationRepository.findById({
       id: session.id,
@@ -66,10 +389,66 @@ describe('Fast conversation repository', () => {
       .select({
         channelId: fastAgentConversations.currentReplyChannelId,
         surface: fastAgentConversations.surface,
+        title: fastAgentConversations.title,
       })
       .from(fastAgentConversations)
       .where(eq(fastAgentConversations.id, session.id));
-    expect(row).toEqual({ channelId: null, surface: 'automation' });
+    expect(row).toEqual({
+      channelId: null,
+      surface: 'automation',
+      title: 'Weekly product update',
+    });
+    const [unifiedSession] = await db
+      .select({ title: sessions.title })
+      .from(sessions)
+      .where(eq(sessions.fastConversationId, session.id));
+    expect(unifiedSession?.title).toBe('Weekly product update');
+  });
+
+  it('creates an automation-owned Session without a run-as user', async () => {
+    const conversation = {
+      surface: 'automation' as const,
+      workspaceId: 'ownerless-automation-repository-test',
+      conversationId: crypto.randomUUID(),
+    };
+
+    const created = await fastAgentConversationRepository.getOrCreate({
+      owner: { kind: 'automation', automationKey: 'custom_automation' },
+      conversation,
+      initialTitle: 'Ownerless weekly update',
+    });
+    const reused = await fastAgentConversationRepository.getOrCreate({
+      owner: { kind: 'automation', automationKey: 'custom_automation' },
+      conversation,
+      initialTitle: 'Changed title must not replace the original',
+    });
+
+    expect(created).toMatchObject({
+      userId: null,
+      owner: { kind: 'automation', automationKey: 'custom_automation' },
+    });
+    expect(reused).toMatchObject({ id: created.id, created: false });
+    const [unifiedSession] = await db
+      .select({
+        id: sessions.id,
+        ownerKind: sessions.ownerKind,
+        ownerUserId: sessions.ownerUserId,
+        ownerAutomation: sessions.ownerAutomation,
+        title: sessions.title,
+      })
+      .from(sessions)
+      .where(eq(sessions.fastConversationId, created.id));
+    expect(unifiedSession).toMatchObject({
+      ownerKind: 'automation',
+      ownerUserId: null,
+      ownerAutomation: 'custom_automation',
+      title: 'Ownerless weekly update',
+    });
+
+    await db.delete(sessions).where(eq(sessions.id, unifiedSession!.id));
+    await db
+      .delete(fastAgentConversations)
+      .where(eq(fastAgentConversations.id, created.id));
   });
 
   it.each(['teams', 'telegram'] as const)(
@@ -100,6 +479,160 @@ describe('Fast conversation repository', () => {
     },
   );
 
+  it('binds a new conversation to the Session it was created for', async () => {
+    const user = await createUser();
+    const [origin] = await db
+      .insert(sessions)
+      .values({
+        title: 'Weekly scan',
+        ownerKind: 'user',
+        ownerUserId: user.id,
+        sourceSurface: 'web',
+        sourceTrigger: 'manual',
+        visibility: 'visible',
+        activityAt: Math.floor(Date.now() / 1000),
+        cachedStatus: 'ready',
+      })
+      .returning({ id: sessions.id });
+    const conversation = {
+      surface: 'slack' as const,
+      workspaceId: 'team-origin-test',
+      conversationId: `thread-origin-${origin!.id}`,
+      replyTarget: {
+        channelId: 'channel-origin-test',
+        threadId: `thread-origin-${origin!.id}`,
+      },
+    };
+
+    const created = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation,
+      sessionId: origin!.id,
+    });
+    const [bound] = await db
+      .select({ id: sessions.id })
+      .from(sessions)
+      .where(eq(sessions.fastConversationId, created.id));
+    expect(bound?.id).toBe(origin!.id);
+
+    // A second Session cannot claim a conversation that already exists.
+    const [other] = await db
+      .insert(sessions)
+      .values({
+        title: 'Another scan',
+        ownerKind: 'user',
+        ownerUserId: user.id,
+        sourceSurface: 'web',
+        sourceTrigger: 'manual',
+        visibility: 'visible',
+        activityAt: Math.floor(Date.now() / 1000),
+        cachedStatus: 'ready',
+      })
+      .returning({ id: sessions.id });
+    const reused = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation,
+      sessionId: other!.id,
+    });
+    expect(reused.id).toBe(created.id);
+    const [otherRow] = await db
+      .select({ fastConversationId: sessions.fastConversationId })
+      .from(sessions)
+      .where(eq(sessions.id, other!.id));
+    expect(otherRow?.fastConversationId).toBeNull();
+    await db
+      .delete(sessions)
+      .where(inArray(sessions.id, [origin!.id, other!.id]));
+  });
+
+  it('rejects a non-owner reusing an already bound private Session', async () => {
+    const owner = await createUser();
+    const otherUser = await createUser();
+    const created = await getOrCreateFastAgentSession({
+      userId: owner.id,
+      conversation: {
+        surface: 'web',
+        workspaceId: owner.id,
+        conversationId: crypto.randomUUID(),
+      },
+      privacy: 'private',
+    });
+    const bound = await getSessionForFastConversation(db, created.id);
+
+    await expect(
+      getOrCreateFastAgentSession({
+        userId: owner.id,
+        conversation: {
+          surface: 'web',
+          workspaceId: owner.id,
+          conversationId: crypto.randomUUID(),
+        },
+        sessionId: bound!.id,
+      }),
+    ).resolves.toMatchObject({ id: created.id, privacy: 'private' });
+    await expect(
+      getOrCreateFastAgentSession({
+        userId: otherUser.id,
+        conversation: {
+          surface: 'web',
+          workspaceId: otherUser.id,
+          conversationId: crypto.randomUUID(),
+        },
+        sessionId: bound!.id,
+      }),
+    ).rejects.toThrow('private owner does not match');
+  });
+
+  it('converges concurrent launches into one Session on the conversation that bound first', async () => {
+    const user = await createUser();
+    const [origin] = await db
+      .insert(sessions)
+      .values({
+        title: 'Weekly scan',
+        ownerKind: 'user',
+        ownerUserId: user.id,
+        sourceSurface: 'web',
+        sourceTrigger: 'manual',
+        visibility: 'visible',
+        activityAt: Math.floor(Date.now() / 1000),
+        cachedStatus: 'ready',
+      })
+      .returning({ id: sessions.id });
+    const identity = (index: number) => ({
+      surface: 'slack' as const,
+      workspaceId: 'team-origin-race-test',
+      conversationId: `thread-origin-race-${origin!.id}-${index}`,
+      replyTarget: {
+        channelId: 'channel-origin-race-test',
+        threadId: `thread-origin-race-${origin!.id}-${index}`,
+      },
+    });
+
+    const results = await Promise.all(
+      Array.from({ length: 6 }, (_, index) =>
+        fastAgentConversationRepository.getOrCreate({
+          userId: user.id,
+          conversation: identity(index),
+          sessionId: origin!.id,
+        }),
+      ),
+    );
+
+    expect(new Set(results.map(({ id }) => id)).size).toBe(1);
+    expect(results.filter(({ created }) => created)).toHaveLength(1);
+    const [bound] = await db
+      .select({ fastConversationId: sessions.fastConversationId })
+      .from(sessions)
+      .where(eq(sessions.id, origin!.id));
+    expect(bound?.fastConversationId).toBe(results[0]!.id);
+    const rows = await db
+      .select({ id: fastAgentConversations.id })
+      .from(fastAgentConversations)
+      .where(eq(fastAgentConversations.workspaceId, 'team-origin-race-test'));
+    expect(rows).toHaveLength(1);
+    await db.delete(sessions).where(eq(sessions.id, origin!.id));
+  });
+
   it('converges concurrent creation on one provider-neutral row', async () => {
     const user = await createUser();
     const sessions = await Promise.all(
@@ -128,6 +661,66 @@ describe('Fast conversation repository', () => {
       );
 
     expect(rows).toEqual([{ id: sessions[0]!.id }]);
+  });
+
+  it('lets another participant take a turn in a user-owned conversation', async () => {
+    const owner = await createUser();
+    const participant = await createUser();
+    const conversation = {
+      surface: 'slack' as const,
+      workspaceId: 'team-participant-test',
+      conversationId: `thread-participant-${owner.id}`,
+      replyTarget: {
+        channelId: 'channel-participant-test',
+        threadId: `thread-participant-${owner.id}`,
+      },
+    };
+    const created = await fastAgentConversationRepository.getOrCreate({
+      userId: owner.id,
+      conversation,
+    });
+    expect(created.created).toBe(true);
+
+    // A coworker replying in the bound thread is a participant, not a new
+    // owner: the turn reuses the conversation and ownership is unchanged.
+    const reused = await fastAgentConversationRepository.getOrCreate({
+      userId: participant.id,
+      conversation,
+    });
+    expect(reused).toMatchObject({ id: created.id, created: false });
+    expect(reused.owner).toEqual({ kind: 'user', userId: owner.id });
+    expect(reused.userId).toBe(owner.id);
+  });
+
+  it('rejects an explicit owner that does not match the conversation', async () => {
+    const owner = await createUser();
+    const other = await createUser();
+    const conversation = {
+      surface: 'slack' as const,
+      workspaceId: 'team-owner-mismatch-test',
+      conversationId: `thread-owner-mismatch-${owner.id}`,
+      replyTarget: {
+        channelId: 'channel-owner-mismatch-test',
+        threadId: `thread-owner-mismatch-${owner.id}`,
+      },
+    };
+    await fastAgentConversationRepository.getOrCreate({
+      owner: { kind: 'user', userId: owner.id },
+      conversation,
+    });
+
+    await expect(
+      fastAgentConversationRepository.getOrCreate({
+        owner: { kind: 'user', userId: other.id },
+        conversation,
+      }),
+    ).rejects.toThrow('Fast conversation owner does not match the caller.');
+    await expect(
+      fastAgentConversationRepository.getOrCreate({
+        owner: { kind: 'automation', automationKey: 'custom_automation' },
+        conversation,
+      }),
+    ).rejects.toThrow('Fast conversation owner does not match the caller.');
   });
 
   it('returns the persisted Fast conversation title', async () => {
@@ -182,6 +775,51 @@ describe('Fast conversation repository', () => {
 
     expect(moved.id).toBe(original.id);
     expect(resolved?.conversation).toEqual(movedConversation);
+  });
+
+  it('resolves a delayed Slack root to the original Fast session', async () => {
+    const user = await createUser();
+    const pendingConversation = {
+      surface: 'slack' as const,
+      workspaceId: 'team-delayed-root',
+      conversationId: 'automation-1:occurrence-1',
+      replyTarget: { channelId: 'channel-delayed-root' },
+    };
+    const pending = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: pendingConversation,
+    });
+    await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: {
+        ...pendingConversation,
+        replyTarget: {
+          ...pendingConversation.replyTarget,
+          threadId: 'root-delayed-root',
+        },
+      },
+    });
+    const inboundConversation = {
+      surface: 'slack' as const,
+      workspaceId: pendingConversation.workspaceId,
+      conversationId: 'root-delayed-root',
+      replyTarget: {
+        channelId: pendingConversation.replyTarget.channelId,
+        threadId: 'root-delayed-root',
+      },
+    };
+
+    expect(await hasFastAgentSession(inboundConversation)).toBe(true);
+    const resumed = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: inboundConversation,
+    });
+
+    expect(resumed.id).toBe(pending.id);
+    expect(resumed.conversation).toMatchObject({
+      conversationId: pendingConversation.conversationId,
+      replyTarget: inboundConversation.replyTarget,
+    });
   });
 
   it('isolates identical external identities by provider', async () => {
@@ -360,7 +998,6 @@ describe('Fast conversation repository', () => {
         messages: [visibleMessage],
       }),
     ]);
-
     const stored = await fastAgentConversationRepository.findById({
       id: canonical.id,
     });
@@ -418,10 +1055,11 @@ describe('Fast conversation repository', () => {
       source: 'slack',
     };
 
-    await Promise.all([
+    const claimResults = await Promise.all([
       fastAgentConversationRepository.upsertMessage({
         conversationId: session.id,
         message: baseMessage,
+        insertOnly: true,
       }),
       fastAgentConversationRepository.upsertMessage({
         conversationId: session.id,
@@ -429,7 +1067,12 @@ describe('Fast conversation repository', () => {
           ...baseMessage,
           contentBlocks: [{ type: 'text', text: 'Recovered' }],
         },
+        insertOnly: true,
       }),
+    ]);
+    expect(claimResults.map((result) => result.inserted).sort()).toEqual([
+      false,
+      true,
     ]);
 
     const rows = await db
@@ -449,7 +1092,7 @@ describe('Fast conversation repository', () => {
     ).toBe(true);
   });
 
-  it('classifies the first human prompt after platform events and retries idempotently', async () => {
+  it('classifies the first message after platform events and human reactions', async () => {
     const user = await createUser();
     const session = await fastAgentConversationRepository.getOrCreate({
       userId: user.id,
@@ -458,6 +1101,7 @@ describe('Fast conversation repository', () => {
     const prompt = (
       eventId: string,
       turnSource: 'human' | 'platform_event',
+      inputKind?: typeof FAST_AGENT_REACTION_INPUT_TYPE,
     ) => ({
       eventId,
       turnId: eventId,
@@ -466,7 +1110,11 @@ describe('Fast conversation repository', () => {
       eventType: 'roomote_runtime.user_prompt' as const,
       role: 'user' as const,
       contentBlocks: [{ type: 'text' as const, text: 'Prompt' }],
-      metadata: { visibleInTranscript: true, turnSource },
+      metadata: {
+        visibleInTranscript: true,
+        turnSource,
+        ...(inputKind ? { inputKind } : {}),
+      },
       payload: {},
       source: 'slack',
     });
@@ -476,25 +1124,35 @@ describe('Fast conversation repository', () => {
         conversationId: session.id,
         message: prompt('platform-event', 'platform_event'),
       }),
-    ).resolves.toEqual({ initialHumanTurn: false });
+    ).resolves.toMatchObject({ initialHumanTurn: false });
+    await expect(
+      fastAgentConversationRepository.upsertMessage({
+        conversationId: session.id,
+        message: prompt(
+          'human-reaction',
+          'human',
+          FAST_AGENT_REACTION_INPUT_TYPE,
+        ),
+      }),
+    ).resolves.toMatchObject({ initialHumanTurn: false });
     await expect(
       fastAgentConversationRepository.upsertMessage({
         conversationId: session.id,
         message: prompt('first-human', 'human'),
       }),
-    ).resolves.toEqual({ initialHumanTurn: true });
+    ).resolves.toMatchObject({ initialHumanTurn: true });
     await expect(
       fastAgentConversationRepository.upsertMessage({
         conversationId: session.id,
         message: prompt('first-human', 'human'),
       }),
-    ).resolves.toEqual({ initialHumanTurn: true });
+    ).resolves.toMatchObject({ initialHumanTurn: true });
     await expect(
       fastAgentConversationRepository.upsertMessage({
         conversationId: session.id,
         message: prompt('later-human', 'human'),
       }),
-    ).resolves.toEqual({ initialHumanTurn: false });
+    ).resolves.toMatchObject({ initialHumanTurn: false });
   });
 
   it('lets only one concurrent human prompt claim the initial turn', async () => {
@@ -556,7 +1214,7 @@ describe('Fast conversation repository', () => {
           source: 'slack',
         },
       }),
-    ).resolves.toEqual({ initialHumanTurn: false });
+    ).resolves.toMatchObject({ initialHumanTurn: false });
   });
 
   it('does not treat legacy platform-event history as a human turn', async () => {
@@ -596,7 +1254,7 @@ describe('Fast conversation repository', () => {
           source: 'slack',
         },
       }),
-    ).resolves.toEqual({ initialHumanTurn: true });
+    ).resolves.toMatchObject({ initialHumanTurn: true });
   });
 
   it('reconciles a persisted legacy retry notice after its turn stops', async () => {
@@ -622,7 +1280,10 @@ describe('Fast conversation repository', () => {
     });
 
     await expect(
-      reconcileFastAgentInferenceRetryNotices(session.id),
+      reconcileFastAgentInferenceRetryNotices(
+        session.id,
+        'next_turn_reconcile',
+      ),
     ).resolves.toBe(1);
 
     const [notice] = await db
@@ -637,6 +1298,57 @@ describe('Fast conversation repository', () => {
       purpose: 'closeout',
       inferenceRetryNotice: true,
       inferenceRetryActive: false,
+      interruptionReason: 'next_turn_reconcile',
+    });
+  });
+
+  it('reveals a quiet durable retry marker after its turn is orphaned', async () => {
+    const user = await createUser();
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    await fastAgentConversationRepository.upsertMessage({
+      conversationId: session.id,
+      message: {
+        eventId: 'turn-stale:retry-notice:0',
+        turnId: 'turn-stale',
+        turnSeq: 1,
+        ts: 100,
+        eventType: 'roomote_runtime.assistant_message',
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: 'Retrying automatically…' }],
+        metadata: {
+          visibleInTranscript: false,
+          purpose: 'progress',
+          inferenceRetryNotice: true,
+          inferenceRetryActive: true,
+        },
+        payload: { purpose: 'progress' },
+        source: 'web',
+      },
+    });
+
+    await expect(
+      reconcileFastAgentInferenceRetryNotices(
+        session.id,
+        'turn_settled_reconcile',
+      ),
+    ).resolves.toBe(1);
+
+    const [notice] = await db
+      .select()
+      .from(fastAgentMessages)
+      .where(eq(fastAgentMessages.conversationId, session.id));
+    expect(notice?.contentBlocks).toEqual([
+      { type: 'text', text: INTERRUPTED_INFERENCE_RETRY_MESSAGE },
+    ]);
+    expect(notice?.metadata).toMatchObject({
+      visibleInTranscript: true,
+      purpose: 'closeout',
+      inferenceRetryNotice: true,
+      inferenceRetryActive: false,
+      interruptionReason: 'turn_settled_reconcile',
     });
   });
 
@@ -707,9 +1419,890 @@ describe('Fast conversation repository', () => {
       );
     expect(
       rows.find((row) => row.conversationId === expired.id)?.metadata,
-    ).toMatchObject({ inferenceRetryActive: false });
+    ).toMatchObject({
+      inferenceRetryActive: false,
+      interruptionReason: 'expired_lease_reconcile',
+    });
     expect(
       rows.find((row) => row.conversationId === active.id)?.metadata,
     ).toMatchObject({ inferenceRetryActive: true });
+  });
+
+  it('preserves a pre-recorded interruption cause when reconciling', async () => {
+    const user = await createUser();
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    await fastAgentConversationRepository.upsertMessage({
+      conversationId: session.id,
+      message: {
+        eventId: 'turn-lost:retry-notice:0',
+        turnId: 'turn-lost',
+        turnSeq: 1,
+        ts: 100,
+        eventType: 'roomote_runtime.assistant_message',
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: 'Retrying in 1s' }],
+        metadata: {
+          visibleInTranscript: true,
+          purpose: 'progress',
+          inferenceRetryNotice: true,
+          inferenceRetryActive: true,
+        },
+        payload: { purpose: 'progress' },
+        source: 'web',
+      },
+    });
+
+    await markFastAgentInferenceRetryNoticeInterruption(
+      session.id,
+      'turn-lost:retry-notice:0',
+      'lock_lost',
+    );
+
+    const [stamped] = await db
+      .select({ metadata: fastAgentMessages.metadata })
+      .from(fastAgentMessages)
+      .where(eq(fastAgentMessages.conversationId, session.id));
+    // The stamp records the cause without ending the notice; the reconciler
+    // still owns the terminal flip.
+    expect(stamped?.metadata).toMatchObject({
+      inferenceRetryActive: true,
+      interruptionReason: 'lock_lost',
+    });
+
+    // A second stamp is fill-only and cannot overwrite the recorded cause.
+    await markFastAgentInferenceRetryNoticeInterruption(
+      session.id,
+      'turn-lost:retry-notice:0',
+      'turn_aborted',
+    );
+
+    await expect(
+      reconcileFastAgentInferenceRetryNotices(
+        session.id,
+        'next_turn_reconcile',
+      ),
+    ).resolves.toBe(1);
+
+    const [notice] = await db
+      .select()
+      .from(fastAgentMessages)
+      .where(eq(fastAgentMessages.conversationId, session.id));
+    expect(notice?.contentBlocks).toEqual([
+      { type: 'text', text: INTERRUPTED_INFERENCE_RETRY_MESSAGE },
+    ]);
+    expect(notice?.metadata).toMatchObject({
+      inferenceRetryActive: false,
+      interruptionReason: 'lock_lost',
+    });
+
+    // Once terminal, the notice no longer matches the fill-only stamp.
+    await expect(
+      markFastAgentInferenceRetryNoticeInterruption(
+        session.id,
+        'turn-lost:retry-notice:0',
+        'turn_aborted',
+      ),
+    ).resolves.toBe(false);
+    const [settled] = await db
+      .select({ metadata: fastAgentMessages.metadata })
+      .from(fastAgentMessages)
+      .where(eq(fastAgentMessages.conversationId, session.id));
+    expect(settled?.metadata).toMatchObject({
+      interruptionReason: 'lock_lost',
+    });
+  });
+
+  it('never loses a concurrently stamped cause to the reconciler', async () => {
+    const user = await createUser();
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+
+    for (let round = 0; round < 10; round += 1) {
+      const eventId = `turn-race-${round}:retry-notice:0`;
+      await fastAgentConversationRepository.upsertMessage({
+        conversationId: session.id,
+        message: {
+          eventId,
+          turnId: `turn-race-${round}`,
+          turnSeq: 1,
+          ts: 100 + round,
+          eventType: 'roomote_runtime.assistant_message',
+          role: 'assistant',
+          contentBlocks: [{ type: 'text', text: 'Retrying in 1s' }],
+          metadata: {
+            visibleInTranscript: true,
+            purpose: 'progress',
+            inferenceRetryNotice: true,
+            inferenceRetryActive: true,
+          },
+          payload: { purpose: 'progress' },
+          source: 'web',
+        },
+      });
+
+      // Race the fill-only lock-lost stamp against the reconciler on separate
+      // connections. Whenever the stamp reports success (the notice was still
+      // active and unreasoned when it ran), the surviving cause must be
+      // lock_lost regardless of how the two interleaved.
+      const [stamped] = await Promise.all([
+        markFastAgentInferenceRetryNoticeInterruption(
+          session.id,
+          eventId,
+          'lock_lost',
+        ),
+        reconcileFastAgentInferenceRetryNotices(
+          session.id,
+          'next_turn_reconcile',
+        ),
+      ]);
+
+      const [notice] = await db
+        .select({ metadata: fastAgentMessages.metadata })
+        .from(fastAgentMessages)
+        .where(
+          and(
+            eq(fastAgentMessages.conversationId, session.id),
+            eq(fastAgentMessages.eventId, eventId),
+          ),
+        );
+      expect(notice?.metadata).toMatchObject({
+        inferenceRetryActive: false,
+        interruptionReason: stamped ? 'lock_lost' : 'next_turn_reconcile',
+      });
+    }
+  });
+
+  it('surfaces the interrupted request the conversation still owes', async () => {
+    const user = await createUser();
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    const write = (
+      message: Parameters<
+        typeof fastAgentConversationRepository.upsertMessage
+      >[0]['message'],
+    ) =>
+      fastAgentConversationRepository.upsertMessage({
+        conversationId: session.id,
+        message,
+      });
+    const prompt = (
+      turnId: string,
+      ts: number,
+      text: string,
+      metadata: Record<string, unknown> = {},
+    ) =>
+      write({
+        eventId: `${turnId}:user`,
+        turnId,
+        turnSeq: 0,
+        ts,
+        eventType: 'roomote_runtime.user_prompt',
+        role: 'user',
+        contentBlocks: [{ type: 'text', text }],
+        metadata: {
+          visibleInTranscript: true,
+          turnSource: 'human',
+          ...metadata,
+        },
+        payload: {},
+        source: 'slack',
+      });
+    const closeout = (
+      turnId: string,
+      ts: number,
+      metadata: Record<string, unknown> = {},
+    ) =>
+      write({
+        eventId: `${turnId}:assistant:0`,
+        turnId,
+        turnSeq: 1,
+        ts,
+        eventType: 'roomote_runtime.assistant_message',
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: 'closeout' }],
+        metadata: {
+          visibleInTranscript: true,
+          purpose: 'closeout',
+          ...metadata,
+        },
+        payload: { purpose: 'closeout' },
+        source: 'slack',
+      });
+
+    await expect(
+      findFastAgentUnresolvedRequest(session.id),
+    ).resolves.toBeNull();
+
+    // A turn that ended in an interruption closeout is still owed.
+    await prompt('turn-1', 100, 'Break down the duplicate validation');
+    await closeout('turn-1', 110, { interruptionReason: 'api_shutdown' });
+    await expect(findFastAgentUnresolvedRequest(session.id)).resolves.toEqual({
+      turnId: 'turn-1',
+      text: 'Break down the duplicate validation',
+      reason: 'api_shutdown',
+    });
+
+    // Platform events and reactions that arrive afterward neither answer nor
+    // supersede the request, so they must not mask it.
+    await prompt('turn-1b', 150, '<platform_event>{}</platform_event>', {
+      visibleInTranscript: false,
+      turnSource: 'platform_event',
+    });
+    await closeout('turn-1b', 160);
+    await prompt('turn-1c', 170, 'reacted', {
+      inputKind: FAST_AGENT_REACTION_INPUT_TYPE,
+    });
+    await closeout('turn-1c', 180);
+    await expect(findFastAgentUnresolvedRequest(session.id)).resolves.toEqual({
+      turnId: 'turn-1',
+      text: 'Break down the duplicate validation',
+      reason: 'api_shutdown',
+    });
+
+    // A nudge that resumed it and was interrupted again still surfaces the
+    // original request, not the nudge.
+    await prompt('turn-2', 200, 'hey', { resumesTurnId: 'turn-1' });
+    await closeout('turn-2', 210, { interruptionReason: 'lock_lost' });
+    await expect(findFastAgentUnresolvedRequest(session.id)).resolves.toEqual({
+      turnId: 'turn-1',
+      text: 'Break down the duplicate validation',
+      reason: 'lock_lost',
+    });
+
+    // A completed turn settles the debt.
+    await prompt('turn-3', 300, 'Thanks, what about the release?');
+    await closeout('turn-3', 310);
+    await expect(
+      findFastAgentUnresolvedRequest(session.id),
+    ).resolves.toBeNull();
+
+    // An interrupted platform-event turn is not a request the user is owed.
+    await prompt('turn-4', 400, '<platform_event>{}</platform_event>', {
+      visibleInTranscript: false,
+      turnSource: 'platform_event',
+    });
+    await closeout('turn-4', 410, { interruptionReason: 'api_shutdown' });
+    await expect(
+      findFastAgentUnresolvedRequest(session.id),
+    ).resolves.toBeNull();
+  });
+
+  it('summarizes what an interrupted attempt already did for the run that resumes it', async () => {
+    const user = await createUser();
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    const write = (
+      message: Parameters<
+        typeof fastAgentConversationRepository.upsertMessage
+      >[0]['message'],
+    ) =>
+      fastAgentConversationRepository.upsertMessage({
+        conversationId: session.id,
+        message,
+      });
+    const tool = (
+      ordinal: number,
+      eventType: 'roomote_runtime.tool_call' | 'roomote_runtime.tool_result',
+      payload: Record<string, unknown>,
+      text?: string,
+    ) =>
+      // Production shape: the call and its result share one canonical event,
+      // so the result overwrites the call row when it lands.
+      write({
+        eventId: `turn-a:tool:${ordinal}`,
+        turnId: 'turn-a',
+        turnSeq: ordinal * 2,
+        ts: 1_000 + ordinal * 10,
+        eventType,
+        role: 'tool',
+        contentBlocks: text ? [{ type: 'text', text }] : [],
+        metadata: { visibleInTranscript: true },
+        payload: { toolCallId: `turn-a:tool:${ordinal}`, ...payload },
+        source: 'slack',
+      });
+
+    await write({
+      eventId: 'turn-a:user',
+      turnId: 'turn-a',
+      turnSeq: 0,
+      ts: 990,
+      eventType: 'roomote_runtime.user_prompt',
+      role: 'user',
+      contentBlocks: [{ type: 'text', text: 'Count the root files.' }],
+      metadata: { visibleInTranscript: true, turnSource: 'human' },
+      payload: {},
+      source: 'slack',
+    });
+    await write({
+      eventId: 'turn-a:assistant:0',
+      turnId: 'turn-a',
+      turnSeq: 1,
+      ts: 1_000,
+      eventType: 'roomote_runtime.assistant_message',
+      role: 'assistant',
+      contentBlocks: [{ type: 'text', text: 'Starting on it.' }],
+      metadata: {
+        visibleInTranscript: true,
+        purpose: 'progress',
+        inferenceRetryNotice: true,
+      },
+      payload: { purpose: 'progress' },
+      source: 'slack',
+    });
+    // A completed launch, a failed message, and a call the process died on
+    // (its call row was never replaced by a result).
+    await tool(1, 'roomote_runtime.tool_call', {
+      toolName: 'launch_task',
+      rawInput: { arguments: { prompt: 'Fix the bug' } },
+    });
+    await tool(
+      1,
+      'roomote_runtime.tool_result',
+      {
+        toolName: 'launch_task',
+        status: 'completed',
+        rawInput: { arguments: { prompt: 'Fix the bug' } },
+      },
+      '{"success":true,"taskId":"task-1"}',
+    );
+    await tool(2, 'roomote_runtime.tool_call', {
+      toolName: 'send_task_message',
+      rawInput: { arguments: { taskId: 'task-1', message: 'hi' } },
+    });
+    await tool(
+      2,
+      'roomote_runtime.tool_result',
+      {
+        toolName: 'send_task_message',
+        status: 'failed',
+        rawInput: { arguments: { taskId: 'task-1', message: 'hi' } },
+      },
+      '{"success":false,"error":"Task is not accepting messages."}',
+    );
+    await tool(3, 'roomote_runtime.tool_call', {
+      toolName: 'save_memory',
+      rawInput: { arguments: { content: 'Prefers bullets.' } },
+    });
+    // A subagent task call persists its input directly, without the
+    // `arguments` wrapper the native tools use.
+    await tool(
+      4,
+      'roomote_runtime.tool_result',
+      {
+        toolName: 'task',
+        status: 'failed',
+        rawInput: { prompt: 'Audit the queue', subagent_type: 'explore' },
+      },
+      'Subagent exited early.',
+    );
+    // Rows from another turn and hidden or terminal assistant rows are not
+    // part of the attempt.
+    await write({
+      eventId: 'turn-b:assistant:0',
+      turnId: 'turn-b',
+      turnSeq: 1,
+      ts: 2_000,
+      eventType: 'roomote_runtime.assistant_message',
+      role: 'assistant',
+      contentBlocks: [{ type: 'text', text: 'Other turn.' }],
+      metadata: { visibleInTranscript: true },
+      payload: {},
+      source: 'slack',
+    });
+    await write({
+      eventId: 'turn-a:interruption',
+      turnId: 'turn-a',
+      turnSeq: 9,
+      ts: 1_900,
+      eventType: 'roomote_runtime.assistant_message',
+      role: 'assistant',
+      contentBlocks: [{ type: 'text', text: 'Roomote restarted…' }],
+      metadata: {
+        visibleInTranscript: true,
+        purpose: 'closeout',
+        interruptionReason: 'api_shutdown',
+      },
+      payload: { purpose: 'closeout' },
+      source: 'slack',
+    });
+
+    await expect(
+      loadFastAgentTurnAttemptSummary(session.id, 'turn-a'),
+    ).resolves.toEqual({
+      // Transcript order: the reply, then each call with its outcome.
+      events: [
+        {
+          kind: 'reply',
+          text: 'Starting on it.',
+          purpose: 'progress',
+          inferenceRetryNotice: true,
+        },
+        {
+          kind: 'action',
+          tool: 'launch_task',
+          arguments: { prompt: 'Fix the bug' },
+          status: 'completed',
+          result: '{"success":true,"taskId":"task-1"}',
+        },
+        {
+          kind: 'action',
+          tool: 'send_task_message',
+          arguments: { taskId: 'task-1', message: 'hi' },
+          status: 'failed',
+          result: '{"success":false,"error":"Task is not accepting messages."}',
+        },
+        {
+          kind: 'action',
+          tool: 'save_memory',
+          arguments: { content: 'Prefers bullets.' },
+          status: 'unknown',
+        },
+        {
+          kind: 'action',
+          tool: 'task',
+          arguments: { prompt: 'Audit the queue', subagent_type: 'explore' },
+          status: 'failed',
+          result: 'Subagent exited early.',
+        },
+      ],
+      // The resumed run numbers its rows after the attempt's, so nothing
+      // is overwritten: assistant:0 exists, tools 1..4 exist, turnSeq 9 is
+      // the highest row.
+      next: {
+        assistantOrdinal: 1,
+        toolOrdinal: 5,
+        retryNoticeOrdinal: 0,
+        turnSeq: 10,
+      },
+      prompt: { ts: 990, turnSeq: 0 },
+    });
+    await expect(
+      loadFastAgentTurnAttemptSummary(session.id, 'turn-none'),
+    ).resolves.toEqual({
+      events: [],
+      next: {
+        assistantOrdinal: 0,
+        toolOrdinal: 0,
+        retryNoticeOrdinal: 0,
+        turnSeq: 0,
+      },
+      prompt: null,
+    });
+  });
+
+  it('walks a durable turn row through claim, release, revoke, and delivery', async () => {
+    const user = await createUser();
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    const parent = { sessionId: session.id, conversation: slackConversation };
+    const insertRow = async (eventKey: string) => {
+      const [row] = await db
+        .insert(fastAgentParentEvents)
+        .values({
+          conversationId: session.id,
+          eventKey,
+          parent,
+          event: { type: 'human_follow_up', eventId: eventKey },
+          admission: 'inline',
+          claimedUntil: new Date(Date.now() + 1_000),
+        })
+        .returning({ id: fastAgentParentEvents.id });
+      return row!.id;
+    };
+    const readRow = async (id: string) => {
+      const [row] = await db
+        .select({
+          claimedUntil: fastAgentParentEvents.claimedUntil,
+          deliveredAt: fastAgentParentEvents.deliveredAt,
+          discardedAt: fastAgentParentEvents.discardedAt,
+          lastError: fastAgentParentEvents.lastError,
+        })
+        .from(fastAgentParentEvents)
+        .where(eq(fastAgentParentEvents.id, id));
+      return row!;
+    };
+
+    // A live owner renews its claim, then hands the turn back on interruption.
+    const resumable = await insertRow('durable-resumable');
+    const before = (await readRow(resumable)).claimedUntil!;
+    await expect(renewFastAgentDurableTurnClaim(resumable)).resolves.toBe(true);
+    expect((await readRow(resumable)).claimedUntil!.getTime()).toBeGreaterThan(
+      before.getTime(),
+    );
+    await expect(releaseFastAgentDurableTurnClaim(resumable)).resolves.toBe(
+      true,
+    );
+    expect((await readRow(resumable)).claimedUntil).toBeNull();
+
+    // Revocation is terminal: later renewals, releases, and settlements no-op.
+    const acted = await insertRow('durable-acted');
+    await expect(
+      revokeFastAgentDurableTurnReplay(acted, 'Native tool launch_task'),
+    ).resolves.toBe(true);
+    const revoked = await readRow(acted);
+    expect(revoked.discardedAt).not.toBeNull();
+    expect(revoked.lastError).toBe('Native tool launch_task');
+    await expect(renewFastAgentDurableTurnClaim(acted)).resolves.toBe(false);
+    await expect(releaseFastAgentDurableTurnClaim(acted)).resolves.toBe(false);
+    await expect(markFastAgentDurableTurnDelivered(acted)).resolves.toBe(false);
+
+    // Delivery settles a pending row exactly once.
+    const completed = await insertRow('durable-completed');
+    await expect(markFastAgentDurableTurnDelivered(completed)).resolves.toBe(
+      true,
+    );
+    expect((await readRow(completed)).deliveredAt).not.toBeNull();
+    await expect(markFastAgentDurableTurnDelivered(completed)).resolves.toBe(
+      false,
+    );
+    await expect(
+      revokeFastAgentDurableTurnReplay(completed, 'late'),
+    ).resolves.toBe(false);
+  });
+
+  it('parks a durable turn for a scheduled retry and lets a resumed run find its notice', async () => {
+    const user = await createUser();
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    const parent = { sessionId: session.id, conversation: slackConversation };
+    const [row] = await db
+      .insert(fastAgentParentEvents)
+      .values({
+        conversationId: session.id,
+        eventKey: 'durable-retry',
+        parent,
+        event: { type: 'human_follow_up', eventId: 'durable-retry' },
+        admission: 'inline',
+        claimedUntil: new Date(Date.now() + 1_000),
+      })
+      .returning({ id: fastAgentParentEvents.id });
+    const readRow = async () => {
+      const [current] = await db
+        .select({
+          claimedUntil: fastAgentParentEvents.claimedUntil,
+          retryAt: fastAgentParentEvents.retryAt,
+          inferenceRetries: fastAgentParentEvents.inferenceRetries,
+          lastError: fastAgentParentEvents.lastError,
+        })
+        .from(fastAgentParentEvents)
+        .where(eq(fastAgentParentEvents.id, row!.id));
+      return current!;
+    };
+
+    // Parking releases the owner's claim and records when and why.
+    const retryAt = new Date(Date.now() + 45_000);
+    await expect(
+      scheduleFastAgentDurableTurnRetry(row!.id, {
+        retryAt,
+        inferenceRetries: 2,
+        reason: 'Inference retry 2/6 scheduled (timeout).',
+      }),
+    ).resolves.toBe(true);
+    const parked = await readRow();
+    expect(parked).toMatchObject({
+      claimedUntil: null,
+      inferenceRetries: 2,
+      lastError: 'Inference retry 2/6 scheduled (timeout).',
+    });
+    expect(parked.retryAt?.getTime()).toBe(retryAt.getTime());
+
+    // A settled row can no longer be parked.
+    await expect(markFastAgentDurableTurnDelivered(row!.id)).resolves.toBe(
+      true,
+    );
+    await expect(
+      scheduleFastAgentDurableTurnRetry(row!.id, {
+        retryAt,
+        inferenceRetries: 3,
+        reason: 'late',
+      }),
+    ).resolves.toBe(false);
+    expect((await readRow()).inferenceRetries).toBe(2);
+
+    // The resumed run finds the notice its predecessor left active for this
+    // turn, and only while it is still active.
+    await fastAgentConversationRepository.upsertMessage({
+      conversationId: session.id,
+      message: {
+        eventId: 'turn-retry:retry-notice:0',
+        turnId: 'turn-retry',
+        turnSeq: 1,
+        ts: 100,
+        eventType: 'roomote_runtime.assistant_message',
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: 'Retrying in 45s' }],
+        metadata: {
+          visibleInTranscript: true,
+          purpose: 'progress',
+          inferenceRetryNotice: true,
+          inferenceRetryActive: true,
+          platformMessageId: 'notice-1',
+        },
+        payload: { purpose: 'progress' },
+        source: 'slack',
+      },
+    });
+    await expect(
+      findFastAgentActiveInferenceRetryNotice(session.id, 'turn-retry'),
+    ).resolves.toEqual({
+      eventId: 'turn-retry:retry-notice:0',
+      ts: 100,
+      text: 'Retrying in 45s',
+      platformMessageId: 'notice-1',
+    });
+    await expect(
+      findFastAgentActiveInferenceRetryNotice(session.id, 'turn-other'),
+    ).resolves.toBeNull();
+    await reconcileFastAgentInferenceRetryNotices(
+      session.id,
+      'turn_settled_reconcile',
+    );
+    await expect(
+      findFastAgentActiveInferenceRetryNotice(session.id, 'turn-retry'),
+    ).resolves.toBeNull();
+  });
+
+  it('does not reconcile an expired lease while a durable retry is scheduled', async () => {
+    const user = await createUser();
+    const conversation = {
+      surface: 'web' as const,
+      workspaceId: user.id,
+      conversationId: crypto.randomUUID(),
+    };
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation,
+    });
+    await fastAgentConversationRepository.upsertMessage({
+      conversationId: session.id,
+      message: {
+        eventId: 'turn-1:retry-notice:0',
+        turnId: 'turn-1',
+        turnSeq: 1,
+        ts: 100,
+        eventType: 'roomote_runtime.assistant_message',
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: 'Retrying in 45s' }],
+        metadata: {
+          visibleInTranscript: true,
+          purpose: 'progress',
+          inferenceRetryNotice: true,
+          inferenceRetryActive: true,
+        },
+        payload: { purpose: 'progress' },
+        source: 'web',
+      },
+    });
+    await db
+      .update(sessions)
+      .set({ respondingUntil: new Date(Date.now() - 1_000) })
+      .where(eq(sessions.fastConversationId, session.id));
+    await db.insert(fastAgentParentEvents).values({
+      conversationId: session.id,
+      eventKey: `scheduled-retry-${session.id}`,
+      parent: { sessionId: session.id, conversation },
+      event: { type: 'human_follow_up', eventId: 'scheduled-retry' },
+      admission: 'inline',
+      retryAt: new Date(Date.now() + 60_000),
+    });
+    const readNotice = async () => {
+      const [notice] = await db
+        .select({ metadata: fastAgentMessages.metadata })
+        .from(fastAgentMessages)
+        .where(
+          and(
+            eq(fastAgentMessages.conversationId, session.id),
+            eq(fastAgentMessages.eventId, 'turn-1:retry-notice:0'),
+          ),
+        );
+      return notice!.metadata;
+    };
+
+    // The lease is inactive, but the scheduled retry still owns the notice.
+    await reconcileExpiredFastAgentInferenceRetryNotices();
+    expect(await readNotice()).toMatchObject({ inferenceRetryActive: true });
+
+    // A hand-off whose claim was released and whose retry time has passed
+    // is only owned while its queue wakeup runs; the expired-lease sweep is
+    // the backstop for one that never does, so such a row does not block it.
+    await db
+      .update(fastAgentParentEvents)
+      .set({ retryAt: new Date(Date.now() - 1_000), claimedUntil: null })
+      .where(eq(fastAgentParentEvents.conversationId, session.id));
+    await reconcileExpiredFastAgentInferenceRetryNotices();
+    expect(await readNotice()).toMatchObject({
+      inferenceRetryActive: false,
+      purpose: 'closeout',
+      interruptionReason: 'expired_lease_reconcile',
+    });
+  });
+
+  it('does not stamp a retry notice whose turn still has a pending durable row', async () => {
+    const user = await createUser();
+    const conversation = {
+      surface: 'web' as const,
+      workspaceId: user.id,
+      conversationId: crypto.randomUUID(),
+    };
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation,
+    });
+    await fastAgentConversationRepository.upsertMessage({
+      conversationId: session.id,
+      message: {
+        eventId: 'turn-parked:retry-notice:0',
+        turnId: 'turn-parked',
+        turnSeq: 1,
+        ts: 100,
+        eventType: 'roomote_runtime.assistant_message',
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: 'Retrying in 45s' }],
+        metadata: {
+          visibleInTranscript: true,
+          purpose: 'progress',
+          inferenceRetryNotice: true,
+          inferenceRetryActive: true,
+        },
+        payload: { purpose: 'progress' },
+        source: 'web',
+      },
+    });
+    const parent = { sessionId: session.id, conversation };
+    // The parked turn that owns the notice: claim released, retry scheduled.
+    const [parked] = await db
+      .insert(fastAgentParentEvents)
+      .values({
+        conversationId: session.id,
+        eventKey: `parked-${session.id}`,
+        parent,
+        event: { type: 'human_follow_up', eventId: 'parked' },
+        admission: 'inline',
+        retryAt: new Date(Date.now() + 60_000),
+      })
+      .returning({ id: fastAgentParentEvents.id });
+    // A reaction turn admitted beside it, under its own claim.
+    const [reaction] = await db
+      .insert(fastAgentParentEvents)
+      .values({
+        conversationId: session.id,
+        eventKey: `reaction-${session.id}`,
+        parent,
+        event: { type: 'human_follow_up', eventId: 'reaction' },
+        admission: 'inline',
+        claimedUntil: new Date(Date.now() + 60_000),
+      })
+      .returning({ id: fastAgentParentEvents.id });
+    const readNotice = async () => {
+      const [notice] = await db
+        .select({ metadata: fastAgentMessages.metadata })
+        .from(fastAgentMessages)
+        .where(
+          and(
+            eq(fastAgentMessages.conversationId, session.id),
+            eq(fastAgentMessages.eventId, 'turn-parked:retry-notice:0'),
+          ),
+        );
+      return notice!.metadata;
+    };
+
+    // The reaction turn's entry reconcile sees the parked row and leaves the
+    // notice for the parked turn's resumed run to edit.
+    await expect(
+      reconcileFastAgentInferenceRetryNotices(
+        session.id,
+        'next_turn_reconcile',
+        {
+          excludeEventId: reaction!.id,
+        },
+      ),
+    ).resolves.toBe(0);
+    expect(await readNotice()).toMatchObject({ inferenceRetryActive: true });
+
+    // Once the parked turn settles, only the caller's own row remains, and
+    // that never counts as a pending turn that owns the notice.
+    await db
+      .update(fastAgentParentEvents)
+      .set({ deliveredAt: new Date() })
+      .where(eq(fastAgentParentEvents.id, parked!.id));
+    await expect(
+      reconcileFastAgentInferenceRetryNotices(
+        session.id,
+        'next_turn_reconcile',
+        {
+          excludeEventId: reaction!.id,
+        },
+      ),
+    ).resolves.toBe(1);
+    expect(await readNotice()).toMatchObject({
+      inferenceRetryActive: false,
+      purpose: 'closeout',
+      interruptionReason: 'next_turn_reconcile',
+    });
+  });
+
+  it('renews only a live responding lease', async () => {
+    const user = await createUser();
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: {
+        surface: 'web',
+        workspaceId: user.id,
+        conversationId: crypto.randomUUID(),
+      },
+    });
+    const readLease = async () => {
+      const [row] = await db
+        .select({ respondingUntil: sessions.respondingUntil })
+        .from(sessions)
+        .where(eq(sessions.fastConversationId, session.id));
+      return row?.respondingUntil ?? null;
+    };
+
+    // A cleared lease is fenced out: a stale renewal cannot resurrect it.
+    await db
+      .update(sessions)
+      .set({ respondingUntil: null })
+      .where(eq(sessions.fastConversationId, session.id));
+    await expect(renewFastSessionRespondingLease(session.id)).resolves.toBe(
+      false,
+    );
+    await expect(readLease()).resolves.toBeNull();
+
+    // An expired lease is fenced out and left untouched.
+    const expired = new Date(Date.now() - 1_000);
+    await db
+      .update(sessions)
+      .set({ respondingUntil: expired })
+      .where(eq(sessions.fastConversationId, session.id));
+    await expect(renewFastSessionRespondingLease(session.id)).resolves.toBe(
+      false,
+    );
+    await expect(readLease()).resolves.toEqual(expired);
+
+    // A live lease is extended.
+    const live = new Date(Date.now() + 60_000);
+    await db
+      .update(sessions)
+      .set({ respondingUntil: live })
+      .where(eq(sessions.fastConversationId, session.id));
+    await expect(renewFastSessionRespondingLease(session.id)).resolves.toBe(
+      true,
+    );
+    const renewed = await readLease();
+    expect(renewed?.getTime()).toBeGreaterThan(live.getTime());
   });
 });

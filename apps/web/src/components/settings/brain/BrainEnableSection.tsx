@@ -42,13 +42,6 @@ export function BrainEnableSection({ settings }: { settings: BrainSettings }) {
               ? 'Agents share one deployment-wide memory: completed tasks, pull requests, and connected sources are ingested, and agents recall them before they start.'
               : 'Memory is off. Agents are not told it exists and nothing is ingested. Sources hold their position, so turning it back on resumes where they left off.'}
           </p>
-          {settings.enabledFromLegacyKey ? (
-            <p className="text-sm text-muted-foreground">
-              Currently enabled by a configured Memory provider key (R_BRAIN_*).
-              Using this toggle stores an explicit choice that wins over the
-              key.
-            </p>
-          ) : null}
         </div>
       </div>
     </Section>

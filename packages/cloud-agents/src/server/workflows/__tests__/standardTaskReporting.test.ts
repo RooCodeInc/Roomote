@@ -3,12 +3,19 @@ import { getTaskReportConsumerFromPayload } from '@roomote/types';
 import { standardTask } from '../standardTask';
 
 describe('standardTask reporting consumer', () => {
-  it('normalizes the legacy persisted consumer value', () => {
+  it('does not infer report ownership from Fast routing metadata', () => {
     expect(
       getTaskReportConsumerFromPayload({
-        reportConsumer: 'fast-orchestrator',
+        fastAgentParent: {
+          sessionId: '11111111-1111-4111-8111-111111111111',
+          conversation: {
+            surface: 'web',
+            workspaceId: 'workspace-1',
+            conversationId: 'conversation-1',
+          },
+        },
       }),
-    ).toBe('orchestrator');
+    ).toBe('direct-user');
   });
 
   it('gives orchestrator-owned coding tasks an internal factual report contract', () => {
@@ -24,10 +31,7 @@ describe('standardTask reporting consumer', () => {
       '<role>You are the coding executor for an orchestrator-owned task.</role>',
     );
     expect(harnessInstructions).toContain(
-      '<destination>All task communication is private input to the orchestrator. The orchestrator owns acknowledgements, progress updates, clarification, and final user communication.</destination>',
-    );
-    expect(harnessInstructions).toContain(
-      '<delivery>Before settlement, send one report to the orchestrator using `send_chat_reply` with purpose `closeout`.</delivery>',
+      '<delivery>Before settlement, send one report to the parent Session using `report_to_parent_session` with purpose `closeout`.</delivery>',
     );
     for (const section of [
       'Outcome',
@@ -58,7 +62,8 @@ describe('standardTask reporting consumer', () => {
       reportingContextStart,
       reportingContextEnd + '</reporting_context>'.length,
     );
-    expect(reportingContext).not.toContain('Do not');
+    expect(reportingContext).not.toContain('<destination>');
+    expect(reportingContext).not.toContain('<interaction>');
     expect(reportingContext).not.toContain('not user-facing');
     expect(reportingContext).not.toContain('not transcript-like');
     expect(reportingContext).not.toContain('unless');
@@ -84,9 +89,6 @@ describe('standardTask reporting consumer', () => {
     expect(harnessInstructions).not.toContain('<reporting_context>');
     expect(harnessInstructions).not.toContain(
       '<consumer>orchestrator</consumer>',
-    );
-    expect(harnessInstructions).not.toContain(
-      'The orchestrator owns acknowledgements, progress updates, clarification, and final user communication.',
     );
     expect(harnessInstructions).toContain(
       'acknowledge it immediately to the user',

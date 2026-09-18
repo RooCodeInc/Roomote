@@ -45,6 +45,7 @@ const state = vi.hoisted(() => ({
     },
   ],
   searchParams: '',
+  prAction: 'draft' as 'draft' | 'create' | 'push',
   configProviders: [
     { provider: 'github', configSatisfied: true },
     { provider: 'gitlab', configSatisfied: true },
@@ -63,6 +64,7 @@ const mutations = vi.hoisted(() => ({
   syncAdo: vi.fn(),
   syncBitbucket: vi.fn(),
   setPrAction: vi.fn(),
+  setMarkRoomotePrReadyAfterCleanReview: vi.fn(),
   setGitHubRoomoteMention: vi.fn(),
 }));
 
@@ -155,12 +157,20 @@ vi.mock('@/hooks/source-control', () => ({
             : mutations.syncAdo,
   }),
   usePrAction: () => ({
-    data: { prAction: 'draft' },
+    data: { prAction: state.prAction },
     isLoading: false,
   }),
   useSetPrAction: () => ({
     isPending: false,
     mutate: mutations.setPrAction,
+  }),
+  useMarkRoomotePrReadyAfterCleanReview: () => ({
+    data: { enabled: false },
+    isLoading: false,
+  }),
+  useSetMarkRoomotePrReadyAfterCleanReview: () => ({
+    isPending: false,
+    mutate: mutations.setMarkRoomotePrReadyAfterCleanReview,
   }),
   useGitHubRoomoteMention: () => ({
     data: { enabled: true },
@@ -297,8 +307,13 @@ vi.mock('@/components/system', () => ({
   SelectItem: ({ children, value }: { children: ReactNode; value: string }) => (
     <div data-value={value}>{children}</div>
   ),
-  SelectTrigger: ({ children }: { children: ReactNode }) => (
-    <div>{children}</div>
+  SelectTrigger: ({
+    children,
+    ...props
+  }: ButtonHTMLAttributes<HTMLButtonElement>) => (
+    <button type="button" role="combobox" {...props}>
+      {children}
+    </button>
   ),
   SelectValue: () => <span />,
   Settings2: (props: SVGProps<SVGSVGElement>) => (
@@ -354,6 +369,7 @@ describe('SourceControl settings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     state.searchParams = '';
+    state.prAction = 'draft';
     state.gitHubInstallations = [{ id: 'gh-1' }];
     state.gitHubRepositories = [
       {
@@ -602,6 +618,9 @@ describe('SourceControl settings', () => {
     render(<SourceControl />);
 
     expect(screen.getByText('Pull request delivery')).toBeInTheDocument();
+    expect(
+      screen.getByRole('combobox', { name: 'Pull request delivery' }),
+    ).toBeInTheDocument();
     expect(screen.getByTestId('pr-action-select')).toHaveAttribute(
       'data-value',
       'draft',
@@ -633,6 +652,39 @@ describe('SourceControl settings', () => {
       expect.anything(),
     );
   });
+
+  it('lets admins opt in to marking clean Roomote drafts ready', () => {
+    render(<SourceControl />);
+
+    const toggle = screen.getByRole('switch', {
+      name: 'Mark Roomote PR ready after clean review',
+    });
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    expect(
+      screen.getByText(/does not approve or merge it/),
+    ).toBeInTheDocument();
+
+    fireEvent.click(toggle);
+
+    expect(
+      mutations.setMarkRoomotePrReadyAfterCleanReview,
+    ).toHaveBeenCalledWith(true, expect.anything());
+  });
+
+  it.each(['create', 'push'] as const)(
+    'hides clean-review promotion when PR delivery is %s',
+    (prAction) => {
+      state.prAction = prAction;
+
+      render(<SourceControl />);
+
+      expect(
+        screen.queryByRole('switch', {
+          name: 'Mark Roomote PR ready after clean review',
+        }),
+      ).not.toBeInTheDocument();
+    },
+  );
 
   it('shows setup links instead of sync for disconnected token providers', () => {
     state.gitLabRepositories = [];

@@ -27,6 +27,9 @@ describe('delivery terminology', () => {
     );
     for (const skillContent of [
       implementSkill,
+      readSkill(
+        '../skills/standard/implement-changes/resources/default-workflow.md',
+      ),
       pushSkill,
       fixPrSkill,
       reviewCodeSkill,

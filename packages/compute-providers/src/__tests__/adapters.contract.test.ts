@@ -151,9 +151,7 @@ describe('compute provider adapter contracts', () => {
     blaxelCreateMock.mockResolvedValue(sandbox);
     blaxelGetMock.mockResolvedValue(sandbox);
     blaxelListMock.mockResolvedValue({
-      async *[Symbol.asyncIterator]() {
-        yield sandbox;
-      },
+      data: [sandbox],
     });
     blaxelDeleteMock.mockResolvedValue(undefined);
     blaxelUpdateTtlMock.mockResolvedValue(sandbox);
@@ -262,6 +260,76 @@ describe('compute provider adapter contracts', () => {
     );
     await client.destroyInstance({ instanceId: created.instanceId });
     expect(blaxelDeleteMock).toHaveBeenCalledWith(created.instanceId);
+  });
+
+  it('lists every Blaxel sandbox across provider-sized pages', async () => {
+    const sandboxes = Array.from({ length: 51 }, (_, index) => ({
+      metadata: { name: `roomote-blaxel-${index}` },
+      status: 'DEPLOYED',
+      expiresIn: 120,
+    }));
+    blaxelListMock.mockImplementation(async ({ cursor, limit }) => {
+      expect(limit).toBeLessThanOrEqual(50);
+      return cursor
+        ? { data: sandboxes.slice(50) }
+        : { data: sandboxes.slice(0, 50), nextCursor: 'page-2' };
+    });
+
+    const client = createComputeProviderClient({
+      provider: 'blaxel',
+      config: {
+        apiKey: 'key',
+        workspace: 'workspace',
+        image: 'sandbox/roomote-worker:version',
+      },
+    });
+
+    await expect(client.listInstances({})).resolves.toHaveLength(51);
+    expect(blaxelListMock).toHaveBeenCalledTimes(2);
+    expect(blaxelListMock).toHaveBeenNthCalledWith(1, { limit: 50 });
+    expect(blaxelListMock).toHaveBeenNthCalledWith(2, {
+      limit: 50,
+      cursor: 'page-2',
+    });
+  });
+
+  it('handles an empty Blaxel sandbox list', async () => {
+    blaxelListMock.mockResolvedValue({ data: [] });
+
+    const client = createComputeProviderClient({
+      provider: 'blaxel',
+      config: {
+        apiKey: 'key',
+        workspace: 'workspace',
+        image: 'sandbox/roomote-worker:version',
+      },
+    });
+
+    await expect(client.listInstances({})).resolves.toEqual([]);
+    expect(blaxelListMock).toHaveBeenCalledOnce();
+    expect(blaxelListMock).toHaveBeenCalledWith({ limit: 50 });
+  });
+
+  it('does not request another Blaxel page for exactly 50 sandboxes', async () => {
+    const sandboxes = Array.from({ length: 50 }, (_, index) => ({
+      metadata: { name: `roomote-blaxel-${index}` },
+      status: 'DEPLOYED',
+      expiresIn: 120,
+    }));
+    blaxelListMock.mockResolvedValue({ data: sandboxes });
+
+    const client = createComputeProviderClient({
+      provider: 'blaxel',
+      config: {
+        apiKey: 'key',
+        workspace: 'workspace',
+        image: 'sandbox/roomote-worker:version',
+      },
+    });
+
+    await expect(client.listInstances({})).resolves.toHaveLength(50);
+    expect(blaxelListMock).toHaveBeenCalledOnce();
+    expect(blaxelListMock).toHaveBeenCalledWith({ limit: 50 });
   });
 
   it('cleans up a Blaxel sandbox when readiness fails after creation', async () => {

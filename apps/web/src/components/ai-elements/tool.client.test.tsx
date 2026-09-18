@@ -2,10 +2,45 @@ import { fireEvent, render, screen } from '@testing-library/react';
 
 import { Search } from '@/components/system';
 
-import { Tool, ToolHeader } from './tool';
+import { Tool, ToolContent, ToolHeader } from './tool';
+
+vi.mock('@/components/system', async (importOriginal) => {
+  const system = await importOriginal<typeof import('@/components/system')>();
+
+  return {
+    ...system,
+    Spinner: () => <div data-testid="spinner" />,
+  };
+});
 
 describe('ToolHeader', () => {
-  it('shows running and failed states textually while success stays implied', () => {
+  it.each(['input-streaming', 'input-available'] as const)(
+    'keeps the spinner and accessible %s status without redundant visible text',
+    (state) => {
+      render(
+        <ToolHeader
+          action="Sending"
+          object="message to task"
+          icon={Search}
+          iconElement={<span data-testid="task-icon" />}
+          state={state}
+          collapsible={false}
+        />,
+      );
+
+      expect(screen.getByTestId('task-icon')).toBeInTheDocument();
+      expect(screen.getByTestId('spinner')).toBeInTheDocument();
+      expect(screen.getByText('Sending')).toBeInTheDocument();
+      expect(screen.getByText('message to task')).toBeInTheDocument();
+      expect(screen.getByText('Running')).toHaveClass('sr-only');
+      expect(screen.getByText('Running')).toHaveAttribute(
+        'aria-live',
+        'polite',
+      );
+    },
+  );
+
+  it('announces every status accessibly without redundant visible text', () => {
     const { rerender } = render(
       <ToolHeader
         action="Using"
@@ -16,7 +51,8 @@ describe('ToolHeader', () => {
       />,
     );
 
-    expect(screen.getByText('Running')).not.toHaveClass('sr-only');
+    expect(screen.getByText('Running')).toHaveClass('sr-only');
+    expect(screen.getByTestId('spinner')).toBeInTheDocument();
 
     rerender(
       <ToolHeader
@@ -28,6 +64,7 @@ describe('ToolHeader', () => {
       />,
     );
     expect(screen.getByText('Completed')).toHaveClass('sr-only');
+    expect(screen.queryByTestId('spinner')).not.toBeInTheDocument();
 
     rerender(
       <ToolHeader
@@ -38,7 +75,7 @@ describe('ToolHeader', () => {
         collapsible={false}
       />,
     );
-    expect(screen.getByText('Failed')).not.toHaveClass('sr-only');
+    expect(screen.getByText('Failed')).toHaveClass('sr-only');
   });
 
   it('exposes expansion state only for interactive headers', () => {
@@ -72,6 +109,82 @@ describe('ToolHeader', () => {
       </Tool>,
     );
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('scopes nested tool icon state to each tool trigger', () => {
+    render(
+      <Tool>
+        <ToolHeader
+          action="Outer tool"
+          icon={Search}
+          state="output-available"
+        />
+        <ToolContent>
+          <Tool>
+            <ToolHeader
+              action="Inner tool"
+              icon={Search}
+              state="output-available"
+            />
+          </Tool>
+        </ToolContent>
+      </Tool>,
+    );
+
+    const outerTrigger = screen.getByRole('button', {
+      name: 'Outer tool Completed',
+    });
+    fireEvent.click(outerTrigger);
+
+    const innerTrigger = screen.getByRole('button', {
+      name: 'Inner tool Completed',
+    });
+    const innerCaret = innerTrigger.querySelector('.lucide-chevron-up');
+    const innerToolIcon = innerTrigger.querySelector('.lucide-search');
+
+    expect(outerTrigger).toHaveAttribute('data-state', 'open');
+    expect(innerTrigger).toHaveAttribute('data-state', 'closed');
+    expect(innerTrigger).toHaveClass('group/collapsible-icon-trigger');
+    expect(innerCaret).toHaveClass(
+      'group-data-[state=open]/collapsible-icon-trigger:opacity-100',
+    );
+    expect(innerCaret).not.toHaveClass('group-data-[state=open]:opacity-100');
+    expect(innerToolIcon).toHaveClass(
+      'group-data-[state=open]/collapsible-icon-trigger:opacity-0',
+    );
+
+    fireEvent.click(innerTrigger);
+    expect(innerTrigger).toHaveAttribute('data-state', 'open');
+  });
+
+  it('keeps a custom icon action separate from the expansion trigger', () => {
+    const onIconClick = vi.fn();
+    render(
+      <Tool>
+        <ToolHeader
+          action="Sent"
+          object="message to task"
+          icon={Search}
+          iconElement={<span data-testid="task-icon" />}
+          iconAction={{ label: 'Focus task prompt', onClick: onIconClick }}
+          state="output-available"
+        />
+      </Tool>,
+    );
+
+    const iconButton = screen.getByRole('button', {
+      name: 'Focus task prompt',
+    });
+    const expansionTrigger = screen.getByRole('button', {
+      name: 'Sent message to task Completed',
+    });
+
+    fireEvent.click(iconButton);
+    expect(onIconClick).toHaveBeenCalledOnce();
+    expect(expansionTrigger).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.click(expansionTrigger);
+    expect(expansionTrigger).toHaveAttribute('aria-expanded', 'true');
   });
 
   it('keeps long action-only labels truncatable inside the header row', () => {

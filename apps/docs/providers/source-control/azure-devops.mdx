@@ -125,6 +125,35 @@ service hooks for:
 Service hook webhook secrets are generated automatically. The deployment API
 must be reachable from Azure DevOps for those deliveries.
 
+## Mention Roomote on pull requests and work items
+
+Mention `@roomote` in a pull request comment or a work item comment to talk to
+Roomote about it. Each pull request or work item is a Roomote Session: Roomote
+reads the discussion, answers as a comment when no workspace is needed, and
+otherwise starts a task on the pull request's source branch (or the project's
+mapped repository for a work item) and reports back in the same discussion.
+Pull request replies stay in the comment thread the mention came from. The
+commenter must have a linked Azure DevOps account. Ask for a review in the
+mention (for example `@roomote review this`) and Roomote runs the Review Code
+automation's structured review on the current head, posts the findings on the
+pull request, and reports back in the same discussion.
+
+## Native pull request merging in sessions
+
+Active members and admins can ask Roomote to read and complete a pull request in
+an active connected Azure DevOps Git repository without starting a coding task.
+The bounded `get_pull_request` and `merge_pull_request` tools require
+`repositoryFullName` as `organization/project/repository`, a positive
+`pullRequestNumber`, and the freshly read 40-character `expectedHeadSha`.
+`mergeMethod` can be `noFastForward`, `squash`, `rebase`, or `rebaseMerge`.
+
+Roomote completes a PR only after an explicit request in the current human message.
+It reads the PR immediately before the mutation, sends the expected source
+commit, never requests policy bypass or source-branch deletion, and reads the PR
+again before reporting success or retrying an ambiguous result. Azure DevOps
+remains authoritative for policies, reviews, permissions, and merge eligibility.
+These tools do not expose other branch/file writes or repository administration.
+
 ## Current limits
 
 Classic TFVC repositories and non-Git build repository types are not triaged.

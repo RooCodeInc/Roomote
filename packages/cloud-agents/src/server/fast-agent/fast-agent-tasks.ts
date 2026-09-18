@@ -1,6 +1,11 @@
 import { tool, type ToolSet } from 'ai';
 import { createAuthToken } from '@roomote/auth';
-import { ALL_REPOSITORIES } from '@roomote/types';
+import {
+  ALL_REPOSITORIES,
+  NO_REPOSITORIES,
+  REASONING_EFFORT_VALUES,
+  type ReasoningEffort,
+} from '@roomote/types';
 import { z } from 'zod';
 
 import { resolveApiBaseUrl } from '../shared-utils';
@@ -114,7 +119,7 @@ async function parseFastAgentTaskApiResponse(
   };
 }
 
-function withAllRepositoriesLaunchTarget(
+function withSyntheticLaunchTargets(
   result: FastAgentTaskToolResult,
 ): FastAgentTaskToolResult {
   const environments = (result as ListEnvironmentsResponse).environments;
@@ -126,14 +131,23 @@ function withAllRepositoriesLaunchTarget(
     ...result,
     environments: [
       {
+        id: NO_REPOSITORIES,
+        name: 'Blank slate',
+        description:
+          'Start a sandbox with no repositories checked out; any active repository can still be checked out on demand.',
+        repositories: [],
+      },
+      {
         id: ALL_REPOSITORIES,
         name: 'All repositories',
         description:
-          'Use this target to run the task against all active repositories.',
+          'Use this target when the task may need any active repository; repositories are checked out on demand, not cloned up front.',
         repositories: [],
       },
       ...environments.filter(
-        (environment) => environment.id !== ALL_REPOSITORIES,
+        (environment) =>
+          environment.id !== NO_REPOSITORIES &&
+          environment.id !== ALL_REPOSITORIES,
       ),
     ],
   };
@@ -156,6 +170,7 @@ async function callFastAgentTaskApi({
     return {
       success: false,
       error: authContext.error,
+      delivery: 'not_accepted',
     };
   }
 
@@ -190,7 +205,7 @@ export async function sendFastAgentTaskMessage(
   context: FastAgentTaskApiContext,
   params: { taskId: string; message: string; images?: string[] },
 ): Promise<FastAgentTaskToolResult> {
-  return callFastAgentTaskApi({
+  const result = await callFastAgentTaskApi({
     ...context,
     method: 'POST',
     path: `${FAST_AGENT_TASKS_API_PATH}/${params.taskId}/steer_message`,
@@ -200,6 +215,14 @@ export async function sendFastAgentTaskMessage(
       senderMode: 'fast_agent',
     },
   });
+
+  return result.success === true
+    ? {
+        ...result,
+        delivery: result.delivery ?? 'accepted',
+        responsePending: true,
+      }
+    : result;
 }
 
 export async function sendFastAgentTaskMessageOnce(
@@ -221,6 +244,48 @@ export async function sendFastAgentTaskMessageOnce(
   });
 }
 
+/**
+ * Launches the structured review pipeline on a pull request through the task
+ * API, attaching the review to the calling Session so its outcome reports
+ * back there.
+ */
+export async function launchFastAgentPrReview(
+  context: FastAgentTaskApiContext,
+  params: {
+    repository: string;
+    pullRequestNumber: number;
+    fastConversationId: string;
+    model?: string;
+    reasoningEffort?: ReasoningEffort;
+  },
+): Promise<
+  FastAgentTaskToolResult & {
+    taskId?: string;
+    taskUrl?: string;
+    prUrl?: string;
+    prTitle?: string;
+    /** True when an already-active review was reused: that run keeps its
+     * original Session binding, so this Session gets no settle event. */
+    alreadyRunning?: boolean;
+  }
+> {
+  return callFastAgentTaskApi({
+    ...context,
+    method: 'POST',
+    path: FAST_AGENT_TASKS_API_PATH,
+    body: {
+      type: 'pr-review',
+      repo: params.repository,
+      prNumber: params.pullRequestNumber,
+      fastConversationId: params.fastConversationId,
+      ...(params.model ? { model: params.model } : {}),
+      ...(params.reasoningEffort
+        ? { reasoningEffort: params.reasoningEffort }
+        : {}),
+    },
+  });
+}
+
 export async function cancelFastAgentTask(
   context: FastAgentTaskApiContext,
   taskId: string,
@@ -229,6 +294,18 @@ export async function cancelFastAgentTask(
     ...context,
     method: 'POST',
     path: `${FAST_AGENT_TASKS_API_PATH}/${taskId}/cancel`,
+  });
+}
+
+export async function stopFastAgentTask(
+  context: FastAgentTaskApiContext,
+  params: { taskId: string; userInitiated: boolean },
+): Promise<FastAgentTaskToolResult> {
+  return callFastAgentTaskApi({
+    ...context,
+    method: 'POST',
+    path: `${FAST_AGENT_TASKS_API_PATH}/${params.taskId}/stop`,
+    body: { userInitiated: params.userInitiated },
   });
 }
 
@@ -250,7 +327,7 @@ export function createFastAgentTaskTools(
       description: 'List environments available for launching Roomote tasks.',
       inputSchema: z.object({}).strict(),
       execute: async () =>
-        withAllRepositoriesLaunchTarget(
+        withSyntheticLaunchTargets(
           await callFastAgentTaskApi({
             ...context,
             method: 'GET',
@@ -269,7 +346,7 @@ export function createFastAgentTaskTools(
           environmentId: nonEmptyTrimmedStringSchema
             .optional()
             .describe(
-              'Optional non-empty environment ID. Omit it or pass "__all_repositories__" to use the deployment-wide default target',
+              `Optional launch target ID. Pass "${NO_REPOSITORIES}" for a Blank slate sandbox without repositories checked out (any active repository can still be checked out on demand), pass "${ALL_REPOSITORIES}" or omit it for all repositories, or pass an exact environment ID`,
             ),
           type: fastAgentTaskTypeSchema
             .optional()
@@ -279,21 +356,37 @@ export function createFastAgentTaskTools(
             .describe(
               'Optional exact deployment-enabled model ID. Omit it to use the deployment default',
             ),
+          reasoningEffort: z
+            .enum(REASONING_EFFORT_VALUES)
+            .optional()
+            .describe('Optional reasoning effort override'),
         })
         .strict(),
-      execute: async ({ prompt, environmentId, type, model }) =>
+      execute: async ({
+        prompt,
+        environmentId,
+        type,
+        model,
+        reasoningEffort,
+      }) =>
         callFastAgentTaskApi({
           ...context,
           method: 'POST',
           path: FAST_AGENT_TASKS_API_PATH,
           body: {
             prompt,
-            repo: ALL_REPOSITORIES,
-            ...(environmentId && environmentId !== ALL_REPOSITORIES
+            repo:
+              environmentId === NO_REPOSITORIES
+                ? NO_REPOSITORIES
+                : ALL_REPOSITORIES,
+            ...(environmentId &&
+            environmentId !== ALL_REPOSITORIES &&
+            environmentId !== NO_REPOSITORIES
               ? { environmentId }
               : {}),
             ...(type ? { type } : {}),
             ...(model ? { model } : {}),
+            ...(reasoningEffort ? { reasoningEffort } : {}),
           },
         }),
     }),
@@ -379,7 +472,7 @@ export function createFastAgentTaskTools(
         sendFastAgentTaskMessage(context, { taskId, message }),
     }),
     cancel_task: tool({
-      description: 'Cancel a running Roomote task.',
+      description: 'Cancel a running Roomote task and end its current run.',
       inputSchema: z
         .object({
           taskId: nonEmptyTrimmedStringSchema.describe(
@@ -388,6 +481,24 @@ export function createFastAgentTaskTools(
         })
         .strict(),
       execute: async ({ taskId }) => cancelFastAgentTask(context, taskId),
+    }),
+    stop_task: tool({
+      description:
+        'Stop a running Roomote task while preserving its resumable sandbox.',
+      inputSchema: z
+        .object({
+          taskId: nonEmptyTrimmedStringSchema.describe(
+            'The non-empty Roomote task ID',
+          ),
+          userInitiated: z
+            .boolean()
+            .describe(
+              'True only when the user explicitly requested this stop; false for autonomous recovery',
+            ),
+        })
+        .strict(),
+      execute: async ({ taskId, userInitiated }) =>
+        stopFastAgentTask(context, { taskId, userInitiated }),
     }),
   };
 }

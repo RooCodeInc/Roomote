@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { BasicTooltip, SendHorizontal } from '@/components/system';
 
 import {
@@ -19,11 +19,13 @@ import {
   Attachment,
   AttachmentPreview,
   AttachmentRemove,
+  LiveVoiceButton,
   VoiceDictationButton,
   usePromptInputAttachments,
 } from '@/components/ai-elements';
 
 import { useVoiceDictation } from '@/hooks/useVoiceDictation';
+import { useGhostSuggestion } from '@/hooks/useGhostSuggestion';
 import { ROOMOTE_FILE_ATTACHMENT_ACCEPT } from '@/lib/prompt-attachments';
 import { cn } from '@/lib/utils';
 
@@ -35,10 +37,12 @@ function SubmitButton({
   isBusy,
   disabledReason,
   icon,
+  submitWithMetaKey,
 }: {
   isBusy: boolean;
   disabledReason?: string;
   icon?: ReactNode;
+  submitWithMetaKey: boolean;
 }) {
   const isDisabled = isBusy || Boolean(disabledReason);
   const button = (
@@ -47,6 +51,7 @@ function SubmitButton({
       variant="default"
       size="sm"
       className="group size-8 overflow-clip"
+      tooltip={submitWithMetaKey ? 'Send (Cmd/Ctrl + Enter)' : 'Send (Enter)'}
     >
       {icon ?? (
         <SendHorizontal className="fill-background group-[:not(:disabled):hover]:animate-fly-through" />
@@ -102,6 +107,9 @@ type TaskPromptInputProps = {
   onPromptTextChange: (text: string) => void;
   onSubmit: (message: PromptInputMessage) => Promise<void> | void;
   placeholder: string;
+  /** Optional empty-composer suggestion accepted with Tab. */
+  promptSuggestion?: string;
+  onPromptFocusChange?: (focused: boolean) => void;
   /** React key forwarded to the PromptInputRoot (useful for resetting state). */
   promptKey?: string;
   autoFocus?: boolean;
@@ -112,12 +120,28 @@ type TaskPromptInputProps = {
   animateContainer?: boolean;
   /** Optional content rendered inside the prompt box, below the input. */
   suggestion?: ReactNode;
+  /** Optional controls rendered after the attachment action. */
+  tools?: ReactNode;
+  /** Optional control rendered immediately before the submit button. */
+  submitLeadingAction?: ReactNode;
   /** Optional reason that disables the submit button and explains why. */
   submitDisabledReason?: string;
   /** When true, submit on Cmd/Ctrl+Enter instead of plain Enter. */
   submitWithMetaKey?: boolean;
   submitIcon?: ReactNode;
   surface?: 'default' | 'embedded';
+  /**
+   * Live voice conversation toggle, shown only when the deployment has
+   * voice configured. Distinct from dictation: it opens a spoken
+   * conversation rather than filling the textarea.
+   */
+  voice?: TaskPromptVoiceControls;
+};
+
+type TaskPromptVoiceControls = {
+  /** Whether a voice conversation is currently running or connecting. */
+  active: boolean;
+  onToggle: () => void;
 };
 
 export function TaskPromptInput({
@@ -126,20 +150,42 @@ export function TaskPromptInput({
   onPromptTextChange,
   onSubmit,
   placeholder,
+  promptSuggestion,
+  onPromptFocusChange,
   promptKey,
   autoFocus,
   textareaMaxHeight,
   animateContainer = true,
   suggestion,
+  tools,
+  submitLeadingAction,
   submitDisabledReason,
   submitWithMetaKey = true,
   submitIcon,
   surface = 'default',
+  voice,
 }: TaskPromptInputProps) {
+  const [isTextareaFocused, setIsTextareaFocused] = useState(false);
   const voiceDictation = useVoiceDictation({
     onTranscript: (text) => onPromptTextChange(text),
     getPrefix: () => promptText,
-    disabled: isBusy,
+    disabled: isBusy || Boolean(voice?.active),
+  });
+  const handleVoiceToggle = () => {
+    if (!voice?.active) voiceDictation.stop();
+    voice?.onToggle();
+  };
+  const {
+    ghostSuggestion,
+    suggestionHintId,
+    acceptGhostSuggestion,
+    handleSuggestionKeyDown,
+    handleSuggestionPointerDown,
+  } = useGhostSuggestion({
+    suggestion: promptSuggestion?.trim() || null,
+    active: !promptText && !isBusy,
+    surface: 'home',
+    onAccept: onPromptTextChange,
   });
 
   return (
@@ -147,7 +193,7 @@ export function TaskPromptInput({
       className={cn(
         'flex flex-col gap-2',
         surface === 'default' &&
-          'border rounded-lg p-2 bg-card border-input focus-within:border-accent-bright-foreground',
+          'border rounded-lg p-2 bg-card border-input outline-0 outline-offset-[-2px] outline-accent-foreground transition-[outline-width] has-[textarea:focus]:outline-2',
         animateContainer &&
           surface === 'default' &&
           'animate-[enter-down_1s_1_200ms_backwards]',
@@ -162,20 +208,54 @@ export function TaskPromptInput({
       >
         <AttachmentsDisplay />
         <PromptInputBody>
-          <PromptInputTextarea
-            autoFocus={autoFocus}
-            placeholder={placeholder}
-            disabled={isBusy}
-            className={surface === 'default' ? 'min-h-30' : undefined}
-            style={
-              textareaMaxHeight != null
-                ? { maxHeight: textareaMaxHeight }
-                : undefined
-            }
-            value={promptText}
-            submitWithMetaKey={submitWithMetaKey}
-            onChange={(e) => onPromptTextChange(e.target.value)}
-          />
+          <div className="flex items-start">
+            <PromptInputTextarea
+              autoFocus={autoFocus}
+              placeholder={ghostSuggestion ?? placeholder}
+              disabled={isBusy}
+              className={cn(
+                'min-w-0 flex-1',
+                surface === 'default' && 'min-h-30',
+              )}
+              style={
+                textareaMaxHeight != null
+                  ? { maxHeight: textareaMaxHeight }
+                  : undefined
+              }
+              value={promptText}
+              submitWithMetaKey={submitWithMetaKey}
+              onChange={(e) => onPromptTextChange(e.target.value)}
+              onFocus={() => {
+                setIsTextareaFocused(true);
+                onPromptFocusChange?.(true);
+              }}
+              onBlur={() => {
+                setIsTextareaFocused(false);
+                onPromptFocusChange?.(false);
+              }}
+              onKeyDown={handleSuggestionKeyDown}
+              aria-describedby={ghostSuggestion ? suggestionHintId : undefined}
+            />
+            {ghostSuggestion ? (
+              <>
+                <span id={suggestionHintId} className="sr-only">
+                  Suggested task: {ghostSuggestion}. Press Tab to accept or
+                  Escape to dismiss.
+                </span>
+                {isTextareaFocused ? (
+                  <button
+                    type="button"
+                    aria-label="Insert suggested task"
+                    onPointerDown={handleSuggestionPointerDown}
+                    onClick={acceptGhostSuggestion}
+                    className="mt-4 mr-4 shrink-0 whitespace-nowrap rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground/70 transition-colors hover:bg-muted hover:text-muted-foreground"
+                  >
+                    Tab to accept
+                  </button>
+                ) : null}
+              </>
+            ) : null}
+          </div>
         </PromptInputBody>
         <PromptInputFooter
           className={surface === 'default' ? 'p-0' : 'pt-0 pb-4 px-4'}
@@ -187,14 +267,23 @@ export function TaskPromptInput({
                 <PromptInputActionAddAttachments />
               </PromptInputActionMenuContent>
             </PromptInputActionMenu>
+            {tools}
           </PromptInputTools>
           <div className="flex items-center gap-1">
+            {voice ? (
+              <LiveVoiceButton
+                active={voice.active}
+                onClick={handleVoiceToggle}
+                disabled={isBusy && !voice.active}
+              />
+            ) : null}
             <VoiceDictationButton
               isRecording={voiceDictation.isRecording}
               isSupported={voiceDictation.isSupported}
               onClick={voiceDictation.toggle}
-              disabled={isBusy}
+              disabled={isBusy || Boolean(voice?.active)}
             />
+            {submitLeadingAction}
             <div
               className={`transition-opacity ${promptText.trim().length > 0 ? 'opacity-100' : 'opacity-50'}`}
             >
@@ -202,6 +291,7 @@ export function TaskPromptInput({
                 isBusy={isBusy}
                 disabledReason={submitDisabledReason}
                 icon={submitIcon}
+                submitWithMetaKey={submitWithMetaKey}
               />
             </div>
           </div>

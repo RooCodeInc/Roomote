@@ -9,8 +9,7 @@ describe('buildSlackRequestUserInputBlocks', () => {
     const blocks = buildSlackRequestUserInputBlocks({
       requestId: 'rui:session:turn:call',
       currentQuestionIndex: 1,
-      footerText:
-        '_Reply with @-mention or use the <https://app.example.com/task/task-1|web app>._',
+      footerText: '<https://app.example.com/task/task-1|Open in Roomote>',
       answers: {
         stack: {
           answers: ['Blessed'],
@@ -78,7 +77,7 @@ describe('buildSlackRequestUserInputBlocks', () => {
           type: 'context',
           elements: [
             expect.objectContaining({
-              text: '_Reply with @-mention or use the <https://app.example.com/task/task-1|web app>._',
+              text: '<https://app.example.com/task/task-1|Open in Roomote>',
             }),
           ],
         }),

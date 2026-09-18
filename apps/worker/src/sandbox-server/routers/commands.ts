@@ -20,6 +20,8 @@ import {
   applyTaskModelSettings,
   scrubSnapshotSecrets,
   restoreScrubbedCredentials,
+  prepareRepository,
+  listRepositories,
 } from '../procedures';
 
 export const commandsRouter = router({
@@ -42,4 +44,6 @@ export const commandsRouter = router({
   applyTaskModelSettings,
   scrubSnapshotSecrets,
   restoreScrubbedCredentials,
+  prepareRepository,
+  listRepositories,
 });

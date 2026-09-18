@@ -1,19 +1,41 @@
-import { createAuthToken, ROOMOTE_MCP_PATH } from '@roomote/auth';
 import {
-  beginSlackFastIntegrationCall,
-  completeSlackFastIntegrationCall,
+  createAuthToken,
+  createSessionBrokerToken,
+  ROOMOTE_MCP_PATH,
+} from '@roomote/auth';
+import { Env, areCuratedIntegrationsDisabled } from '@roomote/env';
+import {
+  HTTP_INTEGRATIONS_MCP_ID,
+  HTTP_INTEGRATIONS_INSTRUCTIONS,
+} from '../../http-integrations';
+import {
+  getBitbucketOAuthConnection,
+  resolveBitbucketInstanceHost,
+} from '@roomote/bitbucket';
+import { resolveAdoInstanceHost } from '@roomote/ado';
+import { resolveGiteaInstanceHost } from '@roomote/gitea';
+import {
+  and,
   db,
+  deploymentSecrets,
+  eq,
   githubInstallations,
   isNull,
+  repositories,
+  users,
 } from '@roomote/db/server';
+import { resolveGitLabInstanceHost } from '@roomote/gitlab';
 import {
   createMemoryMcpInstructions,
+  BRAIN_MCP_ID,
   MCP_INTEGRATION_PROXY_PATH_PREFIX,
   MCP_ROUTING_PROXY_PATH_PREFIX,
   ROOMOTE_MCP_ID,
+  PUBLIC_URL_FETCH_DEFAULT_TIMEOUT_SECONDS,
+  PUBLIC_URL_FETCH_MAX_TIMEOUT_SECONDS,
   getMcpIntegration,
+  getMcpIntegrationDataPolicy,
   getMemoryMcpDisplayName,
-  formatErrorForLog,
   isMemoryMcpServer,
 } from '@roomote/types';
 
@@ -22,18 +44,15 @@ import {
   listMcpTools,
   type McpToolDefinition,
 } from '../mcp-tool-client';
-import { isRouterMcpServerEnabled } from '../router/mcp-policy';
+import { isRouterMcpServerEnabled } from '../mcp-policy';
 import { resolveApiBaseUrl } from '../shared-utils';
-import {
-  getFastAgentConversationStorageWorkspaceId,
-  type FastAgentMcpServerConfig,
-  type FastAgentConversation,
-} from './fast-agent-conversation';
+import { type FastAgentMcpServerConfig } from './fast-agent-conversation';
 
 export type FastAgentIntegration = {
   id: string;
   name: string;
   description: string;
+  dataPolicy?: 'shared' | 'private';
   instructions?: string;
   tools: McpToolDefinition[];
   endpoint?: {
@@ -54,16 +73,43 @@ type BrokerContext = {
   apiBaseUrl?: string;
 };
 
-type IntegrationAuditContext = BrokerContext & {
+type IntegrationCallContext = BrokerContext & {
+  humanTurn?: boolean;
   sessionId: string;
-  conversation: FastAgentConversation;
-  messageId: string;
+  privacy?: 'shared' | 'private';
+  privateOwnerUserId?: string | null;
+  privateSessionsExperimentEnabled?: boolean;
 };
 
 const FAST_AGENT_INTEGRATION_TOOL_CACHE_TTL_MS = 5 * 60_000;
 const FAST_AGENT_INTEGRATION_TOOL_CACHE_RETRY_MS = 30_000;
+const FAST_AGENT_INTEGRATION_TOOL_CACHE_MAX_ENTRIES = 1_000;
 const FAST_AGENT_INTEGRATION_DISCOVERY_TIMEOUT_MS = 10_000;
 const FAST_AGENT_INTEGRATION_CALL_TIMEOUT_MS = 60_000;
+const FAST_AGENT_PUBLIC_FETCH_TIMEOUT_GRACE_MS = 5_000;
+
+function resolveFastIntegrationCallTimeoutMs(request: {
+  integrationId: string;
+  toolName: string;
+  args: Record<string, unknown>;
+}): number {
+  if (
+    request.integrationId !== ROOMOTE_MCP_ID ||
+    request.toolName !== 'fetch_url'
+  ) {
+    return FAST_AGENT_INTEGRATION_CALL_TIMEOUT_MS;
+  }
+
+  const requested =
+    typeof request.args.timeout === 'number' &&
+    Number.isFinite(request.args.timeout) &&
+    request.args.timeout > 0
+      ? Math.min(request.args.timeout, PUBLIC_URL_FETCH_MAX_TIMEOUT_SECONDS)
+      : PUBLIC_URL_FETCH_DEFAULT_TIMEOUT_SECONDS;
+  return (
+    Math.ceil(requested * 1_000) + FAST_AGENT_PUBLIC_FETCH_TIMEOUT_GRACE_MS
+  );
+}
 
 type IntegrationToolCacheEntry = {
   expiresAt: number;
@@ -71,6 +117,63 @@ type IntegrationToolCacheEntry = {
 };
 
 const integrationToolCache = new Map<string, IntegrationToolCacheEntry>();
+
+const FAST_ROOMOTE_MANAGE_TASKS_LAUNCH_FIELDS = new Set([
+  'prompt',
+  'environmentId',
+  'branch',
+  'notifyOnSettle',
+]);
+
+function asObject(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+/**
+ * Fast has a native launch gate that owns Session attachment, kickoff ordering,
+ * attachments, and settlement. Keep the direct task API available to other MCP
+ * consumers without exposing its incompatible launch action to Fast models.
+ */
+function shapeFastIntegrationTool(
+  integrationId: string,
+  tool: McpToolDefinition,
+): McpToolDefinition | null {
+  if (integrationId !== ROOMOTE_MCP_ID || tool.name !== 'manage_tasks') {
+    return tool;
+  }
+
+  const inputSchema = asObject(tool.inputSchema);
+  const properties = asObject(inputSchema?.properties);
+  const action = asObject(properties?.action);
+  const actions = Array.isArray(action?.enum) ? action.enum : null;
+  if (!inputSchema || !properties || !action || !actions) {
+    // A schema we cannot narrow must not retain the unsafe launch path.
+    return null;
+  }
+
+  return {
+    ...tool,
+    description:
+      'Manage Roomote sessions and inspect or control existing tasks. Use launch_task to start coding work from the current session.',
+    inputSchema: {
+      ...inputSchema,
+      properties: {
+        ...Object.fromEntries(
+          Object.entries(properties).filter(
+            ([name]) => !FAST_ROOMOTE_MANAGE_TASKS_LAUNCH_FIELDS.has(name),
+          ),
+        ),
+        action: {
+          ...action,
+          enum: actions.filter((candidate) => candidate !== 'launch'),
+          description: 'The session or existing-task action to perform.',
+        },
+      },
+    },
+  };
+}
 
 async function withFastIntegrationTimeout<T>(
   operation: (signal: AbortSignal) => Promise<T>,
@@ -108,6 +211,9 @@ async function listCachedIntegrationTools(options: {
   const { cacheKey, ...clientOptions } = options;
   const cached = integrationToolCache.get(cacheKey);
   if (cached) {
+    // Re-insert so eviction below is least-recently-used rather than oldest.
+    integrationToolCache.delete(cacheKey);
+    integrationToolCache.set(cacheKey, cached);
     if (cached.expiresAt <= Date.now()) {
       // Keep serving the last known-good catalog while refreshing. Fast turns
       // must never wait behind a deployment MCP server that stopped answering
@@ -144,7 +250,7 @@ async function listCachedIntegrationTools(options: {
     FAST_AGENT_INTEGRATION_DISCOVERY_TIMEOUT_MS,
     'Fast integration tool discovery',
   );
-  pruneExpiredIntegrationToolCacheEntries();
+  pruneIntegrationToolCacheEntries();
   integrationToolCache.set(cacheKey, {
     expiresAt: Date.now() + FAST_AGENT_INTEGRATION_TOOL_CACHE_TTL_MS,
     tools,
@@ -162,13 +268,16 @@ async function listCachedIntegrationTools(options: {
 
 // The cache is keyed per user, so on deployments with many Fast users
 // abandoned entries would otherwise accumulate for the process lifetime.
-// Entries still inside the stale-while-refresh window are kept.
-function pruneExpiredIntegrationToolCacheEntries(): void {
-  const cutoff = Date.now() - FAST_AGENT_INTEGRATION_TOOL_CACHE_TTL_MS;
-  for (const [key, entry] of integrationToolCache) {
-    if (entry.expiresAt <= cutoff) {
-      integrationToolCache.delete(key);
-    }
+// Eviction is by count rather than age: a stale catalog is still served
+// instantly while it refreshes in the background, so keeping it around means
+// the first message after an idle stretch never blocks on tool discovery.
+function pruneIntegrationToolCacheEntries(): void {
+  while (
+    integrationToolCache.size >= FAST_AGENT_INTEGRATION_TOOL_CACHE_MAX_ENTRIES
+  ) {
+    const oldestKey = integrationToolCache.keys().next().value;
+    if (oldestKey === undefined) return;
+    integrationToolCache.delete(oldestKey);
   }
 }
 
@@ -178,20 +287,31 @@ export function clearFastAgentIntegrationToolCache(): void {
 
 function integrationProxyUrl(baseUrl: string, integrationId: string): string {
   const relativePath =
-    integrationId === 'github'
-      ? 'api/mcp-routing/github'
+    integrationId === 'github' || integrationId === 'gitlab'
+      ? `api/mcp-routing/${integrationId}`
       : `api/mcp/${encodeURIComponent(integrationId)}`;
   return new URL(relativePath, `${baseUrl}/`).toString();
 }
 
 function describeMcpServer(
   id: string,
-): Pick<FastAgentIntegration, 'name' | 'description' | 'instructions'> {
+): Pick<
+  FastAgentIntegration,
+  'name' | 'description' | 'instructions' | 'dataPolicy'
+> {
+  if (id === HTTP_INTEGRATIONS_MCP_ID) {
+    return {
+      name: 'HTTP integrations',
+      description:
+        'API-mediated HTTP requests to operator-configured integrations.',
+      instructions: HTTP_INTEGRATIONS_INSTRUCTIONS,
+    };
+  }
   if (id === ROOMOTE_MCP_ID) {
     return {
       name: 'Roomote',
       description:
-        'Manage this Roomote deployment, including custom automations and other deployment capabilities.',
+        'Manage this Roomote deployment, including custom skills, custom automations, and other deployment capabilities.',
     };
   }
   if (isMemoryMcpServer(id)) {
@@ -210,6 +330,7 @@ function describeMcpServer(
       integration?.description ??
       'Use tools from this deployment-configured MCP server.',
     instructions: integration?.instructions,
+    dataPolicy: getMcpIntegrationDataPolicy(integration),
   };
 }
 
@@ -261,10 +382,91 @@ async function resolveBrokerAuth(context: BrokerContext) {
   };
 }
 
+async function hasGitLabDiscoveryConnection(): Promise<boolean> {
+  if (Env.R_CURATED_INTEGRATIONS_DISABLED) {
+    return false;
+  }
+  const host = await resolveGitLabInstanceHost();
+  const [repository, connection] = await Promise.all([
+    db.query.repositories.findFirst({
+      where: and(
+        eq(repositories.sourceControlProvider, 'gitlab'),
+        eq(repositories.isActive, true),
+        eq(repositories.host, host),
+      ),
+      columns: { id: true },
+    }),
+    db.query.deploymentSecrets.findFirst({
+      where: eq(deploymentSecrets.name, 'gitlab_deployment_oauth_connection'),
+      columns: { name: true },
+    }),
+  ]);
+  return Boolean(repository && connection);
+}
+
+async function isBitbucketAvailable(userId: string): Promise<boolean> {
+  if (areCuratedIntegrationsDisabled(Env.R_CURATED_INTEGRATIONS_DISABLED))
+    return false;
+  const connection = await getBitbucketOAuthConnection();
+  if (connection?.status !== 'active') return false;
+  const host = await resolveBitbucketInstanceHost();
+  if (host !== 'bitbucket.org' && host !== 'www.bitbucket.org') return false;
+
+  const [member, repository] = await Promise.all([
+    db.query.users.findFirst({
+      where: and(eq(users.id, userId), isNull(users.deletedAt)),
+      columns: { role: true },
+    }),
+    db.query.repositories.findFirst({
+      where: and(
+        eq(repositories.sourceControlProvider, 'bitbucket'),
+        eq(repositories.host, host),
+        eq(repositories.isActive, true),
+      ),
+      columns: { externalRepoId: true },
+    }),
+  ]);
+  return !!(
+    member &&
+    ['admin', 'member'].includes(member.role) &&
+    repository?.externalRepoId
+  );
+}
+
+async function isNativeProviderMergeAvailable(
+  userId: string,
+  provider: 'ado' | 'gitea',
+): Promise<boolean> {
+  if (areCuratedIntegrationsDisabled(Env.R_CURATED_INTEGRATIONS_DISABLED))
+    return false;
+  const host =
+    provider === 'ado'
+      ? await resolveAdoInstanceHost()
+      : await resolveGiteaInstanceHost();
+  const repository = await db.query.repositories.findFirst({
+    where: and(
+      eq(repositories.sourceControlProvider, provider),
+      eq(repositories.host, host),
+      eq(repositories.isActive, true),
+    ),
+    columns: { externalRepoId: true },
+  });
+  if (!repository?.externalRepoId) return false;
+  const member = await db.query.users.findFirst({
+    where: and(eq(users.id, userId), isNull(users.deletedAt)),
+    columns: { role: true },
+  });
+  return !!(
+    member &&
+    ['admin', 'member'].includes(member.role) &&
+    repository.externalRepoId
+  );
+}
+
 /**
  * Actor-resolved remote MCP servers only. Local transports and filesystem
  * tools remain sandbox-only. Tools disabled by the deployment remain
- * unavailable, and calls to exposed tools are audited.
+ * unavailable.
  */
 export async function listFastAgentIntegrations(
   context: BrokerContext,
@@ -280,7 +482,14 @@ export async function listFastAgentIntegrations(
   const configuredServersPromise: Promise<
     Record<string, FastAgentMcpServerConfig>
   > = resolveMcpServerConfigs?.() ?? Promise.resolve({});
-  const [configuredServers, githubInstallation] = await Promise.all([
+  const [
+    configuredServers,
+    githubInstallation,
+    gitlabConnection,
+    bitbucketAvailable,
+    giteaAvailable,
+    adoAvailable,
+  ] = await Promise.all([
     configuredServersPromise,
     isRouterMcpServerEnabled('github')
       ? db.query.githubInstallations.findFirst({
@@ -288,9 +497,20 @@ export async function listFastAgentIntegrations(
           columns: { id: true },
         })
       : Promise.resolve(undefined),
+    hasGitLabDiscoveryConnection().catch(() => false),
+    isBitbucketAvailable(context.userId),
+    isNativeProviderMergeAvailable(context.userId, 'gitea').catch(() => false),
+    isNativeProviderMergeAvailable(context.userId, 'ado').catch(() => false),
   ]);
 
-  if (Object.keys(configuredServers).length === 0 && !githubInstallation) {
+  if (
+    Object.keys(configuredServers).length === 0 &&
+    !githubInstallation &&
+    !gitlabConnection &&
+    !bitbucketAvailable &&
+    !giteaAvailable &&
+    !adoAvailable
+  ) {
     return [];
   }
 
@@ -314,7 +534,7 @@ export async function listFastAgentIntegrations(
       id: 'github',
       name: 'GitHub',
       description:
-        'Read repositories, code, issues, pull requests, commits, and recent activity available to the deployment GitHub App.',
+        'Read public github.com repositories and connected private repositories using the deployment GitHub App. Public repositories do not need to be connected. In active connected repositories, use the native GitHub tools directly for pull request and issue edits, comments, reviews, labels, branches, merges, and small file changes. Follow the discovered native tool descriptions and schemas for supported arguments.',
       endpoint: {
         url: integrationProxyUrl(apiBaseUrl, 'github'),
         headers: { Authorization: `Bearer ${authToken}` },
@@ -322,6 +542,55 @@ export async function listFastAgentIntegrations(
       },
       disabledTools: new Set<string>(),
     });
+  }
+
+  if (gitlabConnection && !configuredServers.gitlab) {
+    candidates.push({
+      id: 'gitlab',
+      name: 'GitLab',
+      description:
+        'Read connected GitLab repositories and commit history, inspect merge requests, and make bounded merge request updates, merges, and comments. Access is authorized on each request.',
+      endpoint: {
+        url: integrationProxyUrl(apiBaseUrl, 'gitlab'),
+        headers: { Authorization: `Bearer ${authToken}` },
+        deploymentProxy: true,
+      },
+      disabledTools: new Set<string>(),
+    });
+  }
+
+  if (bitbucketAvailable && !configuredServers.bitbucket) {
+    candidates.push({
+      id: 'bitbucket',
+      name: 'Bitbucket',
+      description:
+        'Read bounded files, directories, code search, commits, and pull requests from active connected Bitbucket Cloud repositories; update, merge, or decline PRs and add comments or replies.',
+      endpoint: {
+        url: integrationProxyUrl(apiBaseUrl, 'bitbucket'),
+        headers: { Authorization: `Bearer ${authToken}` },
+        deploymentProxy: true,
+      },
+      disabledTools: new Set<string>(),
+    });
+  }
+
+  for (const [id, name, available] of [
+    ['gitea', 'Gitea', giteaAvailable],
+    ['ado', 'Azure DevOps', adoAvailable],
+  ] as const) {
+    if (available && !configuredServers[id]) {
+      candidates.push({
+        id,
+        name,
+        description: `Read and explicitly merge pull requests in active connected ${name} repositories. Access and target identity are revalidated on every request.`,
+        endpoint: {
+          url: integrationProxyUrl(apiBaseUrl, id),
+          headers: { Authorization: `Bearer ${authToken}` },
+          deploymentProxy: true,
+        },
+        disabledTools: new Set<string>(),
+      });
+    }
   }
 
   if (candidates.length === 0) {
@@ -333,11 +602,16 @@ export async function listFastAgentIntegrations(
       ...integration,
       tools: (
         await listCachedIntegrationTools({
-          cacheKey: `${context.userId}:${integration.endpoint!.url}`,
+          cacheKey: `${context.userId}:${integration.endpoint!.url}:${configuredServers[integration.id]?.cacheRevision ?? ''}`,
           url: integration.endpoint!.url,
           headers: integration.endpoint!.headers,
         })
-      ).filter((tool) => !integration.disabledTools.has(tool.name)),
+      )
+        .filter((tool) => !integration.disabledTools.has(tool.name))
+        .flatMap((tool) => {
+          const shaped = shapeFastIntegrationTool(integration.id, tool);
+          return shaped ? [shaped] : [];
+        }),
     })),
   );
 
@@ -358,6 +632,7 @@ export async function listFastAgentIntegrations(
         id: result.value.id,
         name: result.value.name,
         description: result.value.description,
+        dataPolicy: result.value.dataPolicy,
         instructions: isMemory
           ? createMemoryMcpInstructions(result.value.id, {
               primary: primaryMemory,
@@ -371,16 +646,8 @@ export async function listFastAgentIntegrations(
   });
 }
 
-function serializeAuditPreview(value: unknown, maxLength: number): string {
-  try {
-    return (JSON.stringify(value) ?? String(value)).slice(0, maxLength);
-  } catch {
-    return '[Unserializable integration result]';
-  }
-}
-
 export async function callFastAgentIntegration(
-  context: IntegrationAuditContext,
+  context: IntegrationCallContext,
   available: FastAgentIntegration[],
   request: {
     integrationId: string;
@@ -397,87 +664,84 @@ export async function callFastAgentIntegration(
   if (!integration.tools.some((tool) => tool.name === request.toolName)) {
     throw new Error('That integration tool is not available to fast mode.');
   }
-
-  // Fail closed: an integration tool never executes unless its durable audit
-  // record exists first.
-  const audit = await beginSlackFastIntegrationCall({
-    fastAgentConversationId: context.sessionId,
-    userId: context.userId,
-    slackTeamId: getFastAgentConversationStorageWorkspaceId(
-      context.conversation,
-    ),
-    slackChannel:
-      'replyTarget' in context.conversation
-        ? context.conversation.replyTarget.channelId
-        : context.conversation.conversationId,
-    slackThreadTs: context.conversation.conversationId,
-    slackMessageTs: context.messageId,
-    integrationId: integration.id,
-    toolName: request.toolName,
-    arguments: request.args,
-  });
-
-  try {
-    // The token minted at list time is short-lived, so deployment-proxy calls
-    // re-mint it here: a call late in a long turn must not send an expired
-    // bearer. Direct upstream endpoints keep their own resolved headers.
-    let endpoint = integration.endpoint;
-    if (!endpoint || endpoint.deploymentProxy) {
-      const { apiBaseUrl, authToken } = await resolveBrokerAuth(context);
-      endpoint = endpoint
-        ? {
-            ...endpoint,
-            headers: {
-              ...endpoint.headers,
-              Authorization: `Bearer ${authToken}`,
-            },
-          }
-        : {
-            url: integrationProxyUrl(apiBaseUrl, integration.id),
-            headers: { Authorization: `Bearer ${authToken}` },
-          };
-    }
-    const result = await withFastIntegrationTimeout(
-      (signal) =>
-        callMcpTool({
-          url: endpoint.url,
-          headers: endpoint.headers,
-          toolName: request.toolName,
-          args: request.args,
-          toolCallId: `fast:${audit.id}:${integration.id}:${request.toolName}`,
-          signal,
-        }),
-      FAST_AGENT_INTEGRATION_CALL_TIMEOUT_MS,
-      `Fast ${integration.id}/${request.toolName} integration call`,
+  const privateBrainRead =
+    context.privacy === 'private' && request.integrationId === BRAIN_MCP_ID;
+  const privateIntegrationCall = integration.dataPolicy === 'private';
+  if (
+    privateIntegrationCall &&
+    (context.privateSessionsExperimentEnabled !== true ||
+      context.privacy !== 'private' ||
+      context.privateOwnerUserId !== context.userId)
+  ) {
+    throw new Error(
+      'Private integrations require a private Session owned by the current user.',
     );
-
-    try {
-      await completeSlackFastIntegrationCall({
-        id: audit.id,
-        status: 'succeeded',
-        resultPreview: serializeAuditPreview(result, 30_000),
-        startedAt: audit.startedAt,
-      });
-    } catch (error) {
-      console.warn(
-        `[Fast Agent] Could not complete integration audit ${audit.id}: ${formatErrorForLog(error)}`,
-      );
-    }
-
-    return result;
-  } catch (error) {
-    try {
-      await completeSlackFastIntegrationCall({
-        id: audit.id,
-        status: 'failed',
-        error: formatErrorForLog(error).slice(0, 10_000),
-        startedAt: audit.startedAt,
-      });
-    } catch (auditError) {
-      console.warn(
-        `[Fast Agent] Could not complete failed integration audit ${audit.id}: ${formatErrorForLog(auditError)}`,
-      );
-    }
-    throw error;
   }
+  if (
+    context.privacy === 'private' &&
+    isMemoryMcpServer(request.integrationId) &&
+    request.integrationId !== BRAIN_MCP_ID
+  ) {
+    throw new Error('Private Sessions cannot write to shared memory.');
+  }
+  if (privateBrainRead && request.toolName === 'synthesize') {
+    throw new Error('Brain synthesis is unavailable in private Sessions.');
+  }
+  if (
+    request.integrationId === ROOMOTE_MCP_ID &&
+    request.toolName === 'manage_tasks' &&
+    request.args.action === 'launch'
+  ) {
+    throw new Error(
+      'Sessions must use launch_task so the child stays attached and reports settlement to its parent session.',
+    );
+  }
+
+  // The token minted at list time is short-lived, so deployment-proxy calls
+  // re-mint it here: a call late in a long turn must not send an expired
+  // bearer. Direct upstream endpoints keep their own resolved headers.
+  let endpoint = integration.endpoint;
+  if (!endpoint || endpoint.deploymentProxy) {
+    const { apiBaseUrl, authToken } = await resolveBrokerAuth(context);
+    endpoint = endpoint
+      ? {
+          ...endpoint,
+          headers: {
+            ...endpoint.headers,
+            Authorization: `Bearer ${authToken}`,
+          },
+        }
+      : {
+          url: integrationProxyUrl(apiBaseUrl, integration.id),
+          headers: { Authorization: `Bearer ${authToken}` },
+        };
+  }
+  if (
+    integration.id === HTTP_INTEGRATIONS_MCP_ID &&
+    endpoint.deploymentProxy &&
+    context.humanTurn
+  ) {
+    endpoint = {
+      ...endpoint,
+      headers: {
+        ...endpoint.headers,
+        Authorization: `Bearer ${await createSessionBrokerToken({
+          userId: context.userId,
+          fastConversationId: context.sessionId,
+        })}`,
+      },
+    };
+  }
+  return withFastIntegrationTimeout(
+    (signal) =>
+      callMcpTool({
+        url: endpoint.url,
+        headers: endpoint.headers,
+        toolName: request.toolName,
+        args: request.args,
+        signal,
+      }),
+    resolveFastIntegrationCallTimeoutMs(request),
+    `Fast ${integration.id}/${request.toolName} integration call`,
+  );
 }

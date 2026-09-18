@@ -21,6 +21,7 @@ const CORE_PACKAGED_SKILL_INVOCATIONS = [
   'issue-fixer',
   'environment-setup',
   'explain-repo-code',
+  'explore-delegation',
   'feature-demo',
   'fix-pr',
   'github-management',
@@ -46,6 +47,13 @@ export const PACKAGED_SKILL_INVOCATIONS = [
   ...PACKAGED_AUTOMATION_SKILL_INVOCATIONS,
 ] as const;
 
-export const PACKAGED_WORKFLOW_PHASE_SKILL_INVOCATIONS = [
-  ...PACKAGED_SKILL_INVOCATIONS,
-] as const;
+export const FAST_ONLY_PACKAGED_SKILL_INVOCATIONS = ['doctor'] as const;
+
+const FAST_ONLY_PACKAGED_SKILL_INVOCATION_SET = new Set<string>(
+  FAST_ONLY_PACKAGED_SKILL_INVOCATIONS,
+);
+
+export const PACKAGED_WORKFLOW_PHASE_SKILL_INVOCATIONS =
+  PACKAGED_SKILL_INVOCATIONS.filter(
+    (skillName) => !FAST_ONLY_PACKAGED_SKILL_INVOCATION_SET.has(skillName),
+  );

@@ -74,15 +74,19 @@ describe('subagent spawn row visibility', () => {
     expect(ids).not.toContain('plumbing-1');
   });
 
-  it('keeps thread-bound subagent rows hidden without debug visibility', () => {
+  it('renders thread-bound spawn rows without debug visibility', () => {
     const message = rebuiltSpawnMessage({
       id: 'thread-bound-1',
-      payload: { receiverThreadIds: ['thread-child'] },
+      status: 'completed',
+      payload: {
+        senderThreadId: 'session-1',
+        receiverThreadIds: ['thread-child'],
+      },
     });
 
     const ids = renderedIds([message], { showInternalMessages: false });
 
-    expect(ids).not.toContain('thread-bound-1');
+    expect(ids).toContain('thread-bound-1');
   });
 
   it('still shows non-spawn subagent payloads with debug visibility on', () => {

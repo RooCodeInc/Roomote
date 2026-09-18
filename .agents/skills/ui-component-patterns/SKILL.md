@@ -191,41 +191,61 @@ const [isOpen, setIsOpen] = useState(false);
 
 ## Settings Page Pattern
 
-### Section component
+### Boolean setting cards
 
-All settings cards use the `Section` component from `@/components/settings`:
+All settings cards use the `Section` component from `@/components/settings`.
+`Section` provides the icon/title header and divider above the body. For a
+boolean setting with explanatory copy, place the switch on the left before the
+description in a `flex gap-3` row:
 
 ```tsx
 import { Section } from '@/components/settings';
-import { RefreshCw } from '@/components/system';
+import { Bell, Button, RefreshCw, Switch } from '@/components/system';
 
 <Section icon={RefreshCw} title="Task Sync">
-  <div className="space-y-6">
-    <FormField
-      control={control}
-      name="enableTaskSync"
-      render={({ field }) => (
-        <FormControl>
-          <Switch checked={field.value} onCheckedChange={field.onChange} />
-        </FormControl>
-      )}
+  <div className="flex gap-3">
+    <Switch
+      aria-label="Toggle task sync"
+      checked={enabled}
+      disabled={isUpdating}
+      onCheckedChange={setEnabled}
     />
-    <p>Save all extension tasks to Roomote.</p>
+    <p className="text-sm text-muted-foreground">
+      Save all extension tasks to Roomote.
+    </p>
   </div>
 </Section>
 ```
 
-### Section with action slot (for toggle switches)
+### Section action slot
+
+Reserve the `action` slot for contextual header actions such as buttons. Keep
+boolean switches with their explanatory text in the section body as shown
+above.
 
 ```tsx
 <Section
   icon={Bell}
   title="Push Notifications"
-  action={<Switch checked={enabled} onCheckedChange={setEnabled} />}
+  action={<Button variant="outline">Manage</Button>}
 >
   <p>Receive notifications when tasks complete or need attention.</p>
 </Section>
 ```
+
+### Model routing controls
+
+For Settings routing editors, keep labels concise and avoid redundant headings.
+Use direct sibling rows for consistent first/last padding rather than adding
+per-entry wrappers that interfere with list spacing. Put custom routing controls
+inside a borderless collapsible with a `text-sm` label, a leading chevron that
+rotates with `transition-transform`, and existing persisted rules collapsed by
+default. Keep the add control inside the collapsible, preserve keyboard and
+screen-reader semantics, and use responsive rows that read condition -> target
+model -> reasoning effort -> remove action from left to right. Keep the full
+condition-to-target row on `md` and wider screens, keep the target model and
+reasoning controls together without wrapping, and stack only the rule flow on
+mobile with a left-aligned downward connector (`ml-8`).
 
 ### Settings page form architecture
 
@@ -260,6 +280,56 @@ When adding internal-only product UI in `apps/web/`:
 ---
 
 ## Form Pattern
+
+### Select focus handoff
+
+Use the shared Select's `handoffTargetOnSelect` prop only when committing a
+choice clearly means the user's next action is to edit one specific text field
+or choose from one specific dependent Select:
+
+```tsx
+const detailsRef = useRef<HTMLInputElement>(null);
+
+<Select handoffTargetOnSelect={detailsRef}>
+  {/* trigger, content, and items */}
+</Select>
+<Input ref={detailsRef} />
+```
+
+For a dependent shared Select, expose its handoff handle explicitly:
+
+```tsx
+const channelSelectRef = useRef<SelectHandoffTarget>(null);
+
+<Select handoffTargetOnSelect={channelSelectRef}>{/* provider */}</Select>
+<Select handoffRef={channelSelectRef}>{/* channel */}</Select>
+```
+
+- Always pass an explicit `Input`/`Textarea` ref or shared Select handoff ref.
+  Never infer the next control from DOM order.
+- Opt in for a destination revealed by the choice or an explicit "enter
+  manually" choice. Do not opt in merely because an optional field is nearby.
+- The handoff happens only after an item is committed and the dropdown closes.
+  Browsing, Escape, outside dismissal, and cancelled item events retain normal
+  Radix focus behavior.
+- A text destination must be mounted, visible, enabled, editable, and textual
+  when the source dropdown finishes closing. A Select destination must have a
+  visible enabled trigger; it is focused and opened through its normal
+  controlled or uncontrolled state path. Otherwise focus returns to the source
+  trigger.
+- Do not open a dependent Select when it is loading, has no usable choices, or
+  already holds a valid choice. If options load asynchronously, retain a pending
+  handoff only while focus remains on the source trigger so later user actions
+  are never interrupted.
+- Account for assistive technology and mobile keyboards. The focus move should
+  preserve a logical reading order and opening the software keyboard should be
+  the expected next step, not a surprise.
+- Do not override `SelectContent.onCloseAutoFocus` to recreate this behavior.
+  The shared API coordinates with Radix focus restoration and respects a close
+  handler that deliberately takes focus ownership.
+
+See [the current candidate audit](references/select-focus-handoff-audit.md) for
+the approved adoptions and intentionally skipped flows.
 
 ### Standard form with validation
 

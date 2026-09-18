@@ -63,6 +63,10 @@ function getMentionedSlackUserIds(message: SlackMentionTextSource): string[] {
     .filter((userId): userId is string => Boolean(userId));
 }
 
+export function mentionsAnySlackUser(message: SlackMentionTextSource): boolean {
+  return getMentionedSlackUserIds(message).length > 0;
+}
+
 export function mentionsSlackUserOtherThanBot(
   message: SlackMentionTextSource,
   botUserId: string | null | undefined,

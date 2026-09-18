@@ -1,0 +1,47 @@
+---
+title: Exa
+description: Give Roomote opt-in web search and page fetching through Exa, with an optional deployment API key.
+icon: '/logo/integrations/exa.svg'
+---
+
+Enable Exa when Roomote tasks need current web context, clean page content,
+advanced search controls, or multi-step research.
+
+## When to use it
+
+- Search the web and return relevant, ready-to-use content
+- Fetch clean content from one or more known URLs
+- Apply advanced filters such as domains, dates, text constraints, and freshness
+- With an API key, run multi-step research, enrichment, or structured-output jobs with Exa Agent
+
+## How setup works
+
+Exa is off by default. A deployment operator enables it from **Settings >
+Integrations** without entering credentials. Enabled deployments immediately
+get Exa's free keyless web search, page fetching, and advanced search. Exa's
+rate limits apply in this mode; Exa does not publish a fixed quota on the MCP
+setup page.
+
+An operator can optionally add an API key from the [Exa
+dashboard](https://dashboard.exa.ai/api-keys). Roomote validates the key against
+Exa's hosted MCP server before saving it. The key is encrypted at rest, stays
+on the Roomote control plane, and is sent to Exa only through Roomote's
+integration proxy. Sessions and sandbox tasks use the same proxy without
+receiving the key.
+
+## What to expect
+
+Keyless access enables Exa's documented `web_search_exa`, `web_fetch_exa`, and
+`web_search_advanced_exa` tools. Adding an API key also enables `agent_run`,
+which performs usage-based multi-step research. Roomote does not advertise
+`agent_run` while the deployment is using keyless access.
+
+Removing an API key returns an enabled integration to keyless access. Disabling
+Exa turns off both modes but preserves a stored key so a later re-enable uses
+the same authenticated configuration.
+
+Deployment operators can disable individual Exa tools from **Manage tools** in
+the integration settings.
+
+See [Exa's MCP documentation](https://exa.ai/docs/get-started/exa-mcp) for the
+provider's current capabilities and billing details.

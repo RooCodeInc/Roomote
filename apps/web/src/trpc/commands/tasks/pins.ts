@@ -10,6 +10,7 @@ import {
 } from '@roomote/db/server';
 
 import type { UserAuthSuccess } from '@/types';
+import { customAutomationTaskAccess } from '@/lib/server/custom-automation-task-access';
 
 const MAX_PINNED_TASKS = 5;
 
@@ -20,7 +21,10 @@ export async function listPinnedTaskIdsCommand(auth: UserAuthSuccess) {
       updatedAt: taskPins.updatedAt,
     })
     .from(taskPins)
-    .where(eq(taskPins.userId, auth.userId))
+    .innerJoin(tasks, eq(tasks.id, taskPins.taskId))
+    .where(
+      and(eq(taskPins.userId, auth.userId), customAutomationTaskAccess(auth)),
+    )
     .orderBy(desc(taskPins.updatedAt));
 }
 
@@ -45,11 +49,17 @@ export async function setTaskPinnedCommand(
     return { success: true, pinned: false };
   }
 
-  // Any deployment member can pin any task; pins stay per-user via task_pins.
+  // Pins stay per-user; ordinary tasks remain collaborative.
   const [task] = await db
     .select({ id: tasks.id })
     .from(tasks)
-    .where(and(eq(tasks.id, input.taskId), isNull(tasks.deletedAt)))
+    .where(
+      and(
+        eq(tasks.id, input.taskId),
+        isNull(tasks.deletedAt),
+        customAutomationTaskAccess(auth),
+      ),
+    )
     .limit(1);
 
   if (!task) {

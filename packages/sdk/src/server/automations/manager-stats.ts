@@ -8,7 +8,10 @@ import {
   slackInstallations,
   eq,
 } from '@roomote/db/server';
-import { MANAGER_STATS_SETTINGS_HASH } from '@roomote/types';
+import {
+  buildDataVisualizationBlocks,
+  MANAGER_STATS_SETTINGS_HASH,
+} from '@roomote/types';
 import { SlackNotifier } from '@roomote/slack';
 import type { SlackMessage } from '@roomote/slack';
 
@@ -18,10 +21,14 @@ import {
   buildManagerSlackSettingsUrl,
   degradeSlackMrkdwnToMarkdown,
 } from '../lib/manager-slack';
-import { buildManagerStatsDigest } from '../lib/manager-stats';
+import {
+  buildManagerStatsDigest,
+  getManagerStatsWindowStart,
+} from '../lib/manager-stats';
 import {
   listConnectedCommunicationProviders,
   resolveAutomationRuntimeDestination,
+  sendAutomationEmailReport,
   type ResolvedAutomationDestination,
 } from './destination';
 import { hasAnyActiveRepository } from './github-deployment-scope';
@@ -36,7 +43,6 @@ import {
 const LOG_PREFIX = '[managerStats]';
 const SCHEDULE_DAY_LOCAL = 5; // Friday.
 const SCHEDULE_HOUR_LOCAL = 16;
-const WINDOW_DAYS = 7;
 const numberFormatter = new Intl.NumberFormat('en-US');
 
 function formatNumber(value: number) {
@@ -106,15 +112,77 @@ export function formatManagerStatsMessage({
   stats: Awaited<ReturnType<typeof buildManagerStatsDigest>>;
 }): Pick<SlackMessage, 'text' | 'blocks'> {
   const text = formatManagerStatsText({ stats });
+  const categories = stats.dailyPullRequestActivity.map((day) => day.label);
+  const chartBlocks = buildDataVisualizationBlocks([
+    {
+      title: 'Daily PR activity',
+      chart: {
+        type: 'line',
+        series: [
+          {
+            name: 'Created PRs',
+            data: stats.dailyPullRequestActivity.map((day) => ({
+              label: day.label,
+              value: day.createdPullRequests,
+            })),
+          },
+          {
+            name: 'Merged PRs',
+            data: stats.dailyPullRequestActivity.map((day) => ({
+              label: day.label,
+              value: day.mergedPullRequests,
+            })),
+          },
+        ],
+        axis_config: { categories },
+      },
+    },
+  ]);
 
-  return buildAutomationSettingsMessage(text, MANAGER_STATS_SETTINGS_HASH);
+  return buildAutomationSettingsMessage(text, MANAGER_STATS_SETTINGS_HASH, {
+    contentBlocks: [
+      {
+        type: 'section',
+        text: { type: 'mrkdwn', text },
+      },
+      ...chartBlocks,
+    ],
+  });
 }
 
-async function findEligibleDeployments(): Promise<DeploymentContext[]> {
+export function hasManagerStatsActivity(
+  stats: Awaited<ReturnType<typeof buildManagerStatsDigest>>,
+) {
+  return (
+    stats.activeUsers > 0 ||
+    stats.totalPullRequests > 0 ||
+    stats.dailyPullRequestActivity.some(
+      (day) => day.createdPullRequests > 0 || day.mergedPullRequests > 0,
+    )
+  );
+}
+
+async function findEligibleDeployments(
+  runtime: Awaited<ReturnType<typeof getAutomationRuntime>>,
+): Promise<DeploymentContext[]> {
   // PR stats come from the provider-neutral digest, so any active repository
   // qualifies regardless of source-control provider.
   if (!(await hasAnyActiveRepository())) {
     return [];
+  }
+
+  const emailTarget = runtime.targets.find(
+    (target) =>
+      target.provider === 'email' && target.targetKind === 'email_user',
+  );
+  if (emailTarget) {
+    return [
+      {
+        slackBotToken: null,
+        slackTeamId: null,
+        actorUserId: emailTarget.externalRef,
+      },
+    ];
   }
 
   const rows = await db
@@ -166,6 +234,9 @@ async function postManagerStatsViaCommunicationAdapter(params: {
   stats: Awaited<ReturnType<typeof buildManagerStatsDigest>>;
 }): Promise<void> {
   const { destination } = params;
+  if (destination.provider === 'email') {
+    throw new Error('Email reports use the durable AgentMail delivery path.');
+  }
   const adapter = await getCommunicationProviderAdapter(destination.provider);
 
   if (!adapter) {
@@ -199,7 +270,8 @@ export async function managerStatsJob(
 
   const now = new Date();
   const result = emptyJobResult();
-  const eligibleDeployments = await findEligibleDeployments();
+  const runtime = await getAutomationRuntime('manager_stats');
+  const eligibleDeployments = await findEligibleDeployments(runtime);
 
   if (eligibleDeployments.length === 0) {
     result.skippedReason =
@@ -211,7 +283,6 @@ export async function managerStatsJob(
 
   for (const deployment of eligibleDeployments) {
     try {
-      const runtime = await getAutomationRuntime('manager_stats');
       const frequency = runtime.enabled ? runtime.scheduleMode : 'off';
 
       if (!frequency || frequency === 'off') {
@@ -229,6 +300,15 @@ export async function managerStatsJob(
 
       if (!destination) {
         result.skippedReason = 'Manager channel is not configured.';
+        skipped++;
+        continue;
+      }
+
+      if (
+        destination.provider === 'slack' &&
+        destination.teamId &&
+        destination.teamId !== deployment.slackTeamId
+      ) {
         skipped++;
         continue;
       }
@@ -251,13 +331,15 @@ export async function managerStatsJob(
         continue;
       }
 
-      const since = new Date(now.getTime() - WINDOW_DAYS * 24 * 60 * 60 * 1000);
+      const since = getManagerStatsWindowStart(now, timezone);
       const stats = await buildManagerStatsDigest({
         actorUserId: deployment.actorUserId,
         since,
+        until: now,
+        timeZone: timezone,
       });
 
-      if (stats.activeUsers === 0 && stats.totalPullRequests === 0) {
+      if (!hasManagerStatsActivity(stats)) {
         await recordAutomationRunOutcome(db, {
           key: 'manager_stats',
           status: 'skipped',
@@ -268,7 +350,25 @@ export async function managerStatsJob(
         continue;
       }
 
-      if (destination.provider === 'slack') {
+      if (destination.provider === 'email') {
+        const text = degradeSlackMrkdwnToMarkdown(
+          formatManagerStatsText({ stats }),
+        );
+        await sendAutomationEmailReport(destination, {
+          subject: `Roomote weekly manager summary - ${now.toISOString().slice(0, 10)}`,
+          conversationKey: `builtin-automation:manager_stats:${now.toISOString()}`,
+          text,
+          idempotencyKey: `manager-stats:${now.toISOString()}`,
+          buttons: [
+            [
+              {
+                text: 'Automation settings',
+                url: buildManagerSlackSettingsUrl(MANAGER_STATS_SETTINGS_HASH),
+              },
+            ],
+          ],
+        });
+      } else if (destination.provider === 'slack') {
         if (!deployment.slackBotToken) {
           throw new Error(
             'Manager stats destination is Slack, but Slack is not connected',

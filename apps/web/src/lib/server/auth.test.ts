@@ -5,6 +5,9 @@ const {
   mockResolveAuthProviderConfig,
   mockSourceControlMappingValues,
   mockSourceControlMappingUpsert,
+  mockIsEmailChannelEnabled,
+  mockSendAgentMailSystemEmail,
+  mockAuthSendVerificationEmail,
 } = vi.hoisted(() => {
   const calls: Array<{
     config: Array<{
@@ -18,6 +21,7 @@ const {
     mockBetterAuth: vi.fn((options) => ({
       api: {
         getSession: vi.fn(),
+        sendVerificationEmail: mockAuthSendVerificationEmail,
       },
       handler: vi.fn(),
       options,
@@ -29,6 +33,9 @@ const {
     mockResolveAuthProviderConfig: vi.fn(),
     mockSourceControlMappingValues: vi.fn(),
     mockSourceControlMappingUpsert: vi.fn(),
+    mockIsEmailChannelEnabled: vi.fn(),
+    mockSendAgentMailSystemEmail: vi.fn(),
+    mockAuthSendVerificationEmail: vi.fn(),
   };
 });
 
@@ -54,6 +61,10 @@ vi.mock('better-auth/plugins', () => ({
 
 vi.mock('@better-auth/drizzle-adapter', () => ({
   drizzleAdapter: vi.fn(() => ({ id: 'drizzle-adapter' })),
+}));
+
+vi.mock('@roomote/sdk/server/agentmail-outbound', () => ({
+  sendAgentMailSystemEmail: mockSendAgentMailSystemEmail,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -99,6 +110,7 @@ vi.mock('./env', () => ({
     R_ALLOWED_EMAILS: undefined,
     R_APP_URL: 'http://localhost:3000',
   },
+  isEmailChannelEnabled: mockIsEmailChannelEnabled,
   getEncryptionKey: () => 'test-encryption-key',
   getBetterAuthSecret: () => 'test-better-auth-secret',
 }));
@@ -112,7 +124,11 @@ vi.mock('./canonical-forwarded-proto', () => ({
   withCanonicalForwardedProto: vi.fn((request) => request),
 }));
 
-import { getAuth } from './auth';
+import {
+  capturePasswordResetDelivery,
+  getAuth,
+  sendAuthenticatedVerificationEmail,
+} from './auth';
 
 function getAdoOAuthProvider() {
   const config = genericOAuthCalls.at(-1)?.config;
@@ -156,6 +172,8 @@ describe('getAuth', () => {
       slackClientId: undefined,
       slackClientSecret: undefined,
     });
+    mockIsEmailChannelEnabled.mockReturnValue(false);
+    mockSendAgentMailSystemEmail.mockResolvedValue({ sent: true });
   });
 
   afterEach(() => {
@@ -170,6 +188,134 @@ describe('getAuth', () => {
       | undefined;
 
     expect(options?.session?.freshAge).toBe(0);
+  });
+
+  it('uses a 30-day rolling session without caching revoked sessions', async () => {
+    await getAuth();
+
+    const options = mockBetterAuth.mock.calls.at(-1)?.[0];
+    expect(options.session).toEqual({
+      modelName: 'authSessions',
+      expiresIn: 30 * 24 * 60 * 60,
+      updateAge: 24 * 60 * 60,
+      freshAge: 0,
+    });
+    expect(options.emailAndPassword.revokeSessionsOnPasswordReset).toBe(true);
+  });
+
+  it('delivers password reset links through AgentMail when email is enabled', async () => {
+    mockIsEmailChannelEnabled.mockReturnValue(true);
+    await getAuth();
+
+    const options = mockBetterAuth.mock.calls.at(-1)?.[0] as {
+      emailAndPassword: {
+        sendResetPassword: (input: {
+          user: { email: string };
+          url: string;
+        }) => Promise<void>;
+      };
+    };
+    await options.emailAndPassword.sendResetPassword({
+      user: { email: 'person@example.com' },
+      url: 'https://roomote.example.com/api/auth/reset-password/token',
+    });
+
+    expect(mockSendAgentMailSystemEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: 'person@example.com',
+        subject: 'Reset your Roomote password',
+        text: expect.stringContaining(
+          'https://roomote.example.com/api/auth/reset-password/token',
+        ),
+      }),
+    );
+  });
+
+  it('captures the password reset delivery result for internal callers', async () => {
+    mockIsEmailChannelEnabled.mockReturnValue(true);
+    mockSendAgentMailSystemEmail.mockResolvedValue({
+      sent: false,
+      reason: 'send_failed',
+    });
+    await getAuth();
+
+    const options = mockBetterAuth.mock.calls.at(-1)?.[0] as {
+      emailAndPassword: {
+        sendResetPassword: (input: {
+          user: { email: string };
+          url: string;
+        }) => Promise<void>;
+      };
+    };
+    const result = await capturePasswordResetDelivery(() =>
+      options.emailAndPassword.sendResetPassword({
+        user: { email: 'person@example.com' },
+        url: 'https://roomote.example.com/api/auth/reset-password/token',
+      }),
+    );
+
+    expect(result).toEqual({ sent: false, reason: 'send_failed' });
+  });
+
+  it('does not attempt password reset delivery when email is disabled', async () => {
+    await getAuth();
+
+    const options = mockBetterAuth.mock.calls.at(-1)?.[0] as {
+      emailAndPassword: {
+        sendResetPassword: (input: {
+          user: { email: string };
+          url: string;
+        }) => Promise<void>;
+      };
+    };
+    await options.emailAndPassword.sendResetPassword({
+      user: { email: 'person@example.com' },
+      url: 'https://roomote.example.com/api/auth/reset-password/token',
+    });
+
+    expect(mockSendAgentMailSystemEmail).not.toHaveBeenCalled();
+  });
+
+  it('reports authenticated resend delivery failures without weakening public endpoint privacy', async () => {
+    mockIsEmailChannelEnabled.mockReturnValue(true);
+    mockSendAgentMailSystemEmail.mockResolvedValue({
+      sent: false,
+      reason: 'send_failed',
+    });
+    await getAuth();
+
+    const options = mockBetterAuth.mock.calls.at(-1)?.[0] as {
+      emailVerification?: {
+        sendVerificationEmail?: (
+          input: { user: { email: string }; url: string },
+          request?: Request,
+        ) => Promise<void>;
+      };
+    };
+    const sendVerificationEmail =
+      options.emailVerification?.sendVerificationEmail;
+    const input = {
+      user: { email: 'person@example.com' },
+      url: 'http://localhost:3000/api/auth/verify-email?token=token',
+    };
+
+    await expect(
+      sendVerificationEmail?.(input, new Request('http://localhost:3000')),
+    ).resolves.toBeUndefined();
+
+    mockAuthSendVerificationEmail.mockImplementation(async () => {
+      await sendVerificationEmail?.(
+        input,
+        new Request('http://localhost:3000/api/auth/send-verification-email'),
+      );
+    });
+    await expect(
+      sendAuthenticatedVerificationEmail({
+        email: 'person@example.com',
+        callbackURL: '/settings/personal',
+        headers: new Headers({ cookie: 'session=valid' }),
+      }),
+    ).rejects.toThrow('Verification email could not be delivered');
   });
 
   it('keys the Entra linked-account identity on the normalized uniqueName', async () => {

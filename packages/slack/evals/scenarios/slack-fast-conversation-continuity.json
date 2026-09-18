@@ -41,7 +41,7 @@
       {
         "channel": "C123ABC456",
         "ts": "$TS1",
-        "text": "<@BROOMOTE> !fast Track release readiness: API, typecheck, and browser passed; docs pending.",
+        "text": "<@BROOMOTE> Track release readiness: API, typecheck, and browser passed; docs pending.",
         "user": "UGRACE",
         "type": "message"
       },
@@ -57,7 +57,7 @@
       {
         "channel": "C123ABC456",
         "ts": "$TS4",
-        "text": "<@BROOMOTE> !fast Review this migration. I believe it drops and rebuilds the customer table.",
+        "text": "<@BROOMOTE> Review this migration. I believe it drops and rebuilds the customer table.",
         "user": "UGRACE",
         "type": "message"
       },
@@ -73,7 +73,7 @@
       {
         "channel": "C123ABC456",
         "ts": "$TS7",
-        "text": "<@BROOMOTE> !fast Explain what kickoff means here.",
+        "text": "<@BROOMOTE> Explain what kickoff means here.",
         "user": "UGRACE",
         "type": "message"
       },
@@ -106,14 +106,14 @@
       {
         "channel": "C123ABC456",
         "ts": "$TS12",
-        "text": "<@BROOMOTE> !fast Tests pass, the change is reversible, and the remaining risk is bounded.",
+        "text": "<@BROOMOTE> Tests pass, the change is reversible, and the remaining risk is bounded.",
         "user": "UGRACE",
         "type": "message"
       },
       {
         "channel": "C123ABC456",
         "ts": "$TS14",
-        "text": "<@BROOMOTE> !fast Prepare this for handoff: API, typecheck, and browser passed; docs were the last blocker and are now done.",
+        "text": "<@BROOMOTE> Prepare this for handoff: API, typecheck, and browser passed; docs were the last blocker and are now done.",
         "user": "UGRACE",
         "type": "message"
       }
@@ -129,7 +129,7 @@
           "type": "app_mention",
           "channel": "C123ABC456",
           "user": "UGRACE",
-          "text": "<@BROOMOTE> !fast Docs are done.",
+          "text": "<@BROOMOTE> Docs are done.",
           "ts": "$TS3",
           "thread_ts": "$TS1",
           "channel_type": "channel"
@@ -145,7 +145,7 @@
           "type": "app_mention",
           "channel": "C123ABC456",
           "user": "UGRACE",
-          "text": "<@BROOMOTE> !fast Correction: it only adds a nullable column and creates an index; it does not drop or rebuild the table.",
+          "text": "<@BROOMOTE> Correction: it only adds a nullable column and creates an index; it does not drop or rebuild the table.",
           "ts": "$TS6",
           "thread_ts": "$TS4",
           "channel_type": "channel"
@@ -161,7 +161,7 @@
           "type": "app_mention",
           "channel": "C123ABC456",
           "user": "UGRACE",
-          "text": "<@BROOMOTE> !fast I still do not understand kickoff.",
+          "text": "<@BROOMOTE> I still do not understand kickoff.",
           "ts": "$TS11",
           "thread_ts": "$TS7",
           "channel_type": "channel"
@@ -177,7 +177,7 @@
           "type": "app_mention",
           "channel": "C123ABC456",
           "user": "UGRACE",
-          "text": "<@BROOMOTE> !fast Tests pass, the change is reversible, and the remaining risk is bounded. Should we ship today?",
+          "text": "<@BROOMOTE> Tests pass, the change is reversible, and the remaining risk is bounded. Should we ship today?",
           "ts": "$TS13",
           "thread_ts": "$TS12",
           "channel_type": "channel"
@@ -193,7 +193,7 @@
           "type": "app_mention",
           "channel": "C123ABC456",
           "user": "UGRACE",
-          "text": "<@BROOMOTE> !fast Give me a structured handoff summary now.",
+          "text": "<@BROOMOTE> Give me a structured handoff summary now.",
           "ts": "$TS15",
           "thread_ts": "$TS14",
           "channel_type": "channel"

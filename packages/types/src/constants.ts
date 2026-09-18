@@ -27,8 +27,45 @@ export const DEFAULT_AUTOMATION_KEEPALIVE_MS = 60 * 1_000;
 export const DEFAULT_MAINTENANCE_KEEPALIVE_MS = 5 * 60 * 1_000;
 
 export const ALL_REPOSITORIES = '__all_repositories__';
+export const NO_REPOSITORIES = '__no_repositories__';
 /** Custom-automation environment selector sentinel for a runless Fast turn. */
 export const FAST_EXECUTION = '__fast__';
+
+/**
+ * Whether a Fast launch target is one of the routing sentinels rather than
+ * an environment id. A sentinel must never reach the environments table:
+ * Postgres rejects it as a malformed uuid and the launch fails.
+ */
+export function isFastAgentLaunchTargetSentinel(
+  environmentId: string | null | undefined,
+): boolean {
+  return (
+    environmentId === ALL_REPOSITORIES ||
+    environmentId === NO_REPOSITORIES ||
+    environmentId === FAST_EXECUTION
+  );
+}
+
+/**
+ * Maps a Fast launch target onto the task payload's workspace fields. The
+ * blank-slate sentinel becomes the repo itself (nothing checked out, any
+ * active repository fetched on demand); the all-repositories sentinel or a
+ * missing target keeps `fallbackRepo`; only a real environment id is carried
+ * through as `environmentId`. Every surface that launches from a Fast
+ * Session goes through this so the sentinels are handled in one place.
+ */
+export function resolveFastAgentLaunchWorkspace(
+  environmentId: string | null | undefined,
+  fallbackRepo: string = ALL_REPOSITORIES,
+): { repo: string; environmentId?: string } {
+  if (environmentId === NO_REPOSITORIES) {
+    return { repo: NO_REPOSITORIES };
+  }
+  if (environmentId && !isFastAgentLaunchTargetSentinel(environmentId)) {
+    return { repo: fallbackRepo, environmentId };
+  }
+  return { repo: fallbackRepo };
+}
 export const HAS_PULL_REQUEST_FILTER_VALUE = '__has_pr__';
 
 /**

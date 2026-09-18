@@ -312,6 +312,51 @@ describe('exchangeCodeForTokens', () => {
     expect(params.get('client_id')).toBe('client-id');
     expect(params.has('client_secret')).toBe(false);
   });
+
+  it('includes the resource indicator in the token exchange', async () => {
+    await exchangeCodeForTokens(
+      'https://provider.example.com/token',
+      'auth-code',
+      'code-verifier',
+      {
+        client_id: 'client-id',
+        token_endpoint_auth_method: 'none',
+      },
+      'https://app.example.com/api/mcp-oauth/callback',
+      { resource: 'https://mcp.example.com/mcp' },
+    );
+
+    const [, init] = mockFetch.mock.calls[0] ?? [];
+    const params = new URLSearchParams(String(init?.body));
+
+    expect(params.get('resource')).toBe('https://mcp.example.com/mcp');
+  });
+
+  it('supports JSON token exchange without PKCE for Notion-style providers', async () => {
+    await exchangeCodeForTokens(
+      'https://api.notion.com/v1/oauth/token',
+      'auth-code',
+      'unused-verifier',
+      {
+        client_id: 'client-id',
+        client_secret: 'client-secret',
+        token_endpoint_auth_method: 'client_secret_basic',
+      },
+      'https://app.example.com/api/mcp-oauth/callback',
+      { tokenRequestFormat: 'json', usePkce: false },
+    );
+
+    const [, init] = mockFetch.mock.calls[0] ?? [];
+    expect(init?.headers).toMatchObject({
+      Authorization: `Basic ${Buffer.from('client-id:client-secret').toString('base64')}`,
+      'Content-Type': 'application/json',
+    });
+    expect(JSON.parse(String(init?.body))).toEqual({
+      grant_type: 'authorization_code',
+      code: 'auth-code',
+      redirect_uri: 'https://app.example.com/api/mcp-oauth/callback',
+    });
+  });
 });
 
 describe('refreshOAuthToken', () => {
@@ -342,6 +387,23 @@ describe('refreshOAuthToken', () => {
 
     expect(params.get('client_id')).toBe('client-id');
     expect(params.has('client_secret')).toBe(false);
+  });
+
+  it('includes the resource indicator in refresh-token requests', async () => {
+    await refreshOAuthToken(
+      'https://provider.example.com/token',
+      {
+        client_id: 'client-id',
+        token_endpoint_auth_method: 'none',
+      },
+      'refresh-token',
+      { resource: 'https://mcp.example.com/mcp' },
+    );
+
+    const [, init] = mockFetch.mock.calls[0] ?? [];
+    const params = new URLSearchParams(String(init?.body));
+
+    expect(params.get('resource')).toBe('https://mcp.example.com/mcp');
   });
 
   it('carries the structured RFC 6749 error code on token-endpoint failures', async () => {

@@ -11,7 +11,7 @@ export type TaskBoardColumn = (typeof TASK_BOARD_COLUMNS)[number];
 
 type BoardTask = Pick<
   Task,
-  'state' | 'goalStatus' | 'workflow' | 'initiatorKind' | 'repositoryName'
+  'state' | 'workflow' | 'initiatorKind' | 'repositoryName'
 > & {
   taskRun: Pick<Task['taskRun'], 'taskPhase' | 'prRepo' | 'payload'>;
 };
@@ -24,19 +24,11 @@ export function getTaskBoardColumn(task: BoardTask): TaskBoardColumn {
     return 'needs-input';
   }
 
-  if (
-    task.state === 'failed' ||
-    task.goalStatus === 'blocked' ||
-    task.goalStatus === 'budget_limited'
-  ) {
+  if (task.state === 'failed') {
     return 'blocked';
   }
 
-  if (
-    task.state === 'completed' ||
-    task.state === 'canceled' ||
-    task.goalStatus === 'complete'
-  ) {
+  if (task.state === 'completed' || task.state === 'canceled') {
     return 'done';
   }
 

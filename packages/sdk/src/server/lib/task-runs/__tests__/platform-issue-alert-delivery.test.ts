@@ -3,11 +3,13 @@ const {
   mockDiscordPostMessage,
   mockSlackOpenConversation,
   mockSlackPostMessage,
+  mockSlackConstructor,
 } = vi.hoisted(() => ({
   mockCreateDiscordProvider: vi.fn(),
   mockDiscordPostMessage: vi.fn(),
   mockSlackOpenConversation: vi.fn(),
   mockSlackPostMessage: vi.fn(),
+  mockSlackConstructor: vi.fn(),
 }));
 
 vi.mock('../../discord-communication', () => ({
@@ -15,13 +17,14 @@ vi.mock('../../discord-communication', () => ({
     mockCreateDiscordProvider,
 }));
 
-// Keep the test hermetic: the Slack fallback path constructs a SlackNotifier
-// from the active installation and posts the alert through it.
+// Keep selection and persistence real; only replace the Slack transport.
 vi.mock('@roomote/slack', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@roomote/slack')>();
 
   class MockSlackNotifier {
-    constructor(_token: string) {}
+    constructor(token: string) {
+      mockSlackConstructor(token);
+    }
 
     postMessage(...args: unknown[]) {
       return mockSlackPostMessage(...args);
@@ -40,16 +43,22 @@ import {
   deploymentSettings,
   eq,
   findBackgroundAutomationSlackThread,
+  fastAgentConversations,
+  ensureSessionForFastConversation,
   slackInstallations,
+  slackInstallationChannels,
+  slackInstallationFactory,
   slackUserMappings,
   taskFactory,
   taskPlatformIssueReports,
   taskRuns,
   tasks,
+  sessions,
   upsertAutomation,
   upsertBackgroundAutomationSlackThread,
   updateBackgroundAutomationSlackThreadMetadata,
   users,
+  userFactory,
 } from '@roomote/db/server';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
@@ -58,6 +67,7 @@ import {
 } from '@roomote/types';
 
 import { recordTaskMessageEnvelope } from '../record-task-message-envelope';
+import { createFastSessionPlatformIssueReport } from '../../platform-issue-reporting';
 
 const REPORT = {
   title: 'Broken webhook secret',
@@ -118,12 +128,47 @@ async function findReportRow(taskId: string) {
   });
 }
 
+async function seedSlackOwners() {
+  const memberA = await userFactory.create();
+  const memberB = await userFactory.create();
+  const a = await slackInstallationFactory.create({
+    installedByUserId: memberA.id,
+    botAccessToken: 'xoxb-owner-a',
+    isActive: true,
+  });
+  const b = await slackInstallationFactory.create({
+    installedByUserId: memberB.id,
+    botAccessToken: 'xoxb-owner-b',
+    isActive: true,
+  });
+  await db.insert(slackUserMappings).values([
+    { userId: memberA.id, slackTeamId: a.teamId, slackUserId: 'UOWNER_A' },
+    { userId: memberB.id, slackTeamId: b.teamId, slackUserId: 'UOWNER_B' },
+  ]);
+  await db.insert(slackInstallationChannels).values({
+    slackInstallationId: b.id,
+    channelId: 'C_OWNER_B',
+  });
+  await db.insert(deploymentSettings).values({
+    id: 'default',
+    managerSlackChannelId: 'C_OWNER_B',
+  });
+  await upsertAutomation(db, {
+    key: 'platform_issue_alerts',
+    enabled: true,
+    settings: {},
+    targets: [],
+  });
+  return { a, b };
+}
+
 describe('platform issue alert delivery', () => {
   beforeEach(async () => {
     process.env.R_APP_URL = 'https://app.example.com';
     mockCreateDiscordProvider.mockReset();
     mockDiscordPostMessage.mockReset();
     mockSlackPostMessage.mockReset();
+    mockSlackConstructor.mockReset();
     mockSlackOpenConversation.mockReset();
     mockCreateDiscordProvider.mockResolvedValue({
       postMessage: mockDiscordPostMessage,
@@ -140,6 +185,98 @@ describe('platform issue alert delivery', () => {
     await db.delete(deploymentSettings);
     await db.delete(slackUserMappings);
     await db.delete(slackInstallations);
+  });
+
+  it('persists a Fast report with canonical session and actor identity', async () => {
+    const user = await userFactory.create();
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: user.id,
+        surface: 'web',
+        workspaceId: `platform-issue-${Date.now()}`,
+        conversationId: `platform-issue-${Date.now()}`,
+      })
+      .returning({ id: fastAgentConversations.id });
+    const session = await ensureSessionForFastConversation(
+      db,
+      conversation!.id,
+    );
+
+    await expect(
+      createFastSessionPlatformIssueReport({
+        fastConversationId: conversation!.id,
+        fastEventId: 'turn-1:tool:0',
+        report: REPORT,
+        userId: user.id,
+      }),
+    ).resolves.toEqual({
+      success: true,
+      reportCreated: true,
+      report: REPORT,
+    });
+
+    await expect(
+      db.query.taskPlatformIssueReports.findFirst({
+        where: eq(
+          taskPlatformIssueReports.fastConversationId,
+          conversation!.id,
+        ),
+        columns: {
+          taskId: true,
+          runId: true,
+          sessionId: true,
+          fastConversationId: true,
+          fastEventId: true,
+          reportedByUserId: true,
+          report: true,
+        },
+      }),
+    ).resolves.toMatchObject({
+      taskId: null,
+      runId: null,
+      sessionId: session.id,
+      fastConversationId: conversation!.id,
+      fastEventId: 'turn-1:tool:0',
+      reportedByUserId: user.id,
+      report: REPORT,
+    });
+  });
+
+  it('rejects a Fast report from a non-owner of a private session', async () => {
+    const owner = await userFactory.create();
+    const otherUser = await userFactory.create();
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: owner.id,
+        surface: 'web',
+        workspaceId: `private-platform-issue-${Date.now()}`,
+        conversationId: `private-platform-issue-${Date.now()}`,
+      })
+      .returning({ id: fastAgentConversations.id });
+    const session = await ensureSessionForFastConversation(
+      db,
+      conversation!.id,
+    );
+    await db
+      .update(sessions)
+      .set({
+        privacy: 'private',
+        privateOwnerUserId: owner.id,
+      })
+      .where(eq(sessions.id, session.id));
+
+    await expect(
+      createFastSessionPlatformIssueReport({
+        fastConversationId: conversation!.id,
+        fastEventId: 'turn-2:tool:0',
+        report: REPORT,
+        userId: otherUser.id,
+      }),
+    ).rejects.toThrow(
+      'This user cannot report issues from this private session.',
+    );
   });
 
   it('posts the alert to the automation Discord channel when its own destination is Discord', async () => {
@@ -184,6 +321,138 @@ describe('platform issue alert delivery', () => {
     expect(reportRow?.report).toEqual(REPORT);
     expect(reportRow?.slackPostedAt).not.toBeNull();
   });
+
+  it.each(['manager', 'automation'] as const)(
+    'uses workspace B rather than first-installed A for the %s channel',
+    async (destination) => {
+      const { a, b } = await seedSlackOwners();
+      const taskId = `task-platform-owner-${destination}`;
+      const runId = await seedTaskRun(taskId);
+      if (destination === 'automation') {
+        await upsertAutomation(db, {
+          key: 'platform_issue_alerts',
+          enabled: true,
+          targets: [
+            {
+              provider: 'slack',
+              targetKind: 'slack_channel',
+              externalRef: 'C_OWNER_B',
+            },
+          ],
+        });
+        await db
+          .update(deploymentSettings)
+          .set({ managerSlackChannelId: 'C_OWNER_A' });
+        await db.insert(slackInstallationChannels).values({
+          slackInstallationId: a.id,
+          channelId: 'C_OWNER_A',
+        });
+      }
+
+      await recordTaskMessageEnvelope({
+        runId,
+        taskId,
+        envelope: buildReportEnvelope(),
+      });
+
+      expect(mockSlackConstructor.mock.calls).toEqual([['xoxb-owner-b']]);
+      expect(mockSlackPostMessage).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ channel: 'C_OWNER_B' }),
+      );
+      expect((await findReportRow(taskId))?.slackPostedAt).toBeInstanceOf(Date);
+      await expect(
+        findBackgroundAutomationSlackThread({
+          surface: 'slack',
+          slackTeamId: b.teamId,
+          slackChannelId: 'C_OWNER_B',
+          threadTs: '1727000000.000100',
+        }),
+      ).resolves.toMatchObject({
+        metadata: { sourceTaskId: taskId, slackTeamId: b.teamId },
+      });
+      await expect(
+        findBackgroundAutomationSlackThread({
+          surface: 'slack',
+          slackTeamId: a.teamId,
+          slackChannelId: 'C_OWNER_B',
+          threadTs: '1727000000.000100',
+        }),
+      ).resolves.toBeUndefined();
+    },
+  );
+
+  it.each([
+    'no installations',
+    'unmapped multiple installations',
+    'inactive owner',
+    'ambiguous owners',
+  ] as const)(
+    'leaves a configured Slack report pending with %s',
+    async (scenario) => {
+      const { a, b } = await seedSlackOwners();
+      const taskId = `task-platform-owner-${scenario}`;
+      const runId = await seedTaskRun(taskId);
+      if (scenario === 'no installations') {
+        await db.delete(slackInstallations);
+      } else if (scenario === 'unmapped multiple installations') {
+        await db.delete(slackInstallationChannels);
+      } else if (scenario === 'inactive owner') {
+        await db
+          .update(slackInstallations)
+          .set({ isActive: false })
+          .where(eq(slackInstallations.id, b.id));
+      } else {
+        await db
+          .insert(slackInstallationChannels)
+          .values({ slackInstallationId: a.id, channelId: 'C_OWNER_B' });
+      }
+
+      await recordTaskMessageEnvelope({
+        runId,
+        taskId,
+        envelope: buildReportEnvelope(),
+      });
+
+      expect(mockSlackConstructor).not.toHaveBeenCalled();
+      expect(mockSlackPostMessage).not.toHaveBeenCalled();
+      expect(mockSlackOpenConversation).not.toHaveBeenCalled();
+      expect((await findReportRow(taskId))?.slackPostedAt).toBeNull();
+    },
+  );
+
+  it.each(['empty result', 'rejection'] as const)(
+    'keeps the report pending on Slack %s without trying another workspace',
+    async (failure) => {
+      const { b } = await seedSlackOwners();
+      const taskId = `task-platform-owner-failure-${failure}`;
+      const runId = await seedTaskRun(taskId);
+      if (failure === 'empty result') {
+        mockSlackPostMessage.mockResolvedValueOnce(null);
+      } else {
+        mockSlackPostMessage.mockRejectedValueOnce(
+          new Error('Slack unavailable'),
+        );
+      }
+
+      await recordTaskMessageEnvelope({
+        runId,
+        taskId,
+        envelope: buildReportEnvelope(),
+      });
+
+      expect(mockSlackConstructor.mock.calls).toEqual([['xoxb-owner-b']]);
+      expect(mockSlackPostMessage).toHaveBeenCalledTimes(1);
+      expect((await findReportRow(taskId))?.slackPostedAt).toBeNull();
+      await expect(
+        findBackgroundAutomationSlackThread({
+          surface: 'slack',
+          slackTeamId: b.teamId,
+          slackChannelId: 'C_OWNER_B',
+          threadTs: '1727000000.000100',
+        }),
+      ).resolves.toBeUndefined();
+    },
+  );
 
   it('keeps the Slack manager-channel fallback when no Discord destination is configured', async () => {
     const taskId = 'task-platform-issue-slack';
@@ -243,6 +512,8 @@ describe('platform issue alert delivery', () => {
       envelope: buildReportEnvelope(),
     });
 
+    expect(mockSlackConstructor.mock.calls).toEqual([['xoxb-test']]);
+
     expect(mockDiscordPostMessage).not.toHaveBeenCalled();
     expect(mockSlackPostMessage).toHaveBeenCalledTimes(1);
     const [post] = mockSlackPostMessage.mock.calls[0] ?? [];
@@ -260,6 +531,10 @@ describe('platform issue alert delivery', () => {
           expect.objectContaining({
             type: 'actions',
             elements: expect.arrayContaining([
+              expect.objectContaining({
+                action_id: 'platform_issue_review_and_send',
+                url: expect.stringContaining('/platform-issues/'),
+              }),
               expect.objectContaining({
                 action_id: 'late_bound_automation_view_task',
                 url: expect.stringContaining('utm_source=slack'),
@@ -467,9 +742,12 @@ describe('platform issue alert delivery', () => {
     expect(mockSlackOpenConversation).toHaveBeenCalledWith('UADMIN');
     expect(mockSlackPostMessage).toHaveBeenCalledTimes(1);
     const [post] = mockSlackPostMessage.mock.calls[0] ?? [];
+    const expectedText =
+      `Platform issue reported: *${REPORT.title}*\n> ${REPORT.summary}\n` +
+      `Roomote has not received this report. Review what will be shared, then send it to Roomote if you'd like help.`;
     expect(post).toMatchObject({
       channel: 'DADMIN',
-      text: `Platform issue reported: *${REPORT.title}*\n> ${REPORT.summary}`,
+      text: expectedText,
       blocks: [
         expect.objectContaining({
           type: 'container',
@@ -483,7 +761,7 @@ describe('platform issue alert delivery', () => {
               type: 'section',
               text: {
                 type: 'mrkdwn',
-                text: `Platform issue reported: *${REPORT.title}*\n> ${REPORT.summary}`,
+                text: expectedText,
               },
             },
           ]),
@@ -497,6 +775,9 @@ describe('platform issue alert delivery', () => {
     );
     expect(JSON.stringify(post.blocks)).toContain(
       'late_bound_automation_configure',
+    );
+    expect(JSON.stringify(post.blocks)).toContain(
+      'platform_issue_review_and_send',
     );
     expect((await findReportRow(taskId))?.slackPostedAt).not.toBeNull();
   });

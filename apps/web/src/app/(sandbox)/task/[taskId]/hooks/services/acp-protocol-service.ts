@@ -6,6 +6,7 @@ import {
   type AcpRequestUserInputPayload,
   type AcpToolCallPayload,
   type AcpToolResultPayload,
+  type SetupReceiptPayload,
   type TaskMessageContentBlock,
   type TaskMessageRole,
   asBoolean,
@@ -18,6 +19,7 @@ import {
   extractOutputText,
   formatRequestUserInputResponseText,
   getAcpLogicalEventId,
+  getDataVisualizationBlocks,
   getImageUrisFromContentBlocks,
   getProviderRetryNoticeFromMessageData,
   inferAcpMessageKind,
@@ -29,6 +31,7 @@ import {
   resolveAcpTranscriptVisibility,
   textFromContentArray,
   ACP_ENVELOPE_EVENT_TYPES,
+  SETUP_RECEIPT_INPUT_KIND,
   ACP_LIVE_EVENT_TYPES,
 } from '@roomote/types';
 
@@ -38,6 +41,7 @@ import { isNonTranscriptAcpEvent } from '../../acp-non-transcript';
 import { findStartedTodo } from '../../todo-status';
 import type {
   AcpUiMessage,
+  AcpUiMessageImageArtifact,
   AcpOtherUiMessage,
   AcpPlanUiMessage,
   AcpTodoSectionUiMessage,
@@ -135,6 +139,34 @@ function extractPayloadImageUris(payload: Record<string, unknown>): string[] {
   return [...directPayloadImages, ...payloadBlockImages];
 }
 
+/**
+ * Fast reply images arrive with their backing artifact (see
+ * `attachFastSessionReplyImages`) so the transcript can open them in the
+ * artifact viewer. Malformed entries are dropped; the URL list still renders.
+ */
+function extractPayloadImageArtifacts(
+  payload: Record<string, unknown>,
+): AcpUiMessageImageArtifact[] | undefined {
+  if (!Array.isArray(payload.imageArtifacts)) return undefined;
+
+  const artifacts = payload.imageArtifacts.flatMap((value) => {
+    const record = asRecord(value);
+    if (!record) return [];
+    const url = asString(record.url);
+    const path = asString(record.path);
+    const ownerRecord = asRecord(record.owner);
+    const taskId = ownerRecord ? asString(ownerRecord.taskId) : undefined;
+    const sessionId = ownerRecord ? asString(ownerRecord.sessionId) : undefined;
+    const owner = taskId ? { taskId } : sessionId ? { sessionId } : null;
+    if (!url || !path || !owner || typeof record.version !== 'number') {
+      return [];
+    }
+    return [{ url, owner, path, version: record.version }];
+  });
+
+  return artifacts.length > 0 ? artifacts : undefined;
+}
+
 function extractMessageImageUris(
   contentBlocks: TaskMessageContentBlock[],
   payload: Record<string, unknown>,
@@ -158,6 +190,17 @@ function normalizeAcpMcpToolFields(payload: Record<string, unknown>): {
   const mcpInvocation = extractAcpMcpInvocation(payload, {
     flattenedServerNames: collectAcpFlattenedServerNames(payload),
   });
+
+  const nativeToolName = asString(payload.toolName);
+  if (!mcpInvocation && payload.isMcp === false && nativeToolName) {
+    return {
+      isMcp: false,
+      toolName: nativeToolName,
+      serverName: null,
+      mcpServerName: null,
+      mcpToolName: null,
+    };
+  }
 
   const resolvedServer =
     mcpInvocation?.mcpServerName ??
@@ -294,6 +337,15 @@ export function toAcpUiMessage(
       null,
   };
 
+  if (metadataRecord.inputKind === SETUP_RECEIPT_INPUT_KIND) {
+    return {
+      ...base,
+      role: 'user',
+      kind: 'setup_receipt',
+      data: (payloadRecord.setupReceipt ?? {}) as SetupReceiptPayload,
+    } as AcpUiMessage;
+  }
+
   switch (normalized.kind) {
     case 'text':
       return {
@@ -311,6 +363,8 @@ export function toAcpUiMessage(
           normalized.contentBlocks,
           payloadRecord,
         ),
+        imageArtifacts: extractPayloadImageArtifacts(payloadRecord),
+        charts: getDataVisualizationBlocks(normalized.contentBlocks),
         clientMessageId: getAcpClientMessageId(normalized) ?? undefined,
         data: payloadRecord,
       };
@@ -371,6 +425,14 @@ export function toAcpUiMessage(
         ...base,
         role: 'system',
         kind: 'task_cancelled',
+        data: payloadRecord,
+      };
+
+    case 'voice_call':
+      return {
+        ...base,
+        role: 'system',
+        kind: 'voice_call',
         data: payloadRecord,
       };
 
@@ -616,20 +678,18 @@ function getToolCallUpdateLifecycleState(update: Record<string, unknown>): {
 function mergeToolResultPayload(
   existing: AcpToolCallUiMessage | AcpToolResultUiMessage,
   incoming: AcpToolResultUiMessage,
+  incomingPayload: Record<string, unknown>,
 ): AcpToolResultPayload {
   const existingData = existing.data;
   const existingRawInput = asRecord(
     (existingData as unknown as Record<string, unknown>).rawInput,
   );
   const mergedPayload: AcpToolResultPayload = {
+    ...(existingRawInput ? { rawInput: existingRawInput } : {}),
     ...incoming.data,
     kind: incoming.data.kind ?? existingData.kind,
     title: incoming.data.title ?? existingData.title,
     command: incoming.data.command ?? existingData.command,
-    mcpServerName: incoming.data.mcpServerName ?? existingData.mcpServerName,
-    mcpToolName: incoming.data.mcpToolName ?? existingData.mcpToolName,
-    serverName: incoming.data.serverName ?? existingData.serverName,
-    toolName: incoming.data.toolName ?? existingData.toolName,
     isSubagentSpawn:
       incoming.data.isSubagentSpawn ?? existingData.isSubagentSpawn,
     senderThreadId: incoming.data.senderThreadId ?? existingData.senderThreadId,
@@ -650,7 +710,8 @@ function mergeToolResultPayload(
 
   return {
     ...mergedPayload,
-    ...normalizeAcpMcpToolFields({ ...mergedPayload }),
+    // Normalize with the known identity before a sparse title can imply MCP.
+    ...normalizeAcpMcpToolFields({ ...existingData, ...incomingPayload }),
   };
 }
 
@@ -959,6 +1020,7 @@ export class AcpProtocolService {
   private applyToolResultMessageToList(
     messages: AcpUiMessage[],
     toolResultMessage: Extract<AcpUiMessage, { kind: 'tool_result' }>,
+    incomingPayload: Record<string, unknown>,
   ): AcpUiMessage[] {
     const toolCallId = toolResultMessage.toolCallId;
 
@@ -1004,7 +1066,11 @@ export class AcpProtocolService {
     next[existingIndex] = {
       ...toolResultMessage,
       text: incomingText || existing.text,
-      data: mergeToolResultPayload(existing, toolResultMessage),
+      data: mergeToolResultPayload(
+        existing,
+        toolResultMessage,
+        incomingPayload,
+      ),
       previousTs: existing.previousTs,
       partial: false,
       isTurnCompletion:
@@ -1621,6 +1687,7 @@ export class AcpProtocolService {
         acpMessages: this.applyToolResultMessageToList(
           nextMessages,
           candidate as AcpToolResultUiMessage,
+          event.payload,
         ),
       };
     }
@@ -1744,6 +1811,7 @@ export class AcpProtocolService {
         acpMessages = this.applyToolResultMessageToList(
           acpMessages,
           toolResultMessage,
+          envelope.payload ?? {},
         );
 
         if (toolResultMessage.toolCallId) {

@@ -7,11 +7,13 @@ const {
   mockValidateMcpAccessToken,
   mockValidateAuthToken,
   mockFindDeployment,
+  mockFindUser,
 } = vi.hoisted(() => ({
   mockValidateRunToken: vi.fn(),
   mockValidateMcpAccessToken: vi.fn(),
   mockValidateAuthToken: vi.fn(),
   mockFindDeployment: vi.fn(),
+  mockFindUser: vi.fn(),
 }));
 
 vi.mock('@roomote/auth', () => ({
@@ -24,9 +26,7 @@ vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
       deploymentSettings: { findFirst: mockFindDeployment },
-      users: {
-        findFirst: vi.fn(async () => ({ id: 'user-1', deletedAt: null })),
-      },
+      users: { findFirst: mockFindUser },
     },
   },
   deploymentSettings: { id: 'id' },
@@ -35,6 +35,7 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 import { tokenAuthMiddleware } from '../tokenAuthMiddleware';
+import { routePolicyMiddleware } from '../routePolicyMiddleware';
 
 const RUN_TOKEN_CONTEXT = {
   runId: 42,
@@ -53,6 +54,16 @@ function createApp() {
   return app;
 }
 
+function createArtifactApiApp() {
+  const app = new Hono<{ Variables: Variables }>();
+
+  app.use('*', tokenAuthMiddleware());
+  app.use('*', routePolicyMiddleware);
+  app.post('/api/artifacts', (c) => c.json({ reachedHandler: true }));
+
+  return app;
+}
+
 async function requestAuthContext(
   path: string,
   headers: Record<string, string>,
@@ -67,6 +78,7 @@ describe('tokenAuthMiddleware token extraction', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockFindDeployment.mockResolvedValue({ metadata: null });
+    mockFindUser.mockResolvedValue({ id: 'user-1', deletedAt: null });
     mockValidateRunToken.mockImplementation(async (token: string) => {
       if (token !== 'valid-run-token') {
         throw new Error('invalid token');
@@ -84,6 +96,55 @@ describe('tokenAuthMiddleware token extraction', () => {
     });
 
     expect(authContext).toEqual(RUN_TOKEN_CONTEXT);
+  });
+
+  it('rejects a run token issued for a removed user on artifact routes', async () => {
+    mockValidateRunToken.mockResolvedValue({
+      ...RUN_TOKEN_CONTEXT,
+      userId: 'removed-user',
+      principal: 'user',
+    });
+    mockFindUser.mockResolvedValue({
+      id: 'removed-user',
+      deletedAt: new Date(),
+    });
+
+    const response = await createArtifactApiApp().request(
+      'http://localhost/api/artifacts',
+      {
+        method: 'POST',
+        headers: { authorization: 'Bearer valid-run-token' },
+      },
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: 'authentication_required',
+    });
+  });
+
+  it('rejects a run token when its user no longer exists', async () => {
+    mockValidateRunToken.mockResolvedValue({
+      ...RUN_TOKEN_CONTEXT,
+      userId: 'missing-user',
+      principal: 'user',
+    });
+    mockFindUser.mockResolvedValue(undefined);
+
+    const authContext = await requestAuthContext('/api/artifacts', {
+      authorization: 'Bearer valid-run-token',
+    });
+
+    expect(authContext).toBeNull();
+  });
+
+  it('does not look up a user for deployment-principal run tokens', async () => {
+    const authContext = await requestAuthContext('/api/artifacts', {
+      authorization: 'Bearer valid-run-token',
+    });
+
+    expect(authContext).toEqual(RUN_TOKEN_CONTEXT);
+    expect(mockFindUser).not.toHaveBeenCalled();
   });
 
   it('attaches a browser-issued MCP token for route-level authorization', async () => {
@@ -113,6 +174,15 @@ describe('tokenAuthMiddleware token extraction', () => {
     expect(authContext).toEqual(RUN_TOKEN_CONTEXT);
   });
 
+  it('accepts the run token from api-key on the inference gateway', async () => {
+    const authContext = await requestAuthContext(
+      '/api/inference/azure/v1/responses',
+      { 'api-key': 'valid-run-token' },
+    );
+
+    expect(authContext).toEqual(RUN_TOKEN_CONTEXT);
+  });
+
   it('accepts the run token from x-goog-api-key on the inference gateway', async () => {
     const authContext = await requestAuthContext(
       '/api/inference/google/v1beta/models/gemini-2.5-pro:generateContent',
@@ -135,11 +205,13 @@ describe('tokenAuthMiddleware token extraction', () => {
   });
 
   it('ignores provider key headers outside the inference gateway', async () => {
-    const authContext = await requestAuthContext('/api/task-runs/1', {
-      'x-api-key': 'valid-run-token',
-    });
+    for (const headerName of ['x-api-key', 'api-key', 'x-goog-api-key']) {
+      const authContext = await requestAuthContext('/api/task-runs/1', {
+        [headerName]: 'valid-run-token',
+      });
 
-    expect(authContext).toBeNull();
+      expect(authContext).toBeNull();
+    }
     expect(mockValidateRunToken).not.toHaveBeenCalled();
   });
 

@@ -26,7 +26,7 @@ import { findActiveSlackTaskRun } from './find-active-slack-task-run';
 import {
   postSlackAccountLinkThreadReply,
   promptSlackAccountLink,
-} from './block-kit';
+} from './account-link';
 import { postSlackInteractiveResponse } from './interactive-response';
 import { SlackNotifier } from './slack-notifier';
 import {

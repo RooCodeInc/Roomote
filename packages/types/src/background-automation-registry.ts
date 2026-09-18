@@ -18,6 +18,7 @@ import type { CommunicationProvider } from './communication';
 import { sourceControlProviders } from './source-control';
 import type { SourceControlProvider } from './source-control';
 import type { TaskSuggestionSource } from './task-runs';
+import type { AutomationResultPriority } from './automation-results';
 
 export const AUTO_RESPOND_CHANNELS_SETTINGS_HASH = 'auto-respond-channels';
 export const MANAGER_CHANNEL_SETTINGS_HASH = 'roomote-managers';
@@ -32,6 +33,7 @@ export const CODE_QUALITY_AUDITOR_SETTINGS_HASH = 'code-quality-auditor';
 export const CI_FAILURE_TRIAGE_SETTINGS_HASH = 'ci-failure-triage';
 export const SUMMARIZE_MERGED_PRS_SETTINGS_HASH = 'summarize-merged-prs';
 export const PLATFORM_ISSUE_ALERTS_SETTINGS_HASH = 'platform-issue-alerts';
+export const RELEASE_ANNOUNCEMENTS_SETTINGS_HASH = 'release-announcements';
 export const PROVIDER_USAGE_LIMIT_SETTINGS_HASH = 'provider-usage-limit';
 export const MERGE_ANNOUNCER_SETTINGS_HASH = 'merge-announcer';
 
@@ -49,6 +51,7 @@ export type BackgroundAutomationSettingsHash =
   | typeof CI_FAILURE_TRIAGE_SETTINGS_HASH
   | typeof SUMMARIZE_MERGED_PRS_SETTINGS_HASH
   | typeof PLATFORM_ISSUE_ALERTS_SETTINGS_HASH
+  | typeof RELEASE_ANNOUNCEMENTS_SETTINGS_HASH
   | typeof PROVIDER_USAGE_LIMIT_SETTINGS_HASH
   | typeof MERGE_ANNOUNCER_SETTINGS_HASH;
 
@@ -69,6 +72,7 @@ export type TriggerableBackgroundAutomationDescriptor<
 > = {
   automationKey: TAutomationKey;
   label: string;
+  resultPriority?: AutomationResultPriority;
   /** Public black-on-white PNG used in automation result cards. */
   slackIcon: string;
   scheduleModes: readonly TScheduleMode[];
@@ -90,6 +94,24 @@ export type TriggerableBackgroundAutomationDescriptor<
    */
   supportedSourceControlProviders: readonly SourceControlProvider[];
   scheduledSuggestionSource?: TaskSuggestionSource;
+  /**
+   * Optional natural-language repository scope, per-repository output routing,
+   * and residual workflow guidance. Add this only when output goes to a
+   * communication provider and may matter to different people or teams.
+   * Inherently global, triage-oriented (except CI), and non-comms-output
+   * automations should not opt in.
+   */
+  additionalRules?: {
+    field:
+      | 'suggesterAdditionalRules'
+      | 'announcerAdditionalRules'
+      | 'securityAuditorAdditionalRules'
+      | 'codeQualityAuditorAdditionalRules'
+      | 'ciFailureTriageAdditionalRules'
+      | 'mergeAnnouncerAdditionalRules';
+    placeholder: string;
+    defaultScopeDescription: string;
+  };
 };
 
 const CONFLICT_RESOLVER_SCHEDULE_MODES = [
@@ -174,17 +196,29 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
     supportedSourceControlProviders: sourceControlProviders,
     scheduledSuggestionSource: 'suggest_ideas',
+    additionalRules: {
+      field: 'suggesterAdditionalRules',
+      placeholder:
+        'Only suggest work for backend and platform. Send platform ideas to #platform in our Engineering Slack workspace.',
+      defaultScopeDescription: 'suggest work for all repositories',
+    },
   },
   {
     automationKey: 'announcer',
     label: 'Summarize Merged PRs',
-    slackIcon: 'megaphone',
+    slackIcon: 'git-merge',
     scheduleModes: DAILY_WEEKLY_SCHEDULE_MODES,
     // Merged-PR summaries read the provider-neutral taskPullRequests table.
     manualTriggerRequirements: ['slack', 'repository'],
     usesManagerChannel: true,
     supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
     supportedSourceControlProviders: sourceControlProviders,
+    additionalRules: {
+      field: 'announcerAdditionalRules',
+      placeholder:
+        'Only summarize backend and web. Send web summaries to #web-updates in our Engineering Slack workspace.',
+      defaultScopeDescription: 'summarize all repositories',
+    },
   },
   {
     automationKey: 'manager_stats',
@@ -201,6 +235,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
   {
     automationKey: 'provider_usage_limit',
     label: 'Inference Provider Usage Alerts',
+    resultPriority: 'critical',
     slackIcon: 'battery-warning',
     scheduleModes: PROVIDER_USAGE_LIMIT_SCHEDULE_MODES,
     manualTriggerRequirements: [],
@@ -209,8 +244,19 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     supportedSourceControlProviders: [],
   },
   {
+    automationKey: 'release_announcements',
+    label: 'Announce Roomote Updates',
+    slackIcon: 'megaphone',
+    scheduleModes: [],
+    manualTriggerRequirements: [],
+    usesManagerChannel: true,
+    supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
+    supportedSourceControlProviders: [],
+  },
+  {
     automationKey: 'sentry_triage',
     label: 'Triage Sentry Issues',
+    resultPriority: 'high',
     slackIcon: 'sentry',
     scheduleModes: DAILY_WEEKLY_SCHEDULE_MODES,
     manualTriggerRequirements: ['slack', 'sentry'],
@@ -222,6 +268,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
   {
     automationKey: 'dependabot_triage',
     label: 'Triage Dependabot Alerts',
+    resultPriority: 'high',
     slackIcon: 'dependabot',
     scheduleModes: DAILY_WEEKLY_SCHEDULE_MODES,
     manualTriggerRequirements: ['slack', 'github', 'repository'],
@@ -233,6 +280,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
   {
     automationKey: 'codeql_triage',
     label: 'Triage CodeQL Alerts',
+    resultPriority: 'high',
     slackIcon: 'github',
     scheduleModes: DAILY_WEEKLY_SCHEDULE_MODES,
     manualTriggerRequirements: ['slack', 'github', 'repository'],
@@ -259,6 +307,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
   {
     automationKey: 'security_auditor',
     label: 'Security Auditor',
+    resultPriority: 'critical',
     slackIcon: 'triangle-alert',
     scheduleModes: HOURLY_AUDIT_SCHEDULE_MODES,
     // Merged-PR audits read the provider-neutral pullRequestFacts table.
@@ -267,6 +316,12 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
     supportedSourceControlProviders: sourceControlProviders,
     scheduledSuggestionSource: 'security_auditor',
+    additionalRules: {
+      field: 'securityAuditorAdditionalRules',
+      placeholder:
+        'Audit backend and platform. Send platform findings to #platform-security in our Engineering Slack workspace.',
+      defaultScopeDescription: 'audit all repositories',
+    },
   },
   {
     automationKey: 'code_quality_auditor',
@@ -279,10 +334,17 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
     supportedSourceControlProviders: sourceControlProviders,
     scheduledSuggestionSource: 'code_quality_auditor',
+    additionalRules: {
+      field: 'codeQualityAuditorAdditionalRules',
+      placeholder:
+        'Audit backend and web. Send web findings to #web-quality in our Engineering Slack workspace.',
+      defaultScopeDescription: 'audit all repositories',
+    },
   },
   {
     automationKey: 'ci_failure_triage',
     label: 'CI Failure Triage',
+    resultPriority: 'high',
     slackIcon: 'wrench',
     scheduleModes: CI_FAILURE_TRIAGE_SCHEDULE_MODES,
     // GitHub workflow_run, GitLab Pipeline, Azure DevOps build.complete,
@@ -300,17 +362,29 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
       'gitea',
     ],
     scheduledSuggestionSource: 'ci_failure_triage',
+    additionalRules: {
+      field: 'ciFailureTriageAdditionalRules',
+      placeholder:
+        'Only triage backend and platform. Send platform failures to #platform-ci in our Engineering Slack workspace.',
+      defaultScopeDescription: 'triage all repositories',
+    },
   },
   {
     automationKey: 'merge_announcer',
     label: 'Merge announcer',
-    slackIcon: 'git-commit-vertical',
+    slackIcon: 'git-merge',
     scheduleModes: MERGE_ANNOUNCER_SCHEDULE_MODES,
     // Source-control push webhooks trigger this automation; 'daily' only means enabled.
     manualTriggerRequirements: [],
     usesManagerChannel: true,
     supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
     supportedSourceControlProviders: sourceControlProviders,
+    additionalRules: {
+      field: 'mergeAnnouncerAdditionalRules',
+      placeholder:
+        'Only announce backend and web. Send web announcements to #web-updates in our Engineering Slack workspace.',
+      defaultScopeDescription: 'announce all repositories',
+    },
   },
 ] as const satisfies readonly TriggerableBackgroundAutomationDescriptor[];
 
@@ -367,6 +441,10 @@ const BACKGROUND_AUTOMATION_SETTINGS_CATALOG = [
   {
     hash: PLATFORM_ISSUE_ALERTS_SETTINGS_HASH,
     label: 'Alert on Config Errors',
+  },
+  {
+    hash: RELEASE_ANNOUNCEMENTS_SETTINGS_HASH,
+    automationKey: 'release_announcements',
   },
   {
     hash: MANAGER_STATS_SETTINGS_HASH,

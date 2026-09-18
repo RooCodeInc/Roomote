@@ -6,6 +6,10 @@ import type { Variables } from '../../../types';
 import { mcpAuthMiddleware } from '../../mcp/middleware';
 import { searchTasks } from '../searchTasks';
 
+vi.mock('../../custom-automation-history-access', () => ({
+  customAutomationHistoryAccess: vi.fn(() => undefined),
+}));
+
 const {
   mockDbSelect,
   mockGetLatestTaskRunsByTaskIds,

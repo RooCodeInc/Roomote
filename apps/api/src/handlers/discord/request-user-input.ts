@@ -3,19 +3,21 @@ import {
   buildDiscordCancelledRequestUserInputText,
   getDiscordRequestUserInputCurrentQuestion,
   getPendingCommunicationRequestUserInput,
-  clearPendingCommunicationRequestUserInput,
+  matchesDiscordRequestUserInputRequestToken,
   parseDiscordRequestUserInputAnswerCallbackData,
   parseDiscordRequestUserInputCancelCallbackData,
+  rebindPendingCommunicationRequestUserInputRun,
   submitPendingCommunicationRequestUserInputAnswer,
   type PendingCommunicationRequestUserInput,
 } from '@roomote/communication';
 import type { DiscordInteraction } from '@roomote/communication/discord-event';
 import type { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
 import {
-  parseAcpRequestUserInputAnswerReply,
+  TaskPayloadKind,
   type AcpRequestUserInputAnswers,
 } from '@roomote/types';
 import { setTrustedRunActingUserOnSuccess } from '@roomote/db/server';
+import { findActiveCommunicationTaskRun } from '@roomote/sdk/server/communication';
 
 import { apiLogger } from '../../logging.js';
 import { replyToDiscordEvent } from './replies.js';
@@ -151,88 +153,6 @@ async function finalizeDiscordRequestUserInputAnswer(params: {
 }
 
 /**
- * Try to treat an inbound Discord message as an answer to a pending
- * request_user_input prompt. Returns true when the message was consumed.
- */
-export async function tryHandleDiscordRequestUserInputMessage(params: {
-  provider: DiscordCommunicationProvider;
-  applicationId: string;
-  channel: DiscordChannelContext;
-  activeRun: { id: number };
-  userId: string;
-  text: string;
-  replyToMessageId?: string;
-}): Promise<boolean> {
-  const conversationId = conversationIdForChannel(params.channel);
-  const pendingRequest = await getPendingCommunicationRequestUserInput(
-    'discord',
-    conversationId,
-  );
-
-  if (!pendingRequest) {
-    return false;
-  }
-
-  if (pendingRequest.runId !== params.activeRun.id) {
-    await clearPendingCommunicationRequestUserInput('discord', conversationId, {
-      requestId: pendingRequest.requestId,
-    }).catch(() => undefined);
-    return false;
-  }
-
-  if (pendingRequest.status === 'submitted') {
-    await postAlreadyReceivedNotice({
-      provider: params.provider,
-      applicationId: params.applicationId,
-      channel: params.channel,
-      replyToMessageId: params.replyToMessageId,
-    });
-    return true;
-  }
-
-  const parsedReply = parseAcpRequestUserInputAnswerReply(
-    pendingRequest.questions,
-    params.text,
-  );
-
-  if (!parsedReply) {
-    // Not a recognizable structured answer — fall through to normal follow-up.
-    return false;
-  }
-
-  if (parsedReply.resolution === 'cancelled') {
-    await finalizeDiscordRequestUserInputAnswer({
-      provider: params.provider,
-      applicationId: params.applicationId,
-      channel: params.channel,
-      activeRunId: params.activeRun.id,
-      pendingRequest,
-      answers: {},
-      userId: params.userId,
-      answerText: 'cancel',
-      replyToMessageId: params.replyToMessageId,
-      cancelled: true,
-    });
-    return true;
-  }
-
-  await finalizeDiscordRequestUserInputAnswer({
-    provider: params.provider,
-    applicationId: params.applicationId,
-    channel: params.channel,
-    activeRunId: params.activeRun.id,
-    pendingRequest,
-    answers: parsedReply.answers,
-    userId: params.userId,
-    answerText: Object.values(parsedReply.answers)
-      .flatMap((entry) => entry.answers)
-      .join(', '),
-    replyToMessageId: params.replyToMessageId,
-  });
-  return true;
-}
-
-/**
  * Handle Discord button clicks for request_user_input prompts.
  * Returns true when the interaction was consumed.
  */
@@ -272,7 +192,7 @@ export async function tryHandleDiscordRequestUserInputCallback(params: {
   }
 
   const conversationId = conversationIdForChannel(params.channel);
-  const pendingRequest = await getPendingCommunicationRequestUserInput(
+  let pendingRequest = await getPendingCommunicationRequestUserInput(
     'discord',
     conversationId,
   );
@@ -293,10 +213,15 @@ export async function tryHandleDiscordRequestUserInputCallback(params: {
     return true;
   }
 
-  const expectedToken = pendingRequest.requestId.slice(-8);
   const receivedToken =
     answerCallback?.requestToken ?? cancelCallback?.requestToken;
-  if (receivedToken !== expectedToken) {
+  if (
+    !receivedToken ||
+    !matchesDiscordRequestUserInputRequestToken(
+      pendingRequest.requestId,
+      receivedToken,
+    )
+  ) {
     await replyToDiscordEvent({
       provider: params.provider,
       applicationId: params.applicationId,
@@ -309,6 +234,75 @@ export async function tryHandleDiscordRequestUserInputCallback(params: {
       ephemeral: true,
     });
     return true;
+  }
+
+  const activeRun = await findActiveCommunicationTaskRun({
+    provider: 'discord',
+    channelId: params.channel.parentChannelId ?? params.channel.channelId,
+    ...(params.channel.parentChannelId
+      ? { threadId: params.channel.channelId }
+      : {}),
+    taskId: pendingRequest.taskId,
+  });
+  if (!activeRun) {
+    await replyToDiscordEvent({
+      provider: params.provider,
+      applicationId: params.applicationId,
+      channel: params.channel,
+      interaction: {
+        interaction: params.interaction,
+        interactionDeferred: params.interactionDeferred,
+      },
+      text: 'This prompt is no longer active.',
+      ephemeral: true,
+    });
+    return true;
+  }
+
+  if (activeRun.id !== pendingRequest.runId) {
+    const sourceRunId =
+      activeRun.payloadKind === TaskPayloadKind.SnapshotResume &&
+      activeRun.payload &&
+      typeof activeRun.payload === 'object'
+        ? (activeRun.payload as { sourceRunId?: unknown }).sourceRunId
+        : undefined;
+    if (sourceRunId !== pendingRequest.runId) {
+      await replyToDiscordEvent({
+        provider: params.provider,
+        applicationId: params.applicationId,
+        channel: params.channel,
+        interaction: {
+          interaction: params.interaction,
+          interactionDeferred: params.interactionDeferred,
+        },
+        text: 'This prompt is no longer active.',
+        ephemeral: true,
+      });
+      return true;
+    }
+
+    const rebound = await rebindPendingCommunicationRequestUserInputRun({
+      provider: 'discord',
+      conversationId,
+      taskId: pendingRequest.taskId,
+      sourceRunId: pendingRequest.runId,
+      resumedRunId: activeRun.id,
+    });
+    if (!rebound) {
+      await replyToDiscordEvent({
+        provider: params.provider,
+        applicationId: params.applicationId,
+        channel: params.channel,
+        interaction: {
+          interaction: params.interaction,
+          interactionDeferred: params.interactionDeferred,
+        },
+        text: 'This prompt is no longer active.',
+        ephemeral: true,
+      });
+      return true;
+    }
+    pendingRequest = { ...pendingRequest, runId: activeRun.id };
   }
 
   if (pendingRequest.status === 'submitted') {

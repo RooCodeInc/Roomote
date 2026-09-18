@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -14,11 +14,11 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  ExternalLink,
   Info,
   LogOut,
   Settings,
 } from '@/components/system';
+import { ReleaseNotesDialog } from '@/components/layout/release-notices/ReleaseNotesDialog';
 
 import { useUser } from '@/hooks/useUser';
 import { authClient } from '@/lib/auth-client';
@@ -85,12 +85,19 @@ function SignedInUserMenu({
 }) {
   const trpc = useTRPC();
   const [isAboutOpen, setIsAboutOpen] = useState(false);
+  const [releaseNotesVersion, setReleaseNotesVersion] = useState<string | null>(
+    null,
+  );
+  const [deploymentHost, setDeploymentHost] = useState<string | null>(null);
   const statusQuery = useQuery(
     trpc.releases.status.queryOptions(undefined, {
       staleTime: 30 * 60 * 1000,
       refetchOnWindowFocus: false,
     }),
   );
+  useEffect(() => {
+    setDeploymentHost(window.location.host || null);
+  }, []);
   const handleSignOut = async () => {
     window.localStorage.removeItem(PERSONAL_THEME_STORAGE_KEY);
     await authClient.signOut({
@@ -105,10 +112,20 @@ function SignedInUserMenu({
   const userDisplayName = user.name ?? 'You';
   const userEmail = user.resource.primaryEmailAddress?.emailAddress;
   const displayVersion = statusQuery.data?.displayVersion ?? null;
+  const availableReleaseNotesVersion =
+    statusQuery.data?.runningVersion ?? statusQuery.data?.displayVersion;
   const isReleaseVersion = isParsableProductVersion(displayVersion);
   const releaseUrl = displayVersion
     ? `${GITHUB_RELEASES_BASE_URL}/#release-${toReleaseTag(displayVersion)}`
     : null;
+  const handleOpenReleaseNotes = () => {
+    if (!availableReleaseNotesVersion) {
+      return;
+    }
+
+    setIsAboutOpen(false);
+    setReleaseNotesVersion(availableReleaseNotesVersion);
+  };
 
   return (
     <>
@@ -224,19 +241,31 @@ function SignedInUserMenu({
             )}
           </DialogHeader>
 
+          {deploymentHost ? (
+            <div className="text-sm">
+              <div className="text-muted-foreground">Deployment host</div>
+              <div
+                className="font-mono break-all"
+                title={deploymentHost}
+                aria-label={`Deployment host: ${deploymentHost}`}
+              >
+                {deploymentHost}
+              </div>
+            </div>
+          ) : null}
+
           <p className="max-w-54 min-h-14 md:max-w-none md:min-h-auto">
             Made with care by humans and robots.
           </p>
           <div>
-            <Button variant="link" size="sm" asChild>
-              <a
-                href={GITHUB_RELEASES_BASE_URL}
-                target="_blank"
-                rel="noreferrer"
-              >
-                See all Roomote releases
-                <ExternalLink />
-              </a>
+            <Button
+              type="button"
+              variant="link"
+              size="sm"
+              onClick={handleOpenReleaseNotes}
+              disabled={!availableReleaseNotesVersion}
+            >
+              See all Roomote releases
             </Button>
           </div>
           <Image
@@ -248,6 +277,18 @@ function SignedInUserMenu({
           />
         </DialogContent>
       </Dialog>
+      {releaseNotesVersion ? (
+        <ReleaseNotesDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) {
+              setReleaseNotesVersion(null);
+            }
+          }}
+          mode="whats-new"
+          version={releaseNotesVersion}
+        />
+      ) : null}
     </>
   );
 }

@@ -29,19 +29,21 @@ export function useArtifactLink() {
 interface ArtifactLinkProviderProps {
   session: TaskSession;
   children: ReactNode;
+  onOpenArtifact?: (path: string, version?: number) => void;
 }
 
 export function ArtifactLinkProvider({
   session,
   children,
+  onOpenArtifact,
 }: ArtifactLinkProviderProps) {
   const { openArtifactDetail } = useTaskSidePanel();
 
   const openArtifact = useCallback(
     (path: string, version?: number) => {
-      openArtifactDetail(path, version);
+      (onOpenArtifact ?? openArtifactDetail)(path, version);
     },
-    [openArtifactDetail],
+    [onOpenArtifact, openArtifactDetail],
   );
 
   const artifacts = useMemo(() => session.artifacts ?? [], [session.artifacts]);

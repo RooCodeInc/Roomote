@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { NO_REPOSITORIES } from '@roomote/types';
 
 const {
   useSandboxLayoutMock,
@@ -117,6 +118,18 @@ describe('Header', () => {
             enabled: options?.enabled,
           }),
         },
+        byId: {
+          queryOptions: (
+            _input: { sessionId: string },
+            options?: { enabled?: boolean },
+          ) => ({
+            queryKey: ['sessions.byId'],
+            queryFn: async () => ({
+              tasks: [{ taskId: 'task-123' }, { taskId: 'task-456' }],
+            }),
+            enabled: options?.enabled,
+          }),
+        },
       },
       tasks: {
         updateTitle: {
@@ -138,6 +151,9 @@ describe('Header', () => {
     renderHeader();
 
     expect(screen.queryByText('OpenCode')).not.toBeInTheDocument();
+    expect(
+      document.querySelector('[data-task-robot-icon]'),
+    ).toBeInTheDocument();
   });
 
   it('keeps the header clean when the task uses OpenCode', () => {
@@ -167,16 +183,14 @@ describe('Header', () => {
     expect(screen.queryByText('OpenCode')).not.toBeInTheDocument();
   });
 
-  it('always queries the parent session and renders its links', async () => {
+  it('replaces breadcrumbs with a back-to-session control', async () => {
     renderHeader();
 
     expect(
-      await screen.findByRole('link', { name: 'Parent Session' }),
+      await screen.findByRole('link', { name: 'Back to session' }),
     ).toHaveAttribute('href', '/sessions/session-1?task=task-123');
-    expect(screen.getByRole('link', { name: /Go to session/ })).toHaveAttribute(
-      'href',
-      '/sessions/session-1?task=task-123',
-    );
+    expect(screen.queryByText('Parent Session')).not.toBeInTheDocument();
+    expect(screen.getByText('Workspace env-1')).toBeInTheDocument();
     expect(parentSessionQueryMock).toHaveBeenCalled();
   });
 
@@ -194,8 +208,40 @@ describe('Header', () => {
     });
 
     expect(
-      await screen.findByRole('link', { name: /Go to session/ }),
+      await screen.findByRole('link', { name: 'Back to session' }),
     ).toHaveAttribute('href', '/sessions/00000000-0000-4000-8000-000000000001');
+  });
+
+  it('renders environment and pull request badges together', async () => {
+    renderHeader({
+      taskRun: {
+        payload: { environmentId: 'env-1' },
+        pullRequests: [
+          {
+            repository: 'RooCodeInc/Roomote',
+            prNumber: 42,
+            prUrl: 'https://github.com/RooCodeInc/Roomote/pull/42',
+          },
+        ],
+      } as never,
+    });
+
+    expect(
+      await screen.findByText('RooCodeInc/Roomote#42'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Workspace env-1')).toBeInTheDocument();
+  });
+
+  it('hides the workspace badge for no-repository tasks', () => {
+    renderHeader({
+      taskRun: {
+        payload: { repo: NO_REPOSITORIES },
+      } as never,
+    });
+
+    expect(
+      screen.queryByText(`Repo ${NO_REPOSITORIES}`),
+    ).not.toBeInTheDocument();
   });
 
   it('refreshes task lists after renaming a task', async () => {

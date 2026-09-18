@@ -9,7 +9,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { CommsProviderSection } from './CommsProviderSection';
 
 type CommsProviderStatus = {
-  id: 'slack' | 'microsoft' | 'telegram';
+  id: 'slack' | 'microsoft' | 'telegram' | 'discord' | 'agentmail';
   label: string;
   fields: Array<{
     envVarName: string;
@@ -37,9 +37,20 @@ type CommsProviderStatus = {
     lastErrorMessage: string | null;
   } | null;
   telegramBotUsername?: string | null;
+  agentmail?: {
+    inboxAddress: string | null;
+    inboxEmail: string | null;
+    webhook: {
+      status: 'connected' | 'mismatch' | 'unregistered' | 'error';
+      registeredUrl: string | null;
+      expectedUrl: string;
+      errorMessage: string | null;
+    };
+  } | null;
 };
 
 const state = vi.hoisted(() => ({
+  cloudEnabled: false,
   slackInstallation: null as null | { teamName?: string },
   slackInstallationIsPending: false,
   connectSlackIsPending: false,
@@ -89,6 +100,10 @@ const state = vi.hoisted(() => ({
   slackChannelsIsFetching: false,
   updateRouterDebugIsPending: false,
   createSlackAppIsPending: false,
+}));
+
+vi.mock('@/hooks/useUser', () => ({
+  useAuthorizedUser: () => ({ cloudEnabled: state.cloudEnabled }),
 }));
 
 const mutations = vi.hoisted(() => ({
@@ -333,6 +348,7 @@ vi.mock('@/components/system', () => ({
     <input {...props} />
   ),
   Label: ({ children }: { children: ReactNode }) => <label>{children}</label>,
+  Mail: () => <svg aria-hidden="true" />,
   Pencil: () => <svg aria-hidden="true" />,
   Plug: () => <svg aria-hidden="true" />,
   RefreshCw: () => <svg aria-hidden="true" />,
@@ -366,7 +382,9 @@ vi.mock('@/lib/slack-callback-paths', () => ({
   SLACK_SIGN_IN_CALLBACK_PATH: '/api/slack/signin',
 }));
 vi.mock('@/app/(onboarding)/setup/providerSetupCopy', () => ({
-  getProviderSetupCopy: (providerId: 'slack' | 'microsoft' | 'telegram') =>
+  getProviderSetupCopy: (
+    providerId: 'slack' | 'microsoft' | 'telegram' | 'agentmail',
+  ) =>
     ({
       slack: {
         creationHref: 'https://api.slack.com/apps?new_app=1',
@@ -379,6 +397,10 @@ vi.mock('@/app/(onboarding)/setup/providerSetupCopy', () => ({
       telegram: {
         creationHref: 'https://t.me/BotFather',
         setupLabel: 'Telegram bot',
+      },
+      agentmail: {
+        creationHref: 'https://console.agentmail.to/dashboard/inboxes',
+        setupLabel: 'AgentMail API key',
       },
     })[providerId],
 }));
@@ -547,9 +569,65 @@ function buildTelegramProvider(
   };
 }
 
+function buildDiscordProvider(): CommsProviderStatus {
+  return {
+    id: 'discord',
+    label: 'Discord',
+    fields: [
+      {
+        envVarName: 'R_DISCORD_BOT_TOKEN',
+        acceptedEnvVarNames: ['R_DISCORD_BOT_TOKEN'],
+        label: 'Discord Bot Token',
+        secret: true,
+        runtimeSatisfied: false,
+        savedSatisfied: false,
+        satisfiedByEnvVarName: null,
+      },
+    ],
+    runtimeSatisfied: false,
+    savedSatisfied: false,
+    setupSatisfied: false,
+  };
+}
+
+function buildAgentMailProvider(
+  overrides: Partial<CommsProviderStatus> = {},
+): CommsProviderStatus {
+  return {
+    id: 'agentmail',
+    label: 'Email (AgentMail)',
+    fields: [
+      {
+        envVarName: 'R_AGENTMAIL_API_KEY',
+        acceptedEnvVarNames: ['R_AGENTMAIL_API_KEY'],
+        label: 'AgentMail API Key',
+        secret: true,
+        runtimeSatisfied: true,
+        savedSatisfied: false,
+        satisfiedByEnvVarName: 'R_AGENTMAIL_API_KEY',
+      },
+    ],
+    runtimeSatisfied: true,
+    savedSatisfied: false,
+    setupSatisfied: true,
+    agentmail: {
+      inboxAddress: 'workspace@roomote.me',
+      inboxEmail: 'workspace@roomote.me',
+      webhook: {
+        status: 'connected',
+        registeredUrl: 'https://workspace.example/api/webhooks/agentmail',
+        expectedUrl: 'https://workspace.example/api/webhooks/agentmail',
+        errorMessage: null,
+      },
+    },
+    ...overrides,
+  };
+}
+
 describe('CommsProviderSection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    state.cloudEnabled = false;
     state.slackInstallation = null;
     state.slackInstallationIsPending = false;
     state.connectSlackIsPending = false;
@@ -584,6 +662,30 @@ describe('CommsProviderSection', () => {
     mutations.invalidateQueries.mockReset();
   });
 
+  it.each([
+    buildSlackProvider(),
+    buildMicrosoftProvider(),
+    buildTelegramProvider(),
+    buildDiscordProvider(),
+  ])(
+    'names the $label setup action without changing its visible copy',
+    (provider) => {
+      render(
+        <CommsProviderSection
+          provider={provider}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      expect(
+        screen.getByRole('button', { name: `Set up ${provider.label}` }),
+      ).toHaveTextContent('Set it up');
+    },
+  );
+
   describe('numbered setup instructions', () => {
     it('shows the Slack config-token create-app screen without Back in settings', () => {
       render(
@@ -596,7 +698,7 @@ describe('CommsProviderSection', () => {
         />,
       );
 
-      fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Set up Slack' }));
 
       expect(
         screen.queryByRole('heading', { name: 'Create Slack app' }),
@@ -635,7 +737,7 @@ describe('CommsProviderSection', () => {
         />,
       );
 
-      fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Set up Slack' }));
       fireEvent.change(screen.getByLabelText('App configuration token'), {
         target: { value: 'xoxe.xoxp-config-token' },
       });
@@ -707,7 +809,7 @@ describe('CommsProviderSection', () => {
         />,
       );
 
-      fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Set up Slack' }));
 
       expect(screen.getByLabelText('App configuration token')).toBeDisabled();
       expect(
@@ -726,7 +828,9 @@ describe('CommsProviderSection', () => {
         />,
       );
 
-      fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Set up Microsoft Teams' }),
+      );
 
       expect(
         screen.queryByRole('heading', {
@@ -763,7 +867,7 @@ describe('CommsProviderSection', () => {
         />,
       );
 
-      fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Set up Telegram' }));
 
       expect(
         screen.queryByRole('heading', { name: 'Configure Telegram bot' }),
@@ -808,7 +912,7 @@ describe('CommsProviderSection', () => {
         />,
       );
 
-      fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Set up Telegram' }));
       fireEvent.change(screen.getByPlaceholderText('Telegram Bot Token'), {
         target: { value: 'bot-token' },
       });
@@ -841,7 +945,7 @@ describe('CommsProviderSection', () => {
         />,
       );
 
-      fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Set up Telegram' }));
 
       expect(
         screen.getByText(
@@ -875,7 +979,7 @@ describe('CommsProviderSection', () => {
         />,
       );
 
-      fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Set up Telegram' }));
 
       expect(screen.getByText('Connected to @RoomoteBot')).toBeInTheDocument();
       expect(screen.queryByText('Webhook connected')).not.toBeInTheDocument();
@@ -1313,7 +1417,9 @@ describe('CommsProviderSection', () => {
         />,
       );
 
-      fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Set up Microsoft Teams' }),
+      );
       fireEvent.change(screen.getByPlaceholderText('Microsoft Client ID'), {
         target: { value: 'not-a-guid' },
       });
@@ -1340,7 +1446,9 @@ describe('CommsProviderSection', () => {
         />,
       );
 
-      fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Set up Microsoft Teams' }),
+      );
       fireEvent.change(screen.getByPlaceholderText('Microsoft Client ID'), {
         target: { value: '00000000-0000-0000-0000-000000000001' },
       });
@@ -1348,6 +1456,73 @@ describe('CommsProviderSection', () => {
       expect(
         screen.queryByText(/doesn't look like an Entra app ID/),
       ).not.toBeInTheDocument();
+    });
+
+    it('shows Cloud-managed Email status without configuration controls', () => {
+      state.cloudEnabled = true;
+      render(
+        <CommsProviderSection
+          provider={buildAgentMailProvider()}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      expect(
+        screen.getByText('Email is managed by Roomote Cloud.'),
+      ).toBeVisible();
+      expect(screen.getByText('workspace@roomote.me')).toBeVisible();
+      expect(screen.getByText(/Webhook connected/)).toBeVisible();
+      expect(screen.queryByText('AgentMail API Key')).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: 'Save' }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: 'Remove' }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('keeps self-hosted Email configuration visible', () => {
+      render(
+        <CommsProviderSection
+          provider={buildAgentMailProvider()}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      expect(screen.getByText('AgentMail API Key')).toBeVisible();
+      expect(
+        screen.queryByText('Email is managed by Roomote Cloud.'),
+      ).not.toBeInTheDocument();
+    });
+
+    it('shows when Cloud-managed Email has not been provisioned', () => {
+      state.cloudEnabled = true;
+      render(
+        <CommsProviderSection
+          provider={buildAgentMailProvider({
+            runtimeSatisfied: false,
+            setupSatisfied: false,
+            agentmail: null,
+          })}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      expect(
+        screen.getByText(
+          'Managed Email is unavailable. Roomote Cloud has not provisioned an inbox for this deployment.',
+        ),
+      ).toBeVisible();
+      expect(screen.queryByText('AgentMail API Key')).not.toBeInTheDocument();
     });
   });
 });

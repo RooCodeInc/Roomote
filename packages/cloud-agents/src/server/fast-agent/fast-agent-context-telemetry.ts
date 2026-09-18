@@ -8,8 +8,24 @@ import type {
   FastAgentSurface,
   FastAgentTurnSource,
 } from './fast-agent-conversation';
+import type { FastAgentCapabilityId } from '@roomote/types';
 
 const FAST_AGENT_CONTEXT_MANIFEST_VERSION = 1;
+
+export function captureFastAgentCapabilityOffer(input: {
+  userId: string;
+  capability: FastAgentCapabilityId;
+  outcome: 'requested' | 'shown' | 'deduplicated' | 'unavailable';
+  advancedInitialSetup: boolean;
+}): void {
+  void captureEvent(`capability_offer_${input.outcome}`, {
+    userId: input.userId,
+    properties: {
+      capability: input.capability,
+      advanced_initial_setup: input.advancedInitialSetup,
+    },
+  });
+}
 
 export type FastAgentSessionPath =
   | 'warm'
@@ -60,6 +76,9 @@ type CaptureFastAgentInferenceContextInput = {
   suppliedThreadMessageCount: number;
   threadContextAttached: boolean;
   senderContextPresent: boolean;
+  directedAtRoomote: boolean | null;
+  allowSilentAmbientReply: boolean;
+  peerDirectedTurn: boolean;
   agentContextPresent: boolean;
   inputImageCount: number;
   attachedImageCount: number;
@@ -144,6 +163,9 @@ export function captureFastAgentInferenceContext(
       supplied_thread_message_count: input.suppliedThreadMessageCount,
       thread_context_attached: input.threadContextAttached,
       sender_context_present: input.senderContextPresent,
+      directed_at_roomote: input.directedAtRoomote,
+      allow_silent_ambient_reply: input.allowSilentAmbientReply,
+      peer_directed_turn: input.peerDirectedTurn,
       agent_context_present: input.agentContextPresent,
       input_image_count: input.inputImageCount,
       attached_image_count: input.attachedImageCount,
@@ -208,6 +230,28 @@ export function captureFastAgentTurnSettled(input: {
   visibleReplyCount: number;
   openCodeProviderRetryEventCount: number;
   roomoteInferenceRetryCount: number;
+  modelRequestCount?: number;
+  completedModelRequestCount?: number;
+  firstModelResponseDurationMs?: number;
+  postReplyInferenceDurationMs?: number;
+  abortedAfterCloseout?: boolean;
+  inputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  outputTokens?: number;
+  reasoningTokens?: number;
+  maxContextTokens?: number;
+  systemPromptChars?: number;
+  environmentCount?: number;
+  integrationCount?: number;
+  integrationToolCount?: number;
+  activeTaskCount?: number;
+  promptSkillCount?: number;
+  openCodeServerLeaseMs?: number;
+  openCodeSessionValidateMs?: number;
+  openCodeSessionCreateMs?: number;
+  openCodeEventSubscribeMs?: number;
+  openCodeSetupMs?: number;
 }): void {
   void captureEvent('fast_turn_settled', {
     userId: input.userId,
@@ -230,6 +274,30 @@ export function captureFastAgentTurnSettled(input: {
       opencode_provider_retry_event_count:
         input.openCodeProviderRetryEventCount,
       roomote_inference_retry_count: input.roomoteInferenceRetryCount,
+      model_request_count: input.modelRequestCount ?? null,
+      completed_model_request_count: input.completedModelRequestCount ?? null,
+      first_model_response_duration_ms:
+        input.firstModelResponseDurationMs ?? null,
+      post_reply_inference_duration_ms:
+        input.postReplyInferenceDurationMs ?? null,
+      aborted_after_closeout: input.abortedAfterCloseout ?? null,
+      input_tokens: input.inputTokens ?? null,
+      cache_read_tokens: input.cacheReadTokens ?? null,
+      cache_write_tokens: input.cacheWriteTokens ?? null,
+      output_tokens: input.outputTokens ?? null,
+      reasoning_tokens: input.reasoningTokens ?? null,
+      max_context_tokens: input.maxContextTokens ?? null,
+      system_prompt_chars: input.systemPromptChars ?? null,
+      environment_count: input.environmentCount ?? null,
+      integration_count: input.integrationCount ?? null,
+      integration_tool_count: input.integrationToolCount ?? null,
+      active_task_count: input.activeTaskCount ?? null,
+      prompt_skill_count: input.promptSkillCount ?? null,
+      opencode_server_lease_ms: input.openCodeServerLeaseMs ?? null,
+      opencode_session_validate_ms: input.openCodeSessionValidateMs ?? null,
+      opencode_session_create_ms: input.openCodeSessionCreateMs ?? null,
+      opencode_event_subscribe_ms: input.openCodeEventSubscribeMs ?? null,
+      opencode_setup_ms: input.openCodeSetupMs ?? null,
     },
   });
 }

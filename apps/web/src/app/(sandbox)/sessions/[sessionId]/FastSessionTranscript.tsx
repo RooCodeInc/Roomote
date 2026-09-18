@@ -1,27 +1,41 @@
 'use client';
 
+import { ServiceCredentials } from '@/components/sessions/ServiceCredentials';
+
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useReducer,
   useRef,
   useState,
   type ReactNode,
 } from 'react';
+import { useStickToBottomContext } from 'use-stick-to-bottom';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
+  SETUP_RECEIPT_INPUT_KIND,
+  formatRequestUserInputResponseText,
   getImageUrisFromContentBlocks,
   getTextFromContentBlocks,
   inferAcpMessageKind,
+  parseAcpRequestUserInputPayload,
+  parseAcpRequestUserInputResponsePayload,
+  parseFastAgentCapabilityOfferPayload,
+  parseFastAgentCapabilityOfferResponsePayload,
   parsePrReviewActionOffer,
+  getTaskModelDisplayName,
+  type AcpMessage,
   type PrReviewActionChoice,
   type AcpEventType,
   type ReasoningEffort,
+  type SessionGoal,
 } from '@roomote/types';
 
 import type { FastSessionMessage } from '@/lib/server/fast-sessions';
-import { useTRPCClient } from '@/trpc/client';
+import { useTRPC, useTRPCClient } from '@/trpc/client';
 import {
   Conversation,
   ConversationContent,
@@ -31,23 +45,64 @@ import {
   MessageUiOptionsProvider,
   Shimmer,
 } from '@/components/ai-elements';
+import {
+  SlackMentionProvider,
+  type SlackMentionScope,
+} from '@/components/ai-elements/slack-mention-context';
 import { WorkspaceHeader } from '@/components/layout';
+import { PrivateSessionIcon } from '@/components/sessions/PrivateSessionIcon';
+import { useLiveVoice } from '@/hooks/useLiveVoice';
+import { useSessionVoiceCallLease } from '@/hooks/useSessionVoiceCallLease';
+import { useSessionNavigationState } from '@/hooks/useSessionNavigationState';
+import { useVoiceEnabled } from '@/hooks/useVoiceEnabled';
 import {
   SessionPromptInput,
+  type SessionModelSelection,
   type SessionPromptSubmission,
 } from './SessionPromptInput';
 import { preparePromptAttachments } from '@/lib/prompt-attachments';
-import { useOpenSessionTaskPanel } from './session-task-panel-context';
+import {
+  useOpenSessionTaskPanel,
+  useOpenSessionTasksPanel,
+  useSessionRunningTaskCount,
+  useSessionTaskStateRevision,
+} from './session-task-panel-context';
 import { useNarrationMode } from '@/hooks/useNarrationMode';
 import { usePageTitle } from '@/hooks/usePageTitle';
+import { useUser } from '@/hooks/useUser';
 import { truncatePageTitle } from '@/lib/page-title';
+import { VOICE_AUTOSTART_QUERY_PARAM } from '@/lib/voice-autostart';
+import { splitSpeakableSentences, toSpeakableText } from '@/lib/voice-speech';
+import {
+  clearPendingFastSessionLaunch,
+  getPendingFastSessionLaunch,
+} from '@/lib/pending-fast-session-launch';
 import { PrReviewActionOffer } from '@/components/ai-elements/pr-review-action-offer';
+import {
+  findPendingSessionInputRequest,
+  SessionUserInputCard,
+} from './SessionUserInputCard';
+import { SetupStarterTasksCard } from './setup/SetupStarterTasksCard';
+import { SetupIntegrationsCard } from './setup/SetupIntegrationsCard';
+import { SESSION_HEADER_CONTENT_CLASS_NAME } from './session-header-layout';
+import { isRequestUserInputResponseRepresentedByCanonicalReceipt } from '@/lib/setup-receipt-transcript';
+import { CapabilityOfferCard } from './CapabilityOfferCard';
+import { PendingIntegrationKeys } from '@/components/sessions/PendingIntegrationKeys';
+import { openIntegrationKeyDialog } from '@/components/sessions/integration-key-dialog';
 
 import {
+  AcpMessageItem,
   AcpTranscriptBlockList,
+  AcpWorkingMessage,
+  hasLiveActivity,
   useAcpTranscriptBlocks,
 } from '../../task/[taskId]/messages/acp';
-import { toAcpUiMessage } from '../../task/[taskId]/hooks/services/acp-protocol-service';
+import { ModelBadge } from '@/components/sandbox';
+import {
+  AcpProtocolService,
+  toAcpUiMessage,
+} from '../../task/[taskId]/hooks/services/acp-protocol-service';
+import type { AcpUiMessage } from '../../task/[taskId]/types';
 
 /** Rows arriving over the SSE stream have `createdAt` serialized to a string;
  * the transcript only sorts on ts/turnSeq/id, so both shapes are accepted. */
@@ -56,6 +111,92 @@ type TranscriptMessage = Omit<FastSessionMessage, 'createdAt'> & {
 };
 
 type TranscriptOrder = Pick<TranscriptMessage, 'id' | 'ts' | 'turnSeq'>;
+
+type TranscriptOwner = {
+  userId: string;
+  name: string | null;
+  email: string | null;
+  imageUrl: string | null;
+};
+
+const ROOMOTE_KICKOFF_LINK = /\r?\n\r?\n\[Open in Roomote\]\([^\r\n]+\)\s*$/;
+
+function getTranscriptMessageText(message: TranscriptMessage) {
+  const text = getTextFromContentBlocks(message.contentBlocks) ?? undefined;
+  const payload = message.payload as { kickoff?: unknown } | null;
+  return payload?.kickoff === true
+    ? text?.replace(ROOMOTE_KICKOFF_LINK, '')
+    : text;
+}
+
+/** A completed `prepare_integration_key` call: the agent just asked the owner for a key. */
+function isIntegrationKeyRequest(message: TranscriptMessage) {
+  if (message.eventType !== ACP_ENVELOPE_EVENT_TYPES.ToolResult) return false;
+  const payload = message.payload as {
+    toolName?: unknown;
+    status?: unknown;
+  } | null;
+  return (
+    payload?.toolName === 'prepare_integration_key' &&
+    payload?.status === 'completed'
+  );
+}
+
+/**
+ * The approval a key request created, read from the tool's JSON output. The
+ * native tool persists `{ pending, sessionUrl }` as is; a `{ success, result }`
+ * wrapper is accepted too. Null when the output is missing or another shape.
+ */
+function integrationKeyRequestPendingRef(message: TranscriptMessage) {
+  const output = (message.payload as { output?: unknown } | null)?.output;
+  if (typeof output !== 'string') return null;
+  try {
+    type Body = { pending?: { pendingRef?: unknown } } | null;
+    const parsed = JSON.parse(output) as (Body & { result?: Body }) | null;
+    const ref =
+      parsed?.pending?.pendingRef ?? parsed?.result?.pending?.pendingRef;
+    return typeof ref === 'string' && ref ? ref : null;
+  } catch {
+    return null;
+  }
+}
+
+function shouldSuppressTrustedInputToolMessage(
+  message: TranscriptMessage,
+  requestTurnIds: ReadonlySet<string>,
+  capabilityOfferTurnIds: ReadonlySet<string>,
+) {
+  if (
+    message.eventType !== ACP_ENVELOPE_EVENT_TYPES.ToolCall &&
+    message.eventType !== ACP_ENVELOPE_EVENT_TYPES.ToolCallUpdate &&
+    message.eventType !== ACP_ENVELOPE_EVENT_TYPES.ToolResult
+  ) {
+    return false;
+  }
+
+  const payload = message.payload as {
+    toolName?: unknown;
+    title?: unknown;
+    status?: unknown;
+    rawInput?: { arguments?: { preset?: unknown } } | null;
+  } | null;
+  const isRequestUserInput =
+    payload?.toolName === 'request_user_input' ||
+    payload?.title === 'request_user_input';
+  const isRepresentedCapabilityOffer =
+    (payload?.toolName === 'offer_capability' ||
+      payload?.title === 'offer_capability') &&
+    capabilityOfferTurnIds.has(message.turnId);
+  const isCompletedSourceControlSetup =
+    payload?.status === 'completed' &&
+    payload?.rawInput?.arguments?.preset === 'setup_source_control';
+  return (
+    isRepresentedCapabilityOffer ||
+    (isRequestUserInput &&
+      (isCompletedSourceControlSetup ||
+        (payload?.status !== 'failed' && requestTurnIds.has(message.turnId))))
+  );
+}
 
 type PendingResponseState = {
   pendingAfter: TranscriptOrder | null;
@@ -94,6 +235,57 @@ function getUserMessageIdentity(message: TranscriptMessage) {
   ]);
 }
 
+function buildOptimisticContentBlocks(text: string, images: string[] = []) {
+  const imageBlocks: TranscriptMessage['contentBlocks'] = images.flatMap(
+    (image) => {
+      const match = /^data:(image\/[^;,]+);base64,(.+)$/i.exec(image.trim());
+      return match?.[1] && match[2]
+        ? [{ type: 'image', mimeType: match[1], data: match[2] }]
+        : [];
+    },
+  );
+
+  return [{ type: 'text' as const, text }, ...imageBlocks];
+}
+
+function getInitialOptimisticMessage(
+  sessionId: string,
+  initialMessages: FastSessionMessage[],
+  currentUser?: TranscriptOwner,
+): TranscriptMessage | null {
+  const launch = getPendingFastSessionLaunch(sessionId);
+  if (!launch) return null;
+
+  const eventId = `web-kickoff:${launch.fastConversationId}:user`;
+  if (initialMessages.some((message) => message.eventId === eventId)) {
+    clearPendingFastSessionLaunch(sessionId);
+    return null;
+  }
+
+  return {
+    id: eventId,
+    eventId,
+    turnId: `web-kickoff:${launch.fastConversationId}`,
+    turnSeq: 0,
+    ts: launch.createdAt,
+    eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+    role: 'user',
+    contentBlocks: buildOptimisticContentBlocks(launch.text, launch.images),
+    metadata: {
+      visibleInTranscript: true,
+      ...(currentUser ? { userId: currentUser.userId } : {}),
+    },
+    payload: {},
+    source: 'web',
+    nativeSessionId: null,
+    nativeMessageId: null,
+    userName: currentUser?.name ?? null,
+    userEmail: currentUser?.email ?? null,
+    userImageUrl: currentUser?.imageUrl ?? null,
+    createdAt: new Date(launch.createdAt),
+  };
+}
+
 function isVisibleResponseActivity(message: TranscriptMessage) {
   return (
     message.role !== 'user' && message.metadata?.visibleInTranscript !== false
@@ -122,6 +314,7 @@ export function pendingResponseReducer(
         action.type === 'hydrate' || action.newEventIds.has(message.eventId);
       if (
         message.role === 'user' &&
+        message.metadata?.inputKind !== SETUP_RECEIPT_INPUT_KIND &&
         isNewMessage &&
         (action.type === 'hydrate' ||
           pendingThreshold === null ||
@@ -176,16 +369,64 @@ export function pendingResponseReducer(
   };
 }
 
-function ThinkingMessage() {
+/** Query param that opens a session straight into a voice conversation. */
+
+function RunningTasksMessage({
+  count,
+  onOpenTasks,
+}: {
+  count: number;
+  onOpenTasks: () => void;
+}) {
+  const label = `${count} ${count === 1 ? 'task' : 'tasks'} running`;
+
   return (
     <Message from="assistant" className="chat-reasoning-message">
       <MessageContent>
-        <Shimmer className="text-sm font-light" direction="rl" duration={1}>
-          Thinking
-        </Shimmer>
+        <span role="status" aria-live="polite">
+          <button
+            type="button"
+            className="w-fit cursor-pointer rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            aria-label={`${label}. Open ${count === 1 ? 'task' : 'tasks'}`}
+            onClick={onOpenTasks}
+          >
+            <Shimmer as="span" className="text-sm font-light" spread={1}>
+              {label}
+            </Shimmer>
+          </button>
+        </span>
       </MessageContent>
     </Message>
   );
+}
+
+function SessionScrollRestoration({ sessionId }: { sessionId: string }) {
+  const { scrollRef, stopScroll } = useStickToBottomContext();
+  const navigationState = useSessionNavigationState();
+
+  useLayoutEffect(() => {
+    const scrollElement = scrollRef.current;
+    if (!scrollElement || !navigationState) return;
+
+    const savedScrollTop = navigationState.getScrollPosition(sessionId);
+    if (savedScrollTop !== undefined) {
+      stopScroll();
+      scrollElement.scrollTop = savedScrollTop;
+    }
+
+    const saveScrollPosition = () => {
+      navigationState.setScrollPosition(sessionId, scrollElement.scrollTop);
+    };
+    scrollElement.addEventListener('scroll', saveScrollPosition, {
+      passive: true,
+    });
+
+    return () => {
+      scrollElement.removeEventListener('scroll', saveScrollPosition);
+    };
+  }, [navigationState, scrollRef, sessionId, stopScroll]);
+
+  return null;
 }
 
 export function FastSessionTranscript({
@@ -199,8 +440,13 @@ export function FastSessionTranscript({
   sessionReasoningEffort = null,
   defaultModelId = null,
   defaultReasoningEffort = null,
+  owner,
   headerExtras,
-  timelineExtras,
+  privateSession = false,
+  headerActions,
+  secretSessionId,
+  sessionGoal,
+  autoStartVoice = false,
 }: {
   sessionId: string;
   initialMessages: FastSessionMessage[];
@@ -212,26 +458,98 @@ export function FastSessionTranscript({
   sessionReasoningEffort?: ReasoningEffort | null;
   defaultModelId?: string | null;
   defaultReasoningEffort?: ReasoningEffort | null;
+  owner?: TranscriptOwner;
   headerExtras?: ReactNode;
-  timelineExtras?: ReactNode;
+  privateSession?: boolean;
+  headerActions?: ReactNode;
+  secretSessionId?: string;
+  sessionGoal?: SessionGoal | null;
+  /**
+   * Begin a voice conversation as soon as the page loads: set when the
+   * session was opened from a voice utterance in the new-session composer,
+   * so the first reply is spoken rather than read.
+   */
+  autoStartVoice?: boolean;
 }) {
+  const trpc = useTRPC();
   const trpcClient = useTRPCClient();
+  const queryClient = useQueryClient();
+  const taskReportRefreshRef = useRef({
+    queryClient,
+    fastTasksQueryKey: trpc.fastSessions.tasks.queryKey({ sessionId }),
+    taskSessionQueryKey: (taskId: string) =>
+      trpc.sandboxSession.byTaskId.queryKey({ taskId }),
+    taskArtifactsQueryKey: (taskId: string) =>
+      trpc.artifacts.forTask.queryKey({ taskId }),
+  });
+  taskReportRefreshRef.current = {
+    queryClient,
+    fastTasksQueryKey: trpc.fastSessions.tasks.queryKey({ sessionId }),
+    taskSessionQueryKey: (taskId: string) =>
+      trpc.sandboxSession.byTaskId.queryKey({ taskId }),
+    taskArtifactsQueryKey: (taskId: string) =>
+      trpc.artifacts.forTask.queryKey({ taskId }),
+  };
+  const { user: authenticatedUser } = useUser();
+  const currentUser = useMemo<TranscriptOwner | undefined>(
+    () =>
+      authenticatedUser
+        ? {
+            userId: authenticatedUser.userId,
+            name: authenticatedUser.name,
+            email:
+              authenticatedUser.primaryEmail ??
+              authenticatedUser.resource.primaryEmailAddress?.emailAddress ??
+              null,
+            imageUrl: authenticatedUser.resource.imageUrl,
+          }
+        : undefined,
+    [authenticatedUser],
+  );
+  const navigationState = useSessionNavigationState();
+  const hasSavedScrollPosition =
+    navigationState?.getScrollPosition(sessionId) !== undefined;
   const openTaskPanel = useOpenSessionTaskPanel();
+  const openTasksPanel = useOpenSessionTasksPanel();
+  const runningTaskCount = useSessionRunningTaskCount();
+  const taskStateRevision = useSessionTaskStateRevision();
   const { enabled: narrationModeEnabled } = useNarrationMode();
   const displayMode = narrationModeEnabled ? 'narration' : 'default';
+  const effectiveSessionModel = sessionModel ?? defaultModelId;
+  const slackMentionScope = useMemo<SlackMentionScope>(
+    () => ({ kind: 'session', sessionId }),
+    [sessionId],
+  );
   const [serverMessages, setServerMessages] = useState<
     Map<string, TranscriptMessage>
   >(
     () => new Map(initialMessages.map((message) => [message.eventId, message])),
   );
   const serverMessagesRef = useRef(serverMessages);
+  const hasReceivedInitialSessionStateRef = useRef(false);
+  const pendingTaskReportTimingsRef = useRef(
+    new Map<string, { admittedAtMs: number; serverReceivedAtMs: number }>(),
+  );
+  const [initialOptimisticMessage] = useState(() =>
+    getInitialOptimisticMessage(sessionId, initialMessages, currentUser),
+  );
+  const initialOptimisticMessages = initialOptimisticMessage
+    ? [initialOptimisticMessage]
+    : [];
   const [optimisticMessages, setOptimisticMessages] = useState<
     TranscriptMessage[]
-  >([]);
+  >(initialOptimisticMessages);
+  const optimisticMessagesRef = useRef(initialOptimisticMessages);
+  const replaceOptimisticMessages = useCallback((next: TranscriptMessage[]) => {
+    optimisticMessagesRef.current = next;
+    setOptimisticMessages(next);
+  }, []);
   const [isSending, setIsSending] = useState(false);
   const [pendingResponseState, dispatchPendingResponse] = useReducer(
     pendingResponseReducer,
-    initialMessages,
+    initialOptimisticMessage
+      ? [...initialMessages, initialOptimisticMessage]
+      : initialMessages,
     (messages) =>
       pendingResponseReducer(
         {
@@ -244,28 +562,136 @@ export function FastSessionTranscript({
   );
   const [replyError, setReplyError] = useState<string | null>(null);
   const [title, setTitle] = useState<string | null>(initialTitle);
+  const [goal, setGoal] = useState<SessionGoal | null>(sessionGoal ?? null);
+  const [conversationResponding, setConversationResponding] = useState<
+    boolean | null
+  >(null);
   usePageTitle(truncatePageTitle(title ?? fallbackTitle));
+  const streamServiceRef = useRef<AcpProtocolService | null>(null);
+  const getStreamService = useCallback(
+    () => (streamServiceRef.current ??= new AcpProtocolService()),
+    [],
+  );
+  const [streamMessages, setStreamMessages] = useState<AcpUiMessage[]>([]);
+  const streamMessagesRef = useRef(streamMessages);
+  const replaceStreamMessages = useCallback((next: AcpUiMessage[]) => {
+    streamMessagesRef.current = next;
+    setStreamMessages(next);
+  }, []);
+  const clearStreamMessages = useCallback(() => {
+    if (streamMessagesRef.current.length === 0) return;
+    getStreamService().reset();
+    replaceStreamMessages([]);
+  }, [getStreamService, replaceStreamMessages]);
 
   useEffect(() => {
+    hasReceivedInitialSessionStateRef.current = false;
     const source = new EventSource(`/api/sessions/${sessionId}/stream`);
+    const onOpen = () => {
+      hasReceivedInitialSessionStateRef.current = false;
+      // Chunks missed while disconnected cannot be recovered; the persisted
+      // row fills the gap.
+      clearStreamMessages();
+    };
     const onMessages = (event: MessageEvent) => {
       try {
-        const { messages } = JSON.parse(event.data) as {
+        const { messages, conversationResponding: responding } = JSON.parse(
+          event.data,
+        ) as {
           messages: TranscriptMessage[];
+          conversationResponding?: boolean | null;
         };
         const previous = serverMessagesRef.current;
         const canonicalMessages = messages.filter(
           (message) => !previous.has(message.eventId),
         );
+        // The stream overlaps the server-rendered transcript on connect. A
+        // replayed lease can be stale, so only new output proves that the
+        // parent response should suppress hydrated nested-task activity.
+        if (
+          responding !== undefined &&
+          (responding !== true || canonicalMessages.length > 0)
+        ) {
+          setConversationResponding(responding);
+        }
         const canonicalUserMessages = canonicalMessages.filter(
           (message) => message.role === 'user',
         );
+        const pendingOptimistic = [...optimisticMessagesRef.current];
         const next = new Map(previous);
         for (const message of messages) {
-          next.set(message.eventId, message);
+          const existing = previous.get(message.eventId);
+          let renderId = existing?.id;
+          if (!renderId && message.role === 'user') {
+            const optimisticIndex = pendingOptimistic.findIndex(
+              (optimistic) =>
+                getUserMessageIdentity(optimistic) ===
+                getUserMessageIdentity(message),
+            );
+            if (optimisticIndex >= 0) {
+              renderId = pendingOptimistic[optimisticIndex]?.id;
+              pendingOptimistic.splice(optimisticIndex, 1);
+            }
+          }
+          next.set(
+            message.eventId,
+            renderId ? { ...message, id: renderId } : message,
+          );
         }
         serverMessagesRef.current = next;
         setServerMessages(next);
+        for (const message of canonicalMessages) {
+          const timing = pendingTaskReportTimingsRef.current.get(
+            message.eventId,
+          );
+          if (!timing) continue;
+          pendingTaskReportTimingsRef.current.delete(message.eventId);
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              const displayAt = performance.timeOrigin + performance.now();
+              if (displayAt < timing.admittedAtMs) return;
+              try {
+                performance.measure(
+                  'roomote.task-report-admission-to-display',
+                  {
+                    start: Math.max(
+                      0,
+                      timing.admittedAtMs - performance.timeOrigin,
+                    ),
+                    end: performance.now(),
+                    detail: {
+                      admissionToServerMs: Math.max(
+                        0,
+                        timing.serverReceivedAtMs - timing.admittedAtMs,
+                      ),
+                      admissionToDisplayMs: displayAt - timing.admittedAtMs,
+                    },
+                  },
+                );
+              } catch {
+                // Older browsers may not support options-based measurements.
+              }
+            });
+          });
+        }
+        // A persisted reply row supersedes the live text streamed for it.
+        const persistedStreamIds = new Set(
+          messages
+            .filter((message) => message.role === 'assistant')
+            .map((message) => `assistant:${message.eventId}`),
+        );
+        const streamed = streamMessagesRef.current;
+        if (streamed.some((message) => persistedStreamIds.has(message.id))) {
+          const remaining = streamed.filter(
+            (message) => !persistedStreamIds.has(message.id),
+          );
+          if (remaining.length === 0) {
+            getStreamService().reset();
+          } else {
+            getStreamService().rebindMessages(remaining);
+          }
+          replaceStreamMessages(remaining);
+        }
         dispatchPendingResponse({
           type: 'messages',
           messages,
@@ -275,18 +701,8 @@ export function FastSessionTranscript({
         });
 
         if (canonicalUserMessages.length > 0) {
-          setOptimisticMessages((current) => {
-            const pending = [...current];
-            for (const canonical of canonicalUserMessages) {
-              const index = pending.findIndex(
-                (optimistic) =>
-                  getUserMessageIdentity(optimistic) ===
-                  getUserMessageIdentity(canonical),
-              );
-              if (index >= 0) pending.splice(index, 1);
-            }
-            return pending;
-          });
+          clearPendingFastSessionLaunch(sessionId);
+          replaceOptimisticMessages(pendingOptimistic);
         }
       } catch {
         // Ignore malformed frames; the next poll re-sends current state.
@@ -294,22 +710,132 @@ export function FastSessionTranscript({
     };
     const onSession = (event: MessageEvent) => {
       try {
-        const { title: nextTitle } = JSON.parse(event.data) as {
-          title: string | null;
+        const update = JSON.parse(event.data) as {
+          title?: string;
+          conversationResponding?: boolean | null;
+          goal?: SessionGoal | null;
         };
-        setTitle(nextTitle);
+        if (update.title !== undefined) {
+          setTitle(update.title);
+        }
+        if (update.goal !== undefined) {
+          setGoal(update.goal);
+        }
+        const isInitialSessionState =
+          !hasReceivedInitialSessionStateRef.current;
+        hasReceivedInitialSessionStateRef.current = true;
+        if (
+          update.conversationResponding !== undefined &&
+          (!isInitialSessionState || update.conversationResponding !== true)
+        ) {
+          setConversationResponding(update.conversationResponding);
+        }
+        if (update.conversationResponding === false) {
+          // The turn is over: any text no reply delivered is withdrawn.
+          clearStreamMessages();
+        }
       } catch {
         // Ignore malformed frames.
       }
     };
+    // Live reply text arrives as the same `assistant_message_chunk` events
+    // the task runtime streams, reassembled by the same protocol service.
+    const onChunk = (event: MessageEvent) => {
+      try {
+        const { event: chunk } = JSON.parse(event.data) as {
+          event: AcpMessage;
+        };
+        if (
+          chunk?.eventType !== ACP_ENVELOPE_EVENT_TYPES.AssistantMessageChunk
+        ) {
+          return;
+        }
+        const service = getStreamService();
+        const fastTurnId = (chunk.metadata as { fastTurnId?: unknown } | null)
+          ?.fastTurnId;
+        if (typeof fastTurnId === 'string' && fastTurnId) {
+          streamTurnIdsRef.current.set(`assistant:${chunk.id}`, fastTurnId);
+        }
+        let current = streamMessagesRef.current;
+        if (
+          !current.some((message) => message.id === `assistant:${chunk.id}`)
+        ) {
+          // A new reply begins: the previous one is complete and only waits
+          // for its persisted row.
+          const sessionId = chunk.metadata?.sessionId;
+          const finalized = service.finalizeActiveStreams(
+            current,
+            typeof sessionId === 'string' ? sessionId : undefined,
+          );
+          if (finalized !== current) {
+            current = finalized;
+            service.rebindMessages(current);
+          }
+        }
+        const result = service.applyOutputEvent(current, chunk);
+        if (result) replaceStreamMessages(result.acpMessages);
+      } catch {
+        // Ignore malformed frames; the persisted row still arrives.
+      }
+    };
+    const onTaskReport = (event: MessageEvent) => {
+      try {
+        const refresh = JSON.parse(event.data) as {
+          type: 'task_report_admitted';
+          eventId: string;
+          taskId: string;
+          admittedAtMs: number;
+          serverReceivedAtMs: number;
+        };
+        if (
+          refresh.type !== 'task_report_admitted' ||
+          !refresh.eventId ||
+          !refresh.taskId ||
+          !Number.isFinite(refresh.admittedAtMs) ||
+          !Number.isFinite(refresh.serverReceivedAtMs)
+        ) {
+          return;
+        }
+        pendingTaskReportTimingsRef.current.set(refresh.eventId, {
+          admittedAtMs: refresh.admittedAtMs,
+          serverReceivedAtMs: refresh.serverReceivedAtMs,
+        });
+        const refreshQueries = taskReportRefreshRef.current;
+        void Promise.all([
+          refreshQueries.queryClient.invalidateQueries({
+            queryKey: refreshQueries.fastTasksQueryKey,
+          }),
+          refreshQueries.queryClient.invalidateQueries({
+            queryKey: refreshQueries.taskSessionQueryKey(refresh.taskId),
+          }),
+          refreshQueries.queryClient.invalidateQueries({
+            queryKey: refreshQueries.taskArtifactsQueryKey(refresh.taskId),
+          }),
+        ]);
+      } catch {
+        // Ignore malformed hints; transcript and task polling remain active.
+      }
+    };
+    source.addEventListener('open', onOpen);
     source.addEventListener('messages', onMessages);
     source.addEventListener('session', onSession);
+    source.addEventListener('chunk', onChunk);
+    source.addEventListener('task-report', onTaskReport);
     return () => {
+      source.removeEventListener('open', onOpen);
       source.removeEventListener('messages', onMessages);
       source.removeEventListener('session', onSession);
+      source.removeEventListener('chunk', onChunk);
+      source.removeEventListener('task-report', onTaskReport);
       source.close();
     };
-  }, [sessionId]);
+  }, [
+    sessionId,
+    clearStreamMessages,
+    getStreamService,
+    replaceOptimisticMessages,
+    replaceStreamMessages,
+  ]);
 
   const messages = useMemo(() => {
     return [...serverMessages.values(), ...optimisticMessages].sort(
@@ -317,23 +843,303 @@ export function FastSessionTranscript({
     );
   }, [serverMessages, optimisticMessages]);
 
-  const uiMessages = useMemo(
+  // Persisted user/assistant history only, matching the server's suggestion
+  // cache: optimistic sends must not advance the suggestion query key, and
+  // only a completed agent turn (a new assistant message) regenerates.
+  const suggestionHistory = useMemo(() => {
+    let messageCount = 0;
+    let assistantCount = 0;
+    for (const message of serverMessages.values()) {
+      const isAssistant =
+        message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage;
+      if (
+        (isAssistant ||
+          message.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt) &&
+        getTextFromContentBlocks(message.contentBlocks)?.trim()
+      ) {
+        messageCount += 1;
+        if (isAssistant) {
+          assistantCount += 1;
+        }
+      }
+    }
+    return { messageCount, assistantCount };
+  }, [serverMessages]);
+
+  const pendingInputRequest = useMemo(
+    () => findPendingSessionInputRequest(messages),
+    [messages],
+  );
+  const pendingInputRequestOrder = useMemo(() => {
+    if (!pendingInputRequest) return null;
+
+    return (
+      messages.find((message) => {
+        if (message.eventType !== ACP_ENVELOPE_EVENT_TYPES.RequestUserInput) {
+          return false;
+        }
+        return (
+          parseAcpRequestUserInputPayload(message.payload)?.requestId ===
+          pendingInputRequest.requestId
+        );
+      }) ?? null
+    );
+  }, [messages, pendingInputRequest]);
+  const resolvedCapabilityOfferIds = useMemo(
     () =>
-      messages.map((message) =>
-        toAcpUiMessage({
-          id: message.id,
-          ts: message.ts,
-          eventType: message.eventType as AcpEventType,
-          role: message.role,
-          kind: inferAcpMessageKind(message.eventType),
-          contentBlocks: message.contentBlocks,
-          metadata: message.metadata,
-          payload: message.payload,
-          text: getTextFromContentBlocks(message.contentBlocks) ?? undefined,
+      new Set(
+        messages.flatMap((message) => {
+          if (
+            message.eventType !==
+            ACP_ENVELOPE_EVENT_TYPES.CapabilityOfferResponse
+          )
+            return [];
+          const response = parseFastAgentCapabilityOfferResponsePayload(
+            message.payload,
+          );
+          return response ? [response.offerId] : [];
         }),
       ),
     [messages],
   );
+  const capabilityOffersByMessageId = useMemo(
+    () =>
+      new Map(
+        messages.flatMap((message) => {
+          if (message.eventType !== ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer)
+            return [];
+          const offer = parseFastAgentCapabilityOfferPayload(message.payload);
+          return offer && !resolvedCapabilityOfferIds.has(offer.offerId)
+            ? ([[message.id, offer]] as const)
+            : [];
+        }),
+      ),
+    [messages, resolvedCapabilityOfferIds],
+  );
+  const capabilityOfferTurnIds = useMemo(
+    () =>
+      new Set(
+        messages.flatMap((message) =>
+          message.eventType === ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer
+            ? [message.turnId]
+            : [],
+        ),
+      ),
+    [messages],
+  );
+  const renderCapabilityOfferMessage = useCallback(
+    (message: AcpUiMessage) => {
+      const offer = capabilityOffersByMessageId.get(message.id);
+      if (!offer) return undefined;
+      const introMessage: AcpUiMessage = {
+        ...message,
+        updateType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        role: 'assistant',
+        kind: 'text',
+        text: offer.message,
+        data: {},
+      };
+      return (
+        <>
+          <AcpMessageItem msg={introMessage} />
+          <div className="mt-3">
+            <CapabilityOfferCard sessionId={sessionId} offer={offer} />
+          </div>
+        </>
+      );
+    },
+    [capabilityOffersByMessageId, sessionId],
+  );
+  const { requestUserInputById, requestUserInputTurnIds } = useMemo(() => {
+    const requests = new Map<
+      string,
+      NonNullable<ReturnType<typeof parseAcpRequestUserInputPayload>>
+    >();
+    const turnIds = new Set<string>();
+    for (const message of messages) {
+      if (message.eventType !== ACP_ENVELOPE_EVENT_TYPES.RequestUserInput) {
+        continue;
+      }
+      const request = parseAcpRequestUserInputPayload(message.payload);
+      if (request) {
+        requests.set(request.requestId, request);
+        turnIds.add(request.turnId);
+      }
+    }
+    return {
+      requestUserInputById: requests,
+      requestUserInputTurnIds: turnIds,
+    };
+  }, [messages]);
+  const { persistedBeforeInput, persistedAfterInput } = useMemo(() => {
+    const before: AcpUiMessage[] = [];
+    const after: AcpUiMessage[] = [];
+
+    for (const message of messages) {
+      if (
+        (message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+          (message.payload as { taskNavigation?: unknown } | null)
+            ?.taskNavigation === true) ||
+        message.eventType === ACP_ENVELOPE_EVENT_TYPES.RequestUserInput ||
+        (message.eventType === ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer &&
+          resolvedCapabilityOfferIds.has(
+            parseFastAgentCapabilityOfferPayload(message.payload)?.offerId ??
+              '',
+          )) ||
+        shouldSuppressTrustedInputToolMessage(
+          message,
+          requestUserInputTurnIds,
+          capabilityOfferTurnIds,
+        )
+      ) {
+        continue;
+      }
+
+      let uiMessage = toAcpUiMessage({
+        // A reply keeps the id its streamed chunks rendered under, so the
+        // persisted row reconciles in place instead of remounting.
+        id:
+          message.role === 'assistant' &&
+          message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage
+            ? `assistant:${message.eventId}`
+            : message.id,
+        ts: message.ts,
+        eventType: message.eventType as AcpEventType,
+        role: message.role,
+        kind: inferAcpMessageKind(message.eventType),
+        contentBlocks: message.contentBlocks,
+        metadata: message.metadata,
+        payload: message.payload,
+        text: getTranscriptMessageText(message),
+        userName: message.userName,
+        userEmail: message.userEmail,
+        userImageUrl: message.userImageUrl,
+      });
+
+      // Keep the persisted source in the UI pipeline so it reconciles the
+      // streamed reply in place, but hide this internal voice delivery.
+      if (
+        message.role === 'assistant' &&
+        message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+        (message.metadata as { voiceCommentary?: unknown } | null)
+          ?.voiceCommentary === true
+      ) {
+        const text = getTranscriptMessageText(message) ?? '';
+        uiMessage = toAcpUiMessage({
+          id: `assistant:${message.eventId}`,
+          ts: message.ts,
+          eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult as AcpEventType,
+          role: 'tool',
+          kind: 'tool_result',
+          contentBlocks: [{ type: 'text', text }],
+          metadata: {
+            visibleInTranscript: false,
+            toolCallId: message.eventId,
+          },
+          payload: {
+            toolName: 'report_to_voice',
+            toolCallId: message.eventId,
+            status: 'completed',
+            rawInput: {},
+            output: text,
+          },
+          text,
+          userName: null,
+          userEmail: null,
+          userImageUrl: null,
+        });
+      }
+
+      if (
+        message.eventType === ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse
+      ) {
+        const response = parseAcpRequestUserInputResponsePayload(
+          message.payload,
+        );
+        const requestId =
+          response?.requestId ??
+          (typeof message.payload?.requestId === 'string'
+            ? message.payload.requestId
+            : null);
+        const request = requestId
+          ? (requestUserInputById.get(requestId) ?? null)
+          : null;
+        if (
+          response &&
+          isRequestUserInputResponseRepresentedByCanonicalReceipt(
+            response,
+            messages,
+          )
+        ) {
+          continue;
+        }
+        uiMessage = {
+          ...uiMessage,
+          role: 'user',
+          kind: 'text',
+          text:
+            response !== null
+              ? formatRequestUserInputResponseText(request, response)
+              : (getTranscriptMessageText(message) ??
+                'Submitted input response'),
+          data: request
+            ? { ...(message.payload ?? {}), request }
+            : (message.payload ?? {}),
+          userId: uiMessage.userId ?? owner?.userId,
+          userName: uiMessage.userName ?? owner?.name,
+          userEmail: uiMessage.userEmail ?? owner?.email,
+          userImageUrl: uiMessage.userImageUrl ?? owner?.imageUrl,
+        };
+      } else if (
+        message.eventType === ACP_ENVELOPE_EVENT_TYPES.CapabilityOfferResponse
+      ) {
+        uiMessage = {
+          ...uiMessage,
+          role: 'user',
+          kind: 'text',
+          text:
+            getTranscriptMessageText(message) ??
+            'Resolved capability suggestion.',
+          data: message.payload ?? {},
+          userId: uiMessage.userId ?? owner?.userId,
+          userName: uiMessage.userName ?? owner?.name,
+          userEmail: uiMessage.userEmail ?? owner?.email,
+          userImageUrl: uiMessage.userImageUrl ?? owner?.imageUrl,
+        };
+      } else if (
+        uiMessage.role === 'user' &&
+        owner &&
+        uiMessage.userId === owner.userId
+      ) {
+        uiMessage = {
+          ...uiMessage,
+          userName: uiMessage.userName ?? owner.name,
+          userEmail: uiMessage.userEmail ?? owner.email,
+          userImageUrl: uiMessage.userImageUrl ?? owner.imageUrl,
+        };
+      }
+
+      const target =
+        pendingInputRequestOrder &&
+        compareTranscriptOrder(message, pendingInputRequestOrder) > 0
+          ? after
+          : before;
+      target.push(uiMessage);
+    }
+
+    return {
+      persistedBeforeInput: before,
+      persistedAfterInput: after,
+    };
+  }, [
+    messages,
+    capabilityOfferTurnIds,
+    owner,
+    pendingInputRequestOrder,
+    requestUserInputById,
+    requestUserInputTurnIds,
+    resolvedCapabilityOfferIds,
+  ]);
   const reviewOffers = useMemo(
     () =>
       messages.flatMap((message) => {
@@ -342,8 +1148,108 @@ export function FastSessionTranscript({
       }),
     [messages],
   );
-  const { renderBlocks, suppressMessage } = useAcpTranscriptBlocks({
-    messages: uiMessages,
+  // Words on the call show up as they are spoken, on both sides, and hand
+  // over to the persisted voice-turn row once it arrives. A delegated
+  // request hands over to the reply's optimistic row instead.
+  const [liveVoiceTurns, setLiveVoiceTurns] = useState<{
+    user: { text: string; eventId: string | null } | null;
+    assistant: { text: string; eventId: string | null } | null;
+  }>({ user: null, assistant: null });
+  useEffect(() => {
+    const settled = (turn: { eventId: string | null } | null) =>
+      turn?.eventId !== null &&
+      turn?.eventId !== undefined &&
+      serverMessages.has(turn.eventId);
+    if (settled(liveVoiceTurns.user) || settled(liveVoiceTurns.assistant)) {
+      setLiveVoiceTurns((current) => ({
+        user: settled(current.user) ? null : current.user,
+        assistant: settled(current.assistant) ? null : current.assistant,
+      }));
+    }
+  }, [serverMessages, liveVoiceTurns]);
+  const liveVoiceUiMessages = useMemo(() => {
+    const turns: AcpUiMessage[] = [];
+    const now = Date.now();
+    if (liveVoiceTurns.user?.text) {
+      turns.push({
+        ...toAcpUiMessage({
+          id: 'voice-live:user',
+          ts: now,
+          eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt as AcpEventType,
+          role: 'user',
+          kind: 'text',
+          contentBlocks: [{ type: 'text', text: liveVoiceTurns.user.text }],
+          metadata: { visibleInTranscript: true, voiceTurn: 'heard' },
+          payload: {},
+          text: liveVoiceTurns.user.text,
+          userId: currentUser?.userId ?? null,
+          userName: currentUser?.name ?? null,
+          userEmail: currentUser?.email ?? null,
+          userImageUrl: currentUser?.imageUrl ?? null,
+        }),
+        partial: liveVoiceTurns.user.eventId === null,
+      });
+    }
+    if (liveVoiceTurns.assistant?.text) {
+      turns.push({
+        ...toAcpUiMessage({
+          id: 'voice-live:assistant',
+          ts: now + 1,
+          eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage as AcpEventType,
+          role: 'assistant',
+          kind: 'text',
+          contentBlocks: [
+            { type: 'text', text: liveVoiceTurns.assistant.text },
+          ],
+          metadata: { visibleInTranscript: true, voiceTurn: 'spoken' },
+          payload: {},
+          text: liveVoiceTurns.assistant.text,
+          userName: null,
+          userEmail: null,
+          userImageUrl: null,
+        }),
+        partial: liveVoiceTurns.assistant.eventId === null,
+      });
+    }
+    return turns;
+  }, [currentUser, liveVoiceTurns]);
+  const { uiMessagesBeforeInput, uiMessagesAfterInput } = useMemo(() => {
+    if (!pendingInputRequestOrder) {
+      return {
+        uiMessagesBeforeInput: [
+          ...persistedBeforeInput,
+          ...persistedAfterInput,
+          ...streamMessages,
+          ...liveVoiceUiMessages,
+        ],
+        uiMessagesAfterInput: [],
+      };
+    }
+
+    const before = [...persistedBeforeInput];
+    const after = [...persistedAfterInput];
+    for (const message of streamMessages) {
+      (message.ts <= pendingInputRequestOrder.ts ? before : after).push(
+        message,
+      );
+    }
+    return { uiMessagesBeforeInput: before, uiMessagesAfterInput: after };
+  }, [
+    pendingInputRequestOrder,
+    persistedAfterInput,
+    persistedBeforeInput,
+    streamMessages,
+    liveVoiceUiMessages,
+  ]);
+  const transcriptWorking =
+    isSending ||
+    conversationResponding === true ||
+    pendingResponseState.pendingAfter !== null;
+  const {
+    renderBlocks: renderBlocksBeforeInput,
+    suppressMessage: suppressMessageBeforeInput,
+  } = useAcpTranscriptBlocks({
+    messages: uiMessagesBeforeInput,
     artifacts: [],
     displayMode,
     initialPrompt: null,
@@ -351,11 +1257,40 @@ export function FastSessionTranscript({
     showInternalMessages: false,
     hasLeadingTextBoundary: false,
     keepDelegatedTasksVisible: true,
-    resetKey: `${messages.length}:${messages[0]?.eventId ?? ''}:${messages.at(-1)?.eventId ?? ''}`,
+    resetKey: `before:${messages.length}:${messages[0]?.eventId ?? ''}:${messages.at(-1)?.eventId ?? ''}`,
+    activityResetKey: `${sessionId}:before`,
+    isWorking: transcriptWorking && pendingInputRequestOrder === null,
+  });
+  const {
+    renderBlocks: renderBlocksAfterInput,
+    suppressMessage: suppressMessageAfterInput,
+  } = useAcpTranscriptBlocks({
+    messages: uiMessagesAfterInput,
+    artifacts: [],
+    displayMode,
+    initialPrompt: null,
+    shouldHideFirstMessage: false,
+    showInternalMessages: false,
+    hasLeadingTextBoundary: false,
+    keepDelegatedTasksVisible: true,
+    resetKey: `after:${messages.length}:${messages[0]?.eventId ?? ''}:${messages.at(-1)?.eventId ?? ''}`,
+    activityResetKey: `${sessionId}:after`,
+    isWorking: transcriptWorking && pendingInputRequestOrder !== null,
   });
 
+  // Every Fast turn started by the call, keyed by its turn id (the client
+  // message id), with the GPT-Live delegation it answers (null for a turn
+  // the voice did not delegate, such as a typed kickoff). Both streamed
+  // chunks and persisted rows carry the turn id, so each piece of a reply is
+  // attributed to exactly the delegation that asked for it.
+  const voiceDelegationByTurnIdRef = useRef(new Map<string, string | null>());
+  // Fast turn id of each streamed reply, from the chunk envelope.
+  const streamTurnIdsRef = useRef(new Map<string, string>());
   const sendReply = useCallback(
-    async (message: SessionPromptSubmission): Promise<boolean> => {
+    async (
+      message: SessionPromptSubmission,
+      options?: { voiceDelegationId?: string | null },
+    ): Promise<boolean> => {
       if (isSending) {
         return false;
       }
@@ -363,6 +1298,7 @@ export function FastSessionTranscript({
       setIsSending(true);
       setReplyError(null);
       let optimisticId: string | null = null;
+      let clientMessageId: string | undefined;
       try {
         const prepared = await preparePromptAttachments({
           text: message.text.trim(),
@@ -373,17 +1309,14 @@ export function FastSessionTranscript({
           return false;
         }
 
+        if (options?.voiceDelegationId !== undefined) {
+          clientMessageId = crypto.randomUUID();
+          voiceDelegationByTurnIdRef.current.set(
+            clientMessageId,
+            options.voiceDelegationId,
+          );
+        }
         optimisticId = `optimistic:${Date.now()}:${Math.random().toString(36).slice(2)}`;
-        const imageBlocks: TranscriptMessage['contentBlocks'] = images.flatMap(
-          (image) => {
-            const match = /^data:(image\/[^;,]+);base64,(.+)$/i.exec(
-              image.trim(),
-            );
-            return match?.[1] && match[2]
-              ? [{ type: 'image', mimeType: match[1], data: match[2] }]
-              : [];
-          },
-        );
         const optimistic: TranscriptMessage = {
           id: optimisticId,
           eventId: optimisticId,
@@ -392,21 +1325,31 @@ export function FastSessionTranscript({
           ts: Date.now(),
           eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
           role: 'user',
-          contentBlocks: [
-            { type: 'text', text: prepared.text },
-            ...imageBlocks,
-          ],
-          metadata: { visibleInTranscript: true },
+          contentBlocks: buildOptimisticContentBlocks(prepared.text, images),
+          metadata: {
+            visibleInTranscript: true,
+            ...(currentUser ? { userId: currentUser.userId } : {}),
+          },
           payload: {},
           source: 'web',
           nativeSessionId: null,
           nativeMessageId: null,
+          userName: currentUser?.name ?? null,
+          userEmail: currentUser?.email ?? null,
+          userImageUrl: currentUser?.imageUrl ?? null,
           createdAt: new Date(),
         };
-        setOptimisticMessages((previous) => [...previous, optimistic]);
+        replaceOptimisticMessages([
+          ...optimisticMessagesRef.current,
+          optimistic,
+        ]);
         dispatchPendingResponse({ type: 'optimistic', message: optimistic });
         await trpcClient.fastSessions.reply.mutate({
           sessionId,
+          ...(clientMessageId ? { clientMessageId } : {}),
+          ...(options?.voiceDelegationId !== undefined
+            ? { voiceMode: true }
+            : {}),
           text: prepared.text,
           ...(images.length > 0 ? { images } : {}),
           ...(prepared.attachmentTexts?.length
@@ -421,10 +1364,15 @@ export function FastSessionTranscript({
         });
         return true;
       } catch (error) {
+        if (clientMessageId) {
+          voiceDelegationByTurnIdRef.current.delete(clientMessageId);
+        }
         if (optimisticId) {
           const failedId = optimisticId;
-          setOptimisticMessages((previous) =>
-            previous.filter((row) => row.eventId !== failedId),
+          replaceOptimisticMessages(
+            optimisticMessagesRef.current.filter(
+              (row) => row.eventId !== failedId,
+            ),
           );
         }
         setReplyError(
@@ -441,7 +1389,7 @@ export function FastSessionTranscript({
         setIsSending(false);
       }
     },
-    [isSending, sessionId, trpcClient],
+    [currentUser, isSending, replaceOptimisticMessages, sessionId, trpcClient],
   );
 
   const handleReviewAction = useCallback(
@@ -456,66 +1404,583 @@ export function FastSessionTranscript({
     [sessionId, trpcClient],
   );
 
+  // --- Live voice conversation -------------------------------------------
+
+  const voiceEnabled = useVoiceEnabled();
+  const modelSelectionRef = useRef<SessionModelSelection>({
+    model: sessionModel,
+    reasoningEffort: sessionReasoningEffort,
+  });
+  /** Assistant messages at or before this ts predate the conversation. */
+  const voiceCutoffTsRef = useRef(0);
+  /** Persisted assistant messages already returned to the Live conversation. */
+  const spokenSentenceCountsRef = useRef(new Map<string, number>());
+  const pendingUtterancesRef = useRef<
+    Array<{ text: string; delegationId: string | null }>
+  >([]);
+  const [utteranceQueueVersion, setUtteranceQueueVersion] = useState(0);
+
+  // Spoken requests between being queued and their reply mutation settling.
+  // Counted explicitly so spoken acknowledgements are never recorded in the
+  // gap between dequeue and the request actually being sent.
+  const [voiceRequestsInFlight, setVoiceRequestsInFlight] = useState(0);
+  const enqueueVoiceUtterance = useCallback(
+    (text: string, delegationId: string | null) => {
+      // The reply's optimistic row takes over from the live speech bubble.
+      setLiveVoiceTurns((current) => ({ ...current, user: null }));
+      setVoiceRequestsInFlight((count) => count + 1);
+      pendingUtterancesRef.current.push({ text, delegationId });
+      setUtteranceQueueVersion((version) => version + 1);
+    },
+    [],
+  );
+
+  const recordVoiceTurnRef = useRef<
+    (role: 'user' | 'assistant', text: string) => void
+  >(() => undefined);
+  // GPT-Live acknowledges a request the moment it delegates, before the
+  // request itself has been cleaned up and sent. Spoken turns wait until no
+  // request is in flight so the acknowledgement lands after what it answers.
+  const heldSpokenTurnsRef = useRef<string[]>([]);
+  const requestInFlightRef = useRef(false);
+  const liveVoice = useLiveVoice({
+    onUtterance: enqueueVoiceUtterance,
+    onHeardTurn: (text) => recordVoiceTurnRef.current('user', text),
+    onSpokenTurn: (text) => {
+      if (requestInFlightRef.current) {
+        heldSpokenTurnsRef.current.push(text);
+        return;
+      }
+      recordVoiceTurnRef.current('assistant', text);
+    },
+    onHeardTurnDelta: (text) =>
+      setLiveVoiceTurns((current) => ({
+        ...current,
+        user: { text, eventId: null },
+      })),
+    onSpokenTurnDelta: (text) =>
+      setLiveVoiceTurns((current) => ({
+        ...current,
+        assistant: { text, eventId: null },
+      })),
+  });
+  const waitForVoiceCallLease = useSessionVoiceCallLease(
+    sessionId,
+    liveVoice.active,
+  );
+
+  // Utterances queue rather than dropping when one lands while the previous
+  // reply is still in flight; the queue drains as each send settles.
+  useEffect(() => {
+    if (isSending) {
+      return;
+    }
+
+    const next = pendingUtterancesRef.current.shift();
+
+    if (next === undefined) {
+      return;
+    }
+
+    void waitForVoiceCallLease()
+      .then(() =>
+        sendReply(
+          {
+            text: next.text,
+            files: [],
+            model: modelSelectionRef.current.model,
+            reasoningEffort: modelSelectionRef.current.reasoningEffort,
+          },
+          { voiceDelegationId: next.delegationId },
+        ),
+      )
+      .finally(() => {
+        setVoiceRequestsInFlight((count) => Math.max(0, count - 1));
+      });
+  }, [isSending, utteranceQueueVersion, sendReply, waitForVoiceCallLease]);
+
+  const agentWorking = transcriptWorking;
+  const liveVoiceActive = liveVoice.active;
+  const speakRef = useRef(liveVoice.speak);
+  speakRef.current = liveVoice.speak;
+
+  // Fast's answers to spoken requests are written for the voice, not the
+  // screen: they go to GPT-Live as commentary, every completed sentence as
+  // soon as it exists while the reply streams, and the persisted row (same
+  // id as the stream) finishes the trailing sentence. Progress is tracked per
+  // message so nothing is read twice. GPT-Live reports them aloud and its
+  // words become the transcript's reply.
+  useEffect(() => {
+    if (!liveVoiceActive) {
+      return;
+    }
+
+    const commentary: Array<{
+      id: string;
+      ts: number;
+      text: string;
+      partial: boolean;
+      delegationId: string | null;
+    }> = [];
+    for (const message of messages) {
+      if (
+        message.role === 'assistant' &&
+        message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+        (message.metadata as { voiceCommentary?: unknown } | null)
+          ?.voiceCommentary === true
+      ) {
+        const text = getTranscriptMessageText(message);
+        if (text) {
+          commentary.push({
+            id: `assistant:${message.eventId}`,
+            ts: message.ts,
+            text,
+            partial: false,
+            delegationId:
+              voiceDelegationByTurnIdRef.current.get(message.turnId) ?? null,
+          });
+        }
+      }
+    }
+    // A streamed reply is commentary only when its turn was started by the
+    // call; that turn's delegation is known from the moment the request was
+    // sent, so no sentence is ever attributed to a later request.
+    for (const message of streamMessages) {
+      if (
+        message.role !== 'assistant' ||
+        !message.partial ||
+        !message.text ||
+        message.kind !== 'text'
+      ) {
+        continue;
+      }
+      const turnId = streamTurnIdsRef.current.get(message.id);
+      if (!turnId || !voiceDelegationByTurnIdRef.current.has(turnId)) {
+        continue;
+      }
+      commentary.push({
+        id: message.id,
+        ts: message.ts,
+        text: message.text,
+        partial: true,
+        delegationId: voiceDelegationByTurnIdRef.current.get(turnId) ?? null,
+      });
+    }
+
+    for (const message of commentary) {
+      if (message.ts <= voiceCutoffTsRef.current) continue;
+
+      const sentences = splitSpeakableSentences(toSpeakableText(message.text));
+      // While streaming, the last sentence may still be growing.
+      const readyCount = message.partial
+        ? Math.max(sentences.length - 1, 0)
+        : sentences.length;
+      const spokenCount = spokenSentenceCountsRef.current.get(message.id) ?? 0;
+      if (readyCount <= spokenCount) continue;
+
+      spokenSentenceCountsRef.current.set(message.id, readyCount);
+      speakRef.current(
+        sentences.slice(spokenCount, readyCount).join(' '),
+        message.delegationId,
+      );
+    }
+  }, [messages, streamMessages, liveVoiceActive]);
+
+  // The call is transcribed into the Session: what the person said when the
+  // voice answered directly, what the voice said, and where the call started
+  // and ended. Delegated requests are recorded by the Fast turn they start.
+  const recordVoiceTurn = useCallback(
+    (role: 'user' | 'assistant', text: string) => {
+      // The finished words stay on screen until their persisted row arrives.
+      setLiveVoiceTurns((current) => ({
+        ...current,
+        [role]: { text, eventId: null },
+      }));
+      void trpcClient.voice.recordTurn
+        .mutate({ sessionId, role, text })
+        .then(({ eventId }) => {
+          setLiveVoiceTurns((current) =>
+            current[role]?.text === text
+              ? { ...current, [role]: { text, eventId } }
+              : current,
+          );
+        })
+        .catch((error: unknown) => {
+          console.error('[voice] Failed to record a voice turn', error);
+          setLiveVoiceTurns((current) =>
+            current[role]?.text === text
+              ? { ...current, [role]: null }
+              : current,
+          );
+        });
+    },
+    [sessionId, trpcClient],
+  );
+  recordVoiceTurnRef.current = recordVoiceTurn;
+  const requestInFlight =
+    liveVoice.deliveringUtterances > 0 || voiceRequestsInFlight > 0;
+  requestInFlightRef.current = requestInFlight;
+  useEffect(() => {
+    if (!liveVoiceActive) {
+      heldSpokenTurnsRef.current = [];
+      setLiveVoiceTurns((current) =>
+        current.user === null && current.assistant === null
+          ? current
+          : { user: null, assistant: null },
+      );
+      return;
+    }
+    if (requestInFlight || heldSpokenTurnsRef.current.length === 0) return;
+    const held = heldSpokenTurnsRef.current;
+    heldSpokenTurnsRef.current = [];
+    for (const text of held) recordVoiceTurn('assistant', text);
+  }, [liveVoiceActive, requestInFlight, recordVoiceTurn]);
+  const callStartedAtRef = useRef<number | null>(null);
+  const callEventWriteRef = useRef<Promise<void>>(Promise.resolve());
+  const recordVoiceCallEvent = useCallback(
+    (event: { phase: 'started' | 'ended'; durationMs?: number }) => {
+      const write = callEventWriteRef.current.then(async () => {
+        await trpcClient.voice.recordCallEvent.mutate({ sessionId, ...event });
+      });
+      callEventWriteRef.current = write.catch((error: unknown) => {
+        console.error(`[voice] Failed to record call ${event.phase}`, error);
+      });
+    },
+    [sessionId, trpcClient],
+  );
+  useEffect(() => {
+    if (liveVoice.active && liveVoice.startedAt !== null) {
+      if (callStartedAtRef.current === liveVoice.startedAt) return;
+      callStartedAtRef.current = liveVoice.startedAt;
+      recordVoiceCallEvent({ phase: 'started' });
+      return;
+    }
+    if (!liveVoice.active && callStartedAtRef.current !== null) {
+      const durationMs = Date.now() - callStartedAtRef.current;
+      callStartedAtRef.current = null;
+      recordVoiceCallEvent({ phase: 'ended', durationMs });
+    }
+  }, [liveVoice.active, liveVoice.startedAt, recordVoiceCallEvent]);
+
+  const handleVoiceToggle = useCallback(() => {
+    // Toggling while the handshake is still connecting cancels it.
+    if (liveVoice.active || liveVoice.status === 'connecting') {
+      liveVoice.stop();
+      return;
+    }
+
+    // Replies that predate the conversation stay silent. The cutoff comes
+    // from the transcript's own (server-assigned) timestamps rather than the
+    // browser clock, which may run ahead of the server.
+    voiceCutoffTsRef.current = 0;
+    for (const message of serverMessages.values()) {
+      voiceCutoffTsRef.current = Math.max(voiceCutoffTsRef.current, message.ts);
+    }
+    spokenSentenceCountsRef.current.clear();
+    voiceDelegationByTurnIdRef.current.clear();
+    pendingUtterancesRef.current = [];
+    void liveVoice.start();
+  }, [liveVoice, serverMessages]);
+
+  // A session opened from a spoken prompt picks the conversation straight
+  // up: voice starts once the deployment confirms it is configured, with no
+  // cutoff so the reply to that first utterance is spoken. The flag is
+  // dropped from the URL so a reload does not restart the conversation.
+  //
+  // No "already started" ref guard here: React StrictMode (dev) mounts,
+  // unmounts, and remounts effects, and the simulated unmount runs the voice
+  // hook's cleanup, which stops the handshake. The effect must be able to
+  // start again on the remount, which its dependencies already ensure.
+  const startLiveVoiceRef = useRef(liveVoice.start);
+  startLiveVoiceRef.current = liveVoice.start;
+
+  useEffect(() => {
+    if (!autoStartVoice || !voiceEnabled) {
+      return;
+    }
+
+    voiceCutoffTsRef.current = 0;
+    spokenSentenceCountsRef.current.clear();
+    voiceDelegationByTurnIdRef.current.clear();
+    // The Session was opened for this call, so a kickoff already in it (text
+    // typed before the call) is the voice's turn too, with no delegation.
+    for (const message of serverMessagesRef.current.values()) {
+      if (message.role === 'user') {
+        voiceDelegationByTurnIdRef.current.set(message.turnId, null);
+      }
+    }
+    pendingUtterancesRef.current = [];
+    void startLiveVoiceRef.current();
+
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      if (url.searchParams.has(VOICE_AUTOSTART_QUERY_PARAM)) {
+        url.searchParams.delete(VOICE_AUTOSTART_QUERY_PARAM);
+        window.history.replaceState(window.history.state, '', url);
+      }
+    }
+  }, [autoStartVoice, voiceEnabled]);
+
+  // A structured input request replaces the composer (and with it the voice
+  // controls), so end the conversation rather than leaving the microphone
+  // open with no way to stop it.
+  const liveVoiceConnecting = liveVoice.status === 'connecting';
+  const stopLiveVoiceRef = useRef(liveVoice.stop);
+  stopLiveVoiceRef.current = liveVoice.stop;
+
+  // The key request the conversation is still waiting on: the newest one with
+  // no human message after it. Once the owner replies without saving a key
+  // (or after saving one, since that posts a reply), the ask is over and the
+  // card goes away, even though the approval stays open in the dialog. A
+  // request that arrives while the owner is watching also opens the dialog.
+  const openIntegrationKeyRequest = useMemo(() => {
+    let latest: TranscriptMessage | null = null;
+    let latestHumanMessage: TranscriptMessage | null = null;
+    for (const message of messages) {
+      if (
+        isIntegrationKeyRequest(message) &&
+        (latest === null || compareTranscriptOrder(message, latest) > 0)
+      ) {
+        latest = message;
+      } else if (
+        message.role === 'user' &&
+        message.metadata?.inputKind !== SETUP_RECEIPT_INPUT_KIND &&
+        (latestHumanMessage === null ||
+          compareTranscriptOrder(message, latestHumanMessage) > 0)
+      ) {
+        latestHumanMessage = message;
+      }
+    }
+    if (
+      latest === null ||
+      (latestHumanMessage !== null &&
+        compareTranscriptOrder(latestHumanMessage, latest) > 0)
+    ) {
+      return null;
+    }
+    return {
+      eventId: latest.eventId,
+      pendingRef: integrationKeyRequestPendingRef(latest),
+    };
+  }, [messages]);
+  const openIntegrationKeyRequestId =
+    openIntegrationKeyRequest?.eventId ?? null;
+  const seenIntegrationKeyRequestId = useRef<string | null | undefined>(
+    undefined,
+  );
+  useEffect(() => {
+    if (!secretSessionId) return;
+    if (seenIntegrationKeyRequestId.current === undefined) {
+      seenIntegrationKeyRequestId.current = openIntegrationKeyRequestId;
+      return;
+    }
+    if (
+      openIntegrationKeyRequestId &&
+      openIntegrationKeyRequestId !== seenIntegrationKeyRequestId.current
+    ) {
+      seenIntegrationKeyRequestId.current = openIntegrationKeyRequestId;
+      openIntegrationKeyDialog();
+    }
+  }, [openIntegrationKeyRequestId, secretSessionId]);
+
+  useEffect(() => {
+    if (pendingInputRequest && (liveVoiceActive || liveVoiceConnecting)) {
+      stopLiveVoiceRef.current();
+    }
+  }, [pendingInputRequest, liveVoiceActive, liveVoiceConnecting]);
+
   return (
     <MessageUiOptionsProvider
       value={{ displayMode, hidePrReviewActions: true }}
     >
-      <WorkspaceHeader
-        className="py-4.25"
-        contentClassName="flex-row items-center gap-3"
-      >
-        <h1 className="ph-no-capture min-w-0 flex-1 truncate text-sm font-medium">
-          {title ?? fallbackTitle}
-        </h1>
-        {headerExtras}
-      </WorkspaceHeader>
-      <Conversation className="min-h-0 flex-1" initial="instant">
-        <ConversationContent className="ph-no-capture mx-auto w-full max-w-4xl p-4">
-          {hasOlderMessages ? (
-            <p className="mb-4 rounded-md border border-border bg-muted px-3 py-2 text-center text-xs text-muted-foreground">
-              Older messages in this session are not shown.
-            </p>
-          ) : null}
-          {timelineExtras}
-          <AcpTranscriptBlockList
-            blocks={renderBlocks}
-            showInternalMessages={false}
-            onSuppress={suppressMessage}
-            onOpenDelegatedTask={openTaskPanel ?? undefined}
-          />
-          {pendingResponseState.pendingAfter !== null ? (
-            <ThinkingMessage />
-          ) : null}
-          {reviewOffers.map((offer) => (
-            <PrReviewActionOffer
-              key={offer.deliveryId}
-              className="mt-3 rounded-lg border border-border/70 bg-muted/40 px-3 py-3"
-              offer={offer}
-              showQuestion
-              onAction={(choice) =>
-                handleReviewAction(offer.deliveryId, choice)
-              }
+      <SlackMentionProvider scope={slackMentionScope}>
+        <WorkspaceHeader
+          className="py-3.25"
+          contentClassName={`${SESSION_HEADER_CONTENT_CLASS_NAME} !flex-row !flex-nowrap`}
+          actions={
+            <>
+              {secretSessionId ? (
+                <ServiceCredentials
+                  key={secretSessionId}
+                  sessionId={secretSessionId}
+                />
+              ) : null}
+              {headerActions}
+            </>
+          }
+        >
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            <h1
+              className="ph-no-capture min-w-0 truncate cursor-default text-sm font-medium"
+              title={title ?? fallbackTitle}
+            >
+              {title ?? fallbackTitle}
+            </h1>
+            {(privateSession || effectiveSessionModel || headerExtras) && (
+              <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-2 text-xs text-muted-foreground">
+                {privateSession ? (
+                  <PrivateSessionIcon className="text-accent-foreground" />
+                ) : null}
+                {effectiveSessionModel ? (
+                  <ModelBadge
+                    model={effectiveSessionModel}
+                    displayName={getTaskModelDisplayName(effectiveSessionModel)}
+                    showIcon={false}
+                    iconClassName="text-muted-foreground"
+                  />
+                ) : null}
+                {headerExtras}
+              </div>
+            )}
+          </div>
+        </WorkspaceHeader>
+        {goal ? (
+          <div className="mx-auto w-full max-w-4xl px-4 pb-3">
+            <div className="flex items-start gap-3 rounded-lg border border-border bg-muted/40 px-3 py-2">
+              <span className="mt-0.5 shrink-0 text-xs font-medium text-muted-foreground">
+                Goal
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm text-foreground">{goal.objective}</p>
+                <p className="mt-0.5 text-xs capitalize text-muted-foreground">
+                  {goal.status.replace('_', ' ')} - {goal.continuationsUsed}/
+                  {goal.maxContinuations} continuations
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : null}
+        <Conversation
+          className="min-h-0 flex-1"
+          initial={hasSavedScrollPosition ? false : 'instant'}
+        >
+          <ConversationContent className="ph-no-capture mx-auto w-full max-w-4xl p-4 pt-0">
+            {hasOlderMessages ? (
+              <p className="mb-4 rounded-md border border-border bg-muted px-3 py-2 text-center text-xs text-muted-foreground">
+                Older messages in this session are not shown.
+              </p>
+            ) : null}
+            <AcpTranscriptBlockList
+              blocks={renderBlocksBeforeInput}
+              showInternalMessages={false}
+              onSuppress={suppressMessageBeforeInput}
+              onOpenDelegatedTask={openTaskPanel ?? undefined}
+              renderMessage={renderCapabilityOfferMessage}
             />
-          ))}
-        </ConversationContent>
-        <ConversationScrollButton />
-      </Conversation>
-      {canReply ? (
-        <div className="mx-auto w-full shrink-0 overflow-clip rounded-t-md rounded-b-3xl border-2 border-background bg-card transition-colors @[56rem]:rounded-t-lg">
-          <SessionPromptInput
-            sessionId={sessionId}
-            isBusy={isSending}
-            onSend={sendReply}
-            initialModel={sessionModel}
-            initialReasoningEffort={sessionReasoningEffort}
-            defaultModelId={defaultModelId}
-            defaultReasoningEffort={defaultReasoningEffort}
-          />
-          {replyError ? (
-            <p className="px-4 pb-2 text-xs text-destructive">{replyError}</p>
-          ) : null}
-        </div>
-      ) : null}
+            {pendingInputRequest ? (
+              <div className="mt-3">
+                {pendingInputRequest.preset === 'setup_starter_tasks' ? (
+                  <SetupStarterTasksCard
+                    sessionId={sessionId}
+                    request={pendingInputRequest}
+                  />
+                ) : pendingInputRequest.preset === 'setup_integrations' ? (
+                  <SetupIntegrationsCard
+                    key={pendingInputRequest.requestId}
+                    sessionId={sessionId}
+                    request={pendingInputRequest}
+                  />
+                ) : (
+                  <SessionUserInputCard
+                    sessionId={sessionId}
+                    request={pendingInputRequest}
+                  />
+                )}
+              </div>
+            ) : null}
+            <AcpTranscriptBlockList
+              blocks={renderBlocksAfterInput}
+              showInternalMessages={false}
+              onSuppress={suppressMessageAfterInput}
+              onOpenDelegatedTask={openTaskPanel ?? undefined}
+              renderMessage={renderCapabilityOfferMessage}
+            />
+            {pendingResponseState.pendingAfter !== null &&
+            streamMessages.length === 0 &&
+            !hasLiveActivity([
+              ...renderBlocksBeforeInput,
+              ...renderBlocksAfterInput,
+            ]) ? (
+              pendingResponseState.pendingAfter.id === '' ? (
+                <div className="mt-4">
+                  <AcpWorkingMessage />
+                </div>
+              ) : (
+                <AcpWorkingMessage />
+              )
+            ) : !isSending &&
+              conversationResponding !== true &&
+              runningTaskCount > 0 &&
+              openTasksPanel ? (
+              <RunningTasksMessage
+                count={runningTaskCount}
+                onOpenTasks={openTasksPanel}
+              />
+            ) : null}
+            {reviewOffers.map((offer) => (
+              <PrReviewActionOffer
+                key={offer.deliveryId}
+                offer={offer}
+                onAction={(choice) =>
+                  handleReviewAction(offer.deliveryId, choice)
+                }
+              />
+            ))}
+            {secretSessionId ? (
+              <PendingIntegrationKeys
+                sessionId={secretSessionId}
+                openRequest={openIntegrationKeyRequest}
+              />
+            ) : null}
+          </ConversationContent>
+          <SessionScrollRestoration sessionId={sessionId} />
+          <ConversationScrollButton />
+        </Conversation>
+        {canReply && !pendingInputRequest?.preset ? (
+          <div className="mx-auto w-full shrink-0 overflow-clip rounded-t-md rounded-b-3xl border-2 border-background bg-card outline-0 outline-offset-[-2px] outline-accent-foreground transition-[background-color,border-color,outline-width] has-[textarea:focus]:outline-2 @[56rem]:rounded-t-lg">
+            <SessionPromptInput
+              sessionId={sessionId}
+              isBusy={isSending}
+              onSend={sendReply}
+              historyMessageCount={suggestionHistory.messageCount}
+              assistantMessageCount={suggestionHistory.assistantCount}
+              taskStateRevision={taskStateRevision}
+              agentWorking={agentWorking}
+              initialModel={sessionModel}
+              initialReasoningEffort={sessionReasoningEffort}
+              defaultModelId={defaultModelId}
+              defaultReasoningEffort={defaultReasoningEffort}
+              voice={
+                voiceEnabled
+                  ? {
+                      enabled: true,
+                      active:
+                        liveVoice.active || liveVoice.status === 'connecting',
+                      status: liveVoice.status,
+                      onToggle: handleVoiceToggle,
+                      call: {
+                        startedAt: liveVoice.startedAt,
+                        inputLevel: liveVoice.inputLevel,
+                        micMuted: liveVoice.micMuted,
+                        onToggleMic: () =>
+                          liveVoice.setMicMuted(!liveVoice.micMuted),
+                        outputMuted: liveVoice.outputMuted,
+                        onToggleOutput: () =>
+                          liveVoice.setOutputMuted(!liveVoice.outputMuted),
+                      },
+                    }
+                  : undefined
+              }
+              onModelSelectionChange={(selection) => {
+                modelSelectionRef.current = selection;
+              }}
+            />
+            {replyError ? (
+              <p className="px-4 pb-2 text-xs text-destructive">{replyError}</p>
+            ) : null}
+          </div>
+        ) : null}
+      </SlackMentionProvider>
     </MessageUiOptionsProvider>
   );
 }

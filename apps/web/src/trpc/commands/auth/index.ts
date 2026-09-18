@@ -2,6 +2,7 @@ import { createPublicAuthToken, createRunToken } from '@roomote/auth';
 import { db, eq, taskRuns } from '@roomote/db/server';
 
 import type { UserAuthSuccess } from '@/types';
+import { requireTaskAccess } from '@/lib/server/custom-automation-task-access';
 
 export async function getAuthTokenCommand(
   auth: UserAuthSuccess,
@@ -21,16 +22,16 @@ export async function getSandboxAuthTokenCommand(
 ): Promise<string | undefined> {
   const { userId } = auth;
 
-  // Run access is deployment-scoped: any signed-in member may mint a sandbox
-  // token for any run; the token is stamped with the requesting user.
   const job = await db.query.taskRuns.findFirst({
     where: eq(taskRuns.id, input.runId),
-    columns: { id: true },
+    columns: { taskId: true },
   });
 
   if (!job) {
     return undefined;
   }
+
+  await requireTaskAccess(auth, job.taskId);
 
   return createRunToken({
     runId: input.runId,

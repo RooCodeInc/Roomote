@@ -8,13 +8,19 @@ import {
   asc,
   db,
   eq,
+  environments,
   findTrackedSuggestionWorkItemIds,
   inArray,
+  isNull,
   registerTrackedSuggestionCards,
   sql,
   trackedMessages,
   workItems,
+  customAutomations,
 } from '@roomote/db/server';
+import { ALL_REPOSITORIES, FAST_EXECUTION } from '@roomote/types';
+export { requireFastSuggestionOriginSessionId } from './fast-suggestion-origin';
+import { resolveCustomAutomationResultVisibility } from './automation-result-visibility';
 import {
   buildTaskSuggestionMessageMetadata,
   type SlackNotifier,
@@ -23,6 +29,7 @@ import {
 type FastAutomationSuggestion = {
   title: string;
   brief: string;
+  environmentId?: string;
 };
 
 type PersistedFastAutomationSuggestion = FastAutomationSuggestion & {
@@ -66,11 +73,61 @@ function buildSlackSuggestionClientMessageId(seed: string): string {
 async function persistFastAutomationSuggestions(params: {
   eventId: string;
   suggestions: FastAutomationSuggestion[];
+  createdByUserId: string;
 }): Promise<PersistedFastAutomationSuggestion[]> {
+  const customAutomationId = /^[0-9a-f-]{36}/iu.exec(params.eventId)?.[0];
+  const resultVisibility = customAutomationId
+    ? await resolveCustomAutomationResultVisibility(customAutomationId).catch(
+        () => 'private' as const,
+      )
+    : 'private';
   return db.transaction(async (tx) => {
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext(${`fast-automation-suggestions:${params.eventId}`}))`,
     );
+    const targetEnvironmentIds = [
+      ...new Set(
+        params.suggestions
+          .map((suggestion) => suggestion.environmentId)
+          .filter(
+            (environmentId): environmentId is string =>
+              Boolean(environmentId) &&
+              environmentId !== ALL_REPOSITORIES &&
+              environmentId !== FAST_EXECUTION,
+          ),
+      ),
+    ];
+    const hasInvalidTargetFormat = targetEnvironmentIds.some(
+      (environmentId) =>
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+          environmentId,
+        ),
+    );
+    if (hasInvalidTargetFormat) {
+      throw new Error('A suggested task target environment is unavailable.');
+    }
+    const validTargetEnvironmentIds = new Set(
+      targetEnvironmentIds.length === 0
+        ? []
+        : (
+            await tx
+              .select({ id: environments.id })
+              .from(environments)
+              .where(
+                and(
+                  inArray(environments.id, targetEnvironmentIds),
+                  eq(environments.isEval, false),
+                  isNull(environments.userId),
+                ),
+              )
+          ).map((environment) => environment.id),
+    );
+    const invalidTarget = targetEnvironmentIds.find(
+      (environmentId) => !validTargetEnvironmentIds.has(environmentId),
+    );
+    if (invalidTarget) {
+      throw new Error('A suggested task target environment is unavailable.');
+    }
     const inputs = params.suggestions.map((suggestion, index) => ({
       suggestion,
       index,
@@ -80,6 +137,12 @@ async function persistFastAutomationSuggestions(params: {
         index,
       ),
     }));
+    const customAutomation = customAutomationId
+      ? await tx.query.customAutomations.findFirst({
+          where: eq(customAutomations.id, customAutomationId),
+          columns: { id: true, name: true, resultPriority: true },
+        })
+      : null;
     const existing = await tx
       .select({
         id: workItems.id,
@@ -113,9 +176,19 @@ async function persistFastAutomationSuggestions(params: {
             kind: 'suggestion' as const,
             title: suggestion.title,
             brief: suggestion.brief,
+            ...(suggestion.environmentId === ALL_REPOSITORIES ||
+            suggestion.environmentId === FAST_EXECUTION
+              ? { targetRepositoryFullName: suggestion.environmentId }
+              : suggestion.environmentId
+                ? { targetEnvironmentId: suggestion.environmentId }
+                : {}),
             fingerprint,
             status: 'open' as const,
             sortOrder: index,
+            resultAutomationName: customAutomation?.name ?? 'Custom automation',
+            resultPriority: customAutomation?.resultPriority ?? 'normal',
+            resultUserId: params.createdByUserId,
+            resultVisibility,
           })),
         )
         .returning({
@@ -138,6 +211,9 @@ async function persistFastAutomationSuggestions(params: {
         id: persisted.id,
         title: persisted.title,
         brief: persisted.brief ?? suggestion.brief,
+        ...(suggestion.environmentId
+          ? { environmentId: suggestion.environmentId }
+          : {}),
       };
     });
   });
@@ -153,6 +229,7 @@ function formatSuggestion(
 }
 
 async function trackSuggestion(params: {
+  originSessionId: string;
   surface: 'slack' | 'discord' | 'teams' | 'telegram';
   channelId: string;
   messageId: string;
@@ -160,6 +237,7 @@ async function trackSuggestion(params: {
   workItemId: string;
   createdByUserId: string;
   eventId: string;
+  launchTarget?: string;
 }): Promise<void> {
   await registerTrackedSuggestionCards([
     {
@@ -172,18 +250,23 @@ async function trackSuggestion(params: {
       suggestionType: 'suggested_tasks',
       suggestionKey: `${params.eventId}:${params.workItemId}`,
       suggestionGroupKey: params.eventId,
-      launchRouting: 'router',
+      originSessionId: params.originSessionId,
+      ...(params.launchTarget
+        ? { launchTarget: params.launchTarget }
+        : { launchRouting: 'router' as const }),
     },
   ]);
 }
 
 async function claimSuggestionSend(params: {
+  originSessionId: string;
   surface: 'teams' | 'telegram';
   channelId: string;
   threadId?: string;
   workItemId: string;
   createdByUserId: string;
   eventId: string;
+  launchTarget?: string;
 }): Promise<string | null> {
   const [claim] = await db
     .insert(trackedMessages)
@@ -199,7 +282,10 @@ async function claimSuggestionSend(params: {
         suggestionType: 'suggested_tasks',
         suggestionKey: `${params.eventId}:${params.workItemId}`,
         suggestionGroupKey: params.eventId,
-        launchRouting: 'router',
+        originSessionId: params.originSessionId,
+        ...(params.launchTarget
+          ? { launchTarget: params.launchTarget }
+          : { launchRouting: 'router' }),
       },
     })
     .onConflictDoNothing({
@@ -228,6 +314,7 @@ async function finalizeSuggestionSend(params: {
 }
 
 export async function postFastAutomationSuggestionsToSlack(params: {
+  originSessionId: string;
   slack: Pick<SlackNotifier, 'postMessage'>;
   channelId: string;
   threadTs: string;
@@ -253,7 +340,7 @@ export async function postFastAutomationSuggestionsToSlack(params: {
       text,
       blocks: [{ type: 'markdown', text }],
       metadata: buildTaskSuggestionMessageMetadata({
-        sourceTaskId: params.eventId,
+        sourceTaskId: null,
         suggestionId: suggestion.id,
       }),
     });
@@ -262,17 +349,22 @@ export async function postFastAutomationSuggestionsToSlack(params: {
     }
     await trackSuggestion({
       surface: 'slack',
+      originSessionId: params.originSessionId,
       channelId: params.channelId,
       messageId,
       threadId: params.threadTs,
       workItemId: suggestion.id,
       createdByUserId: params.createdByUserId,
       eventId: params.eventId,
+      ...(suggestion.environmentId
+        ? { launchTarget: suggestion.environmentId }
+        : {}),
     });
   }
 }
 
 export async function postFastAutomationSuggestionsToDiscord(params: {
+  originSessionId: string;
   provider: Pick<DiscordCommunicationProvider, 'postMessage'>;
   channelId: string;
   threadId?: string;
@@ -299,17 +391,22 @@ export async function postFastAutomationSuggestionsToDiscord(params: {
     }
     await trackSuggestion({
       surface: 'discord',
+      originSessionId: params.originSessionId,
       channelId: posted.threadId ?? posted.channelId,
       messageId: posted.messageId,
       ...(posted.threadId ? { threadId: posted.threadId } : {}),
       workItemId: suggestion.id,
       createdByUserId: params.createdByUserId,
       eventId: params.eventId,
+      ...(suggestion.environmentId
+        ? { launchTarget: suggestion.environmentId }
+        : {}),
     });
   }
 }
 
 export async function postFastAutomationSuggestionsToTeams(params: {
+  originSessionId: string;
   provider: Pick<TeamsCommunicationProvider, 'postMessage'>;
   channelId: string;
   serviceUrl: string;
@@ -328,11 +425,15 @@ export async function postFastAutomationSuggestionsToTeams(params: {
 
     const claimId = await claimSuggestionSend({
       surface: 'teams',
+      originSessionId: params.originSessionId,
       channelId: params.channelId,
       ...(params.threadId ? { threadId: params.threadId } : {}),
       workItemId: suggestion.id,
       createdByUserId: params.createdByUserId,
       eventId: params.eventId,
+      ...(suggestion.environmentId
+        ? { launchTarget: suggestion.environmentId }
+        : {}),
     });
     if (!claimId) continue;
 
@@ -355,6 +456,7 @@ export async function postFastAutomationSuggestionsToTeams(params: {
 }
 
 export async function postFastAutomationSuggestionsToTelegram(params: {
+  originSessionId: string;
   provider: Pick<TelegramCommunicationProvider, 'postMessage'>;
   channelId: string;
   threadId?: string;
@@ -372,11 +474,15 @@ export async function postFastAutomationSuggestionsToTelegram(params: {
 
     const claimId = await claimSuggestionSend({
       surface: 'telegram',
+      originSessionId: params.originSessionId,
       channelId: params.channelId,
       ...(params.threadId ? { threadId: params.threadId } : {}),
       workItemId: suggestion.id,
       createdByUserId: params.createdByUserId,
       eventId: params.eventId,
+      ...(suggestion.environmentId
+        ? { launchTarget: suggestion.environmentId }
+        : {}),
     });
     if (!claimId) continue;
 

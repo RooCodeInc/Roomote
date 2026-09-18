@@ -7,6 +7,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 
 const state = vi.hoisted(() => ({
   pathname: '/',
+  recentSessionsEnabled: false,
   user: {
     isAdmin: true,
   },
@@ -18,6 +19,10 @@ function Icon() {
 
 vi.mock('next/navigation', () => ({
   usePathname: () => state.pathname,
+}));
+
+vi.mock('usehooks-ts', () => ({
+  useMediaQuery: () => true,
 }));
 
 vi.mock('next/link', () => ({
@@ -36,12 +41,29 @@ vi.mock('@/hooks/useUser', () => ({
   useAuthorizedUser: () => state.user,
 }));
 
+vi.mock('@/hooks/useResultsPage', () => ({
+  useResultsPage: () => ({ enabled: false, isLoading: false }),
+}));
+
+vi.mock('@/components/layout/side-nav/RecentSessions', () => ({
+  RecentSessions: ({ enabled }: { enabled: boolean }) => {
+    state.recentSessionsEnabled = enabled;
+    return (
+      <section>
+        <h3>Recent sessions</h3>
+      </section>
+    );
+  },
+}));
+
 vi.mock('@/components/system', () => ({
   Menu: Icon,
-  Plus: Icon,
   X: Icon,
   House: Icon,
+  Plug: Icon,
   Rows4: Icon,
+  NotepadText: Icon,
+  Plus: Icon,
   GalleryVerticalEnd: Icon,
   ChartColumnIncreasing: Icon,
   Lightbulb: Icon,
@@ -71,11 +93,12 @@ vi.mock('@/components/system', () => ({
     <div>{children}</div>
   ),
   DrawerTitle: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-}));
-
-vi.mock('@/components/tasks/NewTaskDialog', () => ({
-  NewTaskDialog: ({ open }: { open: boolean }) => (
-    <div data-testid="new-task-dialog" data-open={String(open)} />
+  Tooltip: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  TooltipTrigger: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
+  TooltipContent: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
   ),
 }));
 
@@ -84,6 +107,7 @@ import { NavbarDrawer } from './NavbarDrawer';
 describe('NavbarDrawer', () => {
   beforeEach(() => {
     state.user.isAdmin = true;
+    state.recentSessionsEnabled = false;
   });
 
   it('shows a settings link for members', () => {
@@ -95,6 +119,20 @@ describe('NavbarDrawer', () => {
     );
   });
 
+  it('opens a new Session from the first navigation action', () => {
+    const onNewSession = vi.fn();
+    render(<NavbarDrawer onNewSession={onNewSession} />);
+
+    const newSession = screen.getByRole('button', { name: 'New Session' });
+    const home = screen.getByRole('link', { name: 'Home' });
+
+    expect(newSession.compareDocumentPosition(home)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    fireEvent.click(newSession);
+    expect(onNewSession).toHaveBeenCalledOnce();
+  });
+
   it('keeps settings as the only admin/navigation destination in the drawer', () => {
     render(<NavbarDrawer />);
 
@@ -103,28 +141,54 @@ describe('NavbarDrawer', () => {
         .getAllByRole('link')
         .map((link) => link.textContent?.trim())
         .filter(Boolean),
-    ).toEqual(['Home', 'Sessions', 'Automations', 'Analytics', 'Settings']);
+    ).toEqual([
+      'Home',
+      'Sessions',
+      'Automations',
+      'Integrations',
+      'Analytics',
+      'Settings',
+    ]);
     expect(
       screen.queryByRole('button', { name: /support/i }),
     ).not.toBeInTheDocument();
   });
 
-  it('opens a new session dialog from an action above Home', () => {
+  it('shows recent sessions below the navigation options', () => {
     render(<NavbarDrawer />);
 
-    const newTaskButton = screen.getByRole('button', { name: 'New Session' });
-    const homeLink = screen.getByRole('link', { name: 'Home' });
+    const settings = screen.getByRole('link', { name: /settings/i });
+    const recentSessions = screen.getByRole('heading', {
+      name: 'Recent sessions',
+    });
 
-    expect(newTaskButton.compareDocumentPosition(homeLink)).toBe(
+    expect(settings.compareDocumentPosition(recentSessions)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
+    expect(state.recentSessionsEnabled).toBe(true);
+  });
 
-    fireEvent.click(newTaskButton);
+  it('keeps setup-gated destinations visible but disabled with an explanation', () => {
+    render(<NavbarDrawer setupIncomplete />);
 
-    expect(screen.getByTestId('new-task-dialog')).toHaveAttribute(
-      'data-open',
-      'true',
+    expect(screen.getByRole('link', { name: 'Sessions' })).toHaveAttribute(
+      'href',
+      '/sessions',
     );
+    expect(screen.getByRole('link', { name: 'Settings' })).toHaveAttribute(
+      'href',
+      '/settings',
+    );
+    for (const name of ['Home', 'Automations', 'Analytics']) {
+      expect(screen.queryByRole('link', { name })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name })).toHaveAttribute(
+        'aria-disabled',
+        'true',
+      );
+    }
+    expect(
+      screen.getAllByText('Available when setup is completed.'),
+    ).toHaveLength(3);
   });
 
   it('hides analytics from non-admins', () => {
@@ -137,13 +201,14 @@ describe('NavbarDrawer', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('hides automations from non-admins', () => {
+  it('shows automations to members', () => {
     state.user.isAdmin = false;
 
     render(<NavbarDrawer />);
 
-    expect(
-      screen.queryByRole('link', { name: /automations/i }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /automations/i })).toHaveAttribute(
+      'href',
+      '/automations',
+    );
   });
 });

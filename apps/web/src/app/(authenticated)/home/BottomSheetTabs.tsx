@@ -7,12 +7,14 @@ import {
   useRef,
   useState,
 } from 'react';
+import { useQuery } from '@tanstack/react-query';
 
 import { BasicTooltip, X } from '@/components/system';
 import { cn } from '@/lib/utils';
+import { useTRPC } from '@/trpc/client';
 
 import { PullRequestsList } from './PullRequestsList';
-import { RecentTasksList } from './RecentTasksList';
+import { RecentSessionsList } from './RecentSessionsList';
 
 type HomeTab = 'recent' | 'pullRequests';
 
@@ -21,10 +23,14 @@ type BottomSheetTabsProps = {
 };
 
 export function BottomSheetTabs({ onExpandedChange }: BottomSheetTabsProps) {
+  const trpc = useTRPC();
   const [activeTab, setActiveTab] = useState<HomeTab | null>(null);
   const [renderedTab, setRenderedTab] = useState<HomeTab | null>(null);
   const [panelHeight, setPanelHeight] = useState(0);
   const contentRef = useRef<HTMLDivElement>(null);
+  const pullRequestsQuery = useQuery(
+    trpc.tasks.recentPullRequests.queryOptions(),
+  );
 
   const isExpanded = activeTab !== null;
 
@@ -120,7 +126,7 @@ export function BottomSheetTabs({ onExpandedChange }: BottomSheetTabsProps) {
                   : 'text-muted-foreground/80 hover:text-accent-foreground',
               )}
             >
-              Recent Tasks
+              Recent Sessions
             </button>
           </BasicTooltip>
 
@@ -136,6 +142,9 @@ export function BottomSheetTabs({ onExpandedChange }: BottomSheetTabsProps) {
               )}
             >
               Recent PRs
+              {pullRequestsQuery.data
+                ? ` (${pullRequestsQuery.data.openCount})`
+                : null}
             </button>
           </BasicTooltip>
 
@@ -168,7 +177,7 @@ export function BottomSheetTabs({ onExpandedChange }: BottomSheetTabsProps) {
             className="max-h-56 overflow-y-auto border-t-2 border-background md:max-h-[calc(var(--effective-viewport-height)-26rem)]"
           >
             {renderedTab === 'recent' ? (
-              <RecentTasksList enabled={activeTab === 'recent'} />
+              <RecentSessionsList enabled={activeTab === 'recent'} />
             ) : renderedTab === 'pullRequests' ? (
               <PullRequestsList enabled={activeTab === 'pullRequests'} />
             ) : null}

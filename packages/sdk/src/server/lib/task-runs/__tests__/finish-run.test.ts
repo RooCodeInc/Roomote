@@ -22,6 +22,7 @@ const mockReleaseRedisLock = Object.assign(
   { renewDetailed: mockRenewRedisLock },
 );
 const mockDbExecute = vi.fn().mockResolvedValue([]);
+const mockTerminateCredentialEgress = vi.fn().mockResolvedValue([]);
 const mockRecordTaskRunLifecycleEvent = vi.fn().mockResolvedValue(undefined);
 const mockCleanupSandboxOidcTargetsForTaskRun = vi
   .fn()
@@ -30,6 +31,11 @@ const mockResolveDiscordRuntimeCredentials = vi.fn();
 const mockDiscordPostMessage = vi.fn();
 const mockNotifySourceRunOnSettle = vi.fn().mockResolvedValue(undefined);
 const mockNotifyFastAgentParentOnSettle = vi.fn().mockResolvedValue(undefined);
+const mockNotifyWebTaskInitiatorOnSettle = vi.fn().mockResolvedValue(undefined);
+const mockEnqueueWebTaskInitiatorSettleNotification = vi
+  .fn()
+  .mockResolvedValue(undefined);
+const mockSettleLiveTaskMessageOnExit = vi.fn().mockResolvedValue(undefined);
 const mockDbTransaction = vi.fn();
 const mockCaptureTaskSettled = vi.fn();
 const mockResolveDefaultComputeProvider = vi.fn().mockResolvedValue('modal');
@@ -126,6 +132,8 @@ vi.mock('@roomote/db/server', async () => {
     );
   return {
     ...actual,
+    terminateCredentialEgressWorkloadsForRun: (...args: unknown[]) =>
+      mockTerminateCredentialEgress(...args),
     db: {
       query: {
         taskRuns: {
@@ -238,35 +246,30 @@ const mockGetCheckRun = vi.fn().mockResolvedValue({
   data: { external_id: 'roomote-review:1' },
 });
 const mockUpdateCheckRun = vi.fn().mockResolvedValue(undefined);
+const mockFetchIssueCommentWithToken = vi.fn();
 
 vi.mock('@roomote/github', () => ({
   createTaskRunGitHubToken: vi.fn().mockResolvedValue('github-token'),
   createIssueComment: (...args: unknown[]) => mockCreateIssueComment(...args),
   deleteReaction: (...args: unknown[]) => mockDeleteReaction(...args),
+  fetchIssueCommentWithToken: (...args: unknown[]) =>
+    mockFetchIssueCommentWithToken(...args),
   getCheckRun: (...args: unknown[]) => mockGetCheckRun(...args),
   updateCheckRun: (...args: unknown[]) => mockUpdateCheckRun(...args),
 }));
 
 const mockPostMessage = vi.fn().mockResolvedValue('ts-123');
 const mockUpdateMessage = vi.fn().mockResolvedValue(true);
-const mockRemoveCancelButton = vi.fn().mockResolvedValue(true);
 const mockGetSlackStartedMessageTs = vi.fn().mockResolvedValue(null);
-const mockBuildTaskFailedBlocks = vi.fn();
-const mockBuildTaskFailedMessage = vi.fn();
 const mockOpenConversation = vi.fn().mockResolvedValue('D123');
 const mockListPublicChannels = vi.fn().mockResolvedValue([]);
 vi.mock('@roomote/slack', () => ({
   SlackNotifier: class MockSlackNotifier {
     postMessage = mockPostMessage;
     updateMessage = mockUpdateMessage;
-    removeCancelButton = mockRemoveCancelButton;
     openConversation = mockOpenConversation;
     listPublicChannels = mockListPublicChannels;
   },
-  buildTaskFailedBlocks: (...args: unknown[]) =>
-    mockBuildTaskFailedBlocks(...args),
-  buildTaskFailedMessage: (...args: unknown[]) =>
-    mockBuildTaskFailedMessage(...args),
   getSlackStartedMessageTs: (...args: unknown[]) =>
     mockGetSlackStartedMessageTs(...args),
   refreshAutomationRootFooter: (...args: unknown[]) =>
@@ -303,6 +306,14 @@ vi.mock('../../telegram-communication', () => ({
   ) => mockCreateTelegramCommunicationProvider(...args),
 }));
 
+const mockCreateAgentMailCommunicationProvider = vi.fn();
+const mockAgentMailPostMessage = vi.fn();
+vi.mock('../../agentmail-communication', () => ({
+  createAgentMailCommunicationProviderFromRuntimeCredentials: (
+    ...args: unknown[]
+  ) => mockCreateAgentMailCommunicationProvider(...args),
+}));
+
 vi.mock('@roomote/communication/discord-provider', () => ({
   DiscordCommunicationProvider: class MockDiscordCommunicationProvider {
     postMessage = mockDiscordPostMessage;
@@ -331,6 +342,21 @@ vi.mock('../notify-source-run-on-settle', () => ({
 vi.mock('../notify-fast-agent-parent-on-settle', () => ({
   notifyFastAgentParentOnSettle: (...args: unknown[]) =>
     mockNotifyFastAgentParentOnSettle(...args),
+}));
+
+vi.mock('../notify-web-task-initiator-on-settle', () => ({
+  notifyWebTaskInitiatorOnSettle: (...args: unknown[]) =>
+    mockNotifyWebTaskInitiatorOnSettle(...args),
+}));
+
+vi.mock('../enqueue-web-task-initiator-settle-notification', () => ({
+  enqueueWebTaskInitiatorSettleNotification: (...args: unknown[]) =>
+    mockEnqueueWebTaskInitiatorSettleNotification(...args),
+}));
+
+vi.mock('../settle-live-task-message-on-exit', () => ({
+  settleLiveTaskMessageOnExit: (...args: unknown[]) =>
+    mockSettleLiveTaskMessageOnExit(...args),
 }));
 
 vi.mock('../../automation-result-metadata', () => ({
@@ -417,34 +443,6 @@ describe('finishRun', () => {
     mockGetValidAccessToken.mockResolvedValue('decrypted-token');
     mockFindFirstTask.mockResolvedValue(null);
     mockSuggestSlackQuestionChannels.mockResolvedValue([]);
-    mockBuildTaskFailedBlocks.mockReturnValue([
-      {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.",
-        },
-      },
-      {
-        type: 'actions',
-        elements: [
-          {
-            type: 'button',
-            action_id: 'retry_failed_task',
-            text: { type: 'plain_text', text: 'Try again' },
-            value: JSON.stringify({ runId: 1 }),
-          },
-        ],
-      },
-    ]);
-    mockBuildTaskFailedMessage.mockImplementation((options) => ({
-      text:
-        options && typeof options === 'object' && 'messageText' in options
-          ? ((options as { messageText?: string }).messageText ??
-            "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.")
-          : "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.",
-      blocks: mockBuildTaskFailedBlocks(),
-    }));
     mockRedisSet.mockResolvedValue('OK');
     mockRedisDel.mockResolvedValue(1);
     mockGetCheckRun.mockResolvedValue({
@@ -455,6 +453,8 @@ describe('finishRun', () => {
     mockDbExecute.mockResolvedValue([]);
     mockResolveDefaultComputeProvider.mockResolvedValue('modal');
     mockUpdatePendingEnvironmentSnapshot.mockResolvedValue(true);
+    mockNotifyFastAgentParentOnSettle.mockResolvedValue('admitted');
+    mockNotifyWebTaskInitiatorOnSettle.mockResolvedValue('delivered');
     syncRunRows = [];
     mockDbTransaction.mockImplementation(
       async (callback: (tx: unknown) => unknown) =>
@@ -492,6 +492,14 @@ describe('finishRun', () => {
       channelId: 'channel-1',
       threadId: 'thread-1',
       messageId: 'message-1',
+    });
+    mockAgentMailPostMessage.mockResolvedValue({
+      provider: 'agentmail',
+      channelId: 'roomote@agentmail.test',
+      messageId: 'email-message-1',
+    });
+    mockCreateAgentMailCommunicationProvider.mockResolvedValue({
+      postMessage: mockAgentMailPostMessage,
     });
     vi.mocked(createTaskRunGitHubToken).mockResolvedValue('github-token');
   });
@@ -580,6 +588,10 @@ describe('finishRun', () => {
         outcome,
         errorCode,
       );
+      expect(mockNotifyWebTaskInitiatorOnSettle).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 1 }),
+        status,
+      );
     },
   );
 
@@ -589,6 +601,26 @@ describe('finishRun', () => {
     await finishRun({ id: 1, status: RunStatus.Idle });
 
     expect(mockCaptureTaskSettled).not.toHaveBeenCalled();
+    expect(mockTerminateCredentialEgress).not.toHaveBeenCalled();
+    expect(mockNotifyWebTaskInitiatorOnSettle).not.toHaveBeenCalled();
+  });
+
+  it('continues terminal side effects when retry queue admission fails', async () => {
+    mockFindFirstRun.mockResolvedValue(makeRun());
+    mockNotifyWebTaskInitiatorOnSettle.mockResolvedValue('failed');
+    mockEnqueueWebTaskInitiatorSettleNotification.mockResolvedValue(false);
+
+    await finishRun({ id: 1, status: RunStatus.Completed });
+
+    expect(mockEnqueueWebTaskInitiatorSettleNotification).toHaveBeenCalledWith({
+      runId: 1,
+      taskId: 'task-1',
+      status: RunStatus.Completed,
+    });
+    expect(mockNotifyFastAgentParentOnSettle).toHaveBeenCalledOnce();
+    expect(mockSettleLiveTaskMessageOnExit).toHaveBeenCalledOnce();
+    expect(mockCaptureTaskSettled).toHaveBeenCalledOnce();
+    expect(mockCleanupSandboxOidcTargetsForTaskRun).toHaveBeenCalledWith(1);
   });
 
   it('derives tasks.state completed via the shared sync when the job completes', async () => {
@@ -608,6 +640,11 @@ describe('finishRun', () => {
       state: 'completed',
       updatedAt: expect.any(Date),
     });
+    expect(mockTerminateCredentialEgress).toHaveBeenCalledWith(
+      1,
+      'completed',
+      expect.anything(),
+    );
   });
 
   it('derives tasks.state canceled via the shared sync when the job is canceled', async () => {
@@ -624,6 +661,11 @@ describe('finishRun', () => {
       state: 'canceled',
       updatedAt: expect.any(Date),
     });
+    expect(mockTerminateCredentialEgress).toHaveBeenCalledWith(
+      1,
+      'stopped',
+      expect.anything(),
+    );
   });
 
   it('derives tasks.state failed via the shared sync when the job fails', async () => {
@@ -641,6 +683,11 @@ describe('finishRun', () => {
       state: 'failed',
       updatedAt: expect.any(Date),
     });
+    expect(mockTerminateCredentialEgress).toHaveBeenCalledWith(
+      1,
+      'failed',
+      expect.anything(),
+    );
   });
 
   it('keeps the task active (not terminal) when the finishing run goes idle', async () => {
@@ -1048,11 +1095,6 @@ describe('finishRun', () => {
         expect.anything(),
         expect.anything(),
       );
-      expect(mockRemoveCancelButton).toHaveBeenCalledWith({
-        channel: 'C123',
-        messageTs: '111.333',
-        threadTs: '111.222',
-      });
     });
 
     it('does not post a setup completion message when setup becomes idle with a linked environment', async () => {
@@ -1095,11 +1137,6 @@ describe('finishRun', () => {
         expect.anything(),
         expect.anything(),
       );
-      expect(mockRemoveCancelButton).toHaveBeenCalledWith({
-        channel: 'C123',
-        messageTs: '111.333',
-        threadTs: '111.222',
-      });
     });
 
     it('does not clean up setup UI when an idle setup task is still running', async () => {
@@ -1135,7 +1172,6 @@ describe('finishRun', () => {
       });
 
       expect(mockPostMessage).not.toHaveBeenCalled();
-      expect(mockRemoveCancelButton).not.toHaveBeenCalled();
     });
 
     it('does not clean up setup UI when setup becomes idle without a linked environment', async () => {
@@ -1170,7 +1206,6 @@ describe('finishRun', () => {
       });
 
       expect(mockPostMessage).not.toHaveBeenCalled();
-      expect(mockRemoveCancelButton).not.toHaveBeenCalled();
     });
 
     it('cleans up setup UI for resumed setup snapshot runs by reading sibling runs of the task', async () => {
@@ -1220,11 +1255,6 @@ describe('finishRun', () => {
       });
 
       expect(mockPostMessage).not.toHaveBeenCalled();
-      expect(mockRemoveCancelButton).toHaveBeenCalledWith({
-        channel: 'C123',
-        messageTs: '111.333',
-        threadTs: '111.222',
-      });
     });
 
     it('cleans up setup UI for an idle resume when the linked environment lives on a sibling run', async () => {
@@ -1274,11 +1304,6 @@ describe('finishRun', () => {
       });
 
       expect(mockPostMessage).not.toHaveBeenCalled();
-      expect(mockRemoveCancelButton).toHaveBeenCalledWith({
-        channel: 'C123',
-        messageTs: '111.333',
-        threadTs: '111.222',
-      });
     });
 
     it('DMs the installing user after their second completed non-unknown task when no channels were joined yet', async () => {
@@ -1598,25 +1623,14 @@ describe('finishRun', () => {
         error: 'spawn timeout',
       });
 
-      expect(mockBuildTaskFailedMessage).toHaveBeenCalledWith({
-        runId: 1,
-        messageText:
-          "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.",
-      });
       expect(mockUpdateMessage).toHaveBeenCalledWith({
         channel: 'C123',
         ts: '111.333',
         message: {
           text: "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.",
-          blocks: mockBuildTaskFailedBlocks.mock.results[0]?.value,
         },
       });
       expect(mockPostMessage).not.toHaveBeenCalled();
-      expect(mockRemoveCancelButton).toHaveBeenCalledWith({
-        channel: 'C123',
-        messageTs: '111.333',
-        threadTs: '111.222',
-      });
     });
 
     it('redacts provider credentials and escapes Slack mentions at delivery', async () => {
@@ -1651,10 +1665,10 @@ describe('finishRun', () => {
 
       const messageText = String(
         (
-          mockBuildTaskFailedMessage.mock.calls.at(-1)?.[0] as
-            | { messageText?: string }
+          mockUpdateMessage.mock.calls.at(-1)?.[0] as
+            | { message?: { text?: string } }
             | undefined
-        )?.messageText,
+        )?.message?.text,
       );
       expect(messageText).toContain(
         'The provider returned an error: Invalid credential [redacted]; &lt;!channel&gt; authentication unavailable.',
@@ -1693,7 +1707,6 @@ describe('finishRun', () => {
         error: 'Worker heartbeat stale and instance sb-1 is stopped',
       });
 
-      expect(mockBuildTaskFailedMessage).not.toHaveBeenCalled();
       expect(mockUpdateMessage).not.toHaveBeenCalled();
       expect(mockPostMessage).not.toHaveBeenCalled();
       // Persist/report consistency: the stop-normalized status is also what
@@ -1748,7 +1761,6 @@ describe('finishRun', () => {
           completedAt: expect.any(Date),
         }),
       );
-      expect(mockBuildTaskFailedMessage).toHaveBeenCalled();
       expect(mockUpdateMessage).toHaveBeenCalled();
     });
 
@@ -1783,7 +1795,6 @@ describe('finishRun', () => {
         error: 'resume bootstrap timeout',
       });
 
-      expect(mockBuildTaskFailedBlocks).not.toHaveBeenCalled();
       expect(mockUpdateMessage).toHaveBeenCalledWith({
         channel: 'C123',
         ts: '111.333',
@@ -1792,11 +1803,6 @@ describe('finishRun', () => {
         },
       });
       expect(mockPostMessage).not.toHaveBeenCalled();
-      expect(mockRemoveCancelButton).toHaveBeenCalledWith({
-        channel: 'C123',
-        messageTs: '111.333',
-        threadTs: '111.222',
-      });
     });
 
     it('falls back to a new thread reply when there is no started message ts to update', async () => {
@@ -1833,9 +1839,7 @@ describe('finishRun', () => {
         channel: 'C123',
         thread_ts: '111.222',
         text: "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.",
-        blocks: mockBuildTaskFailedBlocks.mock.results[0]?.value,
       });
-      expect(mockRemoveCancelButton).not.toHaveBeenCalled();
     });
 
     it('posts runtime-failure copy as a new thread reply when the runtime task already started', async () => {
@@ -1872,22 +1876,11 @@ describe('finishRun', () => {
         error: 'worker heartbeat stale',
       });
 
-      expect(mockBuildTaskFailedMessage).toHaveBeenCalledWith({
-        runId: 1,
-        messageText:
-          "I ran into a hiccup while working on this task. This is usually temporary -- try again and I'll give it another shot.",
-      });
       expect(mockUpdateMessage).not.toHaveBeenCalled();
       expect(mockPostMessage).toHaveBeenCalledWith({
         channel: 'C123',
         thread_ts: '111.222',
         text: "I ran into a hiccup while working on this task. This is usually temporary -- try again and I'll give it another shot.",
-        blocks: mockBuildTaskFailedBlocks.mock.results[0]?.value,
-      });
-      expect(mockRemoveCancelButton).toHaveBeenCalledWith({
-        channel: 'C123',
-        messageTs: '111.333',
-        threadTs: '111.222',
       });
     });
 
@@ -1999,6 +1992,101 @@ describe('finishRun', () => {
         status: RunStatus.Failed,
         error: 'test error',
       });
+    });
+  });
+
+  describe('AgentMail failure notification', () => {
+    const emailConversation = {
+      surface: 'agentmail' as const,
+      workspaceId: 'roomote@agentmail.test',
+      conversationId: '11111111-1111-4111-8111-111111111111',
+      replyTarget: { channelId: 'roomote@agentmail.test' },
+    };
+
+    it('lets the Fast parent exclusively deliver a delegated Email failure', async () => {
+      const job = makeRun({
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload: {
+          repo: 'owner/repo',
+          description: 'Run the automation',
+          communicationProvider: 'agentmail',
+          communicationChannelId: 'roomote@agentmail.test',
+          communicationThreadId: emailConversation.conversationId,
+          fastAgentParent: {
+            sessionId: '22222222-2222-4222-8222-222222222222',
+            conversation: emailConversation,
+          },
+          customAutomationId: 'automation-1',
+        },
+      });
+      mockFindFirstRun.mockResolvedValue(job);
+      mockFindFirstTask.mockResolvedValue(job.task);
+
+      await finishRun({
+        id: 1,
+        status: RunStatus.Failed,
+        error: 'spawn timeout',
+      });
+
+      expect(mockAgentMailPostMessage).not.toHaveBeenCalled();
+      expect(mockNotifyFastAgentParentOnSettle).toHaveBeenCalledWith(
+        expect.objectContaining({ taskId: job.taskId }),
+        RunStatus.Failed,
+        job.task.title,
+      );
+    });
+
+    it('uses the child Email fallback when Fast parent admission fails', async () => {
+      const job = makeRun({
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload: {
+          repo: 'owner/repo',
+          description: 'Run the automation',
+          communicationProvider: 'agentmail',
+          communicationChannelId: 'roomote@agentmail.test',
+          communicationThreadId: emailConversation.conversationId,
+          fastAgentParent: {
+            sessionId: '22222222-2222-4222-8222-222222222222',
+            conversation: emailConversation,
+          },
+          customAutomationId: 'automation-1',
+        },
+      });
+      mockFindFirstRun.mockResolvedValue(job);
+      mockFindFirstTask.mockResolvedValue(job.task);
+      mockNotifyFastAgentParentOnSettle.mockResolvedValueOnce('failed');
+
+      await finishRun({
+        id: 1,
+        status: RunStatus.Failed,
+        error: 'spawn timeout',
+      });
+
+      expect(mockAgentMailPostMessage).toHaveBeenCalledOnce();
+    });
+
+    it('keeps direct Email task failures on the child finalizer path', async () => {
+      const job = makeRun({
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload: {
+          repo: 'owner/repo',
+          description: 'Handle an email request',
+          communicationProvider: 'agentmail',
+          communicationChannelId: 'roomote@agentmail.test',
+          communicationThreadId: emailConversation.conversationId,
+        },
+      });
+      mockFindFirstRun.mockResolvedValue(job);
+      mockFindFirstTask.mockResolvedValue(job.task);
+
+      await finishRun({
+        id: 1,
+        status: RunStatus.Failed,
+        error: 'spawn timeout',
+      });
+
+      expect(mockAgentMailPostMessage).toHaveBeenCalledOnce();
+      expect(mockNotifyFastAgentParentOnSettle).toHaveBeenCalledOnce();
     });
   });
 
@@ -2297,6 +2385,7 @@ describe('finishRun', () => {
     };
 
     beforeEach(() => {
+      mockFetchIssueCommentWithToken.mockReset();
       mockFindFirstTaskPullRequest.mockResolvedValue({
         githubCheckRunId: 123,
       });
@@ -2324,6 +2413,126 @@ describe('finishRun', () => {
           status: 'completed',
           conclusion: 'success',
         }),
+      );
+    });
+
+    it('reads the review summary over REST when the CLI read fails and passes the check', async () => {
+      mockFindFirstRun.mockResolvedValue(
+        makeRun(
+          { payloadKind: TaskPayloadKind.GithubPrReview },
+          { workflow: 'pr_review', surface: 'github' },
+        ),
+      );
+      mockFindManyTaskPullRequests.mockResolvedValue([reviewPrRow]);
+      // gh api failed transiently; the comment itself is fine.
+      mockFinalizeGithubPrReviewComment.mockResolvedValueOnce({
+        finalized: false,
+        fetchFailed: true,
+        commentId: 456,
+      });
+      mockFetchIssueCommentWithToken.mockResolvedValueOnce({
+        data: {
+          body: '<!-- roomote-review-summary sha=abc1234 -->\n<!-- roomote-review-status:start -->\nNo issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
+        },
+      });
+
+      await finishRun({ id: 1, status: RunStatus.Completed });
+
+      expect(mockFetchIssueCommentWithToken).toHaveBeenCalledWith(
+        'github-token',
+        expect.objectContaining({
+          owner: 'owner',
+          repo: 'repo',
+          comment_id: 456,
+        }),
+      );
+      expect(mockUpdateCheckRun).toHaveBeenCalledWith(
+        'github-token',
+        expect.objectContaining({
+          check_run_id: 123,
+          status: 'completed',
+          conclusion: 'success',
+        }),
+      );
+    });
+
+    it('completes the check as neutral when the review summary cannot be read at all', async () => {
+      mockFindFirstRun.mockResolvedValue(
+        makeRun(
+          { payloadKind: TaskPayloadKind.GithubPrReview },
+          { workflow: 'pr_review', surface: 'github' },
+        ),
+      );
+      mockFindManyTaskPullRequests.mockResolvedValue([reviewPrRow]);
+      mockFinalizeGithubPrReviewComment.mockResolvedValueOnce({
+        finalized: false,
+        fetchFailed: true,
+        commentId: 456,
+      });
+      mockFetchIssueCommentWithToken.mockRejectedValue(
+        new Error('HttpError: 502 Bad Gateway'),
+      );
+
+      await finishRun({ id: 1, status: RunStatus.Completed });
+
+      expect(mockFetchIssueCommentWithToken).toHaveBeenCalledTimes(3);
+      expect(mockUpdateCheckRun).toHaveBeenCalledWith(
+        'github-token',
+        expect.objectContaining({
+          check_run_id: 123,
+          status: 'completed',
+          conclusion: 'neutral',
+          output: expect.objectContaining({
+            title: 'Roomote review result could not be read',
+          }),
+        }),
+      );
+      expect(mockUpdateCheckRun).not.toHaveBeenCalledWith(
+        'github-token',
+        expect.objectContaining({
+          output: expect.objectContaining({
+            title: 'Roomote review result unavailable',
+          }),
+        }),
+      );
+    }, 15_000);
+
+    it('keeps the failing check when the review summary comment no longer exists', async () => {
+      mockFindFirstRun.mockResolvedValue(
+        makeRun(
+          { payloadKind: TaskPayloadKind.GithubPrReview },
+          { workflow: 'pr_review', surface: 'github' },
+        ),
+      );
+      mockFindManyTaskPullRequests.mockResolvedValue([reviewPrRow]);
+      mockFinalizeGithubPrReviewComment.mockResolvedValueOnce({
+        finalized: false,
+        fetchFailed: true,
+        commentId: 456,
+      });
+      // The comment was deleted (or the stored id is stale): a definitive
+      // answer from GitHub, not a transient failure.
+      mockFetchIssueCommentWithToken.mockRejectedValue(
+        Object.assign(new Error('HttpError: Not Found'), { status: 404 }),
+      );
+
+      await finishRun({ id: 1, status: RunStatus.Completed });
+
+      expect(mockFetchIssueCommentWithToken).toHaveBeenCalledTimes(1);
+      expect(mockUpdateCheckRun).toHaveBeenCalledWith(
+        'github-token',
+        expect.objectContaining({
+          check_run_id: 123,
+          status: 'completed',
+          conclusion: 'failure',
+          output: expect.objectContaining({
+            title: 'Roomote review result unavailable',
+          }),
+        }),
+      );
+      expect(mockUpdateCheckRun).not.toHaveBeenCalledWith(
+        'github-token',
+        expect.objectContaining({ conclusion: 'neutral' }),
       );
     });
 

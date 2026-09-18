@@ -1,7 +1,7 @@
 /**
  * Markdown → Slack `rich_text` conversion for surfaces that take a
- * rich_text entity instead of a `markdown` block (task cards). Covers the
- * inline and block syntax agents actually emit: `**bold**`, italic,
+ * rich_text entity instead of a `markdown` block (task and automation cards).
+ * Covers the inline and block syntax agents actually emit: `**bold**`, italic,
  * strikethrough, inline code, links, bullet/numbered lists, headings, and
  * fenced code blocks. Anything else stays literal text. `__bold__` is
  * deliberately not supported: agent prose mentions Python dunders
@@ -49,7 +49,7 @@ type SlackRichTextConversionOptions = {
 // Every repetition is bounded so a pathological message (for example a
 // long run of "[" or "<http://|") cannot make matching superlinear.
 const INLINE_PATTERN =
-  /(`[^`\n]{1,500}`)|(\*\*[^*\n]{1,500}?\*\*)|(~~[^~\n]{1,500}?~~)|(\[[^\]\n]{1,500}\]\((?:<?https?:\/\/)(?:[^()<>\s]|\([^()<>\s]{0,200}\)){1,2000}>?\))|(<(?:https?:\/\/)[^>\s|]{1,2000}(?:\|[^>\n]{1,500})?>)|(\b(?:https?:\/\/)[^\s<>)]{1,2000})|((?<![\w*])\*(?!\s)[^*\n]{1,500}?(?<!\s)\*(?![\w*]))|((?<![\w_])_(?!\s)[^_\n]{1,500}?(?<!\s)_(?![\w_]))/g;
+  /(`[^`\n]{1,500}`)|(\*\*[^*\n]{1,500}?\*\*)|(~~[^~\n]{1,500}?~~)|(\[[^\]\n]{1,500}\]\((?:(?:https?:\/\/)(?:[^()<>\s]|\([^()<>\s]{0,200}\)){1,2000}|<(?:https?:\/\/)(?:[^()<>\s]|\([^()<>\s]{0,200}\)){1,2000}>)\))|(<(?:https?:\/\/)[^>\s|]{1,2000}(?:\|[^>\n]{1,500})?>)|(\b(?:https?:\/\/)[^\s<>)]{1,2000})|((?<![\w*])\*(?!\s)[^*\n]{1,500}?(?<!\s)\*(?![\w*]))|((?<![\w_])_(?!\s)[^_\n]{1,500}?(?<!\s)_(?![\w_]))/g;
 
 // Sentence punctuation that ends a bare URL belongs to the prose, not the
 // link: "see https://a.io/docs." must not link to "docs.".

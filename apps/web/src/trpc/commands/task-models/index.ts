@@ -14,6 +14,7 @@ import {
 } from '@roomote/db/server';
 import {
   OPENAI_COMPATIBLE_PROVIDER_ID,
+  DEFAULT_MODEL_ROLE_REASONING_EFFORTS,
   rebaseRoomoteModelIdToUpstream,
   ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
   ROOMOTE_INFERENCE_PROVIDER_ID,
@@ -46,6 +47,7 @@ import {
   normalizeTaskModelSettings,
 } from '@roomote/types';
 import type {
+  CodingModelRoutingRule,
   DeploymentModelConfig,
   ReasoningEffort,
   SetupModelProviderId,
@@ -66,6 +68,7 @@ import {
   upsertDeploymentEnvironmentVariables,
 } from '../environment-variables';
 import {
+  applyModelsDevMetadata,
   fetchModelsDevCatalog,
   listXaiChatModelsFromCatalog,
   lookupModelMetadataFromCatalog,
@@ -135,6 +138,7 @@ type TaskModelSettingsResult = {
     displayName: string;
     family: string;
   }>;
+  codingModelRoutingRules: CodingModelRoutingRule[];
 };
 
 type TaskModelSuggestionResult = {
@@ -223,6 +227,7 @@ export async function getTaskModelSettingsCommand(
     chatgptConnected,
     githubCopilotConnected,
     xaiSubscriptionConnected,
+    metadataCatalog,
   ] = await Promise.all([
     getDeploymentTaskModelSettings(),
     getDeploymentRuntimeModelConfig(),
@@ -230,6 +235,9 @@ export async function getTaskModelSettingsCommand(
     isChatGptSubscriptionConnected(),
     isGitHubCopilotSubscriptionConnected(),
     isXaiSubscriptionConnected(),
+    fetchModelsDevCatalog(
+      AbortSignal.timeout(MODEL_METADATA_FETCH_TIMEOUT_MS),
+    ).catch(() => null),
   ]);
   // The Available Models list always shows the full recommended set for
   // every connected provider; entries that are not persisted yet render
@@ -259,7 +267,7 @@ export async function getTaskModelSettingsCommand(
   );
   // A provider must be connected before its models can be selected. This also
   // removes stale rows created by the old implicit OpenRouter default catalog.
-  const catalog = appendSelectedTaskModels({
+  const catalogWithoutMetadataRefresh = appendSelectedTaskModels({
     models: appendRecommendedTaskModels({
       models: getTaskModelCatalog(settings).filter((model) => {
         const providerId = getTaskModelProviderId(model.id);
@@ -267,10 +275,16 @@ export async function getTaskModelSettingsCommand(
         return providerId !== null && connectedProviderIds.has(providerId);
       }),
       connectedProviderIds,
+      metadataCatalog,
     }),
     selectedModelIds,
     connectedProviderIds,
   });
+  const catalog = metadataCatalog
+    ? catalogWithoutMetadataRefresh.map((model) =>
+        applyModelsDevMetadata(metadataCatalog, model),
+      )
+    : catalogWithoutMetadataRefresh;
 
   return {
     defaultModelId: settings.defaultModelId,
@@ -291,6 +305,7 @@ export async function getTaskModelSettingsCommand(
       displayName,
       family,
     })),
+    codingModelRoutingRules: settings.codingModelRoutingRules ?? [],
   };
 }
 
@@ -453,12 +468,19 @@ export async function autoAddConnectedSubscriptionTaskModels(
   providerId: SetupModelProviderId,
 ): Promise<number> {
   const provider = getSetupModelProvider(providerId);
-  const [chatgptConnected, githubCopilotConnected, xaiSubscriptionConnected] =
-    await Promise.all([
-      isChatGptSubscriptionConnected(),
-      isGitHubCopilotSubscriptionConnected(),
-      isXaiSubscriptionConnected(),
-    ]);
+  const [
+    chatgptConnected,
+    githubCopilotConnected,
+    xaiSubscriptionConnected,
+    metadataCatalog,
+  ] = await Promise.all([
+    isChatGptSubscriptionConnected(),
+    isGitHubCopilotSubscriptionConnected(),
+    isXaiSubscriptionConnected(),
+    fetchModelsDevCatalog(
+      AbortSignal.timeout(MODEL_METADATA_FETCH_TIMEOUT_MS),
+    ).catch(() => null),
+  ]);
 
   const addedRecommended = await db.transaction(async (tx) => {
     const [persistedEnvVarNames, persistedTaskModels] = await Promise.all([
@@ -479,6 +501,7 @@ export async function autoAddConnectedSubscriptionTaskModels(
       provider,
       persistedTaskModelSettings: persistedTaskModels,
       connectedProviderIds,
+      metadataCatalog,
     });
 
     if (!autoAdd) {
@@ -666,13 +689,21 @@ export async function saveTaskModelProviderCommand(
           : undefined,
       });
 
-      if (probe.error) {
+      if (
+        probe.error &&
+        (probe.failureReason === 'invalid_credentials' ||
+          probe.failureReason === 'insufficient_credits' ||
+          probe.failureReason === 'invalid_endpoint')
+      ) {
         throw new Error(`${provider.label}: ${probe.error}`);
       }
     }
   }
 
   let addedRecommendedModelCount = 0;
+  const metadataCatalog = await fetchModelsDevCatalog(
+    AbortSignal.timeout(MODEL_METADATA_FETCH_TIMEOUT_MS),
+  ).catch(() => null);
 
   await db.transaction(async (tx) => {
     const [currentSetupNewState, persistedEnvVarNames, persistedTaskModels] =
@@ -730,6 +761,7 @@ export async function saveTaskModelProviderCommand(
       provider,
       persistedTaskModelSettings: persistedTaskModels,
       connectedProviderIds,
+      metadataCatalog,
     });
 
     addedRecommendedModelCount = autoAdd?.addedModels.length ?? 0;
@@ -934,6 +966,7 @@ function removeTaskModelsForProvider({
   );
 
   const taskModelSettings = normalizeTaskModelSettings({
+    ...settings,
     models,
     allowedModelIds,
     defaultModelId: removedModelIds.has(settings.defaultModelId)
@@ -1107,18 +1140,27 @@ export async function getLaunchTaskModelsCommand(_auth: UserAuthSuccess) {
 
   const [
     settings,
+    persistedRuntimeModelConfig,
     chatgptConnected,
     githubCopilotConnected,
     xaiSubscriptionConnected,
     persistedEnvVarNames,
   ] = await Promise.all([
     getDeploymentTaskModelSettings(),
+    getDeploymentRuntimeModelConfig(),
     isChatGptSubscriptionConnected(),
     isGitHubCopilotSubscriptionConnected(),
     isXaiSubscriptionConnected(),
     getPersistedEnvironmentVariableNames(),
   ]);
   const providerSetup = buildSetupModelStatus({
+    runtimeEnv: process.env,
+    persistedEnvVarNames,
+    chatgptConnected,
+    githubCopilotConnected,
+    xaiSubscriptionConnected,
+  });
+  const connectedProviderIds = collectConnectedTaskModelProviderIds({
     runtimeEnv: process.env,
     persistedEnvVarNames,
     chatgptConnected,
@@ -1135,16 +1177,34 @@ export async function getLaunchTaskModelsCommand(_auth: UserAuthSuccess) {
     );
   const enabledModels = getEnabledTaskModels(settings);
   const defaultModel = getDefaultTaskModel(settings);
+  const runtimeModels = resolveRuntimeModelStatus({
+    settingsDefaultModelId: settings.defaultModelId,
+    persisted: persistedRuntimeModelConfig,
+  });
+  const defaultFastModelId =
+    runtimeModels.orchestrationModel.effectiveModelId ?? defaultModel.id;
+  const selectableModels = appendSelectedTaskModels({
+    models: enabledModels,
+    selectedModelIds: new Set([defaultFastModelId]),
+    connectedProviderIds,
+  });
 
   return {
     defaultModelId: defaultModel.id,
+    defaultReasoningEffort:
+      runtimeModels.codingModel.reasoningEffort ??
+      DEFAULT_MODEL_ROLE_REASONING_EFFORTS.coding,
+    defaultFastModelId,
+    defaultFastReasoningEffort:
+      runtimeModels.orchestrationModel.reasoningEffort ??
+      DEFAULT_MODEL_ROLE_REASONING_EFFORTS.orchestration,
     chatgptConnected,
     openaiConnected: isApiKeyProviderConnected('openai'),
     // Display-grouping inputs: `xai/` models group under the Grok
     // subscription only when the API-key sibling is not also connected.
     xaiSubscriptionConnected,
     xaiConnected: isApiKeyProviderConnected('xai'),
-    models: enabledModels.map((option) => ({
+    models: selectableModels.map((option) => ({
       ...option,
       isDefault: option.id === defaultModel.id,
     })),
@@ -1175,6 +1235,7 @@ export async function updateTaskModelSettingsCommand(
     codeReviewModelReasoningEffort: ReasoningEffort | null;
     exploreModelReasoningEffort?: ReasoningEffort | null;
     planningModelReasoningEffort: ReasoningEffort | null;
+    codingModelRoutingRules?: CodingModelRoutingRule[];
   },
 ): Promise<
   | {
@@ -1193,6 +1254,7 @@ export async function updateTaskModelSettingsCommand(
         codeReviewModelId?: string;
         exploreModelId?: string;
         planningModelId?: string;
+        codingModelRoutingRules?: string;
       };
     }
 > {
@@ -1208,6 +1270,7 @@ export async function updateTaskModelSettingsCommand(
     codeReviewModelId?: string;
     exploreModelId?: string;
     planningModelId?: string;
+    codingModelRoutingRules?: string;
   } = {};
   const models = (() => {
     try {
@@ -1255,6 +1318,13 @@ export async function updateTaskModelSettingsCommand(
       ];
     }),
   ) as Record<TaskModelRole, ReasoningEffort | null | undefined>;
+  const codingModelRoutingRules = input.codingModelRoutingRules?.map(
+    (rule) => ({
+      ...rule,
+      modelId: normalizeTaskModelId(rule.modelId),
+      condition: rule.condition.trim(),
+    }),
+  );
 
   if (models.length === 0) {
     fieldErrors.models = 'Add at least one model.';
@@ -1274,6 +1344,27 @@ export async function updateTaskModelSettingsCommand(
     fieldErrors.defaultModelId = 'Choose a valid default model.';
   } else if (!allowedModelIds.includes(normalizedDefaultModelId)) {
     fieldErrors.defaultModelId = 'The default model must be enabled.';
+  }
+
+  if (
+    codingModelRoutingRules?.some(
+      (rule) =>
+        !allowedModelIds.includes(rule.modelId) ||
+        !knownModelIds.has(rule.modelId),
+    )
+  ) {
+    fieldErrors.codingModelRoutingRules =
+      'Routing rules must use enabled models.';
+  } else if (
+    codingModelRoutingRules?.some(
+      (rule) =>
+        rule.reasoningEffort !== null &&
+        models.find((model) => model.id === rule.modelId)?.metadata
+          ?.supportsReasoning === false,
+    )
+  ) {
+    fieldErrors.codingModelRoutingRules =
+      'Routing rule reasoning requires a model that supports reasoning.';
   }
 
   for (const role of TASK_MODEL_ROLES) {
@@ -1355,6 +1446,10 @@ export async function updateTaskModelSettingsCommand(
       models,
       allowedModelIds,
       defaultModelId: normalizedDefaultModelId,
+      codingModelRoutingRules:
+        codingModelRoutingRules ??
+        normalizeTaskModelSettings(persisted?.taskModelSettings ?? null)
+          .codingModelRoutingRules,
       catalogSyncedModelIds: normalizeTaskModelSettings(
         persisted?.taskModelSettings ?? null,
       ).catalogSyncedModelIds,
@@ -1810,6 +1905,7 @@ export async function refreshTaskModelMetadataCommand(
   });
 
   const taskModelSettings = normalizeTaskModelSettings({
+    ...persistedSettings,
     models: refreshedModels,
     allowedModelIds,
     defaultModelId,

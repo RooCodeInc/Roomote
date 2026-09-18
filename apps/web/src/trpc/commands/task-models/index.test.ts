@@ -154,6 +154,7 @@ const PROVIDER_ENV_VAR_NAMES = [
   'VLLM_BASE_URL',
   'R_MODEL',
 ] as const;
+const fetchMock = vi.fn();
 
 function buildMockAuth(
   overrides: Partial<UserAuthSuccess> = {},
@@ -192,8 +193,6 @@ describe('lookupTaskModelCommand', () => {
   const originalRoomoteCodeReviewModel = process.env.R_CODE_REVIEW_MODEL;
   const originalRoomoteExploreModel = process.env.R_EXPLORE_MODEL;
   const originalRoomotePlanningModel = process.env.R_PLANNING_MODEL;
-  const fetchMock = vi.fn();
-
   beforeEach(() => {
     vi.clearAllMocks();
     mockValidateSetupModelProviderCredentials.mockResolvedValue(undefined);
@@ -757,6 +756,131 @@ describe('lookupTaskModelCommand', () => {
         }),
       }),
     );
+  });
+
+  it('persists normalized coding-model routing rules', async () => {
+    mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+      'OPENROUTER_API_KEY',
+    ]);
+
+    const result = await updateTaskModelSettingsCommand(buildMockAuth(), {
+      models: [
+        {
+          id: 'z-ai/glm-5.6',
+          displayName: 'GLM 5.6',
+          family: 'GLM',
+          metadata: null,
+        },
+      ],
+      allowedModelIds: ['z-ai/glm-5.6'],
+      defaultModelId: 'z-ai/glm-5.6',
+      helperModelId: null,
+      visionModelId: null,
+      codeReviewModelId: null,
+      planningModelId: null,
+      codingModelReasoningEffort: null,
+      helperModelReasoningEffort: null,
+      visionModelReasoningEffort: null,
+      codeReviewModelReasoningEffort: null,
+      planningModelReasoningEffort: null,
+      codingModelRoutingRules: [
+        {
+          modelId: 'z-ai/glm-5.6',
+          reasoningEffort: 'high',
+          condition: ' Complex engineering tasks ',
+        },
+      ],
+    });
+
+    expect(result).toMatchObject({ success: true });
+    expect(mockUpdateDeploymentSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        set: expect.objectContaining({
+          taskModelSettings: expect.objectContaining({
+            codingModelRoutingRules: [
+              {
+                modelId: 'openrouter/z-ai/glm-5.6',
+                reasoningEffort: 'high',
+                condition: 'Complex engineering tasks',
+              },
+            ],
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('rejects routing rules for disabled and non-reasoning models', async () => {
+    const baseInput = {
+      models: [
+        {
+          id: 'openai/gpt-5.6',
+          displayName: 'GPT 5.6',
+          family: 'GPT',
+          metadata: {
+            contextWindow: null,
+            inputTypes: null,
+            inputPricePerToken: null,
+            outputPricePerToken: null,
+            lastRefreshedAt: null,
+            supportsReasoning: false,
+          },
+        },
+        {
+          id: 'anthropic/claude-sonnet-5',
+          displayName: 'Claude Sonnet 5',
+          family: 'Claude',
+        },
+      ],
+      allowedModelIds: ['openai/gpt-5.6'],
+      defaultModelId: 'openai/gpt-5.6',
+      helperModelId: null,
+      visionModelId: null,
+      codeReviewModelId: null,
+      planningModelId: null,
+      codingModelReasoningEffort: null,
+      helperModelReasoningEffort: null,
+      visionModelReasoningEffort: null,
+      codeReviewModelReasoningEffort: null,
+      planningModelReasoningEffort: null,
+    } satisfies Parameters<typeof updateTaskModelSettingsCommand>[1];
+
+    await expect(
+      updateTaskModelSettingsCommand(buildMockAuth(), {
+        ...baseInput,
+        codingModelRoutingRules: [
+          {
+            modelId: 'anthropic/claude-sonnet-5',
+            reasoningEffort: 'high',
+            condition: 'Complex tasks',
+          },
+        ],
+      }),
+    ).resolves.toMatchObject({
+      success: false,
+      fieldErrors: {
+        codingModelRoutingRules: 'Routing rules must use enabled models.',
+      },
+    });
+
+    await expect(
+      updateTaskModelSettingsCommand(buildMockAuth(), {
+        ...baseInput,
+        codingModelRoutingRules: [
+          {
+            modelId: 'openai/gpt-5.6',
+            reasoningEffort: 'high',
+            condition: 'Complex tasks',
+          },
+        ],
+      }),
+    ).resolves.toMatchObject({
+      success: false,
+      fieldErrors: {
+        codingModelRoutingRules:
+          'Routing rule reasoning requires a model that supports reasoning.',
+      },
+    });
   });
 
   it('accepts shorthand default model IDs when they normalize to an enabled model', async () => {
@@ -1576,6 +1700,7 @@ describe('task model provider commands', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubGlobal('fetch', fetchMock);
     mockTxDelete.mockReturnValue({ where: txDeleteWhere });
 
     for (const name of PROVIDER_ENV_VAR_NAMES) {
@@ -1596,6 +1721,8 @@ describe('task model provider commands', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
+
     for (const name of PROVIDER_ENV_VAR_NAMES) {
       const originalValue = originalEnvValues.get(name);
 
@@ -1866,18 +1993,20 @@ describe('task model provider commands', () => {
       seededSettings?.models.map((model: { id: string }) => model.id),
     ).toEqual([
       'anthropic/claude-fable-5',
+      'anthropic/claude-fable-5-1',
       'anthropic/claude-haiku-4-5',
       'anthropic/claude-opus-5',
       'anthropic/claude-sonnet-5',
     ]);
     expect([...seededSettings.allowedModelIds].sort()).toEqual([
       'anthropic/claude-fable-5',
+      'anthropic/claude-fable-5-1',
       'anthropic/claude-haiku-4-5',
       'anthropic/claude-opus-5',
       'anthropic/claude-sonnet-5',
     ]);
     expect(seededSettings?.defaultModelId).toBe('anthropic/claude-sonnet-5');
-    expect(result.addedRecommendedModelCount).toBe(4);
+    expect(result.addedRecommendedModelCount).toBe(5);
 
     expect(
       result.providerSetup.providers.find(
@@ -1906,6 +2035,63 @@ describe('task model provider commands', () => {
     expect(txInsert).not.toHaveBeenCalled();
   });
 
+  it('saves an endpoint provider when model discovery is temporarily unavailable', async () => {
+    mockCollectCandidateProviderCredentials.mockResolvedValue({
+      values: [{ name: 'VLLM_BASE_URL', value: 'https://vllm.example/v1' }],
+      clearedEnvVarNames: [],
+      changedValues: [
+        { name: 'VLLM_BASE_URL', value: 'https://vllm.example/v1' },
+      ],
+      clearedPersistedEnvVarNames: [],
+      persistedEnv: {},
+    });
+    mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+      'VLLM_BASE_URL',
+    ]);
+    mockGetPersistedEnvironmentVariableValues.mockResolvedValue({
+      VLLM_BASE_URL: 'https://vllm.example/v1',
+    });
+    fetchMock.mockResolvedValue(new Response(null, { status: 503 }));
+
+    const result = await saveTaskModelProviderCommand(buildMockAuth(), {
+      provider: 'vllm',
+      apiKey: 'https://vllm.example/v1',
+    });
+
+    expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalled();
+    expect(result.discoveryError).toContain('server error (503)');
+    expect(result.addedDiscoveredModelCount).toBe(0);
+  });
+
+  it.each([
+    [401, 'https://vllm.example/v1', 'rejected the API key'],
+    [402, 'https://vllm.example/v1', 'enough credits or quota'],
+    [null, 'not a URL', 'valid endpoint URL'],
+  ])(
+    'does not save an endpoint provider after a blocking %s discovery response',
+    async (status, baseUrl, message) => {
+      mockCollectCandidateProviderCredentials.mockResolvedValue({
+        values: [{ name: 'VLLM_BASE_URL', value: baseUrl }],
+        clearedEnvVarNames: [],
+        changedValues: [{ name: 'VLLM_BASE_URL', value: baseUrl }],
+        clearedPersistedEnvVarNames: [],
+        persistedEnv: {},
+      });
+      if (status !== null) {
+        fetchMock.mockResolvedValue(new Response(null, { status }));
+      }
+
+      await expect(
+        saveTaskModelProviderCommand(buildMockAuth(), {
+          provider: 'vllm',
+          apiKey: baseUrl,
+        }),
+      ).rejects.toThrow(message);
+
+      expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
+    },
+  );
+
   it('keeps other connected providers models when seeding a fresh deployment', async () => {
     process.env.OPENROUTER_API_KEY = 'runtime-openrouter-key';
     mockGetPersistedEnvironmentVariableNames
@@ -1930,7 +2116,7 @@ describe('task model provider commands', () => {
     expect(seededSettings?.defaultModelId).toBe(
       'openrouter/openai/gpt-5.6-terra',
     );
-    expect(result.addedRecommendedModelCount).toBe(4);
+    expect(result.addedRecommendedModelCount).toBe(5);
   });
 
   it('does not reseed models when the provider already has configured models', async () => {

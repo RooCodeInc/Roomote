@@ -190,8 +190,9 @@ if [ "$database_mode" = "external" ] && ! env_has_key "$env_file" DATABASE_URL; 
   die "--database external requires DATABASE_URL in $env_file"
 fi
 
-if [ "$manage_dns" = "true" ] && [ -z "$dns_zone" ]; then
-  die "--dns-zone is required with --manage-dns"
+if [ "$manage_dns" = "true" ]; then
+  [ -n "$dns_zone" ] || die "--dns-zone is required with --manage-dns"
+  validate_domain "$dns_zone"
 fi
 
 if [ "${#ssh_allowed_cidrs[@]}" -eq 0 ]; then
@@ -360,6 +361,10 @@ docker compose --env-file .env -f docker-compose.prod.yml stop controller || tru
 docker pull "$ROOMOTE_WORKER_IMAGE"
 docker compose --env-file .env -f docker-compose.prod.yml pull
 docker compose --env-file .env -f docker-compose.prod.yml up -d --wait --wait-timeout 600
+if ! docker compose --env-file .env -f docker-compose.prod.yml exec -T bullmq \
+  /roomote/.docker/app/entrypoint.sh release-announcement; then
+  echo "warning: release announcement baseline was not recorded; the healthy deployment remains installed" >&2
+fi
 systemctl enable roomote-compose.service
 REMOTE
 

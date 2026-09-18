@@ -133,6 +133,35 @@ describe('GitLab deployment OAuth', () => {
     expect(writeMock).not.toHaveBeenCalled();
   });
 
+  it('disallows credential redirects during code exchange and identity lookup', async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        Response.json({
+          access_token: 'redirect-access-token',
+          refresh_token: 'redirect-refresh-token',
+        }),
+      )
+      .mockResolvedValueOnce(Response.json({ id: 42, username: 'bot' }));
+    await exchangeGitLabOAuthCode({
+      baseUrl: 'https://gitlab.example/gitlab',
+      clientId: 'id',
+      clientSecret: 'secret',
+      code: 'code',
+      redirectUri: 'https://roomote.example/callback',
+      fetchImpl,
+    });
+    expect(fetchImpl.mock.calls.map((call) => call[1]?.redirect)).toEqual([
+      'error',
+      'error',
+    ]);
+    expect(
+      fetchImpl.mock.calls.every(
+        (call) => call[1]?.signal instanceof AbortSignal,
+      ),
+    ).toBe(true);
+  });
+
   it('does not classify unrelated tokens as OAuth while a session is active', async () => {
     const fetchImpl = vi
       .fn()

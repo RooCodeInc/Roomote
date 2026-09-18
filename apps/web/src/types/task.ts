@@ -2,7 +2,6 @@ import { z } from 'zod';
 import type { TaskArtifactType } from '@roomote/types';
 import {
   TASK_INITIATOR_KINDS,
-  TASK_GOAL_STATUSES,
   TASK_STATES,
   TASK_SURFACES,
   TASK_WORKFLOWS,
@@ -36,8 +35,6 @@ export const taskSchema = z.object({
   modelDisplayName: z.string().nullable().optional(),
   mode: z.string().nullable(),
   state: z.enum(TASK_STATES),
-  goalStatus: z.enum(TASK_GOAL_STATUSES).nullable().optional(),
-  goalBlockedReason: z.string().nullable().optional(),
   workflow: z.enum(TASK_WORKFLOWS).optional(),
   surface: z.enum(TASK_SURFACES).optional(),
   timestamp: z.coerce.number(),
@@ -72,7 +69,8 @@ export type TaskArtifact = {
 
 export type ArtifactWithContent = {
   id: string;
-  taskId: string;
+  taskId: string | null;
+  sessionId?: string | null;
   path: string;
   version: number;
   artifactType: TaskArtifactType;
@@ -97,6 +95,12 @@ export type TaskRunWithPullRequest = TaskRun & {
     prUrl?: string;
   }>;
 };
+
+/** Public SSE progress; result.error is folded into error on the server. */
+export type TaskRunProgress = Pick<
+  TaskRun,
+  'id' | 'taskId' | 'status' | 'vendor' | 'error' | 'errorCode'
+>;
 
 export type TaskWithAssociations = Task & {
   attributionKind?: TaskCreatorKind | null;
@@ -130,4 +134,15 @@ export interface TaskMessageEnvelope {
   payload: Record<string, unknown> | null;
   visibleInTranscript?: boolean;
   text?: string;
+}
+
+export interface TaskMessageEnvelopeCursor {
+  createdAt: string;
+  ts: number;
+  id: string;
+}
+
+export interface TaskMessageEnvelopePage {
+  messages: TaskMessageEnvelope[];
+  nextCursor: TaskMessageEnvelopeCursor | null;
 }

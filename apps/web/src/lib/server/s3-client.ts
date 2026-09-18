@@ -8,10 +8,15 @@ import {
   DeleteObjectsCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import {
+  getArtifactStorageKey,
+  ARTIFACT_UPLOAD_URL_MAX_AGE_SECONDS,
+  type ArtifactStorageOwner,
+} from '@roomote/types';
 
 import { Env } from '@/lib/server/env';
 
-const PRESIGNED_URL_EXPIRY = 3600; // 1 hour
+const PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS = 3600;
 
 // Lazy initialization to avoid importing Env at module level
 // This prevents errors when the module is imported by client-side code
@@ -50,12 +55,16 @@ export function getArtifactKey(
   path: string,
   version: number,
 ): string {
-  // Version 0 indicates legacy artifacts stored before versioning was introduced.
-  // These artifacts use the old S3 path structure without the version component.
-  if (version === 0) {
-    return `tasks/${taskId}/artifacts/${artifactId}/${path}`;
-  }
-  return `tasks/${taskId}/artifacts/${artifactId}/v${version}/${path}`;
+  return getArtifactStorageKey({ taskId }, artifactId, path, version);
+}
+
+function getOwnedArtifactKey(
+  owner: ArtifactStorageOwner,
+  artifactId: string,
+  path: string,
+  version: number,
+): string {
+  return getArtifactStorageKey(owner, artifactId, path, version);
 }
 
 export async function generateUploadUrl(
@@ -74,7 +83,7 @@ export async function generateUploadUrl(
   });
 
   return getSignedUrl(getS3PresignClient(), command, {
-    expiresIn: PRESIGNED_URL_EXPIRY,
+    expiresIn: ARTIFACT_UPLOAD_URL_MAX_AGE_SECONDS,
   });
 }
 
@@ -84,17 +93,26 @@ export async function generateDownloadUrl(
   path: string,
   version: number,
 ): Promise<string> {
+  return generateOwnedDownloadUrl({ taskId }, artifactId, path, version);
+}
+
+export async function generateOwnedDownloadUrl(
+  owner: ArtifactStorageOwner,
+  artifactId: string,
+  path: string,
+  version: number,
+): Promise<string> {
   // Extract filename for Content-Disposition header
   const filename = basename(path);
 
   const command = new GetObjectCommand({
     Bucket: Env.S3_BUCKET_ARTIFACTS,
-    Key: getArtifactKey(taskId, artifactId, path, version),
+    Key: getOwnedArtifactKey(owner, artifactId, path, version),
     ResponseContentDisposition: `attachment; filename="${filename}"`,
   });
 
   return getSignedUrl(getS3PresignClient(), command, {
-    expiresIn: PRESIGNED_URL_EXPIRY,
+    expiresIn: PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS,
   });
 }
 
@@ -102,15 +120,15 @@ export async function generateDownloadUrl(
  * Fetch raw artifact content from S3.
  * Returns the S3 response with Body stream, ContentType, and ContentLength.
  */
-export async function getArtifactObject(
-  taskId: string,
+export async function getOwnedArtifactObject(
+  owner: ArtifactStorageOwner,
   artifactId: string,
   path: string,
   version: number,
 ) {
   const command = new GetObjectCommand({
     Bucket: Env.S3_BUCKET_ARTIFACTS,
-    Key: getArtifactKey(taskId, artifactId, path, version),
+    Key: getOwnedArtifactKey(owner, artifactId, path, version),
   });
 
   return getS3Client().send(command);
@@ -133,17 +151,18 @@ export async function deleteArtifact(
   await getS3Client().send(command);
 }
 
+type OwnedArtifactDelete = ArtifactStorageOwner & {
+  artifactId: string;
+  path: string;
+  version: number;
+};
+
 /**
  * Delete multiple artifacts from S3 in a batch.
  * S3 allows up to 1000 objects per batch delete request.
  */
 export async function deleteArtifactsBatch(
-  artifacts: Array<{
-    taskId: string;
-    artifactId: string;
-    path: string;
-    version: number;
-  }>,
+  artifacts: OwnedArtifactDelete[],
 ): Promise<{ deleted: number; errors: number }> {
   if (artifacts.length === 0) {
     return { deleted: 0, errors: 0 };
@@ -161,8 +180,10 @@ export async function deleteArtifactsBatch(
       Bucket: Env.S3_BUCKET_ARTIFACTS,
       Delete: {
         Objects: batch.map((artifact) => ({
-          Key: getArtifactKey(
-            artifact.taskId,
+          Key: getOwnedArtifactKey(
+            artifact.taskId !== undefined
+              ? { taskId: artifact.taskId }
+              : { sessionId: artifact.sessionId },
             artifact.artifactId,
             artifact.path,
             artifact.version,

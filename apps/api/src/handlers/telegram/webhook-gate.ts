@@ -93,6 +93,12 @@ export async function claimTelegramUpdate(updateId: number): Promise<boolean> {
   return Boolean(claimed);
 }
 
+export async function releaseTelegramUpdateClaim(
+  updateId: number,
+): Promise<void> {
+  await getRedis().del(`${TELEGRAM_UPDATE_DEDUP_PREFIX}${updateId}`);
+}
+
 const TELEGRAM_LINK_NUDGE_PREFIX = 'telegram:link-nudge:';
 const TELEGRAM_LINK_NUDGE_USER_TTL_SECONDS = 6 * 60 * 60;
 const TELEGRAM_LINK_NUDGE_CHAT_TTL_SECONDS = 15 * 60;

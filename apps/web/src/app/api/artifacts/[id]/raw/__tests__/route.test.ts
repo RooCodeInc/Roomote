@@ -2,9 +2,10 @@ import { NextRequest } from 'next/server';
 
 import {
   getUploadedArtifactById,
-  getArtifactObject,
+  getOwnedArtifactObject,
   verifyArtifactSignature,
 } from '@/lib/server';
+import { authorize } from '@/lib/server/auth-context';
 
 import { GET } from '../route';
 
@@ -13,21 +14,27 @@ vi.mock('@/lib/server/artifacts', () => ({
 }));
 
 vi.mock('@/lib/server/s3-client', () => ({
-  getArtifactObject: vi.fn(),
+  getOwnedArtifactObject: vi.fn(),
 }));
 
 vi.mock('@/lib/server/artifact-signature', () => ({
   verifyArtifactSignature: vi.fn(),
 }));
+vi.mock('@/lib/server/auth-context', () => ({ authorize: vi.fn() }));
 
 const mockGetUploadedArtifactById = vi.mocked(getUploadedArtifactById);
-const mockGetArtifactObject = vi.mocked(getArtifactObject);
+const mockGetArtifactObject = vi.mocked(getOwnedArtifactObject);
 const mockVerifyArtifactSignature = vi.mocked(verifyArtifactSignature);
+const mockAuthorize = vi.mocked(authorize);
 
-function makeRequest(id: string, params?: { sig?: string; ts?: string }) {
+function makeRequest(
+  id: string,
+  params?: { sig?: string; ts?: string; download?: string },
+) {
   const searchParams = new URLSearchParams();
   if (params?.sig) searchParams.set('sig', params.sig);
   if (params?.ts) searchParams.set('ts', params.ts);
+  if (params?.download) searchParams.set('download', params.download);
   const qs = searchParams.toString();
   const url = `http://localhost:3000/api/artifacts/${id}/raw${qs ? `?${qs}` : ''}`;
   return new NextRequest(url, { method: 'GET' });
@@ -129,6 +136,7 @@ describe('GET /api/artifacts/[id]/raw', () => {
     mockGetUploadedArtifactById.mockResolvedValueOnce({
       id: 'art-1',
       taskId: 'task-1',
+      sessionId: null,
       runId: 1,
       artifactType: 'general',
       path: 'plans/test.md',
@@ -136,6 +144,7 @@ describe('GET /api/artifacts/[id]/raw', () => {
       contentType: 'text/markdown',
       size: 100,
       uploaded: true,
+      uploadUrlExpiresAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),
     });
@@ -161,6 +170,7 @@ describe('GET /api/artifacts/[id]/raw', () => {
     mockGetUploadedArtifactById.mockResolvedValueOnce({
       id: 'art-1',
       taskId: 'task-1',
+      sessionId: null,
       runId: 1,
       artifactType: 'general',
       path: 'videos/demo.webm',
@@ -168,6 +178,7 @@ describe('GET /api/artifacts/[id]/raw', () => {
       contentType: 'video/webm',
       size: 100,
       uploaded: true,
+      uploadUrlExpiresAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),
     });
@@ -204,6 +215,7 @@ describe('GET /api/artifacts/[id]/raw', () => {
     mockGetUploadedArtifactById.mockResolvedValueOnce({
       id: 'art-1',
       taskId: 'task-1',
+      sessionId: null,
       runId: 1,
       artifactType: 'general',
       path: 'screenshots/homepage.png',
@@ -211,6 +223,7 @@ describe('GET /api/artifacts/[id]/raw', () => {
       contentType: 'image/png',
       size: 4,
       uploaded: true,
+      uploadUrlExpiresAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),
     });
@@ -260,6 +273,7 @@ describe('GET /api/artifacts/[id]/raw', () => {
     mockGetUploadedArtifactById.mockResolvedValueOnce({
       id: 'art-1',
       taskId: 'task-1',
+      sessionId: null,
       runId: 1,
       artifactType: 'general',
       path: 'screenshots/homepage.png',
@@ -267,6 +281,7 @@ describe('GET /api/artifacts/[id]/raw', () => {
       contentType: 'image/png',
       size: 100,
       uploaded: true,
+      uploadUrlExpiresAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),
     });
@@ -299,6 +314,7 @@ describe('GET /api/artifacts/[id]/raw', () => {
       mockGetUploadedArtifactById.mockResolvedValueOnce({
         id: 'art-1',
         taskId: 'task-1',
+        sessionId: null,
         runId: 1,
         artifactType: 'general',
         path: 'screenshots/test.img',
@@ -306,6 +322,7 @@ describe('GET /api/artifacts/[id]/raw', () => {
         contentType,
         size: 4,
         uploaded: true,
+        uploadUrlExpiresAt: null,
         createdAt: new Date(),
         updatedAt: new Date(),
       });
@@ -340,6 +357,7 @@ describe('GET /api/artifacts/[id]/raw', () => {
     mockGetUploadedArtifactById.mockResolvedValueOnce({
       id: 'art-1',
       taskId: 'task-1',
+      sessionId: null,
       runId: 1,
       artifactType: 'general',
       path: 'docs/report.pdf',
@@ -347,6 +365,7 @@ describe('GET /api/artifacts/[id]/raw', () => {
       contentType: 'application/pdf',
       size: 1000,
       uploaded: true,
+      uploadUrlExpiresAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),
     });
@@ -359,5 +378,97 @@ describe('GET /api/artifacts/[id]/raw', () => {
     );
 
     expect(response.status).toBe(403);
+  });
+
+  it('hides private artifacts from non-owners', async () => {
+    const objectReadsBefore = mockGetArtifactObject.mock.calls.length;
+    mockVerifyArtifactSignature.mockReturnValueOnce(true);
+    mockGetUploadedArtifactById.mockResolvedValueOnce({
+      id: 'private-artifact',
+      taskId: null,
+      sessionId: 'private-session',
+      runId: null,
+      artifactType: 'general',
+      path: 'private.txt',
+      version: 1,
+      contentType: 'text/plain',
+      size: 7,
+      uploaded: true,
+      uploadUrlExpiresAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      privacy: 'private',
+      privateOwnerUserId: 'owner',
+    });
+    mockAuthorize.mockResolvedValueOnce({
+      success: true,
+      userId: 'other',
+      isAdmin: true,
+    } as never);
+
+    const response = await GET(
+      makeRequest('private-artifact', {
+        sig: 'valid-sig',
+        ts: freshTs(),
+        download: '1',
+      }),
+      { params: Promise.resolve({ id: 'private-artifact' }) },
+    );
+
+    expect(response.status).toBe(404);
+    expect(mockGetArtifactObject).toHaveBeenCalledTimes(objectReadsBefore);
+  });
+
+  it('serves private downloads only to the owner without public caching', async () => {
+    mockVerifyArtifactSignature.mockReturnValueOnce(true);
+    mockGetUploadedArtifactById.mockResolvedValueOnce({
+      id: 'private-artifact',
+      taskId: null,
+      sessionId: 'private-session',
+      runId: null,
+      artifactType: 'general',
+      path: 'private.txt',
+      version: 1,
+      contentType: 'text/plain',
+      size: 7,
+      uploaded: true,
+      uploadUrlExpiresAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      privacy: 'private',
+      privateOwnerUserId: 'owner',
+    });
+    mockAuthorize.mockResolvedValueOnce({
+      success: true,
+      userId: 'owner',
+      isAdmin: false,
+    } as never);
+    mockGetArtifactObject.mockResolvedValueOnce({
+      Body: {
+        transformToWebStream: () =>
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode('private'));
+              controller.close();
+            },
+          }),
+      },
+      ContentLength: 7,
+    } as never);
+
+    const response = await GET(
+      makeRequest('private-artifact', {
+        sig: 'valid-sig',
+        ts: freshTs(),
+        download: '1',
+      }),
+      { params: Promise.resolve({ id: 'private-artifact' }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Cache-Control')).toBe('private, no-store');
+    expect(response.headers.get('Content-Disposition')).toBe(
+      'attachment; filename="private.txt"',
+    );
   });
 });

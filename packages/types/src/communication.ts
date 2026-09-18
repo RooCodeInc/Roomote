@@ -5,6 +5,7 @@ export const communicationProviders = [
   'teams',
   'telegram',
   'discord',
+  'agentmail',
 ] as const;
 
 export const communicationProviderSchema = z.enum(communicationProviders);
@@ -17,6 +18,9 @@ export const CHAT_CHANNELS_TOOL = {
   description:
     'List the communication channels Roomote is connected to or can currently discover, grouped by platform. Returns channel IDs and platform-specific workspace context so another chat tool can target the right channel. Some platforms do not support channel enumeration and report that limitation explicitly.',
 } as const;
+
+export const CHAT_CHANNEL_POST_TOOL_NAME = 'post_to_channel';
+export const CHAT_REACTION_EMOJI_TOOL_NAME = 'send_chat_reaction_emoji';
 
 export const CHAT_MESSAGE_CONTEXT_TOOL = {
   name: 'get_chat_message_context',
@@ -37,7 +41,7 @@ export const CHAT_CHANNEL_MESSAGES_TOOL = {
   name: 'get_chat_channel_messages',
   title: 'Get Chat Channel Messages',
   description:
-    'Fetch readable history from the task communication channel. When the task has no communication channel, or when another channel is needed, provide a Slack or Discord channel/message link. Provider-specific access checks still apply.',
+    'Fetch readable history from the task communication channel. When the task has no communication channel, or when another channel is needed, provide a Slack or Discord channel/message link. Provider-specific access checks still apply. Large results are cut to the newest messages: when the response has truncated set, call again with latest set to nextLatest (and the same oldest) to read older messages.',
   inputDescriptions: {
     channel:
       'Optional channel ID, name, mention, or Slack/Discord channel/message link. Omit it to use the task communication channel.',
@@ -53,6 +57,7 @@ export const communicationProviderQueuePrefixes = {
   teams: 'teams:messages:',
   telegram: 'telegram:messages:',
   discord: 'discord:messages:',
+  agentmail: 'agentmail:messages:',
 } as const satisfies Record<CommunicationProvider, string>;
 
 export function getCommunicationProviderQueuePrefix(
@@ -66,6 +71,7 @@ export const communicationProviderDisplayNames = {
   teams: 'Microsoft Teams',
   telegram: 'Telegram',
   discord: 'Discord',
+  agentmail: 'Email',
 } as const satisfies Record<CommunicationProvider, string>;
 
 export function getCommunicationProviderDisplayName(
@@ -91,6 +97,8 @@ export const queuedCommunicationMessageSchema = z.object({
   channel: z.string().optional(),
   threadTs: z.string().optional(),
   images: z.array(z.string()).optional(),
+  /** Trusted provider context associated with the current message. */
+  agentContext: z.string().optional(),
   formattedPrompt: z.string().optional(),
   turnPolicy: z
     .object({

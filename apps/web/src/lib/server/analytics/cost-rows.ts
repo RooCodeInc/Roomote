@@ -11,6 +11,7 @@ import {
   eq,
   inArray,
   isNull,
+  privateTaskAccess,
   sql,
 } from '@roomote/db/server';
 
@@ -30,7 +31,18 @@ import {
   getPullRequestKey,
   getTaskTypeDimensionValue,
 } from './dimensions';
-import { formatAnalyticsDateTime, getTimeCutoff } from './time-buckets';
+import {
+  formatAnalyticsDateTime,
+  formatPrivateAnalyticsDate,
+  getTimeCutoff,
+} from './time-buckets';
+import {
+  canViewPrivateAnalyticsDetails,
+  createPrivateAnalyticsIdMapper,
+  PRIVATE_SESSION_LABEL,
+  PRIVATE_TASK_LABEL,
+  privateAnalyticsDimensionValue,
+} from './privacy';
 
 const MULTIPLE_VALUES_LABEL = 'Multiple';
 
@@ -61,13 +73,20 @@ export function aggregateCostAnalyticsRowsByTask(
     }
 
     const value = existingRow.value + row.value;
+    const tokens = (existingRow.tokens ?? 0) + (row.tokens ?? 0);
     const values: Record<string, string> = {
       ...existingRow.details.values,
       cost: value.toFixed(2),
+      tokens: String(tokens),
     };
 
     for (const [key, rowValue] of Object.entries(row.details.values)) {
-      if (key === 'date' || key === 'cost' || key === 'taskTitle') {
+      if (
+        key === 'date' ||
+        key === 'cost' ||
+        key === 'tokens' ||
+        key === 'taskTitle'
+      ) {
         continue;
       }
 
@@ -79,6 +98,7 @@ export function aggregateCostAnalyticsRowsByTask(
     aggregatedRows.set(taskId, {
       ...existingRow,
       value,
+      tokens,
       details: {
         ...existingRow.details,
         values,
@@ -92,7 +112,7 @@ export function aggregateCostAnalyticsRowsByTask(
 }
 
 export async function getCostAnalyticsRows(
-  _auth: UserAuthSuccess,
+  auth: UserAuthSuccess,
   timePeriod: TimePeriodFilter | undefined,
   now: Date,
 ): Promise<AnalyticsRow[]> {
@@ -109,6 +129,7 @@ export async function getCostAnalyticsRows(
       timestamp: llmUsageEvents.messageCompletedAt,
       createdAt: llmUsageEvents.createdAt,
       costMicroUsd: llmUsageEvents.costMicroUsd,
+      totalTokens: llmUsageEvents.totalTokens,
       taskId: llmUsageEvents.taskId,
       runId: llmUsageEvents.runId,
       harnessSessionId: llmUsageEvents.harnessSessionId,
@@ -118,6 +139,9 @@ export async function getCostAnalyticsRows(
       modelId: llmUsageEvents.modelId,
       environmentName: environments.name,
       taskTitle: tasks.title,
+      taskDeletedAt: tasks.deletedAt,
+      taskPrivacy: tasks.privacy,
+      taskPrivateOwnerUserId: tasks.privateOwnerUserId,
       initiatorKind: tasks.initiatorKind,
       initiatorAutomation: tasks.initiatorAutomation,
       actorDisplayName: tasks.actorDisplayName,
@@ -139,7 +163,7 @@ export async function getCostAnalyticsRows(
     )
     .leftJoin(taskRuns, eq(taskRuns.id, llmUsageEvents.runId))
     .leftJoin(environments, eq(environments.id, llmUsageEvents.environmentId))
-    .where(and(isNull(tasks.deletedAt), usageCutoffCondition));
+    .where(usageCutoffCondition);
 
   const fallbackEnvironmentIds = [
     ...new Set(
@@ -178,8 +202,14 @@ export async function getCostAnalyticsRows(
       : await db
           .select({
             nativeSessionId: fastAgentMessages.nativeSessionId,
+            privacy: fastAgentConversations.privacy,
+            privateOwnerUserId: fastAgentConversations.privateOwnerUserId,
           })
           .from(fastAgentMessages)
+          .innerJoin(
+            fastAgentConversations,
+            eq(fastAgentConversations.id, fastAgentMessages.conversationId),
+          )
           .where(inArray(fastAgentMessages.nativeSessionId, nativeSessionIds));
   const currentNativeSessionRows =
     nativeSessionIds.length === 0
@@ -187,13 +217,28 @@ export async function getCostAnalyticsRows(
       : await db
           .select({
             nativeSessionId: fastAgentConversations.openCodeSessionId,
+            privacy: fastAgentConversations.privacy,
+            privateOwnerUserId: fastAgentConversations.privateOwnerUserId,
           })
           .from(fastAgentConversations)
           .where(
             inArray(fastAgentConversations.openCodeSessionId, nativeSessionIds),
           );
+  const fastNativeRows = [
+    ...nativeMessageSessionRows,
+    ...currentNativeSessionRows,
+  ];
+  const inaccessiblePrivateNativeSessionIds = new Set(
+    fastNativeRows
+      .filter(
+        (row) =>
+          row.privacy === 'private' && row.privateOwnerUserId !== auth.userId,
+      )
+      .map((row) => row.nativeSessionId)
+      .filter((id): id is string => Boolean(id)),
+  );
   const fastNativeSessionIds = new Set(
-    [...nativeMessageSessionRows, ...currentNativeSessionRows]
+    fastNativeRows
       .map((row) => row.nativeSessionId)
       .filter((id): id is string => Boolean(id)),
   );
@@ -210,6 +255,7 @@ export async function getCostAnalyticsRows(
     .where(
       and(
         isNull(tasks.deletedAt),
+        privateTaskAccess(auth),
         sql`exists (
           select 1
           from ${llmUsageEvents}
@@ -238,25 +284,48 @@ export async function getCostAnalyticsRows(
     prKeysByTaskId.set(pullRequest.taskId, keys);
   }
 
+  const getPrivateUsageId = createPrivateAnalyticsIdMapper('private-cost');
+  const getPrivateTaskId = createPrivateAnalyticsIdMapper('private-task');
+
   return usageRows.map((row) => {
     const isTask = Boolean(row.taskId);
+    const isPrivateTask =
+      isTask &&
+      !canViewPrivateAnalyticsDetails(auth, {
+        privacy: row.taskPrivacy ?? 'shared',
+        privateOwnerUserId: row.taskPrivateOwnerUserId,
+      });
+    const isPrivateSession =
+      !isTask &&
+      Boolean(
+        row.harnessSessionId &&
+        inaccessiblePrivateNativeSessionIds.has(row.harnessSessionId),
+      );
+    const isPrivate = isPrivateTask || isPrivateSession;
+    const isDeletedTask = isTask && Boolean(row.taskDeletedAt);
     const isMemory = !isTask && row.source === 'brain_synthesis';
     const isSession =
       !isTask &&
       !isMemory &&
       fastNativeSessionIds.has(row.harnessSessionId ?? '');
-    const taskType = isTask
-      ? getTaskTypeDimensionValue({
-          initiatorKind: row.initiatorKind,
-          initiatorAutomation: row.initiatorAutomation,
-          actorDisplayName: row.actorDisplayName,
-        })
-      : createLabelBackedDimensionValue(
-          isMemory ? 'Memories' : isSession ? 'Session' : 'Non-task inference',
-        );
+    const taskType = isDeletedTask
+      ? createLabelBackedDimensionValue('Deleted task')
+      : isTask
+        ? getTaskTypeDimensionValue({
+            initiatorKind: row.initiatorKind,
+            initiatorAutomation: row.initiatorAutomation,
+            actorDisplayName: row.actorDisplayName,
+          })
+        : createLabelBackedDimensionValue(
+            isMemory
+              ? 'Memories'
+              : isSession
+                ? 'Session'
+                : 'Non-task inference',
+          );
     const attributedUserId = row.userId ?? row.taskUserId;
     const userDimension =
-      isTask && row.initiatorKind === 'automation'
+      isDeletedTask || (isTask && row.initiatorKind === 'automation')
         ? createLabelBackedDimensionValue(NO_VALUE_LABEL)
         : attributedUserId
           ? getCanonicalUserDimensionValue({
@@ -267,6 +336,7 @@ export async function getCostAnalyticsRows(
           : createLabelBackedDimensionValue(NO_VALUE_LABEL);
     const timestamp = row.timestamp ?? row.createdAt;
     const cost = Number(row.costMicroUsd ?? 0) / 1_000_000;
+    const tokens = Number(row.totalTokens ?? 0);
     const provider = row.providerId ?? 'Unknown provider';
     const model = row.modelId ?? 'Unknown model';
     const project =
@@ -274,10 +344,54 @@ export async function getCostAnalyticsRows(
       (row.runEnvironmentId
         ? (environmentNameById.get(row.runEnvironmentId) ?? NO_PROJECT_LABEL)
         : NO_PROJECT_LABEL);
+    if (isPrivate) {
+      const id = getPrivateUsageId(row.id);
+      const privateLabel = isPrivateTask
+        ? PRIVATE_TASK_LABEL
+        : PRIVATE_SESSION_LABEL;
+      const privateTaskId =
+        isPrivateTask && row.taskId ? getPrivateTaskId(row.taskId) : null;
+
+      return {
+        id,
+        timestamp,
+        value: cost,
+        tokens,
+        dimensions: {
+          user: userDimension,
+          taskType: createLabelBackedDimensionValue(privateLabel),
+          project: privateAnalyticsDimensionValue,
+          source: privateAnalyticsDimensionValue,
+          provider: createLabelBackedDimensionValue(provider),
+          model: createLabelBackedDimensionValue(model),
+        },
+        details: {
+          id,
+          values: {
+            date: formatPrivateAnalyticsDate(timestamp),
+            user: userDimension.label,
+            taskType: privateLabel,
+            project: privateLabel,
+            source: privateLabel,
+            provider,
+            model,
+            cost: cost.toFixed(2),
+            tokens: String(tokens),
+            taskTitle: privateLabel,
+          },
+        },
+        meta: {
+          canonicalTaskId: privateTaskId,
+          prKeys: [],
+        },
+      } satisfies AnalyticsRow;
+    }
+
     return {
       id: row.id,
       timestamp,
       value: cost,
+      tokens,
       dimensions: {
         user: userDimension,
         taskType,
@@ -297,9 +411,15 @@ export async function getCostAnalyticsRows(
           provider,
           model,
           cost: cost.toFixed(2),
-          taskTitle: row.taskTitle ?? taskType.label,
+          tokens: String(tokens),
+          taskTitle: isDeletedTask
+            ? taskType.label
+            : (row.taskTitle ?? taskType.label),
         },
-        links: row.taskId ? { task: `/task/${row.taskId}` } : undefined,
+        links:
+          row.taskId && !isDeletedTask
+            ? { task: `/task/${row.taskId}` }
+            : undefined,
       },
       meta: {
         canonicalTaskId: row.taskId,

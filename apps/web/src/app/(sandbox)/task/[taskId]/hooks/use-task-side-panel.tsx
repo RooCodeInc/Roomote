@@ -102,6 +102,16 @@ function computeBasePath(pathname: string): string {
   );
 }
 
+function buildArtifactDetailPath(
+  basePath: string,
+  path: string,
+  version?: number,
+): string {
+  const search = new URLSearchParams({ path });
+  if (version !== undefined) search.set('v', String(version));
+  return `${basePath}/artifacts?${search}`;
+}
+
 /**
  * Parse the current pathname to determine which panel (if any) should be
  * active and extract its parameters.
@@ -120,7 +130,8 @@ function parseViewFromPathname(
   // /task/[id]/artifacts/[...path]?v=N
   const artifactMatch = pathname.match(/\/artifacts(?:\/(.+))?$/);
   if (artifactMatch) {
-    const path = artifactMatch[1] ?? null;
+    const routePath = artifactMatch[1];
+    const path = routePath ? decodeURIComponent(routePath) : search.get('path');
     const versionParam = search.get('v');
     const parsed = versionParam ? parseInt(versionParam, 10) : undefined;
     const version = Number.isNaN(parsed) ? undefined : parsed;
@@ -128,7 +139,7 @@ function parseViewFromPathname(
     return {
       view: 'artifacts',
       artifactsMode: path ? 'detail' : 'browser',
-      artifactPath: path ? decodeURIComponent(path) : null,
+      artifactPath: path,
       artifactVersion: version,
       previewServiceName: null,
       previewPath: null,
@@ -352,11 +363,10 @@ export function TaskSidePanelProvider({
       setSelectedArtifactPath(path);
       setSelectedArtifactVersion(version);
 
-      const versionParam = version ? `?v=${version}` : '';
       window.history.replaceState(
         null,
         '',
-        `${basePath}/artifacts/${path}${versionParam}`,
+        buildArtifactDetailPath(basePath, path, version),
       );
     },
     [basePath],
@@ -428,7 +438,7 @@ export function TaskSidePanelProvider({
         window.history.replaceState(
           null,
           '',
-          `${basePath}/artifacts/${selectedArtifactPath}?v=${version}`,
+          buildArtifactDetailPath(basePath, selectedArtifactPath, version),
         );
       }
     },

@@ -23,7 +23,7 @@ fi
 baseline_registry="${BASELINE_IMAGE_REGISTRY:-ghcr.io}"
 baseline_namespace="${BASELINE_IMAGE_NAMESPACE:-roocodeinc}"
 project_name="${COMPOSE_PROJECT_NAME:-roomote-upgrade-ci}"
-postgres_port="${DEPLOYMENT_CI_POSTGRES_PORT:-57432}"
+postgres_port="${DEPLOYMENT_CI_POSTGRES_PORT:-0}"
 redis_port="${DEPLOYMENT_CI_REDIS_PORT:-58379}"
 default_network="${ROOMOTE_DEFAULT_NETWORK:-${project_name}_default}"
 worker_network="${DOCKER_WORKER_NETWORK:-${project_name}_worker}"
@@ -57,16 +57,26 @@ cleanup() {
   compose down --volumes --remove-orphans >/dev/null 2>&1 || true
   rm -rf "$temporary_directory"
 }
-trap cleanup EXIT
 
 report_failure() {
-  local exit_code="$?"
   printf 'Upgrade compatibility test failed; final Compose state follows.\n' >&2
+  printf '\nCompose services:\n' >&2
   compose ps --all >&2 || true
-  compose logs --no-color --tail 200 >&2 || true
-  return "$exit_code"
+  printf '\nRequired service logs:\n' >&2
+  compose logs --no-color --tail 200 \
+    postgres redis minio minio-init docker-proxy db-migrate api web controller bullmq gbrain preview-proxy >&2 || true
 }
-trap report_failure ERR
+
+finish() {
+  local exit_code="$?"
+  trap - EXIT
+  if [ "$exit_code" -ne 0 ]; then
+    report_failure
+  fi
+  cleanup
+  exit "$exit_code"
+}
+trap finish EXIT
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -121,7 +131,7 @@ APP_ENV=production
 ARTIFACT_SIGNING_KEY=$artifact_signing_key
 CADDY_HTTP_PORT=19080
 CADDY_HTTPS_PORT=19443
-COMPOSE_PROFILES=local-postgres
+COMPOSE_PROFILES=local-postgres,brain
 DASHBOARD_PASSWORD=$dashboard_password
 DATABASE_URL=postgres://postgres:roomote-postgres-password@postgres:5432/roomote
 DEFAULT_COMPUTE_PROVIDER=docker
@@ -159,10 +169,24 @@ TRPC_URL=http://api:3001
 EOF
 
 verify_endpoints() {
+  printf 'Probing API liveness endpoint\n'
   compose exec -T api curl -fsS --max-time 5 http://127.0.0.1:3001/health/liveness >/dev/null
+
+  printf 'Probing web health endpoint\n'
   compose exec -T web curl -fsS --max-time 5 http://127.0.0.1:3000/health >/dev/null
-  compose exec -T web curl -fsS --max-time 10 "http://127.0.0.1:3000/setup?token=$setup_token" >/dev/null
+
+  printf 'Probing web setup endpoint with generated token\n'
+  compose exec -T web curl -fsS \
+    --max-time 30 \
+    --retry 2 \
+    --retry-delay 1 \
+    --retry-all-errors \
+    "http://127.0.0.1:3000/setup?token=$setup_token" >/dev/null
+
+  printf 'Probing controller health endpoint\n'
   compose exec -T controller curl -fsS --max-time 5 http://api:3001/health/controller >/dev/null
+
+  printf 'Probing BullMQ health endpoint\n'
   compose exec -T bullmq curl -fsS --max-time 5 http://127.0.0.1:3002/admin/health >/dev/null
 }
 
@@ -263,6 +287,31 @@ WHERE to_regclass('public.fast_agent_conversation_aliases') IS NOT NULL
       AND target_column.attname = 'id'
   );
 
+INSERT INTO upgrade_ci_contract.compatibility_boundaries (name, reason)
+SELECT
+  'session-goal-ownership-cutover',
+  'Goal Mode moved from unused task-owned columns to Session-owned storage'
+WHERE (
+  SELECT count(*)
+  FROM information_schema.columns
+  WHERE table_schema = 'public'
+    AND table_name = 'tasks'
+    AND column_name IN (
+      'goal_objective',
+      'goal_status',
+      'goal_max_continuations',
+      'goal_continuations_used',
+      'goal_blocked_reason',
+      'goal_completed_at',
+      'goal_last_continuation_id',
+      'goal_continuation_ids',
+      'goal_generation_ids',
+      'goal_blocker_candidate_reason',
+      'goal_blocker_candidate_count',
+      'goal_blocker_last_continuation_used'
+    )
+) = 12;
+
 -- Feature PRs use the published develop image as their CI baseline even though
 -- develop is not a supported rollback target. That image briefly shipped the
 -- v0.6 usage-table rename before this contract check existed. Allow only that
@@ -309,6 +358,30 @@ FROM (
 ) AS retired(table_name, column_name)
 CROSS JOIN upgrade_ci_contract.compatibility_boundaries AS boundary
 WHERE boundary.name = 'fast-conversation-canonical-storage-v0.41.0';
+
+INSERT INTO upgrade_ci_contract.previous_column_exceptions (
+  table_name,
+  column_name,
+  reason
+)
+SELECT 'tasks', retired.column_name, boundary.reason
+FROM (
+  VALUES
+    ('goal_objective'),
+    ('goal_status'),
+    ('goal_max_continuations'),
+    ('goal_continuations_used'),
+    ('goal_blocked_reason'),
+    ('goal_completed_at'),
+    ('goal_last_continuation_id'),
+    ('goal_continuation_ids'),
+    ('goal_generation_ids'),
+    ('goal_blocker_candidate_reason'),
+    ('goal_blocker_candidate_count'),
+    ('goal_blocker_last_continuation_used')
+) AS retired(column_name)
+CROSS JOIN upgrade_ci_contract.compatibility_boundaries AS boundary
+WHERE boundary.name = 'session-goal-ownership-cutover';
 
 CREATE TABLE upgrade_ci_contract.previous_nullability_exceptions (
   table_name text NOT NULL,
@@ -486,7 +559,16 @@ compose up \
   --detach \
   --wait \
   --wait-timeout 600 \
-  postgres redis minio minio-init db-migrate api web controller bullmq preview-proxy
+  postgres redis minio minio-init db-migrate api web controller bullmq gbrain preview-proxy
+
+postgres_endpoint="$(compose port postgres 5432)"
+postgres_port="${postgres_endpoint##*:}"
+case "$postgres_port" in
+  '' | *[!0-9]*)
+    printf 'could not resolve the published Postgres port from %s\n' "$postgres_endpoint" >&2
+    exit 1
+    ;;
+esac
 
 migration_container="$(compose ps --all --quiet db-migrate)"
 [ -n "$migration_container" ] || {

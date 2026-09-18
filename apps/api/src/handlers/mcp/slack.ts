@@ -2,6 +2,7 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { Hono } from 'hono';
 
 import { Env } from '@roomote/env';
+import { resolveThreadReplyFooterContext } from '@roomote/communication';
 import {
   and,
   asc,
@@ -38,9 +39,9 @@ import {
   removeSlackThreadReplyFooter,
   resolveSlackThreadFooterContext,
   resolveSlackThreadLinkedPrs,
-  resolveSlackThreadLivePreviewUrl,
   setLatestSlackBotReply,
   setSlackThreadReplyFooterMessageTs,
+  rememberSlackThreadFooterRefresh,
   SlackNotifier,
   SlackPostDeliveryError,
   suppressNextSlackReplyQuote,
@@ -146,22 +147,16 @@ async function buildLateBoundSlackRootFooterText(params: {
   taskId: string;
 }): Promise<string> {
   // The explicit-mention marker is per-thread, so a brand-new root message
-  // can never carry it; only the linked PR and live preview need resolving
-  // here. PR metadata lives in taskPullRequests and is resolved by task id.
-  const [linkedPrs, livePreviewUrl] = await Promise.all([
-    resolveSlackThreadLinkedPrs({
-      taskId: params.taskId,
-      prRepo: null,
-      prNumber: null,
-    }),
-    resolveSlackThreadLivePreviewUrl(params.taskId),
-  ]);
+  // can never carry it. Resolve the shared Session navigation and task context.
+  const context = await resolveThreadReplyFooterContext({
+    taskId: params.taskId,
+    prRepo: null,
+    prNumber: null,
+  });
 
   return buildSlackThreadFooterText({
     taskUrl: params.taskUrl,
-    linkedPrs,
-    livePreviewUrl,
-    explicitMentionRequired: false,
+    ...context,
   });
 }
 
@@ -504,6 +499,7 @@ function parseRequestBody(body: unknown): {
   text?: string;
   blocks?: unknown[];
   images: Array<{ artifactId: string }>;
+  clientSendId?: string;
 } {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     throw new Error('Invalid request body');
@@ -513,6 +509,11 @@ function parseRequestBody(body: unknown): {
   const text =
     typeof record.text === 'string' && record.text.trim().length > 0
       ? record.text.trim()
+      : undefined;
+  const clientSendId =
+    typeof record.clientSendId === 'string' &&
+    /^[A-Za-z0-9_-]{8,64}$/.test(record.clientSendId)
+      ? record.clientSendId
       : undefined;
   const blocks =
     record.blocks === undefined
@@ -551,7 +552,7 @@ function parseRequestBody(body: unknown): {
     throw new Error('At least one of text, blocks, or images is required');
   }
 
-  return { text, blocks, images };
+  return { text, blocks, images, clientSendId };
 }
 
 /**
@@ -892,6 +893,40 @@ slackMcp.post('/clear_reply_quote', async (c) => {
   return c.json({ success: true });
 });
 
+async function findSlackNotifierForLateBoundChannel(
+  channelId: string,
+): Promise<
+  | { status: 'resolved'; slack: SlackNotifier; teamId: string }
+  | { status: 'unresolved' }
+  | { status: 'indeterminate' }
+> {
+  const installations = await db.query.slackInstallations.findMany({
+    columns: { botAccessToken: true, teamId: true },
+    where: eq(slackInstallations.isActive, true),
+  });
+  const candidates = await Promise.all(
+    installations.map(async (installation) => {
+      const slack = new SlackNotifier(installation.botAccessToken);
+      return {
+        membership: await slack.isAppInChannel(channelId),
+        slack,
+        teamId: installation.teamId,
+      };
+    }),
+  );
+  if (candidates.some((candidate) => candidate.membership === null)) {
+    return { status: 'indeterminate' };
+  }
+
+  const matchingInstallations = candidates.filter(
+    (candidate) => candidate.membership === true,
+  );
+
+  return matchingInstallations.length === 1
+    ? { status: 'resolved', ...matchingInstallations[0]! }
+    : { status: 'unresolved' };
+}
+
 slackMcp.post('/thread_reply', async (c) => {
   const { authContext } = c.get('mcpAuth');
 
@@ -1020,24 +1055,53 @@ slackMcp.post('/thread_reply', async (c) => {
   const slackTeamId =
     activeSlackReplyTarget?.slackTeamId ??
     getSlackTeamIdFromTaskPayload(taskRun.payload);
-  const slackInstallation = await db.query.slackInstallations.findFirst({
-    columns: { botAccessToken: true, teamId: true },
-    where: slackTeamId
-      ? and(
-          eq(slackInstallations.isActive, true),
-          eq(slackInstallations.teamId, slackTeamId),
-        )
-      : eq(slackInstallations.isActive, true),
-  });
-
-  if (!slackInstallation?.botAccessToken) {
+  const needsLateBoundSlackResolution =
+    !slackTeamId && !slackReplyTarget.threadTs;
+  const lateBoundSlackResolution = needsLateBoundSlackResolution
+    ? await findSlackNotifierForLateBoundChannel(slackReplyTarget.channel)
+    : null;
+  if (lateBoundSlackResolution?.status === 'indeterminate') {
     return c.json(
-      { error: 'No active Slack installation found for this deployment' },
+      {
+        error: 'Slack report destination could not be verified; retry shortly',
+        retryable: true,
+      },
+      503,
+    );
+  }
+  const lateBoundSlack =
+    lateBoundSlackResolution?.status === 'resolved'
+      ? lateBoundSlackResolution
+      : null;
+  const slackInstallation = needsLateBoundSlackResolution
+    ? null
+    : await db.query.slackInstallations.findFirst({
+        columns: { botAccessToken: true, teamId: true },
+        where: slackTeamId
+          ? and(
+              eq(slackInstallations.isActive, true),
+              eq(slackInstallations.teamId, slackTeamId),
+            )
+          : eq(slackInstallations.isActive, true),
+      });
+  const resolvedSlack =
+    lateBoundSlack?.slack ??
+    (slackInstallation?.botAccessToken
+      ? new SlackNotifier(slackInstallation.botAccessToken)
+      : null);
+  const resolvedSlackTeamId =
+    lateBoundSlack?.teamId ?? slackInstallation?.teamId ?? null;
+
+  if (!resolvedSlack || !resolvedSlackTeamId) {
+    return c.json(
+      {
+        error: needsLateBoundSlackResolution
+          ? 'Slack report destination could not be resolved to one active installation'
+          : 'No active Slack installation found for this deployment',
+      },
       404,
     );
   }
-
-  const slack = new SlackNotifier(slackInstallation.botAccessToken);
 
   const artifactIds = [
     ...new Set(parsedBody.images.map((image) => image.artifactId)),
@@ -1155,7 +1219,7 @@ slackMcp.post('/thread_reply', async (c) => {
         })
       : blocks;
 
-    const rootPostResult = await slack.postMessageDetailed({
+    const rootPostResult = await resolvedSlack.postMessageDetailed({
       channel: slackReplyTarget.channel,
       text: getSlackFallbackText(fallbackText, imageBlocks.length),
       unfurl_links: false,
@@ -1206,11 +1270,41 @@ slackMcp.post('/thread_reply', async (c) => {
     }
 
     if (trackRootFooterMessageTs) {
-      await setSlackThreadReplyFooterMessageTs(
-        slackReplyTarget.channel,
-        rootMessageTs,
-        rootMessageTs,
-      ).catch((error) => {
+      await withSlackThreadReplyFooterLock({
+        channel: slackReplyTarget.channel,
+        threadTs: rootMessageTs,
+        fn: async (assertLock) => {
+          const current = await getSlackThreadReplyFooterMessageTs(
+            slackReplyTarget.channel,
+            rootMessageTs,
+          );
+          await assertLock();
+          // A reply may already have relocated the footer while the root was bound.
+          if (current && current !== rootMessageTs) {
+            await removeSlackThreadReplyFooter({
+              slack: resolvedSlack,
+              channel: slackReplyTarget.channel,
+              threadTs: rootMessageTs,
+              messageTs: rootMessageTs,
+              assertLock,
+            });
+            return;
+          }
+          await setSlackThreadReplyFooterMessageTs(
+            slackReplyTarget.channel,
+            rootMessageTs,
+            rootMessageTs,
+          );
+          await rememberSlackThreadFooterRefresh(
+            {
+              slack: resolvedSlack,
+              channel: slackReplyTarget.channel,
+              threadTs: rootMessageTs,
+            },
+            assertLock,
+          );
+        },
+      }).catch((error) => {
         console.error(
           `[slackMcp#thread_reply] Failed to persist late-bound footer message ts ${rootMessageTs}: ${
             error instanceof Error ? error.message : String(error)
@@ -1269,7 +1363,7 @@ slackMcp.post('/thread_reply', async (c) => {
     return withSlackThreadReplyFooterLock({
       channel: slackReplyTarget.channel,
       threadTs: existingThreadTs,
-      fn: async () => {
+      fn: async (assertLock) => {
         const previousFooterMessageTs =
           await getSlackThreadReplyFooterMessageTs(
             slackReplyTarget.channel,
@@ -1328,7 +1422,8 @@ slackMcp.post('/thread_reply', async (c) => {
           );
         }
 
-        const replyPostResult = await slack.postMessageDetailed({
+        await assertLock();
+        const replyPostResult = await resolvedSlack.postMessageDetailed({
           channel: slackReplyTarget.channel,
           thread_ts: existingThreadTs,
           text: getSlackFallbackText(fallbackText, imageBlocks.length),
@@ -1343,6 +1438,23 @@ slackMcp.post('/thread_reply', async (c) => {
             throw new Error('Slack thread source message no longer exists');
           }
           throw new SlackPostDeliveryError(replyPostResult);
+        }
+
+        try {
+          await assertLock();
+        } catch {
+          const current = await getSlackThreadReplyFooterMessageTs(
+            slackReplyTarget.channel,
+            existingThreadTs,
+          ).catch(() => undefined);
+          if (current !== undefined && current !== nextMessageTs)
+            await removeSlackThreadReplyFooter({
+              slack: resolvedSlack,
+              channel: slackReplyTarget.channel,
+              threadTs: existingThreadTs,
+              messageTs: nextMessageTs,
+            }).catch(() => {});
+          return nextMessageTs;
         }
 
         if (pendingQuote) {
@@ -1377,6 +1489,7 @@ slackMcp.post('/thread_reply', async (c) => {
         }
 
         try {
+          await assertLock();
           await trackSlackBotReply(
             slackReplyTarget.channel,
             existingThreadTs,
@@ -1391,6 +1504,7 @@ slackMcp.post('/thread_reply', async (c) => {
         }
 
         try {
+          await assertLock();
           await setLatestSlackBotReply(
             slackReplyTarget.channel,
             existingThreadTs,
@@ -1414,10 +1528,11 @@ slackMcp.post('/thread_reply', async (c) => {
         ) {
           try {
             await removeSlackThreadReplyFooter({
-              slack,
+              slack: resolvedSlack,
               channel: slackReplyTarget.channel,
               threadTs: existingThreadTs,
               messageTs: previousFooterMessageTs,
+              assertLock,
             });
           } catch (error) {
             console.error(
@@ -1430,10 +1545,19 @@ slackMcp.post('/thread_reply', async (c) => {
 
         if (includeFooter) {
           try {
+            await assertLock();
             await setSlackThreadReplyFooterMessageTs(
               slackReplyTarget.channel,
               existingThreadTs,
               nextMessageTs,
+            );
+            await rememberSlackThreadFooterRefresh(
+              {
+                slack: resolvedSlack,
+                channel: slackReplyTarget.channel,
+                threadTs: existingThreadTs,
+              },
+              assertLock,
             );
           } catch (error) {
             console.error(
@@ -1441,9 +1565,15 @@ slackMcp.post('/thread_reply', async (c) => {
                 error instanceof Error ? error.message : String(error)
               }`,
             );
+            const current = await getSlackThreadReplyFooterMessageTs(
+              slackReplyTarget.channel,
+              existingThreadTs,
+            ).catch(() => undefined);
+            if (current === undefined || current === nextMessageTs)
+              return nextMessageTs;
             try {
               await removeSlackThreadReplyFooter({
-                slack,
+                slack: resolvedSlack,
                 channel: slackReplyTarget.channel,
                 threadTs: existingThreadTs,
                 messageTs: nextMessageTs,
@@ -1475,8 +1605,8 @@ slackMcp.post('/thread_reply', async (c) => {
 
         try {
           await refreshTrackedAutomationThreadRootFooter({
-            slack,
-            slackTeamId: slackInstallation.teamId,
+            slack: resolvedSlack,
+            slackTeamId: resolvedSlackTeamId,
             channel: slackReplyTarget.channel,
             threadTs: existingThreadTs,
             taskId: taskRun.taskId,
@@ -1581,7 +1711,7 @@ slackMcp.post('/thread_reply', async (c) => {
   const subject = hasRealTaskRunUser(taskRun.actingUserId)
     ? await findSlackConversationSubjectByUserId({
         userId: taskRun.actingUserId,
-        slackTeamId: slackInstallation.teamId,
+        slackTeamId: resolvedSlackTeamId,
       })
     : null;
 

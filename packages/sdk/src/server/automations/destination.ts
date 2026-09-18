@@ -2,6 +2,7 @@ import {
   and,
   db,
   eq,
+  findActiveSlackInstallationForChannel,
   isNotNull,
   resolveDiscordRuntimeCredentials,
   resolveTeamsBotRuntimeCredentials,
@@ -11,34 +12,79 @@ import {
   type AutomationRuntime,
 } from '@roomote/db/server';
 import {
+  getAutomationTargetEmailIdentityId,
   isBackgroundAutomationUserTargetKind,
+  type AutomationCapableCommunicationProvider,
+  type AutomationDestinationProvider,
   type CommunicationProvider,
+  type AutomationTarget,
 } from '@roomote/types';
 
 import { findDiscordDefaultDestination } from '../lib/discord-persistence';
 import { findTeamsPrimaryConversation } from '../lib/teams-primary-conversation';
 import { findTelegramPrimaryChatId } from '../lib/telegram-primary-chat';
 import { findUserDirectMessageDestination } from '../lib/user-direct-message';
+import {
+  canStartAgentMailConversationWithUser,
+  prepareAgentMailConversation,
+} from '../lib/agentmail/outbound';
+import { createAgentMailCommunicationProviderFromRuntimeCredentials } from '../lib/agentmail-communication';
 
 /** Fully resolved destination an automation run reports to. */
 export type ResolvedAutomationDestination = {
-  provider: CommunicationProvider;
+  provider: AutomationDestinationProvider;
   channelId: string;
   /** Provider workspace/tenant that owns the destination when routing is installation-specific. */
   teamId?: string;
   /** Bot Framework serviceUrl; present for Teams destinations. */
   serviceUrl?: string;
+  /** Exact Email recipient and identity, present only for Email destinations. */
+  userId?: string;
+  identityId?: string;
+  /** Prepared internal AgentMail conversation for one report run. */
+  threadId?: string;
   /** Which waterfall level produced this destination. */
   source: 'automation_target' | 'manager_channel' | 'primary_conversation';
 };
+
+export function getAutomationDestinationCommunicationProvider(
+  destination: Pick<ResolvedAutomationDestination, 'provider'>,
+): CommunicationProvider {
+  return destination.provider === 'email' ? 'agentmail' : destination.provider;
+}
+
+export async function resolveAutomationEmailTarget(
+  target: AutomationTarget,
+): Promise<ResolvedAutomationDestination | null> {
+  const identityId = getAutomationTargetEmailIdentityId(target);
+  return target.provider === 'email' &&
+    target.targetKind === 'email_user' &&
+    identityId &&
+    (await canStartAgentMailConversationWithUser(
+      target.externalRef,
+      identityId,
+    ))
+    ? {
+        provider: 'email',
+        channelId: target.externalRef,
+        userId: target.externalRef,
+        identityId,
+        source: 'automation_target',
+      }
+    : null;
+}
 
 /**
  * Connected comms providers in waterfall precedence order. Slack counts when
  * an installation is active; Teams when bot credentials resolve; Telegram
  * and Discord when a bot token resolves.
  */
+/**
+ * Chat providers that can receive automation output. Email (agentmail) is
+ * inbound-initiated and deliberately never listed here.
+ */
 export async function listConnectedCommunicationProviders(): Promise<
-  CommunicationProvider[]
+  AutomationCapableCommunicationProvider[]
 > {
   const [
     slackInstallation,
@@ -149,6 +195,13 @@ export async function resolveAutomationRuntimeDestination(params: {
   /** Optional user whose DM should receive a one-off fallback report. */
   fallbackUserId?: string | null;
 }): Promise<ResolvedAutomationDestination | null> {
+  const emailTarget = params.runtime.targets?.find(
+    (target) =>
+      target.provider === 'email' && target.targetKind === 'email_user',
+  );
+  if (emailTarget) {
+    return resolveAutomationEmailTarget(emailTarget);
+  }
   const destination = params.runtime.destination;
   const staleSlackDestination =
     destination?.provider === 'slack' && !params.slackConnected;
@@ -177,12 +230,13 @@ export async function resolveAutomationRuntimeDestination(params: {
   );
   if (userTarget) {
     const directMessage = await findUserDirectMessageDestination(
-      userTarget.provider as CommunicationProvider,
+      userTarget.provider as AutomationCapableCommunicationProvider,
       userTarget.externalRef,
     );
     return directMessage
       ? {
-          provider: userTarget.provider as CommunicationProvider,
+          provider:
+            userTarget.provider as AutomationCapableCommunicationProvider,
           ...directMessage,
           source: 'automation_target',
         }
@@ -190,6 +244,14 @@ export async function resolveAutomationRuntimeDestination(params: {
   }
 
   if (destination && !staleSlackDestination) {
+    if (destination.provider === 'slack') {
+      const installation = await findActiveSlackInstallationForChannel(
+        destination.channelId,
+      );
+      return installation
+        ? { ...destination, teamId: installation.teamId }
+        : null;
+    }
     return destination;
   }
 
@@ -255,14 +317,24 @@ export async function resolveAutomationRuntimeDestination(params: {
  * Communication payload fields to stamp onto an automation-launched scan
  * task so the surface-generic worker tools (send_chat_reply,
  * post_to_channel) target the destination conversation. Slack destinations
- * stay unstamped because their scan tasks use the same generic tool with
- * Slack channel normalization and membership checks.
+ * carry their selected workspace while retaining Slack channel normalization
+ * and membership checks.
  */
 export function buildDestinationTaskPayloadFields(
   destination: ResolvedAutomationDestination,
 ): Record<string, string> {
+  if (destination.provider === 'email') {
+    if (!destination.threadId) {
+      throw new Error('Email destination conversation is not prepared.');
+    }
+    return {
+      communicationProvider: 'agentmail',
+      communicationChannelId: destination.channelId,
+      communicationThreadId: destination.threadId,
+    };
+  }
   if (destination.provider === 'slack') {
-    return {};
+    return destination.teamId ? { teamId: destination.teamId } : {};
   }
 
   return {
@@ -290,6 +362,14 @@ export function buildDestinationPromptContext(
     };
   }
 
+  if (destination.provider === 'email') {
+    return {
+      channelTag: 'channel_id',
+      postToolName: 'send_chat_reply',
+      surfaceLabel: 'Email',
+    };
+  }
+
   return {
     channelTag: 'channel_id',
     postToolName: 'post_to_channel',
@@ -300,4 +380,60 @@ export function buildDestinationPromptContext(
           ? 'Discord'
           : 'Telegram',
   };
+}
+
+/** Prepare one durable, replyable Email thread for a built-in automation run. */
+export async function prepareAutomationReportDestination(
+  destination: ResolvedAutomationDestination,
+  input: {
+    subject: string;
+    conversationKey: string;
+  },
+): Promise<ResolvedAutomationDestination> {
+  if (destination.provider !== 'email') return destination;
+  if (!destination.userId || !destination.identityId) {
+    throw new Error('Email destination routing is incomplete.');
+  }
+  const prepared = await prepareAgentMailConversation({
+    userId: destination.userId,
+    identityId: destination.identityId,
+    subject: input.subject,
+    conversationKey: input.conversationKey,
+  });
+  if (!prepared) {
+    throw new Error('Email destination is no longer available.');
+  }
+  return {
+    ...destination,
+    channelId: prepared.inboxId,
+    threadId: prepared.conversationId,
+  };
+}
+
+/** Send a built-in automation report into a fresh durable Email conversation. */
+export async function sendAutomationEmailReport(
+  destination: ResolvedAutomationDestination,
+  input: {
+    subject: string;
+    conversationKey: string;
+    text: string;
+    idempotencyKey: string;
+    buttons?: Array<Array<{ text: string; url: string }>>;
+  },
+): Promise<void> {
+  const prepared = await prepareAutomationReportDestination(destination, input);
+  if (prepared.provider !== 'email' || !prepared.threadId) {
+    throw new Error('Expected a prepared Email destination.');
+  }
+  const adapter =
+    await createAgentMailCommunicationProviderFromRuntimeCredentials();
+  if (!adapter) throw new Error('Email is not connected.');
+  await adapter.postMessage({
+    channelId: prepared.channelId,
+    threadId: prepared.threadId,
+    text: input.text,
+    textFormat: 'markdown',
+    idempotencyKey: input.idempotencyKey,
+    ...(input.buttons ? { buttons: input.buttons } : {}),
+  });
 }

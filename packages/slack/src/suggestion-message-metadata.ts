@@ -3,7 +3,7 @@ import { TASK_SUGGESTION_MESSAGE_METADATA_EVENT_TYPE } from '@roomote/types';
 export { TASK_SUGGESTION_MESSAGE_METADATA_EVENT_TYPE };
 
 export function buildTaskSuggestionMessageMetadata(params: {
-  sourceTaskId: string;
+  sourceTaskId: string | null;
   suggestionId: string;
 }) {
   return {

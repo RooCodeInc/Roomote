@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import Image from 'next/image';
 import { Streamdown } from 'streamdown';
 
@@ -23,6 +24,7 @@ import { getTaskRunDisplayError } from '@/lib/task-run-errors';
 import { formatInferenceCost } from '@/lib/formatters';
 import { getUserDisplayName } from '@/lib/user-display-name';
 import { cn } from '@/lib/utils';
+import { useTRPC } from '@/trpc/client';
 
 import {
   BrandIcon,
@@ -37,6 +39,7 @@ import {
   Button,
   CopyIconButton,
   Calendar,
+  LocalDateTime,
   DollarSign,
   Globe,
   Slack,
@@ -93,17 +96,6 @@ const SANDBOX_PROVIDER_ICONS = {
   azure: CloudIcon,
   roomote: CloudIcon,
 } satisfies Record<ComputeProvider, typeof CloudIcon>;
-
-function formatStartedAt(startedAt: Date | null): string {
-  if (!startedAt) {
-    return 'Not started yet';
-  }
-
-  return startedAt.toLocaleString(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  });
-}
 
 type StartedFromBrandIcon =
   | 'slack'
@@ -236,6 +228,21 @@ export function TaskInfoPanel({
   harness,
   onClose,
 }: TaskInfoPanelProps) {
+  const trpc = useTRPC();
+  // Live usage events only carry context tokens. Refresh persisted cost when
+  // Info opens, even if the workspace's cached session is still fresh, and
+  // keep catching up with asynchronous usage writes while the panel is open.
+  const { data: session } = useQuery(
+    trpc.sandboxSession.byTaskId.queryOptions(
+      { taskId: task.id },
+      {
+        enabled: active,
+        staleTime: 0,
+        refetchOnMount: 'always',
+        refetchInterval: active ? 10_000 : false,
+      },
+    ),
+  );
   const { messages } = useSandboxMessages();
   const {
     enabled: summaryEnabled,
@@ -281,7 +288,7 @@ export function TaskInfoPanel({
         .join(' • ')
     : null;
   const inferenceCostLabel = formatInferenceCost(
-    task.inferenceUsage?.costMicroUsd,
+    (session?.task ?? task).inferenceUsage?.costMicroUsd,
   );
   const showRuntimeRow = false;
   const participants = useMemo(
@@ -477,9 +484,11 @@ export function TaskInfoPanel({
         <SandboxInfoRow label="Started At">
           <span className="inline-flex items-center gap-1.5">
             <Calendar className="size-3.5 shrink-0 text-muted-foreground" />
-            <span className="truncate">
-              {formatStartedAt(taskRun.startedAt)}
-            </span>
+            {taskRun.startedAt ? (
+              <LocalDateTime date={taskRun.startedAt} className="truncate" />
+            ) : (
+              <span className="truncate">Not started yet</span>
+            )}
           </span>
         </SandboxInfoRow>
 

@@ -62,6 +62,7 @@ describe('TaskSidePanelDesktop', () => {
 
     render(
       <TaskSidePanelDesktop
+        activeView="diff"
         session={session}
         diffPanel={{
           data: undefined,
@@ -82,9 +83,24 @@ describe('TaskSidePanelDesktop', () => {
       closeSidePanel: vi.fn(),
     });
 
-    render(<TaskSidePanelDesktop session={session} />);
+    render(<TaskSidePanelDesktop activeView="preview" session={session} />);
 
     expect(screen.getByTestId('preview-side-panel')).toBeInTheDocument();
     expect(screen.queryByTestId('diff-side-panel')).not.toBeInTheDocument();
+  });
+
+  it('keeps the retained view mounted when the context closes during exit', () => {
+    const view = render(
+      <TaskSidePanelDesktop activeView="preview" session={session} />,
+    );
+    const preview = screen.getByTestId('preview-side-panel');
+    useTaskSidePanelMock.mockReturnValue({
+      activeView: null,
+      closeSidePanel: vi.fn(),
+    });
+    view.rerender(
+      <TaskSidePanelDesktop activeView="preview" session={session} />,
+    );
+    expect(screen.getByTestId('preview-side-panel')).toBe(preview);
   });
 });

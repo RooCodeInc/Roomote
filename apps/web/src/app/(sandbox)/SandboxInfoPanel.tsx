@@ -40,8 +40,12 @@ export function SandboxInfoRow({
 }) {
   return (
     <tr>
-      <td className="py-1 pr-4 align-top whitespace-nowrap">{label}</td>
-      <td className="ph-no-capture min-w-0 py-1 break-all">{children}</td>
+      <td className="cursor-default py-1 pr-4 align-top whitespace-nowrap">
+        {label}
+      </td>
+      <td className="ph-no-capture min-w-0 cursor-default py-1 break-all">
+        {children}
+      </td>
     </tr>
   );
 }

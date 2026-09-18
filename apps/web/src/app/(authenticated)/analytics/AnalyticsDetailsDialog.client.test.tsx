@@ -175,4 +175,29 @@ describe('AnalyticsDetailsDialog', () => {
     // Footer total and per-row tokens cell both use compact token formatting.
     expect(screen.getAllByText('1.5K').length).toBeGreaterThanOrEqual(1);
   });
+
+  it('formats cost analytics token rows and totals', () => {
+    render(
+      <AnalyticsDetailsDialog
+        {...BASE_PROPS}
+        object="costs"
+        metric="tokens"
+        data={{
+          object: 'costs',
+          bucketKey: '2026-03-10',
+          seriesKey: 'openai',
+          columns: [{ key: 'tokens', label: 'Tokens' }],
+          rows: [
+            {
+              id: 'row-1',
+              values: { tokens: '2500000' },
+            },
+          ],
+          total: 2_500_000,
+        }}
+      />,
+    );
+
+    expect(screen.getAllByText('2.5M')).toHaveLength(2);
+  });
 });

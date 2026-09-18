@@ -109,9 +109,7 @@ const StartupMessage = ({ step, isActive }: StartupMessageProps) => {
         <div className="flex items-center gap-2 text-sm">
           <Icon className="size-4 shrink-0 text-muted-foreground" />
           {isActive ? (
-            <Shimmer direction="rl" duration={1}>
-              {message}
-            </Shimmer>
+            <Shimmer>{message}</Shimmer>
           ) : (
             <span className="text-muted-foreground">{message}</span>
           )}

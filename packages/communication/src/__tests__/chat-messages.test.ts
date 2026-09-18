@@ -235,16 +235,7 @@ describe('chat message copy builders', () => {
       buildThreadReplyFooterText({
         taskUrl: 'https://roomote.dev/task/123',
       }),
-    ).toBe('_Reply or use the [web app](https://roomote.dev/task/123)._');
-
-    expect(
-      buildThreadReplyFooterText({
-        taskUrl: 'https://roomote.dev/task/123',
-        explicitMentionRequired: true,
-      }),
-    ).toBe(
-      '_Reply with @-mention or use the [web app](https://roomote.dev/task/123)._',
-    );
+    ).toBe('Reply anytime · [Open in Roomote](https://roomote.dev/task/123)');
 
     expect(
       buildThreadReplyFooterText({
@@ -258,7 +249,7 @@ describe('chat message copy builders', () => {
         livePreviewUrl: 'https://preview.roomote.dev',
       }),
     ).toBe(
-      '_Working on [PR #7](https://github.com/org/repo/pull/7), [live preview](https://preview.roomote.dev), reply or use the [web app](https://roomote.dev/task/123)._',
+      'Reply anytime · [PR #7](https://github.com/org/repo/pull/7) · [Open in Roomote](https://roomote.dev/task/123)',
     );
 
     expect(
@@ -276,7 +267,7 @@ describe('chat message copy builders', () => {
         ],
       }),
     ).toBe(
-      '_Working on [PR #7](https://github.com/org/repo/pull/7) and [PR #8](https://github.com/org/other-repo/pull/8), reply or use the [web app](https://roomote.dev/task/123)._',
+      'Reply anytime · [PR #7](https://github.com/org/repo/pull/7), [PR #8](https://github.com/org/other-repo/pull/8) · [Open in Roomote](https://roomote.dev/task/123)',
     );
 
     expect(
@@ -285,17 +276,32 @@ describe('chat message copy builders', () => {
         livePreviewUrl: 'https://preview.roomote.dev',
         formatLink: (label, url) => `<${url}|${label}>`,
       }),
-    ).toBe(
-      '_Working on a <https://preview.roomote.dev|live preview>, reply or use the <https://roomote.dev/task/123|web app>._',
-    );
+    ).toBe('Reply anytime · <https://roomote.dev/task/123|Open in Roomote>');
 
     expect(
       buildThreadReplyFooterText({
         taskUrl: 'https://roomote.dev/task/123',
         formatFooterText: (text) => `-# ${text}`,
       }),
-    ).toBe('-# Reply or use the [web app](https://roomote.dev/task/123).');
+    ).toBe(
+      '-# Reply anytime · [Open in Roomote](https://roomote.dev/task/123)',
+    );
   });
+
+  it.each([0, 1, 2])(
+    'shows a plain running count only when tasks are running (%i)',
+    (count) => {
+      expect(
+        buildThreadReplyFooterText({
+          taskUrl: 'https://roomote.dev/sessions/1',
+          runningTasks: { count, url: 'https://roomote.dev/tasks' },
+          livePreviewUrl: 'https://preview.roomote.dev',
+        }),
+      ).toBe(
+        `Reply anytime${count === 1 ? ' · 1 task running' : count >= 2 ? ` · ${count} tasks running` : ''} · [Open in Roomote](https://roomote.dev/sessions/1)`,
+      );
+    },
+  );
 
   it('escapes Markdown link labels', () => {
     expect(
@@ -305,6 +311,42 @@ describe('chat message copy builders', () => {
       ),
     ).toBe(
       '[\\[Fix\\] Discord \\\\ formatting](https://github.com/org/repo/pull/1)',
+    );
+  });
+
+  it.each([
+    'https://roomote.dev/task/task-1?artifact=notes.md&v=2&utm_source=slack',
+    'https://roomote.dev/sessions/1?task=task-1&artifact=notes.md&v=2&utm_source=slack',
+  ])('preserves caller-provided navigation in %s', (taskUrl) => {
+    expect(buildThreadReplyFooterText({ taskUrl })).toBe(
+      `Reply anytime · [Open in Roomote](${taskUrl})`,
+    );
+  });
+
+  it('keeps non-task navigation such as setup even when the task has a Session', () => {
+    expect(
+      buildThreadReplyFooterText({
+        taskUrl: 'https://roomote.dev/setup?utm_source=slack',
+        webAppUrl: 'https://roomote.dev/sessions/owner',
+      }),
+    ).toBe(
+      'Reply anytime · [Open in Roomote](https://roomote.dev/setup?utm_source=slack)',
+    );
+  });
+
+  it('opens the owning Session transcript while retaining attribution', () => {
+    expect(
+      buildThreadReplyFooterText({
+        taskUrl:
+          'https://roomote.dev/task/task-1?artifact=notes.md&v=2&utm_source=slack&utm_medium=link&utm_campaign=reply',
+        webAppUrl: 'https://roomote.dev/sessions/owner',
+        runningTasks: {
+          count: 1,
+          url: 'https://roomote.dev/sessions/owner?task=task-1',
+        },
+      }),
+    ).toBe(
+      'Reply anytime · 1 task running · [Open in Roomote](https://roomote.dev/sessions/owner?utm_source=slack&utm_medium=link&utm_campaign=reply)',
     );
   });
 

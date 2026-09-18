@@ -110,6 +110,7 @@ export type AnalyticsSeries = {
   key: string;
   label: string;
   total: number;
+  tokenTotal?: number;
 };
 
 export type AnalyticsChartBucket = {
@@ -117,6 +118,8 @@ export type AnalyticsChartBucket = {
   label: string;
   total: number;
   segments: Record<string, number>;
+  tokenTotal?: number;
+  tokenSegments?: Record<string, number>;
 };
 
 export type AnalyticsChartResponse = {
@@ -126,6 +129,7 @@ export type AnalyticsChartResponse = {
   series: AnalyticsSeries[];
   buckets: AnalyticsChartBucket[];
   total: number;
+  tokenTotal?: number;
   costBreakdown?: AnalyticsCostBreakdownRow[];
   costSummary?: AnalyticsCostSummary;
 };
@@ -145,9 +149,11 @@ export type AnalyticsCostBreakdownRow = {
   provider: string;
   model: string;
   totalCost: number;
+  totalTokens: number;
   costShare: number;
   taskCount: number;
   averageCostPerTask: number;
+  averageTokensPerTask: number;
   averageCostPerPr: number | null;
 };
 

@@ -3,6 +3,26 @@ import { render, screen } from '@testing-library/react';
 import { CostSummaryCards } from './CostSummaryCards';
 
 describe('CostSummaryCards', () => {
+  it('groups large costs without changing fixed-decimal rounding', () => {
+    render(
+      <CostSummaryCards
+        timePeriod={7}
+        summary={{
+          totalInferenceCost: 1234567.89,
+          averageCostPerPr: 1000,
+          averageCostPerTask: 999.99,
+          averageCostPerActiveUser: 1.005,
+          prCount: 1,
+          taskCount: 1,
+          activeUserCount: 1,
+        }}
+      />,
+    );
+    for (const value of ['$1,234,567.89', '$1,000.00', '$999.99', '$1.00']) {
+      expect(screen.getByText(value)).toBeInTheDocument();
+    }
+  });
+
   it('renders cost summary metrics using analytics summary card copy', () => {
     render(
       <CostSummaryCards

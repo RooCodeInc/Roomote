@@ -63,6 +63,11 @@ See [`.changeset/README.md`](.changeset/README.md).
    `pnpm run version -- --amend`, merge those amendments to `develop`, and
    explicitly dispatch the Release workflow for that version. The workflow
    only fast-forwards an open, unshipped candidate with no pending changesets.
+   Replacing a reconciled candidate from `develop` while preserving its
+   unpublished version requires an explicitly authorized Release dispatch
+   pinned to both the exact current candidate and audited `develop` commits.
+   That compare-and-swap replacement invalidates prior candidate checks and
+   reconciliation provenance; it is never a manual release-branch push.
 4. Merge that promote PR with a **merge commit** (branch rules on `main` allow
    merge only; `develop` stays squash-only). Tagging (`vX.Y.Z`), GHCR image
    publish (`latest`), and the GitHub Release follow from `main` / tag workflows.
@@ -72,6 +77,20 @@ To replace an unshipped candidate rather than refresh it, run
 `pnpm run version -- --supersede <patch|minor|major>` after auditing from the
 last published tag. This carries the unshipped notes into the replacement
 version; close the older Promote PR before promoting the replacement.
+
+Before promotion, monitor both CI and reviews on the **current Promote PR head**.
+Passing release-preparation checks does not validate the candidate; unresolved
+review findings and missing required approvals remain blockers even with green
+CI. Repeat validation after any candidate refresh or reconciliation.
+
+When production hotfix history conflicts with a frozen candidate, use the
+explicitly authorized **Reconcile Release Candidate** workflow, not a manual
+release-branch push. It applies an independently reviewed merge tree with exact
+candidate/main pins and no newer develop content. The ordinary resolution PR is
+review-only and must not be merged. See the
+[release skill's reconciliation procedure](.agents/skills/changeset-release-pr/SKILL.md#reconcile-a-frozen-candidate-with-production)
+for preparation, approval, dispatch, and post-push monitoring. This procedure
+does not merge the Promote PR, tag, publish, or deploy a release.
 
 ## Contributor License Agreement
 

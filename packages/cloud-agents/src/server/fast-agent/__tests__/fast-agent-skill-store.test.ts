@@ -2,6 +2,7 @@ import {
   mkdtemp,
   mkdir,
   readdir,
+  readFile,
   rm,
   symlink,
   writeFile,
@@ -128,6 +129,89 @@ describe('FastAgentSkillStore', () => {
     expect(reference.content).toContain('Authentication');
   });
 
+  it('discovers delegation exploration as an unscoped packaged skill', async () => {
+    const store = new FastAgentSkillStore();
+
+    await expect(
+      store.list({ name: 'explore-delegation' }),
+    ).resolves.toMatchObject({
+      counts: {
+        packaged: 1,
+        repository: 0,
+        settings: 0,
+        total: 1,
+      },
+      skills: [
+        {
+          id: 'packaged:explore-delegation',
+          invocation: 'explore-delegation',
+          name: 'explore-delegation',
+          source: 'packaged',
+        },
+      ],
+    });
+  });
+
+  it('loads the shipped implement-changes default workflow as a separate resource', async () => {
+    const skillRoot = resolve(
+      import.meta.dirname,
+      '../../workflows/skills/standard',
+    );
+    const store = new FastAgentSkillStore(skillRoot);
+    const resource = 'resources/default-workflow.md';
+    const expectedContent = await readFile(
+      join(skillRoot, 'implement-changes', resource),
+      'utf8',
+    );
+
+    const root = await store.read('packaged:implement-changes');
+    expect(root.resources).toContain(resource);
+    expect(root.content).toContain(resource);
+    expect(root.content).not.toContain(expectedContent);
+
+    const workflow = await store.read('packaged:implement-changes', resource);
+    expect(expectedContent.trim().length).toBeGreaterThan(0);
+    expect(workflow).toMatchObject({
+      id: 'packaged:implement-changes',
+      invocation: 'implement-changes',
+      name: 'implement-changes',
+      source: 'packaged',
+      resource,
+      content: expectedContent,
+      byteLength: Buffer.byteLength(expectedContent, 'utf8'),
+    });
+  });
+
+  it('degrades a failing optional source to a warning', async () => {
+    const repositorySkills = {
+      list: vi.fn().mockRejectedValue(new Error('Unknown Fast environment.')),
+      read: vi.fn(),
+    };
+    const settingsSkills = {
+      list: vi.fn().mockRejectedValue(new Error('Unknown Fast environment.')),
+      read: vi.fn(),
+    };
+    const store = new FastAgentSkillStore(
+      undefined,
+      repositorySkills,
+      settingsSkills,
+    );
+
+    const catalog = await store.list({ environmentId: 'environment-filler' });
+
+    expect(catalog.counts).toEqual({
+      instance: 0,
+      packaged: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
+      repository: 0,
+      settings: 0,
+      total: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
+    });
+    expect(catalog.warnings).toEqual([
+      'Skipped legacy Settings skills: Unknown Fast environment.',
+      'Skipped repository skills: Unknown Fast environment.',
+    ]);
+  });
+
   it('combines packaged and repository-defined skill catalogs', async () => {
     const repositorySkills = {
       list: vi.fn().mockResolvedValue({
@@ -153,8 +237,10 @@ describe('FastAgentSkillStore', () => {
       environmentId: 'environment-1',
     });
     expect(catalog.counts).toEqual({
+      instance: 0,
       packaged: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
       repository: 1,
+      settings: 0,
       total: FAST_AGENT_PACKAGED_SKILL_NAMES.length + 1,
     });
     expect(catalog.skills).toEqual(
@@ -175,8 +261,10 @@ describe('FastAgentSkillStore', () => {
     const packagedOnlyCatalog = await store.list();
     expect(repositorySkills.list).not.toHaveBeenCalled();
     expect(packagedOnlyCatalog.counts).toEqual({
+      instance: 0,
       packaged: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
       repository: 0,
+      settings: 0,
       total: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
     });
     expect(packagedOnlyCatalog.skills).not.toEqual(
@@ -185,6 +273,170 @@ describe('FastAgentSkillStore', () => {
       ]),
     );
     expect(packagedOnlyCatalog.warnings).toEqual([]);
+  });
+
+  it('includes authorized settings skills in an unscoped catalog with deterministic precedence', async () => {
+    const repositorySkills = { list: vi.fn(), read: vi.fn() };
+    const settingsSkills = {
+      list: vi.fn().mockResolvedValue({
+        skills: [
+          {
+            description: 'Second environment variant.',
+            environmentIds: ['environment-2'],
+            id: 'settings:manual:z-thermonuclear',
+            name: 'thermonuclear',
+            source: 'settings' as const,
+          },
+          {
+            description: 'Must lose to the packaged skill.',
+            environmentIds: ['environment-1'],
+            id: 'settings:manual:review-code',
+            name: 'review-code',
+            source: 'settings' as const,
+          },
+          {
+            description: 'First environment variant.',
+            environmentIds: ['environment-1'],
+            id: 'settings:manual:a-thermonuclear',
+            name: 'thermonuclear',
+            source: 'settings' as const,
+          },
+        ],
+        warnings: [],
+      }),
+      read: vi.fn(),
+    };
+    const store = new FastAgentSkillStore(
+      undefined,
+      repositorySkills,
+      settingsSkills,
+    );
+
+    const catalog = await store.list();
+
+    expect(settingsSkills.list).toHaveBeenCalledWith({});
+    expect(repositorySkills.list).not.toHaveBeenCalled();
+    expect(
+      catalog.skills.filter((skill) => skill.name === 'thermonuclear'),
+    ).toEqual([
+      expect.objectContaining({
+        environmentIds: ['environment-1'],
+        id: 'settings:manual:a-thermonuclear',
+      }),
+      expect.objectContaining({
+        environmentIds: ['environment-2'],
+        id: 'settings:manual:z-thermonuclear',
+      }),
+    ]);
+    expect(
+      catalog.skills.filter((skill) => skill.name === 'review-code'),
+    ).toEqual([expect.objectContaining({ id: 'packaged:review-code' })]);
+    expect(catalog.counts).toEqual({
+      packaged: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
+      repository: 0,
+      settings: 2,
+      instance: 0,
+      total: FAST_AGENT_PACKAGED_SKILL_NAMES.length + 2,
+    });
+  });
+
+  it('keeps packaged skills ahead of settings skills and settings ahead of repository skills', async () => {
+    const repositorySkills = {
+      list: vi.fn().mockResolvedValue({
+        skills: [
+          {
+            description: 'Repository collision.',
+            id: 'repository:repo-1:.agents/skills:review-code',
+            name: 'review-code',
+            source: 'repository' as const,
+          },
+          {
+            description: 'Repository release.',
+            id: 'repository:repo-1:.agents/skills:release',
+            name: 'release',
+            source: 'repository' as const,
+          },
+        ],
+        warnings: [],
+      }),
+      read: vi.fn(),
+    };
+    const settingsSkills = {
+      list: vi.fn().mockResolvedValue({
+        skills: [
+          {
+            description: 'Settings collision with packaged.',
+            id: 'settings:manual:review-code',
+            name: 'review-code',
+            source: 'settings' as const,
+          },
+          {
+            description: 'Settings release.',
+            id: 'settings:manual:release',
+            name: 'release',
+            source: 'settings' as const,
+          },
+        ],
+        warnings: [],
+      }),
+      read: vi.fn(),
+    };
+    const store = new FastAgentSkillStore(
+      undefined,
+      repositorySkills,
+      settingsSkills,
+    );
+
+    const catalog = await store.list({ environmentId: 'environment-1' });
+
+    expect(
+      catalog.skills.filter((skill) => skill.name === 'review-code'),
+    ).toEqual([expect.objectContaining({ id: 'packaged:review-code' })]);
+    expect(catalog.skills.filter((skill) => skill.name === 'release')).toEqual([
+      expect.objectContaining({ id: 'settings:manual:release' }),
+    ]);
+    expect(catalog.counts).toEqual({
+      packaged: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
+      repository: 0,
+      settings: 1,
+      instance: 0,
+      total: FAST_AGENT_PACKAGED_SKILL_NAMES.length + 1,
+    });
+  });
+
+  it('uses an unscoped exact-name lookup for packaged and settings skills only', async () => {
+    const repositorySkills = { list: vi.fn(), read: vi.fn() };
+    const settingsSkills = {
+      list: vi.fn().mockResolvedValue({
+        nextSourceOffset: 8,
+        skills: [
+          {
+            description: 'Thermonuclear playbook.',
+            id: 'settings:manual:thermonuclear',
+            name: 'thermonuclear',
+            source: 'settings' as const,
+          },
+        ],
+        warnings: [],
+      }),
+      read: vi.fn(),
+    };
+    const store = new FastAgentSkillStore(
+      undefined,
+      repositorySkills,
+      settingsSkills,
+    );
+
+    const catalog = await store.list({ name: 'thermonuclear' });
+
+    expect(settingsSkills.list).toHaveBeenCalledWith({
+      name: 'thermonuclear',
+    });
+    expect(repositorySkills.list).not.toHaveBeenCalled();
+    expect(catalog.skills).toEqual([
+      expect.objectContaining({ id: 'settings:manual:thermonuclear' }),
+    ]);
+    expect(catalog.nextSourceOffset).toBe(8);
   });
 
   it('rejects traversal, non-Markdown files, symlinks, and unknown skills', async () => {

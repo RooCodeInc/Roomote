@@ -15,14 +15,18 @@ import {
   getWebBundledEnvFilePaths as getSharedWebBundledEnvFilePaths,
   getWebEnvFilePaths as getSharedWebEnvFilePaths,
   isBrainConfigured,
+  isEmailChannelEnabled,
   isEnvFlagEnabled,
   isExposedBindHost,
   isRoomoteCloudEnabled,
+  resolveTrustedClientAddress,
   rehydrateEnv as rehydrateSharedEnv,
   setSecretProvider,
   type SecretName,
   type SecretProvider,
 } from '@roomote/env';
+
+export { resolveTrustedClientAddress };
 
 import {
   getStaticOauthEnvPartnerKey,
@@ -204,6 +208,7 @@ export {
   getArtifactSigningKeyPrevious,
   getBetterAuthSecret,
   isBrainConfigured,
+  isEmailChannelEnabled,
   isEnvFlagEnabled,
   isRoomoteCloudEnabled,
   resolveAppEnv,

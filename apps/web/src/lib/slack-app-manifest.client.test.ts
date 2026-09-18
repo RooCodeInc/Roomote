@@ -127,7 +127,10 @@ describe('Slack app manifest builder', () => {
       expect.arrayContaining([
         'app_mentions:read',
         'assistant:write',
+        'channels:manage',
+        'channels:join',
         'chat:write',
+        'files:write',
         'reactions:write',
         'users:read',
       ]),

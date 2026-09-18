@@ -1,6 +1,6 @@
 {
   "name": "slack-fast-answer",
-  "description": "A user @-mentions Roomote in a channel with a !fast question. Roomote should answer inline with a single, correct, threaded reply and no channel noise.",
+  "description": "A user @-mentions Roomote in a channel with a question. Roomote should answer inline with a single, correct, threaded reply and no channel noise.",
   "criteria": [
     "The bot posts exactly one reply message, and it is a threaded reply whose thread_ts equals the ts of the mention that triggered it",
     "The reply correctly answers the question: it explains that HTTP 429 means too many requests / rate limiting, and mentions backing off or honoring Retry-After as the standard client response",
@@ -45,7 +45,7 @@
           "type": "app_mention",
           "channel": "C123ABC456",
           "user": "UGRACE",
-          "text": "<@BROOMOTE> !fast What does HTTP status code 429 mean, and what is the standard way for a client to respond to it?",
+          "text": "<@BROOMOTE> What does HTTP status code 429 mean, and what is the standard way for a client to respond to it?",
           "ts": "$TS1",
           "channel_type": "channel"
         }

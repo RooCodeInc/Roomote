@@ -16,17 +16,26 @@ import {
   users,
 } from '@roomote/db/server';
 import {
+  CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
   listConnectedCommunicationProviders,
+  listAvailableAgentMailOutboundIdentities,
+  canStartAgentMailConversationWithUser,
   resolveCustomAutomationSchedule,
+  resolveDefaultAutomationTarget,
   runCustomAutomationNow,
 } from '@roomote/sdk/server';
 import {
   ALL_REPOSITORIES,
+  AUTOMATION_TARGET_EMAIL_IDENTITY_KEY,
   FAST_EXECUTION,
-  getCommunicationAutomationTargetKind,
+  REASONING_EFFORT_VALUES,
+  AUTOMATION_RESULT_PRIORITIES,
+  getAutomationTargetEmailIdentityId,
+  getAutomationTargetKind,
   type BackgroundAutomationProvider,
   type CustomAutomationScheduleMode,
   type OptionalAutomationTarget,
+  type ReasoningEffort,
 } from '@roomote/types';
 import { isBackgroundAutomationUserTargetKind } from '@roomote/types';
 import { toActivationAutomationDestinationProvider } from '@roomote/telemetry';
@@ -38,7 +47,7 @@ import { resolveActingUserIdOrNull } from '../mcp/proxy-utils';
 
 type CustomAutomationVariables = Variables & {
   mcpAuth: McpAuth;
-  customAutomationAdminId: string;
+  customAutomationUser: { id: string; role: string };
 };
 
 const modelSchema = z
@@ -58,10 +67,14 @@ const writeSchema = z.object({
   name: z.string().trim().min(1).max(100),
   prompt: z.string().trim().min(1).max(8_000),
   enabled: z.boolean().default(true),
+  resultPriority: z.enum(AUTOMATION_RESULT_PRIORITIES).default('normal'),
   schedule: z.string().trim().min(1).max(500),
   model: modelSchema.optional(),
+  reasoningEffort: z.enum(REASONING_EFFORT_VALUES).nullable().optional(),
   environmentId: environmentTargetSchema,
-  targetProvider: z.enum(['slack', 'discord', 'teams', 'telegram']).optional(),
+  targetProvider: z
+    .enum(['slack', 'discord', 'teams', 'telegram', 'email'])
+    .optional(),
   targetMode: z.enum(['channel', 'direct_message']).optional(),
   targetChannelId: z.string().trim().min(1).max(160).optional(),
 });
@@ -70,11 +83,13 @@ const updateSchema = z.object({
   name: z.string().trim().min(1).max(100).optional(),
   prompt: z.string().trim().min(1).max(8_000).optional(),
   enabled: z.boolean().optional(),
+  resultPriority: z.enum(AUTOMATION_RESULT_PRIORITIES).optional(),
   schedule: z.string().trim().min(1).max(500).optional(),
   model: modelSchema.nullable().optional(),
+  reasoningEffort: z.enum(REASONING_EFFORT_VALUES).nullable().optional(),
   environmentId: environmentTargetSchema.optional(),
   targetProvider: z
-    .enum(['slack', 'discord', 'teams', 'telegram'])
+    .enum(['slack', 'discord', 'teams', 'telegram', 'email'])
     .nullable()
     .optional(),
   targetMode: z.enum(['channel', 'direct_message']).optional(),
@@ -137,8 +152,8 @@ function isDuplicateNameViolation(error: unknown): boolean {
  * Expected validation failures thrown as plain Errors by
  * `createCustomAutomation` / `updateCustomAutomation` (packages/db),
  * `buildTarget`, and schedule validation (packages/sdk). These are safe to
- * echo to the admin-only MCP client so the calling agent can self-correct;
- * the web tRPC surface already shows the same messages to admins. Anything
+ * echo to the authorized MCP client so the calling agent can self-correct;
+ * the web tRPC surface already shows the same messages to users. Anything
  * not matched here is rethrown so the app-level onError handler logs it and
  * returns a generic 500.
  */
@@ -156,12 +171,17 @@ const VALIDATION_ERROR_PATTERNS: RegExp[] = [
   /^Model must be at most \d+ characters\.$/,
   /^Model must use provider\/model format\.$/,
   /^Model ".+" is not enabled for new tasks\.$/,
+  /^Model ".+" does not support configurable reasoning effort\.$/,
+  /^Reasoning effort requires a model override\.$/,
   /^Environment is required\.$/,
   /^Selected environment was not found\.$/,
   /^Custom automation was not found\.$/,
+  /^Automation owner is not configured\.$/,
   /^Report destination must include a provider, target kind, and reference\.$/,
   /^You can create at most \d+ custom automations\.$/,
   /^targetChannelId is required when targetProvider is set\.$/,
+  /^Email destinations must use direct_message mode\.$/,
+  /^Choose an account Email identity\.$/,
   /^Timezone is required\.$/,
   /^Choose a valid IANA timezone\.$/,
 ];
@@ -189,7 +209,7 @@ function knownErrorResponse(
   return null;
 }
 
-async function requireAdmin(auth: McpAuth): Promise<string | null> {
+async function resolveUser(auth: McpAuth) {
   let userId: string | null;
   try {
     userId = await resolveActingUserIdOrNull({
@@ -203,14 +223,10 @@ async function requireAdmin(auth: McpAuth): Promise<string | null> {
   if (!userId) return null;
 
   const user = await db.query.users.findFirst({
-    where: and(
-      eq(users.id, userId),
-      eq(users.role, 'admin'),
-      isNull(users.deletedAt),
-    ),
-    columns: { id: true },
+    where: and(eq(users.id, userId), isNull(users.deletedAt)),
+    columns: { id: true, role: true },
   });
-  return user?.id ?? null;
+  return user ?? null;
 }
 
 function buildTarget(
@@ -221,6 +237,24 @@ function buildTarget(
   ownerUserId: string,
 ): OptionalAutomationTarget {
   if (!input.targetProvider) return {};
+  if (input.targetProvider === 'email') {
+    if (input.targetMode === 'channel') {
+      throw new Error('Email destinations must use direct_message mode.');
+    }
+    if (!input.targetChannelId) {
+      throw new Error('Choose an account Email identity.');
+    }
+    // Email keeps the direct-message shape (externalRef = owner) and pins the
+    // selected identity in metadata.
+    return {
+      provider: 'email',
+      targetKind: getAutomationTargetKind('email', 'direct_message'),
+      externalRef: ownerUserId,
+      metadata: {
+        [AUTOMATION_TARGET_EMAIL_IDENTITY_KEY]: input.targetChannelId,
+      },
+    };
+  }
   const directMessage = input.targetMode === 'direct_message';
   if (!directMessage && !input.targetChannelId) {
     throw new Error('targetChannelId is required when targetProvider is set.');
@@ -228,7 +262,7 @@ function buildTarget(
 
   return {
     provider: input.targetProvider as BackgroundAutomationProvider,
-    targetKind: getCommunicationAutomationTargetKind(
+    targetKind: getAutomationTargetKind(
       input.targetProvider,
       directMessage ? 'direct_message' : 'channel',
     ),
@@ -267,29 +301,68 @@ async function resolveWriteSchedule(schedule: string, userId: string) {
   };
 }
 
+async function isDestinationConnected(
+  provider: NonNullable<z.infer<typeof writeSchema>['targetProvider']>,
+  ownerUserId: string,
+  emailIdentityId?: string,
+): Promise<boolean> {
+  if (provider === 'email') {
+    return Boolean(
+      emailIdentityId &&
+      (await canStartAgentMailConversationWithUser(
+        ownerUserId,
+        emailIdentityId,
+      )),
+    );
+  }
+  return (await listConnectedCommunicationProviders()).includes(provider);
+}
+
 export const customAutomationsRouter = new Hono<{
   Variables: CustomAutomationVariables;
 }>();
 
 customAutomationsRouter.use('*', async (c, next) => {
-  const userId = await requireAdmin(c.get('mcpAuth'));
-  if (!userId) return c.json({ error: 'Admin access required' }, 403);
-  c.set('customAutomationAdminId', userId);
+  const user = await resolveUser(c.get('mcpAuth'));
+  if (!user) return c.json({ error: 'User access required' }, 403);
+  c.set('customAutomationUser', user);
   await next();
 });
 
-function adminId(c: {
-  get: (key: 'customAutomationAdminId') => string;
+function actorId(c: {
+  get: (key: 'customAutomationUser') => { id: string; role: string };
 }): string {
-  return c.get('customAutomationAdminId');
+  return c.get('customAutomationUser').id;
 }
 
-async function assertEnabledModel(model: string | null | undefined) {
-  if (!model) return;
+function canManage(
+  c: Context<{ Variables: CustomAutomationVariables }>,
+  automation: { createdByUserId: string | null },
+) {
+  const user = c.get('customAutomationUser');
+  return user.role === 'admin' || automation.createdByUserId === user.id;
+}
+
+async function assertEnabledModel(
+  model: string | null | undefined,
+  reasoningEffort?: ReasoningEffort | null,
+) {
+  if (!model) {
+    if (reasoningEffort) {
+      throw new Error('Reasoning effort requires a model override.');
+    }
+    return;
+  }
 
   const { models } = await getDeploymentTaskModelOptions();
-  if (!models.some((option) => option.id === model)) {
+  const option = models.find((candidate) => candidate.id === model);
+  if (!option) {
     throw new Error(`Model "${model}" is not enabled for new tasks.`);
+  }
+  if (reasoningEffort && option.metadata?.supportsReasoning === false) {
+    throw new Error(
+      `Model "${model}" does not support configurable reasoning effort.`,
+    );
   }
 }
 
@@ -313,13 +386,59 @@ function toApiAutomation<
 
 customAutomationsRouter.get('/', async (c) =>
   c.json({
-    automations: (await listCustomAutomations()).map(toApiAutomation),
+    automations: (await listCustomAutomations())
+      .filter((row) => canManage(c, row))
+      .map(toApiAutomation),
   }),
 );
 
 customAutomationsRouter.get('/models', async (c) =>
   c.json(await getDeploymentTaskModelOptions()),
 );
+
+// Identities belong to the automation owner (runs execute as the creator),
+// so an admin editing someone else's automation passes its id to list the
+// owner's identities rather than their own.
+customAutomationsRouter.get('/destinations', async (c) => {
+  const automationId = c.req.query('automationId');
+  let ownerUserId = actorId(c);
+  let existingTarget: OptionalAutomationTarget | null = null;
+  if (automationId) {
+    const automation = await getCustomAutomationById(automationId);
+    if (!automation || !canManage(c, automation)) {
+      return c.json({ error: 'Custom automation was not found.' }, 404);
+    }
+    ownerUserId = automation.createdByUserId ?? ownerUserId;
+    existingTarget = automation.target;
+  }
+  const [emailIdentities, defaultTarget] = await Promise.all([
+    listAvailableAgentMailOutboundIdentities(ownerUserId),
+    resolveDefaultAutomationTarget({
+      ownerUserId,
+      capabilities: CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
+      existingTarget,
+      includeSharedChannels: c.get('customAutomationUser').role === 'admin',
+    }),
+  ]);
+  return c.json({
+    emailIdentities,
+    defaultTarget,
+  });
+});
+
+customAutomationsRouter.get('/:id', async (c) => {
+  const automation = await getCustomAutomationById(c.req.param('id'));
+  if (!automation || !canManage(c, automation)) {
+    return c.json({ error: 'Custom automation was not found.' }, 404);
+  }
+  return c.json({
+    automation: {
+      id: automation.id,
+      name: automation.name,
+      prompt: automation.prompt,
+    },
+  });
+});
 
 customAutomationsRouter.post('/resolve-schedule', async (c) => {
   const parsed = z
@@ -330,7 +449,7 @@ customAutomationsRouter.post('/resolve-schedule', async (c) => {
     return c.json(
       await resolveCustomAutomationSchedule({
         schedule: parsed.data.schedule,
-        userId: adminId(c),
+        userId: actorId(c),
       }),
     );
   } catch (error) {
@@ -344,16 +463,21 @@ customAutomationsRouter.post('/', async (c) => {
   const parsed = writeSchema.safeParse(await c.req.json());
   if (!parsed.success) return c.json({ error: parsed.error.message }, 400);
   try {
-    await assertEnabledModel(parsed.data.model);
+    await assertEnabledModel(parsed.data.model, parsed.data.reasoningEffort);
     const schedule = await resolveWriteSchedule(
       parsed.data.schedule,
-      adminId(c),
+      actorId(c),
     );
     if (schedule.status === 'ambiguous') return c.json(schedule, 409);
 
     if (parsed.data.targetProvider) {
-      const connected = await listConnectedCommunicationProviders();
-      if (!connected.includes(parsed.data.targetProvider)) {
+      if (
+        !(await isDestinationConnected(
+          parsed.data.targetProvider,
+          actorId(c),
+          parsed.data.targetChannelId,
+        ))
+      ) {
         return c.json(
           { error: `${parsed.data.targetProvider} is not connected.` },
           400,
@@ -365,12 +489,14 @@ customAutomationsRouter.post('/', async (c) => {
       name: parsed.data.name,
       prompt: parsed.data.prompt,
       enabled: parsed.data.enabled,
+      resultPriority: parsed.data.resultPriority,
       scheduleMode: schedule.scheduleMode,
       cronExpression: schedule.cronExpression,
       model: parsed.data.model ?? null,
+      reasoningEffort: parsed.data.reasoningEffort ?? null,
       environmentId: parsed.data.environmentId,
-      target: buildTarget(parsed.data, adminId(c)),
-      createdByUserId: adminId(c),
+      target: buildTarget(parsed.data, actorId(c)),
+      createdByUserId: actorId(c),
     });
     void captureActivationCustomAutomationChanged(
       'created',
@@ -394,15 +520,19 @@ customAutomationsRouter.patch('/:id', async (c) => {
   const parsed = updateSchema.safeParse(await c.req.json());
   if (!parsed.success) return c.json({ error: parsed.error.message }, 400);
   const existing = await getCustomAutomationById(c.req.param('id'));
-  if (!existing) {
+  if (!existing || !canManage(c, existing)) {
     return c.json({ error: 'Custom automation was not found.' }, 404);
   }
   try {
-    if (typeof parsed.data.model === 'string') {
-      await assertEnabledModel(parsed.data.model);
-    }
+    const model =
+      parsed.data.model === null ? null : (parsed.data.model ?? existing.model);
+    const reasoningEffort =
+      parsed.data.model === null || parsed.data.reasoningEffort === null
+        ? null
+        : (parsed.data.reasoningEffort ?? existing.reasoningEffort);
+    await assertEnabledModel(model, reasoningEffort);
     const schedule = parsed.data.schedule
-      ? await resolveWriteSchedule(parsed.data.schedule, adminId(c))
+      ? await resolveWriteSchedule(parsed.data.schedule, actorId(c))
       : {
           status: 'resolved' as const,
           scheduleMode: existing.scheduleMode as CustomAutomationScheduleMode,
@@ -410,15 +540,6 @@ customAutomationsRouter.patch('/:id', async (c) => {
           resolution: null,
         };
     if (schedule.status === 'ambiguous') return c.json(schedule, 409);
-    if (parsed.data.targetProvider) {
-      const connected = await listConnectedCommunicationProviders();
-      if (!connected.includes(parsed.data.targetProvider)) {
-        return c.json(
-          { error: `${parsed.data.targetProvider} is not connected.` },
-          400,
-        );
-      }
-    }
     const existingTarget = existing.target;
     const clearTarget = parsed.data.targetProvider === null;
     const providerChanged =
@@ -430,48 +551,73 @@ customAutomationsRouter.patch('/:id', async (c) => {
       (existingTarget.provider === 'slack' ||
       existingTarget.provider === 'discord' ||
       existingTarget.provider === 'teams' ||
-      existingTarget.provider === 'telegram'
+      existingTarget.provider === 'telegram' ||
+      existingTarget.provider === 'email'
         ? existingTarget.provider
         : undefined);
+    // Email is direct-message only, so an omitted mode never falls back to
+    // 'channel' the way a provider switch does for chat providers.
     const targetMode =
       parsed.data.targetMode ??
+      (targetProvider === 'email' ||
       (!providerChanged &&
-      isBackgroundAutomationUserTargetKind(existingTarget.targetKind)
+        isBackgroundAutomationUserTargetKind(existingTarget.targetKind))
         ? 'direct_message'
         : 'channel');
+    // The "channel id" carried over from the stored target: the channel ref
+    // for channel destinations, the pinned identity for email.
     const targetChannelId =
       parsed.data.targetChannelId ??
-      (targetMode === 'channel' &&
-      !providerChanged &&
-      !isBackgroundAutomationUserTargetKind(existingTarget.targetKind)
-        ? existingTarget.externalRef
-        : undefined);
+      (providerChanged
+        ? undefined
+        : targetProvider === 'email'
+          ? (getAutomationTargetEmailIdentityId(existingTarget) ?? undefined)
+          : targetMode === 'channel' &&
+              !isBackgroundAutomationUserTargetKind(existingTarget.targetKind)
+            ? existingTarget.externalRef
+            : undefined);
     const destinationChanged =
       parsed.data.targetProvider !== undefined ||
       parsed.data.targetMode !== undefined ||
       parsed.data.targetChannelId !== undefined;
-    if (
-      !clearTarget &&
-      destinationChanged &&
-      targetProvider &&
-      targetMode === 'channel' &&
-      !targetChannelId
-    ) {
-      throw new Error(
-        'targetChannelId is required when targetProvider is set.',
-      );
+    // Destination validation runs once, on the effective destination, and
+    // only when the request touches it: a stale destination must not block
+    // unrelated edits such as disabling or renaming the automation.
+    if (!clearTarget && destinationChanged && targetProvider) {
+      if (targetMode === 'channel' && !targetChannelId) {
+        throw new Error(
+          'targetChannelId is required when targetProvider is set.',
+        );
+      }
+      if (targetProvider === 'email') {
+        if (!targetChannelId) {
+          throw new Error('Choose an account Email identity.');
+        }
+        if (!existing.createdByUserId) {
+          throw new Error('Automation owner is not configured.');
+        }
+      }
+      if (
+        !(await isDestinationConnected(
+          targetProvider,
+          existing.createdByUserId ?? actorId(c),
+          targetChannelId,
+        ))
+      ) {
+        return c.json({ error: `${targetProvider} is not connected.` }, 400);
+      }
     }
     const automation = await updateCustomAutomation(c.req.param('id'), {
       name: parsed.data.name ?? existing.name,
       prompt: parsed.data.prompt ?? existing.prompt,
       enabled: parsed.data.enabled ?? existing.enabled,
+      resultPriority: parsed.data.resultPriority ?? existing.resultPriority,
       scheduleMode: schedule.scheduleMode,
       cronExpression: schedule.cronExpression,
       // Explicit null clears the override; omitted keeps the existing value.
-      model:
-        parsed.data.model === null
-          ? null
-          : (parsed.data.model ?? existing.model),
+      model,
+      // Explicit null clears the override; omitted keeps the existing value.
+      reasoningEffort,
       environmentId:
         parsed.data.environmentId ??
         (existing.executionMode === 'fast'
@@ -488,7 +634,7 @@ customAutomationsRouter.patch('/:id', async (c) => {
                 targetMode,
                 targetChannelId,
               },
-              existing.createdByUserId ?? adminId(c),
+              existing.createdByUserId ?? actorId(c),
             )
           : existingTarget,
     });
@@ -505,7 +651,7 @@ customAutomationsRouter.patch('/:id', async (c) => {
 
 customAutomationsRouter.delete('/:id', async (c) => {
   const existing = await getCustomAutomationById(c.req.param('id'));
-  if (!existing)
+  if (!existing || !canManage(c, existing))
     return c.json({ error: 'Custom automation was not found.' }, 404);
   await deleteCustomAutomation(existing.id);
   void captureActivationCustomAutomationChanged(
@@ -516,6 +662,10 @@ customAutomationsRouter.delete('/:id', async (c) => {
 });
 
 customAutomationsRouter.post('/:id/run', async (c) => {
+  const existing = await getCustomAutomationById(c.req.param('id'));
+  if (!existing || !canManage(c, existing)) {
+    return c.json({ error: 'Custom automation was not found.' }, 404);
+  }
   const result = await runCustomAutomationNow(c.req.param('id'));
   return c.json(result, result.outcome === 'failed' ? 400 : 200);
 });

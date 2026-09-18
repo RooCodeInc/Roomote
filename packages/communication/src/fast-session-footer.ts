@@ -1,18 +1,39 @@
 import { Env } from '@roomote/env';
+import {
+  and,
+  asc,
+  db,
+  eq,
+  getSessionForFastConversation,
+  isNull,
+  sessionTasks,
+  tasks,
+} from '@roomote/db/server';
 
 import {
   buildThreadReplyFooterText,
   formatMarkdownLink,
   type ThreadReplyLinkedPr,
+  type ThreadReplyRunningTasks,
 } from './chat-messages';
+import { formatAgentMailFooterMarkdown } from './agentmail-format';
 import { chunkDiscordMessage } from './discord-provider';
-import { resolveThreadReplyFooterContext } from './thread-reply-footer-context';
+import {
+  resolveSessionRunningTasks,
+  resolveThreadReplyFooterContext,
+} from './thread-reply-footer-context';
 
 export type FastSessionFooterProvider =
   | 'slack'
   | 'discord'
   | 'teams'
-  | 'telegram';
+  | 'telegram'
+  | 'agentmail'
+  | 'github'
+  | 'gitlab'
+  | 'bitbucket'
+  | 'ado'
+  | 'gitea';
 
 export type FastSessionPullRequestReference = {
   number: number | null;
@@ -23,6 +44,9 @@ export type FastSessionPullRequestReference = {
 export type FastSessionReplyFooterContext = {
   linkedPrs: ThreadReplyLinkedPr[];
   livePreviewUrl: string | null;
+  runningTasks?: ThreadReplyRunningTasks | null;
+  /** Session `activityAt` in epoch ms, so a refresh can tell when it has settled. */
+  sessionActivityAt?: number | null;
 };
 
 const TERMINAL_PULL_REQUEST_STATUSES = new Set(['closed', 'merged']);
@@ -50,23 +74,48 @@ function collectFastSessionLinkedPrs(params: {
   return [...uniquePrs.values()];
 }
 
+async function getFastSessionLinkedTasks(sessionId: string) {
+  const session = await getSessionForFastConversation(db, sessionId);
+  const linkedTasks = session
+    ? await db
+        .select({ taskId: sessionTasks.taskId })
+        .from(sessionTasks)
+        .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
+        .where(
+          and(eq(sessionTasks.sessionId, session.id), isNull(tasks.deletedAt)),
+        )
+        // Deterministic ordering so "the first task with a preview" is stable
+        // across footer rebuilds.
+        .orderBy(asc(sessionTasks.attachedAt), asc(sessionTasks.taskId))
+    : [];
+  return { session, linkedTaskIds: linkedTasks.map(({ taskId }) => taskId) };
+}
+
 export async function resolveFastSessionReplyFooterContext(params: {
-  taskIds?: readonly string[];
+  sessionId: string;
   pullRequest?: FastSessionPullRequestReference | null;
   pullRequests?: readonly FastSessionPullRequestReference[];
 }): Promise<FastSessionReplyFooterContext> {
-  const taskIds = [...new Set(params.taskIds ?? [])];
-  const contexts = await Promise.all(
-    taskIds.map((taskId) =>
-      resolveThreadReplyFooterContext({
-        taskId,
-        prRepo: null,
-        prNumber: null,
-      }),
-    ),
+  const { session, linkedTaskIds } = await getFastSessionLinkedTasks(
+    params.sessionId,
   );
+  const [runningTasks, contexts] = await Promise.all([
+    session ? resolveSessionRunningTasks(session.id, linkedTaskIds) : null,
+    Promise.all(
+      linkedTaskIds.map((taskId) =>
+        resolveThreadReplyFooterContext({
+          taskId,
+          prRepo: null,
+          prNumber: null,
+          includeRunningTasks: false,
+        }),
+      ),
+    ),
+  ]);
 
   return {
+    ...(runningTasks ? { runningTasks } : {}),
+    sessionActivityAt: session ? session.activityAt * 1000 : null,
     linkedPrs: collectFastSessionLinkedPrs({
       pullRequest: params.pullRequest,
       pullRequests: params.pullRequests,
@@ -89,9 +138,19 @@ export function buildFastSessionUrl(
   return url.toString();
 }
 
+export function buildSelectedTaskSessionUrl(params: {
+  taskUrl: string;
+  sessionId: string;
+  taskId: string;
+}): string {
+  const url = new URL(params.taskUrl);
+  url.pathname = `/sessions/${params.sessionId}`;
+  url.searchParams.set('task', params.taskId);
+  return url.toString();
+}
+
 /**
- * The Fast-session variant of the task thread-reply footer: always the plain
- * "Reply or use the web app." shape, linking to the session view.
+ * Compact Session links, with task navigation separate from the transcript.
  */
 export function buildFastSessionReplyFooterText(params: {
   provider: FastSessionFooterProvider;
@@ -100,6 +159,7 @@ export function buildFastSessionReplyFooterText(params: {
   pullRequests?: readonly FastSessionPullRequestReference[];
   linkedPrs?: readonly ThreadReplyLinkedPr[];
   livePreviewUrl?: string | null;
+  runningTasks?: ThreadReplyRunningTasks | null;
 }): string {
   const sessionUrl = buildFastSessionUrl(params.provider, params.sessionId);
 
@@ -107,7 +167,7 @@ export function buildFastSessionReplyFooterText(params: {
     taskUrl: sessionUrl,
     linkedPrs: collectFastSessionLinkedPrs(params),
     livePreviewUrl: params.livePreviewUrl,
-    explicitMentionRequired: false,
+    runningTasks: params.runningTasks,
     ...(params.provider === 'slack'
       ? { formatLink: (label: string, url: string) => `<${url}|${label}>` }
       : params.provider === 'discord'
@@ -115,7 +175,17 @@ export function buildFastSessionReplyFooterText(params: {
             formatLink: formatMarkdownLink,
             formatFooterText: (text: string) => `-# ${text}`,
           }
-        : { formatLink: formatMarkdownLink }),
+        : params.provider === 'github'
+          ? {
+              formatLink: formatMarkdownLink,
+              formatFooterText: (text: string) => `<sub>${text}</sub>`,
+            }
+          : params.provider === 'agentmail'
+            ? {
+                formatLink: formatMarkdownLink,
+                formatFooterText: formatAgentMailFooterMarkdown,
+              }
+            : { formatLink: formatMarkdownLink }),
   });
 }
 

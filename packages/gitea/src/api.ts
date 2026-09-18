@@ -4,6 +4,7 @@ import {
   ALL_REPOSITORIES,
   buildRepositoryCloneUrl,
   filterRepositoryNamesForSourceControlProvider,
+  resolveRepositoryNamesForSourceControlProviderFromPayload,
   type SourceControlProvider,
 } from '@roomote/types';
 import {
@@ -497,6 +498,15 @@ function filterRepositorySelectionForGitea(
 async function resolveGiteaRepositoryNamesForTaskRun(
   taskRun: TaskRun,
 ): Promise<string[] | null> {
+  const stampedRepositories =
+    resolveRepositoryNamesForSourceControlProviderFromPayload(
+      taskRun.payload,
+      GITEA_PROVIDER,
+    );
+  if (stampedRepositories) {
+    return stampedRepositories;
+  }
+
   if (taskRun.payload.environmentId) {
     const environment = await db.query.environments.findFirst({
       where: eq(environments.id, taskRun.payload.environmentId),
@@ -1208,4 +1218,169 @@ export async function createTaskRunGiteaCredentials(
         ? parsedExpiresAt
         : null,
   };
+}
+
+const giteaPullRequestDetailsSchema = z
+  .object({
+    number: z.number(),
+    title: z.string(),
+    state: z.string().optional(),
+    merged: z.boolean().optional(),
+    body: z.string().nullable().optional(),
+    html_url: z.string().optional(),
+    head: z
+      .object({ ref: z.string().optional(), sha: z.string().optional() })
+      .passthrough()
+      .optional(),
+    base: z
+      .object({
+        ref: z.string().optional(),
+        repo: z
+          .object({ id: z.number(), full_name: z.string() })
+          .passthrough()
+          .optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
+
+export type GiteaPullRequestDetails = z.infer<
+  typeof giteaPullRequestDetailsSchema
+>;
+
+/** Fetches a pull request by repository full name and number. */
+export async function getGiteaPullRequest({
+  repositoryFullName,
+  pullRequestNumber,
+  token,
+  baseUrl,
+  apiBaseUrl,
+  fetchImpl,
+}: {
+  repositoryFullName: string;
+  pullRequestNumber: number;
+  token?: string;
+  baseUrl?: string;
+  apiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<GiteaPullRequestDetails> {
+  const giteaToken = token ?? (await resolveGiteaToken());
+
+  if (!giteaToken?.trim()) {
+    throw new Error('A Gitea token is required to read pull requests.');
+  }
+
+  const resolvedBaseUrl = baseUrl ?? (await resolveGiteaBaseUrl());
+
+  if (!resolvedBaseUrl?.trim() && !apiBaseUrl?.trim()) {
+    throw new Error('A Gitea base URL is required to read pull requests.');
+  }
+
+  const { owner, repo } = splitGiteaRepositoryFullName(repositoryFullName);
+  const { data } = await requestGiteaJson({
+    apiBaseUrl: apiBaseUrl ?? buildGiteaApiBaseUrl(resolvedBaseUrl!),
+    fetchImpl,
+    path: `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${pullRequestNumber}`,
+    params: {},
+    token: giteaToken,
+    schema: giteaPullRequestDetailsSchema,
+  });
+
+  return data;
+}
+
+export async function mergeGiteaPullRequest({
+  repositoryFullName,
+  pullRequestNumber,
+  expectedHeadSha,
+  mergeMethod,
+  token,
+  baseUrl,
+  apiBaseUrl,
+  fetchImpl,
+}: {
+  repositoryFullName: string;
+  pullRequestNumber: number;
+  expectedHeadSha: string;
+  mergeMethod?: 'merge' | 'rebase' | 'rebase-merge' | 'squash';
+  token?: string;
+  baseUrl?: string;
+  apiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<void> {
+  const giteaToken = token ?? (await resolveGiteaToken());
+  if (!giteaToken?.trim()) {
+    throw new Error('A Gitea token is required to merge pull requests.');
+  }
+  const resolvedBaseUrl = baseUrl ?? (await resolveGiteaBaseUrl());
+  if (!resolvedBaseUrl?.trim() && !apiBaseUrl?.trim()) {
+    throw new Error('A Gitea base URL is required to merge pull requests.');
+  }
+  const { owner, repo } = splitGiteaRepositoryFullName(repositoryFullName);
+  const response = await (fetchImpl ?? fetch)(
+    buildGiteaApiUrl(
+      apiBaseUrl ?? buildGiteaApiBaseUrl(resolvedBaseUrl!),
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${pullRequestNumber}/merge`,
+      {},
+    ),
+    {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${giteaToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        Do: mergeMethod ?? 'merge',
+        head_commit_id: expectedHeadSha,
+      }),
+    },
+  );
+  if (![200, 204].includes(response.status))
+    throw new GiteaApiError(response.status, response.statusText);
+  await response.body?.cancel();
+}
+
+/** Replaces the body of an existing issue or pull request comment. */
+export async function updateGiteaComment({
+  repositoryFullName,
+  commentId,
+  body,
+  token,
+  baseUrl,
+  apiBaseUrl,
+  fetchImpl,
+}: {
+  repositoryFullName: string;
+  commentId: number;
+  body: string;
+  token?: string;
+  baseUrl?: string;
+  apiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<void> {
+  const giteaToken = token ?? (await resolveGiteaToken());
+
+  if (!giteaToken?.trim()) {
+    throw new Error('A Gitea token is required to update comments.');
+  }
+
+  const resolvedBaseUrl = baseUrl ?? (await resolveGiteaBaseUrl());
+
+  if (!resolvedBaseUrl?.trim() && !apiBaseUrl?.trim()) {
+    throw new Error('A Gitea base URL is required to update comments.');
+  }
+
+  const { owner, repo } = splitGiteaRepositoryFullName(repositoryFullName);
+  await requestGiteaJson({
+    apiBaseUrl: apiBaseUrl ?? buildGiteaApiBaseUrl(resolvedBaseUrl!),
+    fetchImpl,
+    method: 'PATCH',
+    path: `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/comments/${commentId}`,
+    params: {},
+    token: giteaToken,
+    body: { body },
+    schema: z.object({ id: z.number() }).passthrough(),
+  });
 }

@@ -1,7 +1,7 @@
 import type { Context } from 'hono';
 
 import type { Variables } from '../../types';
-import type { McpAuth } from '../mcp/middleware';
+import { resolveMcpTaskOrSessionUserId, type McpAuth } from '../mcp/middleware';
 import { steerMessageToTask } from './sendMessageToTask';
 import { sendMessageToFastSessionForUser } from './fastSessionCommunication';
 
@@ -13,7 +13,11 @@ import { sendMessageToFastSessionForUser } from './fastSessionCommunication';
 export async function steerMessage(
   c: Context<{ Variables: Variables & { mcpAuth: McpAuth } }>,
 ): Promise<Response> {
-  const auth = c.get('mcpAuth');
+  const requestAuth = c.get('mcpAuth');
+  const auth = {
+    ...requestAuth,
+    userId: await resolveMcpTaskOrSessionUserId(requestAuth),
+  };
 
   if (!auth.userId) {
     return c.json({ error: 'User context required' }, 403);

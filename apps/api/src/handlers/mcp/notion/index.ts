@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { NullableOptionalsMcpServer } from '@roomote/cloud-agents/mcp-nullable-optionals';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import {
   and,
@@ -10,6 +10,8 @@ import {
   mcpConnections,
 } from '@roomote/db/server';
 import { isMcpConnectionNotionConfig } from '@roomote/types';
+import { getValidAccessToken } from '@roomote/sdk/server/mcp-data';
+import { NOTION_API_ORIGIN } from '@roomote/sdk/server/notion-api';
 
 import type { Variables } from '../../../types';
 
@@ -48,20 +50,24 @@ async function resolveNotionConnection() {
     );
   }
 
-  if (!isMcpConnectionNotionConfig(connection.authConfig)) {
-    throw new McpProxyError(
-      500,
-      'Notion connection is missing a valid internal integration configuration',
-    );
+  if (isMcpConnectionNotionConfig(connection.authConfig)) {
+    return connection.authConfig;
   }
-
-  return connection.authConfig;
+  const accessToken = await getValidAccessToken(
+    connection.id,
+    NOTION_API_ORIGIN,
+  );
+  if (accessToken) return { accessToken };
+  throw new McpProxyError(
+    500,
+    'Notion connection is missing valid authentication',
+  );
 }
 
 function createNotionMcpServer(
   config: Awaited<ReturnType<typeof resolveNotionConnection>>,
 ) {
-  const server = new McpServer(NOTION_MCP_SERVER_INFO, {
+  const server = new NullableOptionalsMcpServer(NOTION_MCP_SERVER_INFO, {
     instructions:
       'Use these Notion tools only for content explicitly shared with the deployment internal integration. Unshared pages, including private pages, are inaccessible to the stored token.',
   });

@@ -142,6 +142,7 @@ describe('automation result blocks', () => {
         '| Build | **Passed** |',
         '| `a|b` | Inline code |',
         '| a\\|b | Escaped pipe |',
+        '| [Report](<https://example.com/report>) | `ready` |',
       ].join('\n'),
     });
 
@@ -156,8 +157,45 @@ describe('automation result blocks', () => {
       { align: 'left', is_wrapped: true },
       { align: 'right', is_wrapped: true },
     ]);
-    expect(table.rows).toHaveLength(4);
-    expect(JSON.stringify(table.rows)).toContain('"text":"a|b"');
+    expect(table.rows).toHaveLength(5);
+    const serializedRows = JSON.stringify(table.rows);
+    expect(serializedRows).toContain('"text":"a|b"');
+    expect(serializedRows).toContain('"url":"https://example.com/report"');
+    expect(serializedRows).toContain('"style":{"code":true}');
+  });
+
+  it('keeps data visualizations top-level because containers do not support them', () => {
+    const chart = {
+      type: 'data_visualization' as const,
+      title: 'Traffic sources',
+      chart: {
+        type: 'pie' as const,
+        segments: [{ label: 'Search', value: 65 }],
+      },
+    };
+
+    const blocks = buildAutomationResultBlocks({
+      title: 'Traffic report',
+      iconUrl: 'https://app.example.com/automation-icons/chart.png',
+      configureUrl: 'https://app.example.com/automations#traffic',
+      contentBlocks: [chart],
+    });
+
+    expect(blocks.map((block) => block.type)).toEqual([
+      'data_visualization',
+      'container',
+    ]);
+    expect(blocks[0]).toEqual(chart);
+    expect(blocks[1]).toMatchObject({
+      type: 'container',
+      title: { text: 'Traffic report' },
+      child_blocks: [
+        expect.objectContaining({
+          type: 'actions',
+          block_id: 'roomote_automation_result_actions',
+        }),
+      ],
+    });
   });
 
   it('formats automation result metadata with compact duration units', () => {
@@ -178,6 +216,24 @@ describe('automation result blocks', () => {
         durationMs: 93_784_000,
       }),
     ).toBe('Weekly · GPT 5.6 Max · $0.00 · 1d 2h 3m 4s');
+  });
+
+  it.each([
+    [999_990_000, '$999.99'],
+    [1_000_000_000, '$1,000.00'],
+    [1_234_560_000, '$1,234.56'],
+    [0, '$0.00'],
+    [1_000, '$0.00'],
+    [10_000, '$0.01'],
+  ])('formats %s micro-USD as %s in subtitles', (costMicroUsd, expected) => {
+    expect(
+      formatAutomationResultSubtitle({
+        trigger: 'Manual',
+        model: 'Kimi K3 Medium',
+        costMicroUsd,
+        durationMs: 37_900,
+      }),
+    ).toBe(`Manual · Kimi K3 Medium · ${expected} · 37s`);
   });
 
   it('places additional actions before a custom Configure label', () => {
@@ -305,6 +361,40 @@ describe('automation result blocks', () => {
     expect(last.child_blocks.at(-1)).toMatchObject({
       type: 'actions',
       block_id: 'roomote_automation_result_actions',
+    });
+  });
+
+  it('reserves the final container when top-level charts reach the block limit', () => {
+    const blocks = buildAutomationResultBlocks({
+      title: 'Traffic report',
+      iconUrl: 'https://app.example.com/automation-icons/chart.png',
+      configureUrl: 'https://app.example.com/automations#traffic',
+      contentBlocks: Array.from({ length: 50 }, (_, index) => ({
+        type: 'data_visualization' as const,
+        title: `Chart ${index + 1}`,
+        chart: {
+          type: 'pie' as const,
+          segments: [{ label: 'Search', value: index + 1 }],
+        },
+      })),
+    });
+
+    expect(blocks).toHaveLength(50);
+    expect(
+      blocks.slice(0, 49).every((block) => block.type === 'data_visualization'),
+    ).toBe(true);
+    expect(blocks[48]).toMatchObject({ title: 'Chart 49' });
+    expect(blocks).not.toContainEqual(
+      expect.objectContaining({ title: 'Chart 50' }),
+    );
+    expect(blocks[49]).toMatchObject({
+      type: 'container',
+      child_blocks: [
+        expect.objectContaining({
+          type: 'actions',
+          block_id: 'roomote_automation_result_actions',
+        }),
+      ],
     });
   });
 });

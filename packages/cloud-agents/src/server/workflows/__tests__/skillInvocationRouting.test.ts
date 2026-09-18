@@ -1,6 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import {
+  PACKAGED_SKILL_INVOCATIONS,
+  PACKAGED_WORKFLOW_PHASE_SKILL_INVOCATIONS,
+} from '../../../packaged-skill-invocations';
 import { isRecognizedInitialSkillInvocation } from '../skillInvocationRouting';
 
 describe('packaged skill invocation routing', () => {
@@ -25,6 +29,29 @@ describe('packaged skill invocation routing', () => {
       path.join(workflowsDir, 'skills', 'standard', skillName, 'SKILL.md'),
       'utf8',
     );
+
+  it.each(['sentry-triage', 'triage-sentry'])(
+    '%s describes schema-driven Sentry discovery and scoped triage outcomes',
+    (skillName) => {
+      const skill = readPackagedSkill(skillName);
+      expect(skill).toContain('Discover the available Sentry capabilities');
+      expect(skill).toContain('advertised schemas');
+      expect(skill).toContain('required organization scope');
+      expect(skill).toContain('request or automation context');
+      expect(skill).toContain(
+        'If the scope is unspecified, request clarification',
+      );
+      expect(skill).toContain('requested report destination');
+      expect(skill).toContain('ambiguity');
+      expect(skill).toContain('actual tool error');
+      expect(skill).not.toMatch(
+        /mcp__sentry__|find_integration_tools|call_integration_tool|find_organizations|organizationSlug|`args`|submit_automation_work_items|post_to_channel/,
+      );
+      expect(skill).not.toMatch(
+        /Roomote|Roo Vet|roomote-|Slack|React|\bNode\b|last 24 hours|production|preview/,
+      );
+    },
+  );
 
   const listBacktickMarkdownReferences = (
     content: string,
@@ -102,9 +129,40 @@ describe('packaged skill invocation routing', () => {
     expect(generalSkill).not.toContain('read the applicable repo-local');
   });
 
-  it('recognizes Doctor as a first-class packaged workflow', () => {
+  it('ships delegation discovery with an explicit execution boundary', () => {
+    expect(
+      isRecognizedInitialSkillInvocation({
+        skillName: 'explore-delegation',
+      }),
+    ).toBe(true);
+
+    const skill = readPackagedSkill('explore-delegation');
+    expect(skill).toContain('name: explore-delegation');
+    expect(skill).toContain('# Find Work To Delegate');
+    expect(skill).toContain('Ask one question at a time');
+    expect(skill).toContain(
+      'Describing pain, supplying an example, or saying an idea sounds useful is exploration, not authorization to execute work',
+    );
+    expect(skill).toContain(
+      'When the user explicitly requests execution, stop the interview',
+    );
+    expect(skill).toContain(
+      'do not make integration or repository setup a prerequisite for this interview',
+    );
+    expect(skill).toContain(
+      'Learning durable context about how the user works is part of this conversation',
+    );
+    expect(skill).toContain(
+      'durable personal work context or a durable preference that would improve future help',
+    );
+    expect(skill).toContain('Do not copy it into shared memory');
+  });
+
+  it('keeps Doctor packaged for Fast without routing it into sandbox tasks', () => {
+    expect(PACKAGED_SKILL_INVOCATIONS).toContain('doctor');
+    expect(PACKAGED_WORKFLOW_PHASE_SKILL_INVOCATIONS).not.toContain('doctor');
     expect(isRecognizedInitialSkillInvocation({ skillName: 'doctor' })).toBe(
-      true,
+      false,
     );
     expect(readPackagedSkill('doctor')).toContain('name: doctor');
   });

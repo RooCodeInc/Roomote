@@ -1,11 +1,14 @@
 import type { AcpToolResultPayload } from '@roomote/types';
 
-import { resolveToolPresentation } from '../tool-presentation';
+import {
+  resolveToolPresentation,
+  summarizeToolGroup,
+} from '../tool-presentation';
 import { resolveToolPresentationPolicy } from '../tool-presentation-policy';
 import type { AcpToolResultUiMessage } from '../types';
 
 function toolData(
-  overrides: Partial<AcpToolResultPayload> = {},
+  overrides: Partial<AcpToolResultPayload> & { rawInput?: unknown } = {},
 ): AcpToolResultPayload {
   return {
     toolCallId: 'call-1',
@@ -24,7 +27,7 @@ function toolData(
 }
 
 function toolMessage(
-  overrides: Partial<AcpToolResultPayload> = {},
+  overrides: Partial<AcpToolResultPayload> & { rawInput?: unknown } = {},
 ): AcpToolResultUiMessage {
   const data = toolData(overrides);
   return {
@@ -46,6 +49,7 @@ describe('tool presentation resolver', () => {
     [{ kind: 'read' }, 'read', 'file'],
     [{ toolName: 'spill_grep' }, 'search', 'search'],
     [{ toolName: 'list_skills' }, 'list', 'folder'],
+    [{ toolName: 'list_repositories' }, 'list', 'folder'],
     [{ toolName: 'launch_task' }, 'task', 'task'],
     [{ toolName: 'save_memory' }, 'memory', 'memory'],
     [{ toolName: 'show_widget' }, 'widget', 'widget'],
@@ -58,6 +62,7 @@ describe('tool presentation resolver', () => {
 
   it.each([
     ['manage_custom_automations', 'task'],
+    ['manage_wakeups', 'stopwatch'],
     ['get_about_me', 'roomote'],
     ['describe_video', 'video'],
     ['manage_goal', 'target'],
@@ -65,19 +70,21 @@ describe('tool presentation resolver', () => {
     ['manage_source_control', 'pull-request'],
     ['manage_environments', 'environment'],
     ['save_task_memory', 'memory'],
+    ['update_personalization', 'book-heart'],
     ['request_environment_variables', 'terminal'],
     ['report_platform_issue', 'alert'],
     ['submit_automation_work_items', 'task'],
     ['list_chat_channels', 'messages'],
     ['get_chat_channel_messages', 'messages'],
     ['get_chat_message_context', 'messages'],
+    ['request_user_input', 'list'],
   ] as const)('uses the %s icon for %s', (toolName, iconKey) => {
     expect(resolveToolPresentation(toolData({ toolName }))).toMatchObject({
       iconKey,
     });
   });
 
-  it('uses Memory as the provider label without changing canonical identity', () => {
+  it('uses Memory language without exposing the internal provider identity', () => {
     expect(
       resolveToolPresentation(
         toolData({
@@ -90,9 +97,254 @@ describe('tool presentation resolver', () => {
       ),
     ).toMatchObject({
       category: 'memory',
-      providerLabel: 'Memory',
+      providerLabel: undefined,
+      verb: 'Searched',
+      object: 'my memory',
       identity: { serverName: 'gbrain', toolName: 'query' },
     });
+  });
+
+  it.each([
+    ['query', 'Searched', 'my memory'],
+    ['search', 'Searched', 'my memory'],
+    ['entity', 'Looked Up', 'a memory'],
+    ['get_page', 'Read', 'a memory'],
+    ['list_pages', 'Listed', 'memories'],
+    ['synthesize', 'Summarized', 'my memory'],
+    ['recall', 'Recalled From', 'my memory'],
+  ] as const)(
+    'uses natural Memory wording for %s',
+    (toolName, verb, object) => {
+      expect(
+        resolveToolPresentation(
+          toolData({
+            isMcp: true,
+            serverName: 'gbrain',
+            toolName,
+          }),
+        ),
+      ).toMatchObject({ verb, object, iconKey: 'memory' });
+    },
+  );
+
+  it('describes Session-targeted manage_tasks actions accurately', () => {
+    expect(
+      resolveToolPresentation(
+        toolData({
+          isMcp: true,
+          serverName: 'roomote',
+          toolName: 'manage_tasks',
+          rawInput: {
+            arguments: { action: 'send_message', sessionId: 'session-1' },
+          },
+        } as never),
+      ),
+    ).toMatchObject({ verb: 'Sent', object: 'message to session' });
+  });
+
+  it('humanizes summaries received from a child session as hearing back from a task', () => {
+    expect(
+      resolveToolPresentation(
+        toolData({
+          isMcp: true,
+          serverName: 'roomote',
+          toolName: 'manage_tasks',
+          rawInput: {
+            arguments: { action: 'get_summary', sessionId: 'session-1' },
+          },
+        } as never),
+      ),
+    ).toMatchObject({ verb: 'Heard back from', object: 'task' });
+  });
+
+  it('humanizes requests for user input', () => {
+    expect(
+      resolveToolPresentation(toolData({ toolName: 'request_user_input' })),
+    ).toMatchObject({
+      verb: 'Asked for',
+      object: 'human guidance',
+      iconKey: 'list',
+    });
+  });
+
+  it.each([
+    ['create', 'in_progress', 'Creating', 'timer'],
+    ['create', 'completed', 'Created', 'timer'],
+    ['create', 'failed', 'Failed to Create', 'timer'],
+    ['list', 'in_progress', 'Listing', 'timers'],
+    ['list', 'completed', 'Listed', 'timers'],
+    ['list', 'failed', 'Failed to List', 'timers'],
+    ['get', 'in_progress', 'Fetching', 'timer'],
+    ['get', 'completed', 'Fetched', 'timer'],
+    ['get', 'failed', 'Failed to Fetch', 'timer'],
+    ['cancel', 'in_progress', 'Canceling', 'timer'],
+    ['cancel', 'completed', 'Canceled', 'timer'],
+    ['cancel', 'failed', 'Failed to Cancel', 'timer'],
+  ] as const)(
+    'humanizes manage_wakeups %s calls while %s',
+    (action, status, verb, object) => {
+      expect(
+        resolveToolPresentation(
+          toolData({
+            isMcp: true,
+            serverName: 'roomote',
+            toolName: 'manage_wakeups',
+            status,
+            rawInput: { arguments: { action } },
+          } as never),
+        ),
+      ).toMatchObject({
+        verb,
+        object,
+        displayName: 'Timer',
+        iconKey: 'stopwatch',
+        providerLabel: undefined,
+      });
+    },
+  );
+
+  it.each([undefined, 'unknown'])(
+    'uses generic manage_wakeups wording for %s actions',
+    (action) => {
+      const rawInput = action ? { arguments: { action } } : undefined;
+      for (const [status, verb] of [
+        ['in_progress', 'Updating'],
+        ['completed', 'Updated'],
+        ['failed', 'Failed to Update'],
+      ] as const) {
+        expect(
+          resolveToolPresentation(
+            toolData({ toolName: 'manage_wakeups', status, rawInput } as never),
+          ),
+        ).toMatchObject({ verb, object: 'timers', iconKey: 'stopwatch' });
+      }
+    },
+  );
+
+  it('does not report a reused wakeup as newly created', () => {
+    expect(
+      resolveToolPresentation(
+        toolData({
+          toolName: 'manage_wakeups',
+          rawInput: { arguments: { action: 'create' } },
+          output: JSON.stringify({ success: true, duplicate: true }),
+        } as never),
+      ),
+    ).toMatchObject({ verb: 'Reused', object: 'timer' });
+  });
+
+  it('describes saved memories with an optional subject', () => {
+    expect(
+      resolveToolPresentation(
+        toolData({
+          toolName: 'save_memory',
+          rawInput: {
+            arguments: { memory: 'Bruno prefers Memory in UI copy.' },
+          },
+        } as never),
+      ),
+    ).toMatchObject({
+      verb: 'Added',
+      object: 'a memory about Bruno prefers Memory in UI copy.',
+      iconKey: 'memory',
+    });
+    expect(
+      resolveToolPresentation(toolData({ toolName: 'save_memory' })),
+    ).toMatchObject({ verb: 'Added', object: 'a memory' });
+    expect(
+      resolveToolPresentation(
+        toolData({
+          isMcp: true,
+          serverName: 'roomote',
+          toolName: 'save_task_memory',
+          rawInput: { outcome: 'Documented the conversation renderer.' },
+        } as never),
+      ),
+    ).toMatchObject({
+      verb: 'Added',
+      object: 'a memory about Documented the conversation renderer.',
+      providerLabel: undefined,
+      iconKey: 'memory',
+    });
+  });
+
+  it.each([
+    ['start', 'Started', 'session'],
+    ['search', 'Searched', 'sessions'],
+    ['get_summary', 'Heard back from', 'task'],
+    ['get_messages', 'Checked', 'recent task messages'],
+    ['send_message', 'Sent', 'message to task'],
+    ['search_tasks', 'Searched', 'tasks'],
+    ['get_compute_logs', 'Received', 'logs from task'],
+    ['launch', 'Started', 'task'],
+    ['cancel', 'Cancelled', 'task'],
+    ['list_environments', 'Listed', 'environments'],
+    ['list_models', 'Listed', 'models'],
+    ['update_models', 'Updated', 'task model'],
+  ] as const)(
+    'uses natural manage_tasks wording for %s',
+    (action, verb, object) => {
+      expect(
+        resolveToolPresentation(
+          toolData({
+            isMcp: true,
+            serverName: 'roomote',
+            toolName: 'manage_tasks',
+            rawInput: { arguments: { action } },
+          } as never),
+        ),
+      ).toMatchObject({ verb, object, providerLabel: undefined });
+    },
+  );
+
+  it('distinguishes task history checks from incoming task reports', () => {
+    expect(
+      resolveToolPresentation(
+        toolData({
+          isMcp: true,
+          serverName: 'roomote',
+          toolName: 'manage_tasks',
+          rawInput: {
+            arguments: { action: 'get_messages', taskId: 'task-1' },
+          },
+        } as never),
+      ),
+    ).toMatchObject({ verb: 'Checked', object: 'recent task messages' });
+    expect(
+      resolveToolPresentation(
+        toolData({
+          isMcp: true,
+          serverName: 'roomote',
+          toolName: 'receive_task_report',
+        }),
+      ),
+    ).toMatchObject({ verb: 'Received', object: 'task report' });
+  });
+
+  it('suppresses only first-party Roomote attribution', () => {
+    expect(
+      resolveToolPresentation(
+        toolData({
+          isMcp: true,
+          serverName: 'roomote',
+          toolName: 'manage_goal',
+        }),
+      ).providerLabel,
+    ).toBeUndefined();
+    expect(
+      resolveToolPresentation(
+        toolData({ isMcp: true, serverName: 'gbrain', toolName: 'query' }),
+      ).providerLabel,
+    ).toBeUndefined();
+    expect(
+      resolveToolPresentation(
+        toolData({
+          isMcp: true,
+          serverName: 'custom-roomote',
+          toolName: 'run',
+        }),
+      ).providerLabel,
+    ).toBe('Custom Roomote');
   });
 
   it('uses a known MCP integration’s catalog label and icon', () => {
@@ -129,15 +381,90 @@ describe('tool presentation resolver', () => {
   it('uses meaningful receipt language for consequential task actions', () => {
     expect(
       resolveToolPresentation(toolData({ toolName: 'launch_task' })),
-    ).toMatchObject({ verb: 'Started', object: 'Coding Task' });
+    ).toMatchObject({ verb: 'Started', object: 'coding task' });
     expect(
       resolveToolPresentation(
         toolData({ toolName: 'launch_task', status: 'failed' }),
       ),
-    ).toMatchObject({ verb: 'Failed to Start', object: 'Coding Task' });
+    ).toMatchObject({ verb: 'Failed to Start', object: 'coding task' });
   });
 
-  it('sanitizes native fallback titles without using them for identity', () => {
+  it('describes integration key tools and historical request calls in plain words', () => {
+    expect(
+      resolveToolPresentation(
+        toolData({
+          toolName: 'prepare_integration_key',
+          rawInput: {
+            arguments: { label: 'Kagi', origin: 'https://kagi.com' },
+          },
+        }),
+      ),
+    ).toMatchObject({ verb: 'Requested', object: 'a key for Kagi' });
+    expect(
+      resolveToolPresentation(toolData({ toolName: 'list_integration_keys' })),
+    ).toMatchObject({ verb: 'Checked', object: 'your integrations' });
+    expect(
+      resolveToolPresentation(
+        toolData({
+          toolName: 'request_with_integration_key',
+          rawInput: {
+            arguments: { method: 'post', path: '/api/v1/search' },
+          },
+          output: JSON.stringify({ success: true, status: 200 }),
+        }),
+      ),
+    ).toMatchObject({ verb: 'Called', object: 'POST /api/v1/search (200)' });
+  });
+
+  it.each([
+    ['in_progress', {}, 'Adding', 'remote MCP DeepWiki'],
+    [
+      'completed',
+      { status: 'connected', name: 'deepwiki', tools: [{}, {}, {}] },
+      'Added',
+      'remote MCP deepwiki (3 tools)',
+    ],
+    [
+      'completed',
+      { status: 'authorization_required', name: 'linear-remote' },
+      'Prepared',
+      'remote MCP linear-remote for authorization',
+    ],
+    [
+      'completed',
+      { status: 'connected', name: 'deepwiki', reused: true },
+      'Found',
+      'remote MCP deepwiki',
+    ],
+    [
+      'completed',
+      { status: 'disabled', name: 'deepwiki', reused: true },
+      'Found',
+      'remote MCP deepwiki (disabled)',
+    ],
+    ['failed', {}, 'Failed to Add', 'remote MCP DeepWiki'],
+  ] as const)(
+    'presents add_remote_mcp while %s',
+    (status, output, verb, object) => {
+      expect(
+        resolveToolPresentation(
+          toolData({
+            toolName: 'add_remote_mcp',
+            status,
+            rawInput: { arguments: { name: 'DeepWiki' } },
+            output: JSON.stringify(output),
+          } as never),
+        ),
+      ).toMatchObject({
+        verb,
+        object,
+        category: 'generic',
+        iconKey: 'tool',
+      });
+    },
+  );
+
+  it('never uses native fallback titles for headers or identity', () => {
     expect(
       resolveToolPresentation(
         toolData({
@@ -146,19 +473,496 @@ describe('tool presentation resolver', () => {
         }),
       ),
     ).toMatchObject({
-      displayName: 'Read RooCodeInc/Roomote/apps/web/package.json',
-      object: 'Read RooCodeInc/Roomote/apps/web/package.json',
+      displayName: 'Tool',
+      verb: 'Completed',
+      object: 'tool call',
       identity: { toolName: null },
       groupKey: 'kind:tool',
+    });
+  });
+
+  it.each([
+    [
+      'read',
+      { filePath: '/sandbox/repos/project/src/app.ts' },
+      'Reading',
+      'Read',
+      'Failed to Read',
+      'project/src/app.ts',
+    ],
+    [
+      'read_file',
+      { file_path: 'src/app.ts' },
+      'Reading',
+      'Read',
+      'Failed to Read',
+      'src/app.ts',
+    ],
+    [
+      'spill_read',
+      { path: 'src/app.ts' },
+      'Reading',
+      'Read',
+      'Failed to Read',
+      'src/app.ts',
+    ],
+    [
+      'apply_patch',
+      { patchText: '*** Delete File: a\n*** Delete File: b' },
+      'Editing',
+      'Edited',
+      'Failed to Edit',
+      '2 files',
+    ],
+    [
+      'skill',
+      { name: 'capture-visual-proof' },
+      'Loading',
+      'Loaded',
+      'Failed to Load',
+      'skill capture-visual-proof',
+    ],
+    [
+      'load_skill',
+      { name: 'capture-visual-proof' },
+      'Loading',
+      'Loaded',
+      'Failed to Load',
+      'skill capture-visual-proof',
+    ],
+  ] as const)(
+    'presents native %s in all phases',
+    (toolName, rawInput, running, completed, failed, object) => {
+      for (const [status, verb] of [
+        ['in_progress', running],
+        ['completed', completed],
+        ['failed', failed],
+      ] as const) {
+        const data = {
+          ...toolData({ toolName }),
+          rawInput,
+          status,
+          title: 'Success. Updated the following files: D /sandbox/repos/a',
+        };
+        expect(resolveToolPresentation(data)).toMatchObject({ verb, object });
+        expect(resolveToolPresentation(data, true).verb).toBe(
+          status === 'failed' ? failed : running,
+        );
+      }
+    },
+  );
+
+  it.each([
+    ['read', 'Read', 'file', 'read'],
+    ['apply_patch', 'Edited', '', 'edit'],
+    ['skill', 'Loaded', 'skill', 'generic'],
+  ])(
+    'presents historical %s without inventing identity',
+    (kind, verb, object, category) => {
+      expect(
+        resolveToolPresentation(
+          toolData({ kind, title: 'Loaded skill: arbitrary output' }),
+        ),
+      ).toMatchObject({
+        verb,
+        object,
+        category,
+        identity: { toolName: null },
+        groupKey: `kind:${kind}`,
+      });
+    },
+  );
+
+  it('uses stored arguments for historical reads and nested skill calls', () => {
+    expect(
+      resolveToolPresentation(
+        toolData({
+          kind: 'read',
+          rawInput: { filePath: '/sandbox/repos/project/a.ts' },
+        }),
+      ).object,
+    ).toBe('project/a.ts');
+    expect(
+      resolveToolPresentation(
+        toolData({
+          toolName: 'skill',
+          rawInput: { arguments: { name: '  capture-visual-proof\n' } },
+        }),
+      ).object,
+    ).toBe('skill capture-visual-proof');
+  });
+
+  it('uses the transcript-safe result name for Fast skill loads without exposing instance IDs', () => {
+    expect(
+      resolveToolPresentation(
+        toolData({
+          toolName: 'load_skill',
+          rawInput: {
+            arguments: { id: 'instance:00000000-0000-4000-8000-000000000001' },
+          },
+          output: JSON.stringify({
+            success: true,
+            id: 'instance:00000000-0000-4000-8000-000000000001',
+            name: 'daily-brief',
+          }),
+        }),
+      ).object,
+    ).toBe('skill daily-brief');
+    expect(
+      resolveToolPresentation(
+        toolData({
+          toolName: 'load_skill',
+          rawInput: { name: 'instance:00000000-0000-4000-8000-000000000001' },
+        }),
+      ).object,
+    ).toBe('skill');
+  });
+
+  it('sanitizes before truncating paths and handles malformed arguments', () => {
+    const filePath = `/sandbox/repos/${'a'.repeat(100)}`;
+    expect(
+      resolveToolPresentation(
+        toolData({ toolName: 'read', rawInput: { filePath } }),
+      ).object,
+    ).toBe(`${'a'.repeat(77)}...`);
+    for (const rawInput of [
+      null,
+      [],
+      'bad',
+      { filePath: 42, file_path: ' ', path: null },
+    ]) {
+      expect(
+        resolveToolPresentation(toolData({ toolName: 'read', rawInput }))
+          .object,
+      ).toBe('file');
+    }
+  });
+
+  it('keeps canonical identity ahead of historical kind and safe unknown language', () => {
+    for (const [status, verb] of [
+      ['in_progress', 'Running'],
+      ['completed', 'Completed'],
+      ['failed', 'Failed'],
+    ] as const) {
+      expect(
+        resolveToolPresentation(
+          toolData({
+            toolName: 'custom_formatter',
+            kind: 'read',
+            status,
+            title: 'Success. output',
+          }),
+        ),
+      ).toMatchObject({ verb, object: 'Custom Formatter call' });
+    }
+    expect(
+      resolveToolPresentation(
+        toolData({ isMcp: true, toolName: 'read', mcpServerName: 'example' }),
+      ),
+    ).toMatchObject({ object: 'Read call', providerLabel: 'Example' });
+  });
+
+  it.each([
+    [
+      '*** Begin Patch\n*** Update File: /sandbox/repos/project/src/app.ts\n@@\n-old\n+new\n*** End Patch',
+      'project/src/app.ts',
+    ],
+    ['*** Add File: new.ts\n+content', 'new.ts'],
+    ['*** Delete File: old.ts', 'old.ts'],
+    ['*** Update File: old.ts\n*** Move to: new.ts\n@@\n-a\n+b', 'new.ts'],
+    [
+      '*** Update File: same.ts\n@@\n-a\n+b\n*** Update File: same.ts\n@@\n-c\n+d',
+      'same.ts',
+    ],
+    ['*** Delete File: old.ts\r\n*** Add File: new.ts\r\n+content', '2 files'],
+    [
+      '*** Update File: real.ts\n@@\n+*** Add File: not-a-target.ts\n-*** Delete File: also-not-a-target.ts',
+      'real.ts',
+    ],
+    ['Success. Updated the following files: D output-only.ts', ''],
+    ['*** Update File:   \n', ''],
+  ])(
+    'derives patch targets only from input operation headers',
+    (patchText, object) => {
+      for (const [status, verb] of [
+        ['in_progress', 'Editing'],
+        ['completed', 'Edited'],
+        ['failed', 'Failed to Edit'],
+      ] as const) {
+        const data = toolData({
+          kind: 'apply_patch',
+          status,
+          rawInput: { patchText },
+          title: 'wrong.ts',
+          output: 'Success. Updated wrong.ts',
+        });
+        expect(resolveToolPresentation(data)).toMatchObject({ verb, object });
+        expect(data.output).toBe('Success. Updated wrong.ts');
+      }
+    },
+  );
+
+  it.each(['Add', 'Update', 'Delete'])(
+    'distinguishes space-prefixed context from a real %s operation after an update hunk',
+    (operation) => {
+      // OpenCode v1.18.10 parseUpdateFileChunks stops at an unprefixed ***;
+      // unchanged context starts with a space, including header-like content.
+      const prefix =
+        '*** Begin Patch\n*** Update File: real.ts\n@@\n-old\n+new\n';
+      const header = `*** ${operation} File: example.ts`;
+      const suffix =
+        operation === 'Add'
+          ? '\n+content'
+          : operation === 'Update'
+            ? '\n@@\n-a\n+b'
+            : '';
+      const present = (patchText: string) =>
+        resolveToolPresentation(
+          toolData({
+            toolName: 'apply_patch',
+            rawInput: { patchText },
+          }),
+        );
+
+      expect(present(`${prefix} ${header}\n*** End Patch`)).toMatchObject({
+        verb: 'Edited',
+        object: 'real.ts',
+      });
+      expect(
+        present(`${prefix}${header}${suffix}\n*** End Patch`),
+      ).toMatchObject({ verb: 'Edited', object: '2 files' });
+    },
+  );
+
+  it('uses structured native edit paths and nested patch arguments', () => {
+    for (const key of ['filePath', 'file_path', 'path']) {
+      expect(
+        resolveToolPresentation(
+          toolData({
+            toolName: 'edit',
+            rawInput: { [key]: '/sandbox/repos/project/file.ts' },
+          }),
+        ),
+      ).toMatchObject({ verb: 'Edited', object: 'project/file.ts' });
+    }
+    expect(
+      resolveToolPresentation(
+        toolData({
+          toolName: 'apply_patch',
+          rawInput: { arguments: { patchText: '*** Delete File: old.ts' } },
+        }),
+      ).object,
+    ).toBe('old.ts');
+    expect(
+      resolveToolPresentation(
+        toolData({
+          toolName: 'apply_patch',
+          rawInput: {
+            patchText: `*** Update File: /sandbox/repos/${'a'.repeat(100)}`,
+          },
+        }),
+      ).object,
+    ).toBe(`${'a'.repeat(77)}...`);
+  });
+
+  it.each([
+    undefined,
+    null,
+    'invalid',
+    [],
+    { patchText: 3 },
+    { filePath: false },
+  ])('keeps unavailable edit targets safe', (rawInput) => {
+    for (const toolName of ['apply_patch', 'edit']) {
+      expect(
+        resolveToolPresentation(
+          toolData({
+            toolName,
+            rawInput,
+            title: 'fake.ts',
+            output: 'D fake.ts',
+          }),
+        ),
+      ).toMatchObject({ verb: 'Edited', object: '' });
+    }
+  });
+
+  it('counts edit calls rather than assuming each patch changes one file', () => {
+    expect(summarizeToolGroup('edit', 2, 'Apply Patch')).toEqual({
+      action: 'Edited',
+      objectSummary: '2 edits',
+    });
+    expect(
+      summarizeToolGroup(
+        'generic',
+        2,
+        resolveToolPresentation(toolData({ title: 'Success. output' }))
+          .displayName,
+      ),
+    ).toEqual({ action: 'Used', objectSummary: '2 tool calls' });
+    expect(summarizeToolGroup('generic', 2, 'Timer')).toEqual({
+      action: 'Used',
+      objectSummary: '2 timer calls',
     });
   });
 });
 
 describe('tool presentation policy', () => {
+  it.each([
+    'inspect_images',
+    'report_to_parent_session',
+    'send_task_message',
+    'receive_task_report',
+  ])('keeps %s expandable and standalone in every phase', (toolName) => {
+    for (const status of ['in_progress', 'completed', 'failed'] as const) {
+      expect(
+        resolveToolPresentationPolicy(toolMessage({ toolName, status }), {
+          displayMode: 'narration',
+          showInternalMessages: false,
+        }),
+      ).toMatchObject({
+        rowVisibility: 'visible',
+        detailMode: 'expandable',
+        activityMode: 'keep-visible',
+        groupingMode: 'standalone',
+      });
+    }
+  });
+
+  it('renders personalization updates as a standalone non-expandable receipt', () => {
+    expect(
+      resolveToolPresentation(
+        toolData({ toolName: 'update_personalization', status: 'completed' }),
+      ),
+    ).toMatchObject({
+      verb: 'Personalization',
+      object: 'updated',
+      iconKey: 'book-heart',
+    });
+    expect(
+      resolveToolPresentationPolicy(
+        toolMessage({ toolName: 'update_personalization' }),
+      ),
+    ).toMatchObject({
+      rowVisibility: 'visible',
+      detailMode: 'none',
+      activityMode: 'keep-visible',
+      groupingMode: 'standalone',
+    });
+  });
+
+  it.each([
+    ['in_progress', 'Sending'],
+    ['completed', 'Sent'],
+    ['failed', 'Failed to Send'],
+  ] as const)('presents parent reports in phase %s', (status, verb) => {
+    expect(
+      resolveToolPresentation(
+        toolData({ toolName: 'report_to_parent_session', status }),
+      ),
+    ).toMatchObject({
+      verb,
+      object: 'report to Session',
+      category: 'communication',
+    });
+  });
+
+  it.each(['read', 'read_file', 'spill_read'])(
+    'keeps ordinary %s details hidden',
+    (toolName) => {
+      expect(
+        resolveToolPresentationPolicy(toolMessage({ toolName })).detailMode,
+      ).toBe('none');
+    },
+  );
+
+  it('only expands skill receipts when they contain meaningful detail', () => {
+    const missingOutput = toolMessage({
+      toolName: 'skill',
+      rawInput: { name: 'implement-changes' },
+    });
+    delete (missingOutput.data as Partial<AcpToolResultPayload>).output;
+
+    expect(resolveToolPresentationPolicy(missingOutput).detailMode).toBe(
+      'none',
+    );
+    expect(
+      resolveToolPresentationPolicy(
+        toolMessage({
+          toolName: 'skill',
+          rawInput: { name: 'implement-changes' },
+        }),
+      ).detailMode,
+    ).toBe('none');
+    expect(
+      resolveToolPresentationPolicy(
+        toolMessage({
+          toolName: 'load_skill',
+          rawInput: {
+            arguments: {
+              id: 'instance:00000000-0000-4000-8000-000000000001',
+            },
+          },
+          output: JSON.stringify({ success: true, name: 'daily-brief' }),
+        }),
+      ).detailMode,
+    ).toBe('none');
+    expect(
+      resolveToolPresentationPolicy(
+        toolMessage({
+          toolName: 'load_skill',
+          rawInput: {
+            arguments: {
+              id: 'instance:00000000-0000-4000-8000-000000000001',
+            },
+          },
+          output: JSON.stringify({
+            success: true,
+            name: 'daily-brief',
+            resource: 'SKILL.md',
+          }),
+        }),
+      ).detailMode,
+    ).toBe('expandable');
+    expect(
+      resolveToolPresentationPolicy(
+        toolMessage({
+          toolName: 'skill',
+          rawInput: { name: 'implement-changes' },
+          output: '# Implementation workflow',
+        }),
+      ).detailMode,
+    ).toBe('expandable');
+  });
+
   it('keeps consequential receipts outside collapsed activity', () => {
     expect(
       resolveToolPresentationPolicy(
         toolMessage({ toolName: 'save_memory', kind: 'memory' }),
+      ).activityMode,
+    ).toBe('keep-visible');
+  });
+
+  it('collapses settled chat reply receipts outside narration mode', () => {
+    const message = toolMessage({
+      toolName: 'send_chat_reply',
+      kind: 'communication',
+    });
+
+    expect(resolveToolPresentationPolicy(message).activityMode).toBe(
+      'collapsible',
+    );
+    expect(
+      resolveToolPresentationPolicy(message, { displayMode: 'narration' })
+        .activityMode,
+    ).toBe('keep-visible');
+    expect(
+      resolveToolPresentationPolicy(
+        toolMessage({
+          toolName: 'send_chat_reply',
+          kind: 'communication',
+          status: 'failed',
+        }),
       ).activityMode,
     ).toBe('keep-visible');
   });
@@ -214,4 +1018,69 @@ describe('tool presentation policy', () => {
       }).rowVisibility,
     ).toBe('visible');
   });
+
+  it('hides integration tool discovery outside internal transcript debugging', () => {
+    const message = toolMessage({
+      title: 'find_integration_tools',
+      toolName: 'find_integration_tools',
+      kind: 'search',
+    });
+
+    expect(
+      resolveToolPresentationPolicy(message, {
+        showInternalMessages: false,
+      }).rowVisibility,
+    ).toBe('debug-only');
+    expect(
+      resolveToolPresentationPolicy(message, {
+        showInternalMessages: true,
+      }).rowVisibility,
+    ).toBe('visible');
+  });
+
+  it.each(['create', 'list'])(
+    'hides manage_wakeups %s receipts outside internal transcript debugging',
+    (action) => {
+      const message = toolMessage({
+        title: 'mcp__roomote__manage_wakeups',
+        kind: 'mcp',
+        isMcp: true,
+        mcpServerName: 'roomote',
+        mcpToolName: 'manage_wakeups',
+        serverName: 'roomote',
+        toolName: 'manage_wakeups',
+        rawInput: { arguments: { action } },
+      } as never);
+
+      expect(
+        resolveToolPresentationPolicy(message, {
+          showInternalMessages: false,
+        }).rowVisibility,
+      ).toBe('debug-only');
+      expect(
+        resolveToolPresentationPolicy(message, {
+          showInternalMessages: true,
+        }).rowVisibility,
+      ).toBe('visible');
+    },
+  );
+
+  it.each(['get', 'cancel'])(
+    'keeps manage_wakeups %s receipts visible in normal transcripts',
+    (action) => {
+      const message = toolMessage({
+        kind: 'mcp',
+        isMcp: true,
+        serverName: 'roomote',
+        toolName: 'manage_wakeups',
+        rawInput: { arguments: { action } },
+      } as never);
+
+      expect(
+        resolveToolPresentationPolicy(message, {
+          showInternalMessages: false,
+        }).rowVisibility,
+      ).toBe('visible');
+    },
+  );
 });

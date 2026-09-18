@@ -6,10 +6,12 @@ import type { McpAuth } from '../../mcp/middleware';
 const {
   mockApplyTaskModelSelectionToRun,
   mockFindLatestTaskRun,
+  mockTaskFindFirst,
   mockTokenRunFindFirst,
 } = vi.hoisted(() => ({
   mockApplyTaskModelSelectionToRun: vi.fn(),
   mockFindLatestTaskRun: vi.fn(),
+  mockTaskFindFirst: vi.fn(),
   mockTokenRunFindFirst: vi.fn(),
 }));
 
@@ -28,13 +30,22 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
+      tasks: {
+        findFirst: mockTaskFindFirst,
+      },
       taskRuns: {
         findFirst: mockTokenRunFindFirst,
       },
     },
   },
+  and: vi.fn((...args) => ({ type: 'and', args })),
   eq: vi.fn((...args) => ({ type: 'eq', args })),
   taskRuns: { id: 'task_runs.id' },
+  tasks: { id: 'tasks.id' },
+}));
+
+vi.mock('../../custom-automation-history-access', () => ({
+  customAutomationHistoryAccess: vi.fn(() => ({ type: 'task-access' })),
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -83,6 +94,8 @@ describe('updateTaskModelSelection', () => {
       sandboxServerUrl: null,
       actingUserId: null,
     });
+    mockTaskFindFirst.mockReset();
+    mockTaskFindFirst.mockResolvedValue({ id: 'target-task' });
     mockTokenRunFindFirst.mockReset();
   });
 
@@ -134,7 +147,7 @@ describe('updateTaskModelSelection', () => {
     });
   });
 
-  it('applies for a user-token context without a bound run', async () => {
+  it('applies for an authorized user-token context without a bound run', async () => {
     const app = createApp({
       userId: 'user-1',
       authContext: { userId: 'user-1' } as never,
@@ -144,7 +157,44 @@ describe('updateTaskModelSelection', () => {
 
     expect(response.status).toBe(200);
     expect(mockTokenRunFindFirst).not.toHaveBeenCalled();
+    expect(mockTaskFindFirst).toHaveBeenCalledOnce();
     expect(mockApplyTaskModelSelectionToRun).toHaveBeenCalled();
+  });
+
+  it('rejects an unauthorized user without applying', async () => {
+    mockTaskFindFirst.mockResolvedValue(undefined);
+    const app = createApp({
+      userId: 'user-1',
+      authContext: { userId: 'user-1' } as never,
+    });
+
+    const response = await postModelSelection(app as never, 'target-task');
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({
+      success: false,
+      error: 'Task not found',
+    });
+    expect(mockFindLatestTaskRun).not.toHaveBeenCalled();
+    expect(mockApplyTaskModelSelectionToRun).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when user task authorization cannot be resolved', async () => {
+    const consoleError = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => {});
+    mockTaskFindFirst.mockRejectedValue(new Error('access lookup failed'));
+    const app = createApp({
+      userId: 'user-1',
+      authContext: { userId: 'user-1' } as never,
+    });
+
+    const response = await postModelSelection(app as never, 'target-task');
+
+    expect(response.status).toBe(500);
+    expect(mockFindLatestTaskRun).not.toHaveBeenCalled();
+    expect(mockApplyTaskModelSelectionToRun).not.toHaveBeenCalled();
+    consoleError.mockRestore();
   });
 
   it('rejects contexts with neither a run token nor a user', async () => {

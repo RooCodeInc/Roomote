@@ -1,5 +1,6 @@
 import {
   db,
+  repositories,
   tasks,
   users,
   environments,
@@ -8,6 +9,7 @@ import {
   eq,
   sql,
   and,
+  or,
   isNotNull,
   isNull,
   desc,
@@ -20,6 +22,7 @@ import {
   formatExternalActorLabel,
   type TaskSurface,
   getTaskModelDisplayName,
+  sourceControlProviderDescriptors,
 } from '@roomote/types';
 
 import type { TimePeriodFilter, UserAuthSuccess } from '@/types';
@@ -30,15 +33,21 @@ import {
 } from '@/lib/task-creator-filter';
 import { formatRepositoryName } from '@/lib';
 import { getTaskSurfaceLabel } from '@/lib/task-surface-label';
+import { buildPullRequestFilterValue } from '@/lib/pull-request-filter';
 import { getCreatorFilterCondition } from '@/lib/server/tasks';
+import { customAutomationTaskAccess } from '@/lib/server/custom-automation-task-access';
 
 type FilterOption = { value: string; label: string; subLabel?: string };
 
 const getTimePeriodCutoff = (timePeriod: number): number =>
   Math.floor(Date.now() / 1000) - timePeriod * 24 * 60 * 60;
 
-function getVisibleTaskHistoryConditions() {
-  return [eq(tasks.visibility, 'visible'), isNull(tasks.deletedAt)];
+function getVisibleTaskHistoryConditions(auth: UserAuthSuccess) {
+  return [
+    eq(tasks.visibility, 'visible'),
+    isNull(tasks.deletedAt),
+    customAutomationTaskAccess(auth),
+  ];
 }
 
 function getSurfaceSubLabel(surface: TaskSurface | null): string | undefined {
@@ -59,8 +68,22 @@ export async function getUsersOnlyForFilterCommand(
     timePeriod?: TimePeriodFilter;
   },
 ): Promise<FilterOption[]> {
-  void auth;
-  const whereConditions = [...getVisibleTaskHistoryConditions()];
+  const whereConditions = [...getVisibleTaskHistoryConditions(auth)];
+
+  if (!auth.isAdmin) {
+    // Custom automation creator ownership is enforced by the history conditions.
+    const ownerCondition = or(
+      and(
+        eq(tasks.initiatorKind, 'user'),
+        eq(tasks.initiatorUserId, auth.userId),
+      ),
+      and(
+        eq(tasks.initiatorKind, 'automation'),
+        eq(tasks.initiatorAutomation, 'custom_automation'),
+      ),
+    );
+    if (ownerCondition) whereConditions.push(ownerCondition);
+  }
 
   if (input.repositoryName) {
     whereConditions.push(eq(tasks.repositoryName, input.repositoryName));
@@ -157,7 +180,7 @@ export async function getRepositoriesForFilterCommand(
   },
 ): Promise<FilterOption[]> {
   void auth;
-  const conditions = [...getVisibleTaskHistoryConditions()];
+  const conditions = [...getVisibleTaskHistoryConditions(auth)];
 
   if (input.userId) {
     conditions.push(getCreatorFilterCondition(input.userId));
@@ -212,7 +235,7 @@ export async function getPullRequestsForFilterCommand(
   },
 ): Promise<FilterOption[]> {
   void auth;
-  const whereConditions = [...getVisibleTaskHistoryConditions()];
+  const whereConditions = [...getVisibleTaskHistoryConditions(auth)];
 
   if (input.repositoryName) {
     whereConditions.push(eq(tasks.repositoryName, input.repositoryName));
@@ -247,9 +270,27 @@ export async function getPullRequestsForFilterCommand(
   const latestDetectedAt = max(taskPullRequests.detectedAt).as(
     'latest_detected_at',
   );
+  const effectiveHost = sql<string | null>`coalesce(
+    ${taskPullRequests.host},
+    ${repositories.host}
+  )`;
 
   const results = await db
     .select({
+      sourceControlProvider: taskPullRequests.sourceControlProvider,
+      hosts: sql<string[]>`coalesce(
+        array_agg(distinct ${effectiveHost})
+          filter (where ${effectiveHost} is not null),
+        '{}'
+      )`,
+      repositoryIds: sql<string[]>`coalesce(
+        array_agg(distinct ${taskPullRequests.repositoryId}::text)
+          filter (
+            where ${taskPullRequests.repositoryId} is not null
+              and ${effectiveHost} is null
+          ),
+        '{}'
+      )`,
       repository: taskPullRequests.repository,
       prNumber: taskPullRequests.prNumber,
       prTitle: latestPrTitle,
@@ -257,8 +298,13 @@ export async function getPullRequestsForFilterCommand(
     })
     .from(tasks)
     .innerJoin(taskPullRequests, eq(taskPullRequests.taskId, tasks.id))
+    .leftJoin(repositories, eq(repositories.id, taskPullRequests.repositoryId))
     .where(and(...whereConditions))
-    .groupBy(taskPullRequests.repository, taskPullRequests.prNumber)
+    .groupBy(
+      taskPullRequests.sourceControlProvider,
+      taskPullRequests.repository,
+      taskPullRequests.prNumber,
+    )
     .orderBy(desc(latestDetectedAt))
     .limit(20);
 
@@ -271,12 +317,35 @@ export async function getPullRequestsForFilterCommand(
         prNumber: number;
       } => !!r.repository && r.prNumber !== null,
     )
-    .map((r) => {
-      const value = `${r.repository}#${r.prNumber}`;
-      const label = r.prTitle || `#${r.prNumber}`;
-      const subLabel = `${formatRepositoryName(r.repository)}#${r.prNumber}`;
-      return { value, label, subLabel };
-    });
+    .flatMap((r) => {
+      const scopes: Array<{ host?: string; repositoryId?: string }> =
+        r.hosts.length > 0 || r.repositoryIds.length > 0
+          ? [
+              ...r.hosts.map((host) => ({ host })),
+              ...r.repositoryIds.map((repositoryId) => ({ repositoryId })),
+            ]
+          : [{}];
+
+      return scopes.map(({ host, repositoryId }) => {
+        const value = buildPullRequestFilterValue({
+          provider: r.sourceControlProvider,
+          repository: r.repository,
+          number: r.prNumber,
+          repositoryId,
+          host,
+        });
+        const label = r.prTitle || `#${r.prNumber}`;
+        const provider =
+          sourceControlProviderDescriptors[r.sourceControlProvider];
+        const providerLabel =
+          host && host !== provider.defaultHost
+            ? `${provider.label} (${host})`
+            : provider.label;
+        const subLabel = `${providerLabel} · ${formatRepositoryName(r.repository)}#${r.prNumber}`;
+        return { value, label, subLabel };
+      });
+    })
+    .slice(0, 20);
 }
 
 export async function getModelsForFilterCommand(
@@ -289,7 +358,7 @@ export async function getModelsForFilterCommand(
   },
 ): Promise<FilterOption[]> {
   void auth;
-  const conditions = [...getVisibleTaskHistoryConditions()];
+  const conditions = [...getVisibleTaskHistoryConditions(auth)];
 
   if (input.repositoryName) {
     if (input.repositoryName.startsWith('env:')) {

@@ -1,14 +1,21 @@
 import { and, eq } from 'drizzle-orm';
 
-import { RunStatus } from '@roomote/types';
+import { resolveAppEnv } from '@roomote/env';
+import { ACP_ENVELOPE_EVENT_TYPES, RunStatus } from '@roomote/types';
 
 import type { CreateUser } from '../types';
 import {
   taskRuns,
+  customMcpServers,
   deploymentSettings,
   environments,
+  fastAgentConversations,
+  fastAgentMessages,
   githubInstallations,
   repositories,
+  sessionParticipants,
+  sessionTasks,
+  sessions,
   tasks,
   taskPullRequests,
   users,
@@ -23,11 +30,52 @@ import {
   taskFactory,
   userFactory,
 } from './factories';
+import {
+  demoSeedArtifactSessionId,
+  demoSeedDevelopmentIntegration,
+  demoSeedLifecycleSessions,
+} from './development-fixtures';
+
+export {
+  demoSeedDevelopmentIntegration,
+  demoSeedLifecycleSessions,
+} from './development-fixtures';
 
 export const demoSeedUserId = 'demo-seed-user';
 const demoSeedUserEmail = 'demo@roomote.dev';
 const demoSeedGithubAccountLogin = 'roomote-demo';
 export const demoSeedEnvironmentName = 'Roomote Demo Environment';
+
+export const demoSeedFastSession = {
+  conversationId: '00000000-0000-4000-8000-000000000101',
+  sessionId: demoSeedArtifactSessionId,
+  participantId: '00000000-0000-4000-8000-000000000103',
+  title: 'Summarize launch readiness',
+  workspaceId: 'TROOMOTEDEMO',
+  providerConversationId: 'demo-fast-session',
+  channelId: 'CROOMOTEDEMO',
+  threadId: '1700000000.000100',
+  messages: [
+    {
+      id: '00000000-0000-4000-8000-000000000104',
+      eventId: 'demo-fast-session-user-prompt',
+      turnId: 'demo-fast-session-turn',
+      turnSeq: 0,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user' as const,
+      text: 'Summarize the launch readiness review and call out any blockers.',
+    },
+    {
+      id: '00000000-0000-4000-8000-000000000105',
+      eventId: 'demo-fast-session-assistant-message',
+      turnId: 'demo-fast-session-turn',
+      turnSeq: 1,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant' as const,
+      text: 'The launch checklist is complete. Authentication, billing, and rollback checks passed, and there are no open blockers.',
+    },
+  ],
+} as const;
 
 export const demoSeedRepositories = [
   {
@@ -62,6 +110,14 @@ export const demoSeedTasks = [
   {
     id: 'demo-seed-task-explain-auth',
     title: 'Explain how session tokens are validated',
+    mode: 'ask',
+    state: 'active',
+    taskRunStatus: RunStatus.Running,
+    repositoryFullName: 'roomote-demo/demo-api',
+  },
+  {
+    id: 'demo-seed-task-lifecycle-active',
+    title: 'Fixture lifecycle active control',
     mode: 'ask',
     state: 'active',
     taskRunStatus: RunStatus.Running,
@@ -105,14 +161,32 @@ interface DemoSeedSummary {
  * Inserts a small, stable set of demo data (a demo user, GitHub installation,
  * repositories, an environment, and a few tasks with task runs) so task
  * sandboxes and preview deployments do not start from an empty dashboard. It
- * also marks setup as complete when the deployment settings row is missing so
- * a freshly seeded app is not gated behind /setup.
+ * also marks setup as complete so a seeded app is not gated behind /setup.
  *
  * Every entity is keyed by a stable identifier and only inserted when missing,
  * so the seed is safe to re-run on every sandbox boot or preview deploy.
- * Existing rows are never updated or deleted.
+ * Existing demo rows are not overwritten; missing setup and task-run lifecycle
+ * fields from older seed versions are backfilled in place.
  */
 export async function seedDemoData(): Promise<DemoSeedSummary> {
+  if (resolveAppEnv(process.env) === 'production') {
+    throw new Error('Refusing to seed demo data in production.');
+  }
+
+  const reservedFastSession = await db.query.sessions.findFirst({
+    where: eq(sessions.id, demoSeedFastSession.sessionId),
+  });
+
+  if (
+    reservedFastSession &&
+    reservedFastSession.fastConversationId !==
+      demoSeedFastSession.conversationId
+  ) {
+    throw new Error(
+      `Cannot seed demo data: reserved Fast Session ID ${demoSeedFastSession.sessionId} is already used by an unrelated Session.`,
+    );
+  }
+
   const summary: DemoSeedSummary = { created: [], skipped: [] };
 
   const record = (label: string, created: boolean) => {
@@ -122,20 +196,26 @@ export async function seedDemoData(): Promise<DemoSeedSummary> {
   const now = new Date();
 
   // Deployment settings. The web app gates everything behind /setup until the
-  // singleton settings row has `setupCompletedAt`, so a freshly seeded
-  // database also gets setup marked complete. An existing row is never
-  // touched so real setup state is preserved.
+  // singleton settings row has `setupCompletedAt`, so a seeded sandbox gets
+  // setup marked complete. Repair an incomplete singleton left by an earlier
+  // sandbox boot while preserving every other setting.
   const existingSettings = await db.query.deploymentSettings.findFirst({
     where: eq(deploymentSettings.id, 'default'),
   });
+  const setupIncomplete = existingSettings?.setupCompletedAt == null;
 
   if (!existingSettings) {
     await db
       .insert(deploymentSettings)
       .values({ id: 'default', setupCompletedAt: now });
+  } else if (setupIncomplete) {
+    await db
+      .update(deploymentSettings)
+      .set({ setupCompletedAt: now })
+      .where(eq(deploymentSettings.id, 'default'));
   }
 
-  record('deployment settings default', !existingSettings);
+  record('deployment settings default', !existingSettings || setupIncomplete);
 
   // Demo user.
   const demoUser: CreateUser = {
@@ -162,6 +242,127 @@ export async function seedDemoData(): Promise<DemoSeedSummary> {
   }
 
   record(`user ${demoSeedUserId}`, !existingUser);
+
+  // A complete Fast Session keeps the standard seed useful for validating the
+  // canonical Session detail route, transcript, and Slack origin metadata.
+  const existingFastConversation =
+    await db.query.fastAgentConversations.findFirst({
+      where: eq(fastAgentConversations.id, demoSeedFastSession.conversationId),
+    });
+
+  if (!existingFastConversation) {
+    await db.insert(fastAgentConversations).values({
+      id: demoSeedFastSession.conversationId,
+      userId: demoSeedUserId,
+      surface: 'slack',
+      workspaceId: demoSeedFastSession.workspaceId,
+      conversationId: demoSeedFastSession.providerConversationId,
+      currentReplyChannelId: demoSeedFastSession.channelId,
+      currentReplyThreadId: null,
+      replyTargetVerified: false,
+      title: demoSeedFastSession.title,
+      llmTitleCheckpoint: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+  } else if (
+    existingFastConversation.currentReplyThreadId !== null ||
+    existingFastConversation.replyTargetVerified
+  ) {
+    await db
+      .update(fastAgentConversations)
+      .set({ currentReplyThreadId: null, replyTargetVerified: false })
+      .where(eq(fastAgentConversations.id, demoSeedFastSession.conversationId));
+  }
+
+  record('Fast conversation demo', !existingFastConversation);
+
+  for (const [index, message] of demoSeedFastSession.messages.entries()) {
+    const existingMessage = await db.query.fastAgentMessages.findFirst({
+      where: eq(fastAgentMessages.id, message.id),
+    });
+
+    if (!existingMessage) {
+      await db.insert(fastAgentMessages).values({
+        id: message.id,
+        conversationId: demoSeedFastSession.conversationId,
+        eventId: message.eventId,
+        turnId: message.turnId,
+        turnSeq: message.turnSeq,
+        ts:
+          now.getTime() - (demoSeedFastSession.messages.length - index) * 1_000,
+        eventType: message.eventType,
+        role: message.role,
+        contentBlocks: [{ type: 'text', text: message.text }],
+        metadata: {
+          visibleInTranscript: true,
+          ...(message.role === 'user' ? { userId: demoSeedUserId } : {}),
+        },
+        payload: {},
+        source: 'slack',
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    record(`Fast message ${message.eventId}`, !existingMessage);
+  }
+
+  let fastSession = await db.query.sessions.findFirst({
+    where: eq(sessions.fastConversationId, demoSeedFastSession.conversationId),
+  });
+  const fastSessionCreated = !fastSession;
+
+  if (!fastSession) {
+    [fastSession] = await db
+      .insert(sessions)
+      .values({
+        id: demoSeedFastSession.sessionId,
+        title: demoSeedFastSession.title,
+        llmTitleCheckpoint: 1,
+        ownerKind: 'user',
+        ownerUserId: demoSeedUserId,
+        sourceSurface: 'slack',
+        sourceTrigger: 'message',
+        fastConversationId: demoSeedFastSession.conversationId,
+        visibility: 'visible',
+        activityAt: Math.floor(now.getTime() / 1_000),
+        cachedStatus: 'ready',
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning();
+  }
+
+  if (!fastSession) {
+    throw new Error('Failed to seed the canonical Fast Session');
+  }
+
+  record('Session for Fast conversation demo', fastSessionCreated);
+
+  const existingFastSessionParticipant =
+    await db.query.sessionParticipants.findFirst({
+      where: and(
+        eq(sessionParticipants.sessionId, fastSession.id),
+        eq(sessionParticipants.userId, demoSeedUserId),
+      ),
+    });
+
+  if (!existingFastSessionParticipant) {
+    await db.insert(sessionParticipants).values({
+      id: demoSeedFastSession.participantId,
+      sessionId: fastSession.id,
+      userId: demoSeedUserId,
+      role: 'owner',
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  record(
+    'owner participant for Fast conversation demo',
+    !existingFastSessionParticipant,
+  );
 
   // Demo GitHub installation owned by the demo user.
   let installation = await db.query.githubInstallations.findFirst({
@@ -253,19 +454,132 @@ export async function seedDemoData(): Promise<DemoSeedSummary> {
       where: eq(taskRuns.taskId, task.id),
     });
 
+    let taskRunChanged = !existingTaskRun;
+
     if (!existingTaskRun) {
       await runFactory.create({
         taskId: task.id,
         actingUserId: demoSeedUserId,
         status: task.taskRunStatus,
+        startedAt: now,
+        completedAt:
+          task.taskRunStatus === RunStatus.Completed ? now : undefined,
         payload: {
           repo: task.repositoryFullName,
           description: task.title,
         },
       });
+    } else {
+      const lifecycleBackfill = {
+        ...(existingTaskRun.startedAt == null ? { startedAt: now } : {}),
+        ...(existingTaskRun.status === RunStatus.Completed &&
+        existingTaskRun.completedAt == null
+          ? { completedAt: now }
+          : {}),
+      };
+
+      if (Object.keys(lifecycleBackfill).length > 0) {
+        await db
+          .update(taskRuns)
+          .set(lifecycleBackfill)
+          .where(eq(taskRuns.id, existingTaskRun.id));
+        taskRunChanged = true;
+      }
     }
 
-    record(`task run for ${task.id}`, !existingTaskRun);
+    record(`task run for ${task.id}`, taskRunChanged);
+  }
+
+  // This deployment-scoped custom server resolves to a development-only,
+  // read-only local MCP adapter. It has no credentials or external egress.
+  const existingDevelopmentIntegration =
+    await db.query.customMcpServers.findFirst({
+      where: eq(customMcpServers.id, demoSeedDevelopmentIntegration.id),
+    });
+  if (!existingDevelopmentIntegration) {
+    await db.insert(customMcpServers).values({
+      ...demoSeedDevelopmentIntegration,
+      authType: 'none',
+      createdByUserId: demoSeedUserId,
+    });
+  }
+  record('development fixture integration', !existingDevelopmentIntegration);
+
+  // Stable lifecycle records support real Ready-filter checks while services
+  // keep running. The active control derives from its linked running task. The
+  // legacy null-status row is the one development-only reconciliation preserve.
+  for (const fixture of Object.values(demoSeedLifecycleSessions)) {
+    const existingSession = await db.query.sessions.findFirst({
+      where: eq(sessions.id, fixture.id),
+    });
+    if (!existingSession) {
+      await db.insert(sessions).values({
+        id: fixture.id,
+        title: fixture.title,
+        ownerKind: 'user',
+        ownerUserId: demoSeedUserId,
+        sourceSurface: 'web',
+        sourceTrigger: 'manual',
+        visibility: 'visible',
+        activityAt: Math.floor(now.getTime() / 1_000),
+        cachedStatus: fixture.cachedStatus,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    record(`lifecycle Session ${fixture.title}`, !existingSession);
+
+    const existingParticipant = await db.query.sessionParticipants.findFirst({
+      where: and(
+        eq(sessionParticipants.sessionId, fixture.id),
+        eq(sessionParticipants.userId, demoSeedUserId),
+      ),
+    });
+    if (!existingParticipant) {
+      await db.insert(sessionParticipants).values({
+        id: fixture.participantId,
+        sessionId: fixture.id,
+        userId: demoSeedUserId,
+        role: 'owner',
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    record(
+      `participant for lifecycle Session ${fixture.title}`,
+      !existingParticipant,
+    );
+
+    if ('taskId' in fixture) {
+      const insertedTaskLink = await db
+        .insert(sessionTasks)
+        .values({
+          sessionId: fixture.id,
+          taskId: fixture.taskId,
+          origin: 'backfill',
+        })
+        .onConflictDoNothing()
+        .returning({ taskId: sessionTasks.taskId });
+      const existingTaskLink = await db.query.sessionTasks.findFirst({
+        where: eq(sessionTasks.taskId, fixture.taskId),
+      });
+      let taskLinkChanged = insertedTaskLink.length > 0;
+      if (existingTaskLink?.sessionId !== fixture.id) {
+        await db
+          .update(sessionTasks)
+          .set({
+            sessionId: fixture.id,
+            attachedAt: now,
+            origin: 'backfill',
+          })
+          .where(eq(sessionTasks.taskId, fixture.taskId));
+        taskLinkChanged = true;
+      }
+      record(
+        `task link for lifecycle Session ${fixture.title}`,
+        taskLinkChanged,
+      );
+    }
   }
 
   // A single-PR task and a split task keep the seeded dashboard useful for

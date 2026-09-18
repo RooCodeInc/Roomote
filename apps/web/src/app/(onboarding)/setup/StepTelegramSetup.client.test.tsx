@@ -1,12 +1,21 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-const { invalidateQueriesMock, toastWarningMock } = vi.hoisted(() => ({
-  invalidateQueriesMock: vi.fn().mockResolvedValue(undefined),
-  toastWarningMock: vi.fn(),
-}));
+const { invalidateQueriesMock, repairMock, state, toastWarningMock } =
+  vi.hoisted(() => ({
+    invalidateQueriesMock: vi.fn().mockResolvedValue(undefined),
+    repairMock: vi.fn(),
+    state: {
+      setupSatisfied: false,
+      telegramWebhook: null as {
+        status: string;
+        lastErrorMessage: string | null;
+      } | null,
+    },
+    toastWarningMock: vi.fn(),
+  }));
 
 vi.mock('sonner', () => ({
-  toast: { error: vi.fn(), warning: toastWarningMock },
+  toast: { error: vi.fn(), success: vi.fn(), warning: toastWarningMock },
 }));
 
 vi.mock('@tanstack/react-query', () => ({
@@ -29,7 +38,8 @@ vi.mock('@tanstack/react-query', () => ({
           ],
           runtimeSatisfied: true,
           savedSatisfied: false,
-          setupSatisfied: false,
+          setupSatisfied: state.setupSatisfied,
+          telegramWebhook: state.telegramWebhook,
         },
       ],
     },
@@ -38,9 +48,14 @@ vi.mock('@tanstack/react-query', () => ({
   }),
   useMutation: (options: {
     onSuccess?: (result: unknown) => Promise<void>;
+    kind?: string;
   }) => ({
     isPending: false,
     mutate: () => {
+      if (options.kind === 'repair') {
+        repairMock();
+        return;
+      }
       if (options.onSuccess) {
         void options.onSuccess({
           telegramWebhook: { registered: false, error: 'network unavailable' },
@@ -59,6 +74,9 @@ vi.mock('@/trpc/client', () => ({
         queryKey: () => ['comms.status'],
       },
       saveAuthConfig: { mutationOptions: (options: unknown) => options },
+      repairTelegram: {
+        mutationOptions: (options: object) => ({ ...options, kind: 'repair' }),
+      },
     },
     linkedAccounts: {
       telegram: { queryKey: () => ['linkedAccounts.telegram'] },
@@ -87,6 +105,11 @@ vi.mock('./ProviderSetupExperience', () => ({
 import { StepTelegramSetup } from './StepTelegramSetup';
 
 describe('StepTelegramSetup', () => {
+  beforeEach(() => {
+    state.setupSatisfied = false;
+    state.telegramWebhook = null;
+  });
+
   it('warns about webhook failure and refreshes linking state after save', async () => {
     render(<StepTelegramSetup onContinue={vi.fn()} onBack={vi.fn()} />);
 
@@ -106,5 +129,22 @@ describe('StepTelegramSetup', () => {
       queryKey: ['linkedAccounts.telegram'],
     });
     expect(screen.getByText('Link Telegram account')).toBeInTheDocument();
+  });
+
+  it('shows the webhook diagnostic and Repair for runtime credentials', () => {
+    state.setupSatisfied = true;
+    state.telegramWebhook = {
+      status: 'unregistered',
+      lastErrorMessage: null,
+    };
+    render(<StepTelegramSetup onContinue={vi.fn()} onBack={vi.fn()} />);
+
+    expect(
+      screen.getByText(
+        'Telegram is configured, but its webhook is not connected.',
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Repair' }));
+    expect(repairMock).toHaveBeenCalledOnce();
   });
 });

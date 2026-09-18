@@ -52,10 +52,15 @@ export function buildChartData(
       timestamp: Date;
       label: string;
       total: number;
+      tokenTotal: number;
       segments: Map<string, number>;
+      tokenSegments: Map<string, number>;
     }
   >();
-  const seriesTotals = new Map<string, { label: string; total: number }>();
+  const seriesTotals = new Map<
+    string,
+    { label: string; total: number; tokenTotal: number }
+  >();
   let firstDataBucketStart: Date | null = null;
 
   for (const row of rows) {
@@ -71,7 +76,9 @@ export function buildChartData(
       timestamp: bucketStart,
       label: formatBucketLabel(bucketStart, granularity),
       total: 0,
+      tokenTotal: 0,
       segments: new Map<string, number>(),
+      tokenSegments: new Map<string, number>(),
     };
 
     if (!firstDataBucketStart || bucketStart < firstDataBucketStart) {
@@ -83,17 +90,27 @@ export function buildChartData(
       seriesDimension.key,
       (existing.segments.get(seriesDimension.key) ?? 0) + row.value,
     );
+    existing.tokenTotal += row.tokens ?? 0;
+    existing.tokenSegments.set(
+      seriesDimension.key,
+      (existing.tokenSegments.get(seriesDimension.key) ?? 0) +
+        (row.tokens ?? 0),
+    );
     bucketMap.set(bucketKey, existing);
 
     const existingSeries = seriesTotals.get(seriesDimension.key);
     seriesTotals.set(seriesDimension.key, {
       label: seriesDimension.label,
       total: (existingSeries?.total ?? 0) + row.value,
+      tokenTotal: (existingSeries?.tokenTotal ?? 0) + (row.tokens ?? 0),
     });
   }
 
   const series: AnalyticsSeries[] = [...seriesTotals.entries()]
-    .filter(([, value]) => value.total > 0)
+    .filter(
+      ([, value]) =>
+        value.total > 0 || (object === 'costs' && value.tokenTotal > 0),
+    )
     .sort((left, right) => {
       const leftLabel = left[1].label;
       const rightLabel = right[1].label;
@@ -109,7 +126,12 @@ export function buildChartData(
 
       return compareDimensionValues(viewBy, leftLabel, rightLabel);
     })
-    .map(([key, value]) => ({ key, label: value.label, total: value.total }));
+    .map(([key, value]) => ({
+      key,
+      label: value.label,
+      total: value.total,
+      ...(object === 'costs' ? { tokenTotal: value.tokenTotal } : {}),
+    }));
 
   for (const expectedBucket of getExpectedBuckets(
     timePeriod,
@@ -124,7 +146,9 @@ export function buildChartData(
         timestamp: expectedBucket,
         label: formatBucketLabel(expectedBucket, granularity),
         total: 0,
+        tokenTotal: 0,
         segments: new Map<string, number>(),
+        tokenSegments: new Map<string, number>(),
       });
     }
   }
@@ -136,6 +160,12 @@ export function buildChartData(
       label: bucket.label,
       total: bucket.total,
       segments: Object.fromEntries(bucket.segments),
+      ...(object === 'costs'
+        ? {
+            tokenTotal: bucket.tokenTotal,
+            tokenSegments: Object.fromEntries(bucket.tokenSegments),
+          }
+        : {}),
     }));
 
   const response: AnalyticsChartResponse = {
@@ -148,6 +178,7 @@ export function buildChartData(
   };
 
   if (object === 'costs') {
+    response.tokenTotal = rows.reduce((sum, row) => sum + (row.tokens ?? 0), 0);
     const costAnalytics = buildCostChartAnalytics(rows);
     response.costBreakdown = costAnalytics.costBreakdown;
     response.costSummary = costAnalytics.costSummary;

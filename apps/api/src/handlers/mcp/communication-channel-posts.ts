@@ -21,7 +21,7 @@ import {
   absolutizeSetupMarkdownLinks,
   getSlackFallbackText,
 } from './slack-message-content';
-import { normalizeSlackChannelTarget } from './slack-thread-lookup';
+import { resolveVerifiedSlackChannel } from './slack-thread-lookup';
 
 type ChannelPostTaskRun = {
   id: number;
@@ -66,6 +66,10 @@ const PROVIDER_UNAVAILABLE_ERRORS: Record<
     message: 'Discord bot token is not configured for outbound posts',
     status: 503,
   },
+  agentmail: {
+    message: 'AgentMail credentials are not configured for outbound posts',
+    status: 503,
+  },
 };
 
 function isOriginChannel(
@@ -86,6 +90,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 async function resolveSlackTarget(params: {
   provider: Extract<RuntimeCommunicationProviderAdapter, { provider: 'slack' }>;
+  taskRun: ChannelPostTaskRun;
   parsedBody: ParsedChannelPostBody;
 }): Promise<ResolvedChannelPostTarget> {
   const rawTarget = params.parsedBody.channel.trim();
@@ -118,14 +123,31 @@ async function resolveSlackTarget(params: {
       );
     }
 
-    const linkedUser = await db.query.slackUserMappings.findFirst({
+    const actingUserId = params.taskRun.actingUserId?.trim();
+    const actingSlackUser = actingUserId
+      ? await db.query.slackUserMappings.findFirst({
+          columns: { slackUserId: true },
+          where: and(
+            eq(slackUserMappings.userId, actingUserId),
+            eq(slackUserMappings.slackTeamId, params.provider.teamId),
+          ),
+        })
+      : null;
+    if (!actingSlackUser) {
+      throw new McpProxyError(
+        403,
+        'Slack DM posts require the acting user to have a linked Slack account in this workspace',
+      );
+    }
+
+    const linkedRecipient = await db.query.slackUserMappings.findFirst({
       columns: { userId: true },
       where: and(
         eq(slackUserMappings.slackUserId, slackUserId),
         eq(slackUserMappings.slackTeamId, params.provider.teamId),
       ),
     });
-    if (!linkedUser) {
+    if (!linkedRecipient) {
       throw new McpProxyError(
         403,
         'Slack DM recipient must have a linked Roomote account in this workspace',
@@ -146,35 +168,19 @@ async function resolveSlackTarget(params: {
     };
   }
 
-  const channelTarget = normalizeSlackChannelTarget(params.parsedBody.channel);
-  if (!channelTarget) {
-    throw new McpProxyError(400, 'channel is required');
-  }
-  if ('error' in channelTarget) {
-    throw new McpProxyError(400, channelTarget.error);
-  }
-
-  const channelId = await params.provider.resolveChannelId(channelTarget.value);
-  if (!channelId) {
+  if (!params.provider.teamId) {
     throw new McpProxyError(
       404,
-      `Could not resolve Slack channel ${channelTarget.value}.`,
+      'No active Slack installation found for this task workspace',
     );
   }
 
-  const membership = await params.provider.isAppInChannel(channelId);
-  if (membership === false) {
-    throw new McpProxyError(
-      403,
-      `Slack app is not a member of channel ${channelTarget.value}.`,
-    );
-  }
-  if (membership === null) {
-    throw new McpProxyError(
-      502,
-      `Could not verify Slack access for channel ${channelTarget.value}.`,
-    );
-  }
+  const channelId = await resolveVerifiedSlackChannel({
+    channel: params.parsedBody.channel,
+    slack: params.provider,
+    slackTeamId: params.provider.teamId,
+    actingSlackMembershipUserId: params.taskRun.actingUserId,
+  });
 
   return {
     channelId,
@@ -321,6 +327,7 @@ async function resolveChannelPostTarget(params: {
     case 'slack':
       return resolveSlackTarget({
         provider: params.provider,
+        taskRun: params.taskRun,
         parsedBody: params.parsedBody,
       });
     case 'teams':
@@ -329,6 +336,14 @@ async function resolveChannelPostTarget(params: {
       return resolveTelegramTarget(params);
     case 'discord':
       return resolveDiscordTarget({ ...params, provider: params.provider });
+    case 'agentmail':
+      // Email is inbound-initiated in v1: replies stay inside the durable
+      // conversation (via the thread-reply path), and there is no channel
+      // surface to post into.
+      throw new McpProxyError(
+        400,
+        'Email is inbound-initiated; posting to arbitrary addresses is not supported.',
+      );
   }
 }
 

@@ -104,6 +104,10 @@ export const updateRuntimeState = (
   options: AppRouterInput['taskRuns']['updateRuntimeState'],
 ) => client.taskRuns.updateRuntimeState.mutate(options);
 
+export const notifyUserAttention = (
+  options: AppRouterInput['taskRuns']['notifyUserAttention'],
+) => client.taskRuns.notifyUserAttention.mutate(options);
+
 export const touchTaskRunHeartbeat = (
   options: AppRouterInput['taskRuns']['touchTaskRunHeartbeat'],
   requestOptions?: TaskRunRequestOptions,
@@ -120,17 +124,6 @@ export const stampMilestone = (
 export const updateEnvironmentSetup = (
   options: AppRouterInput['taskRuns']['updateEnvironmentSetup'],
 ) => client.taskRuns.updateEnvironmentSetup.mutate(options);
-
-export const getGoal = (options: AppRouterInput['taskRuns']['getGoal']) =>
-  client.taskRuns.getGoal.query(options);
-
-export const claimGoalContinuation = (
-  options: AppRouterInput['taskRuns']['claimGoalContinuation'],
-) => client.taskRuns.claimGoalContinuation.mutate(options);
-
-export const releaseGoalContinuation = (
-  options: AppRouterInput['taskRuns']['releaseGoalContinuation'],
-) => client.taskRuns.releaseGoalContinuation.mutate(options);
 
 /**
  * Reconcile the worker's local actor state against the server-authoritative
@@ -183,9 +176,6 @@ export async function syncActingUserId(
 
   return { result: 'updated', actingUserId: serverUserId };
 }
-
-export const enqueue = (options: AppRouterInput['taskRuns']['enqueue']) =>
-  client.taskRuns.enqueue.mutate(options);
 
 export async function dequeue(
   options: AppRouterInput['taskRuns']['dequeue'],
@@ -324,6 +314,11 @@ export const publishFastAgentRequestUserInput = (
   options: AppRouterInput['taskRuns']['publishFastAgentRequestUserInput'],
 ) => client.taskRuns.publishFastAgentRequestUserInput.mutate(options);
 
+export const reportToParentSession = (
+  options: AppRouterInput['taskRuns']['reportToParentSession'],
+) => client.taskRuns.reportToParentSession.mutate(options);
+
+/** @deprecated Kept for workers already running against the prior API contract. */
 export const relayFastAgentChildChatReply = (
   options: AppRouterInput['taskRuns']['relayFastAgentChildChatReply'],
 ) => client.taskRuns.relayFastAgentChildChatReply.mutate(options);

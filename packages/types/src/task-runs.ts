@@ -12,9 +12,9 @@ import {
   queuedCommunicationMessageSchema,
 } from './communication';
 import { fastAgentParentSchema, taskReportConsumerSchema } from './fast-agent';
-import { SANDBOX_SNAPSHOT_EXPIRY_MS } from './compute-providers/worker-runtime';
+import { getSnapshotExpiryMs } from './compute-providers/snapshot-retention';
 import { prActions } from './cloud-agents';
-import { ALL_REPOSITORIES } from './constants';
+import { ALL_REPOSITORIES, NO_REPOSITORIES } from './constants';
 import { sourceControlProviderSchema } from './source-control';
 import { resolveTaskModelIdAlias } from './task-models';
 
@@ -65,6 +65,7 @@ export const TASK_SURFACES = [
   'teams',
   'telegram',
   'discord',
+  'agentmail',
   'linear',
   'github',
   'gitlab',
@@ -115,32 +116,33 @@ export const TASK_STATES = [
 
 export type TaskState = (typeof TASK_STATES)[number];
 
-export const TASK_GOAL_STATUSES = [
+export const SESSION_GOAL_STATUSES = [
   'active',
   'complete',
   'blocked',
   'budget_limited',
+  'canceled',
 ] as const;
 
-export type TaskGoalStatus = (typeof TASK_GOAL_STATUSES)[number];
+export type SessionGoalStatus = (typeof SESSION_GOAL_STATUSES)[number];
 
-export const DEFAULT_TASK_GOAL_MAX_CONTINUATIONS = 5;
+export const DEFAULT_SESSION_GOAL_MAX_CONTINUATIONS = 5;
 
-export const taskGoalInputSchema = z.object({
+export const sessionGoalInputSchema = z.object({
   objective: z.string().trim().min(1).max(10_000),
   maxContinuations: z
     .number()
     .int()
     .min(1)
     .max(20)
-    .default(DEFAULT_TASK_GOAL_MAX_CONTINUATIONS),
+    .default(DEFAULT_SESSION_GOAL_MAX_CONTINUATIONS),
 });
 
-export type TaskGoalInput = z.infer<typeof taskGoalInputSchema>;
+export type SessionGoalInput = z.infer<typeof sessionGoalInputSchema>;
 
-export type TaskGoal = TaskGoalInput & {
-  generation: string | null;
-  status: TaskGoalStatus;
+export type SessionGoal = SessionGoalInput & {
+  generation: string;
+  status: SessionGoalStatus;
   continuationsUsed: number;
   blockedReason: string | null;
   completedAt: Date | null;
@@ -177,6 +179,12 @@ export type TaskInitiator =
       kind: 'automation';
       key: BackgroundAutomationKey;
       actor?: { externalId: string; displayName?: string };
+      /**
+       * The person the automation runs as. The task stays attributed to the
+       * automation; this only seeds the run's acting user so actor-scoped
+       * credentials (user API keys, user MCP connections) resolve to them.
+       */
+      actingUserId?: string;
     };
 
 /**
@@ -193,7 +201,7 @@ export function getTaskInitiatorLinkedUserId(
   initiator: TaskInitiator,
 ): string | null {
   if (initiator.kind === 'automation') {
-    return null;
+    return initiator.actingUserId ?? null;
   }
 
   if ('userId' in initiator) {
@@ -291,6 +299,7 @@ export const TRACKED_MESSAGE_SURFACES = [
   'teams',
   'telegram',
   'discord',
+  'agentmail',
 ] as const;
 export type TrackedMessageSurface = (typeof TRACKED_MESSAGE_SURFACES)[number];
 
@@ -463,6 +472,7 @@ export const EXPIRED_SNAPSHOT_RESUME_ERROR =
 
 export function isSnapshotResumable(
   snapshotCreatedAt: Date | null | undefined,
+  provider: string | null | undefined,
   nowMs: number = Date.now(),
 ): boolean {
   if (
@@ -472,7 +482,8 @@ export function isSnapshotResumable(
     return false;
   }
 
-  return nowMs - snapshotCreatedAt.getTime() < SANDBOX_SNAPSHOT_EXPIRY_MS;
+  const expiryMs = getSnapshotExpiryMs(provider);
+  return expiryMs === null || nowMs - snapshotCreatedAt.getTime() < expiryMs;
 }
 
 const COMPLETE_TASK_ON_SNAPSHOT_PAYLOAD_FLAG = '__completeTaskOnSnapshot';
@@ -534,6 +545,46 @@ export function shouldUseAppTokenOnly(type: TaskPayloadKind): boolean {
   ];
 
   return appTokenOnlyTypes.includes(type);
+}
+
+/**
+ * Review-pipeline runs carry a Fast parent only for session visibility:
+ * review outcomes reach the session through the reviewed PR's feedback relay
+ * and the PR summary comment, so review runs stay quiet on the parent-event
+ * channel except for failures.
+ *
+ * Runs persist the bare payload with the kind in their own `payloadKind`
+ * column, so this reads the run's kind and never `payload.type`.
+ */
+export function isPrReviewRun(run: {
+  payloadKind?: TaskPayloadKind | string | null;
+}): boolean {
+  return (
+    run.payloadKind === TaskPayloadKind.GithubPrReview ||
+    run.payloadKind === TaskPayloadKind.GithubPrReviewSync
+  );
+}
+
+/**
+ * A Session explicitly asked for this review through `review_pull_request`,
+ * so its outcome must reach that Session even though review runs otherwise
+ * stay quiet there. The single carrier is the pull-request feedback relay.
+ */
+export function isSessionRequestedReviewRun(run: {
+  payloadKind?: TaskPayloadKind | string | null;
+  payload?: unknown;
+}): boolean {
+  if (!isPrReviewRun(run)) {
+    return false;
+  }
+  const payload = run.payload;
+  return (
+    Boolean(payload) &&
+    typeof payload === 'object' &&
+    !Array.isArray(payload) &&
+    (payload as { fastParentRequestedReview?: unknown })
+      .fastParentRequestedReview === true
+  );
 }
 
 /**
@@ -1047,12 +1098,16 @@ const sharedTaskPayloadSchema = z.object({
   fastAgentParent: fastAgentParentSchema.optional(),
   /** Explicit consumer for the coding agent's completion report. */
   reportConsumer: taskReportConsumerSchema.optional(),
-  /** Native Slack task card in the parent thread of a Fast-mode delegation.
+  /** Provider-native live task message for a Fast-mode delegation.
    * Inherited onto every snapshot resume by the queue so the card follows
    * the task. */
   liveTaskStream: z.boolean().optional(),
   /** Runless Fast conversation that delegated this task on any chat provider. */
   fastAgentSessionId: z.string().uuid().optional(),
+  /** A Session explicitly requested this review, so its result reaches that
+   * Session through the pull-request feedback relay even though review runs
+   * otherwise stay quiet there. Settle still announces only failures. */
+  fastParentRequestedReview: z.boolean().optional(),
   /** Provider event that caused this fresh launch; used for idempotent retries. */
   communicationSourceEventId: z.string().optional(),
   /**
@@ -2085,6 +2140,9 @@ type TaskWorkspacePayload = {
 
 export type TaskWorkspace =
   | {
+      type: 'no_repositories';
+    }
+  | {
       type: 'repository';
       repo: string;
       branch?: string;
@@ -2129,6 +2187,10 @@ export function resolveTaskWorkspace(
       sourceBranch: payload.branch,
       sourceSha: payload.sha,
     };
+  }
+
+  if (payload.repo === NO_REPOSITORIES) {
+    return { type: 'no_repositories' };
   }
 
   if (payload.repo === ALL_REPOSITORIES) {

@@ -1,4 +1,4 @@
-import { RunStatus, TaskPayloadKind } from '@roomote/types';
+import { NO_REPOSITORIES, RunStatus, TaskPayloadKind } from '@roomote/types';
 import type { TaskRun } from '@roomote/db/server';
 
 const {
@@ -13,6 +13,8 @@ const {
   mockResolveSandboxModelRuntimeEnv,
   mockTaskRunsFindFirst,
   mockNotifySourceRunOnSettle,
+  mockNotifyWebTaskInitiatorOnSettle,
+  mockEnqueueWebTaskInitiatorSettleNotification,
   mockCaptureTaskSettled,
 } = vi.hoisted(() => ({
   mockDecryptSecrets: vi.fn(),
@@ -26,6 +28,8 @@ const {
   mockResolveSandboxModelRuntimeEnv: vi.fn(),
   mockTaskRunsFindFirst: vi.fn(),
   mockNotifySourceRunOnSettle: vi.fn(),
+  mockNotifyWebTaskInitiatorOnSettle: vi.fn(),
+  mockEnqueueWebTaskInitiatorSettleNotification: vi.fn(),
   mockCaptureTaskSettled: vi.fn(),
 }));
 
@@ -112,6 +116,16 @@ vi.mock('../notify-source-run-on-settle', () => ({
 
 vi.mock('../notify-fast-agent-parent-on-settle', () => ({
   notifyFastAgentParentOnSettle: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('../notify-web-task-initiator-on-settle', () => ({
+  notifyWebTaskInitiatorOnSettle: (...args: unknown[]) =>
+    mockNotifyWebTaskInitiatorOnSettle(...args),
+}));
+
+vi.mock('../enqueue-web-task-initiator-settle-notification', () => ({
+  enqueueWebTaskInitiatorSettleNotification: (...args: unknown[]) =>
+    mockEnqueueWebTaskInitiatorSettleNotification(...args),
 }));
 
 import { resolveWorkspaceSourceControlProvider } from '@roomote/db/server';
@@ -221,6 +235,55 @@ describe('createSourceControlTokenForTaskRun', () => {
       envVars: { GH_TOKEN: 'ghs_app_token' },
       source: 'app',
       expiresAt: new Date('2030-01-01T01:00:00.000Z'),
+    });
+    expect(mockCreateTaskRunWorkerGitHubTokenWithMetadata).toHaveBeenCalledWith(
+      taskRun,
+    );
+  });
+
+  it('does not require or mint source-control credentials for Blank slate', async () => {
+    const result = await createSourceControlTokenForTaskRun(
+      makeTaskRun({
+        repo: NO_REPOSITORIES,
+        description: 'Create a standalone artifact',
+      }),
+      '[test]',
+      { maxRetries: 1 },
+    );
+
+    expect(result).toMatchObject({
+      provider: 'github',
+      token: '',
+      envVars: {},
+      source: 'app',
+      expiresAt: null,
+    });
+    expect(
+      mockCreateTaskRunWorkerGitHubTokenWithMetadata,
+    ).not.toHaveBeenCalled();
+    expect(mockCreateTaskRunScopedGitLabTokens).not.toHaveBeenCalled();
+    expect(mockCreateTaskRunGiteaCredentials).not.toHaveBeenCalled();
+    expect(mockCreateTaskRunAdoCredentials).not.toHaveBeenCalled();
+    expect(mockCreateTaskRunBitbucketCredentials).not.toHaveBeenCalled();
+  });
+
+  it('mints credentials for a Blank slate stamped with the deployment repositories', async () => {
+    const taskRun = makeTaskRun({
+      repo: NO_REPOSITORIES,
+      description: 'Investigate and open a PR if needed',
+      sourceControlProvider: 'github',
+      repositoryProviders: { 'acme/api': 'github', 'acme/web': 'github' },
+    });
+
+    const result = await createSourceControlTokenForTaskRun(taskRun, '[test]', {
+      maxRetries: 1,
+    });
+
+    expect(result).toMatchObject({
+      provider: 'github',
+      token: 'ghs_app_token',
+      envVars: { GH_TOKEN: 'ghs_app_token' },
+      source: 'app',
     });
     expect(mockCreateTaskRunWorkerGitHubTokenWithMetadata).toHaveBeenCalledWith(
       taskRun,
@@ -823,6 +886,7 @@ describe('notifyCanceledTaskRunOnSettle', () => {
     mockTaskRunsFindFirst.mockResolvedValueOnce({
       error: 'Failed to create source control token.',
     });
+    mockNotifyWebTaskInitiatorOnSettle.mockResolvedValueOnce('delivered');
 
     await notifyCanceledTaskRunOnSettle(taskRun);
 
@@ -838,6 +902,24 @@ describe('notifyCanceledTaskRunOnSettle', () => {
       taskRun.id,
       RunStatus.Canceled,
     );
+    expect(mockNotifyWebTaskInitiatorOnSettle).toHaveBeenCalledWith(
+      taskRun,
+      RunStatus.Canceled,
+    );
+  });
+
+  it('queues a durable retry when canceled-run personal delivery fails', async () => {
+    const taskRun = makeTaskRun({ repo: 'owner/repo', description: 'Task' });
+    mockTaskRunsFindFirst.mockResolvedValueOnce({ error: 'Canceled.' });
+    mockNotifyWebTaskInitiatorOnSettle.mockResolvedValueOnce('failed');
+
+    await notifyCanceledTaskRunOnSettle(taskRun);
+
+    expect(mockEnqueueWebTaskInitiatorSettleNotification).toHaveBeenCalledWith({
+      runId: taskRun.id,
+      taskId: taskRun.taskId,
+      status: RunStatus.Canceled,
+    });
   });
 });
 
@@ -945,6 +1027,7 @@ describe('redactControlPlaneEnvVars', () => {
         DASHBOARD_PASSWORD: 'dash',
         DATABASE_URL: 'postgres://x',
         S3_SECRET_ACCESS_KEY: 's3',
+        SANDBOX_OPENROUTER_API_KEY: 'sandbox-openrouter-key',
         // Derived from the source-control secret catalog.
         GITLAB_WEBHOOK_SECRET: 'gl-webhook',
         GITLAB_CLIENT_SECRET: 'gl-client',
@@ -967,6 +1050,7 @@ describe('redactControlPlaneEnvVars', () => {
       OPENAI_API_KEY: 'sk-test',
       ANTHROPIC_API_KEY: 'sk-ant',
       OPENROUTER_API_KEY: 'sk-or',
+      SANDBOX_OPENROUTER_API_KEY: 'sandbox-openrouter-key',
       MY_APP_CONFIG: 'value',
       GITLAB_TOKEN: 'glpat-scoped',
     });
@@ -979,6 +1063,33 @@ describe('redactControlPlaneEnvVars', () => {
 });
 
 describe('fetchResolvedRuntimeEnvVars', () => {
+  it('withholds the sandbox OpenRouter key from ordinary tasks', async () => {
+    mockResolveSandboxModelRuntimeEnv.mockResolvedValueOnce({});
+
+    const envVars = await fetchResolvedRuntimeEnvVars({
+      SANDBOX_OPENROUTER_API_KEY: 'sandbox-openrouter-key',
+      MY_APP_CONFIG: 'value',
+    });
+
+    expect(envVars).not.toHaveProperty('SANDBOX_OPENROUTER_API_KEY');
+    expect(envVars.MY_APP_CONFIG).toBe('value');
+  });
+
+  it('admits the sandbox OpenRouter key only for environment-linked workers', async () => {
+    mockResolveSandboxModelRuntimeEnv.mockResolvedValueOnce({});
+
+    const envVars = await fetchResolvedRuntimeEnvVars(
+      {
+        SANDBOX_OPENROUTER_API_KEY: 'sandbox-openrouter-key',
+        MY_APP_CONFIG: 'value',
+      },
+      { includeSandboxOpenRouterApiKey: true },
+    );
+
+    expect(envVars.SANDBOX_OPENROUTER_API_KEY).toBe('sandbox-openrouter-key');
+    expect(envVars.MY_APP_CONFIG).toBe('value');
+  });
+
   it('mirrors resolved model env to legacy ROOMOTE_* aliases for pre-rename snapshot workers', async () => {
     mockResolveSandboxModelRuntimeEnv.mockResolvedValueOnce({
       R_MODEL: 'anthropic/claude-test',

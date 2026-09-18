@@ -168,6 +168,7 @@ services:
   controller:
     environment:
       <<: *roomote-production-env
+      SANDBOX_OPENROUTER_API_KEY: ${SANDBOX_OPENROUTER_API_KEY:-}
     healthcheck:
       test:
         [

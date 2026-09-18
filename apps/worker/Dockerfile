@@ -8,13 +8,13 @@ FROM ubuntu:24.04 AS runtime
 # to their source.
 LABEL org.opencontainers.image.source=https://github.com/RooCodeInc/Roomote
 
-ARG AGENT_BROWSER_VERSION=0.33.2
+ARG AGENT_BROWSER_VERSION=0.37.0
 ARG OPENCODE_CLI_VERSION=1.18.10
 ARG FFMPEG_INSTALLER_VERSION=1.1.0
 # @ffprobe-installer (not ffprobe-static, which ships no linux/arm64 binary
 # yet still reports a path for it) so amd64 and arm64 images share one recipe.
 ARG FFPROBE_INSTALLER_VERSION=2.1.2
-ARG GH_VERSION=2.81.0
+ARG GH_VERSION=2.101.0
 ARG NODE_PTY_VERSION=1.1.0
 ARG PM2_VERSION=7.0.1
 # Remotion mirrors chrome-headless-shell builds for both linux64 and

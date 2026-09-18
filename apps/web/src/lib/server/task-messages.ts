@@ -1,4 +1,5 @@
 import {
+  ACP_ENVELOPE_EVENT_TYPES,
   type AcpEventType,
   sanitizeEnvelopeFields,
   inferAcpMessageKind,
@@ -12,16 +13,89 @@ import {
   asc,
   and,
   db,
+  desc,
   eq,
+  inArray,
   like,
   not,
+  sql,
   taskMessages,
   tasks,
   users,
 } from '@roomote/db/server';
 
-import type { TaskMessageEnvelope } from '@/types';
+import type {
+  TaskMessageEnvelope,
+  TaskMessageEnvelopeCursor,
+  TaskMessageEnvelopePage,
+} from '@/types';
 import { getUserDisplayName } from '@/lib/user-display-name';
+import { COMPOSER_SUGGESTION_HISTORY_LIMIT } from './composer-suggestion-history';
+
+/**
+ * The newest persisted conversational history for composer suggestions,
+ * reduced to the minimal shape the suggestion prompt is built from. Bounded
+ * in SQL so long tasks never load their full transcript, filtered to
+ * user/assistant events, and restricted to transcript-visible entries so
+ * hidden continuation/setup prompts cannot influence the suggestion.
+ */
+export async function getTaskSuggestableMessages(taskId: string): Promise<
+  Array<{
+    id: string;
+    eventType: string;
+    role: string | null;
+    text: string | null;
+  }>
+> {
+  const rows = await db
+    .select({
+      id: taskMessages.id,
+      eventType: taskMessages.eventType,
+      role: taskMessages.role,
+      contentBlocks: taskMessages.contentBlocks,
+      metadata: taskMessages.metadata,
+      payload: taskMessages.payload,
+    })
+    .from(taskMessages)
+    .where(
+      and(
+        eq(taskMessages.taskId, taskId),
+        eq(taskMessages.protocol, ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL),
+        inArray(taskMessages.eventType, [
+          ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+          ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        ]),
+        sql`coalesce(${taskMessages.metadata} ->> 'visibleInTranscript', 'true') <> 'false'`,
+      ),
+    )
+    .orderBy(
+      desc(taskMessages.createdAt),
+      desc(taskMessages.ts),
+      desc(taskMessages.id),
+    )
+    .limit(COMPOSER_SUGGESTION_HISTORY_LIMIT);
+
+  return rows
+    .reverse()
+    .filter((row) =>
+      resolveAcpTranscriptVisibility({
+        eventType: row.eventType as AcpEventType,
+        contentBlocks: row.contentBlocks,
+        metadata: (row.metadata as Record<string, unknown> | null) ?? null,
+        payload: (row.payload as Record<string, unknown> | null) ?? null,
+      }),
+    )
+    .map((row) => ({
+      id: row.id,
+      eventType: row.eventType,
+      role: row.role,
+      text:
+        extractAcpMessageText(
+          row.contentBlocks,
+          (row.payload as Record<string, unknown> | null) ?? null,
+        ) ?? null,
+    }));
+}
 
 export async function getTaskMessageEnvelopes({
   taskId,
@@ -55,8 +129,100 @@ export async function getTaskMessageEnvelopes({
     .innerJoin(tasks, eq(tasks.id, taskMessages.taskId))
     .leftJoin(users, eq(users.id, taskMessages.userId))
     .where(and(...whereConditions))
-    .orderBy(asc(taskMessages.createdAt), asc(taskMessages.ts));
+    .orderBy(
+      asc(taskMessages.createdAt),
+      asc(taskMessages.ts),
+      asc(taskMessages.id),
+    );
 
+  return mapTaskMessageEnvelopeRows(rows);
+}
+
+export const TASK_MESSAGE_ENVELOPE_PAGE_SIZE = 200;
+
+export async function getTaskMessageEnvelopePage({
+  taskId,
+  cursor,
+  limit = TASK_MESSAGE_ENVELOPE_PAGE_SIZE,
+}: {
+  taskId: string;
+  cursor?: TaskMessageEnvelopeCursor;
+  limit?: number;
+}): Promise<TaskMessageEnvelopePage> {
+  const rows = await db
+    .select({
+      id: taskMessages.id,
+      userId: taskMessages.userId,
+      userName: users.name,
+      userEmail: users.email,
+      userImageUrl: users.imageUrl,
+      taskId: taskMessages.taskId,
+      ts: taskMessages.ts,
+      createdAt: taskMessages.createdAt,
+      eventType: taskMessages.eventType,
+      role: taskMessages.role,
+      protocol: taskMessages.protocol,
+      contentBlocks: taskMessages.contentBlocks,
+      metadata: taskMessages.metadata,
+      payload: taskMessages.payload,
+      cursorCreatedAt: sql<string>`${taskMessages.createdAt}::text`,
+    })
+    .from(taskMessages)
+    .innerJoin(tasks, eq(tasks.id, taskMessages.taskId))
+    .leftJoin(users, eq(users.id, taskMessages.userId))
+    .where(
+      and(
+        eq(taskMessages.taskId, taskId),
+        eq(taskMessages.protocol, ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL),
+        not(like(taskMessages.eventType, 'roomote_runtime.output.%')),
+        cursor ? sql`${taskMessages.ts} <= ${cursor.ts}` : undefined,
+        cursor
+          ? sql`(${taskMessages.ts}, ${taskMessages.createdAt}, ${taskMessages.id}) < (${cursor.ts}, ${cursor.createdAt}::timestamp, ${cursor.id}::uuid)`
+          : undefined,
+      ),
+    )
+    .orderBy(
+      desc(taskMessages.ts),
+      desc(taskMessages.createdAt),
+      desc(taskMessages.id),
+    )
+    .limit(limit + 1);
+
+  const hasOlderMessages = rows.length > limit;
+  const pageRows = rows.slice(0, limit);
+  const oldestRow = pageRows.at(-1);
+
+  return {
+    messages: mapTaskMessageEnvelopeRows(pageRows.toReversed()),
+    nextCursor:
+      hasOlderMessages && oldestRow
+        ? {
+            createdAt: oldestRow.cursorCreatedAt,
+            ts: Number(oldestRow.ts),
+            id: oldestRow.id,
+          }
+        : null,
+  };
+}
+
+function mapTaskMessageEnvelopeRows(
+  rows: Array<{
+    id: string;
+    userId: string | null;
+    userName: string | null;
+    userEmail: string | null;
+    userImageUrl: string | null;
+    taskId: string;
+    ts: number;
+    createdAt: Date;
+    eventType: string;
+    role: TaskMessageEnvelope['role'];
+    protocol: TaskMessageEnvelope['protocol'];
+    contentBlocks: TaskMessageEnvelope['contentBlocks'];
+    metadata: unknown;
+    payload: unknown;
+  }>,
+): TaskMessageEnvelope[] {
   return rows.map((row) => {
     // Sanitize at the read boundary: the DB stores full payloads,
     // but we truncate oversized tool output before serving to clients.
@@ -90,7 +256,7 @@ export async function getTaskMessageEnvelopes({
       metadata: sanitized.metadata,
       payload: sanitized.payload,
       visibleInTranscript: resolveAcpTranscriptVisibility({
-        eventType: row.eventType,
+        eventType: row.eventType as AcpEventType,
         contentBlocks: sanitized.contentBlocks,
         metadata: sanitized.metadata,
         payload: sanitized.payload,

@@ -2,14 +2,19 @@ import {
   automations,
   db,
   deploymentSettings,
+  inArray,
   slackInstallations,
   upsertAutomation,
   users,
 } from '@roomote/db/server';
+import { USER_FACING_AUTOMATION_KEYS } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
+import { registerExclusiveAutomationSettingsDatabaseLock } from '@/testing/exclusive-automation-settings-database-lock';
 
 import { getBackgroundAgentSettingsCommand } from '../settings-read';
+
+registerExclusiveAutomationSettingsDatabaseLock();
 
 const SETTINGS_READ_USER_ID = 'user-settings-read-admin';
 const MANAGER_CHANNEL_ID = 'CMANAGER1';
@@ -23,7 +28,6 @@ const adminAuth: UserAuthSuccess = {
   name: 'Admin',
   primaryEmail: 'admin@example.com',
   isAdmin: true,
-  featureFlags: {},
   anonymousAnalyticsEnabled: false,
   cloudEnabled: false,
   cookieConsentedAt: null,
@@ -88,7 +92,10 @@ describe('getBackgroundAgentSettingsCommand Slack fan-out', () => {
   beforeEach(async () => {
     process.env.SLACK_API_BASE_URL = 'https://slack.com/api/';
 
-    await db.delete(automations);
+    // Internal automation rows are referenced by other suites' task fixtures.
+    await db
+      .delete(automations)
+      .where(inArray(automations.key, USER_FACING_AUTOMATION_KEYS));
     await db.delete(deploymentSettings);
     await db.delete(slackInstallations);
 
@@ -173,6 +180,12 @@ describe('getBackgroundAgentSettingsCommand Slack fan-out', () => {
     expect(result.resolvedDestinations.manager_stats?.channelId).toBe(
       STATS_CHANNEL_ID,
     );
+    expect(result.settings.releaseAnnouncementsEnabled).toBe(true);
+    expect(result.resolvedDestinations.release_announcements).toMatchObject({
+      provider: 'slack',
+      channelId: MANAGER_CHANNEL_ID,
+      source: 'manager_channel',
+    });
     expect(result.settings.managerDiscordChannelId).toBe(
       MANAGER_DISCORD_CHANNEL_ID,
     );

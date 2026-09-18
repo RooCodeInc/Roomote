@@ -3,6 +3,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { useTRPC } from '@/trpc/client';
+import { invalidateMcpIntegrationStatusQueries } from './invalidateMcpIntegrationStatusQueries';
 
 export function useConnectMcp() {
   const trpc = useTRPC();
@@ -11,9 +12,7 @@ export function useConnectMcp() {
   return useMutation(
     trpc.mcpConnections.connect.mutationOptions({
       onSuccess: () => {
-        queryClient.invalidateQueries({
-          queryKey: trpc.mcpConnections.userConnections.queryKey(),
-        });
+        void invalidateMcpIntegrationStatusQueries(queryClient, trpc);
       },
     }),
   );

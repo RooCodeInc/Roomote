@@ -33,7 +33,13 @@ export function PreviewPaneLayout({
     <ResponsiveWorkspacePanels
       isPanelOpen={activeView !== null}
       main={children}
-      panel={<TaskSidePanelDesktop session={session} diffPanel={diffPanel} />}
+      panel={
+        <TaskSidePanelDesktop
+          activeView={activeView}
+          session={session}
+          diffPanel={diffPanel}
+        />
+      }
     />
   );
 }

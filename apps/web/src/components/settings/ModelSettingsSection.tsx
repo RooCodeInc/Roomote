@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
@@ -41,9 +41,7 @@ import {
   ScanSearch,
   Select,
   SelectContent,
-  SelectGroup,
   SelectItem,
-  SelectLabel,
   SelectTrigger,
   SelectValue,
   Spinner,
@@ -53,7 +51,21 @@ import {
 import type { LucideIcon } from '@/components/system';
 import { Section } from '@/components/settings';
 import { ReasoningEffortSelect } from '@/components/tasks/ReasoningEffortSelect';
+import { JudgmentModelRow } from './JudgmentModelRow';
+import {
+  CodingModelRoutingRulesEditor,
+  cloneCodingModelRoutingRules,
+  codingModelRoutingRulesEqual,
+  prepareCodingModelRoutingRulesForSave,
+  removeModelFromCodingModelRoutingRules,
+  type CodingModelRoutingRulesChange,
+  type CodingModelRoutingRulesDraft,
+} from './CodingModelRoutingRulesEditor';
 import { formatMetadataSummary } from './model-metadata';
+import {
+  TaskModelSelect,
+  type EditableRuntimeModelOption,
+} from './TaskModelSelect';
 import {
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
   DEFAULT_MODEL_ROLE_REASONING_EFFORTS,
@@ -83,12 +95,6 @@ type EditableTaskModel = {
   metadata?: TaskModelMetadata | null;
 };
 
-type EditableRuntimeModelOption = {
-  id: string;
-  displayName: string;
-  family?: string;
-};
-
 type TaskModelRoleDraft = {
   modelId: string | null;
   reasoningEffort: ReasoningEffort | null;
@@ -105,6 +111,7 @@ type ModelSettingsSectionDraft = {
   models: EditableTaskModel[];
   enabledModelIds: string[];
   roles: TaskModelRoleDrafts;
+  codingModelRoutingRules: CodingModelRoutingRulesDraft;
 };
 
 type SuggestionState = {
@@ -151,12 +158,12 @@ const SECONDARY_TASK_MODEL_ROLES = TASK_MODEL_ROLES.filter(
 const TASK_MODEL_ROLE_CONFIGS: readonly TaskModelRoleConfig[] = [
   {
     role: 'coding',
-    label: 'Default coding model',
+    label: 'Coding model',
     description:
       'Used for new task launches and persisted runtime coding model config.',
     icon: Code2,
     placeholder: 'Select a default coding model',
-    reasoningAriaLabel: 'Default coding model reasoning level',
+    reasoningAriaLabel: 'Coding model reasoning level',
   },
   {
     role: 'orchestration',
@@ -170,8 +177,7 @@ const TASK_MODEL_ROLE_CONFIGS: readonly TaskModelRoleConfig[] = [
   {
     role: 'helper',
     label: 'Helper model',
-    description:
-      'Used for non-task calls such as routing, titles, and summaries.',
+    description: 'Used for non-task calls such as titles and summaries.',
     icon: HandHelping,
     placeholder: 'Select a helper model',
     reasoningAriaLabel: 'Helper model reasoning level',
@@ -224,6 +230,7 @@ function TaskModelRoleEditor({
   reasoningEffort,
   onModelChange,
   onReasoningChange,
+  children,
 }: {
   config: TaskModelRoleConfig;
   managedByEnv: boolean;
@@ -234,6 +241,7 @@ function TaskModelRoleEditor({
   reasoningEffort: ReasoningEffort | null;
   onModelChange: (value: string) => void;
   onReasoningChange: (value: ReasoningEffort | null) => void;
+  children?: ReactNode;
 }) {
   const Icon = config.icon;
   const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[config.role];
@@ -249,7 +257,6 @@ function TaskModelRoleEditor({
       : managedByEnv
         ? `Set by ${descriptor.modelEnvVar}, not changeable in the UI.`
         : `Set by ${descriptor.reasoningEnvVar}, not changeable in the UI.`;
-  const showProviderHeaders = optionGroups.length > 1;
 
   return (
     <div className="flex items-start gap-3 py-3 first:pt-0 last:pb-0">
@@ -272,40 +279,18 @@ function TaskModelRoleEditor({
           <p className="text-xs text-muted-foreground">{config.description}</p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Select
+          <TaskModelSelect
             value={selectValue}
-            onValueChange={onModelChange}
             disabled={managedByEnv || optionGroups.length === 0}
-          >
-            <SelectTrigger className="w-full sm:max-w-sm">
-              <SelectValue placeholder={config.placeholder} />
-            </SelectTrigger>
-            <SelectContent>
-              {descriptor.modelFallback === 'coding' && (
-                <SelectItem value={SAME_AS_CODING_MODEL_VALUE}>
-                  Same as coding model
-                </SelectItem>
-              )}
-              {showProviderHeaders
-                ? optionGroups.map((group) => (
-                    <SelectGroup key={group.providerId}>
-                      <SelectLabel>{group.label}</SelectLabel>
-                      {group.items.map((option) => (
-                        <SelectItem key={option.id} value={option.id}>
-                          {option.displayName}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  ))
-                : optionGroups.flatMap((group) =>
-                    group.items.map((option) => (
-                      <SelectItem key={option.id} value={option.id}>
-                        {option.displayName}
-                      </SelectItem>
-                    )),
-                  )}
-            </SelectContent>
-          </Select>
+            placeholder={config.placeholder}
+            optionGroups={optionGroups}
+            sameAsCodingModelValue={
+              descriptor.modelFallback === 'coding'
+                ? SAME_AS_CODING_MODEL_VALUE
+                : undefined
+            }
+            onValueChange={onModelChange}
+          />
           {supportsReasoning && (
             <ReasoningEffortSelect
               value={reasoningEffort}
@@ -316,6 +301,7 @@ function TaskModelRoleEditor({
             />
           )}
         </div>
+        {children}
       </div>
     </div>
   );
@@ -555,6 +541,9 @@ function cloneDraft(
     })),
     enabledModelIds: [...draft.enabledModelIds],
     roles: cloneTaskModelRoleDrafts(draft.roles),
+    codingModelRoutingRules: cloneCodingModelRoutingRules(
+      draft.codingModelRoutingRules,
+    ),
   };
 }
 
@@ -580,6 +569,15 @@ function draftsEqual(
     ) {
       return false;
     }
+  }
+
+  if (
+    !codingModelRoutingRulesEqual(
+      left.codingModelRoutingRules,
+      right.codingModelRoutingRules,
+    )
+  ) {
+    return false;
   }
 
   for (let index = 0; index < left.enabledModelIds.length; index += 1) {
@@ -723,17 +721,22 @@ export function ModelSettingsSection({
   const saveInFlightRef = useRef(false);
   const saveQueuedRef = useRef(false);
   const suppressNextSaveSuccessToastRef = useRef(false);
+  const suppressSuccessToastForDraftRef =
+    useRef<ModelSettingsSectionDraft | null>(null);
   const lastSyncedDraftRef = useRef<ModelSettingsSectionDraft | null>(null);
   const draftStateRef = useRef<ModelSettingsSectionDraft>({
     models: [],
     enabledModelIds: [],
     roles: createEmptyTaskModelRoleDrafts(),
+    codingModelRoutingRules: [],
   });
   const [models, setModels] = useState<EditableTaskModel[]>([]);
   const [enabledModelIds, setEnabledModelIds] = useState<string[]>([]);
   const [roleDrafts, setRoleDrafts] = useState<TaskModelRoleDrafts>(
     createEmptyTaskModelRoleDrafts,
   );
+  const [codingModelRoutingRules, setCodingModelRoutingRules] =
+    useState<CodingModelRoutingRulesDraft>([]);
   const [newModelId, setNewModelId] = useState('');
   const [newModelProvider, setNewModelProvider] =
     useState<SetupModelProviderId>('openrouter');
@@ -900,8 +903,9 @@ export function ModelSettingsSection({
       models,
       enabledModelIds,
       roles: roleDrafts,
+      codingModelRoutingRules,
     };
-  }, [enabledModelIds, models, roleDrafts]);
+  }, [codingModelRoutingRules, enabledModelIds, models, roleDrafts]);
 
   useEffect(() => {
     return () => {
@@ -966,6 +970,7 @@ export function ModelSettingsSection({
             settingsData.runtimeModels.planningModel.reasoningEffort,
         },
       },
+      codingModelRoutingRules: settingsData.codingModelRoutingRules ?? [],
     } satisfies ModelSettingsSectionDraft;
 
     const isLocallyClean = draftsEqual(
@@ -982,6 +987,7 @@ export function ModelSettingsSection({
     setModels(nextDraft.models);
     setEnabledModelIds(nextDraft.enabledModelIds);
     setRoleDrafts(nextDraft.roles);
+    setCodingModelRoutingRules(nextDraft.codingModelRoutingRules);
   }, [settingsData]);
 
   const enabledModelSet = useMemo(
@@ -1264,6 +1270,7 @@ export function ModelSettingsSection({
     setModels(clonedDraft.models);
     setEnabledModelIds(clonedDraft.enabledModelIds);
     setRoleDrafts(clonedDraft.roles);
+    setCodingModelRoutingRules(clonedDraft.codingModelRoutingRules);
   };
 
   const applyDraftUpdates = (
@@ -1274,6 +1281,8 @@ export function ModelSettingsSection({
       models: updates.models ?? models,
       enabledModelIds: updates.enabledModelIds ?? enabledModelIds,
       roles: updates.roles ?? roleDrafts,
+      codingModelRoutingRules:
+        updates.codingModelRoutingRules ?? codingModelRoutingRules,
     });
     scheduleSave(delayMs);
   };
@@ -1317,6 +1326,27 @@ export function ModelSettingsSection({
     );
   };
 
+  const handleCodingModelRoutingRulesChange = ({
+    rules,
+    saveDelayMs,
+    suppressSuccessToast,
+  }: CodingModelRoutingRulesChange) => {
+    if (saveDelayMs === null) {
+      applyDraftLocally({
+        ...draftStateRef.current,
+        codingModelRoutingRules: rules,
+      });
+    } else {
+      applyDraftUpdates({ codingModelRoutingRules: rules }, saveDelayMs);
+    }
+
+    if (suppressSuccessToast) {
+      suppressSuccessToastForDraftRef.current = cloneDraft(
+        draftStateRef.current,
+      );
+    }
+  };
+
   const commitDraft = async () => {
     if (saveInFlightRef.current) {
       saveQueuedRef.current = true;
@@ -1324,8 +1354,12 @@ export function ModelSettingsSection({
     }
 
     const draft = cloneDraft(draftStateRef.current);
-    const suppressSuccessToast = suppressNextSaveSuccessToastRef.current;
+    const suppressSuccessToast =
+      suppressNextSaveSuccessToastRef.current ||
+      (suppressSuccessToastForDraftRef.current !== null &&
+        draftsEqual(draft, suppressSuccessToastForDraftRef.current));
     suppressNextSaveSuccessToastRef.current = false;
+    suppressSuccessToastForDraftRef.current = null;
 
     if (draftsEqual(draft, lastSyncedDraftRef.current)) {
       return;
@@ -1333,6 +1367,7 @@ export function ModelSettingsSection({
 
     saveInFlightRef.current = true;
     setIsSaving(true);
+    let saveFailed = false;
 
     try {
       const result = await updateMutation.mutateAsync({
@@ -1358,9 +1393,13 @@ export function ModelSettingsSection({
         codeReviewModelReasoningEffort: draft.roles.codeReview.reasoningEffort,
         exploreModelReasoningEffort: draft.roles.explore.reasoningEffort,
         planningModelReasoningEffort: draft.roles.planning.reasoningEffort,
+        codingModelRoutingRules: prepareCodingModelRoutingRulesForSave(
+          draft.codingModelRoutingRules,
+        ),
       });
 
       if (!result.success) {
+        saveFailed = true;
         if (lastSyncedDraftRef.current) {
           applyDraftLocally(lastSyncedDraftRef.current);
         }
@@ -1376,6 +1415,7 @@ export function ModelSettingsSection({
             result.fieldErrors.codeReviewModelId ??
             result.fieldErrors.exploreModelId ??
             result.fieldErrors.planningModelId ??
+            result.fieldErrors.codingModelRoutingRules ??
             'Failed to update model settings.',
         );
         return;
@@ -1394,12 +1434,20 @@ export function ModelSettingsSection({
           queryKey: trpc.taskModels.launchOptions.queryKey(),
         }),
       ]);
+    } catch {
+      saveFailed = true;
+      if (lastSyncedDraftRef.current) {
+        applyDraftLocally(lastSyncedDraftRef.current);
+      }
+      saveQueuedRef.current = false;
+      toast.error('Failed to update model settings.');
     } finally {
       saveInFlightRef.current = false;
 
       const shouldRunAgain =
-        saveQueuedRef.current ||
-        !draftsEqual(draftStateRef.current, lastSyncedDraftRef.current);
+        !saveFailed &&
+        (saveQueuedRef.current ||
+          !draftsEqual(draftStateRef.current, lastSyncedDraftRef.current));
 
       saveQueuedRef.current = false;
 
@@ -1467,6 +1515,10 @@ export function ModelSettingsSection({
           modelId,
           nextEnabledModelIds[0] ?? '',
         ),
+        codingModelRoutingRules: removeModelFromCodingModelRoutingRules(
+          codingModelRoutingRules,
+          modelId,
+        ),
       },
       400,
     );
@@ -1533,6 +1585,10 @@ export function ModelSettingsSection({
           roleDrafts,
           deleteConfirmModelId,
           nextEnabledModelIds[0] ?? nextModels[0]?.id ?? '',
+        ),
+        codingModelRoutingRules: removeModelFromCodingModelRoutingRules(
+          codingModelRoutingRules,
+          deleteConfirmModelId,
         ),
       },
       0,
@@ -1741,9 +1797,23 @@ export function ModelSettingsSection({
                 onReasoningChange={(value) =>
                   updateRoleReasoningEffort(config.role, value)
                 }
-              />
+              >
+                {config.role === 'coding' ? (
+                  <CodingModelRoutingRulesEditor
+                    rules={codingModelRoutingRules}
+                    optionGroups={codingModelGroups}
+                    models={models}
+                    defaultModelId={
+                      roleDrafts.coding.modelId ?? enabledModelIds[0] ?? null
+                    }
+                    defaultReasoningEffort={roleDrafts.coding.reasoningEffort}
+                    onChange={handleCodingModelRoutingRulesChange}
+                  />
+                ) : null}
+              </TaskModelRoleEditor>
             );
           })}
+          <JudgmentModelRow />
         </div>
       </Section>
 
@@ -1855,6 +1925,7 @@ export function ModelSettingsSection({
                 <div className="flex flex-row items-center gap-2">
                   <Select
                     value={activeNewModelProvider.id}
+                    handoffTargetOnSelect={inputRef}
                     onValueChange={(value) =>
                       setNewModelProvider(value as SetupModelProviderId)
                     }
@@ -2030,12 +2101,24 @@ export function ModelSettingsSection({
           {modelGroups.map((group) => (
             <div key={group.providerId} className="pt-2">
               <p className="text-base font-semibold mb-4">{group.label}</p>
+              <div className="mb-2 hidden justify-end gap-4 text-xs font-medium text-muted-foreground md:flex">
+                <span className="w-14 text-right">Context</span>
+                <span className="w-20">Inputs</span>
+                <span className="w-28 text-right">Price</span>
+                <span className="w-20 text-right">Updated</span>
+                <span aria-hidden="true" className="w-9" />
+              </div>
               <div className="divide-y divide-background">
                 {group.items.map((model) => {
                   const checked = enabledModelSet.has(model.id);
                   const isDefault = roleDrafts.coding.modelId === model.id;
                   const summary = formatMetadataSummary(model.metadata ?? null);
                   const metadata = model.metadata ?? null;
+                  const contextDetails = formatDetailedContextWindow(metadata);
+                  const inputDetails = formatInputTypes(metadata);
+                  const priceDetails = formatDetailedPrice(metadata);
+                  const refreshedDetails =
+                    formatDetailedLastRefreshed(metadata);
 
                   return (
                     <div
@@ -2064,67 +2147,112 @@ export function ModelSettingsSection({
                         </div>
                       </div>
 
-                      <div className="flex shrink-0 items-center gap-4 text-xs text-muted-foreground">
-                        <div className="flex w-14 justify-end">
-                          <BasicTooltip
-                            content={
-                              <div className="max-w-64 text-wrap">
-                                {formatDetailedContextWindow(metadata)}
-                              </div>
-                            }
-                            side="top"
-                          >
-                            <span className="cursor-help">
-                              {summary.context}
-                            </span>
-                          </BasicTooltip>
-                        </div>
-                        <div className="flex w-20 items-center gap-1">
-                          <BasicTooltip
-                            content={
-                              <div className="max-w-64 text-wrap">
-                                {formatInputTypes(metadata)}
-                              </div>
-                            }
-                            side="top"
-                          >
-                            <span className="inline-flex cursor-help items-center gap-1">
-                              {summary.inputTypeIcons.length > 0 ? (
-                                summary.inputTypeIcons.map((Icon, index) => (
-                                  <Icon key={index} className="size-4" />
-                                ))
-                              ) : (
-                                <span>-</span>
-                              )}
-                            </span>
-                          </BasicTooltip>
-                        </div>
-                        <div className="w-28 text-right">
-                          <BasicTooltip
-                            content={
-                              <div className="max-w-64 text-wrap">
-                                {formatDetailedPrice(metadata)}
-                              </div>
-                            }
-                            side="top"
-                          >
-                            <span className="cursor-help">{summary.price}</span>
-                          </BasicTooltip>
-                        </div>
-                        <div className="w-20 text-right">
-                          <BasicTooltip
-                            content={
-                              <div className="max-w-64 text-wrap">
-                                {formatDetailedLastRefreshed(metadata)}
-                              </div>
-                            }
-                            side="top"
-                          >
-                            <span className="cursor-help">
-                              {summary.lastRefreshed}
-                            </span>
-                          </BasicTooltip>
-                        </div>
+                      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_2.25rem] items-end gap-3 text-xs text-muted-foreground md:flex md:shrink-0 md:items-center md:gap-4">
+                        <dl
+                          aria-label={`${model.displayName} metadata`}
+                          className="grid min-w-0 grid-cols-2 gap-x-4 gap-y-2 md:flex md:items-center md:gap-4"
+                        >
+                          <div className="min-w-0 md:flex md:w-14 md:justify-end">
+                            <dt className="font-medium text-foreground md:sr-only">
+                              Context
+                            </dt>
+                            <dd>
+                              <BasicTooltip
+                                content={
+                                  <div className="max-w-64 text-wrap">
+                                    {contextDetails}
+                                  </div>
+                                }
+                                side="top"
+                              >
+                                <span
+                                  aria-label={contextDetails}
+                                  className="inline-block cursor-help focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                  tabIndex={0}
+                                >
+                                  {summary.context}
+                                </span>
+                              </BasicTooltip>
+                            </dd>
+                          </div>
+                          <div className="min-w-0 md:w-20">
+                            <dt className="font-medium text-foreground md:sr-only">
+                              Inputs
+                            </dt>
+                            <dd>
+                              <BasicTooltip
+                                content={
+                                  <div className="max-w-64 text-wrap">
+                                    {inputDetails}
+                                  </div>
+                                }
+                                side="top"
+                              >
+                                <span
+                                  aria-label={inputDetails}
+                                  className="inline-flex cursor-help items-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                  tabIndex={0}
+                                >
+                                  {summary.inputTypeIcons.length > 0 ? (
+                                    summary.inputTypeIcons.map(
+                                      (Icon, index) => (
+                                        <Icon key={index} className="size-4" />
+                                      ),
+                                    )
+                                  ) : (
+                                    <span>-</span>
+                                  )}
+                                </span>
+                              </BasicTooltip>
+                            </dd>
+                          </div>
+                          <div className="min-w-0 md:w-28 md:text-right">
+                            <dt className="font-medium text-foreground md:sr-only">
+                              Price
+                            </dt>
+                            <dd>
+                              <BasicTooltip
+                                content={
+                                  <div className="max-w-64 text-wrap">
+                                    {priceDetails}
+                                  </div>
+                                }
+                                side="top"
+                              >
+                                <span
+                                  aria-label={priceDetails}
+                                  className="inline-block cursor-help focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                  tabIndex={0}
+                                >
+                                  {summary.price}
+                                </span>
+                              </BasicTooltip>
+                            </dd>
+                          </div>
+                          <div className="min-w-0 md:w-20 md:text-right">
+                            <dt className="font-medium text-foreground md:sr-only">
+                              Updated
+                            </dt>
+                            <dd>
+                              <BasicTooltip
+                                content={
+                                  <div className="max-w-64 text-wrap">
+                                    {refreshedDetails}
+                                  </div>
+                                }
+                                side="top"
+                              >
+                                <span
+                                  aria-label={refreshedDetails}
+                                  className="inline-block cursor-help focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                  tabIndex={0}
+                                >
+                                  {summary.lastRefreshed}
+                                </span>
+                              </BasicTooltip>
+                            </dd>
+                          </div>
+                        </dl>
                         {recommendedModelIds.has(model.id) ? (
                           <span className="inline-flex w-9 justify-center">
                             <BasicTooltip content="Recommended models stay listed while their provider is connected. Turn the model off to stop using it.">

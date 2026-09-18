@@ -1,4 +1,4 @@
-import { WebClient } from '@slack/web-api';
+import { WebClient, type WebClientOptions } from '@slack/web-api';
 
 import { Env } from '@roomote/env';
 import { isObservedTimeoutError, ObservedTimeoutError } from '@roomote/types';
@@ -56,12 +56,20 @@ function isSlackTimeoutError(error: unknown): error is SlackRequestError {
   );
 }
 
-export function createSlackWebClient(token: string): WebClient {
-  const timeoutMs = Env.SLACK_API_TIMEOUT_MS;
+export function createSlackWebClient(
+  token: string,
+  options: Pick<
+    WebClientOptions,
+    'timeout' | 'retryConfig' | 'rejectRateLimitedCalls' | 'logger'
+  > & { suppressTimeoutLog?: boolean } = {},
+): WebClient {
+  const { suppressTimeoutLog, ...clientOptions } = options;
+  const timeoutMs = options.timeout ?? Env.SLACK_API_TIMEOUT_MS;
   const slackApiUrl = getSlackApiBaseUrl();
 
   const client = new WebClient(token, {
     slackApiUrl,
+    ...clientOptions,
     timeout: timeoutMs,
   });
 
@@ -89,7 +97,9 @@ export function createSlackWebClient(token: string): WebClient {
           timeoutMs,
         };
 
-        console.error('[Slack Web API Timeout]', timeoutDetails);
+        if (!suppressTimeoutLog) {
+          console.error('[Slack Web API Timeout]', timeoutDetails);
+        }
         throw new ObservedTimeoutError(timeoutDetails);
       }
 

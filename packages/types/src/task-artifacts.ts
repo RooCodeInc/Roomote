@@ -12,11 +12,45 @@ export type ReservedTaskArtifactType = Exclude<
 >;
 
 export const DEFAULT_TASK_ARTIFACT_TYPE: TaskArtifactType = 'general';
+
+/** Upload URLs are bearer capabilities and cannot be revoked after issuance. */
+export const ARTIFACT_UPLOAD_URL_MAX_AGE_SECONDS = 60 * 60;
 export const INVALID_TASK_ARTIFACT_TYPE_ERROR =
   'Missing or invalid artifactType';
 
 export const taskArtifactTypeSchema = z.enum(taskArtifactTypes);
 export const uploadArtifactTypeSchema = z.enum(uploadArtifactTypes);
+
+export type ArtifactStorageOwner =
+  | { taskId: string; sessionId?: never }
+  | { taskId?: never; sessionId: string };
+
+export function getArtifactStorageKey(
+  owner: ArtifactStorageOwner,
+  artifactId: string,
+  path: string,
+  version: number,
+): string {
+  const ownerPrefix = owner.taskId
+    ? `tasks/${owner.taskId}`
+    : `sessions/${owner.sessionId}`;
+  return version === 0
+    ? `${ownerPrefix}/artifacts/${artifactId}/${path}`
+    : `${ownerPrefix}/artifacts/${artifactId}/v${version}/${path}`;
+}
+
+export function validateTaskArtifactPath(path: string): string | null {
+  if (!path.trim()) return 'Path cannot be empty';
+  if (path.length > 255) return 'Path too long (max 255 chars)';
+  if (/(?:^|[/\\])\.\.(?:$|[/\\])/u.test(path)) {
+    return 'Invalid path: path traversal detected';
+  }
+  if (path.startsWith('/') || /^[A-Za-z]:[/\\]/u.test(path)) {
+    return 'Invalid path: absolute paths are not allowed';
+  }
+  if (path.includes('\0')) return 'Invalid path: null byte detected';
+  return null;
+}
 
 export function resolveCreateArtifactType(params: {
   rawArtifactType: unknown;

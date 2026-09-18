@@ -1,3 +1,4 @@
+import { resolveWorkerReleaseMetadata } from '../monitoring/worker-release-metadata';
 import {
   type CommunicationProvider,
   type AcpRequestUserInputAnswers,
@@ -16,8 +17,10 @@ import {
   type QueuedCommunicationMessage,
   getSlackChannelFromTaskPayload,
   getSlackThreadTsFromTaskPayload,
+  getFastAgentParentFromPayload,
   getTaskReportConsumerFromPayload,
   isCommunicationProvider,
+  SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
   SANDBOX_SERVER_PORT,
   SANDBOX_TIMEOUT_MS,
 } from '@roomote/types';
@@ -29,11 +32,12 @@ import packageJson from '../../../../package.json';
 import { validateToken } from '@roomote/auth/client';
 import {
   buildRoomoteSystemPrompt,
+  FAST_ONLY_PACKAGED_SKILL_INVOCATIONS,
   resolveRoomoteReleaseVersion,
   stripLeadingSlackProductMention,
   wrapSlackMessage,
 } from '@roomote/cloud-agents';
-import { sdk } from '@roomote/sdk/client';
+import { instanceSkills, sdk } from '@roomote/sdk/client';
 import {
   prependLinearMessages,
   type LinearSessionMessage,
@@ -89,7 +93,7 @@ import {
   buildMcpTaskEnv,
   getCommunicationReplyContext,
   getSlackReplyContext,
-  isFastAgentChildTaskRun,
+  getFastAgentChildRuntimeEnv,
 } from './mcp-task-env';
 import {
   type ActorMismatchPolicy,
@@ -102,12 +106,12 @@ import {
 } from '../workspace/repo-local-skills';
 import { resolveWorkerCodingHarness } from '../lib/resolve-worker-coding-harness';
 import { writeSharedWorkspaceAgentsFile } from './shared-workspace-agents';
+import { ON_DEMAND_REPOSITORIES_ENV_VAR } from '../workspace/on-demand-repositories';
 import {
   getFollowUpWorkflowPhase,
   getInitialWorkflowPhase,
 } from './workflow-phase';
 import { wrapCommunicationMessage } from './communication-message-prompt';
-import { buildTaskGoalContinuationPrompt } from './task-goal';
 import { settleMissingChatCloseoutFallback } from './missing-chat-closeout-fallback-settlement';
 import { isMissingSlackReplyTargetProcedureError } from './slack-reply-target';
 
@@ -247,6 +251,8 @@ function getInitialSlackTurnMessageTs(taskRun: {
 
   // Non-Slack communication tasks track the launch message so turn-satisfaction
   // machinery (ack/closeout enforcement, current-turn reactions) applies.
+  // AgentMail (email) is deliberately excluded from that machinery: email is
+  // low-frequency and must never get ack/silence heartbeats.
   if (
     (payload.communicationProvider === 'telegram' ||
       payload.communicationProvider === 'teams' ||
@@ -661,6 +667,7 @@ export const runTask = async ({
   usesSharedWorkspaceRoot,
   repoPaths,
   repoLocalSkills,
+  onDemandRepositories,
   workspaceReadinessWarnings,
   backgroundEnvironmentSetup,
   prompt,
@@ -679,6 +686,12 @@ export const runTask = async ({
   skipExternalSleepAction = false,
   keepaliveMsOverride,
 }: RunTaskOptions) => {
+  const userAttentionNotificationsEnabled = Boolean(
+    task?.surface === 'web' &&
+    task.initiatorUserId &&
+    !getFastAgentParentFromPayload(taskRun.payload),
+  );
+
   await sdk.taskRuns.update({
     id: taskRun.id,
     status: RunStatus.Spawning,
@@ -713,13 +726,19 @@ export const runTask = async ({
       githubTokenRefreshInterval: undefined,
     };
 
+    const taskEnvVars = Object.fromEntries(
+      Object.entries(envVars).filter(
+        ([name]) => name !== SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
+      ),
+    );
     const unsanitizedEnv = workerEnv
       ? {
           ...workerEnv.buildUserFacingEnv(),
           ...(workerEnv.buildOpenCodeHarnessEnv?.() ?? {}),
-          ...envVars,
+          ...taskEnvVars,
         }
-      : { ...process.env, ...envVars };
+      : { ...process.env, ...taskEnvVars };
+    delete unsanitizedEnv[SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME];
 
     const sanitizedEnv = sanitizeEnv(unsanitizedEnv);
     const openCodeHarnessEnv = buildOpenCodeHarnessEnv(unsanitizedEnv);
@@ -729,7 +748,7 @@ export const runTask = async ({
     // sanitized allowlist always take precedence. This prevents an org from
     // accidentally (or maliciously) overriding vars the worker relies on.
     const deploymentEnvVars: Record<string, string> = Object.fromEntries(
-      Object.entries(envVars).filter(
+      Object.entries(taskEnvVars).filter(
         (entry): entry is [string, string] => entry[1] !== undefined,
       ),
     );
@@ -751,17 +770,17 @@ export const runTask = async ({
         isSilentChannelAutomationLaunch(taskRun)
           ? 'true'
           : 'false',
+      // Exposes `clone_repository` in the Roomote MCP server; the manifest at
+      // the workspace root carries the repository list itself.
+      ...(onDemandRepositories
+        ? { [ON_DEMAND_REPOSITORIES_ENV_VAR]: 'true' }
+        : {}),
       ...(unsanitizedEnv.ROOMOTE_AUTH_BYPASS_VALUE && {
         ROOMOTE_AUTH_BYPASS_VALUE: unsanitizedEnv.ROOMOTE_AUTH_BYPASS_VALUE,
       }),
       ...(unsanitizedEnv.ROOMOTE_AUTH_BYPASS_HEADER_NAME && {
         ROOMOTE_AUTH_BYPASS_HEADER_NAME:
           unsanitizedEnv.ROOMOTE_AUTH_BYPASS_HEADER_NAME,
-      }),
-      // Consumed (and removed) by generateOpenCodeConfig, which registers the
-      // hidden proof-runner subagent only when a browser surface exists.
-      ...(environmentConfig?.initialUrl && {
-        ROOMOTE_PROOF_BROWSER_TARGET: environmentConfig.initialUrl,
       }),
     };
     // Strip credentials for disabled providers as defense in depth, even if a
@@ -854,6 +873,13 @@ export const runTask = async ({
       delete runtimeEnv[INFERENCE_GATEWAY_XAI_ENV_VAR_NAME];
     }
 
+    if (workerEnv.credentialEgressBootstrapRequired) {
+      Object.assign(runtimeEnv, workerEnv.buildCredentialEgressClientEnv());
+      // Substitutes are only usable through the API proxy, so nothing about
+      // the run's own networking or inference routing changes.
+      runtimeEnv.ROOMOTE_CREDENTIAL_EGRESS_API_PROXY = '1';
+    }
+
     const workerHomeDir = runtimeEnv.HOME ?? sanitizedEnv.HOME ?? '';
 
     if (workerHomeDir) {
@@ -920,13 +946,26 @@ export const runTask = async ({
       }
     }
 
+    const runtimeInstanceSkills = await instanceSkills
+      .listForRuntime()
+      .catch(() => {
+        // Do not expose upstream diagnostics or run with stale snapshot skills.
+        throw new Error(
+          'Failed to fetch instance skills; task startup stopped.',
+        );
+      });
+
     const skillsActivated = activateSkillsFolder({
       homeDir,
       sourceHomeDir: workerHomeDir,
       skillsFolderName: selectedSkillsFolder,
       manualSkills: environmentConfig?.manualSkills,
+      instanceSkills: runtimeInstanceSkills,
       repoLocalSkills,
-      excludeSkillNames: zeroIntegrationEnabled ? undefined : ['zero'],
+      excludeSkillNames: [
+        ...FAST_ONLY_PACKAGED_SKILL_INVOCATIONS,
+        ...(zeroIntegrationEnabled ? [] : ['zero']),
+      ],
     });
 
     if (skillsActivated) {
@@ -974,9 +1013,7 @@ export const runTask = async ({
 
     const slackReplyContext = getSlackReplyContext(taskRun);
     const communicationReplyContext = getCommunicationReplyContext(taskRun);
-    if (isFastAgentChildTaskRun(taskRun)) {
-      runtimeEnv.ROOMOTE_FAST_AGENT_CHILD = 'true';
-    }
+    Object.assign(runtimeEnv, getFastAgentChildRuntimeEnv(taskRun));
     if (slackReplyContext?.threadTs) {
       runtimeEnv.ROOMOTE_SLACK_CHANNEL = slackReplyContext.channel;
       runtimeEnv.ROOMOTE_SLACK_THREAD_TS = slackReplyContext.threadTs;
@@ -1050,6 +1087,9 @@ export const runTask = async ({
           ),
           {
             reportConsumer: getTaskReportConsumerFromPayload(taskRun.payload),
+            commitSha: resolveWorkerReleaseMetadata().workerCommit,
+            appEnv: process.env.ROOMOTE_RELEASE_APP_ENV,
+            privacy: task?.privacy,
           },
         ),
         harnessInstructions,
@@ -1062,6 +1102,7 @@ export const runTask = async ({
       workspacePath,
       usesSharedWorkspaceRoot,
       repoPaths,
+      onDemandRepositories,
     });
 
     const taskCancellation = new TaskCancellationController({
@@ -1370,6 +1411,7 @@ export const runTask = async ({
         ),
       ),
       taskRun,
+      userAttentionNotificationsEnabled,
       developerInstructionsContent: harnessDeveloperInstructions,
       callbacks,
       context,
@@ -1418,64 +1460,14 @@ export const runTask = async ({
       callbacks: {
         onTaskCompletionSettled: async (completionId: string) => {
           await settleMissingChatCloseoutFallback(context, completionId);
-        },
-        onBeforeTaskCompletion: async (completionId: string) => {
-          if (taskCancellation.signal.aborted) {
-            return 'finalize' as const;
-          }
-
-          const claim = await sdk.taskRuns.claimGoalContinuation({
-            runId: taskRun.id,
-            continuationId: completionId,
-          });
-          if (!claim.updated) {
-            if (claim.reason === 'already_claimed') {
-              return 'ignore' as const;
-            }
-            if (!claim.goal) {
-              return 'finalize' as const;
-            }
-            await recordWorkerRuntimeEvent({
-              eventType: 'decision',
-              message: `Goal continuation stopped for task run #${taskRun.id}.`,
-              details: {
-                reason: claim.reason,
-                goalStatus: claim.goal?.status ?? null,
-              },
+          if (userAttentionNotificationsEnabled) {
+            await sdk.taskRuns.notifyUserAttention({
+              id: taskRun.id,
+              kind: 'result_ready',
+              presentationKind: 'response',
+              eventId: completionId,
             });
-            return 'finalize' as const;
           }
-
-          const continuationEvent = (sent: boolean) => ({
-            eventType: 'decision' as const,
-            message: `Goal continuation ${sent ? 'started' : 'could not start'} for task run #${taskRun.id}.`,
-            details: {
-              reason: 'goal_continuation',
-              delivered: sent,
-              continuation: claim.goal.continuationsUsed,
-              maxContinuations: claim.goal.maxContinuations,
-            },
-          });
-          return {
-            disposition: 'continue' as const,
-            prompt: {
-              prompt: buildTaskGoalContinuationPrompt(claim.goal),
-              goalContext: claim.goal,
-              visibleInTranscript: false,
-              source: 'goal-continuation',
-              clientMessageId: `goal-continuation:${completionId}`,
-            },
-            onAccepted: () => {
-              void recordWorkerRuntimeEvent(continuationEvent(true));
-            },
-            onRejected: async () => {
-              await sdk.taskRuns.releaseGoalContinuation({
-                runId: taskRun.id,
-                continuationId: completionId,
-              });
-              await recordWorkerRuntimeEvent(continuationEvent(false));
-            },
-          };
         },
         onStart: async (taskId: string) => {
           try {
@@ -1572,11 +1564,6 @@ export const runTask = async ({
       | undefined;
     let runtimeTaskStartedForSetupNotice = false;
 
-    const getActiveGoalContext = async () => {
-      const goal = await sdk.taskRuns.getGoal({ runId: taskRun.id });
-      return goal?.status === 'active' ? goal : undefined;
-    };
-
     const deliverEnvironmentSetupNotice = async () => {
       const currentManager = harnessManager;
       const outcome = pendingEnvironmentSetupOutcome;
@@ -1608,24 +1595,12 @@ export const runTask = async ({
       // deliver the same setup outcome more than once.
       pendingEnvironmentSetupOutcome = undefined;
 
-      let goalContext;
-      try {
-        goalContext = await getActiveGoalContext();
-      } catch (error) {
-        pendingEnvironmentSetupOutcome ??= outcome;
-        logger.warn(
-          `[runTask] Delaying background environment setup notice for task run ${taskRun.id} because active goal lookup failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
-        return;
-      }
-
       const sent = currentManager.sendFollowUpPrompt({
         prompt: wakeFromIdle
           ? buildEnvironmentSetupSettledWakePrompt(outcome)
           : buildEnvironmentSetupSettledPrompt(outcome),
         visibleInTranscript: false,
         source: 'environment-setup',
-        goalContext,
       });
 
       if (!sent) {
@@ -1808,16 +1783,6 @@ export const runTask = async ({
 
       const workflowPhase =
         options.workflowPhase ?? getFollowUpWorkflowPhase(options.prompt);
-      let goalContext;
-      try {
-        goalContext = await getActiveGoalContext();
-      } catch (error) {
-        logger.warn(
-          `[runTask] Deferred resume prompt blocked for task run ${taskRun.id} because active goal lookup failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
-        scheduleDeferredResumePromptRetry(options);
-        return false;
-      }
       const queued = harnessManager.sendFollowUpPrompt({
         prompt: options.prompt,
         images: options.images,
@@ -1827,7 +1792,6 @@ export const runTask = async ({
         clientMessageId: options.clientMessageId,
         // Attribute the turn to the identity actor-scoped routes resolve.
         userId: deferredPromptPrep.effectiveUserId ?? undefined,
-        goalContext,
       });
 
       if (queued) {
@@ -1866,18 +1830,10 @@ export const runTask = async ({
       const workflowPhase =
         options.workflowPhase ?? getFollowUpWorkflowPhase(options.prompt);
 
-      try {
-        return harnessManager.sendFollowUpPrompt({
-          ...options,
-          ...(workflowPhase ? { workflowPhase } : {}),
-          goalContext: await getActiveGoalContext(),
-        });
-      } catch (error) {
-        logger.warn(
-          `[runTask] Follow-up prompt blocked for task run ${taskRun.id} because active goal lookup failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
-        return false;
-      }
+      return harnessManager.sendFollowUpPrompt({
+        ...options,
+        ...(workflowPhase ? { workflowPhase } : {}),
+      });
     };
 
     const deliverQueuedSnapshotResumeSlackMessages = async (
@@ -2043,6 +1999,8 @@ export const runTask = async ({
           return;
         }
 
+        // AgentMail (email) is deliberately excluded: email turns never feed
+        // the turn-satisfaction machinery (no ack/silence heartbeats).
         if (
           message.provider === 'slack' ||
           message.provider === 'telegram' ||
@@ -2284,7 +2242,6 @@ export const runTask = async ({
           ? { workflowPhase: initialWorkflowPhase }
           : {}),
         visibleInTranscript: false,
-        ...(task?.goal?.status === 'active' ? { goalContext: task.goal } : {}),
       });
     } else {
       // Session mode: initialize without prompt.

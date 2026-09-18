@@ -2,21 +2,36 @@ import type { UserAuthSuccess } from '@/types';
 
 const {
   mockGetArtifactByPath,
+  mockGetArtifactBySessionPath,
   mockGenerateDownloadUrl,
+  mockGenerateOwnedDownloadUrl,
+  mockGetOwnedArtifactObject,
   mockSignArtifactId,
   mockCurrentEpochSeconds,
+  mockFindReadableSession,
 } = vi.hoisted(() => ({
   mockGetArtifactByPath: vi.fn(),
+  mockGetArtifactBySessionPath: vi.fn(),
   mockGenerateDownloadUrl: vi.fn(),
+  mockGenerateOwnedDownloadUrl: vi.fn(),
+  mockGetOwnedArtifactObject: vi.fn(),
   mockSignArtifactId: vi.fn(),
   mockCurrentEpochSeconds: vi.fn(),
+  mockFindReadableSession: vi.fn(),
 }));
 
 vi.mock('@/lib/server', () => ({
   getArtifactByPath: mockGetArtifactByPath,
+  getArtifactBySessionPath: mockGetArtifactBySessionPath,
   generateDownloadUrl: mockGenerateDownloadUrl,
+  generateOwnedDownloadUrl: mockGenerateOwnedDownloadUrl,
+  getOwnedArtifactObject: mockGetOwnedArtifactObject,
   signArtifactId: mockSignArtifactId,
   currentEpochSeconds: mockCurrentEpochSeconds,
+}));
+
+vi.mock('@/lib/server/sessions', () => ({
+  findReadableSession: mockFindReadableSession,
 }));
 
 import { getArtifactByPathCommand } from '../by-path';
@@ -55,8 +70,12 @@ describe('getArtifactByPathCommand', () => {
 
     mockGetArtifactByPath.mockResolvedValue(createArtifact());
     mockGenerateDownloadUrl.mockResolvedValue('https://example.test/download');
+    mockGenerateOwnedDownloadUrl.mockResolvedValue(
+      'https://example.test/session-download',
+    );
     mockSignArtifactId.mockReturnValue('sig');
     mockCurrentEpochSeconds.mockReturnValue(1_700_000_000);
+    mockFindReadableSession.mockResolvedValue({ id: 'session-1' });
   });
 
   afterEach(() => {
@@ -74,6 +93,7 @@ describe('getArtifactByPathCommand', () => {
     });
 
     expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockFindReadableSession).not.toHaveBeenCalled();
     expect(result?.content).toBeUndefined();
   });
 
@@ -99,6 +119,196 @@ describe('getArtifactByPathCommand', () => {
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(result?.content).toBe('small text');
+  });
+
+  it('loads only a bounded prefix for gallery previews', async () => {
+    mockGetArtifactByPath.mockResolvedValue(
+      createArtifact({
+        path: 'plans/large.md',
+        contentType: 'text/markdown',
+        size: 2 * 1024 * 1024,
+      }),
+    );
+    mockFetch.mockResolvedValue(new Response('a'.repeat(32 * 1024)));
+
+    const result = await getArtifactByPathCommand(auth, {
+      taskId: 'task-1',
+      path: 'plans/large.md',
+      preview: true,
+    });
+
+    expect(mockFetch).toHaveBeenCalledWith('https://example.test/download', {
+      headers: { Range: 'bytes=0-1023' },
+    });
+    expect(result?.content).toHaveLength(1024);
+  });
+
+  it('does not wait for stream cancellation after reading a bounded preview', async () => {
+    const cancel = vi.fn(() => new Promise<void>(() => {}));
+    const read = vi.fn().mockResolvedValueOnce({
+      done: false,
+      value: new Uint8Array(1024).fill(97),
+    });
+    mockGetArtifactByPath.mockResolvedValue(
+      createArtifact({
+        path: 'plans/large.md',
+        contentType: 'text/markdown',
+        size: 2 * 1024 * 1024,
+      }),
+    );
+    mockFetch.mockResolvedValue({
+      body: { getReader: () => ({ cancel, read }) },
+      headers: new Headers(),
+      ok: true,
+    });
+
+    const result = await Promise.race([
+      getArtifactByPathCommand(auth, {
+        taskId: 'task-1',
+        path: 'plans/large.md',
+        preview: true,
+      }),
+      new Promise<'timed-out'>((resolve) =>
+        setTimeout(() => resolve('timed-out'), 100),
+      ),
+    ]);
+
+    expect(result).not.toBe('timed-out');
+    expect(result).toMatchObject({ content: 'a'.repeat(1024) });
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it('loads Markdown gallery previews detected from the path extension', async () => {
+    mockGetArtifactByPath.mockResolvedValue(
+      createArtifact({
+        path: 'reports/audit.md',
+        contentType: 'application/octet-stream',
+      }),
+    );
+    mockFetch.mockResolvedValue(new Response('# Audit report'));
+
+    const result = await getArtifactByPathCommand(auth, {
+      taskId: 'task-1',
+      path: 'reports/audit.md',
+      preview: true,
+    });
+
+    expect(mockFetch).toHaveBeenCalledWith('https://example.test/download', {
+      headers: { Range: 'bytes=0-1023' },
+    });
+    expect(result?.content).toBe('# Audit report');
+  });
+
+  it('rejects failed gallery preview fetches so the client can retry', async () => {
+    const consoleError = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => {});
+    mockGetArtifactByPath.mockResolvedValue(
+      createArtifact({
+        path: 'reports/audit.md',
+        contentType: 'text/markdown',
+      }),
+    );
+    mockFetch.mockResolvedValue(new Response(null, { status: 503 }));
+
+    await expect(
+      getArtifactByPathCommand(auth, {
+        taskId: 'task-1',
+        path: 'reports/audit.md',
+        preview: true,
+      }),
+    ).rejects.toThrow('Failed to fetch artifact preview');
+    expect(consoleError).toHaveBeenCalledOnce();
+    consoleError.mockRestore();
+  });
+
+  it('loads readable Session-owned artifacts from the Session storage namespace', async () => {
+    mockGetArtifactBySessionPath.mockResolvedValue(
+      createArtifact({
+        taskId: null,
+        sessionId: '11111111-1111-4111-8111-111111111111',
+      }),
+    );
+    mockFetch.mockResolvedValue(new Response('session text'));
+
+    const result = await getArtifactByPathCommand(auth, {
+      sessionId: '11111111-1111-4111-8111-111111111111',
+      path: 'logs/output.txt',
+    });
+
+    expect(mockFindReadableSession).toHaveBeenCalledWith(
+      { userId: auth.userId, isAdmin: false },
+      '11111111-1111-4111-8111-111111111111',
+    );
+    expect(mockGetArtifactBySessionPath).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: '11111111-1111-4111-8111-111111111111',
+      }),
+    );
+    expect(mockGenerateOwnedDownloadUrl).toHaveBeenCalledWith(
+      { sessionId: '11111111-1111-4111-8111-111111111111' },
+      'artifact-1',
+      'logs/output.txt',
+      1,
+    );
+    expect(result).toMatchObject({
+      taskId: null,
+      sessionId: '11111111-1111-4111-8111-111111111111',
+      content: 'session text',
+    });
+  });
+
+  it('keeps private Session previews and downloads on owner-authenticated paths', async () => {
+    const sessionId = '11111111-1111-4111-8111-111111111111';
+    mockFindReadableSession.mockResolvedValue({
+      id: sessionId,
+      privacy: 'private',
+    });
+    mockGetArtifactBySessionPath.mockResolvedValue(
+      createArtifact({ taskId: null, sessionId }),
+    );
+    mockGetOwnedArtifactObject.mockResolvedValue({
+      Body: {
+        transformToWebStream: () => new Response('private session text').body,
+      },
+      ContentLength: 20,
+    });
+
+    const result = await getArtifactByPathCommand(auth, {
+      sessionId,
+      path: 'logs/output.txt',
+    });
+
+    expect(mockGenerateOwnedDownloadUrl).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockGetOwnedArtifactObject).toHaveBeenCalledWith(
+      { sessionId },
+      'artifact-1',
+      'logs/output.txt',
+      1,
+    );
+    expect(result).toMatchObject({
+      content: 'private session text',
+      downloadUrl:
+        '/api/artifacts/artifact-1/raw?sig=sig&ts=1700000000&download=1',
+    });
+  });
+
+  it('rejects unreadable Sessions before loading or signing artifacts', async () => {
+    mockFindReadableSession.mockResolvedValue(null);
+
+    await expect(
+      getArtifactByPathCommand(auth, {
+        sessionId: 'missing-session',
+        path: 'logs/output.txt',
+      }),
+    ).resolves.toBeNull();
+
+    expect(mockGetArtifactBySessionPath).not.toHaveBeenCalled();
+    expect(mockGetArtifactByPath).not.toHaveBeenCalled();
+    expect(mockGenerateOwnedDownloadUrl).not.toHaveBeenCalled();
+    expect(mockGenerateDownloadUrl).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -127,6 +337,45 @@ describe('getArtifactByPathCommand', () => {
 
       expect(mockFetch).toHaveBeenCalledTimes(1);
       expect(result?.content).toBe('<h1>HTML preview</h1>');
+    },
+  );
+
+  it.each([
+    {
+      label: 'normalized CSV content type',
+      path: 'reports/data.bin',
+      contentType: 'TEXT/CSV; charset=UTF-8',
+    },
+    {
+      label: 'CSV extension with binary metadata',
+      path: 'reports/data.CSV',
+      contentType: 'application/octet-stream',
+    },
+    {
+      label: 'normalized TSV content type',
+      path: 'reports/data.bin',
+      contentType: 'TEXT/TAB-SEPARATED-VALUES; charset=UTF-8',
+    },
+    {
+      label: 'TSV extension with plain-text metadata',
+      path: 'reports/data.TSV',
+      contentType: 'text/plain',
+    },
+  ])(
+    'returns tabular content detected from $label',
+    async ({ path, contentType }) => {
+      mockGetArtifactByPath.mockResolvedValue(
+        createArtifact({ path, contentType }),
+      );
+      mockFetch.mockResolvedValue(new Response('first,second\n1,2'));
+
+      const result = await getArtifactByPathCommand(auth, {
+        taskId: 'task-1',
+        path,
+      });
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(result?.content).toBe('first,second\n1,2');
     },
   );
 });

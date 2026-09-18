@@ -100,6 +100,106 @@ export function formatSingleLineLog(
   return suffix ? `${message} ${suffix}` : message;
 }
 
+const OPERATIONAL_LOG_FIELD_NAMES = [
+  'service',
+  'environment',
+  'release',
+  'projectId',
+  'deploymentId',
+  'serviceId',
+  'instanceId',
+  'provider',
+  'surface',
+  'eventType',
+  'outcome',
+  'reason',
+  'status',
+  'requestId',
+  'deliveryId',
+  'externalEventId',
+  'updateId',
+  'repository',
+  'prNumber',
+  'reviewId',
+  'workspaceId',
+  'channelId',
+  'threadId',
+  'messageId',
+  'sessionId',
+  'taskId',
+  'runId',
+  'jobId',
+  'routeProvider',
+  'durationMs',
+  'attempt',
+  'deferrals',
+  'eventCount',
+  'taskCount',
+  'retryable',
+] as const;
+
+type OperationalLogFieldName = (typeof OPERATIONAL_LOG_FIELD_NAMES)[number];
+type OperationalLogFieldValue = string | number | boolean | null | undefined;
+
+export type OperationalLogFields = Partial<
+  Record<OperationalLogFieldName, OperationalLogFieldValue>
+>;
+
+const operationalLogFieldNames = new Set<string>(OPERATIONAL_LOG_FIELD_NAMES);
+
+function normalizeOperationalLogValue(
+  value: OperationalLogFieldValue,
+): Exclude<OperationalLogFieldValue, undefined> | undefined {
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  const normalized = value.replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
+  return normalized ? normalized.slice(0, 256) : undefined;
+}
+
+/**
+ * Formats a query-friendly operational event using only explicitly safe fields.
+ * Arbitrary metadata is intentionally dropped so payloads, bodies, URLs, and
+ * credentials cannot be added to lifecycle logs by accident.
+ */
+export function formatOperationalEvent(
+  event: string,
+  fields: OperationalLogFields,
+): string {
+  const output: Record<string, string | number | boolean | null> = {
+    event: normalizeOperationalLogValue(event) ?? 'unknown',
+  };
+
+  for (const [key, rawValue] of Object.entries(fields)) {
+    if (!operationalLogFieldNames.has(key)) {
+      continue;
+    }
+
+    const value = normalizeOperationalLogValue(rawValue);
+    if (value !== undefined) {
+      output[key] = value;
+    }
+  }
+
+  return JSON.stringify(output);
+}
+
+export function getOperationalLogRuntimeFields(
+  service: string,
+  env: Record<string, string | undefined>,
+): OperationalLogFields {
+  return {
+    service,
+    environment: env.R_APP_ENV?.trim() || env.NODE_ENV?.trim(),
+    release: env.RELEASE_VERSION?.trim(),
+    projectId: env.RAILWAY_PROJECT_ID?.trim(),
+    deploymentId: env.RAILWAY_DEPLOYMENT_ID?.trim(),
+    serviceId: env.RAILWAY_SERVICE_ID?.trim(),
+    instanceId: env.R_INSTANCE_ID?.trim(),
+  };
+}
+
 export type SandboxLogFn = (
   level: 'info' | 'warn' | 'error',
   message: string,

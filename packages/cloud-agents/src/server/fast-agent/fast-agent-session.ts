@@ -1,16 +1,26 @@
 import type { ModelMessage } from 'ai';
 import {
+  type ChatInitiationOrder,
   and,
   desc,
   db,
   eq,
   inArray,
   isTaskRunFollowUpCandidate,
+  isChatInitiationProvider,
   isNull,
+  recordUserChatInitiationProvider,
   taskRuns,
   tasks,
 } from '@roomote/db/server';
-import type { RunStatus } from '@roomote/types';
+import type {
+  FastAgentConversationOwner,
+  ReasoningEffort,
+  RunStatus,
+  TaskSurface,
+  TaskTrigger,
+} from '@roomote/types';
+import { captureUserStartedSessionCreated } from '../session-telemetry';
 import type { FastAgentConversation } from './fast-agent-conversation';
 import { fastAgentConversationRepository } from './fast-agent-conversation-repository';
 import type {
@@ -20,7 +30,14 @@ import type {
 
 type FastAgentSessionRecord = {
   id: string;
+  userId: string | null;
+  owner: FastAgentConversationOwner;
+  privacy?: 'shared' | 'private';
+  privateOwnerUserId?: string | null;
   title: string | null;
+  model: string | null;
+  reasoningEffort: ReasoningEffort | null;
+  conversation: FastAgentConversation;
   compatibilityMessages: ModelMessage[];
   openCodeSessionId: string | null;
   created: boolean;
@@ -33,19 +50,87 @@ export type FastAgentActiveTask = {
 };
 
 export async function getOrCreateFastAgentSession({
+  owner,
   userId,
   conversation,
+  sessionId,
+  initialTitle,
+  privacy,
+  initialModel,
+  initialReasoningEffort,
+  chatInitiationOrder,
+  userInitiated,
 }: {
-  userId: string;
+  owner?: FastAgentConversationOwner;
+  userId?: string;
   conversation: FastAgentConversation;
+  /** Session to bind a newly created conversation to; see the repository. */
+  sessionId?: string;
+  /** Title to seed only when this call creates the conversation. */
+  initialTitle?: string;
+  /** Creation value or explicit assertion; omission preserves an existing mode. */
+  privacy?: 'shared' | 'private';
+  initialModel?: string;
+  initialReasoningEffort?: ReasoningEffort;
+  /** Human turn start order; records the provider only for a new Session. */
+  chatInitiationOrder?: ChatInitiationOrder;
+  /** Origin supplied only when this call represents a person's request to start a Session. */
+  userInitiated?: { surface: TaskSurface; trigger: TaskTrigger };
 }): Promise<FastAgentSessionRecord> {
-  return fastAgentConversationRepository.getOrCreate({ userId, conversation });
+  const session = await fastAgentConversationRepository.getOrCreate({
+    ...(owner ? { owner } : {}),
+    ...(userId ? { userId } : {}),
+    conversation,
+    ...(sessionId ? { sessionId } : {}),
+    ...(initialTitle ? { initialTitle } : {}),
+    ...(privacy ? { privacy } : {}),
+    ...(initialModel !== undefined ? { initialModel } : {}),
+    ...(initialReasoningEffort !== undefined ? { initialReasoningEffort } : {}),
+  });
+  if (
+    chatInitiationOrder &&
+    session.created &&
+    userId &&
+    isChatInitiationProvider(conversation.surface)
+  ) {
+    await recordUserChatInitiationProvider(
+      userId,
+      conversation.surface,
+      chatInitiationOrder,
+    ).catch((error) => {
+      console.warn(
+        `[Fast Agent] Failed to record chat initiation provider: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
+  }
+  if (
+    userInitiated &&
+    session.created &&
+    !sessionId &&
+    session.userId &&
+    session.conversation.surface !== 'automation'
+  ) {
+    captureUserStartedSessionCreated({
+      userId: session.userId,
+      surface: userInitiated.surface,
+      trigger: userInitiated.trigger,
+    });
+  }
+  return session;
 }
 
 export async function hasFastAgentSession(
   conversation: FastAgentConversation,
 ): Promise<boolean> {
   return fastAgentConversationRepository.exists(conversation);
+}
+
+export async function getFastAgentSessionOwner(
+  conversation: FastAgentConversation,
+): Promise<FastAgentConversationOwner | null> {
+  const session =
+    await fastAgentConversationRepository.findByConversation(conversation);
+  return session?.owner ?? null;
 }
 
 export async function getActiveFastAgentTasks(
@@ -65,6 +150,7 @@ export async function getActiveFastAgentTasks(
         snapshotId: taskRuns.snapshotId,
         snapshotCreatedAt: taskRuns.snapshotCreatedAt,
         snapshotFailedAt: taskRuns.snapshotFailedAt,
+        vendor: taskRuns.vendor,
       })
       .from(taskRuns)
       .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
@@ -92,6 +178,7 @@ export async function getActiveFastAgentTasks(
         snapshotId: latestRunPerTask.snapshotId,
         snapshotCreatedAt: latestRunPerTask.snapshotCreatedAt,
         snapshotFailedAt: latestRunPerTask.snapshotFailedAt,
+        vendor: latestRunPerTask.vendor,
       }),
     )
     .orderBy(desc(latestRunPerTask.createdAt));
@@ -117,9 +204,11 @@ export async function appendFastAgentVisibleMessages({
 export async function upsertFastAgentMessage({
   sessionId,
   message,
+  insertOnly,
 }: {
   sessionId: string;
   message: FastAgentMessageWrite;
+  insertOnly?: boolean;
 }): Promise<FastAgentMessageUpsertResult> {
   let lastError: unknown;
 
@@ -128,6 +217,7 @@ export async function upsertFastAgentMessage({
       return await fastAgentConversationRepository.upsertMessage({
         conversationId: sessionId,
         message,
+        insertOnly,
       });
     } catch (error) {
       lastError = error;
@@ -142,7 +232,7 @@ export async function setFastAgentOpenCodeSession({
   openCodeSessionId,
 }: {
   sessionId: string;
-  openCodeSessionId: string;
+  openCodeSessionId: string | null;
 }): Promise<void> {
   await fastAgentConversationRepository.setOpenCodeSession({
     conversationId: sessionId,

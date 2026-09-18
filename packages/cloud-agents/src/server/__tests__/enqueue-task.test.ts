@@ -8,20 +8,30 @@ import Redis from 'ioredis-mock';
 const { mockGenerateLlmTaskTitle } = vi.hoisted(() => ({
   mockGenerateLlmTaskTitle: vi.fn().mockResolvedValue('Generated title'),
 }));
+const { mockCaptureEvent } = vi.hoisted(() => ({
+  mockCaptureEvent: vi.fn().mockResolvedValue(undefined),
+}));
 
 vi.mock('../llm-task-title', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../llm-task-title')>()),
   generateLlmTaskTitle: mockGenerateLlmTaskTitle,
 }));
 
+vi.mock('@roomote/telemetry/server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/telemetry/server')>()),
+  captureEvent: mockCaptureEvent,
+}));
+
 import {
   ALL_REPOSITORIES,
+  NO_REPOSITORIES,
   type TaskSpec,
   type SnapshotResumeTask,
   RunStatus,
   TaskPayloadKind,
   TASK_KICKOFF_MESSAGE_SOURCE,
   ACP_ENVELOPE_EVENT_TYPES,
+  getFastAgentParentFromPayload,
   ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
 } from '@roomote/types';
 import {
@@ -36,10 +46,12 @@ import {
   taskRunEvents,
   deploymentSettings,
   fastAgentConversations,
+  getUserChatInitiationProvider,
   users,
   environments,
   environmentRepositoryMappings,
   repositories,
+  sessions,
   sessionTasks,
   userFactory,
   environmentFactory,
@@ -68,6 +80,7 @@ import { getPrSha } from '../workflows/utils';
 
 const createdTaskIds: string[] = [];
 const createdUserIds: string[] = [];
+const createdRepositoryIds: string[] = [];
 
 const explicitWorkKind = {
   kind: 'implement',
@@ -211,35 +224,114 @@ afterAll(async () => {
     await db.delete(tasks).where(inArray(tasks.id, createdTaskIds));
   }
 
+  if (createdRepositoryIds.length > 0) {
+    await db
+      .delete(repositories)
+      .where(inArray(repositories.id, createdRepositoryIds));
+  }
+
   if (createdUserIds.length > 0) {
     await db.delete(users).where(inArray(users.id, createdUserIds));
   }
 });
 
 describe('enqueueTask initiator stamping', () => {
-  it('persists an optional task goal on a fresh launch', async () => {
+  it('stamps private web tasks and rejects non-web private launches', async () => {
     const userId = await createUser();
     const run = await launchFresh({
       initiator: { kind: 'user', userId },
       workflow: 'standard',
       surface: 'web',
       trigger: 'manual',
-      goal: {
-        objective: 'Ship goal mode safely',
-        maxContinuations: 4,
-      },
+      privacy: 'private',
     });
 
     await expect(
       db.query.tasks.findFirst({ where: eq(tasks.id, run.taskId) }),
     ).resolves.toMatchObject({
-      goalObjective: 'Ship goal mode safely',
-      goalLastContinuationId: expect.stringMatching(/^goal-generation:/),
-      goalGenerationIds: [expect.stringMatching(/^goal-generation:/)],
-      goalStatus: 'active',
-      goalMaxContinuations: 4,
-      goalContinuationsUsed: 0,
+      privacy: 'private',
+      privateOwnerUserId: userId,
     });
+    await expect(
+      launchFresh({
+        initiator: { kind: 'user', userId },
+        workflow: 'standard',
+        surface: 'slack',
+        trigger: 'message',
+        privacy: 'private',
+      }),
+    ).rejects.toThrow('linked user on the web surface');
+  });
+
+  it.each(['slack', 'teams', 'telegram', 'discord'] as const)(
+    'records %s as the authenticated user task-starting chat provider',
+    async (surface) => {
+      const userId = await createUser();
+
+      await launchFresh({
+        initiator: { kind: 'user', userId },
+        workflow: 'standard',
+        surface,
+        trigger: 'message',
+      });
+
+      await expect(getUserChatInitiationProvider(userId)).resolves.toBe(
+        surface,
+      );
+    },
+  );
+
+  it('does not let web or automation task launches overwrite the chat preference', async () => {
+    const userId = await createUser();
+    await launchFresh({
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'slack',
+      trigger: 'message',
+    });
+
+    await launchFresh({
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+    await launchFresh({
+      initiator: {
+        kind: 'automation',
+        key: 'custom_automation',
+        actingUserId: userId,
+      },
+      workflow: 'standard',
+      surface: 'discord',
+      trigger: 'message',
+    });
+
+    await expect(getUserChatInitiationProvider(userId)).resolves.toBe('slack');
+  });
+
+  it('keeps task-starting chat preferences isolated per user', async () => {
+    const firstUserId = await createUser();
+    const secondUserId = await createUser();
+    await launchFresh({
+      initiator: { kind: 'user', userId: firstUserId },
+      workflow: 'standard',
+      surface: 'teams',
+      trigger: 'message',
+    });
+    await launchFresh({
+      initiator: { kind: 'user', userId: secondUserId },
+      workflow: 'standard',
+      surface: 'telegram',
+      trigger: 'message',
+    });
+
+    await expect(getUserChatInitiationProvider(firstUserId)).resolves.toBe(
+      'teams',
+    );
+    await expect(getUserChatInitiationProvider(secondUserId)).resolves.toBe(
+      'telegram',
+    );
   });
 
   it('blocks fresh launches when managed access is read-only', async () => {
@@ -703,6 +795,7 @@ describe('enqueueTask initiator stamping', () => {
       surface: 'web',
       trigger: 'manual',
     });
+    mockCaptureEvent.mockClear();
 
     const childRun = await launchFresh({
       task: standardTaskInput({
@@ -720,6 +813,11 @@ describe('enqueueTask initiator stamping', () => {
     });
 
     expect(childRun.sourceRunId).toBe(parentRun.id);
+    expect(
+      mockCaptureEvent.mock.calls.filter(
+        ([event]) => event === 'session_created',
+      ),
+    ).toHaveLength(0);
     expect(
       (childRun.payload as { notifySourceRunOnSettle?: boolean })
         .notifySourceRunOnSettle,
@@ -914,6 +1012,49 @@ describe('enqueueTask initiator stamping', () => {
 });
 
 describe('enqueueTask Session linkage', () => {
+  it('captures one user-started Session creation with its origin', async () => {
+    const userId = await createUser();
+    mockCaptureEvent.mockClear();
+
+    await launchFresh({
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'slack',
+      trigger: 'message',
+    });
+
+    expect(mockCaptureEvent).toHaveBeenCalledWith('session_created', {
+      userId,
+      properties: {
+        surface: 'slack',
+        trigger: 'message',
+        outcome: 'created',
+      },
+    });
+    expect(
+      mockCaptureEvent.mock.calls.filter(
+        ([event]) => event === 'session_created',
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('does not capture Session creation for automation launches', async () => {
+    mockCaptureEvent.mockClear();
+
+    await launchFresh({
+      initiator: { kind: 'automation', key: 'custom_automation' },
+      workflow: 'standard',
+      surface: 'system',
+      trigger: 'schedule',
+    });
+
+    expect(
+      mockCaptureEvent.mock.calls.filter(
+        ([event]) => event === 'session_created',
+      ),
+    ).toHaveLength(0);
+  });
+
   it('creates exactly one Session link for a visible fresh task', async () => {
     const userId = await createUser();
     const run = await launchFresh({
@@ -931,7 +1072,7 @@ describe('enqueueTask Session linkage', () => {
     expect(links[0]?.origin).toBe('direct_launch');
   });
 
-  it('does not create Session links for hidden tasks', async () => {
+  it('creates exactly one hidden canonical Session for a hidden fresh task', async () => {
     const userId = await createUser();
     const run = await launchFresh({
       initiator: { kind: 'user', userId },
@@ -941,9 +1082,302 @@ describe('enqueueTask Session linkage', () => {
       visibility: 'hidden',
     });
 
+    const links = await db
+      .select()
+      .from(sessionTasks)
+      .where(eq(sessionTasks.taskId, run.taskId));
+    expect(links).toHaveLength(1);
+    expect(links[0]?.origin).toBe('direct_launch');
+
     await expect(
-      db.select().from(sessionTasks).where(eq(sessionTasks.taskId, run.taskId)),
-    ).resolves.toEqual([]);
+      db.query.sessions.findFirst({
+        where: eq(sessions.id, links[0]!.sessionId),
+      }),
+    ).resolves.toMatchObject({
+      visibility: 'hidden',
+      ownerKind: 'user',
+      ownerUserId: userId,
+      fastConversationId: null,
+    });
+    await expect(
+      db.query.tasks.findFirst({ where: eq(tasks.id, run.taskId) }),
+    ).resolves.toMatchObject({ visibility: 'hidden' });
+  });
+
+  it('seeds the acting user from an automation initiator without re-attributing the task', async () => {
+    const userId = await createUser();
+
+    const run = await launchFresh({
+      initiator: {
+        kind: 'automation',
+        key: 'custom_automation',
+        actor: { externalId: 'automation-1', displayName: 'Flaky tests' },
+        actingUserId: userId,
+      },
+      workflow: 'standard',
+      surface: 'system',
+      trigger: 'schedule',
+    });
+
+    const task = await db.query.tasks.findFirst({
+      where: eq(tasks.id, run.taskId),
+    });
+
+    expect(task!.initiatorKind).toBe('automation');
+    expect(task!.initiatorAutomation).toBe('custom_automation');
+    expect(task!.initiatorUserId).toBeNull();
+    expect(task!.actorExternalId).toBe('automation-1');
+    expect(task!.commitAuthorKind).toBe('roomote');
+    expect(run.actingUserId).toBe(userId);
+  });
+
+  it('attaches an ownerless automation task to a Fast Session without a human actor', async () => {
+    const fastAgentSessionId = crypto.randomUUID();
+    await db.insert(fastAgentConversations).values({
+      id: fastAgentSessionId,
+      userId: null,
+      ownerAutomation: 'custom_automation',
+      surface: 'automation',
+      workspaceId: crypto.randomUUID(),
+      conversationId: crypto.randomUUID(),
+    });
+    const task = standardTaskInput({
+      payload: {
+        repo: ALL_REPOSITORIES,
+        description: 'Prepare the weekly product update',
+        fastAgentSessionId,
+      },
+    });
+
+    const run = await launchFresh({
+      task,
+      initiator: { kind: 'automation', key: 'custom_automation' },
+      workflow: 'standard',
+      surface: 'system',
+      trigger: 'schedule',
+    });
+
+    expect(run.actingUserId).toBeNull();
+    expect(getFastAgentParentFromPayload(run.payload)).toBeNull();
+    await expect(
+      db
+        .select({
+          fastConversationId: sessions.fastConversationId,
+          ownerKind: sessions.ownerKind,
+          ownerAutomation: sessions.ownerAutomation,
+          origin: sessionTasks.origin,
+        })
+        .from(sessionTasks)
+        .innerJoin(sessions, eq(sessionTasks.sessionId, sessions.id))
+        .where(eq(sessionTasks.taskId, run.taskId)),
+    ).resolves.toEqual([
+      {
+        fastConversationId: fastAgentSessionId,
+        ownerKind: 'automation',
+        ownerAutomation: 'custom_automation',
+        origin: 'fast_delegation',
+      },
+    ]);
+  });
+
+  it('reuses one Session task for concurrent launch idempotency retries', async () => {
+    const userId = await createUser();
+    const fastAgentSessionId = crypto.randomUUID();
+    await db.insert(fastAgentConversations).values({
+      id: fastAgentSessionId,
+      userId,
+      surface: 'web',
+      workspaceId: userId,
+      conversationId: `setup:first-admin:${userId}`,
+    });
+    const fastAgentParent = {
+      sessionId: fastAgentSessionId,
+      conversation: {
+        surface: 'web' as const,
+        workspaceId: userId,
+        conversationId: `setup:first-admin:${userId}`,
+      },
+    };
+    const task = standardTaskInput({
+      payload: {
+        repo: ALL_REPOSITORIES,
+        description: 'Investigate CI performance',
+        fastAgentSessionId,
+        fastAgentParent,
+        launchIdempotencyKey: 'setup-starter:concurrent-retry',
+      },
+    });
+    mockCaptureEvent.mockClear();
+
+    const [first, second] = await Promise.all([
+      launchFresh({
+        task,
+        initiator: { kind: 'user', userId },
+        workflow: 'standard',
+        surface: 'web',
+        trigger: 'manual',
+      }),
+      launchFresh({
+        task,
+        initiator: { kind: 'user', userId },
+        workflow: 'standard',
+        surface: 'web',
+        trigger: 'manual',
+      }),
+    ]);
+    expect(
+      mockCaptureEvent.mock.calls.filter(
+        ([event]) => event === 'session_created',
+      ),
+    ).toHaveLength(0);
+    expect(
+      mockCaptureEvent.mock.calls.filter(
+        ([event]) => event === 'session_task_delegated',
+      ),
+    ).toHaveLength(1);
+
+    expect(second.id).toBe(first.id);
+    expect(second.taskId).toBe(first.taskId);
+    await expect(
+      db.select().from(taskRuns).where(eq(taskRuns.taskId, first.taskId)),
+    ).resolves.toHaveLength(1);
+    await expect(
+      db
+        .select({ fastConversationId: sessions.fastConversationId })
+        .from(sessionTasks)
+        .innerJoin(sessions, eq(sessionTasks.sessionId, sessions.id))
+        .where(eq(sessionTasks.taskId, first.taskId)),
+    ).resolves.toEqual([{ fastConversationId: fastAgentSessionId }]);
+  });
+
+  it('creates a replacement when cancellation wins before keyed reuse', async () => {
+    const userId = await createUser();
+    const launchIdempotencyKey = 'setup-starter:canceled-before-reuse';
+    const task = standardTaskInput({
+      payload: {
+        repo: ALL_REPOSITORIES,
+        description: 'Investigate CI performance',
+        launchIdempotencyKey,
+      },
+    });
+    const first = await launchFresh({
+      task,
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+    let releaseCancellation!: () => void;
+    const cancellationHeld = new Promise<void>((resolve) => {
+      releaseCancellation = resolve;
+    });
+    let cancellationStarted!: () => void;
+    const cancellationReady = new Promise<void>((resolve) => {
+      cancellationStarted = resolve;
+    });
+    const cancellation = db.transaction(async (tx) => {
+      await tx
+        .update(taskRuns)
+        .set({ canceledAt: new Date(), status: RunStatus.Canceled })
+        .where(eq(taskRuns.id, first.id));
+      cancellationStarted();
+      await cancellationHeld;
+    });
+    await cancellationReady;
+    mockCaptureEvent.mockClear();
+
+    const retry = launchFresh({
+      task,
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+    releaseCancellation();
+    await cancellation;
+    const replacement = await retry;
+
+    expect(replacement.id).not.toBe(first.id);
+    expect(replacement.taskId).not.toBe(first.taskId);
+    expect(
+      mockCaptureEvent.mock.calls.filter(
+        ([event]) => event === 'session_created',
+      ),
+    ).toHaveLength(0);
+  });
+
+  it('rejects keyed reuse when the persisted Session attachment conflicts', async () => {
+    const userId = await createUser();
+    const firstConversationId = crypto.randomUUID();
+    const secondConversationId = crypto.randomUUID();
+    await db.insert(fastAgentConversations).values([
+      {
+        id: firstConversationId,
+        userId,
+        surface: 'web',
+        workspaceId: userId,
+        conversationId: `setup:first:${userId}`,
+      },
+      {
+        id: secondConversationId,
+        userId,
+        surface: 'web',
+        workspaceId: userId,
+        conversationId: `setup:second:${userId}`,
+      },
+    ]);
+    const parent = (sessionId: string, conversationId: string) => ({
+      sessionId,
+      conversation: {
+        surface: 'web' as const,
+        workspaceId: userId,
+        conversationId,
+      },
+    });
+    const launchIdempotencyKey = 'setup-starter:conflicting-session';
+    const firstParent = parent(firstConversationId, `setup:first:${userId}`);
+    const first = await launchFresh({
+      task: standardTaskInput({
+        payload: {
+          repo: ALL_REPOSITORIES,
+          description: 'Investigate CI performance',
+          fastAgentSessionId: firstConversationId,
+          fastAgentParent: firstParent,
+          launchIdempotencyKey,
+        },
+      }),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+    const secondParent = parent(secondConversationId, `setup:second:${userId}`);
+    await db
+      .update(taskRuns)
+      .set({
+        payload: {
+          ...first.payload,
+          fastAgentSessionId: secondConversationId,
+          fastAgentParent: secondParent,
+        },
+      })
+      .where(eq(taskRuns.id, first.id));
+
+    await expect(
+      launchFresh({
+        task: standardTaskInput({
+          payload: {
+            ...first.payload,
+            fastAgentSessionId: secondConversationId,
+            fastAgentParent: secondParent,
+          },
+        }),
+        initiator: { kind: 'user', userId },
+        workflow: 'standard',
+        surface: 'web',
+        trigger: 'manual',
+      }),
+    ).rejects.toThrow('another Session');
   });
 });
 
@@ -1099,17 +1533,34 @@ describe('enqueueTask snapshot resume', () => {
 
   it('inherits source-control stamps from the source run payload', async () => {
     const userId = await createUser();
+    const suffix = crypto.randomUUID();
+    const adoRepositoryFullName = `roomote/Test ADO/Test ADO-${suffix}`;
+    const gitLabRepositoryFullName = `group/web-${suffix}`;
+    const adoRepository = await repositoryFactory.create({
+      linkedByUserId: userId,
+      fullName: adoRepositoryFullName,
+      sourceControlProvider: 'ado',
+      host: 'dev.azure.com',
+      isActive: true,
+    });
+    const gitLabRepository = await repositoryFactory.create({
+      linkedByUserId: userId,
+      fullName: gitLabRepositoryFullName,
+      sourceControlProvider: 'gitlab',
+      isActive: true,
+    });
+    createdRepositoryIds.push(adoRepository.id, gitLabRepository.id);
 
     const freshRun = await launchFresh({
       task: standardTaskInput({
         payload: {
-          repo: 'roomote/Test ADO/Test ADO',
+          repo: adoRepositoryFullName,
           description: 'Do the thing',
           sourceControlProvider: 'ado',
           sourceControlHost: 'dev.azure.com',
           repositoryProviders: {
-            'roomote/Test ADO/Test ADO': 'ado',
-            'group/web': 'gitlab',
+            [adoRepositoryFullName]: 'ado',
+            [gitLabRepositoryFullName]: 'gitlab',
           },
         },
       }),
@@ -1125,7 +1576,7 @@ describe('enqueueTask snapshot resume', () => {
     const resumeTask: SnapshotResumeTask = {
       type: TaskPayloadKind.SnapshotResume,
       payload: {
-        repo: 'roomote/Test ADO/Test ADO',
+        repo: adoRepositoryFullName,
         sourceSnapshotId: 'snap-ado-1',
         sourceRunId: freshRun.id,
       },
@@ -1144,10 +1595,13 @@ describe('enqueueTask snapshot resume', () => {
 
     expect(resumePayload.sourceControlProvider).toBe('ado');
     expect(resumePayload.sourceControlHost).toBe('dev.azure.com');
-    expect(resumePayload.repositoryProviders).toEqual({
-      'roomote/Test ADO/Test ADO': 'ado',
-      'group/web': 'gitlab',
+    expect(freshRun.payload.repositoryProviders).toMatchObject({
+      [adoRepositoryFullName]: 'ado',
+      [gitLabRepositoryFullName]: 'gitlab',
     });
+    expect(resumePayload.repositoryProviders).toEqual(
+      freshRun.payload.repositoryProviders,
+    );
   });
 
   it('preserves Fast parent routing and communication isolation across resume', async () => {
@@ -1247,75 +1701,6 @@ describe('enqueueTask snapshot resume', () => {
     expect(
       (resumeRun.payload as Record<string, unknown>).fastAgentSessionId,
     ).toBe(fastAgentSessionId);
-  });
-
-  it('recovers Fast parent isolation from an older ancestor in a resume chain', async () => {
-    const userId = await createUser();
-    const ancestorFastSessionId = crypto.randomUUID();
-    await db.insert(fastAgentConversations).values({
-      id: ancestorFastSessionId,
-      userId,
-      surface: 'slack',
-      workspaceId: 'T123',
-      conversationId: ancestorFastSessionId,
-    });
-    const fastAgentParent = {
-      sessionId: ancestorFastSessionId,
-      conversation: {
-        surface: 'slack' as const,
-        workspaceId: 'T123',
-        conversationId: '333.444',
-        replyTarget: { channelId: 'C123', threadId: '333.444' },
-      },
-    };
-    const freshRun = await launchFresh({
-      task: standardTaskInput({
-        payload: {
-          repo: 'acme/widgets',
-          description: 'Do the thing',
-          communicationContextInherited: true,
-          fastAgentParent,
-        },
-      }),
-      initiator: { kind: 'user', userId },
-      workflow: 'standard',
-      surface: 'slack' as const,
-      trigger: 'message',
-    });
-    const [legacyResume] = await db
-      .insert(taskRuns)
-      .values({
-        taskId: freshRun.taskId,
-        kind: 'resume',
-        sourceRunId: freshRun.id,
-        payloadKind: TaskPayloadKind.SnapshotResume,
-        status: RunStatus.Completed,
-        sourceSnapshotId: 'snap-fast-legacy',
-        payload: {
-          repo: 'acme/widgets',
-          sourceSnapshotId: 'snap-fast-legacy',
-          sourceRunId: freshRun.id,
-        },
-      })
-      .returning();
-    const resumeTask: SnapshotResumeTask = {
-      type: TaskPayloadKind.SnapshotResume,
-      payload: {
-        repo: 'acme/widgets',
-        sourceSnapshotId: 'snap-fast-latest',
-        sourceRunId: legacyResume!.id,
-      },
-    } as SnapshotResumeTask;
-
-    const resumeRun = await enqueueTask(
-      { task: resumeTask, actingUserId: userId },
-      { enqueue: false },
-    );
-    const resumePayload = resumeRun.payload as Record<string, unknown>;
-
-    expect(resumePayload.communicationContextInherited).toBe(true);
-    expect(resumePayload.reportConsumer).toBe('orchestrator');
-    expect(resumePayload.fastAgentParent).toEqual(fastAgentParent);
   });
 
   it('inherits per-task model role overrides from the source run payload', async () => {
@@ -2218,6 +2603,44 @@ describe('enqueueTask source-control provider stamping', () => {
     }
   });
 
+  it('stamps a Blank slate launch with the deployment repositories so they can be checked out on demand', async () => {
+    const userId = await createUser();
+    const repository = await repositoryFactory.create({
+      sourceControlProvider: 'gitea',
+      host: 'gitea.example.com',
+      linkedByUserId: userId,
+      fullName: 'group/blank-slate-api',
+      isActive: true,
+    });
+    createdRepositoryIds.push(repository.id);
+
+    const run = await launchFresh({
+      task: standardTaskInput({
+        payload: {
+          repo: NO_REPOSITORIES,
+          description: 'Start blank, clone only if needed',
+        },
+      }),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+
+    const persistedRun = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, run.id),
+    });
+    const payload = persistedRun!.payload as {
+      repo?: string;
+      repositoryProviders?: Record<string, string>;
+    };
+
+    expect(payload.repo).toBe(NO_REPOSITORIES);
+    expect(payload.repositoryProviders?.['group/blank-slate-api']).toBe(
+      'gitea',
+    );
+  });
+
   it('stamps the provider and host on a homogeneous environment-workspace launch', async () => {
     const userId = await createUser();
     const repository = await repositoryFactory.create({
@@ -2227,7 +2650,14 @@ describe('enqueueTask source-control provider stamping', () => {
       fullName: 'group/project',
       isActive: true,
     });
-    createdRepositoryIds.push(repository.id);
+    const additionalRepository = await repositoryFactory.create({
+      sourceControlProvider: 'gitea',
+      host: 'gitea.example.com',
+      linkedByUserId: userId,
+      fullName: 'group/additional-project',
+      isActive: true,
+    });
+    createdRepositoryIds.push(repository.id, additionalRepository.id);
 
     const environment = await environmentFactory.create({
       createdByUserId: userId,
@@ -2272,8 +2702,9 @@ describe('enqueueTask source-control provider stamping', () => {
       provider: 'gitea',
       host: 'gitea.example.com',
     });
-    expect(persistedRun!.payload.repositoryProviders).toEqual({
+    expect(persistedRun!.payload.repositoryProviders).toMatchObject({
       'group/project': 'gitea',
+      'group/additional-project': 'gitea',
     });
   });
 

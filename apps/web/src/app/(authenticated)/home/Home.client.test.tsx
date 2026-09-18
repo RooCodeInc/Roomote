@@ -6,38 +6,55 @@ import {
   waitFor,
 } from '@testing-library/react';
 
-import { ALL_REPOSITORIES, FAST_EXECUTION } from '@roomote/types';
 import type { PromptInputMessage } from '@/components/ai-elements';
-import { AUTO_WORKSPACE_VALUE } from '@/components/tasks/constants';
+import {
+  clearPendingFastSessionLaunch,
+  getPendingFastSessionLaunch,
+} from '@/lib/pending-fast-session-launch';
 
 let currentSearchParams = '';
-let currentCloudEnabled = false;
 let currentIsAdmin = true;
 let currentEnvironments: Array<{ id: string; name: string }> | undefined = [
   { id: 'env-1', name: 'Primary Env' },
   { id: 'env-2', name: 'Secondary Env' },
 ];
 let currentEnvironmentsPending = false;
+let currentBrainConfigured = false;
+let currentPrivateSessionsExperimentEnabled = false;
+let currentHomeSuggestions: string[] = [];
+let currentHomeSuggestionsHasData = true;
+let currentHomeSuggestionsPending = false;
+let currentHomeSuggestionsFetching = false;
+let currentHomeSuggestionsError = false;
+let capturedSubmitWithMetaKey: boolean | undefined;
+let capturedAutoFocus: boolean | undefined;
+let capturedHomeSuggestionsQueryEnabled: boolean | undefined;
+let capturedDefaultReasoningEffort: string | null | undefined;
+let submittedPromptText = 'Test prompt';
 
 const {
+  voiceState,
   mockPush,
   mockToast,
   mockToastError,
   mockToastSuccess,
   mockProcessImageFiles,
-  mockUseCreateStandardTaskRun,
-  mockCreateStandardTaskRun,
   mockUseLaunchTaskModels,
   mockPreparePromptAttachments,
   mockStartFastSession,
 } = vi.hoisted(() => ({
+  voiceState: {
+    enabled: false,
+    active: false,
+    start: vi.fn(),
+    stop: vi.fn(),
+    onUtterance: undefined as ((text: string) => void) | undefined,
+  },
   mockPush: vi.fn(),
   mockToast: vi.fn(),
   mockToastError: vi.fn(),
   mockToastSuccess: vi.fn(),
   mockProcessImageFiles: vi.fn(),
-  mockUseCreateStandardTaskRun: vi.fn(),
-  mockCreateStandardTaskRun: vi.fn(),
   mockUseLaunchTaskModels: vi.fn(),
   mockPreparePromptAttachments: vi.fn(),
   mockStartFastSession: vi.fn(),
@@ -55,6 +72,32 @@ vi.mock('sonner', () => ({
   }),
 }));
 
+vi.mock('@tanstack/react-query', () => ({
+  useQuery: () => ({
+    data: currentHomeSuggestionsHasData
+      ? { suggestions: currentHomeSuggestions }
+      : undefined,
+    isPending: currentHomeSuggestionsPending,
+    isFetching: currentHomeSuggestionsFetching,
+    isError: currentHomeSuggestionsError,
+  }),
+}));
+
+vi.mock('@/trpc/client', () => ({
+  useTRPC: () => ({
+    home: {
+      composerSuggestions: {
+        queryOptions: vi.fn(
+          (_input, options: { enabled?: boolean } | undefined) => {
+            capturedHomeSuggestionsQueryEnabled = options?.enabled;
+            return {};
+          },
+        ),
+      },
+    },
+  }),
+}));
+
 vi.mock('@/hooks/useUser', () => ({
   useUser: () => ({
     authStatus: 'signed-in',
@@ -66,7 +109,8 @@ vi.mock('@/hooks/useUser', () => ({
     isAdmin: currentIsAdmin,
     name: 'Test User',
     primaryEmail: 'test@example.com',
-    cloudEnabled: currentCloudEnabled,
+    cloudEnabled: false,
+    brainConfigured: currentBrainConfigured,
     resource: {
       username: 'tester',
       fullName: 'Test User',
@@ -88,12 +132,35 @@ vi.mock('@/hooks/environments', () => ({
   }),
 }));
 
-vi.mock('@/hooks/task-runs', () => ({
-  useCreateStandardTaskRun: mockUseCreateStandardTaskRun,
+vi.mock('@/hooks/task-runs/useStartFastSession', () => ({
   useStartFastSession: () => ({
     isPending: false,
     mutateAsync: mockStartFastSession,
   }),
+}));
+
+vi.mock('@/hooks/useVoiceEnabled', () => ({
+  useVoiceEnabled: () => voiceState.enabled,
+}));
+
+vi.mock('@/hooks/usePrivateSessionsExperiment', () => ({
+  usePrivateSessionsExperiment: () => ({
+    enabled: currentPrivateSessionsExperimentEnabled,
+  }),
+}));
+
+vi.mock('@/hooks/useLiveVoice', () => ({
+  useLiveVoice: ({ onUtterance }: { onUtterance: (text: string) => void }) => {
+    voiceState.onUtterance = onUtterance;
+    return {
+      active: voiceState.active,
+      status: voiceState.active ? 'listening' : 'idle',
+      start: voiceState.start,
+      stop: voiceState.stop,
+      speak: vi.fn(),
+      addContext: vi.fn(),
+    };
+  },
 }));
 
 vi.mock('@/lib/prompt-attachments', async () => {
@@ -136,184 +203,151 @@ vi.mock('@/components/tasks', async () => {
     await vi.importActual<typeof import('@/components/tasks')>(
       '@/components/tasks',
     );
-  const { useEffect } = await vi.importActual<typeof import('react')>('react');
-  const { useFormContext } =
-    await vi.importActual<typeof import('react-hook-form')>('react-hook-form');
-  const { useWorkspaceStorage } = await vi.importActual<
-    typeof import('@/hooks/useWorkspaceStorage')
-  >('@/hooks/useWorkspaceStorage');
-
   return {
     ...actual,
-    SelectWorkspace: ({
-      allowAuto,
-      autoSelectDefaultWorkspace,
-      onInvalidWorkspaceReset,
-      allowBranchSelection,
-    }: {
-      allowAuto?: boolean;
-      autoSelectDefaultWorkspace?: boolean;
-      onInvalidWorkspaceReset?: () => void;
-      allowBranchSelection?: boolean;
-    }) => {
-      const { watch, setValue } = useFormContext();
-      const { setWorkspace } = useWorkspaceStorage();
-      const repository = watch('repository');
-      const environmentId = watch('environmentId');
-
-      useEffect(() => {
-        if (!allowAuto || environmentId !== 'env-stale') {
-          return;
-        }
-
-        setValue('repository', AUTO_WORKSPACE_VALUE);
-        setValue('environmentId', undefined);
-        setValue('branch', '');
-        setWorkspace({ workspace: { type: 'auto' } });
-        onInvalidWorkspaceReset?.();
-      }, [
-        allowAuto,
-        environmentId,
-        onInvalidWorkspaceReset,
-        setValue,
-        setWorkspace,
-      ]);
-
-      return (
-        <div>
-          <span data-testid="repository">{repository ?? ''}</span>
-          <span data-testid="environment">{environmentId ?? ''}</span>
-          <span data-testid="allow-auto">{String(Boolean(allowAuto))}</span>
-          <span data-testid="auto-select-default-workspace">
-            {String(Boolean(autoSelectDefaultWorkspace))}
-          </span>
-          <span data-testid="allow-branch-selection">
-            {String(Boolean(allowBranchSelection))}
-          </span>
-          <button
-            type="button"
-            onClick={() => {
-              setValue('repository', AUTO_WORKSPACE_VALUE);
-              setValue('environmentId', undefined);
-              setValue('branch', '');
-            }}
-          >
-            Use auto workspace
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setValue('repository', FAST_EXECUTION);
-              setValue('environmentId', undefined);
-              setValue('branch', '');
-            }}
-          >
-            Use Fast workspace
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setValue('repository', ALL_REPOSITORIES);
-              setValue('environmentId', undefined);
-              setValue('branch', '');
-            }}
-          >
-            Use all repositories workspace
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setValue('repository', 'env-single');
-              setValue('environmentId', 'env-single');
-              setValue('branch', 'feature/current');
-            }}
-          >
-            Use single-repo environment
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setValue('repository', 'env-multi');
-              setValue('environmentId', 'env-multi');
-              setValue('branch', 'feature/multi');
-            }}
-          >
-            Use multi-repo environment
-          </button>
-        </div>
-      );
-    },
     TaskPromptInput: ({
       onSubmit,
       onPromptTextChange,
       promptText,
       placeholder,
+      promptSuggestion,
+      onPromptFocusChange,
+      autoFocus,
       submitDisabledReason,
+      submitWithMetaKey,
+      tools,
+      submitLeadingAction,
+      voice,
     }: {
       onSubmit: (message: PromptInputMessage) => Promise<void> | void;
       onPromptTextChange?: (value: string) => void;
       promptText?: string;
       placeholder?: string;
+      promptSuggestion?: string;
+      onPromptFocusChange?: (focused: boolean) => void;
+      autoFocus?: boolean;
       submitDisabledReason?: string;
-    }) => (
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (submitDisabledReason) {
-            return;
-          }
-          onPromptTextChange?.('Test prompt');
-          const result = onSubmit({ text: 'Test prompt', files: [] });
+      submitWithMetaKey?: boolean;
+      tools?: import('react').ReactNode;
+      submitLeadingAction?: import('react').ReactNode;
+      voice?: { active: boolean; onToggle: () => void };
+    }) => {
+      capturedSubmitWithMetaKey = submitWithMetaKey;
+      capturedAutoFocus = autoFocus;
 
-          if (result instanceof Promise) {
-            void result.catch(() => {});
-          }
-        }}
-      >
-        <div data-testid="prompt-placeholder">{placeholder}</div>
-        <textarea
-          aria-label="Task prompt"
-          value={promptText ?? ''}
-          onChange={(event) => onPromptTextChange?.(event.target.value)}
-        />
-        <button type="submit" disabled={Boolean(submitDisabledReason)}>
-          Submit prompt
-        </button>
-      </form>
-    ),
-    ModelSelect: ({
-      value,
-      onValueChange,
-      ariaLabel = 'Model',
-    }: {
-      value?: string;
-      onValueChange: (value: string) => void;
-      ariaLabel?: string;
-    }) => (
-      <div>
-        <span data-testid="selected-model-id">{value ?? ''}</span>
-        <button
-          type="button"
-          aria-label={ariaLabel}
-          onClick={() => onValueChange('openrouter/z-ai/glm-5.2')}
+      return (
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (submitDisabledReason) {
+              return;
+            }
+            onPromptTextChange?.(submittedPromptText);
+            const result = onSubmit({ text: submittedPromptText, files: [] });
+
+            if (result instanceof Promise) {
+              void result.catch(() => {});
+            }
+          }}
         >
-          Use GLM 5.2 model
-        </button>
-      </div>
-    ),
+          <button type="button" aria-label="Add attachments">
+            +
+          </button>
+          {tools}
+          {voice ? (
+            <button
+              type="button"
+              aria-label="Voice conversation"
+              onClick={voice.onToggle}
+            >
+              Voice
+            </button>
+          ) : null}
+          <div data-testid="prompt-placeholder">
+            {promptText ? placeholder : (promptSuggestion ?? placeholder)}
+          </div>
+          <textarea
+            aria-label="Task prompt"
+            placeholder={
+              promptText ? placeholder : (promptSuggestion ?? placeholder)
+            }
+            value={promptText ?? ''}
+            onChange={(event) => onPromptTextChange?.(event.target.value)}
+            onFocus={() => onPromptFocusChange?.(true)}
+            onBlur={() => onPromptFocusChange?.(false)}
+          />
+          {submitLeadingAction}
+          <button type="submit" disabled={Boolean(submitDisabledReason)}>
+            Submit prompt
+          </button>
+        </form>
+      );
+    },
+    SessionModelSwitcher: ({
+      model,
+      onModelChange,
+      onReasoningEffortChange,
+      defaultModelId,
+      defaultReasoningEffort,
+    }: {
+      model: string;
+      onModelChange: (value: string) => void;
+      onReasoningEffortChange: (value: 'high') => void;
+      defaultModelId?: string;
+      defaultReasoningEffort?: string | null;
+    }) => {
+      capturedDefaultReasoningEffort = defaultReasoningEffort;
+
+      return (
+        <div>
+          <span data-testid="selected-model-id">
+            {model || defaultModelId || ''}
+          </span>
+          <button
+            type="button"
+            aria-label="Model for this session"
+            onClick={() => onModelChange('openrouter/z-ai/glm-5.2')}
+          >
+            Use GLM 5.2 model
+          </button>
+          <button type="button" onClick={() => onModelChange('')}>
+            Use default model
+          </button>
+          <button type="button" onClick={() => onReasoningEffortChange('high')}>
+            Use high reasoning
+          </button>
+        </div>
+      );
+    },
   };
 });
 
 describe('Home', () => {
   beforeEach(() => {
+    voiceState.enabled = false;
+    voiceState.active = false;
+    voiceState.start.mockReset();
+    voiceState.stop.mockReset();
+    voiceState.onUtterance = undefined;
     currentSearchParams = '';
-    currentCloudEnabled = false;
     currentIsAdmin = true;
     currentEnvironments = [
       { id: 'env-1', name: 'Primary Env' },
       { id: 'env-2', name: 'Secondary Env' },
     ];
     currentEnvironmentsPending = false;
+    currentBrainConfigured = false;
+    currentPrivateSessionsExperimentEnabled = false;
+    currentHomeSuggestions = [];
+    currentHomeSuggestionsHasData = true;
+    currentHomeSuggestionsPending = false;
+    currentHomeSuggestionsFetching = false;
+    currentHomeSuggestionsError = false;
+    capturedSubmitWithMetaKey = undefined;
+    capturedAutoFocus = undefined;
+    capturedHomeSuggestionsQueryEnabled = undefined;
+    capturedDefaultReasoningEffort = undefined;
+    submittedPromptText = 'Test prompt';
     localStorage.clear();
     vi.clearAllMocks();
 
@@ -321,19 +355,18 @@ describe('Home', () => {
     mockPreparePromptAttachments.mockImplementation(
       ({ text }: { text: string }) => Promise.resolve({ text }),
     );
-    mockStartFastSession.mockResolvedValue({ sessionId: 'fast-session-1' });
-    mockCreateStandardTaskRun.mockResolvedValue({
-      success: true,
-      id: 4,
+    mockStartFastSession.mockResolvedValue({
+      sessionId: '11111111-1111-4111-8111-111111111111',
+      fastConversationId: '22222222-2222-4222-8222-222222222222',
       taskId: 'task-4',
     });
-    mockUseCreateStandardTaskRun.mockReturnValue({
-      isPending: false,
-      mutateAsync: mockCreateStandardTaskRun,
-    });
+    clearPendingFastSessionLaunch('11111111-1111-4111-8111-111111111111');
     mockUseLaunchTaskModels.mockReturnValue({
       data: {
         defaultModelId: 'openrouter/openai/gpt-5.4',
+        defaultReasoningEffort: 'medium',
+        defaultFastModelId: 'openrouter/anthropic/claude-haiku-4.5',
+        defaultFastReasoningEffort: 'low',
         models: [
           {
             id: 'openrouter/openai/gpt-5.4',
@@ -352,49 +385,144 @@ describe('Home', () => {
     });
   });
 
-  it('renders without an agent selector and starts a Fast session for Auto submissions', async () => {
-    render(<Home initialPlaceholderIndex={0} />);
+  it('leaves an untouched Fast session on the orchestration default', async () => {
+    render(<Home initialHeading="Let's cook!" initialPlaceholderIndex={0} />);
 
+    expect(screen.getByRole('heading', { name: "Let's cook!" })).toHaveClass(
+      'animate-[enter-down_1s_1]',
+    );
     expect(
-      screen.getByRole('heading', { name: 'New Session' }),
-    ).toBeInTheDocument();
+      screen.getByRole('textbox', { name: 'Task prompt' }).closest('form')
+        ?.parentElement,
+    ).toHaveClass('animate-[enter-down_1s_1_100ms_backwards]');
     expect(
       screen.queryByText(/^Choose where Roomote should work/),
     ).not.toBeInTheDocument();
     expect(screen.queryByText(/Select agent /)).not.toBeInTheDocument();
-    // Auto was retired from the picker (identical to Fast); Fast is offered.
-    expect(screen.getByTestId('allow-auto')).toHaveTextContent('false');
-    expect(mockUseCreateStandardTaskRun).toHaveBeenCalled();
+    expect(screen.queryByLabelText('Workspace')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Sandbox provider')).not.toBeInTheDocument();
+    expect(screen.getByTestId('selected-model-id')).toHaveTextContent(
+      'openrouter/anthropic/claude-haiku-4.5',
+    );
+    const toolbarButtons = screen
+      .getByRole('button', { name: 'Add attachments' })
+      .parentElement?.querySelectorAll('button');
+    expect(toolbarButtons?.[0]).toHaveAccessibleName('Add attachments');
+    expect(
+      screen.queryByRole('switch', { name: 'Start a private Session' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Model for this session' }),
+    ).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Use auto workspace' }));
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
     await waitFor(() => {
       expect(mockStartFastSession).toHaveBeenCalledWith({
         text: 'Test prompt',
         images: undefined,
-        model: 'openrouter/openai/gpt-5.4',
+        attachmentTexts: undefined,
+        model: undefined,
+        conversationId: expect.any(String),
       });
     });
 
-    expect(mockCreateStandardTaskRun).not.toHaveBeenCalled();
-    expect(mockPush).toHaveBeenCalledWith('/sessions/fast-session-1');
+    expect(mockStartFastSession).toHaveBeenCalledTimes(1);
+    expect(mockPush).toHaveBeenCalledWith(
+      '/sessions/11111111-1111-4111-8111-111111111111',
+    );
+    expect(
+      getPendingFastSessionLaunch('11111111-1111-4111-8111-111111111111'),
+    ).toEqual(
+      expect.objectContaining({
+        fastConversationId: '22222222-2222-4222-8222-222222222222',
+        text: 'Test prompt',
+      }),
+    );
+  });
+
+  it('retains the private Session selection and sends it with creation', async () => {
+    currentPrivateSessionsExperimentEnabled = true;
+    const { rerender } = render(<NewTaskForm initialPrompt="First prompt" />);
+
+    const toggle = screen.getByRole('button', {
+      name: 'Private session',
+    });
+    expect(toggle.querySelector('.lucide-hat-glasses')).toBeInTheDocument();
+    expect(
+      toggle.compareDocumentPosition(
+        screen.getByRole('button', { name: 'Submit prompt' }),
+      ) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(toggle);
+
+    rerender(<NewTaskForm initialPrompt="Reset prompt" />);
+    expect(
+      screen.getByRole('button', { name: 'Private session' }),
+    ).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+
+    await waitFor(() => {
+      expect(mockStartFastSession).toHaveBeenCalledWith(
+        expect.objectContaining({ privacy: 'private' }),
+      );
+    });
   });
 
   it('starts a new Fast session with the selected non-default model', async () => {
     render(<Home initialPlaceholderIndex={0} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Model' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Use auto workspace' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Model for this session' }),
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
     await waitFor(() => {
       expect(mockStartFastSession).toHaveBeenCalledWith({
         text: 'Test prompt',
         images: undefined,
+        attachmentTexts: undefined,
         model: 'openrouter/z-ai/glm-5.2',
+        conversationId: expect.any(String),
       });
     });
+  });
+
+  it('starts a new Fast session on the default after resetting the model', async () => {
+    render(<Home initialPlaceholderIndex={0} />);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Model for this session' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Use default model' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+
+    await waitFor(() => {
+      expect(mockStartFastSession).toHaveBeenCalledWith({
+        text: 'Test prompt',
+        images: undefined,
+        attachmentTexts: undefined,
+        model: undefined,
+        conversationId: expect.any(String),
+      });
+    });
+  });
+
+  it('uses the shared plain-Enter submission mode', () => {
+    render(<Home initialPlaceholderIndex={0} />);
+
+    expect(capturedSubmitWithMetaKey).toBe(false);
+  });
+
+  it('shows the deployment Fast reasoning default', () => {
+    render(<Home initialPlaceholderIndex={0} />);
+
+    expect(capturedDefaultReasoningEffort).toBe('low');
   });
 
   it('keeps Home-only content out of the shared launch form', async () => {
@@ -408,48 +536,9 @@ describe('Home', () => {
     expect(screen.queryByText('Onboarding')).not.toBeInTheDocument();
     expect(screen.queryByText('Tabs')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Use Fast workspace' }));
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
     await waitFor(() => expect(onTaskStarted).toHaveBeenCalledOnce());
-  });
-
-  it('always defaults to Fast execution', async () => {
-    render(<Home initialPlaceholderIndex={0} />);
-
-    await waitFor(() => {
-      expect(screen.getByTestId('repository')).toHaveTextContent(
-        FAST_EXECUTION,
-      );
-    });
-    expect(
-      screen.getByTestId('auto-select-default-workspace'),
-    ).toHaveTextContent('false');
-  });
-
-  it.each([
-    {
-      name: 'environment',
-      workspace: { type: 'environment', id: 'env-1' },
-    },
-    {
-      name: 'repository',
-      workspace: { type: 'repository', value: 'RooCodeInc/Roomote' },
-    },
-  ])('prefers Fast over a persisted $name workspace', async ({ workspace }) => {
-    localStorage.setItem(
-      'roomote-workspace:deployment',
-      JSON.stringify({ workspace }),
-    );
-
-    render(<Home initialPlaceholderIndex={0} />);
-
-    await waitFor(() => {
-      expect(screen.getByTestId('repository')).toHaveTextContent(
-        FAST_EXECUTION,
-      );
-      expect(screen.getByTestId('environment')).toHaveTextContent('');
-    });
   });
 
   it('starts a Fast session with an image-only prompt', async () => {
@@ -459,111 +548,44 @@ describe('Home', () => {
     });
     render(<Home initialPlaceholderIndex={0} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Use Fast workspace' }));
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
     await waitFor(() => {
       expect(mockStartFastSession).toHaveBeenCalledWith({
         text: '',
         images: ['data:image/png;base64,image-1'],
-        model: 'openrouter/openai/gpt-5.4',
+        attachmentTexts: undefined,
+        model: undefined,
+        conversationId: expect.any(String),
       });
     });
-    expect(mockPush).toHaveBeenCalledWith('/sessions/fast-session-1');
+    expect(mockPush).toHaveBeenCalledWith(
+      '/sessions/11111111-1111-4111-8111-111111111111',
+    );
   });
 
-  it('renders the feedback prompt below the input and opens its dialog', async () => {
+  it('hands off seeded presence for an attachment-only Fast session', async () => {
+    mockPreparePromptAttachments.mockResolvedValueOnce({
+      text: '',
+      attachmentTexts: ['Attachment contents'],
+    });
     render(<Home initialPlaceholderIndex={0} />);
 
-    fireEvent.click(
-      await screen.findByRole('button', { name: 'Feedback, please!' }),
-    );
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
+    await waitFor(() => expect(mockStartFastSession).toHaveBeenCalledOnce());
+    const conversationId =
+      mockStartFastSession.mock.calls[0]![0].conversationId;
     expect(
-      screen.getByRole('dialog', {
-        name: 'What do you think of Roomote so far?',
+      getPendingFastSessionLaunch('11111111-1111-4111-8111-111111111111'),
+    ).toEqual(
+      expect.objectContaining({
+        presenceClientId: conversationId,
       }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('link', { name: 'Schedule time with the team' }),
-    ).toHaveAttribute(
-      'href',
-      'https://calendly.com/d/ctx9-f7q-6vr/roomote-feedback',
-    );
-    expect(screen.getByRole('link', { name: 'Email us' })).toHaveAttribute(
-      'href',
-      'mailto:help@roomote.dev?subject=My%20thoughts%20on%20Roomote%20so%20far',
     );
   });
 
-  it('persists dismissal of the feedback prompt', async () => {
-    const { unmount } = render(<Home initialPlaceholderIndex={0} />);
-
-    fireEvent.click(
-      await screen.findByRole('button', { name: 'Feedback, please!' }),
-    );
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Dismiss feedback prompt' }),
-    );
-
-    expect(window.localStorage.getItem('roomote-home-feedback-dismissed')).toBe(
-      '1',
-    );
-    expect(
-      screen.queryByRole('button', { name: 'Feedback, please!' }),
-    ).not.toBeInTheDocument();
-
-    unmount();
-    render(<Home initialPlaceholderIndex={0} />);
-
-    expect(
-      screen.queryByRole('button', { name: 'Feedback, please!' }),
-    ).not.toBeInTheDocument();
-  });
-
-  it('keeps feedback dismissal usable when storage access fails', async () => {
-    const feedbackStorageKey = 'roomote-home-feedback-dismissed';
-    const originalGetItem = Storage.prototype.getItem;
-    const originalSetItem = Storage.prototype.setItem;
-    const getItemSpy = vi
-      .spyOn(Storage.prototype, 'getItem')
-      .mockImplementation((key) => {
-        if (key === feedbackStorageKey) {
-          throw new Error('Storage access blocked');
-        }
-
-        return originalGetItem.call(window.localStorage, key);
-      });
-    const setItemSpy = vi
-      .spyOn(Storage.prototype, 'setItem')
-      .mockImplementation((key, value) => {
-        if (key === feedbackStorageKey) {
-          throw new Error('Storage quota exceeded');
-        }
-
-        originalSetItem.call(window.localStorage, key, value);
-      });
-
-    try {
-      render(<Home initialPlaceholderIndex={0} />);
-
-      fireEvent.click(
-        await screen.findByRole('button', { name: 'Feedback, please!' }),
-      );
-      fireEvent.click(
-        screen.getByRole('button', { name: 'Dismiss feedback prompt' }),
-      );
-
-      expect(
-        screen.queryByRole('button', { name: 'Feedback, please!' }),
-      ).not.toBeInTheDocument();
-    } finally {
-      getItemSpy.mockRestore();
-      setItemSpy.mockRestore();
-    }
-  });
-
-  it('cycles prompt placeholders every 5 seconds from a random starting point', async () => {
+  it('cycles prompt placeholders every 10 seconds from a random starting point', async () => {
     vi.useFakeTimers();
 
     try {
@@ -574,7 +596,15 @@ describe('Home', () => {
       );
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(5_000);
+        await vi.advanceTimersByTimeAsync(9_999);
+      });
+
+      expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
+        'Review this pull request and address the feedback',
+      );
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
       });
 
       expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
@@ -582,7 +612,7 @@ describe('Home', () => {
       );
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(10_000);
+        await vi.advanceTimersByTimeAsync(20_000);
       });
 
       expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
@@ -593,350 +623,187 @@ describe('Home', () => {
     }
   });
 
-  it('uses the picker model for explicit environment launches', async () => {
-    render(<Home initialPlaceholderIndex={0} />);
+  it('uses fallback placeholders while personalized suggestions are unavailable', async () => {
+    vi.useFakeTimers();
+    currentBrainConfigured = true;
 
-    fireEvent.click(screen.getByRole('button', { name: 'Model' }));
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Use single-repo environment' }),
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+    try {
+      render(<Home initialPlaceholderIndex={0} />);
+      const textarea = screen.getByRole('textbox', { name: 'Task prompt' });
 
-    await waitFor(() => {
-      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
-        expect.objectContaining({
-          model: 'openrouter/z-ai/glm-5.2',
-          payload: expect.objectContaining({
-            repo: ALL_REPOSITORIES,
-            environmentId: 'env-single',
-            description: 'Test prompt',
-            blank: false,
-          }),
-        }),
+      expect(capturedHomeSuggestionsQueryEnabled).toBe(true);
+      expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
+        'Find a TODO in the code and fix it',
       );
-    });
-  });
-
-  it('always uses createStandardTaskRun for explicit environment launches', async () => {
-    render(<Home initialPlaceholderIndex={0} />);
-
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Use single-repo environment' }),
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
-
-    await waitFor(() => {
-      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
-        expect.objectContaining({
-          computeProvider: 'docker',
-          harness: 'opencode-server',
-          payload: expect.objectContaining({
-            repo: ALL_REPOSITORIES,
-            environmentId: 'env-single',
-            description: 'Test prompt',
-            blank: false,
-          }),
-        }),
+      fireEvent.focus(textarea);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
+        'Find a TODO in the code and fix it',
       );
-    });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it('opens a new task session on the transcript', async () => {
-    mockUseCreateStandardTaskRun.mockImplementation(
-      (options: { onSuccess: (result: unknown) => void }) => ({
-        isPending: false,
-        mutateAsync: async () => {
-          const result = {
-            success: true,
-            id: 4,
-            taskId: 'task-4',
-            sessionId: 'session-1',
-          };
-          options.onSuccess(result);
-          return result;
-        },
-      }),
-    );
-    render(<Home initialPlaceholderIndex={0} />);
-
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Use single-repo environment' }),
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
-
-    await waitFor(() => {
-      expect(mockPush).toHaveBeenCalledWith('/sessions/session-1');
-    });
-  });
-
-  it('uses opencode as the default harness', async () => {
-    render(<Home initialPlaceholderIndex={0} />);
-
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Use single-repo environment' }),
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
-
-    await waitFor(() => {
-      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
-        expect.objectContaining({
-          harness: 'opencode-server',
-        }),
-      );
-    });
-  });
-
-  it('does not show a model selector when debug UI is enabled', () => {
-    render(<Home initialPlaceholderIndex={0} />);
-
-    expect(screen.queryByLabelText('OpenCode model')).not.toBeInTheDocument();
-  });
-
-  it('ignores previously persisted harnesses on new launches', async () => {
-    localStorage.setItem(
-      'roomote-workspace:deployment',
-      JSON.stringify({
-        harness: 'opencode-server',
-        workspace: { type: 'auto' },
-      }),
-    );
+  it('requests personalized suggestions when Brain is enabled', () => {
+    currentBrainConfigured = true;
 
     render(<Home initialPlaceholderIndex={0} />);
 
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Use single-repo environment' }),
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
-
-    await waitFor(() => {
-      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
-        expect.objectContaining({
-          harness: 'opencode-server',
-        }),
-      );
-    });
+    expect(capturedHomeSuggestionsQueryEnabled).toBe(true);
   });
 
-  it('does not persist the default harness after launch', async () => {
+  it('does not autofocus Home', () => {
     render(<Home initialPlaceholderIndex={0} />);
-
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Use single-repo environment' }),
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
-
-    await waitFor(() => {
-      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
-        expect.objectContaining({
-          harness: 'opencode-server',
-        }),
-      );
-    });
 
     expect(
-      JSON.parse(localStorage.getItem('roomote-workspace:deployment') ?? '{}'),
-    ).toEqual(
-      expect.objectContaining({
-        workspace: { type: 'environment', id: 'env-single' },
-      }),
-    );
+      screen.getByRole('textbox', { name: 'Task prompt' }),
+    ).not.toHaveFocus();
+    expect(capturedAutoFocus).toBe(false);
+  });
+
+  it('cycles generated memory suggestions using the existing timing', async () => {
+    vi.useFakeTimers();
+    currentBrainConfigured = true;
+    currentHomeSuggestions = [
+      'Add regression coverage for recent authentication fixes',
+      'Review the latest deployment reliability follow-ups',
+      'Document the new session handoff behavior clearly',
+      'Investigate recent flaky integration test failures',
+      'Ship the pending accessibility improvements safely',
+    ];
+
+    try {
+      render(<Home initialPlaceholderIndex={0} />);
+
+      expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
+        currentHomeSuggestions[0]!,
+      );
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+
+      expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
+        currentHomeSuggestions[1]!,
+      );
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+
+      expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
+        currentHomeSuggestions[4]!,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps the suggestion area empty during the initial request', () => {
+    currentBrainConfigured = true;
+    currentHomeSuggestionsHasData = false;
+    currentHomeSuggestionsPending = true;
+
+    render(<Home initialPlaceholderIndex={0} />);
+
+    expect(screen.getByTestId('prompt-placeholder')).toBeEmptyDOMElement();
     expect(
-      JSON.parse(localStorage.getItem('roomote-workspace:deployment') ?? '{}'),
-    ).not.toHaveProperty('harness');
-    expect(
-      JSON.parse(localStorage.getItem('roomote-workspace:deployment') ?? '{}'),
-    ).not.toHaveProperty('harnessPreference');
+      screen.getByRole('textbox', { name: 'Task prompt' }),
+    ).toHaveAttribute('placeholder', '');
   });
 
-  it('uses the OpenCode harness on new launches', async () => {
-    localStorage.setItem(
-      'roomote-workspace:deployment',
-      JSON.stringify({
-        harness: 'opencode-server',
-        harnessPreference: 'explicit',
-        workspace: { type: 'auto' },
-      }),
-    );
+  it('shows generated suggestions after the initial request succeeds', () => {
+    currentBrainConfigured = true;
+    currentHomeSuggestions = [
+      'Add focused regression tests for authentication callback validation across supported login flows',
+      'Resolve deployment health check gaps before the next production release begins',
+      'Document session handoff behavior for developers troubleshooting interrupted task execution',
+      'Investigate flaky integration failures affecting automated pull request delivery checks',
+      'Improve accessibility guidance for keyboard users accepting Home composer suggestions',
+    ];
 
     render(<Home initialPlaceholderIndex={0} />);
 
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Use single-repo environment' }),
+    expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
+      currentHomeSuggestions[0]!,
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+  });
 
-    await waitFor(() => {
-      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
-        expect.objectContaining({
-          harness: 'opencode-server',
-        }),
+  it.each([
+    { state: 'empty', hasData: true, isError: false },
+    { state: 'error', hasData: false, isError: true },
+  ])(
+    'shows fallback placeholders after a settled $state result',
+    ({ hasData, isError }) => {
+      currentBrainConfigured = true;
+      currentHomeSuggestionsHasData = hasData;
+      currentHomeSuggestionsError = isError;
+
+      render(<Home initialPlaceholderIndex={0} />);
+
+      expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
+        'Find a TODO in the code and fix it',
       );
-    });
-  });
+    },
+  );
 
-  it('uses the provided default compute provider when selection is enabled', async () => {
-    render(<Home initialPlaceholderIndex={0} defaultComputeProvider="modal" />);
-
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Use single-repo environment' }),
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
-
-    await waitFor(() => {
-      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
-        expect.objectContaining({
-          computeProvider: 'modal',
-        }),
-      );
-    });
-  });
-
-  it('does not source-pin selected environment launches from Home when debug UI is enabled', async () => {
-    render(<Home initialPlaceholderIndex={0} />);
-
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Use single-repo environment' }),
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
-
-    await waitFor(() => {
-      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
-        expect.objectContaining({
-          computeProvider: 'docker',
-          payload: expect.objectContaining({
-            repo: ALL_REPOSITORIES,
-            branch: undefined,
-            environmentId: 'env-single',
-            description: 'Test prompt',
-            blank: false,
-          }),
-        }),
-      );
-    });
-  });
-
-  it('does not source-pin environment launches when debug UI is off', async () => {
-    render(<Home initialPlaceholderIndex={0} />);
-
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Use single-repo environment' }),
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
-
-    await waitFor(() => {
-      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
-        expect.objectContaining({
-          computeProvider: 'docker',
-          payload: expect.objectContaining({
-            repo: ALL_REPOSITORIES,
-            branch: undefined,
-            environmentId: 'env-single',
-          }),
-        }),
-      );
-    });
-
-    expect(screen.getByTestId('allow-branch-selection')).toHaveTextContent(
-      'false',
-    );
-  });
-
-  it('shows the compute provider selector outside cloud mode', () => {
-    render(<Home initialPlaceholderIndex={0} />);
-
-    expect(screen.getByLabelText('Sandbox provider')).toBeInTheDocument();
-  });
-
-  it('hides the compute provider selector when cloud mode is enabled', () => {
-    currentCloudEnabled = true;
+  it('keeps cached suggestions visible during a background refresh', () => {
+    currentBrainConfigured = true;
+    currentHomeSuggestionsFetching = true;
+    currentHomeSuggestions = [
+      'Add focused regression tests for authentication callback validation across supported login flows',
+      'Resolve deployment health check gaps before the next production release begins',
+      'Document session handoff behavior for developers troubleshooting interrupted task execution',
+      'Investigate flaky integration failures affecting automated pull request delivery checks',
+      'Improve accessibility guidance for keyboard users accepting Home composer suggestions',
+    ];
 
     render(<Home initialPlaceholderIndex={0} />);
 
-    expect(screen.queryByLabelText('Sandbox provider')).not.toBeInTheDocument();
+    expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
+      currentHomeSuggestions[0]!,
+    );
   });
 
-  it('uses the default compute provider for launches when cloud mode hides selection', async () => {
-    currentCloudEnabled = true;
+  it('pauses suggestion rotation while focused and resumes after blur', async () => {
+    vi.useFakeTimers();
+    currentBrainConfigured = true;
+    currentHomeSuggestions = [
+      'Add focused regression tests for authentication callback validation across supported login flows',
+      'Resolve deployment health check gaps before the next production release begins',
+      'Document session handoff behavior for developers troubleshooting interrupted task execution',
+      'Investigate flaky integration failures affecting automated pull request delivery checks',
+      'Improve accessibility guidance for keyboard users accepting Home composer suggestions',
+    ];
 
-    render(
-      <Home
-        initialPlaceholderIndex={0}
-        defaultComputeProvider="modal"
-        availableComputeProviders={['modal', 'docker']}
-      />,
-    );
+    try {
+      render(<Home initialPlaceholderIndex={0} />);
+      const textarea = screen.getByRole('textbox', { name: 'Task prompt' });
 
-    expect(screen.queryByLabelText('Sandbox provider')).not.toBeInTheDocument();
-
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Use single-repo environment' }),
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
-
-    await waitFor(() => {
-      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
-        expect.objectContaining({
-          computeProvider: 'modal',
-        }),
+      fireEvent.focus(textarea);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+      expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
+        currentHomeSuggestions[0]!,
       );
-    });
-  });
 
-  it('uses only configured sandbox providers for selection and launch', async () => {
-    render(
-      <Home
-        initialPlaceholderIndex={0}
-        defaultComputeProvider="e2b"
-        availableComputeProviders={['modal']}
-      />,
-    );
-
-    expect(screen.queryByLabelText('Sandbox provider')).not.toBeInTheDocument();
-
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Use single-repo environment' }),
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
-
-    await waitFor(() => {
-      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
-        expect.objectContaining({
-          computeProvider: 'modal',
-        }),
+      fireEvent.blur(textarea);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
+        currentHomeSuggestions[1]!,
       );
-    });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it('falls back to the last catalog-ordered available cloud provider', async () => {
-    render(
-      <Home
-        initialPlaceholderIndex={0}
-        defaultComputeProvider="daytona"
-        // Server may return providers in a non-catalog order; Home should
-        // still prefer configured clouds over Local Docker, using the last
-        // catalog-ordered cloud when more than one is available.
-        availableComputeProviders={['docker', 'e2b', 'modal']}
-      />,
-    );
-
-    expect(screen.getByLabelText('Sandbox provider')).toHaveTextContent('E2B');
-
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Use single-repo environment' }),
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
-
-    await waitFor(() => {
-      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
-        expect.objectContaining({
-          computeProvider: 'e2b',
-        }),
-      );
-    });
-  });
-
-  it('starts a Fast session for Auto submissions without an environment', async () => {
+  it('starts a Fast session without an environment', async () => {
     currentEnvironments = [];
 
     render(<Home initialPlaceholderIndex={0} />);
@@ -949,151 +816,82 @@ describe('Home', () => {
       expect(mockStartFastSession).toHaveBeenCalledWith({
         text: 'Test prompt',
         images: undefined,
-        model: 'openrouter/openai/gpt-5.4',
+        attachmentTexts: undefined,
+        model: undefined,
+        conversationId: expect.any(String),
       });
     });
-    expect(mockCreateStandardTaskRun).not.toHaveBeenCalled();
+    expect(mockStartFastSession).toHaveBeenCalledTimes(1);
   });
 
-  it('does not show the empty-environments warning while environments are loading', () => {
-    currentEnvironments = undefined;
-    currentEnvironmentsPending = true;
-
+  it('reuses the client conversation identity after an ambiguous start failure', async () => {
+    mockStartFastSession
+      .mockRejectedValueOnce(new Error('Connection lost'))
+      .mockResolvedValueOnce({
+        sessionId: '11111111-1111-4111-8111-111111111111',
+        fastConversationId: '22222222-2222-4222-8222-222222222222',
+      });
     render(<Home initialPlaceholderIndex={0} />);
 
-    expect(
-      screen.queryByText(/You haven't created any environments yet/i),
-    ).not.toBeInTheDocument();
-  });
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+    await waitFor(() => expect(mockToastError).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+    await waitFor(() => expect(mockStartFastSession).toHaveBeenCalledTimes(2));
 
-  it('shows the empty-environments warning only after load completes with none', () => {
-    currentEnvironments = undefined;
-    currentEnvironmentsPending = true;
-
-    const { rerender } = render(<Home initialPlaceholderIndex={0} />);
-
-    expect(
-      screen.queryByText(/You haven't created any environments yet/i),
-    ).not.toBeInTheDocument();
-
-    currentEnvironments = [];
-    currentEnvironmentsPending = false;
-    rerender(<Home initialPlaceholderIndex={0} />);
-
-    expect(
-      screen.getByText(/You haven't created any environments yet/i),
-    ).toBeInTheDocument();
-  });
-
-  it('does not show the empty-environments warning to members', () => {
-    currentIsAdmin = false;
-    currentEnvironments = [];
-
-    render(<Home initialPlaceholderIndex={0} />);
-
-    expect(
-      screen.queryByText(/You haven't created any environments yet/i),
-    ).not.toBeInTheDocument();
-  });
-
-  it('allows all-repositories launches when no environments exist', async () => {
-    currentEnvironments = [];
-
-    render(<Home initialPlaceholderIndex={0} />);
-
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Use all repositories workspace' }),
+    expect(mockStartFastSession.mock.calls[0]?.[0].conversationId).toBe(
+      mockStartFastSession.mock.calls[1]?.[0].conversationId,
     );
-
-    const submitButton = screen.getByRole('button', { name: 'Submit prompt' });
-    expect(submitButton).toBeEnabled();
-
-    fireEvent.click(submitButton);
-
-    await waitFor(() => {
-      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
-        expect.objectContaining({
-          payload: expect.objectContaining({
-            repo: ALL_REPOSITORIES,
-            environmentId: undefined,
-            description: 'Test prompt',
-            blank: false,
-          }),
-        }),
-      );
-    });
   });
 
-  it('launches all-repositories tasks without an environment when environments exist', async () => {
+  it('uses a new conversation identity when an ambiguous retry changes', async () => {
+    mockStartFastSession
+      .mockRejectedValueOnce(new Error('Connection lost'))
+      .mockResolvedValueOnce({
+        sessionId: '11111111-1111-4111-8111-111111111111',
+        fastConversationId: '22222222-2222-4222-8222-222222222222',
+      });
     render(<Home initialPlaceholderIndex={0} />);
 
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Use all repositories workspace' }),
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+    await waitFor(() => expect(mockToastError).toHaveBeenCalled());
+    submittedPromptText = 'Corrected prompt';
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+    await waitFor(() => expect(mockStartFastSession).toHaveBeenCalledTimes(2));
+
+    expect(mockStartFastSession.mock.calls[0]?.[0].conversationId).not.toBe(
+      mockStartFastSession.mock.calls[1]?.[0].conversationId,
     );
+    expect(mockStartFastSession.mock.calls[1]?.[0].text).toBe(
+      'Corrected prompt',
+    );
+  });
+
+  it('renders onboarding guidance on Home', () => {
+    render(<Home initialPlaceholderIndex={0} />);
+
+    expect(screen.getByText('Onboarding')).toBeInTheDocument();
+  });
+
+  it('treats a legacy environment URL as an ordinary Session launch', async () => {
+    currentSearchParams = 'environmentId=env-created';
+    render(<Home initialPlaceholderIndex={0} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Use high reasoning' }));
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
-    await waitFor(() => {
-      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
-        expect.objectContaining({
-          payload: expect.objectContaining({
-            repo: ALL_REPOSITORIES,
-            environmentId: undefined,
-            description: 'Test prompt',
-            blank: false,
-          }),
-        }),
-      );
-    });
+    await waitFor(() => expect(mockStartFastSession).toHaveBeenCalled());
+    expect(mockStartFastSession.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({ text: 'Test prompt', reasoningEffort: 'high' }),
+    );
+    expect(mockStartFastSession.mock.calls[0]?.[0]).not.toHaveProperty(
+      'pinnedLaunch',
+    );
+    expect(mockPush).not.toHaveBeenCalledWith('/task/task-4');
   });
 
-  it('restores the Fast default after normalizing a stale persisted workspace', async () => {
-    localStorage.setItem(
-      'roomote-workspace:deployment',
-      JSON.stringify({
-        workspace: { type: 'environment', id: 'env-stale' },
-      }),
-    );
-
-    render(<Home initialPlaceholderIndex={0} />);
-
-    await waitFor(() => {
-      expect(screen.getByTestId('repository')).toHaveTextContent(
-        FAST_EXECUTION,
-      );
-      expect(screen.getByTestId('environment')).toHaveTextContent('');
-    });
-  });
-
-  it('prefers environmentId from the URL over the Fast default', async () => {
-    currentSearchParams = 'environmentId=env-created';
-
-    render(<Home initialPlaceholderIndex={0} />);
-
-    await waitFor(() => {
-      expect(screen.getByTestId('repository')).toHaveTextContent('env-created');
-      expect(screen.getByTestId('environment')).toHaveTextContent(
-        'env-created',
-      );
-    });
-
-    const persisted = JSON.parse(
-      localStorage.getItem('roomote-workspace:deployment') ?? '{}',
-    );
-
-    expect(persisted).toEqual(
-      expect.objectContaining({
-        workspace: { type: 'environment', id: 'env-created' },
-      }),
-    );
-    expect(persisted).not.toHaveProperty('harness');
-    expect(persisted).not.toHaveProperty('harnessPreference');
-  });
-
-  it('prefills editable task details from the URL', async () => {
+  it('prefills editable prompt and model details from the URL', async () => {
     currentSearchParams = new URLSearchParams({
       prompt: 'Fix the build',
       model: 'openrouter/openai/gpt-5.4',
-      environmentId: 'env-created',
     }).toString();
 
     render(<Home initialPlaceholderIndex={0} />);
@@ -1105,18 +903,11 @@ describe('Home', () => {
       'openrouter/openai/gpt-5.4',
     );
 
-    await waitFor(() => {
-      expect(screen.getByTestId('environment')).toHaveTextContent(
-        'env-created',
-      );
-    });
-
     fireEvent.change(screen.getByRole('textbox', { name: 'Task prompt' }), {
       target: { value: 'Fix the tests instead' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Model' }));
     fireEvent.click(
-      screen.getByRole('button', { name: 'Use single-repo environment' }),
+      screen.getByRole('button', { name: 'Model for this session' }),
     );
 
     expect(screen.getByRole('textbox', { name: 'Task prompt' })).toHaveValue(
@@ -1125,6 +916,62 @@ describe('Home', () => {
     expect(screen.getByTestId('selected-model-id')).toHaveTextContent(
       'openrouter/z-ai/glm-5.2',
     );
-    expect(screen.getByTestId('environment')).toHaveTextContent('env-single');
+  });
+
+  it('hides the voice conversation button when voice is not configured', async () => {
+    render(<Home initialPlaceholderIndex={0} />);
+    await screen.findByRole('button', { name: 'Submit prompt' });
+    expect(
+      screen.queryByRole('button', { name: 'Voice conversation' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('opens a Session for the call, sending anything already typed, and starts voice there', async () => {
+    voiceState.enabled = true;
+    mockStartFastSession.mockResolvedValue({ sessionId: 'fast-session-1' });
+    render(<Home initialPlaceholderIndex={0} />);
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Voice conversation' }),
+    );
+
+    await waitFor(() => {
+      expect(mockStartFastSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: '',
+          voiceCall: true,
+          conversationId: expect.any(String),
+        }),
+      );
+    });
+    // No call is opened on the home page itself; the Session page owns it.
+    expect(voiceState.start).not.toHaveBeenCalled();
+    expect(mockPush).toHaveBeenCalledWith('/sessions/fast-session-1?voice=1');
+  });
+
+  it('opens an owner-only private Session for a private voice call', async () => {
+    currentPrivateSessionsExperimentEnabled = true;
+    voiceState.enabled = true;
+    mockStartFastSession.mockResolvedValue({ sessionId: 'private-session-1' });
+    render(<Home initialPlaceholderIndex={0} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Private session' }));
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Voice conversation' }),
+    );
+
+    await waitFor(() => {
+      expect(mockStartFastSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: '',
+          privacy: 'private',
+          voiceCall: true,
+          conversationId: expect.any(String),
+        }),
+      );
+    });
+    expect(mockPush).toHaveBeenCalledWith(
+      '/sessions/private-session-1?voice=1',
+    );
   });
 });

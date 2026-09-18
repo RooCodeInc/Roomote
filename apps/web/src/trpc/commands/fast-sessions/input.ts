@@ -1,6 +1,11 @@
 import { z } from 'zod';
 
-import { REASONING_EFFORT_VALUES } from '@roomote/types';
+import {
+  computeProviders,
+  fastAgentCapabilityIdSchema,
+  launchCodingHarnesses,
+  REASONING_EFFORT_VALUES,
+} from '@roomote/types';
 
 const MAX_FAST_ATTACHMENT_COUNT = 20;
 const MAX_FAST_ATTACHMENT_TEXT_CHARS = 200_000;
@@ -26,10 +31,41 @@ const fastSessionMessageInputShape = {
   reasoningEffort: z.enum(REASONING_EFFORT_VALUES).nullable().optional(),
 };
 
+/**
+ * A launch whose workspace the person already chose. The Session records the
+ * request and delegates the task immediately instead of asking Fast to decide.
+ * When present, the top-level `model` selects the task model, and an empty
+ * prompt opens a blank workspace.
+ */
+export const pinnedFastSessionLaunchSchema = z.object({
+  launchId: z.string().uuid(),
+  repo: z.string().trim().min(1),
+  branch: z.string().trim().min(1).optional(),
+  sha: z.string().trim().min(1).optional(),
+  environmentId: z.string().uuid().optional(),
+  harness: z.enum(launchCodingHarnesses).optional(),
+  computeProvider: z.enum(computeProviders).optional(),
+});
+
+export type PinnedFastSessionLaunchInput = z.infer<
+  typeof pinnedFastSessionLaunchSchema
+>;
+
 function requireFastSessionContent(
-  input: { text: string; images?: string[]; attachmentTexts?: string[] },
+  input: {
+    text: string;
+    images?: string[];
+    attachmentTexts?: string[];
+    pinnedLaunch?: unknown;
+    voiceCall?: boolean;
+  },
   ctx: z.RefinementCtx,
 ): void {
+  // A pinned launch may open a blank workspace with nothing to say yet, and a
+  // voice call opens the Session first and talks inside it.
+  if (input.pinnedLaunch || input.voiceCall) {
+    return;
+  }
   if (!input.text && !input.images?.length && !input.attachmentTexts?.length) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
@@ -52,12 +88,22 @@ function requireFastSessionContent(
 }
 
 export const startFastSessionInputSchema = z
-  .object(fastSessionMessageInputShape)
+  .object({
+    ...fastSessionMessageInputShape,
+    conversationId: z.string().uuid().optional(),
+    privacy: z.enum(['shared', 'private']).optional(),
+    pinnedLaunch: pinnedFastSessionLaunchSchema.optional(),
+    /** Open the Session for a voice call; any text is the pre-typed message. */
+    voiceCall: z.boolean().optional(),
+  })
   .superRefine(requireFastSessionContent);
 
 export const replyToFastSessionInputSchema = z
   .object({
     sessionId: z.string().uuid(),
+    clientMessageId: z.string().uuid().optional(),
+    /** The message was spoken on a voice call; the reply goes to the voice. */
+    voiceMode: z.boolean().optional(),
     ...fastSessionMessageInputShape,
   })
   .superRefine(requireFastSessionContent);
@@ -66,6 +112,14 @@ export const fastSessionPrReviewActionInputSchema = z.object({
   sessionId: z.string().uuid(),
   deliveryId: z.string().uuid(),
   choice: z.enum(['yes', 'auto', 'dismiss']),
+});
+
+export const fastSessionCapabilityOfferResponseInputSchema = z.object({
+  sessionId: z.string().uuid(),
+  offerId: z.string().min(1),
+  capability: fastAgentCapabilityIdSchema,
+  resolution: z.enum(['completed', 'dismissed']),
+  selectedIds: z.array(z.string().min(1)).max(20).optional(),
 });
 
 export const updateFastSessionModelSelectionInputSchema = z.object({

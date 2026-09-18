@@ -1,5 +1,5 @@
 import type { TaskRun } from '@roomote/db/server';
-import { RunStatus, TaskRunErrorCode } from '@roomote/types';
+import { RunStatus, TaskPayloadKind, TaskRunErrorCode } from '@roomote/types';
 
 const mocks = vi.hoisted(() => ({
   claimReturning: vi.fn(),
@@ -9,10 +9,12 @@ const mocks = vi.hoisted(() => ({
   listPullRequests: vi.fn(),
   getTaskUrl: vi.fn(() => 'https://roomote.example/task/child-task'),
   canRetryFailedStart: vi.fn(),
+  findRun: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
   db: {
+    query: { taskRuns: { findFirst: mocks.findRun } },
     update: vi.fn(() => ({
       set: vi.fn((values: unknown) => {
         mocks.updateSet(values);
@@ -61,6 +63,7 @@ function makeRun(
   payload: Record<string, unknown>,
   overrides: Partial<TaskRun> = {},
 ): TaskRun {
+  // Persisted runs store the bare payload; the kind lives in payloadKind.
   return {
     id: 200,
     taskId: 'child-task',
@@ -81,6 +84,79 @@ describe('notifyFastAgentParentOnSettle', () => {
     mocks.listPullRequests.mockResolvedValue([]);
     mocks.recordLifecycle.mockResolvedValue(undefined);
     mocks.canRetryFailedStart.mockResolvedValue(false);
+    mocks.findRun.mockResolvedValue({
+      actingUserId: 'user-1',
+      task: { initiatorKind: 'user' },
+    });
+  });
+
+  it('stays quiet for a successful review child settle', async () => {
+    await notifyFastAgentParentOnSettle(
+      makeRun(
+        { fastAgentParent: fastParent },
+        { payloadKind: TaskPayloadKind.GithubPrReview },
+      ),
+      RunStatus.Idle,
+      'Review acme/app#42',
+    );
+
+    expect(mocks.enqueueParentEvent).not.toHaveBeenCalled();
+    expect(mocks.updateSet).not.toHaveBeenCalled();
+  });
+
+  it('stays quiet for a successful session-requested review settle', async () => {
+    // The PR feedback relay is the session's single carrier for the outcome.
+    await notifyFastAgentParentOnSettle(
+      makeRun(
+        { fastAgentParent: fastParent, fastParentRequestedReview: true },
+        { payloadKind: TaskPayloadKind.GithubPrReview },
+      ),
+      RunStatus.Idle,
+      'Review acme/app#42',
+    );
+
+    expect(mocks.enqueueParentEvent).not.toHaveBeenCalled();
+    expect(mocks.updateSet).not.toHaveBeenCalled();
+  });
+
+  it('still announces a failed session-requested review settle', async () => {
+    await notifyFastAgentParentOnSettle(
+      makeRun(
+        { fastAgentParent: fastParent, fastParentRequestedReview: true },
+        { payloadKind: TaskPayloadKind.GithubPrReview },
+      ),
+      RunStatus.Failed,
+      'Review acme/app#42',
+    );
+
+    expect(mocks.enqueueParentEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          type: 'task_settled',
+          status: RunStatus.Failed,
+        }),
+      }),
+    );
+  });
+
+  it('still announces a failed review child settle', async () => {
+    await notifyFastAgentParentOnSettle(
+      makeRun(
+        { fastAgentParent: fastParent },
+        { payloadKind: TaskPayloadKind.GithubPrReviewSync },
+      ),
+      RunStatus.Failed,
+      'Review acme/app#42',
+    );
+
+    expect(mocks.enqueueParentEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          type: 'task_settled',
+          status: RunStatus.Failed,
+        }),
+      }),
+    );
   });
 
   it('queues child lifecycle state and settles the source claim immediately', async () => {
@@ -96,6 +172,7 @@ describe('notifyFastAgentParentOnSettle', () => {
         type: 'task_settled',
         taskId: 'child-task',
         runId: 200,
+        actingUserId: 'user-1',
         title: 'Implement the fix',
         status: RunStatus.Idle,
         taskUrl: 'https://roomote.example/task/child-task',
@@ -114,6 +191,59 @@ describe('notifyFastAgentParentOnSettle', () => {
         message: expect.stringContaining('Queued'),
         details: expect.objectContaining({
           reason: 'fast_agent_parent_settle_event',
+        }),
+      }),
+    );
+  });
+
+  it('omits the settle actor when the run has no acting user', async () => {
+    mocks.findRun.mockResolvedValueOnce({
+      actingUserId: null,
+      task: { initiatorKind: 'user' },
+    });
+    await notifyFastAgentParentOnSettle(
+      makeRun({ fastAgentParent: fastParent }, { actingUserId: null }),
+      RunStatus.Idle,
+    );
+
+    expect(mocks.enqueueParentEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.not.objectContaining({ actingUserId: expect.anything() }),
+      }),
+    );
+  });
+
+  it('does not treat an automation acting user as a human task initiator', async () => {
+    mocks.findRun.mockResolvedValueOnce({
+      actingUserId: 'user-1',
+      task: { initiatorKind: 'automation' },
+    });
+    await notifyFastAgentParentOnSettle(
+      makeRun({ fastAgentParent: fastParent }),
+      RunStatus.Idle,
+    );
+
+    expect(mocks.enqueueParentEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.not.objectContaining({ actingUserId: expect.anything() }),
+      }),
+    );
+  });
+
+  it('carries custom automation identity into the settlement event', async () => {
+    await notifyFastAgentParentOnSettle(
+      makeRun({
+        fastAgentParent: fastParent,
+        customAutomationId: 'automation-1',
+      }),
+      RunStatus.Completed,
+    );
+
+    expect(mocks.enqueueParentEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          type: 'task_settled',
+          customAutomationId: 'automation-1',
         }),
       }),
     );
@@ -203,16 +333,40 @@ describe('notifyFastAgentParentOnSettle', () => {
 
   it('releases the source claim only when durable admission fails', async () => {
     mocks.enqueueParentEvent.mockRejectedValueOnce(new Error('database down'));
-    await notifyFastAgentParentOnSettle(
+    const result = await notifyFastAgentParentOnSettle(
       makeRun({ fastAgentParent: fastParent }),
       RunStatus.Completed,
     );
 
+    expect(result).toBe('failed');
     expect(
       mocks.updateSet.mock.calls.some(([values]) => {
         const result = (values as { result?: { strings?: string[] } }).result;
         return result?.strings?.join('').includes(' - ') === true;
       }),
     ).toBe(true);
+  });
+
+  it('reports claim acquisition errors as admission failures', async () => {
+    mocks.claimReturning.mockRejectedValueOnce(new Error('database down'));
+
+    const result = await notifyFastAgentParentOnSettle(
+      makeRun({ fastAgentParent: fastParent }),
+      RunStatus.Failed,
+    );
+
+    expect(result).toBe('failed');
+    expect(mocks.enqueueParentEvent).not.toHaveBeenCalled();
+  });
+
+  it('reports durable admission even when later bookkeeping fails', async () => {
+    mocks.recordLifecycle.mockRejectedValueOnce(new Error('database down'));
+
+    const result = await notifyFastAgentParentOnSettle(
+      makeRun({ fastAgentParent: fastParent }),
+      RunStatus.Failed,
+    );
+
+    expect(result).toBe('admitted');
   });
 });

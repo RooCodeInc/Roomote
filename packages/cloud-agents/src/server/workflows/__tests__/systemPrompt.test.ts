@@ -23,7 +23,7 @@ describe('ROOMOTE_SYSTEM_PROMPT', () => {
 
   it('includes a resolved release identifier after the opening paragraph', () => {
     expect(buildRoomoteSystemPrompt('0.40.2')).toContain(
-      'until their goal is genuinely handled.\n\nRoomote release 0.40.2\n\n# Roomote Identity',
+      'until their goal is genuinely handled.\n\nRoomote release 0.40.2 (commit unknown)\n\n# Roomote Identity',
     );
   });
 
@@ -48,6 +48,8 @@ describe('ROOMOTE_SYSTEM_PROMPT', () => {
     expect(prompt).not.toContain(DEFAULT_ROOMOTE_STYLE_GUIDANCE);
     expect(prompt).not.toContain('sound lightly conversational');
     expect(prompt).not.toContain('never patronize or dismiss');
-    expect(prompt).not.toContain('Fast');
+    expect(prompt).toContain(
+      'Never expose Roomote-internal Fast terminology such as "Fast session" or "Roomote Fast mode"',
+    );
   });
 });

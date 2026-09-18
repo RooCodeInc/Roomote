@@ -1,4 +1,8 @@
 export {
+  resolveAutomationRepositoryDestination,
+  isCiFailureTriageRepositoryEnabled,
+} from './automations/ci-failure-triage-routing';
+export {
   type AppRouter,
   type AppRouterInput,
   type AppRouterOutput,
@@ -16,6 +20,35 @@ export {
   finishRun,
   maybeEnqueueBrainMemoryForCompletedRun,
 } from './lib/task-runs/finish-run';
+export {
+  WEB_TASK_INITIATOR_SETTLE_NOTIFICATION_JOB,
+  enqueueWebTaskInitiatorSettleNotification,
+  type WebTaskInitiatorSettleNotificationJob,
+} from './lib/task-runs/enqueue-web-task-initiator-settle-notification';
+export {
+  notifyWebTaskInitiatorOnSettle,
+  type WebTaskInitiatorSettleNotificationResult,
+} from './lib/task-runs/notify-web-task-initiator-on-settle';
+export { continueDirectTaskAttentionReply } from './lib/task-runs/continue-direct-task-attention-reply';
+export {
+  findSessionAttentionNotificationReply,
+  acknowledgeSessionBrowserAttention,
+  hasTaskRunAttentionNotification,
+  listSessionBrowserAttentionEvents,
+  notifyDirectWebTaskAttention,
+  notifyFastWebSessionAttention,
+  processSessionAttentionNotificationJob,
+  resolveSessionAttentionFastConversation,
+  type SessionAttentionKind,
+  type SessionAttentionPresentationKind,
+  type SessionAttentionNotificationResult,
+  type BrowserAttentionEvent,
+} from './lib/session-attention-notification';
+export {
+  SESSION_ATTENTION_NOTIFICATION_JOB,
+  enqueueSessionAttentionNotification,
+  type SessionAttentionNotificationJob,
+} from './lib/enqueue-session-attention-notification';
 export {
   AUTOMATION_RECOMMENDATIONS_QUEUE_NAME,
   AUTOMATION_RECOMMENDATION_INITIAL_RUN_QUEUE_NAME,
@@ -36,10 +69,17 @@ export {
   type AutomationSignalPrefetchJob,
 } from './lib/automation-recommendations';
 export {
+  CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
+  resolveDefaultAutomationTarget,
+  type AutomationDestinationCapabilities,
+} from './lib/default-automation-destination';
+export {
   recordLlmUsage,
   type RecordLlmUsageInput,
 } from './lib/task-runs/record-task-inference-usage';
 export { findTaskRunByRunTokenClaims } from './lib/task-runs/find-task-run';
+export { stopTaskRun } from './lib/task-runs/stop-task-run';
+export { settleLiveTaskMessageOnExit } from './lib/task-runs/settle-live-task-message-on-exit';
 export { createSnapshot } from './lib/task-runs/enqueue-snapshot';
 export {
   enqueueTaskSleep,
@@ -85,6 +125,7 @@ export {
 } from './lib/task-runs/pull-request-mergeability-check';
 export * from './lib/manager-slack';
 export * from './lib/automation-result-metadata';
+export * from './lib/automation-result-visibility';
 export * from './automations';
 export * from './lib/manager-stats';
 export {
@@ -107,11 +148,32 @@ export {
   signArtifactIdWithKey,
   verifyArtifactSignatureWithKeys,
 } from './lib/artifacts/raw-url';
-export { createTaskArtifactRecord } from './lib/artifacts/create-record';
+export {
+  authorizeTaskArtifactUpload,
+  createTaskArtifactRecord,
+} from './lib/artifacts/create-record';
+export {
+  createFastAgentConversationArtifact,
+  createFastAgentSessionArtifact,
+  createSessionArtifact,
+} from './lib/artifacts/create-session-artifact';
+export { buildFastAgentArtifactCreator } from './lib/artifacts/fast-agent-artifact-creator';
+export {
+  buildPlatformIssueSourceUrl,
+  createFastSessionPlatformIssueReport,
+  notifyPlatformIssueReport,
+  type PlatformIssueSource,
+} from './lib/platform-issue-reporting';
 export {
   notifyFastAgentParentOnArtifact,
   type FastArtifactNotificationResult,
 } from './lib/artifacts/notify-fast-agent-parent';
+export {
+  buildReleaseAnnouncement,
+  drainReleaseAnnouncementDeliveries,
+  recordInstalledRelease,
+  type RecordInstalledReleaseResult,
+} from './lib/release-announcements';
 
 export {
   SLACK_ACCOUNT_LINK_EDUCATION_DELAY_MS,
@@ -196,28 +258,111 @@ export {
 } from './lib/discord-persistence';
 
 export { createDiscordCommunicationProviderFromRuntimeCredentials } from './lib/discord-communication';
+export { refreshCurrentThreadFooters } from './lib/thread-footer-refresh';
 
 export { createTeamsCommunicationProviderFromRuntimeCredentials } from './lib/teams-communication';
 
 export { createTelegramCommunicationProviderFromRuntimeCredentials } from './lib/telegram-communication';
+export { retireTelegramRequestUserInputPromptBestEffort } from './lib/communication-request-user-input';
 
 export { syncTaskCommunicationThreadTitleBestEffort } from './lib/task-thread-title-sync';
 export { syncFastAgentSlackTitleBestEffort } from './lib/fast-agent-slack-title-sync';
+export { requireFastSuggestionOriginSessionId } from './lib/fast-automation-suggestions';
 
 export {
   buildFastAgentParentEventKey,
   drainFastAgentParentEvents,
+  countOverdueQueuedFastAgentParentEvents,
   enqueueFastAgentParentEvent,
   FastAgentParentBusyError,
   FAST_AGENT_PARENT_EVENT_QUEUE_NAME,
   recoverPendingFastAgentParentEvents,
+  wakeFastAgentParentEventAt,
+  wakeFastAgentParentEventNow,
+  wakeFastAgentParentEventsOnTurnRelease,
   type FastAgentParentEventQueueRequest,
 } from './lib/fast-agent-parent-event-queue';
+export {
+  SESSION_WAKEUP_FIRE_JOB_NAME,
+  SESSION_WAKEUP_QUEUE_NAME,
+  SESSION_WAKEUP_RECOVERY_LOOKAHEAD_MS,
+  fireSessionWakeup,
+  recoverPendingSessionWakeups,
+  type FireSessionWakeupResult,
+  type SessionWakeupFireJob,
+} from './lib/session-wakeups';
+export {
+  admitFastAgentHumanFollowUp,
+  admitFastAgentInlineHumanTurn,
+  persistFastAgentInlineHumanTurn,
+  type FastAgentDurableTurn,
+  type FastAgentInlineHumanTurnAdmission,
+  type FastAgentHumanFollowUpAdmission,
+} from './lib/fast-agent-human-follow-up';
+export {
+  resolveFastAgentSessionImages,
+  type FastAgentReplyImage,
+} from './lib/fast-agent-session-images';
+export { deliverFastAgentSessionVideos } from './lib/fast-agent-session-videos';
 
 export {
   getCommunicationProviderAdapter,
   type RuntimeCommunicationProviderAdapter,
 } from './lib/communication-providers';
+
+export { createAgentMailCommunicationProviderFromRuntimeCredentials } from './lib/agentmail-communication';
+
+export {
+  advanceAgentMailInboundAnchor,
+  normalizeEmailAddress,
+  recordAgentMailOutboundMessage,
+  resolveAgentMailReplyRoute,
+  resolveAgentMailSenderUserId,
+  resolveOrCreateAgentMailConversation,
+  type AgentMailConversationRow,
+  type AgentMailReplyRouteData,
+} from './lib/agentmail/conversation-store';
+
+export {
+  buildAgentMailRuiAnswerToken,
+  buildAgentMailRuiAnswerUrl,
+  verifyAgentMailRuiAnswerToken,
+} from './lib/agentmail/rui-answer-links';
+
+export {
+  buildAgentMailUnsubscribeToken,
+  buildAgentMailUnsubscribeUrl,
+  verifyAgentMailUnsubscribeToken,
+} from './lib/agentmail/unsubscribe-tokens';
+
+export {
+  AgentMailRecipientUnavailableError,
+  canStartAgentMailConversationWithUser,
+  isAgentMailAddressSuppressed,
+  listAgentMailOutboundIdentities,
+  listAvailableAgentMailOutboundIdentities,
+  resolveAgentMailOutboundAddress,
+  resolveAgentMailOutboundIdentity,
+  sendAgentMailSystemEmail,
+  startAgentMailConversation,
+  startAgentMailConversationWithResult,
+  suppressAgentMailAddress,
+  type AgentMailOutboundAddressResolution,
+  type AgentMailOutboundIdentity,
+  type AgentMailSystemEmailResult,
+  type StartAgentMailConversationResult,
+  type AgentMailSuppressionReason,
+} from './lib/agentmail/outbound';
+
+export {
+  AGENTMAIL_WEBHOOK_EVENT_QUEUE_NAME,
+  AgentMailConversationBusyError,
+  drainAgentMailInboundTurns,
+  processAgentMailWebhookEvent,
+  recordAgentMailWebhookEvent,
+  recoverPendingAgentMailWork,
+  type AgentMailWebhookEventJob,
+} from './lib/agentmail/inbound';
 
 export {
   findTelegramPrimaryChatId,
@@ -233,10 +378,13 @@ export {
   findSlackUserDirectMessageDestination,
   findUserDirectMessageDestination,
   hasUserDirectMessageIdentity,
+  hasAnyUserDirectMessageIdentity,
   sendUserDirectMessage,
   sendUserDirectMessageBestEffort,
+  sendUserDirectMessageBestEffortWithReceipts,
   type UserDirectMessageDestination,
   type UserDirectMessageProvider,
+  type UserDirectMessageReceipt,
 } from './lib/user-direct-message';
 
 export {
@@ -267,6 +415,7 @@ export {
   beginCanonicalPrReviewWebAutoDispatch,
   completeCanonicalPrReviewAutoDispatch,
   consumePendingPrReviewActivity,
+  dispatchCanonicalPrReviewAutoFollowUp,
   dispatchDuePrReviewNotifications,
   enqueuePrReviewNotification,
   enqueuePrReviewNotificationInputSchema,
@@ -281,6 +430,7 @@ export {
   prReviewActivityEventSchema,
   prReviewNotificationRequestSchema,
   requeuePendingPrReviewActivity,
+  retrySupersededPrReviewAction,
   resolvePrReviewNotificationRoute,
   schedulePrReviewNotificationJob,
   startPrReviewNotificationCycle,
@@ -298,6 +448,7 @@ export {
   preparePrReviewNotificationDelivery,
   recordPrReviewNotificationDeliveryBestEffort,
   getTaskPrReviewOfferStatus,
+  updateFastAgentPrReviewOfferStatus,
   updateTaskPrReviewOfferStatus,
   triagePrReviewActivity,
   type PreparedPrReviewNotification,
@@ -306,6 +457,11 @@ export {
 export * from './lib/task-runs/pr-review-action';
 export * from './lib/task-runs/pr-review-follow-up-dispatch';
 export * from './lib/fast-agent-surface-reply';
+export * from './lib/linear-fast-session';
+export * from './lib/linear-fast-session-turn';
+export * from './lib/source-control-fast-delivery';
+export * from './lib/source-control-fast-session';
+export * from './lib/fast-agent-slack-reply-stream';
 export * from './lib/fast-agent-provider-message';
 export * from './lib/task-runs/notify-fast-agent-parent-on-pr-feedback';
 export * from './lib/task-runs/notify-fast-agent-parent-on-pull-request-conflict';
@@ -328,6 +484,10 @@ export {
 } from './lib/slack-conversation-log';
 
 export { updateTaskPrStatus } from './lib/pull-requests/update-task-pr-status';
+export {
+  markRoomotePullRequestReadyAfterCleanReview,
+  type MarkRoomotePullRequestReadyResult,
+} from './lib/pull-requests/mark-roomote-pull-request-ready';
 export {
   manageSourceControlIssueForTaskRun,
   sourceControlIssueInputSchema,
@@ -360,6 +520,10 @@ export {
   type SourceControlPullRequestListResult,
   type SourceControlPullRequestSummary,
 } from './lib/pull-requests/source-control-pull-request-reads';
+export {
+  readLivePullRequestStateForNotification,
+  type LivePullRequestState,
+} from './lib/task-runs/pr-review-notification-pr-state';
 export {
   writeSourceControlPullRequestForTaskRun,
   sourceControlPullRequestWriteInputSchema,
@@ -411,6 +575,7 @@ export { resolveUserMcpServerConfigs } from './routers/mcp-connections';
 export {
   discoverOAuthEndpoints,
   discoverOAuthProtectedResourceMetadata,
+  ClientRegistrationRejectedError,
   registerOAuthClient,
   getPreferredTokenEndpointAuthMethod,
   generateCodeVerifier,
@@ -427,6 +592,20 @@ export {
   isDefinitiveOAuthRejection,
   type CustomMcpAuthTarget,
 } from './lib/mcp/custom-auth-target';
+
+export {
+  addRemoteCustomMcpForFast,
+  describeRegistrationRefusal,
+  prepareDeploymentCustomMcpOAuthConnection,
+  type AddRemoteCustomMcpResult,
+} from './lib/mcp/add-remote-custom-mcp';
+export {
+  connectIntegrationForFast,
+  listNativeIntegrationsForFast,
+  getNativeIntegrationSetupStrategy,
+  type NativeIntegrationSetupStrategy,
+  type ConnectIntegrationResult,
+} from './lib/mcp/connect-integration';
 
 export {
   LINEAR_ORG_CONNECTION_ROLE,
@@ -452,3 +631,8 @@ export * from './lib/brain-github';
 export * from './lib/brain-linear';
 export * from './lib/brain-inference';
 export * from './lib/brain-source-availability';
+export * from './lib/home-composer-recommendations';
+export {
+  publishCredentialEgressDelivery,
+  isCredentialEgressBootstrapReady,
+} from './lib/credential-egress-delivery';

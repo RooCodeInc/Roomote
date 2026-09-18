@@ -9,7 +9,6 @@ import {
   and,
   db,
   eq,
-  getTaskGoalForRun,
   isNull,
   repositories,
   sql,
@@ -146,6 +145,7 @@ export const activePrReviewFollowUpJob = async (
       sandboxServerUrl: true,
       snapshotId: true,
       snapshotCreatedAt: true,
+      vendor: true,
       port: true,
       payload: true,
       actingUserId: true,
@@ -167,7 +167,6 @@ export const activePrReviewFollowUpJob = async (
   });
 
   if (!isExitedRunStatus(run.status)) {
-    const goal = await getTaskGoalForRun(run.id);
     await withSandboxServerRpcClient({
       runId: run.id,
       userId: null,
@@ -178,14 +177,16 @@ export const activePrReviewFollowUpJob = async (
           source: 'github-pr-synchronize',
           clientMessageId: buildClientMessageId(data),
           visibleInTranscript: false,
-          ...(goal?.status === 'active' ? { goalContext: goal } : {}),
         }),
     });
     await updateLinkedHead(run.taskId, data.eventHeadSha);
     return;
   }
 
-  if (run.snapshotId && isSnapshotResumable(run.snapshotCreatedAt)) {
+  if (
+    run.snapshotId &&
+    isSnapshotResumable(run.snapshotCreatedAt, run.vendor)
+  ) {
     const sourcePayload = (run.payload ?? {}) as Record<string, unknown>;
     const selectedRepositories = Array.isArray(
       sourcePayload.selectedRepositories,

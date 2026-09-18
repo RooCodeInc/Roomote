@@ -1,5 +1,5 @@
 ---
-title: Source Control Overview
+title: Source control overview
 icon: git-merge
 description: Connect GitHub, GitLab, Gitea, Bitbucket, or Azure DevOps so Roomote can clone repositories and open reviewable changes.
 ---
@@ -39,6 +39,20 @@ After setup, verify that Roomote can:
 - create or update an environment from a repository
 - clone the repository inside a task sandbox
 - push a branch or open a reviewable change when the task finishes
+
+## Manage pull requests from tasks
+
+During an environment-backed task, Roomote can update, close, or reopen pull
+requests and merge requests on GitHub, GitLab, Gitea, Bitbucket Cloud, and Azure
+DevOps. Updates can change the target branch, title, description, or draft state
+when the provider exposes that capability. Gitea cannot clear a native draft
+state through this interface; Bitbucket and Azure DevOps draft updates are
+skipped when the provider does not return the current draft state.
+
+Closing does not merge the change or delete its source branch. The provider may
+describe the resulting state as closed, declined, or abandoned. Roomote reports
+when a requested provider operation was unsupported instead of treating it as
+applied.
 
 ## Attribution on pull requests and commits
 
@@ -84,10 +98,25 @@ and then includes the finding with a file and line reference in the review
 summary. On later sync reviews, Roomote resolves its inline thread when the
 flagged issue is clearly fixed and the provider supports thread resolution.
 
+### Mark clean Roomote drafts ready for review
+
+When **Pull request delivery** is set to **Draft pull request**, admins can
+enable **Mark Roomote PR ready after clean review** under **Settings > Source
+Control**. The setting is off by default. After Roomote's automated reviewer
+records a clean result, Roomote marks its own draft ready for human review on
+GitHub, GitLab, Gitea, Bitbucket Cloud, or Azure DevOps.
+
+Roomote verifies that the pull request or merge request is still open, still a
+draft, and still points at the exact reviewed commit before changing its state.
+Human-created drafts, reviews with findings, stale or incomplete reviews, and
+branches that changed after review remain drafts. This setting does not approve
+or merge anything, and it is inactive when delivery is already set to
+**Ready-for-review pull request** or **Push branch only**.
+
 ## Pull request status notifications
 
 When a tracked, Roomote-created GitHub pull request becomes conflicted, Roomote
-notifies the Slack, Teams, Telegram, Discord, or Fast session where the
+notifies the Slack, Teams, Telegram, Discord, or web session where the
 task started. The notification is automatic and is sent once for each
 transition into a conflicting state. If the pull request becomes clean and then
 conflicts again, Roomote sends a new notification.

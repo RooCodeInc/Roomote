@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 
@@ -13,6 +14,7 @@ import { useTRPC } from '@/trpc/client';
 
 import { NavbarHeader, SideNav, Logo } from '@/components/layout';
 import { Spinner } from '@/components/system';
+import { SessionNavigationStateProvider } from '@/hooks/useSessionNavigationState';
 
 import { SandboxLayoutContext } from './use-sandbox-layout';
 
@@ -26,7 +28,8 @@ export function SandboxShell({
   requireAuth = true,
 }: SandboxShellProps) {
   const router = useRouter();
-  const { authStatus, isSignedIn } = useUser();
+  const { authStatus, isSignedIn, user } = useUser();
+  const pathname = usePathname();
   const shouldRedirectToSignIn = requireAuth && authStatus === 'signed-out';
 
   useRedirectToSignIn(shouldRedirectToSignIn);
@@ -50,19 +53,59 @@ export function SandboxShell({
       staleTime: 30_000,
     }),
   );
+  const { data: setupStatus } = useQuery(
+    trpc.setup.status.queryOptions(undefined, {
+      enabled: onboardingQueryEnabled && user?.isAdmin === true,
+      staleTime: 30_000,
+    }),
+  );
+  const { data: setupSessionStatus, isLoading: isSetupSessionLoading } =
+    useQuery(
+      trpc.setup.sessionStatus.queryOptions(undefined, {
+        enabled:
+          onboardingQueryEnabled &&
+          user?.isAdmin === true &&
+          setupStatus?.setupCompletedAt == null,
+        staleTime: 10_000,
+      }),
+    );
 
   const needsOnboarding =
-    onboardingStatus && !onboardingStatus.onboardingCompletedAt;
+    user?.isAdmin !== true &&
+    onboardingStatus &&
+    !onboardingStatus.onboardingCompletedAt;
+  const setupSessionPath = setupSessionStatus?.sessionId
+    ? `/sessions/${setupSessionStatus.sessionId}`
+    : null;
+  const needsAdminSetup =
+    user?.isAdmin === true &&
+    setupStatus?.setupCompletedAt == null &&
+    setupSessionStatus?.completed !== true;
+  const isAllowedSetupSession =
+    setupSessionPath !== null && pathname === setupSessionPath;
   const sandboxLayoutValue = useMemo(
     () => ({ isSidebarVisible, setSidebarVisible, toggleSidebar }),
     [isSidebarVisible, setSidebarVisible, toggleSidebar],
   );
 
   useEffect(() => {
-    if (needsOnboarding || isOnboardingError) {
+    // Wait for the setup-session lookup before routing. Otherwise a direct
+    // visit to the in-progress setup session can briefly see no session ID
+    // and be redirected to /setup before the lookup resolves.
+    if (needsAdminSetup && !isSetupSessionLoading && !isAllowedSetupSession) {
+      router.replace(setupSessionPath ?? '/setup');
+    } else if (needsOnboarding || isOnboardingError) {
       router.replace('/onboarding');
     }
-  }, [isOnboardingError, needsOnboarding, router]);
+  }, [
+    isAllowedSetupSession,
+    isOnboardingError,
+    isSetupSessionLoading,
+    needsAdminSetup,
+    needsOnboarding,
+    router,
+    setupSessionPath,
+  ]);
 
   if (shouldRedirectToSignIn) {
     return (
@@ -73,33 +116,35 @@ export function SandboxShell({
   }
 
   return (
-    <div className="h-viewport flex flex-col overflow-hidden">
-      {/* Mobile-only top bar */}
-      <div
-        className={`md:hidden top-0 ${zIndex('NAV_HEADER')} w-full shrink-0 bg-card`}
-      >
-        {isSignedIn ? (
-          <NavbarHeader />
-        ) : (
-          <div className="h-(--header-height) mx-auto px-3 flex items-center">
-            <Link href="/" className="shrink-0">
-              <Logo scale={0.3} />
-            </Link>
-          </div>
-        )}
-      </div>
-
-      {/* Main layout with side nav on desktop */}
-      <div className="flex flex-1 min-h-0 overflow-hidden">
-        {isSignedIn && <SideNav />}
-        <SandboxLayoutContext.Provider value={sandboxLayoutValue}>
-          <div className="flex flex-1 min-h-0 min-w-0 md:rounded-l-sm md:shadow-md">
-            <div className="flex flex-col min-h-0 min-w-0 flex-1">
-              {children}
+    <SessionNavigationStateProvider>
+      <div className="h-viewport flex flex-col overflow-hidden">
+        {/* Mobile-only top bar */}
+        <div
+          className={`md:hidden top-0 ${zIndex('NAV_HEADER')} w-full shrink-0 bg-card`}
+        >
+          {isSignedIn ? (
+            <NavbarHeader setupIncomplete={needsAdminSetup} />
+          ) : (
+            <div className="h-(--header-height) mx-auto px-3 flex items-center">
+              <Link href="/" className="shrink-0">
+                <Logo scale={0.3} />
+              </Link>
             </div>
-          </div>
-        </SandboxLayoutContext.Provider>
+          )}
+        </div>
+
+        {/* Main layout with side nav on desktop */}
+        <div className="flex flex-1 min-h-0 overflow-hidden">
+          {isSignedIn && <SideNav setupIncomplete={needsAdminSetup} />}
+          <SandboxLayoutContext.Provider value={sandboxLayoutValue}>
+            <div className="flex flex-1 min-h-0 min-w-0 md:rounded-l-sm md:shadow-md">
+              <div className="flex flex-col min-h-0 min-w-0 flex-1">
+                {children}
+              </div>
+            </div>
+          </SandboxLayoutContext.Provider>
+        </div>
       </div>
-    </div>
+    </SessionNavigationStateProvider>
   );
 }

@@ -10,12 +10,14 @@ import {
 import {
   handleMergeAnnouncerPush,
   recordPrStatusChangeInTaskHistory,
+  retirePendingPrReviewActionsForPullRequest,
   updateTaskPrStatus,
   upsertGitHubPullRequestFactFromWebhook,
 } from '@roomote/sdk/server';
-import type { PullRequestStatus } from '@roomote/types';
+import type { OperationalLogFields, PullRequestStatus } from '@roomote/types';
 
-import { apiLogger, logApiError } from '../../logging';
+import { apiLogger, logApiError, logApiOperationalEvent } from '../../logging';
+import { captureApiException } from '../../monitoring/sentry';
 // Onboarding:
 import { handleInstallationCreated } from './handleInstallationCreated';
 
@@ -24,6 +26,9 @@ import { handlePrOpen } from './handlePrOpen';
 import { handlePrReadyForReview } from './handlePrReadyForReview';
 import { handlePrReopen } from './handlePrReopen';
 import { handlePrSynchronize } from './handlePrSynchronize';
+import { handleCheckRunRerequested } from './handleCheckRunRerequested';
+import { getCurrentGitHubPrHeadSha } from './currentPrHead';
+import type { WebhookPullRequestSynchronize } from './types';
 import { handlePrComment } from './handlePrComment';
 import { handleGitHubIssueComment } from './handleGitHubIssueComment';
 import { handleGitHubIssueFixer } from './handleGitHubIssueFixer';
@@ -53,6 +58,8 @@ import { handleInstallationRepositoriesChange } from './handleInstallationReposi
 // Utilities:
 import { isFromKnownInstallation } from './isFromKnownInstallation';
 import { recordWebhook } from './recordWebhook';
+import { toHostFromUrl } from '../utils';
+import { toValidDate } from '../pull-request-fact-sync';
 import {
   enrichGitHubMergeAnnouncerEvent,
   normalizeGitHubPush,
@@ -65,8 +72,11 @@ function syncPrStatus(
   repo: string,
   prNumber: number,
   status: PullRequestStatus,
+  prUrl: string,
 ): Promise<void> {
-  return updateTaskPrStatus('github', repo, prNumber, status).catch((error) =>
+  return updateTaskPrStatus('github', repo, prNumber, status, {
+    host: toHostFromUrl(prUrl),
+  }).catch((error) =>
     console.warn(
       `[syncPrStatus] Failed to update PR status for ${repo}#${prNumber}: ${
         error instanceof Error ? error.message : String(error)
@@ -140,6 +150,49 @@ function syncPullRequestFact(params: {
   );
 }
 
+/**
+ * Retires review offers whose controls belong to an older head once a PR
+ * receives a new commit. The live head is resolved from GitHub rather than
+ * trusted from the payload, so a late or redelivered `synchronize` for an
+ * older commit cannot dismiss offers for the actual current head. Runs
+ * best-effort in the background: the offers are cosmetic, and failing here
+ * must not block fact sync, mergeability checks, or review-on-commit.
+ */
+function retireStalePrReviewActions(
+  payload: WebhookPullRequestSynchronize,
+): void {
+  const repository = payload.repository.full_name;
+  const prNumber = payload.pull_request.number;
+  const installationId = payload.installation?.id;
+  if (!installationId) return;
+
+  void (async () => {
+    const currentHeadSha = await getCurrentGitHubPrHeadSha({
+      installationId,
+      repository,
+      prNumber,
+    });
+    if (!currentHeadSha) {
+      apiLogger.warn(
+        `[retireStalePrReviewActions] Skipping ${repository}#${prNumber}: live head unavailable`,
+      );
+      return;
+    }
+    await retirePendingPrReviewActionsForPullRequest({
+      sourceControlProvider: 'github',
+      repository,
+      prNumber,
+      currentHeadSha,
+    });
+  })().catch((error) => {
+    apiLogger.error(
+      `[retireStalePrReviewActions] Failed for ${repository}#${prNumber}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  });
+}
+
 // Resolve through the deployment env resolver so a secret saved into
 // encrypted environment_variables by the /setup manifest flow verifies
 // without also being copied into the process environment. Non-empty values
@@ -171,6 +224,12 @@ async function resolveGitHubWebhookSecret(): Promise<string | null> {
 export const github = new Hono();
 
 github.post('/', async (c) => {
+  const requestStartedAt = Date.now();
+  let requestFields: OperationalLogFields = {
+    provider: 'github',
+    surface: 'github',
+    requestId: c.req.header('x-request-id'),
+  };
   try {
     const headers = c.req.header();
     const id = headers['x-github-delivery'];
@@ -178,16 +237,40 @@ github.post('/', async (c) => {
     const signature = headers['x-hub-signature-256'];
 
     if (!id || !name || !signature) {
-      apiLogger.debug(
-        `[GitHub] missing headers: ${JSON.stringify({ id, name, signature })}`,
-      );
+      apiLogger.debug('[GitHub] webhook is missing required headers');
+      logApiOperationalEvent('warn', 'source_control_webhook_terminal', {
+        ...requestFields,
+        deliveryId: id,
+        eventType: name,
+        outcome: 'rejected',
+        reason: 'missing_headers',
+        status: 400,
+        durationMs: Date.now() - requestStartedAt,
+      });
 
       return c.json({ error: 'missing_headers' }, { status: 400 });
     }
 
+    requestFields = {
+      ...requestFields,
+      deliveryId: id,
+      eventType: name,
+    };
+    logApiOperationalEvent('info', 'source_control_webhook_received', {
+      ...requestFields,
+      outcome: 'received',
+    });
+
     const secret = await resolveGitHubWebhookSecret();
 
     if (!secret) {
+      logApiOperationalEvent('warn', 'source_control_webhook_terminal', {
+        ...requestFields,
+        outcome: 'rejected',
+        reason: 'webhook_secret_not_configured',
+        status: 401,
+        durationMs: Date.now() - requestStartedAt,
+      });
       apiLogger.debug('[GitHub] webhook secret is not configured');
       return c.json({ error: 'invalid_signature' }, { status: 401 });
     }
@@ -217,22 +300,12 @@ github.post('/', async (c) => {
         `${name}.${payload.action}`,
         payload,
         async () => {
+          // Mentions are not subject to the automated skip list: a person
+          // addressing this app by name gets a response even in repositories
+          // where unsolicited automations are suppressed. The handlers return
+          // `no_mention` for everything else.
           if (!payload.issue.pull_request) {
-            if (isRepoSkipped(payload.repository.full_name)) {
-              return {
-                status: 'ok' as const,
-                message: `Skipping comment webhook for ${payload.repository.full_name}`,
-              };
-            }
-
             return handleGitHubIssueComment(payload);
-          }
-
-          if (isRepoSkipped(payload.repository.full_name)) {
-            return {
-              status: 'ok' as const,
-              message: `Skipping automated comment handling for ${payload.repository.full_name}`,
-            };
           }
 
           return handlePrComment(payload);
@@ -266,13 +339,6 @@ github.post('/', async (c) => {
 
     webhooks.on('issues.opened', ({ id, name, payload }) =>
       recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
-        if (isRepoSkipped(payload.repository.full_name)) {
-          return {
-            status: 'ok' as const,
-            message: `Skipping issue webhook for ${payload.repository.full_name}`,
-          };
-        }
-
         const mentionResult = await handleGitHubIssueComment({
           installation: payload.installation,
           repository: payload.repository,
@@ -280,6 +346,12 @@ github.post('/', async (c) => {
           issue: payload.issue,
           mentionBody: payload.issue.body ?? '',
         });
+
+        // Triage Issues is unsolicited automation, so the skip list applies
+        // to it but not to the body mention above.
+        if (isRepoSkipped(payload.repository.full_name)) {
+          return mentionResult;
+        }
 
         // Always run Triage Issues when enabled (immediate, like Review Code).
         // Mentions and Triage Issues are independent: a mention still starts a
@@ -313,6 +385,7 @@ github.post('/', async (c) => {
           payload.repository.full_name,
           payload.pull_request.number,
           payload.pull_request.draft ? 'draft' : 'open',
+          payload.pull_request.html_url,
         );
         syncPullRequestFact({
           githubRepoId: payload.repository.id,
@@ -352,6 +425,7 @@ github.post('/', async (c) => {
           payload.repository.full_name,
           payload.pull_request.number,
           payload.pull_request.draft ? 'draft' : 'open',
+          payload.pull_request.html_url,
         );
         syncPullRequestFact({
           githubRepoId: payload.repository.id,
@@ -407,6 +481,7 @@ github.post('/', async (c) => {
           },
         });
         await queueTrackedPullRequestMergeabilityCheck(payload);
+        retireStalePrReviewActions(payload);
 
         if (isRepoSkipped(payload.repository.full_name)) {
           return {
@@ -441,6 +516,7 @@ github.post('/', async (c) => {
           payload.repository.full_name,
           payload.pull_request.number,
           'open',
+          payload.pull_request.html_url,
         );
         await queueTrackedPullRequestMergeabilityCheck(payload);
         syncPullRequestFact({
@@ -480,6 +556,7 @@ github.post('/', async (c) => {
           payload.repository.full_name,
           payload.pull_request.number,
           'draft',
+          payload.pull_request.html_url,
         );
         syncPullRequestFact({
           githubRepoId: payload.repository.id,
@@ -508,22 +585,29 @@ github.post('/', async (c) => {
     webhooks.on(
       'pull_request_review.submitted',
       async ({ id, name, payload }) => {
+        const reviewId = payload.review.id;
+        logApiOperationalEvent('info', 'source_control_review_received', {
+          provider: 'github',
+          surface: 'github',
+          deliveryId: id,
+          eventType: `${name}.${payload.action}`,
+          repository: payload.repository.full_name,
+          prNumber: payload.pull_request.number,
+          reviewId,
+          externalEventId:
+            typeof reviewId === 'number'
+              ? `github-review:${reviewId}`
+              : undefined,
+          outcome: 'admitted',
+          reason: 'verified_known_installation',
+        });
         await queuePrReviewActivityNotification(payload, id);
 
         return recordWebhook(
           id,
           `${name}.${payload.action}`,
           payload,
-          async () => {
-            if (isRepoSkipped(payload.repository.full_name)) {
-              return {
-                status: 'ok' as const,
-                message: `Skipping automated review handling for ${payload.repository.full_name}`,
-              };
-            }
-
-            return handlePrComment(payload);
-          },
+          async () => handlePrComment(payload),
         );
       },
     );
@@ -537,16 +621,7 @@ github.post('/', async (c) => {
           id,
           `${name}.${payload.action}`,
           payload,
-          async () => {
-            if (isRepoSkipped(payload.repository.full_name)) {
-              return {
-                status: 'ok' as const,
-                message: `Skipping automated comment handling for ${payload.repository.full_name}`,
-              };
-            }
-
-            return handlePrComment(payload);
-          },
+          async () => handlePrComment(payload),
         );
       },
     );
@@ -620,6 +695,12 @@ github.post('/', async (c) => {
       );
     });
 
+    webhooks.on('check_run.rerequested', ({ id, name, payload }) =>
+      recordWebhook(id, `${name}.${payload.action}`, payload, () =>
+        handleCheckRunRerequested(payload),
+      ),
+    );
+
     webhooks.on('pull_request.closed', ({ id, name, payload }) =>
       recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
         const status = payload.pull_request.merged ? 'merged' : 'closed';
@@ -629,6 +710,12 @@ github.post('/', async (c) => {
           payload.repository.full_name,
           payload.pull_request.number,
           status,
+          {
+            host: toHostFromUrl(payload.pull_request.html_url),
+            ...(status === 'merged'
+              ? { mergedAt: toValidDate(payload.pull_request.merged_at) }
+              : {}),
+          },
         );
         syncPullRequestFact({
           githubRepoId: payload.repository.id,
@@ -689,6 +776,13 @@ github.post('/', async (c) => {
     // Verify the signature before the installation lookup so unsigned junk
     // cannot trigger database reads.
     if (!(await webhooks.verify(payload, signature))) {
+      logApiOperationalEvent('warn', 'source_control_webhook_terminal', {
+        ...requestFields,
+        outcome: 'rejected',
+        reason: 'invalid_signature',
+        status: 401,
+        durationMs: Date.now() - requestStartedAt,
+      });
       return c.json({ error: 'invalid_signature' }, { status: 401 });
     }
 
@@ -700,6 +794,13 @@ github.post('/', async (c) => {
         `[GitHub] ignoring webhook ${id} (${name}) from unknown installation`,
       );
 
+      logApiOperationalEvent('info', 'source_control_webhook_terminal', {
+        ...requestFields,
+        outcome: 'skipped',
+        reason: 'unknown_installation',
+        status: 200,
+        durationMs: Date.now() - requestStartedAt,
+      });
       return c.json({ message: 'unknown_installation' });
     }
 
@@ -712,8 +813,39 @@ github.post('/', async (c) => {
     ]);
 
     await webhooks.verifyAndReceive({ id, name, signature, payload });
+    logApiOperationalEvent('info', 'source_control_webhook_terminal', {
+      ...requestFields,
+      outcome: 'acknowledged',
+      reason: 'handler_dispatch_returned',
+      status: 200,
+      durationMs: Date.now() - requestStartedAt,
+    });
     return c.json({ message: 'webhook_processed' });
   } catch (error) {
+    logApiOperationalEvent('error', 'source_control_webhook_terminal', {
+      ...requestFields,
+      outcome: 'failed',
+      reason: error instanceof Error ? error.name : 'unknown_error',
+      status: 500,
+      durationMs: Date.now() - requestStartedAt,
+      retryable: true,
+    });
+    captureApiException(
+      new Error('GitHub webhook processing failed'),
+      undefined,
+      {
+        component: 'github_webhook',
+        errorType: error instanceof Error ? error.name : 'unknown_error',
+        deliveryId:
+          typeof requestFields.deliveryId === 'string'
+            ? requestFields.deliveryId
+            : undefined,
+        eventType:
+          typeof requestFields.eventType === 'string'
+            ? requestFields.eventType
+            : undefined,
+      },
+    );
     logApiError('[GitHub] caught error', error);
 
     if (error instanceof Error && error.message.includes('signature')) {

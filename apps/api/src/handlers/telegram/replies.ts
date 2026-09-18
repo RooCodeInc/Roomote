@@ -2,7 +2,8 @@ import type { CommunicationMessageButton } from '@roomote/communication';
 import { resolveTelegramRuntimeCredentials } from '@roomote/db/server';
 import { createTelegramCommunicationProviderFromRuntimeCredentials as createTelegramCommunicationProvider } from '@roomote/sdk/server';
 
-import { apiLogger } from '../../logging.js';
+import { apiLogger, logApiOperationalEvent } from '../../logging.js';
+import { captureApiException } from '../../monitoring/sentry.js';
 
 const TELEGRAM_BOT_INFO_CACHE_TTL_MS = 5 * 60 * 1000;
 let privateTopicsCapabilityCache:
@@ -50,9 +51,24 @@ export async function postTelegramMessageBestEffort(input: {
   textFormat?: 'plain' | 'markdown';
   buttons?: CommunicationMessageButton[][];
 }): Promise<{ messageId: string } | null> {
+  const startedAt = Date.now();
+  const fields = {
+    provider: 'telegram' as const,
+    surface: 'telegram',
+    workspaceId: input.chatId,
+    channelId: input.chatId,
+    threadId: input.threadId,
+  };
   const provider = await createTelegramCommunicationProvider();
 
   if (!provider) {
+    logApiOperationalEvent('warn', 'communication_delivery_terminal', {
+      ...fields,
+      outcome: 'skipped',
+      reason: 'provider_credentials_unavailable',
+      durationMs: Date.now() - startedAt,
+      retryable: true,
+    });
     apiLogger.warn(
       '[telegram] Skipping Telegram reply because bot token is not configured',
     );
@@ -71,8 +87,29 @@ export async function postTelegramMessageBestEffort(input: {
       ...(input.buttons ? { buttons: input.buttons } : {}),
     });
 
+    logApiOperationalEvent('info', 'communication_delivery_terminal', {
+      ...fields,
+      messageId: result.messageId,
+      outcome: 'accepted',
+      reason: 'provider_message_created',
+      durationMs: Date.now() - startedAt,
+    });
+
     return { messageId: result.messageId };
   } catch (error) {
+    logApiOperationalEvent('warn', 'communication_delivery_terminal', {
+      ...fields,
+      outcome: 'failed',
+      reason: error instanceof Error ? error.name : 'unknown_error',
+      durationMs: Date.now() - startedAt,
+      retryable: true,
+    });
+    captureApiException(new Error('Telegram delivery failed'), undefined, {
+      component: 'telegram_delivery',
+      errorType: error instanceof Error ? error.name : 'unknown_error',
+      chatId: input.chatId,
+      threadId: input.threadId,
+    });
     apiLogger.warn(
       `[telegram] Failed to post Telegram reply: ${
         error instanceof Error ? error.message : String(error)
@@ -165,39 +202,6 @@ export async function editTelegramForumTopicBestEffort(input: {
   }
 }
 
-/** Replace the text and keyboard of a bot message (cards, status lines). */
-export async function editTelegramMessageBestEffort(input: {
-  chatId: string;
-  messageId: string;
-  text: string;
-  textFormat?: 'plain' | 'markdown';
-  buttons?: CommunicationMessageButton[][];
-}): Promise<boolean> {
-  const provider = await createTelegramCommunicationProvider();
-
-  if (!provider) {
-    return false;
-  }
-
-  try {
-    await provider.editMessageText({
-      channelId: input.chatId,
-      messageId: input.messageId,
-      text: input.text,
-      ...(input.textFormat ? { textFormat: input.textFormat } : {}),
-      ...(input.buttons ? { buttons: input.buttons } : {}),
-    });
-    return true;
-  } catch (error) {
-    apiLogger.warn(
-      `[telegram] Failed to edit Telegram message: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-    return false;
-  }
-}
-
 /** Answer a callback query so the clicked button stops showing a spinner. */
 export async function answerTelegramCallbackQueryBestEffort(input: {
   callbackQueryId: string;
@@ -247,10 +251,7 @@ export async function clearTelegramMessageButtonsBestEffort(input: {
 
 const TELEGRAM_ACK_REACTION = 'eyes';
 
-/**
- * Mirror Slack's inbound-message ack reaction so the sender sees the bot
- * picked the message up before a task reply lands.
- */
+/** Add a best-effort acknowledgement for task-run messages. */
 export async function ackTelegramMessageBestEffort(input: {
   chatId: string;
   messageId: string | undefined;

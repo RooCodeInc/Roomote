@@ -31,7 +31,11 @@ export const ACP_ENVELOPE_EVENT_TYPES = {
   QueuedMessagesUpdate: 'roomote_runtime.queued_messages_update',
   RequestUserInput: 'roomote_runtime.request_user_input',
   RequestUserInputResponse: 'roomote_runtime.request_user_input_response',
+  CapabilityOffer: 'roomote_runtime.capability_offer',
+  CapabilityOfferResponse: 'roomote_runtime.capability_offer_response',
   TaskCancelled: 'roomote_runtime.task_cancelled',
+  /** Voice call lifecycle marker persisted in a Fast Session transcript. */
+  VoiceCall: 'roomote_runtime.voice_call',
 } as const;
 
 export type AcpEnvelopeEventType =
@@ -73,6 +77,25 @@ export function normalizeAcpReasoningText(text: string): string {
 }
 
 export const ACP_LOGICAL_EVENT_ID_KEY = 'logicalEventId' as const;
+
+/**
+ * Canonical transcript-only record of a trusted setup-card action. These
+ * messages are visible as user choices but are never submitted to the model
+ * or mirrored into Fast Agent compatibility history.
+ */
+export const SETUP_RECEIPT_INPUT_KIND = 'setup_receipt' as const;
+
+/** Payload shared by canonical setup receipts persisted in transcript history. */
+export interface SetupReceiptPayload {
+  kind: string;
+  /** Request-user-input event represented by this receipt, when applicable. */
+  requestId?: string;
+  presentation?: {
+    label: string;
+    iconKey: string;
+  };
+  [key: string]: unknown;
+}
 
 export interface AcpLogicalEventIdParts {
   sessionId: string | null | undefined;
@@ -157,6 +180,8 @@ export const ACP_REQUEST_USER_INPUT_METHOD =
 export const ACP_REQUEST_USER_INPUT_REQUEST_ID_PREFIX = 'rui' as const;
 
 export interface AcpRequestUserInputQuestionOption {
+  /** Canonical option identity supplied by trusted server presets. */
+  id?: string;
   label: string;
   description: string;
 }
@@ -168,6 +193,8 @@ export interface AcpRequestUserInputQuestion {
   isOther: boolean;
   isSecret: boolean;
   options?: AcpRequestUserInputQuestionOption[];
+  /** Multiple-choice questions default to one selection when absent. */
+  multiple?: boolean;
 }
 
 export type AcpRequestUserInputAnswers = Record<
@@ -176,6 +203,73 @@ export type AcpRequestUserInputAnswers = Record<
     answers: string[];
   }
 >;
+
+export function getAcpRequestUserInputValidationError(
+  questions: AcpRequestUserInputQuestion[],
+  answers: AcpRequestUserInputAnswers,
+  resolution: 'submitted' | 'cancelled' = 'submitted',
+): string | null {
+  const questionIds = new Set(questions.map((question) => question.id));
+  if (Object.keys(answers).some((questionId) => !questionIds.has(questionId))) {
+    return 'One or more answers do not belong to this request.';
+  }
+  if (resolution === 'cancelled') return null;
+
+  for (const question of questions) {
+    const submitted = answers[question.id]?.answers ?? [];
+    if (new Set(submitted).size !== submitted.length) {
+      return 'Duplicate answers are not allowed.';
+    }
+    if (submitted.length === 0) {
+      return 'Answer every question before submitting.';
+    }
+    if (!question.multiple && submitted.length > 1) {
+      return 'This question accepts a single answer.';
+    }
+    if (question.options?.length) {
+      const optionValues = new Set(
+        question.options.flatMap((option) =>
+          option.id ? [option.id, option.label] : [option.label],
+        ),
+      );
+      const customAnswerCount = submitted.filter(
+        (answer) => !optionValues.has(answer),
+      ).length;
+      if (customAnswerCount > (question.isOther ? 1 : 0)) {
+        return 'One or more selections are not valid options.';
+      }
+    }
+  }
+  return null;
+}
+
+/** Normalize trusted option selections to stable IDs while accepting labels
+ * persisted or submitted by clients from before option IDs were available. */
+export function normalizeAcpRequestUserInputAnswers(
+  questions: AcpRequestUserInputQuestion[],
+  answers: AcpRequestUserInputAnswers,
+): AcpRequestUserInputAnswers {
+  const questionsById = new Map(
+    questions.map((question) => [question.id, question]),
+  );
+  return Object.fromEntries(
+    Object.entries(answers).map(([questionId, response]) => {
+      const question = questionsById.get(questionId);
+      return [
+        questionId,
+        {
+          answers: response.answers.map((answer) => {
+            const option = question?.options?.find(
+              (candidate) =>
+                candidate.id === answer || candidate.label === answer,
+            );
+            return option?.id ?? answer;
+          }),
+        },
+      ];
+    }),
+  );
+}
 
 export interface AcpRequestUserInputRequestParams {
   sessionId: string;
@@ -187,6 +281,10 @@ export interface AcpRequestUserInputRequestParams {
 export interface AcpRequestUserInputPayload extends AcpRequestUserInputRequestParams {
   requestId: string;
   status: 'pending';
+  preset?:
+    | 'setup_source_control'
+    | 'setup_starter_tasks'
+    | 'setup_integrations';
 }
 
 export interface AcpRequestUserInputResponsePayload {
@@ -230,6 +328,32 @@ export function parseAcpTaskCancelledPayload(
   };
 }
 
+/**
+ * Payload of the persisted `voice_call` marker written when a voice call on a
+ * Fast Session starts or ends. Transcript-only: never sent to the model.
+ */
+export interface AcpVoiceCallPayload {
+  phase: 'started' | 'ended';
+  /** Call length, present on `ended`. */
+  durationMs?: number;
+}
+
+export function parseAcpVoiceCallPayload(
+  payload: Record<string, unknown> | null,
+): AcpVoiceCallPayload | null {
+  const phase = payload?.phase;
+  if (phase !== 'started' && phase !== 'ended') {
+    return null;
+  }
+  const durationMs = payload?.durationMs;
+  return {
+    phase,
+    ...(typeof durationMs === 'number' && Number.isFinite(durationMs)
+      ? { durationMs }
+      : {}),
+  };
+}
+
 export interface ParsedAcpRequestUserInputReply {
   answers: AcpRequestUserInputAnswers;
   resolution: 'submitted' | 'cancelled';
@@ -260,10 +384,11 @@ function parseAcpRequestUserInputQuestionOption(
     return null;
   }
 
-  return { label, description };
+  const id = asStringOrNull(record?.id);
+  return { label, description, ...(id ? { id } : {}) };
 }
 
-function parseAcpRequestUserInputQuestion(
+export function parseAcpRequestUserInputQuestion(
   value: unknown,
 ): AcpRequestUserInputQuestion | null {
   const record = asRecordOrNull(value);
@@ -291,6 +416,7 @@ function parseAcpRequestUserInputQuestion(
     isOther: record?.isOther === true,
     isSecret: record?.isSecret === true,
     ...(options ? { options } : {}),
+    ...(record?.multiple === true ? { multiple: true } : {}),
   };
 }
 
@@ -356,6 +482,12 @@ export function parseAcpRequestUserInputPayload(
 ): AcpRequestUserInputPayload | null {
   const requestId = asStringOrNull(payload?.requestId);
   const request = parseAcpRequestUserInputRequestParams(payload);
+  const preset =
+    payload?.preset === 'setup_source_control' ||
+    payload?.preset === 'setup_starter_tasks' ||
+    payload?.preset === 'setup_integrations'
+      ? payload.preset
+      : undefined;
 
   if (!requestId || !request) {
     return null;
@@ -365,6 +497,7 @@ export function parseAcpRequestUserInputPayload(
     requestId,
     ...request,
     status: 'pending',
+    ...(preset ? { preset } : {}),
   };
 }
 
@@ -436,7 +569,9 @@ function resolveAcpRequestUserInputAnswerDetailed(
 
     if (optionIndex >= 0 && optionIndex < question.options.length) {
       return {
-        answer: question.options[optionIndex]!.label,
+        answer:
+          question.options[optionIndex]!.id ??
+          question.options[optionIndex]!.label,
         viaOtherFallback: false,
       };
     }
@@ -445,12 +580,17 @@ function resolveAcpRequestUserInputAnswerDetailed(
   const normalizedAnswer = normalizeAcpRequestUserInputOptionLabel(answer);
   const exactMatch = question.options.find(
     (option) =>
+      normalizeAcpRequestUserInputOptionLabel(option.id ?? '') ===
+        normalizedAnswer ||
       normalizeAcpRequestUserInputOptionLabel(option.label) ===
-      normalizedAnswer,
+        normalizedAnswer,
   );
 
   if (exactMatch) {
-    return { answer: exactMatch.label, viaOtherFallback: false };
+    return {
+      answer: exactMatch.id ?? exactMatch.label,
+      viaOtherFallback: false,
+    };
   }
 
   const partialMatches = question.options.filter((option) =>
@@ -460,7 +600,10 @@ function resolveAcpRequestUserInputAnswerDetailed(
   );
 
   if (partialMatches.length === 1) {
-    return { answer: partialMatches[0]!.label, viaOtherFallback: false };
+    return {
+      answer: partialMatches[0]!.id ?? partialMatches[0]!.label,
+      viaOtherFallback: false,
+    };
   }
 
   if (question.isOther) {
@@ -702,11 +845,13 @@ export function parseAcpRequestUserInputAnswerReply(
 
 export type AcpMessageKind =
   | 'text'
+  | 'setup_receipt'
   | 'reasoning'
   | 'tool_call'
   | 'tool_result'
   | 'plan'
   | 'task_cancelled'
+  | 'voice_call'
   | 'unknown';
 
 export function inferAcpMessageKind(
@@ -729,6 +874,8 @@ export function inferAcpMessageKind(
       return 'tool_result';
     case ACP_ENVELOPE_EVENT_TYPES.TaskCancelled:
       return 'task_cancelled';
+    case ACP_ENVELOPE_EVENT_TYPES.VoiceCall:
+      return 'voice_call';
     default:
       return 'unknown';
   }
@@ -829,6 +976,29 @@ export function extractVisibleAcpPromptText(text: string): string {
     .replaceAll('<request>', '')
     .replaceAll('</request>', '')
     .trim();
+}
+
+/**
+ * Extract the user-configured prompt from a trusted custom automation event.
+ * Returns undefined for every other platform event or malformed envelope so
+ * callers never need to expose the raw event as a fallback.
+ */
+export function extractAutomationTriggeredPromptText(
+  text: string,
+): string | undefined {
+  const match = /^<platform_event>(.*)<\/platform_event>$/su.exec(text.trim());
+  if (!match?.[1]) return undefined;
+
+  try {
+    const event = asRecord(JSON.parse(match[1]));
+    return event?.type === 'automation_triggered' &&
+      typeof event.prompt === 'string' &&
+      event.prompt.trim().length > 0
+      ? event.prompt
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -1054,7 +1224,7 @@ export interface AcpToolResultPayload {
 export interface ShowWidgetFallbackDelivery {
   toolCallId: string;
   title: string | null;
-  textFallback: string;
+  textFallback: string | null;
   widgetUrl: string;
 }
 
@@ -1137,10 +1307,53 @@ export function normalizePlanPayload(
   return { entries };
 }
 
+// Name of the on-demand integration call tool (FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool;
+// the catalog module imports this one, so the literal lives here).
+const ON_DEMAND_INTEGRATION_CALL_TOOL_NAME = 'call_integration_tool';
+
+/**
+ * `call_integration_tool` is transport, not what the agent did. When a tool
+ * call is that wrapper, present the integration and tool it invoked, exactly
+ * as a directly mounted MCP call would have been shown.
+ */
+function unwrapOnDemandIntegrationCall(
+  update: Record<string, unknown>,
+): AcpMcpInvocation | null {
+  const candidates = [
+    asStringOrNull(update.mcpToolName),
+    asStringOrNull(update.toolName),
+    update.isMcp === false && asStringOrNull(update.toolName)?.trim()
+      ? null
+      : asStringOrNull(update.title),
+  ];
+  const isWrapper = candidates.some(
+    (name) =>
+      name === ON_DEMAND_INTEGRATION_CALL_TOOL_NAME ||
+      name?.endsWith(`_${ON_DEMAND_INTEGRATION_CALL_TOOL_NAME}`),
+  );
+  if (!isWrapper) {
+    return null;
+  }
+  const rawInput = asRecordOrNull(update.rawInput);
+  // Fast records native tool arguments under `arguments`; sandbox ACP events
+  // carry the tool input directly.
+  const args = asRecordOrNull(rawInput?.arguments) ?? rawInput;
+  const integrationId = asStringOrNull(args?.integrationId);
+  const toolName = asStringOrNull(args?.toolName);
+  if (!integrationId || !toolName) {
+    return null;
+  }
+  return { mcpServerName: integrationId, mcpToolName: toolName };
+}
+
 export function extractAcpMcpInvocation(
   update: Record<string, unknown>,
   options: ExtractAcpMcpInvocationOptions = {},
 ): AcpMcpInvocation | null {
+  const unwrapped = unwrapOnDemandIntegrationCall(update);
+  if (unwrapped) {
+    return unwrapped;
+  }
   const kind = asStringOrNull(update.kind);
   const mcpServerName = asStringOrNull(update.mcpServerName);
   const mcpToolName = asStringOrNull(update.mcpToolName);
@@ -1150,6 +1363,15 @@ export function extractAcpMcpInvocation(
       mcpServerName: mcpServerName ?? null,
       mcpToolName: mcpToolName ?? null,
     };
+  }
+
+  // Native arguments and display titles are not MCP identity metadata.
+  if (
+    update.isMcp === false &&
+    asStringOrNull(update.toolName)?.trim() &&
+    !asStringOrNull(update.serverName)
+  ) {
+    return null;
   }
 
   const rawInput = asRecordOrNull(update.rawInput);
@@ -2334,8 +2556,13 @@ export function getAnswerDisplayValue(
     return '[hidden]';
   }
 
+  const optionLabelsById = new Map(
+    question?.options?.flatMap((option) =>
+      option.id ? [[option.id, option.label] as const] : [],
+    ) ?? [],
+  );
   const joined = answers
-    .map((answer) => answer.trim())
+    .map((answer) => (optionLabelsById.get(answer) ?? answer).trim())
     .filter(Boolean)
     .join(', ');
 

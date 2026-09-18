@@ -2,20 +2,23 @@ import { db, tasks, eq, and, isNull } from '@roomote/db/server';
 import { syncTaskCommunicationThreadTitleBestEffort } from '@roomote/sdk/server';
 
 import type { UserAuthSuccess } from '@/types';
+import { customAutomationTaskAccess } from '@/lib/server/custom-automation-task-access';
 
 export async function updateTaskTitleCommand(
   auth: UserAuthSuccess,
   input: { taskId: string; title: string },
 ) {
-  void auth;
   const title = input.title.trim();
 
   if (!title) {
     throw new Error('Task title cannot be empty');
   }
 
-  // Any deployment member can rename a task.
-  const whereConditions = [eq(tasks.id, input.taskId), isNull(tasks.deletedAt)];
+  const whereConditions = [
+    eq(tasks.id, input.taskId),
+    isNull(tasks.deletedAt),
+    customAutomationTaskAccess(auth),
+  ];
 
   const [updatedTask] = await db
     .update(tasks)

@@ -97,6 +97,7 @@ vi.mock('node:fs', () => ({
 }));
 
 vi.mock('@roomote/cloud-agents', () => ({
+  FAST_ONLY_PACKAGED_SKILL_INVOCATIONS: ['doctor'],
   PACKAGED_WORKFLOW_PHASE_SKILL_INVOCATIONS: ['implement-changes'],
   ROOMOTE_COMPACT_PROMPT: 'Default compaction prompt.',
   buildRoomoteSystemPrompt: vi.fn(
@@ -106,6 +107,7 @@ vi.mock('@roomote/cloud-agents', () => ({
 }));
 
 vi.mock('@roomote/sdk/client', () => ({
+  instanceSkills: { listForRuntime: vi.fn().mockResolvedValue([]) },
   sdk: {
     taskRuns: {
       done: taskRunsDoneMock,
@@ -276,7 +278,7 @@ describe('Zero integration runtime gating', () => {
     expect(installZeroCliMock).not.toHaveBeenCalled();
     expect(activateSkillsFolderMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        excludeSkillNames: ['zero'],
+        excludeSkillNames: ['doctor', 'zero'],
       }),
     );
   });
@@ -300,7 +302,7 @@ describe('Zero integration runtime gating', () => {
     expect(installZeroCliMock).toHaveBeenCalledTimes(1);
     expect(activateSkillsFolderMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        excludeSkillNames: undefined,
+        excludeSkillNames: ['doctor'],
       }),
     );
   });

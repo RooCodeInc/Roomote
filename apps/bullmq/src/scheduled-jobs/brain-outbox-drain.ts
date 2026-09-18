@@ -13,6 +13,7 @@ import {
   settleBrainMemoryEvent,
   releaseBrainMemoryEvents,
   releaseFastAgentMemoryEvents,
+  deleteBrainSyncStateFamily,
   settleFastAgentMemoryEvent,
   pullRequestFacts,
   taskPullRequests,
@@ -26,23 +27,42 @@ import {
   renameBrainSyncStateFamilyPrefix,
   type BrainMemoryEventRow,
   type FastAgentMemoryEventRow,
+  type BrainPageRetirementRow,
+  claimPendingBrainPageRetirements,
+  markBrainPageRetirement,
+  rearmBrainPageRetirement,
+  releaseBrainPageRetirements,
+  settleBrainPageRetirement,
 } from '@roomote/db/server';
 import {
   parseBrainToolPayloads,
   postBrainToolCall,
   isBrainEmbeddingAvailable,
+  requestHomeComposerRecommendationPrecomputeForRun,
   resolveBrainConnection,
 } from '@roomote/sdk/server';
 import {
   BRAIN_COLLECTOR_IDS,
   BRAIN_PAGE_TYPES,
+  type PullRequestStatus,
   RunStatus,
+  TaskPayloadKind,
+  type TaskWorkflow,
+  ACP_ENVELOPE_EVENT_TYPES,
+  isSystemInjectedAcpPromptText,
+  normalizeTranscriptUserText,
   brainNamespacePrefix,
+  fastConversationMemorySlug,
+  taskMemorySlug,
   getLinkedEnvironmentIdFromPayload,
   renderBrainFrontmatter,
 } from '@roomote/types';
 
 import { runBrainCollectors } from './brain-collectors';
+import {
+  brainSafeIdentityValue,
+  personIdentitySlug,
+} from './brain-collectors/identity';
 import { drainMemoryOutboxBatch } from './memory-outbox-drain';
 import {
   runSlackDayPageCensus,
@@ -53,6 +73,25 @@ import { slackPublicChannelsCollector } from './brain-collectors/slack-public-ch
 const LOG_PREFIX = '[brainOutboxDrain]';
 /** Sync-state key for the one-time task-history backfill. */
 const TASK_MEMORY_COLLECTOR_ID = BRAIN_COLLECTOR_IDS.taskMemories;
+/**
+ * Task-memory sync-state rows left behind by version bumps. A bump replays
+ * history under the new id (the backfill checkpoint lives on the row), and
+ * the old row would otherwise linger and count as the source's history
+ * cutoff forever. Extend when bumping again.
+ */
+const SUPERSEDED_TASK_MEMORY_COLLECTOR_IDS = ['task-memory:effective-date-v2'];
+/**
+ * How far back a version bump re-puts memories that already reached the
+ * Brain. Older pages keep correct content and pick the new shape up if a
+ * linked pull request later changes state.
+ */
+const LINKABLE_REPLAY_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
+/**
+ * Bound on the request excerpt a task memory carries. The ask is usually a
+ * few sentences; a pasted log or spec should not dominate the page's
+ * embedding, and the task itself remains the place to read the rest.
+ */
+const TASK_REQUEST_CHAR_CAP = 1_500;
 const CLAIM_BATCH_SIZE = 10;
 // Backfill can enqueue a deployment's whole task history at once; drain up
 // to this many batches per tick so the backlog clears in minutes, not hours.
@@ -233,12 +272,216 @@ export async function postToBrain(
   });
 }
 
+/** Idempotently soft-delete one exact Brain page. */
+export async function retireBrainPage(
+  slug: string,
+  connection: { baseUrl: string; token: string },
+): Promise<void> {
+  try {
+    await callBrainWriteTool(connection, 'delete_page', { slug });
+  } catch (error) {
+    if (isBrainRateLimited(error) || isBrainNotReady(error)) throw error;
+
+    const message = error instanceof Error ? error.message : String(error);
+    if (/page_not_found|not[ _]found/i.test(message)) return;
+    throw error;
+  }
+}
+
+/**
+ * One word for what became of a task's pull requests, for the page
+ * frontmatter. Merged wins because shipped work is what later recall should
+ * weight; a task whose every PR closed unmerged is the failure worth
+ * remembering; anything still open is not an outcome yet. A status that was
+ * never observed (the details fetch failed and the row kept its null) is not
+ * "open": the page says nothing about the outcome until one is known, so a PR
+ * that was already terminal when it went unfetched is never recorded as open.
+ */
+type TaskPullRequestOutcome = 'merged' | 'closed' | 'open';
+
+export function summarizePullRequestOutcome(
+  pullRequests: Array<{ status?: PullRequestStatus | null }>,
+): TaskPullRequestOutcome | null {
+  if (pullRequests.length === 0) {
+    return null;
+  }
+
+  if (pullRequests.some((pr) => pr.status === 'merged')) {
+    return 'merged';
+  }
+
+  if (pullRequests.some((pr) => pr.status == null)) {
+    return null;
+  }
+
+  if (pullRequests.every((pr) => pr.status === 'closed')) {
+    return 'closed';
+  }
+
+  return 'open';
+}
+
+function describePullRequestStatus(
+  status: PullRequestStatus | null | undefined,
+): string {
+  switch (status) {
+    case 'merged':
+      return 'merged';
+    case 'closed':
+      return 'closed without merging';
+    case 'draft':
+      return 'still open as a draft';
+    case 'open':
+      return 'still open';
+    default:
+      return 'status unknown';
+  }
+}
+
+function describePullRequestOutcome(
+  outcome: TaskPullRequestOutcome,
+  count: number,
+): string {
+  const noun = count === 1 ? 'the pull request' : 'the pull requests';
+
+  switch (outcome) {
+    case 'merged':
+      return count === 1
+        ? 'Outcome: the pull request was merged, so this work shipped.'
+        : 'Outcome: at least one pull request was merged, so this work shipped.';
+    case 'closed':
+      return `Outcome: ${noun} closed without merging, so this work did not ship as written. Treat the approach with that in mind.`;
+    case 'open':
+      return `Outcome: ${noun} ${count === 1 ? 'was' : 'were'} still open when this memory was last refreshed.`;
+  }
+}
+
+/**
+ * The user's own request, as the web transcript would show it: the launch
+ * payload's visible prompt with Roomote's surface wrappers stripped. Only
+ * standard-workflow tasks carry one; a review or conflict-resolution run's
+ * prompt is generated, not asked. Bootstrap prompts the harness injected and
+ * prompts the launch path marked hidden are not the user's words and are
+ * left out. Treated as evidence like every other ingested text, never as
+ * instructions.
+ */
+export function resolveTaskMemoryRequest(
+  payload: Record<string, unknown>,
+  workflow: TaskWorkflow,
+): string | null {
+  if (workflow !== 'standard') {
+    return null;
+  }
+
+  if (payload.visibleInTranscript === false) {
+    return null;
+  }
+
+  // Same precedence as the prompt the agent actually received
+  // (getInitialTaskPrompt): web and chat launches carry `description` or
+  // `text`; a Linear-launched task carries the triggering comment, else the
+  // issue body, else its title.
+  const raw =
+    [
+      payload.description,
+      payload.text,
+      payload.commentBody,
+      payload.issueDescription,
+      payload.issueTitle,
+    ].find(
+      (value): value is string =>
+        typeof value === 'string' && value.trim() !== '',
+    ) ?? null;
+
+  if (!raw || isSystemInjectedAcpPromptText(raw)) {
+    return null;
+  }
+
+  const text = normalizeTranscriptUserText(
+    raw,
+    ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+  )?.trim();
+
+  if (!text) {
+    return null;
+  }
+
+  return text.length > TASK_REQUEST_CHAR_CAP
+    ? `${text.slice(0, TASK_REQUEST_CHAR_CAP)}\n\n_Request truncated; open the task for the rest._`
+    : text;
+}
+
 /**
  * Build the memory page for a completed run. Deliberately deterministic and
  * conservative: only structured, known-safe fields (title, repos, PRs,
  * timestamps, provenance). LLM distillation of decisions/rationale layers on
  * top of this later; it must never widen what raw data can reach the brain.
  */
+/**
+ * Who started the task. On a standard-workflow task, a linked Roomote member
+ * gets a link to their person page so recall can answer "what has X been
+ * working on"; an unlinked human from an integration surface (a Slack or
+ * GitHub user with no Roomote account) keeps only the display name the
+ * surface reported; an automation names its key. Other workflows (PR
+ * reviews, conflict resolution, scans, snapshots) never link a person: the
+ * human who happened to trigger a review is not its author, and a person
+ * page full of reviews says nothing about what they worked on.
+ */
+type TaskMemoryInitiator =
+  | {
+      kind: 'user';
+      userId: string | null;
+      /** The Roomote member's name, or the surface-reported display name. */
+      name: string | null;
+    }
+  | { kind: 'automation'; automation: string };
+
+function describeInitiator(
+  initiator: TaskMemoryInitiator,
+  workflow: TaskWorkflow,
+): {
+  fields: string[];
+  line: string | null;
+} {
+  if (initiator.kind === 'automation') {
+    return {
+      fields: [`initiated_by_automation: ${initiator.automation}`],
+      line: `Initiated by the ${initiator.automation} automation.`,
+    };
+  }
+
+  if (workflow !== 'standard') {
+    return { fields: [], line: null };
+  }
+
+  const name = initiator.name ? brainSafeIdentityValue(initiator.name) : '';
+
+  if (initiator.userId) {
+    const slug = personIdentitySlug(initiator.userId);
+    const title = name || 'Roomote member';
+
+    return {
+      fields: [
+        `initiated_by: ${JSON.stringify(title)}`,
+        `roomote_user_id: ${initiator.userId}`,
+        // Same convention as person aliases: the person page's slug, so the
+        // Brain can walk from the task to the member and back.
+        `initiated_by_person: ${JSON.stringify(slug)}`,
+      ],
+      line: `Initiated by [${title}](${slug}).`,
+    };
+  }
+
+  if (name) {
+    return {
+      fields: [`initiated_by: ${JSON.stringify(name)}`],
+      line: `Initiated by ${name}.`,
+    };
+  }
+
+  return { fields: [], line: null };
+}
+
 export function buildMemoryPage(input: {
   runId: number;
   taskId: string;
@@ -246,23 +489,30 @@ export function buildMemoryPage(input: {
   completedAt: Date | null;
   environmentName: string | null;
   agentSummary: string | null;
+  initiator: TaskMemoryInitiator;
+  workflow: TaskWorkflow;
+  /** Already bounded and workflow-gated; see resolveTaskMemoryRequest. */
+  request: string | null;
   pullRequests: Array<{
     repository: string | null;
     prNumber: number | null;
     prTitle: string | null;
     prUrl: string;
+    status?: PullRequestStatus | null;
   }>;
 }): IngestPage {
   const completedAtIso = input.completedAt?.toISOString();
   const completed = completedAtIso ?? 'unknown';
   const completedDate = completedAtIso?.slice(0, 10);
+  const outcome = summarizePullRequestOutcome(input.pullRequests);
+  const initiator = describeInitiator(input.initiator, input.workflow);
   const prLines = input.pullRequests.map((pr) => {
     const label =
       pr.repository && pr.prNumber
         ? `${pr.repository}#${pr.prNumber}`
         : pr.prUrl;
 
-    return `- ${label}${pr.prTitle ? `: ${pr.prTitle}` : ''} (${pr.prUrl})`;
+    return `- ${label}${pr.prTitle ? `: ${pr.prTitle}` : ''} (${pr.prUrl}): ${describePullRequestStatus(pr.status)}`;
   });
 
   const content = [
@@ -275,6 +525,7 @@ export function buildMemoryPage(input: {
       fields: [
         `roomote_task_id: ${input.taskId}`,
         `roomote_run_id: ${input.runId}`,
+        ...initiator.fields,
         // GBrain derives effective_date from this conventional field. Keep
         // the full timestamp below as provenance, but make backfilled pages
         // sort and filter by when the task completed rather than when it
@@ -285,22 +536,42 @@ export function buildMemoryPage(input: {
         // retrieval (gbrain sources) or admin triage later without
         // re-ingesting.
         input.environmentName && `environment: ${input.environmentName}`,
+        // What became of the work, as of the latest ingestion. The agent's
+        // summary is written at completion and cannot know this; the page is
+        // re-put when a linked pull request merges or closes so recall can
+        // tell shipped work from abandoned work.
+        outcome && `pr_outcome: ${outcome}`,
         'provenance: roomote-task-memory',
       ],
     }),
     '',
     `# ${input.taskTitle}`,
     '',
+    ...(initiator.line ? [initiator.line, ''] : []),
+    ...(input.request ? ['## Request', '', input.request, ''] : []),
     // The agent that did the work writes the substance when it can; the
     // deterministic completion line is the floor, not the ceiling.
     ...(input.agentSummary
       ? [input.agentSummary, '']
       : ['## Outcome', '', `Task completed at ${completed}.`, '']),
-    ...(prLines.length > 0 ? ['## Pull requests', '', ...prLines, ''] : []),
+    ...(prLines.length > 0
+      ? [
+          '## Pull requests',
+          '',
+          ...prLines,
+          '',
+          ...(outcome
+            ? [
+                describePullRequestOutcome(outcome, input.pullRequests.length),
+                '',
+              ]
+            : []),
+        ]
+      : []),
   ].join('\n');
 
   return {
-    slug: `${brainNamespacePrefix('tasks')}${input.taskId}/runs/${input.runId}`,
+    slug: taskMemorySlug(input.taskId, input.runId),
     title: input.taskTitle,
     content: redactBrainText(content),
   };
@@ -338,6 +609,12 @@ export async function brainOutboxDrainJob(): Promise<void> {
     if (!drained) {
       break;
     }
+  }
+
+  for (let batch = 0; batch < MAX_BATCHES_PER_TICK; batch++) {
+    const drained = await drainOneBrainRetirementBatch(connection);
+
+    if (!drained) break;
   }
 }
 
@@ -381,6 +658,10 @@ async function resolveReadyBrain(): Promise<{
  * restarts (there is no connect action to hang this off anymore).
  */
 async function backfillTaskHistoryOnce(): Promise<void> {
+  for (const collectorId of SUPERSEDED_TASK_MEMORY_COLLECTOR_IDS) {
+    await deleteBrainSyncStateFamily(db, collectorId);
+  }
+
   const state = await getBrainSyncState(db, TASK_MEMORY_COLLECTOR_ID);
 
   if (state?.backfillCompletedAt) {
@@ -388,7 +669,9 @@ async function backfillTaskHistoryOnce(): Promise<void> {
   }
 
   const enqueued = await backfillBrainMemoryEvents(db, {
-    requeueCompleted: true,
+    requeueLinkable: {
+      completedAfter: new Date(Date.now() - LINKABLE_REPLAY_WINDOW_MS),
+    },
   });
 
   await upsertBrainSyncState(db, TASK_MEMORY_COLLECTOR_ID, {
@@ -448,6 +731,7 @@ export async function brainCollectorsJob(): Promise<void> {
   }
 
   let includeIncremental = true;
+  let continueCollectorIds: string[] = [];
 
   await drainBrainHistoricalIngestion({
     async runPass() {
@@ -461,13 +745,20 @@ export async function brainCollectorsJob(): Promise<void> {
 
       const collectorResult = await runBrainCollectors(connection, {
         includeIncremental,
+        continueCollectorIds,
       });
       includeIncremental = false;
+      // Collectors mid-scan (a sweep, reconcile, or discovery walk) keep
+      // their collect phase running across continuation passes; the list
+      // empties as scans settle, letting the loop end.
+      continueCollectorIds =
+        collectorResult.historicalPendingCollectorIds ?? [];
 
       return {
         progressed:
           pullRequestFactsResult.progressed ||
-          collectorResult.backfillProgressed,
+          collectorResult.backfillProgressed ||
+          continueCollectorIds.length > 0,
         interrupted: collectorResult.interrupted,
       };
     },
@@ -505,8 +796,21 @@ export async function drainBrainHistoricalIngestion(input: {
   }
 }
 
+export function requestHomeComposerPrecomputeAfterMemorySettlement(
+  runId: number,
+  result: 'settled' | 'superseded',
+): void {
+  if (result === 'settled') {
+    void requestHomeComposerRecommendationPrecomputeForRun(runId).catch(() =>
+      console.warn(
+        `${LOG_PREFIX} failed to request Home recommendation precompute`,
+      ),
+    );
+  }
+}
+
 /** Returns false when no pending events remained to claim. */
-async function drainOneBatch(connection: {
+export async function drainOneBatch(connection: {
   baseUrl: string;
   token: string;
 }): Promise<boolean> {
@@ -516,7 +820,7 @@ async function drainOneBatch(connection: {
       async prepare(event) {
         const run = await db.query.taskRuns.findFirst({
           where: eq(taskRuns.id, event.runId),
-          with: { task: true },
+          with: { task: { with: { initiatorUser: true } } },
         });
 
         if (!run) {
@@ -525,6 +829,20 @@ async function drainOneBatch(connection: {
             event.id,
             'skipped',
             'run no longer exists',
+          );
+          return null;
+        }
+
+        if (run.task.privacy === 'private') {
+          await markBrainMemoryEvent(db, event.id, 'skipped', 'private task');
+          return null;
+        }
+
+        if (run.task.deletedAt) {
+          await markBrainMemoryEvent(db, event.id, 'skipped', 'task deleted');
+          await rearmBrainPageRetirement(
+            db,
+            taskMemorySlug(run.taskId, run.id),
           );
           return null;
         }
@@ -557,6 +875,16 @@ async function drainOneBatch(connection: {
           return null;
         }
 
+        if (run.payloadKind === TaskPayloadKind.SnapshotEnvironment) {
+          await markBrainMemoryEvent(
+            db,
+            event.id,
+            'skipped',
+            'snapshot environment maintenance task',
+          );
+          return null;
+        }
+
         const prRows = await db
           .select()
           .from(taskPullRequests)
@@ -574,18 +902,35 @@ async function drainOneBatch(connection: {
           environmentName = environment?.name ?? null;
         }
 
+        const task = run.task;
+        const initiator: TaskMemoryInitiator =
+          task.initiatorKind === 'automation' && task.initiatorAutomation
+            ? { kind: 'automation', automation: task.initiatorAutomation }
+            : {
+                kind: 'user',
+                userId: task.initiatorUser?.id ?? null,
+                name: task.initiatorUser?.name ?? task.actorDisplayName,
+              };
+
         const page = buildMemoryPage({
           environmentName,
           agentSummary: event.agentSummary,
           runId: run.id,
           taskId: run.taskId,
-          taskTitle: run.task.title,
+          taskTitle: task.title,
           completedAt: run.completedAt,
+          initiator,
+          workflow: task.workflow,
+          request: resolveTaskMemoryRequest(
+            run.payload as Record<string, unknown>,
+            task.workflow,
+          ),
           pullRequests: prRows.map((pr) => ({
             repository: pr.repository,
             prNumber: pr.prNumber,
             prTitle: pr.prTitle,
             prUrl: pr.prUrl,
+            status: pr.status,
           })),
         });
 
@@ -596,6 +941,7 @@ async function drainOneBatch(connection: {
         };
       },
       write: (page) => postToBrain(page, connection),
+      afterWrite: (_event, page) => rearmBrainPageRetirement(db, page.slug),
       mark: (id, status, lastError) =>
         markBrainMemoryEvent(db, id, status, lastError),
       release: (ids) => releaseBrainMemoryEvents(db, ids),
@@ -609,10 +955,12 @@ async function drainOneBatch(connection: {
           : isBrainNotReady(error)
             ? 'not-ready'
             : null,
-      onSettled: (prepared, result) =>
+      onSettled: (event, prepared, result) => {
         console.log(
           `${LOG_PREFIX} ${result === 'settled' ? prepared.settledMessage : prepared.supersededMessage} (${prepared.page.slug})`,
-        ),
+        );
+        requestHomeComposerPrecomputeAfterMemorySettlement(event.runId, result);
+      },
       onBackpressure: (kind) =>
         console.log(
           `${LOG_PREFIX} ${kind === 'rate-limited' ? 'rate limited by' : 'cannot reach or embed into'} the brain; pausing until next tick`,
@@ -637,7 +985,7 @@ export function buildFastMemoryPage(input: {
   conversationId: string;
   conversationTitle: string | null;
   userName: string | null;
-  userId: string;
+  userId: string | null;
   surface: string;
   memory: string;
   createdAt: Date;
@@ -654,7 +1002,7 @@ export function buildFastMemoryPage(input: {
       created: input.createdAt,
       fields: [
         `roomote_conversation_id: ${input.conversationId}`,
-        `roomote_user_id: ${input.userId}`,
+        input.userId && `roomote_user_id: ${input.userId}`,
         input.userName && `saved_by: ${JSON.stringify(input.userName)}`,
         `surface: ${input.surface}`,
         // GBrain derives effective_date from this conventional field. The
@@ -673,7 +1021,7 @@ export function buildFastMemoryPage(input: {
   ].join('\n');
 
   return {
-    slug: `${brainNamespacePrefix('memories')}fast/${input.conversationId}`,
+    slug: fastConversationMemorySlug(input.conversationId),
     title,
     content: redactBrainText(content),
   };
@@ -694,6 +1042,7 @@ async function drainOneFastMemoryBatch(connection: {
             surface: fastAgentConversations.surface,
             userId: fastAgentConversations.userId,
             userName: users.name,
+            privacy: fastAgentConversations.privacy,
           })
           .from(fastAgentConversations)
           .leftJoin(users, eq(users.id, fastAgentConversations.userId))
@@ -706,6 +1055,20 @@ async function drainOneFastMemoryBatch(connection: {
             event.id,
             'skipped',
             'conversation no longer exists',
+          );
+          await rearmBrainPageRetirement(
+            db,
+            fastConversationMemorySlug(event.conversationId),
+          );
+          return null;
+        }
+
+        if (conversation.privacy === 'private') {
+          await markFastAgentMemoryEvent(
+            db,
+            event.id,
+            'skipped',
+            'private conversation',
           );
           return null;
         }
@@ -728,6 +1091,7 @@ async function drainOneFastMemoryBatch(connection: {
         };
       },
       write: (page) => postToBrain(page, connection),
+      afterWrite: (_event, page) => rearmBrainPageRetirement(db, page.slug),
       mark: (id, status, lastError) =>
         markFastAgentMemoryEvent(db, id, status, lastError),
       release: (ids) => releaseFastAgentMemoryEvents(db, ids),
@@ -741,7 +1105,7 @@ async function drainOneFastMemoryBatch(connection: {
           : isBrainNotReady(error)
             ? 'not-ready'
             : null,
-      onSettled: (prepared, result) =>
+      onSettled: (_event, prepared, result) =>
         console.log(
           `${LOG_PREFIX} ${result === 'settled' ? prepared.settledMessage : prepared.supersededMessage} (${prepared.page.slug})`,
         ),
@@ -752,6 +1116,48 @@ async function drainOneFastMemoryBatch(connection: {
       onFailure: (event, terminal, message) =>
         console.warn(
           `${LOG_PREFIX} ${terminal ? 'permanently failed' : 'will retry'} conversation ${event.conversationId} (attempt ${event.attempts}): ${message}`,
+        ),
+    },
+    MAX_ATTEMPTS,
+  );
+}
+
+/** Returns false when no pending direct-memory retirements remained. */
+export async function drainOneBrainRetirementBatch(connection: {
+  baseUrl: string;
+  token: string;
+}): Promise<boolean> {
+  return drainMemoryOutboxBatch<BrainPageRetirementRow, string>(
+    {
+      claim: () => claimPendingBrainPageRetirements(db, CLAIM_BATCH_SIZE),
+      prepare: async (retirement) => ({
+        page: retirement.slug,
+        settledMessage: `retired direct memory ${retirement.slug}`,
+        supersededMessage: `direct memory ${retirement.slug} was rewritten while retiring; retrying next tick`,
+      }),
+      write: (slug) => retireBrainPage(slug, connection),
+      mark: (id, status, lastError) =>
+        markBrainPageRetirement(db, id, status, lastError),
+      release: (ids) => releaseBrainPageRetirements(db, ids),
+      settle: (id, revision, outcome, lastError) =>
+        settleBrainPageRetirement(db, id, revision, outcome, lastError),
+      classifyBackpressure: (error) =>
+        isBrainRateLimited(error)
+          ? 'rate-limited'
+          : isBrainNotReady(error)
+            ? 'not-ready'
+            : null,
+      onSettled: (_event, prepared, result) =>
+        console.log(
+          `${LOG_PREFIX} ${result === 'settled' ? prepared.settledMessage : prepared.supersededMessage}`,
+        ),
+      onBackpressure: (kind) =>
+        console.log(
+          `${LOG_PREFIX} ${kind === 'rate-limited' ? 'rate limited by' : 'cannot reach'} the brain; pausing direct-memory retirement until next tick`,
+        ),
+      onFailure: (retirement, terminal, message) =>
+        console.warn(
+          `${LOG_PREFIX} ${terminal ? 'permanently failed' : 'will retry'} direct-memory retirement ${retirement.slug} (attempt ${retirement.attempts}): ${message}`,
         ),
     },
     MAX_ATTEMPTS,

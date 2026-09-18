@@ -62,7 +62,7 @@ export const repositoryFactory = Factory.define<
   } = params;
 
   const repoName = name || faker.lorem.word();
-  const fullRepoName = fullName || `${faker.internet.userName()}/${repoName}`;
+  const fullRepoName = fullName || `${faker.internet.username()}/${repoName}`;
   const generatedGitHubRepoId = githubRepoId ?? faker.number.int();
   const sourceControlHost = sourceControlHosts[sourceControlProvider];
 

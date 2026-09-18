@@ -9,6 +9,28 @@ const offer = {
 };
 
 describe('PrReviewActionOffer', () => {
+  it('shows actions without a resolving question and hides them when superseded', () => {
+    const onAction = vi.fn();
+    const { container, rerender } = render(
+      <PrReviewActionOffer offer={offer} onAction={onAction} />,
+    );
+
+    expect(screen.queryByText(offer.question)).not.toBeInTheDocument();
+    expect(
+      screen.getAllByRole('button').map((button) => button.textContent),
+    ).toEqual(['Resolve these issues', 'Auto-resolve on this PR', 'Dismiss']);
+    expect(onAction).not.toHaveBeenCalled();
+
+    rerender(
+      <PrReviewActionOffer
+        offer={{ ...offer, status: 'dismissed' }}
+        onAction={onAction}
+      />,
+    );
+    expect(container).toBeEmptyDOMElement();
+    expect(onAction).not.toHaveBeenCalled();
+  });
+
   it('does not render an offer with dismissed state', () => {
     const { container } = render(
       <PrReviewActionOffer
@@ -18,6 +40,46 @@ describe('PrReviewActionOffer', () => {
     );
 
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it('does not render an offer with persisted resolved state', () => {
+    const { container } = render(
+      <PrReviewActionOffer
+        offer={{ ...offer, status: 'resolved' }}
+        onAction={vi.fn()}
+      />,
+    );
+
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it('keeps the standing auto-resolve state visible', () => {
+    render(
+      <PrReviewActionOffer
+        offer={{ ...offer, status: 'auto_resolved' }}
+        onAction={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText('Auto-resolve is enabled for this pull request.'),
+    ).toBeVisible();
+  });
+
+  it('removes the offer container after resolving', async () => {
+    const onAction = vi.fn().mockResolvedValue('resolved');
+    render(<PrReviewActionOffer offer={offer} onAction={onAction} />);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Resolve these issues' }),
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId('pr-review-action-offer'),
+      ).not.toBeInTheDocument();
+    });
+    expect(onAction).toHaveBeenCalledWith('yes');
   });
 
   it('removes the offer container after dismissal', async () => {

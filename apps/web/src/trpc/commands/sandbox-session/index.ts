@@ -16,7 +16,6 @@ import {
   isExitedRunStatus,
   resolveSourceControlProviderFromPayload,
   taskToolDispatchPayloadSchema,
-  type TaskGoal,
 } from '@roomote/types';
 import { createRunToken } from '@roomote/auth';
 import {
@@ -32,7 +31,6 @@ import {
   eq,
   inArray,
   isNotNull,
-  getTaskGoalForRun,
   getCanonicalPrReviewAction,
   not,
   resolveEffectivePreviewRuntimeConfig,
@@ -40,6 +38,7 @@ import {
   taskMessages,
   taskRuns,
   tasks,
+  touchTaskActivity,
 } from '@roomote/db/server';
 import { httpBatchLink, TRPCClientError } from '@trpc/client';
 import { TRPCError } from '@trpc/server';
@@ -309,6 +308,12 @@ export async function saveDraftPromptCommand(
   });
 
   if (run) {
+    const access = await resolveTaskByIdAccessCommand(auth, {
+      taskId: run.taskId,
+    });
+    if (access.kind !== 'resolved') {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found' });
+    }
     await db
       .update(tasks)
       .set({ draftPrompt: input.draftPrompt || null })
@@ -321,19 +326,11 @@ export async function saveDraftPromptCommand(
 export async function sendSandboxPromptCommand(
   auth: UserAuthSuccess,
   input: z.input<typeof sendSandboxPromptInputSchema>,
-  trustedContext?: { goalContext?: TaskGoal },
 ) {
   const parsed = sendSandboxPromptInputSchema.parse(input);
   const { taskRun } = await getResolvedSandboxTaskRunByTaskId(auth, {
     taskId: parsed.taskId,
   });
-  const currentGoal = trustedContext?.goalContext
-    ? null
-    : await getTaskGoalForRun(taskRun.id);
-  const goalContext =
-    trustedContext?.goalContext ??
-    (currentGoal?.status === 'active' ? currentGoal : undefined);
-
   if (!taskRun.sandboxServerUrl) {
     throw new TRPCError({
       code: 'CONFLICT',
@@ -368,16 +365,25 @@ export async function sendSandboxPromptCommand(
   const previousActingUserId = taskRun.actingUserId;
   const requiresActorHandoff = previousActingUserId !== auth.userId;
   const promptUserName = getAuthenticatedPromptUserName(auth);
-  const shouldTrackDiscordReplyQuote =
+  const communicationProvider = getCommunicationProviderFromTaskPayload(
+    taskRun.payload,
+  );
+  const replyQuoteProvider =
+    communicationProvider === 'discord' || communicationProvider === 'telegram'
+      ? communicationProvider
+      : null;
+  const shouldTrackCommunicationReplyQuote =
     parsed.source === 'web' &&
     typeof parsed.prompt === 'string' &&
     parsed.prompt.trim().length > 0 &&
-    getCommunicationProviderFromTaskPayload(taskRun.payload) === 'discord' &&
+    replyQuoteProvider !== null &&
     Boolean(getCommunicationChannelFromTaskPayload(taskRun.payload));
   let didSwitchActingUser = false;
-  let discordReplyQuoteId: string | null = null;
+  let communicationReplyQuoteId: string | null = null;
 
   try {
+    await touchTaskActivity(db, parsed.taskId);
+
     // The actor switch must land before the prompt reaches the sandbox so the
     // worker's sender-vs-acting-user guard passes (critical for runs that
     // start without an acting user, e.g. automation-started tasks).
@@ -399,20 +405,24 @@ export async function sendSandboxPromptCommand(
       ],
     });
 
-    if (shouldTrackDiscordReplyQuote && typeof parsed.prompt === 'string') {
+    if (
+      shouldTrackCommunicationReplyQuote &&
+      replyQuoteProvider &&
+      typeof parsed.prompt === 'string'
+    ) {
       try {
         const quote = await setLatestUserMessageForReplyQuote(
-          'discord',
+          replyQuoteProvider,
           taskRun.id,
           {
             text: parsed.prompt,
             userName: promptUserName ?? 'Someone',
           },
         );
-        discordReplyQuoteId = quote.id;
+        communicationReplyQuoteId = quote.id;
       } catch (error) {
         console.warn(
-          `[sendSandboxPromptCommand] Failed to persist Discord reply quote for task run ${taskRun.id}: ${error instanceof Error ? error.message : String(error)}`,
+          `[sendSandboxPromptCommand] Failed to persist ${replyQuoteProvider} reply quote for task run ${taskRun.id}: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
     }
@@ -434,7 +444,6 @@ export async function sendSandboxPromptCommand(
       autoSteerWhenQueued: requiresActorHandoff
         ? true
         : parsed.autoSteerWhenQueued,
-      goalContext,
     });
 
     if (typeof parsed.prompt === 'string' && parsed.prompt.trim().length > 0) {
@@ -456,11 +465,11 @@ export async function sendSandboxPromptCommand(
 
     return result;
   } catch (error) {
-    if (discordReplyQuoteId) {
+    if (communicationReplyQuoteId && replyQuoteProvider) {
       await clearLatestUserMessageForReplyQuoteIfId(
-        'discord',
+        replyQuoteProvider,
         taskRun.id,
-        discordReplyQuoteId,
+        communicationReplyQuoteId,
       );
     }
 
@@ -520,6 +529,8 @@ export async function answerSandboxUserInputRequestCommand(
   let didSwitchActingUser = false;
 
   try {
+    await touchTaskActivity(db, parsed.taskId);
+
     // Same trusted pre-delivery actor switch as sendSandboxPromptCommand: the
     // worker blocks answers whose sender is not the run's acting user. Note
     // this resolves the actor before delivery rather than through the atomic

@@ -12,12 +12,12 @@ import { TaskPayloadKind, type SuggestedTasksTask } from '@roomote/types';
 import {
   buildDestinationTaskPayloadFields,
   listConnectedCommunicationProviders,
+  prepareAutomationReportDestination,
   resolveAutomationRuntimeDestination,
   type ResolvedAutomationDestination,
 } from './destination';
 import { resolveDeploymentTimeZone } from './custom-automation-schedule';
 import { isRunDue } from './scheduling-utils';
-import { postScheduledTriageRoutingDebug } from './triage-routing-debug';
 import {
   emptyJobResult,
   type AutomationJobResult,
@@ -66,9 +66,12 @@ type ScheduledTriageAutomationConfig = {
   }) => Promise<TriageScanBuild>;
 };
 
-async function findEligibleDeploymentContexts(): Promise<
-  TriageDeploymentContext[]
-> {
+async function findEligibleDeploymentContexts(
+  runtime: Pick<AutomationRuntime, 'targets'>,
+): Promise<TriageDeploymentContext[]> {
+  if (runtime.targets?.some((target) => target.provider === 'email')) {
+    return [{ slackBotToken: null, slackTeamId: null }];
+  }
   const rows = await db
     .select({
       botAccessToken: slackInstallations.botAccessToken,
@@ -107,7 +110,8 @@ export function createScheduledTriageJob(
 
     const now = new Date();
     const result = emptyJobResult();
-    const eligibleDeployments = await findEligibleDeploymentContexts();
+    const runtime = await getAutomationRuntime(config.automationKey);
+    const eligibleDeployments = await findEligibleDeploymentContexts(runtime);
 
     if (eligibleDeployments.length === 0) {
       result.skippedReason = 'No connected communication provider.';
@@ -118,7 +122,6 @@ export function createScheduledTriageJob(
 
     for (const deployment of eligibleDeployments) {
       try {
-        const runtime = await getAutomationRuntime(config.automationKey);
         const frequency = runtime.enabled ? runtime.scheduleMode : 'off';
 
         if (!frequency || frequency === 'off') {
@@ -135,17 +138,6 @@ export function createScheduledTriageJob(
           }));
 
         if (!destination) {
-          if (deployment.slackBotToken) {
-            await postScheduledTriageRoutingDebug({
-              automationKey: config.automationKey,
-              slackBotToken: deployment.slackBotToken,
-              manualTrigger: opts.manualTrigger === true,
-              outcome: 'skipped',
-              taskSlackChannelId: null,
-              details:
-                'Manager channel not configured, so the task was not queued.',
-            });
-          }
           console.log(
             `${logPrefix} Skipping deployment: manager channel not configured`,
           );
@@ -154,7 +146,16 @@ export function createScheduledTriageJob(
           continue;
         }
 
-        const channelId = destination.channelId;
+        if (
+          destination.provider === 'slack' &&
+          destination.teamId &&
+          destination.teamId !== deployment.slackTeamId
+        ) {
+          skipped++;
+          continue;
+        }
+
+        let reportDestination = destination;
         const timezone = (await resolveDeploymentTimeZone()).timeZone;
 
         if (
@@ -173,10 +174,19 @@ export function createScheduledTriageJob(
           continue;
         }
 
+        reportDestination =
+          destination.provider === 'email'
+            ? await prepareAutomationReportDestination(destination, {
+                subject: `Roomote ${config.automationKey.replaceAll('_', ' ')} report - ${now.toISOString().slice(0, 10)}`,
+                conversationKey: `builtin-automation:${config.automationKey}:${now.toISOString()}`,
+              })
+            : destination;
+        const channelId = reportDestination.channelId;
+
         const scanTask = await config.buildScanTask({
           deployment,
           channelId,
-          destination,
+          destination: reportDestination,
           runtime,
           manualTrigger: opts.manualTrigger === true,
         });
@@ -211,7 +221,7 @@ export function createScheduledTriageJob(
               type: TaskPayloadKind.Scan,
               payload: {
                 ...payload,
-                ...buildDestinationTaskPayloadFields(destination),
+                ...buildDestinationTaskPayloadFields(reportDestination),
               },
             },
             initiator: { kind: 'automation', key: config.automationKey },
@@ -219,7 +229,7 @@ export function createScheduledTriageJob(
             surface: 'system',
             trigger: opts.manualTrigger ? 'manual' : 'schedule',
             visibility: 'hidden',
-            ...(destination.provider === 'slack'
+            ...(reportDestination.provider === 'slack'
               ? { channels: { slackChannelId: channelId } }
               : {}),
           });
@@ -232,22 +242,6 @@ export function createScheduledTriageJob(
           status: 'succeeded',
           at: new Date(),
         });
-
-        if (deployment.slackBotToken) {
-          await postScheduledTriageRoutingDebug({
-            automationKey: config.automationKey,
-            slackBotToken: deployment.slackBotToken,
-            manualTrigger: opts.manualTrigger === true,
-            outcome: 'queued',
-            taskSlackChannelId:
-              destination.provider === 'slack' ? channelId : null,
-            ...(destination.provider === 'slack'
-              ? {}
-              : {
-                  details: `Task reports to the ${destination.provider} conversation ${channelId}.`,
-                }),
-          });
-        }
 
         result.launchedTaskId ??= firstLaunchedTaskId;
         processed++;

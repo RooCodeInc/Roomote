@@ -1,331 +1,132 @@
 'use client';
 
-import Link from 'next/link';
 import { useState, useCallback, useEffect, useRef, type Ref } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { useForm, FormProvider } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { toast } from 'sonner';
+import { useSearchParams } from 'next/navigation';
 
 import {
-  type ComputeProvider,
-  ALL_REPOSITORIES,
-  FAST_EXECUTION,
-  DEFAULT_LAUNCH_CODING_HARNESS,
+  type ReasoningEffort,
   DEFAULT_MANAGED_DEPLOYMENT_ACCESS,
-  pickPreferredConfiguredComputeProvider,
-  SETUP_COMPUTE_PROVIDER_CATALOG,
 } from '@roomote/types';
 
-import { type CreateTaskFormValues, createTaskFormSchema } from '@/types';
-
-import { SETTINGS_PATHS } from '@/lib/settings';
 import { preparePromptAttachments } from '@/lib/prompt-attachments';
 import { getTaskLaunchDisabledReason } from '@/lib/managed-access';
-
-import { useEnvironments } from '@/hooks/environments';
 import { useAuthorizedUser } from '@/hooks/useUser';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
-import {
-  type WorkspaceSelection,
-  useWorkspaceStorage,
-} from '@/hooks/useWorkspaceStorage';
-import {
-  useCreateStandardTaskRun,
-  useStartFastSession,
-} from '@/hooks/task-runs';
+import { useFastSessionLauncher } from '@/hooks/task-runs';
+import { useVoiceEnabled } from '@/hooks/useVoiceEnabled';
+import { usePrivateSessionsExperiment } from '@/hooks/usePrivateSessionsExperiment';
 
-import {
-  Alert,
-  ArrowRight,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-  VectorSquare,
-} from '@/components/system';
-import type { PromptInputMessage } from '@/components/ai-elements';
-import {
-  SelectWorkspace,
-  ModelSelect,
-  TaskPromptInput,
-  AUTO_WORKSPACE_VALUE,
-} from '@/components/tasks';
-import { useTaskLaunchConfig } from '@/components/tasks/TaskLaunchConfig';
+import { type PromptInputMessage } from '@/components/ai-elements';
+import { SessionModelSwitcher, TaskPromptInput } from '@/components/tasks';
+import { BasicTooltip, Button, HatGlasses } from '@/components/system';
 
 const DEFAULT_PROMPT_PLACEHOLDER = 'What do you want to do?';
 
 type SubmissionSnapshot = {
-  branch?: string;
   description?: string;
   images?: string[];
   attachmentTexts?: string[];
-  blank: boolean;
 };
-
-const DEFAULT_FORM_VALUES: CreateTaskFormValues = {
-  repository: AUTO_WORKSPACE_VALUE,
-  branch: '',
-  environmentId: undefined,
-  text: '',
-  images: [],
-  port: undefined,
-};
-
-function resolveInitialComputeProvider(
-  defaultComputeProvider: ComputeProvider,
-  availableComputeProviders: readonly ComputeProvider[],
-): ComputeProvider {
-  if (availableComputeProviders.includes(defaultComputeProvider)) {
-    return defaultComputeProvider;
-  }
-
-  return (
-    pickPreferredConfiguredComputeProvider(availableComputeProviders) ??
-    defaultComputeProvider
-  );
-}
 
 type NewTaskFormProps = {
-  defaultComputeProvider?: ComputeProvider;
-  availableComputeProviders?: readonly ComputeProvider[];
+  animate?: boolean;
   onTaskStarted?: () => void;
+  initialPrompt?: string;
   placeholder?: string;
+  promptSuggestion?: string;
+  onPromptFocusChange?: (focused: boolean) => void;
+  autoFocus?: boolean;
   textareaMaxHeight?: number;
   promptContainerRef?: Ref<HTMLDivElement>;
 };
 
 export function NewTaskForm({
-  defaultComputeProvider: defaultComputeProviderOverride,
-  availableComputeProviders,
+  animate = true,
   onTaskStarted,
+  initialPrompt = '',
   placeholder = DEFAULT_PROMPT_PLACEHOLDER,
+  promptSuggestion,
+  onPromptFocusChange,
+  autoFocus = true,
   textareaMaxHeight,
   promptContainerRef,
 }: NewTaskFormProps) {
-  const taskLaunchConfig = useTaskLaunchConfig();
-  const defaultComputeProvider =
-    defaultComputeProviderOverride ?? taskLaunchConfig.defaultComputeProvider;
-  const resolvedAvailableComputeProviders =
-    availableComputeProviders ?? taskLaunchConfig.availableComputeProviders;
-  const router = useRouter();
-  const environments = useEnvironments();
-  const {
-    cloudEnabled,
-    isAdmin,
-    managedAccess = DEFAULT_MANAGED_DEPLOYMENT_ACCESS,
-  } = useAuthorizedUser();
-
-  const canSelectBranch = false;
-
-  // Keep option order identical to the setup catalog so the first fallback
-  // matches the first visible Sandbox provider row.
-  const catalogComputeProviders = SETUP_COMPUTE_PROVIDER_CATALOG.map(
-    (descriptor) => descriptor.provider,
-  );
-  const computeProviderOptions =
-    resolvedAvailableComputeProviders === undefined
-      ? catalogComputeProviders
-      : resolvedAvailableComputeProviders.length > 0
-        ? catalogComputeProviders.filter((provider) =>
-            resolvedAvailableComputeProviders.includes(provider),
-          )
-        : [defaultComputeProvider];
-  const computeProviderDescriptors = SETUP_COMPUTE_PROVIDER_CATALOG.filter(
-    (descriptor) => computeProviderOptions.includes(descriptor.provider),
-  );
-  const initialComputeProvider = resolveInitialComputeProvider(
-    defaultComputeProvider,
-    computeProviderOptions,
-  );
+  const { managedAccess = DEFAULT_MANAGED_DEPLOYMENT_ACCESS } =
+    useAuthorizedUser();
 
   const searchParams = useSearchParams();
   const promptParam = searchParams.get('prompt') ?? '';
   const modelParam = searchParams.get('model')?.trim() || undefined;
-  const environmentIdParam = searchParams.get('environmentId')?.trim() ?? '';
 
-  const [promptText, setPromptText] = useState(promptParam);
-  const [selectedComputeProvider, setSelectedComputeProvider] =
-    useState<ComputeProvider>(initialComputeProvider);
+  const initialPromptText = promptParam || initialPrompt;
+  const [promptText, setPromptText] = useState(initialPromptText);
   const [selectedModelOverrideId, setSelectedModelOverrideId] = useState<
     string | undefined
   >(modelParam);
+  const [selectedReasoningEffort, setSelectedReasoningEffort] = useState<
+    ReasoningEffort | null | undefined
+  >(undefined);
+  const [privateSession, setPrivateSession] = useState(
+    searchParams.get('private') === '1',
+  );
+  const { enabled: privateSessionsEnabled } = usePrivateSessionsExperiment();
+  const privateModeActive = privateSessionsEnabled && privateSession;
 
-  const workspaceRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => setPromptText(promptParam), [promptParam]);
+  useEffect(() => setPromptText(initialPromptText), [initialPromptText]);
   useEffect(() => setSelectedModelOverrideId(modelParam), [modelParam]);
 
-  const form = useForm<CreateTaskFormValues>({
-    resolver: zodResolver(createTaskFormSchema),
-    defaultValues: DEFAULT_FORM_VALUES,
-  });
-
-  const { workspace, setWorkspace } = useWorkspaceStorage();
-  const hasRestoredWorkspace = useRef(false);
-  const shouldRestoreDefaultWorkspace = useRef(false);
-
-  const handleInvalidWorkspaceReset = useCallback(() => {
-    shouldRestoreDefaultWorkspace.current = true;
-  }, []);
-
-  useEffect(() => {
-    const restoredWorkspace = workspace.workspace as
-      | WorkspaceSelection['workspace']
-      | undefined;
-
-    if (hasRestoredWorkspace.current) {
-      if (
-        !shouldRestoreDefaultWorkspace.current ||
-        restoredWorkspace?.type !== 'auto' ||
-        form.getValues('repository') !== AUTO_WORKSPACE_VALUE
-      ) {
-        return;
-      }
-
-      hasRestoredWorkspace.current = false;
-      shouldRestoreDefaultWorkspace.current = false;
-    }
-
-    if (environmentIdParam) {
-      form.setValue('repository', environmentIdParam);
-      form.setValue('environmentId', environmentIdParam);
-      form.setValue('branch', '');
-
-      setWorkspace({
-        workspace: { type: 'environment', id: environmentIdParam },
-      });
-
-      hasRestoredWorkspace.current = true;
-      return;
-    }
-
-    if (form.getValues('repository') !== AUTO_WORKSPACE_VALUE) {
-      hasRestoredWorkspace.current = true;
-      return;
-    }
-
-    // Fast mode is always the default workspace for new prompts.
-    form.setValue('repository', FAST_EXECUTION);
-    form.setValue('environmentId', undefined);
-    form.setValue('branch', '');
-    hasRestoredWorkspace.current = true;
-  }, [environmentIdParam, form, setWorkspace, workspace]);
-
-  const wiggleWorkspace = useCallback(() => {
-    const el = workspaceRef.current;
-
-    if (!el) {
-      return;
-    }
-
-    el.classList.remove('animate-wiggle');
-    void el.offsetWidth;
-    el.classList.add('animate-wiggle');
-  }, []);
-
-  const navigateToTaskRun = (result: {
-    success: boolean;
-    taskId?: string;
-    sessionId?: string;
-    error?: string;
-  }) => {
-    if (result.success && 'taskId' in result) {
-      onTaskStarted?.();
-      router.push(
-        result.sessionId
-          ? `/sessions/${result.sessionId}`
-          : `/task/${result.taskId}`,
-      );
-    } else if ('error' in result) {
-      toast.error(result.error);
-    }
-  };
-
-  const mutationOptions = {
-    onSuccess: navigateToTaskRun,
-    onError: (error: Error) => toast.error(error.message),
-  };
-
-  const createStandardTaskRun = useCreateStandardTaskRun(mutationOptions);
-  const startFastSessionMutation = useStartFastSession();
-
-  const startFastSession = useCallback(
-    async (payload: {
-      text: string;
-      images?: string[];
-      attachmentTexts?: string[];
-      model?: string;
-    }): Promise<void> => {
-      // A second submit while the first is in flight would mint a second
-      // session and orphan one of them.
-      if (startFastSessionMutation.isPending) {
-        return;
-      }
-      try {
-        const { sessionId } =
-          await startFastSessionMutation.mutateAsync(payload);
-        onTaskStarted?.();
-        router.push(`/sessions/${sessionId}`);
-      } catch (error) {
-        toast.error(
-          error instanceof Error
-            ? error.message
-            : 'Failed to start Fast session',
-        );
-      }
-    },
-    [onTaskStarted, startFastSessionMutation, router],
-  );
+  const { isPending: isFastSessionPending, startFastSession } =
+    useFastSessionLauncher({ onSessionStarted: onTaskStarted });
   const launchTaskModels = useLaunchTaskModels();
-  const selectedModelId =
-    selectedModelOverrideId ?? launchTaskModels.data?.defaultModelId;
+  const defaultModelId = launchTaskModels.data?.defaultFastModelId;
+  const defaultReasoningEffort =
+    launchTaskModels.data?.defaultFastReasoningEffort;
 
-  const launchTask = useCallback(
-    async (payload: {
-      repo: string;
-      branch?: string;
-      environmentId?: string;
-      description?: string;
-      images?: string[];
-      modelId?: string;
-      blank: boolean;
-    }): Promise<boolean> => {
-      try {
-        const result = await createStandardTaskRun.mutateAsync({
-          harness: DEFAULT_LAUNCH_CODING_HARNESS,
-          model: payload.modelId ?? selectedModelId,
-          computeProvider: selectedComputeProvider,
-          payload,
-        });
+  const isBusy = isFastSessionPending;
 
-        return result.success;
-      } catch {
-        return false;
-      }
-    },
-    [createStandardTaskRun, selectedComputeProvider, selectedModelId],
-  );
-
-  const isBusy =
-    createStandardTaskRun.isPending || startFastSessionMutation.isPending;
-
-  const hasAnyEnvironments = (environments.data?.length ?? 0) > 0;
-  const showNoEnvironmentsWarning =
-    isAdmin && !environments.isPending && !hasAnyEnvironments;
   const submitDisabledReason = getTaskLaunchDisabledReason(managedAccess);
+
+  // --- Voice-started sessions ----------------------------------------------
+  // A session needs content to exist, so the composer listens for the first
+  // utterance here, starts the session with it, and hands the conversation
+  // to the session page (which resumes voice and speaks the reply).
+  const voiceEnabled = useVoiceEnabled();
+  const startFastSessionRef = useRef(startFastSession);
+  startFastSessionRef.current = startFastSession;
+  // A voice call lives inside a Session, so the button opens one (sending
+  // anything already typed as the first message) and the Session page starts
+  // the call. Matches the flow of a call button beside the composer.
+  const [openingVoiceSession, setOpeningVoiceSession] = useState(false);
+  const handleVoiceToggle = useCallback(() => {
+    if (openingVoiceSession) return;
+    setOpeningVoiceSession(true);
+    void startFastSessionRef
+      .current(
+        {
+          text: promptText.trim(),
+          model: selectedModelOverrideId,
+          ...(selectedReasoningEffort !== undefined
+            ? { reasoningEffort: selectedReasoningEffort }
+            : {}),
+          ...(privateModeActive ? { privacy: 'private' as const } : {}),
+          voiceCall: true,
+        },
+        { voice: true },
+      )
+      .finally(() => setOpeningVoiceSession(false));
+  }, [
+    openingVoiceSession,
+    promptText,
+    privateModeActive,
+    selectedModelOverrideId,
+    selectedReasoningEffort,
+  ]);
+  const voiceActive = openingVoiceSession;
+
+  const showVoice = voiceEnabled;
 
   const handleSubmit = useCallback(
     async (message: PromptInputMessage) => {
-      const { repository, branch, environmentId } = form.getValues();
-      const isAutoWorkspace = repository === AUTO_WORKSPACE_VALUE;
-
-      if (!isAutoWorkspace && !repository) {
-        wiggleWorkspace();
-        return;
-      }
-
       const text = message.text.trim();
 
       const preparedPrompt = await preparePromptAttachments({
@@ -334,150 +135,98 @@ export function NewTaskForm({
       });
 
       const submission: SubmissionSnapshot = {
-        branch: canSelectBranch ? branch : undefined,
         description:
           preparedPrompt.text.length > 0 ? preparedPrompt.text : undefined,
         images: preparedPrompt.images,
         attachmentTexts: preparedPrompt.attachmentTexts,
-        blank: preparedPrompt.text.length === 0,
       };
 
-      if (repository === FAST_EXECUTION) {
-        if (!submission.description && !submission.images?.length) {
-          return;
-        }
-        await startFastSession({
-          text: submission.description ?? '',
-          images: submission.images,
-          attachmentTexts: submission.attachmentTexts,
-          model: selectedModelId,
-        });
+      if (
+        !submission.description &&
+        !submission.images?.length &&
+        !submission.attachmentTexts?.length
+      ) {
         return;
       }
-
-      // Auto is no longer offered in the picker, but stored workspace
-      // preferences may still restore it; treat it as Fast.
-      if (isAutoWorkspace) {
-        if (!submission.description && !submission.images?.length) return;
-        await startFastSession({
-          text: submission.description ?? '',
-          images: submission.images,
-          attachmentTexts: submission.attachmentTexts,
-          model: selectedModelId,
-        });
-        return;
-      }
-
-      const didLaunch = await launchTask({
-        repo: environmentId ? ALL_REPOSITORIES : repository,
-        branch: environmentId ? undefined : submission.branch,
-        environmentId,
-        description: submission.description,
+      await startFastSession({
+        text: submission.description ?? '',
         images: submission.images,
-        blank: submission.blank,
-      });
-
-      if (!didLaunch) {
-        return;
-      }
-
-      setWorkspace({
-        workspace: environmentId
-          ? { type: 'environment', id: environmentId }
-          : { type: 'repository', value: repository },
+        attachmentTexts: submission.attachmentTexts,
+        model: selectedModelOverrideId,
+        ...(privateModeActive ? { privacy: 'private' as const } : {}),
+        ...(selectedReasoningEffort !== undefined
+          ? { reasoningEffort: selectedReasoningEffort }
+          : {}),
       });
     },
     [
-      form,
-      launchTask,
-      setWorkspace,
-      canSelectBranch,
-      wiggleWorkspace,
       startFastSession,
-      selectedModelId,
+      selectedModelOverrideId,
+      selectedReasoningEffort,
+      privateModeActive,
     ],
   );
 
   return (
-    <FormProvider {...form}>
-      <div className="flex flex-wrap items-center gap-2 animate-[enter-down_1s_1_100ms_backwards]">
-        <div ref={workspaceRef}>
-          <SelectWorkspace
-            allowFast
-            autoSelectDefaultWorkspace={false}
-            onInvalidWorkspaceReset={handleInvalidWorkspaceReset}
-            allowBranchSelection={canSelectBranch}
-          />
-        </div>
-
-        <ModelSelect
-          value={selectedModelId}
-          onValueChange={setSelectedModelOverrideId}
-        />
-
-        {!cloudEnabled && computeProviderDescriptors.length > 1 && (
-          <Select
-            value={selectedComputeProvider}
-            onValueChange={(value) =>
-              setSelectedComputeProvider(value as ComputeProvider)
+    <div
+      ref={promptContainerRef}
+      className={
+        animate ? 'animate-[enter-down_1s_1_100ms_backwards]' : undefined
+      }
+    >
+      <TaskPromptInput
+        promptKey={initialPromptText}
+        isBusy={isBusy}
+        promptText={promptText}
+        onPromptTextChange={setPromptText}
+        onSubmit={handleSubmit}
+        placeholder={placeholder}
+        promptSuggestion={promptSuggestion}
+        onPromptFocusChange={onPromptFocusChange}
+        autoFocus={autoFocus}
+        textareaMaxHeight={textareaMaxHeight}
+        animateContainer={false}
+        submitWithMetaKey={false}
+        submitDisabledReason={submitDisabledReason}
+        voice={
+          showVoice
+            ? { active: voiceActive, onToggle: handleVoiceToggle }
+            : undefined
+        }
+        tools={
+          <SessionModelSwitcher
+            model={selectedModelOverrideId ?? ''}
+            onModelChange={(model) =>
+              setSelectedModelOverrideId(model || undefined)
             }
-          >
-            <SelectTrigger size="sm" aria-label="Sandbox provider">
-              <SelectValue placeholder="Backend" />
-            </SelectTrigger>
-            <SelectContent>
-              {computeProviderDescriptors.map((descriptor) => (
-                <SelectItem
-                  key={descriptor.provider}
-                  value={descriptor.provider}
-                >
-                  {descriptor.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-      </div>
-
-      <div
-        ref={promptContainerRef}
-        className="animate-[enter-down_1s_1_200ms_backwards]"
-      >
-        <TaskPromptInput
-          promptKey={promptParam}
-          isBusy={isBusy}
-          promptText={promptText}
-          onPromptTextChange={setPromptText}
-          onSubmit={handleSubmit}
-          placeholder={placeholder}
-          autoFocus
-          textareaMaxHeight={textareaMaxHeight}
-          animateContainer={false}
-          submitDisabledReason={submitDisabledReason}
-        />
-      </div>
-
-      {showNoEnvironmentsWarning && (
-        <Alert
-          variant="light"
-          className="mt-2 animate-[enter-down_1s_1_300ms_backwards]"
-        >
-          <VectorSquare />
-          <p>
-            <span>You haven&apos;t created any environments yet. </span>
-            <span className="block md:inline">
-              Roomote can work directly on your repos, but it can&apos;t verify
-              its work.{' '}
-            </span>
-            <Link
-              href={SETTINGS_PATHS.newEnvironment}
-              className="text-primary font-semibold underline hover:no-underline block md:inline"
-            >
-              Create your first <ArrowRight className="inline size-4" />
-            </Link>
-          </p>
-        </Alert>
-      )}
-    </FormProvider>
+            reasoningEffort={selectedReasoningEffort ?? null}
+            onReasoningEffortChange={setSelectedReasoningEffort}
+            defaultModelId={defaultModelId}
+            defaultReasoningEffort={defaultReasoningEffort}
+          />
+        }
+        submitLeadingAction={
+          privateSessionsEnabled ? (
+            <BasicTooltip content="Private session">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className={`size-8 rounded-full ${
+                  privateSession
+                    ? 'bg-accent-foreground/10 text-accent-foreground hover:bg-accent-foreground/20 hover:text-accent-foreground'
+                    : 'text-muted-foreground'
+                }`}
+                aria-label="Private session"
+                aria-pressed={privateSession}
+                onClick={() => setPrivateSession((selected) => !selected)}
+              >
+                <HatGlasses />
+              </Button>
+            </BasicTooltip>
+          ) : null
+        }
+      />
+    </div>
   );
 }

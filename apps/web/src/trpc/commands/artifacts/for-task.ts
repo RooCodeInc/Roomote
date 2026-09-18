@@ -20,24 +20,26 @@ export async function getArtifactsForTaskCommand(
 
   return Promise.all(
     artifacts.map(async (artifact) => {
+      const { privacy, ...publicArtifact } = artifact;
       const isImage = artifact.contentType.startsWith('image/');
-      const thumbnailUrl = isImage
-        ? `/api/artifacts/${artifact.id}/raw?sig=${signArtifactId(artifact.id, ts)}&ts=${ts}`
-        : undefined;
+      const authenticatedRawUrl = `/api/artifacts/${artifact.id}/raw?sig=${signArtifactId(artifact.id, ts)}&ts=${ts}`;
+      const thumbnailUrl = isImage ? authenticatedRawUrl : undefined;
 
       const isVideo =
         artifact.contentType.startsWith('video/') ||
         artifact.path.toLowerCase().endsWith('.webm');
       const previewUrl = isVideo
-        ? await generateDownloadUrl(
-            input.taskId,
-            artifact.id,
-            artifact.path,
-            artifact.version,
-          )
+        ? privacy === 'private'
+          ? authenticatedRawUrl
+          : await generateDownloadUrl(
+              input.taskId,
+              artifact.id,
+              artifact.path,
+              artifact.version,
+            )
         : undefined;
 
-      return { ...artifact, thumbnailUrl, previewUrl };
+      return { ...publicArtifact, thumbnailUrl, previewUrl };
     }),
   );
 }

@@ -1,4 +1,10 @@
 import * as path from 'node:path';
+import { HTTP_INTEGRATIONS_BROKER } from '../../mcp-provenance';
+
+import {
+  HTTP_INTEGRATIONS_MCP_ID,
+  HTTP_INTEGRATIONS_MCP_PATH,
+} from '@roomote/sdk/client';
 
 import {
   BRAIN_MCP_ID,
@@ -45,6 +51,7 @@ export const BUILT_IN_MCPS: Record<string, McpServerConfig> = {
 
 interface McpStreamableHttpConfig {
   type: 'streamable-http';
+  roomoteManaged?: typeof HTTP_INTEGRATIONS_BROKER;
   url: string;
   headers?: Record<string, string>;
 }
@@ -171,7 +178,13 @@ function resolveConfigValues(
 }
 
 function buildIntegrationProxyMap(): Map<string, IntegrationProxyConfig> {
-  const integrationConfigs: IntegrationProxyConfig[] = [];
+  const integrationConfigs: IntegrationProxyConfig[] = [
+    {
+      id: HTTP_INTEGRATIONS_MCP_ID,
+      name: 'HTTP integrations',
+      proxyPath: HTTP_INTEGRATIONS_MCP_PATH,
+    },
+  ];
 
   // Credential-only integrations have no MCP server and are never delivered
   // to sandboxes, so they get no proxy-path entry.
@@ -352,6 +365,7 @@ export function resolveBuiltInMcpServers(
     'ROOMOTE_AUTH_BYPASS_VALUE',
     'ROOMOTE_TASK_TYPE',
     'ROOMOTE_AUTOMATION_TASK',
+    'ROOMOTE_ON_DEMAND_REPOSITORIES',
     'ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE',
     'ROOMOTE_SLACK_CHANNEL',
     'ROOMOTE_SLACK_THREAD_TS',
@@ -398,6 +412,17 @@ export function resolveBuiltInMcpServers(
   // Add integration-provided MCP servers.
   if (integrations?.userMcpServers) {
     for (const [name, config] of Object.entries(integrations.userMcpServers)) {
+      if (
+        name === HTTP_INTEGRATIONS_MCP_ID &&
+        (Object.hasOwn(environmentMcpServers ?? {}, name) ||
+          Object.hasOwn(deploymentMcpServers ?? {}, name))
+      ) {
+        console.warn(
+          `[resolveBuiltInMcpServers] Skipping HTTP integrations broker: preserving operator MCP '${HTTP_INTEGRATIONS_MCP_ID}'. Rename the operator server to receive both.`,
+        );
+        continue;
+      }
+
       if (!config.url) {
         continue;
       }
@@ -469,6 +494,9 @@ export function resolveBuiltInMcpServers(
         resolvedMcps[name] = {
           type: 'streamable-http',
           url: `${apiUrl}${integrationProxy.proxyPath}`,
+          ...(name === HTTP_INTEGRATIONS_MCP_ID
+            ? { roomoteManaged: HTTP_INTEGRATIONS_BROKER }
+            : {}),
           headers: withPreviewProxyBypassHeader(
             withTaskRunTokenAuthHeader(config.headers, cloudToken),
             taskEnv,
@@ -511,6 +539,22 @@ export function resolveBuiltInMcpServers(
         headers: config.headers,
       };
     }
+  }
+
+  // GitHub is a built-in source-control surface, not a curated connection.
+  // The API requires an eligible deployment installation, including for public
+  // reads, and keeps run-token calls read-only. Credentials remain server-side.
+  const apiUrl = resolveApiBaseUrl(taskEnv);
+  const cloudToken = taskEnv?.ROOMOTE_CLOUD_TOKEN;
+  if (apiUrl && cloudToken) {
+    resolvedMcps.github = {
+      type: 'streamable-http',
+      url: `${apiUrl}/api/mcp-routing/github`,
+      headers: withPreviewProxyBypassHeader(
+        withTaskRunTokenAuthHeader(undefined, cloudToken),
+        taskEnv,
+      ),
+    };
   }
 
   const substitutionLookup = buildMcpSubstitutionLookup(

@@ -5,7 +5,12 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'motion/react';
 import { toast } from 'sonner';
-import { MCP_INTEGRATIONS } from '@roomote/types';
+import {
+  MCP_INTEGRATIONS,
+  ADMIN_INTEGRATION_ORDER,
+  COMMUNICATION_PROVIDER_ORDER,
+  SOURCE_CONTROL_PROVIDER_ORDER,
+} from '@roomote/types';
 
 import { useAuthorizedUser } from '@/hooks/useUser';
 import {
@@ -16,6 +21,8 @@ import {
 import { useAuthenticateGitHubAccount } from '@/hooks/github';
 import { useAuthenticateSlackAccount } from '@/hooks/slack';
 import { useAuthenticateLinearAccount } from '@/hooks/linear';
+import { useEnvironments } from '@/hooks/environments';
+import { useFastSessionLauncher } from '@/hooks/task-runs';
 import {
   useAuthenticateAdoAccount,
   useAuthenticateBitbucketAccount,
@@ -34,11 +41,13 @@ import {
   DialogHeader,
   DialogTitle,
   Github,
+  Lightbulb,
   LinearLogo,
   Slack,
   X,
   Button,
   Spinner,
+  VectorSquare,
   Zap,
 } from '@/components/system';
 import { McpIcon } from '@/components/settings/McpIcon';
@@ -48,20 +57,9 @@ import { TelegramLinkAccountStep } from '@/components/settings/TelegramLinkAccou
 const DISMISSED_KEY = 'OnboardingCardsDismissedByOrg';
 const DISMISSED_DEPLOYMENT_KEY = 'deployment';
 
-const ADMIN_INTEGRATION_ORDER = [
-  'notion',
-  'sentry',
-  'linear',
-  'jira',
-  'monday',
-  'vercel',
-  'supabase',
-  'posthog',
-  'grafana',
-  'asana',
-] as const;
-
 const PERSONAL_MCP_INTEGRATION_ORDER = ['monday', 'supabase'] as const;
+const DELEGATION_DISCOVERY_PROMPT =
+  '$explore-delegation Find something to take off my plate.';
 
 const CARD_EXIT_TRANSITION = {
   duration: 0.4,
@@ -79,21 +77,6 @@ const CARD_ANIMATION = {
   animate: { opacity: 1, y: 0, transition: CARD_ENTER_TRANSITION },
   exit: { opacity: 0, y: -20, transition: CARD_EXIT_TRANSITION },
 } as const;
-
-const COMMUNICATION_PROVIDER_ORDER = [
-  'slack',
-  'microsoft',
-  'telegram',
-  'discord',
-] as const;
-
-const SOURCE_CONTROL_PROVIDER_ORDER = [
-  'github',
-  'gitlab',
-  'gitea',
-  'bitbucket',
-  'ado',
-] as const;
 
 type CardConfig = {
   id: string;
@@ -155,6 +138,8 @@ export function OnboardingCard() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const trpc = useTRPC();
+  const delegationSession = useFastSessionLauncher();
+  const environments = useEnvironments({ enabled: isAdmin });
   const shouldShowSuggestedTasksCard =
     searchParams.get('link_suggested') === 'true';
   const onboarding = useQuery(trpc.onboarding.status.queryOptions());
@@ -425,6 +410,40 @@ export function OnboardingCard() {
   };
 
   const cards: CardConfig[] = [
+    {
+      id: 'explore-delegation',
+      icon: (
+        <Lightbulb
+          className="size-4 shrink-0 text-muted-foreground"
+          strokeWidth={1}
+        />
+      ),
+      label: 'Find something to take off your plate',
+      buttonLabel: 'Explore',
+      onClick: () =>
+        void delegationSession.startFastSession({
+          text: DELEGATION_DISCOVERY_PROMPT,
+        }),
+      disabled: delegationSession.isPending,
+      visible: true,
+    },
+    {
+      id: 'create-environment',
+      icon: (
+        <VectorSquare
+          className="size-4 shrink-0 text-muted-foreground"
+          strokeWidth={1}
+        />
+      ),
+      label:
+        'Create an environment to get live previews, faster startup and better verification',
+      buttonLabel: 'Create',
+      onClick: () => router.push(SETTINGS_PATHS.newEnvironment),
+      visible:
+        isAdmin &&
+        environments.isSuccess &&
+        (environments.data?.length ?? 0) === 0,
+    },
     {
       id: 'automations',
       icon: (

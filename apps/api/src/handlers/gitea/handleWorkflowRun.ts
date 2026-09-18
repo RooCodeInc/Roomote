@@ -7,7 +7,10 @@ import {
   isGiteaActionRunFailed,
 } from '@roomote/gitea';
 import { and, db, eq, or, repositories } from '@roomote/db/server';
-import { launchCiFailureTriageForFailedRun } from '@roomote/sdk/server';
+import {
+  launchCiFailureTriageForFailedRun,
+  isCiFailureTriageRepositoryEnabled,
+} from '@roomote/sdk/server';
 
 import { logApiError } from '../../logging';
 import type { WebhookResponse } from '../../types';
@@ -127,6 +130,11 @@ export async function handleGiteaWorkflowRun(
     run,
   });
 
+  if (!(await isCiFailureTriageRepositoryEnabled(repo.id)))
+    return {
+      status: 'ok',
+      message: 'Repository is disabled or outside the CI failure triage scope',
+    };
   const failureEvidence = await getGiteaActionRunFailureEvidence({
     repositoryFullName: repo.fullName,
     runId: run.id,

@@ -13,6 +13,7 @@ import {
   inArray,
   isNull,
   or,
+  type DatabaseOrTransaction,
 } from '@roomote/db/server';
 
 import type { UserAuthSuccess } from '@/types';
@@ -24,8 +25,10 @@ type SourceControlConnectionSummary = {
   repositoryCounts: Partial<Record<SourceControlProvider, number>>;
 };
 
-export async function getSourceControlConnectionSummary(): Promise<SourceControlConnectionSummary> {
-  const rows = await db
+export async function getSourceControlConnectionSummary(
+  executor: DatabaseOrTransaction = db,
+): Promise<SourceControlConnectionSummary> {
+  const rows = await executor
     .select({
       sourceControlProvider: repositories.sourceControlProvider,
     })
@@ -160,19 +163,4 @@ export async function checkRepoAccess(repoFullName: string): Promise<boolean> {
     .limit(1);
 
   return match.length > 0;
-}
-
-/**
- * Check whether the current user has access to a repository by its full name
- * (owner/repo). Returns true only when the repo is active, belongs to this
- * deployment, and its source-control connection is active.
- */
-export async function hasRepoAccess(
-  fullName: string,
-  authResult?: UserAuthSuccess,
-): Promise<boolean> {
-  if (authResult === undefined) {
-    await authorizeOrThrow();
-  }
-  return checkRepoAccess(fullName);
 }

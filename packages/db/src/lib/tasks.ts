@@ -1,4 +1,4 @@
-import { and, eq, isNull, type SQL } from 'drizzle-orm';
+import { and, eq, isNull, sql, type SQL } from 'drizzle-orm';
 
 import type { BackgroundAutomationKey } from '@roomote/types';
 
@@ -75,6 +75,17 @@ export async function createTaskWithRetry(
     `Failed to create task after ${maxAttempts} ID generation attempts.`,
     { cause: lastCollisionError },
   );
+}
+
+export async function touchTaskActivity(
+  database: DatabaseOrTransaction,
+  taskId: string,
+  at = Math.floor(Date.now() / 1_000),
+): Promise<void> {
+  await database
+    .update(tasks)
+    .set({ activityAt: sql`GREATEST(${tasks.activityAt}, ${at})` })
+    .where(eq(tasks.id, taskId));
 }
 
 async function insertTask(

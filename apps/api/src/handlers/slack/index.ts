@@ -1,6 +1,5 @@
 import { Hono } from 'hono';
 
-import { getRedis } from '@roomote/redis';
 import { type SlackInteractivePayload, SlackNotifier } from '@roomote/slack';
 import {
   db,
@@ -11,11 +10,15 @@ import {
 
 import { apiLogger } from '../../logging.js';
 import { createSlackWebhookContext } from './context.js';
-import {
-  EVENT_DEDUP_TTL_SECONDS,
-  SLACK_EVENT_DEDUP_PREFIX,
-} from './constants.js';
 import { dispatchSlackEvent } from './dispatch/events.js';
+import {
+  claimSlackEvent,
+  completeSlackEventClaim,
+  releaseSlackEventClaim,
+  renewSlackEventClaim,
+  slackEventLeaseRenewal,
+  type SlackEventClaim,
+} from './event-gate.js';
 import { handleSlackInteractivePayload } from './dispatch/interactive.js';
 import {
   getSlackWebhookEventLogDetails,
@@ -26,8 +29,77 @@ import {
 } from './helpers/event-normalization.js';
 import type { SlackWebhookBody } from './types.js';
 import { verifySlackRequest } from './verifySlackRequest.js';
+import { resumePendingSlackAuthRequest } from './events/auth-resume.js';
 
 export const slack = new Hono();
+
+function renewSlackEventLease(claim: SlackEventClaim): () => void {
+  const startedAt = Date.now();
+  const interval = setInterval(() => {
+    if (Date.now() - startedAt >= slackEventLeaseRenewal.maxDurationMs) {
+      clearInterval(interval);
+      apiLogger.warn(
+        `Slack event lease renewal limit reached for ${claim.key}; allowing the lease to expire`,
+      );
+      return;
+    }
+    void renewSlackEventClaim(claim)
+      .then((renewed) => {
+        if (!renewed) {
+          clearInterval(interval);
+        }
+      })
+      .catch((error) => {
+        apiLogger.warn(
+          `Failed to renew Slack event lease ${claim.key}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+  }, slackEventLeaseRenewal.intervalMs);
+  interval.unref();
+  return () => clearInterval(interval);
+}
+
+slack.post('/auth/resume', async (c) => {
+  let rawBody: unknown;
+
+  try {
+    rawBody = await c.req.json();
+  } catch {
+    return c.json({ success: false, error: 'invalid_json' }, { status: 400 });
+  }
+
+  const stateToken =
+    rawBody &&
+    typeof rawBody === 'object' &&
+    !Array.isArray(rawBody) &&
+    typeof (rawBody as { state?: unknown }).state === 'string'
+      ? (rawBody as { state: string }).state.trim()
+      : '';
+
+  if (!stateToken) {
+    return c.json(
+      { success: false, error: 'missing_state_token' },
+      { status: 400 },
+    );
+  }
+
+  const result = await resumePendingSlackAuthRequest(stateToken);
+
+  if (result.success) {
+    return c.json(result);
+  }
+
+  const status =
+    result.error === 'account_link_required' ||
+    result.error === 'resume_in_progress' ||
+    result.error === 'fast_session_not_accepted'
+      ? 409
+      : result.error === 'invalid_or_expired_auth_token'
+        ? 404
+        : 400;
+
+  return c.json(result, { status });
+});
 
 slack.post('/', async (c) => {
   const headers = c.req.header();
@@ -121,22 +193,23 @@ slack.post('/', async (c) => {
       return c.json({ error: 'Slack installation not found' }, { status: 404 });
     }
 
+    let eventClaim: SlackEventClaim | null = null;
+
     if (eventId) {
-      const eventDedupKey = `${SLACK_EVENT_DEDUP_PREFIX}${eventId}`;
-      const redis = getRedis();
+      const claimResult = await claimSlackEvent(eventId);
 
-      const claimed = await redis.set(
-        eventDedupKey,
-        '1',
-        'EX',
-        EVENT_DEDUP_TTL_SECONDS,
-        'NX',
-      );
-
-      if (!claimed) {
+      if (claimResult.status === 'completed') {
         apiLogger.debug(`🔄 Skipping duplicate Slack event: ${eventId}`);
         return c.json({ ok: true });
       }
+      if (claimResult.status === 'processing') {
+        apiLogger.debug(`⏳ Slack event is still processing: ${eventId}`);
+        return c.json(
+          { ok: false, error: 'slack_event_processing' },
+          { status: 503 },
+        );
+      }
+      eventClaim = claimResult.claim;
     }
 
     const isAppAuthoredEvent = isAppAuthoredSlackEvent(event);
@@ -155,12 +228,19 @@ slack.post('/', async (c) => {
       (!isTopLevelAppMessageEvent ||
         isRoomoteAuthoredSlackEvent(event, slackInstallation))
     ) {
+      if (eventClaim) {
+        await completeSlackEventClaim(eventClaim);
+      }
       return c.json({ ok: true });
     }
 
     const context = createSlackWebhookContext({
       slackInstallation,
-      slack: new SlackNotifier(slackInstallation.botAccessToken),
+      slack: new SlackNotifier(slackInstallation.botAccessToken, {
+        botUserId: slackInstallation.botUserId,
+        botName: slackInstallation.botName,
+        appName: slackInstallation.appName,
+      }),
       teamId,
     });
     const eventLogDetails = getSlackWebhookEventLogDetails(event);
@@ -184,14 +264,34 @@ slack.post('/', async (c) => {
         `text: ${eventLogDetails.text}`,
     );
 
+    const stopLeaseRenewal = eventClaim
+      ? renewSlackEventLease(eventClaim)
+      : () => {};
+
     try {
       await dispatchSlackEvent({
         event,
         context,
       });
+      stopLeaseRenewal();
+      if (eventClaim) {
+        await completeSlackEventClaim(eventClaim);
+      }
     } catch (error) {
+      stopLeaseRenewal();
       console.error(
         `❌ Failed to process ${event.type}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
+      if (eventClaim) {
+        await releaseSlackEventClaim(eventClaim).catch((releaseError) => {
+          console.error(
+            `❌ Failed to release Slack event claim ${eventId}: ${releaseError instanceof Error ? releaseError.message : String(releaseError)}`,
+          );
+        });
+      }
+      return c.json(
+        { ok: false, error: 'slack_event_processing_failed' },
+        { status: 503 },
       );
     }
   }

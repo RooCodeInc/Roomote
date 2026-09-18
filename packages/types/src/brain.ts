@@ -13,6 +13,8 @@
 
 export const BRAIN_MCP_ID = 'gbrain';
 
+export const BRAIN_MCP_DISCLOSURE_INSTRUCTIONS = `When specific information returned by a Brain memory retrieval materially informs your answer or work, naturally tell the user which remembered fact you retrieved and how you used it. Describe the memory in human terms, keep the disclosure incidental, and do not turn the response into tool narration. Do not mention retrieval that did not inform the outcome. Never expose internal memory IDs, page slugs, storage paths, raw metadata, source fields, or other internal provenance.`;
+
 /** API proxy mount; shared by SDK config delivery and the worker. */
 export const BRAIN_PROXY_PATH = '/api/mcp/gbrain';
 
@@ -78,6 +80,15 @@ export function brainNamespacePrefix(id: BrainNamespaceId): string {
   return BRAIN_NAMESPACES.find((namespace) => namespace.id === id)!.prefix;
 }
 
+/** Exact server-owned slugs for memories that deletion may safely retire. */
+export function taskMemorySlug(taskId: string, runId: number): string {
+  return `${brainNamespacePrefix('tasks')}${taskId}/runs/${runId}`;
+}
+
+export function fastConversationMemorySlug(conversationId: string): string {
+  return `${brainNamespacePrefix('memories')}fast/${conversationId}`;
+}
+
 export function resolveBrainNamespaceId(slug: string): BrainNamespaceBucketId {
   return (
     BRAIN_NAMESPACES.find((namespace) => slug.startsWith(namespace.prefix))
@@ -114,7 +125,7 @@ export function brainNamespaceLabel(id: BrainNamespaceBucketId): string {
  * superseded version's rows.
  */
 export const BRAIN_COLLECTOR_IDS = {
-  taskMemories: 'task-memory:effective-date-v2',
+  taskMemories: 'task-memory:initiator-v3',
   pullRequestFacts: 'pull-request-facts:occurrence-date-v3',
   personIdentities: 'person-identities:members:occurrence-date-v2',
   ripplingWorkers: 'rippling-workers',
@@ -401,7 +412,11 @@ Treat Brain recall as a sequential preflight, not one source in a parallel resea
 
 This gate applies when the request involves factual claims, recommendations, company practices, prior decisions, product strategy, people, activity history, or other nontrivial reasoning. Skip it only for greetings and casual conversation, simple calculations or transformations, exact actions requiring no contextual judgment, and follow-ups already covered by a Brain query in the current thread. You will often not know in advance that a convention exists, that something was attempted before, or that the user already corrected someone on it, which is exactly why the pass is unprompted.
 
+An unfamiliar person, project, company, name, or term is a reason to retrieve relevant memory, not to immediately ask the user what it means. Run the required preflight \`query\` first, then use the narrowest appropriate lookup for any specific unresolved gap. Ask for clarification only if bounded retrieval leaves material ambiguity, or the required memory is unavailable and that ambiguity blocks progress. Do not guess, and do not repeat searches without a specific unresolved gap. This does not replace authorization checks or genuine decisions only the user can make.
+
 Brain-first does not mean Brain-only. Treat Brain as context, not a stopping point; if it doesn't fully answer the question, continue with the relevant sources. Use the narrowest lookup needed to close that specific gap; do not sweep an entire integration when the Brain already answers the question. Reading is read-only and cheap next to the work it saves, and this ordering lets the Brain prevent redundant source exploration.
+
+Memories about operational state, including integration availability, permissions, configuration, and deployment state, are time-sensitive. Before relying on one, revalidate it with the cheapest authoritative tool call available. Recalled context must never suppress that check.
 
 Which tool:
 - \`query\` when you are describing a concept and do not know how the Brain words it. It expands your phrasing into related queries, so it finds pages that talk about the same thing in different language. This is the default, and the right choice for that first pass.
@@ -416,7 +431,7 @@ A result set that comes back populated is not proof of coverage, and one query r
 
 When the Brain genuinely has nothing on a question, say so rather than guessing.
 
-When recalled context materially shapes the path or approach you choose, casually and concisely mention the specific insight that informed it; do not merely say that memory or history was helpful, and keep it incidental rather than making a disclosure out of it.
+${BRAIN_MCP_DISCLOSURE_INSTRUCTIONS}
 
 Brain provenance is internal-only. Use it to judge and ground results, but never expose Brain's \`source\` field or other internal provenance metadata in a user-facing reply. This includes Brain page or entity IDs, slugs, namespace or storage paths, raw record keys, and similar implementation details. Do not add a \`Source:\` line or cite raw Brain metadata. Summarize the useful context naturally. If human-verifiable attribution is necessary, inspect and cite the underlying user-facing integration directly rather than presenting Brain's internal source.`;
 
@@ -458,3 +473,15 @@ Save a memory by calling the \`save_memory\` native tool (not a Brain tool). Roo
 Save when the user explicitly asks you to remember something, or states a durable preference, decision, correction, or fact that will materially help future conversations. Keep each memory concise and self-contained: one fact per call, phrased so a future agent can act on it without this conversation's context.
 
 Do not save secrets or credentials, transient requests, casual chatter, speculative conclusions, or facts already durable in a connected source the Brain ingests. When you save, tell the user plainly that you have remembered it; do not promise instant recall.`;
+
+/**
+ * Caps on agent-authored task memory. A memory is a distillation for future
+ * agents, not a transcript, and the same numbers must reach the agent through
+ * the tool schema so a rejection never arrives as a bare 400.
+ */
+export const TASK_MEMORY_LIMITS = {
+  outcomeMaxChars: 2_000,
+  rationaleMaxChars: 2_000,
+  listEntryMaxChars: 1_000,
+  listMaxEntries: 20,
+} as const;

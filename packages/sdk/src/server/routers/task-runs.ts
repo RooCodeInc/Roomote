@@ -1,29 +1,11 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import {
-  and,
-  claimTaskGoalContinuationForRun,
-  db,
-  eq,
-  getTaskGoalForRun,
-  isNotNull,
-  releaseTaskGoalContinuationForRun,
-  sessionTasks,
-  slackInstallations,
-  taskPullRequests,
-} from '@roomote/db/server';
+import { db, eq, slackInstallations } from '@roomote/db/server';
 
 import {
   RunStatus,
-  TASK_SURFACES,
-  TASK_TRIGGERS,
-  TASK_VISIBILITIES,
-  TASK_WORKFLOWS,
-  taskGoalInputSchema,
-  TaskPayloadKind,
   runEventSources,
   runEventTypes,
-  taskSpecSchema,
   communicationProviderSchema,
   getCommunicationChannelFromTaskPayload,
   getCommunicationProviderFromTaskPayload,
@@ -32,9 +14,8 @@ import {
   computeProviderUsageLifecycleActions,
   environmentSetupStates,
   doneRunStatuses,
+  dataVisualizationInputsSchema,
   queuedCommunicationMessageSchema,
-  snapshotResumeSchema,
-  sourceControlProviderSchema,
   ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
   LLM_USAGE_COST_SOURCES,
   type AcpPersistedEnvelope,
@@ -52,15 +33,11 @@ import {
   setPendingCommunicationRequestUserInput,
 } from '@roomote/communication/request-user-input';
 import {
-  enqueueTask,
-  type EnqueueTaskInput,
-} from '@roomote/cloud-agents/server';
-import {
   activateSlackRunReplyTarget,
   clearActiveSlackRunReplyTarget,
   clearPendingSlackRequestUserInput,
   getActiveSlackRunReplyTarget,
-  getSlackThreadFooterText as buildSlackThreadFooterText,
+  getSlackThreadFooterText,
   getSlackStartedMessageData,
   getSlackMessages,
   getSlackRequestUserInputAnswers,
@@ -79,8 +56,9 @@ import {
 } from '@roomote/linear';
 import { publishCommunicationRequestUserInput } from '../lib/communication-request-user-input';
 import { publishFastAgentRequestUserInput } from '../lib/task-runs/publish-fast-agent-request-user-input';
-import { relayFastAgentChildChatReply } from '../lib/task-runs/relay-fast-agent-child-chat-reply';
+import { reportToParentSession } from '../lib/task-runs/report-to-parent-session';
 import { renderSlackLiveTaskCardForRun } from '../lib/task-runs/slack-live-task-stream';
+import { notifyDirectWebTaskAttention } from '../lib/session-attention-notification';
 import {
   authenticatedProcedure,
   isRunToken,
@@ -126,6 +104,16 @@ import {
   recordSlackConversationMessageBestEffort,
 } from '../lib/slack-conversation-log';
 
+const parentSessionReportSchema = z.object({
+  runId: z.number(),
+  taskId: z.string().min(1),
+  deliverySignature: z.string().regex(/^[a-f0-9]{64}$/),
+  purpose: z.enum(['ack', 'progress', 'closeout', 'clarification']),
+  message: z.string().trim().min(1),
+  imageArtifactIds: z.array(z.string().min(1)).optional(),
+  charts: dataVisualizationInputsSchema.optional(),
+});
+
 const runtimePersistedEnvelopeSchema = z
   .object({
     ts: z.number(),
@@ -164,93 +152,6 @@ const acpRequestUserInputAnswersSchema = z.record(
     answers: z.array(z.string()),
   }),
 );
-
-/**
- * Launch-time initiator union. Mirrors the TaskInitiator discriminated shape:
- * a 'user' initiator is either a linked user id or a raw external identity
- * (optionally matched to a user), and an 'automation' initiator carries the
- * automation key plus an optional external actor for context. There is no raw
- * userId/attribution passthrough — attribution derives from this union only.
- */
-const taskInitiatorSchema = z.union([
-  z.object({
-    kind: z.literal('user'),
-    userId: z.string().min(1),
-  }),
-  z.object({
-    kind: z.literal('user'),
-    externalId: z.string().min(1),
-    displayName: z.string().optional(),
-    matchedUserId: z.string().optional(),
-  }),
-  z.object({
-    kind: z.literal('automation'),
-    key: z.string().min(1),
-    actor: z
-      .object({
-        externalId: z.string().min(1),
-        displayName: z.string().optional(),
-      })
-      .optional(),
-  }),
-]);
-
-const taskChannelBindingsSchema = z.object({
-  slackChannelId: z.string().nullish(),
-  slackThreadTs: z.string().nullish(),
-  linearSessionId: z.string().nullish(),
-  linearIssueId: z.string().nullish(),
-  linearOrganizationId: z.string().nullish(),
-});
-
-const taskPrLinkageSchema = z.object({
-  provider: sourceControlProviderSchema,
-  host: z.string().nullish(),
-  repositoryId: z.string().uuid().nullish(),
-  repository: z.string().min(1),
-  prNumber: z.number().int().positive(),
-  prUrl: z.string().min(1),
-  prTitle: z.string().nullish(),
-  prSha: z.string().nullish(),
-  prBaseRef: z.string().nullish(),
-  prBaseSha: z.string().nullish(),
-  githubReactionId: z.number().nullish(),
-  githubCheckRunId: z.number().nullish(),
-  githubReviewCommentId: z.number().nullish(),
-});
-
-/**
- * A fresh launch creates a task (initiator stamp, classification, channel
- * bindings, optional PR linkage) plus its first run.
- */
-const freshEnqueueInputSchema = z.object({
-  task: taskSpecSchema.refine(
-    (task) => task.type !== TaskPayloadKind.SnapshotResume,
-    { message: 'Snapshot resumes must use the resume input shape.' },
-  ),
-  initiator: taskInitiatorSchema,
-  workflow: z.enum(TASK_WORKFLOWS),
-  surface: z.enum(TASK_SURFACES),
-  trigger: z.enum(TASK_TRIGGERS),
-  visibility: z.enum(TASK_VISIBILITIES).optional(),
-  channels: taskChannelBindingsSchema.optional(),
-  prLinkage: taskPrLinkageSchema.optional(),
-  goal: taskGoalInputSchema.optional(),
-});
-
-/**
- * A resume attaches a new run to the source run's task. It never creates a
- * task and never re-attributes; the resumer becomes the run's actingUserId.
- */
-const resumeEnqueueInputSchema = z.object({
-  task: snapshotResumeSchema,
-  actingUserId: z.string().nullish(),
-});
-
-const enqueueTaskInputSchema = z.union([
-  freshEnqueueInputSchema,
-  resumeEnqueueInputSchema,
-]);
 
 const workerReleaseMetadataSchema = z.object({
   workerReleaseTag: z.string().optional(),
@@ -348,6 +249,23 @@ export const taskRunsRouter = router({
       sleepAt: sleepAt ?? null,
     }),
   ),
+  notifyUserAttention: runScoped(
+    z.object({
+      id: z.number(),
+      eventId: z.string().min(1),
+      kind: z.enum(['result_ready', 'input_needed']),
+      presentationKind: z.enum(['response', 'error', 'input']).optional(),
+    }),
+    'id',
+  ).mutation(({ input: { id, eventId, kind, presentationKind } }) =>
+    notifyDirectWebTaskAttention({
+      runId: id,
+      eventId,
+      kind,
+      presentationKind:
+        presentationKind ?? (kind === 'input_needed' ? 'input' : 'response'),
+    }),
+  ),
   touchTaskRunHeartbeat: runScoped(
     z.object({
       id: z.number(),
@@ -387,32 +305,6 @@ export const taskRunsRouter = router({
       completedAt: completedAt ?? undefined,
     }),
   ),
-  getGoal: runTokenOnlyScoped(z.object({ runId: z.number() }), 'runId').query(
-    ({ input }) => getTaskGoalForRun(input.runId),
-  ),
-  claimGoalContinuation: runTokenOnlyScoped(
-    z.object({ runId: z.number(), continuationId: z.string().min(1).max(200) }),
-    'runId',
-  ).mutation(({ input }) => claimTaskGoalContinuationForRun(input)),
-  releaseGoalContinuation: runTokenOnlyScoped(
-    z.object({ runId: z.number(), continuationId: z.string().min(1).max(200) }),
-    'runId',
-  ).mutation(({ input }) => releaseTaskGoalContinuationForRun(input)),
-  enqueue: userOnlyProcedure
-    .input(enqueueTaskInputSchema)
-    .mutation(async ({ input }) => {
-      const launchResult = await enqueueTask(input as EnqueueTaskInput);
-      const linkedSession = await db.query.sessionTasks.findFirst({
-        where: eq(sessionTasks.taskId, launchResult.taskId),
-        columns: { sessionId: true },
-      });
-
-      return {
-        id: launchResult.id,
-        taskId: launchResult.taskId,
-        sessionId: linkedSession?.sessionId,
-      };
-    }),
   dequeue: runScoped(
     z.object({ runId: z.number() }).merge(workerReleaseMetadataSchema),
     'runId',
@@ -556,7 +448,8 @@ export const taskRunsRouter = router({
     z.object({
       runId: z.number(),
       status: z.enum(['in_progress', 'complete', 'error']),
-      message: z.string().optional(),
+      details: z.string().optional(),
+      output: z.string().optional(),
     }),
     'runId',
   )
@@ -572,7 +465,8 @@ export const taskRunsRouter = router({
     .mutation(({ input }) =>
       renderSlackLiveTaskCardForRun(input.runId, {
         status: input.status,
-        ...(input.message ? { message: input.message } : {}),
+        ...(input.details ? { details: input.details } : {}),
+        ...(input.output ? { output: input.output } : {}),
       }),
     ),
   getResolvedGitAuthor: runScoped(
@@ -695,38 +589,11 @@ export const taskRunsRouter = router({
       });
     }
 
-    // PR linkage lives on task_pull_requests; include every active GitHub PR
-    // so the existing footer can point users to the full task split.
-    const linkedPrs = await db.query.taskPullRequests.findMany({
-      where: and(
-        eq(taskPullRequests.taskId, taskRun.taskId),
-        eq(taskPullRequests.sourceControlProvider, 'github'),
-        isNotNull(taskPullRequests.repository),
-        isNotNull(taskPullRequests.prNumber),
-      ),
-      orderBy: (row, { asc }) => [asc(row.detectedAt), asc(row.createdAt)],
-      columns: {
-        repository: true,
-        prNumber: true,
-        prUrl: true,
-        status: true,
-      },
-    });
-
-    const activeLinkedPrs = linkedPrs.filter(
-      (pr) => pr.status !== 'closed' && pr.status !== 'merged',
-    );
-
-    return buildSlackThreadFooterText({
+    return getSlackThreadFooterText({
       taskUrl: input.taskUrl,
       taskId: taskRun.taskId,
-      prRepo: activeLinkedPrs[0]?.repository ?? null,
-      prNumber: activeLinkedPrs[0]?.prNumber ?? null,
-      linkedPrs: activeLinkedPrs.flatMap((pr) =>
-        pr.prNumber !== null && pr.prUrl
-          ? [{ prNumber: pr.prNumber, prUrl: pr.prUrl }]
-          : [],
-      ),
+      prRepo: null,
+      prNumber: null,
       channelId: input.slackChannelId,
       threadTs: input.threadTs,
     });
@@ -814,17 +681,15 @@ export const taskRunsRouter = router({
     }),
     'runId',
   ).mutation(async ({ input }) => publishFastAgentRequestUserInput(input)),
+  reportToParentSession: runScoped(parentSessionReportSchema, 'runId').mutation(
+    async ({ input }) => reportToParentSession(input),
+  ),
+  // N-1 compatibility for workers that were already running when the
+  // coding-task-facing tool was renamed to report_to_parent_session.
   relayFastAgentChildChatReply: runScoped(
-    z.object({
-      runId: z.number(),
-      taskId: z.string().min(1),
-      deliverySignature: z.string().regex(/^[a-f0-9]{64}$/),
-      purpose: z.enum(['ack', 'progress', 'closeout', 'clarification']),
-      message: z.string().trim().min(1),
-      imageArtifactIds: z.array(z.string().min(1)).optional(),
-    }),
+    parentSessionReportSchema,
     'runId',
-  ).mutation(async ({ input }) => relayFastAgentChildChatReply(input)),
+  ).mutation(async ({ input }) => reportToParentSession(input)),
   clearPendingSlackRequestUserInput: runScoped(
     z.object({
       runId: z.number(),
@@ -954,7 +819,8 @@ export const taskRunsRouter = router({
     if (
       provider !== 'discord' &&
       provider !== 'telegram' &&
-      provider !== 'teams'
+      provider !== 'teams' &&
+      provider !== 'agentmail'
     ) {
       throw new TRPCError({
         code: 'BAD_REQUEST',
@@ -1014,7 +880,8 @@ export const taskRunsRouter = router({
     if (
       provider !== 'discord' &&
       provider !== 'telegram' &&
-      provider !== 'teams'
+      provider !== 'teams' &&
+      provider !== 'agentmail'
     ) {
       throw new TRPCError({
         code: 'BAD_REQUEST',
@@ -1087,7 +954,7 @@ export const taskRunsRouter = router({
     clearPendingCommunicationRequestUserInput(
       input.provider,
       input.conversationId,
-      input.requestId ? { requestId: input.requestId } : undefined,
+      { requestId: input.requestId, runId: input.runId },
     ),
   ),
   /**

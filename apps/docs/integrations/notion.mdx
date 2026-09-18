@@ -9,15 +9,17 @@ live there and Roomote should use that material during tasks and automations.
 
 ## Access boundary
 
-Roomote uses a Notion **internal integration**, not Notion's hosted MCP OAuth
-connection. Notion itself restricts the token to pages and data sources that
-have been explicitly shared with the internal integration. Unshared content,
-including private pages, is unavailable to Roomote.
+Roomote connects to Notion's public API with either a deployment-owned internal
+integration secret or a deployment-owned Notion public connection authorized
+through OAuth. This is separate from Notion's hosted MCP. In both cases,
+Notion restricts access to the pages and data sources shared during or after
+authorization. Unshared content, including private pages, is unavailable to
+Roomote.
 
 Sharing a parent page may also grant access to its children. Review the content
 access list in Notion whenever the page hierarchy changes.
 
-## Set up Notion
+## Set up with an internal integration
 
 1. In [Notion integrations](https://www.notion.so/profile/integrations/internal),
    create an internal integration for Roomote.
@@ -36,6 +38,26 @@ access list in Notion whenever the page hierarchy changes.
 
 The secret is encrypted server-side and is never sent to task sandboxes.
 
+## Set up with OAuth
+
+Self-hosted operators can configure a Notion public connection so an admin can
+ask Roomote to connect Notion from a Session:
+
+1. Create a public connection in Notion's developer portal and configure the
+   capabilities Roomote should receive.
+2. Register your public Roomote URL followed by
+   `/api/mcp-oauth/callback` as a redirect URI.
+3. Set `R_NOTION_CLIENT_ID` and `R_NOTION_CLIENT_SECRET` from that public
+   connection, then restart Roomote.
+4. Ask Roomote to connect Notion from a Session and complete Notion's page
+   selection and authorization screen.
+
+Roomote binds the authorization state to the requesting admin and Session,
+stores access and refresh tokens encrypted, and resumes the Session after a
+successful, canceled, or failed authorization attempt. If the operator has not
+configured the OAuth client, Roomote offers the existing internal-integration
+setup instead.
+
 When Memory is enabled, Roomote also backfills the pages shared with this
 integration and keeps their Markdown snapshots current. Notion pages are
 stored under the `notion/` namespace. New and edited pages are picked up on
@@ -43,7 +65,9 @@ regular Memory collector ticks, and a daily full sweep discovers older pages
 that were newly shared without being edited. Because Notion's search index
 does not reliably surface pages that live inside databases, the sweep also
 enumerates every shared data source and walks page trees to capture database
-rows and other inheritance-shared pages. The same sweep replaces pages
+rows and other inheritance-shared pages, running that discovery to
+completion in a continuous loop rather than trickling across scheduled
+ticks. The same sweep replaces pages
 that are no longer shared with unavailable tombstones, so their former
 content is no longer retained in Memory search results.
 
@@ -57,27 +81,33 @@ user-information capability retracts the whole directory the same way.
 
 Roomote agents can read and update page content as enhanced Markdown, move
 regular pages beneath another page or into a data source, and create blocks at
-the start or end of existing content or after a specific child block. These
+the start or end of existing content or after a specific child block. Agents
+can also create a database, its initial data source, and its first table view
+beneath an approved page or as a private workspace page. After creation, agents
+can update database metadata and placement, add, rename, reconfigure, or delete
+data source properties, and create, configure, or delete database views. These
 operations use Notion's public API rather than Notion's hosted MCP tools, so
 their schemas and limitations follow the public API.
 
+The database update API can replace an icon or cover, but its current schema
+does not accept `null` to remove either one. Data source icons can be cleared.
+
 Notion's public API cannot move or reorder an existing block. Positional block
-insertion applies only to newly created blocks. Moving a database or preserving
-a block's ID while recreating it in another position is also unsupported.
+insertion applies only to newly created blocks. Preserving a block's ID while
+recreating it in another position is also unsupported.
 
 Roomote's deployment-wide integration is not a proxy for Notion's hosted MCP.
-Hosted-only features such as connected-source search, attachment helpers,
-database and view creation, page duplication, folders, meeting-note queries,
-and workspace team or user lookup are not currently exposed as agent tools.
+Hosted-only features such as connected-source search, attachment helpers, page
+duplication, folders, meeting-note queries, and workspace team or user lookup
+are not currently exposed as agent tools.
 (Memory's identity linking reads the workspace user directory directly
 through the public API, as described above.) Roomote instead provides the
 direct public-API operations that work with a restricted internal
 integration token.
 
 <Note>
-  A previous hosted-MCP OAuth connection is not reused because it inherits the
-  authorizing person's full Notion permissions. Configure an internal
-  integration before enabling this deployment-wide connection.
+  A Notion hosted-MCP connection is not reused. Roomote's native integration
+  uses either its own public-API OAuth client or an internal integration secret.
 </Note>
 
 ## Control capabilities
@@ -87,7 +117,9 @@ Disable update, insert, or comment capabilities there when the connection
 should be read-only. Roomote exposes its Notion tools, but Notion rejects any
 operation the integration's capabilities do not permit.
 
-Inserting blocks requires **Insert content**. Moving pages and updating page
-Markdown require **Update content**, including edit access to the destination
-parent for page moves. Changing these capabilities on an existing internal
-integration takes effect without reconnecting Roomote.
+Creating databases and inserting blocks require **Insert content**. Creating a
+view requires both **Insert content** and **Update content**. Updating database
+metadata, data source schemas, views, page locations, or page Markdown requires
+**Update content**, including access to destination parents. Notion does not
+allow deleting the last remaining view in a database. Changing capabilities on
+an existing internal integration takes effect without reconnecting Roomote.

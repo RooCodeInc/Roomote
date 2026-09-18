@@ -1,17 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { SlackCommunicationProvider } from '../communication-provider';
+import { SlackPostDeliveryError } from '../post-message-delivery';
 import type { SlackNotifier } from '../slack-notifier';
 
-function buildProvider(postMessageMock: ReturnType<typeof vi.fn>) {
+function buildProvider(postMessageDetailedMock: ReturnType<typeof vi.fn>) {
   return new SlackCommunicationProvider({
-    postMessage: postMessageMock,
+    postMessageDetailed: postMessageDetailedMock,
   } as unknown as SlackNotifier);
 }
 
 describe('SlackCommunicationProvider.postMessage', () => {
   it('posts plain text without synthesizing blocks', async () => {
-    const postMessageMock = vi.fn().mockResolvedValue('111.222');
+    const postMessageMock = vi.fn().mockResolvedValue({ ts: '111.222' });
 
     await expect(
       buildProvider(postMessageMock).postMessage({
@@ -33,7 +34,7 @@ describe('SlackCommunicationProvider.postMessage', () => {
   });
 
   it('renders link buttons as an actions block and keeps the body visible', async () => {
-    const postMessageMock = vi.fn().mockResolvedValue('111.222');
+    const postMessageMock = vi.fn().mockResolvedValue({ ts: '111.222' });
 
     await buildProvider(postMessageMock).postMessage({
       channelId: 'C123',
@@ -72,7 +73,7 @@ describe('SlackCommunicationProvider.postMessage', () => {
   });
 
   it('ignores callback-only buttons entirely', async () => {
-    const postMessageMock = vi.fn().mockResolvedValue('111.222');
+    const postMessageMock = vi.fn().mockResolvedValue({ ts: '111.222' });
 
     await buildProvider(postMessageMock).postMessage({
       channelId: 'C123',
@@ -89,7 +90,7 @@ describe('SlackCommunicationProvider.postMessage', () => {
   });
 
   it('appends the actions block after caller-provided blocks without wrapping text', async () => {
-    const postMessageMock = vi.fn().mockResolvedValue('111.222');
+    const postMessageMock = vi.fn().mockResolvedValue({ ts: '111.222' });
     const callerBlock = {
       type: 'section',
       text: { type: 'mrkdwn', text: 'x' },
@@ -108,30 +109,48 @@ describe('SlackCommunicationProvider.postMessage', () => {
     expect(call.blocks).toHaveLength(2);
   });
 
-  it('throws when Slack returns no message timestamp', async () => {
-    const postMessageMock = vi.fn().mockResolvedValue(undefined);
+  it('preserves Slack error details when posting fails', async () => {
+    const postMessageMock = vi
+      .fn()
+      .mockResolvedValue({ slackErrorCode: 'invalid_blocks' });
 
-    await expect(
-      buildProvider(postMessageMock).postMessage({
+    const error = await buildProvider(postMessageMock)
+      .postMessage({
         channelId: 'C123',
         text: 'hello',
-      }),
-    ).rejects.toThrow('Slack chat.postMessage returned no message timestamp');
+      })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(SlackPostDeliveryError);
+    expect(error).toMatchObject({ slackErrorCode: 'invalid_blocks' });
   });
 });
 
 describe('SlackCommunicationProvider channel targets', () => {
-  it('delegates channel resolution and app-membership checks', async () => {
+  it('delegates channel resolution and access checks', async () => {
     const resolveChannelId = vi.fn().mockResolvedValue('C123');
     const isAppInChannel = vi.fn().mockResolvedValue(true);
+    const isPublicChannel = vi.fn().mockResolvedValue(false);
+    const isUserInChannel = vi.fn().mockResolvedValue(true);
     const provider = new SlackCommunicationProvider({
       resolveChannelId,
       isAppInChannel,
+      isPublicChannel,
+      isUserInChannel,
     } as unknown as SlackNotifier);
 
     await expect(provider.resolveChannelId('#eng')).resolves.toBe('C123');
     await expect(provider.isAppInChannel('C123')).resolves.toBe(true);
+    await expect(provider.isPublicChannel('C123')).resolves.toBe(false);
+    await expect(
+      provider.isUserInChannel({ channelId: 'C123', userId: 'U123' }),
+    ).resolves.toBe(true);
     expect(resolveChannelId).toHaveBeenCalledWith('#eng');
     expect(isAppInChannel).toHaveBeenCalledWith('C123');
+    expect(isPublicChannel).toHaveBeenCalledWith('C123');
+    expect(isUserInChannel).toHaveBeenCalledWith({
+      channelId: 'C123',
+      userId: 'U123',
+    });
   });
 });

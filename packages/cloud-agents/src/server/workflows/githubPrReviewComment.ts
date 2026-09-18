@@ -490,6 +490,14 @@ export function buildTerminalReviewStatus({
  * separate comment). Only PATCHes when the comment still shows an in-progress
  * status, so a real agent completion is never clobbered.
  */
+export type FinalizeGithubPrReviewCommentResult = {
+  finalized: boolean;
+  body?: string;
+  /** The summary comment exists but GitHub did not return it. */
+  fetchFailed?: boolean;
+  commentId?: number;
+};
+
 export async function finalizeGithubPrReviewComment({
   gitHubToken,
   owner,
@@ -506,10 +514,7 @@ export async function finalizeGithubPrReviewComment({
   commentId?: number | null;
   terminalStatus: string;
   signal?: AbortSignal;
-}): Promise<{
-  finalized: boolean;
-  body?: string;
-}> {
+}): Promise<FinalizeGithubPrReviewCommentResult> {
   const fullName = `${owner}/${repo}`;
   const resolvedCommentId =
     commentId ?? (await getPrReviewCommentId({ repo: fullName, prNumber }));
@@ -526,8 +531,20 @@ export async function finalizeGithubPrReviewComment({
       commentId: resolvedCommentId,
       signal,
     });
-  } catch {
-    return { finalized: false };
+  } catch (error) {
+    // A transient GitHub failure here is not evidence about the review. The
+    // caller decides what to do with an unreadable summary; swallowing the
+    // error made every such hiccup read as "no review result was published".
+    console.warn(
+      `[finalizeGithubPrReviewComment] Could not read review summary comment ${resolvedCommentId} on ${fullName}#${prNumber}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return {
+      finalized: false,
+      fetchFailed: true,
+      commentId: resolvedCommentId,
+    };
   }
 
   const updatedBody = buildTerminalReviewSummaryBody({

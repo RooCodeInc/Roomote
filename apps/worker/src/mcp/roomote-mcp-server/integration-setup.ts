@@ -25,10 +25,7 @@ GitHub is connected via a GitHub App installation. An admin installs the Roomote
 
 # Notion
 
-Notion uses one deployment-wide internal integration whose content access is enforced by Notion:
-1. A deployment operator opens Settings > Integrations.
-2. In Notion, that operator creates an internal integration, selects its capabilities, and shares only approved pages and data sources with it.
-3. The operator stores the internal integration secret in Roomote.
+Notion uses one deployment-wide native integration whose content access is enforced by Notion. A deployment operator can either authorize a Roomote public connection through OAuth when the deployment has configured its Notion OAuth client, or create an internal integration, select its capabilities, share only approved pages and data sources with it, and store its secret through the secure integration form.
 
 Once connected, I can use the permitted Notion tools during both interactive tasks and automations. Notion remains the source of truth for both capabilities and content access. Unshared content, including private pages, is unavailable.
 
@@ -119,6 +116,15 @@ Granola uses an admin-managed API key:
 2. That operator connects Granola once for the deployment with a Granola API key.
 
 Prefer a workspace API key, which cannot read ordinary private notes. Workspace keys can read public notes and notes in spaces where Allow Granola API access is enabled. If using a personal API key instead, create it with only Public notes selected. Once connected, I can browse and read accessible meeting notes, folders, transcripts, decisions, and action items. The built-in connection is read-only.
+
+# Exa
+
+Exa supports free keyless access with an optional admin-managed API key:
+1. A deployment operator enables Exa from Settings > Integrations.
+2. Exa then provides web search, page fetching, and advanced search through its free keyless access. Exa rate limits apply, and Exa Agent is unavailable.
+3. The operator can optionally add a deployment Exa API key for authenticated limits and usage-based Exa Agent research.
+
+When configured, the API key stays on the Roomote control plane and is sent only to Exa's hosted MCP server. Removing the key returns an enabled integration to keyless access; disabling Exa turns off both modes without deleting a stored key.
 
 # Asana
 

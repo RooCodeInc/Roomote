@@ -74,16 +74,3 @@ export async function claimUndeliveredDiscordThreadMessages(
 
   return claimed;
 }
-
-export async function releaseClaimedDiscordThreadMessages(
-  channelId: string,
-  messageIds: string[],
-): Promise<void> {
-  if (messageIds.length === 0) {
-    return;
-  }
-
-  const redis = getRedis();
-  const key = getDiscordThreadDeliveredMessagesKey(channelId);
-  await redis.srem(key, ...messageIds);
-}

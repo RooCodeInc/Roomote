@@ -35,7 +35,6 @@ const {
     pathname: '/tasks',
     user: { isAdmin: true },
     isSideNavExpanded: false,
-    recentSessionIds: ['session-2', 'session-1'],
     pinnedTaskIds: ['task-3', 'task-1'],
     tasks: [
       { id: 'task-1', title: 'Task 1' },
@@ -43,8 +42,8 @@ const {
       { id: 'task-3', title: 'Task 3' },
     ],
     sessions: [
-      { id: 'session-1', title: 'Session 1' },
       { id: 'session-2', title: 'Session 2' },
+      { id: 'session-1', title: 'Session 1' },
     ],
   },
 }));
@@ -93,6 +92,7 @@ vi.mock('@/components/system', () => ({
   Container: () => <svg aria-hidden="true" />,
   GalleryVerticalEnd: () => <svg aria-hidden="true" />,
   House: () => <svg aria-hidden="true" />,
+  Plug: () => <svg aria-hidden="true" />,
   Lightbulb: () => <svg aria-hidden="true" />,
   ListChevronsUpDown: () => <svg aria-hidden="true" />,
   MessageCircleQuestionMark: () => <svg aria-hidden="true" />,
@@ -101,6 +101,7 @@ vi.mock('@/components/system', () => ({
   PanelLeftOpen: () => <svg aria-hidden="true" />,
   Plus: () => <svg aria-hidden="true" />,
   Rows4: () => <svg aria-hidden="true" />,
+  NotepadText: () => <svg aria-hidden="true" />,
   Search: () => <svg aria-hidden="true" />,
   Settings: () => <svg aria-hidden="true" />,
   Zap: () => <svg aria-hidden="true" />,
@@ -150,12 +151,12 @@ vi.mock('@/hooks/useLayoutOptions', () => ({
     }),
 }));
 
-vi.mock('@/hooks/useRecentSessions', () => ({
-  useRecentSessions: () => ({ recentSessionIds: state.recentSessionIds }),
-}));
-
 vi.mock('@/hooks/useUser', () => ({
   useAuthorizedUser: () => state.user,
+}));
+
+vi.mock('@/hooks/useResultsPage', () => ({
+  useResultsPage: () => ({ enabled: false, isLoading: false }),
 }));
 
 vi.mock('@/hooks/tasks', () => ({
@@ -175,6 +176,9 @@ vi.mock('@/trpc/client', () => ({
     tasks: {
       search: { queryOptions: queryOptionsMock },
     },
+    results: {
+      unreadCount: { queryOptions: () => ({ queryKey: ['results'] }) },
+    },
   }),
 }));
 
@@ -183,19 +187,36 @@ vi.mock('./SideNavItem', () => ({
     href,
     onClick,
     tooltip,
+    label,
     expanded,
+    disabled,
+    description,
+    'aria-label': ariaLabel,
   }: {
     href?: string;
     onClick?: () => void;
-    tooltip: string;
+    tooltip: ReactNode;
+    label?: string;
     expanded?: boolean;
+    disabled?: boolean;
+    description?: ReactNode;
+    'aria-label'?: string;
   }) =>
     href ? (
-      <div data-testid={`nav-${href}`} data-expanded={String(expanded)} />
+      <a
+        href={href}
+        aria-label={ariaLabel}
+        data-testid={`nav-${href}`}
+        data-expanded={String(expanded)}
+        data-disabled={String(disabled ?? false)}
+        data-description={typeof description === 'string' ? description : ''}
+        data-tooltip={typeof tooltip === 'string' ? tooltip : ''}
+      />
     ) : (
       <button
         type="button"
-        data-testid={`nav-action-${tooltip}`}
+        aria-label={ariaLabel}
+        data-testid={`nav-action-${typeof tooltip === 'string' ? tooltip : label}`}
         data-expanded={String(expanded)}
         onClick={onClick}
       >
@@ -251,11 +272,8 @@ vi.mock('./SideNavSessionItem', () => ({
   ),
 }));
 
-import {
-  SideNav,
-  getSessionIdFromPathname,
-  getTaskIdFromPathname,
-} from './SideNav';
+import { getSessionIdFromPathname } from './RecentSessions';
+import { SideNav, getTaskIdFromPathname } from './SideNav';
 
 describe('SideNav recent sessions', () => {
   beforeEach(() => {
@@ -263,7 +281,6 @@ describe('SideNav recent sessions', () => {
     state.pathname = '/tasks';
     state.user.isAdmin = true;
     state.isSideNavExpanded = false;
-    state.recentSessionIds = ['session-2', 'session-1'];
     state.pinnedTaskIds = ['task-3', 'task-1'];
     state.tasks = [
       { id: 'task-1', title: 'Task 1' },
@@ -271,10 +288,20 @@ describe('SideNav recent sessions', () => {
       { id: 'task-3', title: 'Task 3' },
     ];
     state.sessions = [
-      { id: 'session-1', title: 'Session 1' },
       { id: 'session-2', title: 'Session 2' },
+      { id: 'session-1', title: 'Session 1' },
     ];
     useLiveTaskStatusMock.mockReturnValue(null);
+    vi.mocked(window.matchMedia).mockImplementation((query) => ({
+      matches: query === '(min-width: 768px)',
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
   });
 
   it('extracts task and session ids only from detail routes', () => {
@@ -307,14 +334,17 @@ describe('SideNav recent sessions', () => {
       expect.objectContaining({ enabled: true }),
     );
     expect(sessionsQueryOptionsMock).toHaveBeenCalledWith(
-      { ids: ['session-2', 'session-1'], limit: 20 },
+      { ownedOnly: true, limit: 20 },
       expect.objectContaining({ enabled: true }),
     );
   });
 
-  it('keeps recent sessions in visit order and omits unavailable ids', () => {
+  it('keeps recent sessions in server activity order', () => {
     state.isSideNavExpanded = true;
-    state.recentSessionIds = ['session-2', 'missing-session', 'session-1'];
+    state.sessions = [
+      { id: 'session-2', title: 'Newer session' },
+      { id: 'session-1', title: 'Older session' },
+    ];
 
     render(<SideNav />);
 
@@ -325,6 +355,26 @@ describe('SideNav recent sessions', () => {
     ]);
     expect(sessionItems[0]).toHaveAttribute('href', '/sessions/session-2');
     expect(sessionItems[1]).toHaveAttribute('href', '/sessions/session-1');
+  });
+
+  it('does not reorder recent sessions when one is opened', () => {
+    state.isSideNavExpanded = true;
+    state.sessions = [
+      { id: 'session-2', title: 'Newer session' },
+      { id: 'session-1', title: 'Older session' },
+    ];
+    const view = render(<SideNav />);
+
+    state.pathname = '/sessions/session-1';
+    view.rerender(<SideNav />);
+
+    expect(
+      screen.getAllByTestId(/^session-item-/).map((item) => item.textContent),
+    ).toEqual(['session-2', 'session-1']);
+    expect(screen.getByTestId('session-item-session-1')).toHaveAttribute(
+      'data-active',
+      'true',
+    );
   });
 
   it('marks the active session and active pinned task on detail subroutes', () => {
@@ -373,7 +423,7 @@ describe('SideNav recent sessions', () => {
       expect.objectContaining({ enabled: false }),
     );
     expect(sessionsQueryOptionsMock).toHaveBeenCalledWith(
-      { ids: ['session-2', 'session-1'], limit: 20 },
+      { ownedOnly: true, limit: 20 },
       expect.objectContaining({ enabled: false }),
     );
   });
@@ -387,6 +437,11 @@ describe('SideNav recent sessions', () => {
   it('preserves collapsed and expanded sidebar controls', () => {
     const view = render(<SideNav />);
 
+    expect(screen.getByRole('link', { name: 'Settings' })).toHaveAttribute(
+      'href',
+      '/settings',
+    );
+    expect(screen.getByRole('button', { name: 'Search' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Open sidebar' }));
     expect(setSideNavExpandedMock).toHaveBeenCalledWith(true);
     fireEvent.click(screen.getByTestId('nav-action-Expand sidebar'));
@@ -394,6 +449,11 @@ describe('SideNav recent sessions', () => {
 
     state.isSideNavExpanded = true;
     view.rerender(<SideNav />);
+    expect(screen.getByRole('link', { name: 'Settings' })).toHaveAttribute(
+      'href',
+      '/settings',
+    );
+    expect(screen.getByRole('button', { name: 'Search' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Close sidebar' }));
     expect(setSideNavExpandedMock).toHaveBeenCalledWith(false);
     expect(
@@ -411,6 +471,61 @@ describe('SideNav recent sessions', () => {
     expect(screen.getByTestId('new-task-dialog')).toHaveAttribute(
       'data-open',
       'true',
+    );
+  });
+
+  it('opens the new session dialog with the desktop N shortcut', () => {
+    render(<SideNav />);
+
+    fireEvent.keyDown(document, { key: 'n' });
+
+    expect(screen.getByTestId('new-task-dialog')).toHaveAttribute(
+      'data-open',
+      'true',
+    );
+  });
+
+  it('does not handle the N shortcut while a text field is focused', () => {
+    render(<SideNav />);
+    const input = document.createElement('input');
+    document.body.append(input);
+    input.focus();
+
+    fireEvent.keyDown(input, { key: 'n' });
+
+    expect(screen.getByTestId('new-task-dialog')).toHaveAttribute(
+      'data-open',
+      'false',
+    );
+    input.remove();
+  });
+
+  it('does not handle the N shortcut on mobile', () => {
+    vi.mocked(window.matchMedia).mockImplementation((query) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+    render(<SideNav />);
+
+    fireEvent.keyDown(document, { key: 'n' });
+
+    expect(screen.getByTestId('new-task-dialog')).toHaveAttribute(
+      'data-open',
+      'false',
+    );
+  });
+
+  it('advertises the N shortcut in the new session tooltip', () => {
+    render(<SideNav />);
+
+    expect(screen.getByTestId('nav-action-New Session')).toHaveTextContent(
+      'New Session (N)',
     );
   });
 
@@ -476,12 +591,58 @@ describe('SideNav recent sessions', () => {
     );
   });
 
-  it('keeps settings visible for members and automations admin-only', () => {
+  it('shows settings and automations to members but keeps analytics admin-only', () => {
     state.user.isAdmin = false;
 
     render(<SideNav />);
 
     expect(screen.getByTestId('nav-/settings')).toBeInTheDocument();
-    expect(screen.queryByTestId('nav-/automations')).not.toBeInTheDocument();
+    expect(screen.getByTestId('nav-/automations')).toBeInTheDocument();
+    expect(screen.queryByTestId('nav-/analytics')).not.toBeInTheDocument();
+  });
+
+  it('disables inaccessible destinations during setup while keeping Settings enabled', () => {
+    render(<SideNav setupIncomplete />);
+
+    expect(screen.getByTestId('nav-/')).toHaveAttribute(
+      'data-disabled',
+      'true',
+    );
+    expect(screen.getByTestId('nav-/automations')).toHaveAttribute(
+      'data-disabled',
+      'true',
+    );
+    expect(screen.getByTestId('nav-/analytics')).toHaveAttribute(
+      'data-disabled',
+      'true',
+    );
+    for (const href of ['/', '/automations', '/analytics']) {
+      expect(screen.getByTestId(`nav-${href}`)).toHaveAttribute(
+        'data-tooltip',
+        'Available when setup is completed.',
+      );
+      expect(screen.getByTestId(`nav-${href}`)).toHaveAttribute(
+        'data-description',
+        '',
+      );
+    }
+    expect(screen.getByTestId('nav-/sessions')).toHaveAttribute(
+      'data-disabled',
+      'false',
+    );
+    expect(screen.getByTestId('nav-/settings')).toHaveAttribute(
+      'data-disabled',
+      'false',
+    );
+  });
+
+  it('removes the expanded wordmark Home link during setup', () => {
+    state.isSideNavExpanded = true;
+
+    render(<SideNav setupIncomplete />);
+
+    expect(
+      screen.getByRole('img', { name: 'Roomote' }).closest('a'),
+    ).toBeNull();
   });
 });

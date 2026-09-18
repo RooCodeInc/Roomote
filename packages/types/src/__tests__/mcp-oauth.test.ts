@@ -1,20 +1,54 @@
 import {
+  DEFAULT_OPENAI_REALTIME_VOICE_ID,
   getMcpIntegration,
   getMcpIntegrationAuthorizationParameters,
   getMcpIntegrationConnectionScope,
+  getMcpIntegrationDataPolicy,
   getMcpIntegrationDefaultDisabledTools,
+  getMcpIntegrationOauthResource,
   getMcpIntegrationOauthScopeMode,
   getMcpIntegrationOauthScopes,
   isMcpConnectionNotionConfig,
   isMcpConnectionRipplingConfig,
   isMcpConnectionElevenLabsConfig,
+  isMcpConnectionVoiceConfig,
+  isMcpConnectionExaConfig,
+  OPENAI_REALTIME_VOICE_OPTIONS,
   isMcpConnectionGbrainConfig,
   LINEAR_APP_OAUTH_SCOPES,
   MONDAY_MCP_READ_ONLY_OAUTH_SCOPES,
   RESEND_DEFAULT_DISABLED_TOOL_NAMES,
 } from '../mcp-oauth';
 
+describe('integration data policy', () => {
+  it('keeps existing and unknown integrations shared by default', () => {
+    expect(getMcpIntegrationDataPolicy('monday')).toBe('shared');
+    expect(getMcpIntegrationDataPolicy('unknown')).toBe('shared');
+    expect(
+      getMcpIntegrationDataPolicy({
+        id: 'private-example',
+        name: 'Private example',
+        description: 'Private data',
+        icon: 'lock',
+        dataPolicy: 'private',
+      }),
+    ).toBe('private');
+  });
+});
+
 describe('Linear OAuth scopes', () => {
+  it('keeps issue comments separate from issue field updates', () => {
+    expect(getMcpIntegration('linear')?.instructions).toContain(
+      'dedicated comment-creation tool',
+    );
+    expect(getMcpIntegration('linear')?.instructions).toContain(
+      'do not pass comment text to an issue-update or status-update tool',
+    );
+    expect(getMcpIntegration('linear')?.instructions).toContain(
+      'report the returned tool error verbatim',
+    );
+  });
+
   it('makes deployment app actors assignable and mentionable', () => {
     expect(
       getMcpIntegrationOauthScopes('linear', 'linear_org_install'),
@@ -42,6 +76,9 @@ describe('monday.com OAuth', () => {
       serverMode: 'upstream_proxy',
     });
     expect(getMcpIntegrationConnectionScope('monday')).toBe('user');
+    expect(getMcpIntegrationOauthResource('monday')).toBe(
+      'https://mcp.monday.com/mcp',
+    );
     expect(getMcpIntegrationOauthScopeMode('monday')).toBe('read-only');
     expect(getMcpIntegrationOauthScopes('monday')).toEqual(
       MONDAY_MCP_READ_ONLY_OAUTH_SCOPES,
@@ -60,7 +97,15 @@ describe('Notion internal integration', () => {
       connectionMode: 'admin_configured',
       serverMode: 'native',
     });
-    expect(getMcpIntegration('notion')?.url).toBeUndefined();
+    expect(getMcpIntegration('notion')).toMatchObject({
+      url: 'https://api.notion.com',
+      oauthClientEnv: {
+        clientIdEnv: 'R_NOTION_CLIENT_ID',
+        clientSecretEnv: 'R_NOTION_CLIENT_SECRET',
+      },
+      oauthTokenRequestFormat: 'json',
+      oauthPkce: false,
+    });
     expect(getMcpIntegrationConnectionScope('notion')).toBe('deployment');
   });
 
@@ -131,6 +176,25 @@ describe('Granola API key connection', () => {
     expect(getMcpIntegrationConnectionScope('granola')).toBe('deployment');
     expect(getMcpIntegrationOauthScopeMode('granola')).toBeUndefined();
     expect(getMcpIntegrationDefaultDisabledTools('granola')).toEqual([]);
+  });
+});
+
+describe('Exa optional API key connection', () => {
+  it('separates keyless and authenticated hosted MCP tools', () => {
+    expect(getMcpIntegration('exa')).toMatchObject({
+      name: 'Exa',
+      connectionScope: 'deployment',
+      connectionMode: 'admin_configured',
+      serverMode: 'upstream_proxy',
+      supportsKeylessAccess: true,
+      url: 'https://mcp.exa.ai/mcp?tools=web_search_exa,web_fetch_exa,web_search_advanced_exa',
+      authenticatedUrl:
+        'https://mcp.exa.ai/mcp?tools=web_search_exa,web_fetch_exa,web_search_advanced_exa,agent_run',
+    });
+    expect(
+      isMcpConnectionExaConfig({ type: 'exa', encryptedApiKey: 'enc' }),
+    ).toBe(true);
+    expect(isMcpConnectionExaConfig({ type: 'exa' } as never)).toBe(false);
   });
 });
 
@@ -245,5 +309,68 @@ describe('Resend OAuth', () => {
     expect(getMcpIntegrationDefaultDisabledTools('resend')).not.toContain(
       'list-contacts',
     );
+  });
+});
+
+describe('Voice credential-only integration', () => {
+  it('is a deployment-scoped credential_only entry with no MCP url', () => {
+    expect(getMcpIntegration('voice')).toMatchObject({
+      name: 'Voice',
+      connectionScope: 'deployment',
+      connectionMode: 'admin_configured',
+      serverMode: 'credential_only',
+    });
+    expect(getMcpIntegration('voice')?.url).toBeUndefined();
+    expect(getMcpIntegrationDefaultDisabledTools('voice')).toEqual([]);
+  });
+
+  it('recognizes a valid stored Voice config and rejects others', () => {
+    expect(
+      isMcpConnectionVoiceConfig({ type: 'voice', encryptedApiKey: 'enc' }),
+    ).toBe(true);
+    expect(
+      isMcpConnectionVoiceConfig({
+        type: 'voice',
+        encryptedApiKey: 'enc',
+        voiceId: 'cedar',
+      }),
+    ).toBe(true);
+    expect(
+      isMcpConnectionVoiceConfig({
+        type: 'voice',
+        encryptedApiKey: 'enc',
+        voiceId: 'unsupported',
+      } as never),
+    ).toBe(false);
+    expect(
+      isMcpConnectionVoiceConfig({ type: 'voice', encryptedApiKey: '' }),
+    ).toBe(false);
+    expect(
+      isMcpConnectionVoiceConfig({
+        type: 'elevenlabs',
+        encryptedApiKey: 'enc',
+        voiceId: 'v1',
+      }),
+    ).toBe(false);
+    expect(isMcpConnectionVoiceConfig(null)).toBe(false);
+  });
+
+  it('defaults to a documented Australian voice when available, otherwise a provider recommendation', () => {
+    const australianVoice = OPENAI_REALTIME_VOICE_OPTIONS.find(
+      (voice) => voice.locale === 'en-AU',
+    );
+
+    expect(australianVoice).toBeUndefined();
+    expect(DEFAULT_OPENAI_REALTIME_VOICE_ID).toBe('marin');
+  });
+
+  it('lists voices alphabetically with the recommended ones marked', () => {
+    const labels = OPENAI_REALTIME_VOICE_OPTIONS.map((voice) => voice.label);
+    expect(labels).toEqual([...labels].sort((a, b) => a.localeCompare(b)));
+    expect(
+      OPENAI_REALTIME_VOICE_OPTIONS.filter((voice) => voice.recommended).map(
+        (voice) => voice.id,
+      ),
+    ).toEqual(['cedar', 'marin']);
   });
 });

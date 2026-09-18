@@ -889,4 +889,80 @@ describe('MockSlackServer', () => {
       await server.stop();
     }
   });
+
+  it('streams a message through chat.startStream, appendStream, and stopStream', async () => {
+    const server = new MockSlackServer({
+      state: {
+        team: { id: 'T1', domain: 'mock-roomote' },
+        acceptedBotTokens: ['xoxb-mock-token'],
+        botUserId: 'BROOMOTE',
+        channels: [{ id: 'C1', name: 'product-debug', isMember: true }],
+        users: [{ id: 'U1', name: 'alex', displayName: 'Alex' }],
+        messages: [],
+      },
+    });
+
+    try {
+      await server.start();
+      const call = async (method: string, body: Record<string, unknown>) => {
+        const response = await fetch(`${server.baseUrl}/api/${method}`, {
+          method: 'POST',
+          headers: {
+            authorization: 'Bearer xoxb-mock-token',
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify(body),
+        });
+        return (await response.json()) as {
+          ok: boolean;
+          ts?: string;
+          error?: string;
+        };
+      };
+
+      const started = await call('chat.startStream', {
+        channel: 'C1',
+        thread_ts: '1710000000.000100',
+        recipient_team_id: 'T1',
+        recipient_user_id: 'U1',
+        markdown_text: 'Looking',
+      });
+      expect(started.ok).toBe(true);
+      const ts = started.ts!;
+
+      expect(
+        await call('chat.appendStream', {
+          channel: 'C1',
+          ts,
+          markdown_text: ' at the logs',
+        }),
+      ).toMatchObject({ ok: true, ts });
+      expect(
+        await call('chat.stopStream', {
+          channel: 'C1',
+          ts,
+          markdown_text: '.',
+          blocks: [{ type: 'context', elements: [] }],
+        }),
+      ).toMatchObject({ ok: true, ts });
+      expect(
+        await call('chat.appendStream', {
+          channel: 'C1',
+          ts: '0.0',
+          markdown_text: 'x',
+        }),
+      ).toMatchObject({ ok: false, error: 'message_not_found' });
+
+      const state = server.getState();
+      const streamed = state.messages?.find((message) => message.ts === ts);
+      expect(streamed).toMatchObject({
+        channel: 'C1',
+        thread_ts: '1710000000.000100',
+        text: 'Looking at the logs.',
+        blocks: [{ type: 'context', elements: [] }],
+      });
+    } finally {
+      await server.stop();
+    }
+  });
 });

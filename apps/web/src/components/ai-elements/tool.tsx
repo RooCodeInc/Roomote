@@ -1,6 +1,6 @@
 'use client';
 
-import { type ComponentProps } from 'react';
+import { type ComponentProps, type ReactNode } from 'react';
 
 import type { AcpToolCallPayload, AcpToolResultPayload } from '@roomote/types';
 
@@ -13,6 +13,7 @@ import {
   CollapsibleContent,
   CollapsibleIconTrigger,
   CollapsibleTrigger,
+  Spinner,
 } from '@/components/system';
 
 type ToolState =
@@ -37,7 +38,7 @@ const TOOL_STATE_LABELS: Record<ToolState, string> = {
 type ToolProps = ComponentProps<typeof Collapsible>;
 
 export const Tool = ({ className, ...props }: ToolProps) => (
-  <Collapsible className={cn('group not-prose', className)} {...props} />
+  <Collapsible className={cn('not-prose', className)} {...props} />
 );
 
 type ToolHeaderProps = {
@@ -47,6 +48,11 @@ type ToolHeaderProps = {
   suffix?: string;
   suffixPrefix?: string;
   icon: LucideIcon;
+  iconElement?: ReactNode;
+  iconAction?: {
+    label: string;
+    onClick: () => void;
+  };
   state: ToolState;
   params?: AcpToolCallPayload | AcpToolResultPayload;
   additions?: number;
@@ -61,6 +67,8 @@ export const ToolHeader = ({
   suffix,
   suffixPrefix = 'from',
   icon: ActionIcon,
+  iconElement,
+  iconAction,
   state,
   params: _params,
   additions,
@@ -74,24 +82,28 @@ export const ToolHeader = ({
     (deletions !== undefined && deletions > 0);
   const hasSecondaryLabel = Boolean(object || suffix);
   const statusLabel = TOOL_STATE_LABELS[state];
-  const showStatus =
-    state === 'input-streaming' ||
-    state === 'input-available' ||
-    state === 'output-error';
+  const isRunning = state === 'input-streaming' || state === 'input-available';
 
-  const inner = (
-    <div
-      className={cn(
-        'flex min-w-0 items-center gap-2 py-1',
-        !collapsible && 'cursor-default',
-      )}
-    >
-      {collapsible ? (
-        <CollapsibleIconTrigger icon={ActionIcon} />
+  const customIcon = iconElement ? (
+    <span className="flex shrink-0 items-center gap-1">
+      {iconAction ? (
+        <button
+          type="button"
+          aria-label={iconAction.label}
+          className="cursor-pointer rounded-full transition-opacity hover:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          onClick={iconAction.onClick}
+        >
+          {iconElement}
+        </button>
       ) : (
-        <ActionIcon className="size-3 shrink-0" />
+        iconElement
       )}
+      {isRunning ? <Spinner size="sm" /> : null}
+    </span>
+  ) : null;
 
+  const details = (
+    <>
       <span className="flex min-w-0 gap-1 overflow-hidden text-sm whitespace-nowrap">
         {action && (
           <span
@@ -124,15 +136,27 @@ export const ToolHeader = ({
           )}
         </span>
       )}
-      <span
-        aria-live="polite"
-        className={cn(
-          showStatus ? 'shrink-0 text-xs' : 'sr-only',
-          state === 'output-error' && 'text-destructive',
-        )}
-      >
+      <span aria-live="polite" className="sr-only">
         {statusLabel}
       </span>
+    </>
+  );
+  const inner = (
+    <div
+      className={cn(
+        'flex min-w-0 items-center gap-2 py-1',
+        !collapsible && 'cursor-default',
+      )}
+    >
+      {customIcon ??
+        (isRunning ? (
+          <Spinner size="sm" className="shrink-0" />
+        ) : collapsible ? (
+          <CollapsibleIconTrigger icon={ActionIcon} />
+        ) : (
+          <ActionIcon className="size-3 shrink-0" />
+        ))}
+      {details}
     </div>
   );
 
@@ -149,10 +173,31 @@ export const ToolHeader = ({
     );
   }
 
+  if (iconElement && iconAction) {
+    return (
+      <div
+        className={cn(
+          'flex w-full items-center gap-2 text-muted-foreground',
+          className,
+        )}
+      >
+        {customIcon}
+        <CollapsibleTrigger
+          className="flex min-w-0 flex-1 cursor-pointer items-center justify-between transition-opacity hover:opacity-50"
+          {...props}
+        >
+          <div className="flex min-w-0 flex-1 items-center gap-2 py-1">
+            {details}
+          </div>
+        </CollapsibleTrigger>
+      </div>
+    );
+  }
+
   return (
     <CollapsibleTrigger
       className={cn(
-        'flex w-full items-center justify-between cursor-pointer transition-opacity hover:opacity-50 text-muted-foreground',
+        'group/collapsible-icon-trigger flex w-full items-center justify-between cursor-pointer transition-opacity hover:opacity-50 text-muted-foreground',
         className,
       )}
       {...props}

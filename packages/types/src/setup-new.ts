@@ -129,6 +129,150 @@ export type AutomationRecommendationBatch = {
 export type SetupProvisionableComputeProvider =
   keyof typeof SETUP_COMPUTE_PROVISIONING_STATE_FIELDS;
 
+export const SETUP_STARTER_TASK_IDS = [
+  'speed-up-ci',
+  'security-scan',
+  'fix-test-flakes',
+  'address-todos',
+  'update-dependencies',
+] as const;
+
+export type SetupStarterTaskId = (typeof SETUP_STARTER_TASK_IDS)[number];
+
+/** Persisted setup workflow contract for in-progress session compatibility. */
+export const SETUP_SESSION_WORKFLOW_VERSION = 1 as const;
+
+export function isSetupStarterTaskId(
+  value: unknown,
+): value is SetupStarterTaskId {
+  return (
+    typeof value === 'string' &&
+    (SETUP_STARTER_TASK_IDS as readonly string[]).includes(value)
+  );
+}
+
+/**
+ * Linkage between deployment setup and the persisted conversational setup
+ * Fast session. This deliberately stays a small additive JSON shape so
+ * existing deployments need no migration and checklist state stays derived.
+ */
+export type SetupNewSetupSession = {
+  workflowVersion: number;
+  /** Missing on pre-discovery sessions; null means the optional conversation is pending. */
+  integrationDiscoveryCompletedAt?: string | null;
+  /** Missing on older sessions; null means source control is still undecided. */
+  sourceControlSkippedAt?: string | null;
+  /** Unified (canonical) session ID shown in routes and transcript. */
+  sessionId: string;
+  startedAt: string;
+  starterTaskSelection: {
+    requestId: string;
+    taskIds: SetupStarterTaskId[];
+    selectedAt: string;
+  } | null;
+};
+
+export function createSetupNewSetupSession(input: {
+  sessionId: string;
+  startedAt?: string;
+}): SetupNewSetupSession {
+  return {
+    workflowVersion: SETUP_SESSION_WORKFLOW_VERSION,
+    sessionId: input.sessionId,
+    startedAt: input.startedAt ?? new Date().toISOString(),
+    starterTaskSelection: null,
+    integrationDiscoveryCompletedAt: null,
+    sourceControlSkippedAt: null,
+  };
+}
+
+/**
+ * Parse and normalize a persisted setup-session linkage. Returns null for
+ * absent or malformed values so older JSON without setup metadata, partially
+ * written rows, or corrupt payloads degrade to a fresh session instead of
+ * breaking setup.
+ */
+export function normalizeSetupNewSetupSession(
+  value: unknown,
+): SetupNewSetupSession | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const sessionId = asNonEmptyString(record.sessionId);
+  const startedAt = asIsoTimestamp(record.startedAt);
+  if (!sessionId || !startedAt) {
+    return null;
+  }
+
+  let starterTaskSelection: SetupNewSetupSession['starterTaskSelection'] = null;
+  if (
+    record.starterTaskSelection &&
+    typeof record.starterTaskSelection === 'object' &&
+    !Array.isArray(record.starterTaskSelection)
+  ) {
+    const selection = record.starterTaskSelection as Record<string, unknown>;
+    const requestId = asNonEmptyString(selection.requestId);
+    const selectedAt = asIsoTimestamp(selection.selectedAt);
+    const persistedTaskIds = Array.isArray(selection.taskIds)
+      ? selection.taskIds
+      : null;
+    const taskIds = persistedTaskIds
+      ? [...new Set(persistedTaskIds.filter(isSetupStarterTaskId))]
+      : [];
+    if (
+      requestId &&
+      selectedAt &&
+      persistedTaskIds &&
+      (persistedTaskIds.length === 0 || taskIds.length > 0)
+    ) {
+      starterTaskSelection = { requestId, taskIds, selectedAt };
+    }
+  }
+
+  return {
+    // Sessions created before workflow versioning shipped use the original
+    // contract. Future versions can migrate or deliberately preserve them.
+    workflowVersion:
+      typeof record.workflowVersion === 'number' &&
+      Number.isSafeInteger(record.workflowVersion) &&
+      record.workflowVersion > 0
+        ? record.workflowVersion
+        : SETUP_SESSION_WORKFLOW_VERSION,
+    sessionId,
+    startedAt,
+    starterTaskSelection,
+    ...(record.integrationDiscoveryCompletedAt === null
+      ? { integrationDiscoveryCompletedAt: null }
+      : asIsoTimestamp(record.integrationDiscoveryCompletedAt)
+        ? {
+            integrationDiscoveryCompletedAt: asIsoTimestamp(
+              record.integrationDiscoveryCompletedAt,
+            ),
+          }
+        : {}),
+    ...(record.sourceControlSkippedAt === null
+      ? { sourceControlSkippedAt: null }
+      : asIsoTimestamp(record.sourceControlSkippedAt)
+        ? {
+            sourceControlSkippedAt: asIsoTimestamp(
+              record.sourceControlSkippedAt,
+            ),
+          }
+        : {}),
+  };
+}
+
+function asNonEmptyString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value : null;
+}
+
+function asIsoTimestamp(value: unknown): string | null {
+  return typeof value === 'string' && !Number.isNaN(Date.parse(value))
+    ? value
+    : null;
+}
+
 export const isSetupProvisionableComputeProvider = (
   provider: ComputeProvider,
 ): provider is SetupProvisionableComputeProvider =>
@@ -175,6 +319,12 @@ export type SetupNewState = {
   lastInteractedByUserId: string | null;
   automationRecommendations: AutomationRecommendationBatch | null;
   /**
+   * Conversational setup session linkage. Optional for backward
+   * compatibility with deployments whose persisted state predates the
+   * conversational setup flow; normalization supplies null.
+   */
+  setupSession: SetupNewSetupSession | null;
+  /**
    * When the hosting-injected Roomote inference key was imported from the
    * process environment into encrypted Settings storage. One-shot: once
    * stamped, the env value is never imported again, so deleting the Roomote
@@ -212,6 +362,7 @@ export function createEmptySetupNewState(): SetupNewState {
     azureDiskImageBuild: null,
     lastInteractedByUserId: null,
     automationRecommendations: null,
+    setupSession: null,
     trialInferenceKeyImportedAt: null,
   };
 }
@@ -244,5 +395,6 @@ export function normalizeSetupNewState(
     authProvider: isSetupAuthProviderId(normalizedState.authProvider)
       ? normalizedState.authProvider
       : null,
+    setupSession: normalizeSetupNewSetupSession(state?.setupSession),
   };
 }

@@ -10,13 +10,18 @@ import {
   eq,
   tasks,
   taskRuns,
+  sessions,
+  sessionTasks,
+  sessionFactory,
   taskFactory,
   syncTaskStateFromRuns,
   deriveTaskStateFromRuns,
+  selectTaskStateRun,
 } from '../../server';
 import type { CreateTaskRun } from '../../types';
 
 const createdTaskIds: string[] = [];
+const createdSessionIds: string[] = [];
 
 async function makeTask(state: TaskState = 'active') {
   const task = await taskFactory.create({ state });
@@ -74,6 +79,12 @@ afterEach(async () => {
       .where(eq(tasks.id, taskId))
       .catch(() => {});
   }
+  while (createdSessionIds.length > 0) {
+    await db
+      .delete(sessions)
+      .where(eq(sessions.id, createdSessionIds.pop()!))
+      .catch(() => {});
+  }
 });
 
 describe('deriveTaskStateFromRuns', () => {
@@ -125,16 +136,89 @@ describe('deriveTaskStateFromRuns', () => {
   });
 
   it('prefers the latest progressed terminal run among siblings', () => {
-    expect(
-      deriveTaskStateFromRuns([
-        { id: 1, status: RunStatus.Completed, startedAt: new Date() },
-        { id: 2, status: RunStatus.Failed, startedAt: new Date() },
-      ]),
-    ).toBe('failed');
+    const runs = [
+      { id: 1, status: RunStatus.Completed, startedAt: new Date() },
+      { id: 2, status: RunStatus.Failed, startedAt: new Date() },
+    ];
+    expect(deriveTaskStateFromRuns(runs)).toBe('failed');
+    expect(selectTaskStateRun(runs)?.id).toBe(2);
   });
 });
 
 describe('syncTaskStateFromRuns', () => {
+  it('marks an only-child Session ready when sleep completion settles its task', async () => {
+    const task = await makeTask('active');
+    const run = await insertRun({
+      taskId: task.id,
+      status: RunStatus.Idle,
+      startedAt: new Date(),
+    });
+    const session = await sessionFactory.create({ cachedStatus: 'active' });
+    createdSessionIds.push(session.id);
+    await db.insert(sessionTasks).values({
+      sessionId: session.id,
+      taskId: task.id,
+      origin: 'direct_launch',
+    });
+
+    await db.transaction(async (tx) => {
+      await tx
+        .update(taskRuns)
+        .set({ status: RunStatus.Completed })
+        .where(eq(taskRuns.id, run.id));
+      await syncTaskStateFromRuns(tx, task.id);
+    });
+
+    const [updated] = await db
+      .select({ cachedStatus: sessions.cachedStatus })
+      .from(sessions)
+      .where(eq(sessions.id, session.id));
+    expect(updated?.cachedStatus).toBe('ready');
+  });
+
+  it('keeps a Session active when another child task is still active', async () => {
+    const sleepingTask = await makeTask('active');
+    const siblingTask = await makeTask('active');
+    const run = await insertRun({
+      taskId: sleepingTask.id,
+      status: RunStatus.Idle,
+      startedAt: new Date(),
+    });
+    await insertRun({
+      taskId: siblingTask.id,
+      status: RunStatus.Running,
+      startedAt: new Date(),
+    });
+    const session = await sessionFactory.create({ cachedStatus: 'active' });
+    createdSessionIds.push(session.id);
+    await db.insert(sessionTasks).values([
+      {
+        sessionId: session.id,
+        taskId: sleepingTask.id,
+        origin: 'direct_launch',
+      },
+      {
+        sessionId: session.id,
+        taskId: siblingTask.id,
+        origin: 'follow_up',
+      },
+    ]);
+
+    await db.transaction(async (tx) => {
+      await tx
+        .update(taskRuns)
+        .set({ status: RunStatus.Completed })
+        .where(eq(taskRuns.id, run.id));
+      await syncTaskStateFromRuns(tx, sleepingTask.id);
+    });
+
+    const [updated] = await db
+      .select({ cachedStatus: sessions.cachedStatus })
+      .from(sessions)
+      .where(eq(sessions.id, session.id));
+    expect(updated?.cachedStatus).toBe('active');
+  });
+
   it('repairs a stale active task when its runs have completed', async () => {
     const task = await makeTask('active');
     await insertRun({

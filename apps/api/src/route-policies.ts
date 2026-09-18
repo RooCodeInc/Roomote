@@ -37,15 +37,16 @@ export type RoutePolicyClass =
 
 /**
  * How a rate limit derives its bucket key:
- * - `client`: best-effort client IP from proxy headers. Server-to-server
- *   callers that send none of those headers collapse into one shared bucket,
- *   so client-keyed limits must be sized as global ceilings, not per-user
- *   quotas.
+ * - `client`: client IP from the operator-configured trusted proxy header.
+ *   Deployments without one collapse into a shared bucket, so these limits
+ *   must be sized as global ceilings, not per-user quotas.
+ * - `principal`: validated run or user identity attached by token middleware.
+ *   Unauthenticated requests collapse into one shared bucket.
  * - `state-token`: SHA-256 of the `state` string field in the JSON request
  *   body. Legitimate callers use a fresh single-use token per flow, so they
  *   never share a bucket; repeated hammering of one token is throttled.
  */
-export type RouteRateLimitKeySource = 'client' | 'state-token';
+export type RouteRateLimitKeySource = 'client' | 'principal' | 'state-token';
 
 export type RouteRateLimit = {
   keySource: RouteRateLimitKeySource;
@@ -120,6 +121,11 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
     policy: 'public',
   },
   {
+    name: 'health-bullmq',
+    match: { type: 'prefix', path: '/health/bullmq' },
+    policy: 'public',
+  },
+  {
     name: 'roomote-mcp-oauth-protected-resource-metadata',
     match: {
       type: 'exact',
@@ -148,8 +154,8 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
     policy: 'public',
   },
 
-  // Teams OAuth resume: called server-to-server by the web app after account
-  // linking to resume a pending Teams conversation, authenticated by a
+  // Communication OAuth resumes: called server-to-server by the web app after
+  // account linking to resume a pending conversation, authenticated by a
   // single-use random-UUID state token in the body. The primary limit is
   // keyed on the state token so concurrent legitimate users (who all arrive
   // from the web app's egress IP with distinct tokens) never share a bucket,
@@ -161,6 +167,15 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
   {
     name: 'webhook-teams-auth-resume',
     match: { type: 'exact', path: '/api/webhooks/teams/auth/resume' },
+    policy: 'webhook',
+    rateLimits: [
+      { keySource: 'state-token', limit: 10, windowSeconds: 60 },
+      { keySource: 'client', limit: 300, windowSeconds: 60 },
+    ],
+  },
+  {
+    name: 'webhook-slack-auth-resume',
+    match: { type: 'exact', path: '/api/webhooks/slack/auth/resume' },
     policy: 'webhook',
     rateLimits: [
       { keySource: 'state-token', limit: 10, windowSeconds: 60 },
@@ -225,6 +240,12 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
     rateLimits: WEBHOOK_RATE_LIMITS,
   },
   {
+    name: 'webhook-agentmail',
+    match: { type: 'prefix', path: '/api/webhooks/agentmail' },
+    policy: 'webhook',
+    rateLimits: WEBHOOK_RATE_LIMITS,
+  },
+  {
     // The BullMQ worker authenticates this route with the Discord gateway
     // secret. It has no client IP, so applying webhook limits would make every
     // worker request share one bucket during an outage retry storm.
@@ -242,6 +263,38 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
     name: 'internal-cloud-deployment-access',
     match: { type: 'exact', path: '/api/internal/cloud/deployment-access' },
     policy: 'webhook',
+  },
+  {
+    // Credential egress control plane. Callers are the trusted controller (a
+    // job-auth-signed service token) and the credential-substituting egress
+    // gateway (a shared deployment secret); the handler verifies both itself
+    // and rejects run, user, MCP, and session-broker tokens. No client-keyed
+    // limit: the gateway calls authorize on every proxied request and has no
+    // meaningful client IP, so a shared bucket would only throttle it.
+    name: 'internal-credential-egress',
+    match: { type: 'prefix', path: '/api/internal/credential-egress' },
+    policy: 'webhook',
+  },
+
+  // Credential egress substitution proxy: attached coding runs call an owner-
+  // approved origin through `/api/credential-egress/<grant>` with a substitute
+  // token in the grant's own header slot; the API injects the real credential
+  // and forwards. The substitute is not a Roomote bearer, so the handler owns
+  // authentication (live workload, Session, run, grant, generation, expiry)
+  // and no bearer class applies here.
+  // The client-keyed limit bounds the database work an unauthenticated caller
+  // can cause by spraying tokens; a sandbox's legitimate use sits far below it.
+  {
+    name: 'credential-egress-proxy',
+    match: { type: 'prefix', path: '/api/credential-egress' },
+    policy: 'webhook',
+    rateLimits: [
+      {
+        keySource: 'client',
+        limit: 300,
+        windowSeconds: 60,
+      },
+    ],
   },
 
   // Inference gateway: task sandboxes call model providers through this
@@ -266,17 +319,15 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
   },
 
   // Narration text-to-speech for task sandboxes: the ElevenLabs key is
-  // injected server-side and never enters the sandbox. The client-keyed
-  // limit is a global ceiling (server-to-server callers share one bucket)
-  // sized far above legitimate use — a demo narrates a handful of lines
-  // once — to blunt credit-drain from a leaked run token.
+  // injected server-side and never enters the sandbox. Key the credit-drain
+  // ceiling on the validated run so callers cannot rotate network headers.
   {
     name: 'tts',
     match: { type: 'prefix', path: '/api/tts' },
     policy: 'task-token',
     rateLimits: [
       {
-        keySource: 'client',
+        keySource: 'principal',
         limit: 60,
         windowSeconds: 60,
       },
@@ -305,7 +356,8 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
   },
 
   // Worker/agent MCP surface. `mcpAuthMiddleware` and the per-integration
-  // resolvers apply finer-grained token-type checks per endpoint.
+  // resolvers apply finer-grained token-type checks per endpoint, including
+  // the opt-in /api/mcp/http-integrations broker (active member/run actor required).
   {
     name: 'mcp',
     match: { type: 'prefix', path: '/api/mcp' },

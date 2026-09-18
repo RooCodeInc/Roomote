@@ -7,12 +7,13 @@ import type {
   ActivationSetupMilestone,
   ActivationSetupMilestoneProperties,
 } from '@roomote/telemetry';
-import type {
-  SetupAuthStatus,
-  SetupComputeStatus,
-  SetupModelStatus,
-  SetupNewState,
-  SetupSourceControlStatus,
+import {
+  normalizeSetupNewSetupSession,
+  type SetupAuthStatus,
+  type SetupComputeStatus,
+  type SetupModelStatus,
+  type SetupNewState,
+  type SetupSourceControlStatus,
 } from '@roomote/types';
 
 const METADATA_KEY = 'setup_funnel_milestones';
@@ -148,6 +149,13 @@ export function evaluateSetupFunnelMilestones(input: {
     });
   }
 
+  const setupSession = normalizeSetupNewSetupSession(
+    input.setupNewState.setupSession,
+  );
+  if (setupSession?.integrationDiscoveryCompletedAt) {
+    candidates.push({ milestone: 'integrations_decided' });
+  }
+
   const computeProvider =
     input.setupNewState.computeProvider ??
     input.computeSetup.selectedProvider ??
@@ -169,6 +177,7 @@ export function evaluateSetupFunnelMilestones(input: {
 
 export async function recordSetupFunnelMilestones(
   candidates: SetupFunnelMilestoneInput[],
+  options: { allowAfterSetupCompletion?: boolean } = {},
 ): Promise<void> {
   if (candidates.length === 0 || !(await isAnonymousAnalyticsEnabled())) {
     return;
@@ -188,7 +197,11 @@ export async function recordSetupFunnelMilestones(
         where: eq(deploymentSettings.id, 'default'),
         columns: { metadata: true, setupCompletedAt: true },
       });
-      if (!settings || settings.setupCompletedAt !== null) {
+      if (
+        !settings ||
+        (settings.setupCompletedAt !== null &&
+          !options.allowAfterSetupCompletion)
+      ) {
         return [];
       }
 

@@ -6,6 +6,8 @@ import {
   getFastAgentParentFromPayload,
   getSlackChannelFromTaskPayload,
   getSlackThreadTsFromTaskPayload,
+  getTaskReportConsumerFromPayload,
+  isPrReviewRun,
 } from '@roomote/types';
 
 interface SlackReplyContext {
@@ -34,7 +36,31 @@ const RESERVED_COMMUNICATION_MCP_ENV_KEYS = [
 export function isFastAgentChildTaskRun(taskRun: {
   payload: unknown;
 }): boolean {
-  return getFastAgentParentFromPayload(taskRun.payload) !== null;
+  return (
+    getFastAgentParentFromPayload(taskRun.payload) !== null &&
+    getTaskReportConsumerFromPayload(taskRun.payload) === 'orchestrator'
+  );
+}
+
+/**
+ * Runtime env that tells the Roomote MCP server how this run talks to its
+ * parent Session. A review child gets no report tool: its outcome reaches the
+ * Session through the PR feedback relay alone, so an additional report would
+ * only produce narration the parent then double-announces.
+ */
+export function getFastAgentChildRuntimeEnv(taskRun: {
+  payload: unknown;
+  payloadKind?: string | null;
+}): Record<string, string> {
+  if (!isFastAgentChildTaskRun(taskRun)) {
+    return {};
+  }
+  return {
+    ROOMOTE_FAST_AGENT_CHILD: 'true',
+    ...(isPrReviewRun(taskRun)
+      ? { ROOMOTE_FAST_AGENT_CHILD_CHAT_RELAY: 'false' }
+      : {}),
+  };
 }
 
 function hasInheritedCommunicationContext(payload: unknown): boolean {
@@ -140,7 +166,9 @@ export function buildMcpTaskEnv(input: {
     ) {
       // Telegram, Teams, and Discord tasks use the same turn-satisfaction
       // machinery as Slack (ack/closeout enforcement and current-turn emoji
-      // reactions).
+      // reactions). AgentMail (email) is deliberately excluded: email is a
+      // low-frequency surface with no reactions, and it must never get the
+      // silence-reminder heartbeats this state file drives.
       mcpTaskEnv.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE ??= [
         input.runtimeEnv.HOME ?? '/tmp',
         '.config',
@@ -152,7 +180,7 @@ export function buildMcpTaskEnv(input: {
 
   if (input.runtimeEnv.ROOMOTE_FAST_AGENT_CHILD === 'true') {
     // Fast children cannot post to the inherited chat surface directly, but
-    // their private parent relay still uses the normal lifecycle hooks.
+    // their private parent report still uses the normal lifecycle hooks.
     mcpTaskEnv.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE ??= [
       input.runtimeEnv.HOME ?? '/tmp',
       '.config',

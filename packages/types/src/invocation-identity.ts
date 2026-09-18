@@ -5,6 +5,7 @@ export const invocationProviders = [
   'microsoft',
   'telegram',
   'discord',
+  'agentmail',
   'github',
   'linear',
   'gitlab',
@@ -98,6 +99,26 @@ export function buildTelegramInvocationIdentity(
     guidanceName: mentionText ?? 'Telegram bot',
     examplePrompt: mentionText
       ? `${mentionText} Add support for a reset password flow.`
+      : null,
+  };
+}
+
+export function buildAgentMailInvocationIdentity(
+  inboxAddress: string | null | undefined,
+): InvocationIdentity {
+  const normalizedAddress = inboxAddress?.trim() || null;
+
+  return {
+    provider: 'agentmail',
+    label: 'Email',
+    configured: Boolean(normalizedAddress),
+    displayName: normalizedAddress,
+    mentionText: null,
+    nativeMention: null,
+    deepLinkUrl: normalizedAddress ? `mailto:${normalizedAddress}` : null,
+    guidanceName: normalizedAddress ?? 'Email',
+    examplePrompt: normalizedAddress
+      ? `Email ${normalizedAddress} with a request like "Add support for a reset password flow."`
       : null,
   };
 }

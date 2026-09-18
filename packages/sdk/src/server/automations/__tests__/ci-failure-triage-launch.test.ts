@@ -19,6 +19,7 @@ const {
   mockResolveAutomationResultSubtitle,
   mockUpdateMessage,
   mockDbSelect,
+  mockFindActiveSlackInstallationForChannel,
 } = vi.hoisted(() => ({
   mockGetAutomationRuntime: vi.fn(),
   mockListConnectedCommunicationProviders: vi.fn(),
@@ -43,6 +44,7 @@ const {
   mockResolveAutomationResultSubtitle: vi.fn(),
   mockUpdateMessage: vi.fn(),
   mockDbSelect: vi.fn(),
+  mockFindActiveSlackInstallationForChannel: vi.fn(),
 }));
 
 vi.mock('../destination', () => ({
@@ -102,13 +104,17 @@ vi.mock('@roomote/db/server', () => ({
     select: mockDbSelect,
   },
   eq: vi.fn((left: unknown, right: unknown) => [left, right]),
+  and: vi.fn((...args: unknown[]) => args),
   getAutomationRuntime: mockGetAutomationRuntime,
+  findActiveSlackInstallationForChannel:
+    mockFindActiveSlackInstallationForChannel,
   recordAutomationRunOutcome: mockRecordAutomationRunOutcome,
   upsertBackgroundAutomationSlackThread:
     mockUpsertBackgroundAutomationSlackThread,
   slackInstallations: {
     botAccessToken: 'slackInstallations.botAccessToken',
     isActive: 'slackInstallations.isActive',
+    teamId: 'slackInstallations.teamId',
   },
 }));
 
@@ -215,6 +221,7 @@ vi.mock('../../lib/automation-result-metadata', () => ({
 }));
 
 import { TaskPayloadKind } from '@roomote/types';
+import { eq, slackInstallations } from '@roomote/db/server';
 
 import { launchCiFailureTriageForFailedRun } from '../ci-failure-triage-launch';
 
@@ -245,6 +252,9 @@ describe('launchCiFailureTriageForFailedRun', () => {
       },
     });
     mockListConnectedCommunicationProviders.mockResolvedValue(['slack']);
+    mockFindActiveSlackInstallationForChannel.mockResolvedValue({
+      teamId: 'TROUTE',
+    });
     mockResolveAutomationRuntimeDestination.mockResolvedValue({
       provider: 'slack',
       channelId: 'C123MANAGER',
@@ -289,6 +299,161 @@ describe('launchCiFailureTriageForFailedRun', () => {
       }) =>
         `$ci-failure-triage trigger=${params.trigger} run=${params.triggeringRun?.runUrl ?? 'none'} announced=${params.hasAnnouncementThread === true}`,
     );
+  });
+
+  it.each(['github', 'gitlab', 'ado', 'gitea', 'bitbucket'] as const)(
+    'ignores unselected %s repositories before any side effects',
+    async (provider) => {
+      mockGetAutomationRuntime.mockResolvedValue({
+        enabled: true,
+        scheduleMode: 'daily',
+        settings: {
+          additionalRules: 'Only backend',
+          compiledRules: {
+            text: 'Only backend',
+            repositoryIds: ['10000000-0000-4000-8000-000000000001'],
+            destinations: [],
+            instructions: '',
+          },
+        },
+      });
+      const result = await launchCiFailureTriageForFailedRun({
+        ...failedRun,
+        provider,
+      });
+      expect(result.message).toContain('outside');
+      expect(mockListConnectedCommunicationProviders).not.toHaveBeenCalled();
+      expect(mockFindEnvironmentIdForRepositoryId).not.toHaveBeenCalled();
+      expect(mockRedisSet).not.toHaveBeenCalled();
+      expect(mockTryClaimCiFailureTriageInvestigation).not.toHaveBeenCalled();
+      expect(mockPostMessage).not.toHaveBeenCalled();
+      expect(mockEnqueueTask).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['github', 'gitlab', 'ado', 'gitea', 'bitbucket'] as const)(
+    'routes selected %s webhook announcements and tasks to the explicit destination',
+    async (provider) => {
+      const repositoryId = '10000000-0000-4000-8000-000000000001';
+      mockGetAutomationRuntime.mockResolvedValue({
+        enabled: true,
+        scheduleMode: 'daily',
+        settings: {
+          additionalRules: 'Only backend',
+          compiledRules: {
+            text: 'Only backend',
+            repositoryIds: [repositoryId],
+            instructions: '',
+            destinations: [
+              {
+                repositoryId,
+                target: {
+                  provider: 'slack',
+                  externalRef: 'CROUTE',
+                  workspaceId: 'TROUTE',
+                },
+              },
+            ],
+          },
+        },
+      });
+      mockFindEnvironmentIdForRepositoryId.mockResolvedValue('env-api');
+      mockResolveAutomationRuntimeDestination.mockImplementation(
+        async ({ runtime }) => runtime.destination,
+      );
+      const result = await launchCiFailureTriageForFailedRun({
+        ...failedRun,
+        provider,
+        repositoryId,
+      });
+      expect(result.taskId).toBe('task-scan-1');
+      expect(mockFindActiveSlackInstallationForChannel).toHaveBeenCalledWith(
+        'CROUTE',
+        'TROUTE',
+      );
+      expect(mockResolveAutomationRuntimeDestination).not.toHaveBeenCalled();
+      expect(mockBuildDestinationTaskPayloadFields).toHaveBeenCalledWith(
+        expect.objectContaining({ teamId: 'TROUTE' }),
+      );
+      expect(mockPostMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ channel: 'CROUTE' }),
+      );
+      expect(mockEnqueueTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          task: expect.objectContaining({
+            payload: expect.objectContaining({
+              channel: 'CROUTE',
+              slackChannel: 'CROUTE',
+            }),
+          }),
+        }),
+        expect.anything(),
+      );
+    },
+  );
+
+  it.each([
+    { compiledRules: undefined },
+    { compiledRules: null },
+    {
+      compiledRules: {
+        text: 'different',
+        repositoryIds: null,
+        destinations: [],
+        instructions: '',
+      },
+    },
+    {
+      compiledRules: {
+        text: 'Only backend',
+        repositoryIds: [],
+        destinations: [],
+        instructions: '',
+      },
+    },
+  ])(
+    'does not fall back to all repositories for empty or malformed config',
+    async ({ compiledRules }) => {
+      mockGetAutomationRuntime.mockResolvedValue({
+        enabled: true,
+        scheduleMode: 'daily',
+        settings: { additionalRules: 'Only backend', compiledRules },
+      });
+      await launchCiFailureTriageForFailedRun(failedRun);
+      expect(mockRedisSet).not.toHaveBeenCalled();
+      expect(mockPostMessage).not.toHaveBeenCalled();
+      expect(mockEnqueueTask).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not use another destination when an override provider is disconnected', async () => {
+    const repositoryId = '10000000-0000-4000-8000-000000000001';
+    mockGetAutomationRuntime.mockResolvedValue({
+      enabled: true,
+      scheduleMode: 'daily',
+      settings: {
+        additionalRules: 'Only backend',
+        compiledRules: {
+          text: 'Only backend',
+          repositoryIds: [repositoryId],
+          instructions: '',
+          destinations: [
+            {
+              repositoryId,
+              target: {
+                provider: 'discord',
+                workspaceId: 'guild',
+                externalRef: 'route',
+              },
+            },
+          ],
+        },
+      },
+    });
+    await launchCiFailureTriageForFailedRun({ ...failedRun, repositoryId });
+    expect(mockResolveAutomationRuntimeDestination).not.toHaveBeenCalled();
+    expect(mockRedisSet).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('launches one environment-backed investigate-and-fix task', async () => {
@@ -384,6 +549,21 @@ describe('launchCiFailureTriageForFailedRun', () => {
         taskId: 'task-scan-1',
       }),
     );
+  });
+
+  it('scopes the announcement token to the resolved manager channel owner', async () => {
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'slack',
+      channelId: 'C123MANAGER',
+      teamId: 'T-B',
+      source: 'manager_channel',
+    });
+    await launchCiFailureTriageForFailedRun(failedRun);
+    expect(eq).toHaveBeenCalledWith(slackInstallations.teamId, 'T-B');
+    expect(mockBuildDestinationTaskPayloadFields).toHaveBeenCalledWith(
+      expect.objectContaining({ teamId: 'T-B' }),
+    );
+    expect(mockPostMessage).toHaveBeenCalled();
   });
 
   it('still launches without a thread when the announcement fails', async () => {

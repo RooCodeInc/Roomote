@@ -1,5 +1,7 @@
 import type {
   AnnouncerFrequency,
+  AutomationDestinationEmailField,
+  AutomationDestinationProvider,
   BackgroundAutomationKey,
   ChannelAutoStartLaunchMode,
   CommunicationProvider,
@@ -19,6 +21,12 @@ import type {
 
 export type BackgroundAgentFieldErrorKey =
   | 'general'
+  | 'ciFailureTriageAdditionalRules'
+  | 'suggesterAdditionalRules'
+  | 'announcerAdditionalRules'
+  | 'securityAuditorAdditionalRules'
+  | 'codeQualityAuditorAdditionalRules'
+  | 'mergeAnnouncerAdditionalRules'
   | 'reviewerEnvironmentIds'
   | 'reviewerCollaborators'
   | 'reviewerExcludedAuthors'
@@ -52,6 +60,7 @@ export type BackgroundAgentFieldErrorKey =
   | 'securityAuditorDiscordChannel'
   | 'codeQualityAuditorDiscordChannel'
   | 'ciFailureTriageDiscordChannel'
+  | AutomationDestinationEmailField
   | 'suggesterDiscordChannel'
   | 'announcerDiscordChannel'
   | 'platformIssueDiscordChannel'
@@ -160,6 +169,7 @@ export const MANAGER_REPORTING_AUTOMATION_KEYS = [
   'suggester',
   'announcer',
   'platform_issue_alerts',
+  'release_announcements',
 ] as const satisfies readonly BackgroundAutomationKey[];
 
 export type ManagerReportingAutomationKey =
@@ -213,6 +223,10 @@ type ScheduleOnlyAutomationInputFields = Partial<
   >
 >;
 
+type AutomationDestinationEmailInputFields = Partial<
+  Record<AutomationDestinationEmailField, string | null>
+>;
+
 export interface ResolvedChannelAutoStartRow {
   channelId: string;
   channelName: string | null;
@@ -228,7 +242,10 @@ export interface ResolvedChannelAutoStartDiscordRow {
   launchCriteria: string | null;
 }
 
-export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomationInputFields {
+export interface UpdateBackgroundAgentSettingsInput
+  extends
+    ScheduleOnlyAutomationInputFields,
+    AutomationDestinationEmailInputFields {
   savingAutomation:
     | 'callRoomoteViaEmoji'
     | 'channelAutoStart'
@@ -243,7 +260,8 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
     | 'codeqlTriage'
     | ScheduleOnlyBackgroundAutomationId
     | 'announcer'
-    | 'platformIssueAlerts';
+    | 'platformIssueAlerts'
+    | 'releaseAnnouncements';
   reviewerEnabled: boolean;
   reviewerEnvironmentScope: NonNullable<PrReviewSettings['environmentScope']>;
   reviewerEnvironmentIds: string[];
@@ -265,6 +283,13 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
   callRoomoteViaEmojiName?: string | null;
   callRoomoteViaEmojiInstructions?: string | null;
   issueFixerInstructions?: string | null;
+  /** Empty or null restores the default; omitted preserves saved rules. */
+  ciFailureTriageAdditionalRules?: string | null;
+  suggesterAdditionalRules?: string | null;
+  announcerAdditionalRules?: string | null;
+  securityAuditorAdditionalRules?: string | null;
+  codeQualityAuditorAdditionalRules?: string | null;
+  mergeAnnouncerAdditionalRules?: string | null;
   channelAutoStartSlackChannels?: ChannelAutoStartInputRow[];
   /**
    * Optional with no default: older clients never send it, and their saves
@@ -308,13 +333,17 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
   platformIssueAlertsEnabled?: boolean;
   platformIssueSlackChannel: string | null;
   platformIssueDiscordChannel?: string | null;
+  releaseAnnouncementsEnabled?: boolean;
+  releaseAnnouncementsTargetProvider?: AutomationDestinationProvider | null;
+  releaseAnnouncementsTargetMode?: 'channel' | 'direct_message';
+  releaseAnnouncementsTargetChannelId?: string | null;
   securityAuditorSlackChannel?: string | null;
   securityAuditorDiscordChannel?: string | null;
   codeQualityAuditorSlackChannel?: string | null;
   codeQualityAuditorDiscordChannel?: string | null;
   ciFailureTriageSlackChannel?: string | null;
   ciFailureTriageDiscordChannel?: string | null;
-  mergeAnnouncerTargetProvider?: CommunicationProvider | null;
+  mergeAnnouncerTargetProvider?: AutomationDestinationProvider | null;
   mergeAnnouncerTargetMode?: 'channel' | 'direct_message';
   mergeAnnouncerTargetChannelId?: string | null;
 }

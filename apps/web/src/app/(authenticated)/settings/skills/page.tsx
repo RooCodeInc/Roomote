@@ -5,7 +5,7 @@ import { authorize } from '@/lib/server/auth-context';
 
 export default async function Page() {
   const authorizedUser = await authorize();
-  if (!authorizedUser.success || !authorizedUser.isAdmin) {
+  if (!authorizedUser.success) {
     return notFound();
   }
 

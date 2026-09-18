@@ -28,6 +28,7 @@ import {
   DEFAULT_PROVIDER_USAGE_LIMIT_THRESHOLD,
   DEFAULT_PR_REVIEW_SETTINGS,
   getTriggerableBackgroundAutomationDescriptorByKey,
+  getAutomationTargetEmailIdentityId,
   isChannelAutoStartLaunchMode,
   isConflictResolverMaxPrAgeDays,
   isInternalAutomationKey,
@@ -339,7 +340,7 @@ export function resolveAutomationSlackChannelId(
 
 /** Provider-neutral resolved destination an automation reports to. */
 export type AutomationDestination = {
-  provider: 'slack' | 'teams' | 'telegram' | 'discord';
+  provider: 'slack' | 'teams' | 'telegram' | 'discord' | 'email';
   channelId: string;
   /** Which waterfall level produced this destination. */
   source: 'automation_target' | 'manager_channel';
@@ -350,6 +351,7 @@ const DESTINATION_TARGET_KINDS = [
   ['teams', 'teams_channel'],
   ['telegram', 'telegram_chat'],
   ['discord', 'discord_channel'],
+  ['email', 'email_user'],
 ] as const;
 
 function getAutomationCommunicationTarget(
@@ -506,16 +508,21 @@ export async function ensureAutomationRows(
       BACKGROUND_AUTOMATION_KEYS.map((key) => ({
         key,
         enabled:
-          key === 'platform_issue_alerts' || key === 'provider_usage_limit',
+          key === 'platform_issue_alerts' ||
+          key === 'release_announcements' ||
+          key === 'provider_usage_limit' ||
+          key === 'manager_stats',
         internal: isInternalAutomationKey(key),
-        ...(key === 'provider_usage_limit'
-          ? {
-              schedule: { mode: DEFAULT_PROVIDER_USAGE_LIMIT_FREQUENCY },
-              settings: {
-                threshold: DEFAULT_PROVIDER_USAGE_LIMIT_THRESHOLD,
-              },
-            }
-          : {}),
+        ...(key === 'manager_stats'
+          ? { schedule: { mode: 'weekly' } }
+          : key === 'provider_usage_limit'
+            ? {
+                schedule: { mode: DEFAULT_PROVIDER_USAGE_LIMIT_FREQUENCY },
+                settings: {
+                  threshold: DEFAULT_PROVIDER_USAGE_LIMIT_THRESHOLD,
+                },
+              }
+            : {}),
       })),
     )
     .onConflictDoNothing({ target: automations.key });
@@ -959,7 +966,10 @@ export function normalizeBackgroundAgentSettings(
   const ciFailureTriage = automationMap.get('ci_failure_triage');
   const mergeAnnouncer = automationMap.get('merge_announcer');
   const platformIssueAlerts = automationMap.get('platform_issue_alerts');
+  const releaseAnnouncements = automationMap.get('release_announcements');
   const mergeAnnouncerTarget = getAutomationCommunicationTarget(mergeAnnouncer);
+  const releaseAnnouncementsTarget =
+    getAutomationCommunicationTarget(releaseAnnouncements);
 
   const managerSlackChannelId = row?.managerSlackChannelId ?? null;
   const managerDiscordChannelId = row?.managerDiscordChannelId ?? null;
@@ -1009,6 +1019,10 @@ export function normalizeBackgroundAgentSettings(
       isFrequencyOf(SUGGESTER_FREQUENCIES),
     ),
     suggesterInstructions: suggester?.instructions ?? null,
+    suggesterAdditionalRules:
+      typeof suggester?.settings?.additionalRules === 'string'
+        ? suggester.settings.additionalRules
+        : '',
     suggesterLastRunAt: suggester?.lastRunAt ?? null,
 
     announcerFrequency: getAutomationFrequency(
@@ -1016,12 +1030,38 @@ export function normalizeBackgroundAgentSettings(
       isFrequencyOf(ANNOUNCER_FREQUENCIES),
     ),
     announcerInstructions: announcer?.instructions ?? null,
+    announcerAdditionalRules:
+      typeof announcer?.settings?.additionalRules === 'string'
+        ? announcer.settings.additionalRules
+        : '',
     announcerLastRunAt: announcer?.lastRunAt ?? null,
 
     // Platform issue alerts are on unless an admin explicitly opts out. This
     // keeps legacy rows whose enabled bit was derived from channel presence on.
     platformIssueAlertsEnabled:
       getAutomationSettingBoolean(platformIssueAlerts, 'optedOut') !== true,
+    releaseAnnouncementsEnabled:
+      getAutomationSettingBoolean(releaseAnnouncements, 'optedOut') !== true,
+    releaseAnnouncementsTargetProvider:
+      releaseAnnouncementsTarget?.provider === 'sentry'
+        ? null
+        : (releaseAnnouncementsTarget?.provider ?? null),
+    releaseAnnouncementsTargetMode: releaseAnnouncementsTarget
+      ? releaseAnnouncementsTarget.targetKind.endsWith('_user')
+        ? 'direct_message'
+        : 'channel'
+      : null,
+    releaseAnnouncementsTargetChannelId:
+      releaseAnnouncementsTarget?.provider === 'email'
+        ? getAutomationTargetEmailIdentityId(releaseAnnouncementsTarget)
+        : releaseAnnouncementsTarget &&
+            !releaseAnnouncementsTarget.targetKind.endsWith('_user')
+          ? releaseAnnouncementsTarget.externalRef
+          : null,
+    releaseAnnouncementsTargetUserId:
+      releaseAnnouncementsTarget?.provider === 'email'
+        ? releaseAnnouncementsTarget.externalRef
+        : null,
 
     callRoomoteViaEmojiEnabled:
       callRoomoteViaEmoji?.enabled === true &&
@@ -1099,6 +1139,10 @@ export function normalizeBackgroundAgentSettings(
     ),
     securityAuditorLastRunAt: securityAuditor?.lastRunAt ?? null,
     securityAuditorScanCursor: securityAuditor?.scanCursor ?? null,
+    securityAuditorAdditionalRules:
+      typeof securityAuditor?.settings?.additionalRules === 'string'
+        ? securityAuditor.settings.additionalRules
+        : '',
 
     codeQualityAuditorFrequency: getAutomationFrequency(
       codeQualityAuditor,
@@ -1106,12 +1150,20 @@ export function normalizeBackgroundAgentSettings(
     ),
     codeQualityAuditorLastRunAt: codeQualityAuditor?.lastRunAt ?? null,
     codeQualityAuditorScanCursor: codeQualityAuditor?.scanCursor ?? null,
+    codeQualityAuditorAdditionalRules:
+      typeof codeQualityAuditor?.settings?.additionalRules === 'string'
+        ? codeQualityAuditor.settings.additionalRules
+        : '',
 
     ciFailureTriageFrequency: getAutomationFrequency(
       ciFailureTriage,
       isFrequencyOf(['off', 'daily'] as const),
     ),
     ciFailureTriageLastRunAt: ciFailureTriage?.lastRunAt ?? null,
+    ciFailureTriageAdditionalRules:
+      typeof ciFailureTriage?.settings?.additionalRules === 'string'
+        ? ciFailureTriage.settings.additionalRules
+        : '',
     ciFailureTriageScanCursor: ciFailureTriage?.scanCursor ?? null,
 
     mergeAnnouncerFrequency: getAutomationFrequency(
@@ -1130,9 +1182,20 @@ export function normalizeBackgroundAgentSettings(
         : 'channel'
       : null,
     mergeAnnouncerTargetChannelId:
-      mergeAnnouncerTarget && !mergeAnnouncerTarget.targetKind.endsWith('_user')
+      mergeAnnouncerTarget?.provider === 'email'
+        ? getAutomationTargetEmailIdentityId(mergeAnnouncerTarget)
+        : mergeAnnouncerTarget &&
+            !mergeAnnouncerTarget.targetKind.endsWith('_user')
+          ? mergeAnnouncerTarget.externalRef
+          : null,
+    mergeAnnouncerTargetUserId:
+      mergeAnnouncerTarget?.provider === 'email'
         ? mergeAnnouncerTarget.externalRef
         : null,
+    mergeAnnouncerAdditionalRules:
+      typeof mergeAnnouncer?.settings?.additionalRules === 'string'
+        ? mergeAnnouncer.settings.additionalRules
+        : '',
 
     ...Object.fromEntries(
       AUTOMATION_DESTINATION_DESCRIPTORS.flatMap((descriptor) => {
@@ -1141,10 +1204,19 @@ export function normalizeBackgroundAgentSettings(
           ? resolveAutomationSlackChannelId(automation, managerSlackChannelId)
           : getAutomationSlackChannelTarget(automation);
         const discordChannelId = getAutomationDiscordChannelTarget(automation);
+        const emailTarget = automation?.targets.find(
+          (target) =>
+            target.provider === 'email' && target.targetKind === 'email_user',
+        );
 
         return [
           [descriptor.slackSettingsKey, slackChannelId],
           [descriptor.discordSettingsKey, discordChannelId],
+          [
+            descriptor.emailSettingsKey,
+            getAutomationTargetEmailIdentityId(emailTarget),
+          ],
+          [descriptor.emailUserSettingsKey, emailTarget?.externalRef ?? null],
         ];
       }),
     ),

@@ -7,6 +7,7 @@ import type { SlackNotifier } from './slack-notifier';
 const SLACK_AGENT_SESSION_TITLE_MAX_CHARS = 200;
 const SLACK_AGENT_SESSION_TITLE_CACHE_TTL_SECONDS = 30 * 24 * 60 * 60;
 const SLACK_AGENT_SESSION_TITLE_PENDING_TTL_SECONDS = 60 * 60;
+const SLACK_AGENT_SESSION_TITLE_REJECTED_TTL_SECONDS = 60 * 60;
 const SLACK_AGENT_SESSION_TITLE_LOCK_RETRY_MS = 100;
 const SLACK_AGENT_SESSION_TITLE_LOCK_MAX_ATTEMPTS = 50;
 const SLACK_AGENT_SESSION_TITLE_LOCK_RENEW_SECONDS = 60;
@@ -15,9 +16,17 @@ const DELETE_PENDING_TITLE_SCRIPT = `if redis.call('get',KEYS[1])==ARGV[1] then 
 export function normalizeSlackAgentSessionTitle(
   title: string | null | undefined,
 ): string | undefined {
-  return title?.trim()
-    ? title.slice(0, SLACK_AGENT_SESSION_TITLE_MAX_CHARS)
-    : undefined;
+  if (!title) return undefined;
+
+  const normalized = title
+    .replace(/[\u0000-\u001f\u007f-\u009f]/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim();
+  if (!normalized) return undefined;
+
+  return Array.from(normalized)
+    .slice(0, SLACK_AGENT_SESSION_TITLE_MAX_CHARS)
+    .join('');
 }
 
 export async function syncSlackAgentSessionTitleBestEffort({
@@ -117,16 +126,39 @@ export async function syncSlackAgentSessionTitleBestEffort({
       const pendingTitleHash = createHash('sha256')
         .update(pendingTitle)
         .digest('hex');
+      const rejectedKey = `${cacheKey}:rejected:${pendingTitleHash}`;
 
       if ((await redis.get(cacheKey)) !== pendingTitleHash) {
         const reported = normalizeSlackAgentSessionTitle(reportedTitle);
-        const synchronized =
-          (pendingTitle === normalizedTitle && reported === pendingTitle) ||
-          (await slack.renameAgentSession({
+        let synchronized =
+          pendingTitle === normalizedTitle && reported === pendingTitle;
+        if (!synchronized) {
+          if (await redis.get(rejectedKey)) {
+            await redis.eval(
+              DELETE_PENDING_TITLE_SCRIPT,
+              1,
+              pendingKey,
+              pendingTitle,
+            );
+            if (!(await redis.get(pendingKey))) return;
+            continue;
+          }
+
+          const renameResult = await slack.renameAgentSession({
             channel,
             threadTs,
             title: pendingTitle,
-          }));
+          });
+          synchronized = renameResult.ok;
+          if (!renameResult.ok && renameResult.error === 'invalid_name') {
+            await redis.set(
+              rejectedKey,
+              '1',
+              'EX',
+              SLACK_AGENT_SESSION_TITLE_REJECTED_TTL_SECONDS,
+            );
+          }
+        }
         if (!synchronized) return;
 
         await redis.set(

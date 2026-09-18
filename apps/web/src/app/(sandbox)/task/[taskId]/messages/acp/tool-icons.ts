@@ -3,7 +3,8 @@ import type { LucideProps } from 'lucide-react';
 
 import {
   type LucideIcon,
-  Brain,
+  BookHeart,
+  BookOpenText,
   BrandIcon,
   Bot,
   FileIcon,
@@ -11,6 +12,7 @@ import {
   GalleryVerticalEnd,
   GitPullRequest,
   HardDriveUpload,
+  List,
   ListChecks,
   MessageSquareText,
   MessagesSquare,
@@ -19,6 +21,7 @@ import {
   SquarePen,
   Target,
   Terminal,
+  Timer,
   TriangleAlert,
   VectorSquare,
   Video,
@@ -37,17 +40,20 @@ export function toolIconForKey(key: ToolIconKey): LucideIcon {
   if (key === 'bot') return Bot;
   if (key === 'task') return Zap;
   if (key === 'message') return MessageSquareText;
-  if (key === 'memory') return Brain;
+  if (key === 'memory') return BookOpenText;
+  if (key === 'book-heart') return BookHeart;
   if (key === 'artifact') return HardDriveUpload;
   if (key === 'widget') return GalleryVerticalEnd;
   if (key === 'roomote') return RoomoteR;
   if (key === 'video') return Video;
   if (key === 'target') return Target;
+  if (key === 'list') return List;
   if (key === 'list-checks') return ListChecks;
   if (key === 'pull-request') return GitPullRequest;
   if (key === 'environment') return VectorSquare;
   if (key === 'alert') return TriangleAlert;
   if (key === 'messages') return MessagesSquare;
+  if (key === 'stopwatch') return Timer;
   return Wrench;
 }
 

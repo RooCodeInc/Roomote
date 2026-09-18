@@ -55,7 +55,6 @@ vi.mock('@/components/system', async () => {
     VectorSquare: Icon,
     IdCard: Icon,
     Label: ({ children }: { children: ReactNode }) => <label>{children}</label>,
-    PlugIcon: Icon,
     GraduationCap: Icon,
     ScrollText: Icon,
     Select: ({ children }: { children: ReactNode }) => <div>{children}</div>,
@@ -83,9 +82,9 @@ describe('SettingsShell', () => {
     state.pushMock.mockReset();
   });
 
-  it('shows all settings destinations and the integrations subtitle for admins', () => {
+  it('shows settings destinations for admins', () => {
     render(
-      <SettingsShell pageId="integrations" adminOnly={true}>
+      <SettingsShell pageId="personal">
         <div>content</div>
       </SettingsShell>,
     );
@@ -97,9 +96,6 @@ describe('SettingsShell', () => {
     expect(
       screen.getByRole('link', { name: /agent guidance/i }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole('link', { name: /integrations/i }),
-    ).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /users/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /skills/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /memory/i })).toHaveAttribute(
@@ -109,11 +105,6 @@ describe('SettingsShell', () => {
     expect(
       screen.getByRole('link', { name: /sandboxes/i }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        'Enable deployment integrations. Individual users can optionally link their own accounts when an integration supports it.',
-      ),
-    ).toBeInTheDocument();
     expect(screen.getByText('content')).toBeInTheDocument();
   });
 
@@ -121,7 +112,7 @@ describe('SettingsShell', () => {
     state.cloudEnabled = true;
 
     render(
-      <SettingsShell pageId="integrations" adminOnly={true}>
+      <SettingsShell pageId="personal">
         <div>content</div>
       </SettingsShell>,
     );
@@ -130,9 +121,6 @@ describe('SettingsShell', () => {
       screen.queryByRole('link', { name: /sandboxes/i }),
     ).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: /personal/i })).toBeInTheDocument();
-    expect(
-      screen.getByRole('link', { name: /integrations/i }),
-    ).toBeInTheDocument();
   });
 
   it('places agent guidance before skills in the admin settings rail', () => {
@@ -179,7 +167,7 @@ describe('SettingsShell', () => {
 
   it('shows skills for admins without feature-flag gating', () => {
     render(
-      <SettingsShell pageId="integrations" adminOnly={true}>
+      <SettingsShell pageId="personal">
         <div>content</div>
       </SettingsShell>,
     );
@@ -191,7 +179,7 @@ describe('SettingsShell', () => {
     state.isAdmin = false;
 
     render(
-      <SettingsShell pageId="integrations" adminOnly={true}>
+      <SettingsShell pageId="personal" adminOnly={true}>
         <div>content</div>
       </SettingsShell>,
     );

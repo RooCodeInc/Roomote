@@ -10,6 +10,7 @@ import type {
 } from '@roomote/communication/provider';
 
 import { SlackNotifier } from './slack-notifier';
+import { SlackPostDeliveryError } from './post-message-delivery';
 import type { SlackChannelMessage, SlackThreadMessage } from './types';
 
 function normalizeSlackMessage(
@@ -87,6 +88,17 @@ export class SlackCommunicationProvider implements CommunicationProviderAdapter 
     return this.slack.isAppInChannel(channelId);
   }
 
+  isPublicChannel(channelId: string): Promise<boolean | null> {
+    return this.slack.isPublicChannel(channelId);
+  }
+
+  isUserInChannel(input: {
+    channelId: string;
+    userId: string;
+  }): Promise<boolean | null> {
+    return this.slack.isUserInChannel(input);
+  }
+
   async postMessage(
     input: CommunicationPostMessageInput,
   ): Promise<CommunicationPostMessageResult> {
@@ -109,7 +121,7 @@ export class SlackCommunicationProvider implements CommunicationProviderAdapter 
       ...imageBlocks,
       ...(actionsBlock ? [actionsBlock] : []),
     ];
-    const messageId = await this.slack.postMessage({
+    const result = await this.slack.postMessageDetailed({
       channel: input.channelId,
       ...(input.threadId ? { thread_ts: input.threadId } : {}),
       ...(input.text ? { text: input.text } : {}),
@@ -118,14 +130,14 @@ export class SlackCommunicationProvider implements CommunicationProviderAdapter 
       unfurl_media: false,
     });
 
-    if (!messageId) {
-      throw new Error('Slack chat.postMessage returned no message timestamp');
+    if (!result.ts) {
+      throw new SlackPostDeliveryError(result);
     }
 
     return {
       provider: 'slack',
       channelId: input.channelId,
-      messageId,
+      messageId: result.ts,
       ...(input.threadId ? { threadId: input.threadId } : {}),
     };
   }

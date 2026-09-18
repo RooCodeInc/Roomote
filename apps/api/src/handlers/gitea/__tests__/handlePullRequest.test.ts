@@ -20,6 +20,7 @@ const {
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: mockEnqueueTask,
+  getPrOriginFastAgentParent: vi.fn(async () => null),
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -58,6 +59,8 @@ vi.mock('../../github/notifyPullRequestTerminalStatus', () => ({
 vi.mock('../../pull-request-fact-sync', () => ({
   scheduleSourceControlPullRequestFactSync:
     mockScheduleSourceControlPullRequestFactSync,
+  toValidDate: (value: string | null | undefined) =>
+    value ? new Date(value) : null,
 }));
 
 vi.mock('../getGiteaAutomationTargets', async () => {
@@ -193,6 +196,45 @@ describe('handleGiteaPullRequest', () => {
       'acme/backend',
       42,
       'draft',
+      { host: 'git.example.com' },
+    );
+  });
+
+  it.each([
+    [
+      'https://Git.Example.Com:8443/acme/backend/pulls/42',
+      'git.example.com:8443',
+    ],
+    [undefined, 'git.example.com'],
+    ['not-a-url', null],
+  ] as const)(
+    'scopes status updates using PR URL %s',
+    async (html_url, host) => {
+      await handleGiteaPullRequest(makePayload('closed', { html_url }));
+
+      expect(mockUpdateTaskPrStatus).toHaveBeenCalledWith(
+        'gitea',
+        'acme/backend',
+        42,
+        'closed',
+        { host },
+      );
+    },
+  );
+
+  it('does not infer an instance when all webhook URL provenance is missing', async () => {
+    const payload = makePayload('closed', {
+      html_url: undefined,
+      url: undefined,
+    });
+    payload.repository.html_url = undefined;
+    await handleGiteaPullRequest(payload);
+    expect(mockUpdateTaskPrStatus).toHaveBeenCalledWith(
+      'gitea',
+      'acme/backend',
+      42,
+      'closed',
+      { host: null },
     );
   });
 
@@ -343,6 +385,10 @@ describe('handleGiteaPullRequest', () => {
       'acme/backend',
       42,
       'merged',
+      {
+        host: 'git.example.com',
+        mergedAt: new Date('2026-07-10T00:00:00.000Z'),
+      },
     );
     expect(mockRecordPrStatusChangeInTaskHistory).toHaveBeenLastCalledWith(
       expect.objectContaining({ targetBranch: 'main' }),
@@ -388,6 +434,7 @@ describe('handleGiteaPullRequest', () => {
       'acme/backend',
       42,
       'closed',
+      { host: 'git.example.com' },
     );
     expect(mockScheduleNotifyPullRequestTerminalStatus).toHaveBeenCalledWith(
       {

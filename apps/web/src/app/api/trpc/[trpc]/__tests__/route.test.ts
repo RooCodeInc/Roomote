@@ -87,6 +87,14 @@ describe('POST /api/trpc/[trpc]', () => {
     expect(maxDuration).toBe(800);
   });
 
+  it('enables cookie renewal in the HTTP route handler', async () => {
+    const response = await call();
+    expect(createContextMock).toHaveBeenCalledWith({
+      allowSessionRefresh: true,
+    });
+    await response.text();
+  });
+
   it('emits one request-timing line with the auth and handler durations', async () => {
     const response = await call();
 

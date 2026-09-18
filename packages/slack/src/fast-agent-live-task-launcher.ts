@@ -3,8 +3,8 @@ import {
   type FastAgentSlackTaskLauncherParams,
   type LaunchFastAgentTask,
 } from '@roomote/cloud-agents/server';
+import { buildSelectedTaskSessionUrl } from '@roomote/communication';
 import { RunStatus } from '@roomote/types';
-import { Env } from '@roomote/env';
 import { db, getSessionForTask } from '@roomote/db/server';
 import {
   buildSlackLiveTaskCardBlocks,
@@ -20,10 +20,13 @@ import { settleSlackLiveTaskCardForRun } from './settle-live-task-card';
 
 type SlackLiveTaskCardNotifier = Pick<
   SlackNotifier,
-  'postMessage' | 'postMessageDetailed' | 'updateMessage'
+  | 'normalizeIncomingText'
+  | 'postMessage'
+  | 'postMessageDetailed'
+  | 'updateMessage'
 >;
 
-const PREPARING_WORKSPACE_TITLE = 'Preparing workspace…';
+const STARTING_TASK_TITLE = 'Starting task…';
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -32,7 +35,7 @@ function describeError(error: unknown): string {
 /**
  * Fast delegation launcher that also posts a native task card (a
  * `task_card` block) in the parent thread. The card opens as a bare
- * "Preparing workspace…" placeholder; once the sandbox is up the worker renders
+ * "Starting task…" placeholder; once the sandbox is up the worker renders
  * the generated title and then re-renders the whole card through
  * chat.update for the task's lifetime, so it always shows the latest state.
  *
@@ -80,7 +83,11 @@ export function createFastAgentSlackLiveTaskLauncher(
     try {
       const linkedSession = await getSessionForTask(db, taskRun.taskId);
       destinationUrl = linkedSession
-        ? `${Env.R_APP_URL}/sessions/${linkedSession.id}?task=${taskRun.taskId}`
+        ? buildSelectedTaskSessionUrl({
+            taskUrl: context.taskUrl,
+            sessionId: linkedSession.id,
+            taskId: taskRun.taskId,
+          })
         : context.taskUrl;
       // A card for this task already exists (for example an idempotent
       // relaunch of the same task); keep updating it instead of posting
@@ -94,7 +101,7 @@ export function createFastAgentSlackLiveTaskLauncher(
         thread_ts: launcherParams.threadTs,
         ...buildSlackLiveTaskCardBlocks({
           taskUpdateId,
-          title: PREPARING_WORKSPACE_TITLE,
+          title: STARTING_TASK_TITLE,
           status: 'in_progress',
           taskUrl: destinationUrl,
         }),
@@ -134,7 +141,7 @@ export function createFastAgentSlackLiveTaskLauncher(
       );
 
       if (!messageTs) {
-        await postTaskLink(context.taskUrl);
+        await postTaskLink(destinationUrl);
         return;
       }
 
@@ -148,9 +155,9 @@ export function createFastAgentSlackLiveTaskLauncher(
           ts: messageTs,
           message: buildSlackLiveTaskCardBlocks({
             taskUpdateId,
-            title: PREPARING_WORKSPACE_TITLE,
+            title: STARTING_TASK_TITLE,
             status: 'error',
-            message: SLACK_SESSION_LIVE_TASK_CARD_MESSAGES.trackingUnavailable,
+            output: SLACK_SESSION_LIVE_TASK_CARD_MESSAGES.trackingUnavailable,
             taskUrl: destinationUrl,
           }),
         });
@@ -165,7 +172,7 @@ export function createFastAgentSlackLiveTaskLauncher(
     }
   };
 
-  return createFastAgentSlackTaskLauncher({
+  const launchTask = createFastAgentSlackTaskLauncher({
     ...launcherParams,
     liveTaskStream: true,
     afterKickoff: startLiveTaskCard,
@@ -178,4 +185,17 @@ export function createFastAgentSlackLiveTaskLauncher(
     },
     rendersTaskLink: true,
   });
+
+  return async (input) => {
+    const prompt = await slack
+      .normalizeIncomingText(input.prompt, { preserveMentions: true })
+      .catch((error) => {
+        console.warn(
+          `[Fast Agent] Failed to normalize the Slack task prompt: ${describeError(error)}`,
+        );
+        return input.prompt;
+      });
+
+    return launchTask({ ...input, prompt });
+  };
 }

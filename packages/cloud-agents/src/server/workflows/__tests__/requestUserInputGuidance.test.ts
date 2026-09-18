@@ -179,6 +179,15 @@ describe('request_user_input guidance in workflow prompts', () => {
     });
 
     expect(harnessInstructions).toContain(
+      "Autonomous mode carries the request through the selected skill's workflow without waiting for extra confirmations",
+    );
+    expect(harnessInstructions).toContain(
+      'Autonomy applies to Roomote and authorized agents within the user request and permissions, not assuming authority over humans',
+    );
+    expect(harnessInstructions).toContain(
+      'Respect Human Ownership and Coordinate Agents Within Scope still apply; delegation does not expand authority',
+    );
+    expect(harnessInstructions).toContain(
       'the active `implement-changes` workflow stays responsible for the run until the required delivery result is known and must finish through the delegated `create-draft-pr` skill',
     );
     expect(harnessInstructions).toContain(
@@ -188,7 +197,7 @@ describe('request_user_input guidance in workflow prompts', () => {
       'In Autonomous mode, repository-changing runs keep the active `implement-changes` workflow open so that, after implementation and before delivery, any repository-file change transitions into `capture-visual-proof`, then finish through the delegated `create-draft-pr` skill so it owns commit, push, draft-PR create-or-refresh execution, and PR result reporting.',
     );
     expect(harnessInstructions).toContain(
-      "If the run later transitions into `fix-pr`, that child skill owns branch push state, any required delegated `capture-visual-proof` handoff before PR metadata refresh, PR metadata refresh itself, and PR-fixer closeout instead of inheriting the parent workflow's default PR-delivery finish.",
+      "If the run later transitions into `fix-pr`, that child skill owns branch push state, any required `capture-visual-proof` step before PR metadata refresh, PR metadata refresh itself, and PR-fixer closeout instead of inheriting the parent workflow's default PR-delivery finish.",
     );
     expect(harnessInstructions).toContain(
       'After validation and self-review, the next required action for repository-changing work is delegated delivery, not final reporting.',
@@ -239,6 +248,18 @@ describe('request_user_input guidance in workflow prompts', () => {
     );
     expect(harnessInstructions).toContain(
       'for follow-up asks.` at the top of the PR body file before creating or refreshing the pull request',
+    );
+    expect(harnessInstructions).toContain(
+      'This is the initial attribution, not an exact-output requirement: the source-control tool owns the final canonical attribution and follow-up URL.',
+    );
+    expect(harnessInstructions).toContain(
+      'It uses a verified visible parent Session URL for delegated tasks, otherwise the task URL, and preserves the original opener identity on GitHub updates when `prAttribution` is omitted.',
+    );
+    expect(harnessInstructions).toContain(
+      '`prAttribution` selects an eligible credited person, not a URL override.',
+    );
+    expect(harnessInstructions).toContain(
+      'Do not retry or edit the PR to force the initial task URL when the tool returns a canonical Session URL.',
     );
     expect(harnessInstructions).toContain(
       'must use the conflict resolver label `custom:conflict-label` instead of assuming a hardcoded default',

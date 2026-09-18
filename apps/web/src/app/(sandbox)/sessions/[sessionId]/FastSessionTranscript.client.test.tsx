@@ -1,31 +1,171 @@
 import {
   act,
+  createEvent,
   fireEvent,
   render,
   screen,
   waitFor,
 } from '@testing-library/react';
-import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
+import { useState } from 'react';
+import {
+  ACP_ENVELOPE_EVENT_TYPES,
+  SETUP_RECEIPT_INPUT_KIND,
+} from '@roomote/types';
 
 import {
   FastSessionTranscript,
   pendingResponseReducer,
 } from './FastSessionTranscript';
+import { isRequestUserInputResponseRepresentedByCanonicalReceipt } from '@/lib/setup-receipt-transcript';
+import { SessionRunningTaskCountContext } from './session-task-panel-context';
+import {
+  clearPendingFastSessionLaunch,
+  stagePendingFastSessionLaunch,
+} from '@/lib/pending-fast-session-launch';
+import {
+  SessionNavigationStateProvider,
+  useSessionNavigationState,
+} from '@/hooks/useSessionNavigationState';
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn() }),
+  usePathname: () => '/sessions/session-1',
+}));
+
+const integrationApprovalsState: { pending: unknown[] } = { pending: [] };
+vi.mock('@/hooks/useSessionIntegrationApprovals', () => ({
+  useSessionIntegrationApprovals: () => ({
+    data: { pending: integrationApprovalsState.pending, secrets: [] },
+    refetch: vi.fn(),
+  }),
+}));
+
+vi.mock('./CapabilityOfferCard', () => ({
+  CapabilityOfferCard: ({ offer }: { offer: { capability: string } }) => (
+    <div>Capability offer: {offer.capability}</div>
+  ),
+}));
 
 const {
   replyMutate,
+  startGoalMutate,
   reviewActionMutate,
   updateModelSelectionMutate,
   preparePromptAttachments,
   openTaskPanel,
+  openTasksPanel,
   narrationState,
+  composerSuggestionState,
+  voiceStatusQuery,
+  recordVoiceTurnMutate,
+  recordVoiceCallEventMutate,
+  waitForVoiceCallLease,
+  liveVoiceState,
+  authenticatedUserState,
+  invalidateQueries,
 } = vi.hoisted(() => ({
   replyMutate: vi.fn(),
+  startGoalMutate: vi.fn(),
   reviewActionMutate: vi.fn(),
   updateModelSelectionMutate: vi.fn(),
   preparePromptAttachments: vi.fn(),
   openTaskPanel: vi.fn(),
+  openTasksPanel: vi.fn(),
   narrationState: { enabled: false },
+  composerSuggestionState: {
+    data: undefined as { suggestion: string; messageCount: number } | undefined,
+  },
+  voiceStatusQuery: vi.fn(),
+  recordVoiceTurnMutate: vi.fn(),
+  recordVoiceCallEventMutate: vi.fn(),
+  waitForVoiceCallLease: vi.fn(),
+  authenticatedUserState: {
+    user: null as null | {
+      userId: string;
+      name: string | null;
+      primaryEmail: string | null;
+      resource: {
+        primaryEmailAddress: { id: string; emailAddress: string } | null;
+        imageUrl: string;
+      };
+    },
+  },
+  invalidateQueries: vi.fn(),
+  liveVoiceState: {
+    active: false,
+    status: 'idle' as
+      | 'idle'
+      | 'connecting'
+      | 'listening'
+      | 'speaking'
+      | 'error',
+    start: vi.fn(),
+    stop: vi.fn(),
+    speak: vi.fn(),
+    setMicMuted: vi.fn(),
+    setOutputMuted: vi.fn(),
+    micMuted: false,
+    outputMuted: false,
+    startedAt: null as number | null,
+    inputLevel: 0,
+    deliveringUtterances: 0,
+    onUtterance: undefined as
+      | ((text: string, delegationId: string | null) => void)
+      | undefined,
+    onHeardTurn: undefined as ((text: string) => void) | undefined,
+    onSpokenTurn: undefined as ((text: string) => void) | undefined,
+    onHeardTurnDelta: undefined as ((text: string) => void) | undefined,
+    onSpokenTurnDelta: undefined as ((text: string) => void) | undefined,
+  },
+}));
+
+vi.mock('@/hooks/useUser', () => ({
+  useUser: () => ({
+    user: authenticatedUserState.user,
+    isSignedIn: authenticatedUserState.user !== null,
+    authStatus:
+      authenticatedUserState.user === null ? 'signed-out' : 'signed-in',
+  }),
+}));
+
+vi.mock('@/hooks/useLiveVoice', () => ({
+  useLiveVoice: ({
+    onUtterance,
+    onHeardTurn,
+    onSpokenTurn,
+    onHeardTurnDelta,
+    onSpokenTurnDelta,
+  }: {
+    onUtterance: (text: string, delegationId: string | null) => void;
+    onHeardTurn?: (text: string) => void;
+    onSpokenTurn?: (text: string) => void;
+    onHeardTurnDelta?: (text: string) => void;
+    onSpokenTurnDelta?: (text: string) => void;
+  }) => {
+    liveVoiceState.onUtterance = onUtterance;
+    liveVoiceState.onHeardTurn = onHeardTurn;
+    liveVoiceState.onSpokenTurn = onSpokenTurn;
+    liveVoiceState.onHeardTurnDelta = onHeardTurnDelta;
+    liveVoiceState.onSpokenTurnDelta = onSpokenTurnDelta;
+    return {
+      active: liveVoiceState.active,
+      status: liveVoiceState.status,
+      start: liveVoiceState.start,
+      stop: liveVoiceState.stop,
+      speak: liveVoiceState.speak,
+      micMuted: liveVoiceState.micMuted,
+      setMicMuted: liveVoiceState.setMicMuted,
+      outputMuted: liveVoiceState.outputMuted,
+      setOutputMuted: liveVoiceState.setOutputMuted,
+      startedAt: liveVoiceState.startedAt,
+      inputLevel: liveVoiceState.inputLevel,
+      deliveringUtterances: liveVoiceState.deliveringUtterances,
+    };
+  },
+}));
+
+vi.mock('@/hooks/useSessionVoiceCallLease', () => ({
+  useSessionVoiceCallLease: () => waitForVoiceCallLease,
 }));
 
 vi.mock('@/hooks/useNarrationMode', () => ({
@@ -35,14 +175,74 @@ vi.mock('@/hooks/useNarrationMode', () => ({
 vi.mock('@/trpc/client', () => ({
   useTRPCClient: () => ({
     fastSessions: {
+      tasks: {
+        queryKey: (input: unknown) => ['fastSessions.tasks', input],
+      },
       reply: { mutate: replyMutate },
+      startGoal: { mutate: startGoalMutate },
       reviewAction: { mutate: reviewActionMutate },
       updateModelSelection: { mutate: updateModelSelectionMutate },
+    },
+    voice: {
+      status: { query: voiceStatusQuery },
+      recordTurn: { mutate: recordVoiceTurnMutate },
+      recordCallEvent: { mutate: recordVoiceCallEventMutate },
+    },
+  }),
+  useTRPC: () => ({
+    slack: {
+      resolveUsers: {
+        queryOptions: (input: unknown) => ({
+          queryKey: ['slack.resolveUsers', input],
+        }),
+      },
+    },
+    fastSessions: {
+      tasks: {
+        queryKey: (input: unknown) => ['fastSessions.tasks', input],
+      },
+      composerSuggestion: {
+        queryOptions: (input: unknown, options?: Record<string, unknown>) => ({
+          ...options,
+          queryKey: ['fastSessions.composerSuggestion', input],
+          queryFn: async () => ({ suggestion: null, messageCount: 0 }),
+        }),
+      },
+    },
+    sandboxSession: {
+      byTaskId: {
+        queryKey: (input: unknown) => ['sandboxSession.byTaskId', input],
+      },
+    },
+    artifacts: {
+      forTask: {
+        queryKey: (input: unknown) => ['artifacts.forTask', input],
+      },
     },
   }),
 }));
 
-vi.mock('./SessionModelSwitcher', () => ({
+// The session composer's suggestion query needs no QueryClientProvider here;
+// these tests exercise the transcript, not suggestions.
+vi.mock('@tanstack/react-query', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@tanstack/react-query')>()),
+  useQuery: () => ({ data: composerSuggestionState.data }),
+  useQueryClient: () => ({ invalidateQueries }),
+}));
+
+// Wakeup polling has dedicated provider-backed tests. Keep this suite's query
+// mocks scoped to composer suggestions rather than mounting the live poller.
+vi.mock('./SessionWakeups', () => ({
+  SessionWakeups: () => null,
+}));
+
+vi.mock('../../task/[taskId]/messages/acp/AcpDataVisualizations', () => ({
+  AcpDataVisualizations: ({ charts }: { charts: Array<{ title: string }> }) => (
+    <div data-testid="session-chart">{charts[0]?.title}</div>
+  ),
+}));
+
+vi.mock('@/components/tasks/SessionModelSwitcher', () => ({
   SessionModelSwitcher: ({
     model,
     onModelChange,
@@ -95,8 +295,10 @@ vi.mock('@/hooks/task-models/useLaunchTaskModels', () => ({
   }),
 }));
 
-vi.mock('./session-task-panel-context', () => ({
+vi.mock('./session-task-panel-context', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./session-task-panel-context')>()),
   useOpenSessionTaskPanel: () => openTaskPanel,
+  useOpenSessionTasksPanel: () => openTasksPanel,
 }));
 
 vi.mock('../../task/[taskId]/messages/acp/DelegatedTaskCard', () => ({
@@ -111,6 +313,18 @@ vi.mock('../../task/[taskId]/messages/acp/DelegatedTaskCard', () => ({
       Delegated task {taskId}
     </button>
   ),
+}));
+
+vi.mock('./SessionUserInputCard', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./SessionUserInputCard')>()),
+  SessionUserInputCard: () => <div>Structured input request</div>,
+}));
+
+vi.mock('./setup/SetupStarterTasksCard', () => ({
+  SetupStarterTasksCard: () => <div>Setup starter tasks</div>,
+}));
+vi.mock('./setup/SetupIntegrationsCard', () => ({
+  SetupIntegrationsCard: () => <div>Optional integration setup</div>,
 }));
 
 class FakeEventSource {
@@ -141,15 +355,55 @@ class FakeEventSource {
 }
 
 beforeEach(() => {
+  vi.spyOn(window, 'matchMedia').mockReturnValue({
+    matches: true,
+    media: '(min-width: 768px)',
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  } as MediaQueryList);
+  window.location.hash = '';
   FakeEventSource.instances = [];
   replyMutate.mockReset();
+  startGoalMutate.mockReset();
+  startGoalMutate.mockResolvedValue({ success: true, goal: {} });
   reviewActionMutate.mockReset();
   updateModelSelectionMutate.mockReset();
   preparePromptAttachments.mockImplementation(({ text }: { text: string }) =>
     Promise.resolve({ text }),
   );
   narrationState.enabled = false;
+  composerSuggestionState.data = undefined;
   openTaskPanel.mockReset();
+  openTasksPanel.mockReset();
+  invalidateQueries.mockReset();
+  invalidateQueries.mockResolvedValue(undefined);
+  voiceStatusQuery.mockReset();
+  voiceStatusQuery.mockResolvedValue({ enabled: false });
+  recordVoiceTurnMutate.mockReset();
+  recordVoiceTurnMutate.mockResolvedValue({ eventId: 'voice:1' });
+  recordVoiceCallEventMutate.mockReset();
+  recordVoiceCallEventMutate.mockResolvedValue({ eventId: 'voice-call:1' });
+  waitForVoiceCallLease.mockReset();
+  waitForVoiceCallLease.mockResolvedValue(undefined);
+  liveVoiceState.startedAt = null;
+  liveVoiceState.inputLevel = 0;
+  liveVoiceState.micMuted = false;
+  liveVoiceState.outputMuted = false;
+  liveVoiceState.deliveringUtterances = 0;
+  liveVoiceState.onHeardTurn = undefined;
+  liveVoiceState.onSpokenTurn = undefined;
+  liveVoiceState.active = false;
+  liveVoiceState.status = 'idle';
+  liveVoiceState.start.mockReset();
+  liveVoiceState.stop.mockReset();
+  liveVoiceState.speak.mockReset();
+  liveVoiceState.onUtterance = undefined;
+  authenticatedUserState.user = null;
+  clearPendingFastSessionLaunch('session-1');
   vi.stubGlobal('EventSource', FakeEventSource);
 });
 
@@ -159,6 +413,331 @@ afterEach(() => {
 });
 
 describe('FastSessionTranscript', () => {
+  /**
+   * A completed `prepare_integration_key` call at `ts` that created
+   * `pendingRef`, persisted as the tool returns it or under a result wrapper.
+   */
+  const keyRequestMessage = (
+    ts: number,
+    pendingRef: string,
+    shape: 'plain' | 'wrapped' = 'plain',
+  ) => ({
+    id: `key-request-${ts}`,
+    eventId: `key-request-${ts}:event`,
+    turnId: `key-request-${ts}:turn`,
+    turnSeq: 1,
+    ts,
+    eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+    role: 'tool' as const,
+    contentBlocks: [
+      {
+        type: 'text' as const,
+        text: JSON.stringify({ pending: { pendingRef } }),
+      },
+    ],
+    metadata: { visibleInTranscript: true },
+    payload: {
+      toolCallId: `key-request-${ts}:tool`,
+      title: 'prepare_integration_key',
+      kind: 'tool',
+      status: 'completed',
+      isExecute: false,
+      isRead: false,
+      isMcp: false,
+      mcpServerName: null,
+      mcpToolName: null,
+      toolName: 'prepare_integration_key',
+      command: null,
+      output: JSON.stringify(
+        shape === 'plain'
+          ? {
+              pending: { pendingRef },
+              sessionUrl:
+                'https://app.example/sessions/canonical-session#integrations',
+            }
+          : { success: true, result: { pending: { pendingRef } } },
+      ),
+    },
+    source: 'web',
+    nativeSessionId: 'opencode-1',
+    nativeMessageId: null,
+    createdAt: new Date(ts),
+  });
+
+  it('shows a pending-key card for the owner and opens the key dialog from it', async () => {
+    integrationApprovalsState.pending = [
+      {
+        pendingRef: '6a1f8f1e-0000-4000-8000-000000000009',
+        label: 'Figma',
+        origin: 'https://api.figma.com',
+        headerName: 'x-figma-token',
+        headerPrefix: '',
+        allowedMethods: ['GET', 'HEAD'],
+        lifetimeHours: null,
+        expiresAt: new Date(Date.now() + 3600000).toISOString(),
+        createdAt: new Date().toISOString(),
+      },
+    ];
+    // The dialog fetches the same route; a fresh Response per call, since a
+    // body can only be read once.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(() =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              secrets: [],
+              pending: integrationApprovalsState.pending,
+            }),
+          ),
+        ),
+      ),
+    );
+    window.location.hash = '';
+    render(
+      <FastSessionTranscript
+        sessionId="fast-conversation"
+        secretSessionId="canonical-session"
+        initialMessages={[
+          textMessage({ id: 'ask', role: 'user', text: 'Read Figma', ts: 1 }),
+          keyRequestMessage(2, '6a1f8f1e-0000-4000-8000-000000000009'),
+          textMessage({
+            id: 'link',
+            role: 'assistant',
+            text: 'Add your key in the secure form.',
+            ts: 3,
+          }),
+        ]}
+        canReply
+      />,
+    );
+    expect(screen.getByText('Add your Figma key')).toBeInTheDocument();
+    expect(screen.queryByLabelText('API key')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Enter key' }));
+    expect(window.location.hash).toBe('#integrations');
+    // jsdom does not dispatch hashchange for a programmatic fragment change.
+    fireEvent(window, new HashChangeEvent('hashchange'));
+    await screen.findByLabelText('API key');
+    integrationApprovalsState.pending = [];
+  });
+
+  it('hides the pending-key card once the owner replies after the request', () => {
+    integrationApprovalsState.pending = [
+      {
+        pendingRef: '6a1f8f1e-0000-4000-8000-000000000011',
+        label: 'Intercom',
+        origin: 'https://api.intercom.io',
+        headerName: 'Authorization',
+        headerPrefix: 'Bearer ',
+        allowedMethods: ['GET', 'HEAD'],
+        lifetimeHours: null,
+        expiresAt: new Date(Date.now() + 3600000).toISOString(),
+        createdAt: new Date().toISOString(),
+      },
+    ];
+    render(
+      <FastSessionTranscript
+        sessionId="fast-conversation"
+        secretSessionId="canonical-session"
+        initialMessages={[
+          keyRequestMessage(1, '6a1f8f1e-0000-4000-8000-000000000011'),
+          textMessage({
+            id: 'moved-on',
+            role: 'user',
+            text: 'Intercom can only use oauth',
+            ts: 2,
+          }),
+          textMessage({
+            id: 'answer',
+            role: 'assistant',
+            text: 'The token form does not fit your setup.',
+            ts: 3,
+          }),
+        ]}
+        canReply
+      />,
+    );
+    expect(screen.queryByText('Add your Intercom key')).toBeNull();
+    integrationApprovalsState.pending = [];
+  });
+
+  it('shows only the open request approval, not one the owner declined earlier', () => {
+    const approval = (pendingRef: string, label: string, origin: string) => ({
+      pendingRef,
+      label,
+      origin,
+      headerName: 'Authorization',
+      headerPrefix: 'Bearer ',
+      allowedMethods: ['GET', 'HEAD'],
+      lifetimeHours: null,
+      expiresAt: new Date(Date.now() + 3600000).toISOString(),
+      createdAt: new Date().toISOString(),
+    });
+    integrationApprovalsState.pending = [
+      approval(
+        '6a1f8f1e-0000-4000-8000-000000000012',
+        'Figma',
+        'https://api.figma.com',
+      ),
+      approval(
+        '6a1f8f1e-0000-4000-8000-000000000013',
+        'Intercom',
+        'https://api.intercom.io',
+      ),
+    ];
+    render(
+      <FastSessionTranscript
+        sessionId="fast-conversation"
+        secretSessionId="canonical-session"
+        initialMessages={[
+          keyRequestMessage(1, '6a1f8f1e-0000-4000-8000-000000000012'),
+          textMessage({
+            id: 'declined',
+            role: 'user',
+            text: 'Skip Figma, read Intercom instead',
+            ts: 2,
+          }),
+          keyRequestMessage(
+            3,
+            '6a1f8f1e-0000-4000-8000-000000000013',
+            'wrapped',
+          ),
+        ]}
+        canReply
+      />,
+    );
+    expect(screen.getByText('Add your Intercom key')).toBeInTheDocument();
+    expect(screen.queryByText('Add your Figma key')).toBeNull();
+    integrationApprovalsState.pending = [];
+  });
+
+  it('hides the pending-key card from viewers who do not own the Session', () => {
+    integrationApprovalsState.pending = [
+      {
+        pendingRef: '6a1f8f1e-0000-4000-8000-000000000010',
+        label: 'Figma',
+        origin: 'https://api.figma.com',
+        headerName: 'x-figma-token',
+        headerPrefix: '',
+        allowedMethods: ['GET', 'HEAD'],
+        lifetimeHours: null,
+        expiresAt: new Date(Date.now() + 3600000).toISOString(),
+        createdAt: new Date().toISOString(),
+      },
+    ];
+    render(
+      <FastSessionTranscript
+        sessionId="fast-conversation"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+    expect(screen.queryByText('Add your Figma key')).toBeNull();
+    integrationApprovalsState.pending = [];
+  });
+
+  it('reports server-owned secure-save continuation without submitting or replacing the browser composer draft', async () => {
+    const secretRef = '6a1f8f1e-0000-4000-8000-000000000007';
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          secrets: [],
+          pending: [
+            {
+              pendingRef: secretRef,
+              label: 'Demo',
+              origin: 'https://api.example.com',
+              headerName: 'authorization',
+              headerPrefix: 'Bearer ',
+              allowedMethods: ['GET', 'HEAD'],
+              visibility: 'deployment',
+              expiresAt: new Date(Date.now() + 3600000).toISOString(),
+              revokedAt: null,
+              createdAt: new Date().toISOString(),
+            },
+          ],
+        }),
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    window.location.hash = '#integrations';
+    render(
+      <FastSessionTranscript
+        sessionId="fast-conversation"
+        secretSessionId="canonical-session"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+    const composer = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(composer, { target: { value: 'Keep this unsent draft' } });
+    await screen.findByLabelText('API key');
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/sessions/canonical-session/secrets',
+      expect.objectContaining({
+        cache: 'no-store',
+        credentials: 'same-origin',
+      }),
+    );
+    expect(replyMutate).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText('API key'), {
+      target: { value: 'disposable-test-credential' },
+    });
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /info|How it is used|Review/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/Review access details|GET and HEAD/),
+    ).not.toBeInTheDocument();
+    expect(replyMutate).not.toHaveBeenCalled();
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          secret: {
+            secretRef,
+            label: 'Demo',
+            origin: 'https://api.example.com',
+            headerName: 'authorization',
+            headerPrefix: 'Bearer ',
+            allowedMethods: ['GET', 'HEAD'],
+            expiresAt: new Date(Date.now() + 3600000).toISOString(),
+            createdAt: new Date().toISOString(),
+            revokedAt: null,
+          },
+          resumed: true,
+        }),
+        { status: 201 },
+      ),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+    );
+    expect(replyMutate).not.toHaveBeenCalled();
+    expect(preparePromptAttachments).not.toHaveBeenCalled();
+    expect(composer).toHaveValue('Keep this unsent draft');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      '/api/sessions/canonical-session/secrets',
+      expect.objectContaining({
+        method: 'POST',
+        cache: 'no-store',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pendingRef: secretRef,
+          secret: 'disposable-test-credential',
+          allowedMethods: ['GET', 'HEAD'],
+          visibility: 'deployment',
+        }),
+      }),
+    );
+    expect(document.body.textContent).not.toContain(
+      'disposable-test-credential',
+    );
+  });
+
   const textMessage = ({
     id,
     role,
@@ -166,6 +745,11 @@ describe('FastSessionTranscript', () => {
     ts,
     visible = true,
     turnSeq = role === 'user' ? 0 : 1,
+    inputKind,
+    userId,
+    userName = null,
+    userEmail = null,
+    userImageUrl = null,
   }: {
     id: string;
     role: 'user' | 'assistant';
@@ -173,6 +757,11 @@ describe('FastSessionTranscript', () => {
     ts: number;
     visible?: boolean;
     turnSeq?: number;
+    inputKind?: string;
+    userId?: string;
+    userName?: string | null;
+    userEmail?: string | null;
+    userImageUrl?: string | null;
   }) => ({
     id,
     eventId: `${id}:event`,
@@ -185,12 +774,116 @@ describe('FastSessionTranscript', () => {
         : ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
     role,
     contentBlocks: [{ type: 'text' as const, text }],
-    metadata: { visibleInTranscript: visible },
+    metadata: {
+      visibleInTranscript: visible,
+      ...(inputKind ? { inputKind } : {}),
+      ...(userId ? { userId } : {}),
+    },
     payload: {},
     source: 'web',
     nativeSessionId: role === 'assistant' ? 'opencode-1' : null,
     nativeMessageId: null,
+    userName,
+    userEmail,
+    userImageUrl,
     createdAt: new Date(ts),
+  });
+
+  it('restores each Session draft and scroll position without focusing after a direct switch', () => {
+    function SessionSwitchHarness() {
+      const [sessionId, setSessionId] = useState('session-a');
+      const navigationState = useSessionNavigationState();
+      const switchTo = (nextSessionId: string) => {
+        navigationState?.prepareSessionSwitch(nextSessionId);
+        setSessionId(nextSessionId);
+      };
+
+      return (
+        <>
+          <button type="button" onClick={() => switchTo('session-a')}>
+            Session A
+          </button>
+          <button type="button" onClick={() => switchTo('session-b')}>
+            Session B
+          </button>
+          <FastSessionTranscript
+            key={sessionId}
+            sessionId={sessionId}
+            initialMessages={[]}
+            canReply
+          />
+        </>
+      );
+    }
+
+    render(
+      <SessionNavigationStateProvider>
+        <SessionSwitchHarness />
+      </SessionNavigationStateProvider>,
+    );
+
+    const sessionAInput = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(sessionAInput, { target: { value: 'Draft for A' } });
+    const sessionAScroll = screen.getByRole('log').firstElementChild!;
+    sessionAScroll.scrollTop = 146;
+    fireEvent.scroll(sessionAScroll);
+
+    const sessionBButton = screen.getByRole('button', { name: 'Session B' });
+    sessionBButton.focus();
+    fireEvent.click(sessionBButton);
+
+    const sessionBInput = screen.getByPlaceholderText('Message agent');
+    expect(sessionBInput).toHaveValue('');
+    expect(sessionBInput).not.toHaveFocus();
+    fireEvent.change(sessionBInput, { target: { value: 'Draft for B' } });
+
+    const sessionAButton = screen.getByRole('button', { name: 'Session A' });
+    sessionAButton.focus();
+    fireEvent.click(sessionAButton);
+
+    expect(screen.getByPlaceholderText('Message agent')).toHaveValue(
+      'Draft for A',
+    );
+    expect(screen.getByPlaceholderText('Message agent')).not.toHaveFocus();
+    expect(screen.getByRole('log').firstElementChild).toHaveProperty(
+      'scrollTop',
+      146,
+    );
+  });
+
+  it('renders charts restored from persisted Session messages', () => {
+    const message = textMessage({
+      id: 'assistant-chart',
+      role: 'assistant',
+      text: 'Search accounts for most visits.',
+      ts: 10,
+    });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          {
+            ...message,
+            contentBlocks: [
+              ...message.contentBlocks,
+              {
+                type: 'data_visualization',
+                title: 'Traffic sources',
+                chart: {
+                  type: 'pie',
+                  segments: [{ label: 'Search', value: 65 }],
+                },
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByTestId('session-chart')).toHaveTextContent(
+      'Traffic sources',
+    );
   });
 
   describe('pendingResponseReducer', () => {
@@ -199,6 +892,24 @@ describe('FastSessionTranscript', () => {
       latestVisibleResponse: null,
       optimisticRollback: null,
     };
+
+    it('does not treat transcript-only setup receipts as pending model input', () => {
+      const receipt = textMessage({
+        id: 'setup-receipt',
+        role: 'user',
+        text: 'Sandbox configured with Modal.',
+        ts: 2,
+        inputKind: SETUP_RECEIPT_INPUT_KIND,
+      });
+
+      const next = pendingResponseReducer(emptyState, {
+        type: 'messages',
+        newEventIds: new Set([receipt.eventId]),
+        messages: [receipt],
+      });
+
+      expect(next.pendingAfter).toBeNull();
+    });
 
     it('uses the same ordering and visibility rules for hydration and streamed messages', () => {
       const hydrated = pendingResponseReducer(emptyState, {
@@ -342,15 +1053,1161 @@ describe('FastSessionTranscript', () => {
     });
   });
 
-  it('shows Thinking while the initial Fast turn is awaiting output', () => {
+  it.each(['setup_starter_tasks', 'setup_integrations'])(
+    'renders and removes the %s card when its response control event arrives',
+    (preset) => {
+      const requestId = 'rui:setup-starters';
+      const request = {
+        ...textMessage({
+          id: 'starter-request',
+          role: 'assistant',
+          text: 'Choose starter tasks',
+          ts: 1,
+        }),
+        eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+        payload: {
+          requestId,
+          status: 'pending',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          callId: 'call-1',
+          preset,
+          questions: [
+            {
+              id: 'starters',
+              question: 'What should I work on first?',
+              multiple: true,
+              isOther: false,
+              isSecret: false,
+              options: [{ label: 'Speed up CI', description: 'Improve CI.' }],
+            },
+          ],
+        },
+      };
+      const response = {
+        ...textMessage({
+          id: 'starter-response',
+          role: 'user',
+          text: 'Structured response',
+          ts: 2,
+        }),
+        eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse,
+        payload: {
+          requestId,
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          callId: 'call-1',
+          answers: { starters: { answers: ['Speed up CI'] } },
+          resolution: 'submitted',
+        },
+      };
+      const starterReceipt = {
+        ...textMessage({
+          id: 'starter-receipt',
+          role: 'user',
+          text: 'Selected Speed up CI.',
+          ts: 2,
+          inputKind: SETUP_RECEIPT_INPUT_KIND,
+          userId: 'user-1',
+        }),
+        metadata: {
+          visibleInTranscript: true,
+          inputKind: SETUP_RECEIPT_INPUT_KIND,
+          setupReceiptKind: 'starter_selection',
+          userId: 'user-1',
+        },
+        payload: {
+          setupReceipt: {
+            requestId,
+            kind: 'starter_selection',
+          },
+        },
+      };
+
+      const { unmount } = render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[request]}
+        />,
+      );
+      const cardLabel =
+        preset === 'setup_integrations'
+          ? 'Optional integration setup'
+          : 'Setup starter tasks';
+      expect(screen.getByText(cardLabel)).toBeInTheDocument();
+      unmount();
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={
+            preset === 'setup_starter_tasks'
+              ? [request, response, starterReceipt]
+              : [request, response]
+          }
+          owner={{
+            userId: 'user-1',
+            name: 'Test User',
+            email: 'test@example.com',
+            imageUrl: null,
+          }}
+        />,
+      );
+
+      expect(screen.queryByText('Structured input request')).toBeNull();
+      if (preset === 'setup_starter_tasks') {
+        expect(screen.queryByText('Structured response')).toBeNull();
+        expect(screen.getAllByText('Selected Speed up CI.')).toHaveLength(1);
+      } else {
+        expect(
+          screen.getByTestId('request-user-input-response'),
+        ).toBeInTheDocument();
+      }
+      if (preset === 'setup_integrations') {
+        expect(screen.getByLabelText('Test User')).toBeInTheDocument();
+      }
+      expect(screen.queryByText(cardLabel)).toBeNull();
+    },
+  );
+
+  it('keeps an unmatched setup response visible even when a setup receipt exists', () => {
+    const request = {
+      ...textMessage({
+        id: 'request',
+        role: 'assistant',
+        text: 'Choose',
+        ts: 1,
+      }),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+      payload: {
+        requestId: 'request-1',
+        status: 'pending',
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        callId: 'call-1',
+        preset: 'setup_starter_tasks' as const,
+        questions: [
+          { id: 'choice', question: 'Choose', options: [{ label: 'One' }] },
+        ],
+      },
+    };
+    const response = {
+      ...textMessage({ id: 'response', role: 'user', text: 'Response', ts: 2 }),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse,
+      payload: {
+        requestId: 'request-1',
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        callId: 'call-1',
+        answers: { choice: { answers: ['One'] } },
+        resolution: 'submitted' as const,
+      },
+    };
+    const receipt = textMessage({
+      id: 'receipt',
+      role: 'user',
+      text: 'A different setup result.',
+      ts: 2,
+      inputKind: SETUP_RECEIPT_INPUT_KIND,
+    });
+    receipt.metadata = {
+      visibleInTranscript: true,
+      inputKind: SETUP_RECEIPT_INPUT_KIND,
+      setupReceiptKind: 'compute_readiness',
+    } as {
+      visibleInTranscript: boolean;
+      inputKind?: string;
+      setupReceiptKind?: string;
+    };
+    receipt.payload = {
+      setupReceipt: { kind: 'compute_readiness', requestId: 'request-2' },
+    };
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[request, response, receipt]}
+      />,
+    );
+
+    expect(screen.getByText('One')).toBeInTheDocument();
+    expect(screen.getByText('A different setup result.')).toBeInTheDocument();
+  });
+
+  it('does not suppress responses for historical receipts without request linkage', () => {
+    expect(
+      isRequestUserInputResponseRepresentedByCanonicalReceipt(
+        {
+          requestId: 'request-1',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          callId: 'call-1',
+          answers: {},
+          resolution: 'submitted',
+        },
+        [
+          {
+            metadata: {
+              inputKind: SETUP_RECEIPT_INPUT_KIND,
+              setupReceiptKind: 'starter_selection',
+            },
+            payload: { setupReceipt: { kind: 'starter_selection' } },
+          },
+        ],
+      ),
+    ).toBe(false);
+  });
+
+  it('renders a structured response once in chronology as human-authored text', () => {
+    const requestId = 'rui:chronology';
+    const question = 'Which direction should I take?';
+    const request = {
+      ...textMessage({
+        id: 'input-request',
+        role: 'assistant',
+        text: question,
+        ts: 2,
+      }),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+      payload: {
+        requestId,
+        status: 'pending',
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        callId: 'call-1',
+        questions: [
+          {
+            id: 'direction',
+            header: 'Direction',
+            question,
+            isOther: true,
+            isSecret: false,
+          },
+        ],
+      },
+    };
+    const response = {
+      ...textMessage({
+        id: 'input-response',
+        role: 'user',
+        text: 'Legacy persisted answer',
+        ts: 3,
+      }),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse,
+      payload: {
+        requestId,
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        callId: 'call-1',
+        answers: { direction: { answers: ['Use the narrow path'] } },
+        resolution: 'submitted',
+      },
+    };
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          textMessage({
+            id: 'assistant-before',
+            role: 'assistant',
+            text: 'Before the question',
+            ts: 1,
+          }),
+          request,
+          response,
+          textMessage({
+            id: 'assistant-after',
+            role: 'assistant',
+            text: 'After the answer',
+            ts: 4,
+          }),
+        ]}
+        owner={{
+          userId: 'user-1',
+          name: 'Transcript Owner',
+          email: 'owner@example.com',
+          imageUrl: null,
+        }}
+      />,
+    );
+
+    const before = screen.getByText('Before the question');
+    const answer = screen.getByText('Use the narrow path');
+    const after = screen.getByText('After the answer');
+    expect(before.compareDocumentPosition(answer)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(answer.compareDocumentPosition(after)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(screen.getAllByText(question)).toHaveLength(1);
+    expect(screen.queryByText('Legacy persisted answer')).toBeNull();
+    expect(screen.getByLabelText('Transcript Owner')).toBeInTheDocument();
+  });
+
+  it('hides request_user_input tool lifecycle rows while keeping the interaction card', () => {
+    const requestId = 'rui:hidden-tools';
+    const toolPayload = {
+      toolCallId: 'turn-1:tool:0',
+      title: 'request_user_input',
+      kind: 'tool',
+      status: 'completed',
+      isExecute: false,
+      isRead: false,
+      isMcp: false,
+      mcpServerName: null,
+      mcpToolName: null,
+      toolName: 'request_user_input',
+      command: null,
+      rawInput: { arguments: { question: 'Hidden tool question' } },
+    };
+    const toolBase = {
+      id: 'request-tool',
+      eventId: 'turn-1:tool:0',
+      turnId: 'turn-1',
+      turnSeq: 1,
+      ts: 1,
+      role: 'tool' as const,
+      metadata: { visibleInTranscript: true },
+      source: 'web',
+      nativeSessionId: 'opencode-1',
+      nativeMessageId: null,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    };
+    const request = {
+      ...textMessage({
+        id: 'input-request',
+        role: 'assistant',
+        text: 'Choose a path',
+        ts: 2,
+      }),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+      payload: {
+        requestId,
+        status: 'pending',
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        callId: 'call-1',
+        questions: [
+          {
+            id: 'path',
+            header: 'Path',
+            question: 'Choose a path',
+            isOther: true,
+            isSecret: false,
+          },
+        ],
+      },
+    };
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          {
+            ...toolBase,
+            eventType: ACP_ENVELOPE_EVENT_TYPES.ToolCall,
+            contentBlocks: [],
+            payload: toolPayload,
+          },
+          {
+            ...toolBase,
+            id: 'request-tool-result',
+            eventId: 'turn-1:tool-result:0',
+            eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+            contentBlocks: [
+              { type: 'text' as const, text: 'Hidden tool result' },
+            ],
+            payload: { ...toolPayload, output: 'Hidden tool result' },
+          },
+          request,
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('Structured input request')).toBeInTheDocument();
+    expect(screen.queryByText('Asked for')).toBeNull();
+    expect(screen.queryByText('human guidance')).toBeNull();
+    expect(screen.queryByText('Hidden tool result')).toBeNull();
+    expect(screen.queryByText('Choose a path')).toBeNull();
+  });
+
+  it.each([
+    ['failed', 'Failed to Ask for'],
+    ['completed', 'Asked for'],
+  ] as const)(
+    'keeps a %s request_user_input tool row when no interaction card was persisted',
+    (status, actionLabel) => {
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            {
+              id: 'request-tool-result',
+              eventId: 'turn-1:tool-result:0',
+              turnId: 'turn-1',
+              turnSeq: 1,
+              ts: 1,
+              eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+              role: 'tool',
+              contentBlocks: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({
+                    success: status === 'completed',
+                    ...(status === 'failed'
+                      ? { error: 'Preset unavailable' }
+                      : {}),
+                  }),
+                },
+              ],
+              metadata: { visibleInTranscript: true },
+              payload: {
+                toolCallId: 'turn-1:tool:0',
+                title: 'request_user_input',
+                kind: 'tool',
+                status,
+                isExecute: false,
+                isRead: false,
+                isMcp: false,
+                mcpServerName: null,
+                mcpToolName: null,
+                toolName: 'request_user_input',
+                command: null,
+                output: JSON.stringify({
+                  success: status === 'completed',
+                  ...(status === 'failed'
+                    ? { error: 'Preset unavailable' }
+                    : {}),
+                }),
+                rawInput: {
+                  arguments: { preset: 'setup_starter_tasks' },
+                },
+              },
+              source: 'web',
+              nativeSessionId: 'opencode-1',
+              nativeMessageId: null,
+              createdAt: new Date('2026-01-01T00:00:00.000Z'),
+            },
+          ]}
+        />,
+      );
+
+      expect(screen.getByText(actionLabel)).toBeInTheDocument();
+      expect(screen.getByText('human guidance')).toBeInTheDocument();
+      if (status === 'failed') {
+        expect(screen.getByText('Failed')).toHaveClass('sr-only');
+      } else {
+        expect(screen.getByText('Completed')).toHaveClass('sr-only');
+      }
+      expect(screen.queryByText('Structured input request')).toBeNull();
+    },
+  );
+
+  it('places a pending interaction at its chronological position', () => {
+    const request = {
+      ...textMessage({
+        id: 'input-request',
+        role: 'assistant',
+        text: 'Choose a path',
+        ts: 2,
+      }),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+      payload: {
+        requestId: 'rui:pending-order',
+        status: 'pending',
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        callId: 'call-1',
+        questions: [
+          {
+            id: 'path',
+            header: 'Path',
+            question: 'Choose a path',
+            isOther: true,
+            isSecret: false,
+          },
+        ],
+      },
+    };
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          textMessage({
+            id: 'assistant-before',
+            role: 'assistant',
+            text: 'Before pending input',
+            ts: 1,
+          }),
+          request,
+          textMessage({
+            id: 'assistant-after',
+            role: 'assistant',
+            text: 'Later transcript activity',
+            ts: 3,
+          }),
+        ]}
+      />,
+    );
+
+    const before = screen.getByText('Before pending input');
+    const interaction = screen.getByText('Structured input request');
+    const after = screen.getByText('Later transcript activity');
+    expect(before.compareDocumentPosition(interaction)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(interaction.compareDocumentPosition(after)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+
+  it('keeps the composer available for non-preset input requests', () => {
+    const request = {
+      ...textMessage({
+        id: 'input-request',
+        role: 'assistant',
+        text: 'Choose or write another direction',
+        ts: 1,
+      }),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+      payload: {
+        requestId: 'rui:optional',
+        status: 'pending',
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        callId: 'call-1',
+        questions: [
+          {
+            id: 'direction',
+            header: 'Direction',
+            question: 'Choose or write another direction',
+            isOther: true,
+            isSecret: false,
+          },
+        ],
+      },
+    };
+
+    const { unmount } = render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[request]}
+        canReply
+      />,
+    );
+    expect(screen.getByPlaceholderText('Message agent')).toBeInTheDocument();
+
+    unmount();
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          {
+            ...request,
+            payload: { ...request.payload, preset: 'setup_starter_tasks' },
+          },
+        ]}
+        canReply
+      />,
+    );
+    expect(screen.queryByPlaceholderText('Message agent')).toBeNull();
+    expect(screen.getByText('Setup starter tasks')).toBeInTheDocument();
+  });
+
+  it.each([
+    [1, '1 task running'],
+    [2, '2 tasks running'],
+  ])('shows the running task count as %s', (runningTaskCount, label) => {
+    render(
+      <SessionRunningTaskCountContext.Provider value={runningTaskCount}>
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            textMessage({
+              id: 'user-1',
+              role: 'user',
+              text: 'Start tasks',
+              ts: 1,
+            }),
+            textMessage({
+              id: 'assistant-1',
+              role: 'assistant',
+              text: 'Tasks launched',
+              ts: 2,
+            }),
+          ]}
+          canReply
+        />
+      </SessionRunningTaskCountContext.Provider>,
+    );
+
+    const status = screen.getByRole('status');
+    expect(status).toHaveTextContent(label);
+    expect(status.closest('.chat-reasoning-message')).toHaveClass(
+      'is-assistant',
+    );
+  });
+
+  it('renders a setup receipt as a completed action with its card icon', () => {
+    const receipt = textMessage({
+      id: 'setup-receipt',
+      role: 'user',
+      text: 'GitHub connected with 17 repositories.',
+      ts: 1,
+      inputKind: SETUP_RECEIPT_INPUT_KIND,
+      userId: 'user-1',
+    });
+    receipt.payload = {
+      setupReceipt: {
+        kind: 'source_connection',
+        presentation: {
+          label: 'Asked to connect source control',
+          iconKey: 'git-branch',
+        },
+      },
+    };
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[receipt]}
+        owner={{
+          userId: 'user-1',
+          name: 'Test User',
+          email: 'test@example.com',
+          imageUrl: 'https://example.com/avatar.png',
+        }}
+      />,
+    );
+
+    expect(
+      screen.getByText('Asked to connect source control'),
+    ).toBeInTheDocument();
+    expect(document.querySelector('.lucide-git-branch')).toBeInTheDocument();
+  });
+
+  it('renders integration discovery with the requested status copy and plug icon', () => {
+    const receipt = textMessage({
+      id: 'integration-receipt',
+      role: 'user',
+      text: 'Asked about integrations.',
+      ts: 1,
+      inputKind: SETUP_RECEIPT_INPUT_KIND,
+      userId: 'user-1',
+    });
+    receipt.payload = {
+      setupReceipt: {
+        kind: 'integration_discovery',
+        presentation: {
+          label: 'Asked about integrations',
+          iconKey: 'plug',
+        },
+      },
+    };
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[receipt]}
+        owner={{
+          userId: 'user-1',
+          name: 'Test User',
+          email: 'test@example.com',
+          imageUrl: 'https://example.com/avatar.png',
+        }}
+      />,
+    );
+
+    expect(screen.getByText('Asked about integrations')).toBeInTheDocument();
+    expect(document.querySelector('.lucide-plug')).toBeInTheDocument();
+  });
+
+  it('removes the running task indicator when the count returns to zero', () => {
+    const { rerender } = render(
+      <SessionRunningTaskCountContext.Provider value={1}>
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            textMessage({
+              id: 'user-1',
+              role: 'user',
+              text: 'Start tasks',
+              ts: 1,
+            }),
+            textMessage({
+              id: 'assistant-1',
+              role: 'assistant',
+              text: 'Tasks launched',
+              ts: 2,
+            }),
+          ]}
+          canReply
+        />
+      </SessionRunningTaskCountContext.Provider>,
+    );
+    expect(screen.getByText('1 task running')).toBeInTheDocument();
+
+    rerender(
+      <SessionRunningTaskCountContext.Provider value={0}>
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            textMessage({
+              id: 'user-1',
+              role: 'user',
+              text: 'Start tasks',
+              ts: 1,
+            }),
+            textMessage({
+              id: 'assistant-1',
+              role: 'assistant',
+              text: 'Tasks launched',
+              ts: 2,
+            }),
+          ]}
+          canReply
+        />
+      </SessionRunningTaskCountContext.Provider>,
+    );
+
+    expect(screen.queryByText('1 task running')).not.toBeInTheDocument();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('opens the tasks panel from a keyboard-focusable activity button', () => {
+    render(
+      <SessionRunningTaskCountContext.Provider value={1}>
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            textMessage({
+              id: 'user-1',
+              role: 'user',
+              text: 'Start tasks',
+              ts: 1,
+            }),
+            textMessage({
+              id: 'assistant-1',
+              role: 'assistant',
+              text: 'Tasks launched',
+              ts: 2,
+            }),
+          ]}
+          canReply
+        />
+      </SessionRunningTaskCountContext.Provider>,
+    );
+
+    const button = screen.getByRole('button', {
+      name: '1 task running. Open task',
+    });
+    button.focus();
+    expect(button).toHaveFocus();
+    expect(button).toHaveAttribute('type', 'button');
+    fireEvent.click(button);
+
+    expect(openTasksPanel).toHaveBeenCalledOnce();
+  });
+
+  it('shows the task indicator only after the session response finishes', () => {
+    render(
+      <SessionRunningTaskCountContext.Provider value={1}>
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            textMessage({
+              id: 'user-1',
+              role: 'user',
+              text: 'Start tasks',
+              ts: 1,
+            }),
+          ]}
+          canReply
+        />
+      </SessionRunningTaskCountContext.Provider>,
+    );
+
+    expect(screen.queryByText('1 task running')).not.toBeInTheDocument();
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [
+          textMessage({
+            id: 'assistant-1',
+            role: 'assistant',
+            text: 'Tasks launched',
+            ts: 2,
+          }),
+        ],
+      });
+    });
+
+    expect(screen.getByText('1 task running')).toBeInTheDocument();
+  });
+
+  it('keeps running task activity visible when a Session is loaded directly', () => {
+    render(
+      <SessionRunningTaskCountContext.Provider value={1}>
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            textMessage({
+              id: 'user-1',
+              role: 'user',
+              text: 'Start tasks',
+              ts: 1,
+            }),
+            textMessage({
+              id: 'assistant-1',
+              role: 'assistant',
+              text: 'Tasks launched',
+              ts: 2,
+            }),
+          ]}
+          canReply
+        />
+      </SessionRunningTaskCountContext.Provider>,
+    );
+
+    expect(screen.getByText('1 task running')).toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        conversationResponding: true,
+        messages: [
+          textMessage({
+            id: 'assistant-1',
+            role: 'assistant',
+            text: 'Tasks launched',
+            ts: 2,
+          }),
+        ],
+      });
+    });
+    expect(screen.getByText('1 task running')).toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('session', {
+        conversationResponding: true,
+      });
+    });
+    expect(screen.getByText('1 task running')).toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('open', null);
+      FakeEventSource.instances[0]!.emit('session', {
+        conversationResponding: true,
+      });
+    });
+    expect(screen.getByText('1 task running')).toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('session', {
+        conversationResponding: false,
+      });
+    });
+    expect(screen.getByText('1 task running')).toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('session', {
+        conversationResponding: true,
+      });
+    });
+    expect(screen.queryByText('1 task running')).not.toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('session', {
+        conversationResponding: false,
+      });
+    });
+    expect(screen.getByText('1 task running')).toBeInTheDocument();
+  });
+
+  it('applies streamed parent activity with visible output atomically', () => {
+    render(
+      <SessionRunningTaskCountContext.Provider value={1}>
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            textMessage({
+              id: 'user-1',
+              role: 'user',
+              text: 'Start tasks',
+              ts: 1,
+            }),
+            textMessage({
+              id: 'assistant-1',
+              role: 'assistant',
+              text: 'Tasks launched',
+              ts: 2,
+            }),
+          ]}
+          canReply
+        />
+      </SessionRunningTaskCountContext.Provider>,
+    );
+    expect(screen.getByText('1 task running')).toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        conversationResponding: true,
+        messages: [
+          textMessage({
+            id: 'assistant-2',
+            role: 'assistant',
+            text: 'Parent output is streaming',
+            ts: 3,
+          }),
+        ],
+      });
+    });
+
+    expect(screen.getByText('Parent output is streaming')).toBeInTheDocument();
+    expect(screen.queryByText('1 task running')).not.toBeInTheDocument();
+  });
+
+  it('shows Working while the initial Fast turn is awaiting output', () => {
     render(
       <FastSessionTranscript sessionId="session-1" initialMessages={[]} />,
     );
 
-    expect(screen.getByText('Thinking')).toBeInTheDocument();
+    expect(screen.getByText('Working')).toBeInTheDocument();
   });
 
-  it('shows Thinking after a follow-up until streamed output arrives', async () => {
+  it('shows a staged initial prompt immediately and reconciles its canonical event', () => {
+    authenticatedUserState.user = {
+      userId: 'current-user',
+      name: 'Current User',
+      primaryEmail: 'current@example.com',
+      resource: {
+        primaryEmailAddress: {
+          id: 'current-email',
+          emailAddress: 'current@example.com',
+        },
+        imageUrl: 'https://example.com/current-user.png',
+      },
+    };
+    stagePendingFastSessionLaunch('session-1', {
+      fastConversationId: 'fast-session-1',
+      text: 'Initial question',
+      images: ['data:image/png;base64,aGVsbG8='],
+    });
+    render(
+      <FastSessionTranscript sessionId="session-1" initialMessages={[]} />,
+    );
+
+    expect(screen.getByText('Initial question')).toBeInTheDocument();
+    expect(screen.getByText('Working')).toBeInTheDocument();
+    const optimisticAvatarLink = screen.getByRole('link', {
+      name: 'View sessions by Current User',
+    });
+    const optimisticAvatarImage = optimisticAvatarLink.querySelector('img');
+    expect(optimisticAvatarImage).toHaveAttribute(
+      'src',
+      'https://example.com/current-user.png',
+    );
+    expect(optimisticAvatarLink).not.toHaveTextContent('?');
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [
+          {
+            ...textMessage({
+              id: 'canonical-user',
+              role: 'user',
+              text: 'Initial question',
+              ts: Date.now(),
+              userId: 'current-user',
+              userName: 'Current User',
+              userEmail: 'current@example.com',
+              userImageUrl: 'https://example.com/current-user.png',
+            }),
+            eventId: 'web-kickoff:fast-session-1:user',
+            contentBlocks: [
+              { type: 'text', text: 'Initial question' },
+              { type: 'image', mimeType: 'image/png', data: 'aGVsbG8=' },
+            ],
+          },
+        ],
+      });
+    });
+
+    expect(screen.getAllByText('Initial question')).toHaveLength(1);
+    expect(
+      screen.getByRole('link', { name: 'View sessions by Current User' }),
+    ).toBe(optimisticAvatarLink);
+    expect(optimisticAvatarLink.querySelector('img')).toBe(
+      optimisticAvatarImage,
+    );
+  });
+
+  it('does not duplicate a staged prompt already present in initial messages', () => {
+    stagePendingFastSessionLaunch('session-1', {
+      fastConversationId: 'fast-session-1',
+      text: 'Already persisted',
+    });
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          {
+            ...textMessage({
+              id: 'canonical-user',
+              role: 'user',
+              text: 'Already persisted',
+              ts: Date.now(),
+            }),
+            eventId: 'web-kickoff:fast-session-1:user',
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getAllByText('Already persisted')).toHaveLength(1);
+  });
+
+  it('renders a trusted capability offer without waiting for another message', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        canReply
+        initialMessages={[
+          {
+            id: 'source-control-offer',
+            eventId: 'turn-1:capability-offer:0',
+            turnId: 'turn-1',
+            turnSeq: 1,
+            ts: 1,
+            eventType: ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer,
+            role: 'assistant',
+            contentBlocks: [{ type: 'text', text: 'Connect your code.' }],
+            metadata: { visibleInTranscript: true },
+            payload: {
+              offerId: 'cap:source-1',
+              capability: 'source_control',
+              message: 'Connect your code.',
+              status: 'pending',
+            },
+            source: 'web',
+            nativeSessionId: 'opencode-1',
+            nativeMessageId: null,
+            createdAt: new Date('2026-01-01T00:00:00.000Z'),
+          },
+        ]}
+      />,
+    );
+
+    expect(
+      screen.getByText('Capability offer: source_control'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Connect your code.')).toBeInTheDocument();
+    expect(screen.getByRole('textbox')).toBeInTheDocument();
+  });
+
+  it('hides capability tool activity when the offer is represented by its message and card', () => {
+    const toolResult = (
+      id: string,
+      status: 'failed' | 'completed',
+      ts: number,
+    ) => ({
+      ...textMessage({
+        id,
+        role: 'assistant',
+        text: `${status} offer capability`,
+        ts,
+      }),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+      role: 'tool' as const,
+      turnId: 'turn-1',
+      payload: {
+        toolCallId: id,
+        title: 'offer_capability',
+        toolName: 'offer_capability',
+        kind: 'communication',
+        status,
+        rawInput: { arguments: { capability: 'source_control' } },
+      },
+    });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          toolResult('failed-offer', 'failed', 1),
+          {
+            ...textMessage({
+              id: 'source-control-offer',
+              role: 'assistant',
+              text: 'Hi, I can help with your code.',
+              ts: 2,
+            }),
+            eventType: ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer,
+            turnId: 'turn-1',
+            payload: {
+              offerId: 'cap:source-1',
+              capability: 'source_control',
+              message: 'Hi, I can help with your code.',
+              status: 'pending',
+            },
+          },
+          toolResult('completed-offer', 'completed', 3),
+        ]}
+      />,
+    );
+
+    expect(
+      screen.getByText('Hi, I can help with your code.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('Capability offer: source_control'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('failed offer capability')).toBeNull();
+    expect(screen.queryByText('completed offer capability')).toBeNull();
+  });
+
+  it('keeps a capability response in history and removes the resolved card', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          {
+            ...textMessage({
+              id: 'source-control-offer',
+              role: 'assistant',
+              text: 'Connect your code.',
+              ts: 1,
+            }),
+            eventType: ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer,
+            payload: {
+              offerId: 'cap:source-1',
+              capability: 'source_control',
+              message: 'Connect your code.',
+              status: 'pending',
+            },
+          },
+          {
+            ...textMessage({
+              id: 'source-control-response',
+              role: 'user',
+              text: 'Not now: source control.',
+              ts: 2,
+            }),
+            eventType: ACP_ENVELOPE_EVENT_TYPES.CapabilityOfferResponse,
+            payload: {
+              offerId: 'cap:source-1',
+              capability: 'source_control',
+              resolution: 'dismissed',
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.queryByText('Capability offer: source_control')).toBeNull();
+    expect(screen.getByText('Not now: source control.')).toBeInTheDocument();
+  });
+
+  it('shows Working after a follow-up until streamed output arrives', async () => {
     vi.spyOn(Date, 'now').mockReturnValue(2);
     replyMutate.mockResolvedValue({ success: true });
     render(
@@ -374,12 +2231,12 @@ describe('FastSessionTranscript', () => {
       />,
     );
 
-    expect(screen.queryByText('Thinking')).not.toBeInTheDocument();
+    expect(screen.queryByText('Working')).not.toBeInTheDocument();
     const input = screen.getByPlaceholderText('Message agent');
     fireEvent.change(input, { target: { value: 'Follow up' } });
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
 
-    expect(await screen.findByText('Thinking')).toBeInTheDocument();
+    expect(await screen.findByText('Working')).toBeInTheDocument();
     act(() => {
       FakeEventSource.instances[0]!.emit('messages', {
         messages: [
@@ -400,7 +2257,7 @@ describe('FastSessionTranscript', () => {
         ],
       });
     });
-    expect(screen.getByText('Thinking')).toBeInTheDocument();
+    expect(screen.getByText('Working')).toBeInTheDocument();
 
     act(() => {
       FakeEventSource.instances[0]!.emit('messages', {
@@ -415,11 +2272,11 @@ describe('FastSessionTranscript', () => {
       });
     });
 
-    expect(screen.queryByText('Thinking')).not.toBeInTheDocument();
+    expect(screen.queryByText('Working')).not.toBeInTheDocument();
     expect(screen.getByText('Follow-up answer')).toBeInTheDocument();
   });
 
-  it('clears Thinking when a follow-up send fails', async () => {
+  it('clears Working when a follow-up send fails', async () => {
     replyMutate.mockRejectedValue(new Error('turn is busy'));
     render(
       <FastSessionTranscript
@@ -447,10 +2304,10 @@ describe('FastSessionTranscript', () => {
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
 
     expect(await screen.findByText('turn is busy')).toBeInTheDocument();
-    expect(screen.queryByText('Thinking')).not.toBeInTheDocument();
+    expect(screen.queryByText('Working')).not.toBeInTheDocument();
   });
 
-  it('keeps Thinking for an earlier pending response when a later send fails', async () => {
+  it('keeps Working for an earlier pending response when a later send fails', async () => {
     replyMutate.mockRejectedValue(new Error('turn is busy'));
     render(
       <FastSessionTranscript
@@ -472,7 +2329,7 @@ describe('FastSessionTranscript', () => {
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
 
     expect(await screen.findByText('turn is busy')).toBeInTheDocument();
-    expect(screen.getByText('Thinking')).toBeInTheDocument();
+    expect(screen.getByText('Working')).toBeInTheDocument();
     expect(screen.getByText('Earlier pending follow-up')).toBeInTheDocument();
     expect(screen.getByRole('log')).not.toHaveTextContent('Rejected follow-up');
   });
@@ -517,14 +2374,14 @@ describe('FastSessionTranscript', () => {
         ],
       });
     });
-    expect(screen.queryByText('Thinking')).not.toBeInTheDocument();
+    expect(screen.queryByText('Working')).not.toBeInTheDocument();
 
     await act(async () => {
       finishPreparing?.({ text: 'Later follow-up' });
     });
 
     expect(await screen.findByText('turn is busy')).toBeInTheDocument();
-    expect(screen.queryByText('Thinking')).not.toBeInTheDocument();
+    expect(screen.queryByText('Working')).not.toBeInTheDocument();
     expect(screen.getByText('Earlier response')).toBeInTheDocument();
   });
 
@@ -562,6 +2419,11 @@ describe('FastSessionTranscript', () => {
       />,
     );
 
+    expect(
+      screen.queryByText('Would you like me to resolve these issues?'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText('Review feedback remains.')).toBeInTheDocument();
+    expect(reviewActionMutate).not.toHaveBeenCalled();
     fireEvent.click(
       screen.getByRole('button', { name: 'Resolve these issues' }),
     );
@@ -572,9 +2434,25 @@ describe('FastSessionTranscript', () => {
         choice: 'yes',
       }),
     );
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId('pr-review-action-offer'),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it('does not render a persisted resolved offer', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="22222222-2222-4222-8222-222222222222"
+        initialMessages={[reviewOfferMessage('resolved')]}
+      />,
+    );
+
     expect(
-      await screen.findByText('Resolving the current review issues.'),
-    ).toBeInTheDocument();
+      screen.queryByTestId('pr-review-action-offer'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText('Review feedback remains.')).toBeVisible();
   });
 
   it('hides dismissed offers and renders late-click states without controls', async () => {
@@ -657,6 +2535,9 @@ describe('FastSessionTranscript', () => {
             source: 'slack',
             nativeSessionId: null,
             nativeMessageId: null,
+            userName: 'Slack Sender',
+            userEmail: 'sender@example.com',
+            userImageUrl: null,
             createdAt: new Date('2026-01-01T00:00:00.000Z'),
           },
           {
@@ -682,9 +2563,10 @@ describe('FastSessionTranscript', () => {
     expect(screen.getByRole('log')).toBeInTheDocument();
     expect(screen.getByText('What changed?')).toBeInTheDocument();
     expect(screen.getByText('Two files')).toBeInTheDocument();
+    expect(screen.getByLabelText('Slack Sender')).toHaveTextContent('SS');
   });
 
-  it('updates one canonical tool row from in-progress to completed via the stream', () => {
+  it('hides voice delivery while updating an ordinary tool row via the stream', () => {
     const baseMessage = {
       id: 'tool-1',
       eventId: 'turn-1:tool:0',
@@ -730,15 +2612,27 @@ describe('FastSessionTranscript', () => {
       createdAt: '2026-01-01T00:00:01.000Z',
     };
 
+    const voiceCommentary = {
+      ...textMessage({
+        id: 'voice-result-1',
+        role: 'assistant' as const,
+        text: 'Internal voice result',
+        ts: 1,
+      }),
+      metadata: { visibleInTranscript: true, voiceCommentary: true },
+    };
+
     render(
       <FastSessionTranscript
         sessionId="session-1"
-        initialMessages={[toolCall]}
+        initialMessages={[voiceCommentary, toolCall]}
       />,
     );
 
+    expect(screen.queryByText(/result to voice/i)).not.toBeInTheDocument();
+    expect(screen.queryByText('Internal voice result')).not.toBeInTheDocument();
     expect(screen.getByText('Starting')).toBeInTheDocument();
-    expect(screen.getByText('Coding Task')).toBeInTheDocument();
+    expect(screen.getByText('coding task')).toBeInTheDocument();
     expect(screen.getByText('Running')).toBeInTheDocument();
     expect(FakeEventSource.instances).toHaveLength(1);
     expect(FakeEventSource.instances[0]!.url).toBe(
@@ -875,68 +2769,124 @@ describe('FastSessionTranscript', () => {
     expect(openTaskPanel).toHaveBeenCalledWith('child-1');
   });
 
-  it('cold-loads one completed tool row before an intervening kickoff', () => {
-    render(
-      <FastSessionTranscript
-        sessionId="session-1"
-        initialMessages={[
-          {
-            id: 'tool-1',
-            eventId: 'turn-1:tool:0',
-            turnId: 'turn-1',
-            turnSeq: 1,
-            ts: 2,
-            eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
-            role: 'tool',
-            contentBlocks: [{ type: 'text', text: '{"success":true}' }],
-            metadata: { visibleInTranscript: true },
-            payload: {
-              toolCallId: 'turn-1:tool:0',
-              title: 'launch_task',
-              kind: 'tool',
-              status: 'completed',
-              isExecute: false,
-              isMcp: false,
-              mcpServerName: null,
-              mcpToolName: null,
-              toolName: 'launch_task',
-              command: null,
-              exitCode: null,
-              output: '{"success":true}',
-              rawInput: { arguments: { prompt: 'Fix checkout' } },
+  it.each([false, true])(
+    'keeps the task card while hiding runtime navigation (standalone: %s)',
+    (standalone) => {
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            {
+              id: 'tool-1',
+              eventId: 'turn-1:tool:0',
+              turnId: 'turn-1',
+              turnSeq: 1,
+              ts: 2,
+              eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+              role: 'tool',
+              contentBlocks: [{ type: 'text', text: '{"success":true}' }],
+              metadata: { visibleInTranscript: true },
+              payload: {
+                toolCallId: 'turn-1:tool:0',
+                title: 'launch_task',
+                kind: 'tool',
+                status: 'completed',
+                isExecute: false,
+                isMcp: false,
+                mcpServerName: null,
+                mcpToolName: null,
+                toolName: 'launch_task',
+                command: null,
+                exitCode: null,
+                output: '{"success":true}',
+                rawInput: { arguments: { prompt: 'Fix checkout' } },
+              },
+              source: 'slack',
+              nativeSessionId: 'opencode-1',
+              nativeMessageId: null,
+              createdAt: new Date('2026-01-01T00:00:01.000Z'),
             },
-            source: 'slack',
-            nativeSessionId: 'opencode-1',
-            nativeMessageId: null,
-            createdAt: new Date('2026-01-01T00:00:01.000Z'),
-          },
-          {
-            id: 'kickoff-1',
-            eventId: 'turn-1:assistant:0',
-            turnId: 'turn-1',
-            turnSeq: 2,
-            ts: 3,
-            eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
-            role: 'assistant',
-            contentBlocks: [
-              { type: 'text', text: 'I started the checkout fix.' },
-            ],
-            metadata: { visibleInTranscript: true },
-            payload: { purpose: 'progress', kickoff: true },
-            source: 'slack',
-            nativeSessionId: 'opencode-1',
-            nativeMessageId: null,
-            createdAt: new Date('2026-01-01T00:00:02.000Z'),
-          },
-        ]}
-      />,
-    );
+            {
+              id: 'kickoff-1',
+              eventId: 'turn-1:assistant:0',
+              turnId: 'turn-1',
+              turnSeq: 2,
+              ts: 3,
+              eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+              role: 'assistant',
+              contentBlocks: [
+                {
+                  type: 'text',
+                  text: `${standalone ? '' : 'I started the checkout fix.\n\n'}[Open in Roomote](https://roomote.example/sessions/session-1?task=child-1)`,
+                },
+              ],
+              metadata: { visibleInTranscript: true },
+              payload: {
+                purpose: 'progress',
+                ...(standalone ? { taskNavigation: true } : { kickoff: true }),
+              },
+              source: 'slack',
+              nativeSessionId: 'opencode-1',
+              nativeMessageId: null,
+              createdAt: new Date('2026-01-01T00:00:02.000Z'),
+            },
+          ]}
+        />,
+      );
 
-    expect(
-      screen.getByRole('button', { name: /Started Coding Task Completed/ }),
-    ).toBeInTheDocument();
-    expect(screen.getByText('I started the checkout fix.')).toBeInTheDocument();
-  });
+      expect(
+        screen.getByRole('button', { name: /Started coding task Completed/ }),
+      ).toBeInTheDocument();
+      if (!standalone) {
+        expect(
+          screen.getByText('I started the checkout fix.'),
+        ).toBeInTheDocument();
+      }
+      expect(
+        screen.queryByRole('link', { name: 'Open in Roomote' }),
+      ).not.toBeInTheDocument();
+    },
+  );
+
+  it.each(['', 'You can follow the work here.\n\n'])(
+    'preserves ordinary assistant links with prefix %j',
+    (prefix) => {
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            {
+              id: 'ordinary-link',
+              eventId: 'turn-1:assistant:0',
+              turnId: 'turn-1',
+              turnSeq: 1,
+              ts: 1,
+              eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+              role: 'assistant',
+              contentBlocks: [
+                {
+                  type: 'text',
+                  text: `${prefix}[Open in Roomote](https://roomote.example/sessions/session-1?task=child-1)`,
+                },
+              ],
+              metadata: { visibleInTranscript: true },
+              payload: { purpose: 'progress' },
+              source: 'slack',
+              nativeSessionId: 'opencode-1',
+              nativeMessageId: null,
+              createdAt: new Date('2026-01-01T00:00:00.000Z'),
+            },
+          ]}
+        />,
+      );
+      expect(
+        screen.getByRole('link', { name: 'Open in Roomote' }),
+      ).toHaveAttribute(
+        'href',
+        'https://roomote.example/sessions/session-1?task=child-1',
+      );
+    },
+  );
 
   it('shows a reply composer for web sessions and sends replies optimistically', async () => {
     replyMutate.mockResolvedValue({ success: true });
@@ -950,6 +2900,7 @@ describe('FastSessionTranscript', () => {
     );
 
     const input = screen.getByPlaceholderText('Message agent');
+    expect(input).toHaveFocus();
     fireEvent.change(input, { target: { value: 'Follow up question' } });
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
 
@@ -962,6 +2913,209 @@ describe('FastSessionTranscript', () => {
       model: null,
       reasoningEffort: null,
     });
+  });
+
+  it('keeps the current-user avatar mounted while an optimistic reply reconciles', async () => {
+    authenticatedUserState.user = {
+      userId: 'current-user',
+      name: 'Current User',
+      primaryEmail: 'current@example.com',
+      resource: {
+        primaryEmailAddress: {
+          id: 'current-email',
+          emailAddress: 'current@example.com',
+        },
+        imageUrl: 'https://example.com/current-user.png',
+      },
+    };
+    replyMutate.mockResolvedValue({ success: true });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        canReply
+        owner={{
+          userId: 'session-owner',
+          name: 'Session Owner',
+          email: 'owner@example.com',
+          imageUrl: 'https://example.com/session-owner.png',
+        }}
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, { target: { value: 'Follow up question' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+
+    const optimisticAvatarLink = await screen.findByRole('link', {
+      name: 'View sessions by Current User',
+    });
+    const optimisticAvatarImage = optimisticAvatarLink.querySelector('img');
+    expect(optimisticAvatarImage).toHaveAttribute(
+      'src',
+      'https://example.com/current-user.png',
+    );
+    expect(optimisticAvatarLink).not.toHaveTextContent('?');
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [
+          textMessage({
+            id: 'canonical-user',
+            role: 'user',
+            text: 'Follow up question',
+            ts: Date.now(),
+            userId: 'current-user',
+            userName: 'Current User',
+            userEmail: 'current@example.com',
+            userImageUrl: 'https://example.com/current-user.png',
+          }),
+        ],
+      });
+    });
+
+    expect(screen.getAllByText('Follow up question')).toHaveLength(1);
+    expect(
+      screen.getByRole('link', { name: 'View sessions by Current User' }),
+    ).toBe(optimisticAvatarLink);
+    expect(optimisticAvatarLink.querySelector('img')).toBe(
+      optimisticAvatarImage,
+    );
+    expect(
+      screen.queryByRole('link', { name: 'View sessions by Session Owner' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it.each(['Tab', 'Escape', 'mouse', 'touch'])(
+    'preserves focus-only hints and %s interaction for a long suggestion',
+    (action) => {
+      const suggestion =
+        'Implement the marker fix and add regression coverage.';
+      composerSuggestionState.data = { suggestion, messageCount: 2 };
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            textMessage({
+              id: 'user-1',
+              role: 'user',
+              text: 'Question',
+              ts: 1,
+            }),
+            textMessage({
+              id: 'assistant-1',
+              role: 'assistant',
+              text: 'Answer',
+              ts: 2,
+            }),
+          ]}
+          canReply
+        />,
+      );
+      const input = screen.getByPlaceholderText(suggestion);
+      act(() => input.blur());
+      expect(
+        screen.queryByRole('button', { name: 'Insert suggested message' }),
+      ).not.toBeInTheDocument();
+      act(() => input.focus());
+      const hint = screen.getByRole('button', {
+        name: 'Insert suggested message',
+      });
+      expect(hint).toHaveTextContent('Tab to accept');
+      expect(input).toHaveAccessibleDescription(
+        `Suggested message: ${suggestion}. Press Tab to accept or Escape to dismiss.`,
+      );
+      act(() => input.blur());
+      expect(hint).not.toBeInTheDocument();
+      act(() => input.focus());
+
+      if (action === 'mouse' || action === 'touch') {
+        const focusedHint = screen.getByRole('button', {
+          name: 'Insert suggested message',
+        });
+        const pointerDown = createEvent.pointerDown(focusedHint, {
+          cancelable: true,
+        });
+        Object.defineProperty(pointerDown, 'pointerType', { value: action });
+        expect(fireEvent(focusedHint, pointerDown)).toBe(false);
+        expect(input).toHaveFocus();
+        if (action === 'mouse') {
+          fireEvent.click(focusedHint);
+        }
+      } else {
+        fireEvent.keyDown(input, { key: action, code: action });
+      }
+
+      expect(input).toHaveValue(action === 'Escape' ? '' : suggestion);
+      expect(input).toHaveFocus();
+      expect(
+        screen.queryByRole('button', { name: 'Insert suggested message' }),
+      ).not.toBeInTheDocument();
+    },
+  );
+
+  it('shows a later suggestion hint on the focused composer after a successful send', async () => {
+    composerSuggestionState.data = {
+      suggestion: 'Accept the first suggestion',
+      messageCount: 2,
+    };
+    replyMutate.mockResolvedValue({ success: true });
+    const initialMessages = [
+      textMessage({ id: 'user-1', role: 'user', text: 'Question', ts: 1 }),
+      textMessage({
+        id: 'assistant-1',
+        role: 'assistant',
+        text: 'Answer',
+        ts: 2,
+      }),
+    ];
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={initialMessages}
+        canReply
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('Accept the first suggestion');
+    fireEvent.focus(input);
+    expect(
+      screen.getByRole('button', { name: 'Insert suggested message' }),
+    ).toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: 'My own reply' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+    await waitFor(() => expect(replyMutate).toHaveBeenCalled());
+    await screen.findByPlaceholderText('Message agent');
+
+    composerSuggestionState.data = {
+      suggestion: 'Accept the next suggestion',
+      messageCount: 3,
+    };
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [
+          textMessage({
+            id: 'assistant-2',
+            role: 'assistant',
+            text: 'Next answer',
+            ts: Date.now() + 1,
+          }),
+        ],
+      });
+    });
+
+    await waitFor(() =>
+      expect(
+        screen.getByPlaceholderText('Accept the next suggestion'),
+      ).toHaveFocus(),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Insert suggested message' }),
+      ).toBeInTheDocument(),
+    );
   });
 
   it('persists model selections immediately and uses them for the next reply', async () => {
@@ -1104,7 +3258,7 @@ describe('FastSessionTranscript', () => {
             source: 'web',
             nativeSessionId: null,
             nativeMessageId: null,
-            createdAt: new Date().toISOString(),
+            createdAt: new Date(),
           },
         ],
       });
@@ -1138,6 +3292,52 @@ describe('FastSessionTranscript', () => {
     expect(input.value).toBe('Do not lose me');
   });
 
+  it('shows structured input with the ordinary composer while non-preset input is pending', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          {
+            id: 'request-1',
+            eventId: 'request-1',
+            turnId: 'turn-1',
+            turnSeq: 1,
+            ts: Date.now(),
+            eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+            role: 'assistant',
+            contentBlocks: [{ type: 'text', text: 'Choose one' }],
+            metadata: { visibleInTranscript: true },
+            payload: {
+              requestId: 'rui:request-1',
+              status: 'pending',
+              sessionId: 'session-1',
+              turnId: 'turn-1',
+              callId: 'call-1',
+              questions: [
+                {
+                  id: 'choice',
+                  header: 'Choice',
+                  question: 'Choose one',
+                  isOther: false,
+                  isSecret: false,
+                  options: [{ label: 'One', description: 'First choice' }],
+                },
+              ],
+            },
+            source: 'web',
+            nativeSessionId: null,
+            nativeMessageId: null,
+            createdAt: new Date(),
+          },
+        ]}
+        canReply
+      />,
+    );
+
+    expect(screen.getByText('Structured input request')).toBeVisible();
+    expect(screen.getByPlaceholderText('Message agent')).toBeInTheDocument();
+  });
+
   it('updates the header title from the session stream event', () => {
     document.title = 'Roomote';
     render(
@@ -1148,7 +3348,9 @@ describe('FastSessionTranscript', () => {
       />,
     );
 
-    expect(screen.getByText('New session')).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { name: 'New session' }),
+    ).toHaveAttribute('title', 'New session');
 
     act(() => {
       FakeEventSource.instances[0]!.emit('session', {
@@ -1158,13 +3360,69 @@ describe('FastSessionTranscript', () => {
     });
 
     expect(
-      screen.getByText(
-        'Rotate the API keys across every production environment without downtime',
-      ),
-    ).toBeInTheDocument();
+      screen.getByRole('heading', {
+        name: 'Rotate the API keys across every production environment without downtime',
+      }),
+    ).toHaveAttribute(
+      'title',
+      'Rotate the API keys across every production environment without downtime',
+    );
     expect(document.title).toBe(
       'Rotate the API keys across every production environment with... | Roomote',
     );
+  });
+
+  it('renders header extras and actions while preserving the Fast stream ID', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="fast-conversation-1"
+        initialMessages={[]}
+        initialTitle="Short session title"
+        headerExtras={
+          <a href="https://github.com/acme/widgets/pull/42">widgets#42</a>
+        }
+        headerActions={<button type="button">Session viewers</button>}
+      />,
+    );
+
+    const heading = screen.getByRole('heading', {
+      name: 'Short session title',
+    });
+    expect(heading.closest('header')).toContainElement(
+      screen.getByRole('link', { name: 'widgets#42' }),
+    );
+    expect(heading.closest('header')).toContainElement(
+      screen.getByRole('button', { name: 'Session viewers' }),
+    );
+    expect(FakeEventSource.instances).toHaveLength(1);
+    expect(FakeEventSource.instances[0]!.url).toBe(
+      '/api/sessions/fast-conversation-1/stream',
+    );
+  });
+
+  it('shows private session metadata before the model in the header', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="private-session"
+        initialMessages={[]}
+        initialTitle="Private planning"
+        sessionModel="model-1"
+        privateSession
+      />,
+    );
+
+    const privateIndicator = screen.getByLabelText('Private session');
+    expect(privateIndicator).toHaveClass('text-accent-foreground');
+    expect(
+      privateIndicator.querySelector('.lucide-hat-glasses'),
+    ).toBeInTheDocument();
+    const metadata = privateIndicator.parentElement;
+    expect(metadata).not.toBeNull();
+    expect(metadata?.textContent).toContain('model-1');
+    expect(
+      privateIndicator.compareDocumentPosition(screen.getByText('model-1')) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it('hides the reply composer for non-web sessions', () => {
@@ -1173,5 +3431,1070 @@ describe('FastSessionTranscript', () => {
     );
 
     expect(screen.queryByPlaceholderText('Message agent')).toBeNull();
+  });
+  const chunkEvent = (
+    eventId: string,
+    text: string,
+    ts = 2,
+    fastTurnId?: string,
+  ) => ({
+    event: {
+      id: eventId,
+      kind: 'text',
+      ts,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessageChunk,
+      role: 'assistant',
+      contentBlocks: [{ type: 'text', text }],
+      metadata: {
+        sessionId: 'opencode-1',
+        turnId: 'msg-1',
+        ...(fastTurnId ? { fastTurnId } : {}),
+      },
+      payload: { sessionId: 'opencode-1', turnId: 'msg-1', text },
+      text,
+    },
+  });
+
+  it('streams reply chunks live and lets the persisted row replace them', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          textMessage({ id: 'user-1', role: 'user', text: 'Hi', ts: 1 }),
+        ]}
+        canReply
+      />,
+    );
+    expect(screen.getByText('Working')).toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit(
+        'chunk',
+        chunkEvent('assistant-1:event', 'Looking'),
+      );
+    });
+    expect(screen.getByText('Looking')).toBeInTheDocument();
+    expect(screen.queryByText('Working')).not.toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit(
+        'chunk',
+        chunkEvent('assistant-1:event', ' into it'),
+      );
+    });
+    expect(screen.getByText('Looking into it')).toBeInTheDocument();
+    const streamedNode = screen.getByText('Looking into it');
+
+    // The persisted row lands under the same eventId and takes over in
+    // place: the same element is updated rather than remounted.
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [
+          textMessage({
+            id: 'assistant-1',
+            role: 'assistant',
+            text: 'Looking into it now.',
+            ts: 3,
+          }),
+        ],
+      });
+    });
+    expect(screen.getByText('Looking into it now.')).toBe(streamedNode);
+    expect(screen.queryByText('Looking into it')).not.toBeInTheDocument();
+
+    // A later reply streams as its own message.
+    act(() => {
+      FakeEventSource.instances[0]!.emit(
+        'chunk',
+        chunkEvent('assistant-2:event', 'Done.', 4),
+      );
+    });
+    expect(screen.getByText('Looking into it now.')).toBeInTheDocument();
+    expect(screen.getByText('Done.')).toBeInTheDocument();
+  });
+
+  it('refreshes task-backed panes when a task report admission is pushed', async () => {
+    render(
+      <FastSessionTranscript sessionId="session-1" initialMessages={[]} />,
+    );
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('task-report', {
+        type: 'task_report_admitted',
+        eventId: 'fast-parent-child-message:report-1:user',
+        taskId: 'task-1',
+        admittedAtMs: Date.now() - 20,
+        serverReceivedAtMs: Date.now() - 10,
+      });
+    });
+
+    await waitFor(() => expect(invalidateQueries).toHaveBeenCalledTimes(3));
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ['fastSessions.tasks', { sessionId: 'session-1' }],
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ['sandboxSession.byTaskId', { taskId: 'task-1' }],
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ['artifacts.forTask', { taskId: 'task-1' }],
+    });
+  });
+
+  it('withdraws streamed text that no reply delivered once the turn settles', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          textMessage({ id: 'user-1', role: 'user', text: 'Hi', ts: 1 }),
+          textMessage({
+            id: 'assistant-0',
+            role: 'assistant',
+            text: 'Earlier answer',
+            ts: 2,
+          }),
+        ]}
+        canReply
+      />,
+    );
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit(
+        'chunk',
+        chunkEvent('assistant-1:event', 'Draft text', 3),
+      );
+    });
+    expect(screen.getByText('Draft text')).toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('session', {
+        conversationResponding: false,
+      });
+    });
+    expect(screen.queryByText('Draft text')).not.toBeInTheDocument();
+    expect(screen.getByText('Earlier answer')).toBeInTheDocument();
+  });
+
+  describe('live voice', () => {
+    it('hides the voice toggle until the deployment reports voice enabled', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: false });
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />,
+      );
+
+      await waitFor(() => expect(voiceStatusQuery).toHaveBeenCalled());
+      expect(
+        screen.queryByRole('button', { name: /^voice conversation$/i }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('starts a conversation from the voice toggle when voice is enabled', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: true });
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />,
+      );
+
+      const toggle = await screen.findByRole('button', {
+        name: /^voice conversation$/i,
+      });
+      fireEvent.click(toggle);
+      expect(liveVoiceState.start).toHaveBeenCalledTimes(1);
+      expect(liveVoiceState.stop).not.toHaveBeenCalled();
+    });
+
+    it('cancels a connecting handshake from the toggle', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: true });
+      liveVoiceState.status = 'connecting';
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />,
+      );
+
+      // The button lights up as soon as the handshake starts; there is no
+      // separate status strip, so it is the only voice control on screen.
+      const toggle = await screen.findByRole('button', {
+        name: /^end voice conversation$/i,
+      });
+      expect(screen.getByText('Connecting voice...')).toBeInTheDocument();
+      expect(screen.queryByPlaceholderText('Message agent')).toBeNull();
+      fireEvent.click(toggle);
+      expect(liveVoiceState.stop).toHaveBeenCalledTimes(1);
+      expect(liveVoiceState.start).not.toHaveBeenCalled();
+    });
+
+    it('replaces typing with in-call controls and restores the saved draft when the call ends', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: true });
+      const view = render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />,
+      );
+
+      const input = await screen.findByPlaceholderText('Message agent');
+      fireEvent.change(input, { target: { value: 'Keep this draft' } });
+
+      liveVoiceState.active = true;
+      liveVoiceState.status = 'listening';
+      liveVoiceState.startedAt = Date.now() - 4_000;
+      liveVoiceState.inputLevel = 0.6;
+      view.rerender(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />,
+      );
+
+      expect(screen.queryByPlaceholderText('Message agent')).toBeNull();
+      expect(
+        screen.getByRole('meter', { name: 'Microphone level' }),
+      ).toHaveAttribute('aria-valuenow', '60');
+      const muteButton = screen.getByRole('button', {
+        name: 'Mute your voice',
+      });
+      expect(muteButton.querySelector('.lucide-audio-lines')).not.toBeNull();
+      expect(muteButton.querySelector('.lucide-x')).toBeNull();
+      fireEvent.click(muteButton);
+      expect(liveVoiceState.setMicMuted).toHaveBeenCalledWith(true);
+      expect(
+        screen.getByRole('button', { name: 'Silence Roomote' }),
+      ).toBeInTheDocument();
+
+      liveVoiceState.micMuted = true;
+      view.rerender(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />,
+      );
+      const unmuteButton = screen.getByRole('button', {
+        name: 'Unmute your voice',
+      });
+      expect(unmuteButton.querySelector('.lucide-audio-lines')).not.toBeNull();
+      expect(unmuteButton.querySelector('.lucide-x')).not.toBeNull();
+
+      liveVoiceState.active = false;
+      liveVoiceState.status = 'idle';
+      liveVoiceState.startedAt = null;
+      view.rerender(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />,
+      );
+
+      expect(screen.getByPlaceholderText('Message agent')).toHaveValue(
+        'Keep this draft',
+      );
+    });
+
+    it('waits for the voice-call lease before sending the first spoken request', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: true });
+      liveVoiceState.active = true;
+      liveVoiceState.status = 'listening';
+      let releaseLease!: () => void;
+      waitForVoiceCallLease.mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          releaseLease = resolve;
+        }),
+      );
+      replyMutate.mockResolvedValue({ success: true });
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />,
+      );
+      await screen.findAllByRole('button', { name: /end voice conversation/i });
+
+      act(() => {
+        liveVoiceState.onUtterance?.('Check the build', 'item_1');
+      });
+      expect(waitForVoiceCallLease).toHaveBeenCalledOnce();
+      expect(replyMutate).not.toHaveBeenCalled();
+
+      releaseLease();
+      await waitFor(() => expect(replyMutate).toHaveBeenCalledOnce());
+    });
+
+    it('reads the answer to a spoken request to Live as it streams, and leaves typed replies on screen', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: true });
+      liveVoiceState.active = true;
+      liveVoiceState.status = 'listening';
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />,
+      );
+      await screen.findAllByRole('button', { name: /end voice conversation/i });
+      replyMutate.mockResolvedValue({ success: true });
+
+      act(() => {
+        liveVoiceState.onUtterance?.('Check the build', 'item_1');
+      });
+      await waitFor(() =>
+        expect(replyMutate).toHaveBeenCalledWith(
+          expect.objectContaining({ text: 'Check the build', voiceMode: true }),
+        ),
+      );
+      const turnId = replyMutate.mock.calls[0]?.[0].clientMessageId;
+
+      // A completed sentence is read while the reply is still streaming; the
+      // growing tail waits. The chunk names its Fast turn, so it is attributed
+      // to the delegation that asked for it.
+      act(() => {
+        FakeEventSource.instances[0]!.emit(
+          'chunk',
+          chunkEvent('assistant-1:event', 'First sentence. Second', 11, turnId),
+        );
+      });
+      expect(liveVoiceState.speak).toHaveBeenCalledTimes(1);
+      expect(liveVoiceState.speak).toHaveBeenLastCalledWith(
+        'First sentence.',
+        'item_1',
+      );
+
+      // The persisted row shares the stream's id, so only the unread tail is
+      // spoken; nothing is read twice. Its internal delivery row stays hidden.
+      act(() => {
+        FakeEventSource.instances[0]!.emit('messages', {
+          messages: [
+            {
+              ...textMessage({
+                id: 'assistant-1',
+                role: 'assistant',
+                text: 'First sentence. Second part is here.',
+                ts: 11,
+              }),
+              turnId,
+              metadata: { visibleInTranscript: true, voiceCommentary: true },
+            },
+          ],
+        });
+      });
+      expect(liveVoiceState.speak).toHaveBeenCalledTimes(2);
+      expect(liveVoiceState.speak).toHaveBeenLastCalledWith(
+        'Second part is here.',
+        'item_1',
+      );
+      expect(screen.queryByText(/result to voice/i)).not.toBeInTheDocument();
+
+      // A typed message's written reply stays on screen and is not spoken,
+      // streamed or persisted.
+      act(() => {
+        FakeEventSource.instances[0]!.emit(
+          'chunk',
+          chunkEvent(
+            'assistant-2:event',
+            'Typed answer stays written.',
+            12,
+            'typed-turn',
+          ),
+        );
+        FakeEventSource.instances[0]!.emit('messages', {
+          messages: [
+            textMessage({
+              id: 'assistant-2',
+              role: 'assistant',
+              text: 'Typed answer stays written.',
+              ts: 12,
+            }),
+          ],
+        });
+      });
+      expect(liveVoiceState.speak).toHaveBeenCalledTimes(2);
+      expect(
+        screen.getByText('Typed answer stays written.'),
+      ).toBeInTheDocument();
+    });
+
+    it('shows what is being said on the call as it is spoken, then hands over to the persisted row', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: true });
+      liveVoiceState.active = true;
+      liveVoiceState.status = 'listening';
+      recordVoiceTurnMutate.mockResolvedValue({ eventId: 'voice:spoken-1' });
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />,
+      );
+      await screen.findAllByRole('button', { name: /end voice conversation/i });
+
+      act(() => {
+        liveVoiceState.onSpokenTurnDelta?.('Roo-Code has about');
+      });
+      expect(screen.getByText('Roo-Code has about')).toBeInTheDocument();
+      act(() => {
+        liveVoiceState.onSpokenTurnDelta?.('Roo-Code has about 452,000 lines.');
+      });
+      expect(
+        screen.getByText('Roo-Code has about 452,000 lines.'),
+      ).toBeInTheDocument();
+
+      // The finished turn stays on screen while its row is written, then the
+      // persisted row replaces it without a flash.
+      act(() => {
+        liveVoiceState.onSpokenTurn?.('Roo-Code has about 452,000 lines.');
+      });
+      await waitFor(() =>
+        expect(recordVoiceTurnMutate).toHaveBeenCalledWith({
+          sessionId: 'session-1',
+          role: 'assistant',
+          text: 'Roo-Code has about 452,000 lines.',
+        }),
+      );
+      expect(
+        screen.getByText('Roo-Code has about 452,000 lines.'),
+      ).toBeInTheDocument();
+      act(() => {
+        FakeEventSource.instances[0]!.emit('messages', {
+          messages: [
+            {
+              ...textMessage({
+                id: 'spoken-1',
+                role: 'assistant',
+                text: 'Roo-Code has about 452,000 lines.',
+                ts: 9,
+              }),
+              eventId: 'voice:spoken-1',
+              metadata: { visibleInTranscript: true, voiceTurn: 'spoken' },
+            },
+          ],
+        });
+      });
+      await waitFor(() =>
+        expect(
+          screen.getAllByText('Roo-Code has about 452,000 lines.'),
+        ).toHaveLength(1),
+      );
+    });
+
+    it('records a spoken acknowledgement only after the request it answers is sent', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: true });
+      liveVoiceState.active = true;
+      liveVoiceState.status = 'listening';
+      // The person has finished speaking; the utterance is still being
+      // cleaned up when GPT-Live says its acknowledgement.
+      liveVoiceState.deliveringUtterances = 1;
+      const transcript = () => (
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />
+      );
+      const { rerender } = render(transcript());
+      await screen.findAllByRole('button', { name: /end voice conversation/i });
+
+      act(() => {
+        liveVoiceState.onSpokenTurn?.('Sure, checking what it would take.');
+      });
+      expect(recordVoiceTurnMutate).not.toHaveBeenCalled();
+
+      // The cleaned request reaches the Session first...
+      replyMutate.mockResolvedValue({ success: true });
+      liveVoiceState.deliveringUtterances = 0;
+      act(() => {
+        liveVoiceState.onUtterance?.(
+          'Can you add a dinosaur to the Sunny Acres game?',
+          'item_1',
+        );
+      });
+      rerender(transcript());
+      await waitFor(() => expect(replyMutate).toHaveBeenCalledTimes(1));
+
+      // ...and the acknowledgement is recorded after it.
+      await waitFor(() =>
+        expect(recordVoiceTurnMutate).toHaveBeenCalledWith({
+          sessionId: 'session-1',
+          role: 'assistant',
+          text: 'Sure, checking what it would take.',
+        }),
+      );
+    });
+
+    it('drops a held spoken acknowledgement when the call ends before cleanup finishes', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: true });
+      liveVoiceState.active = true;
+      liveVoiceState.status = 'listening';
+      liveVoiceState.startedAt = 1_000;
+      liveVoiceState.deliveringUtterances = 1;
+      const transcript = () => (
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />
+      );
+      const { rerender } = render(transcript());
+      await screen.findAllByRole('button', { name: /end voice conversation/i });
+
+      act(() => {
+        liveVoiceState.onHeardTurnDelta?.('check the build');
+        liveVoiceState.onSpokenTurnDelta?.('Sure, checking.');
+        liveVoiceState.onSpokenTurn?.('Sure, checking.');
+      });
+      expect(screen.getByText('check the build')).toBeInTheDocument();
+      expect(screen.getByText('Sure, checking.')).toBeInTheDocument();
+      expect(recordVoiceTurnMutate).not.toHaveBeenCalled();
+
+      liveVoiceState.active = false;
+      liveVoiceState.status = 'idle';
+      liveVoiceState.startedAt = null;
+      rerender(transcript());
+      expect(screen.queryByText('check the build')).not.toBeInTheDocument();
+      expect(screen.queryByText('Sure, checking.')).not.toBeInTheDocument();
+      await waitFor(() =>
+        expect(recordVoiceCallEventMutate).toHaveBeenCalledWith(
+          expect.objectContaining({ sessionId: 'session-1', phase: 'ended' }),
+        ),
+      );
+
+      liveVoiceState.deliveringUtterances = 0;
+      rerender(transcript());
+      expect(recordVoiceTurnMutate).not.toHaveBeenCalled();
+      expect(replyMutate).not.toHaveBeenCalled();
+    });
+
+    it('transcribes the call into the Session: markers, heard turns, and spoken turns', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: true });
+      const transcript = () => (
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />
+      );
+      const { rerender } = render(transcript());
+      fireEvent.click(
+        await screen.findByRole('button', { name: /^voice conversation$/i }),
+      );
+      liveVoiceState.active = true;
+      liveVoiceState.status = 'listening';
+      liveVoiceState.startedAt = 1_000;
+      rerender(transcript());
+      await waitFor(() =>
+        expect(recordVoiceCallEventMutate).toHaveBeenCalledWith({
+          sessionId: 'session-1',
+          phase: 'started',
+        }),
+      );
+
+      act(() => {
+        liveVoiceState.onHeardTurn?.('Hi Roomote, how is it going');
+        liveVoiceState.onSpokenTurn?.('Good, thanks. What can I do for you?');
+      });
+      expect(recordVoiceTurnMutate).toHaveBeenCalledWith({
+        sessionId: 'session-1',
+        role: 'user',
+        text: 'Hi Roomote, how is it going',
+      });
+      expect(recordVoiceTurnMutate).toHaveBeenCalledWith({
+        sessionId: 'session-1',
+        role: 'assistant',
+        text: 'Good, thanks. What can I do for you?',
+      });
+
+      // Persisted markers render as dividers.
+      act(() => {
+        FakeEventSource.instances[0]!.emit('messages', {
+          messages: [
+            {
+              ...textMessage({
+                id: 'call-1',
+                role: 'assistant',
+                text: 'Call started',
+                ts: 5,
+              }),
+              eventType: ACP_ENVELOPE_EVENT_TYPES.VoiceCall,
+              role: 'system',
+              payload: { phase: 'started' },
+            },
+          ],
+        });
+      });
+      expect(screen.getByTestId('voice-call-marker')).toHaveTextContent(
+        'Call started',
+      );
+
+      liveVoiceState.active = false;
+      liveVoiceState.status = 'idle';
+      liveVoiceState.startedAt = null;
+      rerender(transcript());
+      await waitFor(() =>
+        expect(recordVoiceCallEventMutate).toHaveBeenCalledWith(
+          expect.objectContaining({ sessionId: 'session-1', phase: 'ended' }),
+        ),
+      );
+
+      act(() => {
+        FakeEventSource.instances[0]!.emit('messages', {
+          messages: [
+            {
+              ...textMessage({
+                id: 'call-2',
+                role: 'assistant',
+                text: 'Call ended',
+                ts: 10,
+              }),
+              eventType: ACP_ENVELOPE_EVENT_TYPES.VoiceCall,
+              role: 'system',
+              payload: { phase: 'ended', durationMs: 9_000 },
+            },
+          ],
+        });
+      });
+      expect(screen.getByText('Call ended · 9s')).toBeInTheDocument();
+    });
+
+    it('persists the call end only after a delayed call start finishes', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: true });
+      let resolveStart!: (value: { eventId: string }) => void;
+      recordVoiceCallEventMutate.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveStart = resolve;
+          }),
+      );
+      const transcript = () => (
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />
+      );
+      const { rerender } = render(transcript());
+
+      liveVoiceState.active = true;
+      liveVoiceState.status = 'listening';
+      liveVoiceState.startedAt = 1_000;
+      rerender(transcript());
+      await waitFor(() =>
+        expect(recordVoiceCallEventMutate).toHaveBeenCalledWith({
+          sessionId: 'session-1',
+          phase: 'started',
+        }),
+      );
+
+      liveVoiceState.active = false;
+      liveVoiceState.status = 'idle';
+      liveVoiceState.startedAt = null;
+      rerender(transcript());
+      expect(recordVoiceCallEventMutate).toHaveBeenCalledTimes(1);
+
+      resolveStart({ eventId: 'voice-call:started' });
+      await waitFor(() => {
+        expect(recordVoiceCallEventMutate).toHaveBeenCalledTimes(2);
+        expect(recordVoiceCallEventMutate).toHaveBeenLastCalledWith(
+          expect.objectContaining({
+            sessionId: 'session-1',
+            phase: 'ended',
+          }),
+        );
+      });
+    });
+
+    it('attributes a streamed first reply to its own delegation even after a second request', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: true });
+      liveVoiceState.active = true;
+      liveVoiceState.status = 'listening';
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />,
+      );
+      await screen.findAllByRole('button', { name: /end voice conversation/i });
+      replyMutate.mockResolvedValue({ success: true });
+
+      act(() => {
+        liveVoiceState.onUtterance?.('Check the first build', 'item_first');
+      });
+      await waitFor(() => expect(replyMutate).toHaveBeenCalledTimes(1));
+      const firstTurnId = replyMutate.mock.calls[0]?.[0].clientMessageId;
+      act(() => {
+        liveVoiceState.onUtterance?.(
+          'Actually check the second',
+          'item_second',
+        );
+      });
+      await waitFor(() => expect(replyMutate).toHaveBeenCalledTimes(2));
+
+      // The first reply starts streaming only now, after the second request.
+      act(() => {
+        FakeEventSource.instances[0]!.emit(
+          'chunk',
+          chunkEvent(
+            'assistant-first:event',
+            'First build passed. More',
+            5,
+            firstTurnId,
+          ),
+        );
+      });
+      expect(liveVoiceState.speak).toHaveBeenCalledWith(
+        'First build passed.',
+        'item_first',
+      );
+    });
+
+    it('returns overlapping Fast results to their originating Live delegations', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: true });
+      liveVoiceState.active = true;
+      liveVoiceState.status = 'listening';
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />,
+      );
+      await screen.findAllByRole('button', { name: /end voice conversation/i });
+
+      act(() => {
+        liveVoiceState.onUtterance?.('Check the first build', 'item_first');
+      });
+      await waitFor(() => expect(replyMutate).toHaveBeenCalledTimes(1));
+      const firstTurnId = replyMutate.mock.calls[0]?.[0].clientMessageId;
+
+      act(() => {
+        liveVoiceState.onUtterance?.(
+          'Actually check the second',
+          'item_second',
+        );
+      });
+      await waitFor(() => expect(replyMutate).toHaveBeenCalledTimes(2));
+      const secondTurnId = replyMutate.mock.calls[1]?.[0].clientMessageId;
+
+      act(() => {
+        FakeEventSource.instances[0]!.emit('messages', {
+          messages: [
+            {
+              ...textMessage({
+                id: 'assistant-first',
+                role: 'assistant',
+                text: 'First build result',
+                ts: 5,
+              }),
+              turnId: firstTurnId,
+              metadata: { visibleInTranscript: true, voiceCommentary: true },
+            },
+            {
+              ...textMessage({
+                id: 'assistant-second',
+                role: 'assistant',
+                text: 'Second build result',
+                ts: 6,
+              }),
+              turnId: secondTurnId,
+              metadata: { visibleInTranscript: true, voiceCommentary: true },
+            },
+          ],
+        });
+      });
+
+      expect(liveVoiceState.speak).toHaveBeenNthCalledWith(
+        1,
+        'First build result',
+        'item_first',
+      );
+      expect(liveVoiceState.speak).toHaveBeenNthCalledWith(
+        2,
+        'Second build result',
+        'item_second',
+      );
+    });
+
+    it('sets the spoken cutoff from server timestamps, not the browser clock', async () => {
+      // Browser clock far ahead of the server-assigned message timestamps.
+      vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+      voiceStatusQuery.mockResolvedValue({ enabled: true });
+      const transcript = () => (
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            textMessage({
+              id: 'assistant-0',
+              role: 'assistant',
+              text: 'Earlier answer',
+              ts: 1,
+            }),
+          ]}
+          canReply
+        />
+      );
+      const { rerender } = render(transcript());
+      replyMutate.mockResolvedValue({ success: true });
+      const input = screen.getByPlaceholderText('Message agent');
+      fireEvent.change(input, { target: { value: 'Optimistic message' } });
+      fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+      await waitFor(() => expect(replyMutate).toHaveBeenCalled());
+
+      // Start voice while the browser-timestamped optimistic row is waiting
+      // for its persisted SSE echo.
+      fireEvent.click(
+        await screen.findByRole('button', { name: /^voice conversation$/i }),
+      );
+      liveVoiceState.active = true;
+      liveVoiceState.status = 'listening';
+      rerender(transcript());
+
+      act(() => {
+        FakeEventSource.instances[0]!.emit('session', {
+          conversationResponding: true,
+        });
+      });
+      act(() => {
+        FakeEventSource.instances[0]!.emit('messages', {
+          messages: [
+            {
+              ...textMessage({
+                id: 'assistant-1',
+                role: 'assistant',
+                text: 'Server-timed reply',
+                ts: 2,
+              }),
+              metadata: { visibleInTranscript: true, voiceCommentary: true },
+            },
+          ],
+        });
+      });
+      act(() => {
+        FakeEventSource.instances[0]!.emit('session', {
+          conversationResponding: false,
+        });
+      });
+
+      expect(liveVoiceState.speak).toHaveBeenCalledTimes(1);
+      expect(liveVoiceState.speak).toHaveBeenCalledWith(
+        'Server-timed reply',
+        null,
+      );
+    });
+
+    it('stops the voice conversation when a structured input request arrives', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: true });
+      liveVoiceState.active = true;
+      liveVoiceState.status = 'listening';
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />,
+      );
+      await screen.findAllByRole('button', { name: /end voice conversation/i });
+      expect(liveVoiceState.stop).not.toHaveBeenCalled();
+
+      act(() => {
+        FakeEventSource.instances[0]!.emit('messages', {
+          messages: [
+            {
+              ...textMessage({
+                id: 'request-1',
+                role: 'assistant',
+                text: 'Choose one',
+                ts: 5,
+              }),
+              eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+              payload: {
+                requestId: 'rui:request-1',
+                status: 'pending',
+                sessionId: 'session-1',
+                turnId: 'turn-1',
+                callId: 'call-1',
+                questions: [
+                  {
+                    id: 'choice',
+                    header: 'Choice',
+                    question: 'Choose one',
+                    isOther: false,
+                    isSecret: false,
+                    options: [{ label: 'One', description: 'First choice' }],
+                  },
+                ],
+              },
+            },
+          ],
+        });
+      });
+
+      expect(screen.getByText('Structured input request')).toBeVisible();
+      expect(liveVoiceState.stop).toHaveBeenCalledTimes(1);
+    });
+
+    it('auto-starts voice for a session opened from a spoken prompt and speaks the first reply', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: true });
+      window.history.replaceState(null, '', '/sessions/session-1?voice=1');
+      const transcript = () => (
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            textMessage({
+              id: 'user-1',
+              role: 'user',
+              text: 'Hey there',
+              ts: 1,
+            }),
+          ]}
+          canReply
+          autoStartVoice
+        />
+      );
+      const { rerender } = render(transcript());
+
+      await waitFor(() =>
+        expect(liveVoiceState.start).toHaveBeenCalledTimes(1),
+      );
+      // The flag is one-shot: a reload must not restart the conversation.
+      expect(window.location.search).toBe('');
+
+      liveVoiceState.active = true;
+      liveVoiceState.status = 'listening';
+      rerender(transcript());
+
+      act(() => {
+        FakeEventSource.instances[0]!.emit('messages', {
+          messages: [
+            {
+              ...textMessage({
+                id: 'assistant-1',
+                role: 'assistant',
+                text: 'Hi! What can I do?',
+                ts: 2,
+              }),
+              metadata: { visibleInTranscript: true, voiceCommentary: true },
+            },
+          ],
+        });
+      });
+      expect(liveVoiceState.speak).toHaveBeenCalledWith(
+        'Hi! What can I do?',
+        null,
+      );
+    });
+
+    it('does not auto-start voice when the deployment has it disabled', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: false });
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+          autoStartVoice
+        />,
+      );
+      await waitFor(() => expect(voiceStatusQuery).toHaveBeenCalled());
+      expect(liveVoiceState.start).not.toHaveBeenCalled();
+    });
+  });
+
+  it('shows the Session-owned goal above the transcript', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        sessionGoal={{
+          objective: 'Ship the complete release',
+          generation: 'goal-generation:one',
+          status: 'active',
+          maxContinuations: 5,
+          continuationsUsed: 2,
+          blockedReason: null,
+          completedAt: null,
+        }}
+      />,
+    );
+
+    expect(screen.getByText('Ship the complete release')).toBeInTheDocument();
+    expect(
+      screen.getByText(/active - 2\/5 continuations/i),
+    ).toBeInTheDocument();
+  });
+
+  it('updates the Session-owned goal from the live Session stream', () => {
+    render(
+      <FastSessionTranscript sessionId="session-1" initialMessages={[]} />,
+    );
+
+    expect(screen.queryByText('Initial objective')).not.toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('session', {
+        goal: {
+          objective: 'Initial objective',
+          generation: 'goal-generation:one',
+          status: 'active',
+          maxContinuations: 5,
+          continuationsUsed: 0,
+          blockedReason: null,
+          completedAt: null,
+        },
+      });
+    });
+
+    expect(screen.getByText('Initial objective')).toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('session', {
+        goal: {
+          objective: 'Replacement objective',
+          generation: 'goal-generation:two',
+          status: 'active',
+          maxContinuations: 5,
+          continuationsUsed: 0,
+          blockedReason: null,
+          completedAt: null,
+        },
+      });
+    });
+
+    expect(screen.queryByText('Initial objective')).not.toBeInTheDocument();
+    expect(screen.getByText('Replacement objective')).toBeInTheDocument();
+    expect(
+      screen.getByText(/active - 0\/5 continuations/i),
+    ).toBeInTheDocument();
+  });
+
+  it('starts /goal from the Session composer without sending a normal reply', async () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, { target: { value: '/goal ship the release' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+
+    await waitFor(() =>
+      expect(startGoalMutate).toHaveBeenCalledWith({
+        sessionId: 'session-1',
+        objective: 'ship the release',
+      }),
+    );
+    expect(replyMutate).not.toHaveBeenCalled();
   });
 });

@@ -1,5 +1,6 @@
 const {
   mockFindFirstSlackInstallation,
+  mockFindActiveSlackInstallationForChannel,
   mockResolveTeamsCredentials,
   mockResolveTelegramCredentials,
   mockResolveDiscordCredentials,
@@ -8,8 +9,12 @@ const {
   mockFindTelegramPrimaryChatId,
   mockFindDiscordDefaultDestination,
   mockFindUserDirectMessageDestination,
+  mockCanStartAgentMailConversationWithUser,
+  mockPrepareAgentMailConversation,
+  mockAgentMailPostMessage,
 } = vi.hoisted(() => ({
   mockFindFirstSlackInstallation: vi.fn(),
+  mockFindActiveSlackInstallationForChannel: vi.fn(),
   mockResolveTeamsCredentials: vi.fn(),
   mockResolveTelegramCredentials: vi.fn(),
   mockResolveDiscordCredentials: vi.fn(),
@@ -18,9 +23,26 @@ const {
   mockFindTelegramPrimaryChatId: vi.fn(),
   mockFindDiscordDefaultDestination: vi.fn(),
   mockFindUserDirectMessageDestination: vi.fn(),
+  mockCanStartAgentMailConversationWithUser: vi.fn(),
+  mockPrepareAgentMailConversation: vi.fn(),
+  mockAgentMailPostMessage: vi.fn(),
+}));
+
+vi.mock('../../lib/agentmail/outbound', () => ({
+  canStartAgentMailConversationWithUser:
+    mockCanStartAgentMailConversationWithUser,
+  prepareAgentMailConversation: mockPrepareAgentMailConversation,
+}));
+
+vi.mock('../../lib/agentmail-communication', () => ({
+  createAgentMailCommunicationProviderFromRuntimeCredentials: vi.fn(
+    async () => ({ postMessage: mockAgentMailPostMessage }),
+  ),
 }));
 
 vi.mock('@roomote/db/server', () => ({
+  findActiveSlackInstallationForChannel:
+    mockFindActiveSlackInstallationForChannel,
   db: {
     query: {
       slackInstallations: { findFirst: mockFindFirstSlackInstallation },
@@ -68,11 +90,67 @@ import {
   buildDestinationTaskPayloadFields,
   listConnectedCommunicationProviders,
   resolveAutomationRuntimeDestination,
+  prepareAutomationReportDestination,
+  sendAutomationEmailReport,
 } from '../destination';
 
 describe('listConnectedCommunicationProviders', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockCanStartAgentMailConversationWithUser.mockResolvedValue(true);
+  });
+
+  it('resolves the exact Email identity before chat fallbacks', async () => {
+    await expect(
+      resolveAutomationRuntimeDestination({
+        runtime: {
+          destination: {
+            provider: 'slack',
+            channelId: 'C_MANAGER',
+            source: 'manager_channel',
+          },
+          targets: [
+            {
+              provider: 'email',
+              targetKind: 'email_user',
+              externalRef: 'user-1',
+              metadata: { emailIdentityId: 'verified:user-1:opaque' },
+            },
+          ],
+        },
+        slackConnected: true,
+      }),
+    ).resolves.toEqual({
+      provider: 'email',
+      channelId: 'user-1',
+      userId: 'user-1',
+      identityId: 'verified:user-1:opaque',
+      source: 'automation_target',
+    });
+  });
+
+  it('does not substitute chat when an explicit Email identity is unavailable', async () => {
+    mockCanStartAgentMailConversationWithUser.mockResolvedValue(false);
+    await expect(
+      resolveAutomationRuntimeDestination({
+        runtime: {
+          destination: {
+            provider: 'slack',
+            channelId: 'C_MANAGER',
+            source: 'manager_channel',
+          },
+          targets: [
+            {
+              provider: 'email',
+              targetKind: 'email_user',
+              externalRef: 'user-1',
+              metadata: { emailIdentityId: 'verified:user-1:opaque' },
+            },
+          ],
+        },
+        slackConnected: true,
+      }),
+    ).resolves.toBeNull();
   });
 
   it('lists providers in waterfall order', async () => {
@@ -144,7 +222,10 @@ describe('resolveAutomationRuntimeDestination', () => {
     vi.clearAllMocks();
   });
 
-  it('returns a slack destination as-is', async () => {
+  it('binds the manager fallback to its resolved active Slack owner', async () => {
+    mockFindActiveSlackInstallationForChannel.mockResolvedValue({
+      teamId: 'T-B',
+    });
     await expect(
       resolveAutomationRuntimeDestination({
         runtime: {
@@ -160,7 +241,44 @@ describe('resolveAutomationRuntimeDestination', () => {
       provider: 'slack',
       channelId: 'C123',
       source: 'manager_channel',
+      teamId: 'T-B',
     });
+    expect(mockFindActiveSlackInstallationForChannel).toHaveBeenCalledWith(
+      'C123',
+    );
+  });
+
+  it('fails closed when the manager channel has no safe active installation', async () => {
+    mockFindActiveSlackInstallationForChannel.mockResolvedValue(null);
+    await expect(
+      resolveAutomationRuntimeDestination({
+        runtime: {
+          destination: {
+            provider: 'slack',
+            channelId: 'C123',
+            source: 'manager_channel',
+          },
+        },
+        slackConnected: true,
+      }),
+    ).resolves.toBeNull();
+    expect(mockFindTeamsPrimaryConversation).not.toHaveBeenCalled();
+  });
+
+  it('preserves explicit Slack destinations without consulting manager ownership', async () => {
+    const destination = {
+      provider: 'slack',
+      channelId: 'C123',
+      teamId: 'T-EXPLICIT',
+      source: 'automation_target',
+    } as const;
+    await expect(
+      resolveAutomationRuntimeDestination({
+        runtime: { destination },
+        slackConnected: true,
+      }),
+    ).resolves.toEqual(destination);
+    expect(mockFindActiveSlackInstallationForChannel).not.toHaveBeenCalled();
   });
 
   it('ignores a saved slack destination after Slack disconnects and falls back', async () => {
@@ -330,6 +448,73 @@ describe('resolveAutomationRuntimeDestination', () => {
 });
 
 describe('payload fields and prompt context', () => {
+  it('prepares a durable Email conversation and stamps its internal thread', async () => {
+    mockPrepareAgentMailConversation.mockResolvedValue({
+      conversationId: 'conversation-1',
+      inboxId: 'roomote@example.test',
+      messageId: null,
+    });
+    const prepared = await prepareAutomationReportDestination(
+      {
+        provider: 'email',
+        channelId: 'user-1',
+        userId: 'user-1',
+        identityId: 'verified:user-1:opaque',
+        source: 'automation_target',
+      },
+      { subject: 'Report', conversationKey: 'builtin:test:1' },
+    );
+    expect(buildDestinationTaskPayloadFields(prepared)).toEqual({
+      communicationProvider: 'agentmail',
+      communicationChannelId: 'roomote@example.test',
+      communicationThreadId: 'conversation-1',
+    });
+    expect(buildDestinationPromptContext(prepared)).toEqual({
+      channelTag: 'channel_id',
+      postToolName: 'send_chat_reply',
+      surfaceLabel: 'Email',
+    });
+  });
+
+  it('sends a first Email report through the prepared AgentMail thread', async () => {
+    mockPrepareAgentMailConversation.mockResolvedValue({
+      conversationId: 'conversation-1',
+      inboxId: 'roomote@example.test',
+      messageId: null,
+    });
+    await sendAutomationEmailReport(
+      {
+        provider: 'email',
+        channelId: 'user-1',
+        userId: 'user-1',
+        identityId: 'verified:user-1:opaque',
+        source: 'automation_target',
+      },
+      {
+        subject: 'Report',
+        conversationKey: 'builtin:test:1',
+        text: 'Finished',
+        idempotencyKey: 'builtin:test:1:report',
+      },
+    );
+    expect(mockAgentMailPostMessage).toHaveBeenCalledWith({
+      channelId: 'roomote@example.test',
+      threadId: 'conversation-1',
+      text: 'Finished',
+      textFormat: 'markdown',
+      idempotencyKey: 'builtin:test:1:report',
+    });
+  });
+  it('stamps the resolved Slack team into task payloads', () => {
+    expect(
+      buildDestinationTaskPayloadFields({
+        provider: 'slack',
+        channelId: 'C123',
+        teamId: 'T-B',
+        source: 'manager_channel',
+      }),
+    ).toEqual({ teamId: 'T-B' });
+  });
   it('stamps nothing for slack destinations', () => {
     expect(
       buildDestinationTaskPayloadFields({

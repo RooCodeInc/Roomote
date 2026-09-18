@@ -1,6 +1,7 @@
 import {
   db,
   eq,
+  ensureAutomationRows,
   fastAgentConversations,
   llmUsageEvents,
   recordLlmUsage,
@@ -17,9 +18,13 @@ import {
 import {
   advanceSessionReadCursor,
   advanceSessionNotifiedCursor,
+  attachFastConversationToSession,
   deriveSessionStatus,
   ensureSessionForFastConversation,
   ensureSessionForTask,
+  getSessionForFastConversation,
+  getSessionForTask,
+  getTaskHumanOwnerUserIds,
   touchSessionActivity,
 } from '../sessions';
 
@@ -29,7 +34,7 @@ const createdConversationIds: string[] = [];
 const createdUserIds: string[] = [];
 
 afterEach(async () => {
-  if (createdSessionIds.length > 0) {
+  while (createdSessionIds.length > 0) {
     await db.delete(sessions).where(eq(sessions.id, createdSessionIds.pop()!));
   }
   while (createdTaskIds.length > 0) {
@@ -53,7 +58,6 @@ describe('deriveSessionStatus', () => {
   ) => ({
     state: 'completed' as const,
     taskPhase: null,
-    goalStatus: null,
     ...overrides,
   });
 
@@ -70,13 +74,6 @@ describe('deriveSessionStatus', () => {
     ['a responding conversation', true, [task()], 'active'],
     ['an active task', false, [task({ state: 'active' })], 'active'],
     ['a failed task', false, [task({ state: 'failed' })], 'blocked'],
-    ['a blocked goal', false, [task({ goalStatus: 'blocked' })], 'blocked'],
-    [
-      'a budget-limited goal',
-      false,
-      [task({ goalStatus: 'budget_limited' })],
-      'blocked',
-    ],
     ['only settled work', false, [task()], 'ready'],
     ['no work', false, [], 'ready'],
   ] as const)('derives %s as %s', (_label, responding, taskRows, expected) => {
@@ -87,6 +84,19 @@ describe('deriveSessionStatus', () => {
       }),
     ).toBe(expected);
   });
+
+  it.each(['blocked', 'budget_limited'] as const)(
+    'derives a %s Session goal as blocked',
+    (goalStatus) => {
+      expect(
+        deriveSessionStatus({
+          conversationResponding: false,
+          goalStatus,
+          tasks: [task()],
+        }),
+      ).toBe('blocked');
+    },
+  );
 
   it('prioritizes active work over blocked settled work', () => {
     expect(
@@ -272,53 +282,173 @@ describe('session helpers', () => {
     expect(refreshed?.cachedStatus).toBe('ready');
   });
 
-  it('creates one canonical session and owner participant for a visible task', async () => {
-    const user = await userFactory.create();
-    createdUserIds.push(user.id);
-    const task = await taskFactory.create({ initiatorUserId: user.id });
+  it.each(['visible', 'hidden'] as const)(
+    'creates one canonical session and owner participant for a %s task',
+    async (visibility) => {
+      const user = await userFactory.create();
+      createdUserIds.push(user.id);
+      const task = await taskFactory.create({
+        initiatorUserId: user.id,
+        visibility,
+      });
+      createdTaskIds.push(task.id);
+
+      const first = await db.transaction((tx) =>
+        ensureSessionForTask(tx, { taskId: task.id }),
+      );
+      const second = await db.transaction((tx) =>
+        ensureSessionForTask(tx, { taskId: task.id, existingTaskReused: true }),
+      );
+
+      expect(first).not.toBeNull();
+      expect(second?.id).toBe(first?.id);
+      expect(first).toMatchObject({
+        visibility,
+        ownerKind: 'user',
+        ownerUserId: user.id,
+      });
+      expect(second).toMatchObject({ visibility });
+      if (first) createdSessionIds.push(first.id);
+
+      const links = await db
+        .select()
+        .from(sessionTasks)
+        .where(eq(sessionTasks.taskId, task.id));
+      const participants = await db
+        .select()
+        .from(sessionParticipants)
+        .where(eq(sessionParticipants.sessionId, first!.id));
+
+      expect(links).toHaveLength(1);
+      expect(await getSessionForTask(db, task.id)).toMatchObject({
+        id: first!.id,
+        visibility,
+      });
+      expect(
+        await db.select().from(tasks).where(eq(tasks.id, task.id)),
+      ).toEqual([expect.objectContaining({ visibility })]);
+      expect(participants).toEqual([
+        expect.objectContaining({ userId: user.id, role: 'owner' }),
+      ]);
+    },
+  );
+
+  it('copies private task ownership into its canonical Session', async () => {
+    const owner = await userFactory.create();
+    createdUserIds.push(owner.id);
+    const task = await taskFactory.create({
+      initiatorUserId: owner.id,
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+    });
     createdTaskIds.push(task.id);
 
-    const first = await db.transaction((tx) =>
-      ensureSessionForTask(tx, { taskId: task.id }),
-    );
-    const second = await db.transaction((tx) =>
-      ensureSessionForTask(tx, { taskId: task.id, existingTaskReused: true }),
-    );
+    const session = await ensureSessionForTask(db, { taskId: task.id });
+    createdSessionIds.push(session.id);
 
-    expect(first).not.toBeNull();
-    expect(second?.id).toBe(first?.id);
-    if (first) createdSessionIds.push(first.id);
-
-    const links = await db
-      .select()
-      .from(sessionTasks)
-      .where(eq(sessionTasks.taskId, task.id));
-    const participants = await db
-      .select()
-      .from(sessionParticipants)
-      .where(eq(sessionParticipants.sessionId, first!.id));
-
-    expect(links).toHaveLength(1);
-    expect(participants).toEqual([
-      expect.objectContaining({ userId: user.id, role: 'owner' }),
-    ]);
+    expect(session).toMatchObject({
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+      ownerUserId: owner.id,
+    });
   });
 
-  it('does not create a session for a hidden task', async () => {
-    const task = await taskFactory.create({ visibility: 'hidden' });
+  it('copies private Fast conversation ownership into its canonical Session', async () => {
+    const owner = await userFactory.create();
+    createdUserIds.push(owner.id);
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: owner.id,
+        privacy: 'private',
+        privateOwnerUserId: owner.id,
+        surface: 'web',
+        workspaceId: owner.id,
+        conversationId: crypto.randomUUID(),
+      })
+      .returning();
+    createdConversationIds.push(conversation!.id);
+
+    const session = await ensureSessionForFastConversation(
+      db,
+      conversation!.id,
+    );
+    createdSessionIds.push(session.id);
+
+    expect(session).toMatchObject({
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+      ownerUserId: owner.id,
+    });
+  });
+
+  it('creates a hidden Session preserving the automation task owner', async () => {
+    await ensureAutomationRows(db);
+    const initiatorAutomation = 'slack_channel_auto_start';
+    const task = await taskFactory.create({
+      visibility: 'hidden',
+      initiatorKind: 'automation',
+      initiatorUserId: null,
+      initiatorAutomation,
+    });
     createdTaskIds.push(task.id);
 
     const result = await db.transaction((tx) =>
       ensureSessionForTask(tx, { taskId: task.id }),
     );
 
-    expect(result).toBeNull();
+    createdSessionIds.push(result.id);
+    expect(result).toMatchObject({
+      visibility: 'hidden',
+      ownerKind: 'automation',
+      ownerUserId: null,
+      ownerAutomation: initiatorAutomation,
+    });
+    expect(await getSessionForTask(db, task.id)).toMatchObject({
+      id: result.id,
+    });
+    expect(
+      await db.transaction((tx) =>
+        ensureSessionForTask(tx, { taskId: task.id }),
+      ),
+    ).toMatchObject({ id: result.id, visibility: 'hidden' });
     expect(
       await db
         .select()
         .from(sessionTasks)
         .where(eq(sessionTasks.taskId, task.id)),
-    ).toEqual([]);
+    ).toEqual([
+      expect.objectContaining({ sessionId: result.id, taskId: task.id }),
+    ]);
+  });
+
+  it('promotes the existing Session when a hidden task becomes visible', async () => {
+    const task = await taskFactory.create({ visibility: 'hidden' });
+    createdTaskIds.push(task.id);
+    const hidden = await db.transaction((tx) =>
+      ensureSessionForTask(tx, { taskId: task.id }),
+    );
+    createdSessionIds.push(hidden.id);
+
+    await db
+      .update(tasks)
+      .set({ visibility: 'visible' })
+      .where(eq(tasks.id, task.id));
+    const promoted = await db.transaction((tx) =>
+      ensureSessionForTask(tx, { taskId: task.id, existingTaskReused: true }),
+    );
+
+    expect(promoted).toMatchObject({ id: hidden.id, visibility: 'visible' });
+    expect(await getSessionForTask(db, task.id)).toMatchObject({
+      id: hidden.id,
+      visibility: 'visible',
+    });
+    expect(
+      await db
+        .select()
+        .from(sessionTasks)
+        .where(eq(sessionTasks.taskId, task.id)),
+    ).toHaveLength(1);
   });
 
   it('retains a session when its owner user is deleted', async () => {
@@ -340,7 +470,90 @@ describe('session helpers', () => {
     );
   });
 
-  it('attaches Fast-delegated tasks to the conversation session', async () => {
+  it.each(['visible', 'hidden'] as const)(
+    'attaches a visible sibling to the same %s conversation Session without duplicates',
+    async (visibility) => {
+      const user = await userFactory.create();
+      createdUserIds.push(user.id);
+      const [conversation] = await db
+        .insert(fastAgentConversations)
+        .values({
+          userId: user.id,
+          surface: 'web',
+          workspaceId: `workspace-${crypto.randomUUID()}`,
+          conversationId: `conversation-${crypto.randomUUID()}`,
+        })
+        .returning();
+      createdConversationIds.push(conversation!.id);
+
+      const firstTask = await taskFactory.create({
+        visibility,
+        initiatorUserId: user.id,
+        activityAt: 100,
+      });
+      const secondTask = await taskFactory.create({
+        initiatorUserId: user.id,
+        activityAt: 200,
+      });
+      createdTaskIds.push(firstTask.id, secondTask.id);
+
+      const first = await db.transaction((tx) =>
+        ensureSessionForTask(tx, {
+          taskId: firstTask.id,
+          fastConversationId: conversation!.id,
+          origin: 'fast_delegation',
+        }),
+      );
+      createdSessionIds.push(first.id);
+      expect(first.visibility).toBe(visibility);
+      expect(
+        await getSessionForFastConversation(db, conversation!.id),
+      ).toMatchObject({ id: first.id, visibility });
+      expect(
+        await db.transaction((tx) =>
+          ensureSessionForFastConversation(tx, conversation!.id),
+        ),
+      ).toMatchObject({ id: first.id, visibility });
+      const second = await db.transaction((tx) =>
+        ensureSessionForTask(tx, {
+          taskId: secondTask.id,
+          fastConversationId: conversation!.id,
+          origin: 'fast_delegation',
+        }),
+      );
+
+      expect(second?.id).toBe(first?.id);
+      expect(second?.activityAt).toBe(200);
+      expect(second.visibility).toBe('visible');
+      expect(
+        await getSessionForFastConversation(db, conversation!.id),
+      ).toMatchObject({ id: first.id, visibility: 'visible' });
+      expect(
+        await db
+          .select()
+          .from(sessions)
+          .where(eq(sessions.fastConversationId, conversation!.id)),
+      ).toHaveLength(1);
+      expect(
+        await db.select().from(tasks).where(eq(tasks.id, firstTask.id)),
+      ).toEqual([expect.objectContaining({ visibility })]);
+      const reused = await db.transaction((tx) =>
+        ensureSessionForTask(tx, {
+          taskId: firstTask.id,
+          existingTaskReused: true,
+        }),
+      );
+      expect(reused).toMatchObject({ id: first.id, visibility: 'visible' });
+      expect(
+        await db
+          .select()
+          .from(sessionTasks)
+          .where(eq(sessionTasks.sessionId, first!.id)),
+      ).toHaveLength(2);
+    },
+  );
+
+  it('promotes a hidden Session on explicit conversation binding without changing its task', async () => {
     const user = await userFactory.create();
     createdUserIds.push(user.id);
     const [conversation] = await db
@@ -353,41 +566,69 @@ describe('session helpers', () => {
       })
       .returning();
     createdConversationIds.push(conversation!.id);
-
-    const firstTask = await taskFactory.create({
+    const task = await taskFactory.create({
+      visibility: 'hidden',
       initiatorUserId: user.id,
-      activityAt: 100,
     });
-    const secondTask = await taskFactory.create({
-      initiatorUserId: user.id,
-      activityAt: 200,
-    });
-    createdTaskIds.push(firstTask.id, secondTask.id);
-
-    const first = await db.transaction((tx) =>
-      ensureSessionForTask(tx, {
-        taskId: firstTask.id,
-        fastConversationId: conversation!.id,
-        origin: 'fast_delegation',
-      }),
+    createdTaskIds.push(task.id);
+    const hidden = await db.transaction((tx) =>
+      ensureSessionForTask(tx, { taskId: task.id }),
     );
-    const second = await db.transaction((tx) =>
-      ensureSessionForTask(tx, {
-        taskId: secondTask.id,
+    createdSessionIds.push(hidden.id);
+
+    const attached = await db.transaction((tx) =>
+      attachFastConversationToSession(tx, {
+        sessionId: hidden.id,
         fastConversationId: conversation!.id,
-        origin: 'fast_delegation',
       }),
     );
 
-    expect(second?.id).toBe(first?.id);
-    expect(second?.activityAt).toBe(200);
-    if (first) createdSessionIds.push(first.id);
+    expect(attached).toMatchObject({
+      id: hidden.id,
+      visibility: 'visible',
+      ownerUserId: user.id,
+      fastConversationId: conversation!.id,
+    });
     expect(
-      await db
-        .select()
-        .from(sessionTasks)
-        .where(eq(sessionTasks.sessionId, first!.id)),
-    ).toHaveLength(2);
+      await getSessionForFastConversation(db, conversation!.id),
+    ).toMatchObject({ id: hidden.id, visibility: 'visible' });
+    expect(await db.select().from(tasks).where(eq(tasks.id, task.id))).toEqual([
+      expect.objectContaining({ visibility: 'hidden' }),
+    ]);
+    expect(
+      await db.transaction((tx) =>
+        attachFastConversationToSession(tx, {
+          sessionId: hidden.id,
+          fastConversationId: conversation!.id,
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it('resolves the Session owner for an automation-delegated task', async () => {
+    await ensureAutomationRows(db);
+    const owner = await userFactory.create();
+    createdUserIds.push(owner.id);
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+    });
+    createdSessionIds.push(session.id);
+    const task = await taskFactory.create({
+      initiatorKind: 'automation',
+      initiatorUserId: null,
+      initiatorAutomation: 'slack_channel_auto_start',
+    });
+    createdTaskIds.push(task.id);
+    await db.insert(sessionTasks).values({
+      sessionId: session.id,
+      taskId: task.id,
+      origin: 'fast_delegation',
+    });
+
+    await expect(getTaskHumanOwnerUserIds(db, task.id)).resolves.toEqual([
+      owner.id,
+    ]);
   });
 
   it('ignores an unknown Fast conversation id instead of aborting', async () => {

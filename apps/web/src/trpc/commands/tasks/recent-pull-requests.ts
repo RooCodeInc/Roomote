@@ -1,16 +1,20 @@
 import {
   and,
+  count,
   db,
   desc,
   eq,
+  inArray,
   isNotNull,
   isNull,
+  sql,
   tasks,
   taskPullRequests,
 } from '@roomote/db/server';
 import type { PullRequestStatus, SourceControlProvider } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
+import { customAutomationTaskAccess } from '@/lib/server/custom-automation-task-access';
 
 type RecentPullRequest = {
   repo: string;
@@ -25,33 +29,82 @@ type RecentPullRequest = {
 
 export async function getRecentPullRequestsCommand(
   auth: UserAuthSuccess,
-): Promise<RecentPullRequest[]> {
-  // Query task_pull_requests joined with tasks for org/user filtering.
-  const rows = await db
-    .select({
-      repo: taskPullRequests.repository,
-      prNumber: taskPullRequests.prNumber,
-      prTitle: taskPullRequests.prTitle,
-      prUrl: taskPullRequests.prUrl,
-      taskId: taskPullRequests.taskId,
-      createdAt: taskPullRequests.detectedAt,
-      status: taskPullRequests.status,
-      sourceControlProvider: taskPullRequests.sourceControlProvider,
-    })
+): Promise<{ pullRequests: RecentPullRequest[]; openCount: number }> {
+  const eligiblePullRequests = and(
+    eq(tasks.initiatorUserId, auth.userId),
+    isNull(tasks.deletedAt),
+    customAutomationTaskAccess(auth),
+    isNotNull(taskPullRequests.repository),
+    isNotNull(taskPullRequests.prNumber),
+  );
+  // Legacy associations may predate host backfills, but their PR URL still
+  // identifies the source-control instance.
+  const normalizedPullRequestHost = sql<string>`coalesce(
+    nullif(
+      case
+        when lower(${taskPullRequests.prUrl}) like 'http://%'
+          then regexp_replace(lower(${taskPullRequests.host}), ':80$', '')
+        else regexp_replace(lower(${taskPullRequests.host}), ':443$', '')
+      end,
+      ''
+    ),
+    nullif(
+      case
+        when lower(${taskPullRequests.prUrl}) like 'http://%'
+          then regexp_replace(lower(split_part(split_part(${taskPullRequests.prUrl}, '://', 2), '/', 1)), ':80$', '')
+        else regexp_replace(lower(split_part(split_part(${taskPullRequests.prUrl}, '://', 2), '/', 1)), ':443$', '')
+      end,
+      ''
+    )
+  )`;
+
+  const latestPullRequestStatuses = db
+    .selectDistinctOn(
+      [
+        taskPullRequests.sourceControlProvider,
+        normalizedPullRequestHost,
+        taskPullRequests.repository,
+        taskPullRequests.prNumber,
+      ],
+      { status: taskPullRequests.status },
+    )
     .from(taskPullRequests)
     .innerJoin(tasks, eq(taskPullRequests.taskId, tasks.id))
-    .where(
-      and(
-        eq(tasks.initiatorUserId, auth.userId),
-        isNull(tasks.deletedAt),
-        isNotNull(taskPullRequests.repository),
-        isNotNull(taskPullRequests.prNumber),
-      ),
+    .where(eligiblePullRequests)
+    .orderBy(
+      taskPullRequests.sourceControlProvider,
+      normalizedPullRequestHost,
+      taskPullRequests.repository,
+      taskPullRequests.prNumber,
+      desc(taskPullRequests.detectedAt),
     )
-    .orderBy(desc(taskPullRequests.detectedAt))
-    .limit(100);
+    .as('latest_pull_request_statuses');
 
-  // Deduplicate by repo#prNumber and collect up to 10 unique PRs.
+  // Query task_pull_requests joined with tasks for org/user filtering.
+  const [rows, [openCountRow]] = await Promise.all([
+    db
+      .select({
+        repo: taskPullRequests.repository,
+        prNumber: taskPullRequests.prNumber,
+        prTitle: taskPullRequests.prTitle,
+        prUrl: taskPullRequests.prUrl,
+        taskId: taskPullRequests.taskId,
+        createdAt: taskPullRequests.detectedAt,
+        status: taskPullRequests.status,
+        sourceControlProvider: taskPullRequests.sourceControlProvider,
+      })
+      .from(taskPullRequests)
+      .innerJoin(tasks, eq(taskPullRequests.taskId, tasks.id))
+      .where(eligiblePullRequests)
+      .orderBy(desc(taskPullRequests.detectedAt))
+      .limit(100),
+    db
+      .select({ count: count() })
+      .from(latestPullRequestStatuses)
+      .where(inArray(latestPullRequestStatuses.status, ['draft', 'open'])),
+  ]);
+
+  // Deduplicate by repo#prNumber and collect up to 15 unique PRs.
   const recentPullRequests: RecentPullRequest[] = [];
   const seen = new Set<string>();
 
@@ -84,5 +137,8 @@ export async function getRecentPullRequestsCommand(
     }
   }
 
-  return recentPullRequests;
+  return {
+    pullRequests: recentPullRequests,
+    openCount: openCountRow?.count ?? 0,
+  };
 }

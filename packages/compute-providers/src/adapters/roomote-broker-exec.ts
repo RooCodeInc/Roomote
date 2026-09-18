@@ -32,39 +32,59 @@ export class RoomoteBrokerExec {
   ) {}
 
   public async run(input: RunCommandInput): Promise<RunCommandResult> {
-    const response = await this.request({
-      method: 'POST',
-      path: `/v1/sandboxes/${encodeURIComponent(input.instanceId)}/exec`,
-      body: JSON.stringify({
-        cmd: input.cmd,
-        ...(input.args?.length ? { args: input.args } : {}),
-        ...(input.cwd ? { cwd: input.cwd } : {}),
-        ...(input.env ? { env: input.env } : {}),
-      }),
-      signal: input.signal,
-    });
-    const events = new ExecEventPump(iterateNdjson<BrokerExecEvent>(response));
+    const detachedRequest = input.detached
+      ? createDetachedRequestSignal(input.signal)
+      : undefined;
 
-    if (!input.detached) {
-      const outcome = await consumeExecEvents(events);
-      if (outcome.error !== undefined) throw new Error(outcome.error);
-      return finishCommandResult(outcome, input);
-    }
-
-    const graceOutcome = await consumeExecEvents(
-      events,
-      DETACHED_EXIT_GRACE_PERIOD_MS,
-    );
-    if (graceOutcome.error !== undefined) throw new Error(graceOutcome.error);
-    if (graceOutcome.exitCode !== null) {
-      console.warn(
-        `[RoomoteBrokerClient] Detached command exited during grace period ${JSON.stringify({ instanceId: input.instanceId, cmd: input.cmd, exitCode: graceOutcome.exitCode })}`,
+    try {
+      const response = await this.request({
+        method: 'POST',
+        path: `/v1/sandboxes/${encodeURIComponent(input.instanceId)}/exec`,
+        body: JSON.stringify({
+          cmd: input.cmd,
+          ...(input.args?.length ? { args: input.args } : {}),
+          ...(input.cwd ? { cwd: input.cwd } : {}),
+          ...(input.env ? { env: input.env } : {}),
+        }),
+        signal: detachedRequest?.signal ?? input.signal,
+      });
+      const events = new ExecEventPump(
+        iterateNdjson<BrokerExecEvent>(response),
       );
-      return finishCommandResult(graceOutcome, input);
-    }
 
-    this.watchDetachedCommand(input, graceOutcome);
-    return { commandId: undefined, exitCode: null };
+      if (!input.detached) {
+        const outcome = await consumeExecEvents(events);
+        if (outcome.error !== undefined) {
+          deliverOutput(outcome, input.onOutput);
+          throw new Error(outcome.error);
+        }
+        return finishCommandResult(outcome, input);
+      }
+
+      const graceOutcome = await consumeExecEvents(
+        events,
+        DETACHED_EXIT_GRACE_PERIOD_MS,
+      );
+      if (graceOutcome.error !== undefined) {
+        deliverOutput(graceOutcome, input.onOutput);
+        throw new Error(graceOutcome.error);
+      }
+      if (graceOutcome.exitCode !== null) {
+        console.warn(
+          `[RoomoteBrokerClient] Detached command exited during grace period ${JSON.stringify({ instanceId: input.instanceId, cmd: input.cmd, exitCode: graceOutcome.exitCode })}`,
+        );
+        return finishCommandResult(graceOutcome, input);
+      }
+
+      // The caller's timeout only bounds launch. Once detached execution is
+      // established, keep the broker stream alive for runtime diagnostics.
+      detachedRequest?.detach();
+      deliverOutput(graceOutcome, input.onOutput);
+      this.watchDetachedCommand(input, graceOutcome);
+      return { commandId: graceOutcome.execId, exitCode: null };
+    } finally {
+      detachedRequest?.detach();
+    }
   }
 
   private watchDetachedCommand(
@@ -76,11 +96,18 @@ export class RoomoteBrokerExec {
       const streamed = await consumeExecEvents(grace.remaining, undefined, {
         tolerateStreamErrors: true,
         onOutput: (event) => {
+          input.onOutput?.(event);
           for (const line of event.data.trimEnd().split('\n')) {
             console.log(`[${label}:${event.stream}] ${line}`);
           }
         },
       });
+      if (streamed.error) {
+        input.onOutput?.({
+          stream: 'stderr',
+          data: `Broker exec error: ${streamed.error}\n`,
+        });
+      }
       const execId = streamed.execId ?? grace.execId;
       let exitCode = streamed.exitCode;
       if (exitCode === null && execId) {
@@ -125,6 +152,22 @@ export class RoomoteBrokerExec {
     }
     return null;
   }
+}
+
+function createDetachedRequestSignal(signal: AbortSignal | undefined): {
+  signal: AbortSignal;
+  detach: () => void;
+} {
+  const controller = new AbortController();
+  const onAbort = () => controller.abort(signal?.reason);
+
+  if (signal?.aborted) onAbort();
+  else signal?.addEventListener('abort', onAbort, { once: true });
+
+  return {
+    signal: controller.signal,
+    detach: () => signal?.removeEventListener('abort', onAbort),
+  };
 }
 
 class ExecEventPump {
@@ -191,7 +234,8 @@ async function consumeExecEvents(
       }
     } catch (error) {
       if (hooks?.tolerateStreamErrors) return outcome;
-      throw error;
+      outcome.error = error instanceof Error ? error.message : String(error);
+      return outcome;
     }
     if (result.done) return outcome;
     switch (result.value.type) {
@@ -224,11 +268,22 @@ function finishCommandResult(
 ): RunCommandResult {
   const stdout = outcome.stdout || undefined;
   const stderr = outcome.stderr || undefined;
-  if (input.onOutput) {
-    if (stdout) input.onOutput({ stream: 'stdout', data: stdout });
-    if (stderr) input.onOutput({ stream: 'stderr', data: stderr });
-  }
-  return { commandId: undefined, exitCode: outcome.exitCode, stdout, stderr };
+  deliverOutput(outcome, input.onOutput);
+  return {
+    commandId: outcome.execId,
+    exitCode: outcome.exitCode,
+    stdout,
+    stderr,
+  };
+}
+
+function deliverOutput(
+  outcome: Pick<ExecOutcome, 'stdout' | 'stderr'>,
+  onOutput: RunCommandInput['onOutput'],
+): void {
+  if (!onOutput) return;
+  if (outcome.stdout) onOutput({ stream: 'stdout', data: outcome.stdout });
+  if (outcome.stderr) onOutput({ stream: 'stderr', data: outcome.stderr });
 }
 
 async function* iterateNdjson<T>(response: Response): AsyncGenerator<T> {

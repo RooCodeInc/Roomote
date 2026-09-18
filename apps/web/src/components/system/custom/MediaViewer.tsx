@@ -25,10 +25,20 @@ const IMAGE_ZOOM_MAX = 5;
 const IMAGE_ZOOM_STEP = 0.25;
 const IMAGE_PAN_DRAG_THRESHOLD = 5;
 const IMAGE_ZOOM_INDICATOR_HIDE_DELAY_MS = 1200;
+const loadedImageUrlCache = new Map<string, string>();
 
 function clampImageZoom(value: number): number {
   const rounded = Math.round(value * 100) / 100;
   return Math.min(IMAGE_ZOOM_MAX, Math.max(IMAGE_ZOOM_MIN, rounded));
+}
+
+function getImageResourceKey(src: string): string {
+  try {
+    const url = new URL(src, 'http://localhost');
+    return `${url.origin}${url.pathname}`;
+  } catch {
+    return src.split(/[?#]/, 1)[0] ?? src;
+  }
 }
 
 type ImageZoomAnchor = {
@@ -83,15 +93,19 @@ export function MediaViewerDialog({
 interface MediaViewerImageProps extends ComponentProps<'div'> {
   src: string | null | undefined;
   alt: string;
+  viewportClassName?: string;
 }
 
 export function MediaViewerImage({
   src,
   alt,
   className,
+  viewportClassName,
   ...props
 }: MediaViewerImageProps) {
-  const [loadedImageUrl, setLoadedImageUrl] = useState<string | null>(null);
+  const [loadedImageUrl, setLoadedImageUrl] = useState<string | null>(() =>
+    src ? (loadedImageUrlCache.get(getImageResourceKey(src)) ?? null) : null,
+  );
   const [imageZoom, setImageZoom] = useState(1);
   const [isPanning, setIsPanning] = useState(false);
   const [showZoomIndicator, setShowZoomIndicator] = useState(false);
@@ -123,13 +137,20 @@ export function MediaViewerImage({
       return;
     }
 
-    setLoadedImageUrl(null);
+    const resourceKey = getImageResourceKey(src);
+    const cachedUrl = loadedImageUrlCache.get(resourceKey);
+    setLoadedImageUrl(cachedUrl ?? null);
+
+    if (cachedUrl === src) {
+      return;
+    }
 
     const img = new Image();
     let cancelled = false;
 
     img.onload = () => {
       if (!cancelled) {
+        loadedImageUrlCache.set(resourceKey, src);
         setLoadedImageUrl(src);
       }
     };
@@ -428,12 +449,20 @@ export function MediaViewerImage({
         ? 'cursor-grab'
         : 'cursor-zoom-in';
   const shouldRenderZoomIndicator = imageZoom !== 1 || hasInteractedWithZoom;
+  const displayedImageUrl =
+    loadedImageUrl &&
+    getImageResourceKey(loadedImageUrl) === getImageResourceKey(src)
+      ? loadedImageUrl
+      : null;
 
   return (
     <div className={cn('relative h-full w-full', className)} {...props}>
       <div
         ref={imageViewportRef}
-        className="h-full w-full overflow-auto bg-zinc-800 p-4"
+        className={cn(
+          'h-full w-full overflow-auto bg-zinc-800 p-4',
+          viewportClassName,
+        )}
         onClick={handleImageClick}
         onDoubleClick={handleImageDoubleClick}
         onMouseDown={handleImageMouseDown}
@@ -441,11 +470,11 @@ export function MediaViewerImage({
         onMouseUp={stopImagePan}
         onMouseLeave={stopImagePan}
       >
-        {loadedImageUrl ? (
+        {displayedImageUrl ? (
           /* eslint-disable-next-line @next/next/no-img-element */
           <img
             ref={imageElementRef}
-            src={loadedImageUrl}
+            src={displayedImageUrl}
             alt={alt}
             className={cn(
               'block m-auto rounded-xl object-contain select-none transition-[width] duration-150',

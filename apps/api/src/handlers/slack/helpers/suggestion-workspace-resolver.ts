@@ -1,4 +1,4 @@
-import { type EnvironmentConfig } from '@roomote/types';
+import { ALL_REPOSITORIES, type EnvironmentConfig } from '@roomote/types';
 import {
   and,
   db,
@@ -174,7 +174,21 @@ export async function resolveSuggestionLaunchWorkspaceFromMetadata(input: {
   const targetRepositoryFullName =
     input.targetRepositoryFullName?.trim() || null;
 
-  if (!targetRepositoryFullName) {
+  if (
+    targetRepositoryFullName === ALL_REPOSITORIES &&
+    !input.targetEnvironmentId
+  ) {
+    return {
+      workspace: {
+        repoForPayload: ALL_REPOSITORIES,
+        workspaceDisplayName: 'all repositories',
+        readinessMessage: input.readinessMessage ?? null,
+      },
+      failureReason: null,
+    };
+  }
+
+  if (!targetRepositoryFullName && !input.targetEnvironmentId) {
     return {
       workspace: null,
       failureReason:
@@ -185,6 +199,13 @@ export async function resolveSuggestionLaunchWorkspaceFromMetadata(input: {
   const readinessMessage = input.readinessMessage ?? null;
 
   if (!input.targetEnvironmentId) {
+    if (!targetRepositoryFullName) {
+      return {
+        workspace: null,
+        failureReason:
+          "I couldn't start this suggestion because it does not have a target repository.",
+      };
+    }
     return {
       workspace: {
         repoForPayload: targetRepositoryFullName,
@@ -221,22 +242,31 @@ export async function resolveSuggestionLaunchWorkspaceFromMetadata(input: {
   const configuredRepositoryFullNames = getConfiguredRepositoryFullNames(
     environment.config,
   );
+  const resolvedTargetRepositoryFullName =
+    targetRepositoryFullName ?? configuredRepositoryFullNames[0] ?? null;
+  if (!resolvedTargetRepositoryFullName) {
+    return {
+      workspace: null,
+      failureReason:
+        "I couldn't start this suggestion because its environment has no repositories.",
+    };
+  }
   const includesTargetRepository = configuredRepositoryFullNames.some(
     (repositoryFullName) =>
       repositoryFullName.toLowerCase() ===
-      targetRepositoryFullName.toLowerCase(),
+      resolvedTargetRepositoryFullName.toLowerCase(),
   );
 
   if (!includesTargetRepository) {
     return {
       workspace: null,
-      failureReason: `I couldn't start this suggestion because its environment no longer includes \`${targetRepositoryFullName}\`.`,
+      failureReason: `I couldn't start this suggestion because its environment no longer includes \`${resolvedTargetRepositoryFullName}\`.`,
     };
   }
 
   return {
     workspace: {
-      repoForPayload: targetRepositoryFullName,
+      repoForPayload: resolvedTargetRepositoryFullName,
       environmentId: environment.id,
       workspaceDisplayName: environment.name,
       readinessMessage,

@@ -7,7 +7,8 @@ import {
   sanitizeSandboxPathString,
 } from '@/lib';
 
-import { AlertCircle, Loader2 } from '@/components/system';
+import { AlertCircle } from '@/components/system';
+import { useTaskRobotIconContext } from '@/components/tasks/TaskRobotIcon';
 import {
   Message,
   MessageContent,
@@ -29,16 +30,20 @@ import { resolveVisualProofMediaForToolMessage } from './visual-proof-tool-resul
 import { resolveToolPresentation } from './tool-presentation';
 import { mcpIntegrationIconFor, toolIconForKey } from './tool-icons';
 import { resolveToolPresentationPolicy } from './tool-presentation-policy';
+import { resolveTaskToolReference } from './task-tool-reference';
+import { useTaskToolIcon } from './task-tool-icon';
 
 interface AcpToolMessageProps {
   msg: AcpToolCallUiMessage | AcpToolResultUiMessage;
   showSubagentPayload?: boolean;
+  forceDetails?: boolean;
   children?: ReactNode;
 }
 
 export function AcpToolMessage({
   msg,
   showSubagentPayload = false,
+  forceDetails = false,
   children,
 }: AcpToolMessageProps) {
   const artifactLink = useArtifactLink();
@@ -57,13 +62,16 @@ export function AcpToolMessage({
       : 'output-available';
 
   const presentation = resolveToolPresentation(msg.data, msg.partial);
+  const taskIconContext = useTaskRobotIconContext();
+  const taskIcon = useTaskToolIcon(
+    resolveTaskToolReference(msg, taskIconContext),
+    isFailed,
+  );
   const ToolIcon = isFailed
     ? AlertCircle
-    : isRunning
-      ? Loader2
-      : presentation.integrationIcon
-        ? mcpIntegrationIconFor(presentation.integrationIcon)
-        : toolIconForKey(presentation.iconKey);
+    : presentation.integrationIcon
+      ? mcpIntegrationIconFor(presentation.integrationIcon)
+      : toolIconForKey(presentation.iconKey);
 
   const visualProofMedia = resolveVisualProofMediaForToolMessage(
     msg,
@@ -81,7 +89,7 @@ export function AcpToolMessage({
   // subagent rows keep their collapsible prompt/result details alongside it.
   const showExpandedDetails =
     (isSubagentRow || (!showVisualProofPreview && !showWidgetPreview)) &&
-    policy.detailMode === 'expandable';
+    (forceDetails || policy.detailMode === 'expandable');
   const showNestedActivity = Boolean(children);
   const showCollapsibleContent = showExpandedDetails || showNestedActivity;
 
@@ -121,6 +129,7 @@ export function AcpToolMessage({
             suffix={suffix}
             suffixPrefix={suffixPrefix}
             icon={ToolIcon}
+            {...taskIcon}
             state={toolState}
             params={sanitizedToolData}
             collapsible={showCollapsibleContent}
@@ -141,6 +150,7 @@ export function AcpToolMessage({
                 <AcpToolDetails
                   msg={msg}
                   showSubagentPayload={showSubagentPayload}
+                  forceVisible={forceDetails}
                 />
               ) : null}
               {showNestedActivity ? (

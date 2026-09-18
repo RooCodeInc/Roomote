@@ -390,6 +390,10 @@ function getHealthEndpoints(
       url: `http://localhost:${apiPort}/health/controller`,
     },
     {
+      name: 'bullmq health',
+      url: `http://localhost:${apiPort}/health/bullmq`,
+    },
+    {
       name: 'preview proxy',
       url: `http://localhost:${previewProxyPort}/health`,
     },
@@ -467,7 +471,7 @@ function checkAuthProviders(
   const configuredProviders: string[] = [];
   const incompleteProviders: string[] = [];
   const configEnv = Object.keys(env).length > 0 ? env : process.env;
-  const hasValue = (key: string) => Boolean(configEnv[key]);
+  const hasValue = (key: string) => Boolean(configEnv[key]?.trim());
   const checkProvider = ({
     name,
     requiredKeyGroups,

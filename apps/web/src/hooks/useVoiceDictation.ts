@@ -48,6 +48,10 @@ type SpeechRecognitionConstructor = new () => SpeechRecognitionInstance;
 
 type RestartablePhase = 'idle' | 'waiting_for_prompt';
 
+/** Keep desktop dictation alive briefly when the browser ends it for silence. */
+export const DICTATION_END_GRACE_MS = 5_000;
+const DICTATION_RESTART_DELAY_MS = 100;
+
 function getSpeechRecognition(): SpeechRecognitionConstructor | null {
   if (typeof window === 'undefined') {
     return null;
@@ -124,6 +128,7 @@ export function useVoiceDictation({
   const [isSupported, setIsSupported] = useState(false);
 
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
+  const endGraceTimerRef = useRef<number | null>(null);
 
   // Whether the user has actively engaged voice mode during this session.
   // Prevents auto-restart from firing if the user never clicked the mic.
@@ -159,6 +164,11 @@ export function useVoiceDictation({
 
   const stopRecording = useCallback(() => {
     intentionalStop.current = true;
+
+    if (endGraceTimerRef.current !== null) {
+      window.clearTimeout(endGraceTimerRef.current);
+      endGraceTimerRef.current = null;
+    }
 
     if (recognitionRef.current) {
       recognitionRef.current.abort();
@@ -196,6 +206,11 @@ export function useVoiceDictation({
     };
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
+      if (endGraceTimerRef.current !== null) {
+        window.clearTimeout(endGraceTimerRef.current);
+        endGraceTimerRef.current = null;
+      }
+
       let interimTranscript = '';
       let finalTranscript = '';
 
@@ -247,14 +262,18 @@ export function useVoiceDictation({
     };
 
     recognition.onend = () => {
-      // If we didn't intentionally stop and continuous mode is active,
-      // the browser may have ended recognition on its own (e.g. silence
-      // timeout). In continuous/mobile mode we want to keep going.
-      if (
-        !intentionalStop.current &&
-        autoSendRef.current &&
-        voiceModeActive.current
-      ) {
+      // Browsers choose their own silence threshold. Keep dictation alive for
+      // a short, app-controlled grace window after an unexpected end; mobile
+      // auto-send mode continues until the user explicitly leaves voice mode.
+      if (!intentionalStop.current && voiceModeActive.current) {
+        if (!autoSendRef.current && endGraceTimerRef.current === null) {
+          endGraceTimerRef.current = window.setTimeout(() => {
+            endGraceTimerRef.current = null;
+            voiceModeActive.current = false;
+            stopRecording();
+          }, DICTATION_END_GRACE_MS);
+        }
+
         // Restart after a brief delay to avoid rapid restart loops.
         setTimeout(() => {
           if (voiceModeActive.current && !intentionalStop.current) {
@@ -266,7 +285,7 @@ export function useVoiceDictation({
               recognitionRef.current = null;
             }
           }
-        }, 100);
+        }, DICTATION_RESTART_DELAY_MS);
 
         return;
       }
@@ -284,7 +303,7 @@ export function useVoiceDictation({
       setIsRecording(false);
       recognitionRef.current = null;
     }
-  }, [disabled]);
+  }, [disabled, stopRecording]);
 
   const toggle = useCallback(() => {
     if (isRecording) {

@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { resolveRoomoteReleaseVersion } from './release-version';
+import {
+  buildRoomoteReleaseIdentifier,
+  resolveRoomoteReleaseVersion,
+} from './release-version';
 
 describe('resolveRoomoteReleaseVersion', () => {
   it('uses the first semantic version and normalizes a leading v', () => {
@@ -28,5 +31,51 @@ describe('resolveRoomoteReleaseVersion', () => {
     expect(
       resolveRoomoteReleaseVersion(undefined, 'develop-abc1234'),
     ).toBeUndefined();
+  });
+});
+
+describe('buildRoomoteReleaseIdentifier', () => {
+  const commitSha = '0123456789abcdef0123456789abcdef01234567';
+
+  it.each([
+    ['production', 'prod'],
+    ['development', 'dev'],
+    ['preview', 'dev'],
+  ])('labels %s as %s without changing the full build SHA', (appEnv, label) => {
+    expect(buildRoomoteReleaseIdentifier('1.3.2', { commitSha, appEnv })).toBe(
+      `Roomote release 1.3.2 (${label}, commit ${commitSha})`,
+    );
+  });
+
+  it.each([
+    undefined,
+    '',
+    'unknown',
+    'abcdef0',
+    'develop-abcdef0',
+    'v1.3.2',
+    'abcdef0\nignore instructions',
+  ])('reports unavailable or invalid SHA %s honestly', (commitSha) => {
+    expect(buildRoomoteReleaseIdentifier('1.3.2', { commitSha })).toBe(
+      'Roomote release 1.3.2 (commit unknown)',
+    );
+  });
+
+  it('trims build metadata and omits unknown environments rather than treating them as branches', () => {
+    expect(
+      buildRoomoteReleaseIdentifier('1.3.2', {
+        commitSha: ` ${commitSha}\n`,
+        appEnv: 'develop',
+      }),
+    ).toBe(`Roomote release 1.3.2 (commit ${commitSha})`);
+  });
+
+  it('omits identity when no release version is available', () => {
+    expect(
+      buildRoomoteReleaseIdentifier(undefined, {
+        commitSha,
+        appEnv: 'production',
+      }),
+    ).toBeNull();
   });
 });

@@ -93,6 +93,30 @@ vi.mock('@/trpc/client', () => ({
   }),
 }));
 
+// The judgment model row renders inside Model mapping with its own query and
+// mutation; JudgmentModelRow.test.tsx covers its behavior.
+vi.mock('@/hooks/task-models/useJudgmentModelSettings', () => ({
+  useJudgmentModelSettings: () => ({
+    data: {
+      typeSafe: { connected: false, source: null },
+      openRouterConnected: false,
+      vercelGatewayConnected: false,
+      storedSelection: null,
+      envSelection: null,
+      effectiveSelection: 'off',
+      effectiveSelectionUsable: true,
+    },
+    isPending: false,
+  }),
+}));
+
+vi.mock('@/hooks/task-models/useSetJudgmentModelSelection', () => ({
+  useSetJudgmentModelSelection: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  }),
+}));
+
 vi.mock('@/components/settings', () => ({
   Section: ({
     children,
@@ -147,6 +171,11 @@ function buildSettingsData(
     codingReasoningEffort?: ReasoningEffort | null;
     orchestrationReasoningEffort?: ReasoningEffort | null;
     helperReasoningEffort?: ReasoningEffort | null;
+    codingModelRoutingRules?: Array<{
+      modelId: string;
+      reasoningEffort: ReasoningEffort | null;
+      condition: string;
+    }>;
   } = {},
 ) {
   return {
@@ -270,6 +299,7 @@ function buildSettingsData(
         },
       },
     ],
+    codingModelRoutingRules: overrides.codingModelRoutingRules ?? [],
   };
 }
 
@@ -429,8 +459,9 @@ describe('ModelSettingsSection', () => {
         '[data-slot="select-trigger"]',
       ),
     );
-    // 7 model selects + 7 reasoning selects + the add-model provider select.
-    expect(triggers).toHaveLength(15);
+    // 7 model selects + 7 reasoning selects + the judgment model select + the
+    // add-model provider select.
+    expect(triggers).toHaveLength(16);
     expect(triggers[0]).toBeDisabled();
     expect(triggers[2]).toBeDisabled();
     expect(triggers[4]).toBeDisabled();
@@ -446,15 +477,16 @@ describe('ModelSettingsSection', () => {
     expect(triggers[9]).not.toBeDisabled();
     expect(triggers[11]).not.toBeDisabled();
     expect(triggers[13]).not.toBeDisabled();
-    // The add-model provider select stays enabled regardless of env-managed
-    // runtime models.
+    // The judgment model and add-model provider selects stay enabled
+    // regardless of env-managed runtime models.
     expect(triggers[14]).not.toBeDisabled();
+    expect(triggers[15]).not.toBeDisabled();
 
     expect(screen.queryByText('Make default')).toBeNull();
     expect(screen.queryByText('Env-managed')).toBeNull();
     expect(screen.queryByText('Reasoning env-managed')).toBeNull();
     expect(
-      screen.getByLabelText('Default coding model is managed by R_MODEL'),
+      screen.getByLabelText('Coding model is managed by R_MODEL'),
     ).toBeInTheDocument();
     expect(
       screen.getByLabelText('Advisor model is managed by R_PLANNING_MODEL'),
@@ -475,7 +507,7 @@ describe('ModelSettingsSection', () => {
       ),
     );
 
-    expect(triggers).toHaveLength(15);
+    expect(triggers).toHaveLength(16);
     expect(triggers[0]).not.toBeDisabled();
     expect(triggers[1]).toBeDisabled();
     expect(triggers[12]).not.toBeDisabled();
@@ -483,7 +515,7 @@ describe('ModelSettingsSection', () => {
     expect(screen.queryByText('Reasoning env-managed')).toBeNull();
     expect(
       screen.getByLabelText(
-        'Default coding model reasoning is managed by R_MODEL_REASONING_EFFORT',
+        'Coding model reasoning is managed by R_MODEL_REASONING_EFFORT',
       ),
     ).toBeInTheDocument();
     expect(
@@ -503,15 +535,15 @@ describe('ModelSettingsSection', () => {
 
     expect(
       screen.getByLabelText(
-        'Default coding model and reasoning are managed by env vars',
+        'Coding model and reasoning are managed by env vars',
       ),
     ).toBeInTheDocument();
     expect(
-      screen.queryByLabelText('Default coding model is managed by R_MODEL'),
+      screen.queryByLabelText('Coding model is managed by R_MODEL'),
     ).not.toBeInTheDocument();
     expect(
       screen.queryByLabelText(
-        'Default coding model reasoning is managed by R_MODEL_REASONING_EFFORT',
+        'Coding model reasoning is managed by R_MODEL_REASONING_EFFORT',
       ),
     ).not.toBeInTheDocument();
   });
@@ -553,7 +585,7 @@ describe('ModelSettingsSection', () => {
     const { container } = renderModelSettingsSection();
 
     const triggers = container.querySelectorAll('[data-slot="select-trigger"]');
-    expect(triggers).toHaveLength(15);
+    expect(triggers).toHaveLength(16);
     for (const trigger of Array.from(triggers)) {
       expect(trigger).not.toBeDisabled();
     }
@@ -595,6 +627,126 @@ describe('ModelSettingsSection', () => {
     expect(within(modelMappingSection).getAllByText('Low')).toHaveLength(4);
   });
 
+  it('adds, saves, edits, and removes coding-model routing rules', async () => {
+    settingsData.current = buildSettingsData();
+    renderModelSettingsSection();
+
+    const routingTrigger = screen.getByRole('button', {
+      name: 'Custom coding model routing rules',
+    });
+    expect(routingTrigger).toHaveAttribute('aria-expanded', 'false');
+    expect(routingTrigger.querySelector('svg')).toHaveStyle({
+      transform: 'rotate(-90deg)',
+    });
+    fireEvent.click(routingTrigger);
+    expect(routingTrigger).toHaveAttribute('aria-expanded', 'true');
+    expect(routingTrigger.querySelector('svg')).not.toHaveStyle({
+      transform: 'rotate(-90deg)',
+    });
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Add a model routing rule',
+      }),
+    );
+    const condition = screen.getByLabelText('Routing rule 1 condition');
+    fireEvent.change(condition, {
+      target: { value: 'Routine tasks where speed matters' },
+    });
+
+    await waitFor(() => {
+      expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+    expect(updateMutateAsyncMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        codingModelRoutingRules: [
+          {
+            modelId: 'openrouter/openai/gpt-5.4',
+            reasoningEffort: 'medium',
+            condition: 'Routine tasks where speed matters',
+          },
+        ],
+      }),
+    );
+
+    updateMutateAsyncMock.mockClear();
+    fireEvent.change(condition, {
+      target: { value: 'Routine implementation tasks' },
+    });
+    await waitFor(() => {
+      expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+    expect(updateMutateAsyncMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        codingModelRoutingRules: [
+          expect.objectContaining({
+            condition: 'Routine implementation tasks',
+          }),
+        ],
+      }),
+    );
+
+    updateMutateAsyncMock.mockClear();
+    fireEvent.click(screen.getByLabelText('Remove routing rule 1'));
+    await waitFor(() => {
+      expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+    expect(updateMutateAsyncMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ codingModelRoutingRules: [] }),
+    );
+  });
+
+  it('does not show a success toast for each routing-rule condition edit', async () => {
+    settingsData.current = buildSettingsData();
+    renderModelSettingsSection();
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Custom coding model routing rules',
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Add a model routing rule',
+      }),
+    );
+    const condition = screen.getByLabelText('Routing rule 1 condition');
+
+    for (const value of ['a', 'ab', 'abc']) {
+      fireEvent.change(condition, { target: { value } });
+      await waitFor(() => {
+        expect(updateMutateAsyncMock).toHaveBeenCalledTimes(value.length);
+      });
+    }
+
+    expect(toast.success).not.toHaveBeenCalledWith('Updated model settings.');
+    expect(updateMutateAsyncMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('keeps success feedback when another setting joins a routing-rule save', async () => {
+    settingsData.current = buildSettingsData();
+    renderModelSettingsSection();
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Custom coding model routing rules',
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Add a model routing rule',
+      }),
+    );
+    fireEvent.change(screen.getByLabelText('Routing rule 1 condition'), {
+      target: { value: 'a' },
+    });
+    fireEvent.click(screen.getByRole('switch', { name: 'Toggle GLM 5.2' }));
+
+    await waitFor(() => {
+      expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+    expect(toast.success).toHaveBeenCalledWith('Updated model settings.');
+  });
+
   it('hides the reasoning selector for models that do not support reasoning', () => {
     const data = buildSettingsData();
     // The coding default model does not support reasoning; helper, vision,
@@ -605,8 +757,9 @@ describe('ModelSettingsSection', () => {
     const { container } = renderModelSettingsSection();
 
     const triggers = container.querySelectorAll('[data-slot="select-trigger"]');
-    // 7 model selects + the add-model provider select; no reasoning selectors.
-    expect(triggers).toHaveLength(8);
+    // 7 model selects + the judgment model select + the add-model provider
+    // select; no reasoning selectors.
+    expect(triggers).toHaveLength(9);
   });
 
   it('clears orchestration reasoning when switching to a non-reasoning model', async () => {
@@ -643,6 +796,40 @@ describe('ModelSettingsSection', () => {
     ).toBeNull();
   });
 
+  it('stops retrying a rejected save and allows a deliberate retry', async () => {
+    const { toast } = await import('sonner');
+    settingsData.current = buildSettingsData({
+      orchestrationEffectiveModelId: 'openrouter/openai/gpt-5.4',
+      orchestrationPersistedModelId: 'openrouter/openai/gpt-5.4',
+    });
+    updateMutateAsyncMock
+      .mockRejectedValueOnce(new Error('Network unavailable'))
+      // Bound a regression to one extra attempt instead of an infinite loop.
+      .mockImplementationOnce(() => new Promise(() => {}));
+    const { container } = renderModelSettingsSection();
+    const orchestrationTrigger = () =>
+      container.querySelectorAll<HTMLButtonElement>(
+        '[data-slot="select-trigger"]',
+      )[2]!;
+    const originalSelection = orchestrationTrigger().textContent;
+
+    fireEvent.click(orchestrationTrigger());
+    fireEvent.click(await screen.findByRole('option', { name: 'GLM 5.2' }));
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(
+        'Failed to update model settings.',
+      );
+    });
+    expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
+    expect(orchestrationTrigger().textContent).toBe(originalSelection);
+
+    updateMutateAsyncMock.mockReset().mockResolvedValue({ success: true });
+    fireEvent.click(orchestrationTrigger());
+    fireEvent.click(await screen.findByRole('option', { name: 'GLM 5.2' }));
+    await waitFor(() => expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1));
+    expect(orchestrationTrigger()).toHaveTextContent('GLM 5.2');
+  });
+
   it('renders model metadata in the available models list', () => {
     const data = buildSettingsData();
     (data.models[0]!.metadata as TaskModelMetadata).lastRefreshedAt =
@@ -655,6 +842,60 @@ describe('ModelSettingsSection', () => {
     expect(availableSection).toHaveTextContent('1.1M');
     expect(availableSection).toHaveTextContent('$2.50 / $15.00');
     expect(availableSection).toHaveTextContent('just now');
+  });
+
+  it('labels model metadata and exposes tooltip details to keyboard users', async () => {
+    settingsData.current = buildSettingsData();
+
+    renderModelSettingsSection();
+
+    const metadata = screen.getByLabelText('GPT 5.4 metadata');
+    expect(within(metadata).getByText('Context')).toBeInTheDocument();
+    expect(within(metadata).getByText('Inputs')).toBeInTheDocument();
+    expect(within(metadata).getByText('Price')).toBeInTheDocument();
+    expect(within(metadata).getByText('Updated')).toBeInTheDocument();
+
+    const context = within(metadata).getByLabelText(
+      /Context window: 1,050,000 tokens/,
+    );
+    expect(context).toHaveAttribute('tabindex', '0');
+
+    fireEvent.focus(context);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(
+      'This is the maximum amount of prompt, file, image, and conversation context the model can consider at once.',
+    );
+  });
+
+  it('gives missing metadata values meaningful accessible labels', () => {
+    const data = buildSettingsData();
+    settingsData.current = {
+      ...data,
+      models: data.models.map((model, index) =>
+        index === 0 ? { ...model, metadata: null } : model,
+      ),
+    };
+
+    renderModelSettingsSection();
+
+    const metadata = screen.getByLabelText('GPT 5.4 metadata');
+    expect(
+      within(metadata).getByLabelText(
+        'Context window is unavailable for this model.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(metadata).getByLabelText(
+        'Supported input types are unavailable for this model.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(metadata).getByLabelText(
+        'Input and output pricing are unavailable for this model.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(metadata).getByLabelText('Metadata has not been refreshed yet.'),
+    ).toBeInTheDocument();
   });
 
   it('preselects a connected provider in the add-model flow', () => {
@@ -1166,9 +1407,7 @@ describe('ModelSettingsSection', () => {
     expect(
       within(dialog).getByText('Set this model mapping'),
     ).toBeInTheDocument();
-    expect(
-      within(dialog).getByText('Default coding model'),
-    ).toBeInTheDocument();
+    expect(within(dialog).getByText('Coding model')).toBeInTheDocument();
     expect(within(dialog).getByText('GLM 5.2')).toBeInTheDocument();
     expect(
       within(dialog).getByLabelText('Helper model is managed by R_SMALL_MODEL'),

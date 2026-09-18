@@ -7,9 +7,13 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Env } from '@roomote/env';
+import {
+  ARTIFACT_UPLOAD_URL_MAX_AGE_SECONDS,
+  getArtifactStorageKey,
+} from '@roomote/types';
 
-const PRESIGNED_URL_EXPIRY_SECONDS = 3600;
 const LOCAL_DOCKER_HOSTNAME = 'host.docker.internal';
+const PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS = 3600;
 const HOST_LOCAL_ENDPOINT_HOSTNAMES = new Set(['localhost', '127.0.0.1']);
 
 const s3PresignClients = new Map<string, S3Client>();
@@ -35,19 +39,6 @@ function getS3PresignClient(endpoint: string): S3Client {
   const client = createS3Client(endpoint);
   s3PresignClients.set(endpoint, client);
   return client;
-}
-
-function getArtifactKey(
-  taskId: string,
-  artifactId: string,
-  path: string,
-  version: number,
-): string {
-  if (version === 0) {
-    return `tasks/${taskId}/artifacts/${artifactId}/${path}`;
-  }
-
-  return `tasks/${taskId}/artifacts/${artifactId}/v${version}/${path}`;
 }
 
 function parseHostname(value: string | undefined): string | null {
@@ -104,7 +95,7 @@ export async function generateUploadUrl(
 ): Promise<string> {
   const command = new PutObjectCommand({
     Bucket: Env.S3_BUCKET_ARTIFACTS,
-    Key: getArtifactKey(taskId, artifactId, path, version),
+    Key: getArtifactStorageKey({ taskId }, artifactId, path, version),
     ContentType: contentType,
     ContentLength: size,
   });
@@ -115,7 +106,7 @@ export async function generateUploadUrl(
     ),
     command,
     {
-      expiresIn: PRESIGNED_URL_EXPIRY_SECONDS,
+      expiresIn: ARTIFACT_UPLOAD_URL_MAX_AGE_SECONDS,
     },
   );
 }
@@ -129,7 +120,7 @@ export async function generateDownloadUrl(
 ): Promise<string> {
   const command = new GetObjectCommand({
     Bucket: Env.S3_BUCKET_ARTIFACTS,
-    Key: getArtifactKey(taskId, artifactId, path, version),
+    Key: getArtifactStorageKey({ taskId }, artifactId, path, version),
     ResponseContentDisposition: `attachment; filename="${basename(path)}"`,
   });
 
@@ -139,7 +130,7 @@ export async function generateDownloadUrl(
     ),
     command,
     {
-      expiresIn: PRESIGNED_URL_EXPIRY_SECONDS,
+      expiresIn: PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS,
     },
   );
 }

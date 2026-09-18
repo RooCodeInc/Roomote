@@ -55,6 +55,7 @@ import {
   prependSlackMessages,
   setLatestSlackBotReply,
   setLatestUserMessage,
+  setSlackThreadReplyFooterMessageTs,
   suppressNextSlackReplyQuote,
   trackLatestUserMessageForSlackQuote,
   trackSlackBotReply,
@@ -89,6 +90,32 @@ describe('slack-messages', () => {
     lrangeMock.mockReturnValue(multi);
     multiDelMock.mockReturnValue(multi);
     multiMock.mockReturnValue(multi);
+  });
+
+  it('fences footer pointer writes with the carrier lease', async () => {
+    const lock = { key: 'footer-lock', ownerId: 'owner' };
+    evalMock.mockResolvedValueOnce(0).mockResolvedValueOnce(1);
+
+    await expect(
+      setSlackThreadReplyFooterMessageTs('C123', '111.222', '999.888', {
+        lock,
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      setSlackThreadReplyFooterMessageTs('C123', '111.222', '999.888', {
+        lock,
+      }),
+    ).resolves.toBe(true);
+
+    expect(evalMock).toHaveBeenCalledWith(
+      expect.stringContaining("redis.call('get', KEYS[1])"),
+      2,
+      'footer-lock',
+      'slack:thread_reply_footer:C123:111.222',
+      'owner',
+      '999.888',
+      30 * 24 * 60 * 60,
+    );
   });
 
   afterAll(() => {

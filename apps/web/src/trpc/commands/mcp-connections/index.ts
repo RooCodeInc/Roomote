@@ -1,26 +1,33 @@
 import {
+  and,
   db,
-  mcpConnections,
   deploymentMcpEnablements,
   eq,
   inArray,
-  and,
   isNull,
+  mcpConnections,
   or,
+  resolveModelProviderEnvValue,
 } from '@roomote/db/server';
 import {
   filterMcpToolDefinitions,
+  DEFAULT_OPENAI_REALTIME_VOICE_ID,
   getDefaultMcpConnectionRole,
   getAllowedIntegrationMcpToolNames,
   getMcpIntegration,
+  getMcpIntegrationConnectionMode,
   getMcpIntegrationConnectionScope,
+  getMcpIntegrationDataPolicy,
   getMcpIntegrationDefaultDisabledTools,
   type McpConnectionRole,
+  type OpenAiRealtimeVoiceId,
   isMcpConnectionAsanaConfig,
   isMcpConnectionNotionConfig,
   isMcpConnectionRipplingConfig,
   isMcpConnectionGranolaConfig,
+  isMcpConnectionExaConfig,
   isMcpConnectionElevenLabsConfig,
+  isMcpConnectionVoiceConfig,
   isMcpConnectionGrafanaConfig,
   isMcpConnectionSnowflakeConfig,
   isMcpConnectionVercelConfig,
@@ -31,6 +38,7 @@ import {
   MCP_INTEGRATIONS,
   normalizeGrafanaBaseUrl,
   type McpIntegration,
+  type EffectiveMcpIntegration,
   type McpToolsListJsonRpcPayload,
   parseMcpJsonRpcPayload,
 } from '@roomote/types';
@@ -38,6 +46,7 @@ import { decrypt, encrypt } from '@roomote/db/encryption';
 import { getValidAccessToken } from '@roomote/sdk/server';
 import { validateRipplingConnection } from '@roomote/sdk/server/rippling-api';
 
+import { isVoiceDisabledForDeployment } from '@/lib/server/voice';
 import type { UserAuthSuccess } from '@/types';
 import type { StaticOauthReadiness } from '@/lib/server/mcp-static-oauth';
 import { getDeploymentStaticOauthReadiness } from '@/lib/server/deployment-static-oauth';
@@ -50,23 +59,14 @@ import type {
   SaveNotionConnectionInput,
   SaveRipplingConnectionInput,
   SaveGranolaConnectionInput,
+  SaveExaConnectionInput,
   SaveElevenLabsConnectionInput,
+  SaveVoiceConnectionInput,
   SaveGrafanaConnectionInput,
   SaveSnowflakeConnectionInput,
   SaveVercelConnectionInput,
   SaveXConnectionInput,
 } from '@/types';
-
-type LegacySnowflakePasswordInput = Omit<
-  SaveSnowflakeConnectionInput,
-  'authMethod'
-> & {
-  authMethod: 'password';
-};
-
-type SaveSnowflakeConnectionCommandInput =
-  | SaveSnowflakeConnectionInput
-  | LegacySnowflakePasswordInput;
 
 type VercelConnectionData = {
   authStatus?: 'pending' | 'authenticated' | 'error' | null;
@@ -128,7 +128,7 @@ type ListedMcpTool = {
 };
 
 type VisibleMcpConnectionForCatalog = {
-  id: string;
+  id?: string;
   mcpId: string;
 };
 
@@ -186,6 +186,10 @@ async function getVisibleMcpConnectionForToolCatalog(
   });
 
   if (!connection) {
+    if (integration.supportsKeylessAccess) {
+      return { mcpId };
+    }
+
     throw new Error(
       connectionScope === 'deployment'
         ? `Connect ${integration.name} before managing tools for this deployment.`
@@ -207,13 +211,16 @@ async function getVisibleMcpConnectionForToolCatalog(
 
 /**
  * Resolve the bearer credential used to list an upstream integration's tool
- * catalog. Admin-configured upstream integrations (X) store a static
- * encrypted bearer token; everything else resolves OAuth tokens.
+ * catalog. Admin-configured upstream integrations store encrypted static
+ * credentials; everything else resolves OAuth tokens.
  */
-async function resolveUpstreamCatalogAccessToken(
+async function resolveUpstreamCatalogAuth(
   connectionId: string,
   integrationUrl: string,
-): Promise<string | null> {
+): Promise<{
+  headers: Record<string, string>;
+  upstreamUrl?: string;
+} | null> {
   const connection = await db.query.mcpConnections.findFirst({
     where: eq(mcpConnections.id, connectionId),
     columns: {
@@ -226,16 +233,36 @@ async function resolveUpstreamCatalogAccessToken(
       connection.authConfig.encryptedBearerToken,
     ).trim();
 
-    return bearerToken.length > 0 ? bearerToken : null;
+    return bearerToken.length > 0
+      ? { headers: { authorization: `Bearer ${bearerToken}` } }
+      : null;
   }
 
-  return (await getValidAccessToken(connectionId, integrationUrl)) ?? null;
+  if (isMcpConnectionExaConfig(connection?.authConfig)) {
+    const apiKey = decrypt(connection.authConfig.encryptedApiKey).trim();
+
+    return apiKey.length > 0
+      ? {
+          headers: { 'x-api-key': apiKey },
+          ...(getMcpIntegration('exa')?.authenticatedUrl
+            ? { upstreamUrl: getMcpIntegration('exa')!.authenticatedUrl }
+            : {}),
+        }
+      : null;
+  }
+
+  const accessToken = await getValidAccessToken(connectionId, integrationUrl);
+  return accessToken
+    ? { headers: { authorization: `Bearer ${accessToken}` } }
+    : null;
 }
 
 async function fetchUpstreamMcpTools(input: {
-  id: string;
+  id?: string;
   mcpId: string;
   disabledTools: string[] | null;
+  authHeaders?: Record<string, string>;
+  upstreamUrl?: string;
 }): Promise<ListedMcpTool[]> {
   const integration = getMcpIntegration(input.mcpId);
   if (!integration) {
@@ -243,18 +270,21 @@ async function fetchUpstreamMcpTools(input: {
   }
   const resolvedIntegration = integration;
 
-  const integrationUrl = resolvedIntegration.url;
+  const integrationUrl = input.upstreamUrl ?? resolvedIntegration.url;
   if (!integrationUrl) {
     throw new Error(
       `${resolvedIntegration.name} does not expose an upstream tool catalog that can be managed from this dialog yet.`,
     );
   }
 
-  const accessToken = await resolveUpstreamCatalogAccessToken(
-    input.id,
-    integrationUrl,
-  );
-  if (!accessToken) {
+  const auth = input.authHeaders
+    ? { headers: input.authHeaders, upstreamUrl: input.upstreamUrl }
+    : input.id
+      ? await resolveUpstreamCatalogAuth(input.id, integrationUrl)
+      : resolvedIntegration.supportsKeylessAccess
+        ? { headers: {} }
+        : null;
+  if (!auth) {
     throw new Error(
       `${resolvedIntegration.name} needs to be reconnected before tools can be managed.`,
     );
@@ -383,12 +413,12 @@ async function fetchUpstreamMcpTools(input: {
     body: Record<string, unknown>,
     extraHeaders: Record<string, string> = {},
   ) =>
-    fetch(integrationUrl, {
+    fetch(auth.upstreamUrl ?? integrationUrl, {
       method: 'POST',
       headers: {
         accept: 'application/json, text/event-stream',
-        authorization: `Bearer ${accessToken}`,
         'content-type': 'application/json',
+        ...auth.headers,
         ...extraHeaders,
       },
       body: JSON.stringify(body),
@@ -582,6 +612,108 @@ export function getCuratedIntegrationsAvailabilityCommand() {
   };
 }
 
+/** Resolve catalog metadata and actor-scoped state without exposing credentials. */
+export async function getEffectiveMcpIntegrationsCommand(
+  auth: UserAuthSuccess,
+): Promise<EffectiveMcpIntegration[]> {
+  const integrationIds = getMcpIntegrationIds();
+  const deploymentScopedIds = integrationIds.filter((id) =>
+    isDeploymentScopedMcpIntegration(id),
+  );
+  const userScopedIds = integrationIds.filter(
+    (id) => !isDeploymentScopedMcpIntegration(id),
+  );
+  const visibilityFilters = [
+    ...(deploymentScopedIds.length > 0
+      ? [
+          and(
+            isNull(mcpConnections.userId),
+            inArray(mcpConnections.mcpId, deploymentScopedIds),
+          ),
+        ]
+      : []),
+    ...(userScopedIds.length > 0
+      ? [
+          and(
+            eq(mcpConnections.userId, auth.userId),
+            inArray(mcpConnections.mcpId, userScopedIds),
+          ),
+        ]
+      : []),
+  ];
+  const [enablements, connections, oauthReadiness] = await Promise.all([
+    db.query.deploymentMcpEnablements.findMany({
+      where: inArray(deploymentMcpEnablements.mcpId, integrationIds),
+      columns: { mcpId: true, enabled: true },
+    }),
+    visibilityFilters.length > 0
+      ? db.query.mcpConnections.findMany({
+          where: or(...visibilityFilters),
+          orderBy: (table, { desc }) => [desc(table.createdAt)],
+          columns: {
+            mcpId: true,
+            enabled: true,
+            authStatus: true,
+          },
+        })
+      : Promise.resolve([]),
+    Promise.all(
+      MCP_INTEGRATIONS.map((integration) =>
+        getDeploymentStaticOauthReadiness(Env, integration),
+      ),
+    ),
+  ]);
+  const enabledById = new Map(
+    enablements.map((entry) => [entry.mcpId, entry.enabled]),
+  );
+  const connectionById = new Map<string, (typeof connections)[number]>();
+  for (const connection of connections) {
+    if (!connectionById.has(connection.mcpId)) {
+      connectionById.set(connection.mcpId, connection);
+    }
+  }
+  const available = !areCuratedIntegrationsDisabled(
+    Env.R_CURATED_INTEGRATIONS_DISABLED,
+  );
+
+  return MCP_INTEGRATIONS.map((integration, index) => {
+    const enabled = enabledById.get(integration.id) ?? false;
+    const connection = connectionById.get(integration.id);
+    const authStatus = connection?.enabled
+      ? (connection.authStatus ?? null)
+      : null;
+    const connected =
+      authStatus === 'authenticated' || integration.supportsKeylessAccess;
+    const serverMode = integration.serverMode ?? 'upstream_proxy';
+    const status = !available
+      ? 'unavailable'
+      : enabled
+        ? connected
+          ? 'connected'
+          : 'needs_connection'
+        : 'not_enabled';
+
+    return {
+      id: integration.id,
+      name: integration.name,
+      description: integration.description,
+      icon: integration.icon,
+      connectionScope: getMcpIntegrationConnectionScope(integration),
+      connectionMode: getMcpIntegrationConnectionMode(integration),
+      serverMode,
+      available,
+      enabled,
+      authStatus,
+      oauthReadiness: oauthReadiness[index]!,
+      status,
+      capabilities: {
+        agentTools: serverMode !== 'credential_only',
+        toolManagement: serverMode === 'upstream_proxy',
+      },
+    } satisfies EffectiveMcpIntegration;
+  });
+}
+
 /**
  * Return public-safe OAuth setup status for integrations that require a
  * deployment-configured client. Credential names and values never leave the
@@ -627,8 +759,21 @@ export async function setDeploymentMcpEnabledCommand(
     throw new Error(`Unknown MCP integration: ${input.mcpId}`);
   }
 
+  // Voice's key can come from the environment (an operator's or a fleet-wide
+  // key) with no connection row at all. That key decides who pays for Voice;
+  // this switch still decides whether the deployment has it on. So enabling
+  // needs no stored connection, and disabling must not delete a stored key
+  // the deployment would fall back to if the environment key went away.
+  const voiceConfiguredByEnvironment =
+    input.mcpId === 'voice' &&
+    Boolean(
+      (await resolveModelProviderEnvValue(['R_VOICE_OPENAI_API_KEY']))?.trim(),
+    );
+
   if (
     input.enabled &&
+    !voiceConfiguredByEnvironment &&
+    !integration.supportsKeylessAccess &&
     isDeploymentScopedMcpIntegration(input.mcpId) &&
     ALL_DEPLOYMENT_CONTROLLED_APP_IDS.has(input.mcpId)
   ) {
@@ -690,7 +835,11 @@ export async function setDeploymentMcpEnabledCommand(
     .returning();
 
   // When disabling, clean up all user connections for this MCP
-  if (!input.enabled) {
+  if (
+    !input.enabled &&
+    !voiceConfiguredByEnvironment &&
+    !integration.supportsKeylessAccess
+  ) {
     await db
       .delete(mcpConnections)
       .where(eq(mcpConnections.mcpId, input.mcpId));
@@ -783,9 +932,6 @@ export async function getSnowflakeConnectionCommand(auth: UserAuthSuccess) {
 
   return {
     authStatus: connection.authStatus,
-    authMethod: connection.authConfig.encryptedPrivateKey
-      ? ('key_pair' as const)
-      : ('password' as const),
     account: connection.authConfig.account,
     username: connection.authConfig.username,
     role: connection.authConfig.role,
@@ -879,6 +1025,26 @@ export async function getGranolaConnectionCommand(auth: UserAuthSuccess) {
   };
 }
 
+export async function getExaConnectionCommand(auth: UserAuthSuccess) {
+  assertAdmin(auth);
+
+  const connection = await db.query.mcpConnections.findFirst({
+    where: and(eq(mcpConnections.mcpId, 'exa'), isNull(mcpConnections.userId)),
+    columns: {
+      authConfig: true,
+      authStatus: true,
+    },
+  });
+
+  if (!connection || !isMcpConnectionExaConfig(connection.authConfig)) {
+    return null;
+  }
+
+  return {
+    authStatus: connection.authStatus,
+  };
+}
+
 export async function getElevenLabsConnectionCommand(auth: UserAuthSuccess) {
   assertAdmin(auth);
 
@@ -900,6 +1066,56 @@ export async function getElevenLabsConnectionCommand(auth: UserAuthSuccess) {
   return {
     authStatus: connection.authStatus,
     voiceId: connection.authConfig.voiceId,
+  };
+}
+
+/**
+ * Where the deployment's voice key comes from. An `R_VOICE_OPENAI_API_KEY`
+ * environment variable wins over the Settings-managed connection, so the
+ * card shows as connected without anything to configure or disconnect. The
+ * deployment's admins can still switch Voice off; `enabled` carries that
+ * state so the card can offer the switch (no enablement row means on).
+ */
+export async function getVoiceConnectionCommand(
+  auth: UserAuthSuccess,
+): Promise<{
+  authStatus: 'pending' | 'authenticated' | 'error' | null;
+  source: 'environment' | 'connection';
+  enabled: boolean;
+  voiceId?: OpenAiRealtimeVoiceId;
+} | null> {
+  assertAdmin(auth);
+
+  const envKey = await resolveModelProviderEnvValue(['R_VOICE_OPENAI_API_KEY']);
+  if (envKey?.trim()) {
+    return {
+      authStatus: 'authenticated',
+      source: 'environment',
+      enabled: !(await isVoiceDisabledForDeployment()),
+      voiceId: DEFAULT_OPENAI_REALTIME_VOICE_ID,
+    };
+  }
+
+  const connection = await db.query.mcpConnections.findFirst({
+    where: and(
+      eq(mcpConnections.mcpId, 'voice'),
+      isNull(mcpConnections.userId),
+    ),
+    columns: {
+      authConfig: true,
+      authStatus: true,
+    },
+  });
+
+  if (!connection || !isMcpConnectionVoiceConfig(connection.authConfig)) {
+    return null;
+  }
+
+  return {
+    authStatus: connection.authStatus,
+    source: 'connection',
+    enabled: !(await isVoiceDisabledForDeployment()),
+    voiceId: connection.authConfig.voiceId ?? DEFAULT_OPENAI_REALTIME_VOICE_ID,
   };
 }
 
@@ -977,7 +1193,7 @@ export async function getGrafanaConnectionCommand(
 
 export async function saveSnowflakeConnectionCommand(
   auth: UserAuthSuccess,
-  input: SaveSnowflakeConnectionCommandInput,
+  input: SaveSnowflakeConnectionInput,
 ) {
   assertAdmin(auth);
   assertCuratedIntegrationsEnabled();
@@ -997,32 +1213,16 @@ export async function saveSnowflakeConnectionCommand(
   )
     ? existingConnection.authConfig
     : null;
-  const preservingExistingCredential =
-    input.authMethod === 'password' && input.password.length === 0;
-  const nextEncryptedPassword =
-    input.authMethod === 'password'
-      ? input.password.length > 0
-        ? encrypt(input.password)
-        : existingConfig?.encryptedPassword
-      : undefined;
-  const nextEncryptedPrivateKey =
-    input.authMethod === 'key_pair'
-      ? input.privateKey.trim().length > 0
-        ? encrypt(input.privateKey)
-        : existingConfig?.encryptedPrivateKey
-      : preservingExistingCredential
-        ? existingConfig?.encryptedPrivateKey
-        : undefined;
+  const providedPrivateKey = input.privateKey.trim().length > 0;
+  const nextEncryptedPrivateKey = providedPrivateKey
+    ? encrypt(input.privateKey)
+    : existingConfig?.encryptedPrivateKey;
   const nextEncryptedPrivateKeyPassphrase =
-    input.authMethod === 'key_pair'
-      ? input.privateKeyPassphrase.length > 0
-        ? encrypt(input.privateKeyPassphrase)
-        : input.privateKey.trim().length > 0
-          ? undefined
-          : existingConfig?.encryptedPrivateKeyPassphrase
-      : preservingExistingCredential
-        ? existingConfig?.encryptedPrivateKeyPassphrase
-        : undefined;
+    input.privateKeyPassphrase.length > 0
+      ? encrypt(input.privateKeyPassphrase)
+      : providedPrivateKey
+        ? undefined
+        : existingConfig?.encryptedPrivateKeyPassphrase;
 
   const authConfig = {
     type: 'snowflake' as const,
@@ -1039,9 +1239,6 @@ export async function saveSnowflakeConnectionCommand(
       : existingConfig?.database
         ? { database: existingConfig.database }
         : {}),
-    ...(nextEncryptedPassword
-      ? { encryptedPassword: nextEncryptedPassword }
-      : {}),
     ...(nextEncryptedPrivateKey
       ? { encryptedPrivateKey: nextEncryptedPrivateKey }
       : {}),
@@ -1056,17 +1253,7 @@ export async function saveSnowflakeConnectionCommand(
       : {}),
   };
 
-  if (
-    input.authMethod === 'password' &&
-    !authConfig.encryptedPassword &&
-    !authConfig.encryptedPrivateKey
-  ) {
-    throw new Error(
-      'Programmatic Access Token is required when no Snowflake credential is already stored.',
-    );
-  }
-
-  if (input.authMethod === 'key_pair' && !authConfig.encryptedPrivateKey) {
+  if (!authConfig.encryptedPrivateKey) {
     throw new Error(
       'Private key is required when no Snowflake key pair is already stored.',
     );
@@ -1127,9 +1314,6 @@ export async function saveSnowflakeConnectionCommand(
   }
 
   return {
-    authMethod: nextEncryptedPrivateKey
-      ? ('key_pair' as const)
-      : ('password' as const),
     account: authConfig.account,
     username: authConfig.username,
     role: authConfig.role,
@@ -1528,6 +1712,118 @@ export async function saveGranolaConnectionCommand(
   };
 }
 
+export async function saveExaConnectionCommand(
+  auth: UserAuthSuccess,
+  input: SaveExaConnectionInput,
+) {
+  assertAdmin(auth);
+  assertCuratedIntegrationsEnabled();
+
+  const existingConnection = await db.query.mcpConnections.findFirst({
+    where: and(eq(mcpConnections.mcpId, 'exa'), isNull(mcpConnections.userId)),
+    columns: {
+      authConfig: true,
+    },
+  });
+
+  const existingConfig = isMcpConnectionExaConfig(
+    existingConnection?.authConfig,
+  )
+    ? existingConnection.authConfig
+    : null;
+  const apiKey =
+    input.apiKey.length > 0
+      ? input.apiKey
+      : existingConfig
+        ? decrypt(existingConfig.encryptedApiKey).trim()
+        : '';
+
+  if (!apiKey) {
+    throw new Error(
+      'Exa API key is required when no Exa key is already stored.',
+    );
+  }
+
+  const authenticatedUrl = getMcpIntegration('exa')?.authenticatedUrl;
+  if (!authenticatedUrl) {
+    throw new Error('Exa authenticated MCP URL is not configured.');
+  }
+
+  try {
+    await fetchUpstreamMcpTools({
+      mcpId: 'exa',
+      disabledTools: null,
+      authHeaders: { 'x-api-key': apiKey },
+      upstreamUrl: authenticatedUrl,
+    });
+  } catch {
+    throw new Error(
+      'Unable to validate the Exa API key with Exa. Check the key and try again.',
+    );
+  }
+
+  const authConfig = {
+    type: 'exa' as const,
+    encryptedApiKey:
+      input.apiKey.length > 0
+        ? encrypt(apiKey)
+        : existingConfig!.encryptedApiKey,
+  };
+
+  await db
+    .insert(mcpConnections)
+    .values({
+      userId: null,
+      mcpId: 'exa',
+      connectionRole: 'default',
+      authConfig,
+      enabled: true,
+      authStatus: 'authenticated',
+    })
+    .onConflictDoUpdate({
+      target: [
+        mcpConnections.userId,
+        mcpConnections.mcpId,
+        mcpConnections.connectionRole,
+      ],
+      set: {
+        connectionRole: 'default',
+        authConfig,
+        enabled: true,
+        authStatus: 'authenticated',
+        updatedAt: new Date(),
+      },
+    });
+
+  if (!existingConnection) {
+    captureIntegrationLifecycleEvent(
+      'integration_connected',
+      'exa',
+      auth.userId,
+    );
+  }
+
+  return {
+    authStatus: 'authenticated' as const,
+  };
+}
+
+export async function removeExaApiKeyCommand(auth: UserAuthSuccess) {
+  assertAdmin(auth);
+
+  const [deleted] = await db
+    .delete(mcpConnections)
+    .where(and(eq(mcpConnections.mcpId, 'exa'), isNull(mcpConnections.userId)))
+    .returning({ id: mcpConnections.id });
+
+  if (!deleted) {
+    throw new Error('No Exa API key is configured.');
+  }
+
+  captureIntegrationLifecycleEvent('integration_removed', 'exa', auth.userId);
+  return { success: true };
+}
+
 export async function saveElevenLabsConnectionCommand(
   auth: UserAuthSuccess,
   input: SaveElevenLabsConnectionInput,
@@ -1617,6 +1913,104 @@ export async function saveElevenLabsConnectionCommand(
     captureIntegrationLifecycleEvent(
       'integration_enabled',
       'elevenlabs',
+      auth.userId,
+    );
+  }
+
+  return {
+    authStatus: 'authenticated' as const,
+  };
+}
+
+export async function saveVoiceConnectionCommand(
+  auth: UserAuthSuccess,
+  input: SaveVoiceConnectionInput,
+) {
+  assertAdmin(auth);
+  assertCuratedIntegrationsEnabled();
+
+  const existingConnection = await db.query.mcpConnections.findFirst({
+    where: and(
+      eq(mcpConnections.mcpId, 'voice'),
+      isNull(mcpConnections.userId),
+    ),
+    columns: {
+      authConfig: true,
+    },
+  });
+
+  const existingConfig = isMcpConnectionVoiceConfig(
+    existingConnection?.authConfig,
+  )
+    ? existingConnection.authConfig
+    : null;
+  const nextEncryptedApiKey =
+    input.apiKey.length > 0
+      ? encrypt(input.apiKey)
+      : existingConfig?.encryptedApiKey;
+
+  if (!nextEncryptedApiKey) {
+    throw new Error(
+      'An OpenAI API key is required when no voice key is already stored.',
+    );
+  }
+
+  const authConfig = {
+    type: 'voice' as const,
+    encryptedApiKey: nextEncryptedApiKey,
+    voiceId: input.voiceId,
+  };
+
+  await db
+    .insert(mcpConnections)
+    .values({
+      userId: null,
+      mcpId: 'voice',
+      connectionRole: 'default',
+      authConfig,
+      enabled: true,
+      authStatus: 'authenticated',
+    })
+    .onConflictDoUpdate({
+      target: [
+        mcpConnections.userId,
+        mcpConnections.mcpId,
+        mcpConnections.connectionRole,
+      ],
+      set: {
+        connectionRole: 'default',
+        authConfig,
+        enabled: true,
+        authStatus: 'authenticated',
+        updatedAt: new Date(),
+      },
+    });
+
+  await db
+    .insert(deploymentMcpEnablements)
+    .values({
+      mcpId: 'voice',
+      enabled: true,
+      enabledByUserId: auth.userId,
+    })
+    .onConflictDoUpdate({
+      target: [deploymentMcpEnablements.mcpId],
+      set: {
+        enabled: true,
+        enabledByUserId: auth.userId,
+        updatedAt: new Date(),
+      },
+    });
+
+  if (!existingConnection) {
+    captureIntegrationLifecycleEvent(
+      'integration_connected',
+      'voice',
+      auth.userId,
+    );
+    captureIntegrationLifecycleEvent(
+      'integration_enabled',
+      'voice',
       auth.userId,
     );
   }
@@ -1929,7 +2323,7 @@ export async function listDeploymentMcpIntegrationToolsCommand(
   return {
     mcpId: enablement.mcpId,
     tools: await fetchUpstreamMcpTools({
-      id: connection.id,
+      ...(connection.id ? { id: connection.id } : {}),
       mcpId: connection.mcpId,
       disabledTools: enablement.disabledTools,
     }),
@@ -2049,7 +2443,11 @@ export async function connectMcpCommand(
       set: {
         userId: isDeploymentScoped ? null : auth.userId,
         connectionRole,
-        authConfig: {},
+        // Keep Linear's last verified account identity through the pending
+        // authorization flow. The callback uses it to retain an omitted
+        // refresh token only when the newly authorized account matches.
+        // Other integrations still reset their client configuration.
+        ...(integration.id === 'linear' ? {} : { authConfig: {} }),
         enabled: false,
         authStatus: 'pending',
         updatedAt: new Date(),
@@ -2090,15 +2488,30 @@ export async function disconnectMcpCommand(
     assertAdmin(auth);
   }
 
+  const ownerCondition =
+    connectionScope === 'deployment'
+      ? isNull(mcpConnections.userId)
+      : eq(mcpConnections.userId, auth.userId);
+  if (getMcpIntegrationDataPolicy(integration) === 'private') {
+    await db
+      .update(mcpConnections)
+      .set({ enabled: false, authStatus: 'pending', updatedAt: new Date() })
+      .where(
+        and(
+          eq(mcpConnections.mcpId, input.mcpId),
+          eq(mcpConnections.connectionRole, connectionRole),
+          ownerCondition,
+        ),
+      );
+  }
+
   const [deleted] = await db
     .delete(mcpConnections)
     .where(
       and(
         eq(mcpConnections.mcpId, input.mcpId),
         eq(mcpConnections.connectionRole, connectionRole),
-        connectionScope === 'deployment'
-          ? isNull(mcpConnections.userId)
-          : eq(mcpConnections.userId, auth.userId),
+        ownerCondition,
       ),
     )
     .returning();

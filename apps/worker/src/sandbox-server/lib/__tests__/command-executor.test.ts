@@ -61,6 +61,43 @@ describe('CommandExecutor', () => {
   });
 
   describe('tailStream', () => {
+    it('preserves UTF-8 characters split across tail reads', async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tail-utf8-'));
+      const filePath = path.join(tmpDir, 'output.log');
+      const bytes = Buffer.from('\u20ac');
+      fs.writeFileSync(
+        filePath,
+        Buffer.concat([Buffer.from('READY\n'), bytes.subarray(0, 1)]),
+      );
+      let output = '';
+      let appended = false;
+      const handle = CommandExecutor.tailStream(filePath, {
+        cwd: testCwd,
+        timeout: 5000,
+        onChunk: (chunk) => {
+          if (chunk.type !== 'stdout') return;
+          output += chunk.data;
+          // Only append after tail has flushed the read containing the first byte.
+          if (!appended && output.includes('READY\n')) {
+            appended = true;
+            fs.appendFileSync(
+              filePath,
+              Buffer.concat([bytes.subarray(1), Buffer.from('\nEND\n')]),
+            );
+          }
+          if (output.endsWith('\nEND\n')) handle.kill();
+        },
+      });
+      try {
+        await handle.promise;
+        expect(output).toBe('READY\n\u20ac\nEND\n');
+      } finally {
+        handle.kill();
+        await handle.promise;
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    }, 10000);
+
     it('should stream tail output and can be killed', async () => {
       const chunks: StreamChunk[] = [];
 

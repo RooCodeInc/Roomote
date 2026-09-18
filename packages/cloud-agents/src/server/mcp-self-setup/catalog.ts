@@ -172,11 +172,25 @@ export const MCP_SETUP_INTEGRATION_METADATA: Record<
       'Keep access read-only and limited by the Granola key configuration',
     ],
   },
+  exa: {
+    capabilities: [
+      'Search the web and fetch full page content with free keyless access',
+      'Use advanced filters while Exa rate limits apply',
+      'Optionally add a deployment API key for usage-based Exa Agent research',
+    ],
+  },
   elevenlabs: {
     capabilities: [
       'Narrate feature-demo videos in a configured ElevenLabs voice',
       'Keep the API key on the control plane, never exposed to agents',
       'Configure once per deployment with a text-to-speech-scoped key',
+    ],
+  },
+  voice: {
+    capabilities: [
+      'Talk to Roomote on a voice call from any session',
+      'Keep the OpenAI key on the control plane, never exposed to agents',
+      'Configure once per deployment with a key that has GPT-Live access',
     ],
   },
   x: {

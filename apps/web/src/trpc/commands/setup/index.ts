@@ -11,6 +11,7 @@ import {
   inArray,
   invalidateBrainEnabledCache,
   sql,
+  type DatabaseOrTransaction,
 } from '@roomote/db/server';
 import {
   TaskPayloadKind,
@@ -61,15 +62,8 @@ export async function batchCreateEnvironmentsCommand(
   assertAdmin(auth);
   const { userId } = auth;
 
-  if (
-    input.environments.length === 0 ||
-    input.environments.every(
-      (environment) => environment.repositoryIds.length === 0,
-    )
-  ) {
-    throw new Error(
-      'At least one environment with at least one repository is required',
-    );
+  if (input.environments.length === 0) {
+    throw new Error('At least one environment is required');
   }
 
   // Collect all unique repository IDs to look up in one query
@@ -79,10 +73,13 @@ export async function batchCreateEnvironmentsCommand(
     ),
   ];
 
-  const repos = await db
-    .select({ id: repositories.id, fullName: repositories.fullName })
-    .from(repositories)
-    .where(inArray(repositories.id, allRepoIds));
+  const repos =
+    allRepoIds.length > 0
+      ? await db
+          .select({ id: repositories.id, fullName: repositories.fullName })
+          .from(repositories)
+          .where(inArray(repositories.id, allRepoIds))
+      : [];
 
   const repoMap = new Map(repos.map((r) => [r.id, r.fullName]));
 
@@ -421,15 +418,22 @@ export async function completeSetupCommand(
     anonymousAnalyticsEnabled?: boolean;
     productUpdatesEnabled?: boolean;
   },
+  options?: {
+    requireIncomplete?: boolean;
+    validateBeforeCompletion?: (tx: DatabaseOrTransaction) => Promise<boolean>;
+  },
 ) {
   assertAdmin(auth);
   const { userId } = auth;
 
   const now = new Date();
 
-  const defaultedBrainEnabled = await db.transaction(async (tx) => {
+  const completion = await db.transaction(async (tx) => {
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext('setup-complete'))`,
+    );
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext('setup-recommendation-dispatch'))`,
     );
 
     // Persist the StepInvoke anonymous-analytics choice alongside setup
@@ -444,6 +448,21 @@ export async function completeSetupCommand(
         brainEnabled: true,
       },
     });
+    if (
+      options?.requireIncomplete &&
+      existingSettings?.setupCompletedAt != null
+    ) {
+      return {
+        state: 'already_completed' as const,
+        defaultedBrainEnabled: false,
+      };
+    }
+    if (
+      options?.validateBeforeCompletion &&
+      !(await options.validateBeforeCompletion(tx))
+    ) {
+      return { state: 'not_ready' as const, defaultedBrainEnabled: false };
+    }
     const recommendationsWereReviewed =
       normalizeSetupNewState(existingSettings?.setupNewState ?? {})
         .automationRecommendations?.status === 'ready';
@@ -511,10 +530,17 @@ export async function completeSetupCommand(
       await ensureManagedReviewerEnabledByDefaultInTx(tx, auth);
     }
 
-    return brainEnabledDefault === true;
+    return {
+      state: 'completed' as const,
+      defaultedBrainEnabled: brainEnabledDefault === true,
+    };
   });
 
-  if (defaultedBrainEnabled) {
+  if (completion.state !== 'completed') {
+    return { success: true as const, completionState: completion.state };
+  }
+
+  if (completion.defaultedBrainEnabled) {
     invalidateBrainEnabledCache();
   }
 
@@ -544,7 +570,7 @@ export async function completeSetupCommand(
     void subscribeToProductUpdates(auth.primaryEmail, 'setup');
   }
 
-  return { success: true as const };
+  return { success: true as const, completionState: 'completed' as const };
 }
 
 // --- Queries ---

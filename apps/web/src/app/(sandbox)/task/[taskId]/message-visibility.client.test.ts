@@ -9,6 +9,8 @@ import {
 function mcpToolCallMessage(
   toolName: string,
   serverName = 'browser-mcp',
+  rawInput?: unknown,
+  title = `${serverName}/${toolName}`,
 ): AcpUiMessage {
   return {
     id: `tool-call-${toolName}`,
@@ -21,7 +23,7 @@ function mcpToolCallMessage(
     text: toolName,
     data: {
       toolCallId: 'call-1',
-      title: `${serverName}/${toolName}`,
+      title,
       kind: 'mcp',
       status: 'completed',
       isExecute: false,
@@ -32,6 +34,7 @@ function mcpToolCallMessage(
       serverName,
       toolName,
       command: null,
+      ...(rawInput ? { rawInput } : {}),
     },
   };
 }
@@ -39,6 +42,8 @@ function mcpToolCallMessage(
 function mcpToolResultMessage(
   toolName: string,
   serverName = 'browser-mcp',
+  rawInput?: unknown,
+  title = `${serverName}/${toolName}`,
 ): AcpUiMessage {
   return {
     id: `tool-result-${toolName}`,
@@ -52,7 +57,7 @@ function mcpToolResultMessage(
     data: {
       toolCallId: 'call-1',
       kind: 'mcp',
-      title: `${serverName}/${toolName}`,
+      title,
       isExecute: false,
       isMcp: true,
       mcpServerName: serverName,
@@ -63,6 +68,7 @@ function mcpToolResultMessage(
       exitCode: null,
       output: '',
       status: 'completed',
+      ...(rawInput ? { rawInput } : {}),
     },
   };
 }
@@ -179,16 +185,71 @@ describe('message visibility helpers', () => {
     ).toBe(false);
   });
 
-  it('hides internal post_to_channel calls from the Roomote server', () => {
+  it('treats only effect-free Roomote lifecycle calls as internal debug rows', () => {
     expect(
       isInternalDebugToolCallMessage(
-        mcpToolCallMessage('post_to_channel', 'roomote'),
+        mcpToolCallMessage('ignore_event', 'roomote'),
       ),
     ).toBe(true);
     expect(
       isInternalDebugToolCallMessage(
-        mcpToolResultMessage('post_to_channel', 'roomote'),
+        mcpToolResultMessage('ignore_event', 'roomote'),
       ),
     ).toBe(true);
+    // Outbound communication is the task's visible output, not plumbing.
+    for (const toolName of [
+      'send_chat_reply',
+      'post_to_channel',
+      'send_chat_reaction_emoji',
+    ]) {
+      expect(
+        isInternalDebugToolCallMessage(mcpToolCallMessage(toolName, 'roomote')),
+      ).toBe(false);
+      expect(
+        isInternalDebugToolCallMessage(
+          mcpToolResultMessage(toolName, 'roomote'),
+        ),
+      ).toBe(false);
+    }
   });
+
+  it.each(['create', 'list'])(
+    'treats the full manage_wakeups %s lifecycle as internal debug rows',
+    (action) => {
+      const rawInput = { arguments: { action } };
+      const call = mcpToolCallMessage(
+        'manage_wakeups',
+        'roomote',
+        rawInput,
+        'mcp__roomote__manage_wakeups',
+      );
+      const result = mcpToolResultMessage(
+        'manage_wakeups',
+        'roomote',
+        rawInput,
+        'mcp__roomote__manage_wakeups',
+      );
+
+      expect(isInternalDebugToolCallMessage(call)).toBe(true);
+      expect(isInternalDebugToolCallMessage(result)).toBe(true);
+    },
+  );
+
+  it.each(['get', 'cancel', 'unknown'])(
+    'keeps manage_wakeups %s lifecycle rows user-visible',
+    (action) => {
+      const rawInput = { arguments: { action } };
+
+      expect(
+        isInternalDebugToolCallMessage(
+          mcpToolCallMessage('manage_wakeups', 'roomote', rawInput),
+        ),
+      ).toBe(false);
+      expect(
+        isInternalDebugToolCallMessage(
+          mcpToolResultMessage('manage_wakeups', 'roomote', rawInput),
+        ),
+      ).toBe(false);
+    },
+  );
 });

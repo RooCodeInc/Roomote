@@ -201,4 +201,22 @@ describe('resolveRequest', () => {
       requestedPortKey: 'GUI',
     });
   });
+
+  it('keeps completed Modal previews resumable after seven days', async () => {
+    taskRunFindFirstMock.mockResolvedValue(
+      createRunningTaskRun({
+        status: RunStatus.Completed,
+        vendor: 'modal',
+        snapshotId: 'im-old-modal-snapshot',
+        snapshotCreatedAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+      }),
+    );
+
+    const result = await resolveRequest({ taskId: 'outertask12345' }, 'web');
+
+    expect(result).toMatchObject({
+      status: 'resumable',
+      snapshotId: 'im-old-modal-snapshot',
+    });
+  });
 });

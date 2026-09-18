@@ -1,5 +1,82 @@
 import type { TaskArtifactType } from '@roomote/types';
-import { and, db, eq, max, sql, taskArtifacts } from '@roomote/db/server';
+import {
+  and,
+  db,
+  eq,
+  max,
+  sessions,
+  sql,
+  taskArtifacts,
+  tasks,
+} from '@roomote/db/server';
+
+type ArtifactRecordOwner =
+  | { taskId: string; sessionId?: never; runId?: number | null }
+  | { taskId?: never; sessionId: string; runId?: never };
+
+type CreateArtifactRecordInput = ArtifactRecordOwner & {
+  artifactType: TaskArtifactType;
+  contentType: string;
+  path: string;
+  size: number;
+  uploadUrlExpiresAt?: Date | null;
+};
+
+export async function createArtifactRecord(input: CreateArtifactRecordInput) {
+  return await db.transaction(async (tx) => {
+    const taskOwned = input.taskId !== undefined;
+
+    const [owner] = taskOwned
+      ? await tx
+          .select({ id: tasks.id })
+          .from(tasks)
+          .where(eq(tasks.id, input.taskId))
+          .for('key share')
+      : await tx
+          .select({ id: sessions.id })
+          .from(sessions)
+          .where(eq(sessions.id, input.sessionId))
+          .for('key share');
+    if (!owner) {
+      throw new Error(taskOwned ? 'Task not found.' : 'Session not found.');
+    }
+    const ownerId = taskOwned ? input.taskId : input.sessionId;
+    const lockOwner = taskOwned ? ownerId : `session:${ownerId}`;
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${lockOwner} || ':' || ${input.path}))`,
+    );
+
+    const ownerCondition = taskOwned
+      ? eq(taskArtifacts.taskId, input.taskId)
+      : eq(taskArtifacts.sessionId, input.sessionId);
+    const maxVersionResult = await tx
+      .select({ maxVersion: max(taskArtifacts.version) })
+      .from(taskArtifacts)
+      .where(and(ownerCondition, eq(taskArtifacts.path, input.path)))
+      .limit(1);
+
+    const newVersion = (maxVersionResult[0]?.maxVersion ?? 0) + 1;
+    const ownerValues = taskOwned
+      ? { taskId: input.taskId, runId: input.runId ?? null }
+      : { sessionId: input.sessionId };
+
+    const [created] = await tx
+      .insert(taskArtifacts)
+      .values({
+        ...ownerValues,
+        artifactType: input.artifactType,
+        contentType: input.contentType,
+        path: input.path,
+        version: newVersion,
+        size: input.size,
+        uploaded: false,
+        uploadUrlExpiresAt: input.uploadUrlExpiresAt ?? null,
+      })
+      .returning();
+
+    return created ?? null;
+  });
+}
 
 export async function createTaskArtifactRecord(input: {
   taskId: string;
@@ -9,38 +86,31 @@ export async function createTaskArtifactRecord(input: {
   path: string;
   size: number;
 }) {
-  return await db.transaction(async (tx) => {
-    await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(hashtext(${input.taskId} || ':' || ${input.path}))`,
-    );
+  return createArtifactRecord(input);
+}
 
-    const maxVersionResult = await tx
-      .select({ maxVersion: max(taskArtifacts.version) })
-      .from(taskArtifacts)
+export async function authorizeTaskArtifactUpload(input: {
+  taskId: string;
+  artifactId: string;
+  expiresAt: Date;
+}): Promise<void> {
+  await db.transaction(async (tx) => {
+    const [task] = await tx
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(eq(tasks.id, input.taskId))
+      .for('key share');
+    if (!task) throw new Error('Task not found.');
+    const [authorized] = await tx
+      .update(taskArtifacts)
+      .set({ uploadUrlExpiresAt: input.expiresAt, updatedAt: new Date() })
       .where(
         and(
+          eq(taskArtifacts.id, input.artifactId),
           eq(taskArtifacts.taskId, input.taskId),
-          eq(taskArtifacts.path, input.path),
         ),
       )
-      .limit(1);
-
-    const newVersion = (maxVersionResult[0]?.maxVersion ?? 0) + 1;
-
-    const [created] = await tx
-      .insert(taskArtifacts)
-      .values({
-        taskId: input.taskId,
-        runId: input.runId ?? null,
-        artifactType: input.artifactType,
-        contentType: input.contentType,
-        path: input.path,
-        version: newVersion,
-        size: input.size,
-        uploaded: false,
-      })
-      .returning();
-
-    return created ?? null;
+      .returning({ id: taskArtifacts.id });
+    if (!authorized) throw new Error('Artifact not found.');
   });
 }

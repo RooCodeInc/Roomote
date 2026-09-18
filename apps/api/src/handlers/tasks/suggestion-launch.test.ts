@@ -2,12 +2,24 @@ const mocks = vi.hoisted(() => ({
   finalize: vi.fn(),
   release: vi.fn(),
   cancel: vi.fn(),
+  getSessionForTask: vi.fn(),
+  findSession: vi.fn(),
+  findConversation: vi.fn(),
+  getOrCreateSession: vi.fn(),
+}));
+
+vi.mock('@roomote/cloud-agents/server', () => ({
+  fastAgentConversationRepository: { findById: mocks.findConversation },
+  getOrCreateFastAgentSession: mocks.getOrCreateSession,
 }));
 
 vi.mock('@roomote/db/server', () => ({
-  db: {},
+  db: { query: { sessions: { findFirst: mocks.findSession } } },
+  eq: vi.fn(),
+  sessions: { id: 'sessions.id' },
   finalizeWorkItemLaunched: mocks.finalize,
   releaseWorkItemClaim: mocks.release,
+  getSessionForTask: mocks.getSessionForTask,
 }));
 
 vi.mock('./orphaned-work-item-run.js', () => ({
@@ -27,6 +39,8 @@ vi.mock('../fast-agent-entry.js', () => ({
 import {
   launchClaimedSuggestedTask,
   resolveSuggestedTaskLaunchMode,
+  resolveSuggestionOriginSessionId,
+  resolveSuggestionFastConversation,
 } from './suggestion-launch';
 
 const claimedAt = new Date('2026-08-28T00:00:00.000Z');
@@ -37,6 +51,84 @@ beforeEach(() => {
   mocks.finalize.mockResolvedValue(true);
   mocks.release.mockResolvedValue(true);
   mocks.cancel.mockResolvedValue('orphaned run canceled');
+});
+
+describe('resolveSuggestionFastConversation', () => {
+  const conversation = {
+    surface: 'telegram' as const,
+    workspaceId: 'chat',
+    conversationId: 'clicked-card',
+    replyTarget: { channelId: 'chat', threadId: 'clicked-topic' },
+  };
+  const canonical = {
+    ...conversation,
+    conversationId: 'original-conversation',
+    replyTarget: { channelId: 'chat', threadId: 'original-topic' },
+  };
+
+  it('keeps legacy identity when no origin is available', async () => {
+    await expect(
+      resolveSuggestionFastConversation({ userId: 'actor', conversation }),
+    ).resolves.toBe(conversation);
+    expect(mocks.findSession).not.toHaveBeenCalled();
+    expect(mocks.getOrCreateSession).not.toHaveBeenCalled();
+  });
+
+  it('reuses the origin conversation and reply target without changing its owner', async () => {
+    mocks.findSession.mockResolvedValue({
+      id: 'origin',
+      fastConversationId: 'original-fast-id',
+    });
+    mocks.findConversation.mockResolvedValue({
+      id: 'original-fast-id',
+      userId: 'different-owner',
+      conversation: canonical,
+    });
+    await expect(
+      resolveSuggestionFastConversation({
+        userId: 'actor',
+        originSessionId: 'origin',
+        conversation,
+      }),
+    ).resolves.toBe(canonical);
+    expect(mocks.findConversation).toHaveBeenCalledWith({
+      id: 'original-fast-id',
+    });
+    expect(mocks.getOrCreateSession).not.toHaveBeenCalled();
+  });
+
+  it.each([null, 'missing-fast-id'])(
+    'binds an origin without an available conversation (%s) and returns the canonical result',
+    async (fastConversationId) => {
+      mocks.findSession.mockResolvedValue({ id: 'origin', fastConversationId });
+      mocks.findConversation.mockResolvedValue(null);
+      mocks.getOrCreateSession.mockResolvedValue({ conversation: canonical });
+      await expect(
+        resolveSuggestionFastConversation({
+          userId: 'actor',
+          originSessionId: 'origin',
+          conversation,
+        }),
+      ).resolves.toBe(canonical);
+      expect(mocks.getOrCreateSession).toHaveBeenCalledWith({
+        userId: 'actor',
+        sessionId: 'origin',
+        conversation,
+      });
+    },
+  );
+
+  it('fails without creating a replacement when the origin disappears', async () => {
+    mocks.findSession.mockResolvedValue(null);
+    await expect(
+      resolveSuggestionFastConversation({
+        userId: 'actor',
+        originSessionId: 'origin',
+        conversation,
+      }),
+    ).rejects.toThrow('The suggestion origin Session is no longer available.');
+    expect(mocks.getOrCreateSession).not.toHaveBeenCalled();
+  });
 });
 
 describe('resolveSuggestedTaskLaunchMode', () => {
@@ -69,6 +161,20 @@ describe('resolveSuggestedTaskLaunchMode', () => {
       }),
     ).toBe('coding');
   });
+
+  it.each(['fast', 'coding'] as const)(
+    'honors an explicit %s launch mode',
+    (requiredMode) => {
+      expect(
+        resolveSuggestedTaskLaunchMode({
+          fastEligible: requiredMode !== 'fast',
+          userDefaultEnabled: requiredMode !== 'fast',
+          fastAvailable: requiredMode !== 'fast',
+          requiredMode,
+        }),
+      ).toBe(requiredMode);
+    },
+  );
 });
 
 describe('launchClaimedSuggestedTask', () => {
@@ -224,5 +330,52 @@ describe('launchClaimedSuggestedTask', () => {
     });
     expect(abort).toHaveBeenCalledOnce();
     expect(mocks.release).toHaveBeenCalled();
+  });
+});
+
+describe('resolveSuggestionOriginSessionId', () => {
+  it('uses the persisted canonical origin for a taskless Fast suggestion', async () => {
+    mocks.findSession.mockResolvedValue({ id: 'session-fast-origin' });
+    await expect(
+      resolveSuggestionOriginSessionId(null, 'session-fast-origin'),
+    ).resolves.toBe('session-fast-origin');
+    expect(mocks.getSessionForTask).not.toHaveBeenCalled();
+  });
+
+  it('does not silently create a new origin when the persisted Session is missing', async () => {
+    mocks.findSession.mockResolvedValue(null);
+    await expect(
+      resolveSuggestionOriginSessionId(null, 'deleted-session'),
+    ).rejects.toThrow('origin Session is no longer available');
+  });
+
+  it('returns the Session that owns the source task', async () => {
+    mocks.getSessionForTask.mockResolvedValue({ id: 'session-origin' });
+
+    await expect(resolveSuggestionOriginSessionId('scan-task-1')).resolves.toBe(
+      'session-origin',
+    );
+    expect(mocks.getSessionForTask).toHaveBeenCalledWith(
+      expect.anything(),
+      'scan-task-1',
+    );
+  });
+
+  it('returns null without a source task, without a Session, or on a lookup failure', async () => {
+    await expect(resolveSuggestionOriginSessionId(null)).resolves.toBeNull();
+    expect(mocks.getSessionForTask).not.toHaveBeenCalled();
+
+    mocks.getSessionForTask.mockResolvedValueOnce(null);
+    await expect(
+      resolveSuggestionOriginSessionId('scan-task-1'),
+    ).resolves.toBeNull();
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mocks.getSessionForTask.mockRejectedValueOnce(new Error('db down'));
+    await expect(
+      resolveSuggestionOriginSessionId('scan-task-1'),
+    ).resolves.toBeNull();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 });

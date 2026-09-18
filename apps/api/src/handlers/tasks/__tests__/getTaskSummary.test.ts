@@ -3,13 +3,20 @@ import type { AuthTokenContext } from '@roomote/types';
 
 import type { Variables } from '../../../types';
 import { mcpAuthMiddleware } from '../../mcp/middleware';
+
+vi.mock('../../custom-automation-history-access', () => ({
+  customAutomationHistoryAccess: vi.fn(() => undefined),
+}));
 import { getTaskSummary } from '../getTaskSummary';
 
 const {
   andMock,
   eqMock,
   mockEnvironmentFindFirst,
+  mockReportFindFirst,
+  mockMessageFindFirst,
   mockGetLatestTaskRunsByTaskIds,
+  mockListArtifactsByTask,
   mockSelect,
   selectFromMock,
   selectLimitMock,
@@ -19,7 +26,10 @@ const {
   andMock: vi.fn((...args) => ({ type: 'and', args })),
   eqMock: vi.fn((...args) => ({ type: 'eq', args })),
   mockEnvironmentFindFirst: vi.fn(),
+  mockReportFindFirst: vi.fn(),
+  mockMessageFindFirst: vi.fn(),
   mockGetLatestTaskRunsByTaskIds: vi.fn(),
+  mockListArtifactsByTask: vi.fn(),
   mockSelect: vi.fn(),
   selectFromMock: vi.fn(),
   selectLimitMock: vi.fn(),
@@ -42,14 +52,29 @@ vi.mock('../helpers', () => ({
   visibleTaskHistoryCondition,
 }));
 
+vi.mock('../../artifacts/service', () => ({
+  listArtifactsByTask: mockListArtifactsByTask,
+}));
+
+vi.mock('@roomote/env', () => ({
+  Env: {
+    R_APP_URL: 'https://api.roomote.example',
+    R_PUBLIC_URL: 'https://roomote.example',
+  },
+}));
+
 vi.mock('@roomote/db/server', () => ({
   and: andMock,
+  desc: vi.fn((column) => ({ desc: column })),
+  sql: vi.fn((strings, ...values) => ({ strings: [...strings], values })),
   db: {
     select: mockSelect,
     query: {
       environments: {
         findFirst: mockEnvironmentFindFirst,
       },
+      fastAgentParentEvents: { findFirst: mockReportFindFirst },
+      taskMessages: { findFirst: mockMessageFindFirst },
     },
   },
   environments: {
@@ -57,6 +82,21 @@ vi.mock('@roomote/db/server', () => ({
   },
   eq: eqMock,
   tasks: { id: 'tasks.id', orgId: 'tasks.orgId' },
+  taskMessages: {
+    taskId: 'taskMessages.taskId',
+    runId: 'taskMessages.runId',
+    eventType: 'taskMessages.eventType',
+    metadata: 'taskMessages.metadata',
+    payload: 'taskMessages.payload',
+    ts: 'taskMessages.ts',
+    createdAt: 'taskMessages.createdAt',
+  },
+  fastAgentParentEvents: {
+    conversationId: 'fastAgentParentEvents.conversationId',
+    event: 'fastAgentParentEvents.event',
+    createdAt: 'fastAgentParentEvents.createdAt',
+    id: 'fastAgentParentEvents.id',
+  },
 }));
 
 function createApp(authContext?: AuthTokenContext) {
@@ -117,6 +157,15 @@ describe('getTaskSummary', () => {
         environmentSetupState: 'failed',
         payload: {
           environmentDefinitionId: 'env-123',
+          fastAgentParent: {
+            sessionId: '11111111-1111-4111-8111-111111111111',
+            conversation: {
+              surface: 'web',
+              workspaceId: 'user-1',
+              conversationId: '11111111-1111-4111-8111-111111111111',
+              replyTarget: {},
+            },
+          },
         },
       },
     });
@@ -124,9 +173,19 @@ describe('getTaskSummary', () => {
       id: 'env-123',
       name: 'Onboarding Sandbox',
     });
+    mockListArtifactsByTask.mockResolvedValue([]);
+    mockReportFindFirst.mockResolvedValue(undefined);
+    mockMessageFindFirst.mockResolvedValue(undefined);
   });
 
   it('returns the latest task run error in the summary payload', async () => {
+    mockMessageFindFirst.mockResolvedValue({
+      metadata: {
+        terminalProviderError: { errorSummary: 'Insufficient credits' },
+      },
+      payload: {},
+      createdAt: new Date('2026-01-01T00:00:03Z'),
+    });
     const response = await createApp(authContext).request(
       'http://localhost/tasks/task-1/summary',
     );
@@ -137,8 +196,35 @@ describe('getTaskSummary', () => {
       taskRunStatus: 'failed',
       taskRunError: 'Sandbox startup timed out',
       environmentSetupState: 'failed',
+      summary: null,
+      videoArtifacts: [],
     });
   });
+
+  it('includes the actual task report, with secrets redacted, in the result', async () => {
+    mockReportFindFirst.mockResolvedValueOnce({
+      event: {
+        message: 'Fixed the retry race.\nTests pass. token=secret-value',
+      },
+    });
+    const response = await createApp(authContext).request(
+      'http://localhost/tasks/task-1/summary',
+    );
+    const body = await response.json();
+    expect(body.summary).toContain('Fixed the retry race.\nTests pass.');
+    expect(body.summary).not.toContain('secret-value');
+  });
+
+  it.each([null, '', '  ', 123])(
+    'returns null for missing or invalid report text',
+    async (message) => {
+      mockReportFindFirst.mockResolvedValueOnce({ event: { message } });
+      const response = await createApp(authContext).request(
+        'http://localhost/tasks/task-1/summary',
+      );
+      await expect(response.json()).resolves.toMatchObject({ summary: null });
+    },
+  );
 
   it('adds the hidden-task-history condition to the summary query', async () => {
     const response = await createApp(authContext).request(
@@ -150,6 +236,77 @@ describe('getTaskSummary', () => {
     expect(andMock.mock.calls[0]).toContain(visibleTaskHistoryCondition);
   });
 
+  it('returns separate stable IDs and viewer links for uploaded task images and videos', async () => {
+    mockListArtifactsByTask.mockResolvedValueOnce([
+      {
+        id: '11111111-1111-4111-8111-111111111111',
+        taskId: 'task-1',
+        runId: 101,
+        path: 'proof/final image.png',
+        version: 2,
+        artifactType: 'visual-proof',
+        contentType: 'image/png',
+        size: 123,
+        uploaded: true,
+        createdAt: new Date('2026-04-21T12:00:00Z'),
+      },
+      {
+        id: '22222222-2222-4222-8222-222222222222',
+        taskId: 'task-1',
+        runId: 101,
+        path: 'report.txt',
+        version: 1,
+        artifactType: 'general',
+        contentType: 'text/plain',
+        size: 10,
+        uploaded: true,
+        createdAt: new Date('2026-04-21T12:00:01Z'),
+      },
+      {
+        id: '33333333-3333-4333-8333-333333333333',
+        taskId: 'task-1',
+        runId: 101,
+        path: 'proof/final recording.webm',
+        version: 3,
+        artifactType: 'visual-proof',
+        contentType: 'video/webm',
+        size: 456,
+        uploaded: true,
+        createdAt: new Date('2026-04-21T12:00:02Z'),
+      },
+    ]);
+
+    const response = await createApp(authContext).request(
+      'http://localhost/tasks/task-1/summary',
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      imageArtifacts: [
+        {
+          id: '11111111-1111-4111-8111-111111111111',
+          path: 'proof/final image.png',
+          version: 2,
+          artifactType: 'visual-proof',
+          contentType: 'image/png',
+          viewUrl:
+            'https://roomote.example/task/task-1/artifacts/proof/final%20image.png?v=2',
+        },
+      ],
+      videoArtifacts: [
+        {
+          id: '33333333-3333-4333-8333-333333333333',
+          path: 'proof/final recording.webm',
+          version: 3,
+          artifactType: 'visual-proof',
+          contentType: 'video/webm',
+          viewUrl:
+            'https://roomote.example/task/task-1/artifacts/proof/final%20recording.webm?v=3',
+        },
+      ],
+    });
+  });
+
   it('returns 404 when the task is hidden from task history', async () => {
     selectLimitMock.mockResolvedValueOnce([]);
 
@@ -159,6 +316,8 @@ describe('getTaskSummary', () => {
 
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({ error: 'Task not found' });
+    expect(mockListArtifactsByTask).not.toHaveBeenCalled();
+    expect(mockReportFindFirst).not.toHaveBeenCalled();
   });
 
   it('includes the linked environment id and name from the latest task run payload', async () => {
@@ -218,7 +377,9 @@ describe('getTaskSummary', () => {
     await expect(response.json()).resolves.toMatchObject({
       linkedEnvironmentId: null,
       linkedEnvironmentName: null,
+      summary: null,
     });
     expect(mockEnvironmentFindFirst).not.toHaveBeenCalled();
+    expect(mockReportFindFirst).not.toHaveBeenCalled();
   });
 });

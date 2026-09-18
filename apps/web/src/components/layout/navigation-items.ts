@@ -1,5 +1,12 @@
 import { type LucideIcon } from '@/components/system';
-import { ChartColumnIncreasing, House, Rows4, Zap } from '@/components/system';
+import {
+  ChartColumnIncreasing,
+  House,
+  Plug,
+  NotepadText,
+  Rows4,
+  Zap,
+} from '@/components/system';
 
 interface PrimaryNavItem {
   icon: LucideIcon;
@@ -10,7 +17,12 @@ interface PrimaryNavItem {
   matchExact: boolean;
   matchPaths: string[];
   adminOnly?: boolean;
+  requiresSetup?: boolean;
+  resultsExperiment?: boolean;
 }
+
+export const SETUP_INCOMPLETE_NAV_TOOLTIP =
+  'Available when setup is completed.';
 
 const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
   {
@@ -20,6 +32,7 @@ const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
     description: 'Start here',
     matchExact: true,
     matchPaths: ['/'],
+    requiresSetup: true,
   },
   {
     icon: Rows4,
@@ -36,7 +49,25 @@ const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
     description: 'Configure background work that runs for your team',
     matchExact: false,
     matchPaths: ['/automations'],
-    adminOnly: true,
+    requiresSetup: true,
+  },
+  {
+    icon: Plug,
+    href: '/integrations',
+    label: 'Integrations',
+    description: 'Connect Roomote with tools your team uses',
+    matchExact: false,
+    matchPaths: ['/integrations'],
+  },
+  {
+    icon: NotepadText,
+    href: '/results',
+    label: 'Results',
+    description: 'Review automation results',
+    matchExact: false,
+    matchPaths: ['/results'],
+    requiresSetup: true,
+    resultsExperiment: true,
   },
   {
     icon: ChartColumnIncreasing,
@@ -46,11 +77,17 @@ const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
     matchExact: false,
     matchPaths: ['/analytics'],
     adminOnly: true,
+    requiresSetup: true,
   },
 ];
 
 export function getVisiblePrimaryNavItems(opts: {
   isAdmin: boolean;
+  resultsEnabled?: boolean;
 }): PrimaryNavItem[] {
-  return PRIMARY_NAV_ITEMS.filter((item) => !item.adminOnly || opts.isAdmin);
+  return PRIMARY_NAV_ITEMS.filter(
+    (item) =>
+      (!item.adminOnly || opts.isAdmin) &&
+      (!item.resultsExperiment || opts.resultsEnabled),
+  );
 }

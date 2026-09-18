@@ -149,6 +149,7 @@ describe('UserPreferencesSection', () => {
       ),
     ).toBeInTheDocument();
     expect(screen.getByLabelText('Toggle narration mode')).toBeChecked();
+    expect(screen.queryByText('Therapist mode')).not.toBeInTheDocument();
   });
 
   it('disables controls while the corresponding preference is loading or updating', () => {

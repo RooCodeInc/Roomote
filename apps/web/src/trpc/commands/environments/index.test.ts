@@ -130,7 +130,6 @@ function buildMockAuth(): UserAuthSuccess {
     name: 'Admin',
     primaryEmail: 'admin@example.com',
     isAdmin: true,
-    featureFlags: {},
     anonymousAnalyticsEnabled: false,
     cloudEnabled: false,
     cookieConsentedAt: null,
@@ -183,6 +182,34 @@ describe('startEnvironmentDefinitionTaskCommand', () => {
         surface: 'web',
         trigger: 'manual',
       }),
+    );
+  });
+
+  it('starts setup without repository context in a blank-slate workspace', async () => {
+    await startEnvironmentDefinitionTaskCommand(buildMockAuth(), {
+      repositoryIds: [],
+      changeRequest: 'Install the database tools.',
+    });
+
+    expect(mockGetRepositoryEmptyStates).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Set up your first environment',
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            repo: '__no_repositories__',
+          }),
+        }),
+      }),
+    );
+    const enqueueInput = mockEnqueueTask.mock.calls[0]?.[0] as {
+      task: { payload: { description: string } };
+    };
+    expect(enqueueInput.task.payload.description).not.toContain(
+      'repository-free',
+    );
+    expect(enqueueInput.task.payload.description).not.toContain(
+      'for this repository set:',
     );
   });
 

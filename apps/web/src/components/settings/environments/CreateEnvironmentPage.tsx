@@ -34,6 +34,7 @@ import {
   HandMetal,
   Info,
   Loader2,
+  RetryableLoadError,
   Textarea,
 } from '@/components/system';
 
@@ -162,10 +163,6 @@ export function CreateEnvironmentPage({
   };
 
   const handleStartAgent = async () => {
-    if (selectedRepositoryIds.length === 0) {
-      return;
-    }
-
     await startDefinitionTask.mutateAsync({
       repositoryIds: selectedRepositoryIds,
       changeRequest: agentSetupGuidance.trim() || undefined,
@@ -206,6 +203,11 @@ export function CreateEnvironmentPage({
                   isEmpty: (repository as { isEmpty?: boolean }).isEmpty,
                 }))}
                 repositoriesLoading={repositories.isPending}
+                repositoriesError={
+                  repositories.isError && repositories.data === undefined
+                }
+                repositoriesRetrying={repositories.isFetching}
+                onRetryRepositories={() => void repositories.refetch()}
                 onOpenCreateRepo={() => setCreateRepoDialogOpen(true)}
                 selectedRepositoryIds={selectedRepositoryIds}
                 onToggleRepository={(repositoryId) => {
@@ -268,6 +270,9 @@ type AgentViewRepository = {
 function AgentMasterView({
   repositories,
   repositoriesLoading,
+  repositoriesError,
+  repositoriesRetrying,
+  onRetryRepositories,
   selectedRepositoryIds,
   onToggleRepository,
   onStartAgent,
@@ -282,6 +287,9 @@ function AgentMasterView({
 }: {
   repositories: AgentViewRepository[];
   repositoriesLoading: boolean;
+  repositoriesError: boolean;
+  repositoriesRetrying: boolean;
+  onRetryRepositories: () => void;
   selectedRepositoryIds: string[];
   onToggleRepository: (repositoryId: string) => void;
   onStartAgent: () => void;
@@ -298,6 +306,9 @@ function AgentMasterView({
     <AgentRepositorySelectionSubview
       repositories={repositories}
       repositoriesLoading={repositoriesLoading}
+      repositoriesError={repositoriesError}
+      repositoriesRetrying={repositoriesRetrying}
+      onRetryRepositories={onRetryRepositories}
       selectedRepositoryIds={selectedRepositoryIds}
       onToggleRepository={onToggleRepository}
       onStartAgent={onStartAgent}
@@ -316,6 +327,9 @@ function AgentMasterView({
 function AgentRepositorySelectionSubview({
   repositories,
   repositoriesLoading,
+  repositoriesError,
+  repositoriesRetrying,
+  onRetryRepositories,
   selectedRepositoryIds,
   onToggleRepository,
   onStartAgent,
@@ -330,6 +344,9 @@ function AgentRepositorySelectionSubview({
 }: {
   repositories: AgentViewRepository[];
   repositoriesLoading: boolean;
+  repositoriesError: boolean;
+  repositoriesRetrying: boolean;
+  onRetryRepositories: () => void;
   selectedRepositoryIds: string[];
   onToggleRepository: (repositoryId: string) => void;
   onStartAgent: () => void;
@@ -358,83 +375,68 @@ function AgentRepositorySelectionSubview({
   return (
     <>
       <p className="text-sm text-muted-foreground">
-        Pick the repo(s) needed for the environment you want to set up.
+        Select repositories when this environment needs source code.
       </p>
 
       <Card>
         <CardContent>
-          {repositoriesLoading ? (
-            <div className="flex items-center justify-center py-12 text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" />
-            </div>
-          ) : repositories.length === 0 ? (
-            <div className="space-y-4">
-              <Alert>
-                <AlertDescription>
-                  Connect GitHub and make sure at least one repository is
-                  available before starting the environment definition agent.
-                </AlertDescription>
-              </Alert>
-              <UpdateGitHubReposHint />
-              <EnvironmentRepositorySelector
-                repositories={repositories}
-                selectedRepositoryIds={selectedRepositoryIds}
-                onToggleRepository={onToggleRepository}
-                onCreateRepository={onOpenCreateRepo}
-                inputPrefix="create-environment-repository"
-                heightClassName="max-h-[calc(var(--effective-viewport-height)-17rem)] overflow-auto"
+          <div className="space-y-4">
+            {repositoriesError ? (
+              <RetryableLoadError
+                className="border"
+                message="Failed to load repositories."
+                isRetrying={repositoriesRetrying}
+                onRetry={onRetryRepositories}
               />
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <EnvironmentRepositorySelector
-                repositories={repositories}
-                selectedRepositoryIds={selectedRepositoryIds}
-                onToggleRepository={onToggleRepository}
-                onCreateRepository={onOpenCreateRepo}
-                inputPrefix="create-environment-repository"
-                heightClassName="max-h-[calc(var(--effective-viewport-height)-17rem)] overflow-auto"
-              />
-
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                <UpdateGitHubReposHint />
+            ) : repositoriesLoading ? (
+              <div className="flex items-center justify-center py-12 text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" />
               </div>
-
-              {allSelectedRepositoriesAreEmpty ? (
-                <Alert>
-                  <Info className="size-4" />
-                  <AlertDescription className="flex-col items-start gap-1">
-                    <p>
-                      {selectedEmptyRepositories.length === 1
-                        ? 'The selected repository has no commits yet.'
-                        : 'All selected repositories have no commits yet.'}{' '}
-                      Roomote will push an initial commit and set up a basic
-                      environment — then you can start building with your first
-                      task.
-                    </p>
-                    <p className="font-medium text-foreground">
-                      {selectedEmptyRepositories
-                        .map((repository) => repository.fullName)
-                        .join(', ')}
-                    </p>
-                  </AlertDescription>
-                </Alert>
-              ) : null}
-
-              <div>
-                <Textarea
-                  value={setupGuidance}
-                  onChange={(event) =>
-                    onSetupGuidanceChange(event.target.value)
-                  }
-                  placeholder={
-                    ENVIRONMENT_DEFINITION_SETUP_GUIDANCE_PLACEHOLDER
-                  }
-                  className="h-24 min-h-24 resize-none"
+            ) : (
+              <div className="space-y-4">
+                <EnvironmentRepositorySelector
+                  repositories={repositories}
+                  selectedRepositoryIds={selectedRepositoryIds}
+                  onToggleRepository={onToggleRepository}
+                  onCreateRepository={onOpenCreateRepo}
+                  inputPrefix="create-environment-repository"
+                  heightClassName="max-h-[calc(var(--effective-viewport-height)-17rem)] overflow-auto"
                 />
+
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <UpdateGitHubReposHint />
+                </div>
+
+                {allSelectedRepositoriesAreEmpty ? (
+                  <Alert>
+                    <Info className="size-4" />
+                    <AlertDescription className="flex-col items-start gap-1">
+                      <p>
+                        {selectedEmptyRepositories.length === 1
+                          ? 'The selected repository has no commits yet.'
+                          : 'All selected repositories have no commits yet.'}{' '}
+                        Roomote will push an initial commit and set up a basic
+                        environment — then you can start building with your
+                        first task.
+                      </p>
+                      <p className="font-medium text-foreground">
+                        {selectedEmptyRepositories
+                          .map((repository) => repository.fullName)
+                          .join(', ')}
+                      </p>
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
               </div>
-            </div>
-          )}
+            )}
+
+            <Textarea
+              value={setupGuidance}
+              onChange={(event) => onSetupGuidanceChange(event.target.value)}
+              placeholder={ENVIRONMENT_DEFINITION_SETUP_GUIDANCE_PLACEHOLDER}
+              className="h-24 min-h-24 resize-none"
+            />
+          </div>
         </CardContent>
       </Card>
 
@@ -461,9 +463,7 @@ function AgentRepositorySelectionSubview({
           size="sm"
           onClick={onStartAgent}
           disabled={
-            selectedRepositoryIds.length === 0 ||
-            isStartAgentPending ||
-            repositoriesLoading
+            isStartAgentPending || repositoriesLoading || repositoriesError
           }
         >
           {isStartAgentPending && <Loader2 className="animate-spin" />}

@@ -1,8 +1,22 @@
 // pnpm --filter @roomote/cloud-agents test src/server/workflows/__tests__/githubPrReviewSync.test.ts
 
 import * as utils from '../utils';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 describe('githubPrReviewSync', () => {
+  it('does not carry obsolete per-user memory disclosure state', () => {
+    const thisFilePath = fileURLToPath(import.meta.url);
+    const workflowPath = path.resolve(
+      path.dirname(thisFilePath),
+      '../githubPrReviewSync.ts',
+    );
+    const workflowContent = fs.readFileSync(workflowPath, 'utf8');
+
+    expect(workflowContent).not.toContain('therapistModeEnabled');
+  });
+
   describe('getMarkdownChecklist unit tests', () => {
     it('should extract checklist items and preserve checked state', () => {
       const markdown = `

@@ -1,8 +1,11 @@
 import { decrypt } from '@roomote/db/encryption';
 import type { McpConnectionNotionConfig } from '@roomote/types';
 
-const NOTION_API_BASE_URL = 'https://api.notion.com/v1/';
+export const NOTION_API_ORIGIN = 'https://api.notion.com';
+const NOTION_API_BASE_URL = `${NOTION_API_ORIGIN}/v1/`;
 export const NOTION_API_VERSION = '2026-03-11';
+
+export type NotionApiAuth = McpConnectionNotionConfig | { accessToken: string };
 
 type NotionErrorResponse = {
   code?: string;
@@ -21,9 +24,12 @@ export class NotionApiError extends Error {
   }
 }
 
-export function resolveNotionAccessToken(
-  config: McpConnectionNotionConfig,
-): string {
+export function resolveNotionAccessToken(config: NotionApiAuth): string {
+  if ('accessToken' in config) {
+    const token = config.accessToken.trim();
+    if (token) return token;
+    throw new Error('Notion OAuth connection is missing an access token');
+  }
   const token = decrypt(config.encryptedToken).trim();
 
   if (!token) {
@@ -36,9 +42,9 @@ export function resolveNotionAccessToken(
 }
 
 export async function notionApiRequestJson<T>(params: {
-  config: McpConnectionNotionConfig;
+  config: NotionApiAuth;
   path: string;
-  method?: 'GET' | 'POST' | 'PATCH';
+  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   query?: Record<string, string | number | boolean | undefined>;
   body?: unknown;
 }): Promise<T> {

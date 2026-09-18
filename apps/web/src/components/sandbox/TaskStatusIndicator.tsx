@@ -108,9 +108,20 @@ export function TaskStatusIndicator({
 
   if (compact) {
     return (
-      <span className={cn('inline-flex items-center', statusColor, className)}>
-        {dot}
-      </span>
+      <BasicTooltip
+        content={
+          hasError && lastErrorMessage
+            ? `${statusLabel}: ${lastErrorMessage}`
+            : statusLabel
+        }
+      >
+        <span
+          aria-label={statusLabel}
+          className={cn('inline-flex items-center', statusColor, className)}
+        >
+          {dot}
+        </span>
+      </BasicTooltip>
     );
   }
 

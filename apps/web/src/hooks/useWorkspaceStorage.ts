@@ -3,7 +3,7 @@ import { useLocalStorage } from 'usehooks-ts';
 
 const STORAGE_KEY_PREFIX = 'roomote-workspace';
 
-export type WorkspaceSelection = {
+type WorkspaceSelection = {
   workspace?:
     | { type: 'repository'; value: string }
     | { type: 'environment'; id: string }

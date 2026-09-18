@@ -7,6 +7,9 @@ import {
   db,
   desc,
   eq,
+  getCanonicalPrReviewAction,
+  getSessionForFastConversation,
+  isSessionConversationResponding,
   slackInstallations,
   taskPullRequests,
   taskRuns,
@@ -16,9 +19,7 @@ import {
   PR_REVIEW_NOTIFICATION_MAX_DEFERRALS,
   PrReviewNotificationRateLimitError,
   attachPendingPrReviewActionMessageWithRetirement,
-  beginCanonicalPrReviewAutoDispatch,
   beginCanonicalPrReviewPrompt,
-  beginCanonicalPrReviewWebAutoDispatch,
   beginCanonicalPrReviewWebPrompt,
   buildPrReviewNotificationPostInput,
   createPrReviewNotificationTelemetry,
@@ -27,11 +28,12 @@ import {
   type PrReviewNotificationRoute,
   consumePendingPrReviewActivity,
   completeCanonicalPrReviewAutoDispatch,
-  dispatchPrReviewFollowUp,
+  dispatchCanonicalPrReviewAutoFollowUp,
   findAutoHandlePrReviewFeedbackPreference,
   finalizePrReviewNotificationRequest,
   isDurablePrReviewNotificationRequest,
   renewPrReviewNotificationRequestLease,
+  readLivePullRequestStateForNotification,
   releaseCanonicalPrReviewWebAutoDispatch,
   retirePrReviewActionMessagesBestEffort,
   migrateLegacyPrReviewNotificationRequest,
@@ -41,8 +43,11 @@ import {
   prReviewNotificationRequestSchema,
   recordPrReviewNotificationDeliveryBestEffort,
   requeuePendingPrReviewActivity,
+  retrySupersededPrReviewAction,
   schedulePrReviewNotificationJob,
   setPendingPrReviewAction,
+  updateFastAgentPrReviewOfferStatus,
+  updateTaskPrReviewOfferStatus,
 } from '@roomote/sdk/server';
 import {
   buildSlackPrReviewActionBlocks,
@@ -54,10 +59,56 @@ import {
   PR_REVIEW_ACTION_LABELS,
   isTaskExecutingTurn,
   getFastAgentParentFromPayload,
+  isPrReviewRun,
+  isSessionRequestedReviewRun,
   WORKER_HEARTBEAT_STALE_MS,
+  formatOperationalEvent,
+  getOperationalLogRuntimeFields,
+  type OperationalLogFields,
 } from '@roomote/types';
 
 type PrReviewNotificationJob = Job<PrReviewNotificationRequest, void, string>;
+
+function getPrReviewJobOperationalFields(
+  job: PrReviewNotificationJob,
+  data: PrReviewNotificationRequest,
+): OperationalLogFields {
+  const event = data.events?.find(
+    (candidate) => candidate.providerEventId || candidate.sourceDeliveryId,
+  );
+  const reviewId = event?.providerEventId?.startsWith('github-review:')
+    ? Number(event.providerEventId.slice('github-review:'.length))
+    : undefined;
+
+  return {
+    ...getOperationalLogRuntimeFields('bullmq', process.env),
+    provider: data.sourceControlProvider ?? 'github',
+    deliveryId: event?.sourceDeliveryId,
+    externalEventId: event?.providerEventId,
+    repository: data.repository,
+    prNumber: data.prNumber,
+    reviewId: Number.isFinite(reviewId) ? reviewId : undefined,
+    taskId: data.taskId,
+    jobId: job.id,
+    routeProvider: data.routeProvider,
+    deferrals: data.deferrals,
+    eventCount: data.events?.length,
+  };
+}
+
+function logPrReviewJobEvent(
+  level: 'info' | 'warn' | 'error',
+  event: string,
+  fields: OperationalLogFields,
+): void {
+  const writer =
+    level === 'error'
+      ? console.error
+      : level === 'warn'
+        ? console.warn
+        : console.log;
+  writer(formatOperationalEvent(event, fields));
+}
 
 function isLiveTaskTurn(run: typeof taskRuns.$inferSelect): boolean {
   if (!isTaskExecutingTurn(run.status, run.taskPhase)) {
@@ -70,8 +121,37 @@ function isLiveTaskTurn(run: typeof taskRuns.$inferSelect): boolean {
   );
 }
 
-function findTaskPullRequestForNotification(data: PrReviewNotificationRequest) {
-  return db.query.taskPullRequests.findFirst({
+async function getNotificationActivity(
+  run: typeof taskRuns.$inferSelect,
+): Promise<{ active: boolean; source: 'fast_session' | 'task' }> {
+  const fastParent = getFastAgentParentFromPayload(run.payload);
+  if (fastParent) {
+    const session = await getSessionForFastConversation(
+      db,
+      fastParent.sessionId,
+    );
+    if (session) {
+      return {
+        active: isSessionConversationResponding(session),
+        source: 'fast_session',
+      };
+    }
+  }
+
+  return { active: isLiveTaskTurn(run), source: 'task' };
+}
+
+/**
+ * The task's link for the pull request this notification is about. The same
+ * task, provider, repository, and number can name pull requests on different
+ * source-control hosts, so the request's repository id or host picks the
+ * instance; a legacy link that recorded neither is the only fallback, and an
+ * ambiguous set yields no link rather than an arbitrary one.
+ */
+async function findTaskPullRequestForNotification(
+  data: PrReviewNotificationRequest,
+) {
+  const links = await db.query.taskPullRequests.findMany({
     where: and(
       eq(taskPullRequests.taskId, data.taskId),
       eq(
@@ -82,6 +162,7 @@ function findTaskPullRequestForNotification(data: PrReviewNotificationRequest) {
       eq(taskPullRequests.prNumber, data.prNumber),
     ),
     columns: {
+      id: true,
       sourceControlProvider: true,
       host: true,
       repository: true,
@@ -93,6 +174,22 @@ function findTaskPullRequestForNotification(data: PrReviewNotificationRequest) {
       autoHandleFeedbackByUserId: true,
     },
   });
+  if (data.repositoryId) {
+    const byRepository = links.find(
+      (link) => link.repositoryId === data.repositoryId,
+    );
+    if (byRepository) return byRepository;
+  }
+  if (data.host) {
+    const byHost = links.find((link) => link.host === data.host);
+    if (byHost) return byHost;
+  }
+  const legacy = links.filter(
+    (link) => link.host == null && link.repositoryId == null,
+  );
+  if (legacy.length === 1) return legacy[0];
+  if (!data.repositoryId && !data.host && links.length === 1) return links[0];
+  return undefined;
 }
 
 function logPrReviewNotificationTriage(input: {
@@ -118,6 +215,7 @@ function logPrReviewNotificationTriage(input: {
       githubTokenMintRequests: input.telemetry.githubTokenMintRequests,
       triageInvoked: input.telemetry.triageInvoked,
       triageCacheHit: input.telemetry.triageCacheHit,
+      triageJudgmentSkipped: input.telemetry.triageJudgmentSkipped,
       triageInputChars: input.telemetry.triageInputChars,
       triageInputTokenEstimate: input.telemetry.triageInputTokenEstimate,
       outcome: input.outcome,
@@ -130,7 +228,6 @@ function logPrReviewNotificationTriage(input: {
 type PrReviewNotificationAction = {
   /** Summary text in the route provider's link syntax, without the question. */
   summaryText: string;
-  question: string;
   followUpPrompt: string;
   repository: string;
   prNumber: number;
@@ -157,9 +254,16 @@ function isButtonRoute(
 }
 
 function getFastParentButtonRoute(
-  payload: unknown,
+  run: Pick<typeof taskRuns.$inferSelect, 'payload' | 'payloadKind'>,
 ): ButtonPrReviewNotificationRoute | null {
-  const parent = getFastAgentParentFromPayload(payload);
+  // An automatic review carries a Fast parent for session visibility only;
+  // its PR notifications must not route buttons into the parent thread. A
+  // review the session requested is that session's carrier for the outcome,
+  // so it keeps the buttons.
+  if (isPrReviewRun(run) && !isSessionRequestedReviewRun(run)) {
+    return null;
+  }
+  const parent = getFastAgentParentFromPayload(run.payload);
   if (
     !parent ||
     parent.conversation.surface === 'automation' ||
@@ -170,6 +274,9 @@ function getFastParentButtonRoute(
 
   const conversation = parent.conversation;
   if (conversation.surface === 'slack') {
+    if (!conversation.replyTarget.threadId) {
+      return null;
+    }
     return {
       provider: 'slack',
       slackTeamId: conversation.workspaceId,
@@ -178,14 +285,17 @@ function getFastParentButtonRoute(
     };
   }
 
-  // Teams and Telegram can receive the Fast parent event itself, but the PR
-  // action-button renderer does not yet have provider-native callbacks there.
-  if (conversation.surface !== 'discord') {
+  // Teams can receive the Fast parent event itself, but the PR action-button
+  // renderer does not yet have provider-native callbacks there.
+  if (
+    conversation.surface !== 'discord' &&
+    conversation.surface !== 'telegram'
+  ) {
     return null;
   }
 
   return {
-    provider: 'discord',
+    provider: conversation.surface,
     channelId: conversation.replyTarget.channelId,
     threadId: conversation.replyTarget.threadId ?? null,
   };
@@ -213,6 +323,23 @@ function getPersistedButtonRoute(
     channelId: data.routeChannelId,
     threadId: data.routeThreadId ?? null,
   };
+}
+
+/**
+ * A lost publish fence means another actor moved the delivery out of
+ * `prompt_posting`. Only flip the transcript card to dismissed when the
+ * delivery really was superseded; an expired lease re-claimed by another
+ * worker leaves the same delivery id live, and that worker's card must stay
+ * actionable.
+ */
+async function dismissWebOfferIfSuperseded(
+  deliveryId: string,
+  dismiss: () => Promise<void>,
+): Promise<void> {
+  const action = await getCanonicalPrReviewAction(deliveryId);
+  if (action?.status === 'dismissed') {
+    await dismiss();
+  }
 }
 
 async function postPrReviewNotification({
@@ -278,12 +405,11 @@ async function postPrReviewNotification({
       channel: route.channelId,
       threadTs: route.threadId,
       taskId,
-      text,
+      text: action ? action.summaryText : text,
       ...(action && nonce
         ? {
             blocks: buildSlackPrReviewActionBlocks({
               text: action.summaryText,
-              question: action.question,
               nonce,
             }),
           }
@@ -302,6 +428,11 @@ async function postPrReviewNotification({
           },
         );
       if (canonicalDeliveryId && !attached) {
+        if (pendingAction) {
+          await retirePrReviewActionMessagesBestEffort([
+            { ...pendingAction, messageId: messageTs },
+          ]);
+        }
         throw new Error('Canonical PR review prompt lost its posting fence');
       }
       if (superseded.length > 0) {
@@ -324,22 +455,24 @@ async function postPrReviewNotification({
   const postInput = buildPrReviewNotificationPostInput(route, text);
 
   if (action && nonce && isButtonRouteProvider(route.provider)) {
-    postInput.buttons = [
-      [
-        {
-          text: PR_REVIEW_ACTION_LABELS.yes,
-          callbackData: buildPrReviewActionCallbackData('yes', nonce),
-        },
-        {
-          text: PR_REVIEW_ACTION_LABELS.auto,
-          callbackData: buildPrReviewActionCallbackData('auto', nonce),
-        },
-        {
-          text: PR_REVIEW_ACTION_LABELS.dismiss,
-          callbackData: buildPrReviewActionCallbackData('dismiss', nonce),
-        },
-      ],
+    const resolveButton = {
+      text: PR_REVIEW_ACTION_LABELS.yes,
+      callbackData: buildPrReviewActionCallbackData('yes', nonce),
+    };
+    const secondaryButtons = [
+      {
+        text: PR_REVIEW_ACTION_LABELS.auto,
+        callbackData: buildPrReviewActionCallbackData('auto', nonce),
+      },
+      {
+        text: PR_REVIEW_ACTION_LABELS.dismiss,
+        callbackData: buildPrReviewActionCallbackData('dismiss', nonce),
+      },
     ];
+    postInput.buttons =
+      route.provider === 'telegram'
+        ? [[resolveButton], secondaryButtons]
+        : [[resolveButton, ...secondaryButtons]];
   }
 
   const posted = await adapter.postMessage(postInput);
@@ -355,6 +488,14 @@ async function postPrReviewNotification({
         },
       );
     if (canonicalDeliveryId && !attached) {
+      if (pendingAction) {
+        await retirePrReviewActionMessagesBestEffort([
+          {
+            ...pendingAction,
+            messageId: posted.lastTextMessageId ?? posted.messageId,
+          },
+        ]);
+      }
       throw new Error('Canonical PR review prompt lost its posting fence');
     }
     if (superseded.length > 0) {
@@ -367,8 +508,9 @@ async function postPrReviewNotification({
 
 /**
  * Posts an informational message about new PR review feedback into the owning
- * task's originating conversation once that task
- * is idle. This never starts an agent turn or changes any code on its own.
+ * task's originating conversation once that conversation is idle. Fast tasks
+ * use their parent Session's responding lease; direct tasks use task activity.
+ * This never starts an agent turn or changes any code on its own.
  */
 export const prReviewNotificationJob = async (
   job: PrReviewNotificationJob,
@@ -382,6 +524,13 @@ export const prReviewNotificationJob = async (
   }
 
   const data = parsed.data;
+  const operationalFields = getPrReviewJobOperationalFields(job, data);
+  logPrReviewJobEvent('info', 'source_control_review_dispatch', {
+    ...operationalFields,
+    outcome: 'started',
+    reason: 'job_received',
+    attempt: (job.attemptsMade ?? 0) + 1,
+  });
   if (!isDurablePrReviewNotificationRequest(data)) {
     const migrated = await migrateLegacyPrReviewNotificationRequest(data);
     console.log(
@@ -391,6 +540,11 @@ export const prReviewNotificationJob = async (
   }
 
   if (!(await renewPrReviewNotificationRequestLease(data))) {
+    logPrReviewJobEvent('info', 'source_control_review_dispatch', {
+      ...operationalFields,
+      outcome: 'skipped',
+      reason: 'superseded_delivery_claim',
+    });
     console.log(
       `[PrReviewNotification] Delivery claim for ${data.repository}#${data.prNumber} was superseded, skipping`,
     );
@@ -416,6 +570,11 @@ export const prReviewNotificationJob = async (
   });
 
   if (!latestJob) {
+    logPrReviewJobEvent('warn', 'source_control_review_delivery', {
+      ...operationalFields,
+      outcome: 'suppressed',
+      reason: 'task_run_missing',
+    });
     console.warn(
       `[PrReviewNotification] No run found for task ${data.taskId}, skipping`,
     );
@@ -424,34 +583,49 @@ export const prReviewNotificationJob = async (
     return;
   }
 
-  const isExecutingTurn = isTaskExecutingTurn(
-    latestJob.status,
-    latestJob.taskPhase,
-  );
-  const isWorkerHeartbeatStale = isExecutingTurn && !isLiveTaskTurn(latestJob);
+  const activity = await getNotificationActivity(latestJob);
 
-  if (isExecutingTurn && !isWorkerHeartbeatStale) {
+  if (activity.active) {
     if (data.deferrals < PR_REVIEW_NOTIFICATION_MAX_DEFERRALS) {
       await schedulePrReviewNotificationJob({
         request: { ...data, deferrals: data.deferrals + 1 },
         delayMs: PR_REVIEW_NOTIFICATION_DEFER_MS,
       });
 
+      logPrReviewJobEvent('info', 'source_control_review_dispatch', {
+        ...operationalFields,
+        outcome: 'deferred',
+        reason:
+          activity.source === 'fast_session'
+            ? 'session_responding'
+            : 'task_running',
+        deferrals: data.deferrals + 1,
+      });
+
       console.log(
-        `[PrReviewNotification] Task ${data.taskId} is still running, deferred notification for ${data.repository}#${data.prNumber} (deferral ${data.deferrals + 1})`,
+        `[PrReviewNotification] ${activity.source === 'fast_session' ? 'Fast Session is responding' : `Task ${data.taskId} is still running`}, deferred notification for ${data.repository}#${data.prNumber} (deferral ${data.deferrals + 1})`,
       );
       return;
     }
 
     console.warn(
-      `[PrReviewNotification] Task ${data.taskId} never went idle after ${data.deferrals} deferrals, dropping pending review activity for ${data.repository}#${data.prNumber}`,
+      `[PrReviewNotification] ${activity.source === 'fast_session' ? 'Fast Session never stopped responding' : `Task ${data.taskId} never went idle`} after ${data.deferrals} deferrals, dropping pending review activity for ${data.repository}#${data.prNumber}`,
     );
     await consumePendingPrReviewActivity(target);
     await finalizePrReviewNotificationRequest(data, 'suppressed');
+    logPrReviewJobEvent('warn', 'source_control_review_delivery', {
+      ...operationalFields,
+      outcome: 'suppressed',
+      reason: 'idle_wait_exhausted',
+    });
     return;
   }
 
-  if (isExecutingTurn && isWorkerHeartbeatStale) {
+  if (
+    activity.source === 'task' &&
+    isTaskExecutingTurn(latestJob.status, latestJob.taskPhase) &&
+    !activity.active
+  ) {
     console.warn(
       `[PrReviewNotification] Task ${data.taskId} has a stale worker heartbeat while its phase is running; delivering pending review activity for ${data.repository}#${data.prNumber}`,
     );
@@ -460,6 +634,12 @@ export const prReviewNotificationJob = async (
   const prLink = await findTaskPullRequestForNotification(data);
 
   if (prLink?.status === 'merged' || prLink?.status === 'closed') {
+    logPrReviewJobEvent('info', 'source_control_review_delivery', {
+      ...operationalFields,
+      runId: latestJob.id,
+      outcome: 'suppressed',
+      reason: `pull_request_${prLink.status}`,
+    });
     console.log(
       `[PrReviewNotification] PR ${data.repository}#${data.prNumber} is already ${prLink.status}, skipping notification`,
     );
@@ -471,6 +651,12 @@ export const prReviewNotificationJob = async (
   const events = await consumePendingPrReviewActivity(target);
 
   if (events.length === 0) {
+    logPrReviewJobEvent('info', 'source_control_review_delivery', {
+      ...operationalFields,
+      runId: latestJob.id,
+      outcome: 'suppressed',
+      reason: 'no_pending_activity',
+    });
     console.log(
       `[PrReviewNotification] No pending review activity for task ${data.taskId} on ${data.repository}#${data.prNumber}, skipping`,
     );
@@ -480,6 +666,7 @@ export const prReviewNotificationJob = async (
 
   const deliveryStartedAt = Date.now();
   const telemetry = createPrReviewNotificationTelemetry(events.length);
+  let preparationCompleted = false;
 
   try {
     const delivery = await preparePrReviewNotificationDelivery({
@@ -488,6 +675,7 @@ export const prReviewNotificationJob = async (
       events,
       telemetry,
     });
+    preparationCompleted = true;
 
     logPrReviewNotificationTriage({
       data,
@@ -499,6 +687,13 @@ export const prReviewNotificationJob = async (
     });
 
     if (!delivery.post) {
+      logPrReviewJobEvent('info', 'source_control_review_delivery', {
+        ...operationalFields,
+        runId: latestJob.id,
+        outcome: 'suppressed',
+        reason: delivery.reason,
+        durationMs: Date.now() - deliveryStartedAt,
+      });
       console.log(
         `[PrReviewNotification] Skipping review-feedback notification for ${data.repository}#${data.prNumber} (${delivery.reason})`,
       );
@@ -532,14 +727,26 @@ export const prReviewNotificationJob = async (
       ]);
     const taskChangedDuringPreparation =
       latestBeforeDelivery?.id !== latestJob.id;
+    const latestActivity = latestBeforeDelivery
+      ? await getNotificationActivity(latestBeforeDelivery)
+      : null;
     if (
       latestBeforeDelivery &&
-      (taskChangedDuringPreparation || isLiveTaskTurn(latestBeforeDelivery))
+      (taskChangedDuringPreparation || latestActivity?.active)
     ) {
       if (data.deferrals < PR_REVIEW_NOTIFICATION_MAX_DEFERRALS) {
         await schedulePrReviewNotificationJob({
           request: { ...data, deferrals: data.deferrals + 1 },
           delayMs: PR_REVIEW_NOTIFICATION_DEFER_MS,
+        });
+        logPrReviewJobEvent('info', 'source_control_review_dispatch', {
+          ...operationalFields,
+          runId: latestBeforeDelivery.id,
+          outcome: 'deferred',
+          reason: taskChangedDuringPreparation
+            ? 'task_changed_during_preparation'
+            : 'task_resumed_during_preparation',
+          deferrals: data.deferrals + 1,
         });
         console.log(
           `[PrReviewNotification] Task ${data.taskId} changed or resumed while preparing review feedback for ${data.repository}#${data.prNumber}; deferred delivery (deferral ${data.deferrals + 1})`,
@@ -551,6 +758,12 @@ export const prReviewNotificationJob = async (
         `[PrReviewNotification] Task ${data.taskId} changed or resumed while preparing review feedback for ${data.repository}#${data.prNumber}; dropping pending activity after ${data.deferrals} deferrals`,
       );
       await finalizePrReviewNotificationRequest(data, 'suppressed');
+      logPrReviewJobEvent('warn', 'source_control_review_delivery', {
+        ...operationalFields,
+        runId: latestBeforeDelivery.id,
+        outcome: 'suppressed',
+        reason: 'preparation_deferrals_exhausted',
+      });
       return;
     }
 
@@ -572,6 +785,12 @@ export const prReviewNotificationJob = async (
     // external side-effect boundary so a replacement worker cannot reclaim it
     // while this worker posts.
     if (!(await renewPrReviewNotificationRequestLease(data))) {
+      logPrReviewJobEvent('info', 'source_control_review_dispatch', {
+        ...operationalFields,
+        runId: latestJob.id,
+        outcome: 'skipped',
+        reason: 'claim_superseded_during_preparation',
+      });
       console.log(
         `[PrReviewNotification] Delivery claim for ${data.repository}#${data.prNumber} was superseded while preparing, skipping`,
       );
@@ -579,25 +798,28 @@ export const prReviewNotificationJob = async (
     }
 
     const followUp =
-      delivery.followUpQuestion && delivery.followUpPrompt
+      !data.reviewActionSuperseded &&
+      delivery.followUpQuestion &&
+      delivery.followUpPrompt
         ? {
             question: delivery.followUpQuestion,
             prompt: delivery.followUpPrompt,
           }
         : null;
-    // Surfaces without buttons (and the task-history record) carry the offer
-    // as a trailing question, preserving the pre-elicitation message shape.
-    const textWithQuestion = followUp
-      ? `${delivery.text}\n${followUp.question}`
-      : delivery.text;
     const roomoteReviewIdentity = events.find(
       (event) => event.reviewTaskId && event.reviewHeadSha,
     );
     const roomoteReviewResult = events.find(
       (event) => event.reviewResult,
     )?.reviewResult;
-    const fallbackAutoHandleRoute = getFastParentButtonRoute(latestJob.payload);
+    const fallbackAutoHandleRoute = getFastParentButtonRoute(latestJob);
     const fastParent = getFastAgentParentFromPayload(latestJob.payload);
+    const deliveryFields: OperationalLogFields = {
+      ...operationalFields,
+      runId: latestJob.id,
+      sessionId: fastParent?.sessionId,
+      routeProvider: delivery.route?.provider ?? data.routeProvider,
+    };
     const isWebFastParent = fastParent?.conversation.surface === 'web';
     const persistedAutoHandleRoute = getPersistedButtonRoute(data);
     const canonicalPreference =
@@ -662,6 +884,42 @@ export const prReviewNotificationJob = async (
     const autoHandleUserId =
       autoHandleRoute || canAutoHandleWeb ? autoHandlePreference?.userId : null;
 
+    // Auto-dispatch resumes or launches work on the pull request, so it is
+    // held to the provider's live state rather than the persisted link. The
+    // link is webhook-maintained and can miss a merge; a delivery that
+    // waited long enough for that to happen would otherwise reopen a merged
+    // pull request days later (a week-old CI failure did exactly that).
+    if (followUp && autoHandlePreference && autoHandleUserId) {
+      const provider = data.sourceControlProvider ?? 'github';
+      const liveState = await readLivePullRequestStateForNotification({
+        provider,
+        host: deliveryPrLink?.host ?? data.host,
+        repository: data.repository,
+        prNumber: data.prNumber,
+      });
+      if (liveState === 'merged' || liveState === 'closed') {
+        console.log(
+          `[PrReviewNotification] PR ${data.repository}#${data.prNumber} is ${liveState} on the provider while the task link says ${deliveryPrLink?.status ?? 'unknown'}; suppressing stale review feedback instead of auto-dispatching`,
+        );
+        // Correct only the link row this notification resolved. The same
+        // task/provider/repository/number can name pull requests on
+        // different hosts, and those links must keep their own status.
+        if (deliveryPrLink) {
+          await db
+            .update(taskPullRequests)
+            .set({ status: liveState, updatedAt: new Date() })
+            .where(eq(taskPullRequests.id, deliveryPrLink.id))
+            .catch((error: unknown) => {
+              console.warn(
+                `[PrReviewNotification] Could not record ${data.repository}#${data.prNumber} as ${liveState}: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            });
+        }
+        await finalizePrReviewNotificationRequest(data, 'suppressed');
+        return;
+      }
+    }
+
     // Fast-parent delivery can fail and release this notification for retry.
     // Complete it before auto-dispatch so a retry cannot enqueue the same
     // resolve prompt twice.
@@ -679,6 +937,7 @@ export const prReviewNotificationJob = async (
           followUpPrompt: followUp.prompt,
         }))
       ) {
+        await retrySupersededPrReviewAction(data);
         console.log(
           `[PrReviewNotification] Canonical Fast web delivery ${data.deliveryId} lost its prompt-posting fence, skipping`,
         );
@@ -756,6 +1015,12 @@ export const prReviewNotificationJob = async (
           { leaseToken: data.leaseToken },
         );
       if (!attached) {
+        await dismissWebOfferIfSuperseded(webReviewActionDeliveryId, () =>
+          updateFastAgentPrReviewOfferStatus({
+            deliveryIds: [webReviewActionDeliveryId],
+            status: 'dismissed',
+          }),
+        );
         throw new Error(
           'Canonical Fast web review offer lost its publish fence',
         );
@@ -772,36 +1037,19 @@ export const prReviewNotificationJob = async (
       (autoHandleRoute || canAutoHandleWeb) &&
       ownsAutoHandleDispatch
     ) {
-      if (
-        data.deliveryState !== 'auto_dispatch_pending' &&
-        !(await (canAutoHandleWeb
-          ? beginCanonicalPrReviewWebAutoDispatch({
-              request: data,
-              followUpPrompt: followUp.prompt,
-              targetTaskId: autoHandlePreference.taskId,
-              actingUserId: autoHandleUserId,
-            })
-          : beginCanonicalPrReviewAutoDispatch({
-              request: data,
-              followUpPrompt: followUp.prompt,
-              targetTaskId: autoHandlePreference.taskId,
-              actingUserId: autoHandleUserId,
-              route: autoHandleRoute!,
-            })))
-      ) {
-        console.log(
-          `[PrReviewNotification] Canonical delivery ${data.deliveryId} lost its automatic-dispatch fence, skipping`,
-        );
-        return;
-      }
       const dispatchInput = {
         taskId: autoHandlePreference.taskId,
         followUpPrompt: followUp.prompt,
         actingUserId: autoHandleUserId,
         ...(data.dispatchKey ? { idempotencyKey: data.dispatchKey } : {}),
       };
-      const dispatched = await dispatchPrReviewFollowUp(
-        canAutoHandleWeb
+      const dispatched = await dispatchCanonicalPrReviewAutoFollowUp({
+        request: data,
+        followUpPrompt: followUp.prompt,
+        targetTaskId: autoHandlePreference.taskId,
+        actingUserId: autoHandleUserId,
+        route: canAutoHandleWeb ? null : autoHandleRoute!,
+        dispatchInput: canAutoHandleWeb
           ? {
               ...dispatchInput,
               provider: 'web',
@@ -816,7 +1064,14 @@ export const prReviewNotificationJob = async (
               channelId: autoHandleRoute!.channelId,
               threadId: autoHandleRoute!.threadId ?? null,
             },
-      );
+      });
+      if (!dispatched) {
+        await retrySupersededPrReviewAction(data);
+        console.log(
+          `[PrReviewNotification] Canonical delivery ${data.deliveryId} lost its automatic-dispatch fence, skipping`,
+        );
+        return;
+      }
 
       if (dispatched.outcome !== 'unavailable') {
         if (
@@ -865,6 +1120,7 @@ ${delivery.text}`;
               followUpPrompt: followUp.prompt,
             }))
           ) {
+            await retrySupersededPrReviewAction(data);
             console.log(
               `[PrReviewNotification] Canonical Fast web delivery ${data.deliveryId} lost its interactive-fallback fence, skipping`,
             );
@@ -879,13 +1135,20 @@ ${delivery.text}`;
               'Canonical Fast web review fallback was not delivered',
             );
           }
+          const fallbackDeliveryId = data.deliveryId;
           const { attached } =
             await attachPendingPrReviewActionMessageWithRetirement(
-              data.deliveryId,
-              data.deliveryId,
+              fallbackDeliveryId,
+              fallbackDeliveryId,
               { leaseToken: data.leaseToken },
             );
           if (!attached) {
+            await dismissWebOfferIfSuperseded(fallbackDeliveryId, () =>
+              updateFastAgentPrReviewOfferStatus({
+                deliveryIds: [fallbackDeliveryId],
+                status: 'dismissed',
+              }),
+            );
             throw new Error(
               'Canonical Fast web review fallback lost its publish fence',
             );
@@ -894,7 +1157,13 @@ ${delivery.text}`;
             runId: latestJob.id,
             taskId: data.taskId,
             route: null,
-            text: textWithQuestion,
+            text: delivery.text,
+          });
+          logPrReviewJobEvent('info', 'source_control_review_delivery', {
+            ...deliveryFields,
+            outcome: 'delivered',
+            reason: 'fast_parent_notified',
+            retryable: false,
           });
           return;
         }
@@ -906,11 +1175,17 @@ ${delivery.text}`;
         runId: latestJob.id,
         taskId: data.taskId,
         route: null,
-        text: autoHandledText ?? textWithQuestion,
+        text: autoHandledText ?? delivery.text,
       });
       if (!webReviewActionDeliveryId) {
         await finalizePrReviewNotificationRequest(data);
       }
+      logPrReviewJobEvent('info', 'source_control_review_delivery', {
+        ...deliveryFields,
+        outcome: 'delivered',
+        reason: 'fast_parent_notified',
+        retryable: false,
+      });
       return;
     }
 
@@ -949,6 +1224,7 @@ ${delivery.text}`;
           followUpPrompt: followUp.prompt,
         }))
       ) {
+        await retrySupersededPrReviewAction(data);
         console.log(
           `[PrReviewNotification] Canonical delivery ${data.deliveryId} lost its prompt-posting fence, skipping`,
         );
@@ -957,12 +1233,11 @@ ${delivery.text}`;
       messageTs = await postPrReviewNotification({
         taskId: data.taskId,
         route: delivery.route,
-        text: textWithQuestion,
+        text: delivery.text,
         ...(followUp && isButtonRouteProvider(delivery.route.provider)
           ? {
               action: {
                 summaryText: delivery.text,
-                question: followUp.question,
                 followUpPrompt: followUp.prompt,
                 repository: data.repository,
                 prNumber: data.prNumber,
@@ -1000,6 +1275,7 @@ ${delivery.text}`;
             followUpPrompt: followUp.prompt,
           }))
         ) {
+          await retrySupersededPrReviewAction(data);
           console.log(
             `[PrReviewNotification] Canonical web task delivery ${data.deliveryId} lost its prompt-posting fence, skipping`,
           );
@@ -1010,12 +1286,17 @@ ${delivery.text}`;
       console.log(
         `[PrReviewNotification] No conversation routing for task ${data.taskId}; recording review feedback to task history only`,
       );
+      logPrReviewJobEvent('info', 'source_control_review_routing', {
+        ...deliveryFields,
+        outcome: 'no_route',
+        reason: 'task_history_only',
+      });
     }
     const recorded = await recordPrReviewNotificationDeliveryBestEffort({
       runId: latestJob.id,
       taskId: data.taskId,
       route: delivery.route,
-      text: textWithQuestion,
+      text: delivery.text,
       ...(messageTs ? { messageTs } : {}),
       ...(taskReviewActionDeliveryId && followUp
         ? {
@@ -1037,6 +1318,13 @@ ${delivery.text}`;
           { leaseToken: data.leaseToken },
         );
       if (!attached) {
+        await dismissWebOfferIfSuperseded(taskReviewActionDeliveryId, () =>
+          updateTaskPrReviewOfferStatus({
+            taskId: data.taskId,
+            deliveryIds: [taskReviewActionDeliveryId],
+            status: 'dismissed',
+          }),
+        );
         throw new Error(
           'Canonical web task review offer lost its publish fence',
         );
@@ -1053,10 +1341,33 @@ ${delivery.text}`;
     }
 
     if (delivery.route) {
+      logPrReviewJobEvent(
+        messageTs ? 'info' : 'error',
+        'source_control_review_delivery',
+        {
+          ...deliveryFields,
+          messageId: messageTs,
+          outcome: messageTs ? 'delivered' : 'failed',
+          reason: messageTs
+            ? 'conversation_notification_posted'
+            : 'provider_message_id_missing',
+          retryable: false,
+        },
+      );
       console.log(
         `[PrReviewNotification] Posted review-feedback notification for ${data.repository}#${data.prNumber} to ${delivery.route.provider} conversation ${delivery.route.channelId}`,
       );
     } else {
+      logPrReviewJobEvent(
+        recorded ? 'info' : 'error',
+        'source_control_review_delivery',
+        {
+          ...deliveryFields,
+          outcome: recorded ? 'persisted' : 'failed',
+          reason: recorded ? 'task_history_only' : 'task_history_record_failed',
+          retryable: !recorded,
+        },
+      );
       console.log(
         `[PrReviewNotification] Recorded review-feedback notification for ${data.repository}#${data.prNumber} on task ${data.taskId}`,
       );
@@ -1106,12 +1417,33 @@ ${delivery.text}`;
       durationMs: Date.now() - deliveryStartedAt,
       telemetry,
     });
+    logPrReviewJobEvent('error', 'source_control_review_delivery', {
+      ...operationalFields,
+      runId: latestJob.id,
+      outcome: 'failed',
+      reason: error instanceof Error ? error.name : 'unknown_error',
+      durationMs: Date.now() - deliveryStartedAt,
+      attempt: (job.attemptsMade ?? 0) + 1,
+      retryable:
+        (job.attemptsMade ?? 0) + 1 < Math.max(job.opts?.attempts ?? 1, 1),
+    });
 
-    // Put the drained events back so a retried job can deliver them.
+    // BullMQ retries carry the same token. Releasing it here makes that retry
+    // look superseded and forces preparation to wait for the scheduled drain.
+    if (
+      !preparationCompleted &&
+      data.ownershipVersion === 'canonical' &&
+      data.deliveryState === 'claimed' &&
+      job.attemptsMade + 1 < Math.max(job.opts.attempts ?? 1, 1)
+    ) {
+      throw error;
+    }
+
+    // Exhausted retries and failures after preparation need a fresh durable claim.
     try {
       await requeuePendingPrReviewActivity({ target, events });
     } catch {
-      // Best effort; the events are lost if Redis is unavailable too.
+      // Best effort; lease expiry remains the recovery backstop.
     }
 
     throw error;

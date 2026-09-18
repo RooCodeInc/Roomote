@@ -4,16 +4,21 @@ import {
   DEFAULT_PR_REVIEW_SETTINGS,
   DEFAULT_PROVIDER_USAGE_LIMIT_FREQUENCY,
   DEFAULT_PROVIDER_USAGE_LIMIT_THRESHOLD,
+  AUTOMATION_TARGET_EMAIL_IDENTITY_KEY,
   getTriggerableBackgroundAutomationDescriptorByKey,
   getCommunicationAutomationTargetKind,
   isConflictResolverMaxPrAgeDays,
   isProviderUsageLimitThreshold,
   type AutomationTarget,
+  type AutomationDestinationProvider,
+  type CommunicationProvider,
   type PrReviewSettings,
   type TriggerableBackgroundAutomationKey,
 } from '@roomote/types';
 import {
   db,
+  automations,
+  eq,
   DEFAULT_CONFLICT_RESOLVER_LABEL,
   deploymentSettings,
   getAutomationByKey,
@@ -27,6 +32,7 @@ import {
   findDiscordDestinationByChannelId,
   findTeamsPrimaryConversation,
   findTelegramPrimaryChatId,
+  canStartAgentMailConversationWithUser,
   listConnectedCommunicationProviders,
   resolveAutomationRuntimeDestination,
 } from '@roomote/sdk/server';
@@ -36,6 +42,7 @@ import { captureActivationAutomationChanged } from '@roomote/telemetry/server';
 import type { ActivationAutomation } from '@roomote/telemetry';
 
 import type { UserAuthSuccess } from '@/types';
+import { resolveAutomationAdditionalRules } from './ci-failure-triage-routing';
 
 import {
   hasActiveGitHubInstallation,
@@ -90,6 +97,27 @@ type BackgroundAgentSettings = Awaited<
   ReturnType<typeof getBackgroundAgentSettingsForDeployment>
 >;
 
+const ADDITIONAL_RULES_BY_AUTOMATION = {
+  suggester: { key: 'suggester', field: 'suggesterAdditionalRules' },
+  announcer: { key: 'announcer', field: 'announcerAdditionalRules' },
+  securityAuditor: {
+    key: 'security_auditor',
+    field: 'securityAuditorAdditionalRules',
+  },
+  codeQualityAuditor: {
+    key: 'code_quality_auditor',
+    field: 'codeQualityAuditorAdditionalRules',
+  },
+  ciFailureTriage: {
+    key: 'ci_failure_triage',
+    field: 'ciFailureTriageAdditionalRules',
+  },
+  mergeAnnouncer: {
+    key: 'merge_announcer',
+    field: 'mergeAnnouncerAdditionalRules',
+  },
+} as const;
+
 function getAutomationActivations(
   settings: BackgroundAgentSettings,
 ): Array<{ automation: ActivationAutomation; enabled: boolean }> {
@@ -117,6 +145,10 @@ function getAutomationActivations(
     {
       automation: 'provider_usage_limit',
       enabled: settings.providerUsageLimitFrequency !== 'off',
+    },
+    {
+      automation: 'release_announcements',
+      enabled: settings.releaseAnnouncementsEnabled,
     },
     {
       automation: 'sentry_triage',
@@ -233,6 +265,88 @@ function buildDestinationChannelTargets(
 // check the channel type.
 const CHANNEL_AUTO_START_DISCORD_CHANNEL_TYPES: readonly number[] = [0, 5];
 
+const COMMUNICATION_MANAGED_TARGET_KINDS = [
+  'slack_channel',
+  'slack_user',
+  'discord_channel',
+  'discord_user',
+  'teams_channel',
+  'teams_user',
+  'telegram_chat',
+  'telegram_user',
+  'email_user',
+] as const;
+
+async function buildSubmittedCommunicationTarget(params: {
+  submitted: boolean;
+  provider: AutomationDestinationProvider | null;
+  mode: 'channel' | 'direct_message';
+  channelId: string;
+  userId: string;
+  connectedProviders: readonly Exclude<
+    AutomationDestinationProvider,
+    'email'
+  >[];
+  existingTarget?: AutomationTarget | null;
+}): Promise<{ target: AutomationTarget | null; error?: string }> {
+  if (!params.submitted || !params.provider) return { target: null };
+  if (params.provider === 'email') {
+    if (!params.channelId) {
+      return { target: null, error: 'Choose an Email address.' };
+    }
+    if (
+      params.existingTarget?.provider === 'email' &&
+      params.existingTarget.externalRef &&
+      params.existingTarget.metadata?.[AUTOMATION_TARGET_EMAIL_IDENTITY_KEY] ===
+        params.channelId
+    ) {
+      return { target: params.existingTarget };
+    }
+    if (
+      !(await canStartAgentMailConversationWithUser(
+        params.userId,
+        params.channelId,
+      ))
+    ) {
+      return {
+        target: null,
+        error: 'This Email destination is no longer available.',
+      };
+    }
+    return {
+      target: {
+        provider: 'email',
+        targetKind: 'email_user',
+        externalRef: params.userId,
+        metadata: {
+          [AUTOMATION_TARGET_EMAIL_IDENTITY_KEY]: params.channelId,
+        },
+      },
+    };
+  }
+  if (!params.connectedProviders.includes(params.provider)) {
+    return {
+      target: null,
+      error: `Connect ${params.provider} before saving a ${params.provider} report destination.`,
+    };
+  }
+  if (params.mode === 'channel' && !params.channelId) {
+    return { target: null, error: 'Choose a destination channel.' };
+  }
+
+  return {
+    target: {
+      provider: params.provider,
+      targetKind: getCommunicationAutomationTargetKind(
+        params.provider,
+        params.mode,
+      ),
+      externalRef:
+        params.mode === 'direct_message' ? params.userId : params.channelId,
+    },
+  };
+}
+
 type DiscordChannelResolution = {
   channelId: string | null;
   error?: {
@@ -327,16 +441,54 @@ export async function updateBackgroundAgentSettingsCommand(
 > {
   assertAdmin(auth);
   const fieldErrors: BackgroundAgentFieldErrors = {};
-  const [existingSettings, existingProviderUsageLimitAutomation] =
-    await Promise.all([
-      getBackgroundAgentSettingsForDeployment(),
-      getAutomationByKey('provider_usage_limit'),
-    ]);
+  // Capture row presence before the settings read can seed missing rows.
+  const [
+    existingProviderUsageLimitAutomation,
+    existingChannelAutoStartAutomation,
+  ] = await Promise.all([
+    getAutomationByKey('provider_usage_limit'),
+    getAutomationByKey('slack_channel_auto_start'),
+  ]);
+  const existingSettings = await getBackgroundAgentSettingsForDeployment();
   const platformIssueAlertsEnabled =
     input.savingAutomation === 'platformIssueAlerts'
       ? (input.platformIssueAlertsEnabled ??
         existingSettings.platformIssueAlertsEnabled)
       : existingSettings.platformIssueAlertsEnabled;
+  const releaseAnnouncementsEnabled =
+    input.savingAutomation === 'releaseAnnouncements'
+      ? (input.releaseAnnouncementsEnabled ??
+        existingSettings.releaseAnnouncementsEnabled)
+      : existingSettings.releaseAnnouncementsEnabled;
+  const additionalRulesConfig =
+    ADDITIONAL_RULES_BY_AUTOMATION[
+      input.savingAutomation as keyof typeof ADDITIONAL_RULES_BY_AUTOMATION
+    ];
+  const submittedAdditionalRules = additionalRulesConfig
+    ? input[additionalRulesConfig.field]
+    : undefined;
+  const additionalRulesText = submittedAdditionalRules?.trim() ?? '';
+  let compiledAdditionalRules: Awaited<
+    ReturnType<typeof resolveAutomationAdditionalRules>
+  >;
+  if (additionalRulesConfig && submittedAdditionalRules !== undefined) {
+    try {
+      compiledAdditionalRules = await resolveAutomationAdditionalRules(
+        auth,
+        additionalRulesConfig.key,
+        additionalRulesText,
+        (await getAutomationByKey(additionalRulesConfig.key))?.settings ?? {},
+      );
+    } catch (error) {
+      return {
+        success: false,
+        fieldErrors: {
+          [additionalRulesConfig.field]:
+            error instanceof Error ? error.message : String(error),
+        },
+      };
+    }
+  }
   const shouldUpdateCallRoomoteViaEmoji =
     input.savingAutomation === 'callRoomoteViaEmoji';
   const callRoomoteViaEmojiEnabled = shouldUpdateCallRoomoteViaEmoji
@@ -566,7 +718,22 @@ export async function updateBackgroundAgentSettingsCommand(
     ...destinationDescriptors.map(async (descriptor) => {
       const shouldUpdate = input.savingAutomation === descriptor.automationId;
       const submitted = submittedDestinations[descriptor.automationId];
-      const [slack, discord] = await Promise.all([
+      const existingEmailIdentityId =
+        existingSettings[descriptor.emailSettingsKey];
+      const existingEmailUserId =
+        existingSettings[descriptor.emailUserSettingsKey];
+      const existingEmailTarget: AutomationTarget | null =
+        existingEmailIdentityId && existingEmailUserId
+          ? {
+              provider: 'email',
+              targetKind: 'email_user',
+              externalRef: existingEmailUserId,
+              metadata: {
+                [AUTOMATION_TARGET_EMAIL_IDENTITY_KEY]: existingEmailIdentityId,
+              },
+            }
+          : null;
+      const [slack, discord, email] = await Promise.all([
         shouldUpdate
           ? resolveChannelId({
               field: descriptor.slackField as SlackChannelFieldErrorKey,
@@ -594,15 +761,29 @@ export async function updateBackgroundAgentSettingsCommand(
                 existingSettings,
               ),
             ),
+        shouldUpdate && submitted.resolveEmail
+          ? submitted.emailIdentityId
+            ? buildSubmittedCommunicationTarget({
+                submitted: true,
+                provider: 'email',
+                mode: 'direct_message',
+                channelId: submitted.emailIdentityId,
+                userId: auth.userId,
+                connectedProviders: [],
+                existingTarget: existingEmailTarget,
+              })
+            : Promise.resolve({ target: null })
+          : Promise.resolve({ target: existingEmailTarget }),
       ]);
 
-      return [descriptor.automationId, { slack, discord }] as const;
+      return [descriptor.automationId, { slack, discord, email }] as const;
     }),
   ]);
 
   type DestinationResolution = {
     slack: Awaited<ReturnType<typeof resolveChannelId>>;
     discord: DiscordChannelResolution;
+    email: { target: AutomationTarget | null; error?: string };
   };
 
   const destinationResults = Object.fromEntries(
@@ -711,6 +892,12 @@ export async function updateBackgroundAgentSettingsCommand(
   for (const result of Object.values(destinationResults)) {
     if (result.discord.error) {
       fieldErrors[result.discord.error.field] = result.discord.error.message;
+    }
+    if (result.email.error) {
+      const descriptor = destinationDescriptors.find(
+        (entry) => destinationResults[entry.automationId] === result,
+      );
+      if (descriptor) fieldErrors[descriptor.emailField] = result.email.error;
     }
   }
 
@@ -895,6 +1082,13 @@ export async function updateBackgroundAgentSettingsCommand(
   const channelAutoStartChannelIds = finalResolvedChannelAutoStartRows.map(
     ({ channelId }) => channelId,
   );
+  const channelAutoStartEnabled =
+    input.channelAutoStartEnabled ??
+    (existingChannelAutoStartAutomation
+      ? existingSettings.channelAutoStartEnabled
+      : finalResolvedChannelAutoStartRows.length +
+          finalResolvedChannelAutoStartDiscordRows.length >
+        0);
   const managerChannelHasApp =
     input.savingAutomation === 'managerChannel' &&
     managerChannelChanged &&
@@ -915,7 +1109,6 @@ export async function updateBackgroundAgentSettingsCommand(
     input.suggesterInstructions,
   );
   const effectiveSuggesterInstructions = normalizedSuggesterInstructions;
-  const suggesterAutomationSettings: Record<string, string> = {};
   const sentryTriageFrequency = input.sentryTriageFrequency ?? 'off';
   const dependabotTriageFrequency = input.dependabotTriageFrequency ?? 'off';
   const codeqlTriageFrequency = input.codeqlTriageFrequency ?? 'off';
@@ -937,31 +1130,52 @@ export async function updateBackgroundAgentSettingsCommand(
   const mergeAnnouncerTargetMode = input.mergeAnnouncerTargetMode ?? 'channel';
   const mergeAnnouncerTargetChannelId =
     input.mergeAnnouncerTargetChannelId?.trim() ?? '';
-  let mergeAnnouncerTarget: AutomationTarget | null = null;
-
-  if (mergeAnnouncerDestinationSubmitted && mergeAnnouncerTargetProvider) {
-    const connectedProviders = await listConnectedCommunicationProviders();
-    if (!connectedProviders.includes(mergeAnnouncerTargetProvider)) {
-      fieldErrors.general = `Connect ${mergeAnnouncerTargetProvider} before saving a ${mergeAnnouncerTargetProvider} report destination.`;
-    } else if (
-      mergeAnnouncerTargetMode === 'channel' &&
-      !mergeAnnouncerTargetChannelId
-    ) {
-      fieldErrors.general = 'Choose a destination channel.';
-    } else {
-      mergeAnnouncerTarget = {
-        provider: mergeAnnouncerTargetProvider,
-        targetKind: getCommunicationAutomationTargetKind(
-          mergeAnnouncerTargetProvider,
-          mergeAnnouncerTargetMode,
-        ),
-        externalRef:
-          mergeAnnouncerTargetMode === 'direct_message'
-            ? auth.userId
-            : mergeAnnouncerTargetChannelId,
-      };
-    }
+  const releaseAnnouncementsDestinationSubmitted =
+    input.savingAutomation === 'releaseAnnouncements' &&
+    input.releaseAnnouncementsTargetProvider !== undefined;
+  const releaseAnnouncementsTargetProvider =
+    input.releaseAnnouncementsTargetProvider ?? null;
+  const releaseAnnouncementsTargetMode =
+    input.releaseAnnouncementsTargetMode ?? 'channel';
+  const releaseAnnouncementsTargetChannelId =
+    input.releaseAnnouncementsTargetChannelId?.trim() ?? '';
+  const connectedProviders =
+    mergeAnnouncerDestinationSubmitted ||
+    releaseAnnouncementsDestinationSubmitted
+      ? await listConnectedCommunicationProviders()
+      : [];
+  const mergeAnnouncerExistingTarget = (
+    await getAutomationRuntime('merge_announcer')
+  ).targets.find((target) => target.provider !== 'sentry');
+  const releaseAnnouncementsExistingTarget = (
+    await getAutomationRuntime('release_announcements')
+  ).targets.find((target) => target.provider !== 'sentry');
+  const mergeAnnouncerTargetResult = await buildSubmittedCommunicationTarget({
+    submitted: mergeAnnouncerDestinationSubmitted,
+    provider: mergeAnnouncerTargetProvider,
+    mode: mergeAnnouncerTargetMode,
+    channelId: mergeAnnouncerTargetChannelId,
+    userId: auth.userId,
+    connectedProviders,
+    existingTarget: mergeAnnouncerExistingTarget,
+  });
+  const releaseAnnouncementsTargetResult =
+    await buildSubmittedCommunicationTarget({
+      submitted: releaseAnnouncementsDestinationSubmitted,
+      provider: releaseAnnouncementsTargetProvider,
+      mode: releaseAnnouncementsTargetMode,
+      channelId: releaseAnnouncementsTargetChannelId,
+      userId: auth.userId,
+      connectedProviders,
+      existingTarget: releaseAnnouncementsExistingTarget,
+    });
+  const communicationTargetError =
+    mergeAnnouncerTargetResult.error ?? releaseAnnouncementsTargetResult.error;
+  if (communicationTargetError) {
+    fieldErrors.general ??= communicationTargetError;
   }
+  const mergeAnnouncerTarget = mergeAnnouncerTargetResult.target;
+  const releaseAnnouncementsTarget = releaseAnnouncementsTargetResult.target;
 
   // Manager-channel automations resolve their destination as
   // automation target -> shared manager channel. Enabling one requires a
@@ -997,6 +1211,7 @@ export async function updateBackgroundAgentSettingsCommand(
         suggesterDiscordResult.channelId ??
         suggesterTelegramTarget?.externalRef ??
         suggesterTeamsTarget?.externalRef ??
+        destinationResults.suggester.email.target?.externalRef ??
         null,
       field: 'suggesterSlackChannel',
     },
@@ -1005,7 +1220,10 @@ export async function updateBackgroundAgentSettingsCommand(
       key: 'announcer',
       frequency: effectiveAnnouncerFrequency,
       channelId:
-        announcerChannelResult.channelId ?? announcerDiscordResult.channelId,
+        announcerChannelResult.channelId ??
+        announcerDiscordResult.channelId ??
+        destinationResults.announcer.email.target?.externalRef ??
+        null,
       field: 'announcerSlackChannel',
     },
     {
@@ -1014,7 +1232,9 @@ export async function updateBackgroundAgentSettingsCommand(
       frequency: effectiveManagerStatsFrequency,
       channelId:
         managerStatsChannelResult.channelId ??
-        managerStatsDiscordResult.channelId,
+        managerStatsDiscordResult.channelId ??
+        destinationResults.managerStats.email.target?.externalRef ??
+        null,
       field: 'managerStatsSlackChannel',
     },
     {
@@ -1023,7 +1243,9 @@ export async function updateBackgroundAgentSettingsCommand(
       frequency: providerUsageLimitFrequency,
       channelId:
         providerUsageLimitChannelResult.channelId ??
-        providerUsageLimitDiscordResult.channelId,
+        providerUsageLimitDiscordResult.channelId ??
+        destinationResults.providerUsageLimit.email.target?.externalRef ??
+        null,
       field: 'providerUsageLimitSlackChannel',
     },
     {
@@ -1032,7 +1254,9 @@ export async function updateBackgroundAgentSettingsCommand(
       frequency: sentryTriageFrequency,
       channelId:
         sentryTriageChannelResult.channelId ??
-        sentryTriageDiscordResult.channelId,
+        sentryTriageDiscordResult.channelId ??
+        destinationResults.sentryTriage.email.target?.externalRef ??
+        null,
       field: 'sentryTriageSlackChannel',
     },
     {
@@ -1041,7 +1265,9 @@ export async function updateBackgroundAgentSettingsCommand(
       frequency: dependabotTriageFrequency,
       channelId:
         dependabotTriageChannelResult.channelId ??
-        dependabotTriageDiscordResult.channelId,
+        dependabotTriageDiscordResult.channelId ??
+        destinationResults.dependabotTriage.email.target?.externalRef ??
+        null,
       field: 'dependabotTriageSlackChannel',
     },
     {
@@ -1050,7 +1276,9 @@ export async function updateBackgroundAgentSettingsCommand(
       frequency: codeqlTriageFrequency,
       channelId:
         codeqlTriageChannelResult.channelId ??
-        codeqlTriageDiscordResult.channelId,
+        codeqlTriageDiscordResult.channelId ??
+        destinationResults.codeqlTriage.email.target?.externalRef ??
+        null,
       field: 'codeqlTriageSlackChannel',
     },
     {
@@ -1059,7 +1287,9 @@ export async function updateBackgroundAgentSettingsCommand(
       frequency: securityAuditorFrequency,
       channelId:
         securityAuditorChannelResult.channelId ??
-        securityAuditorDiscordResult.channelId,
+        securityAuditorDiscordResult.channelId ??
+        destinationResults.securityAuditor.email.target?.externalRef ??
+        null,
       field: 'securityAuditorSlackChannel',
     },
     {
@@ -1068,7 +1298,9 @@ export async function updateBackgroundAgentSettingsCommand(
       frequency: codeQualityAuditorFrequency,
       channelId:
         codeQualityAuditorChannelResult.channelId ??
-        codeQualityAuditorDiscordResult.channelId,
+        codeQualityAuditorDiscordResult.channelId ??
+        destinationResults.codeQualityAuditor.email.target?.externalRef ??
+        null,
       field: 'codeQualityAuditorSlackChannel',
     },
     {
@@ -1077,7 +1309,9 @@ export async function updateBackgroundAgentSettingsCommand(
       frequency: ciFailureTriageFrequency,
       channelId:
         ciFailureTriageChannelResult.channelId ??
-        ciFailureTriageDiscordResult.channelId,
+        ciFailureTriageDiscordResult.channelId ??
+        destinationResults.ciFailureTriage.email.target?.externalRef ??
+        null,
       field: 'ciFailureTriageSlackChannel',
     },
     {
@@ -1100,6 +1334,18 @@ export async function updateBackgroundAgentSettingsCommand(
       continue;
     }
 
+    const destinationDescriptor = destinationDescriptors.find(
+      (descriptor) => descriptor.automationId === validation.automationId,
+    );
+    if (
+      destinationDescriptor &&
+      (fieldErrors[destinationDescriptor.slackField] ||
+        fieldErrors[destinationDescriptor.discordField] ||
+        fieldErrors[destinationDescriptor.emailField])
+    ) {
+      continue;
+    }
+
     if (
       validation.key === 'provider_usage_limit' &&
       !validation.channelId &&
@@ -1118,7 +1364,7 @@ export async function updateBackgroundAgentSettingsCommand(
       const descriptor = getTriggerableBackgroundAutomationDescriptorByKey(
         validation.key,
       );
-      const nonSlackProviders =
+      const nonSlackProviders: readonly CommunicationProvider[] =
         descriptor?.supportedCommunicationProviders.filter(
           (provider) => provider !== 'slack',
         ) ?? [];
@@ -1134,7 +1380,11 @@ export async function updateBackgroundAgentSettingsCommand(
           slackConnected: await hasActiveSlackInstallation(),
         });
 
-        if (destination && nonSlackProviders.includes(destination.provider)) {
+        if (
+          destination &&
+          destination.provider !== 'email' &&
+          nonSlackProviders.includes(destination.provider)
+        ) {
           continue;
         }
       }
@@ -1268,6 +1518,7 @@ export async function updateBackgroundAgentSettingsCommand(
           result.discord.channelId,
           suggesterExtraTargets,
         ),
+        ...(result.email.target ? [result.email.target] : []),
         ...extraTargets,
       ],
       managedTargetKinds:
@@ -1282,6 +1533,30 @@ export async function updateBackgroundAgentSettingsCommand(
   }
 
   await db.transaction(async (tx) => {
+    let updatedAdditionalRulesSettings: Record<string, unknown> | undefined;
+    if (additionalRulesConfig && submittedAdditionalRules !== undefined) {
+      updatedAdditionalRulesSettings = {
+        ...(
+          await tx.query.automations.findFirst({
+            where: eq(automations.key, additionalRulesConfig.key),
+          })
+        )?.settings,
+      };
+      if (!compiledAdditionalRules) {
+        delete updatedAdditionalRulesSettings.additionalRules;
+        delete updatedAdditionalRulesSettings.compiledRules;
+      } else {
+        updatedAdditionalRulesSettings.additionalRules = additionalRulesText;
+        updatedAdditionalRulesSettings.compiledRules = compiledAdditionalRules;
+      }
+    }
+    const additionalRulesUpsertFields = (
+      key: TriggerableBackgroundAutomationKey,
+    ) =>
+      additionalRulesConfig?.key === key && updatedAdditionalRulesSettings
+        ? { settings: updatedAdditionalRulesSettings }
+        : {};
+
     await tx
       .insert(deploymentSettings)
       .values({
@@ -1336,10 +1611,7 @@ export async function updateBackgroundAgentSettingsCommand(
 
     await upsertAutomation(tx, {
       key: 'slack_channel_auto_start',
-      enabled:
-        finalResolvedChannelAutoStartRows.length +
-          finalResolvedChannelAutoStartDiscordRows.length >
-        0,
+      enabled: channelAutoStartEnabled,
       instructions:
         normalizeOptionalText(
           finalResolvedChannelAutoStartRows[0]?.instructions,
@@ -1459,6 +1731,7 @@ export async function updateBackgroundAgentSettingsCommand(
 
     await upsertAutomation(tx, {
       key: 'security_auditor',
+      ...additionalRulesUpsertFields('security_auditor'),
       enabled: securityAuditorFrequency !== 'off',
       schedule: { mode: securityAuditorFrequency },
       ...destinationUpsertFields('securityAuditor'),
@@ -1467,6 +1740,7 @@ export async function updateBackgroundAgentSettingsCommand(
 
     await upsertAutomation(tx, {
       key: 'code_quality_auditor',
+      ...additionalRulesUpsertFields('code_quality_auditor'),
       enabled: codeQualityAuditorFrequency !== 'off',
       schedule: { mode: codeQualityAuditorFrequency },
       ...destinationUpsertFields('codeQualityAuditor'),
@@ -1475,6 +1749,7 @@ export async function updateBackgroundAgentSettingsCommand(
 
     await upsertAutomation(tx, {
       key: 'ci_failure_triage',
+      ...additionalRulesUpsertFields('ci_failure_triage'),
       enabled: ciFailureTriageFrequency !== 'off',
       schedule: { mode: ciFailureTriageFrequency },
       ...destinationUpsertFields('ciFailureTriage'),
@@ -1483,21 +1758,13 @@ export async function updateBackgroundAgentSettingsCommand(
 
     await upsertAutomation(tx, {
       key: 'merge_announcer',
+      ...additionalRulesUpsertFields('merge_announcer'),
       enabled: mergeAnnouncerFrequency !== 'off',
       schedule: { mode: mergeAnnouncerFrequency },
       ...(mergeAnnouncerDestinationSubmitted
         ? {
             targets: mergeAnnouncerTarget ? [mergeAnnouncerTarget] : [],
-            managedTargetKinds: [
-              'slack_channel',
-              'slack_user',
-              'discord_channel',
-              'discord_user',
-              'teams_channel',
-              'teams_user',
-              'telegram_chat',
-              'telegram_user',
-            ] as const,
+            managedTargetKinds: COMMUNICATION_MANAGED_TARGET_KINDS,
           }
         : {}),
       updatedAt: now,
@@ -1505,18 +1772,19 @@ export async function updateBackgroundAgentSettingsCommand(
 
     await upsertAutomation(tx, {
       key: 'suggester',
+      ...additionalRulesUpsertFields('suggester'),
       enabled: effectiveSuggesterFrequency !== 'off',
       schedule: {
         mode: effectiveSuggesterFrequency,
       },
       instructions: effectiveSuggesterInstructions,
-      settings: suggesterAutomationSettings,
       ...destinationUpsertFields('suggester'),
       updatedAt: now,
     });
 
     await upsertAutomation(tx, {
       key: 'announcer',
+      ...additionalRulesUpsertFields('announcer'),
       enabled: effectiveAnnouncerFrequency !== 'off',
       schedule: {
         mode: effectiveAnnouncerFrequency,
@@ -1533,17 +1801,35 @@ export async function updateBackgroundAgentSettingsCommand(
       ...destinationUpsertFields('platformIssueAlerts'),
       updatedAt: now,
     });
+
+    await upsertAutomation(tx, {
+      key: 'release_announcements',
+      enabled: releaseAnnouncementsEnabled,
+      settings: { optedOut: !releaseAnnouncementsEnabled },
+      ...(releaseAnnouncementsDestinationSubmitted
+        ? {
+            targets: releaseAnnouncementsTarget
+              ? [releaseAnnouncementsTarget]
+              : [],
+            managedTargetKinds: COMMUNICATION_MANAGED_TARGET_KINDS,
+          }
+        : {}),
+      updatedAt: now,
+    });
   });
 
   await Promise.all([
     syncSlackAutoStartChannelCache({
       shouldUpdate: true,
-      enabled: finalResolvedChannelAutoStartRows.length > 0,
+      enabled:
+        channelAutoStartEnabled && finalResolvedChannelAutoStartRows.length > 0,
       channelIds: channelAutoStartChannelIds,
     }),
     syncDiscordAutoStartChannelCache({
       shouldUpdate: true,
-      enabled: finalResolvedChannelAutoStartDiscordRows.length > 0,
+      enabled:
+        channelAutoStartEnabled &&
+        finalResolvedChannelAutoStartDiscordRows.length > 0,
       channelIds: finalResolvedChannelAutoStartDiscordRows.map(
         ({ channelId }) => channelId,
       ),

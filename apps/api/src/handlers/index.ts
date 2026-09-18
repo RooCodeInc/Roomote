@@ -2,6 +2,7 @@
 export { apiHealth } from './health/api';
 export { apiLiveness } from './health/liveness';
 export { controllerHealth } from './health/controller';
+export { bullmqHealth } from './health/bullmq';
 
 // webhooks
 export { github } from './github';
@@ -13,6 +14,7 @@ export { slack } from './slack';
 export { linear } from './linear';
 export { teams } from './teams';
 export { telegram } from './telegram';
+export { agentmail } from './agentmail';
 export { discord } from './discord';
 export { cloudDeploymentAccess } from './cloud-deployment-access';
 
@@ -30,6 +32,15 @@ export { inference } from './inference';
 
 // the deployment Brain's own inference, keyless on the Brain's side
 export { brainInference } from './brain-inference';
+
+// credential egress control plane: controller/gateway service principals only
+export { credentialEgress } from './credential-egress';
+
+// API-side substitution proxy for coding runs holding Service tokens
+export {
+  credentialEgressProxy,
+  credentialEgressProxyHostAlias,
+} from './credential-egress-proxy';
 
 // narration tts
 export { tts } from './tts';

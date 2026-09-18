@@ -5,13 +5,18 @@ import path from 'node:path';
 
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { GitMergeIcon } from '@primer/octicons-react';
 import {
-  ChartColumnIncreasing,
   BatteryWarning,
-  GitMergeConflict,
+  BellElectric,
+  ChartColumnIncreasing,
   GitCommitVertical,
+  GitMergeConflict,
+  GitPullRequest,
   Lightbulb,
   Megaphone,
+  MessagesSquare,
+  Smile,
   SquarePen,
   TriangleAlert,
   Wrench,
@@ -27,15 +32,23 @@ const outputDirectory = path.resolve(
 
 const lucideIcons = {
   'battery-warning': BatteryWarning,
+  'bell-electric': BellElectric,
   'chart-column-increasing': ChartColumnIncreasing,
-  'git-merge-conflict': GitMergeConflict,
   'git-commit-vertical': GitCommitVertical,
+  'git-merge-conflict': GitMergeConflict,
+  'git-pull-request': GitPullRequest,
   lightbulb: Lightbulb,
   megaphone: Megaphone,
+  'messages-square': MessagesSquare,
+  smile: Smile,
   'square-pen': SquarePen,
   'triangle-alert': TriangleAlert,
   wrench: Wrench,
   zap: Zap,
+};
+
+const octicons = {
+  'git-merge': GitMergeIcon,
 };
 
 const simpleIcons = {
@@ -61,6 +74,17 @@ function renderLucideIcon(Icon) {
   );
 }
 
+function renderOcticon(Icon) {
+  return wrapIcon(
+    renderToStaticMarkup(
+      createElement(Icon, {
+        size: 56,
+        fill: '#000000',
+      }),
+    ),
+  );
+}
+
 function renderSimpleIcon(icon) {
   return wrapIcon(
     `<svg width="56" height="56" viewBox="0 0 24 24" fill="#000000" aria-hidden="true"><path d="${icon.path}"/></svg>`,
@@ -71,6 +95,12 @@ await mkdir(outputDirectory, { recursive: true });
 
 for (const [name, Icon] of Object.entries(lucideIcons)) {
   await sharp(Buffer.from(renderLucideIcon(Icon)))
+    .png()
+    .toFile(path.join(outputDirectory, `${name}.png`));
+}
+
+for (const [name, Icon] of Object.entries(octicons)) {
+  await sharp(Buffer.from(renderOcticon(Icon)))
     .png()
     .toFile(path.join(outputDirectory, `${name}.png`));
 }

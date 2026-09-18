@@ -1,4 +1,4 @@
-import { listArtifactsByTask } from '../service';
+import { listArtifactsByTask, validateArtifactPath } from '../service';
 
 const { andMock, ascMock, descMock, eqMock, orderByMock, mockSelect } =
   vi.hoisted(() => ({
@@ -82,5 +82,15 @@ describe('listArtifactsByTask', () => {
       'taskArtifacts.artifactType',
       'visual-proof',
     );
+  });
+});
+
+describe('validateArtifactPath', () => {
+  it('uses the shared artifact path policy', () => {
+    expect(validateArtifactPath('plans/result.md')).toEqual({ valid: true });
+    expect(validateArtifactPath('C:\\Users\\roomote\\secret.txt')).toEqual({
+      valid: false,
+      error: 'Invalid path: absolute paths are not allowed',
+    });
   });
 });

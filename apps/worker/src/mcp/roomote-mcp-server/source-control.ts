@@ -15,10 +15,14 @@ type ManageSourceControlParams = {
     | 'get_pull_request'
     | 'list_pull_requests'
     | 'list_pull_request_comments'
+    | 'close_pull_request'
+    | 'update_pull_request'
+    | 'reopen_pull_request'
     | 'reply_to_pull_request_comment'
     | 'create_pull_request_comment'
     | 'create_pull_request_review_comment'
     | 'resolve_pull_request_thread'
+    | 'request_pull_request_reviewers'
     | 'submit_pull_request_review'
     | 'dismiss_pull_request_review'
     | 'update_pull_request_comment'
@@ -35,6 +39,8 @@ type ManageSourceControlParams = {
   reviewId?: string;
   resolved?: boolean;
   reviewEvent?: 'approve' | 'request_changes' | 'comment';
+  reviewers?: string[];
+  teamReviewers?: string[];
   path?: string;
   line?: number;
   side?: 'LEFT' | 'RIGHT';
@@ -44,6 +50,7 @@ type ManageSourceControlParams = {
   targetBranch?: string;
   title?: string;
   body?: string;
+  draft?: boolean;
   prAttribution?: string;
   labels?: string[];
   assignees?: string[];
@@ -172,6 +179,28 @@ export async function handleManageSourceControl(
       );
     }
 
+    const targetBranch = params.targetBranch?.trim() || undefined;
+    const title = params.title?.trim() || undefined;
+    if (
+      params.action === 'update_pull_request' &&
+      targetBranch === undefined &&
+      title === undefined &&
+      typeof params.body !== 'string' &&
+      typeof params.draft !== 'boolean'
+    ) {
+      return errorResult(
+        'update_pull_request requires at least one of targetBranch, title, body, or draft',
+      );
+    }
+    if (
+      params.action === 'update_pull_request' &&
+      (params.labels !== undefined || params.assignees !== undefined)
+    ) {
+      return errorResult(
+        'update_pull_request supports only targetBranch, title, body, and draft updates',
+      );
+    }
+
     if (
       (params.action === 'reply_to_pull_request_comment' ||
         params.action === 'resolve_pull_request_thread') &&
@@ -232,6 +261,22 @@ export async function handleManageSourceControl(
       );
     }
 
+    const reviewers = params.reviewers
+      ?.map((reviewer) => reviewer.trim())
+      .filter(Boolean);
+    const teamReviewers = params.teamReviewers
+      ?.map((reviewer) => reviewer.trim())
+      .filter(Boolean);
+    if (
+      params.action === 'request_pull_request_reviewers' &&
+      !reviewers?.length &&
+      !teamReviewers?.length
+    ) {
+      return errorResult(
+        'reviewers or teamReviewers is required for request_pull_request_reviewers',
+      );
+    }
+
     if (params.action === 'dismiss_pull_request_review') {
       if (!params.reviewId?.trim()) {
         return errorResult(
@@ -259,9 +304,14 @@ export async function handleManageSourceControl(
         threadId,
         commentId,
         reviewId,
+        targetBranch,
+        title,
         body: params.body,
+        draft: params.draft,
         resolved: params.resolved,
         reviewEvent: params.reviewEvent,
+        reviewers,
+        teamReviewers,
         path,
         line: params.line,
         side: params.side,

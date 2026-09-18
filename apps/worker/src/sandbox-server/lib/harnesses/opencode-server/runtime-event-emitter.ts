@@ -157,6 +157,7 @@ export class OpenCodeRuntimeEventEmitter extends RuntimeEnvelopeBuilder {
     sessionId: string;
     messageId?: string;
     text: string;
+    metadata?: Record<string, unknown>;
   }): void {
     if (options.text.length === 0) {
       return;
@@ -172,6 +173,7 @@ export class OpenCodeRuntimeEventEmitter extends RuntimeEnvelopeBuilder {
           metadata: {
             sessionId: options.sessionId,
             ...(options.messageId ? { turnId: options.messageId } : {}),
+            ...(options.metadata ?? {}),
           },
           payload: {
             sessionId: options.sessionId,
@@ -188,6 +190,7 @@ export class OpenCodeRuntimeEventEmitter extends RuntimeEnvelopeBuilder {
     sessionId: string;
     messageId?: string;
     text: string;
+    metadata?: Record<string, unknown>;
   }): void {
     if (options.text.length === 0) {
       return;
@@ -203,6 +206,7 @@ export class OpenCodeRuntimeEventEmitter extends RuntimeEnvelopeBuilder {
           metadata: {
             sessionId: options.sessionId,
             ...(options.messageId ? { turnId: options.messageId } : {}),
+            ...(options.metadata ?? {}),
           },
           payload: {
             sessionId: options.sessionId,
@@ -220,6 +224,7 @@ export class OpenCodeRuntimeEventEmitter extends RuntimeEnvelopeBuilder {
     messageId?: string;
     text: string;
     hadDelta?: boolean;
+    metadata?: Record<string, unknown>;
   }): void {
     if (options.text.length === 0) {
       return;
@@ -237,6 +242,7 @@ export class OpenCodeRuntimeEventEmitter extends RuntimeEnvelopeBuilder {
         metadata: {
           sessionId: options.sessionId,
           ...(options.messageId ? { turnId: options.messageId } : {}),
+          ...(options.metadata ?? {}),
         },
         payload: {
           sessionId: options.sessionId,
@@ -433,6 +439,7 @@ export class OpenCodeRuntimeEventEmitter extends RuntimeEnvelopeBuilder {
     status: string;
     payload: Record<string, unknown>;
     contentText?: string;
+    metadata?: Record<string, unknown>;
   }): void {
     const contentText = options.contentText ?? options.title;
 
@@ -449,6 +456,7 @@ export class OpenCodeRuntimeEventEmitter extends RuntimeEnvelopeBuilder {
             ...(options.messageId ? { turnId: options.messageId } : {}),
             toolCallId: options.toolCallId,
             status: options.status,
+            ...(options.metadata ?? {}),
           },
           payload: {
             sessionId: options.sessionId,
@@ -475,6 +483,7 @@ export class OpenCodeRuntimeEventEmitter extends RuntimeEnvelopeBuilder {
     output?: string;
     error?: string;
     payload?: Record<string, unknown>;
+    metadata?: Record<string, unknown>;
   }): void {
     this.output(
       this.withLogicalEventId(
@@ -490,6 +499,7 @@ export class OpenCodeRuntimeEventEmitter extends RuntimeEnvelopeBuilder {
             ...(options.messageId ? { turnId: options.messageId } : {}),
             toolCallId: options.toolCallId,
             status: options.status,
+            ...(options.metadata ?? {}),
           },
           payload: {
             sessionId: options.sessionId,
@@ -519,6 +529,7 @@ export class OpenCodeRuntimeEventEmitter extends RuntimeEnvelopeBuilder {
     status: string;
     output: string;
     payload: Record<string, unknown>;
+    metadata?: Record<string, unknown>;
   }): void {
     this.persist(
       this.withLogicalEventId(
@@ -535,6 +546,7 @@ export class OpenCodeRuntimeEventEmitter extends RuntimeEnvelopeBuilder {
             ...(options.messageId ? { turnId: options.messageId } : {}),
             toolCallId: options.toolCallId,
             status: options.status,
+            ...(options.metadata ?? {}),
           },
           payload: {
             sessionId: options.sessionId,

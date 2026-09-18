@@ -10,7 +10,10 @@ import {
   isSubagentToolMessage,
 } from './subagent-tool';
 import { resolveShowWidgetForToolMessage } from './show-widget-tool-result';
-import { resolveToolPresentation } from './tool-presentation';
+import {
+  readToolArguments,
+  resolveToolPresentation,
+} from './tool-presentation';
 import type { AcpToolCallUiMessage, AcpToolResultUiMessage } from './types';
 import { resolveVisualProofMediaForToolMessage } from './visual-proof-tool-result';
 
@@ -34,9 +37,16 @@ interface ResolvedToolPolicy {
 
 const CONSEQUENTIAL_RECEIPTS = new Set([
   'launch_task',
+  'review_pull_request',
   'cancel_task',
   'retry_task_start',
   'send_task_message',
+  'report_to_parent_session',
+  'receive_task_report',
+  'inspect_images',
+  'send_chat_reply',
+  'post_to_channel',
+  'send_chat_reaction_emoji',
   'save_memory',
 ]);
 
@@ -61,6 +71,16 @@ export function resolveToolPresentationPolicy(
   const consequentialReceipt =
     presentation.identity.toolName !== null &&
     CONSEQUENTIAL_RECEIPTS.has(presentation.identity.toolName);
+  const isPersonalizationReceipt =
+    presentation.identity.toolName === 'update_personalization';
+  const isSkillReceipt =
+    presentation.identity.toolName === 'skill' ||
+    presentation.identity.toolName === 'load_skill';
+  const keepConsequentialReceiptVisible =
+    consequentialReceipt &&
+    (presentation.identity.toolName !== 'send_chat_reply' ||
+      options.displayMode === 'narration' ||
+      presentation.phase === 'failed');
 
   let rowVisibility: ResolvedToolPolicy['rowVisibility'] = 'visible';
   if (shouldHideAcpMessage(msg)) {
@@ -82,18 +102,23 @@ export function resolveToolPresentationPolicy(
     rowVisibility = 'hidden';
   }
 
-  const detailMode: ResolvedToolPolicy['detailMode'] =
-    isSubagentToolMessage(msg) && hasSubagentSummary(msg)
-      ? 'expandable'
-      : hasPreview
-        ? 'preview'
-        : isInternalDebugToolCallMessage(msg) ||
-            presentation.category === 'read' ||
-            (isSubagentToolMessage(msg) &&
-              !options.showInternalMessages &&
-              !hasSubagentSummary(msg))
-          ? 'none'
-          : 'expandable';
+  const detailMode: ResolvedToolPolicy['detailMode'] = isPersonalizationReceipt
+    ? 'none'
+    : isSkillReceipt
+      ? hasSkillDetails(msg)
+        ? 'expandable'
+        : 'none'
+      : isSubagentToolMessage(msg) && hasSubagentSummary(msg)
+        ? 'expandable'
+        : hasPreview
+          ? 'preview'
+          : isInternalDebugToolCallMessage(msg) ||
+              (presentation.category === 'read' && !consequentialReceipt) ||
+              (isSubagentToolMessage(msg) &&
+                !options.showInternalMessages &&
+                !hasSubagentSummary(msg))
+            ? 'none'
+            : 'expandable';
 
   return {
     rowVisibility,
@@ -101,14 +126,16 @@ export function resolveToolPresentationPolicy(
     detailMode,
     activityMode:
       isRunning ||
+      isPersonalizationReceipt ||
       hasPreview ||
       isArtifact ||
       renderAs === 'delegated-task-card' ||
-      consequentialReceipt
+      keepConsequentialReceiptVisible
         ? 'keep-visible'
         : 'collapsible',
     renderAs,
     groupingMode:
+      isPersonalizationReceipt ||
       hasPreview ||
       isArtifact ||
       renderAs === 'delegated-task-card' ||
@@ -116,6 +143,28 @@ export function resolveToolPresentationPolicy(
         ? 'standalone'
         : 'groupable',
   };
+}
+
+function hasSkillDetails(msg: ToolMessage): boolean {
+  const args = readToolArguments(msg.data);
+  if (args && Object.keys(args).some((key) => key !== 'name' && key !== 'id')) {
+    return true;
+  }
+
+  const output = msg.kind === 'tool_result' ? msg.data.output : null;
+  if (typeof output !== 'string' || !output.trim()) return false;
+
+  try {
+    const result = JSON.parse(output) as unknown;
+    if (!result || typeof result !== 'object' || Array.isArray(result)) {
+      return true;
+    }
+    return Object.keys(result).some(
+      (key) => key !== 'success' && key !== 'name' && key !== 'id',
+    );
+  } catch {
+    return true;
+  }
 }
 
 function hasSubagentSummary(msg: ToolMessage): boolean {

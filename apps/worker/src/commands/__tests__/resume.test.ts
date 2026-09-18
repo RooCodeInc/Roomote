@@ -29,7 +29,8 @@ vi.mock('../utils', () => ({
   executeTaskRun: executeTaskRunMock,
 }));
 
-import { TaskPayloadKind } from '@roomote/types';
+import { NO_REPOSITORIES, TaskPayloadKind } from '@roomote/types';
+import { buildWorkspaceConfig } from '../utils';
 
 import { resume } from '../resume';
 
@@ -76,6 +77,28 @@ describe('resume', () => {
         harnessSessionId: 'session-42',
       }),
     );
+  });
+
+  it('preserves Blank slate when rebuilding a resumed workspace', async () => {
+    vi.mocked(buildWorkspaceConfig).mockResolvedValue({
+      type: 'no_repositories',
+    });
+    executeTaskRunMock.mockImplementation(async ({ workspaceConfigFn }) => {
+      await workspaceConfigFn({
+        sourceEnvironmentId: undefined,
+        sourceRepo: NO_REPOSITORIES,
+        sourceSelectedRepositories: undefined,
+      });
+      return true;
+    });
+
+    await resume(45);
+
+    expect(buildWorkspaceConfig).toHaveBeenCalledWith({
+      environmentId: undefined,
+      repo: NO_REPOSITORIES,
+      selectedRepositories: undefined,
+    });
   });
 
   it('forwards workspace readiness warnings into runTask', async () => {

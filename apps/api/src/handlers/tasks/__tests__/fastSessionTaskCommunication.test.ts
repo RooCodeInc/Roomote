@@ -20,6 +20,10 @@ import {
   db,
   fastAgentConversations,
   fastAgentMessages,
+  ensureSessionForFastConversation,
+  runFactory,
+  taskFactory,
+  taskMessages,
   userFactory,
 } from '@roomote/db/server';
 
@@ -135,12 +139,12 @@ describe('Fast session communication through task routes', () => {
         messages: [
           {
             taskId: session.id,
-            text: 'Newest text',
+            text: 'Participant text',
             visibleInTranscript: true,
           },
           {
             taskId: session.id,
-            text: 'Participant text',
+            text: 'Newest text',
             visibleInTranscript: true,
           },
         ],
@@ -148,12 +152,71 @@ describe('Fast session communication through task routes', () => {
     }
   });
 
-  it('hides Fast sessions from bystanders and rejects absent or invalid IDs', async () => {
+  it('continues past hidden rows to satisfy a limited task transcript', async () => {
+    const owner = await userFactory.create();
+    const task = await taskFactory.create({ initiatorUserId: owner.id });
+    const run = await runFactory.create({
+      taskId: task.id,
+      actingUserId: owner.id,
+    });
+    const messages: Array<typeof taskMessages.$inferInsert> = [
+      {
+        runId: run.id,
+        taskId: task.id,
+        ts: 1,
+        eventType: 'roomote_runtime.assistant_text',
+        protocol: 'roomote_runtime',
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: 'Oldest visible' }],
+        metadata: { visibleInTranscript: true },
+        payload: {},
+      },
+      {
+        runId: run.id,
+        taskId: task.id,
+        ts: 2,
+        eventType: 'roomote_runtime.assistant_text',
+        protocol: 'roomote_runtime',
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: 'Newest visible' }],
+        metadata: { visibleInTranscript: true },
+        payload: {},
+      },
+      {
+        runId: run.id,
+        taskId: task.id,
+        ts: 3,
+        eventType: 'roomote_runtime.user_prompt',
+        protocol: 'roomote_runtime',
+        role: 'user',
+        contentBlocks: [{ type: 'text', text: 'Hidden prompt' }],
+        metadata: { visibleInTranscript: false },
+        payload: {},
+      },
+    ];
+    await db.insert(taskMessages).values(messages);
+
+    const response = await createApp(userAuth(owner.id)).request(
+      `/tasks/${task.id}/messages?limit=2&order=desc`,
+    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      returned: 2,
+      messages: [{ text: 'Newest visible' }, { text: 'Oldest visible' }],
+    });
+  });
+
+  it('shares Fast sessions with bystanders but rejects absent or invalid IDs', async () => {
     const owner = await userFactory.create();
     const bystander = await userFactory.create();
     const session = await createSession(owner.id);
 
-    for (const taskId of [session.id, crypto.randomUUID(), 'not-an-id']) {
+    const shared = await createApp(userAuth(bystander.id)).request(
+      `/tasks/${session.id}/messages`,
+    );
+    expect(shared.status).toBe(200);
+
+    for (const taskId of [crypto.randomUUID(), 'not-an-id']) {
       const response = await createApp(userAuth(bystander.id)).request(
         `/tasks/${taskId}/messages`,
       );
@@ -183,6 +246,13 @@ describe('Fast session communication through task routes', () => {
       },
     );
     expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      sent: {
+        direction: 'Codex → Roomote',
+        target: { kind: 'task', id: session.id },
+        text: 'Continue this conversation',
+      },
+    });
     expect(mocks.sendMessageToTask).toHaveBeenCalledWith(
       expect.objectContaining({ taskId: session.id }),
     );
@@ -194,6 +264,32 @@ describe('Fast session communication through task routes', () => {
         images: ['https://example.com/member.png'],
       }),
     );
+  });
+
+  it('requires canonical unified Session IDs to use Session routes', async () => {
+    const owner = await userFactory.create();
+    const fastSession = await createSession(owner.id);
+    const session = await ensureSessionForFastConversation(db, fastSession.id);
+    await addMessage({
+      sessionId: fastSession.id,
+      eventId: 'unified-session-message',
+      text: 'Unified session text',
+    });
+
+    const app = createApp(userAuth(owner.id));
+    const messagesResponse = await app.request(`/tasks/${session.id}/messages`);
+    expect(messagesResponse.status).toBe(404);
+
+    const sendResponse = await app.request(
+      `/tasks/${session.id}/send_message`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: 'Continue unified session' }),
+      },
+    );
+    expect(sendResponse.status).toBe(404);
+    expect(mocks.queueReply).not.toHaveBeenCalled();
   });
 
   it('uses the same Fast fallback for the worker steering route', async () => {
@@ -240,6 +336,13 @@ describe('Fast session communication through task routes', () => {
       },
     );
     expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      sent: {
+        direction: 'Codex → Roomote',
+        target: { kind: 'task', id: 'normal-task' },
+        text: 'Normal follow-up',
+      },
+    });
     expect(mocks.queueReply).not.toHaveBeenCalled();
   });
 
@@ -248,18 +351,26 @@ describe('Fast session communication through task routes', () => {
     const bystander = await userFactory.create();
     const session = await createSession(owner.id);
 
-    const denied = await createApp(userAuth(bystander.id)).request(
+    const bystanderSend = await createApp(userAuth(bystander.id)).request(
       `/tasks/${session.id}/send_message`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: 'Not allowed' }),
+        body: JSON.stringify({ message: 'Deployment users can reply' }),
       },
     );
-    expect(denied.status).toBe(404);
+    expect(bystanderSend.status).toBe(200);
 
+    // A run without a human driver mints a user-less token. The handler
+    // resolves the actor from the run's acting user, then the task's human
+    // owner; an automation task with neither still has no actor.
+    const orphanTask = await taskFactory.create();
+    const orphanRun = await runFactory.create({
+      taskId: orphanTask.id,
+      actingUserId: null,
+    });
     const deploymentRun: RunTokenContext = {
-      runId: 1,
+      runId: orphanRun.id,
       userId: null,
       principal: 'deployment',
       tokenType: 'run',
@@ -274,6 +385,22 @@ describe('Fast session communication through task routes', () => {
       },
     );
     expect(noActor.status).toBe(403);
+
+    // The same token shape resolves to the task's human owner when one exists.
+    const ownedTask = await taskFactory.create({ initiatorUserId: owner.id });
+    const ownedRun = await runFactory.create({
+      taskId: ownedTask.id,
+      actingUserId: null,
+    });
+    const ownerResolved = await createApp({
+      ...deploymentRun,
+      runId: ownedRun.id,
+    }).request(`/tasks/${session.id}/send_message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'Resolved through task owner' }),
+    });
+    expect(ownerResolved.status).toBe(200);
 
     mocks.queueReply.mockResolvedValueOnce(false);
     const unavailable = await createApp(userAuth(owner.id)).request(

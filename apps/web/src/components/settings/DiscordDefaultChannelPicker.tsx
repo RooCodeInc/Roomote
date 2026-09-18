@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
@@ -10,6 +10,7 @@ import {
   Label,
   Select,
   SelectContent,
+  type SelectHandoffTarget,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -30,6 +31,9 @@ export function DiscordDefaultChannelPicker() {
   const [selectedChannelId, setSelectedChannelId] = useState<string | null>(
     null,
   );
+  const channelSelectRef = useRef<SelectHandoffTarget>(null);
+  const guildTriggerRef = useRef<HTMLButtonElement>(null);
+  const [pendingChannelHandoff, setPendingChannelHandoff] = useState(false);
 
   const currentGuild = useMemo(
     () =>
@@ -60,6 +64,27 @@ export function DiscordDefaultChannelPicker() {
   useEffect(() => {
     setSelectedChannelId(null);
   }, [effectiveGuildId]);
+
+  useEffect(() => {
+    if (!pendingChannelHandoff || channels.isPending) return;
+
+    setPendingChannelHandoff(false);
+    const hasAvailableChannel = channels.data?.channels.some(
+      (channel) => channel.supported,
+    );
+    if (
+      !effectiveChannelId &&
+      hasAvailableChannel &&
+      document.activeElement === guildTriggerRef.current
+    ) {
+      channelSelectRef.current?.focusAndOpen();
+    }
+  }, [
+    channels.data?.channels,
+    channels.isPending,
+    effectiveChannelId,
+    pendingChannelHandoff,
+  ]);
 
   const save = useMutation(
     trpc.comms.selectDiscordDestination.mutationOptions({
@@ -96,10 +121,16 @@ export function DiscordDefaultChannelPicker() {
       <div className="flex flex-wrap items-center gap-2">
         {guilds.data.guilds.length > 1 ? (
           <Select
-            value={effectiveGuildId ?? undefined}
-            onValueChange={(value) => setSelectedGuildId(value)}
+            value={effectiveGuildId ?? ''}
+            handoffTargetOnSelect={
+              effectiveChannelId ? undefined : channelSelectRef
+            }
+            onValueChange={(value) => {
+              if (value !== effectiveGuildId) setPendingChannelHandoff(true);
+              setSelectedGuildId(value);
+            }}
           >
-            <SelectTrigger className="w-56">
+            <SelectTrigger ref={guildTriggerRef} className="w-56">
               <SelectValue placeholder="Choose a server" />
             </SelectTrigger>
             <SelectContent>
@@ -112,7 +143,8 @@ export function DiscordDefaultChannelPicker() {
           </Select>
         ) : null}
         <Select
-          value={effectiveChannelId ?? undefined}
+          handoffRef={channelSelectRef}
+          value={effectiveChannelId ?? ''}
           onValueChange={(value) => setSelectedChannelId(value)}
           disabled={effectiveGuildId === null || channels.isPending}
         >

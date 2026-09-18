@@ -4,29 +4,54 @@ import {
   type ReactElement,
   type ReactNode,
 } from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-const { createTaskRunState, queryOptionsMock } = vi.hoisted(() => ({
-  createTaskRunState: {
-    mutate: vi.fn(),
-    options: undefined as
-      | {
-          onSuccess: (
-            result: {
-              success: boolean;
-              taskId?: string;
-              error?: string;
-            },
-            variables: { sourceArtifactPath?: string },
-          ) => void;
-        }
-      | undefined,
+const {
+  navigationState,
+  queryOptionsMock,
+  forTaskQueryMock,
+  replyMutationMock,
+} = vi.hoisted(() => ({
+  navigationState: {
+    pathname: '/task/task-1/artifacts/plans/widget-plan.md',
+    push: vi.fn(),
   },
+  forTaskQueryMock: vi.fn(),
+  replyMutationMock: vi.fn(),
   queryOptionsMock: vi.fn(() => ({})),
+}));
+
+vi.mock('next/navigation', () => ({
+  usePathname: () => navigationState.pathname,
+  useRouter: () => ({ push: navigationState.push }),
+}));
+
+vi.mock('@/trpc/client', () => ({
+  useTRPC: () => ({
+    artifacts: {
+      versions: {
+        queryOptions: queryOptionsMock,
+      },
+    },
+  }),
+  useTRPCClient: () => ({
+    sessions: { forTask: { query: forTaskQueryMock } },
+    fastSessions: { reply: { mutate: replyMutationMock } },
+  }),
 }));
 
 vi.mock('@tanstack/react-query', () => ({
   useQuery: () => ({ data: [] }),
+  useMutation: (options: {
+    mutationFn: () => Promise<unknown>;
+    onSuccess: (result: unknown) => void;
+    onError: (error: Error) => void;
+  }) => ({
+    isPending: false,
+    mutate: () => {
+      void options.mutationFn().then(options.onSuccess).catch(options.onError);
+    },
+  }),
 }));
 
 vi.mock('streamdown', () => ({
@@ -62,30 +87,6 @@ vi.mock('sonner', () => ({
   },
 }));
 
-vi.mock('@roomote/types', () => ({
-  ALL_REPOSITORIES: [],
-  DEFAULT_MANAGED_DEPLOYMENT_ACCESS: {
-    state: 'active',
-    reason: null,
-    revision: 1,
-    effectiveAt: '2026-01-01T00:00:00.000Z',
-    restrictionStartsAt: null,
-    remediationUrl: null,
-  },
-  MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE:
-    'New tasks are paused due to a billing issue. Please check billing.',
-}));
-
-vi.mock('@/trpc/client', () => ({
-  useTRPC: () => ({
-    artifacts: {
-      versions: {
-        queryOptions: queryOptionsMock,
-      },
-    },
-  }),
-}));
-
 vi.mock('@/lib', () => ({
   humanizeFilename: (value: string) => value,
 }));
@@ -95,33 +96,6 @@ vi.mock('@/lib/utils', () => ({
     classes.filter(Boolean).join(' '),
 }));
 
-vi.mock('@/hooks/tasks', () => ({
-  useTask: () => ({ data: null }),
-}));
-
-vi.mock('@/hooks/useUser', () => ({
-  useAuthorizedUser: () => ({
-    managedAccess: {
-      state: 'active',
-      reason: null,
-      revision: 1,
-      effectiveAt: '2026-01-01T00:00:00.000Z',
-      restrictionStartsAt: null,
-      remediationUrl: null,
-    },
-  }),
-}));
-
-vi.mock('@/hooks/task-runs', () => ({
-  useCreateStandardTaskRun: (options: typeof createTaskRunState.options) => {
-    createTaskRunState.options = options;
-    return {
-      isPending: false,
-      mutate: createTaskRunState.mutate,
-    };
-  },
-}));
-
 vi.mock('@/components/system', () => ({
   Download: () => <svg aria-hidden="true" />,
   Hammer: () => <svg aria-hidden="true" />,
@@ -129,6 +103,7 @@ vi.mock('@/components/system', () => ({
   Check: () => <svg aria-hidden="true" />,
   Globe: () => <svg aria-hidden="true" />,
   LucideLink: () => <svg aria-hidden="true" />,
+  Loader2Icon: () => <svg aria-hidden="true" />,
   Button: ({
     children,
     asChild,
@@ -180,6 +155,24 @@ vi.mock('@/components/system', () => ({
   ),
   BasicTooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
   MediaViewerImage: () => <div>image</div>,
+  Table: ({ children, ...props }: React.ComponentProps<'table'>) => (
+    <table {...props}>{children}</table>
+  ),
+  TableHeader: ({ children, ...props }: React.ComponentProps<'thead'>) => (
+    <thead {...props}>{children}</thead>
+  ),
+  TableBody: ({ children, ...props }: React.ComponentProps<'tbody'>) => (
+    <tbody {...props}>{children}</tbody>
+  ),
+  TableHead: ({ children, ...props }: React.ComponentProps<'th'>) => (
+    <th {...props}>{children}</th>
+  ),
+  TableRow: ({ children, ...props }: React.ComponentProps<'tr'>) => (
+    <tr {...props}>{children}</tr>
+  ),
+  TableCell: ({ children, ...props }: React.ComponentProps<'td'>) => (
+    <td {...props}>{children}</td>
+  ),
 }));
 
 vi.mock('@/components/ai-elements', () => ({
@@ -190,40 +183,20 @@ vi.mock('@/components/ai-elements', () => ({
   streamdownPlugins: {},
 }));
 
-vi.mock('./BuildArtifactConfirmDialog', () => ({
-  BuildArtifactConfirmDialog: ({
-    open,
-    onConfirm,
-  }: {
-    open: boolean;
-    onConfirm: (values: {
-      repo: string;
-      environmentId: string;
-      modelId: string;
-    }) => void;
-  }) =>
-    open ? (
-      <button
-        onClick={() =>
-          onConfirm({
-            repo: 'org/repo',
-            environmentId: 'environment-1',
-            modelId: 'model-1',
-          })
-        }
-      >
-        Confirm build
-      </button>
-    ) : null,
-}));
-
-import {
-  ArtifactViewerContent,
-  buildArtifactPlanDescription,
-} from './ArtifactViewerContent';
+import { ArtifactViewerContent } from './ArtifactViewerContent';
 import { toast } from 'sonner';
 
 describe('ArtifactViewerContent', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    navigationState.pathname = '/task/task-1/artifacts/plans/widget-plan.md';
+    forTaskQueryMock.mockResolvedValue({
+      sessionId: 'parent-session-id',
+      title: 'Parent Session',
+    });
+    replyMutationMock.mockResolvedValue({ success: true });
+  });
+
   it.each([
     {
       label: 'normalized content type',
@@ -366,6 +339,360 @@ describe('ArtifactViewerContent', () => {
     ).toBeInTheDocument();
   });
 
+  it.each([
+    {
+      path: 'reports/data.bin',
+      contentType: 'TEXT/CSV; charset=UTF-8',
+      delimiter: ',',
+    },
+    {
+      path: 'reports/data.TSV',
+      contentType: 'application/octet-stream',
+      delimiter: '\t',
+    },
+  ])(
+    'renders $path as a table without consuming the first row as headers',
+    ({ path, contentType, delimiter }) => {
+      render(
+        <ArtifactViewerContent
+          taskId="task-1"
+          artifact={{
+            id: 'artifact-table',
+            taskId: 'task-1',
+            path,
+            version: 1,
+            artifactType: 'general',
+            contentType,
+            size: 128,
+            createdAt: new Date('2026-05-22T00:00:00.000Z'),
+            downloadUrl: 'https://example.test/data',
+            content: `name${delimiter}value\nAda${delimiter}42`,
+          }}
+        />,
+      );
+
+      const table = screen.getByRole('table');
+      expect(table).toBeInTheDocument();
+      expect(table.parentElement).toHaveClass('overflow-x-auto');
+      expect(
+        screen.getByRole('columnheader', { name: 'Column 1' }),
+      ).toBeVisible();
+      expect(screen.getByRole('cell', { name: 'name' })).toBeVisible();
+      expect(screen.getByRole('cell', { name: 'Ada' })).toBeVisible();
+      expect(screen.getByLabelText('First row is a header')).not.toBeChecked();
+      expect(screen.getByText('Source')).toBeVisible();
+    },
+  );
+
+  it('uses the first parsed row as semantic column headers when enabled', () => {
+    render(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={{
+          id: 'artifact-table',
+          taskId: 'task-1',
+          path: 'reports/data.csv',
+          version: 1,
+          artifactType: 'general',
+          contentType: 'text/csv',
+          size: 32,
+          createdAt: new Date('2026-05-22T00:00:00.000Z'),
+          downloadUrl: 'https://example.test/data.csv',
+          content: 'name,value\nAda,42',
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText('First row is a header'));
+
+    expect(screen.getByRole('columnheader', { name: 'name' })).toBeVisible();
+    expect(screen.getByRole('columnheader', { name: 'value' })).toBeVisible();
+    expect(
+      screen.queryByRole('cell', { name: 'name' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: 'Ada' })).toBeVisible();
+    expect(screen.getByRole('rowheader', { name: '2' })).toBeVisible();
+
+    fireEvent.click(screen.getByLabelText('First row is a header'));
+
+    expect(
+      screen.getByRole('columnheader', { name: 'Column 1' }),
+    ).toBeVisible();
+    expect(screen.getByRole('cell', { name: 'name' })).toBeVisible();
+
+    fireEvent.click(screen.getByLabelText('First row is a header'));
+    fireEvent.click(screen.getByLabelText('Source'));
+
+    expect(
+      screen.getByText(
+        (_, element) =>
+          element?.tagName === 'PRE' &&
+          element.textContent === 'name,value\nAda,42',
+      ),
+    ).toBeVisible();
+  });
+
+  it('renders controlled header mode without a toolbar', () => {
+    render(
+      <ArtifactViewerContent
+        taskId="task-1"
+        showToolbar={false}
+        firstRowIsHeader
+        artifact={{
+          id: 'artifact-table',
+          taskId: 'task-1',
+          path: 'reports/data.csv',
+          version: 1,
+          artifactType: 'general',
+          contentType: 'text/csv',
+          size: 32,
+          createdAt: new Date('2026-05-22T00:00:00.000Z'),
+          downloadUrl: 'https://example.test/data.csv',
+          content: 'name,value\nAda,42',
+        }}
+      />,
+    );
+
+    expect(
+      screen.queryByLabelText('First row is a header'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'name' })).toBeVisible();
+    expect(
+      screen.queryByRole('cell', { name: 'name' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('reports controlled header mode changes', () => {
+    const onFirstRowIsHeaderChange = vi.fn();
+    render(
+      <ArtifactViewerContent
+        taskId="task-1"
+        firstRowIsHeader={false}
+        onFirstRowIsHeaderChange={onFirstRowIsHeaderChange}
+        artifact={{
+          id: 'artifact-table',
+          taskId: 'task-1',
+          path: 'reports/data.csv',
+          version: 1,
+          artifactType: 'general',
+          contentType: 'text/csv',
+          size: 32,
+          createdAt: new Date('2026-05-22T00:00:00.000Z'),
+          downloadUrl: 'https://example.test/data.csv',
+          content: 'name,value\nAda,42',
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText('First row is a header'));
+
+    expect(onFirstRowIsHeaderChange).toHaveBeenCalledWith(true);
+  });
+
+  it('renders table values as inert text and keeps source available', () => {
+    const content = 'value\n<script>window.alert(1)</script>';
+    const { container } = render(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={{
+          id: 'artifact-table',
+          taskId: 'task-1',
+          path: 'reports/data.csv',
+          version: 1,
+          artifactType: 'general',
+          contentType: 'text/csv',
+          size: content.length,
+          createdAt: new Date('2026-05-22T00:00:00.000Z'),
+          downloadUrl: 'https://example.test/data.csv',
+          content,
+        }}
+      />,
+    );
+
+    expect(screen.getByText('<script>window.alert(1)</script>')).toBeVisible();
+    expect(container.querySelector('script')).toBeNull();
+
+    fireEvent.click(screen.getByLabelText('Source'));
+
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        (_, element) =>
+          element?.tagName === 'PRE' && element.textContent === content,
+      ),
+    ).toBeVisible();
+  });
+
+  it('resets table view options when the path or version changes', () => {
+    const createTableArtifact = (path: string, version: number) => ({
+      id: 'artifact-table',
+      taskId: 'task-1',
+      path,
+      version,
+      artifactType: 'general' as const,
+      contentType: 'text/csv',
+      size: 32,
+      createdAt: new Date('2026-05-22T00:00:00.000Z'),
+      downloadUrl: 'https://example.test/data.csv',
+      content: `path,version\n${path},${version}`,
+    });
+    const { rerender } = render(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={createTableArtifact('reports/first.csv', 1)}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText('First row is a header'));
+    fireEvent.click(screen.getByLabelText('Source'));
+    rerender(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={createTableArtifact('reports/second.csv', 1)}
+      />,
+    );
+    expect(screen.getByRole('table')).toBeVisible();
+    expect(screen.getByLabelText('First row is a header')).not.toBeChecked();
+    expect(
+      screen.getByRole('columnheader', { name: 'Column 1' }),
+    ).toBeVisible();
+
+    fireEvent.click(screen.getByLabelText('First row is a header'));
+    fireEvent.click(screen.getByLabelText('Source'));
+    rerender(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={createTableArtifact('reports/second.csv', 2)}
+      />,
+    );
+    expect(screen.getByRole('table')).toBeVisible();
+    expect(screen.getByLabelText('First row is a header')).not.toBeChecked();
+    expect(
+      screen.getByRole('columnheader', { name: 'Column 1' }),
+    ).toBeVisible();
+  });
+
+  it('supports header-only and ragged tables without changing parsed cells', () => {
+    const { rerender } = render(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={{
+          id: 'artifact-table',
+          taskId: 'task-1',
+          path: 'reports/header-only.csv',
+          version: 1,
+          artifactType: 'general',
+          contentType: 'text/csv',
+          size: 10,
+          createdAt: new Date('2026-05-22T00:00:00.000Z'),
+          downloadUrl: 'https://example.test/header-only.csv',
+          content: 'name,value',
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText('First row is a header'));
+
+    expect(screen.getByRole('columnheader', { name: 'name' })).toBeVisible();
+    expect(screen.getAllByRole('row')).toHaveLength(1);
+
+    rerender(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={{
+          id: 'artifact-table',
+          taskId: 'task-1',
+          path: 'reports/ragged.csv',
+          version: 1,
+          artifactType: 'general',
+          contentType: 'text/csv',
+          size: 18,
+          createdAt: new Date('2026-05-22T00:00:00.000Z'),
+          downloadUrl: 'https://example.test/ragged.csv',
+          content: 'name\nAda,42',
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByLabelText('First row is a header'));
+
+    expect(screen.getByRole('columnheader', { name: 'name' })).toBeVisible();
+    expect(screen.getAllByRole('columnheader')).toHaveLength(3);
+    expect(screen.getByRole('cell', { name: '42' })).toBeVisible();
+  });
+
+  it('handles empty and malformed tables with source available', () => {
+    const { rerender } = render(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={{
+          id: 'artifact-table',
+          taskId: 'task-1',
+          path: 'reports/empty.csv',
+          version: 1,
+          artifactType: 'general',
+          contentType: 'text/csv',
+          size: 0,
+          createdAt: new Date('2026-05-22T00:00:00.000Z'),
+          downloadUrl: 'https://example.test/empty.csv',
+          content: '',
+        }}
+      />,
+    );
+
+    expect(screen.getByText(/This table is empty/)).toBeVisible();
+    expect(screen.getByText('Source')).toBeVisible();
+    fireEvent.click(screen.getByLabelText('First row is a header'));
+    expect(screen.getByText(/This table is empty/)).toBeVisible();
+
+    rerender(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={{
+          id: 'artifact-table',
+          taskId: 'task-1',
+          path: 'reports/malformed.csv',
+          version: 1,
+          artifactType: 'general',
+          contentType: 'text/csv',
+          size: 14,
+          createdAt: new Date('2026-05-22T00:00:00.000Z'),
+          downloadUrl: 'https://example.test/malformed.csv',
+          content: 'one,"two"three',
+        }}
+      />,
+    );
+
+    expect(screen.getByText(/Malformed quoted data/)).toBeVisible();
+    expect(screen.getByRole('cell', { name: 'twothree' })).toBeVisible();
+  });
+
+  it('clearly reports table preview limits', () => {
+    render(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={{
+          id: 'artifact-table',
+          taskId: 'task-1',
+          path: 'reports/large.csv',
+          version: 1,
+          artifactType: 'general',
+          contentType: 'text/csv',
+          size: 1024,
+          createdAt: new Date('2026-05-22T00:00:00.000Z'),
+          downloadUrl: 'https://example.test/large.csv',
+          content: Array.from({ length: 201 }, (_, index) => `${index}`).join(
+            '\n',
+          ),
+        }}
+      />,
+    );
+
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Preview is limited to 200 rows, 50 columns, and 2,000 characters per cell.',
+    );
+    expect(screen.getAllByRole('row')).toHaveLength(201);
+  });
+
   it('keeps non-HTML text artifacts in the existing code view', () => {
     render(
       <ArtifactViewerContent
@@ -420,7 +747,43 @@ describe('ArtifactViewerContent', () => {
     expect(screen.queryByText('Type: visual-proof')).not.toBeInTheDocument();
   });
 
-  it('hides the Build action when a markdown plan has no fetched content', () => {
+  it('keeps universal toolbar actions mounted and disabled while loading', () => {
+    render(<ArtifactViewerContent taskId="task-1" artifact={null} isLoading />);
+
+    expect(screen.getByRole('button', { name: 'Download' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Copy URL' })).toBeDisabled();
+    expect(screen.getByLabelText('Loading artifact')).toBeVisible();
+  });
+
+  it('labels the enabled download link without changing native download behavior', () => {
+    render(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={{
+          id: 'artifact-1',
+          taskId: 'task-1',
+          path: 'reports/data.csv',
+          version: 1,
+          artifactType: 'general',
+          contentType: 'text/csv',
+          size: 128,
+          createdAt: new Date('2026-05-22T00:00:00.000Z'),
+          downloadUrl: 'https://example.test/data.csv',
+          content: 'name,value\nalpha,1',
+        }}
+      />,
+    );
+
+    expect(screen.getByRole('link', { name: 'Download' })).toHaveAttribute(
+      'href',
+      'https://example.test/data.csv',
+    );
+    expect(screen.getByRole('link', { name: 'Download' })).toHaveAttribute(
+      'download',
+    );
+  });
+
+  it('offers the Build action when a markdown plan has no fetched content', () => {
     render(
       <ArtifactViewerContent
         taskId="task-1"
@@ -439,12 +802,10 @@ describe('ArtifactViewerContent', () => {
       />,
     );
 
-    // A plan larger than the preview byte cap has no content to embed, so the
-    // Build action must not be offered (it would silently produce an empty prompt).
-    expect(screen.queryByText('Build this')).not.toBeInTheDocument();
+    expect(screen.getByText('Build this')).toBeInTheDocument();
   });
 
-  it('shows build progress and links to the new task', () => {
+  it('sends the artifact URL to its parent Session and opens that Session', async () => {
     render(
       <ArtifactViewerContent
         taskId="task-1"
@@ -464,59 +825,167 @@ describe('ArtifactViewerContent', () => {
     );
 
     fireEvent.click(screen.getByText('Build this'));
-    fireEvent.click(screen.getByText('Confirm build'));
 
-    expect(toast.info).toHaveBeenCalledWith(
-      'Starting new task to build plans/widget-plan.md',
-    );
-
-    createTaskRunState.options?.onSuccess(
-      {
-        success: true,
-        taskId: 'new-task-id',
-      },
-      {
-        sourceArtifactPath: 'plans/widget-plan.md',
-      },
-    );
-
-    expect(toast.success).toHaveBeenCalledWith(
-      'Building plans/widget-plan.md.',
-      expect.objectContaining({ action: expect.anything() }),
-    );
-
-    const successToastOptions = vi.mocked(toast.success).mock.calls[0]?.[1];
-    render(successToastOptions?.action as ReactElement);
-
-    const viewTaskLink = screen.getByRole('link', { name: 'View task' });
-    expect(viewTaskLink).toHaveAttribute('href', '/task/new-task-id');
-    expect(viewTaskLink).toHaveAttribute('data-size', 'sm');
-    expect(viewTaskLink).toHaveAttribute('data-variant', 'default');
+    await waitFor(() => {
+      expect(forTaskQueryMock).toHaveBeenCalledWith({ taskId: 'task-1' });
+      expect(replyMutationMock).toHaveBeenCalledWith({
+        sessionId: 'parent-session-id',
+        text: `Build this ${window.location.origin}/task/task-1/artifacts?path=plans%2Fwidget-plan.md&v=1`,
+      });
+      expect(navigationState.push).toHaveBeenCalledWith(
+        '/sessions/parent-session-id',
+      );
+    });
   });
 
-  describe('buildArtifactPlanDescription', () => {
-    it('embeds the plan content directly into the build prompt', () => {
-      const description = buildArtifactPlanDescription({
-        artifactPath: 'plans/widget.md',
-        artifactVersion: 2,
-        artifactContent: '# Widget plan\n\nDo the thing.',
+  it('sends a Session-owned artifact back into the same Session', async () => {
+    render(
+      <ArtifactViewerContent
+        owner={{ sessionId: '11111111-1111-4111-8111-111111111111' }}
+        artifact={{
+          id: 'artifact-2',
+          taskId: null,
+          sessionId: '11111111-1111-4111-8111-111111111111',
+          path: 'plans/session-plan.md',
+          version: 1,
+          artifactType: 'plan',
+          contentType: 'text/markdown',
+          size: 128,
+          createdAt: new Date('2026-05-22T00:00:00.000Z'),
+          downloadUrl: 'https://example.test/session-plan.md',
+          content: '# Session plan',
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('Build this'));
+
+    await waitFor(() => {
+      expect(forTaskQueryMock).not.toHaveBeenCalled();
+      expect(replyMutationMock).toHaveBeenCalledWith({
+        sessionId: '11111111-1111-4111-8111-111111111111',
+        text: 'Build the plans/session-plan.md artifact (v1) created in this Session.',
       });
-
-      expect(description).toContain('Build the plan from plans/widget.md (v2)');
-      expect(description).toContain('# Widget plan\n\nDo the thing.');
     });
+  });
 
-    it('does not instruct the new task to download via manage_artifacts', () => {
-      const description = buildArtifactPlanDescription({
-        artifactPath: 'plans/widget.md',
-        artifactVersion: 2,
-        artifactContent: '# Widget plan',
+  it('preserves artifact paths in the sent URL', async () => {
+    render(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={{
+          id: 'artifact-2',
+          taskId: 'task-1',
+          path: 'plans/a?# b.md',
+          version: 2,
+          artifactType: 'plan',
+          contentType: 'text/markdown',
+          size: 128,
+          createdAt: new Date('2026-05-22T00:00:00.000Z'),
+          downloadUrl: 'https://example.test/widget-plan.md',
+          content: '# Widget plan',
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('Build this'));
+
+    await waitFor(() => {
+      expect(replyMutationMock).toHaveBeenCalledWith({
+        sessionId: 'parent-session-id',
+        text: `Build this ${window.location.origin}/task/task-1/artifacts?path=plans%2Fa%3F%23+b.md&v=2`,
       });
-
-      // The plan content is embedded directly so the build is deterministic;
-      // the prompt must not tell the task to fetch the plan via download.
-      expect(description).not.toMatch(/manage_artifacts/);
-      expect(description).not.toMatch(/download/i);
     });
+  });
+
+  it('preserves legacy dot-only path segments in the sent URL', async () => {
+    render(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={{
+          id: 'artifact-2',
+          taskId: 'task-1',
+          path: 'plans/./draft.md',
+          version: 2,
+          artifactType: 'plan',
+          contentType: 'text/markdown',
+          size: 128,
+          createdAt: new Date('2026-05-22T00:00:00.000Z'),
+          downloadUrl: 'https://example.test/widget-plan.md',
+          content: '# Widget plan',
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('Build this'));
+
+    await waitFor(() => {
+      expect(replyMutationMock).toHaveBeenCalledWith({
+        sessionId: 'parent-session-id',
+        text: `Build this ${window.location.origin}/task/task-1/artifacts?path=plans%2F.%2Fdraft.md&v=2`,
+      });
+    });
+  });
+
+  it('does not navigate when the parent Session is already visible', async () => {
+    navigationState.pathname = '/sessions/parent-session-id';
+    render(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={{
+          id: 'artifact-2',
+          taskId: 'task-1',
+          path: 'plans/widget-plan.md',
+          version: 1,
+          artifactType: 'plan',
+          contentType: 'text/markdown',
+          size: 128,
+          createdAt: new Date('2026-05-22T00:00:00.000Z'),
+          downloadUrl: 'https://example.test/widget-plan.md',
+          content: '# Widget plan',
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('Build this'));
+
+    await waitFor(() => {
+      expect(replyMutationMock).toHaveBeenCalledWith({
+        sessionId: 'parent-session-id',
+        text: `Build this ${window.location.origin}/task/task-1/artifacts?path=plans%2Fwidget-plan.md&v=1`,
+      });
+    });
+    expect(navigationState.push).not.toHaveBeenCalled();
+  });
+
+  it('reports when the artifact task has no parent Session', async () => {
+    forTaskQueryMock.mockResolvedValue(null);
+    render(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={{
+          id: 'artifact-2',
+          taskId: 'task-1',
+          path: 'plans/widget-plan.md',
+          version: 1,
+          artifactType: 'plan',
+          contentType: 'text/markdown',
+          size: 128,
+          createdAt: new Date('2026-05-22T00:00:00.000Z'),
+          downloadUrl: 'https://example.test/widget-plan.md',
+          content: '# Widget plan',
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('Build this'));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(
+        'The task that created this artifact is not attached to a Session.',
+      );
+    });
+    expect(replyMutationMock).not.toHaveBeenCalled();
+    expect(navigationState.push).not.toHaveBeenCalled();
   });
 });

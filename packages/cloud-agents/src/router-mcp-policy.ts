@@ -3,4 +3,4 @@ export {
   getRouterMcpServerPolicy,
   getRouterMcpUpstreamConstraints,
   type RouterMcpServerId,
-} from './server/router/mcp-policy';
+} from './server/mcp-policy';

@@ -20,6 +20,7 @@ export const FAST_AGENT_PACKAGED_SKILL_NAMES = [
   'doctor',
   'environment-setup',
   'explain-repo-code',
+  'explore-delegation',
   'explore-and-act',
   'feature-demo',
   'fix-pr',
@@ -55,7 +56,9 @@ export type FastAgentSkillSummary = {
   invocation?: string;
   name: string;
   repository?: string;
-  source: 'packaged' | 'repository';
+  settingsSource?: string;
+  source: 'packaged' | 'instance' | 'repository' | 'settings';
+  version?: number;
 };
 
 export type FastAgentSkillDocument = FastAgentSkillSummary & {
@@ -66,16 +69,26 @@ export type FastAgentSkillDocument = FastAgentSkillSummary & {
 };
 
 export type FastAgentSkillListResult = {
+  nextSourceOffset?: number;
   skills: FastAgentSkillSummary[];
   warnings: string[];
 };
 
 type FastAgentSkillCatalog = FastAgentSkillListResult & {
   counts: {
+    instance: number;
     packaged: number;
     repository: number;
+    settings: number;
     total: number;
   };
+};
+
+export type FastAgentSkillQuery = {
+  environmentId?: string;
+  name?: string;
+  repositoryId?: string;
+  sourceOffset?: number;
 };
 
 export type FastAgentSkillScope =
@@ -84,6 +97,12 @@ export type FastAgentSkillScope =
 
 export type FastAgentRepositorySkillSource = {
   list(scope: FastAgentSkillScope): Promise<FastAgentSkillListResult>;
+  read(id: string, resource?: string): Promise<FastAgentSkillDocument>;
+  dispose?(): Promise<void>;
+};
+
+export type FastAgentSettingsSkillSource = {
+  list(query: FastAgentSkillQuery): Promise<FastAgentSkillListResult>;
   read(id: string, resource?: string): Promise<FastAgentSkillDocument>;
   dispose?(): Promise<void>;
 };
@@ -202,6 +221,26 @@ function packagedSkillId(name: string): string {
   return `packaged:${name}`;
 }
 
+// Packaged and instance skills never depend on the caller's scope, so their
+// failures (missing runtime files, an unauthorized actor) stay hard errors.
+// Settings and repository lookups depend on the scope a model passed, which
+// may be an unknown or filler environment ID, or on remote state, so a failure
+// there degrades to a warning instead of hiding the whole catalog.
+async function collectOptionalSource(
+  label: string,
+  list: () => Promise<FastAgentSkillListResult>,
+): Promise<FastAgentSkillListResult> {
+  try {
+    return await list();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      skills: [],
+      warnings: [`Skipped ${label} skills: ${message}`],
+    };
+  }
+}
+
 export class FastAgentSkillStore {
   private readonly resources = new Map<string, Promise<string[]>>();
   private readonly rootDirectory: Promise<string>;
@@ -209,13 +248,15 @@ export class FastAgentSkillStore {
   constructor(
     rootDirectory?: string,
     private readonly repositorySkills?: FastAgentRepositorySkillSource,
+    private readonly settingsSkills?: FastAgentSettingsSkillSource,
+    private readonly instanceSkills?: FastAgentSettingsSkillSource,
   ) {
     this.rootDirectory = rootDirectory
       ? Promise.resolve(resolve(rootDirectory))
       : resolveDefaultSkillRoot();
   }
 
-  async list(scope?: FastAgentSkillScope): Promise<FastAgentSkillCatalog> {
+  async list(query: FastAgentSkillQuery = {}): Promise<FastAgentSkillCatalog> {
     const packaged = await Promise.all(
       FAST_AGENT_PACKAGED_SKILL_NAMES.map(async (name) => {
         const document = await this.readPackaged(name);
@@ -228,22 +269,92 @@ export class FastAgentSkillStore {
         };
       }),
     );
-    const repository =
-      scope && this.repositorySkills
-        ? await this.repositorySkills.list(scope)
+    const scope = query.environmentId
+      ? ({ environmentId: query.environmentId } as const)
+      : query.repositoryId
+        ? ({ repositoryId: query.repositoryId } as const)
+        : undefined;
+    const packagedNames = new Set<string>(packaged.map((skill) => skill.name));
+    const packagedMatchIsAuthoritative =
+      !!query.name && packagedNames.has(query.name);
+    const instance = this.instanceSkills
+      ? await this.instanceSkills.list(query)
+      : { skills: [], warnings: [] };
+    const filteredInstance = instance.skills.filter(
+      (skill) =>
+        (!query.name || skill.name === query.name) &&
+        !packagedNames.has(skill.name),
+    );
+    const instanceNames = new Set(filteredInstance.map((skill) => skill.name));
+    const instanceMatchIsAuthoritative =
+      !!query.name && instanceNames.has(query.name);
+    const settings =
+      !packagedMatchIsAuthoritative &&
+      !instanceMatchIsAuthoritative &&
+      this.settingsSkills
+        ? await collectOptionalSource('legacy Settings', () =>
+            this.settingsSkills!.list(query),
+          )
         : { skills: [], warnings: [] };
+    const repository =
+      !packagedMatchIsAuthoritative &&
+      !instanceMatchIsAuthoritative &&
+      (query.sourceOffset ?? 0) === 0 &&
+      scope &&
+      this.repositorySkills
+        ? await collectOptionalSource('repository', () =>
+            this.repositorySkills!.list(scope),
+          )
+        : { skills: [], warnings: [] };
+    const filteredPackaged = query.name
+      ? packaged.filter((skill) => skill.name === query.name)
+      : packaged;
+    const filteredSettings = settings.skills.filter(
+      (skill) =>
+        (!query.name || skill.name === query.name) &&
+        !packagedNames.has(skill.name) &&
+        !instanceNames.has(skill.name),
+    );
+    const settingsNames = new Set<string>(
+      filteredSettings.map((skill) => skill.name),
+    );
+    const filteredRepository = repository.skills.filter(
+      (skill) =>
+        (!query.name || skill.name === query.name) &&
+        !packagedNames.has(skill.name) &&
+        !instanceNames.has(skill.name) &&
+        !settingsNames.has(skill.name),
+    );
     return {
       counts: {
-        packaged: packaged.length,
-        repository: repository.skills.length,
-        total: packaged.length + repository.skills.length,
+        instance: filteredInstance.length,
+        packaged: filteredPackaged.length,
+        repository: filteredRepository.length,
+        settings: filteredSettings.length,
+        total:
+          filteredPackaged.length +
+          filteredInstance.length +
+          filteredSettings.length +
+          filteredRepository.length,
       },
-      skills: [...packaged, ...repository.skills].sort((left, right) =>
+      skills: [
+        ...filteredPackaged,
+        ...filteredInstance,
+        ...filteredSettings,
+        ...filteredRepository,
+      ].sort((left, right) =>
         left.name === right.name
           ? left.id.localeCompare(right.id)
           : left.name.localeCompare(right.name),
       ),
-      warnings: repository.warnings,
+      ...(settings.nextSourceOffset === undefined
+        ? {}
+        : { nextSourceOffset: settings.nextSourceOffset }),
+      warnings: [
+        ...instance.warnings,
+        ...settings.warnings,
+        ...repository.warnings,
+      ],
     };
   }
 
@@ -254,12 +365,24 @@ export class FastAgentSkillStore {
     if (id.startsWith('packaged:')) {
       return this.readPackaged(id.slice('packaged:'.length), requestedResource);
     }
+    if (id.startsWith('settings:')) {
+      if (!this.settingsSkills) throw new Error('Unknown skill.');
+      return this.settingsSkills.read(id, requestedResource);
+    }
+    if (id.startsWith('instance:')) {
+      if (!this.instanceSkills) throw new Error('Unknown skill.');
+      return this.instanceSkills.read(id, requestedResource);
+    }
     if (!this.repositorySkills) throw new Error('Unknown skill.');
     return this.repositorySkills.read(id, requestedResource);
   }
 
   async dispose(): Promise<void> {
-    await this.repositorySkills?.dispose?.();
+    await Promise.all([
+      this.repositorySkills?.dispose?.(),
+      this.settingsSkills?.dispose?.(),
+      this.instanceSkills?.dispose?.(),
+    ]);
   }
 
   private async readPackaged(

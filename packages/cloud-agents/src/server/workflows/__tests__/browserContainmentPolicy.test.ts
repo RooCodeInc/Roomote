@@ -6,7 +6,7 @@ const thisFilePath = fileURLToPath(import.meta.url);
 const thisDirPath = path.dirname(thisFilePath);
 
 describe('Browser containment policy', () => {
-  it('keeps the upstream agent-browser discovery stub while limiting it to explicit invocation or delegated browser work', () => {
+  it('keeps the upstream agent-browser discovery stub while limiting it to explicit invocation or the capture-visual-proof step', () => {
     const skillPath = path.resolve(
       thisDirPath,
       '../skills/standard/agent-browser/SKILL.md',
@@ -36,7 +36,7 @@ describe('Browser containment policy', () => {
     expect(skillContent).toContain('agent-browser skills get electron');
     expect(packagedSkillInvocationsContent).toContain("'agent-browser'");
     expect(standardTaskContent).toContain(
-      'the parent workflow must not load or directly use browser tooling',
+      'Browser capture belongs inside that step and follows its `agent-browser` rules.',
     );
   });
 

@@ -75,6 +75,7 @@ export function buildCustomAutomationSlackMessage(params: {
   text: string;
   contentBlocks?: SlackBlock[];
   sessionId?: string;
+  taskUrl?: string;
 }): SlackAutomationSettingsMessage {
   return {
     text: params.text,
@@ -85,6 +86,9 @@ export function buildCustomAutomationSlackMessage(params: {
       contentBlocks: params.contentBlocks ?? [
         { type: 'markdown', text: params.text },
       ],
+      ...(!params.sessionId && params.taskUrl
+        ? { taskUrl: params.taskUrl }
+        : {}),
       additionalActions: params.sessionId
         ? [
             {
@@ -156,7 +160,12 @@ export function buildAutomationSettingsContextBlock(hash: string) {
 export function buildAutomationSettingsMessage(
   text: string,
   hash: string,
-  options?: { taskUrl?: string | null; slackIcon?: string },
+  options?: {
+    taskUrl?: string | null;
+    slackIcon?: string;
+    contentBlocks?: SlackBlock[];
+    additionalActions?: Record<string, unknown>[];
+  },
 ): SlackAutomationSettingsMessage {
   const trimmedText = text.trim();
   const settingsDescriptor = getBackgroundAutomationSettingsDescriptor(hash);
@@ -176,7 +185,8 @@ export function buildAutomationSettingsMessage(
       ),
       configureUrl: buildManagerSlackSettingsUrl(hash),
       taskUrl: options?.taskUrl,
-      contentBlocks: [
+      additionalActions: options?.additionalActions,
+      contentBlocks: options?.contentBlocks ?? [
         {
           type: 'section',
           text: { type: 'mrkdwn', text: trimmedText },

@@ -280,6 +280,7 @@ vi.mock('@/components/system', () => ({
   CardTitle: ({ children }: { children: ReactNode }) => <h3>{children}</h3>,
   ChartColumnIncreasing: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Check: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
+  ChevronDown: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Checkbox: ({
     checked,
     onCheckedChange,
@@ -316,9 +317,12 @@ vi.mock('@/components/system', () => ({
   }: { children: ReactNode } & HTMLAttributes<HTMLLabelElement>) => (
     <label {...props}>{children}</label>
   ),
+  Pencil: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
+  Plus: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Search: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Settings2: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Skeleton: (props: HTMLAttributes<HTMLDivElement>) => <div {...props} />,
+  Sparkles: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Spinner: (props: HTMLAttributes<HTMLDivElement>) => <div {...props} />,
   SquareArrowOutUpRight: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Textarea: (props: TextareaHTMLAttributes<HTMLTextAreaElement>) => (
@@ -331,7 +335,11 @@ vi.mock('@/components/system', () => ({
 
 import { CustomSkills } from './CustomSkills';
 
-function renderCustomSkills() {
+function renderCustomSkills({
+  marketplaceOpen = false,
+  filter = 'environment' as const,
+  search = '',
+} = {}) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -345,7 +353,11 @@ function renderCustomSkills() {
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <CustomSkills />
+      <CustomSkills
+        filter={filter}
+        search={search}
+        marketplaceOpen={marketplaceOpen}
+      />
     </QueryClientProvider>,
   );
 }
@@ -422,16 +434,59 @@ describe('CustomSkills settings', () => {
       ).toBeInTheDocument();
     });
 
-    expect(screen.getByText('Installed')).toBeInTheDocument();
-    expect(screen.getByText('Alpha')).toBeInTheDocument();
-    expect(screen.getByText('Add a custom skill')).toBeInTheDocument();
+    expect(screen.getByText('Only in Alpha')).toBeInTheDocument();
+  });
+
+  it('filters environment rows by skill and availability text', async () => {
+    state.listData.installed.push({
+      kind: 'manual',
+      source: 'manual',
+      name: 'beta-skill',
+      skillId: 'manual@beta-skill#1234567890ab',
+      isAllSelection: false,
+      installsLabel: null,
+      url: null,
+      description: 'Beta instructions',
+      content: '# Beta',
+      environments: [{ id: 'env-2', name: 'Beta' }],
+    });
+
+    renderCustomSkills({ search: 'Beta' });
+
+    expect(await screen.findByText('beta skill')).toBeVisible();
     expect(
-      screen.getByRole('button', { name: 'Add a custom skill' }),
+      screen.queryByText('vercel / react best practices'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows a useful empty state when environments have no skills', async () => {
+    state.listData.installed = [];
+    renderCustomSkills();
+
+    expect(
+      await screen.findByText(
+        'No environment-specific skills yet. Add a custom skill or install one from the marketplace.',
+      ),
     ).toBeVisible();
   });
 
-  it('debounces search input before rendering marketplace results', async () => {
+  it('explains why management is unavailable when there are no environments', async () => {
+    state.listData.environments = [];
+    state.listData.installed = [];
     renderCustomSkills();
+
+    expect(
+      await screen.findByText(
+        'No environments are available. Create an environment before adding an environment-specific skill.',
+      ),
+    ).toBeVisible();
+    expect(
+      screen.queryByPlaceholderText('Search by skill name or source'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('debounces search input before rendering marketplace results', async () => {
+    renderCustomSkills({ marketplaceOpen: true });
 
     const input = await screen.findByPlaceholderText(
       'Search by skill name or source',
@@ -453,7 +508,7 @@ describe('CustomSkills settings', () => {
   });
 
   it('supports multi-environment availability updates', async () => {
-    renderCustomSkills();
+    renderCustomSkills({ marketplaceOpen: true });
 
     const input = await screen.findByPlaceholderText(
       'Search by skill name or source',
@@ -515,7 +570,7 @@ describe('CustomSkills settings', () => {
       ],
     };
 
-    renderCustomSkills();
+    renderCustomSkills({ marketplaceOpen: true });
 
     const input = await screen.findByPlaceholderText(
       'Search by skill name or source',
@@ -583,7 +638,7 @@ describe('CustomSkills settings', () => {
       ],
     };
 
-    renderCustomSkills();
+    renderCustomSkills({ marketplaceOpen: true });
 
     const input = await screen.findByPlaceholderText(
       'Search by skill name or source',
@@ -595,40 +650,6 @@ describe('CustomSkills settings', () => {
     });
 
     expect(installedButton).toBeDisabled();
-  });
-
-  it('lets users add a manual skill with separate fields', async () => {
-    renderCustomSkills();
-
-    fireEvent.click(
-      await screen.findByRole('button', { name: 'Add a custom skill' }),
-    );
-
-    fireEvent.change(screen.getByLabelText('Manual skill slug'), {
-      target: { value: 'my manual/skill' },
-    });
-    fireEvent.change(screen.getByLabelText('Manual skill description'), {
-      target: { value: 'Manual skill.' },
-    });
-    fireEvent.change(screen.getByLabelText('Manual skill content'), {
-      target: {
-        value: '# My Manual Skill',
-      },
-    });
-
-    fireEvent.click(screen.getByLabelText('Alpha'));
-    fireEvent.click(screen.getByLabelText('Beta'));
-    fireEvent.click(screen.getByRole('button', { name: 'Save Skill' }));
-
-    await waitFor(() => {
-      expect(saveManualMock.mock.calls[0]?.[0]).toEqual({
-        name: 'mymanualskill',
-        description: 'Manual skill.',
-        content: '# My Manual Skill',
-        environmentIds: ['env-1', 'env-2'],
-        previousSkillId: undefined,
-      });
-    });
   });
 
   it('opens installed manual skills in the manual editor', async () => {
@@ -668,15 +689,41 @@ describe('CustomSkills settings', () => {
     expect(screen.getByLabelText('Manual skill content')).toHaveValue(
       '# My Manual Skill\n',
     );
+    fireEvent.change(screen.getByLabelText('Manual skill content'), {
+      target: { value: '# Updated instructions' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Skill' }));
+
+    await waitFor(() => {
+      expect(saveManualMock.mock.calls[0]?.[0]).toEqual({
+        name: 'my-manual-skill',
+        description: 'Manual skill',
+        content: '# Updated instructions',
+        environmentIds: ['env-1'],
+        previousSkillId: 'manual@my-manual-skill#1234567890ab',
+      });
+    });
   });
 
-  it('prompts before closing the manual editor with unsaved changes', async () => {
+  it('prompts before closing an environment skill editor with unsaved changes', async () => {
     const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(false);
-
+    state.listData.installed = [
+      {
+        kind: 'manual',
+        source: 'manual',
+        name: 'my-manual-skill',
+        skillId: 'manual@my-manual-skill#1234567890ab',
+        isAllSelection: false,
+        installsLabel: null,
+        url: null,
+        description: 'Manual skill',
+        content: '# My Manual Skill',
+        environments: [{ id: 'env-1', name: 'Alpha' }],
+      },
+    ];
     renderCustomSkills();
-
     fireEvent.click(
-      await screen.findByRole('button', { name: 'Add a custom skill' }),
+      await screen.findByRole('button', { name: 'Edit my-manual-skill' }),
     );
     fireEvent.change(screen.getByLabelText('Manual skill description'), {
       target: { value: 'Changed description' },
@@ -693,7 +740,7 @@ describe('CustomSkills settings', () => {
     confirmMock.mockRestore();
   });
 
-  it('toggles manual skill descriptions between clamped and expanded states', async () => {
+  it('uses the same compact description treatment as shared skills', async () => {
     state.listData.installed = [
       {
         kind: 'manual',
@@ -719,11 +766,9 @@ describe('CustomSkills settings', () => {
     );
 
     expect(description).toHaveClass('line-clamp-2');
-
-    fireEvent.click(screen.getByRole('button', { name: 'More' }));
-
-    expect(description).not.toHaveClass('line-clamp-2');
-    expect(screen.getByRole('button', { name: 'Less' })).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: 'More' }),
+    ).not.toBeInTheDocument();
   });
 
   it('removes an installed skill from all environments', async () => {
@@ -750,8 +795,42 @@ describe('CustomSkills settings', () => {
 
     expect(
       screen.getByText(
-        'No custom skills installed yet. Roomote itself has mad skills though.',
+        'No environment-specific skills yet. Add a custom skill or install one from the marketplace.',
       ),
     ).toBeInTheDocument();
+  });
+
+  it('removes a manual skill variant from its environments', async () => {
+    state.listData.installed = [
+      {
+        kind: 'manual',
+        source: 'manual',
+        name: 'my-manual-skill',
+        skillId: 'manual@my-manual-skill#1234567890ab',
+        isAllSelection: false,
+        installsLabel: null,
+        url: null,
+        description: 'Manual skill',
+        content: '# My Manual Skill\n',
+        environments: [{ id: 'env-1', name: 'Alpha' }],
+      },
+    ];
+    renderCustomSkills();
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Remove my-manual-skill' }),
+    );
+    expect(
+      screen.getByText(
+        /from the environments currently using this manual skill variant/,
+      ),
+    ).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Uninstall' }));
+
+    await waitFor(() => {
+      expect(removeMock.mock.calls[0]?.[0]).toEqual({
+        skillId: 'manual@my-manual-skill#1234567890ab',
+      });
+    });
   });
 });

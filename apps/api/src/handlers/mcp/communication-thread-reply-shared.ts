@@ -1,18 +1,16 @@
 import {
   buildThreadReplyFooterText,
   formatMarkdownLink,
-  getThreadReplyFooterRecord,
   resolveThreadReplyFooterContext,
-  setThreadReplyFooterRecord,
   type ThreadReplyFooterRecord,
 } from '@roomote/communication';
+import { deliverManagedThreadReplyFooter as deliverSharedThreadReplyFooter } from '@roomote/communication/thread-reply-footer-delivery';
 import { Env } from '@roomote/env';
 
 import {
   buildThreadReplyImages,
   errorResponseForThreadReplyImageError,
   type ThreadReplyImage,
-  withThreadReplyFooterLock,
 } from './chat-reply-helpers';
 
 export type CommunicationReplyTaskRun = {
@@ -26,6 +24,12 @@ export type CommunicationReplyTaskRun = {
 export type ParsedThreadReplyBody = {
   text?: string;
   images: Array<{ artifactId: string }>;
+  /**
+   * Caller-minted per-invocation send id: every HTTP retry of one tool call
+   * carries the same value, so providers with idempotent sends (email) can
+   * dedupe the logical send without depending on mutable route state.
+   */
+  clientSendId?: string;
 };
 
 type CommunicationThreadReplyProvider = 'discord' | 'telegram' | 'teams';
@@ -33,6 +37,7 @@ type CommunicationThreadReplyProvider = 'discord' | 'telegram' | 'teams';
 type PostedFooterRecord<T extends { messageId: string }> = T & {
   textWithoutFooter: string;
   images?: ThreadReplyFooterRecord['images'];
+  refresh?: ThreadReplyFooterRecord['refresh'];
 };
 
 function getThreadReplyWebPath(payload: unknown): string | null {
@@ -157,63 +162,9 @@ export async function deliverManagedThreadReplyFooter<
     previousFooterRecord: ThreadReplyFooterRecord,
   ) => Promise<void>;
 }): Promise<TReply> {
-  return withThreadReplyFooterLock({
-    lockKey: params.lockKey,
-    fn: async () => {
-      let previousFooterRecord: ThreadReplyFooterRecord | null = null;
-      try {
-        previousFooterRecord = await getThreadReplyFooterRecord(
-          params.provider,
-          params.channelId,
-          params.footerStateThreadId,
-        );
-      } catch (error) {
-        console.error(
-          `[${params.logContext}] Failed to read previous ${params.providerLabel} footer record for task run ${params.runId}: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      }
-
-      const posted = await params.postReplyWithFooter();
-
-      if (
-        previousFooterRecord &&
-        previousFooterRecord.messageId !== posted.messageId
-      ) {
-        try {
-          await params.clearPreviousFooter(previousFooterRecord);
-        } catch (error) {
-          console.error(
-            `[${params.logContext}] Failed to clear prior ${params.providerLabel} footer message ${previousFooterRecord.messageId}: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
-        }
-      }
-
-      try {
-        await setThreadReplyFooterRecord(
-          params.provider,
-          params.channelId,
-          params.footerStateThreadId,
-          {
-            messageId: posted.messageId,
-            textWithoutFooter: posted.textWithoutFooter,
-            ...(posted.images && posted.images.length > 0
-              ? { images: posted.images }
-              : {}),
-          },
-        );
-      } catch (error) {
-        console.error(
-          `[${params.logContext}] Failed to persist latest ${params.providerLabel} footer record ${posted.messageId}: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      }
-
-      return posted;
-    },
+  const { runId, ...delivery } = params;
+  return deliverSharedThreadReplyFooter({
+    ...delivery,
+    logRef: `task run ${runId}`,
   });
 }

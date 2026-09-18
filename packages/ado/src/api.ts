@@ -4,6 +4,7 @@ import {
   ALL_REPOSITORIES,
   buildRepositoryCloneUrl,
   filterRepositoryNamesForSourceControlProvider,
+  resolveRepositoryNamesForSourceControlProviderFromPayload,
   stripCloneUrlUserInfo,
   type SourceControlProvider,
 } from '@roomote/types';
@@ -233,7 +234,7 @@ async function requestAdoJson<T>({
 }: {
   organizationApiBaseUrl: string;
   fetchImpl?: typeof fetch;
-  method?: 'GET' | 'POST' | 'PUT';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH';
   path: string;
   params: Record<string, string | number | boolean>;
   token: string;
@@ -383,8 +384,18 @@ export function normalizeAdoLinkedAccountKey(
 }
 
 const adoPullRequestDetailsSchema = z
-  .object({ pullRequestId: z.number() })
+  .object({
+    pullRequestId: z.number(),
+    status: z.string().optional(),
+    repository: z.object({ id: z.string() }).passthrough().optional(),
+    lastMergeSourceCommit: z
+      .object({ commitId: z.string() })
+      .passthrough()
+      .optional(),
+  })
   .passthrough();
+
+export type AdoPullRequestDetails = z.infer<typeof adoPullRequestDetailsSchema>;
 
 /**
  * Fetches a pull request by repository UUID and pull request number.
@@ -408,7 +419,7 @@ export async function getAdoPullRequest({
   baseUrl?: string;
   organizationApiBaseUrl?: string;
   fetchImpl?: typeof fetch;
-}): Promise<Record<string, unknown>> {
+}): Promise<AdoPullRequestDetails> {
   const adoToken = token ?? (await resolveAdoToken());
 
   if (!adoToken?.trim()) {
@@ -438,6 +449,62 @@ export async function getAdoPullRequest({
     schema: adoPullRequestDetailsSchema,
   });
 
+  return data;
+}
+
+export async function mergeAdoPullRequest({
+  repositoryId,
+  pullRequestNumber,
+  expectedHeadSha,
+  mergeStrategy,
+  token,
+  organization,
+  baseUrl,
+  organizationApiBaseUrl,
+  fetchImpl,
+}: {
+  repositoryId: string;
+  pullRequestNumber: number;
+  expectedHeadSha: string;
+  mergeStrategy?: 'noFastForward' | 'squash' | 'rebase' | 'rebaseMerge';
+  token?: string;
+  organization?: string;
+  baseUrl?: string;
+  organizationApiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<AdoPullRequestDetails> {
+  const adoToken = token ?? (await resolveAdoToken());
+  if (!adoToken?.trim()) {
+    throw new Error(
+      'ADO_TOKEN is required to merge Azure DevOps pull requests.',
+    );
+  }
+  const resolvedOrganizationApiBaseUrl = await resolveAdoOrganizationApiBaseUrl(
+    { organization, baseUrl, organizationApiBaseUrl },
+  );
+  if (!resolvedOrganizationApiBaseUrl) {
+    throw new Error(
+      'ADO_ORGANIZATION is required to merge Azure DevOps pull requests.',
+    );
+  }
+  const { data } = await requestAdoJson({
+    organizationApiBaseUrl: resolvedOrganizationApiBaseUrl,
+    fetchImpl,
+    method: 'PATCH',
+    path: `/_apis/git/repositories/${encodeURIComponent(repositoryId)}/pullRequests/${pullRequestNumber}`,
+    params: { 'api-version': ADO_API_VERSION },
+    token: adoToken,
+    body: {
+      status: 'completed',
+      lastMergeSourceCommit: { commitId: expectedHeadSha },
+      completionOptions: {
+        bypassPolicy: false,
+        deleteSourceBranch: false,
+        mergeStrategy: mergeStrategy ?? 'noFastForward',
+      },
+    },
+    schema: adoPullRequestDetailsSchema,
+  });
   return data;
 }
 
@@ -1492,6 +1559,14 @@ async function resolveAdoRepositoryNamesForTaskRun(
       ADO_PROVIDER,
     );
   };
+  const stampedRepositories =
+    resolveRepositoryNamesForSourceControlProviderFromPayload(
+      taskRun.payload,
+      ADO_PROVIDER,
+    );
+  if (stampedRepositories) {
+    return stampedRepositories;
+  }
 
   if (taskRun.payload.environmentId) {
     const environment = await db.query.environments.findFirst({
@@ -1701,4 +1776,123 @@ export async function createTaskRunAdoCredentials(
     ),
     expiresAt: resolvedToken?.expiresAt ?? null,
   };
+}
+
+/** Replaces the content of an existing pull request thread comment. */
+export async function updateAdoPullRequestComment({
+  repositoryFullName,
+  repositoryId,
+  pullRequestNumber,
+  threadId,
+  commentId,
+  body,
+  token,
+  organization,
+  baseUrl,
+  organizationApiBaseUrl,
+  fetchImpl,
+}: {
+  repositoryFullName: string;
+  repositoryId: string;
+  pullRequestNumber: number;
+  threadId: string;
+  commentId: string | number;
+  body: string;
+  token?: string;
+  organization?: string;
+  baseUrl?: string;
+  organizationApiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<void> {
+  const adoToken = token ?? (await resolveAdoToken());
+
+  if (!adoToken?.trim()) {
+    throw new Error(
+      'ADO_TOKEN is required to update Azure DevOps pull request comments.',
+    );
+  }
+
+  const parsedRepository = parseAdoRepositoryFullName(repositoryFullName);
+  const resolvedOrganizationApiBaseUrl = await resolveAdoOrganizationApiBaseUrl(
+    {
+      organization: organization ?? parsedRepository.organization,
+      baseUrl,
+      organizationApiBaseUrl,
+    },
+  );
+
+  if (!resolvedOrganizationApiBaseUrl) {
+    throw new Error(
+      'ADO_ORGANIZATION is required to update Azure DevOps pull request comments.',
+    );
+  }
+
+  await requestAdoJson({
+    organizationApiBaseUrl: resolvedOrganizationApiBaseUrl,
+    fetchImpl,
+    method: 'PATCH',
+    path: `/${encodeURIComponent(
+      parsedRepository.project,
+    )}/_apis/git/repositories/${encodeURIComponent(
+      repositoryId,
+    )}/pullRequests/${pullRequestNumber}/threads/${encodeURIComponent(
+      String(threadId),
+    )}/comments/${encodeURIComponent(String(commentId))}`,
+    params: { 'api-version': ADO_API_VERSION },
+    token: adoToken,
+    body: { content: body },
+    schema: z.object({}).passthrough(),
+  });
+}
+
+/** Replaces the text of an existing work item comment. */
+export async function updateAdoWorkItemComment({
+  project,
+  workItemId,
+  commentId,
+  body,
+  token,
+  organization,
+  baseUrl,
+  organizationApiBaseUrl,
+  fetchImpl,
+}: {
+  project: string;
+  workItemId: number;
+  commentId: string | number;
+  body: string;
+  token?: string;
+  organization?: string;
+  baseUrl?: string;
+  organizationApiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<void> {
+  const adoToken = token ?? (await resolveAdoToken());
+
+  if (!adoToken?.trim()) {
+    throw new Error(
+      'ADO_TOKEN is required to update Azure DevOps work item comments.',
+    );
+  }
+
+  const resolvedOrganizationApiBaseUrl = await resolveAdoOrganizationApiBaseUrl(
+    { organization, baseUrl, organizationApiBaseUrl },
+  );
+
+  if (!resolvedOrganizationApiBaseUrl) {
+    throw new Error(
+      'ADO_ORGANIZATION is required to update Azure DevOps work item comments.',
+    );
+  }
+
+  await requestAdoJson({
+    organizationApiBaseUrl: resolvedOrganizationApiBaseUrl,
+    fetchImpl,
+    method: 'PATCH',
+    path: `/${encodeURIComponent(project)}/_apis/wit/workItems/${workItemId}/comments/${encodeURIComponent(String(commentId))}`,
+    params: { 'api-version': '7.1-preview.4' },
+    token: adoToken,
+    body: { text: body },
+    schema: z.object({}).passthrough(),
+  });
 }

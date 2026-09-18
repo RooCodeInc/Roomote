@@ -7,6 +7,7 @@ import {
   type SetupStarterTaskId,
 } from '@/lib/setup-starter-tasks';
 import { startSetupFastSessionCommand } from '../fast-sessions';
+import { getSetupNewStatusCommand } from '../setup-new';
 import { completeSetupCommand } from './index';
 import { assertAdmin } from './shared';
 
@@ -36,6 +37,15 @@ export async function completeSetupWithStarterTasksCommand(
   },
 ): Promise<CompleteSetupWithStarterTasksResult> {
   assertAdmin(auth);
+  const status = await getSetupNewStatusCommand(auth);
+  if (
+    !status.setupNewState.onboardingTaskId ||
+    !status.setupNewState.onboardingTaskStartedAt
+  ) {
+    throw new Error(
+      'This legacy setup completion path is available only for an already-started onboarding task.',
+    );
+  }
 
   const selectedStarterTaskIds = [...new Set(input.selectedStarterTaskIds)];
 

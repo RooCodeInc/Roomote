@@ -1,4 +1,5 @@
 import { useState, type ComponentType } from 'react';
+import Link from 'next/link';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   type AcpRequestUserInputPayload,
@@ -8,6 +9,7 @@ import {
   parsePrReviewActionOffer,
   stripLlmCitationArtifacts,
 } from '@roomote/types';
+import { formatReactionEmojiForDisplay } from '@roomote/communication/reaction-emoji';
 
 import { cn } from '@/lib/utils';
 import { useTRPCClient } from '@/trpc/client';
@@ -42,8 +44,12 @@ import { messageAnchorId } from '../message-anchor';
 import type { AcpUiMessage } from './types';
 import { ProviderRetryNoticeMessage } from './ProviderRetryNoticeMessage';
 import { TerminalProviderErrorMessage } from './TerminalProviderErrorMessage';
+import { AcpDataVisualizations } from './AcpDataVisualizations';
 import { PrReviewActionOffer } from '@/components/ai-elements/pr-review-action-offer';
 import { useMessageUiOptions } from '@/components/ai-elements/message-ui-options';
+import { SlackMessageText } from '@/components/ai-elements/slack-message-text';
+import { useOpenSessionArtifactViewer } from '@/app/(sandbox)/sessions/[sessionId]/session-task-panel-context';
+import { useArtifactLink } from '../../hooks/ArtifactLinkProvider';
 
 const UserMessageToggle = ({
   isExpanded,
@@ -119,6 +125,16 @@ function getUserTooltipContent(msg: AcpUiMessage): string {
   return msg.userEmail ? `${userName} (${msg.userEmail})` : userName;
 }
 
+function getReactionReceiptContent(msg: AcpUiMessage): string | null {
+  if (msg.role !== 'assistant' || msg.kind !== 'text') {
+    return null;
+  }
+  const reaction = msg.data.reaction;
+  if (typeof reaction !== 'string') return null;
+
+  return formatReactionEmojiForDisplay(reaction) || null;
+}
+
 function formatLinkedReviewResultTitle(
   reviewKind: 'initial' | 'sync' | null,
   outcome: string | null,
@@ -183,10 +199,12 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
   );
   const showPersistentTimestamp = useInternalTranscriptRowsVisible();
   const { hidePrReviewActions } = useMessageUiOptions();
+  const openSessionArtifactViewer = useOpenSessionArtifactViewer();
+  const artifactLink = useArtifactLink();
   const isUser = msg.role === 'user';
-  const baseContent = isUser
-    ? (msg.text ?? '')
-    : stripLlmCitationArtifacts(msg.text ?? '');
+  const baseContent =
+    getReactionReceiptContent(msg) ??
+    (isUser ? (msg.text ?? '') : stripLlmCitationArtifacts(msg.text ?? ''));
   const anchorId = messageAnchorId(msg.ts);
   const taskTool = isUser ? getTaskToolByInvocation(baseContent) : undefined;
   const linkedReviewResult = isUser
@@ -240,7 +258,42 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
       ? 'Conversation image attachment'
       : `Conversation image attachment ${selectedImageIndex + 1}`;
 
-  if (!msg.partial && content === '' && !msg.images?.length) {
+  // Images backed by an artifact open in the artifact viewer (Session side
+  // panel, or the task's own artifact panel); anything else falls back to the
+  // fullscreen media dialog.
+  const openImage = (index: number) => {
+    const url = msg.images?.[index];
+    const artifact = url
+      ? msg.imageArtifacts?.find((candidate) => candidate.url === url)
+      : undefined;
+    if (artifact && openSessionArtifactViewer) {
+      openSessionArtifactViewer({
+        owner: artifact.owner,
+        path: artifact.path,
+        version: artifact.version,
+      });
+      return;
+    }
+    if (
+      artifact &&
+      artifactLink &&
+      'taskId' in artifact.owner &&
+      artifactLink.artifacts.some(
+        (candidate) => candidate.path === artifact.path,
+      )
+    ) {
+      artifactLink.openArtifact(artifact.path, artifact.version);
+      return;
+    }
+    setSelectedImageIndex(index);
+  };
+
+  if (
+    !msg.partial &&
+    content === '' &&
+    !msg.images?.length &&
+    !msg.charts?.length
+  ) {
     return;
   }
 
@@ -251,15 +304,31 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
       >
         {isUser ? (
           <BasicTooltip content={userTooltipContent}>
-            <div className="shrink-0 pt-1 mt-8">
-              <Avatar
-                imageUrl={msg.userImageUrl}
-                name={msg.userName}
-                email={msg.userEmail}
-                size="sm"
-                alt={msg.userName ?? msg.userEmail ?? 'User'}
-              />
-            </div>
+            {msg.userId ? (
+              <Link
+                href={{ pathname: '/sessions', query: { user: msg.userId } }}
+                aria-label={`View sessions by ${msg.userName?.trim() || msg.userEmail?.trim() || 'user'}`}
+                className="shrink-0 pt-1 mt-8 cursor-pointer"
+              >
+                <Avatar
+                  imageUrl={msg.userImageUrl}
+                  name={msg.userName}
+                  email={msg.userEmail}
+                  size="md"
+                  alt={msg.userName ?? msg.userEmail ?? 'User'}
+                />
+              </Link>
+            ) : (
+              <div className="shrink-0 pt-1 mt-8">
+                <Avatar
+                  imageUrl={msg.userImageUrl}
+                  name={msg.userName}
+                  email={msg.userEmail}
+                  size="md"
+                  alt={msg.userName ?? msg.userEmail ?? 'User'}
+                />
+              </div>
+            )}
           </BasicTooltip>
         ) : null}
         <MessageContent id={anchorId} className={messageContentClassName}>
@@ -270,7 +339,7 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
                   key={`${msg.ts}-${i}`}
                   type="button"
                   className="rounded-lg bg-transparent p-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                  onClick={() => setSelectedImageIndex(i)}
+                  onClick={() => openImage(i)}
                   aria-label={`Open conversation image attachment ${i + 1}`}
                 >
                   <Attachment
@@ -349,16 +418,21 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
                         </p>
                       ),
                     )}
-                    <span className="mt-2 block">{baseContent}</span>
+                    <span className="mt-2 block">
+                      <SlackMessageText text={baseContent} />
+                    </span>
                   </>
                 ) : (
-                  baseContent
+                  <SlackMessageText text={baseContent} />
                 )}
               </MessagePlainText>
             </CollapsibleContent>
           ) : (
             <MessageResponse>{content}</MessageResponse>
           )}
+          {!isUser && msg.charts?.length ? (
+            <AcpDataVisualizations charts={msg.charts} />
+          ) : null}
           {!hidePrReviewActions && !isUser && msg.kind === 'text' ? (
             <PrReviewNotificationActions msg={msg} />
           ) : null}

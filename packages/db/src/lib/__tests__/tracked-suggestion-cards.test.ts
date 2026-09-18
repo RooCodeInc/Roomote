@@ -10,6 +10,7 @@ import {
 
 describe('tracked suggestion cards', () => {
   it('registers shared card metadata and isolates lookups by surface', async () => {
+    const originSessionId = '22222222-2222-4222-8222-222222222222';
     const user = await userFactory.create();
     const [workItem] = await db
       .insert(workItems)
@@ -24,6 +25,7 @@ describe('tracked suggestion cards', () => {
     await registerTrackedSuggestionCards([
       {
         surface: 'slack',
+        originSessionId,
         channelId: 'C123',
         messageTs: '200.001',
         threadTs: '100.001',
@@ -38,6 +40,7 @@ describe('tracked suggestion cards', () => {
     await registerTrackedSuggestionCards([
       {
         surface: 'slack',
+        originSessionId,
         channelId: 'C123',
         messageTs: '200.001',
         threadTs: '100.001',
@@ -77,12 +80,16 @@ describe('tracked suggestion cards', () => {
       threadTs: '100.001',
       createdByUserId: user.id,
       metadata: {
+        originSessionId,
         suggestionType: 'suggested_tasks',
         suggestionKey: `event-1:${workItem!.id}`,
         suggestionGroupKey: 'event-1',
         launchRouting: 'router',
       },
     });
+    expect(
+      trackedRows.find((row) => row.surface === 'discord')?.metadata,
+    ).not.toHaveProperty('originSessionId');
     expect(
       await findTrackedSuggestionWorkItemIds({
         surface: 'slack',

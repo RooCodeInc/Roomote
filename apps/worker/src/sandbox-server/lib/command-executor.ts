@@ -166,12 +166,12 @@ export class CommandExecutor {
       cancelSignal: signal,
     });
 
-    subprocess.stdout?.on('data', (data: Buffer) => {
-      onChunk({ type: 'stdout', data: data.toString(), timestamp: new Date() });
+    subprocess.stdout?.setEncoding('utf8').on('data', (data: string) => {
+      onChunk({ type: 'stdout', data, timestamp: new Date() });
     });
 
-    subprocess.stderr?.on('data', (data: Buffer) => {
-      onChunk({ type: 'stderr', data: data.toString(), timestamp: new Date() });
+    subprocess.stderr?.setEncoding('utf8').on('data', (data: string) => {
+      onChunk({ type: 'stderr', data, timestamp: new Date() });
     });
 
     const promise = subprocess

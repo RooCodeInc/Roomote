@@ -8,21 +8,29 @@ vi.mock('@roomote/db/server', () => ({
   deleteExpiredWebhooks: mockDeleteExpiredWebhooks,
 }));
 
-vi.mock('@roomote/env', () => ({
-  Env: { WEBHOOK_RETENTION_DAYS: 3 },
-}));
-
+import { rehydrateEnv } from '@roomote/env';
 import { webhookCleanupJob } from '../webhook-cleanup';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 describe('webhookCleanupJob', () => {
+  const originalEnv = { ...process.env };
+
   beforeEach(() => {
     mockDeleteExpiredWebhooks.mockReset();
     mockDeleteExpiredWebhooks.mockResolvedValue(0);
+
+    const skippedEnv: NodeJS.ProcessEnv = {
+      ...originalEnv,
+      SKIP_ENV_VALIDATION: '1',
+    };
+    delete skippedEnv.WEBHOOK_RETENTION_DAYS;
+    rehydrateEnv(skippedEnv);
   });
 
-  it('deletes rows older than WEBHOOK_RETENTION_DAYS', async () => {
+  afterAll(() => rehydrateEnv(originalEnv));
+
+  it('uses the default retention when env validation is skipped', async () => {
     const before = Date.now();
     await webhookCleanupJob();
     const after = Date.now();

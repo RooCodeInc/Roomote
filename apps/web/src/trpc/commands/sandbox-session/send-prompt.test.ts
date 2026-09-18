@@ -106,6 +106,7 @@ import {
   runFactory,
   taskFactory,
   taskRuns,
+  tasks,
   userFactory,
 } from '@roomote/db/server';
 import { RunStatus } from '@roomote/types';
@@ -191,6 +192,7 @@ describe('sendSandboxPromptCommand', () => {
     const user = await userFactory.create({ name: 'DB User' });
     const task = await taskFactory.create({
       initiatorUserId: user.id,
+      activityAt: 1,
     });
 
     await runFactory.create({
@@ -199,6 +201,15 @@ describe('sendSandboxPromptCommand', () => {
       status: RunStatus.Running,
       sandboxServerUrl: 'http://sandbox.example.test',
       result: {},
+    });
+
+    mockSendPromptMutate.mockImplementationOnce(async () => {
+      const [updated] = await db
+        .select({ activityAt: tasks.activityAt })
+        .from(tasks)
+        .where(eq(tasks.id, task.id));
+      expect(updated?.activityAt).toBeGreaterThan(1);
+      return { success: true };
     });
 
     await sendSandboxPromptCommand(
@@ -393,6 +404,40 @@ describe('sendSandboxPromptCommand', () => {
     expect(mockClearLatestUserMessageForReplyQuoteIfId).not.toHaveBeenCalled();
   });
 
+  it('stores web follow-ups for the next Telegram thread reply quote', async () => {
+    const user = await userFactory.create({ name: 'DB User' });
+    const task = await taskFactory.create({ initiatorUserId: user.id });
+
+    const run = await runFactory.create({
+      actingUserId: user.id,
+      taskId: task.id,
+      status: RunStatus.Running,
+      sandboxServerUrl: 'http://sandbox.example.test',
+      payload: {
+        communicationProvider: 'telegram',
+        communicationChannelId: 'chat-1',
+        communicationThreadId: 'topic-1',
+      },
+      result: {},
+    });
+
+    await sendSandboxPromptCommand(buildMockAuth({ userId: user.id }), {
+      taskId: task.id,
+      prompt: 'Please quote this in Telegram.',
+      source: 'web',
+    });
+
+    expect(mockSetLatestUserMessageForReplyQuote).toHaveBeenCalledWith(
+      'telegram',
+      run.id,
+      {
+        text: 'Please quote this in Telegram.',
+        userName: 'Test User',
+      },
+    );
+    expect(mockClearLatestUserMessageForReplyQuoteIfId).not.toHaveBeenCalled();
+  });
+
   it('clears the exact Discord quote when sandbox delivery fails', async () => {
     mockSendPromptMutate.mockRejectedValueOnce(new Error('sandbox exploded'));
 
@@ -456,42 +501,6 @@ describe('sendSandboxPromptCommand', () => {
       expect.objectContaining({
         prompt: 'change direction',
         autoSteerWhenQueued: true,
-      }),
-    );
-  });
-
-  it('attaches the active goal context to an ordinary web follow-up', async () => {
-    const user = await userFactory.create({ name: 'DB User' });
-    const task = await taskFactory.create({
-      initiatorUserId: user.id,
-      goalObjective: 'Finish the active objective',
-      goalStatus: 'active',
-      goalMaxContinuations: 5,
-      goalContinuationsUsed: 2,
-      goalLastContinuationId: 'goal-generation:current',
-    });
-
-    await runFactory.create({
-      actingUserId: user.id,
-      taskId: task.id,
-      status: RunStatus.Running,
-      sandboxServerUrl: 'http://sandbox.example.test',
-      result: {},
-    });
-
-    await sendSandboxPromptCommand(buildMockAuth({ userId: user.id }), {
-      taskId: task.id,
-      prompt: 'Verify the final requirement.',
-      source: 'web',
-    });
-
-    expect(mockSendPromptMutate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        goalContext: expect.objectContaining({
-          objective: 'Finish the active objective',
-          generation: 'goal-generation:current',
-          continuationsUsed: 2,
-        }),
       }),
     );
   });

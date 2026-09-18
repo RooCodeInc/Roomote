@@ -4,9 +4,11 @@ import type { AcpUiMessage } from './types';
 import { AcpCommandOutputMessage } from './AcpCommandOutputMessage';
 import { AcpReasoningMessage } from './AcpReasoningMessage';
 import { AcpTaskCancelledMessage } from './AcpTaskCancelledMessage';
+import { AcpVoiceCallMessage } from './AcpVoiceCallMessage';
 import { AcpTodoSectionMessage } from './AcpTodoSectionMessage';
 import { AcpTextMessage } from './AcpTextMessage';
 import { AcpToolMessage } from './AcpToolMessage';
+import { AcpSetupReceiptMessage } from './AcpSetupReceiptMessage';
 import { AcpUnknownMessage } from './AcpUnknownMessage';
 import { DelegatedTaskCard } from './DelegatedTaskCard';
 import { getDelegatedTaskDetails } from './delegated-task';
@@ -16,6 +18,7 @@ interface AcpMessageItemProps {
   msg: AcpUiMessage;
   onSuppress?: (messageId: string) => void;
   showSubagentPayload?: boolean;
+  forceToolDetails?: boolean;
   onOpenDelegatedTask?: (taskId: string) => void;
   children?: ReactNode;
 }
@@ -24,10 +27,13 @@ function AcpMessageItemBase({
   msg,
   onSuppress,
   showSubagentPayload = false,
+  forceToolDetails = false,
   onOpenDelegatedTask,
   children,
 }: AcpMessageItemProps) {
   switch (msg.kind) {
+    case 'setup_receipt':
+      return <AcpSetupReceiptMessage msg={msg} />;
     case 'text':
       return <AcpTextMessage msg={msg} />;
     case 'reasoning':
@@ -59,7 +65,11 @@ function AcpMessageItemBase({
           status={msg.data.status}
         />
       ) : (
-        <AcpToolMessage msg={msg} showSubagentPayload={showSubagentPayload}>
+        <AcpToolMessage
+          msg={msg}
+          showSubagentPayload={showSubagentPayload}
+          forceDetails={forceToolDetails}
+        >
           {children}
         </AcpToolMessage>
       );
@@ -69,6 +79,8 @@ function AcpMessageItemBase({
       return null;
     case 'task_cancelled':
       return <AcpTaskCancelledMessage msg={msg} />;
+    case 'voice_call':
+      return <AcpVoiceCallMessage msg={msg} />;
     default:
       return <AcpUnknownMessage msg={msg} />;
   }

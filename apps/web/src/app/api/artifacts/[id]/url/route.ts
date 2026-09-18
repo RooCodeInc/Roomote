@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   authorizeRunToken,
   getArtifactById,
-  generateDownloadUrl,
+  generateOwnedDownloadUrl,
 } from '@/lib/server';
 
 export const runtime = 'nodejs';
@@ -63,8 +63,10 @@ export async function GET(
   }
 
   // Generate presigned download URL
-  const downloadUrl = await generateDownloadUrl(
-    artifact.taskId,
+  const downloadUrl = await generateOwnedDownloadUrl(
+    artifact.taskId
+      ? { taskId: artifact.taskId }
+      : { sessionId: artifact.sessionId! },
     artifact.id,
     artifact.path,
     artifact.version,
