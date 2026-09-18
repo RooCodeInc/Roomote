@@ -40,7 +40,10 @@ import {
 } from '@roomote/types';
 
 /** Fixed Slack reaction for closed (not merged) PRs on the originating message. */
-export const SLACK_PR_CLOSED_REACTION_EMOJI = '-1';
+export const SLACK_PR_CLOSED_REACTION_EMOJI = 'file_cabinet';
+
+/** Preserve Discord's existing thumbs-down reaction for closed PRs. */
+const DISCORD_PR_CLOSED_REACTION_EMOJI = '-1';
 
 const LINEAR_MCP_URL = 'https://mcp.linear.app/mcp';
 
@@ -578,9 +581,9 @@ async function deliverDiscordTerminalStatus({
     formatLink: formatDiscordPullRequestLink,
     formatStatus: (value) => `**${value}**`,
   });
-  // Match Slack terminal reactions: check on merge, thumbsdown on closed.
+  // Keep Discord terminal reactions independent from the Slack mapping.
   const terminalReaction =
-    status === 'closed' ? SLACK_PR_CLOSED_REACTION_EMOJI : 'white_check_mark';
+    status === 'closed' ? DISCORD_PR_CLOSED_REACTION_EMOJI : 'white_check_mark';
   const ackEmoji = 'eyes';
 
   const notifiedConversations = new Set<string>();

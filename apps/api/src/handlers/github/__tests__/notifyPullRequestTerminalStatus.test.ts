@@ -271,7 +271,7 @@ describe('notifyPullRequestTerminalStatus', () => {
       timestamp: 'thread-ts-1',
       name: SLACK_PR_CLOSED_REACTION_EMOJI,
     });
-    expect(SLACK_PR_CLOSED_REACTION_EMOJI).toBe('-1');
+    expect(SLACK_PR_CLOSED_REACTION_EMOJI).toBe('file_cabinet');
   });
 
   it('delivers a direct task-run Slack binding for a non-Fast task', async () => {
@@ -564,6 +564,23 @@ describe('notifyPullRequestTerminalStatus', () => {
       channelId: 'thread-9',
       messageId: 'origin-fallback',
       name: 'white_check_mark',
+    });
+  });
+
+  it('preserves Discord thumbs-down reaction when a PR is closed', async () => {
+    mockedGithubFind.mockResolvedValue({ id: 1 } as any);
+    mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
+    mockedTaskRunsFind.mockResolvedValue([{ payload: discordPayload }] as any);
+
+    await notifyPullRequestTerminalStatus({
+      ...baseParams,
+      status: 'closed',
+    });
+
+    expect(mockAddReaction).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      messageId: 'origin-msg-1',
+      name: '-1',
     });
   });
 
