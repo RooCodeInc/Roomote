@@ -37,8 +37,12 @@ export {
   findTeamsConversationDisplayName,
   findTeamsConversationRoute,
   findTeamsConversationServiceUrl,
+  getAutomationDestinationCommunicationProvider,
   listConnectedCommunicationProviders,
+  prepareAutomationReportDestination,
   resolveAutomationRuntimeDestination,
+  resolveAutomationEmailTarget,
+  sendAutomationEmailReport,
   type ResolvedAutomationDestination,
 } from './destination';
 export {

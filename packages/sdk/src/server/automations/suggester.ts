@@ -17,6 +17,7 @@ import {
 import {
   buildDestinationTaskPayloadFields,
   listConnectedCommunicationProviders,
+  prepareAutomationReportDestination,
   resolveAutomationRuntimeDestination,
   type ResolvedAutomationDestination,
 } from './destination';
@@ -50,11 +51,14 @@ const WINDOW_DAYS: Record<string, number> = {
   weekly: 7,
 };
 
-async function findEligibleDeployments(): Promise<
-  SuggesterDeploymentContext[]
-> {
+async function findEligibleDeployments(
+  runtime: Awaited<ReturnType<typeof getAutomationRuntime>>,
+): Promise<SuggesterDeploymentContext[]> {
   if (!(await hasAnyActiveRepository())) {
     return [];
+  }
+  if (runtime.targets?.some((target) => target.provider === 'email')) {
+    return [{ slackBotToken: null, slackTeamId: null }];
   }
 
   const rows = await db
@@ -155,7 +159,8 @@ export async function suggesterJob(
 
   const now = new Date();
   const result = emptyJobResult();
-  const eligibleDeployments = await findEligibleDeployments();
+  const runtime = await getAutomationRuntime('suggester');
+  const eligibleDeployments = await findEligibleDeployments(runtime);
 
   if (eligibleDeployments.length === 0) {
     result.skippedReason =
@@ -168,7 +173,6 @@ export async function suggesterJob(
 
   for (const deployment of eligibleDeployments) {
     try {
-      const runtime = await getAutomationRuntime('suggester');
       const frequency = runtime.enabled ? runtime.scheduleMode : 'off';
       const destination =
         opts.destination ??
@@ -357,9 +361,16 @@ export async function suggesterJob(
               repositoryIds: [repository.id],
             });
         }
+        const reportDestination =
+          group.destination.provider === 'email'
+            ? await prepareAutomationReportDestination(group.destination, {
+                subject: `Roomote suggested work - ${now.toISOString().slice(0, 10)}`,
+                conversationKey: `builtin-automation:suggester:${now.toISOString()}:${routeKey}`,
+              })
+            : group.destination;
         const dispatchResult = await dispatchSuggestionScan({
           deployment,
-          channelId: group.destination.channelId,
+          channelId: reportDestination.channelId,
           now,
           suggesterInstructions: [runtime.instructions, rules?.instructions]
             .filter((value): value is string => Boolean(value?.trim()))
@@ -373,9 +384,8 @@ export async function suggesterJob(
           ),
           repositoryPartitions: [...partitions.values()],
           triggerKind: opts.manualTrigger ? 'manual' : 'scheduled',
-          destinationPayloadFields: buildDestinationTaskPayloadFields(
-            group.destination,
-          ),
+          destinationPayloadFields:
+            buildDestinationTaskPayloadFields(reportDestination),
         });
         if (dispatchResult.successfulScans > 0) {
           launchedRouteGroups.add(routeKey);

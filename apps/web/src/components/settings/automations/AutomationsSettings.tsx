@@ -15,7 +15,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   AUTOMATION_DESTINATION_DESCRIPTORS,
-  type AutomationCapableCommunicationProvider,
+  type AutomationDestinationProvider,
+  type AutomationDestinationEmailField,
   type BackgroundAutomationKey,
   type CommunicationProvider,
   communicationProviders,
@@ -82,13 +83,9 @@ import { AutomationAdditionalRules } from './CiFailureTriageAdditionalRules';
 import {
   buildAutomationDiscordDestinationOptions,
   buildManagerSlackChannelOptions,
-  DISCORD_DESTINATION_OPTION_PREFIX,
-  isManagerChannelSelectionDisabled,
   shouldShowManagerSlackChannelWarning,
-  type SlackChannelOption,
 } from './channelOptions';
 import { ManagerChannelEditor } from './ManagerChannelEditor';
-import { SlackChannelSelect } from './SlackChannelSelect';
 
 import {
   Alert,
@@ -176,6 +173,7 @@ type FieldErrors = Partial<
     | 'securityAuditorDiscordChannel'
     | 'codeQualityAuditorDiscordChannel'
     | 'ciFailureTriageDiscordChannel'
+    | AutomationDestinationEmailField
     | 'suggesterDiscordChannel'
     | 'announcerDiscordChannel'
     | 'platformIssueDiscordChannel'
@@ -230,6 +228,8 @@ const SLACK_DESTINATION_FIELD_AUTOMATION_IDS = Object.fromEntries(
 
 type AutomationDiscordDestinationField =
   (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['discordField'];
+type AutomationEmailDestinationField =
+  (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['emailField'];
 
 // The form field holding the same automation's Discord destination; the
 // destination picker is one-of, so selecting one provider clears the other.
@@ -239,9 +239,12 @@ const SLACK_TO_DISCORD_DESTINATION_FIELDS = Object.fromEntries(
     descriptor.discordField,
   ]),
 ) as Record<AutomationSlackDestinationField, AutomationDiscordDestinationField>;
-/** Synthetic option id for Suggest Ideas Telegram sticky-topic destination. */
-const TELEGRAM_DESTINATION_OPTION = 'telegram:primary';
-const TEAMS_DESTINATION_OPTION = 'teams:primary';
+const SLACK_TO_EMAIL_DESTINATION_FIELDS = Object.fromEntries(
+  AUTOMATION_DESTINATION_DESCRIPTORS.map((descriptor) => [
+    descriptor.slackField,
+    descriptor.emailField,
+  ]),
+) as Record<AutomationSlackDestinationField, AutomationEmailDestinationField>;
 
 type AutomationDefinition = {
   id: AutomationId;
@@ -832,7 +835,7 @@ function mapSettingsToFormState(
     platformIssueSlackChannelName?: string | null;
     platformIssueDiscordChannelId: string | null;
     releaseAnnouncementsEnabled?: boolean;
-    releaseAnnouncementsTargetProvider?: AutomationCapableCommunicationProvider | null;
+    releaseAnnouncementsTargetProvider?: AutomationDestinationProvider | null;
     releaseAnnouncementsTargetMode?: 'channel' | 'direct_message' | null;
     releaseAnnouncementsTargetChannelId?: string | null;
     securityAuditorSlackChannelId: string | null;
@@ -847,12 +850,16 @@ function mapSettingsToFormState(
     ciFailureTriageSlackChannelName?: string | null;
     ciFailureTriageDiscordChannelId: string | null;
     ciFailureTriageAdditionalRules?: string;
-    mergeAnnouncerTargetProvider: AutomationCapableCommunicationProvider | null;
+    mergeAnnouncerTargetProvider: AutomationDestinationProvider | null;
     mergeAnnouncerTargetMode: 'channel' | 'direct_message' | null;
     mergeAnnouncerTargetChannelId: string | null;
     mergeAnnouncerAdditionalRules?: string;
   } & ScheduleOnlyAutomationFrequencyState & {
       issueFixerInstructions: string | null;
+    } & {
+      [K in (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['emailSettingsKey']]:
+        | string
+        | null;
     },
 ): FormState {
   return {
@@ -1008,6 +1015,12 @@ function mapSettingsToFormState(
     mergeAnnouncerTargetMode: settings.mergeAnnouncerTargetMode ?? 'channel',
     mergeAnnouncerTargetChannelId: settings.mergeAnnouncerTargetChannelId ?? '',
     mergeAnnouncerAdditionalRules: settings.mergeAnnouncerAdditionalRules ?? '',
+    ...Object.fromEntries(
+      AUTOMATION_DESTINATION_DESCRIPTORS.map((descriptor) => [
+        descriptor.emailField,
+        settings[descriptor.emailSettingsKey] ?? '',
+      ]),
+    ),
   };
 }
 
@@ -1270,70 +1283,6 @@ function AutomationReportsToLine({
       {getCommunicationProviderDisplayName(destination.provider)}) —{' '}
       {DESTINATION_SOURCE_LABELS[destination.source]}
     </p>
-  );
-}
-
-function AutomationSlackDestinationInput({
-  inputId,
-  label,
-  helperText,
-  value,
-  options,
-  disabled,
-  discordConnected = false,
-  showWarning,
-  slackAppMention,
-  error,
-  destination,
-  reportsToFallbackText,
-  onChange,
-}: {
-  inputId: string;
-  label: string;
-  helperText?: string;
-  value: string | null;
-  options: SlackChannelOption[];
-  disabled: boolean;
-  discordConnected?: boolean;
-  showWarning: boolean;
-  slackAppMention: string;
-  error?: string;
-  destination: ResolvedAutomationDestinationSummary | null | undefined;
-  reportsToFallbackText?: string;
-  onChange: (value: string | null) => void;
-}) {
-  return (
-    <div className="space-y-2">
-      <Label htmlFor={inputId}>{label}</Label>
-      <SlackChannelSelect
-        id={inputId}
-        value={value}
-        onChange={onChange}
-        options={options}
-        disabled={disabled}
-        className="w-full md:w-md"
-        placeholder={
-          disabled && options.length === 0
-            ? 'Connect Slack to choose a channel'
-            : discordConnected
-              ? 'Select a channel'
-              : 'Select a Slack channel'
-        }
-      />
-      {helperText ? (
-        <p className="text-xs text-muted-foreground md:max-w-160">
-          {helperText}
-        </p>
-      ) : null}
-      <AutomationReportsToLine
-        destination={destination}
-        emptyFallbackText={reportsToFallbackText}
-      />
-      {showWarning ? (
-        <SlackChannelAccessWarning slackAppMention={slackAppMention} />
-      ) : null}
-      {error ? <p className="text-xs text-destructive">{error}</p> : null}
-    </div>
   );
 }
 
@@ -2274,6 +2223,28 @@ export function AutomationsSettings({
     () => slackChannelsQuery.data?.channels ?? [],
     [slackChannelsQuery.data?.channels],
   );
+  const emailOptions = useMemo(
+    () =>
+      (settingsQuery.data?.emailIdentities ?? []).map((identity) => ({
+        id: identity.id,
+        name: identity.emailAddress,
+        label: `${identity.emailAddress} · Account email`,
+      })),
+    [settingsQuery.data?.emailIdentities],
+  );
+  const availableDestinationProviders = useMemo(
+    () => [
+      ...communicationProviders.flatMap((provider) =>
+        provider !== 'agentmail' &&
+        capabilities?.[`${provider}Connected` as keyof typeof capabilities] ===
+          true
+          ? [provider]
+          : [],
+      ),
+      ...(capabilities?.emailConnected ? (['email'] as const) : []),
+    ],
+    [capabilities],
+  );
   const managerStatsIsEnabled = formState?.managerStatsFrequency !== 'off';
   const providerUsageLimitIsEnabled =
     formState?.providerUsageLimitFrequency !== 'off';
@@ -2473,8 +2444,22 @@ export function AutomationsSettings({
       }),
     [slackChannelChoices],
   );
+  const buildEmailDestinationOptions = useCallback(
+    (selectedIdentityId: string | null) =>
+      selectedIdentityId &&
+      !emailOptions.some((option) => option.id === selectedIdentityId)
+        ? [
+            ...emailOptions,
+            {
+              id: selectedIdentityId,
+              name: 'Email',
+              label: 'Email · No longer available',
+            },
+          ]
+        : emailOptions,
+    [emailOptions],
+  );
   const discordConnected = capabilities?.discordConnected === true;
-  const slackConnected = capabilities?.slackConnected === true;
   // Unprefixed catalog options for the auto-respond editor's Discord rows
   // (provider is explicit per row, unlike the shared destination combobox).
   // A persisted channel missing from the catalog stays selectable by raw id.
@@ -2538,7 +2523,7 @@ export function AutomationsSettings({
       label,
       helperText,
       savedChannelId,
-      savedDiscordChannelId,
+      savedDiscordChannelId: _savedDiscordChannelId,
       warningChannelId,
       reportsToFallbackText,
       allowTelegram = false,
@@ -2562,8 +2547,10 @@ export function AutomationsSettings({
       savedTeamsSelected?: boolean;
     }) => {
       const discordField = SLACK_TO_DISCORD_DESTINATION_FIELDS[field];
+      const emailField = SLACK_TO_EMAIL_DESTINATION_FIELDS[field];
       const value = formState?.[field] ?? '';
       const discordValue = formState?.[discordField] ?? '';
+      const emailValue = formState?.[emailField] ?? '';
       const useTelegram =
         allowTelegram && (formState?.suggesterUseTelegram ?? false);
       const useTeams = allowTeams && (formState?.suggesterUseTeams ?? false);
@@ -2571,53 +2558,40 @@ export function AutomationsSettings({
         settingsQuery.data?.capabilities.telegramConnected ?? false;
       const teamsConnected =
         settingsQuery.data?.capabilities.teamsConnected ?? false;
-      const showDiscordOptions = discordConnected || Boolean(discordValue);
       const showTelegramOption =
         allowTelegram &&
         (telegramConnected || useTelegram || savedTelegramSelected);
       const showTeamsOption =
         allowTeams && (teamsConnected || useTeams || savedTeamsSelected);
-      const multiProvider =
-        showDiscordOptions || showTelegramOption || showTeamsOption;
-      const effectiveLabel = multiProvider
-        ? label.replace(/ Slack channel$/u, ' channel')
-        : label;
-      const options = [
-        ...buildSlackDestinationOptions(value),
-        ...(showDiscordOptions
-          ? buildAutomationDiscordDestinationOptions({
-              channels: discordChannelsQuery.data?.channels ?? [],
-              selectedChannelId: discordValue || null,
-              includeProviderSuffix:
-                slackConnected || showTelegramOption || showTeamsOption,
-            })
-          : []),
-        ...(showTeamsOption
+      const effectiveLabel = label.replace(/ Slack channel$/u, ' destination');
+      const selectedProvider = emailValue
+        ? 'email'
+        : useTelegram
+          ? 'telegram'
+          : useTeams
+            ? 'teams'
+            : discordValue
+              ? 'discord'
+              : value
+                ? 'slack'
+                : 'none';
+      const selectedChannelId = emailValue || discordValue || value;
+      const visibleEmailOptions =
+        emailValue && !emailOptions.some((option) => option.id === emailValue)
           ? [
+              ...emailOptions,
               {
-                id: TEAMS_DESTINATION_OPTION,
-                name: 'Teams',
-                label: 'Teams · primary conversation',
+                id: emailValue,
+                name: 'Email',
+                label: 'Email · No longer available',
               },
             ]
-          : []),
-        ...(showTelegramOption
-          ? [
-              {
-                id: TELEGRAM_DESTINATION_OPTION,
-                name: 'Telegram',
-                label: 'Telegram · recurring topic',
-              },
-            ]
-          : []),
-      ];
-      const selectedValue = useTelegram
-        ? TELEGRAM_DESTINATION_OPTION
-        : useTeams
-          ? TEAMS_DESTINATION_OPTION
-          : discordValue
-            ? `${DISCORD_DESTINATION_OPTION_PREFIX}${discordValue}`
-            : value || null;
+          : emailOptions;
+      const destinationProviders = availableDestinationProviders.filter(
+        (provider) =>
+          (provider !== 'telegram' || allowTelegram) &&
+          (provider !== 'teams' || allowTeams),
+      );
 
       const destinationHelper = useTelegram
         ? 'Roomote will create a recurring Suggest Ideas topic in your Telegram chat and keep posting there. You can’t pick an existing thread.'
@@ -2625,123 +2599,130 @@ export function AutomationsSettings({
           ? 'Roomote will post Suggest Ideas digests to your primary Teams conversation.'
           : helperText;
 
-      const clearSuggesterAltDestinations = {
-        ...(allowTelegram ? { suggesterUseTelegram: false } : {}),
-        ...(allowTeams ? { suggesterUseTeams: false } : {}),
-      };
-
       return (
-        <AutomationSlackDestinationInput
-          inputId={inputId}
-          label={effectiveLabel}
-          helperText={destinationHelper}
-          value={selectedValue}
-          options={options}
-          disabled={isManagerChannelSelectionDisabled({
-            slackConnected:
-              slackConnected ||
-              discordConnected ||
-              (allowTelegram && telegramConnected) ||
-              (allowTeams && teamsConnected),
-            isFetching:
-              slackChannelsQuery.isFetching || discordChannelsQuery.isFetching,
-            hasValue:
-              Boolean(value.trim()) ||
-              Boolean(discordValue.trim()) ||
-              useTelegram ||
-              useTeams,
-            isConfigured:
-              Boolean(savedChannelId) ||
-              Boolean(savedDiscordChannelId) ||
-              savedTelegramSelected ||
-              savedTeamsSelected,
-          })}
-          discordConnected={
-            discordConnected || showTelegramOption || showTeamsOption
-          }
-          destination={
-            settingsQuery.data?.resolvedDestinations[
-              SLACK_DESTINATION_FIELD_AUTOMATION_KEYS[field]
-            ]
-          }
-          reportsToFallbackText={reportsToFallbackText}
-          slackAppMention={slackAppMention}
-          showWarning={
-            !discordValue &&
-            !useTelegram &&
-            !useTeams &&
-            shouldShowManagerSlackChannelWarning({
-              formValue: value,
-              savedChannelId,
-              warningChannelId,
-              isDirty: isDirty[SLACK_DESTINATION_FIELD_AUTOMATION_IDS[field]],
-            })
-          }
-          error={
-            fieldErrors[field] ??
-            fieldErrors[discordField] ??
-            fieldErrors.suggesterUseTelegram ??
-            fieldErrors.suggesterUseTeams
-          }
-          onChange={(nextValue) =>
-            setFormState((prev) => {
-              if (!prev) {
-                return prev;
-              }
-
-              if (nextValue === TELEGRAM_DESTINATION_OPTION) {
-                return {
-                  ...prev,
-                  [field]: '',
-                  [discordField]: '',
-                  suggesterUseTelegram: true,
-                  ...(allowTeams ? { suggesterUseTeams: false } : {}),
-                };
-              }
-
-              if (nextValue === TEAMS_DESTINATION_OPTION) {
-                return {
-                  ...prev,
-                  [field]: '',
-                  [discordField]: '',
-                  suggesterUseTeams: true,
-                  ...(allowTelegram ? { suggesterUseTelegram: false } : {}),
-                };
-              }
-
-              if (nextValue?.startsWith(DISCORD_DESTINATION_OPTION_PREFIX)) {
-                return {
-                  ...prev,
-                  [field]: '',
-                  [discordField]: nextValue.slice(
-                    DISCORD_DESTINATION_OPTION_PREFIX.length,
-                  ),
-                  ...clearSuggesterAltDestinations,
-                };
-              }
-
-              return {
-                ...prev,
-                [field]: nextValue ?? '',
-                [discordField]: '',
-                ...clearSuggesterAltDestinations,
-              };
-            })
-          }
-        />
+        <div className="space-y-2">
+          <AutomationDestinationPicker
+            id={inputId}
+            label={effectiveLabel}
+            value={{
+              provider: selectedProvider,
+              mode: selectedProvider === 'email' ? 'direct_message' : 'channel',
+              channelId: selectedChannelId,
+            }}
+            availableProviders={destinationProviders}
+            slackOptions={buildSlackDestinationOptions(value)}
+            discordOptions={buildAutomationDiscordDestinationOptions({
+              channels: discordChannelsQuery.data?.channels ?? [],
+              selectedChannelId: discordValue || null,
+              includeProviderSuffix: false,
+            })}
+            emailOptions={visibleEmailOptions}
+            defaultSlackChannelId={managerSlackChannelId ?? ''}
+            defaultDiscordChannelId={managerDiscordChannelId ?? ''}
+            defaultEmailIdentityId={emailOptions[0]?.id ?? ''}
+            fixedDestinationLabels={{
+              ...(showTeamsOption
+                ? { teams: 'Uses the primary Teams conversation.' }
+                : {}),
+              ...(showTelegramOption
+                ? { telegram: 'Uses the recurring Suggest Ideas topic.' }
+                : {}),
+            }}
+            allowDirectMessage={false}
+            noneLabel="Default"
+            noneDescription="Uses the Manager Channel or primary conversation fallback."
+            disabled={
+              (slackChannelsQuery.isFetching ||
+                discordChannelsQuery.isFetching) &&
+              selectedProvider === 'none'
+            }
+            onChange={(destination) =>
+              setFormState((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      [field]:
+                        destination.provider === 'slack'
+                          ? destination.channelId
+                          : '',
+                      [discordField]:
+                        destination.provider === 'discord'
+                          ? destination.channelId
+                          : '',
+                      [emailField]:
+                        destination.provider === 'email'
+                          ? destination.channelId
+                          : '',
+                      ...(allowTelegram
+                        ? {
+                            suggesterUseTelegram:
+                              destination.provider === 'telegram',
+                          }
+                        : {}),
+                      ...(allowTeams
+                        ? {
+                            suggesterUseTeams: destination.provider === 'teams',
+                          }
+                        : {}),
+                    }
+                  : prev,
+              )
+            }
+          />
+          {destinationHelper ? (
+            <p className="text-xs text-muted-foreground md:max-w-160">
+              {destinationHelper}
+            </p>
+          ) : null}
+          <AutomationReportsToLine
+            destination={
+              settingsQuery.data?.resolvedDestinations[
+                SLACK_DESTINATION_FIELD_AUTOMATION_KEYS[field]
+              ]
+            }
+            emptyFallbackText={reportsToFallbackText}
+          />
+          {!discordValue &&
+          !emailValue &&
+          !useTelegram &&
+          !useTeams &&
+          shouldShowManagerSlackChannelWarning({
+            formValue: value,
+            savedChannelId,
+            warningChannelId,
+            isDirty: isDirty[SLACK_DESTINATION_FIELD_AUTOMATION_IDS[field]],
+          }) ? (
+            <SlackChannelAccessWarning slackAppMention={slackAppMention} />
+          ) : null}
+          {(fieldErrors[field] ??
+          fieldErrors[discordField] ??
+          fieldErrors[emailField] ??
+          fieldErrors.suggesterUseTelegram ??
+          fieldErrors.suggesterUseTeams) ? (
+            <p className="text-xs text-destructive">
+              {fieldErrors[field] ??
+                fieldErrors[discordField] ??
+                fieldErrors[emailField] ??
+                fieldErrors.suggesterUseTelegram ??
+                fieldErrors.suggesterUseTeams}
+            </p>
+          ) : null}
+        </div>
       );
     },
     [
       buildSlackDestinationOptions,
-      slackConnected,
+      availableDestinationProviders,
       discordChannelsQuery.data?.channels,
       discordChannelsQuery.isFetching,
-      discordConnected,
       fieldErrors,
+      emailOptions,
       formState,
       isDirty,
       settingsQuery.data,
       slackAppMention,
+      managerDiscordChannelId,
+      managerSlackChannelId,
       slackChannelsQuery.isFetching,
     ],
   );
@@ -3132,28 +3113,26 @@ export function AutomationsSettings({
                     mode: formState.releaseAnnouncementsTargetMode,
                     channelId: formState.releaseAnnouncementsTargetChannelId,
                   }}
-                  availableProviders={communicationProviders.filter(
-                    (
-                      provider,
-                    ): provider is AutomationCapableCommunicationProvider =>
-                      provider !== 'agentmail' &&
-                      settingsQuery.data?.capabilities[
-                        `${provider}Connected` as keyof typeof settingsQuery.data.capabilities
-                      ] === true,
-                  )}
+                  availableProviders={availableDestinationProviders}
                   slackOptions={buildSlackDestinationOptions(
                     formState.releaseAnnouncementsTargetProvider === 'slack'
                       ? formState.releaseAnnouncementsTargetChannelId
                       : null,
                   )}
                   discordOptions={mergeAnnouncerDiscordOptions}
+                  emailOptions={buildEmailDestinationOptions(
+                    formState.releaseAnnouncementsTargetProvider === 'email'
+                      ? formState.releaseAnnouncementsTargetChannelId
+                      : null,
+                  )}
                   defaultSlackChannelId={managerSlackChannelId ?? ''}
                   defaultDiscordChannelId={managerDiscordChannelId ?? ''}
+                  defaultEmailIdentityId={emailOptions[0]?.id ?? ''}
                   noneLabel="Default"
                   noneDescription="Uses the standard automation destination."
                   onChange={(destination) =>
                     setFormState((previous) =>
-                      previous && destination.provider !== 'email'
+                      previous
                         ? {
                             ...previous,
                             releaseAnnouncementsTargetProvider:
@@ -3730,32 +3709,28 @@ export function AutomationsSettings({
                               channelId:
                                 formState.mergeAnnouncerTargetChannelId,
                             }}
-                            availableProviders={communicationProviders.filter(
-                              (
-                                provider,
-                              ): provider is AutomationCapableCommunicationProvider =>
-                                // Built-in automations post to chat only;
-                                // Email is a custom-automation destination.
-                                provider !== 'agentmail' &&
-                                settingsQuery.data?.capabilities[
-                                  `${provider}Connected` as keyof typeof settingsQuery.data.capabilities
-                                ] === true,
-                            )}
+                            availableProviders={availableDestinationProviders}
                             slackOptions={buildSlackDestinationOptions(
                               formState.mergeAnnouncerTargetProvider === 'slack'
                                 ? formState.mergeAnnouncerTargetChannelId
                                 : null,
                             )}
                             discordOptions={mergeAnnouncerDiscordOptions}
+                            emailOptions={buildEmailDestinationOptions(
+                              formState.mergeAnnouncerTargetProvider === 'email'
+                                ? formState.mergeAnnouncerTargetChannelId
+                                : null,
+                            )}
                             defaultSlackChannelId={managerSlackChannelId ?? ''}
                             defaultDiscordChannelId={
                               managerDiscordChannelId ?? ''
                             }
+                            defaultEmailIdentityId={emailOptions[0]?.id ?? ''}
                             noneLabel="Default"
                             noneDescription="Uses the Manager Channel or primary conversation fallback."
                             onChange={(destination) =>
                               setFormState((previous) =>
-                                previous && destination.provider !== 'email'
+                                previous
                                   ? {
                                       ...previous,
                                       mergeAnnouncerTargetProvider:

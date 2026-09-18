@@ -52,7 +52,9 @@ import {
 
 import {
   buildDestinationTaskPayloadFields,
+  getAutomationDestinationCommunicationProvider,
   listConnectedCommunicationProviders,
+  prepareAutomationReportDestination,
   resolveAutomationRuntimeDestination,
 } from './destination';
 import { resolveAutomationRepositoryDestination } from './ci-failure-triage-routing';
@@ -154,7 +156,6 @@ export async function ciFailureTriageJob(
           destination: opts.destination,
         }));
       if (!destination) continue;
-      const channelId = destination.channelId;
       // Prefer the provider+host-scoped mapping row. Path-only fullName fallback
       // is GitHub-only so GitLab same-path hosts cannot mis-resolve workspaces.
       const mappedEnvironmentId = await findEnvironmentIdForRepositoryId(
@@ -531,6 +532,13 @@ export async function ciFailureTriageJob(
       ];
 
       try {
+        const reportDestination =
+          destination.provider === 'email'
+            ? await prepareAutomationReportDestination(destination, {
+                subject: `Roomote CI failure triage: ${selectedRepository.fullName}`,
+                conversationKey: `builtin-automation:ci_failure_triage:manual:${sourceControlProvider}:${selectedRepository.fullName}:${claimMarker}`,
+              })
+            : destination;
         const launchResult = await enqueueTask(
           {
             task: {
@@ -548,15 +556,20 @@ export async function ciFailureTriageJob(
                   : {}),
                 description: buildCiFailureTriagePrompt({
                   additionalInstructions: rules?.instructions,
-                  channelId,
+                  channelId: reportDestination.channelId,
                   repositoryFullNames: [selectedRepository.fullName],
                   repositoryCoverage: coverageSlice,
                   trigger: 'manual',
-                  destinationProvider: destination.provider,
+                  destinationProvider:
+                    reportDestination.provider === 'email'
+                      ? getAutomationDestinationCommunicationProvider(
+                          reportDestination,
+                        )
+                      : reportDestination.provider,
                   sourceControlProvider,
                   triggeringRun,
                 }),
-                ...buildDestinationTaskPayloadFields(destination),
+                ...buildDestinationTaskPayloadFields(reportDestination),
                 visibleInTranscript: false,
               },
             },
@@ -565,8 +578,12 @@ export async function ciFailureTriageJob(
             surface: 'system',
             trigger: 'manual',
             visibility: 'hidden',
-            ...(destination.provider === 'slack'
-              ? { channels: { slackChannelId: channelId } }
+            ...(reportDestination.provider === 'slack'
+              ? {
+                  channels: {
+                    slackChannelId: reportDestination.channelId,
+                  },
+                }
               : {}),
           },
           { launchClass: 'automation' },

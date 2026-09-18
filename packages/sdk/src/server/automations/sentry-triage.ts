@@ -22,6 +22,7 @@ import {
 import { loadAutomationThreadFeedbackReport } from './automation-thread-feedback';
 import {
   buildDestinationPromptContext,
+  getAutomationDestinationCommunicationProvider,
   type ResolvedAutomationDestination,
 } from './destination';
 import {
@@ -163,7 +164,7 @@ export const sentryTriageJob = createScheduledTriageJob({
     const recentThreadFeedback = await loadAutomationThreadFeedbackReport({
       automationKey: 'sentry_triage',
       slackChannelId: channelId,
-      surface: destination.provider,
+      surface: getAutomationDestinationCommunicationProvider(destination),
     });
 
     const projectSlugs = getAutomationTargetRefs(

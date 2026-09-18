@@ -39,6 +39,7 @@ const mockRunAutomationNow = vi.hoisted(() =>
 );
 const mockResolveAutomationRepositoryDestination = vi.hoisted(() => vi.fn());
 const mockResolveAutomationRuntimeDestination = vi.hoisted(() => vi.fn());
+const mockCanStartAgentMailConversationWithUser = vi.hoisted(() => vi.fn());
 vi.mock('@roomote/sdk/server', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@roomote/sdk/server')>();
   mockResolveAutomationRepositoryDestination.mockImplementation(
@@ -54,6 +55,8 @@ vi.mock('@roomote/sdk/server', async (importOriginal) => {
       mockResolveAutomationRepositoryDestination,
     resolveAutomationRuntimeDestination:
       mockResolveAutomationRuntimeDestination,
+    canStartAgentMailConversationWithUser:
+      mockCanStartAgentMailConversationWithUser,
   };
 });
 
@@ -259,7 +262,9 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
     mockRunAutomationNow.mockClear();
     mockResolveAutomationRepositoryDestination.mockClear();
     mockResolveAutomationRuntimeDestination.mockClear();
+    mockCanStartAgentMailConversationWithUser.mockClear();
     mockResolveRules.mockReset();
+    mockCanStartAgentMailConversationWithUser.mockResolvedValue(true);
     // Internal automation rows are referenced by other suites' task fixtures.
     await db
       .delete(automations)
@@ -277,6 +282,100 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
     await db.delete(discordInstallations);
     await db.delete(slackInstallations);
     await db.delete(users).where(eq(users.id, adminAuth.userId));
+  });
+
+  it('saves and reloads an exact owner-bound Email destination', async () => {
+    const identityId = 'verified:user-admin:opaque';
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'managerStats',
+        managerStatsFrequency: 'weekly',
+        managerStatsSlackChannel: null,
+        managerStatsDiscordChannel: null,
+        managerStatsEmailIdentityId: identityId,
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(mockCanStartAgentMailConversationWithUser).toHaveBeenCalledWith(
+      adminAuth.userId,
+      identityId,
+    );
+    const automation = await db.query.automations.findFirst({
+      where: eq(automations.key, 'manager_stats'),
+    });
+    expect(automation?.targets).toEqual([
+      {
+        provider: 'email',
+        targetKind: 'email_user',
+        externalRef: adminAuth.userId,
+        metadata: { emailIdentityId: identityId },
+      },
+    ]);
+    const settings = await getBackgroundAgentSettingsForDeployment();
+    expect(settings.managerStatsEmailIdentityId).toBe(identityId);
+    expect(settings.managerStatsEmailUserId).toBe(adminAuth.userId);
+  });
+
+  it('preserves an unchanged unavailable Email destination without substitution', async () => {
+    const identityId = 'verified:user-admin:old';
+    await upsertAutomation(db, {
+      key: 'provider_usage_limit',
+      enabled: true,
+      schedule: { mode: 'every_hour' },
+      targets: [
+        {
+          provider: 'email',
+          targetKind: 'email_user',
+          externalRef: adminAuth.userId,
+          metadata: { emailIdentityId: identityId },
+        },
+      ],
+    });
+    mockCanStartAgentMailConversationWithUser.mockResolvedValue(false);
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'providerUsageLimit',
+        providerUsageLimitFrequency: 'every_hour',
+        providerUsageLimitThreshold: 80,
+        providerUsageLimitEmailIdentityId: identityId,
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(mockCanStartAgentMailConversationWithUser).not.toHaveBeenCalled();
+    const automation = await db.query.automations.findFirst({
+      where: eq(automations.key, 'provider_usage_limit'),
+    });
+    expect(automation?.targets).toContainEqual({
+      provider: 'email',
+      targetKind: 'email_user',
+      externalRef: adminAuth.userId,
+      metadata: { emailIdentityId: identityId },
+    });
+  });
+
+  it('rejects a newly selected unavailable Email identity', async () => {
+    mockCanStartAgentMailConversationWithUser.mockResolvedValue(false);
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'managerStats',
+        managerStatsFrequency: 'weekly',
+        managerStatsEmailIdentityId: 'verified:user-admin:missing',
+      }),
+    );
+
+    expect(result).toEqual({
+      success: false,
+      fieldErrors: {
+        managerStatsEmailIdentityId:
+          'This Email destination is no longer available.',
+      },
+    });
   });
 
   it('tracks a built-in automation when its enabled state changes', async () => {

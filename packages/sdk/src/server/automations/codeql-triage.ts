@@ -9,6 +9,7 @@ import { ALL_REPOSITORIES } from '@roomote/types';
 import { loadAutomationThreadFeedbackContext } from './automation-thread-feedback';
 import {
   buildDestinationPromptContext,
+  getAutomationDestinationCommunicationProvider,
   type ResolvedAutomationDestination,
 } from './destination';
 import {
@@ -103,7 +104,7 @@ export const codeqlTriageJob = createScheduledTriageJob({
     const recentThreadFeedback = await loadAutomationThreadFeedbackContext({
       automationKey: 'codeql_triage',
       slackChannelId: channelId,
-      surface: destination.provider,
+      surface: getAutomationDestinationCommunicationProvider(destination),
     });
 
     return {

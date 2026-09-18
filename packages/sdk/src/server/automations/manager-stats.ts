@@ -28,6 +28,7 @@ import {
 import {
   listConnectedCommunicationProviders,
   resolveAutomationRuntimeDestination,
+  sendAutomationEmailReport,
   type ResolvedAutomationDestination,
 } from './destination';
 import { hasAnyActiveRepository } from './github-deployment-scope';
@@ -161,11 +162,27 @@ export function hasManagerStatsActivity(
   );
 }
 
-async function findEligibleDeployments(): Promise<DeploymentContext[]> {
+async function findEligibleDeployments(
+  runtime: Awaited<ReturnType<typeof getAutomationRuntime>>,
+): Promise<DeploymentContext[]> {
   // PR stats come from the provider-neutral digest, so any active repository
   // qualifies regardless of source-control provider.
   if (!(await hasAnyActiveRepository())) {
     return [];
+  }
+
+  const emailTarget = runtime.targets.find(
+    (target) =>
+      target.provider === 'email' && target.targetKind === 'email_user',
+  );
+  if (emailTarget) {
+    return [
+      {
+        slackBotToken: null,
+        slackTeamId: null,
+        actorUserId: emailTarget.externalRef,
+      },
+    ];
   }
 
   const rows = await db
@@ -217,6 +234,9 @@ async function postManagerStatsViaCommunicationAdapter(params: {
   stats: Awaited<ReturnType<typeof buildManagerStatsDigest>>;
 }): Promise<void> {
   const { destination } = params;
+  if (destination.provider === 'email') {
+    throw new Error('Email reports use the durable AgentMail delivery path.');
+  }
   const adapter = await getCommunicationProviderAdapter(destination.provider);
 
   if (!adapter) {
@@ -250,7 +270,8 @@ export async function managerStatsJob(
 
   const now = new Date();
   const result = emptyJobResult();
-  const eligibleDeployments = await findEligibleDeployments();
+  const runtime = await getAutomationRuntime('manager_stats');
+  const eligibleDeployments = await findEligibleDeployments(runtime);
 
   if (eligibleDeployments.length === 0) {
     result.skippedReason =
@@ -262,7 +283,6 @@ export async function managerStatsJob(
 
   for (const deployment of eligibleDeployments) {
     try {
-      const runtime = await getAutomationRuntime('manager_stats');
       const frequency = runtime.enabled ? runtime.scheduleMode : 'off';
 
       if (!frequency || frequency === 'off') {
@@ -330,7 +350,25 @@ export async function managerStatsJob(
         continue;
       }
 
-      if (destination.provider === 'slack') {
+      if (destination.provider === 'email') {
+        const text = degradeSlackMrkdwnToMarkdown(
+          formatManagerStatsText({ stats }),
+        );
+        await sendAutomationEmailReport(destination, {
+          subject: `Roomote weekly manager summary - ${now.toISOString().slice(0, 10)}`,
+          conversationKey: `builtin-automation:manager_stats:${now.toISOString()}`,
+          text,
+          idempotencyKey: `manager-stats:${now.toISOString()}`,
+          buttons: [
+            [
+              {
+                text: 'Automation settings',
+                url: buildManagerSlackSettingsUrl(MANAGER_STATS_SETTINGS_HASH),
+              },
+            ],
+          ],
+        });
+      } else if (destination.provider === 'slack') {
         if (!deployment.slackBotToken) {
           throw new Error(
             'Manager stats destination is Slack, but Slack is not connected',

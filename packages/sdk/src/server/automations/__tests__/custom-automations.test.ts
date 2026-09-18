@@ -117,6 +117,27 @@ vi.mock('@roomote/db/server', () => ({
 vi.mock('../destination', () => ({
   findTeamsConversationRoute: vi.fn(),
   listConnectedCommunicationProviders: vi.fn(async () => ['slack', 'teams']),
+  resolveAutomationEmailTarget: vi.fn(
+    async (target: {
+      externalRef: string;
+      metadata?: Record<string, unknown>;
+    }) => {
+      const identityId = target.metadata?.emailIdentityId;
+      return identityId &&
+        (await fastMocks.canStartAgentMailConversation(
+          target.externalRef,
+          identityId,
+        ))
+        ? {
+            provider: 'email',
+            channelId: target.externalRef,
+            userId: target.externalRef,
+            identityId,
+            source: 'automation_target',
+          }
+        : null;
+    },
+  ),
 }));
 
 vi.mock('../../lib/user-direct-message', () => ({

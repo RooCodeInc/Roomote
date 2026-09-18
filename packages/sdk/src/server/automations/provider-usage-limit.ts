@@ -32,6 +32,7 @@ import {
 } from '../lib/manager-slack';
 import {
   resolveAutomationRuntimeDestination,
+  sendAutomationEmailReport,
   type ResolvedAutomationDestination,
 } from './destination';
 import {
@@ -399,7 +400,26 @@ export async function providerUsageLimitJob(
   try {
     if (alerts.length > 0) {
       const message = buildProviderUsageLimitWarningMessage({ alerts });
-      if (destination.provider === 'slack') {
+      if (destination.provider === 'email') {
+        await sendAutomationEmailReport(destination, {
+          subject: 'Roomote inference provider usage alert',
+          conversationKey: `builtin-automation:provider_usage_limit:${now.toISOString()}`,
+          text: degradeSlackMrkdwnToMarkdown(
+            formatProviderUsageLimitWarningText({ alerts }),
+          ),
+          idempotencyKey: `provider-usage-limit:${now.toISOString()}`,
+          buttons: [
+            [
+              {
+                text: 'Automation settings',
+                url: buildManagerSlackSettingsUrl(
+                  PROVIDER_USAGE_LIMIT_SETTINGS_HASH,
+                ),
+              },
+            ],
+          ],
+        });
+      } else if (destination.provider === 'slack') {
         const notifier = dependencies.createNotifier(slackBotToken!);
         const messageTs = await notifier.postMessage({
           channel: destination.channelId,

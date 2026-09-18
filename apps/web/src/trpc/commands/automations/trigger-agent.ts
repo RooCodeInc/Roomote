@@ -114,7 +114,10 @@ async function assertManualTriggerIsRunnable(
     const supportedProviders: readonly CommunicationProvider[] =
       descriptor.supportedCommunicationProviders;
 
-    if (!supportedProviders.includes(preflightDestination.provider)) {
+    if (
+      preflightDestination.provider !== 'email' &&
+      !supportedProviders.includes(preflightDestination.provider)
+    ) {
       throw new Error(
         `${descriptor.label} cannot report to ${preflightDestination.provider} yet. Choose a Slack channel or the shared Manager Channel.`,
       );

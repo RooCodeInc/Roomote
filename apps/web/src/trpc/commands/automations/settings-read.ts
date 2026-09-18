@@ -22,6 +22,8 @@ import {
   findDiscordDestinationByChannelId,
   findTeamsConversationDisplayName,
   findTeamsPrimaryConversation,
+  getAutomationDestinationCommunicationProvider,
+  listAvailableAgentMailOutboundIdentities,
   resolveAutomationRuntimeDestination,
   type ResolvedAutomationDestination,
 } from '@roomote/sdk/server';
@@ -173,6 +175,7 @@ async function resolveDestinationDisplayName(
   destination: ResolvedAutomationDestination,
   notifier: SlackNotifier | null,
 ): Promise<string | null> {
+  if (destination.provider === 'email') return 'Email';
   if (destination.provider === 'slack') {
     const channelName = notifier
       ? await notifier.getChannelName(destination.channelId)
@@ -239,7 +242,7 @@ async function resolveAutomationDestinations(params: {
       return [
         key,
         {
-          provider: destination.provider,
+          provider: getAutomationDestinationCommunicationProvider(destination),
           channelId: destination.channelId,
           source: destination.source,
           displayName: await resolveDestinationDisplayName(
@@ -279,12 +282,14 @@ export async function getBackgroundAgentSettingsCommand(
     discordConnected: boolean;
     telegramConnected: boolean;
     teamsConnected: boolean;
+    emailConnected: boolean;
     sentryConnected: boolean;
     missingScopes: readonly string[];
     requiredScopes: string[];
     requiresSlackReconnect: boolean;
     slackWorkspaceDomain: string | null;
   };
+  emailIdentities: Array<{ id: string; emailAddress: string }>;
   slackChannelAccessWarnings: {
     channelAutoStartSlackChannels: string[];
     managerStatsSlackChannel: string | null;
@@ -317,6 +322,7 @@ export async function getBackgroundAgentSettingsCommand(
     telegramCredentials,
     teamsPrimaryConversation,
     sentryConnected,
+    emailIdentities,
     recentRuns,
   ] = await Promise.all([
     getBackgroundAgentSettingsWithAutomationsForDeployment(),
@@ -328,6 +334,7 @@ export async function getBackgroundAgentSettingsCommand(
     resolveTelegramRuntimeCredentials(),
     findTeamsPrimaryConversation(),
     hasActiveSentryIntegration(),
+    listAvailableAgentMailOutboundIdentities(auth.userId),
     listRecentAutomationTasks(),
   ]);
   const status = buildAutomationStatus(automationRows);
@@ -430,6 +437,7 @@ export async function getBackgroundAgentSettingsCommand(
       discordConnected: Boolean(discordInstallation),
       telegramConnected: Boolean(telegramCredentials.botToken),
       teamsConnected: Boolean(teamsPrimaryConversation),
+      emailConnected: emailIdentities.length > 0,
       sentryConnected,
       missingScopes,
       requiredScopes: [...REQUIRED_BACKGROUND_AGENT_SCOPES],
@@ -438,6 +446,7 @@ export async function getBackgroundAgentSettingsCommand(
         ? slackInstallation.teamDomain
         : null,
     },
+    emailIdentities,
     slackChannelAccessWarnings,
     slackChannelDisplayNames,
     resolvedDestinations,

@@ -28,6 +28,7 @@ import {
   DEFAULT_PROVIDER_USAGE_LIMIT_THRESHOLD,
   DEFAULT_PR_REVIEW_SETTINGS,
   getTriggerableBackgroundAutomationDescriptorByKey,
+  getAutomationTargetEmailIdentityId,
   isChannelAutoStartLaunchMode,
   isConflictResolverMaxPrAgeDays,
   isInternalAutomationKey,
@@ -339,7 +340,7 @@ export function resolveAutomationSlackChannelId(
 
 /** Provider-neutral resolved destination an automation reports to. */
 export type AutomationDestination = {
-  provider: 'slack' | 'teams' | 'telegram' | 'discord';
+  provider: 'slack' | 'teams' | 'telegram' | 'discord' | 'email';
   channelId: string;
   /** Which waterfall level produced this destination. */
   source: 'automation_target' | 'manager_channel';
@@ -350,6 +351,7 @@ const DESTINATION_TARGET_KINDS = [
   ['teams', 'teams_channel'],
   ['telegram', 'telegram_chat'],
   ['discord', 'discord_channel'],
+  ['email', 'email_user'],
 ] as const;
 
 function getAutomationCommunicationTarget(
@@ -1050,8 +1052,14 @@ export function normalizeBackgroundAgentSettings(
         : 'channel'
       : null,
     releaseAnnouncementsTargetChannelId:
-      releaseAnnouncementsTarget &&
-      !releaseAnnouncementsTarget.targetKind.endsWith('_user')
+      releaseAnnouncementsTarget?.provider === 'email'
+        ? getAutomationTargetEmailIdentityId(releaseAnnouncementsTarget)
+        : releaseAnnouncementsTarget &&
+            !releaseAnnouncementsTarget.targetKind.endsWith('_user')
+          ? releaseAnnouncementsTarget.externalRef
+          : null,
+    releaseAnnouncementsTargetUserId:
+      releaseAnnouncementsTarget?.provider === 'email'
         ? releaseAnnouncementsTarget.externalRef
         : null,
 
@@ -1174,7 +1182,14 @@ export function normalizeBackgroundAgentSettings(
         : 'channel'
       : null,
     mergeAnnouncerTargetChannelId:
-      mergeAnnouncerTarget && !mergeAnnouncerTarget.targetKind.endsWith('_user')
+      mergeAnnouncerTarget?.provider === 'email'
+        ? getAutomationTargetEmailIdentityId(mergeAnnouncerTarget)
+        : mergeAnnouncerTarget &&
+            !mergeAnnouncerTarget.targetKind.endsWith('_user')
+          ? mergeAnnouncerTarget.externalRef
+          : null,
+    mergeAnnouncerTargetUserId:
+      mergeAnnouncerTarget?.provider === 'email'
         ? mergeAnnouncerTarget.externalRef
         : null,
     mergeAnnouncerAdditionalRules:
@@ -1189,10 +1204,19 @@ export function normalizeBackgroundAgentSettings(
           ? resolveAutomationSlackChannelId(automation, managerSlackChannelId)
           : getAutomationSlackChannelTarget(automation);
         const discordChannelId = getAutomationDiscordChannelTarget(automation);
+        const emailTarget = automation?.targets.find(
+          (target) =>
+            target.provider === 'email' && target.targetKind === 'email_user',
+        );
 
         return [
           [descriptor.slackSettingsKey, slackChannelId],
           [descriptor.discordSettingsKey, discordChannelId],
+          [
+            descriptor.emailSettingsKey,
+            getAutomationTargetEmailIdentityId(emailTarget),
+          ],
+          [descriptor.emailUserSettingsKey, emailTarget?.externalRef ?? null],
         ];
       }),
     ),
