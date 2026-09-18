@@ -1,6 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
-
-import { SESSION_STATUSES, getSessionStatusLabel } from '@roomote/types';
+import { render, screen } from '@testing-library/react';
 
 import SessionsPage from './page';
 
@@ -28,6 +26,8 @@ vi.mock('@/lib/server/sessions', () => ({
       inferenceCostMicroUsd: 0,
       directInferenceCostMicroUsd: 0,
       unread: false,
+      artifactCount: 0,
+      singleArtifact: null,
       pullRequests: [1, 2, 3].map((number) => ({
         repository: `example/${'long-repository-name'.repeat(10)}`,
         number,
@@ -39,32 +39,28 @@ vi.mock('@/lib/server/sessions', () => ({
   }),
 }));
 
-describe('Sessions board', () => {
-  it('keeps every status section and long-content link accessible, including older sessions', async () => {
-    render(
-      await SessionsPage({ searchParams: Promise.resolve({ view: 'board' }) }),
-    );
+describe('Sessions list', () => {
+  it('keeps every session and long-content link accessible, including older sessions', async () => {
+    render(await SessionsPage({ searchParams: Promise.resolve({}) }));
 
-    for (const status of SESSION_STATUSES) {
-      const column = screen.getByRole('region', {
-        name: getSessionStatusLabel(status),
-      });
+    for (const status of ['active', 'needs_input', 'blocked', 'ready']) {
       expect(
-        within(column).getByRole('link', {
-          name: new RegExp(`Review ${status}`),
-        }),
+        screen.getByRole('link', { name: new RegExp(`Review ${status}`) }),
       ).toHaveAttribute('href', `/sessions/${status}`);
-      for (const number of [1, 2, 3]) {
-        expect(
-          within(column).getByRole('link', { name: new RegExp(`#${number}$`) }),
-        ).toHaveAttribute(
-          'href',
-          `https://github.com/example/repo/pull/${number}`,
-        );
-      }
+    }
+    for (const number of [1, 2, 3]) {
+      expect(
+        screen
+          .getAllByRole('link', { name: new RegExp(`#${number}$`) })
+          .some(
+            (link) =>
+              link.getAttribute('href') ===
+              `https://github.com/example/repo/pull/${number}`,
+          ),
+      ).toBe(true);
     }
     expect(
       screen.getByRole('link', { name: 'Show older sessions' }),
-    ).toHaveAttribute('href', '/sessions?view=board&before=older-cursor');
+    ).toHaveAttribute('href', '/sessions?before=older-cursor');
   });
 });

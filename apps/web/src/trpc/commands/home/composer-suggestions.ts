@@ -38,8 +38,6 @@ export async function getHomeComposerSuggestionsCommand(
       logger.info(
         `[home-suggestion-timing] outcome=${outcome} total_ms=${formatMetric(
           performance.now() - requestStartedAt,
-        )} preference_guard_ms=${formatMetric(
-          timing?.preferenceGuardMs ?? null,
         )} eligible_reference_lookup_ms=${formatMetric(
           timing?.eligibleReferenceLookupMs ?? null,
         )} context_cache_status=${timing?.cacheStatus ?? 'not_checked'} context_cache_ms=${formatMetric(

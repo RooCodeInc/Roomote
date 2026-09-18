@@ -170,7 +170,7 @@ async function finalizeSuggestionLaunch(params: {
 const REMOVED_SLACK_ACCOUNT_LAUNCH_FAILURE =
   'I could not start this because your linked Roomote account was removed. Ask an admin to restore your access, then reconnect Slack.';
 const UNLINKED_SLACK_ACCOUNT_FAST_LAUNCH_FAILURE =
-  'This suggestion starts in Fast mode, which needs a linked Roomote account. Link your account, then react again.';
+  'This suggestion starts a session, which needs a linked Roomote account. Link your account, then react again.';
 
 async function resolveOriginSessionSlackThread(input: {
   originSessionId: string;
@@ -740,7 +740,10 @@ async function launchTaskSuggestionTaskFromReaction({
       launch: async (launchMode) => {
         if (launchMode === 'fast') {
           if (!activeUserMapping) {
-            return { accepted: false, reason: 'Fast mode is unavailable.' };
+            return {
+              accepted: false,
+              reason: "Roomote couldn't start a conversation right now.",
+            };
           }
           if (originSessionId) {
             await fastAgentConversationRepository.getOrCreate({

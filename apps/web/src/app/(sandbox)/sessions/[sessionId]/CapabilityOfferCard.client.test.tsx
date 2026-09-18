@@ -5,7 +5,9 @@ import { CapabilityOfferCard } from './CapabilityOfferCard';
 
 const mocks = vi.hoisted(() => ({
   integrationsProps: vi.fn(),
+  invalidateQueries: vi.fn(),
   mutate: vi.fn(),
+  mutationOptions: null as null | { onSuccess?: () => Promise<void> },
   sourceControlCard: vi.fn(),
   effectiveIntegrations: [] as Array<{
     id: string;
@@ -42,18 +44,33 @@ vi.mock('@tanstack/react-query', () => ({
     isPending: false,
     isSuccess: false,
   }),
+  useQueryClient: () => ({ invalidateQueries: mocks.invalidateQueries }),
 }));
 
 vi.mock('@/trpc/client', () => ({
   useTRPC: () => ({
-    setupNew: { status: { queryOptions: () => ({ kind: 'status' }) } },
+    setup: {
+      status: { queryKey: () => ['setup.status'] },
+      sessionStatus: { queryKey: () => ['setup.sessionStatus'] },
+    },
+    setupNew: {
+      status: {
+        queryKey: () => ['setupNew.status'],
+        queryOptions: () => ({ kind: 'status' }),
+      },
+    },
     mcpConnections: {
       effectiveIntegrations: {
         queryOptions: () => ({ kind: 'effective-integrations' }),
       },
     },
     fastSessions: {
-      resolveCapabilityOffer: { mutationOptions: () => ({}) },
+      resolveCapabilityOffer: {
+        mutationOptions: (options: { onSuccess?: () => Promise<void> }) => {
+          mocks.mutationOptions = options;
+          return options;
+        },
+      },
     },
   }),
 }));
@@ -99,6 +116,8 @@ describe('CapabilityOfferCard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.effectiveIntegrations = [];
+    mocks.invalidateQueries.mockResolvedValue(undefined);
+    mocks.mutationOptions = null;
   });
 
   it.each([
@@ -198,6 +217,24 @@ describe('CapabilityOfferCard', () => {
         }),
       ),
     );
+  });
+
+  it('refreshes setup guards after resolving an offer', async () => {
+    render(
+      <CapabilityOfferCard
+        sessionId="session-1"
+        offer={{ ...offer('integrations'), integrationIds: ['notion'] }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Keep going' }));
+    await mocks.mutationOptions?.onSuccess?.();
+
+    expect(mocks.invalidateQueries.mock.calls).toEqual([
+      [{ queryKey: ['setup.status'] }],
+      [{ queryKey: ['setup.sessionStatus'] }],
+      [{ queryKey: ['setupNew.status'] }],
+    ]);
   });
 
   it('resolves a pending offer when its global configuration becomes ready', async () => {

@@ -30,7 +30,6 @@ import {
   users,
 } from '../schema';
 import { runInTransactionIfAvailable } from './transaction-utils';
-import { isDeploymentExperimentEnabled } from './deployment-experiments';
 import { createMemoryOutboxLifecycle } from './memory-outbox-lifecycle';
 import { isVisibleTask } from './tasks';
 
@@ -113,12 +112,6 @@ export async function findHomeComposerPrecomputeUserForRun(
   database: DatabaseOrTransaction,
   runId: number,
 ): Promise<string | null> {
-  if (
-    !(await isDeploymentExperimentEnabled('homeComposerSuggestions', database))
-  ) {
-    return null;
-  }
-
   const [row] = await database
     .select({ userId: tasks.initiatorUserId })
     .from(brainMemoryEvents)
@@ -129,12 +122,6 @@ export async function findHomeComposerPrecomputeUserForRun(
     .limit(1);
 
   return row?.userId ?? null;
-}
-
-export async function isHomeComposerSuggestionsEnabled(
-  database: DatabaseOrTransaction,
-): Promise<boolean> {
-  return isDeploymentExperimentEnabled('homeComposerSuggestions', database);
 }
 
 export async function upsertBrainCollectorItems(

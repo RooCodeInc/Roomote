@@ -20,8 +20,6 @@ let currentEnvironments: Array<{ id: string; name: string }> | undefined = [
 ];
 let currentEnvironmentsPending = false;
 let currentBrainConfigured = false;
-let currentHomeComposerSuggestionsEnabled = false;
-let currentHomeComposerSuggestionsFlagLoading = false;
 let currentPrivateSessionsExperimentEnabled = false;
 let currentHomeSuggestions: string[] = [];
 let currentHomeSuggestionsHasData = true;
@@ -97,15 +95,6 @@ vi.mock('@/trpc/client', () => ({
         ),
       },
     },
-  }),
-}));
-
-vi.mock('@/hooks/useHomeComposerSuggestions', () => ({
-  useHomeComposerSuggestions: () => ({
-    enabled: currentHomeComposerSuggestionsEnabled,
-    isLoading: currentHomeComposerSuggestionsFlagLoading,
-    isUpdating: false,
-    setEnabled: vi.fn(),
   }),
 }));
 
@@ -348,8 +337,6 @@ describe('Home', () => {
     ];
     currentEnvironmentsPending = false;
     currentBrainConfigured = false;
-    currentHomeComposerSuggestionsEnabled = false;
-    currentHomeComposerSuggestionsFlagLoading = false;
     currentPrivateSessionsExperimentEnabled = false;
     currentHomeSuggestions = [];
     currentHomeSuggestionsHasData = true;
@@ -598,97 +585,6 @@ describe('Home', () => {
     );
   });
 
-  it('renders the feedback prompt below the input and opens its dialog', async () => {
-    render(<Home initialPlaceholderIndex={0} />);
-
-    fireEvent.click(
-      await screen.findByRole('button', { name: 'Feedback, please!' }),
-    );
-
-    expect(
-      screen.getByRole('dialog', {
-        name: 'What do you think of Roomote so far?',
-      }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('link', { name: 'Schedule time with the team' }),
-    ).toHaveAttribute(
-      'href',
-      'https://calendly.com/d/ctx9-f7q-6vr/roomote-feedback',
-    );
-    expect(screen.getByRole('link', { name: 'Email us' })).toHaveAttribute(
-      'href',
-      'mailto:help@roomote.dev?subject=My%20thoughts%20on%20Roomote%20so%20far',
-    );
-  });
-
-  it('persists dismissal of the feedback prompt', async () => {
-    const { unmount } = render(<Home initialPlaceholderIndex={0} />);
-
-    fireEvent.click(
-      await screen.findByRole('button', { name: 'Feedback, please!' }),
-    );
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Dismiss feedback prompt' }),
-    );
-
-    expect(window.localStorage.getItem('roomote-home-feedback-dismissed')).toBe(
-      '1',
-    );
-    expect(
-      screen.queryByRole('button', { name: 'Feedback, please!' }),
-    ).not.toBeInTheDocument();
-
-    unmount();
-    render(<Home initialPlaceholderIndex={0} />);
-
-    expect(
-      screen.queryByRole('button', { name: 'Feedback, please!' }),
-    ).not.toBeInTheDocument();
-  });
-
-  it('keeps feedback dismissal usable when storage access fails', async () => {
-    const feedbackStorageKey = 'roomote-home-feedback-dismissed';
-    const originalGetItem = Storage.prototype.getItem;
-    const originalSetItem = Storage.prototype.setItem;
-    const getItemSpy = vi
-      .spyOn(Storage.prototype, 'getItem')
-      .mockImplementation((key) => {
-        if (key === feedbackStorageKey) {
-          throw new Error('Storage access blocked');
-        }
-
-        return originalGetItem.call(window.localStorage, key);
-      });
-    const setItemSpy = vi
-      .spyOn(Storage.prototype, 'setItem')
-      .mockImplementation((key, value) => {
-        if (key === feedbackStorageKey) {
-          throw new Error('Storage quota exceeded');
-        }
-
-        originalSetItem.call(window.localStorage, key, value);
-      });
-
-    try {
-      render(<Home initialPlaceholderIndex={0} />);
-
-      fireEvent.click(
-        await screen.findByRole('button', { name: 'Feedback, please!' }),
-      );
-      fireEvent.click(
-        screen.getByRole('button', { name: 'Dismiss feedback prompt' }),
-      );
-
-      expect(
-        screen.queryByRole('button', { name: 'Feedback, please!' }),
-      ).not.toBeInTheDocument();
-    } finally {
-      getItemSpy.mockRestore();
-      setItemSpy.mockRestore();
-    }
-  });
-
   it('cycles prompt placeholders every 10 seconds from a random starting point', async () => {
     vi.useFakeTimers();
 
@@ -727,22 +623,15 @@ describe('Home', () => {
     }
   });
 
-  it('restores static placeholders and suppresses personalized requests when the flag is off', async () => {
+  it('uses fallback placeholders while personalized suggestions are unavailable', async () => {
     vi.useFakeTimers();
     currentBrainConfigured = true;
-    currentHomeSuggestions = [
-      'Review authentication callback regression coverage',
-      'Fix deployment health check failures',
-      'Document session handoff recovery behavior',
-      'Investigate flaky pull request delivery',
-      'Improve Home composer keyboard accessibility',
-    ];
 
     try {
       render(<Home initialPlaceholderIndex={0} />);
       const textarea = screen.getByRole('textbox', { name: 'Task prompt' });
 
-      expect(capturedHomeSuggestionsQueryEnabled).toBe(false);
+      expect(capturedHomeSuggestionsQueryEnabled).toBe(true);
       expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
         'Find a TODO in the code and fix it',
       );
@@ -751,70 +640,33 @@ describe('Home', () => {
         await vi.advanceTimersByTimeAsync(10_000);
       });
       expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
-        'Try a different design for our home page',
+        'Find a TODO in the code and fix it',
       );
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('requests personalized suggestions only when the flag and Brain are enabled', () => {
+  it('requests personalized suggestions when Brain is enabled', () => {
     currentBrainConfigured = true;
-    currentHomeComposerSuggestionsEnabled = true;
 
     render(<Home initialPlaceholderIndex={0} />);
 
     expect(capturedHomeSuggestionsQueryEnabled).toBe(true);
   });
 
-  it('autofocuses Home when the experiment is off', () => {
-    render(<Home initialPlaceholderIndex={0} />);
-
-    expect(screen.getByRole('textbox', { name: 'Task prompt' })).toHaveFocus();
-    expect(capturedAutoFocus).toBe(false);
-  });
-
-  it('does not autofocus Home when the experiment is on', () => {
-    currentHomeComposerSuggestionsEnabled = true;
-
+  it('does not autofocus Home', () => {
     render(<Home initialPlaceholderIndex={0} />);
 
     expect(
       screen.getByRole('textbox', { name: 'Task prompt' }),
     ).not.toHaveFocus();
-  });
-
-  it('waits for a disabled experiment to load before focusing once', () => {
-    currentHomeComposerSuggestionsFlagLoading = true;
-    const { rerender } = render(<Home initialPlaceholderIndex={0} />);
-    const textarea = screen.getByRole('textbox', { name: 'Task prompt' });
-
-    expect(textarea).not.toHaveFocus();
-    currentHomeComposerSuggestionsFlagLoading = false;
-    rerender(<Home initialPlaceholderIndex={0} />);
-    expect(textarea).toHaveFocus();
-
-    act(() => textarea.blur());
-    rerender(<Home initialPlaceholderIndex={0} />);
-    expect(textarea).not.toHaveFocus();
-  });
-
-  it('never autofocuses after an enabled experiment finishes loading', () => {
-    currentHomeComposerSuggestionsEnabled = true;
-    currentHomeComposerSuggestionsFlagLoading = true;
-    const { rerender } = render(<Home initialPlaceholderIndex={0} />);
-    const textarea = screen.getByRole('textbox', { name: 'Task prompt' });
-
-    currentHomeComposerSuggestionsFlagLoading = false;
-    rerender(<Home initialPlaceholderIndex={0} />);
-
-    expect(textarea).not.toHaveFocus();
+    expect(capturedAutoFocus).toBe(false);
   });
 
   it('cycles generated memory suggestions using the existing timing', async () => {
     vi.useFakeTimers();
     currentBrainConfigured = true;
-    currentHomeComposerSuggestionsEnabled = true;
     currentHomeSuggestions = [
       'Add regression coverage for recent authentication fixes',
       'Review the latest deployment reliability follow-ups',
@@ -852,7 +704,6 @@ describe('Home', () => {
 
   it('keeps the suggestion area empty during the initial request', () => {
     currentBrainConfigured = true;
-    currentHomeComposerSuggestionsEnabled = true;
     currentHomeSuggestionsHasData = false;
     currentHomeSuggestionsPending = true;
 
@@ -866,7 +717,6 @@ describe('Home', () => {
 
   it('shows generated suggestions after the initial request succeeds', () => {
     currentBrainConfigured = true;
-    currentHomeComposerSuggestionsEnabled = true;
     currentHomeSuggestions = [
       'Add focused regression tests for authentication callback validation across supported login flows',
       'Resolve deployment health check gaps before the next production release begins',
@@ -889,7 +739,6 @@ describe('Home', () => {
     'shows fallback placeholders after a settled $state result',
     ({ hasData, isError }) => {
       currentBrainConfigured = true;
-      currentHomeComposerSuggestionsEnabled = true;
       currentHomeSuggestionsHasData = hasData;
       currentHomeSuggestionsError = isError;
 
@@ -903,7 +752,6 @@ describe('Home', () => {
 
   it('keeps cached suggestions visible during a background refresh', () => {
     currentBrainConfigured = true;
-    currentHomeComposerSuggestionsEnabled = true;
     currentHomeSuggestionsFetching = true;
     currentHomeSuggestions = [
       'Add focused regression tests for authentication callback validation across supported login flows',
@@ -923,7 +771,6 @@ describe('Home', () => {
   it('pauses suggestion rotation while focused and resumes after blur', async () => {
     vi.useFakeTimers();
     currentBrainConfigured = true;
-    currentHomeComposerSuggestionsEnabled = true;
     currentHomeSuggestions = [
       'Add focused regression tests for authentication callback validation across supported login flows',
       'Resolve deployment health check gaps before the next production release begins',

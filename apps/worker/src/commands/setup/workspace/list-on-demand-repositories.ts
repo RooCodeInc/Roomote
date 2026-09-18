@@ -35,14 +35,22 @@ function toOnDemandRepository(
  * snapshot, so when it is present the live list is narrowed to it and each
  * entry keeps its stamped provider; otherwise the deployment's active
  * repositories for the run's source-control provider are used.
+ *
+ * The manifest keeps every stamped entry, because a repository prepared at
+ * setup stays on disk even if it is deactivated later. `checkoutableOnly`
+ * instead drops stamped entries that are no longer active under their stamped
+ * provider, which is exactly what `clone_repository` would reject.
  */
-export async function listOnDemandRepositories({
-  sourceControlProvider = DEFAULT_SOURCE_CONTROL_PROVIDER,
-  repositoryProviders,
-}: {
-  sourceControlProvider?: SourceControlProvider;
-  repositoryProviders?: Record<string, SourceControlProvider>;
-}): Promise<OnDemandRepository[]> {
+export async function listOnDemandRepositories(
+  {
+    sourceControlProvider = DEFAULT_SOURCE_CONTROL_PROVIDER,
+    repositoryProviders,
+  }: {
+    sourceControlProvider?: SourceControlProvider;
+    repositoryProviders?: Record<string, SourceControlProvider>;
+  },
+  { checkoutableOnly = false }: { checkoutableOnly?: boolean } = {},
+): Promise<OnDemandRepository[]> {
   const stampedProviders = Object.entries(repositoryProviders ?? {});
 
   if (stampedProviders.length === 0) {
@@ -58,11 +66,23 @@ export async function listOnDemandRepositories({
     );
   }
 
+  const active = await sdk.repositories.listRepositories({});
+
+  if (checkoutableOnly) {
+    return stampedProviders.flatMap(([fullName, provider]) => {
+      const repository = active.find(
+        (candidate) =>
+          candidate.fullName === fullName &&
+          (candidate.sourceControlProvider ??
+            DEFAULT_SOURCE_CONTROL_PROVIDER) === provider,
+      );
+
+      return repository ? [toOnDemandRepository(repository, provider)] : [];
+    });
+  }
+
   const listed = new Map(
-    (await sdk.repositories.listRepositories({})).map((repository) => [
-      repository.fullName,
-      repository,
-    ]),
+    active.map((repository) => [repository.fullName, repository]),
   );
 
   return stampedProviders.map(([fullName, provider]) =>

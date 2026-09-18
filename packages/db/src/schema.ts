@@ -3865,11 +3865,24 @@ export const sessionAttentionNotifications = pgTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     eventKey: text('event_key').notNull(),
     kind: text('kind').notNull().$type<'result_ready' | 'input_needed'>(),
+    presentationKind: text('presentation_kind').$type<
+      'response' | 'error' | 'input'
+    >(),
+    body: text('body'),
     leaseToken: uuid('lease_token'),
     leaseExpiresAt: timestamp('lease_expires_at'),
     outcome: text('outcome').$type<
       'delivered' | 'skipped_present' | 'failed'
     >(),
+    deliveryChannel: text('delivery_channel').$type<
+      'browser' | 'personal_provider'
+    >(),
+    browserPromptEligibleAt: timestamp('browser_prompt_eligible_at'),
+    browserOfferedAt: timestamp('browser_offered_at'),
+    browserOfferExpiresAt: timestamp('browser_offer_expires_at'),
+    browserAcceptedAt: timestamp('browser_accepted_at'),
+    browserOpenedAt: timestamp('browser_opened_at'),
+    browserClientId: uuid('browser_client_id'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
@@ -3886,6 +3899,14 @@ export const sessionAttentionNotifications = pgTable(
     check(
       'session_attention_notifications_outcome_check',
       sql`${table.outcome} IS NULL OR ${table.outcome} in ('delivered', 'skipped_present', 'failed')`,
+    ),
+    check(
+      'session_attention_notifications_presentation_kind_check',
+      sql`${table.presentationKind} IS NULL OR ${table.presentationKind} in ('response', 'error', 'input')`,
+    ),
+    check(
+      'session_attention_notifications_delivery_channel_check',
+      sql`${table.deliveryChannel} IS NULL OR ${table.deliveryChannel} in ('browser', 'personal_provider')`,
     ),
   ],
 );
@@ -5613,6 +5634,69 @@ export const customMcpServersRelations = relations(
   ({ one }) => ({
     createdByUser: one(users, {
       fields: [customMcpServers.createdByUserId],
+      references: [users.id],
+    }),
+  }),
+);
+
+/**
+ * personalMcpServers
+ *
+ * Remote MCP servers private to the member who added them ("Only me"),
+ * shown under Personal settings. They are a separate table from
+ * customMcpServers on purpose: every deployment-scoped query, the N-1
+ * release included, keeps seeing only deployment rows, so a code path that
+ * has not been taught about ownership fails closed instead of handing one
+ * member's credentials to another. Names are unique per owner.
+ *
+ * A row keeps its id when its visibility changes, so it moves between this
+ * table and customMcpServers without breaking its proxy URL
+ * (`/api/mcp/custom/<id>`) or its `custom:<id>` connection. The OAuth
+ * connection for a personal server is the mcpConnections row whose userId is
+ * the owner. Remote transport only: a stdio server would put the owner's env
+ * values inside a sandbox.
+ */
+export const personalMcpServers = pgTable(
+  'personal_mcp_servers',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    ownerUserId: text('owner_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    url: text('url').notNull(),
+    authType: text('auth_type')
+      .notNull()
+      .default('none')
+      .$type<CustomMcpServerAuthType>(),
+    headers: jsonb('headers').$type<Record<string, string>>(),
+    disabledTools: text('disabled_tools').array(),
+    manualClientId: text('manual_client_id'),
+    manualClientSecret: encryptedText('manual_client_secret'),
+    oauthServerMetadata: jsonb(
+      'oauth_server_metadata',
+    ).$type<OAuthServerMetadata>(),
+    oauthServerMetadataFetchedAt: timestamp('oauth_server_metadata_fetched_at'),
+    oauthResourceIndicatorDisabled: boolean('oauth_resource_indicator_disabled')
+      .notNull()
+      .default(false),
+    enabled: boolean('enabled').notNull().default(true),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    unique('personal_mcp_servers_owner_name_unique').on(
+      table.ownerUserId,
+      table.name,
+    ),
+  ],
+);
+
+export const personalMcpServersRelations = relations(
+  personalMcpServers,
+  ({ one }) => ({
+    owner: one(users, {
+      fields: [personalMcpServers.ownerUserId],
       references: [users.id],
     }),
   }),

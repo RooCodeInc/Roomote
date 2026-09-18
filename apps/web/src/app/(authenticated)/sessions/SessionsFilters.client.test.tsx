@@ -142,7 +142,7 @@ describe('SessionsFilters', () => {
     );
   });
 
-  it('expands search to the left, shows a submit hint, and switches views', () => {
+  it('expands search to the left and shows a submit hint', () => {
     render(<SessionsFilters {...baseProps} />);
     const searchButton = screen.getByRole('button', {
       name: 'Toggle session search',
@@ -167,19 +167,13 @@ describe('SessionsFilters', () => {
       screen.getByRole('button', { name: 'Submit session search' }),
     );
     expect(replaceMock).toHaveBeenCalledWith('/sessions?q=release+notes');
-
-    fireEvent.click(screen.getByRole('button', { name: 'Board view' }));
-    expect(replaceMock).toHaveBeenCalledWith('/sessions?view=board');
-    expect(localStorage.getItem('roomote-sessions-view')).toBe('board');
   });
 
   it('clears the search query from the URL when search is closed', () => {
     searchParamsMock.current = new URLSearchParams(
       'q=release+notes&view=board',
     );
-    render(
-      <SessionsFilters {...baseProps} query="release notes" view="board" />,
-    );
+    render(<SessionsFilters {...baseProps} query="release notes" />);
 
     const searchButton = screen.getByRole('button', {
       name: 'Toggle session search',
@@ -190,6 +184,6 @@ describe('SessionsFilters', () => {
 
     expect(screen.queryByPlaceholderText('Search...')).not.toBeInTheDocument();
     expect(searchButton).toHaveAttribute('aria-pressed', 'false');
-    expect(replaceMock).toHaveBeenCalledWith('/sessions?view=board');
+    expect(replaceMock).toHaveBeenCalledWith('/sessions');
   });
 });

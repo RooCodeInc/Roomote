@@ -438,8 +438,8 @@ function SessionArtifactsPanel({
   sessionId: string;
   sessionArtifacts: SessionArtifact[];
   /**
-   * Session-owned artifact requested by the page URL. Preselects the matching
-   * gallery entry on mount; an unmatched request falls back to the gallery.
+   * Artifact requested by the page URL. Preselects the matching gallery entry
+   * on mount; an unmatched request falls back to the gallery.
    */
   initialSelection?: SessionArtifactSelection | null;
   /** Called when the viewer returns to the gallery. */
@@ -456,7 +456,10 @@ function SessionArtifactsPanel({
       if (!initialSelection) return null;
       const entry = artifacts.find(
         ({ owner, artifact }) =>
-          'sessionId' in owner && artifact.path === initialSelection.path,
+          artifact.path === initialSelection.path &&
+          (initialSelection.taskId
+            ? 'taskId' in owner && owner.taskId === initialSelection.taskId
+            : 'sessionId' in owner),
       );
       return entry
         ? {

@@ -27,6 +27,7 @@ import {
   FAST_AGENT_MEMORY_FACT_MAX_CHARS,
   INFERENCE_PROVIDER_MAX_RETRIES,
   MCP_INTEGRATIONS,
+  customMcpServerVisibilitySchema,
   NO_REPOSITORIES,
   ROOMOTE_MCP_ID,
   HTTP_INTEGRATIONS_MCP_ID,
@@ -60,6 +61,7 @@ import {
   type DataVisualizationInput,
   CALL_INTEGRATION_TOOL_TOOL,
   FIND_INTEGRATION_TOOLS_TOOL,
+  LIST_REPOSITORIES_MAX_LIMIT,
 } from '@roomote/types';
 import {
   and,
@@ -108,7 +110,9 @@ import {
 } from '../../utils';
 import { resolveRoomoteReleaseVersion } from '../../release-version';
 import {
+  getActiveRepositoryCatalog,
   getAvailableEnvironments,
+  listActiveRepositories,
   type RoutableEnvironment,
 } from '../available-environments';
 import { requireRecipeControlAdapter } from '../environment-recipes';
@@ -558,6 +562,18 @@ const ignoreEventArgsSchema = z.object({ reason: z.string().trim().min(1) });
 const findIntegrationToolsArgsSchema = z.object(
   FIND_INTEGRATION_TOOLS_TOOL.inputSchema,
 );
+// gpt-5.x fills every optional argument, so null means absent here.
+const listRepositoriesArgsSchema = z.object({
+  query: z.string().trim().nullable().optional(),
+  offset: z.number().int().nonnegative().nullable().optional(),
+  limit: z
+    .number()
+    .int()
+    .positive()
+    .max(LIST_REPOSITORIES_MAX_LIMIT)
+    .nullable()
+    .optional(),
+});
 const inspectImagesArgsSchema = z.object({
   question: z.string().min(1),
   imageIds: z.array(z.string().min(1)).nullable().optional(),
@@ -1766,6 +1782,7 @@ const addRemoteMcpArgsSchema = z
   .object({
     name: z.string().trim().min(1).max(80),
     url: z.string().url().startsWith('https://').max(2_048),
+    visibility: customMcpServerVisibilitySchema.optional(),
   })
   .strict();
 
@@ -3220,11 +3237,13 @@ export async function answerFastAgentQuestion({
   let visibleUpdatePosted = false;
   let userAttention: {
     kind: 'result_ready' | 'input_needed';
+    presentationKind: 'response' | 'error' | 'input';
     eventId: string;
     message?: string;
     manual: boolean;
   } = {
     kind: 'result_ready',
+    presentationKind: 'response',
     eventId: turnId,
     // Human web turns and their delegated-task results are manual attention;
     // automation and scheduler platform events must never notify an absent user.
@@ -3264,6 +3283,7 @@ export async function answerFastAgentQuestion({
     }
     const [
       availableEnvironments,
+      activeRepositories,
       taskModelOptions,
       session,
       discoveredIntegrations,
@@ -3272,6 +3292,13 @@ export async function answerFastAgentQuestion({
       nativeIntegrationCatalog,
     ] = await Promise.all([
       getAvailableEnvironments(),
+      getActiveRepositoryCatalog().catch((error) => {
+        degradedContextComponents.add('repository_catalog');
+        console.warn(
+          `[Fast Agent] Active repository catalog unavailable: ${formatErrorForLog(error)}`,
+        );
+        return null;
+      }),
       getDeploymentTaskModelOptions().catch((error) => {
         degradedContextComponents.add('task_model_catalog');
         console.warn(
@@ -3690,6 +3717,7 @@ export async function answerFastAgentQuestion({
     );
     const system = buildFastAgentSystemPrompt({
       availableEnvironments,
+      activeRepositories,
       availableSkills,
       availableTaskModels: taskModelOptions.models,
       defaultTaskModelId: taskModelOptions.defaultModelId,
@@ -3714,7 +3742,7 @@ export async function answerFastAgentQuestion({
       ...(setupSnapshot ? { setupSnapshot } : {}),
       setupSession,
       serviceCredentialToolsEnabled: currentUser.serviceCredentialToolsEnabled,
-      addRemoteMcpEnabled: currentUser.isAdmin && !platformEvent,
+      addRemoteMcpEnabled: !platformEvent,
       personalizationContext,
       globalAgentInstructions: agentBehaviorSettings?.globalAgentInstructions,
       workspaceRoutingRules:
@@ -3822,6 +3850,8 @@ export async function answerFastAgentQuestion({
             replyWithImages.purpose === 'clarification'
               ? 'input_needed'
               : 'result_ready',
+          presentationKind:
+            replyWithImages.purpose === 'clarification' ? 'input' : 'response',
           eventId: turnId,
           message: replyWithImages.message,
           manual: userAttention.manual,
@@ -4038,6 +4068,9 @@ export async function answerFastAgentQuestion({
       // A catalog lookup reads nothing external; the call it prepares for is
       // still gated on the acknowledgement.
       FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools,
+      // Resolving which connected repository the user meant is part of
+      // understanding the request; it reads only this deployment's own list.
+      FAST_AGENT_NATIVE_TOOL_NAMES.listRepositories,
       // Reading an attachment the user just sent is part of understanding
       // the request, not an action taken on their behalf.
       FAST_AGENT_NATIVE_TOOL_NAMES.inspectImages,
@@ -4301,7 +4334,7 @@ export async function answerFastAgentQuestion({
       if (found.unknownIntegration && catalogIntegrations.length === 0) {
         return {
           success: false as const,
-          error: `No on-demand deployment MCP server with id "${args.integrationId}" is available in fast mode.`,
+          error: `No on-demand deployment MCP server with id "${args.integrationId}" is available in this conversation.`,
         };
       }
       const disconnectedCatalogMatch = catalogIntegrations.some(
@@ -4476,14 +4509,7 @@ export async function answerFastAgentQuestion({
               return {
                 success: false,
                 error:
-                  'A deployment administrator must request this connection in a human-authored turn.',
-              };
-            }
-            if (!currentUser.isAdmin) {
-              return {
-                success: false,
-                error:
-                  'Only a deployment administrator can add a custom remote MCP integration.',
+                  'A member must request this connection in a human-authored turn.',
               };
             }
             const args = addRemoteMcpArgsSchema.parse(call.args);
@@ -5757,6 +5783,7 @@ export async function answerFastAgentQuestion({
             });
             userAttention = {
               kind: 'input_needed',
+              presentationKind: 'input',
               eventId: requestId,
               message: questions
                 .map((question) => question.question)
@@ -5773,6 +5800,18 @@ export async function answerFastAgentQuestion({
             return describeIntegrationTools(
               findIntegrationToolsArgsSchema.parse(call.args),
             );
+          }
+          case FAST_AGENT_NATIVE_TOOL_NAMES.listRepositories: {
+            const args = listRepositoriesArgsSchema.parse(call.args);
+            throwIfTurnCancelled();
+            return {
+              success: true,
+              ...(await listActiveRepositories({
+                ...(args.query ? { query: args.query } : {}),
+                ...(args.offset ? { offset: args.offset } : {}),
+                ...(args.limit ? { limit: args.limit } : {}),
+              })),
+            };
           }
           case FAST_AGENT_NATIVE_TOOL_NAMES.inspectImages: {
             return inspectTurnImages(inspectImagesArgsSchema.parse(call.args));
@@ -5905,6 +5944,8 @@ export async function answerFastAgentQuestion({
             recordedCloseout.purpose === 'clarification'
               ? 'input_needed'
               : 'result_ready',
+          presentationKind:
+            recordedCloseout.purpose === 'clarification' ? 'input' : 'response',
           eventId: turnId,
           message: recordedCloseout.text,
           manual: userAttention.manual,
@@ -5970,7 +6011,7 @@ export async function answerFastAgentQuestion({
               currentUser.serviceCredentialToolsEnabled,
             serviceCredentialPrepareEnabled:
               currentUser.serviceCredentialToolsEnabled && !platformEvent,
-            addRemoteMcpEnabled: currentUser.isAdmin && !platformEvent,
+            addRemoteMcpEnabled: !platformEvent,
           },
         );
         const unbindExecutors = new Set<() => void>();
@@ -6739,7 +6780,11 @@ export async function answerFastAgentQuestion({
         inferenceRetryMessageIndex = undefined;
         inferenceRetryCanonicalEvent = undefined;
         lastVisibleMessage = message;
-        userAttention = { ...userAttention, message };
+        userAttention = {
+          ...userAttention,
+          presentationKind: 'error',
+          message,
+        };
         userAttentionReady = true;
       } catch (postError) {
         console.error(

@@ -131,7 +131,6 @@ export {
   Maximize2,
   Medal,
   Menu,
-  MessageCirclePlus,
   MessageCircleQuestionMark,
   MessageSquareCode,
   MessageSquareIcon,

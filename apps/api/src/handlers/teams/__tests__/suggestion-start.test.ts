@@ -416,7 +416,9 @@ describe('launchClaimedTeamsSuggestion', () => {
 
     expect(outcome).toEqual({ result: 'rejected' });
     expect(postMessage).toHaveBeenCalledWith(
-      expect.stringContaining('Fast mode is unavailable.'),
+      expect.stringContaining(
+        "Roomote couldn't start a conversation right now.",
+      ),
     );
     expect(releaseWorkItemClaimMock).toHaveBeenCalledTimes(1);
   });

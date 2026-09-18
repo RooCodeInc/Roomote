@@ -10,7 +10,10 @@ describe('startAcceptedFastAgentTurn', () => {
         run: async ({ onRejected }) => onRejected(),
         onError: vi.fn(),
       }),
-    ).resolves.toEqual({ accepted: false, reason: 'Fast session is busy.' });
+    ).resolves.toEqual({
+      accepted: false,
+      reason: 'This conversation is busy.',
+    });
   });
 
   it('rejects startup failures before acceptance', async () => {
@@ -35,7 +38,7 @@ describe('startAcceptedFastAgentTurn', () => {
       }),
     ).resolves.toEqual({
       accepted: false,
-      reason: 'Fast session did not accept the request.',
+      reason: 'Roomote did not accept the request.',
     });
   });
 

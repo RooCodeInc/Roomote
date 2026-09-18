@@ -50,7 +50,7 @@ export function AcpActivityGroupMessage({
   return (
     <Collapsible
       defaultOpen={false}
-      className="group group/acp-activity my-3"
+      className="group/acp-activity my-3"
       data-testid="acp-activity-group"
     >
       {anchorIds.map((anchorId) => (

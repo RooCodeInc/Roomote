@@ -2,6 +2,7 @@ import { type LucideIcon } from '@/components/system';
 import {
   ChartColumnIncreasing,
   House,
+  Plug,
   NotepadText,
   Rows4,
   Zap,
@@ -49,6 +50,14 @@ const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
     matchExact: false,
     matchPaths: ['/automations'],
     requiresSetup: true,
+  },
+  {
+    icon: Plug,
+    href: '/integrations',
+    label: 'Integrations',
+    description: 'Connect Roomote with tools your team uses',
+    matchExact: false,
+    matchPaths: ['/integrations'],
   },
   {
     icon: NotepadText,

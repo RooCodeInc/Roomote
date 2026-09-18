@@ -1336,26 +1336,32 @@ describe('deliverFastAgentParentEvent', () => {
         text: 'The report is ready.',
         blocks: [
           expect.objectContaining({
-            type: 'context',
-            elements: expect.arrayContaining([
-              expect.objectContaining({ text: 'Weekly scan' }),
-            ]),
+            type: 'container',
+            title: expect.objectContaining({ text: 'Weekly scan' }),
+            child_blocks: [expect.objectContaining({ type: 'rich_text' })],
           }),
-          { type: 'markdown', text: 'The report is ready.' },
           { type: 'data_visualization', ...chart },
           expect.objectContaining({
-            type: 'actions',
-            elements: [
+            type: 'container',
+            title: expect.objectContaining({ text: 'Weekly scan' }),
+            child_blocks: [
               expect.objectContaining({
-                action_id: 'late_bound_automation_view_session',
-                text: expect.objectContaining({ text: 'Follow' }),
-                url: expect.stringContaining(`/sessions/${parent.sessionId}`),
-              }),
-              expect.objectContaining({
-                action_id: 'late_bound_automation_configure',
-                url: expect.stringContaining(
-                  '/automations#custom-automation-automation-1',
-                ),
+                type: 'actions',
+                elements: [
+                  expect.objectContaining({
+                    action_id: 'late_bound_automation_view_session',
+                    text: expect.objectContaining({ text: 'Follow' }),
+                    url: expect.stringContaining(
+                      `/sessions/${parent.sessionId}`,
+                    ),
+                  }),
+                  expect.objectContaining({
+                    action_id: 'late_bound_automation_configure',
+                    url: expect.stringContaining(
+                      '/automations#custom-automation-automation-1',
+                    ),
+                  }),
+                ],
               }),
             ],
           }),
@@ -1584,8 +1590,13 @@ describe('deliverFastAgentParentEvent', () => {
         channel: 'C123',
         text: 'The proof is ready.',
         blocks: expect.arrayContaining([
-          { type: 'markdown', text: 'The proof is ready.' },
-          expect.objectContaining({ type: 'image' }),
+          expect.objectContaining({
+            type: 'container',
+            child_blocks: expect.arrayContaining([
+              expect.objectContaining({ type: 'rich_text' }),
+              expect.objectContaining({ type: 'image' }),
+            ]),
+          }),
         ]),
       }),
     );
@@ -1869,7 +1880,12 @@ describe('deliverFastAgentParentEvent', () => {
             message: expect.objectContaining({
               text: `Result.\n\n${fallback}`,
               blocks: expect.arrayContaining([
-                { type: 'markdown', text: fallback },
+                expect.objectContaining({
+                  type: 'container',
+                  child_blocks: expect.arrayContaining([
+                    expect.objectContaining({ type: 'rich_text' }),
+                  ]),
+                }),
               ]),
             }),
           }),
@@ -2055,20 +2071,20 @@ describe('deliverFastAgentParentEvent', () => {
         text: 'The proof is ready.',
         blocks: [
           expect.objectContaining({
-            type: 'context',
-            elements: expect.arrayContaining([
-              expect.objectContaining({ text: 'Weekly scan' }),
-            ]),
-          }),
-          { type: 'markdown', text: 'The proof is ready.' },
-          expect.objectContaining({
-            type: 'actions',
-            elements: expect.arrayContaining([
+            type: 'container',
+            title: expect.objectContaining({ text: 'Weekly scan' }),
+            child_blocks: expect.arrayContaining([
+              expect.objectContaining({ type: 'rich_text' }),
               expect.objectContaining({
-                action_id: 'late_bound_automation_view_session',
-              }),
-              expect.objectContaining({
-                action_id: 'late_bound_automation_configure',
+                type: 'actions',
+                elements: expect.arrayContaining([
+                  expect.objectContaining({
+                    action_id: 'late_bound_automation_view_session',
+                  }),
+                  expect.objectContaining({
+                    action_id: 'late_bound_automation_configure',
+                  }),
+                ]),
               }),
             ]),
           }),
@@ -2114,12 +2130,17 @@ describe('deliverFastAgentParentEvent', () => {
       message: expect.objectContaining({
         text: 'The proof is ready.',
         blocks: expect.arrayContaining([
-          { type: 'markdown', text: 'The proof is ready.' },
           expect.objectContaining({
-            type: 'actions',
-            elements: expect.arrayContaining([
+            type: 'container',
+            child_blocks: expect.arrayContaining([
+              expect.objectContaining({ type: 'rich_text' }),
               expect.objectContaining({
-                action_id: 'late_bound_automation_view_session',
+                type: 'actions',
+                elements: expect.arrayContaining([
+                  expect.objectContaining({
+                    action_id: 'late_bound_automation_view_session',
+                  }),
+                ]),
               }),
             ]),
           }),

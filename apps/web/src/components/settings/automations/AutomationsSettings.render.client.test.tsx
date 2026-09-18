@@ -12,6 +12,12 @@ const managerInstructionsPlaceholder =
   /Optional guidance for which ideas to prioritize or avoid/;
 
 const state = vi.hoisted(() => ({
+  latestScheduleOptions: null as {
+    onSuccess: (
+      result: { status: 'ambiguous'; clarification: string },
+      variables: { schedule: string },
+    ) => void;
+  } | null,
   isAdmin: true,
   catalogQueryOptions: [] as Array<{ enabled?: boolean }>,
   queriedKeys: [] as unknown[],
@@ -570,7 +576,11 @@ vi.mock('@/trpc/client', () => ({
         },
       },
       resolveCustomAutomationSchedule: {
-        mutationOptions: (options?: Record<string, unknown>) => options ?? {},
+        mutationOptions: (options?: Record<string, unknown>) => {
+          state.latestScheduleOptions =
+            options as typeof state.latestScheduleOptions;
+          return options ?? {};
+        },
       },
       updateSettings: {
         mutationOptions: (options?: Record<string, unknown>) => {
@@ -1165,6 +1175,16 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
   });
 
+  it('offers the shared run-now action for installed release announcements', async () => {
+    render(<AutomationsSettings />);
+
+    expect(
+      await screen.findByRole('button', {
+        name: 'Run Announce Roomote Updates now',
+      }),
+    ).toBeEnabled();
+  });
+
   it('shows provider support as plain text instead of badges', async () => {
     render(<AutomationsSettings />);
 
@@ -1347,6 +1367,101 @@ describe('AutomationsSettings', () => {
       screen.getByRole('switch', { name: 'Toggle Daily scan' }),
     ).not.toBeChecked();
     expect(mutations.updateSettings).not.toHaveBeenCalled();
+  });
+
+  it('preserves the resolver clarification after another submission', async () => {
+    render(<CustomAutomationsSection />);
+    fireEvent.click(screen.getByRole('button', { name: 'New' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), {
+      target: { value: 'Review' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Prompt' }), {
+      target: { value: 'Review prompt' },
+    });
+    fireEvent.click(
+      screen.getByRole('combobox', { name: 'Preferred environment' }),
+    );
+    fireEvent.click(screen.getByRole('option', { name: 'Let Roomote decide' }));
+    fireEvent.click(screen.getByRole('combobox', { name: 'Schedule' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Custom schedule' }));
+    const input = screen.getByRole('textbox', { name: 'Custom schedule' });
+    fireEvent.change(input, { target: { value: 'Every weekday' } });
+    await act(async () =>
+      state.latestScheduleOptions!.onSuccess(
+        { status: 'ambiguous', clarification: 'What time on weekdays?' },
+        { schedule: 'Every weekday' },
+      ),
+    );
+    expect(screen.getByText('What time on weekdays?')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    expect(screen.getByText('What time on weekdays?')).toBeVisible();
+  });
+
+  it('focuses and describes an invalid custom schedule before creating', () => {
+    render(<CustomAutomationsSection />);
+    fireEvent.click(screen.getByRole('button', { name: 'New' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), {
+      target: { value: 'Schedule validation' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Prompt' }), {
+      target: { value: 'Verify custom schedule recovery.' },
+    });
+    fireEvent.click(
+      screen.getByRole('combobox', { name: 'Preferred environment' }),
+    );
+    fireEvent.click(screen.getByRole('option', { name: 'Let Roomote decide' }));
+    fireEvent.click(screen.getByRole('combobox', { name: 'Schedule' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Custom schedule' }));
+
+    const schedule = screen.getByRole('textbox', { name: 'Custom schedule' });
+    mutations.updateSettings.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+    expect(mutations.updateSettings).not.toHaveBeenCalled();
+    expect(schedule).toHaveFocus();
+    expect(schedule).toHaveAttribute('aria-invalid', 'true');
+    expect(schedule).toHaveAccessibleDescription(
+      'Enter a valid schedule first.',
+    );
+    expect(screen.getByText('Enter a valid schedule first.')).toHaveAttribute(
+      'role',
+      'alert',
+    );
+
+    fireEvent.change(schedule, { target: { value: '0 9 * * 1-5' } });
+    expect(schedule).not.toHaveAttribute('aria-invalid');
+    expect(
+      screen.queryByText('Enter a valid schedule first.'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText('At 09:00 AM, Monday through Friday (UTC)'),
+    ).toBeInTheDocument();
+  });
+
+  it('uses the same invalid custom schedule recovery while editing', async () => {
+    setRunnableCustomAutomation();
+    render(<AutomationsSettings />);
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Configure Daily scan' }),
+    );
+    fireEvent.click(screen.getByRole('combobox', { name: 'Schedule' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Custom schedule' }));
+
+    const schedule = screen.getByRole('textbox', { name: 'Custom schedule' });
+    mutations.updateSettings.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(mutations.updateSettings).not.toHaveBeenCalled();
+    expect(schedule).toHaveFocus();
+    expect(schedule).toHaveAccessibleDescription(
+      'Enter a valid schedule first.',
+    );
+
+    fireEvent.click(screen.getByRole('combobox', { name: 'Schedule' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Daily' }));
+    expect(
+      screen.queryByText('Enter a valid schedule first.'),
+    ).not.toBeInTheDocument();
   });
 
   it('disables a scheduled automation directly', async () => {
@@ -1853,7 +1968,7 @@ describe('AutomationsSettings', () => {
     ).toHaveTextContent('High');
     expect(
       screen.getByText(
-        'Each run is a Session in the web app and does not send a report.',
+        'Each run is a session in the web app and does not send a report.',
       ),
     ).toBeInTheDocument();
     fireEvent.click(
@@ -2063,7 +2178,7 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        'Each run is a Session that reports findings and failures here, and replies continue it.',
+        'Each run is a session that reports findings and failures here, and replies continue it.',
       ),
     ).toBeInTheDocument();
   });
@@ -2114,7 +2229,7 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        'Each run is a Session that reports findings and failures here, and replies continue it.',
+        'Each run is a session that reports findings and failures here, and replies continue it.',
       ),
     ).toBeInTheDocument();
   });
@@ -2157,7 +2272,7 @@ describe('AutomationsSettings', () => {
 
     expect(
       screen.getByText(
-        'Each run is a Session that reports findings and failures here, and replies continue it.',
+        'Each run is a session that reports findings and failures here, and replies continue it.',
       ),
     ).toBeInTheDocument();
   });
@@ -2200,7 +2315,7 @@ describe('AutomationsSettings', () => {
 
     expect(
       screen.getByText(
-        'Each run is a Session that reports findings and failures here, and replies continue it.',
+        'Each run is a session that reports findings and failures here, and replies continue it.',
       ),
     ).toBeInTheDocument();
   });

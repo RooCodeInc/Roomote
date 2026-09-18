@@ -48,9 +48,9 @@ describe('metadata descriptions', () => {
     ).toEqual({
       results: true,
       slackPeerConversations: false,
-      homeComposerSuggestions: false,
       serviceCredentialTools: false,
       privateSessions: false,
+      browserNotifications: false,
     });
   });
 });

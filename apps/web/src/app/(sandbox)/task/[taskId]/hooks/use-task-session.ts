@@ -120,6 +120,12 @@ export interface TaskSession {
   /** True while session data or the sandbox token is still being fetched. */
   isLoading: boolean;
 
+  /** True while the task session query is fetching, including a retry. */
+  isSessionFetching: boolean;
+
+  /** Retry the initial task session query without navigating away. */
+  retryInitialLoad: () => Promise<void>;
+
   /** Refresh the live sandbox connection target after a connection error. */
   refreshConnection: () => Promise<SandboxConnectionTarget | null>;
 }
@@ -259,6 +265,7 @@ export function useTaskSession(
   );
 
   const isSessionLoading = sessionQuery.isLoading;
+  const isSessionFetching = sessionQuery.isFetching;
   const isTokenLoading = tokenEnabled && tokenQuery.isLoading;
 
   const hasTransportError = tokenEnabled && tokenQuery.isError;
@@ -273,6 +280,10 @@ export function useTaskSession(
     trpc.auth.sandboxToken.queryOptions,
   );
   sandboxTokenQueryOptionsRef.current = trpc.auth.sandboxToken.queryOptions;
+
+  const retryInitialLoad = useCallback(async () => {
+    await sessionRefetchRef.current();
+  }, []);
 
   const refreshConnection = useCallback(async () => {
     const nextSession = await sessionRefetchRef.current();
@@ -323,6 +334,8 @@ export function useTaskSession(
       draftPrompt: task?.draftPrompt ?? null,
       sessionState,
       isSessionLoading,
+      isSessionFetching,
+      retryInitialLoad,
       isTokenLoading,
       hasTransportError,
       transportErrorCategory,
@@ -341,6 +354,8 @@ export function useTaskSession(
       payloadBlank,
       sessionState,
       isSessionLoading,
+      isSessionFetching,
+      retryInitialLoad,
       isTokenLoading,
       hasTransportError,
       transportErrorCategory,

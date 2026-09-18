@@ -1464,6 +1464,7 @@ export const runTask = async ({
             await sdk.taskRuns.notifyUserAttention({
               id: taskRun.id,
               kind: 'result_ready',
+              presentationKind: 'response',
               eventId: completionId,
             });
           }

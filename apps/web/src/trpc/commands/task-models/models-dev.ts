@@ -1,7 +1,9 @@
 import {
   GATEWAY_TASK_MODEL_PROVIDER_IDS,
+  buildTaskModelOption,
   type TaskModelInputType,
   type TaskModelMetadata,
+  type TaskModelOption,
   rebaseRoomoteModelIdToUpstream,
 } from '@roomote/types';
 
@@ -341,6 +343,24 @@ export function mergeMetadata(
     lastRefreshedAt: base?.lastRefreshedAt ?? null,
     ...(supportsReasoning != null ? { supportsReasoning } : {}),
   };
+}
+
+export function applyModelsDevMetadata(
+  catalog: ModelsDevCatalog,
+  model: TaskModelOption,
+): TaskModelOption {
+  const lookup = lookupModelMetadataFromCatalog(catalog, model.id);
+
+  if (Object.keys(lookup.metadata).length === 0) {
+    return model;
+  }
+
+  return buildTaskModelOption({
+    id: model.id,
+    displayName: model.displayName,
+    family: model.family,
+    metadata: mergeMetadata(model.metadata, lookup.metadata),
+  });
 }
 
 /**

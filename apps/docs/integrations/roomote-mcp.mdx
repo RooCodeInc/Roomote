@@ -14,7 +14,7 @@ forth between tools.
 ### Start a Session
 
 Ask your MCP client to start Roomote with a clear message. The ordinary start
-action creates a Session, where Fast can answer directly or delegate repository
+action creates a session, where Roomote can answer directly or delegate repository
 work to tasks. You can keep working locally and return to the same Session for
 the result. When work must start directly in a known compute environment, your
 client can still use the explicit environment-targeted task launch action.
@@ -86,7 +86,7 @@ redirect. Transport-controlled headers such as `Host` and `Content-Length`
 cannot be overridden.
 
 Roomote agents use this tool instead of the client runtime's generic fetch tool
-so Fast Sessions and coding tasks get the same behavior. The tool treats every
+so sessions and coding tasks get the same behavior. The tool treats every
 response as untrusted data, rejects private, internal, reserved, and other
 non-public destinations, checks and pins every resolved address, revalidates
 every redirect, and supports only default HTTP and HTTPS ports. These are
@@ -104,7 +104,7 @@ coding sandbox.
 - “Show me the messages and compute logs from the task that failed this
   morning.”
 - “Tell the running task to add a regression test before it opens the PR.”
-- “Read the latest messages from this Fast Session and send a follow-up.”
+- “Read the latest messages from this session and send a follow-up.”
 - “Use this Slack message as context and explain what the team decided.”
 - “Read this public documentation page and summarize its authentication
   requirements.”

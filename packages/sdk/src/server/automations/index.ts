@@ -28,6 +28,7 @@ export {
   buildProviderUsageLimitWarningMessage,
   getProviderUsageLimitPeriodId,
 } from './provider-usage-limit';
+export { releaseAnnouncementsJob } from './release-announcements';
 export { securityAuditorJob } from './security-auditor';
 export { sentryTriageJob } from './sentry-triage';
 export { suggesterJob } from './suggester';

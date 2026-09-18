@@ -32,13 +32,17 @@ export {
 export { continueDirectTaskAttentionReply } from './lib/task-runs/continue-direct-task-attention-reply';
 export {
   findSessionAttentionNotificationReply,
+  acknowledgeSessionBrowserAttention,
   hasTaskRunAttentionNotification,
+  listSessionBrowserAttentionEvents,
   notifyDirectWebTaskAttention,
   notifyFastWebSessionAttention,
   processSessionAttentionNotificationJob,
   resolveSessionAttentionFastConversation,
   type SessionAttentionKind,
+  type SessionAttentionPresentationKind,
   type SessionAttentionNotificationResult,
+  type BrowserAttentionEvent,
 } from './lib/session-attention-notification';
 export {
   SESSION_ATTENTION_NOTIFICATION_JOB,
@@ -165,7 +169,7 @@ export {
   type FastArtifactNotificationResult,
 } from './lib/artifacts/notify-fast-agent-parent';
 export {
-  buildInstalledReleaseAnnouncement,
+  buildReleaseAnnouncement,
   drainReleaseAnnouncementDeliveries,
   recordInstalledRelease,
   type RecordInstalledReleaseResult,
@@ -590,8 +594,17 @@ export {
 } from './lib/mcp/custom-auth-target';
 
 export {
+  canManageCustomMcpServer,
+  customMcpConnectionWhere,
+  findCustomMcpServerById,
+  storeCustomMcpServerMetadata,
+  type ResolvedCustomMcpServer,
+} from './lib/mcp/custom-servers';
+
+export {
   addRemoteCustomMcpForFast,
   describeRegistrationRefusal,
+  prepareCustomMcpOAuthConnection,
   prepareDeploymentCustomMcpOAuthConnection,
   type AddRemoteCustomMcpResult,
 } from './lib/mcp/add-remote-custom-mcp';

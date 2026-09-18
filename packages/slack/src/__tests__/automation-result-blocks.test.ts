@@ -40,77 +40,75 @@ describe('automation result blocks', () => {
     expect(buildAutomationResultContentBlocks('  \n')).toEqual([]);
   });
 
-  it('builds top-level header, Markdown, images, and actions', () => {
-    expect(
-      buildAutomationResultBlocks({
-        title: 'Daily report',
-        iconUrl: 'https://app.example.com/automation-icons/zap.png',
-        configureUrl: 'https://app.example.com/automations#custom-automation-1',
-        contentBlocks: [
-          { type: 'markdown', text: '  ## Summary\n- Healthy  ' },
-          {
-            type: 'image',
-            image_url: 'https://app.example.com/proof.png',
-            alt_text: 'Proof',
-          },
-        ],
-        subtitle: {
-          type: 'plain_text',
-          text: formatAutomationResultSubtitle({
-            trigger: 'Weekly',
-            model: 'GPT 5.6 High',
-            costMicroUsd: 560_000,
-            durationMs: 157_000,
-          }),
+  it('builds a container with formatted Markdown, images, metadata, and actions', () => {
+    const [container] = buildAutomationResultBlocks({
+      title: 'Daily report',
+      iconUrl: 'https://app.example.com/automation-icons/zap.png',
+      configureUrl: 'https://app.example.com/automations#custom-automation-1',
+      contentBlocks: [
+        { type: 'markdown', text: '  ## Summary\n- Healthy  ' },
+        {
+          type: 'image',
+          image_url: 'https://app.example.com/proof.png',
+          alt_text: 'Proof',
         },
-        taskUrl: 'https://app.example.com/task/1',
-      }),
-    ).toEqual([
-      {
-        type: 'context',
-        block_id: 'roomote_automation_result_header',
-        elements: [
-          {
-            type: 'image',
-            image_url: 'https://app.example.com/automation-icons/zap.png',
-            alt_text: 'Daily report automation icon',
-          },
-          {
-            type: 'plain_text',
-            text: 'Daily report',
-            emoji: false,
-          },
-          {
-            type: 'plain_text',
-            text: 'Weekly · GPT 5.6 High · $0.56 · 2m 37s',
-          },
-        ],
+      ],
+      subtitle: {
+        type: 'plain_text',
+        text: formatAutomationResultSubtitle({
+          trigger: 'Weekly',
+          model: 'GPT 5.6 High',
+          costMicroUsd: 560_000,
+          durationMs: 157_000,
+        }),
       },
-      { type: 'markdown', text: '  ## Summary\n- Healthy  ' },
-      {
-        type: 'image',
-        image_url: 'https://app.example.com/proof.png',
-        alt_text: 'Proof',
+      taskUrl: 'https://app.example.com/task/1',
+    });
+
+    expect(container).toMatchObject({
+      type: 'container',
+      width: 'full',
+      title: { text: 'Daily report' },
+      subtitle: {
+        type: 'plain_text',
+        text: 'Weekly · GPT 5.6 High · $0.56 · 2m 37s',
       },
-      {
-        type: 'actions',
-        block_id: 'roomote_automation_result_actions',
-        elements: [
-          {
-            type: 'button',
-            action_id: 'late_bound_automation_view_task',
-            text: { type: 'plain_text', text: 'Go to task', emoji: false },
-            url: 'https://app.example.com/task/1',
-          },
-          {
-            type: 'button',
-            action_id: 'late_bound_automation_configure',
-            text: { type: 'plain_text', text: 'Configure', emoji: false },
-            url: 'https://app.example.com/automations#custom-automation-1',
-          },
-        ],
+      icon: {
+        image_url: 'https://app.example.com/automation-icons/zap.png',
       },
-    ]);
+    });
+    if (container?.type !== 'container') return;
+    expect(container.child_blocks).toContainEqual({
+      type: 'rich_text',
+      elements: [
+        {
+          type: 'rich_text_section',
+          elements: [{ type: 'text', text: 'Summary', style: { bold: true } }],
+        },
+        {
+          type: 'rich_text_list',
+          style: 'bullet',
+          elements: [
+            {
+              type: 'rich_text_section',
+              elements: [{ type: 'text', text: 'Healthy  ' }],
+            },
+          ],
+        },
+      ],
+    });
+    expect(container.child_blocks).toContainEqual({
+      type: 'image',
+      image_url: 'https://app.example.com/proof.png',
+      alt_text: 'Proof',
+    });
+    expect(container.child_blocks.at(-1)).toMatchObject({
+      type: 'actions',
+      elements: [
+        { action_id: 'late_bound_automation_view_task' },
+        { action_id: 'late_bound_automation_configure' },
+      ],
+    });
   });
 
   it('leaves explicitly provided native tables unchanged', () => {
@@ -131,6 +129,41 @@ describe('automation result blocks', () => {
     expect(container.child_blocks).toContainEqual(table);
   });
 
+  it('converts Markdown tables into native table children', () => {
+    const [container] = buildAutomationResultBlocks({
+      title: 'Build report',
+      iconUrl: 'https://app.example.com/automation-icons/wrench.png',
+      configureUrl: 'https://app.example.com/automations#build-report',
+      contentText: [
+        '**Summary**',
+        '',
+        '| Name | Result |',
+        '| --- | ---: |',
+        '| Build | **Passed** |',
+        '| `a|b` | Inline code |',
+        '| a\\|b | Escaped pipe |',
+        '| [Report](<https://example.com/report>) | `ready` |',
+      ].join('\n'),
+    });
+
+    expect(container?.type).toBe('container');
+    if (container?.type !== 'container') return;
+    const table = container.child_blocks.find(
+      (block) => block.type === 'table',
+    );
+    expect(table?.type).toBe('table');
+    if (table?.type !== 'table') return;
+    expect(table.column_settings).toEqual([
+      { align: 'left', is_wrapped: true },
+      { align: 'right', is_wrapped: true },
+    ]);
+    expect(table.rows).toHaveLength(5);
+    const serializedRows = JSON.stringify(table.rows);
+    expect(serializedRows).toContain('"text":"a|b"');
+    expect(serializedRows).toContain('"url":"https://example.com/report"');
+    expect(serializedRows).toContain('"style":{"code":true}');
+  });
+
   it('keeps data visualizations top-level because containers do not support them', () => {
     const chart = {
       type: 'data_visualization' as const,
@@ -149,11 +182,20 @@ describe('automation result blocks', () => {
     });
 
     expect(blocks.map((block) => block.type)).toEqual([
-      'context',
       'data_visualization',
-      'actions',
+      'container',
     ]);
-    expect(blocks[1]).toEqual(chart);
+    expect(blocks[0]).toEqual(chart);
+    expect(blocks[1]).toMatchObject({
+      type: 'container',
+      title: { text: 'Traffic report' },
+      child_blocks: [
+        expect.objectContaining({
+          type: 'actions',
+          block_id: 'roomote_automation_result_actions',
+        }),
+      ],
+    });
   });
 
   it('formats automation result metadata with compact duration units', () => {
@@ -239,7 +281,11 @@ describe('automation result blocks', () => {
       ),
     });
 
-    const actions = blocks.filter((block) => block.type === 'actions');
+    const actions = blocks.flatMap((block) =>
+      block.type === 'container'
+        ? block.child_blocks.filter((child) => child.type === 'actions')
+        : [],
+    );
     expect(actions).toHaveLength(2);
     expect(actions[0]?.type).toBe('actions');
     expect(actions[1]?.type).toBe('actions');
@@ -254,7 +300,7 @@ describe('automation result blocks', () => {
     ]);
   });
 
-  it('reserves top-level block capacity for automation chrome', () => {
+  it('splits long reports into bounded containers and keeps actions last', () => {
     const blocks = buildAutomationResultBlocks({
       title: 'Audit',
       iconUrl: 'https://app.example.com/automation-icons/wrench.png',
@@ -269,14 +315,159 @@ describe('automation result blocks', () => {
       ],
     });
 
-    expect(blocks).toHaveLength(50);
-    expect(blocks[0]?.type).toBe('context');
-    expect(blocks[1]).toEqual({ type: 'markdown', text: '## Summary' });
-    expect(blocks.at(-1)?.type).toBe('actions');
-    expect(blocks).not.toContainEqual(
+    expect(blocks).toHaveLength(5);
+    expect(blocks.every((block) => block.type === 'container')).toBe(true);
+    expect(
+      blocks.every(
+        (block) =>
+          block.type !== 'container' || block.child_blocks.length <= 10,
+      ),
+    ).toBe(true);
+    const first = blocks[0];
+    expect(first?.type).toBe('container');
+    if (first?.type !== 'container') return;
+    expect(first.child_blocks[0]).toMatchObject({ type: 'rich_text' });
+    const last = blocks.at(-1);
+    expect(last?.type).toBe('container');
+    if (last?.type !== 'container') return;
+    expect(last.child_blocks).toContainEqual(
       expect.objectContaining({
         image_url: 'https://app.example.com/proof-48.png',
       }),
     );
+    expect(last.child_blocks.at(-1)?.type).toBe('actions');
+  });
+
+  it('caps normalized reports while reserving the final actions container', () => {
+    const blocks = buildAutomationResultBlocks({
+      title: 'Audit',
+      iconUrl: 'https://app.example.com/automation-icons/wrench.png',
+      configureUrl: 'https://app.example.com/automations#audit',
+      contentBlocks: Array.from({ length: 500 }, (_, index) => ({
+        type: 'markdown' as const,
+        text: `Finding ${index + 1}`,
+      })),
+    });
+
+    expect(blocks).toHaveLength(50);
+    expect(blocks.every((block) => block.type === 'container')).toBe(true);
+    const serialized = JSON.stringify(blocks);
+    expect(serialized).toContain('Finding 499');
+    expect(serialized).not.toContain('Finding 500');
+    const last = blocks.at(-1);
+    expect(last?.type).toBe('container');
+    if (last?.type !== 'container') return;
+    expect(last.child_blocks).toHaveLength(10);
+    expect(last.child_blocks.at(-1)).toMatchObject({
+      type: 'actions',
+      block_id: 'roomote_automation_result_actions',
+    });
+  });
+
+  it('reserves two final action rows when normalized content reaches the limit', () => {
+    const blocks = buildAutomationResultBlocks({
+      title: 'Audit',
+      iconUrl: 'https://app.example.com/automation-icons/wrench.png',
+      configureUrl: 'https://app.example.com/automations#audit',
+      contentBlocks: Array.from({ length: 500 }, (_, index) => ({
+        type: 'markdown' as const,
+        text: `Finding ${index + 1}`,
+      })),
+      taskUrl: 'https://app.example.com/task/1',
+      linkedPrUrls: Array.from(
+        { length: 30 },
+        (_, index) => `https://github.com/acme/app/pull/${index + 1}`,
+      ),
+    });
+
+    expect(blocks).toHaveLength(50);
+    expect(
+      blocks.every(
+        (block) =>
+          block.type !== 'container' || block.child_blocks.length <= 10,
+      ),
+    ).toBe(true);
+    const serialized = JSON.stringify(blocks);
+    expect(serialized).toContain('Finding 498');
+    expect(serialized).not.toContain('Finding 499');
+    const last = blocks.at(-1);
+    expect(last?.type).toBe('container');
+    if (last?.type !== 'container') return;
+    expect(last.child_blocks).toHaveLength(10);
+    expect(
+      last.child_blocks.filter((block) => block.type === 'actions'),
+    ).toHaveLength(2);
+  });
+
+  it('budgets trailing rich text after top-level charts', () => {
+    const blocks = buildAutomationResultBlocks({
+      title: 'Traffic report',
+      iconUrl: 'https://app.example.com/automation-icons/chart.png',
+      configureUrl: 'https://app.example.com/automations#traffic',
+      contentBlocks: [
+        ...Array.from({ length: 49 }, (_, index) => ({
+          type: 'data_visualization' as const,
+          title: `Chart ${index + 1}`,
+          chart: {
+            type: 'pie' as const,
+            segments: [{ label: 'Search', value: index + 1 }],
+          },
+        })),
+        ...Array.from({ length: 15 }, (_, index) => ({
+          type: 'markdown' as const,
+          text: `Finding ${index + 1}`,
+        })),
+      ],
+    });
+
+    expect(blocks).toHaveLength(50);
+    expect(
+      blocks.slice(0, 49).every((block) => block.type === 'data_visualization'),
+    ).toBe(true);
+    const last = blocks.at(-1);
+    expect(last?.type).toBe('container');
+    if (last?.type !== 'container') return;
+    expect(last.child_blocks).toHaveLength(10);
+    const serialized = JSON.stringify(last);
+    expect(serialized).toContain('Finding 9');
+    expect(serialized).not.toContain('Finding 10');
+    expect(last.child_blocks.at(-1)).toMatchObject({
+      type: 'actions',
+      block_id: 'roomote_automation_result_actions',
+    });
+  });
+
+  it('reserves the final container when top-level charts reach the block limit', () => {
+    const blocks = buildAutomationResultBlocks({
+      title: 'Traffic report',
+      iconUrl: 'https://app.example.com/automation-icons/chart.png',
+      configureUrl: 'https://app.example.com/automations#traffic',
+      contentBlocks: Array.from({ length: 50 }, (_, index) => ({
+        type: 'data_visualization' as const,
+        title: `Chart ${index + 1}`,
+        chart: {
+          type: 'pie' as const,
+          segments: [{ label: 'Search', value: index + 1 }],
+        },
+      })),
+    });
+
+    expect(blocks).toHaveLength(50);
+    expect(
+      blocks.slice(0, 49).every((block) => block.type === 'data_visualization'),
+    ).toBe(true);
+    expect(blocks[48]).toMatchObject({ title: 'Chart 49' });
+    expect(blocks).not.toContainEqual(
+      expect.objectContaining({ title: 'Chart 50' }),
+    );
+    expect(blocks[49]).toMatchObject({
+      type: 'container',
+      child_blocks: [
+        expect.objectContaining({
+          type: 'actions',
+          block_id: 'roomote_automation_result_actions',
+        }),
+      ],
+    });
   });
 });

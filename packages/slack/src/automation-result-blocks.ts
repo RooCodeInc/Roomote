@@ -1,11 +1,16 @@
-import type { SlackBlock } from '@roomote/types';
+import type { SlackBlock, SlackTableCell } from '@roomote/types';
 
-// Kept for recognizing and migrating automation messages created before
-// narrative output moved to top-level Slack markdown blocks.
+import {
+  convertMarkdownInlineToRichText,
+  convertMarkdownToRichText,
+} from './markdown-rich-text';
+
 export const AUTOMATION_RESULT_CONTAINER_BLOCK_ID =
   'roomote_automation_result_container';
 export const AUTOMATION_RESULT_ACTIONS_BLOCK_ID =
   'roomote_automation_result_actions';
+// Kept for migrating automation messages created while Markdown reports used
+// an uncontained header/content/actions layout.
 export const AUTOMATION_RESULT_HEADER_BLOCK_ID =
   'roomote_automation_result_header';
 // Kept for removing the settings accessory from messages created before the
@@ -15,17 +20,236 @@ const AUTOMATION_RESULT_SETTINGS_BLOCK_ID =
 
 const MAX_CONTAINER_CHILDREN = 10;
 const MAX_MESSAGE_BLOCKS = 50;
+const MAX_TABLE_ROWS = 100;
+const MAX_TABLE_COLUMNS = 20;
+const MAX_TABLE_CHARACTERS = 10_000;
+
+const AUTOMATION_MARKDOWN_OPTIONS = {
+  angleBracketLinkDestinations: true,
+} as const;
 
 export function buildAutomationResultContentBlocks(text: string): SlackBlock[] {
   return text.trim() ? [{ type: 'markdown', text }] : [];
 }
 
-function normalizeContentBlocks(blocks: SlackBlock[]): SlackBlock[] {
-  return blocks.flatMap((block) =>
-    block.type === 'markdown'
-      ? buildAutomationResultContentBlocks(block.text)
-      : [block],
+function splitTableRow(line: string): string[] {
+  const trimmed = line.trim().replace(/^\|/, '').replace(/\|$/, '');
+  const cells: string[] = [];
+  let cell = '';
+  let escaped = false;
+  let codeDelimiterLength: number | null = null;
+
+  for (let index = 0; index < trimmed.length;) {
+    const character = trimmed[index] ?? '';
+    if (escaped) {
+      cell += character;
+      escaped = false;
+      index += 1;
+      continue;
+    }
+    if (character === '\\') {
+      cell += character;
+      escaped = true;
+      index += 1;
+      continue;
+    }
+    if (character === '`') {
+      let delimiterLength = 1;
+      while (trimmed[index + delimiterLength] === '`') {
+        delimiterLength += 1;
+      }
+      if (codeDelimiterLength === null) {
+        codeDelimiterLength = delimiterLength;
+      } else if (codeDelimiterLength === delimiterLength) {
+        codeDelimiterLength = null;
+      }
+      cell += '`'.repeat(delimiterLength);
+      index += delimiterLength;
+      continue;
+    }
+    if (character === '|' && codeDelimiterLength === null) {
+      cells.push(cell.trim().replaceAll('\\|', '|'));
+      cell = '';
+      index += 1;
+      continue;
+    }
+    cell += character;
+    index += 1;
+  }
+
+  cells.push(cell.trim().replaceAll('\\|', '|'));
+  return cells;
+}
+
+function parseTableAlignment(
+  value: string,
+): 'left' | 'center' | 'right' | null {
+  const trimmed = value.trim();
+  if (!/^:?-{3,}:?$/.test(trimmed)) return null;
+  if (trimmed.startsWith(':') && trimmed.endsWith(':')) return 'center';
+  if (trimmed.endsWith(':')) return 'right';
+  return 'left';
+}
+
+function buildTableCell(value: string, header: boolean): SlackTableCell {
+  const elements = convertMarkdownInlineToRichText(
+    value,
+    header ? { bold: true } : {},
+    AUTOMATION_MARKDOWN_OPTIONS,
   );
+
+  if (elements.length === 0) {
+    return { type: 'raw_text', text: ' ' };
+  }
+
+  return {
+    type: 'rich_text',
+    elements: [{ type: 'rich_text_section', elements }],
+  };
+}
+
+function parseMarkdownTable(
+  lines: string[],
+  startIndex: number,
+): { block: SlackBlock; nextIndex: number } | null {
+  const headerLine = lines[startIndex];
+  const alignmentLine = lines[startIndex + 1];
+  if (!headerLine?.includes('|') || !alignmentLine?.includes('|')) return null;
+
+  const header = splitTableRow(headerLine);
+  const alignments = splitTableRow(alignmentLine).map(parseTableAlignment);
+  if (
+    header.length === 0 ||
+    header.length !== alignments.length ||
+    alignments.some((alignment) => alignment === null)
+  ) {
+    return null;
+  }
+
+  const rows = [header];
+  let nextIndex = startIndex + 2;
+  while (nextIndex < lines.length && lines[nextIndex]?.includes('|')) {
+    const row = splitTableRow(lines[nextIndex] ?? '');
+    if (row.length !== header.length) break;
+    rows.push(row);
+    nextIndex += 1;
+  }
+
+  const characterCount = rows
+    .flat()
+    .reduce((sum, value) => sum + value.length, 0);
+  if (
+    rows.length > MAX_TABLE_ROWS ||
+    header.length > MAX_TABLE_COLUMNS ||
+    characterCount > MAX_TABLE_CHARACTERS
+  ) {
+    return null;
+  }
+
+  return {
+    block: {
+      type: 'table',
+      column_settings: alignments.map((align) => ({
+        align: align ?? 'left',
+        is_wrapped: true,
+      })),
+      rows: rows.map((row, rowIndex) =>
+        row.map((value) => buildTableCell(value, rowIndex === 0)),
+      ),
+    },
+    nextIndex,
+  };
+}
+
+function convertAutomationMarkdownToBlocks(markdown: string): SlackBlock[] {
+  const lines = markdown.replace(/\r\n/g, '\n').split('\n');
+  const blocks: SlackBlock[] = [];
+  let prose: string[] = [];
+  let fence: { character: string; length: number } | null = null;
+
+  const flushProse = () => {
+    const text = prose.join('\n');
+    if (text.trim()) {
+      blocks.push(convertMarkdownToRichText(text, AUTOMATION_MARKDOWN_OPTIONS));
+    }
+    prose = [];
+  };
+
+  for (let index = 0; index < lines.length;) {
+    const line = lines[index] ?? '';
+    const fenceMatch = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+    const marker = fenceMatch?.[1];
+    if (marker) {
+      if (!fence) {
+        fence = { character: marker[0] ?? '', length: marker.length };
+      } else if (
+        marker[0] === fence.character &&
+        marker.length >= fence.length &&
+        !(fenceMatch?.[2] ?? '').trim()
+      ) {
+        fence = null;
+      }
+      prose.push(line);
+      index += 1;
+      continue;
+    }
+
+    const table = fence ? null : parseMarkdownTable(lines, index);
+    if (table) {
+      flushProse();
+      blocks.push(table.block);
+      index = table.nextIndex;
+      continue;
+    }
+
+    prose.push(line);
+    index += 1;
+  }
+
+  flushProse();
+  return blocks;
+}
+
+function normalizeContentBlocks(blocks: SlackBlock[]): SlackBlock[] {
+  const normalized: SlackBlock[] = [];
+
+  for (const block of blocks) {
+    if (block.type === 'markdown') {
+      if (block.text.trim()) {
+        normalized.push(...convertAutomationMarkdownToBlocks(block.text));
+      }
+    } else {
+      normalized.push(block);
+    }
+  }
+
+  return normalized;
+}
+
+function buildAutomationResultContainer(params: {
+  title: string;
+  iconUrl: string;
+  subtitle?: { type: string; text: string };
+  index: number;
+  childBlocks: SlackBlock[];
+}): SlackBlock {
+  return {
+    type: 'container',
+    width: 'full',
+    block_id:
+      params.index === 0
+        ? AUTOMATION_RESULT_CONTAINER_BLOCK_ID
+        : `${AUTOMATION_RESULT_CONTAINER_BLOCK_ID}_${params.index + 1}`,
+    title: { type: 'plain_text', text: params.title, emoji: false },
+    ...(params.subtitle ? { subtitle: params.subtitle } : {}),
+    icon: {
+      type: 'image',
+      image_url: params.iconUrl,
+      alt_text: `${params.title} automation icon`,
+    },
+    has_header_divider: true,
+    child_blocks: params.childBlocks,
+  };
 }
 
 export function formatAutomationResultSubtitle(params: {
@@ -112,10 +336,10 @@ export function buildAutomationResultBlocks(params: {
       ? [actionElements, [configureAction]]
       : [[...actionElements, ...(configureAction ? [configureAction] : [])]];
 
-  const contentBlocks = (
+  const contentBlocks = normalizeContentBlocks(
     params.contentBlocks
-      ? normalizeContentBlocks(params.contentBlocks)
-      : buildAutomationResultContentBlocks(params.contentText ?? '')
+      ? params.contentBlocks
+      : buildAutomationResultContentBlocks(params.contentText ?? ''),
   ).filter(
     (block) =>
       !(
@@ -124,76 +348,57 @@ export function buildAutomationResultBlocks(params: {
       ),
   );
 
-  if (
-    !contentBlocks.some(
-      (block) =>
-        block.type === 'markdown' || block.type === 'data_visualization',
-    )
-  ) {
-    const groups: SlackBlock[][] = [];
-    let remainingBlocks = contentBlocks;
-    const finalContentCapacity = MAX_CONTAINER_CHILDREN - actionGroups.length;
-    while (remainingBlocks.length > finalContentCapacity) {
-      const leadingCount = Math.min(
-        MAX_CONTAINER_CHILDREN,
-        remainingBlocks.length - finalContentCapacity,
-      );
-      groups.push(remainingBlocks.slice(0, leadingCount));
-      remainingBlocks = remainingBlocks.slice(leadingCount);
+  const groups: Array<SlackBlock[] | SlackBlock> = [];
+  let lastTopLevelIndex = -1;
+  for (let index = contentBlocks.length - 1; index >= 0; index -= 1) {
+    if (contentBlocks[index]?.type === 'data_visualization') {
+      lastTopLevelIndex = index;
+      break;
     }
-    groups.push(remainingBlocks);
-
-    return groups.map((group, index) => ({
-      type: 'container',
-      width: 'full',
-      block_id:
-        index === 0
-          ? AUTOMATION_RESULT_CONTAINER_BLOCK_ID
-          : `${AUTOMATION_RESULT_CONTAINER_BLOCK_ID}_${index + 1}`,
-      title: { type: 'plain_text', text: params.title, emoji: false },
-      ...(params.subtitle ? { subtitle: params.subtitle } : {}),
-      icon: {
-        type: 'image',
-        image_url: params.iconUrl,
-        alt_text: `${params.title} automation icon`,
-      },
-      has_header_divider: true,
-      child_blocks: [
-        ...group,
-        ...(index === groups.length - 1
-          ? actionGroups.map((elements, actionIndex) => ({
-              type: 'actions' as const,
-              block_id:
-                actionIndex === 0
-                  ? AUTOMATION_RESULT_ACTIONS_BLOCK_ID
-                  : `${AUTOMATION_RESULT_ACTIONS_BLOCK_ID}_${actionIndex + 1}`,
-              elements,
-            }))
-          : []),
-      ],
-    }));
   }
+  let remainingBlocks = contentBlocks.slice(0, lastTopLevelIndex + 1);
+  let pendingContainerBlocks: SlackBlock[] = [];
 
-  const topLevelContentBlocks = contentBlocks.slice(
-    0,
-    Math.max(0, MAX_MESSAGE_BLOCKS - 1 - actionGroups.length),
-  );
+  const flushPendingContainerBlocks = () => {
+    while (pendingContainerBlocks.length > 0) {
+      groups.push(pendingContainerBlocks.slice(0, MAX_CONTAINER_CHILDREN));
+      pendingContainerBlocks = pendingContainerBlocks.slice(
+        MAX_CONTAINER_CHILDREN,
+      );
+    }
+  };
 
-  return [
-    {
-      type: 'context',
-      block_id: AUTOMATION_RESULT_HEADER_BLOCK_ID,
-      elements: [
-        {
-          type: 'image',
-          image_url: params.iconUrl,
-          alt_text: `${params.title} automation icon`,
-        },
-        { type: 'plain_text', text: params.title, emoji: false },
-        ...(params.subtitle ? [params.subtitle] : []),
-      ],
-    },
-    ...topLevelContentBlocks,
+  for (const block of remainingBlocks) {
+    if (block.type === 'data_visualization') {
+      flushPendingContainerBlocks();
+      groups.push(block);
+    } else {
+      pendingContainerBlocks.push(block);
+    }
+  }
+  flushPendingContainerBlocks();
+
+  remainingBlocks = contentBlocks.slice(lastTopLevelIndex + 1);
+  const finalContentCapacity = MAX_CONTAINER_CHILDREN - actionGroups.length;
+  if (groups.length >= MAX_MESSAGE_BLOCKS) {
+    groups.length = MAX_MESSAGE_BLOCKS - 1;
+    remainingBlocks = [];
+  } else {
+    const availableContainers = MAX_MESSAGE_BLOCKS - groups.length;
+    const maxRemainingBlocks =
+      (availableContainers - 1) * MAX_CONTAINER_CHILDREN + finalContentCapacity;
+    remainingBlocks = remainingBlocks.slice(0, maxRemainingBlocks);
+  }
+  while (remainingBlocks.length > finalContentCapacity) {
+    const leadingCount = Math.min(
+      MAX_CONTAINER_CHILDREN,
+      remainingBlocks.length - finalContentCapacity,
+    );
+    groups.push(remainingBlocks.slice(0, leadingCount));
+    remainingBlocks = remainingBlocks.slice(leadingCount);
+  }
+  groups.push([
+    ...remainingBlocks,
     ...actionGroups.map((elements, actionIndex) => ({
       type: 'actions' as const,
       block_id:
@@ -202,5 +407,34 @@ export function buildAutomationResultBlocks(params: {
           : `${AUTOMATION_RESULT_ACTIONS_BLOCK_ID}_${actionIndex + 1}`,
       elements,
     })),
-  ];
+  ]);
+
+  const boundedGroups =
+    groups.length <= MAX_MESSAGE_BLOCKS
+      ? groups
+      : [
+          ...groups.slice(0, MAX_MESSAGE_BLOCKS - 1),
+          actionGroups.map((elements, actionIndex) => ({
+            type: 'actions' as const,
+            block_id:
+              actionIndex === 0
+                ? AUTOMATION_RESULT_ACTIONS_BLOCK_ID
+                : `${AUTOMATION_RESULT_ACTIONS_BLOCK_ID}_${actionIndex + 1}`,
+            elements,
+          })),
+        ];
+
+  let containerIndex = 0;
+  return boundedGroups.map((group) => {
+    if (!Array.isArray(group)) return group;
+    const container = buildAutomationResultContainer({
+      title: params.title,
+      iconUrl: params.iconUrl,
+      subtitle: params.subtitle,
+      index: containerIndex,
+      childBlocks: group,
+    });
+    containerIndex += 1;
+    return container;
+  });
 }

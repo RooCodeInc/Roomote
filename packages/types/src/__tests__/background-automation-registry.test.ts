@@ -129,6 +129,29 @@ describe('background automation registry', () => {
     ).toBe('provider-usage-limit');
   });
 
+  it('registers installed release announcements for manual cross-provider tests', () => {
+    expect(
+      getTriggerableBackgroundAutomationDescriptorByKey(
+        'release_announcements',
+      ),
+    ).toMatchObject({
+      label: 'Announce Roomote Updates',
+      slackIcon: 'megaphone',
+      scheduleModes: [],
+      usesManagerChannel: true,
+      supportedCommunicationProviders: [
+        'slack',
+        'teams',
+        'telegram',
+        'discord',
+      ],
+      supportedSourceControlProviders: [],
+    });
+    expect(
+      getTriggerableBackgroundAutomationSettingsHash('release_announcements'),
+    ).toBe('release-announcements');
+  });
+
   it('allows Teams, Telegram, and Discord destinations for CI failure triage Run now', () => {
     const descriptor =
       getTriggerableBackgroundAutomationDescriptorByKey('ci_failure_triage');

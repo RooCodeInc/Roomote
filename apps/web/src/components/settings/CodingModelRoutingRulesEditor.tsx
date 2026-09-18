@@ -1,6 +1,20 @@
 'use client';
 
-import { BasicTooltip, Button, Input, Plus, Trash2 } from '@/components/system';
+import { useState } from 'react';
+
+import {
+  ArrowDownIcon,
+  ArrowRight,
+  BasicTooltip,
+  Button,
+  ChevronDown,
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+  Input,
+  Plus,
+  Trash2,
+} from '@/components/system';
 import { ReasoningEffortSelect } from '@/components/tasks/ReasoningEffortSelect';
 import {
   TaskModelSelect,
@@ -86,6 +100,8 @@ export function CodingModelRoutingRulesEditor({
   defaultReasoningEffort: ReasoningEffort | null;
   onChange: (change: CodingModelRoutingRulesChange) => void;
 }) {
+  const [open, setOpen] = useState(false);
+
   const updateRule = (index: number, rule: CodingModelRoutingRule) => {
     onChange({
       rules: rules.map((currentRule, currentIndex) =>
@@ -124,90 +140,109 @@ export function CodingModelRoutingRulesEditor({
   };
 
   return (
-    <div className="space-y-3 pb-3">
-      {rules.length > 0 ? (
-        <div className="space-y-2">
-          <p className="text-xs text-muted-foreground">
-            Use another coding model when a task matches a condition.
-          </p>
-          {rules.map((rule, index) => {
-            const modelSupportsReasoning = supportsReasoning(
-              models,
-              rule.modelId,
-            );
+    <Collapsible
+      open={open}
+      onOpenChange={setOpen}
+      className={`space-y-3 ${open ? 'pb-3' : ''}`}
+    >
+      <CollapsibleTrigger className="group flex cursor-pointer items-center gap-1.5 text-left text-sm text-muted-foreground hover:text-foreground">
+        <ChevronDown
+          className="size-4 shrink-0 transition-transform"
+          style={{ transform: open ? undefined : 'rotate(-90deg)' }}
+        />
+        Custom coding model routing rules
+      </CollapsibleTrigger>
+      <CollapsibleContent className="space-y-3">
+        {rules.length > 0 ? (
+          <div className="space-y-2">
+            {rules.map((rule, index) => {
+              const modelSupportsReasoning = supportsReasoning(
+                models,
+                rule.modelId,
+              );
 
-            return (
-              <div
-                key={index}
-                className="flex flex-col gap-2 sm:flex-row sm:items-center"
-              >
-                <div className="flex items-center gap-2 sm:contents">
-                  <TaskModelSelect
-                    value={rule.modelId}
-                    optionGroups={optionGroups}
-                    placeholder="Select a coding model"
-                    ariaLabel={`Routing rule ${index + 1} model`}
-                    onValueChange={(modelId) =>
+              return (
+                <div
+                  key={index}
+                  className="flex flex-col gap-2 md:flex-row md:items-center"
+                >
+                  <Input
+                    value={rule.condition}
+                    onChange={(event) =>
                       updateRule(index, {
                         ...rule,
-                        modelId,
-                        reasoningEffort: supportsReasoning(models, modelId)
-                          ? (rule.reasoningEffort ?? 'medium')
-                          : null,
+                        condition: event.target.value,
                       })
                     }
+                    aria-label={`Routing rule ${index + 1} condition`}
+                    placeholder="When should this model be used?"
+                    className="min-w-0 flex-1"
                   />
-                  <BasicTooltip content="Remove routing rule">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="shrink-0 text-muted-foreground sm:order-last"
-                      aria-label={`Remove routing rule ${index + 1}`}
-                      onClick={() => removeRule(index)}
-                    >
-                      <Trash2 />
-                    </Button>
-                  </BasicTooltip>
+                  <ArrowDownIcon className="ml-8 size-4 shrink-0 self-start text-muted-foreground md:hidden" />
+                  <ArrowRight className="hidden size-4 shrink-0 self-center text-muted-foreground md:block" />
+                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                    <div className="flex min-w-0 flex-1 flex-nowrap items-center gap-2">
+                      <div className="min-w-0 flex-1">
+                        <TaskModelSelect
+                          value={rule.modelId}
+                          optionGroups={optionGroups}
+                          placeholder="Select a coding model"
+                          ariaLabel={`Routing rule ${index + 1} model`}
+                          onValueChange={(modelId) =>
+                            updateRule(index, {
+                              ...rule,
+                              modelId,
+                              reasoningEffort: supportsReasoning(
+                                models,
+                                modelId,
+                              )
+                                ? (rule.reasoningEffort ?? 'medium')
+                                : null,
+                            })
+                          }
+                        />
+                      </div>
+                      {modelSupportsReasoning ? (
+                        <ReasoningEffortSelect
+                          value={rule.reasoningEffort}
+                          defaultEffort="medium"
+                          onChange={(reasoningEffort) =>
+                            updateRule(index, { ...rule, reasoningEffort })
+                          }
+                          ariaLabel={`Routing rule ${index + 1} reasoning level`}
+                        />
+                      ) : null}
+                    </div>
+                    <BasicTooltip content="Remove routing rule">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="shrink-0 text-muted-foreground"
+                        aria-label={`Remove routing rule ${index + 1}`}
+                        onClick={() => removeRule(index)}
+                      >
+                        <Trash2 />
+                      </Button>
+                    </BasicTooltip>
+                  </div>
                 </div>
-                {modelSupportsReasoning ? (
-                  <ReasoningEffortSelect
-                    value={rule.reasoningEffort}
-                    defaultEffort="medium"
-                    onChange={(reasoningEffort) =>
-                      updateRule(index, { ...rule, reasoningEffort })
-                    }
-                    ariaLabel={`Routing rule ${index + 1} reasoning level`}
-                  />
-                ) : null}
-                <Input
-                  value={rule.condition}
-                  onChange={(event) =>
-                    updateRule(index, {
-                      ...rule,
-                      condition: event.target.value,
-                    })
-                  }
-                  aria-label={`Routing rule ${index + 1} condition`}
-                  placeholder="When should this model be used?"
-                  className="min-w-0 flex-1"
-                />
-              </div>
-            );
-          })}
-        </div>
-      ) : null}
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="-ml-4"
-        disabled={rules.length >= MAX_CODING_MODEL_ROUTING_RULES}
-        onClick={addRule}
-      >
-        <Plus />
-        Add a model routing rule
-      </Button>
-    </div>
+              );
+            })}
+          </div>
+        ) : null}
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="-ml-4"
+          disabled={rules.length >= MAX_CODING_MODEL_ROUTING_RULES}
+          onClick={addRule}
+        >
+          <Plus />
+          Add a model routing rule
+        </Button>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }

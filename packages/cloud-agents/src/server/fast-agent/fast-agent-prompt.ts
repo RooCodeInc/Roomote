@@ -9,7 +9,10 @@ import {
   type WorkspaceRoutingSettings,
 } from '@roomote/types';
 
-import type { RoutableEnvironment } from '../available-environments';
+import type {
+  ActiveRepositoryCatalog,
+  RoutableEnvironment,
+} from '../available-environments';
 import type { FastAgentIntegration } from './fast-agent-integration-broker';
 import {
   FAST_AGENT_REACTION_INPUT_TYPE,
@@ -42,10 +45,35 @@ When the current input begins with the platform-generated \`<voice_mode active="
 - If you need a decision from the person, ask one clear question.`;
 }
 
+/**
+ * Active repositories are listed independently of environments: a deployment
+ * with connected source control and no environments would otherwise show the
+ * model no repository names at all.
+ */
+function formatActiveRepositoriesForPrompt(
+  activeRepositories: ActiveRepositoryCatalog | null | undefined,
+): string {
+  if (activeRepositories === undefined) return '';
+  if (activeRepositories === null) {
+    return '\n  - The active repository list could not be loaded for this turn; call `list_repositories` to look a repository up by name.';
+  }
+  if (activeRepositories.totalCount === 0) {
+    return '\n  - No active repositories are connected.';
+  }
+  const omitted =
+    activeRepositories.totalCount - activeRepositories.names.length;
+  return `\n  - Active repositories (${activeRepositories.totalCount}): ${activeRepositories.names.join(', ')}${
+    omitted > 0
+      ? `\n  - ${omitted} more active repositories are not listed here; call \`list_repositories\` with a name to search all of them.`
+      : ''
+  }`;
+}
+
 function formatRepositoriesForPrompt(
   availableEnvironments: RoutableEnvironment[],
+  activeRepositories?: ActiveRepositoryCatalog | null,
 ): string {
-  const allRepositories = `- All repositories [id: ${ALL_REPOSITORIES}]: Every active repository is available; the task checks out only the ones it needs.`;
+  const allRepositories = `- All repositories [id: ${ALL_REPOSITORIES}]: Every active repository is available; the task checks out only the ones it needs.${formatActiveRepositoriesForPrompt(activeRepositories)}`;
   const blankSlate = `- Blank slate [id: ${NO_REPOSITORIES}]: Start a sandbox with no repositories checked out; the task can still check out any active repository on demand.`;
   if (availableEnvironments.length === 0) {
     return `${blankSlate}\n${allRepositories}\n- No configured environments were found for this deployment.`;
@@ -146,7 +174,7 @@ function formatIntegrationsForPrompt(
   integrations: FastAgentIntegration[],
 ): string {
   if (integrations.length === 0) {
-    return '- No deployment MCP servers are available in fast mode.';
+    return '- No deployment MCP servers are available in this conversation.';
   }
 
   const native = integrations.filter((integration) =>
@@ -197,11 +225,11 @@ function buildIntegrationConnectionGuidance(input: {
 - Treat remote MCP verification errors, network failures, and indeterminate results as unresolved. Report that the endpoint could not be verified and do not switch to an API key.
 - Never accept credentials in chat or tool arguments. Setup links are pending human action, not proof of connection.${
     input.addRemoteMcpEnabled && !input.platformEvent
-      ? "\n- For an official remote MCP, call `add_remote_mcp` with the documented name and HTTPS endpoint. Roomote registers this deployment with the provider before returning an authorization link. Preserve returned authorization and Settings links exactly and use the returned integrationId for later tool discovery/calls. An authorization_required result is pending and cannot be bypassed. A client_registration_required or needs_static_headers result means authorization did not start: give the provider's `reason` in plain words, share settingsUrl, and use the API-key route when one exists."
+      ? '\n- For an official remote MCP, call `add_remote_mcp` with the documented name and HTTPS endpoint. Any member may add one. It is shared with everyone in the deployment by default, like an integration key; pass `visibility: "owner"` only when the human asked to keep it private to them, and say which it is when you report it. Roomote registers this deployment with the provider before returning an authorization link. Preserve returned authorization and Settings links exactly and use the returned integrationId for later tool discovery/calls. An authorization_required result is pending and cannot be bypassed. A client_registration_required or needs_static_headers result means authorization did not start: give the provider\'s `reason` in plain words, share settingsUrl, and use the API-key route when one exists. A pending_owner result means a shared server someone else added is still waiting on them or an administrator: say so, share no link, and use the API-key route when one exists, or add a private one if the human asks.'
       : '\n- Remote MCP setup is unavailable on this turn. If the human explicitly requested the MCP, report that outcome and stop. For a generic connection request, use the API-key route when available and mention the MCP in one sentence as an option.'
   }${
     input.serviceCredentialToolsEnabled && !input.platformEvent
-      ? '\n- For an explicit or established HTTPS API-key route, call `list_integration_keys` first, reuse pending or ready entries, and call `prepare_integration_key` only when none exists. Never delegate that lookup to a coding task or tell the human to enable Integration keys while these tools are available. Share the returned secure Session link with a service-specific label such as "Connect Figma securely"; never ask for the key in chat. Once ready, use the `_roomote_http_integrations` server and its `integration_request` tool with the `session:` integration id for one or a few direct calls; use a coding task only for scripts or many calls.'
+      ? '\n- For an explicit or established HTTPS API-key route, call `list_integration_keys` first, reuse pending or ready entries, and call `prepare_integration_key` only when none exists. Never delegate that lookup to a coding task or tell the human to enable integration keys while these tools are available. Share the returned secure session link with a service-specific label such as "Connect Figma securely"; never ask for the key in chat. Once ready, use the `_roomote_http_integrations` server and its `integration_request` tool with the `session:` integration id for one or a few direct calls; use a coding task only for scripts or many calls.'
       : '\n- Integration-key setup is unavailable on this turn; do not ask the human to paste a key.'
   }`;
 }
@@ -267,6 +295,7 @@ function formatAvailableSkillsForPrompt(
 
 export function buildFastAgentSystemPrompt({
   availableEnvironments,
+  activeRepositories,
   availableSkills,
   availableTaskModels = [],
   defaultTaskModelId,
@@ -301,6 +330,9 @@ export function buildFastAgentSystemPrompt({
   userIsAdmin = false,
 }: {
   availableEnvironments: RoutableEnvironment[];
+  /** Active connected repositories, mapped to an environment or not. `null`
+   * means the lookup failed; `undefined` means the caller did not try. */
+  activeRepositories?: ActiveRepositoryCatalog | null;
   /** Instance and inline environment skills already discovered for this turn.
    * `null` means discovery failed; `undefined` means the caller did not try. */
   availableSkills?: FastAgentPromptSkillCatalog | null;
@@ -467,7 +499,7 @@ ${peerDirectedStartupGuidance}${humanTurnDirectednessGuidance}- Except for a tur
 - An eligible ambient message or optional human reaction may use \`ignore_event\` under its narrow rule below. Trusted platform events follow their dedicated rules instead of this startup contract.
 
 ${privacy === 'private' ? `${buildPrivateSessionGuidance('fast')}\n\n` : ''}## All Environments
-${formatRepositoriesForPrompt(availableEnvironments)}
+${formatRepositoriesForPrompt(availableEnvironments, activeRepositories)}
 
 ${
   workspaceRoutingGuidance
@@ -506,10 +538,10 @@ ${
 - Objective: ${sessionGoal.objective}
 - Status: ${sessionGoal.status}
 - Continuations used: ${sessionGoal.continuationsUsed}/${sessionGoal.maxContinuations}
-${sessionGoal.blockedReason ? `- Blocked reason: ${sessionGoal.blockedReason}\n` : ''}- This goal belongs to the Fast Session, not to any delegated task. Child tasks are execution units only.
+${sessionGoal.blockedReason ? `- Blocked reason: ${sessionGoal.blockedReason}\n` : ''}- This goal belongs to the session, not to any delegated task. Child tasks are execution units only.
 - Keep pursuing the complete objective across turns. Put the relevant objective and acceptance criteria in every delegated task brief.
 - Use \`manage_goal\` to inspect state, mark complete only after the entire objective is verified, mark blocked only after a concrete blocker persists across attempts, or mark canceled only when the user cancels or replaces it.
-- Do not treat one child task finishing, failing, or being canceled as automatic completion or cancellation of the Session goal.
+- Do not treat one child task finishing, failing, or being canceled as automatic completion or cancellation of the session goal.
 `
     : ''
 }
@@ -719,6 +751,7 @@ ${emailCadenceGuidance}- Prefer one direct closeout over an acknowledgement foll
 - Use "launch_task" for new independent repository or workspace work when local checkout, local edits, execution, or testing is required, or a checkout is substantially more appropriate under the exploration rule above, regardless of whether the message is phrased as a question, request, or declarative feedback. Existing active tasks do not block a new independent task.
 - Choose the task environment from the work's requirements and the instance's available environments. When a configured environment clearly matches the required project, repository, or tools, pass its exact ID to \`launch_task\`.
 - Use Blank slate only when the work can be completed in a standalone sandbox without a configured environment, including when the user explicitly requests it. Instances without connected source control or configured environments can still use Blank slate for suitable work. A Blank slate request never overrides a required repository or environment, including one identified by a matching Routing Rule.
+- When the user refers to a repository by name, including loosely (a bare project name, "my fork of X", "the X repo"), resolve it against the repositories listed under All Environments before asking anything. A single matching active repository is a suitable target even when no environment maps it: launch the task in All repositories and name that repository in the task prompt. When nothing listed matches, or the list is truncated or could not be loaded, call \`list_repositories\` with the distinctive part of the name before asking anything; it searches every active repository live and also returns repository IDs, default branches, and mapped environments. Do not ask the user for a repository URL while source control is connected and that lookup has not been tried. If the lookup itself fails, launch an All repositories task with the user's wording and let it resolve the repository from its own manifest. When the lookup finishes with no match and no further page, the repository is not connected: say so instead of guessing. Ask only when several repositories plausibly match, including the same name listed more than once with different providers or hosts, and name the candidates.
 - If the work depends on a specific repository or environment and no suitable target is available, explain what is missing and ask how to proceed. If multiple targets are plausible, ask which to use. Never silently substitute Blank slate or All repositories for a required or ambiguous target.
 - Do not use Blank slate to work around missing access or an environment failure. Handle work directly in Fast when it does not require sandbox execution.
 - For GitHub, an eligible deployment GitHub App installation with an active connected repository is required for repository operations. Active Roomote members can use the existing native tools to inspect public github.com repositories, including source, code search, issues, and pull requests, without connecting the public target or linking a personal GitHub account. Follow the discovered tool descriptions and schemas. Searches can span the connected repositories in one call; add a \`repo:owner/name\` or \`org:\` qualifier when the scope is known rather than fanning out one search per repository. Respect upstream pagination and search-index limits and disclose incomplete results. Private repository reads and repository writes still require an eligible connection to the target repository; never retry an authorization denial anonymously or through a task. For requested GitHub updates, use the discovered native GitHub tools directly: pull request and issue edits, comments, reviews, labels, branches, and small file changes do not require a coding task. Work that needs a checkout, a build, or tests to get right still belongs in a coding task. Follow their discovered descriptions, schemas, and arguments. For repository writes, read the target first, send only the requested fields, and report success only after the tool confirms it. Native composite calls are not guaranteed atomic: inspect the resulting state before retrying an error. Writes unsupported by the discovered provider API tools still require a coding task, not an authorization bypass.
@@ -871,6 +904,6 @@ ${surface === 'slack' ? 'Do not assume Slack formatting is limited to old mrkdwn
 
 ## Capability Boundary
 - You have no local filesystem, shell, repository checkout, or arbitrary network access.
-- Deployment MCP servers are the only direct external capabilities available in fast mode beyond its native orchestration and reply tools.
+- Deployment MCP servers are the only direct external capabilities available in this conversation beyond its native orchestration and reply tools.
 - Never claim to read or modify local files. Delegate repository execution to a Roomote task.`;
 }

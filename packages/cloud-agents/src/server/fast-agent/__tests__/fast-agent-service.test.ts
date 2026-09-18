@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   setOpenCodeSession: vi.fn(),
   upsertMessage: vi.fn(),
   getEnvironments: vi.fn(),
+  getActiveRepositories: vi.fn(),
+  listActiveRepositories: vi.fn(),
   listCustomSkills: vi.fn(),
   getCustomSkill: vi.fn(),
   scoreTypeSafeRelevance: vi.fn(),
@@ -110,6 +112,7 @@ const nativeToolNames = vi.hoisted(
       ignoreEvent: 'ignore_event',
       inspectImages: 'inspect_images',
       launchTask: 'launch_task',
+      listRepositories: 'list_repositories',
       manageGoal: 'manage_goal',
       manageWakeups: 'manage_wakeups',
       reviewPullRequest: 'review_pull_request',
@@ -188,6 +191,8 @@ vi.mock('../fast-agent-conversation-repository', () => ({
 }));
 
 vi.mock('../../available-environments', () => ({
+  getActiveRepositoryCatalog: mocks.getActiveRepositories,
+  listActiveRepositories: mocks.listActiveRepositories,
   getAvailableEnvironments: mocks.getEnvironments,
 }));
 
@@ -611,6 +616,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.listCustomSkills.mockResolvedValue([]);
     mocks.getCustomSkill.mockResolvedValue(null);
     mocks.scoreTypeSafeRelevance.mockResolvedValue(null);
+    mocks.getActiveRepositories.mockResolvedValue({
+      names: ['acme/app'],
+      totalCount: 1,
+    });
     mocks.getEnvironments.mockResolvedValue([
       {
         id: 'env-1',
@@ -1193,6 +1202,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
     expect(notifyUserAttention).toHaveBeenCalledWith({
       kind: 'result_ready',
+      presentationKind: 'response',
       eventId: expect.any(String),
       message: 'It coordinates incoming requests.',
       manual: true,
@@ -2169,6 +2179,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       });
       expect(notifyUserAttention).toHaveBeenCalledWith({
         kind: 'input_needed',
+        presentationKind: 'input',
         eventId: expect.stringMatching(/^rui:/),
         message: 'Which tools would you like to connect?',
         manual: false,
@@ -5274,6 +5285,121 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(adapter.postReply).toHaveBeenCalledOnce();
   });
 
+  it('lists active repositories in the system prompt without any environments', async () => {
+    mocks.getEnvironments.mockResolvedValueOnce([]);
+    mocks.getActiveRepositories.mockResolvedValueOnce({
+      names: ['acme/app', 'octo/widgets'],
+      totalCount: 2,
+    });
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    const system = mocks.generateText.mock.calls[0]?.[0].system;
+    expect(system).toContain(
+      '  - Active repositories (2): acme/app, octo/widgets',
+    );
+    expect(system).toContain(
+      'No configured environments were found for this deployment',
+    );
+  });
+
+  it('answers list_repositories before any acknowledgement and drops null arguments', async () => {
+    const page = {
+      repositories: [
+        {
+          id: 'repo-2',
+          fullName: 'octo/widgets',
+          sourceControlProvider: 'github',
+          host: 'github.com',
+          defaultBranch: 'main',
+          private: true,
+          url: 'https://github.com/octo/widgets',
+          environments: [],
+        },
+      ],
+      totalCount: 1,
+    };
+    mocks.listActiveRepositories.mockResolvedValue(page);
+    const results: unknown[] = [];
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        results.push(
+          await invokeTool(nativeToolNames.listRepositories, {
+            query: ' widgets ',
+            offset: null,
+            limit: null,
+          }),
+          await invokeTool(nativeToolNames.listRepositories, {
+            query: null,
+            offset: 50,
+            limit: 25,
+          }),
+        );
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Found it.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(results).toEqual([
+      { success: true, ...page },
+      { success: true, ...page },
+    ]);
+    expect(mocks.listActiveRepositories.mock.calls).toEqual([
+      [{ query: 'widgets' }],
+      [{ offset: 50, limit: 25 }],
+    ]);
+  });
+
+  it('rejects a list_repositories page size above the cap', async () => {
+    let result: unknown;
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        result = await invokeTool(nativeToolNames.listRepositories, {
+          limit: 500,
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Done.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.listActiveRepositories).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      success: false,
+      error: expect.stringContaining('limit'),
+    });
+  });
+
+  it('keeps the turn running when the active repository lookup fails', async () => {
+    mocks.getActiveRepositories.mockRejectedValueOnce(new Error('db down'));
+    const adapter = callbacks();
+
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+
+    expect(adapter.postReply).toHaveBeenCalledOnce();
+    expect(mocks.generateText.mock.calls[0]?.[0].system).toContain(
+      'The active repository list could not be loaded for this turn',
+    );
+    expect(mocks.captureInferenceContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        degradedComponents: expect.arrayContaining(['repository_catalog']),
+      }),
+    );
+  });
+
   it('records context loader failures as degraded inference components', async () => {
     mocks.getTaskModelOptions.mockRejectedValueOnce(new Error('models down'));
     mocks.listIntegrations.mockRejectedValueOnce(new Error('MCP down'));
@@ -6140,7 +6266,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     ).toMatchObject({ allowSkillAccess: false, allowSpillRecovery: false });
   });
 
-  it('does not enable remote MCP setup for a non-admin', async () => {
+  it('enables remote MCP setup for any member, like integration keys', async () => {
     mocks.getUserIdentity.mockResolvedValue({
       displayName: 'Member',
       githubLogin: null,
@@ -6153,7 +6279,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.getNativeRuntime).toHaveBeenCalledWith(
       'conversation-1',
       expect.any(Array),
-      expect.objectContaining({ addRemoteMcpEnabled: false }),
+      expect.objectContaining({ addRemoteMcpEnabled: true }),
     );
   });
 
@@ -6790,6 +6916,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(postReply).not.toHaveBeenCalled();
       expect(notifyUserAttention).toHaveBeenCalledWith({
         kind: 'result_ready',
+        presentationKind: 'response',
         eventId: expect.any(String),
         message: 'All done.',
         manual: true,
@@ -6819,6 +6946,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
       expect(notifyUserAttention).toHaveBeenCalledWith({
         kind: 'input_needed',
+        presentationKind: 'input',
         eventId: expect.any(String),
         message: 'Which environment?',
         manual: true,

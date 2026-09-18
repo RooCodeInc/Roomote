@@ -14,6 +14,7 @@ export const FAST_AGENT_NATIVE_TOOL_NAMES = {
   ignoreEvent: 'ignore_event',
   inspectImages: 'inspect_images',
   launchTask: 'launch_task',
+  listRepositories: 'list_repositories',
   manageWakeups: 'manage_wakeups',
   manageGoal: 'manage_goal',
   retryTaskStart: 'retry_task_start',
@@ -106,6 +107,10 @@ export const FAST_AGENT_NATIVE_TOOL_CATALOG = [
   {
     name: FAST_AGENT_NATIVE_TOOL_NAMES.sendTaskMessage,
     kind: ACP_TOOL_KINDS.task,
+  },
+  {
+    name: FAST_AGENT_NATIVE_TOOL_NAMES.listRepositories,
+    kind: ACP_TOOL_KINDS.list,
   },
   { name: FAST_AGENT_NATIVE_TOOL_NAMES.listSkills, kind: ACP_TOOL_KINDS.list },
   { name: FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill, kind: ACP_TOOL_KINDS.read },

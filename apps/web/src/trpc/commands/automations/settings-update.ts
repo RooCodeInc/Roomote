@@ -147,6 +147,10 @@ function getAutomationActivations(
       enabled: settings.providerUsageLimitFrequency !== 'off',
     },
     {
+      automation: 'release_announcements',
+      enabled: settings.releaseAnnouncementsEnabled,
+    },
+    {
       automation: 'sentry_triage',
       enabled: settings.sentryTriageFrequency !== 'off',
     },

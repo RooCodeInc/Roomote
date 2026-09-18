@@ -8,6 +8,7 @@ import {
   Button,
   Check,
   Label,
+  RetryableLoadError,
   RotateCcw,
   Sparkles,
   Switch,
@@ -58,91 +59,101 @@ export function PersonalizationSection() {
   return (
     <Section icon={Sparkles} title="How to work with me">
       <div className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="personalization-instructions">
-            Things Roomote should always know about you to be more useful. Not
-            shared with others.
-          </Label>
-          <Textarea
-            id="personalization-instructions"
-            value={instructions}
-            disabled={isBusy}
-            maxLength={MAX_INSTRUCTIONS_LENGTH}
-            rows={7}
-            className="md:min-h-48"
-            placeholder="For example: Keep answers concise, lead with a recommendation, and use examples when explaining unfamiliar concepts."
-            onChange={(event) => setInstructions(event.target.value)}
+        {personalization.isError && settings === undefined ? (
+          <RetryableLoadError
+            message="Failed to load personalization settings."
+            isRetrying={personalization.isFetching}
+            onRetry={() => void personalization.refetch()}
           />
-          {instructions.length > MAX_INSTRUCTIONS_LENGTH * 0.8 && (
-            <div className="flex justify-end text-xs text-muted-foreground">
-              <span className="shrink-0">
-                {instructions.length}/{MAX_INSTRUCTIONS_LENGTH}
-              </span>
+        ) : (
+          <>
+            <div className="space-y-2">
+              <Label htmlFor="personalization-instructions">
+                Things Roomote should always know about you to be more useful.
+                Not shared with others.
+              </Label>
+              <Textarea
+                id="personalization-instructions"
+                value={instructions}
+                disabled={isBusy}
+                maxLength={MAX_INSTRUCTIONS_LENGTH}
+                rows={7}
+                className="md:min-h-48"
+                placeholder="For example: Keep answers concise, lead with a recommendation, and use examples when explaining unfamiliar concepts."
+                onChange={(event) => setInstructions(event.target.value)}
+              />
+              {instructions.length > MAX_INSTRUCTIONS_LENGTH * 0.8 && (
+                <div className="flex justify-end text-xs text-muted-foreground">
+                  <span className="shrink-0">
+                    {instructions.length}/{MAX_INSTRUCTIONS_LENGTH}
+                  </span>
+                </div>
+              )}
             </div>
-          )}
-        </div>
 
-        <div className="flex gap-3">
-          <Switch
-            aria-label="Learn from conversations"
-            checked={settings?.learnFromConversations ?? true}
-            disabled={isBusy || !settings || hasChanges}
-            onCheckedChange={(learnFromConversations) => {
-              if (!settings) return;
-              update.mutate({
-                expectedVersion: settings.version,
-                learnFromConversations,
-              });
-            }}
-          />
-          <div className="space-y-1">
-            <p className="text-sm font-semibold text-foreground">
-              Learn from conversations
-            </p>
-            <p className="text-xs text-muted-foreground">
-              Disable if you don&apos;t want Roomote to learn automatically. Any
-              content here will still be used.
-            </p>
-          </div>
-        </div>
+            <div className="flex gap-3">
+              <Switch
+                aria-label="Learn from conversations"
+                checked={settings?.learnFromConversations ?? true}
+                disabled={isBusy || !settings || hasChanges}
+                onCheckedChange={(learnFromConversations) => {
+                  if (!settings) return;
+                  update.mutate({
+                    expectedVersion: settings.version,
+                    learnFromConversations,
+                  });
+                }}
+              />
+              <div className="space-y-1">
+                <p className="text-sm font-semibold text-foreground">
+                  Learn from conversations
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Disable if you don&apos;t want Roomote to learn automatically.
+                  Any content here will still be used.
+                </p>
+              </div>
+            </div>
 
-        <div className="flex flex-wrap justify-start gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={isBusy || !settings}
-            onClick={() => {
-              if (!settings) return;
-              update.mutate(
-                { expectedVersion: settings.version, reset: true },
-                { onSuccess: () => toast.success('Personalization reset') },
-              );
-            }}
-          >
-            <RotateCcw /> Reset
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            disabled={isBusy || !settings || !hasChanges}
-            onClick={() => {
-              if (!settings) return;
-              update.mutate(
-                { expectedVersion: settings.version, instructions },
-                {
-                  onSuccess: () =>
-                    toast.success(
-                      "Personal instructions saved. They'll apply in your next new session.",
-                    ),
-                },
-              );
-            }}
-          >
-            <Check />
-            Save
-          </Button>
-        </div>
+            <div className="flex flex-wrap justify-start gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={isBusy || !settings}
+                onClick={() => {
+                  if (!settings) return;
+                  update.mutate(
+                    { expectedVersion: settings.version, reset: true },
+                    { onSuccess: () => toast.success('Personalization reset') },
+                  );
+                }}
+              >
+                <RotateCcw /> Reset
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                disabled={isBusy || !settings || !hasChanges}
+                onClick={() => {
+                  if (!settings) return;
+                  update.mutate(
+                    { expectedVersion: settings.version, instructions },
+                    {
+                      onSuccess: () =>
+                        toast.success(
+                          "Personal instructions saved. They'll apply in your next new session.",
+                        ),
+                    },
+                  );
+                }}
+              >
+                <Check />
+                Save
+              </Button>
+            </div>
+          </>
+        )}
       </div>
     </Section>
   );

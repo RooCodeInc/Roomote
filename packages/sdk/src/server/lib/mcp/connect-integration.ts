@@ -339,7 +339,7 @@ export async function connectIntegrationForFast(input: {
   }
 
   const settingsUrl = publicUrl(
-    `/settings/integrations?highlight=${encodeURIComponent(integration.id)}`,
+    `/integrations?highlight=${encodeURIComponent(integration.id)}`,
   );
   if (setupStrategy === 'oauth' && requiredEnvironmentVariables.length > 0) {
     return {

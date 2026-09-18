@@ -765,10 +765,17 @@ async function createWebFastAgentParentTurn(params: {
       postReply: async () => {
         params.onReplyPosted();
       },
-      notifyUserAttention: ({ kind, eventId, message, manual }) =>
+      notifyUserAttention: ({
+        kind,
+        presentationKind,
+        eventId,
+        message,
+        manual,
+      }) =>
         notifyFastWebSessionAttention({
           fastConversationId: session.id,
           kind,
+          presentationKind,
           eventId,
           message,
           manual,

@@ -22,7 +22,7 @@ export const MANAGER_MCP_SETUP_NO_THANKS_ACTION_ID =
   'manager_mcp_setup_no_thanks';
 
 function buildManagerMcpSetupConfigureUrl(serviceId: string): string {
-  const url = new URL('/settings/integrations', Env.R_APP_URL);
+  const url = new URL('/integrations', Env.R_APP_URL);
   url.searchParams.set('service', serviceId);
   url.searchParams.set('source', 'slack-manager-integration-setup');
   return url.toString();

@@ -276,6 +276,8 @@ export {
   deploymentMcpEnablementsRelations,
   customMcpServers,
   customMcpServersRelations,
+  personalMcpServers,
+  personalMcpServersRelations,
   mcpConnections,
   mcpConnectionsRelations,
   oauthState,

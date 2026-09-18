@@ -1,11 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
-import {
-  getSessionStatusLabel,
-  SESSION_STATUSES,
-  type SessionStatus,
-} from '@roomote/types';
+import { SESSION_STATUSES, type SessionStatus } from '@roomote/types';
 
 import { parseTimePeriodParam } from '@/types';
 import { authorize } from '@/lib/server/auth-context';
@@ -28,7 +24,6 @@ export default async function SessionsPage({
     period?: string;
     scope?: string;
     status?: string;
-    view?: string;
     q?: string;
     repository?: string;
     pullRequest?: string;
@@ -54,8 +49,6 @@ export default async function SessionsPage({
   )
     ? (params.status as SessionStatus)
     : undefined;
-  const view = params.view === 'board' ? 'board' : 'list';
-
   const timePeriod = parseTimePeriodParam(period ?? null, 'all');
   const [result, sources] = await Promise.all([
     getSessions(authorizedUser, {
@@ -74,10 +67,10 @@ export default async function SessionsPage({
   ]);
   const olderParams = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
-    if (value && key !== 'before') olderParams.set(key, value);
+    if (value && key !== 'before' && key !== 'view')
+      olderParams.set(key, value);
   });
   if (result.nextCursor) olderParams.set('before', result.nextCursor);
-  const columns = SESSION_STATUSES;
 
   return (
     <div className="flex h-full min-h-0 min-w-0 w-full flex-col bg-card">
@@ -87,7 +80,6 @@ export default async function SessionsPage({
           timePeriod={timePeriod}
           scope={scope}
           status={status ?? 'all'}
-          view={view}
           query={q ?? ''}
           repository={params.repository ?? null}
           pullRequest={params.pullRequest ?? null}
@@ -103,37 +95,6 @@ export default async function SessionsPage({
               <EmptyDescription>No sessions found.</EmptyDescription>
             </EmptyHeader>
           </Empty>
-        ) : view === 'board' ? (
-          <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-2 xl:grid-cols-4">
-            {columns.map((column) => (
-              <section key={column} aria-labelledby={`session-${column}`}>
-                <h2
-                  id={`session-${column}`}
-                  className="mb-2 text-sm font-medium capitalize"
-                >
-                  {getSessionStatusLabel(column)}
-                </h2>
-                <div className="divide-y-2 divide-background bg-card">
-                  {result.sessions
-                    .filter((session) =>
-                      column === 'ready'
-                        ? !session.cachedStatus ||
-                          session.cachedStatus === column
-                        : session.cachedStatus === column,
-                    )
-                    .map((session) => (
-                      <SessionCard
-                        key={session.id}
-                        session={session}
-                        viewerUserId={authorizedUser.userId}
-                        query={q}
-                        view="board"
-                      />
-                    ))}
-                </div>
-              </section>
-            ))}
-          </div>
         ) : (
           <div className="divide-y divide-card">
             {result.sessions.map((session) => (

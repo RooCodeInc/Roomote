@@ -4,12 +4,12 @@ icon: clipboard-check
 description: Inspect the transcript, logs, diffs, previews, and follow-up path before you trust the result.
 ---
 
-A task is one independently controllable execution. It may run inside a Session
+A task is one independently controllable execution. It may run inside a session
 or start directly from chat, source control, Linear, the API, or the web
 dashboard. The task workspace remains the place to inspect operational details
 such as logs, terminal output, diffs, previews, retries, and artifacts.
 
-For a delegated task, use the owning Session for conversation, input, reports,
+For a delegated task, use the owning session for conversation, input, reports,
 and follow-up. For a standalone task, continue from the task view instead. In
 either case, open the task view as the execution-review surface when you need
 evidence for your normal review process. A task is complete only when that
@@ -28,55 +28,66 @@ Before you dive into details, check the basics:
 - whether the end state matches the kind of outcome you wanted: answer, plan,
   patch, branch, or PR
 
-## Sessions and the task board
+## Sessions and task status
 
-Use the board view on the Sessions page to scan shared work by lifecycle.
-Roomote places Sessions in **Active**, **Needs input**, **Blocked**, or **Ready**
+Use the sessions page to scan shared work and filter it by lifecycle.
+Roomote places sessions in **Active**, **Needs input**, **Blocked**, or **Ready**
 from their current task, goal, and run state, so your team does not need to
 maintain a separate status field.
 
-Each Session card shows its owner and participants, recent activity, delegated
+Each session card shows its owner and participants, recent activity, delegated
 execution count, workspace or pull-request context, aggregate cost, and unread
-state. Use the **Tasks** scope when you only want Sessions containing execution
-work. Board and list choices remain in the URL so views are shareable.
+state. Use the **Tasks** scope when you only want sessions containing execution
+work.
 
 ## Attention notifications
 
-When a manually started web Session has a new response or its task needs input
+When a manually started web session has a new response or its task needs input
 while the initiator is away, Roomote sends a personal notification. Automation
 and scheduled results do not send these attention notifications. The first
 notification quotes the initial request, includes Roomote's response, and uses
-the standard Session footer. When it needs a new provider thread, Roomote first
+the standard session footer. When it needs a new provider thread, Roomote first
 tries the Slack, Teams, Telegram, or Discord platform the user most recently
-chose to start a task or Session, then falls back through Slack, Teams, Telegram,
+chose to start a task or session, then falls back through Slack, Teams, Telegram,
 Discord, and the user's account email without retrying the preferred platform.
 Email verification is required for inbound requests and replies, not for
 receiving these notifications — and replying to one of these emails verifies
 the account address implicitly. Later
-notifications reuse that Session's successful provider thread when it remains
+notifications reuse that session's successful provider thread when it remains
 available, and the standard footer moves to the latest supported message.
-Roomote skips the notification while the initiator is present in the Session or
-has an active Voice call there.
+Roomote skips the notification while the initiator is present in the session or
+has an active voice call there.
+
+When enabled by an administrator, Roomote first offers a desktop browser
+notification if the relevant session or task page is still open in a background
+or unfocused tab. Permission is requested contextually after the first eligible
+attention event and only after you select **Enable notifications**; Roomote does
+not ask during setup or first run. If the browser does not accept the
+notification within ten seconds, permission is denied or unsupported, or the
+page is closed, Roomote continues through the configured personal-provider
+waterfall. Browser delivery only replaces that extra attention copy: normal
+replies continue in the session or existing communication thread. Closed-page
+browser push is not supported.
 
 If you continue the conversation on the web and then leave again, the next
 notification in that same provider thread marks the messages that were not
 shown there. For gaps of up to four conversation messages, it also quotes the
-latest web request. Longer gaps link to the Session instead of generating a
+latest web request. Longer gaps link to the session instead of generating a
 summary or copying the omitted conversation. Presence changes alone do not add
 this marker, and a notification that starts a new provider thread still uses
 the original request quote.
 
 Reply directly to a notification in Slack, Teams, Telegram, Discord, or email
-to continue the same Session. Use the provider's reply action so Roomote can
-match the message to the Session; a separate top-level message starts or
+to continue the same session. Use the provider's reply action so Roomote can
+match the message to the session; a separate top-level message starts or
 continues that provider's ordinary conversation instead. Direct task replies
-return to the notified task, while replies to Fast Session notifications keep
-the Session's existing context. If a Teams personal chat does not attach reply
+return to the notified task, while replies to session notifications keep
+the session's existing context. If a Teams personal chat does not attach reply
 metadata, start the message with `continue:` to continue the most recent
 attention notification from the past seven days.
 
 Failed and canceled tasks retain a terminal notification fallback. Roomote
-deduplicates delivery across task completion, retries, and Fast parent reports.
+deduplicates delivery across task completion, retries, and parent-session reports.
 
 ## Recover from a failed start
 
@@ -90,8 +101,8 @@ reattach any files the new task needs.
 
 The task view gives you the working context for a run:
 
-- a header breadcrumb linking back to the owning Session (when you opened the
-  workspace from a filtered Sessions view, browser Back returns to that view)
+- a header breadcrumb linking back to the owning session (when you opened the
+  workspace from a filtered sessions view, browser Back returns to that view)
 - conversation history and Roomote updates
 - inline widgets for structured tables, status cards, plans, and other
   presentational results an agent chooses to show
@@ -108,10 +119,10 @@ detail to review the work. Presentational widgets remain available in the task
 transcript; when an agent provides a text fallback, Roomote also sends that
 fallback to the originating Slack, Teams, Telegram, or Discord conversation.
 
-For a Markdown plan artifact, **Build this** starts a Session and delegates the
+For a Markdown plan artifact, **Build this** starts a session and delegates the
 plan to a task inside it. Roomote preserves the selected environment, branch,
 and model, and retries the same kickoff if the first launch is interrupted. Use
-the confirmation link to follow the Session, then open the delegated task for
+the confirmation link to follow the session, then open the delegated task for
 its operational details.
 
 Generated HTML artifacts open in a sandboxed **Preview** by default. Switch to
@@ -188,7 +199,7 @@ that prior workspace instead of starting over. Snapshot retention depends on
 the sandbox provider: Modal-backed snapshots do not have Roomote's seven-day
 application expiry, while other providers may use a bounded window.
 
-When a task delegated from a Fast session asks for input, reply naturally in
+When a task delegated from a session asks for input, reply naturally in
 the originating session. If one input request is pending, Roomote
 applies a matching reply to that request instead of treating it as a separate
 task instruction.

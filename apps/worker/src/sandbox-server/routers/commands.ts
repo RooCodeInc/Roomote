@@ -21,6 +21,7 @@ import {
   scrubSnapshotSecrets,
   restoreScrubbedCredentials,
   prepareRepository,
+  listRepositories,
 } from '../procedures';
 
 export const commandsRouter = router({
@@ -44,4 +45,5 @@ export const commandsRouter = router({
   scrubSnapshotSecrets,
   restoreScrubbedCredentials,
   prepareRepository,
+  listRepositories,
 });

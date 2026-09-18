@@ -105,7 +105,7 @@ const state = vi.hoisted(() => ({
     },
   },
   linearRedirectPath: '',
-  pathname: '/settings/integrations',
+  pathname: '/integrations',
   searchParams: '',
 }));
 
@@ -601,7 +601,7 @@ function Integrations(props: ComponentProps<typeof ActualIntegrations> = {}) {
 describe('Integrations settings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    window.history.replaceState(null, '', '/settings/integrations');
+    window.history.replaceState(null, '', '/integrations');
     state.voiceConnection = null;
     state.deploymentEnablements = [];
     state.integrationsEnabled = true;
@@ -613,7 +613,7 @@ describe('Integrations settings', () => {
       linearOrganizationName: 'Roomote',
     };
     state.linearRedirectPath = '';
-    state.pathname = '/settings/integrations';
+    state.pathname = '/integrations';
     state.asanaConnection = null;
     state.notionConnection = null;
     state.ripplingConnection = null;
@@ -647,9 +647,7 @@ describe('Integrations settings', () => {
   it('returns Linear OAuth to a service-specific integrations URL', () => {
     render(<ActualIntegrations />);
 
-    expect(state.linearRedirectPath).toBe(
-      '/settings/integrations?service=linear',
-    );
+    expect(state.linearRedirectPath).toBe('/integrations?service=linear');
   });
 
   it('renders only requested integrations in passed order without custom servers or groups', () => {
@@ -1165,7 +1163,7 @@ describe('Integrations settings', () => {
     screen.getByRole('button', { name: 'Connect and enable Pylon' }).click();
 
     expect(mutations.connectMcp).toHaveBeenCalledWith(
-      { mcpId: 'pylon', redirectTo: '/settings/integrations' },
+      { mcpId: 'pylon', redirectTo: '/integrations' },
       expect.objectContaining({
         onSuccess: expect.any(Function),
         onError: expect.any(Function),
@@ -1179,7 +1177,7 @@ describe('Integrations settings', () => {
     screen.getByRole('button', { name: 'Connect and enable PostHog' }).click();
 
     expect(mutations.connectMcp).toHaveBeenCalledWith(
-      { mcpId: 'posthog', redirectTo: '/settings/integrations' },
+      { mcpId: 'posthog', redirectTo: '/integrations' },
       expect.objectContaining({
         onSuccess: expect.any(Function),
         onError: expect.any(Function),
@@ -1195,7 +1193,7 @@ describe('Integrations settings', () => {
       .click();
 
     expect(mutations.connectMcp).toHaveBeenCalledWith(
-      { mcpId: 'betterstack', redirectTo: '/settings/integrations' },
+      { mcpId: 'betterstack', redirectTo: '/integrations' },
       expect.objectContaining({
         onSuccess: expect.any(Function),
         onError: expect.any(Function),
@@ -1209,7 +1207,7 @@ describe('Integrations settings', () => {
     screen.getByRole('button', { name: 'Connect and enable Pylon' }).click();
 
     expect(mutations.connectMcp).toHaveBeenCalledWith(
-      { mcpId: 'pylon', redirectTo: '/settings/integrations' },
+      { mcpId: 'pylon', redirectTo: '/integrations' },
       expect.objectContaining({
         onSuccess: expect.any(Function),
         onError: expect.any(Function),
@@ -1223,7 +1221,7 @@ describe('Integrations settings', () => {
     screen.getByRole('button', { name: 'Connect and enable Railway' }).click();
 
     expect(mutations.connectMcp).toHaveBeenCalledWith(
-      { mcpId: 'railway', redirectTo: '/settings/integrations' },
+      { mcpId: 'railway', redirectTo: '/integrations' },
       expect.objectContaining({
         onSuccess: expect.any(Function),
         onError: expect.any(Function),
@@ -1239,7 +1237,7 @@ describe('Integrations settings', () => {
     );
 
     expect(mutations.connectMcp).toHaveBeenCalledWith(
-      { mcpId: 'jira', redirectTo: '/settings/integrations' },
+      { mcpId: 'jira', redirectTo: '/integrations' },
       expect.objectContaining({
         onSuccess: expect.any(Function),
         onError: expect.any(Function),
@@ -1255,7 +1253,7 @@ describe('Integrations settings', () => {
     );
 
     expect(mutations.connectMcp).toHaveBeenCalledWith(
-      { mcpId: 'sentry', redirectTo: '/settings/integrations' },
+      { mcpId: 'sentry', redirectTo: '/integrations' },
       expect.objectContaining({
         onSuccess: expect.any(Function),
         onError: expect.any(Function),
@@ -1379,7 +1377,7 @@ describe('Integrations settings', () => {
     );
 
     expect(mutations.connectMcp).toHaveBeenCalledWith(
-      { mcpId: 'sentry', redirectTo: '/settings/integrations' },
+      { mcpId: 'sentry', redirectTo: '/integrations' },
       expect.objectContaining({
         onSuccess: expect.any(Function),
         onError: expect.any(Function),
@@ -1402,7 +1400,7 @@ describe('Integrations settings', () => {
     );
 
     expect(mutations.connectMcp).toHaveBeenCalledWith(
-      { mcpId: 'sentry', redirectTo: '/settings/integrations' },
+      { mcpId: 'sentry', redirectTo: '/integrations' },
       expect.objectContaining({
         onSuccess: expect.any(Function),
         onError: expect.any(Function),
@@ -1432,7 +1430,7 @@ describe('Integrations settings', () => {
     window.history.replaceState(
       null,
       '',
-      '/settings/integrations?highlight=pylon&source=slack-manager-integration-setup',
+      '/integrations?highlight=pylon&source=slack-manager-integration-setup',
     );
 
     render(<Integrations />);
@@ -1450,7 +1448,7 @@ describe('Integrations settings', () => {
     expect(replaceState).toHaveBeenLastCalledWith(
       null,
       '',
-      '/settings/integrations?source=slack-manager-integration-setup',
+      '/integrations?source=slack-manager-integration-setup',
     );
   });
 
@@ -1463,11 +1461,7 @@ describe('Integrations settings', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Not now' }));
 
-    expect(replaceState).toHaveBeenLastCalledWith(
-      null,
-      '',
-      '/settings/integrations',
-    );
+    expect(replaceState).toHaveBeenLastCalledWith(null, '', '/integrations');
   });
 
   it('shows workspace connection status for an enabled org-scoped MCP', () => {
@@ -2079,7 +2073,7 @@ describe('Integrations settings', () => {
   it('labels enabled keyless Exa without advertising Exa Agent', () => {
     state.deploymentEnablements = [{ mcpId: 'exa', enabled: true }];
 
-    render(<Integrations />);
+    render(<ActualIntegrations />);
 
     expect(
       screen.getByText(
@@ -2087,8 +2081,23 @@ describe('Integrations settings', () => {
       ),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Disable Exa' }),
+      screen.queryByText(
+        'Enable Exa so your agents can search and fetch the web, with an optional API key for multi-step research from Roomote tasks',
+      ),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Remove Exa' }),
     ).toBeInTheDocument();
+  });
+
+  it('leaves the details column empty instead of falling back to descriptions', () => {
+    render(<ActualIntegrations />);
+
+    expect(
+      screen.queryByText(
+        'Enable Linear so this deployment can route issue context and task entry through it.',
+      ),
+    ).not.toBeInTheDocument();
   });
 
   it('shows Asana connected controls and supports editing', () => {

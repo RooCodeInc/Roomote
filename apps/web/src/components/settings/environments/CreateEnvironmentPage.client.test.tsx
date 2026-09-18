@@ -55,7 +55,13 @@ const { mockNavigationState, mockRepositoriesState, mockCreateRepoDialog } =
       data: [
         { id: 'repo-1', fullName: 'acme/api' },
         { id: 'repo-2', fullName: 'acme/web' },
-      ] as Array<{ id: string; fullName: string; isEmpty?: boolean }>,
+      ] as
+        | Array<{ id: string; fullName: string; isEmpty?: boolean }>
+        | undefined,
+      isError: false,
+      isFetching: false,
+      isPending: false,
+      refetch: vi.fn(),
     },
     mockCreateRepoDialog: vi.fn(),
   }));
@@ -87,7 +93,10 @@ vi.mock('@/hooks/environments', () => ({
 vi.mock('@/hooks/source-control', () => ({
   useRepositories: () => ({
     data: mockRepositoriesState.data,
-    isPending: false,
+    isError: mockRepositoriesState.isError,
+    isFetching: mockRepositoriesState.isFetching,
+    isPending: mockRepositoriesState.isPending,
+    refetch: mockRepositoriesState.refetch,
   }),
 }));
 
@@ -265,6 +274,22 @@ vi.mock('@/components/system', () => ({
   Info: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Loader2: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Plus: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
+  RetryableLoadError: ({
+    message,
+    isRetrying,
+    onRetry,
+  }: {
+    message: string;
+    isRetrying?: boolean;
+    onRetry: () => void;
+  }) => (
+    <div>
+      <p>{message}</p>
+      <button type="button" disabled={isRetrying} onClick={onRetry}>
+        Retry
+      </button>
+    </div>
+  ),
   ScrollArea: ({
     children,
     ...props
@@ -287,6 +312,21 @@ describe('CreateEnvironmentPage', () => {
       { id: 'repo-1', fullName: 'acme/api' },
       { id: 'repo-2', fullName: 'acme/web' },
     ];
+    mockRepositoriesState.isError = false;
+    mockRepositoriesState.isFetching = false;
+    mockRepositoriesState.isPending = false;
+    mockRepositoriesState.refetch.mockReset();
+  });
+
+  it('keeps cached repositories visible after a background failure', () => {
+    mockRepositoriesState.isError = true;
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <CreateEnvironmentPage />
+      </QueryClientProvider>,
+    );
+    expect(screen.getByText('acme/api')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Start Agent' })).toBeEnabled();
   });
 
   it('renders the create-repo affordance and opens the dialog', () => {
@@ -409,6 +449,63 @@ describe('CreateEnvironmentPage', () => {
         expect.anything(),
       );
     });
+  });
+
+  it('blocks agent start and retries when repositories fail to load', async () => {
+    mockRepositoriesState.isError = true;
+    mockRepositoriesState.data = undefined;
+    const queryClient = new QueryClient();
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <CreateEnvironmentPage />
+      </QueryClientProvider>,
+    );
+
+    expect(
+      screen.getByText('Failed to load repositories.'),
+    ).toBeInTheDocument();
+    const retryButton = screen.getByRole('button', { name: 'Retry' });
+    expect(retryButton).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Start Agent' })).toBeDisabled();
+
+    fireEvent.click(retryButton);
+
+    expect(mockRepositoriesState.refetch).toHaveBeenCalledOnce();
+    expect(mockStartDefinitionTask).not.toHaveBeenCalled();
+  });
+
+  it('blocks agent start while repositories are initially loading', () => {
+    mockRepositoriesState.isPending = true;
+    mockRepositoriesState.data = [];
+    const queryClient = new QueryClient();
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <CreateEnvironmentPage />
+      </QueryClientProvider>,
+    );
+
+    expect(
+      screen.queryByRole('button', { name: 'Retry' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start Agent' })).toBeDisabled();
+  });
+
+  it('keeps retry disabled while the repository query is retrying', () => {
+    mockRepositoriesState.isError = true;
+    mockRepositoriesState.isFetching = true;
+    mockRepositoriesState.data = undefined;
+    const queryClient = new QueryClient();
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <CreateEnvironmentPage />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Start Agent' })).toBeDisabled();
   });
 
   it('clears stale continue-anyway state after yaml edits', async () => {

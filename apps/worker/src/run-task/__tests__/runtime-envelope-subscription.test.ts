@@ -951,6 +951,7 @@ describe('subscribeHarnessCallbacks', () => {
       expect(sdk.taskRuns.notifyUserAttention).toHaveBeenCalledWith({
         id: 50,
         kind: 'input_needed',
+        presentationKind: 'input',
         eventId: 'rui:session:turn:call',
       });
       expect(loggerWarn).toHaveBeenCalledWith(

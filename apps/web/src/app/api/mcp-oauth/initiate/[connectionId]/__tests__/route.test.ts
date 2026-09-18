@@ -114,6 +114,14 @@ vi.mock('@roomote/sdk/server', () => ({
   storeClientInformation: storeClientInformationMock,
   getClientInformation: getClientInformationMock,
   resolveCustomMcpAuthTarget: resolveCustomMcpAuthTargetMock,
+  // The real rule, so these suites exercise who may authorize a custom server.
+  canManageCustomMcpServer: (
+    server: { ownerUserId: string | null; createdByUserId: string | null },
+    actor: { userId: string; isAdmin: boolean },
+  ) =>
+    server.ownerUserId
+      ? server.ownerUserId === actor.userId
+      : actor.isAdmin || server.createdByUserId === actor.userId,
   ensureCustomMcpServerMetadata: ensureCustomMcpServerMetadataMock,
   updateAuthStatus: updateAuthStatusMock,
 }));
@@ -259,6 +267,8 @@ describe('GET /api/mcp-oauth/initiate/[connectionId]', () => {
     getMcpIntegrationMock.mockReturnValue(undefined);
     resolveCustomMcpAuthTargetMock.mockResolvedValue({
       serverId: 'server-1',
+      ownerUserId: null,
+      createdByUserId: null,
       name: 'accounting',
       url: 'https://mcp.example.com/mcp',
       manualClient: null,
@@ -299,6 +309,8 @@ describe('GET /api/mcp-oauth/initiate/[connectionId]', () => {
     getMcpIntegrationMock.mockReturnValue(undefined);
     resolveCustomMcpAuthTargetMock.mockResolvedValue({
       serverId: 'server-1',
+      ownerUserId: null,
+      createdByUserId: null,
       name: 'intercom',
       url: 'https://mcp.example.com/mcp',
       manualClient: null,
@@ -355,6 +367,8 @@ describe('GET /api/mcp-oauth/initiate/[connectionId]', () => {
     getMcpIntegrationMock.mockReturnValue(undefined);
     resolveCustomMcpAuthTargetMock.mockResolvedValue({
       serverId: 'server-1',
+      ownerUserId: null,
+      createdByUserId: null,
       name: 'intercom',
       url: 'https://mcp.example.com/mcp',
       manualClient: null,
@@ -387,6 +401,8 @@ describe('GET /api/mcp-oauth/initiate/[connectionId]', () => {
     getMcpIntegrationMock.mockReturnValue(undefined);
     resolveCustomMcpAuthTargetMock.mockResolvedValue({
       serverId: 'server-1',
+      ownerUserId: null,
+      createdByUserId: null,
       name: 'accounting',
       url: 'https://mcp.example.com/mcp',
       manualClient: null,

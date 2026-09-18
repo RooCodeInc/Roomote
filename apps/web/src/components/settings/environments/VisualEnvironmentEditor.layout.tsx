@@ -41,13 +41,13 @@ export function SectionShell({
     <Collapsible
       asChild
       defaultOpen={defaultOpen}
-      className={cn('group rounded-md bg-card p-4', className)}
+      className={cn('rounded-md bg-card p-4', className)}
     >
       <section>
         <div className="flex items-center justify-between gap-3">
           <CollapsibleTrigger
             type="button"
-            className="group flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left text-sm font-medium transition-colors hover:text-accent-foreground"
+            className="group/collapsible-icon-trigger flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left text-sm font-medium transition-colors hover:text-accent-foreground"
           >
             <CollapsibleIconTrigger
               icon={Icon}

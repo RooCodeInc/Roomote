@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   findTaskMessage: vi.fn(),
   resolvePresentation: vi.fn(),
   getChatPreference: vi.fn(),
+  notifyDirectAttention: vi.fn(),
 }));
 
 function updateChain() {
@@ -53,6 +54,7 @@ vi.mock('../session-attention-notification', () => ({
   findLatestSessionAttentionReceipt: mocks.findLatestReceipt,
   findTaskAttentionMessage: mocks.findTaskMessage,
   hasTaskRunAttentionNotification: mocks.hasAttention,
+  notifyDirectWebTaskAttention: mocks.notifyDirectAttention,
   resolveSessionAttentionPresentation: mocks.resolvePresentation,
 }));
 vi.mock('./fast-agent-delivery-claim', () => ({
@@ -93,6 +95,7 @@ describe('notifyWebTaskInitiatorOnSettle', () => {
       receipts: [],
     });
     mocks.recordEvent.mockResolvedValue(undefined);
+    mocks.notifyDirectAttention.mockResolvedValue('delivered');
   });
 
   it('uses the user task-starting chat preference for a new notification route', async () => {
@@ -107,7 +110,6 @@ describe('notifyWebTaskInitiatorOnSettle', () => {
 
   it.each([
     [RunStatus.Completed, 'completed'],
-    [RunStatus.Failed, 'failed'],
     [RunStatus.Canceled, 'was canceled'],
   ] as const)(
     'delivers a %s settle through the personal waterfall',
@@ -139,6 +141,30 @@ describe('notifyWebTaskInitiatorOnSettle', () => {
       );
     },
   );
+
+  it('routes failed settlement through error attention delivery', async () => {
+    mocks.findTask.mockResolvedValue({
+      ...eligibleTask,
+      state: RunStatus.Failed,
+      runs: [{ ...eligibleTask.runs[0], status: RunStatus.Failed }],
+    });
+    mocks.selectTaskStateRun.mockReturnValue({
+      ...eligibleTask.runs[0],
+      status: RunStatus.Failed,
+    });
+
+    await expect(
+      notifyWebTaskInitiatorOnSettle(run, RunStatus.Failed),
+    ).resolves.toBe('delivered');
+    expect(mocks.notifyDirectAttention).toHaveBeenCalledWith({
+      runId: run.id,
+      eventId: `settlement:${run.id}`,
+      kind: 'result_ready',
+      presentationKind: 'error',
+      message: 'The actual task response.',
+    });
+    expect(mocks.sendPersonalNotification).not.toHaveBeenCalled();
+  });
 
   it('suppresses delivery while the initiating user is viewing the Session', async () => {
     mocks.isPresent.mockResolvedValue(true);
