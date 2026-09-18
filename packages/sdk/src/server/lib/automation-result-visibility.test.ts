@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import {
   customAutomations,
   db,
+  deploymentSettings,
   eq,
   slackInstallationChannels,
   slackInstallations,
@@ -11,7 +12,10 @@ import {
 } from '@roomote/db/server';
 import { SlackNotifier } from '@roomote/slack';
 
-import { resolveCustomAutomationResultVisibility } from './automation-result-visibility';
+import {
+  resolveBackgroundAutomationResultVisibility,
+  resolveCustomAutomationResultVisibility,
+} from './automation-result-visibility';
 
 async function createAutomation(
   name: string,
@@ -83,6 +87,42 @@ describe('automation result visibility', () => {
           .delete(customAutomations)
           .where(eq(customAutomations.id, automation.id));
       }
+    }
+  });
+
+  it('keeps built-in output private when the deployment default is a DM', async () => {
+    await db
+      .insert(deploymentSettings)
+      .values({
+        id: 'default',
+        defaultAutomationTarget: {
+          provider: 'slack',
+          targetKind: 'slack_user',
+          externalRef: `user-${randomUUID()}`,
+        },
+      })
+      .onConflictDoUpdate({
+        target: deploymentSettings.id,
+        set: {
+          managerSlackChannelId: null,
+          managerDiscordChannelId: null,
+          defaultAutomationTarget: {
+            provider: 'slack',
+            targetKind: 'slack_user',
+            externalRef: `user-${randomUUID()}`,
+          },
+        },
+      });
+
+    try {
+      await expect(
+        resolveBackgroundAutomationResultVisibility('suggester'),
+      ).resolves.toBe('private');
+    } finally {
+      await db
+        .update(deploymentSettings)
+        .set({ defaultAutomationTarget: null })
+        .where(eq(deploymentSettings.id, 'default'));
     }
   });
 

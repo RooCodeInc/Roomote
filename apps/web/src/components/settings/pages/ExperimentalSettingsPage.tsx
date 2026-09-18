@@ -3,7 +3,6 @@
 import { SettingsShell } from '@/components/settings/SettingsShell';
 import { ResultsExperimentalSetting } from '@/components/settings/ResultsExperimentalSetting';
 import { SlackPeerConversationsExperimentalSetting } from '@/components/settings/SlackPeerConversationsExperimentalSetting';
-import { ServiceCredentialToolsExperimentalSetting } from '@/components/settings/ServiceCredentialToolsExperimentalSetting';
 import { PrivateSessionsExperimentalSetting } from '@/components/settings/PrivateSessionsExperimentalSetting';
 import { BrowserNotificationsExperimentalSetting } from '@/components/settings/BrowserNotificationsExperimentalSetting';
 import { ToolApprovalsExperimentalSetting } from '@/components/settings/ToolApprovalsExperimentalSetting';
@@ -30,7 +29,6 @@ export function ExperimentalSettingsPage() {
           <ToolApprovalsExperimentalSetting />
           <ResultsExperimentalSetting />
           <SlackPeerConversationsExperimentalSetting />
-          <ServiceCredentialToolsExperimentalSetting />
         </>
       )}
     </SettingsShell>

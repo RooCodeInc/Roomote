@@ -16,6 +16,7 @@ describe('metadata descriptions', () => {
     'opencode_background_subagents',
     'opencode_code_mode',
     'composerSuggestions',
+    'integration_keys_enabled',
   ])('classifies removed experiment metadata %s as legacy', (key) => {
     expect(getBooleanMetadataDescriptorByKey(key)).toEqual({
       kind: 'legacy',
@@ -34,9 +35,6 @@ describe('metadata descriptions', () => {
     expect(getBooleanMetadataDescriptorByKey('results_page_enabled').kind).toBe(
       'deployment-control',
     );
-    expect(
-      getBooleanMetadataDescriptorByKey('integration_keys_enabled').kind,
-    ).toBe('deployment-control');
   });
 
   it('enables deployment experiments only from explicit true metadata', () => {
@@ -48,7 +46,6 @@ describe('metadata descriptions', () => {
     ).toEqual({
       results: true,
       slackPeerConversations: false,
-      serviceCredentialTools: false,
       privateSessions: false,
       browserNotifications: false,
       toolApprovals: false,

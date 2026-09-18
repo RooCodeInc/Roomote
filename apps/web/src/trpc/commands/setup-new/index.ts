@@ -108,6 +108,7 @@ import {
   type TaskModelSettings,
   AUTOMATION_RECOMMENDATIONS_CATALOG_VERSION,
   AUTOMATION_RECOMMENDATION_CATALOG,
+  AUTOMATION_DESTINATION_DESCRIPTORS,
   ALL_REPOSITORIES,
   getTriggerableBackgroundAutomationDescriptorByKey,
   isAutomationDestinationTarget,
@@ -2628,7 +2629,10 @@ async function applySetupRecommendationInTx(
             ownerUserId: auth.userId,
             capabilities: {
               chatProviders: descriptor.supportedCommunicationProviders,
-              email: false,
+              email: AUTOMATION_DESTINATION_DESCRIPTORS.some(
+                (destination) =>
+                  destination.automationKey === candidate.automationKey,
+              ),
             },
             includeSetupHandoff: true,
             client: tx,

@@ -7,7 +7,6 @@ const mocks = vi.hoisted(() => ({
   list: vi.fn(),
   revoke: vi.fn(),
   findSession: vi.fn(),
-  isDeploymentExperimentEnabled: vi.fn(),
   reply: vi.fn(),
   eq: vi.fn((column, value) => ({ column, value })),
   env: {
@@ -25,7 +24,6 @@ vi.mock('@roomote/db/server', () => ({
   },
   sessions: { id: 'sessions.id' },
   eq: mocks.eq,
-  isDeploymentExperimentEnabled: mocks.isDeploymentExperimentEnabled,
 }));
 vi.mock('@/trpc/commands/fast-sessions', () => ({
   replyToFastSessionCommand: mocks.reply,
@@ -80,7 +78,6 @@ beforeEach(() => {
   mocks.env.R_PUBLIC_URL = 'https://roomote.example';
   mocks.authorize.mockResolvedValue(auth);
   mocks.findSession.mockResolvedValue(liveSession);
-  mocks.isDeploymentExperimentEnabled.mockResolvedValue(false);
   mocks.reply.mockResolvedValue({ success: true });
   mocks.create.mockResolvedValue(metadata);
   mocks.list.mockResolvedValue({
@@ -182,7 +179,7 @@ describe('integration key route boundary', () => {
     });
     expect(mocks.reply).toHaveBeenCalledExactlyOnceWith(auth, {
       sessionId: fastConversationId,
-      text: expect.stringContaining('Integration keys are turned off'),
+      text: expect.stringContaining('call list_integration_keys'),
     });
     expect(mocks.create.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.findSession.mock.invocationCallOrder[0]!,
@@ -196,9 +193,7 @@ describe('integration key route boundary', () => {
     }
   });
 
-  it('resumes with the available workflow when the experiment is enabled', async () => {
-    mocks.isDeploymentExperimentEnabled.mockResolvedValue(true);
-
+  it('resumes with the available integration workflow', async () => {
     await POST(request('POST', createArgs), props);
 
     expect(mocks.reply).toHaveBeenCalledWith(auth, {
@@ -217,11 +212,8 @@ describe('integration key route boundary', () => {
     await POST(request('POST', createArgs), props);
     const text = mocks.reply.mock.calls[0]![1].text;
     expect(text).not.toContain('GET or HEAD');
-    expect(text).toContain(
-      'integration was saved but cannot currently be used',
-    );
+    expect(text).toContain('call list_integration_keys');
     for (const tool of [
-      'list_integration_keys',
       'prepare_integration_key',
       'request_with_integration_key',
     ]) {

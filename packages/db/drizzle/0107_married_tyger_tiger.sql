@@ -1,0 +1,1 @@
+ALTER TABLE "deployment_settings" ADD COLUMN "default_automation_target" jsonb;

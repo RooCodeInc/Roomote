@@ -8,7 +8,6 @@ import {
   users,
   resolveServiceCredentialContext,
   listOwnedServiceCredentials,
-  isDeploymentExperimentEnabled,
   type ServiceCredentialContext,
 } from '@roomote/db/server';
 import { Env } from '@roomote/env';
@@ -100,13 +99,7 @@ export function createHttpIntegrationsMcp() {
           403,
           'HTTP integrations requires an active member actor',
         );
-      const serviceCredentialToolsEnabled = await isDeploymentExperimentEnabled(
-        'serviceCredentialTools',
-      );
-      const integrationKeysStillEnabled = () =>
-        serviceCredentialToolsEnabled
-          ? isDeploymentExperimentEnabled('serviceCredentialTools')
-          : Promise.resolve(false);
+      const integrationKeysAvailable = Boolean(resolveContext);
       const scope =
         auth.tokenType === 'run' ? `run:${auth.runId}` : `user:${user.id}`;
       server = new McpServer(
@@ -119,7 +112,7 @@ export function createHttpIntegrationsMcp() {
       server.registerTool(
         'list_integrations',
         {
-          description: serviceCredentialToolsEnabled
+          description: integrationKeysAvailable
             ? "List allowed operator integrations and live integration keys available to this member with their methods and paths. Credentials are never returned. integration keys need no operator manifest: use integration_request with a session: id for any of the grant's allowed methods, or, inside an attached coding run, the substitute token and base URL delivered for that grant (see ROOMOTE_CREDENTIAL_EGRESS_SERVICES) with any ordinary HTTP client and the grant's allowed methods."
             : 'List allowed operator integrations with their methods and paths. Credentials are never returned.',
           inputSchema: {},
@@ -131,13 +124,11 @@ export function createHttpIntegrationsMcp() {
           },
         },
         async () => {
-          const integrationKeysEnabled = await integrationKeysStillEnabled();
-          const grants =
-            integrationKeysEnabled && resolveContext
-              ? await resolveContext()
-                  .then(listOwnedServiceCredentials)
-                  .catch(() => [])
-              : [];
+          const grants = resolveContext
+            ? await resolveContext()
+                .then(listOwnedServiceCredentials)
+                .catch(() => [])
+            : [];
           return toMcpToolResult({
             integrations: [
               ...config.integrations
@@ -182,8 +173,7 @@ export function createHttpIntegrationsMcp() {
         },
         async (args) => {
           try {
-            if (!(await integrationKeysStillEnabled()) || !resolveContext)
-              throw new Error();
+            if (!resolveContext) throw new Error();
             const context = await resolveContext();
             const pending = await prepareServiceCredential(context, args);
             return toMcpToolResult({
@@ -212,8 +202,7 @@ export function createHttpIntegrationsMcp() {
         },
         async () => {
           try {
-            if (!(await integrationKeysStillEnabled()) || !resolveContext)
-              throw new Error();
+            if (!resolveContext) throw new Error();
             return toMcpToolResult(
               await listServiceCredentialApprovals(await resolveContext()),
             );
@@ -230,14 +219,14 @@ export function createHttpIntegrationsMcp() {
           }
         },
       );
-      if (!serviceCredentialToolsEnabled) {
+      if (!integrationKeysAvailable) {
         prepareSecretTool.disable();
         listSecretsTool.disable();
       }
       server.registerTool(
         'integration_request',
         {
-          description: serviceCredentialToolsEnabled
+          description: integrationKeysAvailable
             ? 'Make a credential-broker request using an ID from list_integrations: an operator integration ID, or a session: ID for an owner-approved integration key. integration keys accept any method the owner approved for them; for scripts or SDKs inside an attached run, use the delivered substitute token with the base URL instead. Supply only integrationId, method, relative path (optional query), optional body/contentType and Session accept preference; never supply credentials, arbitrary headers, or a Session/user ID.'
             : 'Make a credential-broker request using an operator integration ID from list_integrations. Supply only integrationId, method, relative path (optional query), optional body/contentType and accept preference; never supply credentials, arbitrary headers, or a Session/user ID.',
           inputSchema: integrationRequestSchema,
@@ -250,7 +239,6 @@ export function createHttpIntegrationsMcp() {
         },
         async (args) => {
           try {
-            const integrationKeysEnabled = await integrationKeysStillEnabled();
             return toMcpToolResult(
               await integrationRequest(
                 config,
@@ -258,7 +246,7 @@ export function createHttpIntegrationsMcp() {
                 args,
                 user.id,
                 c.req.raw.signal,
-                integrationKeysEnabled ? resolveContext : undefined,
+                resolveContext,
               ),
             );
           } catch (error) {

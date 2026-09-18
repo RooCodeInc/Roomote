@@ -3,7 +3,6 @@ import type { MetadataBooleanDescriptor } from './types';
 export const DEPLOYMENT_EXPERIMENT_IDS = [
   'results',
   'slackPeerConversations',
-  'serviceCredentialTools',
   'privateSessions',
   'browserNotifications',
   'toolApprovals',
@@ -14,7 +13,6 @@ export type DeploymentExperimentId = (typeof DEPLOYMENT_EXPERIMENT_IDS)[number];
 export const DEPLOYMENT_EXPERIMENT_METADATA_KEYS = {
   results: 'results_page_enabled',
   slackPeerConversations: 'slack_peer_conversations_experiment_enabled',
-  serviceCredentialTools: 'integration_keys_enabled',
   privateSessions: 'private_sessions_experiment_enabled',
   browserNotifications: 'browser_notifications_experiment_enabled',
   toolApprovals: 'tool_approvals_experiment_enabled',
@@ -55,11 +53,6 @@ export const DEPLOYMENT_METADATA_BOOLEAN_CONFIG: Record<
     group: null,
     description:
       'Allow Fast to observe human-to-human discussion in established Slack and Discord threads',
-  },
-  [DEPLOYMENT_EXPERIMENT_METADATA_KEYS.serviceCredentialTools]: {
-    kind: 'deployment-control',
-    group: null,
-    description: 'Allow members to use approved integration keys',
   },
   [DEPLOYMENT_EXPERIMENT_METADATA_KEYS.privateSessions]: {
     kind: 'deployment-control',

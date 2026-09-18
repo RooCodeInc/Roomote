@@ -275,35 +275,41 @@ const NonTaskInputModalityUnsupportedError = vi.hoisted(
     },
 );
 
-vi.mock('../../non-task-provider-usage', () => ({
-  FAST_AGENT_SESSION_PERMISSIONS: fastAgentSessionPermissions,
-  FAST_AGENT_SESSION_TOOL_FILTER: fastAgentSessionToolFilter,
-  NON_TASK_INFERENCE_SURFACES: {
-    fastAgentImageInspection: 'fast_agent_image_inspection',
-    fastAgentQuestionAnswering: 'fast_agent',
-  },
-  NonTaskInputModalityUnsupportedError,
-  classifyNonTaskInferenceError: mocks.classifyInferenceError,
-  generateTrackedNonTaskObject: mocks.generateTrackedObject,
-  generateTrackedNonTaskText: mocks.generateHelperText,
-  generateTrackedNonTaskTextInOpenCodeSession: mocks.generateText,
-  resolveNonTaskInputModalityDelivery: mocks.resolveImageDelivery,
-  NonTaskOpenCodePromptTimeoutError: class extends Error {
-    constructor(timeoutMs: number) {
-      super(`Timed out waiting for OpenCode output after ${timeoutMs}ms.`);
-      this.name = 'NonTaskOpenCodePromptTimeoutError';
-    }
-  },
-  isNonTaskOpenCodePromptTimeoutError: (error: unknown) =>
-    error instanceof Error &&
-    error.name === 'NonTaskOpenCodePromptTimeoutError',
-  isNonTaskOpenCodeSessionNotFoundError: (error: unknown) =>
-    error instanceof Error &&
-    error.name === 'NonTaskOpenCodeSessionNotFoundError',
-  isNonTaskOpenCodeSessionValidationError: (error: unknown) =>
-    error instanceof Error &&
-    error.name === 'NonTaskOpenCodeSessionValidationError',
-}));
+vi.mock('../../non-task-provider-usage', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../non-task-provider-usage')>();
+  return {
+    FAST_AGENT_SESSION_PERMISSIONS: fastAgentSessionPermissions,
+    FAST_AGENT_SESSION_TOOL_FILTER: fastAgentSessionToolFilter,
+    NON_TASK_INFERENCE_SURFACES: {
+      fastAgentImageInspection: 'fast_agent_image_inspection',
+      fastAgentQuestionAnswering: 'fast_agent',
+    },
+    NonTaskInputModalityUnsupportedError,
+    classifyNonTaskInferenceError: mocks.classifyInferenceError,
+    generateTrackedNonTaskObject: mocks.generateTrackedObject,
+    generateTrackedNonTaskText: mocks.generateHelperText,
+    generateTrackedNonTaskTextInOpenCodeSession: mocks.generateText,
+    isNonTaskImageInputUnsupportedError:
+      actual.isNonTaskImageInputUnsupportedError,
+    resolveNonTaskInputModalityDelivery: mocks.resolveImageDelivery,
+    NonTaskOpenCodePromptTimeoutError: class extends Error {
+      constructor(timeoutMs: number) {
+        super(`Timed out waiting for OpenCode output after ${timeoutMs}ms.`);
+        this.name = 'NonTaskOpenCodePromptTimeoutError';
+      }
+    },
+    isNonTaskOpenCodePromptTimeoutError: (error: unknown) =>
+      error instanceof Error &&
+      error.name === 'NonTaskOpenCodePromptTimeoutError',
+    isNonTaskOpenCodeSessionNotFoundError: (error: unknown) =>
+      error instanceof Error &&
+      error.name === 'NonTaskOpenCodeSessionNotFoundError',
+    isNonTaskOpenCodeSessionValidationError: (error: unknown) =>
+      error instanceof Error &&
+      error.name === 'NonTaskOpenCodeSessionValidationError',
+  };
+});
 
 vi.mock('../../typesafe-judgment', () => ({
   evaluateTypeSafeJudgments: mocks.evaluateJudgments,
@@ -423,6 +429,7 @@ import {
   FastAgentDurableRetryScheduledError,
   FAST_AGENT_DURABLE_RETRY_HORIZON_MS,
   FAST_AGENT_DURABLE_RETRY_MAX_PARKS,
+  FAST_AGENT_INFERENCE_MAX_RETRIES,
   FAST_AGENT_MAX_INFERENCE_RETRIES_PER_TURN,
 } from '../fast-agent-service';
 import {
@@ -8746,6 +8753,156 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       'What does the screenshot show?',
     );
   });
+
+  it.each([
+    { statusCode: 400, reason: 'provider_error' },
+    { statusCode: 404, reason: 'model_unavailable' },
+  ])(
+    'falls back through the image helper after an HTTP $statusCode image rejection',
+    async ({ statusCode, reason }) => {
+      vi.useFakeTimers();
+      try {
+        mocks.classifyInferenceError.mockReturnValue({
+          message: 'The inference provider rejected the image input.',
+          reason,
+          retryable: false,
+        });
+        mocks.resolveImageDelivery
+          .mockResolvedValueOnce({
+            delivery: 'direct',
+            model: 'openai-compatible-local/custom-model',
+          })
+          .mockResolvedValueOnce({
+            delivery: 'helper',
+            model: 'openai-compatible-local/custom-model',
+            helperModel: 'openrouter/google/gemini-3.8-flash',
+            helperReasoningEffort: 'low',
+          });
+        mocks.generateHelperText.mockResolvedValue(
+          'A dashboard with a red deployment error.',
+        );
+        mocks.generateText
+          .mockRejectedValueOnce(
+            Object.assign(
+              new Error('This model does not support image input.'),
+              {
+                data: {
+                  statusCode,
+                  message: 'This model does not support image input.',
+                },
+              },
+            ),
+          )
+          .mockImplementationOnce(async (_params, _session, options) => {
+            await options.onSessionReady('opencode-session-2');
+            const inspection = await invokeTool(nativeToolNames.inspectImages, {
+              question: 'What does the screenshot show?',
+            });
+            expect(inspection).toMatchObject({
+              success: true,
+              observations: 'A dashboard with a red deployment error.',
+            });
+            await invokeTool(nativeToolNames.sendChatReply, {
+              purpose: 'closeout',
+              message: 'The screenshot shows a deployment error.',
+            });
+            return '';
+          });
+
+        const result = answerFastAgentQuestion({
+          ...baseParams,
+          images: ['data:image/png;base64,aGVsbG8='],
+          adapter: callbacks(),
+        });
+        result.catch(() => undefined);
+        await vi.runAllTimersAsync();
+        vi.useRealTimers();
+        await expect(result).resolves.toBe(
+          'The screenshot shows a deployment error.',
+        );
+
+        expect(mocks.generateText).toHaveBeenCalledTimes(2);
+        expect(mocks.generateText.mock.calls[0]?.[0]).toMatchObject({
+          files: [{ mime: 'image/png' }],
+        });
+        expect(mocks.generateText.mock.calls[1]?.[0]).not.toHaveProperty(
+          'files',
+        );
+        expect(mocks.generateText.mock.calls[1]?.[0].prompt).toContain(
+          'Image attachments: image-1 (image/png)',
+        );
+        expect(mocks.resolveImageDelivery).toHaveBeenLastCalledWith({
+          modality: 'image',
+          modelRole: 'orchestration',
+          skipSessionModel: true,
+        });
+        expect(mocks.generateHelperText).toHaveBeenCalledOnce();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it.each([
+    {
+      label: 'authentication',
+      error: Object.assign(new Error('Invalid API key.'), {
+        data: { statusCode: 401, message: 'Invalid API key.' },
+      }),
+      failure: {
+        message: 'The inference provider rejected these credentials.',
+        reason: 'invalid_credentials',
+        retryable: false,
+      },
+      attempts: 1,
+    },
+    {
+      label: 'rate limit',
+      error: new Error('429 Rate limit exceeded.'),
+      failure: {
+        message: 'The inference provider is rate limiting requests.',
+        reason: 'rate_limited',
+        retryable: true,
+      },
+      attempts: FAST_AGENT_INFERENCE_MAX_RETRIES + 1,
+    },
+    {
+      label: 'network',
+      error: new TypeError('fetch failed'),
+      failure: {
+        message: 'Roomote could not reach the inference provider endpoint.',
+        reason: 'endpoint_unreachable',
+        retryable: true,
+      },
+      attempts: 7,
+    },
+  ])(
+    'does not use the image helper for unrelated $label failures',
+    async ({ error, failure, attempts }) => {
+      vi.useFakeTimers();
+      try {
+        mocks.classifyInferenceError.mockReturnValue(failure);
+        mocks.generateText.mockRejectedValue(error);
+
+        const result = answerFastAgentQuestion({
+          ...baseParams,
+          images: ['data:image/png;base64,aGVsbG8='],
+          adapter: callbacks(),
+        }).catch(() => undefined);
+        await vi.runAllTimersAsync();
+        await result;
+
+        expect(mocks.generateText).toHaveBeenCalledTimes(attempts);
+        expect(mocks.resolveImageDelivery).toHaveBeenCalledOnce();
+        expect(mocks.resolveImageDelivery).not.toHaveBeenCalledWith(
+          expect.objectContaining({ skipSessionModel: true }),
+        );
+        expect(mocks.generateHelperText).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it('rejects unknown attachment IDs passed to inspect_images', async () => {
     mocks.resolveImageDelivery.mockResolvedValue({

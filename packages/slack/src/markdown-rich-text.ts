@@ -44,6 +44,7 @@ export interface SlackRichTextValue {
 
 type SlackRichTextConversionOptions = {
   angleBracketLinkDestinations?: boolean;
+  preserveParagraphs?: boolean;
 };
 
 // Every repetition is bounded so a pathological message (for example a
@@ -220,6 +221,21 @@ export function convertMarkdownToRichText(
   const lines = markdown.replace(/\r\n/g, '\n').split('\n');
   const elements: SlackRichTextBlockElement[] = [];
   let index = 0;
+  let pendingBlankLine = false;
+
+  const preservePendingParagraph = () => {
+    if (!options.preserveParagraphs || !pendingBlankLine) return;
+    const previous = elements.at(-1);
+    if (previous?.type === 'rich_text_section') {
+      previous.elements.push({ type: 'text', text: '\n\n' });
+    } else {
+      elements.push({
+        type: 'rich_text_section',
+        elements: [{ type: 'text', text: '\n\n' }],
+      });
+    }
+    pendingBlankLine = false;
+  };
 
   while (index < lines.length) {
     const line = lines[index]!;
@@ -232,6 +248,7 @@ export function convertMarkdownToRichText(
         index += 1;
       }
       index += 1; // closing fence (or end of input)
+      preservePendingParagraph();
       elements.push({
         type: 'rich_text_preformatted',
         elements: [{ type: 'text', text: code.join('\n') }],
@@ -255,6 +272,7 @@ export function convertMarkdownToRichText(
         items.push(section(item[1]!, {}, options));
         index += 1;
       }
+      preservePendingParagraph();
       elements.push({
         type: 'rich_text_list',
         style: listStyle,
@@ -265,9 +283,11 @@ export function convertMarkdownToRichText(
 
     index += 1;
     if (line.trim().length === 0) {
+      if (elements.length > 0) pendingBlankLine = true;
       continue;
     }
 
+    preservePendingParagraph();
     const heading = line.match(HEADING);
     elements.push(
       heading

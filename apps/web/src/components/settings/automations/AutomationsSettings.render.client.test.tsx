@@ -133,6 +133,11 @@ const state = vi.hoisted(() => ({
         channelAutoStartDiscordChannels: [],
         managerSlackChannelId: 'C123MANAGER',
         managerDiscordChannelId: null as string | null,
+        defaultAutomationTarget: {
+          provider: 'slack' as const,
+          targetKind: 'slack_channel' as const,
+          externalRef: 'C123MANAGER',
+        },
         managerStatsFrequency: 'off' as const,
         managerStatsSlackChannelId: null,
         managerStatsDiscordChannelId: null,
@@ -374,6 +379,7 @@ vi.mock('@tanstack/react-query', () => ({
           capabilities: state.settingsQuery.data.capabilities,
           managerSlackChannelId,
           managerDiscordChannelId,
+          emailIdentities: state.settingsQuery.data.emailIdentities,
           defaultTarget:
             state.customAutomationDefaultTarget !== undefined
               ? state.customAutomationDefaultTarget
@@ -793,6 +799,11 @@ describe('AutomationsSettings', () => {
     state.settingsQuery.data.settings.announcerDiscordChannelId = null;
     state.settingsQuery.data.settings.platformIssueDiscordChannelId = null;
     state.settingsQuery.data.settings.managerSlackChannelId = 'C123MANAGER';
+    state.settingsQuery.data.settings.defaultAutomationTarget = {
+      provider: 'slack',
+      targetKind: 'slack_channel',
+      externalRef: 'C123MANAGER',
+    };
     state.settingsQuery.data.slackChannelDisplayNames.managerSlackChannel =
       '#roomote-managers';
     state.settingsQuery.data.settings.managerDiscordChannelId = null;
@@ -931,6 +942,7 @@ describe('AutomationsSettings', () => {
 
   it('shows per-automation Slack destinations without requiring a manager channel', async () => {
     state.settingsQuery.data.settings.managerSlackChannelId = null as never;
+    state.settingsQuery.data.settings.defaultAutomationTarget = null as never;
     state.settingsQuery.data.settings.managerStatsFrequency = 'weekly' as never;
     state.settingsQuery.data.settings.sentryTriageFrequency = 'daily' as never;
     state.settingsQuery.data.settings.dependabotTriageFrequency =
@@ -1051,8 +1063,14 @@ describe('AutomationsSettings', () => {
   it('shows Discord as the shared manager destination', async () => {
     state.settingsQuery.data.capabilities.discordConnected = true;
     state.settingsQuery.data.settings.managerSlackChannelId = null as never;
+    state.settingsQuery.data.settings.defaultAutomationTarget = null as never;
     state.settingsQuery.data.settings.managerDiscordChannelId =
       '111222333444555666';
+    state.settingsQuery.data.settings.defaultAutomationTarget = {
+      provider: 'discord',
+      targetKind: 'discord_channel',
+      externalRef: '111222333444555666',
+    } as never;
     state.discordChannelsQuery.data.channels = [
       {
         id: '111222333444555666',
@@ -1065,21 +1083,31 @@ describe('AutomationsSettings', () => {
 
     render(<AutomationsSettings />);
 
-    fireEvent.click(
-      await screen.findByRole('button', {
+    expect(await screen.findByText('#automation-reports')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    expect(
+      screen.getByRole('combobox', { name: 'Destination provider' }),
+    ).toHaveTextContent('Discord');
+    expect(
+      screen.getByRole('combobox', { name: 'Destination channel' }),
+    ).toHaveTextContent('#automation-reports');
+    expect(
+      screen.queryByRole('button', {
         name: /(?:Set up|Configure) Automation output/,
       }),
-    );
-    const destination = await screen.findByRole('button', {
-      name: /#automation-reports \(Discord\)/,
-    });
-    expect(destination).toBeInTheDocument();
+    ).not.toBeInTheDocument();
+  });
 
-    fireEvent.click(destination);
-    expect(screen.getByLabelText('Select manager channel')).toBeInTheDocument();
-    expect(
-      screen.getByText('Make sure the Roomote app is added to the channel.'),
-    ).toBeInTheDocument();
+  it('shows an explicit unconfigured state instead of an automatic destination', async () => {
+    state.settingsQuery.data.settings.managerSlackChannelId = null as never;
+    state.settingsQuery.data.settings.managerDiscordChannelId = null;
+    state.settingsQuery.data.settings.defaultAutomationTarget = null as never;
+
+    render(<AutomationsSettings />);
+
+    expect(screen.getByText('Not configured')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Select' })).toBeInTheDocument();
+    expect(screen.queryByText(/Automatic · Shared/)).not.toBeInTheDocument();
   });
 
   it('offers the platform issue alerts destination picker with a saved Discord channel selected', async () => {
@@ -1587,6 +1615,7 @@ describe('AutomationsSettings', () => {
   it('keeps platform issue alerts enabled by default while showing the custom empty state', async () => {
     state.settingsQuery.data.settings.channelAutoStartSlackChannels = [];
     state.settingsQuery.data.settings.managerSlackChannelId = null as never;
+    state.settingsQuery.data.settings.defaultAutomationTarget = null as never;
     state.settingsQuery.data.slackChannelDisplayNames.managerSlackChannel =
       null as never;
 
@@ -2325,6 +2354,7 @@ describe('AutomationsSettings', () => {
     state.settingsQuery.data.capabilities.discordConnected = true;
     state.settingsQuery.data.capabilities.teamsConnected = true;
     state.settingsQuery.data.settings.managerSlackChannelId = null as never;
+    state.settingsQuery.data.settings.defaultAutomationTarget = null as never;
     state.customAutomationDefaultTarget = {
       provider: 'discord',
       targetKind: 'discord_user',

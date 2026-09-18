@@ -262,6 +262,18 @@ export function isCommunicationAutomationTarget(
   );
 }
 
+/** Channel-level report target on a communication provider. */
+export function buildChannelAutomationTarget(
+  provider: Exclude<AutomationDestinationProvider, 'email'>,
+  channelId: string,
+): AutomationTarget {
+  return {
+    provider,
+    targetKind: getCommunicationAutomationTargetKind(provider, 'channel'),
+    externalRef: channelId,
+  };
+}
+
 export function isAutomationDestinationTarget(
   target: Pick<AutomationTarget, 'provider' | 'targetKind'>,
 ): boolean {

@@ -1,5 +1,6 @@
 import {
   USER_FACING_AUTOMATION_KEYS,
+  isBackgroundAutomationUserTargetKind,
   type BackgroundAutomationKey,
   type PrReviewSettings,
   type TaskTrigger,
@@ -16,6 +17,7 @@ import {
   inArray,
   resolveTelegramRuntimeCredentials,
   tasks,
+  users,
   type Automation,
 } from '@roomote/db/server';
 import {
@@ -312,6 +314,15 @@ export async function getBackgroundAgentSettingsCommand(
   automationStatus: Partial<
     Record<BackgroundAutomationKey, AutomationStatusSummary>
   >;
+  /**
+   * Recipient of a DM or Email default destination. Those targets are bound
+   * to the admin who saved them, who is not necessarily the viewer.
+   */
+  defaultDestinationOwner: {
+    userId: string;
+    name: string | null;
+    isViewer: boolean;
+  } | null;
 }> {
   assertAdmin(auth);
 
@@ -338,6 +349,27 @@ export async function getBackgroundAgentSettingsCommand(
     listRecentAutomationTasks(),
   ]);
   const status = buildAutomationStatus(automationRows);
+  const defaultDestinationOwnerId =
+    settings.defaultAutomationTarget &&
+    isBackgroundAutomationUserTargetKind(
+      settings.defaultAutomationTarget.targetKind,
+    )
+      ? settings.defaultAutomationTarget.externalRef
+      : null;
+  const defaultDestinationOwnerRow =
+    defaultDestinationOwnerId && defaultDestinationOwnerId !== auth.userId
+      ? await db.query.users.findFirst({
+          columns: { name: true },
+          where: eq(users.id, defaultDestinationOwnerId),
+        })
+      : null;
+  const defaultDestinationOwner = defaultDestinationOwnerId
+    ? {
+        userId: defaultDestinationOwnerId,
+        name: defaultDestinationOwnerRow?.name ?? null,
+        isViewer: defaultDestinationOwnerId === auth.userId,
+      }
+    : null;
   const visibleSettings = maskSlackChannelAutoStartSettings(auth, settings);
 
   const botScopes = extractSlackBotScopes(slackInstallation?.scopes).map(
@@ -452,5 +484,6 @@ export async function getBackgroundAgentSettingsCommand(
     resolvedDestinations,
     recentRuns,
     automationStatus: status,
+    defaultDestinationOwner,
   };
 }

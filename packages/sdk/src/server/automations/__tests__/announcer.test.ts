@@ -112,6 +112,12 @@ vi.mock('../automation-thread-feedback', () => ({
 }));
 
 vi.mock('../destination', () => ({
+  hasAutomationEmailTarget: vi.fn(
+    (runtime) =>
+      runtime.targets?.some(
+        (target: { provider?: string }) => target.provider === 'email',
+      ) || runtime.defaultAutomationTarget?.provider === 'email',
+  ),
   resolveAutomationRuntimeDestination: mockResolveAutomationRuntimeDestination,
   listConnectedCommunicationProviders: mockListConnectedCommunicationProviders,
   buildDestinationTaskPayloadFields: (destination: {

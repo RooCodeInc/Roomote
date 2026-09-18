@@ -55,6 +55,13 @@ describe('OPENCODE_IDENTITY_PLUGIN_SCRIPT', () => {
       expected:
         "You and the user share the same workspace and collaborate to achieve the user's goals.",
     },
+    {
+      name: 'GPT-6 prompt',
+      prompt:
+        'You are an AI agent powered by OpenCode, a coding agent harness. Help the user accomplish their goals using the tools you have available.\n\n# Harness',
+      expected:
+        'Help the user accomplish their goals using the tools you have available.\n\n# Harness',
+    },
   ])(
     'removes only the leading identity declaration from the $name',
     async ({ prompt, expected }) => {

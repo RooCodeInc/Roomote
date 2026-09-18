@@ -314,7 +314,7 @@ ENTRYPOINT ["/usr/bin/tini", "--", "/roomote/.docker/app/entrypoint.sh"]
 # control-plane calls) starts a managed OpenCode SDK server in-process.
 FROM runtime-base AS runtime-inference-base
 
-ARG OPENCODE_CLI_VERSION=1.18.10
+ARG OPENCODE_CLI_VERSION=1.18.30
 
 # Fast mode uses bounded, temporary partial Git fetches to discover
 # repository-defined skills without exposing a checkout to the model.

@@ -491,6 +491,7 @@ type StoredBackgroundAgentSettings = Pick<
   | 'id'
   | 'managerSlackChannelId'
   | 'managerDiscordChannelId'
+  | 'defaultAutomationTarget'
   | 'globalAgentInstructions'
   | 'timeZone'
   | 'timeZoneUpdatedAt'

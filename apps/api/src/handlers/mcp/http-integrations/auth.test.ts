@@ -42,24 +42,10 @@ import {
 } from './broker';
 import { createHttpIntegrationsMcp } from './index';
 
-const {
-  enabled,
-  secretToolsEnabled,
-  isDeploymentExperimentEnabledMock,
-  destroy,
-} = vi.hoisted(() => ({
+const { enabled, destroy } = vi.hoisted(() => ({
   enabled: { value: true },
-  secretToolsEnabled: { value: true },
-  isDeploymentExperimentEnabledMock: vi.fn(),
   destroy: vi.fn(async () => {}),
 }));
-vi.mock('@roomote/db/server', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@roomote/db/server')>();
-  return {
-    ...actual,
-    isDeploymentExperimentEnabled: isDeploymentExperimentEnabledMock,
-  };
-});
 vi.mock('@roomote/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@roomote/env')>();
   return {
@@ -139,10 +125,6 @@ afterAll(() => configureAuthClientEnv(null));
 beforeEach(() => {
   observedAuth.mockClear();
   enabled.value = true;
-  secretToolsEnabled.value = true;
-  isDeploymentExperimentEnabledMock
-    .mockReset()
-    .mockImplementation(() => Promise.resolve(secretToolsEnabled.value));
   vi.mocked(integrationRequest).mockClear();
   vi.mocked(loadHttpIntegrationsConfig)
     .mockReset()
@@ -350,9 +332,8 @@ it('publishes optional nullable body fields without defaults and accepts native 
 });
 
 it('publishes a provider-safe optional header prefix schema', async () => {
-  const actor = await member();
-  const token = await createAuthToken({ userId: actor.id, timeoutMs: 60_000 });
-  const listing = await (await post(token)).json();
+  const fixture = await sessionGrant();
+  const listing = await (await post(fixture.brokerToken)).json();
   const schema = listing.result.tools.find(
     (tool: { name: string }) => tool.name === 'prepare_integration_key',
   ).inputSchema;
@@ -401,12 +382,16 @@ it.each(['auth', 'run', 'deployment-run'] as const)(
     const tools = await toolsResponse.json();
     expect(
       tools.result.tools.map((tool: { name: string }) => tool.name).sort(),
-    ).toEqual([
-      'integration_request',
-      'list_integration_keys',
-      'list_integrations',
-      'prepare_integration_key',
-    ]);
+    ).toEqual(
+      kind === 'auth'
+        ? ['integration_request', 'list_integrations']
+        : [
+            'integration_request',
+            'list_integration_keys',
+            'list_integrations',
+            'prepare_integration_key',
+          ],
+    );
     const requestTool = tools.result.tools.find(
       (tool: { name: string }) => tool.name === 'integration_request',
     );
@@ -774,18 +759,6 @@ it.each(['broker', 'run'] as const)(
     expect(fetch).toHaveBeenCalledOnce();
   },
 );
-
-it('rechecks the deployment experiment before using an established integration-key tool', async () => {
-  const fixture = await sessionGrant();
-  isDeploymentExperimentEnabledMock
-    .mockReset()
-    .mockResolvedValueOnce(true)
-    .mockResolvedValue(false);
-
-  const response = await tool(fixture.brokerToken, 'list_integration_keys');
-
-  expect(response.isError).toBe(true);
-});
 
 it('keeps broker authority separate from ordinary auth and restricts it to the exact API resource', async () => {
   const fixture = await sessionGrant();
@@ -1240,31 +1213,3 @@ it('denies a still-valid signed run token after its live bound actor drifts', as
   ).toBe(true);
   expect(fetch).toHaveBeenCalledOnce();
 });
-
-it.each(['broker', 'run'] as const)(
-  'hides paused Integration-key tools and grants for %s clients',
-  async (kind) => {
-    secretToolsEnabled.value = false;
-    const fixture = await sessionGrant();
-    const token = kind === 'broker' ? fixture.brokerToken : fixture.runToken;
-    const response = await post(token);
-    const listed = (await response.json()).result.tools;
-    expect(listed.map((entry: { name: string }) => entry.name).sort()).toEqual([
-      'integration_request',
-      'list_integrations',
-    ]);
-    expect(JSON.stringify(listed)).not.toContain('session-prefixed');
-    const integrations = await tool(token, 'list_integrations');
-    const entries = JSON.parse(integrations.content[0].text).integrations;
-    expect(
-      entries.some((entry: { id: string }) => entry.id.startsWith('session:')),
-    ).toBe(false);
-    for (const name of ['prepare_integration_key', 'list_integration_keys']) {
-      const denied = await post(token, 'tools/call', { name, arguments: {} });
-      const payload = await denied.json();
-      expect(
-        payload.error ?? (payload.result?.isError ? payload.result : undefined),
-      ).toBeDefined();
-    }
-  },
-);
