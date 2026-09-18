@@ -59,7 +59,7 @@ export function isTaskRunSnapshotting(
  * Returns an array of ArtifactGroup objects sorted by latest artifact's
  * createdAt desc.
  */
-export function groupArtifactsByPath<
+function groupArtifactsByPath<
   T extends { path: string; version: number; createdAt: Date | string },
 >(artifacts: T[]): ArtifactGroup<T>[] {
   const groupMap = new Map<string, T[]>();
