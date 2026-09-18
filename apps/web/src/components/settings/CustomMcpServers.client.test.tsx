@@ -40,6 +40,7 @@ const {
     availability: { enabled: true },
     isAdmin: true,
     servers: [] as ListedServer[],
+    listFails: false,
     tools: [] as {
       name: string;
       description: string | null;
@@ -81,7 +82,10 @@ vi.mock('@/trpc/client', () => ({
           listInputs.push(input);
           return {
             queryKey: ['customMcpServers', 'list', input ?? null],
-            queryFn: async () => state.servers,
+            queryFn: async () => {
+              if (state.listFails) throw new Error('offline');
+              return state.servers;
+            },
           };
         },
       },
@@ -609,6 +613,7 @@ describe('PersonalMcpServers', () => {
     state.isAdmin = false;
     state.availability = { enabled: true };
     state.servers = [];
+    state.listFails = false;
     listInputs.length = 0;
     createMock.mockClear();
   });
@@ -677,6 +682,16 @@ describe('PersonalMcpServers', () => {
       name: 'example-tools',
       visibility: 'owner',
     });
+  });
+
+  it('reports a failed load instead of claiming the member has none', async () => {
+    state.listFails = true;
+    renderSection();
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'MCP servers are unavailable.',
+    );
+    expect(screen.queryByText('No personal MCP servers yet.')).toBeNull();
   });
 
   it('renders nothing when the operator disabled custom MCP servers', async () => {

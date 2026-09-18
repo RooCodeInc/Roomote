@@ -2073,7 +2073,7 @@ describe('Integrations settings', () => {
   it('labels enabled keyless Exa without advertising Exa Agent', () => {
     state.deploymentEnablements = [{ mcpId: 'exa', enabled: true }];
 
-    render(<Integrations />);
+    render(<ActualIntegrations />);
 
     expect(
       screen.getByText(
@@ -2081,8 +2081,23 @@ describe('Integrations settings', () => {
       ),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Disable Exa' }),
+      screen.queryByText(
+        'Enable Exa so your agents can search and fetch the web, with an optional API key for multi-step research from Roomote tasks',
+      ),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Remove Exa' }),
     ).toBeInTheDocument();
+  });
+
+  it('leaves the details column empty instead of falling back to descriptions', () => {
+    render(<ActualIntegrations />);
+
+    expect(
+      screen.queryByText(
+        'Enable Linear so this deployment can route issue context and task entry through it.',
+      ),
+    ).not.toBeInTheDocument();
   });
 
   it('shows Asana connected controls and supports editing', () => {

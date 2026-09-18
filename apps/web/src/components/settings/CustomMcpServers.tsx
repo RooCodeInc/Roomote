@@ -213,7 +213,7 @@ function KeyValueRows({
           <div className="flex-1">
             <Input
               secret
-              className="font-mono"
+              className="ph-no-capture ph-mask font-mono sentry-mask"
               placeholder={
                 isEdit ? 'Leave blank to keep the existing value' : 'Value'
               }
@@ -354,6 +354,7 @@ function ServerFormDialog({
             ? { visibility: values.visibility }
             : {}),
         });
+        toast.success(`Added ${values.name}.`);
       }
 
       onSaved();
@@ -368,13 +369,16 @@ function ServerFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="xl">
+      <DialogContent
+        size="xl"
+        className="ph-no-capture ph-mask ph-no-recording sentry-block"
+      >
         <DialogHeader>
           <DialogTitle>
             {isEdit ? 'Edit custom MCP server' : 'Add custom MCP server'}
           </DialogTitle>
           <DialogDescription>
-            {scope === 'owner'
+            {visibility === 'owner'
               ? 'A personal server is available only to your own Sessions and tasks. It is reached through an authenticated Roomote proxy, so credentials stay server-side.'
               : 'Custom servers are available to agents in every task. Remote servers are reached through an authenticated Roomote proxy, so credentials stay server-side. Local servers run inside the task sandbox with the same privileges as the agent.'}
           </DialogDescription>
@@ -553,8 +557,9 @@ function ServerFormDialog({
 
           {transport === 'remote' && (isEdit || scope === 'deployment') ? (
             <div className="space-y-2">
-              <Label>Who can use it</Label>
+              <Label id="mcp-visibility-label">Who can use this server?</Label>
               <RadioGroup
+                aria-labelledby="mcp-visibility-label"
                 value={visibility}
                 onValueChange={(value) =>
                   setValue('visibility', value as CustomMcpServerVisibility)
@@ -575,6 +580,10 @@ function ServerFormDialog({
                   <Label htmlFor="visibility-owner">Only me</Label>
                 </div>
               </RadioGroup>
+              <p className="text-sm text-muted-foreground">
+                Anyone in this deployment can use a shared server. Its
+                credentials always stay server-side.
+              </p>
             </div>
           ) : null}
 
@@ -657,7 +666,7 @@ function ServerFormDialog({
                     <Label>Client secret (optional)</Label>
                     <Input
                       secret
-                      className="font-mono"
+                      className="ph-no-capture ph-mask font-mono sentry-mask"
                       placeholder={
                         isEdit ? 'Leave blank to keep the existing value' : ''
                       }
@@ -896,6 +905,7 @@ export function useCustomMcpServers(
 ): {
   isEnabled: boolean;
   isLoading: boolean;
+  error: string | null;
   items: IntegrationItem[];
   openAddDialog: () => void;
   dialogs: ReactNode;
@@ -972,7 +982,7 @@ export function useCustomMcpServers(
           id: `custom-${server.id}`,
           name: server.name,
           description,
-          icon: <Plug className="size-5" />,
+          icon: <Plug className="size-4" />,
           enabled: server.enabled,
           connected: server.enabled && !needsConnection,
           configured: true,
@@ -989,7 +999,7 @@ export function useCustomMcpServers(
         id: `custom-${server.id}`,
         name: server.name,
         description,
-        icon: <Plug className="size-5" />,
+        icon: <Plug className="size-4" />,
         enabled: server.enabled,
         connected: server.enabled && !needsConnection,
         // Custom servers are always deployment-defined, so a disabled one
@@ -1140,6 +1150,7 @@ export function useCustomMcpServers(
   return {
     isEnabled,
     isLoading: serversQuery.isLoading,
+    error: serversQuery.isError ? 'MCP servers are unavailable.' : null,
     items,
     openAddDialog: () => {
       setEditingServer(null);
@@ -1154,7 +1165,7 @@ export function useCustomMcpServers(
  * and actions as the shared list in Settings → Integrations.
  */
 export function PersonalMcpServers() {
-  const { isEnabled, isLoading, items, openAddDialog, dialogs } =
+  const { isEnabled, isLoading, error, items, openAddDialog, dialogs } =
     useCustomMcpServers('owner');
 
   if (!isEnabled) return null;
@@ -1170,13 +1181,18 @@ export function PersonalMcpServers() {
         </Button>
       }
     >
+      {error ? (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
       <div role="table" aria-label="Personal MCP servers">
         <div role="rowgroup" className="divide-y divide-background">
           {isLoading ? <Skeleton className="h-16 w-full" /> : null}
           {items.map((item) => (
             <IntegrationListRow key={item.id} item={item} stackDescription />
           ))}
-          {!isLoading && items.length === 0 ? (
+          {!isLoading && items.length === 0 && !error ? (
             <p className="px-4 py-3 text-sm text-muted-foreground">
               No personal MCP servers yet.
             </p>
