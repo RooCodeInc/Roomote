@@ -36,6 +36,7 @@ import {
 } from '@roomote/db/server';
 import { Env } from '@roomote/env';
 import { isRoomoteDeploymentDisabled } from '@roomote/types';
+import { isPrincipalRouteRateLimited } from '../../middleware/routePolicyMiddleware';
 
 const DESKTOP_DEVICE_BROKER_PATH = '/api/desktop/devices/connect';
 const HELLO_TIMEOUT_MS = 10_000;
@@ -85,6 +86,7 @@ export type DesktopDeviceBrokerOptions = {
   instanceId: string;
   authenticate: (request: IncomingMessage) => Promise<AuthenticatedDevice>;
   store: DesktopDeviceStore;
+  isRateLimited: (userId: string) => Promise<boolean>;
   now?: () => number;
 };
 
@@ -200,6 +202,8 @@ export class DesktopDeviceBroker {
         error.code === 'device_revoked'
       ) {
         this.revoke(ownerUserId, deviceId);
+      } else {
+        connection.socket.close(1008, 'authorization changed');
       }
       throw error;
     }
@@ -374,6 +378,10 @@ export class DesktopDeviceBroker {
       return;
     } finally {
       this.inFlightUpgrades -= 1;
+    }
+    if (await this.options.isRateLimited(auth.userId)) {
+      rejectUpgrade(socket, 429, 'Too Many Requests');
+      return;
     }
     const ownerCount = [...this.connections.values()].filter(
       (connection) => connection.ownerUserId === auth.userId,
@@ -587,12 +595,7 @@ export class DesktopDeviceBroker {
     connection.pending = undefined;
     connection.busy = false;
     try {
-      if (JSON.stringify(result.structuredContent).includes('"output"')) {
-        throw new DesktopBrokerError(
-          'unsafe_response',
-          'Desktop response exposed a local output path',
-        );
-      }
+      assertSafeDesktopResult(result);
       await this.revalidate(connection);
       await this.audit({
         deviceId: connection.deviceId,
@@ -652,6 +655,12 @@ export class DesktopDeviceBroker {
         'Desktop device is revoked or unavailable',
       );
     }
+    if (device.lastInstanceId !== this.options.instanceId) {
+      throw new DesktopBrokerError(
+        'device_on_other_instance',
+        'Desktop device reconnected to another API instance',
+      );
+    }
   }
 
   private rejectPending(
@@ -680,6 +689,53 @@ export class DesktopDeviceBroker {
   }
 }
 
+const LOCAL_PATH_PATTERN =
+  /(?:^|[\s"'(=:])(?:file:\/\/|\/(?!\/)[^\s"']+|[A-Za-z]:[\\/][^\s"']+)/;
+
+export function assertSafeDesktopResult(result: DesktopDeviceToolResult): void {
+  assertNoLocalPathValue(result.structuredContent);
+  for (const part of result.content) {
+    if (part.type !== 'text') continue;
+    try {
+      assertNoLocalPathValue(JSON.parse(part.text));
+    } catch (error) {
+      if (error instanceof DesktopBrokerError) throw error;
+      if (LOCAL_PATH_PATTERN.test(part.text)) {
+        throw new DesktopBrokerError(
+          'unsafe_response',
+          'Desktop response exposed a local filesystem path',
+        );
+      }
+    }
+  }
+}
+
+function assertNoLocalPathValue(value: unknown): void {
+  if (typeof value === 'string') {
+    if (LOCAL_PATH_PATTERN.test(value)) {
+      throw new DesktopBrokerError(
+        'unsafe_response',
+        'Desktop response exposed a local filesystem path',
+      );
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) assertNoLocalPathValue(item);
+    return;
+  }
+  if (!value || typeof value !== 'object') return;
+  for (const [key, nested] of Object.entries(value)) {
+    if (key === 'output') {
+      throw new DesktopBrokerError(
+        'unsafe_response',
+        'Desktop response exposed a local output path',
+      );
+    }
+    assertNoLocalPathValue(nested);
+  }
+}
+
 let installedBroker: DesktopDeviceBroker | undefined;
 
 export function getDesktopDeviceBroker(): DesktopDeviceBroker {
@@ -694,6 +750,11 @@ export function installDesktopDeviceBroker(
   const broker = new DesktopDeviceBroker({
     instanceId: process.env.HOSTNAME ?? Env.R_INSTANCE_ID ?? 'api',
     authenticate: authenticateDesktopUpgrade,
+    isRateLimited: (userId) =>
+      isPrincipalRouteRateLimited('desktop-device-broker', userId, {
+        limit: 120,
+        windowSeconds: 60,
+      }),
     store: {
       register: registerDesktopDevice,
       getActive: getActiveDesktopDevice,

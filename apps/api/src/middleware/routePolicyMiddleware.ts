@@ -226,13 +226,21 @@ async function isRateLimited(
   rule: RoutePolicyRule,
   rateLimit: RouteRateLimit,
 ): Promise<boolean> {
+  const bucketKey = await resolveRateLimitBucketKey(c, rateLimit);
+  return isNamedRateLimited(rule.name, rateLimit, bucketKey);
+}
+
+async function isNamedRateLimited(
+  ruleName: string,
+  rateLimit: RouteRateLimit,
+  bucketKey: string,
+): Promise<boolean> {
   try {
-    const bucketKey = await resolveRateLimitBucketKey(c, rateLimit);
     const redis = getRedis();
     const windowStart = Math.floor(
       Date.now() / (rateLimit.windowSeconds * 1000),
     );
-    const key = `api:route-rate-limit:${rule.name}:${rateLimit.keySource}:${bucketKey}:${windowStart}`;
+    const key = `api:route-rate-limit:${ruleName}:${rateLimit.keySource}:${bucketKey}:${windowStart}`;
 
     const count = await withTimeout(
       redis.eval(
@@ -247,13 +255,26 @@ async function isRateLimited(
     return count > rateLimit.limit;
   } catch (error) {
     console.warn(
-      `[RoutePolicy] Rate limit check failed open for ${rule.name}:${rateLimit.keySource}: ${
+      `[RoutePolicy] Rate limit check failed open for ${ruleName}:${rateLimit.keySource}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
 
     return false;
   }
+}
+
+/** Apply the same principal bucket used by route-policy middleware to an upgrade request. */
+export function isPrincipalRouteRateLimited(
+  ruleName: string,
+  userId: string,
+  options: { limit: number; windowSeconds: number },
+): Promise<boolean> {
+  return isNamedRateLimited(
+    ruleName,
+    { keySource: 'principal', ...options },
+    `user:${userId}`,
+  );
 }
 
 /**

@@ -10,6 +10,7 @@ import {
   DesktopDeviceBroker,
   DesktopBrokerError,
   assertDesktopMcpContext,
+  assertSafeDesktopResult,
   type DesktopDeviceBrokerOptions,
   type DesktopDeviceStore,
 } from './broker';
@@ -42,6 +43,27 @@ describe('DesktopDeviceBroker', () => {
         { ...context, scopes: [] },
         'https://roomote.example/mcp',
       ),
+    ).toThrowError(DesktopBrokerError);
+  });
+
+  it('recursively rejects local paths while allowing accessibility paths', () => {
+    expect(() =>
+      assertSafeDesktopResult({
+        content: [{ type: 'text', text: '{"path":"root.0.1"}' }],
+        structuredContent: { result: { path: 'root.0.1' } },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      assertSafeDesktopResult({
+        content: [{ type: 'text', text: 'captured /Users/me/private.png' }],
+        structuredContent: {},
+      }),
+    ).toThrowError(DesktopBrokerError);
+    expect(() =>
+      assertSafeDesktopResult({
+        content: [{ type: 'text', text: '{}' }],
+        structuredContent: { nested: { path: '/tmp/private.png' } },
+      }),
     ).toThrowError(DesktopBrokerError);
   });
 
@@ -115,6 +137,20 @@ describe('DesktopDeviceBroker', () => {
     );
   });
 
+  it('applies the principal route rate limit to authenticated upgrades', async () => {
+    const fixture = await createFixture(undefined, async () => true);
+    const rejected = new WebSocket(fixture.url, {
+      headers: { Authorization: 'Bearer owner-a' },
+    });
+    const [, response] = (await once(rejected, 'unexpected-response')) as [
+      unknown,
+      { statusCode: number },
+    ];
+    expect(response.statusCode).toBe(429);
+    rejected.on('error', () => undefined);
+    rejected.terminate();
+  });
+
   it('revalidates revocation before returning a response', async () => {
     const fixture = await createFixture();
     const client = await connectClient(fixture.url, 'owner-a');
@@ -145,6 +181,21 @@ describe('DesktopDeviceBroker', () => {
     await requestRejection;
     const [code] = (await once(client, 'close')) as [number];
     expect(code).toBe(1000);
+  });
+
+  it('fails closed when the device reconnects to another API instance', async () => {
+    const fixture = await createFixture();
+    const client = await connectClient(fixture.url, 'owner-a');
+    client.send(JSON.stringify(hello()));
+    await waitFor(() => fixture.devices.has(DEVICE_ID));
+    fixture.devices.get(DEVICE_ID)!.instanceId = 'other-api';
+    const closed = once(client, 'close');
+
+    await expect(
+      fixture.broker.request('owner-a', DEVICE_ID, { action: 'status' }),
+    ).rejects.toMatchObject({ code: 'device_on_other_instance' });
+    const [code] = (await closed) as [number];
+    expect(code).toBe(1008);
   });
 
   it('delivers revoke and closes the live connection', async () => {
@@ -202,14 +253,16 @@ describe('DesktopDeviceBroker', () => {
   });
 
   async function createFixture(
-    authenticate: DesktopDeviceBrokerOptions['authenticate'] = async (
-      request,
-    ) => ({
-      userId: request.headers.authorization?.replace('Bearer ', '') ?? '',
-      expiresAt: Date.now() + 60_000,
-    }),
+    authenticate:
+      | DesktopDeviceBrokerOptions['authenticate']
+      | undefined = undefined,
+    isRateLimited: DesktopDeviceBrokerOptions['isRateLimited'] = async () =>
+      false,
   ) {
-    const devices = new Map<string, { ownerUserId: string; active: boolean }>();
+    const devices = new Map<
+      string,
+      { ownerUserId: string; active: boolean; instanceId: string }
+    >();
     const audit: Array<{ event: DesktopDeviceAuditEvent }> = [];
     const disconnects: string[] = [];
     const store: DesktopDeviceStore = {
@@ -218,13 +271,17 @@ describe('DesktopDeviceBroker', () => {
         if (existing && existing.ownerUserId !== input.ownerUserId)
           return 'owner_mismatch';
         if (existing && !existing.active) return 'revoked';
-        devices.set(input.id, { ownerUserId: input.ownerUserId, active: true });
+        devices.set(input.id, {
+          ownerUserId: input.ownerUserId,
+          active: true,
+          instanceId: input.instanceId,
+        });
         return 'connected';
       },
       getActive: async (ownerUserId, deviceId) => {
         const device = devices.get(deviceId);
         return device?.ownerUserId === ownerUserId && device.active
-          ? ({ id: deviceId } as Awaited<
+          ? ({ id: deviceId, lastInstanceId: device.instanceId } as Awaited<
               ReturnType<DesktopDeviceStore['getActive']>
             >)
           : undefined;
@@ -238,7 +295,13 @@ describe('DesktopDeviceBroker', () => {
     };
     const broker = new DesktopDeviceBroker({
       instanceId: 'test-api',
-      authenticate,
+      authenticate:
+        authenticate ??
+        (async (request) => ({
+          userId: request.headers.authorization?.replace('Bearer ', '') ?? '',
+          expiresAt: Date.now() + 60_000,
+        })),
+      isRateLimited,
       store,
     });
     const server = createServer();
