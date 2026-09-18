@@ -11,6 +11,7 @@ describe('getWorkspaceInstructions', () => {
       'Available repositories:\n- acme/api\n- acme/web',
     );
     expect(instructions).not.toContain('clone_repository');
+    expect(instructions).not.toContain('list_repositories');
   });
 
   it('routes all-repositories workspaces through the manifest and clone_repository tool', () => {
@@ -24,6 +25,9 @@ describe('getWorkspaceInstructions', () => {
     expect(instructions).toContain('`REPOSITORIES.md` at the workspace root');
     expect(instructions).toContain(
       'call the `clone_repository` tool with its full name (owner/repo)',
+    );
+    expect(instructions).toContain(
+      'The `list_repositories` tool searches those same repositories live by name or description',
     );
     expect(instructions).toContain(
       'Available repositories (check out with `clone_repository` before use):\n- acme/api\n- acme/web',
@@ -42,6 +46,7 @@ describe('getWorkspaceInstructions', () => {
       '`REPOSITORIES.md` at the workspace root lists the active repositories authorized for this task',
     );
     expect(instructions).toContain('call the `clone_repository` tool');
+    expect(instructions).toContain('The `list_repositories` tool searches');
     expect(instructions).toContain(
       "does not run another environment's setup commands or provision its services",
     );

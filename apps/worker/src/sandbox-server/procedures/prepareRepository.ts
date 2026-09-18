@@ -53,7 +53,9 @@ const inFlightPreparations = new Map<
  * the run token can call this mutation directly. The persisted provider map
  * remains the authorization gate for every workspace type.
  */
-async function loadRepositoryScope(runId: number): Promise<RepositoryScope> {
+export async function loadRepositoryScope(
+  runId: number,
+): Promise<RepositoryScope> {
   const taskRun = await sdk.taskRuns.findFirstById(runId);
 
   if (!taskRun) {
