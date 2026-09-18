@@ -107,6 +107,7 @@ export function LogsSidePanel({ active, onClose }: LogsSidePanelProps) {
                 variant="ghost"
                 size="icon"
                 className="size-8"
+                aria-label="Clear logs"
                 onClick={() => tailLogs.clear(selectedLogfile.filePath)}
               >
                 <Trash2 className="size-4" />
