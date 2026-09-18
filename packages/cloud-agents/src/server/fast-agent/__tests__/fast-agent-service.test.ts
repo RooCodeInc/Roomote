@@ -57,6 +57,8 @@ const mocks = vi.hoisted(() => ({
   scheduleDurableRetry: vi.fn(),
   findActiveRetryNotice: vi.fn(),
   loadTurnAttempt: vi.fn(),
+  listTranscriptImages: vi.fn(),
+  loadTranscriptImagesById: vi.fn(),
   getUnifiedSession: vi.fn(),
   prepareServiceCredential: vi.fn(),
   listServiceCredentialApprovals: vi.fn(),
@@ -188,6 +190,8 @@ vi.mock('../fast-agent-conversation-repository', () => ({
   scheduleFastAgentDurableTurnRetry: mocks.scheduleDurableRetry,
   findFastAgentActiveInferenceRetryNotice: mocks.findActiveRetryNotice,
   loadFastAgentTurnAttemptSummary: mocks.loadTurnAttempt,
+  listFastAgentTranscriptImages: mocks.listTranscriptImages,
+  loadFastAgentTranscriptImagesById: mocks.loadTranscriptImagesById,
 }));
 
 vi.mock('../../available-environments', () => ({
@@ -432,6 +436,7 @@ import {
   registerFastAgentTurnActivity,
 } from '../fast-agent-turn-lock';
 import { FAST_RESPONDING_LEASE_RENEW_MS } from '../fast-agent-constants';
+import { encodeFastAgentTranscriptImageId } from '../fast-agent-transcript-images';
 
 const baseParams = {
   question: 'What does this service do?',
@@ -618,6 +623,14 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         turnSeq: 0,
       },
       prompt: null,
+    });
+    mocks.listTranscriptImages.mockResolvedValue({
+      images: [],
+      truncated: false,
+    });
+    mocks.loadTranscriptImagesById.mockResolvedValue({
+      images: [],
+      missingIds: [],
     });
     mocks.getActiveTasks.mockResolvedValue([]);
     mocks.listCustomSkills.mockResolvedValue([]);
@@ -2838,7 +2851,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       const steer = mocks.nativeSteer.mock.calls[0]?.[0];
       expect(steer?.files).toEqual([]);
       expect(steer?.text).toContain(
-        'Image attachments: image-1 (image/png), image-2 (image/jpeg)',
+        `${encodeFastAgentTranscriptImageId('100.3:user', 1)} (image/png)`,
+      );
+      expect(steer?.text).toContain(
+        `${encodeFastAgentTranscriptImageId('100.4:user', 1)} (image/jpeg)`,
       );
       expect(steer?.text).toContain('inspect_images');
 
@@ -2848,7 +2864,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         }),
       ).resolves.toEqual({
         success: true,
-        imageIds: ['image-1', 'image-2'],
+        imageIds: [
+          encodeFastAgentTranscriptImageId('100.3:user', 1),
+          encodeFastAgentTranscriptImageId('100.4:user', 1),
+        ],
         observations: 'Two screenshots.',
       });
       expect(mocks.generateHelperText).toHaveBeenCalledWith(
@@ -2935,9 +2954,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       for (const call of mocks.nativeSteer.mock.calls) {
         expect(call[0]?.files).toEqual([]);
         expect(call[0]?.text).toContain(
-          'Image attachments: image-1 (image/png)',
+          `${encodeFastAgentTranscriptImageId('100.3:user', 1)} (image/png)`,
         );
-        expect(call[0]?.text).not.toContain('image-2');
+        expect(call[0]?.text).not.toContain(':2 (image/png)');
       }
       await expect(
         invokeTool(nativeToolNames.inspectImages, {
@@ -2945,7 +2964,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         }),
       ).resolves.toEqual({
         success: true,
-        imageIds: ['image-1'],
+        imageIds: [encodeFastAgentTranscriptImageId('100.3:user', 1)],
         observations: 'One screenshot.',
       });
       expect(mocks.generateHelperText).toHaveBeenCalledWith(
@@ -8506,6 +8525,283 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
+  it('inspects an initial transcript photo from a later text-only helper turn', async () => {
+    const imageId = encodeFastAgentTranscriptImageId('100.1:user', 1);
+    mocks.listTranscriptImages.mockResolvedValue({
+      truncated: false,
+      images: [
+        {
+          id: imageId,
+          eventId: '100.1:user',
+          turnId: '100.1',
+          imageIndex: 1,
+          ts: 100,
+          turnSeq: 0,
+          messageText: 'What is this picture of?',
+          file: {
+            mime: 'image/jpeg',
+            url: 'data:image/jpeg;base64,ZG9n',
+          },
+          byteSize: 3,
+        },
+      ],
+    });
+    mocks.resolveImageDelivery.mockResolvedValue({
+      delivery: 'helper',
+      model: 'openrouter/openai/gpt-5.4',
+      helperModel: 'openrouter/google/gemini-3.8-flash',
+    });
+    mocks.generateHelperText.mockResolvedValue('A scruffy brown dog.');
+    let inspection: unknown;
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        inspection = await invokeTool(nativeToolNames.inspectImages, {
+          question: 'What kind of dog is shown?',
+          imageIds: [imageId],
+        });
+        return 'It looks like a terrier mix.';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question: 'What kind of dog?',
+      images: [],
+      adapter: callbacks(),
+    });
+
+    expect(inspection).toEqual({
+      success: true,
+      imageIds: [imageId],
+      observations: 'A scruffy brown dog.',
+    });
+    expect(mocks.generateHelperText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        files: [
+          {
+            mime: 'image/jpeg',
+            url: 'data:image/jpeg;base64,ZG9n',
+          },
+        ],
+      }),
+    );
+  });
+
+  it('requires explicit transcript IDs and inspects only the selected photo', async () => {
+    const firstId = encodeFastAgentTranscriptImageId('100.1:user', 1);
+    const secondId = encodeFastAgentTranscriptImageId('100.3:user', 1);
+    const transcriptImages = [
+      {
+        id: firstId,
+        eventId: '100.1:user',
+        turnId: '100.1',
+        imageIndex: 1,
+        ts: 100,
+        turnSeq: 0,
+        messageText: 'First dog',
+        file: { mime: 'image/png', url: 'data:image/png;base64,Zmlyc3Q=' },
+        byteSize: 5,
+      },
+      {
+        id: secondId,
+        eventId: '100.3:user',
+        turnId: '100.3',
+        imageIndex: 1,
+        ts: 300,
+        turnSeq: 2,
+        messageText: 'Second dog',
+        file: {
+          mime: 'image/jpeg',
+          url: 'data:image/jpeg;base64,c2Vjb25k',
+        },
+        byteSize: 6,
+      },
+    ];
+    mocks.listTranscriptImages.mockResolvedValue({
+      images: transcriptImages,
+      truncated: false,
+    });
+    mocks.resolveImageDelivery.mockResolvedValue({
+      delivery: 'helper',
+      model: 'openrouter/openai/gpt-5.4',
+      helperModel: 'openrouter/google/gemini-3.8-flash',
+    });
+    mocks.generateHelperText.mockResolvedValue(
+      'The second dog has pointy ears.',
+    );
+    const results: unknown[] = [];
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        results.push(
+          await invokeTool(nativeToolNames.inspectImages, {
+            question: 'Which image should I inspect?',
+          }),
+        );
+        results.push(
+          await invokeTool(nativeToolNames.inspectImages, {
+            question: 'Describe the second dog.',
+            imageIds: [secondId],
+          }),
+        );
+        return 'The second dog has pointy ears.';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question: 'What about the second photo?',
+      images: [],
+      adapter: callbacks(),
+    });
+
+    expect(results[0]).toMatchObject({
+      success: false,
+      availableImages: [
+        { id: firstId, messageId: '100.1' },
+        { id: secondId, messageId: '100.3' },
+      ],
+    });
+    expect(results[1]).toEqual({
+      success: true,
+      imageIds: [secondId],
+      observations: 'The second dog has pointy ears.',
+    });
+    expect(mocks.generateHelperText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        files: [
+          {
+            mime: 'image/jpeg',
+            url: 'data:image/jpeg;base64,c2Vjb25k',
+          },
+        ],
+      }),
+    );
+  });
+
+  it('reconstructs historical direct images from the canonical transcript', async () => {
+    const imageId = encodeFastAgentTranscriptImageId('100.1:user', 1);
+    mocks.listTranscriptImages.mockResolvedValue({
+      truncated: false,
+      images: [
+        {
+          id: imageId,
+          eventId: '100.1:user',
+          turnId: '100.1',
+          imageIndex: 1,
+          ts: 100,
+          turnSeq: 0,
+          messageText: 'Original dog photo',
+          file: {
+            mime: 'image/jpeg',
+            url: 'data:image/jpeg;base64,ZG9n',
+          },
+          byteSize: 3,
+        },
+      ],
+    });
+    mocks.runSession.mockImplementation(({ bootstrapPrompt, execute }) =>
+      execute(
+        {},
+        typeof bootstrapPrompt === 'function'
+          ? bootstrapPrompt()
+          : bootstrapPrompt,
+        { path: 'cold_rebuild', validateSession: false },
+      ),
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question: 'What kind of dog?',
+      images: [],
+      adapter: callbacks(),
+    });
+
+    expect(mocks.generateText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        files: [
+          {
+            mime: 'image/jpeg',
+            url: 'data:image/jpeg;base64,ZG9n',
+          },
+        ],
+        prompt: expect.stringContaining(
+          `message 100.1 ("Original dog photo"): ${imageId}`,
+        ),
+      }),
+      expect.any(Object),
+      expect.any(Object),
+    );
+  });
+
+  it('reconstructs helper image references without sending unsupported files', async () => {
+    const imageId = encodeFastAgentTranscriptImageId('100.1:user', 1);
+    mocks.listTranscriptImages.mockResolvedValue({
+      truncated: false,
+      images: [
+        {
+          id: imageId,
+          eventId: '100.1:user',
+          turnId: '100.1',
+          imageIndex: 1,
+          ts: 100,
+          turnSeq: 0,
+          messageText: 'Original dog photo',
+          file: {
+            mime: 'image/jpeg',
+            url: 'data:image/jpeg;base64,ZG9n',
+          },
+          byteSize: 3,
+        },
+      ],
+    });
+    mocks.resolveImageDelivery.mockResolvedValue({
+      delivery: 'helper',
+      model: 'openrouter/openai/gpt-5.4',
+      helperModel: 'openrouter/google/gemini-3.8-flash',
+    });
+    mocks.generateHelperText.mockResolvedValue('A scruffy brown dog.');
+    let inspection: unknown;
+    mocks.runSession.mockImplementation(({ bootstrapPrompt, execute }) =>
+      execute(
+        {},
+        typeof bootstrapPrompt === 'function'
+          ? bootstrapPrompt()
+          : bootstrapPrompt,
+        { path: 'fallback_rebuild', validateSession: false },
+      ),
+    );
+    mocks.generateText.mockImplementation(async (params, _session, options) => {
+      expect(params).not.toHaveProperty('files');
+      expect(params.prompt).toContain(
+        `message 100.1 ("Original dog photo"): ${imageId}`,
+      );
+      await options.onSessionReady('opencode-session-2');
+      options.onPromptStarted?.();
+      inspection = await invokeTool(nativeToolNames.inspectImages, {
+        question: 'Describe the original dog.',
+        imageIds: [imageId],
+      });
+      return 'It is a scruffy brown dog.';
+    });
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question: 'What kind of dog?',
+      images: [],
+      adapter: callbacks(),
+    });
+
+    expect(inspection).toEqual({
+      success: true,
+      imageIds: [imageId],
+      observations: 'A scruffy brown dog.',
+    });
+  });
+
   it('keeps the orchestration model and inspects images through a helper model when it cannot view them', async () => {
     mocks.resolveImageDelivery.mockResolvedValue({
       delivery: 'helper',
@@ -8546,12 +8842,18 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     const promptParams = mocks.generateText.mock.calls[0]?.[0];
     expect(promptParams).not.toHaveProperty('files');
     expect(promptParams.prompt).toContain(
-      'Image attachments: image-1 (image/png), image-2 (image/jpeg)',
+      `${encodeFastAgentTranscriptImageId('100.2:user', 1)} (image/png)`,
+    );
+    expect(promptParams.prompt).toContain(
+      `${encodeFastAgentTranscriptImageId('100.2:user', 2)} (image/jpeg)`,
     );
     expect(promptParams.prompt).toContain('inspect_images');
     expect(inspection).toEqual({
       success: true,
-      imageIds: ['image-1', 'image-2'],
+      imageIds: [
+        encodeFastAgentTranscriptImageId('100.2:user', 1),
+        encodeFastAgentTranscriptImageId('100.2:user', 2),
+      ],
       observations:
         'A settings page with a red error banner reading "Review check failed".',
     });
@@ -8649,7 +8951,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           'files',
         );
         expect(mocks.generateText.mock.calls[1]?.[0].prompt).toContain(
-          'Image attachments: image-1 (image/png)',
+          `${encodeFastAgentTranscriptImageId('100.2:user', 1)} (image/png)`,
         );
         expect(mocks.resolveImageDelivery).toHaveBeenLastCalledWith({
           modality: 'image',

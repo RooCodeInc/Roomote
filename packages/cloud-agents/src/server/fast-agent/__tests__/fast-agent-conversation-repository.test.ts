@@ -20,12 +20,18 @@ import {
   userFactory,
   users,
 } from '@roomote/db/server';
-import type { FastAgentConversation, FastAgentSurface } from '@roomote/types';
+import {
+  ACP_ENVELOPE_EVENT_TYPES,
+  type FastAgentConversation,
+  type FastAgentSurface,
+} from '@roomote/types';
 
 import {
   fastAgentConversationRepository,
   findFastAgentActiveInferenceRetryNotice,
   findFastAgentUnresolvedRequest,
+  listFastAgentTranscriptImages,
+  loadFastAgentTranscriptImagesById,
   loadFastAgentTurnAttemptSummary,
   INTERRUPTED_INFERENCE_RETRY_MESSAGE,
   scheduleFastAgentDurableTurnRetry,
@@ -39,6 +45,7 @@ import {
   renewFastSessionRespondingLease,
 } from '../fast-agent-conversation-repository';
 import { FAST_AGENT_REACTION_INPUT_TYPE } from '../fast-agent-conversation';
+import { encodeFastAgentTranscriptImageId } from '../fast-agent-transcript-images';
 import {
   getOrCreateFastAgentSession,
   hasFastAgentSession,
@@ -2304,5 +2311,72 @@ describe('Fast conversation repository', () => {
     );
     const renewed = await readLease();
     expect(renewed?.getTime()).toBeGreaterThan(live.getTime());
+  });
+
+  it('loads canonical transcript images by stable same-conversation IDs', async () => {
+    const user = await createUser();
+    const first = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: {
+        surface: 'web',
+        workspaceId: user.id,
+        conversationId: crypto.randomUUID(),
+      },
+    });
+    const second = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: {
+        surface: 'web',
+        workspaceId: user.id,
+        conversationId: crypto.randomUUID(),
+      },
+    });
+    await fastAgentConversationRepository.upsertMessage({
+      conversationId: first.id,
+      message: {
+        eventId: '100.1:user',
+        turnId: '100.1',
+        turnSeq: 1,
+        ts: 100,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        role: 'user',
+        contentBlocks: [
+          { type: 'text', text: 'First dog' },
+          { type: 'image', mimeType: 'image/png', data: 'Zmlyc3Q=' },
+          { type: 'image', mimeType: 'image/jpeg', data: 'c2Vjb25k' },
+        ],
+        metadata: { turnSource: 'human' },
+        payload: {},
+      },
+    });
+
+    const catalog = await listFastAgentTranscriptImages(first.id);
+    const firstId = encodeFastAgentTranscriptImageId('100.1:user', 1);
+    const secondId = encodeFastAgentTranscriptImageId('100.1:user', 2);
+    expect(catalog).toMatchObject({
+      truncated: false,
+      images: [
+        { id: firstId, turnId: '100.1', messageText: 'First dog' },
+        { id: secondId, turnId: '100.1', messageText: 'First dog' },
+      ],
+    });
+    await expect(
+      loadFastAgentTranscriptImagesById(first.id, [secondId, firstId]),
+    ).resolves.toMatchObject({
+      missingIds: [],
+      images: [
+        {
+          id: secondId,
+          file: { mime: 'image/jpeg', url: 'data:image/jpeg;base64,c2Vjb25k' },
+        },
+        {
+          id: firstId,
+          file: { mime: 'image/png', url: 'data:image/png;base64,Zmlyc3Q=' },
+        },
+      ],
+    });
+    await expect(
+      loadFastAgentTranscriptImagesById(second.id, [firstId]),
+    ).resolves.toEqual({ images: [], missingIds: [firstId] });
   });
 });

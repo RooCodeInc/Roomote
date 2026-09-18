@@ -15,6 +15,7 @@ import {
   advanceSessionReadCursor,
   getSessionForFastConversation,
   gt,
+  inArray,
   isNotNull,
   isNull,
   lt,
@@ -37,6 +38,14 @@ import {
   FAST_AGENT_REACTION_INPUT_TYPE,
   type FastAgentConversation,
 } from './fast-agent-conversation';
+import {
+  FAST_AGENT_TRANSCRIPT_IMAGE_MAX_MESSAGES,
+  parseFastAgentTranscriptImageId,
+  selectBoundedFastAgentTranscriptImages,
+  transcriptImagesFromRow,
+  type FastAgentTranscriptImage,
+  type FastAgentTranscriptImageRow,
+} from './fast-agent-transcript-images';
 
 export type FastAgentConversationRecord = {
   id: string;
@@ -473,6 +482,96 @@ export async function loadFastAgentTurnAttemptSummary(
     }
   }
   return { events, next, prompt };
+}
+
+const transcriptImageRowSelection = {
+  eventId: fastAgentMessages.eventId,
+  turnId: fastAgentMessages.turnId,
+  ts: fastAgentMessages.ts,
+  turnSeq: fastAgentMessages.turnSeq,
+  contentBlocks: fastAgentMessages.contentBlocks,
+};
+
+function transcriptImageRows(
+  rows: Array<{
+    eventId: string;
+    turnId: string;
+    ts: number;
+    turnSeq: number;
+    contentBlocks: unknown;
+  }>,
+): FastAgentTranscriptImageRow[] {
+  return rows.map((row) => ({
+    ...row,
+    contentBlocks: Array.isArray(row.contentBlocks)
+      ? (row.contentBlocks as FastAgentTranscriptImageRow['contentBlocks'])
+      : [],
+  }));
+}
+
+export async function listFastAgentTranscriptImages(
+  conversationId: string,
+): Promise<{ images: FastAgentTranscriptImage[]; truncated: boolean }> {
+  const rows = await db
+    .select(transcriptImageRowSelection)
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, conversationId),
+        eq(fastAgentMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.UserPrompt),
+        eq(fastAgentMessages.role, 'user'),
+        sql`exists (
+          select 1
+          from jsonb_array_elements(${fastAgentMessages.contentBlocks}) as block
+          where block ->> 'type' = 'image'
+        )`,
+      ),
+    )
+    .orderBy(desc(fastAgentMessages.ts), desc(fastAgentMessages.turnSeq))
+    .limit(FAST_AGENT_TRANSCRIPT_IMAGE_MAX_MESSAGES + 1);
+
+  return selectBoundedFastAgentTranscriptImages(transcriptImageRows(rows));
+}
+
+export async function loadFastAgentTranscriptImagesById(
+  conversationId: string,
+  ids: string[],
+): Promise<{ images: FastAgentTranscriptImage[]; missingIds: string[] }> {
+  const parsed = ids.map((id) => ({
+    id,
+    parsed: parseFastAgentTranscriptImageId(id),
+  }));
+  const eventIds = [
+    ...new Set(
+      parsed.flatMap(({ parsed }) => (parsed ? [parsed.eventId] : [])),
+    ),
+  ];
+  if (eventIds.length === 0) {
+    return { images: [], missingIds: ids };
+  }
+
+  const rows = await db
+    .select(transcriptImageRowSelection)
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, conversationId),
+        eq(fastAgentMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.UserPrompt),
+        eq(fastAgentMessages.role, 'user'),
+        inArray(fastAgentMessages.eventId, eventIds),
+      ),
+    );
+  const available = new Map(
+    transcriptImageRows(rows)
+      .flatMap(transcriptImagesFromRow)
+      .map((image) => [image.id, image]),
+  );
+  const images = ids.flatMap((id) => {
+    const image = available.get(id);
+    return image ? [image] : [];
+  });
+  const foundIds = new Set(images.map(({ id }) => id));
+  return { images, missingIds: ids.filter((id) => !foundIds.has(id)) };
 }
 
 export type FastAgentUnresolvedRequest = {

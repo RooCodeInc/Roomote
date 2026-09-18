@@ -189,8 +189,16 @@ import {
   type FastAgentTurnAttemptReply,
   type FastAgentTurnAttemptSummary,
   type FastAgentUnresolvedRequest,
+  listFastAgentTranscriptImages,
+  loadFastAgentTranscriptImagesById,
   loadFastAgentTurnAttemptSummary,
 } from './fast-agent-conversation-repository';
+import {
+  buildFastAgentTranscriptImageNotice,
+  FAST_AGENT_TRANSCRIPT_IMAGE_MAX_INSPECTION,
+  transcriptImagesFromRow,
+  type FastAgentTranscriptImage,
+} from './fast-agent-transcript-images';
 import {
   bindFastAgentNativeToolExecutor,
   createFastAgentSpillTurnBudget,
@@ -816,29 +824,14 @@ type FastAgentImageDelivery =
   | NonTaskInputModalityDelivery
   | { delivery: 'unsupported' };
 
-function formatFastAgentImageAttachmentList(
-  entries: Array<{ id: string; file: NonTaskPromptFile }>,
-): string {
-  return entries.map(({ id, file }) => `${id} (${file.mime})`).join(', ');
-}
-
-function buildFastAgentImageNotice(
-  entries: Array<{ id: string; file: NonTaskPromptFile }>,
-  delivery: FastAgentImageDelivery,
-): string {
-  const attachments = formatFastAgentImageAttachmentList(entries);
-  if (delivery.delivery === 'unsupported') {
-    return `[Image attachments: ${attachments}. No configured model accepts image input, so they cannot be viewed in this conversation. Tell the user plainly that the image could not be viewed and answer from the text only.]`;
-  }
-  return `[Image attachments: ${attachments}. The current model cannot view images, so they are not shown here. Call inspect_images with a targeted question (and these IDs when only some apply) so Roomote's image-capable model describes them before answering about their contents. Never claim to have seen them yourself.]`;
-}
-
 function buildFastAgentImageInspectionPrompt(
   question: string,
   entries: Array<{ id: string; file: NonTaskPromptFile }>,
 ): string {
   return [
-    `Attached image(s), in order: ${formatFastAgentImageAttachmentList(entries)}.`,
+    `Attached image(s), in order: ${entries
+      .map(({ id, file }) => `${id} (${file.mime})`)
+      .join(', ')}.`,
     '',
     'Question from the assistant:',
     question,
@@ -2165,9 +2158,14 @@ export async function answerFastAgentQuestion({
   const humanFollowUpTurnSeqs = new Map<string, number>();
   const injectedHumanFollowUpMessages: ModelMessage[] = [];
   const injectedHumanFollowUpFiles: NonTaskPromptFile[] = [];
-  // Images the turn model cannot view are held here, under IDs stable for
-  // the turn, for `inspect_images` instead of riding along as prompt parts.
-  const turnImages = new Map<string, NonTaskPromptFile>();
+  const injectedHumanFollowUpImages: FastAgentTranscriptImage[] = [];
+  // This overlay keeps just-accepted native steers immediately inspectable.
+  // Durable identity and bytes live in the canonical transcript.
+  const turnImages = new Map<string, FastAgentTranscriptImage>();
+  let transcriptImageCatalog: {
+    images: FastAgentTranscriptImage[];
+    truncated: boolean;
+  } = { images: [], truncated: false };
   let imageDeliveryPromise: Promise<FastAgentImageDelivery> | undefined;
   let resolvedImageDelivery: FastAgentImageDelivery | undefined;
   let imageHelperFallbackUsed = false;
@@ -2201,40 +2199,37 @@ export async function answerFastAgentQuestion({
       });
     return imageDeliveryPromise;
   };
-  type HeldTurnImage = { id: string; file: NonTaskPromptFile };
-  const commitTurnImages = (held: HeldTurnImage[]) => {
-    for (const { id, file } of held) turnImages.set(id, file);
+  const commitTurnImages = (held: FastAgentTranscriptImage[]) => {
+    for (const image of held) turnImages.set(image.id, image);
   };
-  // Reserves IDs for `files` without holding them yet. The caller commits
-  // once the prompt that names those IDs is actually accepted, so a prompt
-  // abandoned in between leaves nothing behind for its next attempt to
-  // duplicate. Synchronous: nothing may run between reserving and building
-  // the prompt text.
   const holdImagesForPrompt = (
-    files: NonTaskPromptFile[],
+    images: FastAgentTranscriptImage[],
     text: string,
     delivery: FastAgentImageDelivery,
-  ): { files: NonTaskPromptFile[]; text: string; held: HeldTurnImage[] } => {
-    if (files.length === 0 || delivery.delivery === 'direct') {
-      return { files, text, held: [] };
+  ): {
+    files: NonTaskPromptFile[];
+    text: string;
+    held: FastAgentTranscriptImage[];
+  } => {
+    if (images.length === 0 || delivery.delivery === 'direct') {
+      return { files: images.map(({ file }) => file), text, held: [] };
     }
-    const held = files.map((file, index) => ({
-      id: `image-${turnImages.size + index + 1}`,
-      file,
-    }));
     return {
       files: [],
-      text: `${text}\n\n${buildFastAgentImageNotice(held, delivery)}`,
-      held,
+      text: `${text}\n\n${buildFastAgentTranscriptImageNotice(
+        images,
+        delivery.delivery,
+      )}`,
+      held: images,
     };
   };
   const prepareImagesForPrompt = async (
-    files: NonTaskPromptFile[],
+    images: FastAgentTranscriptImage[],
     text: string,
   ): Promise<{ files: NonTaskPromptFile[]; text: string }> => {
-    if (files.length === 0) return { files, text };
+    if (images.length === 0) return { files: [], text };
     const prepared = holdImagesForPrompt(
-      files,
+      images,
       text,
       await resolveImageDelivery(),
     );
@@ -2246,30 +2241,74 @@ export async function answerFastAgentQuestion({
   // the delivery has resolved to something other than direct.
   const withTurnImageNotice = (text: string): string => {
     if (turnImages.size === 0 || !resolvedImageDelivery) return text;
-    return `${text}\n\n${buildFastAgentImageNotice(
-      [...turnImages].map(([id, file]) => ({ id, file })),
-      resolvedImageDelivery,
+    return `${text}\n\n${buildFastAgentTranscriptImageNotice(
+      [...turnImages.values()],
+      resolvedImageDelivery.delivery,
     )}`;
   };
   const inspectTurnImages = async (args: {
     question: string;
     imageIds?: string[] | null;
   }): Promise<unknown> => {
-    if (turnImages.size === 0) {
+    const currentImages = [...turnImages.values()];
+    if (
+      currentImages.length === 0 &&
+      transcriptImageCatalog.images.length === 0
+    ) {
       return {
         success: false,
         error:
-          'No image attachments are held for this turn. Images the current model can view are delivered with the prompt itself.',
+          'No image attachments are available in this conversation transcript.',
       };
     }
-    const requestedIds = args.imageIds?.length
+    let requestedIds = args.imageIds?.length
       ? args.imageIds
-      : [...turnImages.keys()];
-    const unknownIds = requestedIds.filter((id) => !turnImages.has(id));
+      : currentImages.map(({ id }) => id);
+    if (requestedIds.length === 0) {
+      if (transcriptImageCatalog.images.length === 1) {
+        requestedIds = [transcriptImageCatalog.images[0]!.id];
+      } else {
+        return {
+          success: false,
+          error:
+            'Multiple historical images are available. Choose explicit image IDs from availableImages so the original message association is preserved.',
+          availableImages: transcriptImageCatalog.images.map(
+            ({ id, turnId, messageText, file }) => ({
+              id,
+              messageId: turnId,
+              messageText,
+              mimeType: file.mime,
+            }),
+          ),
+          truncated: transcriptImageCatalog.truncated,
+        };
+      }
+    }
+    if (requestedIds.length > FAST_AGENT_TRANSCRIPT_IMAGE_MAX_INSPECTION) {
+      return {
+        success: false,
+        error: `At most ${FAST_AGENT_TRANSCRIPT_IMAGE_MAX_INSPECTION} images can be inspected at once.`,
+      };
+    }
+    const cached = new Map(
+      [...currentImages, ...transcriptImageCatalog.images].map((image) => [
+        image.id,
+        image,
+      ]),
+    );
+    const unresolvedIds = requestedIds.filter((id) => !cached.has(id));
+    if (unresolvedIds.length > 0 && canonicalConversationId) {
+      const loaded = await loadFastAgentTranscriptImagesById(
+        canonicalConversationId,
+        unresolvedIds,
+      );
+      for (const image of loaded.images) cached.set(image.id, image);
+    }
+    const unknownIds = requestedIds.filter((id) => !cached.has(id));
     if (unknownIds.length > 0) {
       return {
         success: false,
-        error: `Unknown image attachment ID(s): ${unknownIds.join(', ')}. Use the IDs listed in the turn's image notice.`,
+        error: `Unknown image attachment ID(s): ${unknownIds.join(', ')}. Use IDs listed in the conversation's image notice.`,
       };
     }
     const delivery = await resolveImageDelivery();
@@ -2282,7 +2321,7 @@ export async function answerFastAgentQuestion({
     }
     const entries = requestedIds.map((id) => ({
       id,
-      file: turnImages.get(id)!,
+      file: cached.get(id)!.file,
     }));
     const observations = await generateTrackedNonTaskText({
       surface: NON_TASK_INFERENCE_SURFACES.fastAgentImageInspection,
@@ -2647,19 +2686,34 @@ export async function answerFastAgentQuestion({
       }
       if (signal?.aborted || !nativeSteer || activeToolExecutions > 0) return;
       const batchMessages = batch.flatMap(({ turnMessages }) => turnMessages);
-      const batchSourceFiles = batch.flatMap(({ files }) => files);
+      const batchSourceImages = batch.flatMap(
+        ({ row, followUp, followUpTurnId, files }) =>
+          transcriptImagesFromRow({
+            eventId: `${followUpTurnId}:user`,
+            turnId: followUpTurnId,
+            ts: row.createdAt.getTime(),
+            turnSeq: humanFollowUpTurnSeqs.get(row.id)!,
+            contentBlocks: buildFastAgentUserContentBlocks(
+              normalizeThreadText(followUp.question),
+              followUp.images ?? [],
+            ),
+          }).map((image, index) => ({
+            ...image,
+            file: files[index] ?? image.file,
+          })),
+      );
       const batchText = batch
         .map(({ serializedPrompt }) => serializedPrompt)
         .join('\n\n');
       const batchImageDelivery =
-        batchSourceFiles.length > 0 ? await resolveImageDelivery() : undefined;
+        batchSourceImages.length > 0 ? await resolveImageDelivery() : undefined;
       // The lookup above may have let a tool start or the turn end. Re-check
       // before anything is reserved for this batch: it stays pending when
       // abandoned here and must not have held images already.
       if (signal?.aborted || !nativeSteer || activeToolExecutions > 0) return;
       const batchInput = batchImageDelivery
-        ? holdImagesForPrompt(batchSourceFiles, batchText, batchImageDelivery)
-        : { files: batchSourceFiles, text: batchText, held: [] };
+        ? holdImagesForPrompt(batchSourceImages, batchText, batchImageDelivery)
+        : { files: [], text: batchText, held: [] };
       const batchFiles = batchInput.files;
       const batchPrompt = batchInput.text;
       const firstRow = batch[0]!.row;
@@ -2700,6 +2754,7 @@ export async function answerFastAgentQuestion({
       }
       injectedHumanFollowUpMessages.push(...batchMessages);
       injectedHumanFollowUpFiles.push(...batchFiles);
+      injectedHumanFollowUpImages.push(...batchSourceImages);
       // Native steering starts a new human instruction boundary inside the
       // same OpenCode run. Prior tool results remain in-session, while local
       // duplicate guards reset so the user may intentionally repeat an action.
@@ -3547,18 +3602,20 @@ export async function answerFastAgentQuestion({
     const userEvent = previousAttempt?.prompt
       ? { eventId: `${turnId}:user`, turnSeq: previousAttempt.prompt.turnSeq }
       : allocateCanonicalEvent('user');
+    const userMessageTs =
+      previousAttempt?.prompt?.ts ?? platformEventTimestampMs ?? Date.now();
+    const userMessageContentBlocks = buildFastAgentUserContentBlocks(
+      normalizeThreadText(question),
+      images,
+    );
     const userMessageResult = await persistCanonicalMessage(
       {
         ...userEvent,
         turnId,
-        ts:
-          previousAttempt?.prompt?.ts ?? platformEventTimestampMs ?? Date.now(),
+        ts: userMessageTs,
         eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
         role: 'user',
-        contentBlocks: buildFastAgentUserContentBlocks(
-          normalizeThreadText(question),
-          images,
-        ),
+        contentBlocks: userMessageContentBlocks,
         metadata: {
           // Synthetic envelopes are useful model input but not readable
           // transcript or title seeds.
@@ -3584,6 +3641,13 @@ export async function answerFastAgentQuestion({
       },
       true,
     );
+    const currentTurnTranscriptImages = transcriptImagesFromRow({
+      eventId: userEvent.eventId,
+      turnId,
+      ts: userMessageTs,
+      turnSeq: userEvent.turnSeq,
+      contentBlocks: userMessageContentBlocks,
+    });
     diagnostics.recordInitialHumanTurn(
       substantiveHumanInput ? userMessageResult?.initialHumanTurn : false,
     );
@@ -5661,8 +5725,37 @@ export async function answerFastAgentQuestion({
       }
     };
 
+    transcriptImageCatalog = await listFastAgentTranscriptImages(
+      session.id,
+    ).catch((error) => {
+      console.warn(
+        `[Fast Agent] Conversation image transcript unavailable: ${formatErrorForLog(error)}`,
+      );
+      return { images: [], truncated: false };
+    });
+    const historicalTranscriptImages = transcriptImageCatalog.images.filter(
+      ({ eventId }) => eventId !== userEvent.eventId,
+    );
+    const historicalImageDelivery = historicalTranscriptImages.length
+      ? await resolveImageDelivery()
+      : undefined;
+    const historicalImageFiles =
+      historicalImageDelivery?.delivery === 'direct'
+        ? historicalTranscriptImages.map(({ file }) => file)
+        : [];
+    const withHistoricalImageNotice = (
+      text: string,
+      delivery: FastAgentImageDelivery | undefined = historicalImageDelivery,
+    ) =>
+      delivery
+        ? `${text}\n\n${buildFastAgentTranscriptImageNotice(
+            historicalTranscriptImages,
+            delivery.delivery,
+            { truncated: transcriptImageCatalog.truncated },
+          )}`
+        : text;
     const turnPromptInput = await prepareImagesForPrompt(
-      getFastAgentImageFiles(images),
+      currentTurnTranscriptImages,
       serializeFastAgentMessages(turnMessages),
     );
     const imageFiles = turnPromptInput.files;
@@ -5728,10 +5821,12 @@ export async function answerFastAgentQuestion({
       prompt: serializedTurnPrompt,
       bootstrapPrompt: () =>
         withTurnImageNotice(
-          serializeFastAgentMessages([
-            ...bootstrapMessages,
-            ...injectedHumanFollowUpMessages,
-          ]),
+          withHistoricalImageNotice(
+            serializeFastAgentMessages([
+              ...bootstrapMessages,
+              ...injectedHumanFollowUpMessages,
+            ]),
+          ),
         ),
       onPathSelected: (path) => {
         diagnostics.recordSessionPath(path);
@@ -5779,8 +5874,12 @@ export async function answerFastAgentQuestion({
         };
         let promptForAttempt = selectedPrompt;
         let imageFilesForAttempt =
-          sessionPath === 'fallback_rebuild'
-            ? [...imageFiles, ...injectedHumanFollowUpFiles]
+          sessionPath === 'fallback_rebuild' || sessionPath === 'cold_rebuild'
+            ? [
+                ...imageFiles,
+                ...injectedHumanFollowUpFiles,
+                ...historicalImageFiles,
+              ]
             : imageFiles;
         let promptKind: FastAgentPromptKind =
           sessionPath === 'warm' || sessionPath === 'cold_resume'
@@ -6244,11 +6343,17 @@ export async function answerFastAgentQuestion({
                   resolvedImageDelivery = fallback;
                   diagnostics.recordImageDelivery(fallback);
                   const fallbackInput = holdImagesForPrompt(
-                    [...imageFiles, ...injectedHumanFollowUpFiles],
-                    serializeFastAgentMessages([
-                      ...bootstrapMessages,
-                      ...injectedHumanFollowUpMessages,
-                    ]),
+                    [
+                      ...currentTurnTranscriptImages,
+                      ...injectedHumanFollowUpImages,
+                    ],
+                    withHistoricalImageNotice(
+                      serializeFastAgentMessages([
+                        ...bootstrapMessages,
+                        ...injectedHumanFollowUpMessages,
+                      ]),
+                      fallback,
+                    ),
                     fallback,
                   );
                   commitTurnImages(fallbackInput.held);
@@ -6272,14 +6377,17 @@ export async function answerFastAgentQuestion({
                   // append the original turn to the failed session again.
                   openCodeSession.id = undefined;
                   promptForAttempt = withTurnImageNotice(
-                    serializeFastAgentMessages([
-                      ...bootstrapMessages,
-                      ...injectedHumanFollowUpMessages,
-                    ]),
+                    withHistoricalImageNotice(
+                      serializeFastAgentMessages([
+                        ...bootstrapMessages,
+                        ...injectedHumanFollowUpMessages,
+                      ]),
+                    ),
                   );
                   imageFilesForAttempt = [
                     ...imageFiles,
                     ...injectedHumanFollowUpFiles,
+                    ...historicalImageFiles,
                   ];
                   promptKind = 'clean_retry_bootstrap';
                   attemptSessionPath = 'cold_rebuild';

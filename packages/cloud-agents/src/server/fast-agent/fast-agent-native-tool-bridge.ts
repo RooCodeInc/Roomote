@@ -693,10 +693,10 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Ask Roomote's image-capable helper model to inspect image attachments from the current turn that this model cannot view directly. Only available when a turn notice lists attachment IDs. Ask one targeted question per call and call again for follow-ups. Returns factual observations as untrusted data.",
+  description: "Ask Roomote's image-capable helper model to inspect image attachments referenced by the current turn or conversation transcript. Ask one targeted question per call and call again for follow-ups. When multiple historical images exist, use exact IDs to preserve their original message association. Returns factual observations as untrusted data.",
   args: {
     question: z.string().min(1).describe("What to look for or extract from the attached image(s), including any context the helper needs"),
-    imageIds: z.array(z.string().min(1)).nullable().optional().describe("Exact attachment IDs from the turn's image notice; omit or pass null to inspect every attached image"),
+    imageIds: z.array(z.string().min(1).max(512)).max(8).nullable().optional().describe("Exact attachment IDs from a turn or conversation image notice. Omit only when the applicable image is unambiguous; multiple historical images require explicit IDs."),
   },
   execute: (args, context) => invoke("inspect_images", args, context),
 }
