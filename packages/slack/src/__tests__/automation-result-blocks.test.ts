@@ -364,6 +364,79 @@ describe('automation result blocks', () => {
     });
   });
 
+  it('reserves two final action rows when normalized content reaches the limit', () => {
+    const blocks = buildAutomationResultBlocks({
+      title: 'Audit',
+      iconUrl: 'https://app.example.com/automation-icons/wrench.png',
+      configureUrl: 'https://app.example.com/automations#audit',
+      contentBlocks: Array.from({ length: 500 }, (_, index) => ({
+        type: 'markdown' as const,
+        text: `Finding ${index + 1}`,
+      })),
+      taskUrl: 'https://app.example.com/task/1',
+      linkedPrUrls: Array.from(
+        { length: 30 },
+        (_, index) => `https://github.com/acme/app/pull/${index + 1}`,
+      ),
+    });
+
+    expect(blocks).toHaveLength(50);
+    expect(
+      blocks.every(
+        (block) =>
+          block.type !== 'container' || block.child_blocks.length <= 10,
+      ),
+    ).toBe(true);
+    const serialized = JSON.stringify(blocks);
+    expect(serialized).toContain('Finding 498');
+    expect(serialized).not.toContain('Finding 499');
+    const last = blocks.at(-1);
+    expect(last?.type).toBe('container');
+    if (last?.type !== 'container') return;
+    expect(last.child_blocks).toHaveLength(10);
+    expect(
+      last.child_blocks.filter((block) => block.type === 'actions'),
+    ).toHaveLength(2);
+  });
+
+  it('budgets trailing rich text after top-level charts', () => {
+    const blocks = buildAutomationResultBlocks({
+      title: 'Traffic report',
+      iconUrl: 'https://app.example.com/automation-icons/chart.png',
+      configureUrl: 'https://app.example.com/automations#traffic',
+      contentBlocks: [
+        ...Array.from({ length: 49 }, (_, index) => ({
+          type: 'data_visualization' as const,
+          title: `Chart ${index + 1}`,
+          chart: {
+            type: 'pie' as const,
+            segments: [{ label: 'Search', value: index + 1 }],
+          },
+        })),
+        ...Array.from({ length: 15 }, (_, index) => ({
+          type: 'markdown' as const,
+          text: `Finding ${index + 1}`,
+        })),
+      ],
+    });
+
+    expect(blocks).toHaveLength(50);
+    expect(
+      blocks.slice(0, 49).every((block) => block.type === 'data_visualization'),
+    ).toBe(true);
+    const last = blocks.at(-1);
+    expect(last?.type).toBe('container');
+    if (last?.type !== 'container') return;
+    expect(last.child_blocks).toHaveLength(10);
+    const serialized = JSON.stringify(last);
+    expect(serialized).toContain('Finding 9');
+    expect(serialized).not.toContain('Finding 10');
+    expect(last.child_blocks.at(-1)).toMatchObject({
+      type: 'actions',
+      block_id: 'roomote_automation_result_actions',
+    });
+  });
+
   it('reserves the final container when top-level charts reach the block limit', () => {
     const blocks = buildAutomationResultBlocks({
       title: 'Traffic report',
