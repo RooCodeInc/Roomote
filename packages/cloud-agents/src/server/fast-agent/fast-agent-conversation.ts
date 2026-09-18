@@ -124,6 +124,8 @@ export type LaunchFastAgentTask = (params: {
   environmentId: string | null;
   /** Exact environment for a fresh, server-authorized verification task. */
   verifiesEnvironmentId?: string;
+  /** Repository-free setup task that must receive environment-build resources. */
+  preparesEnvironment?: boolean;
   branch?: string;
   /** Optional launch idempotency key persisted in the standard task-run
    * payload; a partial unique index makes concurrent retries converge. */

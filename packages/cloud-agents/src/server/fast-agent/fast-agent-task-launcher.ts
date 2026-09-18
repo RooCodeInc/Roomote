@@ -63,6 +63,7 @@ export function createFastAgentTaskLauncher(
     images,
     environmentId,
     verifiesEnvironmentId,
+    preparesEnvironment,
     branch,
     launchIdempotencyKey,
     model,
@@ -99,6 +100,7 @@ export function createFastAgentTaskLauncher(
         ...(launchIdempotencyKey ? { launchIdempotencyKey } : {}),
         ...(images?.length ? { images } : {}),
         ...(verifiesEnvironmentId ? { verifiesEnvironmentId } : {}),
+        ...(preparesEnvironment ? { preparesEnvironment: true } : {}),
       },
     };
     let taskUrl: string | undefined;

@@ -13,10 +13,11 @@ describe('inspectRAnalysisScript', () => {
         require("airway")
         ggplot2::ggplot()
         library(ggplot2, quietly = TRUE)
+        library(quietly = TRUE, package = edgeR)
         library(stats)
       `),
     ).toEqual({
-      packages: ['airway', 'DESeq2', 'ggplot2'],
+      packages: ['airway', 'DESeq2', 'edgeR', 'ggplot2'],
       unresolvedPackageExpressions: [],
     });
   });

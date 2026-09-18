@@ -477,7 +477,7 @@ const launchTaskArgsSchema = z.object({
   reasoningEffort: z.enum(REASONING_EFFORT_VALUES).nullable().optional(),
   includeAttachments: z.boolean().optional().default(false),
   mode: z
-    .enum(['standard', 'environment_verification'])
+    .enum(['standard', 'environment_setup', 'environment_verification'])
     .optional()
     .default('standard'),
 });
@@ -4801,6 +4801,22 @@ export async function answerFastAgentQuestion({
                 };
               }
             }
+            if (args.mode === 'environment_setup') {
+              if (!currentUser.isAdmin) {
+                return {
+                  success: false,
+                  error:
+                    'Only deployment administrators can start environment setup.',
+                };
+              }
+              if (args.environmentId !== NO_REPOSITORIES) {
+                return {
+                  success: false,
+                  error:
+                    'Repository-free environment setup must use the Blank slate target.',
+                };
+              }
+            }
             if (
               selectedModel &&
               !taskModelOptions.models.some(
@@ -4922,6 +4938,9 @@ export async function answerFastAgentQuestion({
                 ...(args.mode === 'environment_verification' &&
                 args.environmentId
                   ? { verifiesEnvironmentId: args.environmentId }
+                  : {}),
+                ...(args.mode === 'environment_setup'
+                  ? { preparesEnvironment: true }
                   : {}),
                 model: selectedModel,
                 reasoningEffort: selectedReasoningEffort,
