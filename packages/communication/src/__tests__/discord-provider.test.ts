@@ -928,6 +928,7 @@ describe('DiscordCommunicationProvider', () => {
       ['x', '❌'],
       ['thumbsdown', '👎'],
       ['+1', '👍'],
+      ['file_cabinet', '🗄️'],
     ] as const) {
       await provider.addReaction({
         channelId,
