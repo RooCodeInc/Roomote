@@ -26,7 +26,7 @@ type SlackLiveTaskCardNotifier = Pick<
   | 'updateMessage'
 >;
 
-const PREPARING_WORKSPACE_TITLE = 'Preparing workspace…';
+const STARTING_TASK_TITLE = 'Starting task…';
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -35,7 +35,7 @@ function describeError(error: unknown): string {
 /**
  * Fast delegation launcher that also posts a native task card (a
  * `task_card` block) in the parent thread. The card opens as a bare
- * "Preparing workspace…" placeholder; once the sandbox is up the worker renders
+ * "Starting task…" placeholder; once the sandbox is up the worker renders
  * the generated title and then re-renders the whole card through
  * chat.update for the task's lifetime, so it always shows the latest state.
  *
@@ -101,7 +101,7 @@ export function createFastAgentSlackLiveTaskLauncher(
         thread_ts: launcherParams.threadTs,
         ...buildSlackLiveTaskCardBlocks({
           taskUpdateId,
-          title: PREPARING_WORKSPACE_TITLE,
+          title: STARTING_TASK_TITLE,
           status: 'in_progress',
           taskUrl: destinationUrl,
         }),
@@ -155,7 +155,7 @@ export function createFastAgentSlackLiveTaskLauncher(
           ts: messageTs,
           message: buildSlackLiveTaskCardBlocks({
             taskUpdateId,
-            title: PREPARING_WORKSPACE_TITLE,
+            title: STARTING_TASK_TITLE,
             status: 'error',
             output: SLACK_SESSION_LIVE_TASK_CARD_MESSAGES.trackingUnavailable,
             taskUrl: destinationUrl,
