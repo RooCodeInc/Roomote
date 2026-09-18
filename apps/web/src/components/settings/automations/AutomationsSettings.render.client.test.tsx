@@ -1349,6 +1349,73 @@ describe('AutomationsSettings', () => {
     expect(mutations.updateSettings).not.toHaveBeenCalled();
   });
 
+  it('focuses and describes an invalid custom schedule before creating', () => {
+    render(<CustomAutomationsSection />);
+    fireEvent.click(screen.getByRole('button', { name: 'New' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), {
+      target: { value: 'Schedule validation' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Prompt' }), {
+      target: { value: 'Verify custom schedule recovery.' },
+    });
+    fireEvent.click(
+      screen.getByRole('combobox', { name: 'Preferred environment' }),
+    );
+    fireEvent.click(screen.getByRole('option', { name: 'Let Roomote decide' }));
+    fireEvent.click(screen.getByRole('combobox', { name: 'Schedule' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Custom schedule' }));
+
+    const schedule = screen.getByRole('textbox', { name: 'Custom schedule' });
+    mutations.updateSettings.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+    expect(mutations.updateSettings).not.toHaveBeenCalled();
+    expect(schedule).toHaveFocus();
+    expect(schedule).toHaveAttribute('aria-invalid', 'true');
+    expect(schedule).toHaveAccessibleDescription(
+      'Enter a valid schedule first.',
+    );
+    expect(screen.getByText('Enter a valid schedule first.')).toHaveAttribute(
+      'role',
+      'alert',
+    );
+
+    fireEvent.change(schedule, { target: { value: '0 9 * * 1-5' } });
+    expect(schedule).not.toHaveAttribute('aria-invalid');
+    expect(
+      screen.queryByText('Enter a valid schedule first.'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText('At 09:00 AM, Monday through Friday (UTC)'),
+    ).toBeInTheDocument();
+  });
+
+  it('uses the same invalid custom schedule recovery while editing', async () => {
+    setRunnableCustomAutomation();
+    render(<AutomationsSettings />);
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Configure Daily scan' }),
+    );
+    fireEvent.click(screen.getByRole('combobox', { name: 'Schedule' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Custom schedule' }));
+
+    const schedule = screen.getByRole('textbox', { name: 'Custom schedule' });
+    mutations.updateSettings.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(mutations.updateSettings).not.toHaveBeenCalled();
+    expect(schedule).toHaveFocus();
+    expect(schedule).toHaveAccessibleDescription(
+      'Enter a valid schedule first.',
+    );
+
+    fireEvent.click(screen.getByRole('combobox', { name: 'Schedule' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Daily' }));
+    expect(
+      screen.queryByText('Enter a valid schedule first.'),
+    ).not.toBeInTheDocument();
+  });
+
   it('disables a scheduled automation directly', async () => {
     state.settingsQuery.data.settings.managerStatsFrequency = 'weekly' as never;
     render(<AutomationsSettings />);

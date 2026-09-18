@@ -96,7 +96,9 @@ type CustomAutomationFormState = {
   targetChannelId: string;
 };
 
-type CustomAutomationFieldErrors = Partial<Record<'name' | 'prompt', string>>;
+type CustomAutomationFieldErrors = Partial<
+  Record<'name' | 'prompt' | 'schedule', string>
+>;
 
 const EMPTY_FORM: CustomAutomationFormState = {
   name: '',
@@ -691,9 +693,13 @@ export function CustomAutomationsSection({
         if (result.status === 'ambiguous') {
           setResolvedCron(null);
           setScheduleSummary(null);
-          toast.message(result.clarification ?? 'Clarify the schedule.');
+          setFieldErrors((current) => ({
+            ...current,
+            schedule: result.clarification ?? 'Clarify the schedule.',
+          }));
           return;
         }
+        setFieldErrors((current) => ({ ...current, schedule: undefined }));
         setResolvedCron(result.cronExpression);
         setScheduleSummary(
           scheduleSummaryLine(result.summary, result.timeZone),
@@ -703,7 +709,10 @@ export function CustomAutomationsSection({
         if (variables.schedule !== form.cronExpression) {
           return;
         }
-        toast.error(error.message);
+        setFieldErrors((current) => ({
+          ...current,
+          schedule: error.message,
+        }));
       },
     }),
   );
@@ -894,11 +903,13 @@ export function CustomAutomationsSection({
       return;
     }
     if (form.scheduleMode === 'cron' && !effectiveResolvedCron) {
-      toast.error(
-        resolveScheduleMutation.isPending
+      setFieldErrors((current) => ({
+        ...current,
+        schedule: resolveScheduleMutation.isPending
           ? 'Still interpreting the schedule, try again in a moment.'
           : 'Enter a valid schedule first.',
-      );
+      }));
+      cronExpressionRef.current?.focus();
       return;
     }
     if (
@@ -1033,6 +1044,10 @@ export function CustomAutomationsSection({
               onValueChange={(value) => {
                 setResolvedCron(null);
                 setScheduleSummary(null);
+                setFieldErrors((current) => ({
+                  ...current,
+                  schedule: undefined,
+                }));
                 setForm((current) => ({
                   ...current,
                   scheduleMode: value as CustomAutomationScheduleMode,
@@ -1063,9 +1078,21 @@ export function CustomAutomationsSection({
                 value={form.cronExpression}
                 disabled={busy}
                 placeholder="Weekdays at 9am or 0 9 * * 1-5"
+                aria-invalid={fieldErrors.schedule ? true : undefined}
+                aria-describedby={
+                  fieldErrors.schedule
+                    ? 'custom-automation-schedule-error'
+                    : undefined
+                }
                 onChange={(event) => {
                   setResolvedCron(null);
                   setScheduleSummary(null);
+                  if (fieldErrors.schedule) {
+                    setFieldErrors((current) => ({
+                      ...current,
+                      schedule: undefined,
+                    }));
+                  }
                   setForm((current) => ({
                     ...current,
                     cronExpression: event.target.value,
@@ -1090,7 +1117,15 @@ export function CustomAutomationsSection({
               />
             ) : null}
           </div>
-          {resolveScheduleMutation.isPending ? (
+          {fieldErrors.schedule ? (
+            <p
+              id="custom-automation-schedule-error"
+              role="alert"
+              className="text-sm text-destructive"
+            >
+              {fieldErrors.schedule}
+            </p>
+          ) : resolveScheduleMutation.isPending ? (
             <p className="text-sm text-muted-foreground">
               Interpreting schedule...
             </p>
