@@ -18,6 +18,7 @@ import {
   users,
 } from '@roomote/db/server';
 
+import { buildAgentMailReplyVerificationFooter } from './reply-verification';
 import { buildAgentMailUnsubscribeUrl } from './unsubscribe-tokens';
 import {
   isUniqueViolation,
@@ -360,6 +361,13 @@ export async function startAgentMailConversationWithResult(input: {
   const inboxId = normalizeEmailAddress(credentials.inboxId);
   const body = buildAgentMailEmailBody(input.text);
   const unsubscribeUrl = buildAgentMailUnsubscribeUrl(resolution.emailAddress);
+  // A reply to this email implicitly verifies an unverified account address;
+  // the footer carries the single-use proof token that makes the reply a
+  // proof of receipt.
+  const replyVerification = await buildAgentMailReplyVerificationFooter({
+    userId: input.userId,
+    emailAddress: resolution.emailAddress,
+  });
 
   let response: { message_id?: string; thread_id?: string };
   try {
@@ -369,8 +377,8 @@ export async function startAgentMailConversationWithResult(input: {
       {
         to: [resolution.emailAddress],
         subject: input.subject,
-        text: `${body.text}\n\nTo stop receiving these emails: ${unsubscribeUrl}`,
-        html: `${body.html}<p style="color:#8a93a3;font-size:12px;margin-top:24px"><a href="${unsubscribeUrl}" style="color:#8a93a3">Stop receiving these emails</a></p>`,
+        text: `${body.text}\n\nTo stop receiving these emails: ${unsubscribeUrl}${replyVerification?.textFooter ?? ''}`,
+        html: `${body.html}<p style="color:#8a93a3;font-size:12px;margin-top:24px"><a href="${unsubscribeUrl}" style="color:#8a93a3">Stop receiving these emails</a></p>${replyVerification?.htmlFooter ?? ''}`,
         headers: {
           // RFC 8058 one-click unsubscribe; Gmail and Yahoo require it for
           // sender reputation, and honoring it protects every tenant sharing

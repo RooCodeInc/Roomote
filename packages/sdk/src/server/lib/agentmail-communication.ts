@@ -10,6 +10,7 @@ import {
   AgentMailRecipientUnavailableError,
   resolveAgentMailOutboundRecipient,
 } from './agentmail/outbound';
+import { buildAgentMailReplyVerificationFooter } from './agentmail/reply-verification';
 import { buildAgentMailUnsubscribeUrl } from './agentmail/unsubscribe-tokens';
 
 type AgentMailCommunicationProviderRuntimeOptions = {
@@ -66,6 +67,15 @@ export async function createAgentMailCommunicationProviderFromRuntimeCredentials
       const unsubscribeUrl = buildAgentMailUnsubscribeUrl(
         recipient.emailAddress,
       );
+      // First send of a Roomote-initiated conversation: an unverified
+      // account address also gets the single-use token whose quoted return
+      // in a reply verifies the address implicitly.
+      const replyVerification = route.latestOutboundMessageId
+        ? null
+        : await buildAgentMailReplyVerificationFooter({
+            userId: route.ownerUserId,
+            emailAddress: recipient.emailAddress,
+          });
       return {
         ...route,
         replyToMessageId: route.latestOutboundMessageId,
@@ -73,8 +83,8 @@ export async function createAgentMailCommunicationProviderFromRuntimeCredentials
         ...(!route.latestOutboundMessageId
           ? {
               outboundStart: {
-                textFooter: `\n\nTo stop receiving these emails: ${unsubscribeUrl}`,
-                htmlFooter: `<p style="color:#8a93a3;font-size:12px;margin-top:24px"><a href="${unsubscribeUrl}" style="color:#8a93a3">Stop receiving these emails</a></p>`,
+                textFooter: `\n\nTo stop receiving these emails: ${unsubscribeUrl}${replyVerification?.textFooter ?? ''}`,
+                htmlFooter: `<p style="color:#8a93a3;font-size:12px;margin-top:24px"><a href="${unsubscribeUrl}" style="color:#8a93a3">Stop receiving these emails</a></p>${replyVerification?.htmlFooter ?? ''}`,
                 headers: {
                   'List-Unsubscribe': `<${unsubscribeUrl}>`,
                   'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
