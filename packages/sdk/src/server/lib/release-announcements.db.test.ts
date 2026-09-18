@@ -359,18 +359,20 @@ describe('release announcement delivery', () => {
         blocks: [
           expect.objectContaining({
             type: 'container',
+            title: expect.objectContaining({
+              type: 'plain_text',
+              text: 'Announce Roomote Updates',
+            }),
             icon: expect.objectContaining({
               image_url: expect.stringContaining(
                 '/automation-icons/megaphone.png',
               ),
               alt_text: 'Announce Roomote Updates automation icon',
             }),
-            title: expect.objectContaining({
-              type: 'plain_text',
-              text: 'Announce Roomote Updates',
-            }),
             child_blocks: expect.arrayContaining([
-              expect.objectContaining({ type: 'rich_text' }),
+              expect.objectContaining({
+                type: 'rich_text',
+              }),
               expect.objectContaining({
                 type: 'actions',
                 elements: expect.arrayContaining([
@@ -385,8 +387,10 @@ describe('release announcement delivery', () => {
         ],
       }),
     );
-    expect(JSON.stringify(message?.blocks)).toContain(
-      "What's new in Roomote v1.2.0",
+    const serializedBlocks = JSON.stringify(message?.blocks);
+    expect(serializedBlocks).toContain("What's new in Roomote v1.2.0");
+    expect(serializedBlocks).toContain(
+      'https://github.com/RooCodeInc/Roomote/releases/tag/v1.2.0',
     );
   });
 

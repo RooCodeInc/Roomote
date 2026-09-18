@@ -207,12 +207,18 @@ describe('publishFastAgentRequestUserInput', () => {
       expect.objectContaining({
         channel: 'C123',
         text: 'Weekly scan needs input to continue.',
-        blocks: [
+        blocks: expect.arrayContaining([
           expect.objectContaining({
             type: 'container',
             title: expect.objectContaining({ text: 'Weekly scan' }),
+            icon: expect.objectContaining({
+              image_url: expect.stringContaining('/automation-icons/zap.png'),
+              alt_text: 'Weekly scan automation icon',
+            }),
             child_blocks: expect.arrayContaining([
-              expect.objectContaining({ type: 'rich_text' }),
+              expect.objectContaining({
+                type: 'rich_text',
+              }),
               expect.objectContaining({
                 type: 'actions',
                 elements: expect.arrayContaining([
@@ -222,11 +228,17 @@ describe('publishFastAgentRequestUserInput', () => {
                       `/sessions/${parent.sessionId}`,
                     ),
                   }),
+                  expect.objectContaining({
+                    action_id: 'late_bound_automation_configure',
+                    url: expect.stringContaining(
+                      '/automations#custom-automation-automation-1',
+                    ),
+                  }),
                 ]),
               }),
             ]),
           }),
-        ],
+        ]),
       }),
     );
     expect(
