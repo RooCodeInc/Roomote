@@ -260,7 +260,7 @@ export function IntegrationListHeader() {
         Name
       </span>
       <span role="columnheader" className="col-start-3">
-        Details
+        Description
       </span>
       <span role="columnheader" className="sr-only">
         Actions
@@ -272,11 +272,9 @@ export function IntegrationListHeader() {
 export function IntegrationListRow({
   item,
   stackDescription = false,
-  showStatusInDescription = false,
 }: {
   item: IntegrationItem;
   stackDescription?: boolean;
-  showStatusInDescription?: boolean;
 }) {
   const configureAction = item.configureAction;
   const manageToolsAction = item.manageToolsAction;
@@ -301,7 +299,7 @@ export function IntegrationListRow({
             <p className="truncate text-sm font-semibold">{item.name}</p>
             {item.badge}
           </div>
-          {item.status && !showStatusInDescription ? (
+          {item.status ? (
             <div className="flex items-start gap-1 text-xs text-muted-foreground">
               {item.statusIcon ? (
                 <span className="mt-0.5 shrink-0 text-destructive">
@@ -322,20 +320,7 @@ export function IntegrationListRow({
             role="cell"
             className="col-span-2 col-start-2 row-start-2 min-w-0 text-sm text-muted-foreground/80 md:col-span-1 md:col-start-3 md:row-start-1"
           >
-            {showStatusInDescription ? (
-              item.status ? (
-                <div className="flex items-start gap-1">
-                  {item.statusIcon ? (
-                    <span className="mt-0.5 shrink-0 text-destructive">
-                      {item.statusIcon}
-                    </span>
-                  ) : null}
-                  <span>{item.status}</span>
-                </div>
-              ) : null
-            ) : (
-              item.description
-            )}
+            {item.description}
           </div>
         ) : null}
         <div

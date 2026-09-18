@@ -408,10 +408,23 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
       'registers this deployment with the provider before returning an authorization link',
     );
 
-    expect(Object.keys(tool.args!).sort()).toEqual(['name', 'url']);
+    expect(tool.description).toContain('Any member may call this.');
+    expect(tool.description).toContain(
+      "pass visibility 'owner' only when the human asked to keep it private to them",
+    );
+    expect(tool.description).toContain(
+      'A pending-owner result means a shared server someone else added is still waiting on them or an administrator',
+    );
+
+    expect(Object.keys(tool.args!).sort()).toEqual([
+      'name',
+      'url',
+      'visibility',
+    ]);
     expect(schema).toMatchObject({
       type: 'object',
       properties: {
+        visibility: { type: 'string', enum: ['owner', 'deployment'] },
         name: { type: 'string', minLength: 1, maxLength: 80 },
         url: {
           type: 'string',

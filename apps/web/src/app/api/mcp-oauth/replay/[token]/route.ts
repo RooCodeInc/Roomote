@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { and, db, eq, isNull, mcpConnections } from '@roomote/db/server';
+import { and, db, eq, mcpConnections } from '@roomote/db/server';
 import {
   isCustomMcpConnectionId,
   getDefaultMcpConnectionRole,
@@ -16,6 +16,7 @@ import {
 import { authorize } from '@/lib/server';
 import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
 import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
+import { canAuthorizeCustomMcpConnection } from '@/lib/server/custom-mcp-oauth-access';
 
 export const runtime = 'nodejs';
 
@@ -52,16 +53,12 @@ export async function GET(
     if (replay.userId !== authResult.userId) {
       return NextResponse.redirect(
         new URL(
-          '/error?message=This authorization link belongs to another administrator',
+          '/error?message=This authorization link belongs to another member',
           webUrl,
         ),
       );
     }
-    if (
-      webEnv.R_CUSTOM_MCP_DISABLED === true ||
-      !authResult.isAdmin ||
-      !replay.connectionId
-    ) {
+    if (webEnv.R_CUSTOM_MCP_DISABLED === true || !replay.connectionId) {
       return NextResponse.redirect(
         new URL('/error?message=Unknown MCP integration', webUrl),
       );
@@ -76,10 +73,20 @@ export async function GET(
       where: and(
         eq(mcpConnections.id, replay.connectionId),
         eq(mcpConnections.mcpId, replay.mcpId),
-        isNull(mcpConnections.userId),
       ),
     });
-    if (!connection) {
+    // The connection must be the one that belongs to this server, and the
+    // member must be allowed to manage the server; anything else looks like
+    // an integration that does not exist.
+    if (
+      !connection ||
+      !canAuthorizeCustomMcpConnection({
+        target: customTarget,
+        connectionUserId: connection.userId,
+        userId: authResult.userId,
+        isAdmin: authResult.isAdmin,
+      })
+    ) {
       return NextResponse.redirect(
         new URL('/error?message=Unknown MCP integration', webUrl),
       );

@@ -2061,6 +2061,25 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
+  it('lets any member add a remote MCP, shared by default and private on request', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      addRemoteMcpEnabled: true,
+    });
+
+    expect(prompt).toContain('Any member may add one.');
+    expect(prompt).toContain(
+      'It is shared with everyone in the deployment by default, like an integration key',
+    );
+    expect(prompt).toContain(
+      'pass `visibility: "owner"` only when the human asked to keep it private to them',
+    );
+    expect(prompt).toContain(
+      'A pending_owner result means a shared server someone else added is still waiting on them or an administrator: say so, share no link',
+    );
+    expect(prompt).not.toContain('Only deployment administrators');
+  });
+
   it('checks the full built-in catalog before fallback setup routes', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],

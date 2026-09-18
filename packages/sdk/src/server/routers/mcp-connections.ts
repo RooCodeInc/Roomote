@@ -13,6 +13,7 @@ import {
   mcpConnections,
   deploymentMcpEnablements,
   customMcpServers,
+  personalMcpServers,
   eq,
   and,
   inArray,
@@ -54,7 +55,10 @@ import {
   userOnlyProcedure,
   router,
 } from '../trpc';
-import { resolveActorScopedUserContext } from '../lib/auth';
+import {
+  resolveActorScopedUserContext,
+  type ActorScopedUserContext,
+} from '../lib/auth';
 import {
   readCredentialEgressDelivery,
   markCredentialEgressBootstrapReady,
@@ -111,19 +115,43 @@ async function resolveMcpServerConfigs(options: {
 }): Promise<ResolvedMcpServerConfigs> {
   const logInfo: InfoLogger = options.quiet ? () => {} : console.info;
   const servers: ResolvedMcpServerConfigs = {};
+  const curatedEnabled = !areCuratedIntegrationsDisabled(
+    Env.R_CURATED_INTEGRATIONS_DISABLED,
+  );
+  const customEnabled = !isCustomMcpDisabled(Env.R_CUSTOM_MCP_DISABLED);
+  // The human this request acts for decides which member-scoped entries it
+  // may see: their own catalog connections and their own personal servers.
+  const actorContext: ActorScopedUserContext =
+    curatedEnabled || customEnabled
+      ? await resolveActorScopedUserContext(options.auth)
+      : {};
 
-  if (!areCuratedIntegrationsDisabled(Env.R_CURATED_INTEGRATIONS_DISABLED)) {
+  if (curatedEnabled) {
     Object.assign(
       servers,
       await buildCuratedMcpServerConfigs({
-        auth: options.auth,
+        actorContext,
         requestOrigin: options.requestOrigin,
         logInfo,
       }),
     );
   }
 
-  if (!isCustomMcpDisabled(Env.R_CUSTOM_MCP_DISABLED)) {
+  if (customEnabled) {
+    // Personal servers are resolved for the acting member only and merged
+    // first, so the more specific scope wins a name shared with a
+    // deployment server.
+    if (actorContext.userId) {
+      const personal = await buildPersonalMcpServerConfigs(
+        options.requestOrigin,
+        actorContext.userId,
+        logInfo,
+      );
+      for (const [name, config] of Object.entries(personal)) {
+        if (!servers[name]) servers[name] = config;
+      }
+    }
+
     const custom = await buildCustomMcpServerConfigs(
       options.requestOrigin,
       logInfo,
@@ -420,13 +448,66 @@ async function buildCustomMcpServerConfigs(
   return servers;
 }
 
+/**
+ * Proxy entries for the acting member's enabled personal servers. Secret-free
+ * like the deployment entries, but actor-dependent: only the owner ever
+ * receives them, and the proxy checks the owner again on every call.
+ */
+async function buildPersonalMcpServerConfigs(
+  requestOrigin: string | null,
+  ownerUserId: string,
+  logInfo: InfoLogger,
+): Promise<ResolvedMcpServerConfigs> {
+  const servers: ResolvedMcpServerConfigs = {};
+
+  // The acting member is the owner, so there is no separate owner to vet
+  // here; the proxy confirms the owner is still active on every call.
+  const rows = await db.query.personalMcpServers.findMany({
+    where: and(
+      eq(personalMcpServers.ownerUserId, ownerUserId),
+      eq(personalMcpServers.enabled, true),
+    ),
+  });
+
+  for (const row of rows) {
+    let connectionUpdatedAt: Date | undefined;
+    if (row.authType === 'oauth') {
+      const connection = await db.query.mcpConnections.findFirst({
+        where: and(
+          eq(mcpConnections.mcpId, customMcpConnectionId(row.id)),
+          eq(mcpConnections.userId, ownerUserId),
+        ),
+        columns: { authStatus: true, updatedAt: true },
+      });
+
+      if (connection?.authStatus !== 'authenticated') {
+        logInfo(
+          `[getMcpServerConfigs] Skipping personal server '${row.name}': OAuth connection not authenticated`,
+        );
+        continue;
+      }
+      connectionUpdatedAt = connection.updatedAt;
+    }
+
+    const proxyPath = `${CUSTOM_MCP_PROXY_PATH_PREFIX}${row.id}`;
+
+    servers[row.name] = {
+      url: requestOrigin ? `${requestOrigin}${proxyPath}` : proxyPath,
+      headers: { 'X-MCP-Client': PRODUCT_NAME },
+      cacheRevision: `${row.updatedAt?.getTime() ?? 0}:${connectionUpdatedAt?.getTime() ?? ''}`,
+    };
+  }
+
+  return servers;
+}
+
 async function buildCuratedMcpServerConfigs(ctx: {
-  auth: Parameters<typeof resolveActorScopedUserContext>[0];
+  actorContext: ActorScopedUserContext;
   requestOrigin: string | null;
   logInfo: InfoLogger;
 }): Promise<ResolvedMcpServerConfigs> {
   const logInfo = ctx.logInfo;
-  const actorContext = await resolveActorScopedUserContext(ctx.auth);
+  const actorContext = ctx.actorContext;
 
   const connectionFilters = [];
 

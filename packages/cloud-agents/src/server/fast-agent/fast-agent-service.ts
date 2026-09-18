@@ -27,6 +27,7 @@ import {
   FAST_AGENT_MEMORY_FACT_MAX_CHARS,
   INFERENCE_PROVIDER_MAX_RETRIES,
   MCP_INTEGRATIONS,
+  customMcpServerVisibilitySchema,
   NO_REPOSITORIES,
   ROOMOTE_MCP_ID,
   HTTP_INTEGRATIONS_MCP_ID,
@@ -1737,6 +1738,7 @@ const addRemoteMcpArgsSchema = z
   .object({
     name: z.string().trim().min(1).max(80),
     url: z.string().url().startsWith('https://').max(2_048),
+    visibility: customMcpServerVisibilitySchema.optional(),
   })
   .strict();
 
@@ -3651,7 +3653,7 @@ export async function answerFastAgentQuestion({
       ...(setupSnapshot ? { setupSnapshot } : {}),
       setupSession,
       serviceCredentialToolsEnabled: currentUser.serviceCredentialToolsEnabled,
-      addRemoteMcpEnabled: currentUser.isAdmin && !platformEvent,
+      addRemoteMcpEnabled: !platformEvent,
       personalizationContext,
       globalAgentInstructions: agentBehaviorSettings?.globalAgentInstructions,
       workspaceRoutingRules:
@@ -4413,14 +4415,7 @@ export async function answerFastAgentQuestion({
               return {
                 success: false,
                 error:
-                  'A deployment administrator must request this connection in a human-authored turn.',
-              };
-            }
-            if (!currentUser.isAdmin) {
-              return {
-                success: false,
-                error:
-                  'Only a deployment administrator can add a custom remote MCP integration.',
+                  'A member must request this connection in a human-authored turn.',
               };
             }
             const args = addRemoteMcpArgsSchema.parse(call.args);
@@ -5728,7 +5723,7 @@ export async function answerFastAgentQuestion({
               currentUser.serviceCredentialToolsEnabled,
             serviceCredentialPrepareEnabled:
               currentUser.serviceCredentialToolsEnabled && !platformEvent,
-            addRemoteMcpEnabled: currentUser.isAdmin && !platformEvent,
+            addRemoteMcpEnabled: !platformEvent,
           },
         );
         const unbindExecutors = new Set<() => void>();

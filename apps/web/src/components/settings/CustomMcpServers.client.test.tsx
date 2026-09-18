@@ -22,6 +22,8 @@ type ListedServer = {
   oauthResourceIndicatorDisabled: boolean;
   authStatus: 'pending' | 'authenticated' | 'error' | null;
   enabled: boolean;
+  visibility: 'owner' | 'deployment';
+  canManage: boolean;
 };
 
 const {
@@ -29,11 +31,14 @@ const {
   createMock,
   deleteMock,
   setEnabledMock,
+  setVisibilityMock,
+  listInputs,
   toastSuccessMock,
   toastErrorMock,
 } = vi.hoisted(() => ({
   state: {
     availability: { enabled: true },
+    isAdmin: true,
     servers: [] as ListedServer[],
     tools: [] as {
       name: string;
@@ -44,12 +49,18 @@ const {
   createMock: vi.fn(async () => ({ id: 'new-server' })),
   deleteMock: vi.fn(async () => ({ deleted: true })),
   setEnabledMock: vi.fn(async () => ({ enabled: false })),
+  setVisibilityMock: vi.fn(async () => ({ visibility: 'owner' })),
+  listInputs: [] as unknown[],
   toastSuccessMock: vi.fn(),
   toastErrorMock: vi.fn(),
 }));
 
 vi.mock('sonner', () => ({
   toast: { success: toastSuccessMock, error: toastErrorMock },
+}));
+
+vi.mock('@/hooks/useUser', () => ({
+  useAuthorizedUser: () => ({ isAdmin: state.isAdmin }),
 }));
 
 vi.mock('@/trpc/client', () => ({
@@ -64,10 +75,13 @@ vi.mock('@/trpc/client', () => ({
       },
       list: {
         queryKey: () => ['customMcpServers', 'list'],
-        queryOptions: () => ({
-          queryKey: ['customMcpServers', 'list'],
-          queryFn: async () => state.servers,
-        }),
+        queryOptions: (input?: unknown) => {
+          listInputs.push(input);
+          return {
+            queryKey: ['customMcpServers', 'list', input ?? null],
+            queryFn: async () => state.servers,
+          };
+        },
       },
       listTools: {
         queryKey: () => ['customMcpServers', 'listTools'],
@@ -104,6 +118,12 @@ vi.mock('@/trpc/client', () => ({
           ...options,
         }),
       },
+      setVisibility: {
+        mutationOptions: (options = {}) => ({
+          mutationFn: setVisibilityMock,
+          ...options,
+        }),
+      },
       setDisabledTools: {
         mutationOptions: (options = {}) => ({
           mutationFn: vi.fn(),
@@ -127,7 +147,7 @@ vi.mock('@/trpc/client', () => ({
 }));
 
 import { IntegrationListRow, type IntegrationItem } from './integration-card';
-import { useCustomMcpServers } from './CustomMcpServers';
+import { PersonalMcpServers, useCustomMcpServers } from './CustomMcpServers';
 
 function buildServer(overrides: Partial<ListedServer> = {}): ListedServer {
   return {
@@ -145,6 +165,8 @@ function buildServer(overrides: Partial<ListedServer> = {}): ListedServer {
     oauthResourceIndicatorDisabled: false,
     authStatus: null,
     enabled: true,
+    visibility: 'deployment',
+    canManage: true,
     ...overrides,
   };
 }
@@ -465,6 +487,182 @@ describe('useCustomMcpServers', () => {
 
     expect(
       screen.getByText('The pasted text is not valid JSON.'),
+    ).toBeInTheDocument();
+  });
+
+  describe('mirroring integration keys', () => {
+    beforeEach(() => {
+      state.isAdmin = true;
+      state.servers = [];
+      listInputs.length = 0;
+      createMock.mockClear();
+      setVisibilityMock.mockClear();
+    });
+
+    it('shows a shared server someone else added read-only', async () => {
+      state.isAdmin = false;
+      state.servers = [buildServer({ canManage: false })];
+      renderHarness();
+
+      expect(await screen.findByTestId('status')).toHaveTextContent(
+        'Added by another member.',
+      );
+      expect(screen.getByTestId('secondary')).toBeEmptyDOMElement();
+      expect(
+        screen.queryByRole('button', { name: /Remove internal-tools/ }),
+      ).toBeNull();
+      expect(
+        screen.queryByRole('button', { name: /Configure internal-tools/ }),
+      ).toBeNull();
+    });
+
+    it('says a shared server is waiting on its owner when it is not connected', async () => {
+      state.servers = [
+        buildServer({
+          canManage: false,
+          authType: 'oauth',
+          authStatus: 'pending',
+        }),
+      ];
+      renderHarness();
+
+      expect(await screen.findByTestId('status')).toHaveTextContent(
+        'Waiting on the member who added it to connect it.',
+      );
+    });
+
+    it('lets a member choose who can use a new server, shared by default', async () => {
+      state.isAdmin = false;
+      renderHarness();
+
+      fireEvent.click(await screen.findByTestId('open-add'));
+      // Local (stdio) servers stay with administrators.
+      expect(screen.queryByLabelText('Local (stdio)')).toBeNull();
+      expect(
+        screen.getByLabelText('Everyone in this deployment'),
+      ).toBeChecked();
+
+      fireEvent.change(screen.getByPlaceholderText('e.g. internal-tools'), {
+        target: { value: 'intercom' },
+      });
+      fireEvent.change(
+        screen.getByPlaceholderText('https://mcp.example.com/mcp'),
+        { target: { value: 'https://mcp.example.com/mcp' } },
+      );
+      fireEvent.click(screen.getByLabelText('Only me'));
+      fireEvent.click(screen.getByRole('button', { name: 'Add server' }));
+
+      await waitFor(() => expect(createMock).toHaveBeenCalledTimes(1));
+      expect(createMock.mock.calls[0]?.[0]).toMatchObject({
+        transport: 'remote',
+        name: 'intercom',
+        visibility: 'owner',
+      });
+    });
+
+    it('moves a server to Personal settings when its owner makes it private', async () => {
+      state.servers = [buildServer({ authType: 'none', headerNames: [] })];
+      renderHarness();
+
+      fireEvent.click(
+        await screen.findByRole('button', { name: 'Configure internal-tools' }),
+      );
+      fireEvent.click(await screen.findByLabelText('Only me'));
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+      await waitFor(() =>
+        expect(setVisibilityMock).toHaveBeenCalledWith(
+          {
+            id: '4c72c9dd-3f5e-4d3e-9f7a-2c1b8a6e5d40',
+            visibility: 'owner',
+          },
+          expect.anything(),
+        ),
+      );
+      expect(toastSuccessMock).toHaveBeenCalledWith(
+        'internal-tools moved to Personal settings.',
+      );
+    });
+  });
+});
+
+describe('PersonalMcpServers', () => {
+  afterEach(async () => {
+    cleanup();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
+  function renderSection() {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <PersonalMcpServers />
+      </QueryClientProvider>,
+    );
+  }
+
+  beforeEach(() => {
+    state.isAdmin = false;
+    state.availability = { enabled: true };
+    state.servers = [];
+    listInputs.length = 0;
+    createMock.mockClear();
+  });
+
+  it("asks only for the viewer's private servers and shows an empty state", async () => {
+    renderSection();
+
+    expect(
+      await screen.findByText('No personal MCP servers yet.'),
+    ).toBeInTheDocument();
+    expect(listInputs).toContainEqual({ scope: 'owner' });
+    expect(listInputs).not.toContainEqual(undefined);
+  });
+
+  it('adds a private remote server without offering a transport or visibility choice', async () => {
+    renderSection();
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Add personal MCP server' }),
+    );
+    expect(screen.queryByLabelText('Local (stdio)')).toBeNull();
+    expect(screen.queryByLabelText('Everyone in this deployment')).toBeNull();
+    expect(
+      screen.getByText(/available only to your own Sessions and tasks/),
+    ).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText('e.g. internal-tools'), {
+      target: { value: 'intercom' },
+    });
+    fireEvent.change(
+      screen.getByPlaceholderText('https://mcp.example.com/mcp'),
+      { target: { value: 'https://mcp.example.com/mcp' } },
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Add server' }));
+
+    await waitFor(() => expect(createMock).toHaveBeenCalledTimes(1));
+    expect(createMock.mock.calls[0]?.[0]).toMatchObject({
+      name: 'intercom',
+      visibility: 'owner',
+    });
+  });
+
+  it('renders nothing when the operator disabled custom MCP servers', async () => {
+    state.availability = { enabled: false };
+    const { container } = renderSection();
+
+    await waitFor(() => expect(container).toBeEmptyDOMElement());
+  });
+
+  it('lists a private server with its manage actions', async () => {
+    state.servers = [buildServer({ visibility: 'owner' })];
+    renderSection();
+
+    expect(await screen.findByText('internal-tools')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /Remove internal-tools/ }),
     ).toBeInTheDocument();
   });
 });

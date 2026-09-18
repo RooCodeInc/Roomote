@@ -6142,7 +6142,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     ).toMatchObject({ allowSkillAccess: false, allowSpillRecovery: false });
   });
 
-  it('does not enable remote MCP setup for a non-admin', async () => {
+  it('enables remote MCP setup for any member, like integration keys', async () => {
     mocks.getUserIdentity.mockResolvedValue({
       displayName: 'Member',
       githubLogin: null,
@@ -6155,7 +6155,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.getNativeRuntime).toHaveBeenCalledWith(
       'conversation-1',
       expect.any(Array),
-      expect.objectContaining({ addRemoteMcpEnabled: false }),
+      expect.objectContaining({ addRemoteMcpEnabled: true }),
     );
   });
 

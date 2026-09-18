@@ -3126,11 +3126,7 @@ export function Integrations({
                     </div>
                   ) : null}
                   {displayedActiveItems.map((item) => (
-                    <IntegrationListRow
-                      key={item.id}
-                      item={item}
-                      showStatusInDescription
-                    />
+                    <IntegrationListRow key={item.id} item={item} />
                   ))}
                   {!apiKeyItemsLoading && displayedActiveItems.length === 0 ? (
                     <div className="flex min-h-64 flex-1 flex-col items-center justify-center gap-3 px-4 py-6">

@@ -5,6 +5,7 @@ import {
   inArray,
   mcpConnections,
   mcpOauthReplays,
+  personalMcpServers,
   userFactory,
   users,
 } from '@roomote/db/server';
@@ -116,7 +117,11 @@ async function cleanup() {
     where: inArray(customMcpServers.createdByUserId, userIds),
     columns: { id: true },
   });
-  const serverIds = servers.map((server) => server.id);
+  const personal = await db.query.personalMcpServers.findMany({
+    where: inArray(personalMcpServers.ownerUserId, userIds),
+    columns: { id: true },
+  });
+  const serverIds = [...servers, ...personal].map((server) => server.id);
   const mcpIds = serverIds.map(customMcpConnectionId);
   await db
     .delete(mcpOauthReplays)
@@ -153,7 +158,12 @@ describe('addRemoteCustomMcpForFast', () => {
 
   afterAll(cleanup);
 
-  it('rejects members before probing or writing', async () => {
+  it('rejects a deactivated member before probing or writing', async () => {
+    await db
+      .update(users)
+      .set({ deletedAt: new Date() })
+      .where(eq(users.id, memberId));
+
     await expect(
       addRemoteCustomMcpForFast({
         userId: memberId,
@@ -161,10 +171,116 @@ describe('addRemoteCustomMcpForFast', () => {
         name: 'records',
         url: 'https://mcp.example.com/mcp',
       }),
-    ).rejects.toThrow('Only deployment administrators');
+    ).rejects.toThrow('Only active members');
 
     expect(guardedFetchMock).not.toHaveBeenCalled();
     expect(await db.query.customMcpServers.findMany()).toEqual([]);
+  });
+
+  describe('for any member, like integration keys', () => {
+    it('shares a server with everyone by default and lets its creator authorize it', async () => {
+      guardedFetchMock.mockImplementation(
+        oauthServerFetch(acceptedRegistration),
+      );
+
+      const result = await addRemoteCustomMcpForFast({
+        userId: memberId,
+        sessionId: crypto.randomUUID(),
+        name: 'accounting',
+        url: 'https://mcp.example.com/mcp',
+      });
+
+      expect(result).toMatchObject({
+        status: 'authorization_required',
+        visibility: 'deployment',
+      });
+      expect(await db.query.customMcpServers.findFirst()).toMatchObject({
+        createdByUserId: memberId,
+      });
+      expect(await db.query.mcpConnections.findFirst()).toMatchObject({
+        userId: null,
+      });
+    });
+
+    it('keeps a private server in the personal table with the owner holding the connection', async () => {
+      guardedFetchMock.mockImplementation(
+        oauthServerFetch(acceptedRegistration),
+      );
+
+      const result = await addRemoteCustomMcpForFast({
+        userId: memberId,
+        sessionId: crypto.randomUUID(),
+        name: 'accounting',
+        url: 'https://mcp.example.com/mcp',
+        visibility: 'owner',
+      });
+
+      expect(result).toMatchObject({
+        status: 'authorization_required',
+        visibility: 'owner',
+        reused: false,
+      });
+      expect(await db.query.customMcpServers.findMany()).toEqual([]);
+      expect(await db.query.personalMcpServers.findFirst()).toMatchObject({
+        ownerUserId: memberId,
+        authType: 'oauth',
+      });
+      expect(await db.query.mcpConnections.findFirst()).toMatchObject({
+        userId: memberId,
+        authStatus: 'pending',
+      });
+      expect(await db.query.mcpOauthReplays.findFirst()).toMatchObject({
+        userId: memberId,
+      });
+    });
+
+    it('lets two members keep the same private server without sharing a row', async () => {
+      guardedFetchMock.mockImplementation(successfulMcpFetch());
+
+      const mine = await addRemoteCustomMcpForFast({
+        userId: memberId,
+        sessionId: crypto.randomUUID(),
+        name: 'records',
+        url: 'https://mcp.example.com/mcp',
+        visibility: 'owner',
+      });
+      const theirs = await addRemoteCustomMcpForFast({
+        userId: adminId,
+        sessionId: crypto.randomUUID(),
+        name: 'records',
+        url: 'https://mcp.example.com/mcp',
+        visibility: 'owner',
+      });
+
+      expect(mine).toMatchObject({ status: 'connected', reused: false });
+      expect(theirs).toMatchObject({ status: 'connected', reused: false });
+      expect(await db.query.personalMcpServers.findMany()).toHaveLength(2);
+    });
+
+    it('tells another member a shared server is waiting on its owner, with no link', async () => {
+      guardedFetchMock.mockImplementation(
+        oauthServerFetch(acceptedRegistration),
+      );
+      await addRemoteCustomMcpForFast({
+        userId: adminId,
+        sessionId: crypto.randomUUID(),
+        name: 'accounting',
+        url: 'https://mcp.example.com/mcp',
+      });
+
+      const result = await addRemoteCustomMcpForFast({
+        userId: memberId,
+        sessionId: crypto.randomUUID(),
+        name: 'accounting',
+        url: 'https://mcp.example.com/mcp',
+      });
+
+      expect(result).toMatchObject({ status: 'pending_owner', reused: true });
+      expect(result).not.toHaveProperty('authorizeUrl');
+      expect(result).not.toHaveProperty('settingsUrl');
+      // Nothing about the owner's pending authorization was disturbed.
+      expect(await db.query.mcpOauthReplays.findMany()).toHaveLength(1);
+    });
   });
 
   it('rejects HTTP before probing or persistence', async () => {
