@@ -44,7 +44,6 @@ export interface SlackRichTextValue {
 
 type SlackRichTextConversionOptions = {
   angleBracketLinkDestinations?: boolean;
-  preserveParagraphs?: boolean;
 };
 
 // Every repetition is bounded so a pathological message (for example a
@@ -214,6 +213,25 @@ const ORDERED_ITEM = /^\s*\d+[.)]\s+(.*)$/;
 const HEADING = /^\s*#{1,6}\s+(.*)$/;
 const FENCE = /^\s*```/;
 
+type SlackRichTextListStyle = 'bullet' | 'ordered';
+
+function getListStyle(line: string): SlackRichTextListStyle | null {
+  return BULLET_ITEM.test(line)
+    ? 'bullet'
+    : ORDERED_ITEM.test(line)
+      ? 'ordered'
+      : null;
+}
+
+function listIndent(line: string): number {
+  const leadingWhitespace = line.match(/^\s*/)?.[0] ?? '';
+  const columns = [...leadingWhitespace].reduce(
+    (total, character) => total + (character === '\t' ? 4 : 1),
+    0,
+  );
+  return columns < 2 ? 0 : Math.ceil(columns / 2);
+}
+
 export function convertMarkdownToRichText(
   markdown: string,
   options: SlackRichTextConversionOptions = {},
@@ -224,7 +242,7 @@ export function convertMarkdownToRichText(
   let pendingBlankLine = false;
 
   const preservePendingParagraph = () => {
-    if (!options.preserveParagraphs || !pendingBlankLine) return;
+    if (!pendingBlankLine) return;
     const previous = elements.at(-1);
     if (previous?.type === 'rich_text_section') {
       previous.elements.push({ type: 'text', text: '\n\n' });
@@ -256,28 +274,81 @@ export function convertMarkdownToRichText(
       continue;
     }
 
-    const listStyle = BULLET_ITEM.test(line)
-      ? 'bullet'
-      : ORDERED_ITEM.test(line)
-        ? 'ordered'
-        : null;
+    const listStyle = getListStyle(line);
     if (listStyle) {
       const pattern = listStyle === 'bullet' ? BULLET_ITEM : ORDERED_ITEM;
+      const indent = listIndent(line);
       const items: SlackRichTextSection[] = [];
       while (index < lines.length) {
-        const item = lines[index]!.match(pattern);
-        if (!item) {
+        const itemLine = lines[index]!;
+        if (
+          getListStyle(itemLine) !== listStyle ||
+          listIndent(itemLine) !== indent
+        ) {
           break;
         }
-        items.push(section(item[1]!, {}, options));
+        const item = itemLine.match(pattern)!;
+        const itemLines = [item[1] ?? ''];
         index += 1;
+        while (index < lines.length) {
+          const continuation = lines[index]!;
+          if (FENCE.test(continuation)) {
+            break;
+          }
+          if (getListStyle(continuation)) {
+            break;
+          }
+          if (continuation.trim().length === 0) {
+            let nextIndex = index + 1;
+            while (lines[nextIndex]?.trim().length === 0) {
+              nextIndex += 1;
+            }
+            if (getListStyle(lines[nextIndex] ?? '')) {
+              break;
+            }
+            if (/^\s+/.test(lines[nextIndex] ?? '')) {
+              itemLines.push('');
+              index = nextIndex;
+              continue;
+            }
+            break;
+          }
+          if (!/^\s+/.test(continuation)) {
+            break;
+          }
+          const value = continuation.trim();
+          if (itemLines.length === 1 && itemLines[0]?.trim().length === 0) {
+            itemLines[0] = value;
+          } else {
+            itemLines.push(value);
+          }
+          index += 1;
+        }
+        if (itemLines.some((value) => value.trim().length > 0)) {
+          items.push(section(itemLines.join('\n'), {}, options));
+        }
+        if (lines[index]?.trim().length === 0) {
+          let nextIndex = index;
+          while (lines[nextIndex]?.trim().length === 0) {
+            nextIndex += 1;
+          }
+          if (
+            getListStyle(lines[nextIndex] ?? '') === listStyle &&
+            listIndent(lines[nextIndex] ?? '') === indent
+          ) {
+            index = nextIndex;
+          }
+        }
       }
       preservePendingParagraph();
-      elements.push({
-        type: 'rich_text_list',
-        style: listStyle,
-        elements: items,
-      });
+      if (items.length > 0) {
+        elements.push({
+          type: 'rich_text_list',
+          style: listStyle,
+          ...(indent > 0 ? { indent } : {}),
+          elements: items,
+        });
+      }
       continue;
     }
 
