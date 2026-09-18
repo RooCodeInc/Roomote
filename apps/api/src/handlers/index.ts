@@ -53,3 +53,9 @@ export { artifactsRouter, taskArtifactsRouter } from './artifacts';
 
 // sandbox oidc
 export { oidcRouter } from './oidc';
+
+// owner-bound outbound desktop devices
+export {
+  desktopDevicesRouter,
+  installDesktopDeviceBroker,
+} from './desktop-devices';

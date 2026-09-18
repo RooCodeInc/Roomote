@@ -63,6 +63,8 @@ import {
   artifactsRouter,
   taskArtifactsRouter,
   oidcRouter,
+  desktopDevicesRouter,
+  installDesktopDeviceBroker,
   trpc,
 } from './handlers';
 
@@ -252,6 +254,7 @@ export function createApiApp(): ApiApp {
   app.route('/api/task-runs', taskRunsRouter);
   app.route('/api/artifacts', artifactsRouter);
   app.route('/api/tasks', taskArtifactsRouter);
+  app.route('/api/desktop/devices', desktopDevicesRouter);
   app.route('/', oidcRouter);
 
   app.route('/trpc', trpc);
@@ -309,8 +312,12 @@ export async function startApiServer({
 
   const app = createApiApp();
   const server = createAdaptorServer({ fetch: app.fetch });
+  const desktopDeviceBroker = installDesktopDeviceBroker(server);
   const address = await listen(server, { port, hostname });
-  installApiGracefulShutdown(server, { flushSentry: flushApiSentry });
+  installApiGracefulShutdown(server, {
+    flushSentry: flushApiSentry,
+    beforeServerClose: () => desktopDeviceBroker.closeAll(),
+  });
 
   if (Env.NODE_ENV === 'development') {
     showRoutes(app);

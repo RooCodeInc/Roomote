@@ -19,6 +19,7 @@ type ApiShutdownOptions = FastAgentShutdownDrainDeps & {
   flushSentry?: () => Promise<unknown>;
   logError?: (...args: Parameters<typeof console.error>) => void;
   logWarn?: (...args: Parameters<typeof console.warn>) => void;
+  beforeServerClose?: () => void;
 };
 
 export async function gracefullyShutdownApi(
@@ -33,6 +34,7 @@ export async function gracefullyShutdownApi(
     flushSentry = async () => undefined,
     logError = (...args) => console.error(...args),
     logWarn = (...args) => console.warn(...args),
+    beforeServerClose = () => undefined,
   }: ApiShutdownOptions = {},
 ): Promise<void> {
   const reason = new FastAgentProcessShutdownError(signal);
@@ -47,6 +49,7 @@ export async function gracefullyShutdownApi(
       service: 'api',
       logWarn,
       onDrainStarted: () => {
+        beforeServerClose();
         closePromise = new Promise<Error | null>((resolve) => {
           server.close((error) => resolve(error ?? null));
         });

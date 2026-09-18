@@ -94,6 +94,9 @@ import type {
   SessionWakeupStatus,
   AutomationResultPriority,
   AutomationResultVisibility,
+  DesktopDeviceAction,
+  DesktopDeviceAuditEvent,
+  DesktopDeviceAuditOutcome,
 } from '@roomote/types';
 import { DEFAULT_TASK_ARTIFACT_TYPE } from '@roomote/types';
 
@@ -4571,6 +4574,68 @@ export const serviceCredentialAudit = pgTable('service_credential_audit', {
     .$type<'started' | 'succeeded' | 'denied' | 'failed'>(),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
+
+/** Owner-bound desktop devices are additive and leave N-1 readers untouched. */
+export const desktopDevices = pgTable(
+  'desktop_devices',
+  {
+    id: uuid('id').primaryKey(),
+    ownerUserId: text('owner_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    platform: text('platform').notNull(),
+    capabilities: text('capabilities')
+      .array()
+      .notNull()
+      .$type<DesktopDeviceAction[]>(),
+    protocolVersion: integer('protocol_version').notNull(),
+    lastInstanceId: text('last_instance_id'),
+    lastConnectedAt: timestamp('last_connected_at'),
+    lastDisconnectedAt: timestamp('last_disconnected_at'),
+    revokedAt: timestamp('revoked_at'),
+    revokedByUserId: text('revoked_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    revokeReason: text('revoke_reason'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('desktop_devices_owner_idx').on(table.ownerUserId, table.createdAt),
+  ],
+);
+
+// Metadata only: never persist request payloads, text, image bytes, tokens, or error messages.
+export const desktopDeviceAudit = pgTable(
+  'desktop_device_audit',
+  {
+    id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
+    deviceId: uuid('device_id').references(() => desktopDevices.id, {
+      onDelete: 'set null',
+    }),
+    ownerUserId: text('owner_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    event: text('event').notNull().$type<DesktopDeviceAuditEvent>(),
+    actorUserId: text('actor_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    requestId: uuid('request_id'),
+    action: text('action').$type<DesktopDeviceAction>(),
+    outcome: text('outcome').$type<DesktopDeviceAuditOutcome>(),
+    durationMs: integer('duration_ms'),
+    responseBytes: integer('response_bytes'),
+    errorCode: text('error_code'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('desktop_device_audit_device_created_idx').on(
+      table.deviceId,
+      table.createdAt,
+    ),
+  ],
+);
 
 /**
  * Credential egress control plane (additive, N-1 safe: previous releases never

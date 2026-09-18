@@ -56,6 +56,7 @@ export * from './lib/tasks';
 export * from './lib/sessions';
 export * from './lib/service-credentials';
 export * from './lib/credential-egress';
+export * from './lib/desktop-devices';
 export * from './lib/session-goals';
 export * from './lib/source-control-provider';
 export * from './lib/sync-task-state';
@@ -149,6 +150,8 @@ export {
   serviceCredentials,
   serviceCredentialApprovals,
   serviceCredentialAudit,
+  desktopDevices,
+  desktopDeviceAudit,
   credentialEgressWorkloads,
   credentialEgressSubstitutes,
   credentialEgressAudit,

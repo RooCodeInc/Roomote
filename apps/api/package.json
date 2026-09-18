@@ -50,11 +50,13 @@
     "snowflake-sdk": "^2.4.3",
     "svix": "^1.99.1",
     "undici": "^7.29.0",
+    "ws": "^8.20.1",
     "zod": "^3.25.76"
   },
   "devDependencies": {
     "@roomote/config-typescript": "workspace:^",
     "@types/node": "^24.10.13",
+    "@types/ws": "^8.18.1",
     "tsup": "^8.5.1",
     "vitest": "^4.1.1"
   }

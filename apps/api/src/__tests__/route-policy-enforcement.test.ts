@@ -334,6 +334,9 @@ describe('route policy enforcement', () => {
       expect(publicBody.result?.tools?.map((tool) => tool.name)).toContain(
         'manage_custom_automations',
       );
+      expect(publicBody.result?.tools?.map((tool) => tool.name)).toEqual(
+        expect.arrayContaining(['desktop_devices', 'desktop_request']),
+      );
       const manageTasks = publicBody.result?.tools?.find(
         (tool) => tool.name === 'manage_tasks',
       );
@@ -485,6 +488,9 @@ describe('route policy enforcement', () => {
       expect(legacyBody.result?.tools?.map((tool) => tool.name)).not.toContain(
         'manage_tasks',
       );
+      expect(legacyBody.result?.tools?.map((tool) => tool.name)).not.toContain(
+        'desktop_request',
+      );
       expect(legacyBody.result?.tools?.map((tool) => tool.name)).toContain(
         'manage_custom_automations',
       );
@@ -528,6 +534,56 @@ describe('route policy enforcement', () => {
       expect(
         legacyRunTokenBody.result?.tools?.map((tool) => tool.name),
       ).toContain('manage_custom_automations');
+    });
+
+    it('exposes desktop tools only on the owner-scoped public MCP endpoint', async () => {
+      const request = {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer test-mcp-token',
+          accept: 'application/json, text/event-stream',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/list',
+          params: {},
+        }),
+      };
+      const publicResponse = await createApiApp().request(
+        'http://localhost/mcp',
+        request,
+      );
+      const publicBody = (await publicResponse.json()) as {
+        result?: { tools?: Array<{ name: string }> };
+      };
+      expect(publicBody.result?.tools?.map((tool) => tool.name)).toEqual(
+        expect.arrayContaining(['desktop_devices', 'desktop_request']),
+      );
+
+      const legacyResponse = await createApiApp().request(
+        'http://localhost/api/mcp-routing/roomote',
+        {
+          ...request,
+          headers: {
+            ...request.headers,
+            authorization: 'Bearer test-user-token',
+          },
+        },
+      );
+      const legacyBody = (await legacyResponse.json()) as {
+        result?: { tools?: Array<{ name: string }> };
+      };
+      expect(legacyBody.result?.tools?.map((tool) => tool.name)).not.toContain(
+        'desktop_request',
+      );
+
+      const upgradeRequired = await createApiApp().request(
+        'http://localhost/api/desktop/devices/connect',
+        { headers: { authorization: 'Bearer test-mcp-token' } },
+      );
+      expect(upgradeRequired.status).toBe(426);
     });
 
     it('lets run-token requests through to handler-level run scoping', async () => {

@@ -364,6 +364,12 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
     policy: 'authenticated',
     errorFormat: 'json-rpc',
   },
+  {
+    name: 'desktop-device-broker',
+    match: { type: 'prefix', path: '/api/desktop/devices' },
+    policy: 'roomote-mcp',
+    rateLimits: [{ keySource: 'principal', limit: 120, windowSeconds: 60 }],
+  },
 
   // Task run log streaming: run tokens are scoped to their own run inside
   // the handler; user tokens may stream any run in the deployment.

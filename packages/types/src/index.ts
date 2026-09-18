@@ -19,6 +19,7 @@ export * from './session-wakeups';
 export * from './fast-agent';
 export * from './fast-agent-capabilities';
 export * from './data-visualization';
+export * from './desktop-devices';
 export * from './fast-agent-tool-catalog';
 export * from './list-repositories-tool';
 export * from './integration-tool-lookup';
