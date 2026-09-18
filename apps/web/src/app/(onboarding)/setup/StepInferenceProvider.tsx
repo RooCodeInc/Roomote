@@ -3,6 +3,7 @@
 import {
   type ReactNode,
   useCallback,
+  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
@@ -22,13 +23,11 @@ import {
   getDefaultAdditionalEnvValues,
   getSetupModelProvider,
   getSetupProviderModelIdPrefixes,
-  getSetupProviderTaskModelPrefix,
   getTaskModelProviderId,
   type SetupModelProviderId,
   type SetupModelStatus,
 } from '@roomote/types';
 
-import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useTRPC } from '@/trpc/client';
 import {
   ArrowRight,
@@ -252,14 +251,8 @@ export function StepInferenceProvider({
       ? modelId
       : '';
   }, [modelSetup.persistedRoomoteModel, providerModelIdPrefixes]);
-  const chosenModelId = catalogModelTouched
-    ? selectedCatalogModelId
-    : persistedProviderModelId;
   const trimmedCatalogModelQuery = catalogModelQuery.trim();
-  const debouncedCatalogModelQuery = useDebouncedValue(
-    trimmedCatalogModelQuery,
-    150,
-  );
+  const debouncedCatalogModelQuery = useDeferredValue(trimmedCatalogModelQuery);
   const catalogSuggestionsQuery = useQuery(
     trpc.taskModels.suggest.queryOptions(
       {
@@ -280,30 +273,22 @@ export function StepInferenceProvider({
   // The catalog is best-effort (models.dev may be unreachable or not list a
   // private model), so a typed id can always be used as-is.
   const manualModelId = useMemo(() => {
-    if (
-      !selectedProvider ||
-      !trimmedCatalogModelQuery ||
-      /\s/u.test(trimmedCatalogModelQuery)
-    ) {
+    if (!trimmedCatalogModelQuery || /\s/u.test(trimmedCatalogModelQuery)) {
       return '';
     }
 
     const prefix = getTaskModelProviderId(trimmedCatalogModelQuery);
-    if (
-      trimmedCatalogModelQuery.includes('/') &&
-      prefix !== null &&
-      providerModelIdPrefixes.has(prefix)
-    ) {
+    if (prefix !== null && providerModelIdPrefixes.has(prefix)) {
       return trimmedCatalogModelQuery.length > prefix.length + 1
         ? trimmedCatalogModelQuery
         : '';
     }
 
-    return `${getSetupProviderTaskModelPrefix(selectedProvider)}/${trimmedCatalogModelQuery}`;
-  }, [providerModelIdPrefixes, selectedProvider, trimmedCatalogModelQuery]);
-  const showManualModelOption =
-    manualModelId.length > 0 &&
-    !catalogSuggestions.some((suggestion) => suggestion.slug === manualModelId);
+    return '';
+  }, [providerModelIdPrefixes, trimmedCatalogModelQuery]);
+  const chosenModelId = catalogModelTouched
+    ? selectedCatalogModelId || manualModelId
+    : persistedProviderModelId;
   const chatgptConnected = Boolean(modelSetup.chatgptConnected);
   const githubCopilotConnected = Boolean(modelSetup.githubCopilotConnected);
   const xaiSubscriptionConnected = Boolean(
@@ -666,105 +651,82 @@ export function StepInferenceProvider({
         ) : null}
 
         {requiresModelSelection ? (
-          <div className="max-w-lg space-y-2">
-            <InferenceProviderRow>
-              <span className="w-44 shrink-0 text-sm text-muted-foreground">
-                Model
-              </span>
-              <Popover
-                open={
-                  catalogSuggestionsOpen && trimmedCatalogModelQuery.length > 0
-                }
-                onOpenChange={setCatalogSuggestionsOpen}
+          <InferenceProviderRow>
+            <span className="w-44 shrink-0 text-sm text-muted-foreground">
+              Model
+            </span>
+            <Popover
+              open={
+                catalogSuggestionsOpen && trimmedCatalogModelQuery.length > 0
+              }
+              onOpenChange={setCatalogSuggestionsOpen}
+            >
+              {/* The input anchors the list; clicking into it must not
+                  toggle the popover closed. */}
+              <PopoverTrigger
+                asChild
+                onClick={(event) => event.preventDefault()}
               >
-                {/* The input anchors the list; clicking into it must not
-                    toggle the popover closed. */}
-                <PopoverTrigger
-                  asChild
-                  onClick={(event) => event.preventDefault()}
-                >
-                  <div className="w-full">
-                    <Input
-                      value={
-                        catalogModelTouched
-                          ? catalogModelQuery
-                          : persistedProviderModelId
-                      }
-                      onChange={(event) => {
-                        setCatalogModelTouched(true);
-                        setCatalogModelQuery(event.target.value);
-                        setSelectedCatalogModelId('');
-                        setCatalogSuggestionsOpen(true);
-                      }}
-                      placeholder="Search the catalog or enter a model ID"
-                      aria-label={`${selectedProviderStatus?.label ?? 'Provider'} model`}
-                      disabled={saveModelConfig.isPending}
-                    />
-                  </div>
-                </PopoverTrigger>
-                <PopoverContent
-                  align="start"
-                  className="w-(--radix-popover-trigger-width) p-0"
-                  onOpenAutoFocus={(event) => event.preventDefault()}
-                >
-                  <Command shouldFilter={false}>
-                    <CommandList>
-                      <CommandEmpty>
-                        {catalogSuggestionsQuery.isFetching
-                          ? 'Searching the catalog...'
-                          : 'No catalog models found.'}
-                      </CommandEmpty>
-                      {catalogSuggestions.length > 0 ? (
-                        <CommandGroup heading="Catalog models">
-                          {catalogSuggestions.map((suggestion) => (
-                            <CommandItem
-                              key={suggestion.slug}
-                              value={suggestion.slug}
-                              onSelect={() => {
-                                setSelectedCatalogModelId(suggestion.slug);
-                                setCatalogModelQuery(suggestion.displayName);
-                                setCatalogSuggestionsOpen(false);
-                              }}
-                            >
-                              <div className="min-w-0">
-                                <p className="truncate font-medium">
-                                  {suggestion.displayName}
-                                </p>
-                                <p className="truncate text-xs text-muted-foreground">
-                                  {suggestion.slug}
-                                </p>
-                              </div>
-                            </CommandItem>
-                          ))}
-                        </CommandGroup>
-                      ) : null}
-                      {showManualModelOption ? (
-                        <CommandGroup heading="Model ID">
+                <div className="w-full">
+                  <Input
+                    value={
+                      catalogModelTouched
+                        ? catalogModelQuery
+                        : persistedProviderModelId
+                    }
+                    onChange={(event) => {
+                      setCatalogModelTouched(true);
+                      setCatalogModelQuery(event.target.value);
+                      setSelectedCatalogModelId('');
+                      setCatalogSuggestionsOpen(true);
+                    }}
+                    placeholder="Search or enter a full model ID"
+                    aria-label={`${selectedProviderStatus?.label ?? 'Provider'} model`}
+                    disabled={saveModelConfig.isPending}
+                  />
+                </div>
+              </PopoverTrigger>
+              <PopoverContent
+                align="start"
+                className="w-(--radix-popover-trigger-width) p-0"
+                onOpenAutoFocus={(event) => event.preventDefault()}
+              >
+                <Command shouldFilter={false}>
+                  <CommandList>
+                    <CommandEmpty>
+                      {catalogSuggestionsQuery.isFetching
+                        ? 'Searching the catalog...'
+                        : 'No catalog models found.'}
+                    </CommandEmpty>
+                    {catalogSuggestions.length > 0 ? (
+                      <CommandGroup>
+                        {catalogSuggestions.map((suggestion) => (
                           <CommandItem
-                            value={`manual:${manualModelId}`}
+                            key={suggestion.slug}
+                            value={suggestion.slug}
                             onSelect={() => {
-                              setSelectedCatalogModelId(manualModelId);
-                              setCatalogModelQuery(manualModelId);
+                              setSelectedCatalogModelId(suggestion.slug);
+                              setCatalogModelQuery(suggestion.displayName);
                               setCatalogSuggestionsOpen(false);
                             }}
                           >
-                            <span className="truncate">
-                              Use &ldquo;{manualModelId}&rdquo; as the model ID
-                            </span>
+                            <div className="min-w-0">
+                              <p className="truncate font-medium">
+                                {suggestion.displayName}
+                              </p>
+                              <p className="truncate text-xs text-muted-foreground">
+                                {suggestion.slug}
+                              </p>
+                            </div>
                           </CommandItem>
-                        </CommandGroup>
-                      ) : null}
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
-            </InferenceProviderRow>
-            <p className="text-xs text-muted-foreground">
-              Search the {selectedProviderStatus?.label ?? 'provider'} catalog
-              or enter a model ID. Catalog availability does not prove account
-              access.
-            </p>
-          </div>
+                        ))}
+                      </CommandGroup>
+                    ) : null}
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+          </InferenceProviderRow>
         ) : null}
 
         {selectedProvider === 'openrouter' && !hasRuntimeProviderKey && (

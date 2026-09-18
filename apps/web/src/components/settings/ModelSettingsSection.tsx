@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
-import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useTRPC } from '@/trpc/client';
 
 import {
@@ -134,6 +133,22 @@ const EMPTY_SUGGESTION_STATE: SuggestionState = {
   suggestions: [],
   highlightedIndex: -1,
 };
+
+function useDebouncedValue<T>(value: T, delayMs: number) {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedValue(value);
+    }, delayMs);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [delayMs, value]);
+
+  return debouncedValue;
+}
 
 const TASK_MODEL_ROLE_ORDER = TASK_MODEL_ROLES;
 const SECONDARY_TASK_MODEL_ROLES = TASK_MODEL_ROLES.filter(
@@ -1874,7 +1889,7 @@ export function ModelSettingsSection({
         icon={Brain}
         title="Available Models"
         action={
-          <div className="flex flex-wrap items-center justify-end gap-2">
+          <div className="flex items-center gap-2">
             {isSaving && (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Spinner />

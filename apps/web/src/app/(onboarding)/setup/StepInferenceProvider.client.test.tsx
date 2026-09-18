@@ -411,7 +411,7 @@ describe('StepInferenceProvider configured API key display', () => {
     ).toBeInTheDocument();
   });
 
-  it('requires an explicit Bedrock catalog choice without implying access', async () => {
+  it('requires an explicit Bedrock catalog choice', async () => {
     setupQueryMocks({
       chatgptConnected: false,
       suggestions: [
@@ -442,7 +442,7 @@ describe('StepInferenceProvider configured API key display', () => {
       { target: { value: 'GLM-5' } },
     );
     expect(
-      screen.getByText(/Catalog availability does not prove account access/i),
+      screen.getByPlaceholderText('Search or enter a full model ID'),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Continue/ })).toBeDisabled();
 
@@ -478,15 +478,9 @@ describe('StepInferenceProvider configured API key display', () => {
     );
     fireEvent.change(
       screen.getByRole('textbox', { name: 'Amazon Bedrock model' }),
-      { target: { value: 'vendor.private-model' } },
+      { target: { value: 'amazon-bedrock/vendor.private-model' } },
     );
-    expect(screen.getByRole('button', { name: /Continue/ })).toBeDisabled();
-
-    fireEvent.click(
-      screen.getByRole('button', {
-        name: /amazon-bedrock\/vendor\.private-model/,
-      }),
-    );
+    expect(screen.getByRole('button', { name: /Continue/ })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
 
     await waitFor(() => {

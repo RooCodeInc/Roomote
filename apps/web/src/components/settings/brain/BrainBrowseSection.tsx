@@ -23,7 +23,6 @@ import {
   Search,
   Skeleton,
 } from '@/components/system';
-import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { cn } from '@/lib/utils';
 import { formatDistanceToNowCompact, formatNumber } from '@/lib/formatters';
 import { useTRPC } from '@/trpc/client';
@@ -48,6 +47,18 @@ function namespaceRank(id: string): number {
   const index = BRAIN_NAMESPACES.findIndex((namespace) => namespace.id === id);
 
   return index === -1 ? BRAIN_NAMESPACES.length : index;
+}
+
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setDebouncedValue(value), delayMs);
+
+    return () => window.clearTimeout(timeout);
+  }, [delayMs, value]);
+
+  return debouncedValue;
 }
 
 function useDelayedLoading(isPending: boolean): boolean {
