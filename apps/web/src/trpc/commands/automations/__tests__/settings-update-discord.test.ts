@@ -952,6 +952,10 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
         },
       ],
     });
+    expect(mockCaptureActivationAutomationChanged).toHaveBeenCalledWith(
+      'disabled',
+      'release_announcements',
+    );
   });
 
   it('manually tests release announcements with the normal saved destination', async () => {
