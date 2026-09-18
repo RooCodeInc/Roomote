@@ -41,11 +41,15 @@ export function SessionModelSwitcher({
   const { data } = useLaunchTaskModels();
   const displayModelName = (modelId: string) =>
     data?.models.find(({ id }) => id === modelId)?.displayName ?? modelId;
-  const effectiveDefaultEffort = defaultReasoningEffort ?? 'medium';
+  const effectiveDefaultModelId =
+    defaultModelId ?? data?.defaultFastModelId ?? null;
+  const effectiveDefaultEffort =
+    defaultReasoningEffort ?? data?.defaultFastReasoningEffort ?? null;
+  const effectiveReasoningEffort = reasoningEffort ?? effectiveDefaultEffort;
   const chipLabel = model
     ? displayModelName(model)
-    : defaultModelId
-      ? displayModelName(defaultModelId)
+    : effectiveDefaultModelId
+      ? displayModelName(effectiveDefaultModelId)
       : 'Model';
 
   return (
@@ -60,11 +64,11 @@ export function SessionModelSwitcher({
             disabled={disabled}
           >
             <span className="max-w-40 truncate">{chipLabel}</span>
-            <span className="text-muted-foreground/70">
-              {getReasoningEffortLabel(
-                reasoningEffort ?? effectiveDefaultEffort,
-              )}
-            </span>
+            {effectiveReasoningEffort ? (
+              <span className="text-muted-foreground/70">
+                {getReasoningEffortLabel(effectiveReasoningEffort)}
+              </span>
+            ) : null}
             <ChevronDown className="size-3 shrink-0" />
           </Button>
         </PopoverTrigger>
@@ -75,8 +79,8 @@ export function SessionModelSwitcher({
             value={model}
             onValueChange={onModelChange}
             emptyOptionLabel={
-              defaultModelId
-                ? `Default (${displayModelName(defaultModelId)})`
+              effectiveDefaultModelId
+                ? `Default (${displayModelName(effectiveDefaultModelId)})`
                 : 'Deployment default'
             }
             disabled={disabled}
