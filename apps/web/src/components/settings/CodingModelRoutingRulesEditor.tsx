@@ -3,6 +3,7 @@
 import { useState } from 'react';
 
 import {
+  ArrowDownIcon,
   ArrowRight,
   BasicTooltip,
   Button,
@@ -173,7 +174,8 @@ export function CodingModelRoutingRulesEditor({
                     placeholder="When should this model be used?"
                     className="min-w-0 flex-1"
                   />
-                  <ArrowRight className="size-4 shrink-0 self-center text-muted-foreground" />
+                  <ArrowDownIcon className="ml-8 size-4 shrink-0 self-center text-muted-foreground sm:hidden" />
+                  <ArrowRight className="hidden size-4 shrink-0 self-center text-muted-foreground sm:block" />
                   <div className="flex min-w-0 flex-wrap items-center gap-2">
                     <TaskModelSelect
                       value={rule.modelId}
