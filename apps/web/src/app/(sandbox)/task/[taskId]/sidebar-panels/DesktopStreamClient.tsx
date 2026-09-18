@@ -123,6 +123,14 @@ export function remoteKeyCode(code: string, isMac: boolean): string {
   return code;
 }
 
+/**
+ * A sandbox restored from an older environment snapshot runs an older desktop
+ * service, which rejects events added since as unknown variants. Those events
+ * are optional, so that is a missing feature to mention once, not an error.
+ */
+const NEWER_EVENT_REJECTED =
+  /unknown variant `(paste|clipboard_read|hand_back)`/;
+
 function isMacPlatform(): boolean {
   return (
     typeof navigator !== 'undefined' &&
@@ -288,6 +296,8 @@ export function DesktopStreamClient({
   const recoveryAttemptsRef = useRef(0);
   const streamRetriesRef = useRef(0);
   const unmountedRef = useRef(false);
+  /** The sandbox's desktop service predates clipboard transfer. */
+  const clipboardUnsupportedRef = useRef(false);
   /** Mirrors controlState === 'on' for handlers that run outside render. */
   const controlOnRef = useRef(false);
   /** Pending visibility-change retry, removed on unmount. */
@@ -695,6 +705,16 @@ export function DesktopStreamClient({
             }
           }
         }
+        if (message.error && NEWER_EVENT_REJECTED.test(message.error)) {
+          const clipboardEvent = !message.error.includes('`hand_back`');
+          if (clipboardEvent && !clipboardUnsupportedRef.current) {
+            clipboardUnsupportedRef.current = true;
+            setSessionError(
+              'Copy and paste need a newer sandbox image. Refresh this environment\u2019s snapshot to enable them.',
+            );
+          }
+          return;
+        }
         if (message.error) {
           restartPendingRef.current = false;
           if (/another viewer took control/i.test(message.error)) {
@@ -1026,7 +1046,11 @@ export function DesktopStreamClient({
           onKeyDown={(event) => {
             if (!controlReady) return;
             const shortcut = event.metaKey || event.ctrlKey;
-            if (shortcut && event.code === 'KeyV') {
+            if (
+              shortcut &&
+              event.code === 'KeyV' &&
+              !clipboardUnsupportedRef.current
+            ) {
               // Let the browser fire `paste`, which carries the clipboard
               // text without a permission prompt; onPaste sends it on.
               return;
@@ -1040,6 +1064,7 @@ export function DesktopStreamClient({
             if (
               shortcut &&
               !event.repeat &&
+              !clipboardUnsupportedRef.current &&
               (event.code === 'KeyC' || event.code === 'KeyX')
             ) {
               window.setTimeout(
@@ -1058,7 +1083,7 @@ export function DesktopStreamClient({
             });
           }}
           onPaste={(event) => {
-            if (!controlReady) return;
+            if (!controlReady || clipboardUnsupportedRef.current) return;
             const text = event.clipboardData.getData('text/plain');
             if (!text) return;
             event.preventDefault();

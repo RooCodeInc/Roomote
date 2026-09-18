@@ -641,6 +641,54 @@ describe('DesktopStreamClient', () => {
     }
   });
 
+  it('mentions an older sandbox service once instead of reporting errors', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      render(
+        <DesktopStreamClient
+          previewUrl="https://desktop.preview.test"
+          runId={123}
+          onClose={() => {}}
+        />,
+      );
+      const start = await screen.findByRole('button', {
+        name: 'Start remote desktop',
+      });
+      await waitFor(() => expect(start).toBeEnabled());
+      fireEvent.click(start);
+      const socket = FakeWebSocket.instances[0]!;
+      act(() => socket.open());
+      await controlIsOn();
+      const video = screen.getByLabelText('Remote desktop');
+      fireEvent.loadedData(video);
+
+      act(() =>
+        socket.emit('message', {
+          data: JSON.stringify({
+            error:
+              'invalid control event: unknown variant `clipboard_read`, expected one of `pointer_move`, `key`',
+          }),
+        } as MessageEvent),
+      );
+      await screen.findByText(/need a newer sandbox image/);
+      expect(screen.queryByText(/unknown variant/)).toBeNull();
+
+      // Clipboard shortcuts fall back to plain keys from then on.
+      socket.sent = [];
+      fireEvent.keyDown(video, { code: 'KeyV', ctrlKey: true });
+      fireEvent.keyDown(video, { code: 'KeyC', ctrlKey: true });
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+      expect(socket.sent.map((payload) => JSON.parse(payload))).toEqual([
+        expect.objectContaining({ type: 'key', code: 'KeyV' }),
+        expect.objectContaining({ type: 'key', code: 'KeyC' }),
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('only remaps Command on a Mac', () => {
     expect(remoteKeyCode('MetaLeft', true)).toBe('ControlLeft');
     expect(remoteKeyCode('MetaRight', true)).toBe('ControlRight');

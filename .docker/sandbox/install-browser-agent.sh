@@ -764,9 +764,11 @@ launch_shared_browser() {
     --disable-dev-shm-usage
     --hide-crash-restore-bubble
     # The sandbox is the isolation boundary and offers no user namespaces for
-    # Chrome's own sandbox. --test-type hides the warning bar that flag adds.
+    # Chrome's own sandbox. --test-type hides the warning bar that flag adds,
+    # and its "gpu" value also hides the "Chrome for Testing is only for
+    # automated testing" bar that the bundled build shows on every tab.
     --no-sandbox
-    --test-type
+    --test-type=gpu
     --window-position=0,0
     "--load-extension=${extension_dir}"
     # Chrome-branded builds ignore --load-extension unless this is set; the
