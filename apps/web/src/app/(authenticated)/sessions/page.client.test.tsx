@@ -28,6 +28,8 @@ vi.mock('@/lib/server/sessions', () => ({
       inferenceCostMicroUsd: 0,
       directInferenceCostMicroUsd: 0,
       unread: false,
+      artifactCount: 0,
+      singleArtifact: null,
       pullRequests: [1, 2, 3].map((number) => ({
         repository: `example/${'long-repository-name'.repeat(10)}`,
         number,

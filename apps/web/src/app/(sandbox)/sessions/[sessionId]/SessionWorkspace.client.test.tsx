@@ -1853,7 +1853,9 @@ describe('SessionWorkspace', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Back to artifacts' }));
 
-    expect(routerReplaceMock).toHaveBeenCalledWith('/sessions/session-1');
+    expect(routerReplaceMock).toHaveBeenCalledWith(
+      '/sessions/session-1?panel=artifacts',
+    );
     expect(
       screen.getByRole('button', { name: 'Open Decision from Session' }),
     ).toBeVisible();
@@ -1928,6 +1930,81 @@ describe('SessionWorkspace', () => {
     expect(screen.getByText('No artifacts in this session yet.')).toBeVisible();
     expect(artifactQueryInputs).toEqual([]);
     expect(routerReplaceMock).not.toHaveBeenCalled();
+  });
+
+  it('opens a gallery-only deep link without selecting an artifact', () => {
+    const taskWithArtifact = {
+      ...singleTask,
+      artifacts: [
+        {
+          id: 'artifact-image',
+          path: 'screenshot.png',
+          version: 1,
+          artifactType: 'visual-proof' as const,
+          contentType: 'image/png',
+          size: 100,
+          createdAt: new Date('2026-01-05T00:00:00.000Z'),
+        },
+      ],
+    };
+    renderWorkspace({
+      isMobile: false,
+      searchParams: 'panel=artifacts',
+      sessionOverride: { tasks: [taskWithArtifact] },
+    });
+
+    expect(screen.getByRole('heading', { name: 'Artifacts' })).toBeVisible();
+    expect(
+      screen.getByRole('button', {
+        name: 'Open Screenshot from Update homepage background',
+      }),
+    ).toBeVisible();
+  });
+
+  it('opens a deep-linked task artifact in the Session artifact viewer', async () => {
+    artifactQueryState.dataByPath['task-1:screenshot.png'] = {
+      id: 'artifact-image',
+      taskId: 'task-1',
+      path: 'screenshot.png',
+      version: 1,
+      artifactType: 'visual-proof',
+      contentType: 'image/png',
+      size: 100,
+      createdAt: new Date('2026-01-05T00:00:00.000Z'),
+      downloadUrl: '/api/artifacts/artifact-image/download',
+    };
+    renderWorkspace({
+      isMobile: false,
+      searchParams:
+        'panel=artifacts&artifact=screenshot.png&artifactTask=task-1&v=1',
+      sessionOverride: {
+        tasks: [
+          {
+            ...singleTask,
+            artifacts: [
+              {
+                id: 'artifact-image',
+                path: 'screenshot.png',
+                version: 1,
+                artifactType: 'visual-proof',
+                contentType: 'image/png',
+                size: 100,
+                createdAt: new Date('2026-01-05T00:00:00.000Z'),
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(screen.getByRole('heading', { name: 'Screenshot' })).toBeVisible();
+    await waitFor(() =>
+      expect(artifactQueryInputs).toContainEqual({
+        taskId: 'task-1',
+        path: 'screenshot.png',
+        version: 1,
+      }),
+    );
   });
 
   it('leaves the side panel to the URL-selected task when a deep link also names an artifact', () => {

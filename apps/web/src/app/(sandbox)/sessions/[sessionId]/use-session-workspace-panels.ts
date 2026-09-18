@@ -4,7 +4,10 @@ import { useCallback, useEffect, useReducer, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import { useSessionNavigationState } from '@/hooks/useSessionNavigationState';
-import { parseSessionArtifactSearchParams } from '@/lib/artifact-view-urls';
+import {
+  hasSessionArtifactsSearchParams,
+  parseSessionArtifactSearchParams,
+} from '@/lib/artifact-view-urls';
 import type { SessionArtifactViewerSelection } from './session-task-panel-context';
 
 export type UtilityWorkspacePanelKind =
@@ -467,7 +470,8 @@ export function useSessionWorkspacePanels({
   const [state, dispatch] = useReducer(
     sessionWorkspacePanelReducer,
     {
-      hasRequestedArtifact: Boolean(requestedArtifact),
+      hasRequestedArtifact:
+        !selectedTaskId && hasSessionArtifactsSearchParams(searchParams),
       selectedTaskId,
     },
     createSessionWorkspacePanelState,
@@ -500,6 +504,18 @@ export function useSessionWorkspacePanels({
     () =>
       replaceSearchParams((params) => {
         params.delete('artifact');
+        params.delete('artifactTask');
+        params.delete('v');
+        params.set('panel', 'artifacts');
+      }),
+    [replaceSearchParams],
+  );
+  const clearArtifactsSearchParams = useCallback(
+    () =>
+      replaceSearchParams((params) => {
+        params.delete('panel');
+        params.delete('artifact');
+        params.delete('artifactTask');
         params.delete('v');
       }),
     [replaceSearchParams],
@@ -509,7 +525,9 @@ export function useSessionWorkspacePanels({
       replaceSearchParams((params) => {
         if (taskId) params.set('task', taskId);
         else params.delete('task');
+        params.delete('panel');
         params.delete('artifact');
+        params.delete('artifactTask');
         params.delete('v');
       }),
     [replaceSearchParams],
@@ -644,8 +662,8 @@ export function useSessionWorkspacePanels({
   }, []);
   const closeSessionArtifact = useCallback(() => {
     dispatch({ type: 'close-utility' });
-    clearRequestedArtifact();
-  }, [clearRequestedArtifact]);
+    clearArtifactsSearchParams();
+  }, [clearArtifactsSearchParams]);
   const backToSessionArtifacts = useCallback(() => {
     dispatch({ type: 'back-to-session-artifacts' });
   }, []);
