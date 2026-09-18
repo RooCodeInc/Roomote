@@ -1,6 +1,6 @@
 {
-  "id": "57341f5a-b8aa-4909-b4c4-5345a2f52a45",
-  "prevId": "ff90615b-2cfb-4364-84de-b324354d8d3f",
+  "id": "50447ace-5dbc-4423-9799-a7409bb49916",
+  "prevId": "57341f5a-b8aa-4909-b4c4-5345a2f52a45",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -9959,6 +9959,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "recipient_user_id": {
+          "name": "recipient_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "email_identity_id": {
+          "name": "email_identity_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "status": {
           "name": "status",
           "type": "text",
@@ -10075,7 +10087,17 @@
           "with": {}
         }
       },
-      "foreignKeys": {},
+      "foreignKeys": {
+        "release_announcement_deliveries_recipient_user_id_users_id_fk": {
+          "name": "release_announcement_deliveries_recipient_user_id_users_id_fk",
+          "tableFrom": "release_announcement_deliveries",
+          "tableTo": "users",
+          "columnsFrom": ["recipient_user_id"],
+          "columnsTo": ["id"],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -10086,7 +10108,7 @@
         },
         "release_announcement_deliveries_provider_check": {
           "name": "release_announcement_deliveries_provider_check",
-          "value": "\"release_announcement_deliveries\".\"provider\" in ('slack', 'teams', 'telegram', 'discord')"
+          "value": "\"release_announcement_deliveries\".\"provider\" in ('slack', 'teams', 'telegram', 'discord', 'email')"
         }
       },
       "isRLSEnabled": false

@@ -143,15 +143,24 @@ is removed, the address changes, delivery is suppressed, or AgentMail is
 disabled or unconfigured, Roomote records a delivery failure and does not
 substitute another address or provider.
 
-Replying to a Roomote-initiated email works like any other inbound message: the
-sender address must first be verified on the account and pass DMARC. Until then,
-the reply cannot continue the conversation or start a task.
+Replying to a Roomote-initiated email verifies an unverified account address
+implicitly: each email Roomote sends to an unverified address carries a
+single-use reference token, and a reply from that exact address that passes
+DMARC and quotes the token proves the mailbox received it. Roomote marks the
+address verified and processes the reply like any other verified reply — no
+separate verification message or Settings visit is needed. The token expires
+after 30 days and can verify only the account and address it was sent to, so
+a forwarded thread cannot verify anyone else, and unsolicited email from an
+unverified address is still refused. If the quote is missing (some clients
+strip it) or the token has expired, verify from **Personal settings > Linked
+Accounts** instead.
 
 ## Account email verification
 
 Roomote requires verification before an account email can initiate work or
 reply on the email channel. Receiving Roomote-initiated email does not require
-verification. With the email channel enabled:
+verification — and replying to it verifies the address implicitly, as
+described above. With the email channel enabled:
 
 - New email-and-password sign-ups receive a verification email. Confirming
   it lets Roomote recognize the address on the email channel; signing in
@@ -182,8 +191,9 @@ Current limitations:
 - Email automation destinations are private; channel-style posting is not
   supported
 - each account has one email address for outbound delivery; that login email
-  must be verified before it can send commands or replies to Roomote, and there
-  is no way to add other sender addresses
+  must be verified before it can send commands or replies to Roomote (replying
+  to an email Roomote sent it verifies it), and there is no way to add other
+  sender addresses
 - reactions are not supported
 - attachments from inbound email are not yet processed
 - each deployment has one inbox

@@ -3280,6 +3280,44 @@ export const agentmailSuppressions = pgTable(
 );
 
 /**
+ * agentmail_reply_verification_proofs
+ *
+ * Single-use, expiring proof that lets a reply to a Roomote-initiated email
+ * implicitly verify the account email it was sent to. Each Roomote-initiated
+ * email to an unverified account address carries a random reference token in
+ * its footer; the raw token never touches the database (only its SHA-256
+ * hash), and it authorizes exactly one thing: marking the bound (user,
+ * address) pair verified, and only alongside a DMARC-passing reply from that
+ * exact address on a conversation the user already participates in.
+ */
+export const agentmailReplyVerificationProofs = pgTable(
+  'agentmail_reply_verification_proofs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** The exact account address the proof may verify (normalized). */
+    emailAddress: text('email_address').notNull(),
+    /** SHA-256 hex of the bearer token mailed to the recipient. */
+    tokenHash: text('token_hash').notNull(),
+    expiresAt: timestamp('expires_at').notNull(),
+    /** Set when the proof is spent; a consumed proof never verifies again. */
+    consumedAt: timestamp('consumed_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    unique('agentmail_reply_verification_proofs_token_unique').on(
+      table.tokenHash,
+    ),
+    index('agentmail_reply_verification_proofs_user_idx').on(
+      table.userId,
+      table.emailAddress,
+    ),
+  ],
+);
+
+/**
  * discord_installations
  *
  * One row per Discord guild where the deployment's bot is installed. The

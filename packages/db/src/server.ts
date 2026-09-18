@@ -215,6 +215,7 @@ export {
   agentmailConversationParticipantsRelations,
   agentmailWebhookEvents,
   agentmailInboundTurns,
+  agentmailReplyVerificationProofs,
   agentmailSuppressions,
   discordInstallations,
   discordInstallationsRelations,
