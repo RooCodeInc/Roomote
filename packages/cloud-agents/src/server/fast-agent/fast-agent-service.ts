@@ -4238,7 +4238,7 @@ export async function answerFastAgentQuestion({
       if (found.unknownIntegration && catalogIntegrations.length === 0) {
         return {
           success: false as const,
-          error: `No on-demand deployment MCP server with id "${args.integrationId}" is available in fast mode.`,
+          error: `No on-demand deployment MCP server with id "${args.integrationId}" is available in this conversation.`,
         };
       }
       const disconnectedCatalogMatch = catalogIntegrations.some(

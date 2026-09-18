@@ -25,6 +25,22 @@ describe('ROOMOTE_SYSTEM_PROMPT', () => {
     expect(ROOMOTE_SYSTEM_PROMPT).not.toContain(
       'follow the shared workspace guidance for the prepared repositories',
     );
+    expect(ROOMOTE_SYSTEM_PROMPT).toContain(
+      'treat session, task, home, integration, automation, memory, skill, and similar product feature nouns as lowercase common nouns',
+    );
+    expect(ROOMOTE_SYSTEM_PROMPT).toContain(
+      'Never expose internal names such as "Fast mode" or "Fast session"',
+    );
+  });
+
+  it('keeps nomenclature guidance in orchestrator-owned coding tasks', () => {
+    const prompt = buildRoomoteSystemPrompt(undefined, {
+      reportConsumer: 'orchestrator',
+    });
+
+    expect(prompt).toContain(
+      'treat session, task, home, integration, automation, memory, skill, and similar product feature nouns as lowercase common nouns',
+    );
   });
 
   it('tells private tasks to get owner approval before external actions', () => {

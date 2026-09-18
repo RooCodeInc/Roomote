@@ -814,7 +814,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'call `list_integration_keys` first, reuse pending or ready entries',
     );
     expect(enabledPrompt).toContain(
-      'Share the returned secure Session link with a service-specific label',
+      'Share the returned secure session link with a service-specific label',
     );
     expect(enabledPrompt).toContain('never ask for the key in chat');
     expect(enabledPrompt).toContain(
@@ -830,7 +830,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'If available documentation cannot verify the API origin and credential header, say those details could not be verified and do not guess',
     );
     expect(enabledPrompt).toContain(
-      'tell the human to enable Integration keys while these tools are available',
+      'tell the human to enable integration keys while these tools are available',
     );
     expect(enabledPrompt).toContain(
       'service-specific label such as "Connect Figma securely"',
@@ -1313,6 +1313,9 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain(
       'The opening acknowledgement is already visible and needs no duplicate launch reply, but it does not suppress later useful updates while work continues',
+    );
+    expect(prompt).toContain(
+      'Never expose internal names such as "Fast mode" or "Fast session"',
     );
   });
 
@@ -2036,7 +2039,7 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('Objective: Ship the complete release');
     expect(prompt).toContain('Continuations used: 2/5');
     expect(prompt).toContain(
-      'This goal belongs to the Fast Session, not to any delegated task',
+      'This goal belongs to the session, not to any delegated task',
     );
     expect(prompt).toContain('Use `manage_goal`');
   });

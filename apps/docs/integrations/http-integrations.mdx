@@ -4,7 +4,7 @@ description: Let agents call approved HTTP APIs while Roomote keeps credentials 
 icon: arrow-right-left
 ---
 
-HTTP integrations let Fast sessions and sandbox agents call an API without
+HTTP integrations let sessions and sandbox agents call an API without
 receiving its credential. The agent chooses a configured integration, method,
 path, and request body. Roomote checks the current actor's access, attaches the
 server-side credential, and sends the HTTPS request.
@@ -47,7 +47,7 @@ required. See [Integration keys self-hosting](/integration-keys#self-hosting).
 1. Create a JSON manifest on the API server and mount it read-only. Use narrow
    paths and least-privilege upstream credentials.
 2. Set `R_HTTP_INTEGRATIONS_ENABLED=true` on the Roomote control-plane services
-   that run the API, resolve task configuration, or execute Fast sessions
+   that run the API, resolve task configuration, or execute sessions
    (including web and background workers). Set
    `R_HTTP_INTEGRATIONS_CONFIG_PATH` to the manifest's absolute path on the API
    server only.
@@ -92,7 +92,7 @@ omit `prefix` unless the upstream API requires one.
 - `allowedUserIds` restricts both discovery and calls to those Roomote user IDs.
   If omitted, the integration is shared with **all active human members** of the
   deployment. An empty list is invalid; remove the entry to disable it.
-- Fast uses its acting user's authentication. Sandbox requests use their
+- A session uses its acting user's authentication. Sandbox requests use their
   run-scoped token and the task's current server-recorded actor, not the token's
   original user. Actorless service-principal runs and external Roomote MCP OAuth
   clients cannot use this endpoint.
@@ -121,7 +121,7 @@ connection flows.
 ## Use an integration
 
 Ask Roomote to list the available HTTP integrations. The `_roomote_http_integrations`
-server exposes `list_integrations` and `integration_request` to both Fast and
+server exposes `list_integrations` and `integration_request` to both sessions and
 sandbox agents. Listings contain permitted origins and rules, never credential
 values or environment-variable references.
 
@@ -129,7 +129,7 @@ If an environment or deployment already defines an MCP server named
 `_roomote_http_integrations`, sandbox tasks preserve that server and skip the HTTP
 integrations broker with a warning. Rename the operator-defined server to receive
 both. Environment definitions still take precedence over deployment definitions;
-Fast sessions are unaffected.
+Sessions are unaffected.
 
 For example, a request after listing `inventory` is:
 

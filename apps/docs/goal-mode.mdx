@@ -1,24 +1,24 @@
 ---
 title: Goal Mode
 icon: target
-description: Keep a Roomote Session working toward one objective across multiple turns.
+description: Keep a Roomote session working toward one objective across multiple turns.
 ---
 
-Goal Mode keeps a Roomote Session focused on one objective when the work may take
+Goal Mode keeps a Roomote session focused on one objective when the work may take
 more than a single turn. Roomote carries the objective into each turn,
 checks whether the full outcome is complete, and can continue automatically
 when more work remains.
 
 Use Goal Mode for work that has a clear finish line but may require several
 rounds of investigation, implementation, or verification. For a normal scoped
-request that should finish in one turn, send an ordinary Session message instead.
+request that should finish in one turn, send an ordinary session message instead.
 
 ## Start Goal Mode
 
-Goal Mode belongs to the current Session. Roomote can answer directly, continue
-the Session, or create child tasks as execution units while pursuing the goal.
+Goal Mode belongs to the current session. Roomote can answer directly, continue
+the session, or create child tasks as execution units while pursuing the goal.
 
-### From the web Session view
+### From the web session view
 
 Enter `/goal` followed by the objective in the composer:
 
@@ -27,7 +27,7 @@ Enter `/goal` followed by the objective in the composer:
 ```
 
 Describe the complete outcome after the command. Goal Mode does not accept file
-attachments, so send any supporting files to the Session before starting the goal.
+attachments, so send any supporting files to the session before starting the goal.
 
 ### From Discord
 
@@ -57,19 +57,19 @@ acknowledgement repeats the accepted objective. See
 
 ## What happens next
 
-The first Goal Mode turn receives the objective as its Session instruction. If
+The first Goal Mode turn receives the objective as its session instruction. If
 the agent reaches the end of a turn before the objective is complete, Roomote
-can continue automatically in the same Session. Child tasks may be created for
+can continue automatically in the same session. Child tasks may be created for
 repository or workspace execution, but they do not own the goal.
 
 By default, a goal can use up to five automatic continuation turns after its
 initial turn. The goal stops earlier when the agent verifies that the complete
 objective is done. It can also stop when the same concrete blocker prevents
 progress across three consecutive goal turns. If neither happens before the
-continuation budget is exhausted, the Session settles without claiming the goal is
+continuation budget is exhausted, the session settles without claiming the goal is
 complete.
 
-Ordinary follow-up messages in the Session keep the active objective in context.
+Ordinary follow-up messages in the session keep the active objective in context.
 Starting `/goal` again replaces the previous objective and resets the
 continuation budget for the new goal. If another Goal Mode activation is still
 pending, wait for it to finish before starting a replacement goal.
@@ -104,7 +104,7 @@ complete.
 
 ## When Goal Mode stops
 
-Review the final Session message and any child task logs, diffs, artifacts, and
+Review the final session message and any child task logs, diffs, artifacts, and
 pull requests. A stopped goal may have one of these outcomes:
 
 - **Complete**: the agent verified the entire objective before closing out.
@@ -114,4 +114,4 @@ pull requests. A stopped goal may have one of these outcomes:
   before the agent could verify completion.
 
 If the goal stops before the outcome is complete, send the missing information
-or narrow the remaining work, then start a new `/goal` in the same Session.
+or narrow the remaining work, then start a new `/goal` in the same session.

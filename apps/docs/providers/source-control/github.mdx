@@ -10,7 +10,7 @@ push branches, and work with pull requests.
 
 Use `<public-url>` below for your stable public Roomote URL.
 
-## Fast path
+## Session path
 
 Open `/setup` and complete the short account and inference bootstrap. In the
 setup conversation, choose GitHub in the source-control card, open its
@@ -162,7 +162,7 @@ R_GITHUB_ADDITIONAL_APP_SLUGS=roomote-community,roomote-reviewer
 Roomote treats only the primary slug and this comma-separated allowlist as
 managed bot identities. Do not add unrelated GitHub Apps.
 
-Fast can use the GitHub App's Actions access to inspect workflow runs, jobs, and
+Roomote can use the GitHub App's Actions access to inspect workflow runs, jobs, and
 logs when it explains a CI failure. That diagnostic path is read-only even
 though the app keeps broader Actions and Workflows permissions for normal task
 and automation workflows.
@@ -193,7 +193,7 @@ items.
 An eligible deployment GitHub App installation with an active connected
 repository is required to mint the scoped installation token used by the GitHub
 tools, including public reads. With that connection, active
-Roomote members can inspect any public `github.com` repository in Fast without
+Roomote members can inspect any public `github.com` repository in a session without
 connecting the public target or linking a personal GitHub account. The same
 reads are available in coding tasks, including automated tasks without a human
 driver. No clone or personal access token is needed.
@@ -244,7 +244,7 @@ one.
 
 ## Daily GitHub management
 
-Fast can use GitHub's native tools directly, without starting a coding task:
+Roomote can use GitHub's native tools directly, without starting a coding task:
 pull request and issue edits, comments, replies and reactions, reviews, labels,
 branches, and small file changes. Their discovered descriptions and schemas
 define the supported arguments. These actions use the deployment GitHub App,
@@ -264,7 +264,7 @@ For example, ask Roomote to:
 
 Retargeting a pull request's base to an existing branch does not write a branch
 or change files. A merge requires an explicit request from the current human
-message. Fast reads the pull request immediately before the merge, binds the
+message. Roomote reads the pull request immediately before the merge, binds the
 request to the current head SHA when the native schema supports it, leaves
 branch protections and merge permissions to GitHub, and reads the pull request
 again before reporting success or retrying an ambiguous result. Work that needs a
@@ -272,8 +272,8 @@ checkout, a build, or tests to get right still belongs in a coding task, which
 also remains read-only on this GitHub tool path and writes through its own
 checkout instead.
 [GitLab](/providers/source-control/gitlab#native-gitlab-api-tools-for-fast)
-and [Bitbucket Cloud](/providers/source-control/bitbucket#api-first-work-in-fast)
-have their own supported Fast operations and limits.
+and [Bitbucket Cloud](/providers/source-control/bitbucket#api-first-work-in-sessions)
+have their own supported session operations and limits.
 
 Native updates that combine several actions are not guaranteed to be atomic.
 After an error, Roomote inspects the resulting state before retrying so an action
@@ -349,7 +349,7 @@ and any work it delegates runs on the pull request's branch from the same
 Session.
 
 When a Roomote task opens a pull request, actionable review feedback returns to
-the owning Session and appears in both Fast and standard web task transcripts.
+the owning session and appears in both session and standard web task transcripts.
 Use **Resolve these issues** to address the current feedback, **Auto-resolve on
 this PR** to handle later actionable feedback automatically, or **Dismiss** to
 take no action.

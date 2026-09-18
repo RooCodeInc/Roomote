@@ -565,7 +565,7 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Read or finish the active goal owned by this Fast Session. Use complete only after the entire objective is verified; use blocked only for a concrete repeated blocker; use canceled only when the user cancels or replaces the objective.",
+  description: "Read or finish the active goal owned by this session. Use complete only after the entire objective is verified; use blocked only for a concrete repeated blocker; use canceled only when the user cancels or replaces the objective.",
   args: {
     action: z.enum(["get", "complete", "blocked", "canceled"]),
     reason: z.string().min(1).optional().describe("Required for blocked; omit otherwise."),
@@ -617,7 +617,7 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: ${JSON.stringify(`${FIND_INTEGRATION_TOOLS_TOOL.description} In Fast Sessions, omit every argument to list the complete built-in integration catalog with current connection status, including disabled and unconfigured providers. This operation is always read-only and never starts setup or OAuth.`)},
+  description: ${JSON.stringify(`${FIND_INTEGRATION_TOOLS_TOOL.description} In sessions, omit every argument to list the complete built-in integration catalog with current connection status, including disabled and unconfigured providers. This operation is always read-only and never starts setup or OAuth.`)},
   args: {
     integrationId: z.string().min(1).optional().describe(${JSON.stringify(FIND_INTEGRATION_TOOLS_ARG_DESCRIPTIONS.integrationId)}),
     toolName: z.string().min(1).optional().describe(${JSON.stringify(FIND_INTEGRATION_TOOLS_ARG_DESCRIPTIONS.toolName)}),

@@ -515,7 +515,7 @@ describe('InferenceProviderSection', () => {
       screen.queryByRole('button', { name: /Connect ChatGPT/ }),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByRole('switch', { name: 'ChatGPT fast mode' }),
+      screen.getByRole('switch', { name: 'Faster ChatGPT responses' }),
     ).not.toBeChecked();
   });
 
@@ -532,7 +532,7 @@ describe('InferenceProviderSection', () => {
 
     await act(async () => {
       fireEvent.click(
-        screen.getByRole('switch', { name: 'ChatGPT fast mode' }),
+        screen.getByRole('switch', { name: 'Faster ChatGPT responses' }),
       );
     });
 

@@ -278,7 +278,7 @@ describe('Fast session queries', () => {
             answers: {},
           }),
       ]) {
-        await expect(action()).rejects.toThrow('Fast session not found');
+        await expect(action()).rejects.toThrow('Session not found');
       }
       expect(
         (await getFastSessionById(otherAuth, conversation.id))?.messages.map(
@@ -365,7 +365,7 @@ describe('Fast session queries', () => {
         await expect(getFastSessionTasks(auth, id)).resolves.toBeNull();
         await expect(
           getFastSessionMessagesCommand(auth as UserAuthSuccess, id),
-        ).rejects.toThrow('Fast session not found');
+        ).rejects.toThrow('Session not found');
       }
     }
     expect(

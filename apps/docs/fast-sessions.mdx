@@ -4,43 +4,43 @@ icon: messages-square
 description: Follow a conversation and every execution it delegates from one continuous Roomote workspace.
 ---
 
-Sessions are the primary way to follow work in Roomote. A Session keeps the
+Sessions are the primary way to follow work in Roomote. A session keeps the
 conversation, delegated executions, review activity, artifacts, pull requests,
 cost, and unread state together, whether it started in chat, source control, an
-automation, the API, or the web dashboard. Fast is the conversational
-orchestrator inside a Session: it answers directly when it can and delegates
+automation, the API, or the web dashboard. Roomote is the conversational
+orchestrator inside a session: it answers directly when it can and delegates
 execution work when needed across Slack, Discord, Microsoft Teams, Telegram,
 automations, and the web dashboard.
 
-A Session can also run Roomote's structured code review on demand. Ask it to
+A session can also run Roomote's structured code review on demand. Ask it to
 review a pull request and the Review Code pipeline runs as a task inside the
-Session; in a pull request discussion, it reviews that pull request. You can
+session; in a pull request discussion, it reviews that pull request. You can
 name an enabled model and reasoning effort in the request when a review needs a
 specific balance of speed and depth. If you omit either choice, the review uses
 the deployment's code review defaults.
 
-When a task in a Session opens a pull request, that pull request belongs to the
-Session. A mention on it joins the Session instead of starting a new one, and
-Roomote answers on the pull request as well as in the Session's home surface.
+When a task in a session opens a pull request, that pull request belongs to the
+session. A mention on it joins the session instead of starting a new one, and
+Roomote answers on the pull request as well as in the session's home surface.
 
 ## Start a Session from the dashboard
 
-On the home page, leave the workspace selector on **Fast** to start a
-conversation. Roomote answers directly when it can and delegates execution
-when the request needs a repository workspace. Selecting an environment or
-repository still starts a Session: the Session records your request, delegates
+On the home page, leave the workspace unselected to start a conversation.
+Roomote answers directly when it can and delegates execution when the request
+needs a repository workspace. Selecting an environment or repository still
+starts a session: the session records your request, delegates
 the task into that workspace right away without a model turn, and opens the
-task workspace. You can return to the Session at any time to continue the
+task workspace. You can return to the session at any time to continue the
 conversation around that task.
 
-Fast is the default for unpinned requests across the web dashboard and
+Conversation-first routing is the default for unpinned requests across the web dashboard and
 supported chat providers. Choose an environment or repository explicitly when
 you already know where the work should run. That choice controls the initial
 checkout and tooling, while the sandbox can still check out other active
 repositories authorized for the task through its `REPOSITORIES.md` index. An
 additional checkout does not provision another environment's services.
 
-When work needs a sandbox but no source code, ask Fast to delegate it to
+When work needs a sandbox but no source code, ask Roomote to delegate it to
 **Blank slate**. The delegated task starts with an empty workspace and clones
 nothing up front. This is useful for artifact generation, integration work, and
 other tasks that need command execution without a repository. When source
@@ -53,12 +53,12 @@ preferred environment.
 Select **New Session** in the navigation to open the same launcher from any
 dashboard page.
 
-You do not need to choose a separate conversation mode. The Session grows from
+You do not need to choose a separate conversation mode. The session grows from
 conversation to execution to review without changing identity.
 
 ## Source-control work without a workspace
 
-Fast discovers the available tools and capabilities of configured source-control
+Roomote discovers the available tools and capabilities of configured source-control
 integrations for focused repository exploration. Reading files and directories,
 searching code, or inspecting commits, pull/merge request diffs, and reported CI
 results does not require a
@@ -93,22 +93,22 @@ be connected; access denials are not retried anonymously.
 
 Native source-control tools can merge existing pull or merge requests on
 [GitHub](/providers/source-control/github#daily-github-management),
-[GitLab](/providers/source-control/gitlab#native-gitlab-api-tools-for-fast),
-[Gitea](/providers/source-control/gitea#native-pull-request-merging-in-fast),
-[Bitbucket Cloud](/providers/source-control/bitbucket#api-first-work-in-fast),
-and [Azure DevOps](/providers/source-control/azure-devops#native-pull-request-merging-in-fast).
+[GitLab](/providers/source-control/gitlab#native-gitlab-api-tools-for-sessions),
+[Gitea](/providers/source-control/gitea#native-pull-request-merging-in-sessions),
+[Bitbucket Cloud](/providers/source-control/bitbucket#api-first-work-in-sessions),
+and [Azure DevOps](/providers/source-control/azure-devops#native-pull-request-merging-in-sessions).
 Merging requires an explicit request in the current human message, an immediate
 pre-merge read and head binding where supported, and a post-merge read before
-Fast reports success or retries an ambiguous result.
+Roomote reports success or retries an ambiguous result.
 
-[GitLab API tools](/providers/source-control/gitlab#native-gitlab-api-tools-for-fast)
+[GitLab API tools](/providers/source-control/gitlab#native-gitlab-api-tools-for-sessions)
 reuse the existing deployment OAuth connection for bounded repository reads,
 merge request title, description and close/reopen updates, notes, and discussion
 replies. No additional MCP server or installation is needed. Tools require an
 active member, an active connected repository on the configured GitLab host, and
 valid deployment OAuth access; curated integrations must be enabled.
 
-[Bitbucket Cloud API tools](/providers/source-control/bitbucket#api-first-work-in-fast)
+[Bitbucket Cloud API tools](/providers/source-control/bitbucket#api-first-work-in-sessions)
 reuse the existing deployment OAuth connection for files, directories, code
 search, commits, pull requests, diffs, and comments, plus supported PR updates
 and replies. No additional MCP server is needed. See that guide for access
@@ -116,25 +116,25 @@ requirements, pagination limits, and the code-search deprecation.
 
 ## The session view
 
-A Session header shows the other people currently viewing that Session. Your
+A session header shows the other people currently viewing that session. Your
 own avatar is omitted from the viewer list.
 
-A Session timeline shows prompts, replies, and delegated execution activity.
+A session timeline shows prompts, replies, and delegated execution activity.
 Execution cards show their status, workspace, pull requests, artifacts, latest
 error, and cost. Select a card to open its details panel. For a live nested
 task, you can reply, attach files, use commands, answer pending requests, cancel
-work, or wake a sleeping task without leaving the Session. Choose **Open full
+work, or wake a sleeping task without leaving the session. Choose **Open full
 workspace** for terminal, logs, diff, and preview tools.
 
-To pause just one active coding task, select **Stop** on its Session card. This
+To pause just one active coding task, select **Stop** on its session card. This
 requires execution access and interrupts the task's current work while
 preserving the task, sandbox, and artifacts, so a later message can resume it.
-The parent Session and sibling tasks continue. Explicitly canceling the task is
+The parent session and sibling tasks continue. Explicitly canceling the task is
 different: cancellation terminally ends the current run and shuts down its
 sandbox. Stop or cancellation errors appear on the card; check the resulting
 task status rather than assuming the request succeeded.
 
-On desktop, you can keep several task workspaces open beside the Session,
+On desktop, you can keep several task workspaces open beside the session,
 resize them, and switch between the conversation and task panels without losing
 your place. On smaller screens, Roomote shows one workspace at a time so the
 active conversation or task remains usable.
@@ -143,49 +143,49 @@ When delegated tasks keep working after the conversation becomes idle, the
 timeline shows the live task count. Select that activity to open the **Tasks**
 panel. The **Artifacts** panel combines the latest uploaded outputs from every
 task with documents created directly during the conversation, labels each item
-by its Session or task source, and opens previews without leaving the Session.
+by its session or task source, and opens previews without leaving the session.
 CSV and TSV files use abstract table thumbnails and open as bounded table
 previews. Turn on **First row is a header** when the file includes column names,
 scroll horizontally through wide tables, or switch to **Source** for the complete
 loaded text. The viewer reports malformed or truncated data without discarding
 the values it can display.
-Links to a Session-created artifact, including the link the Session shares when
+Links to a session-created artifact, including the link the session shares when
 it creates one, open that artifact directly in the Artifacts panel. Individual
 task details continue to show their own artifacts. When a reply attaches
 screenshots or other images captured by a task, they appear inline with that
 reply in the transcript. Delegated tasks also report their completion, blockers,
-and relevant results back into the parent Session; open the task workspace when
+and relevant results back into the parent session; open the task workspace when
 you need its full logs or diff.
 
-Fast quietly follows the coding tasks it launches after the conversation becomes
+Roomote quietly follows the coding tasks it launches after the conversation becomes
 idle. It reports meaningful progress, blockers, and questions that need input,
 and can send an evidence-backed correction when a task is drifting from the
-request. Routine status stays quiet. Follow-through stops when the Session's
+request. Routine status stays quiet. Follow-through stops when the session's
 coding work settles instead of leaving a recurring monitor behind.
 
 **Session info** shows the total inference cost for the conversation and its
-attached tasks. Open the cost breakdown to separate direct Session orchestration
+attached tasks. Open the cost breakdown to separate direct session orchestration
 from each task's usage.
 
-The Sessions page supports list and board views, pins, recent Sessions, and
+The sessions page supports list and board views, pins, recent sessions, and
 unread indicators. Common scope, status, and time filters stay visible; turn on
 advanced filters for user, environment, pull request, model, and source. Active
 advanced filters remain visible until you clear them, and Roomote remembers the
-selected list or board view. Search matches Session and task titles,
+selected list or board view. Search matches session and task titles,
 repositories, and conversation text. Queries of at least three characters
 include transcript matches and show a highlighted excerpt. **Ready** is not a
-terminal state: you can reply or start another execution in the same Session
+terminal state: you can reply or start another execution in the same session
 later.
 
 Session rows show who or which automation started the work, its source and
-cost, and links to accumulated active pull requests. In the Session workspace,
+cost, and links to accumulated active pull requests. In the session workspace,
 those pull requests remain available across delegated tasks. Selecting the live
 task count opens the only running task directly or shows the task list when
-several are active. A Session link with a selected task opens that task's full
-workspace while keeping the Session conversation alongside it on desktop.
+several are active. A session link with a selected task opens that task's full
+workspace while keeping the session conversation alongside it on desktop.
 
 The transcript renders prompts, replies, and tool activity in real time with a
-generated title that updates as the Session evolves. Replies appear as the
+generated title that updates as the session evolves. Replies appear as the
 model writes them, then settle into the saved message once the reply is
 delivered.
 
@@ -196,7 +196,7 @@ title, with its ID as a fallback. Details are sanitized for display; internal
 event metadata is not exposed. A running receipt may show its input before a
 result arrives.
 
-Fast sessions can also render presentational widgets such as status cards,
+Sessions can also render presentational widgets such as status cards,
 tables, and plans directly in the transcript. Widget HTML is sanitized and
 sandboxed in the web view. Chat surfaces receive a concise text preview and a
 link to open the rendered widget when both are available.
@@ -208,68 +208,68 @@ Markdown fallback; other chat providers receive the fallback text.
 
 ## Reply to a session
 
-Conversational Sessions have a reply box at the bottom of the transcript;
+Conversational sessions have a reply box at the bottom of the transcript;
 follow-ups continue the same conversation with full context. For conversations
 that live on another surface, Roomote posts the answer back into the originating
 thread with a quoted copy of your web message, so the conversation stays in one
 place for everyone following it there.
 
-For substantive requests, Fast sends a brief acknowledgement before it starts
+For substantive requests, Roomote sends a brief acknowledgement before it starts
 model-invoked work. An eligible Slack message may receive an acknowledgement
 reaction instead. Immediate answers and clarifying questions remain single
 responses, and delegated tasks keep their existing kickoff message rather than
 posting a duplicate acknowledgement.
 
-Fast replies across Slack, Discord, Microsoft Teams, and Telegram link back to
-the Session view and can resume the same Session directly from chat. Roomote
+Roomote replies across Slack, Discord, Microsoft Teams, and Telegram link back to
+the session view and can resume the same session directly from chat. Roomote
 verifies the provider installation, conversation, and linked user before it
 accepts the follow-up. On Slack, a longer reply streams into the thread as the
 model writes it and settles into the finished message.
 
-From any Fast surface, you can ask Roomote to read an authorized Slack or
+From any supported surface, you can ask Roomote to read an authorized Slack or
 Discord message link or explicitly name either provider for a context lookup.
 Roomote resolves the target provider independently of the conversation you are
 using and applies the target provider's installation, linked-account, and
 channel-access checks. It does not infer access from the originating chat.
 
-Fast can also post an explicitly requested update to Slack from another chat
+Roomote can also post an explicitly requested update to Slack from another chat
 surface. Outside a Slack conversation, name the Slack workspace and destination.
 Public channels require the Roomote app to be a member; private channels also
 require your linked Slack account to be a member, and direct messages require
 workspace-scoped linked identities for both participants.
 
-Follow-ups sent while Fast is responding are retained before Roomote reports
+Follow-ups sent while Roomote is responding are retained before Roomote reports
 that they were accepted. A correction from the same person can steer the active
 response between completed tool calls; messages from another participant wait
 for a separate turn under that participant's identity. This keeps shared
 conversations ordered without losing instructions that arrive during active
 work.
 
-Fast turns also survive API or worker interruptions. Roomote durably admits the turn before acknowledging it, records every action the turn takes as it happens, and resumes unfinished work on another process. The resumed run receives the transcript of its earlier attempt, up to the point it was cut off, so it continues from there instead of repeating actions or asking you to send the request again. If the cut lands on the final reply itself, the resumed run finishes from the transcript: a reply that was recorded is not posted again, and a reply the process died while posting goes out once more without another model request. This covers turns started by a typed message, by an emoji reaction, and by platform events such as a setup kickoff. Provider-side retry waits are honored the same way: short waits keep the turn in place, and longer waits park it durably until the scheduled time.
+Session turns also survive API or worker interruptions. Roomote durably admits the turn before acknowledging it, records every action the turn takes as it happens, and resumes unfinished work on another process. The resumed run receives the transcript of its earlier attempt, up to the point it was cut off, so it continues from there instead of repeating actions or asking you to send the request again. If the cut lands on the final reply itself, the resumed run finishes from the transcript: a reply that was recorded is not posted again, and a reply the process died while posting goes out once more without another model request. This covers turns started by a typed message, by an emoji reaction, and by platform events such as a setup kickoff. Provider-side retry waits are honored the same way: short waits keep the turn in place, and longer waits park it durably until the scheduled time.
 
 ### Message Suggestions
 
-An empty task or Session composer can show one contextual follow-up after an
+An empty task or session composer can show one contextual follow-up after an
 agent turn completes. Press **Tab** or select the suggestion to insert it, press
 **Escape** to dismiss it, or start typing to replace it with your own message.
 
 Roomote generates each suggestion with the deployment's helper model using a
 bounded view of visible conversation history. This adds one small inference
-call per completed turn for each task or Session where the suggestion is
+call per completed turn for each task or session where the suggestion is
 requested.
 
-In shared Slack and Discord conversations, Fast can stay silent when linked
+In shared Slack and Discord conversations, Roomote can stay silent when linked
 participants are talking to each other. A direct reply to Roomote, a mention,
 or a direct message still requires a response.
 
 ## Reminders and monitors
 
-A Session can schedule a message to itself. Ask Fast to "remind me in twenty
+A session can schedule a message to itself. Ask Roomote to "remind me in twenty
 minutes", "check every ten minutes whether CI is green, up to six times", or
 "every weekday at nine, summarize the open pull requests", and it creates a
-wakeup for that Session. When the wakeup fires, Fast picks the conversation back
+wakeup for that session. When the wakeup fires, Roomote picks the conversation back
 up with its full history in context, does what was asked, and replies on the same surface
-the Session lives on: the transcript in the dashboard, or the originating Slack,
+the session lives on: the transcript in the dashboard, or the originating Slack,
 Discord, Teams, or Telegram thread.
 
 Reporting policy is separate from the schedule. One-shot wakeups default to
@@ -277,26 +277,26 @@ replying every run; recurring wakeups default to replying only when there is
 something notable, such as a change, a result, a blocker, or a decision you need
 to make. Ongoing-process checks can be one-shot or recurring and stay quiet
 without news. Ask for a reply on every run when you want a recurring reminder
-or report instead. When a monitored condition resolves, Fast tells you and
-cancels any remaining checks. You can also ask Fast to list or cancel wakeups
-at any time; archiving a Session cancels all of its wakeups.
+or report instead. When a monitored condition resolves, Roomote tells you and
+cancels any remaining checks. You can also ask Roomote to list or cancel wakeups
+at any time; archiving a session cancels all of its wakeups.
 
-In the dashboard, active scheduled wakeups appear above the Session composer,
+In the dashboard, active scheduled wakeups appear above the session composer,
 ordered by their next run. Each row shows the wakeup's name and a countdown.
 **Due soon** means the scheduled time has arrived, not that the check has run
-or completed. The Session owner or an admin can use the row's **Cancel wakeup**
+or completed. The session owner or an admin can use the row's **Cancel wakeup**
 control to stop it; other viewers can see the schedule but cannot cancel it
 from this list.
 
-Fast can proactively offer a follow-up when an ongoing process has a concrete
+Roomote can proactively offer a follow-up when an ongoing process has a concrete
 unresolved outcome worth checking and it has verified that available tools can
 check it. The offer names the outcome, evidence source, timing, and stop bound.
-Fast waits for your acceptance before scheduling; an explicit request to monitor
+Roomote waits for your acceptance before scheduling; an explicit request to monitor
 already gives that permission. Before scheduling, it rechecks access and reuses
 an equivalent active check rather than duplicating monitoring or notifications.
 
-Coding work that Fast starts for your request is a separate exception. The
-Session follows its own running tasks without asking for additional monitoring
+Coding work that Roomote starts for your request is a separate exception. The
+session follows its own running tasks without asking for additional monitoring
 consent, reports important milestones, blockers, or needed input, and can send a
 factual status after roughly ten minutes without a useful update. It may also
 correct a running task when inspected evidence shows that it has drifted from
@@ -304,17 +304,17 @@ the accepted request. This follow-through is hidden from the scheduled wakeup
 list and ends when no linked task is running; it does not change the consent and
 finite-bound rules for monitoring an external process.
 
-For ongoing-process monitoring, Fast uses a one-shot check or sets a finite run
+For ongoing-process monitoring, Roomote uses a one-shot check or sets a finite run
 count or end time on a recurring schedule at any cadence, without automatic
 renewal. It stops earlier if the outcome resolves, the check becomes irrelevant,
 or it loses the capability to verify the outcome. Missing evidence or reaching
-the bound without evidence of resolution is not success. This is how Fast is
+the bound without evidence of resolution is not success. This is how Roomote is
 instructed to manage monitors, not a scheduler restriction on every recurring
 wakeup: explicitly requested recurring reminders or reports can remain unbounded
 where the scheduling limits below allow it.
 
 Wakeups belong to the conversation and do not require an administrator. A
-Session may hold up to ten active wakeups, intervals range from one second to
+session may hold up to ten active wakeups, intervals range from one second to
 seven days, and recurring wakeups can be bounded by a run count or an end time.
 Intervals under five minutes must carry one of those bounds. A recurring wakeup
 whose turns fail five times in a row is retired. Deployment-wide recurring work
@@ -331,15 +331,15 @@ later.
 
 ## Session and execution access
 
-Any signed-in deployment member with a Session link can view its timeline,
-including custom automation Sessions and their linked task transcripts, logs,
-and artifacts. A Session link does not provide anonymous or public access.
+Any signed-in deployment member with a session link can view its timeline,
+including custom automation sessions and their linked task transcripts, logs,
+and artifacts. A session link does not provide anonymous or public access.
 
 Viewing is separate from acting. Custom automation management remains restricted
 to its creator and administrators. Existing permissions still apply to replies,
 edits, deletion, execution, terminals, previews, and secrets; a link does not
 grant those permissions. Replies are attributed to the teammate who sent them.
 
-The Sessions list and filter options remain scoped to the member's existing
+The sessions list and filter options remain scoped to the member's existing
 visibility permissions. Direct-link viewing does not make other members' custom
 automations discoverable in those lists.

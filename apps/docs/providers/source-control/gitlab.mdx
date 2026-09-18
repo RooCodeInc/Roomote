@@ -114,9 +114,9 @@ request when it can fix the failure.
 4. open or update a merge request and confirm configured review automation runs
 5. trigger a failing default-branch pipeline and confirm CI Failure Triage starts
 
-## Native GitLab API tools for Fast
+## Native GitLab API tools for sessions
 
-Fast can read code and handle supported merge request requests directly through
+Roomote can read code and handle supported merge request requests directly through
 GitLab's API without cloning a repository. These tools are built into Roomote:
 no extra MCP server, package installation, or server URL is required.
 
@@ -180,7 +180,7 @@ also verify the target MR and, for replies, its discussion before sending the wr
 
 These native tools do not expose file or branch writes, MR
 creation, approvals, thread resolution, note editing/deletion, issue
-tools, CI tools, or arbitrary GraphQL. Fast uses available APIs first for this
+tools, CI tools, or arbitrary GraphQL. Roomote uses available APIs first for this
 supported scope. Local checkout inspection, edits, commands, and validation
 still need a task. Task authorization and structured code reviews are unchanged.
 
@@ -197,7 +197,7 @@ still need a task. Task authorization and structured code reviews are unchanged.
 3. Test writes only with explicit authorization on a designated disposable MR.
    Specify the exact note, reply, or reversible title/state change, inspect the
    result in GitLab, and restore any changed fields. Never mutate arbitrary MRs
-   as a connectivity check. For a merge, Fast reads the MR immediately before
+   as a connectivity check. For a merge, Roomote reads the MR immediately before
    the mutation, binds it to `expected_head_sha`, and reads it again before
    reporting success or retrying an ambiguous result. Successful discovery or reads do not prove live
    authorized writes; verify each required operation before relying on it.

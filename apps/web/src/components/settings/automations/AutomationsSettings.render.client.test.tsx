@@ -1863,7 +1863,7 @@ describe('AutomationsSettings', () => {
     ).toHaveTextContent('High');
     expect(
       screen.getByText(
-        'Each run is a Session in the web app and does not send a report.',
+        'Each run is a session in the web app and does not send a report.',
       ),
     ).toBeInTheDocument();
     fireEvent.click(
@@ -2073,7 +2073,7 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        'Each run is a Session that reports findings and failures here, and replies continue it.',
+        'Each run is a session that reports findings and failures here, and replies continue it.',
       ),
     ).toBeInTheDocument();
   });
@@ -2124,7 +2124,7 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        'Each run is a Session that reports findings and failures here, and replies continue it.',
+        'Each run is a session that reports findings and failures here, and replies continue it.',
       ),
     ).toBeInTheDocument();
   });
@@ -2167,7 +2167,7 @@ describe('AutomationsSettings', () => {
 
     expect(
       screen.getByText(
-        'Each run is a Session that reports findings and failures here, and replies continue it.',
+        'Each run is a session that reports findings and failures here, and replies continue it.',
       ),
     ).toBeInTheDocument();
   });
@@ -2210,7 +2210,7 @@ describe('AutomationsSettings', () => {
 
     expect(
       screen.getByText(
-        'Each run is a Session that reports findings and failures here, and replies continue it.',
+        'Each run is a session that reports findings and failures here, and replies continue it.',
       ),
     ).toBeInTheDocument();
   });
