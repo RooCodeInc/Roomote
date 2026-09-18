@@ -68,7 +68,6 @@ export function SessionCard({
   session: SessionCardData;
   viewerUserId: string;
   query?: string;
-  view?: 'list' | 'board';
 }) {
   const ownerDisplayName =
     getUserDisplayName({
