@@ -146,4 +146,72 @@ describe('consumeAgentMailReplyVerification (real database)', () => {
     });
     expect(proof?.consumedAt).toBeNull();
   });
+
+  // Race regression: a revocation IN FLIGHT while consumption runs must still
+  // invalidate the proof. The consumption transaction locks the membership
+  // and participant rows FOR UPDATE, so a concurrent revocation either
+  // commits first (the locked read then sees it) or blocks behind the lock
+  // until consumption finishes — never slips in between the read and the
+  // verification write.
+  it.each([
+    {
+      kind: 'membership revocation',
+      revoke: (tx: typeof db, userId: string) =>
+        tx
+          .update(users)
+          .set({ deletedAt: new Date() })
+          .where(eq(users.id, userId)),
+    },
+    {
+      kind: 'participation removal',
+      revoke: (tx: typeof db, userId: string) =>
+        tx
+          .delete(agentmailConversationParticipants)
+          .where(eq(agentmailConversationParticipants.userId, userId)),
+    },
+  ])(
+    'does not verify when $kind commits while consumption waits on its row lock',
+    async ({ revoke }) => {
+      const { user, email } = await createUnverifiedUser();
+      const providerThreadId = await createOutboundThread(user.id);
+      const token = await extractToken(user.id, email);
+
+      let revocationApplied = false;
+      let releaseHold!: () => void;
+      const hold = new Promise<void>((resolve) => {
+        releaseHold = resolve;
+      });
+      // Revocation runs in its own transaction: it takes the row lock with
+      // its write, proves it is in flight, then holds the lock open while
+      // consumption starts (and blocks on the same row), then commits.
+      const revocation = db.transaction(async (tx) => {
+        await revoke(tx as unknown as typeof db, user.id);
+        revocationApplied = true;
+        await hold;
+      });
+      await vi.waitFor(() => {
+        expect(revocationApplied).toBe(true);
+      });
+
+      const consumption = consumeAgentMailReplyVerification({
+        inboxId: INBOX,
+        providerThreadId,
+        senderEmail: email,
+        message: replyMessage(token),
+      });
+      releaseHold();
+      const [result] = await Promise.all([consumption, revocation]);
+
+      expect(result).toBeNull();
+      const authUser = await db.query.authUsers.findFirst({
+        where: eq(authUsers.id, user.id),
+        columns: { emailVerified: true },
+      });
+      expect(authUser?.emailVerified).toBe(false);
+      const proof = await db.query.agentmailReplyVerificationProofs.findFirst({
+        where: eq(agentmailReplyVerificationProofs.userId, user.id),
+      });
+      expect(proof?.consumedAt).toBeNull();
+    },
+  );
 });

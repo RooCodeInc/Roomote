@@ -183,19 +183,26 @@ export async function consumeAgentMailReplyVerification(input: {
     }
 
     const verifiedUserId = await db.transaction(async (tx) => {
-      // Re-verify membership and participation inside the transaction: a
-      // soft-delete or participant split after the pre-checks must invalidate
-      // the proof rather than race the verification write.
-      const activeMember = await tx.query.users.findFirst({
-        where: and(eq(users.id, authUser.id), isNull(users.deletedAt)),
-        columns: { id: true },
-      });
-      if (!activeMember) {
+      // Lock the membership and participant rows FOR UPDATE: under READ
+      // COMMITTED a plain re-read can still be invalidated by a concurrent
+      // revocation committing before the verification write. With the row
+      // locks, a soft-delete or participant deletion either commits first
+      // (locked read then sees it) or blocks until this transaction commits,
+      // making revocation vs verification linearizable.
+      const memberRows = await tx
+        .select({ id: users.id, deletedAt: users.deletedAt })
+        .from(users)
+        .where(eq(users.id, authUser.id))
+        .for('update');
+      const member = memberRows[0];
+      if (!member || member.deletedAt) {
         return null;
       }
-      const currentParticipation =
-        await tx.query.agentmailConversationParticipants.findFirst({
-          where: and(
+      const participantRows = await tx
+        .select({ id: agentmailConversationParticipants.id })
+        .from(agentmailConversationParticipants)
+        .where(
+          and(
             eq(
               agentmailConversationParticipants.inboxId,
               normalizeEmailAddress(input.inboxId),
@@ -206,9 +213,9 @@ export async function consumeAgentMailReplyVerification(input: {
             ),
             eq(agentmailConversationParticipants.userId, authUser.id),
           ),
-          columns: { id: true },
-        });
-      if (!currentParticipation) {
+        )
+        .for('update');
+      if (participantRows.length === 0) {
         return null;
       }
       const updated = await tx
