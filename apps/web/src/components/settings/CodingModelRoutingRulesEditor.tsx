@@ -1,10 +1,12 @@
 'use client';
 
+import { useState } from 'react';
+
 import {
   ArrowRight,
   BasicTooltip,
   Button,
-  ChevronDown,
+  ChevronRight,
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
@@ -97,6 +99,8 @@ export function CodingModelRoutingRulesEditor({
   defaultReasoningEffort: ReasoningEffort | null;
   onChange: (change: CodingModelRoutingRulesChange) => void;
 }) {
+  const [open, setOpen] = useState(false);
+
   const updateRule = (index: number, rule: CodingModelRoutingRule) => {
     onChange({
       rules: rules.map((currentRule, currentIndex) =>
@@ -135,9 +139,12 @@ export function CodingModelRoutingRulesEditor({
   };
 
   return (
-    <Collapsible defaultOpen={false} className="space-y-3 pb-3">
+    <Collapsible open={open} onOpenChange={setOpen} className="space-y-3 pb-3">
       <CollapsibleTrigger className="group flex cursor-pointer items-center gap-1.5 text-left text-sm text-muted-foreground hover:text-foreground">
-        <ChevronDown className="size-4 shrink-0 transition-transform group-data-[state=open]:rotate-180" />
+        <ChevronRight
+          className={`size-4 shrink-0 transition-transform ${open ? 'rotate-90' : ''}`}
+          style={{ transform: open ? 'rotate(90deg)' : undefined }}
+        />
         Custom coding model routing rules
       </CollapsibleTrigger>
       <CollapsibleContent className="space-y-3">

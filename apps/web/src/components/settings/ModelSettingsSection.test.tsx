@@ -631,11 +631,16 @@ describe('ModelSettingsSection', () => {
     settingsData.current = buildSettingsData();
     renderModelSettingsSection();
 
-    fireEvent.click(
-      screen.getByRole('button', {
-        name: 'Custom coding model routing rules',
-      }),
-    );
+    const routingTrigger = screen.getByRole('button', {
+      name: 'Custom coding model routing rules',
+    });
+    expect(routingTrigger).toHaveAttribute('aria-expanded', 'false');
+    expect(routingTrigger.querySelector('svg')).not.toHaveClass('rotate-90');
+    fireEvent.click(routingTrigger);
+    expect(routingTrigger).toHaveAttribute('aria-expanded', 'true');
+    expect(routingTrigger.querySelector('svg')).toHaveStyle({
+      transform: 'rotate(90deg)',
+    });
     fireEvent.click(
       screen.getByRole('button', {
         name: 'Add a model routing rule',
