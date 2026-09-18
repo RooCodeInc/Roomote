@@ -55,7 +55,9 @@ const { mockNavigationState, mockRepositoriesState, mockCreateRepoDialog } =
       data: [
         { id: 'repo-1', fullName: 'acme/api' },
         { id: 'repo-2', fullName: 'acme/web' },
-      ] as Array<{ id: string; fullName: string; isEmpty?: boolean }>,
+      ] as
+        | Array<{ id: string; fullName: string; isEmpty?: boolean }>
+        | undefined,
       isError: false,
       isFetching: false,
       isPending: false,
@@ -316,6 +318,17 @@ describe('CreateEnvironmentPage', () => {
     mockRepositoriesState.refetch.mockReset();
   });
 
+  it('keeps cached repositories visible after a background failure', () => {
+    mockRepositoriesState.isError = true;
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <CreateEnvironmentPage />
+      </QueryClientProvider>,
+    );
+    expect(screen.getByText('acme/api')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Start Agent' })).toBeEnabled();
+  });
+
   it('renders the create-repo affordance and opens the dialog', () => {
     const queryClient = new QueryClient();
 
@@ -440,7 +453,7 @@ describe('CreateEnvironmentPage', () => {
 
   it('blocks agent start and retries when repositories fail to load', async () => {
     mockRepositoriesState.isError = true;
-    mockRepositoriesState.data = [];
+    mockRepositoriesState.data = undefined;
     const queryClient = new QueryClient();
 
     render(
@@ -482,7 +495,7 @@ describe('CreateEnvironmentPage', () => {
   it('keeps retry disabled while the repository query is retrying', () => {
     mockRepositoriesState.isError = true;
     mockRepositoriesState.isFetching = true;
-    mockRepositoriesState.data = [];
+    mockRepositoriesState.data = undefined;
     const queryClient = new QueryClient();
 
     render(

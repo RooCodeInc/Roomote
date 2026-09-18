@@ -203,7 +203,9 @@ export function CreateEnvironmentPage({
                   isEmpty: (repository as { isEmpty?: boolean }).isEmpty,
                 }))}
                 repositoriesLoading={repositories.isPending}
-                repositoriesError={repositories.isError}
+                repositoriesError={
+                  repositories.isError && repositories.data === undefined
+                }
                 repositoriesRetrying={repositories.isFetching}
                 onRetryRepositories={() => void repositories.refetch()}
                 onOpenCreateRepo={() => setCreateRepoDialogOpen(true)}
