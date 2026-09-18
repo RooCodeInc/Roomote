@@ -233,7 +233,7 @@ describe('AuthenticatedLayoutClient', () => {
     expect(replaceMock).not.toHaveBeenCalled();
   });
 
-  it('keeps Settings accessible while admin setup is incomplete', () => {
+  it('keeps Integrations accessible while admin setup is incomplete', () => {
     mockPathname = '/integrations';
     useQueryMock.mockImplementation((options: { queryKey: string[] }) => ({
       data:
@@ -250,11 +250,11 @@ describe('AuthenticatedLayoutClient', () => {
 
     render(
       <AuthenticatedLayoutClient>
-        <div>Settings content</div>
+        <div>Integrations content</div>
       </AuthenticatedLayoutClient>,
     );
 
-    expect(screen.getByText('Settings content')).toBeVisible();
+    expect(screen.getByText('Integrations content')).toBeVisible();
     expect(replaceMock).not.toHaveBeenCalled();
   });
 
