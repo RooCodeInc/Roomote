@@ -26,6 +26,7 @@ const MAX_TABLE_CHARACTERS = 10_000;
 
 const AUTOMATION_MARKDOWN_OPTIONS = {
   angleBracketLinkDestinations: true,
+  preserveParagraphs: true,
 } as const;
 
 export function buildAutomationResultContentBlocks(text: string): SlackBlock[] {
