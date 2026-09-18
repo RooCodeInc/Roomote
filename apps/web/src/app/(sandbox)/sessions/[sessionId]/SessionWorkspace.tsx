@@ -1094,7 +1094,15 @@ export function SessionWorkspace({
           className="relative"
           sideActions={
             <>
-              <SandboxSideActions isPanelOpen={panelOpen} onShowMain={showMain}>
+              <SandboxSideActions
+                isPanelOpen={panelOpen}
+                onShowMain={showMain}
+                footer={
+                  session.canDelete ? (
+                    <SessionDeleteAction sessionId={session.id} />
+                  ) : null
+                }
+              >
                 <SideNavItem
                   side="right"
                   label="Tasks"
@@ -1141,9 +1149,6 @@ export function SessionWorkspace({
                   icon={Info}
                   onClick={() => togglePanel('info')}
                 />
-                {session.canDelete ? (
-                  <SessionDeleteAction sessionId={session.id} />
-                ) : null}
               </SandboxSideActions>
               {!isSidebarVisible && !panelOpen ? (
                 <BasicTooltip content="Show sidebar">
