@@ -69,4 +69,17 @@ describe('inspectRAnalysisScript', () => {
       unresolvedPackageExpressions: [],
     });
   });
+
+  it('ignores package-like calls inside R raw strings', () => {
+    expect(
+      inspectRAnalysisScript(`
+        message(r"(a " then library(notAPackage))")
+        message(R"--[require(alsoNotAPackage)]--")
+        library(DESeq2)
+      `),
+    ).toEqual({
+      packages: ['DESeq2'],
+      unresolvedPackageExpressions: [],
+    });
+  });
 });
