@@ -2268,13 +2268,14 @@ export class SlackNotifier {
       context === 'fetchMessageBlocks'
         ? 1
         : MAX_SLACK_CONVERSATIONS_REPLIES_RATE_LIMIT_RETRIES;
+    const requestKey = `${cacheKey}:retries=${maxRateLimitRetries}`;
     const cached = this.threadResponseCache.get(cacheKey);
     if (cached) {
       if (cached.expiresAt > Date.now()) return cached.response;
       this.threadResponseCache.delete(cacheKey);
     }
 
-    const pending = this.threadResponseRequests.get(cacheKey);
+    const pending = this.threadResponseRequests.get(requestKey);
     if (pending) return pending;
 
     const request = (async () => {
@@ -2359,11 +2360,11 @@ export class SlackNotifier {
       return null;
     })();
 
-    this.threadResponseRequests.set(cacheKey, request);
+    this.threadResponseRequests.set(requestKey, request);
     try {
       return await request;
     } finally {
-      this.threadResponseRequests.delete(cacheKey);
+      this.threadResponseRequests.delete(requestKey);
     }
   }
 

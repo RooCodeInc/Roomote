@@ -1514,6 +1514,57 @@ describe('SlackNotifier', () => {
       await expect(Promise.all([first, second])).resolves.toEqual([true, true]);
       expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(1);
     });
+
+    it('does not share an in-flight request across retry budgets', async () => {
+      vi.useFakeTimers();
+      vi.spyOn(Math, 'random').mockReturnValue(0);
+
+      try {
+        getGlobalWithFetch().fetch = vi
+          .fn()
+          .mockResolvedValueOnce({
+            ok: false,
+            status: 429,
+            statusText: 'Too Many Requests',
+            headers: { get: () => null },
+          })
+          .mockResolvedValueOnce(
+            Response.json({
+              ok: true,
+              messages: [{ ts: '111.000' }],
+            }),
+          )
+          .mockResolvedValueOnce(
+            Response.json({
+              ok: true,
+              messages: [
+                { ts: '111.000', type: 'message', bot_id: 'B123', blocks: [] },
+              ],
+            }),
+          );
+
+        const blocksPromise = notifier.getMessageBlocks({
+          channel: 'C123',
+          messageTs: '111.000',
+          threadTs: '111.000',
+        });
+
+        await Promise.resolve();
+
+        const existsPromise = notifier.hasMessageInThread({
+          channel: 'C123',
+          threadTs: '111.000',
+          messageTs: '111.000',
+        });
+
+        await expect(existsPromise).resolves.toBe(true);
+        await vi.advanceTimersByTimeAsync(1_000);
+        await expect(blocksPromise).resolves.toEqual([]);
+        expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(3);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   describe('fetchThreadMessages', () => {
