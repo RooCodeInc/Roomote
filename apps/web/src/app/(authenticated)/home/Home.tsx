@@ -5,7 +5,6 @@ import { useQuery } from '@tanstack/react-query';
 
 import { cn } from '@/lib/utils';
 import { useAuthorizedUser } from '@/hooks/useUser';
-import { useHomeComposerSuggestions } from '@/hooks/useHomeComposerSuggestions';
 import { useTRPC } from '@/trpc/client';
 import { NewTaskForm } from '@/components/tasks/NewTaskForm';
 
@@ -40,14 +39,10 @@ export function Home({
   >(undefined);
 
   const { brainConfigured } = useAuthorizedUser();
-  const {
-    enabled: homeComposerSuggestionsEnabled,
-    isLoading: homeComposerSuggestionsFlagLoading,
-  } = useHomeComposerSuggestions();
   const trpc = useTRPC();
   const suggestionsQuery = useQuery(
     trpc.home.composerSuggestions.queryOptions(undefined, {
-      enabled: homeComposerSuggestionsEnabled && brainConfigured === true,
+      enabled: brainConfigured === true,
       // Recheck for newly completed memories on a later Home visit without
       // repeatedly invoking the helper model for an unchanged memory revision.
       staleTime: 5 * 60_000,
@@ -55,13 +50,10 @@ export function Home({
     }),
   );
   const isInitialSuggestionsLoading =
-    homeComposerSuggestionsEnabled &&
     brainConfigured === true &&
     suggestionsQuery.isPending &&
     suggestionsQuery.data === undefined;
-  const generatedSuggestions = homeComposerSuggestionsEnabled
-    ? (suggestionsQuery.data?.suggestions ?? [])
-    : [];
+  const generatedSuggestions = suggestionsQuery.data?.suggestions ?? [];
   const promptPlaceholders =
     generatedSuggestions.length > 0
       ? generatedSuggestions
@@ -75,32 +67,6 @@ export function Home({
 
   const contentColumnRef = useRef<HTMLDivElement>(null);
   const promptCardRef = useRef<HTMLDivElement>(null);
-  const hasResolvedPromptAutoFocusRef = useRef(false);
-
-  useEffect(() => {
-    if (
-      homeComposerSuggestionsFlagLoading ||
-      hasResolvedPromptAutoFocusRef.current
-    ) {
-      return;
-    }
-
-    hasResolvedPromptAutoFocusRef.current = true;
-    if (homeComposerSuggestionsEnabled) {
-      return;
-    }
-
-    const textarea = promptCardRef.current?.querySelector('textarea');
-    if (
-      !textarea ||
-      (document.activeElement !== document.body &&
-        document.activeElement !== textarea)
-    ) {
-      return;
-    }
-
-    textarea.focus({ preventScroll: true });
-  }, [homeComposerSuggestionsEnabled, homeComposerSuggestionsFlagLoading]);
 
   useEffect(() => {
     setPlaceholderIndex(
@@ -109,10 +75,7 @@ export function Home({
   }, [initialPlaceholderIndex]);
 
   useEffect(() => {
-    if (
-      (homeComposerSuggestionsEnabled && isPromptFocused) ||
-      promptPlaceholders.length <= 1
-    ) {
+    if (isPromptFocused || promptPlaceholders.length <= 1) {
       return;
     }
 
@@ -125,11 +88,7 @@ export function Home({
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [
-    homeComposerSuggestionsEnabled,
-    isPromptFocused,
-    promptPlaceholders.length,
-  ]);
+  }, [isPromptFocused, promptPlaceholders.length]);
 
   // Dynamically compute the max textarea height so it can grow to fill the
   // available space without pushing the bottom-sheet tabs off screen.
@@ -231,20 +190,10 @@ export function Home({
             <NewTaskForm
               onTaskStarted={handleTaskStarted}
               placeholder={
-                isInitialSuggestionsLoading
-                  ? ''
-                  : homeComposerSuggestionsEnabled
-                    ? FALLBACK_PROMPT_PLACEHOLDER
-                    : activePromptPlaceholder
+                isInitialSuggestionsLoading ? '' : FALLBACK_PROMPT_PLACEHOLDER
               }
-              promptSuggestion={
-                homeComposerSuggestionsEnabled
-                  ? activePromptPlaceholder
-                  : undefined
-              }
-              onPromptFocusChange={
-                homeComposerSuggestionsEnabled ? setIsPromptFocused : undefined
-              }
+              promptSuggestion={activePromptPlaceholder}
+              onPromptFocusChange={setIsPromptFocused}
               autoFocus={false}
               textareaMaxHeight={textareaMaxHeight}
               promptContainerRef={promptCardRef}
