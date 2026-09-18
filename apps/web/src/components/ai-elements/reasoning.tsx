@@ -111,7 +111,7 @@ export const Reasoning = memo(
         value={{ isStreaming, isOpen: isOpen!, setIsOpen, duration }}
       >
         <Collapsible
-          className={cn('group not-prose', className)}
+          className={cn('not-prose', className)}
           onOpenChange={handleOpenChange}
           open={isOpen}
           {...props}
@@ -149,7 +149,7 @@ export const ReasoningTrigger = memo(
     return (
       <CollapsibleTrigger
         className={cn(
-          'flex w-full min-w-0 items-center gap-2 text-muted-foreground text-sm font-light whitespace-nowrap transition-colors hover:text-foreground cursor-pointer',
+          'group/collapsible-icon-trigger flex w-full min-w-0 items-center gap-2 text-muted-foreground text-sm font-light whitespace-nowrap transition-colors hover:text-foreground cursor-pointer',
           className,
         )}
         {...props}
