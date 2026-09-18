@@ -46,7 +46,9 @@ const {
       enabled: boolean;
     }[],
   },
-  createMock: vi.fn(async () => ({ id: 'new-server' })),
+  createMock: vi.fn(async (_input: Record<string, unknown>) => ({
+    id: 'new-server',
+  })),
   deleteMock: vi.fn(async () => ({ deleted: true })),
   setEnabledMock: vi.fn(async () => ({ enabled: false })),
   setVisibilityMock: vi.fn(async () => ({ visibility: 'owner' })),
