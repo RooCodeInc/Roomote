@@ -113,7 +113,7 @@ export const TodoListSectionTrigger = ({
   <CollapsibleTrigger asChild>
     <button
       className={cn(
-        'group flex w-full items-center justify-between px-4 py-2 text-left font-medium text-muted-foreground text-sm transition-colors cursor-pointer',
+        'group/collapsible-icon-trigger flex w-full items-center justify-between px-4 py-2 text-left font-medium text-muted-foreground text-sm transition-colors cursor-pointer',
         className,
       )}
       type="button"
