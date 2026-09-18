@@ -18,6 +18,20 @@ import {
 import { toolError } from './in-process-api';
 import { toMcpToolResult } from './proxy-utils';
 
+export function getDesktopDeviceRoutingStatus(input: {
+  localSocketOnline: boolean;
+  lastInstanceId: string | null;
+  currentInstanceId: string;
+}): { online: boolean; routedElsewhere: boolean } {
+  const routedElsewhere =
+    input.lastInstanceId != null &&
+    input.lastInstanceId !== input.currentInstanceId;
+  return {
+    online: input.localSocketOnline && !routedElsewhere,
+    routedElsewhere,
+  };
+}
+
 export function registerRoomoteDesktopTools(
   server: McpServer,
   ownerUserId: string,
@@ -46,14 +60,14 @@ export function registerRoomoteDesktopTools(
       if (action === 'list') {
         const devices = await listDesktopDevices(ownerUserId);
         return toMcpToolResult({
-          devices: devices.map((device) => ({
-            ...device,
-            online: broker.isOnline(ownerUserId, device.id),
-            routedElsewhere:
-              !broker.isOnline(ownerUserId, device.id) &&
-              device.lastInstanceId != null &&
-              device.lastInstanceId !== broker.instanceId,
-          })),
+          devices: devices.map((device) => {
+            const routing = getDesktopDeviceRoutingStatus({
+              localSocketOnline: broker.isOnline(ownerUserId, device.id),
+              lastInstanceId: device.lastInstanceId,
+              currentInstanceId: broker.instanceId,
+            });
+            return { ...device, ...routing };
+          }),
         });
       }
       if (!deviceId)
@@ -121,7 +135,12 @@ export function registerRoomoteDesktopTools(
       const devices = await listDesktopDevices(ownerUserId);
       const online = devices.filter(
         (device) =>
-          !device.revokedAt && broker.isOnline(ownerUserId, device.id),
+          !device.revokedAt &&
+          getDesktopDeviceRoutingStatus({
+            localSocketOnline: broker.isOnline(ownerUserId, device.id),
+            lastInstanceId: device.lastInstanceId,
+            currentInstanceId: broker.instanceId,
+          }).online,
       );
       const deviceId =
         input.deviceId ?? (online.length === 1 ? online[0]!.id : undefined);
@@ -138,11 +157,12 @@ export function registerRoomoteDesktopTools(
       );
       if (!selectedDevice)
         return toolError({ error: 'Desktop device not found' });
-      if (
-        !broker.isOnline(ownerUserId, deviceId) &&
-        selectedDevice.lastInstanceId != null &&
-        selectedDevice.lastInstanceId !== broker.instanceId
-      ) {
+      const selectedRouting = getDesktopDeviceRoutingStatus({
+        localSocketOnline: broker.isOnline(ownerUserId, deviceId),
+        lastInstanceId: selectedDevice.lastInstanceId,
+        currentInstanceId: broker.instanceId,
+      });
+      if (selectedRouting.routedElsewhere) {
         return toolError({
           error:
             'device_on_other_instance: desktop routing across API replicas is not available yet',
