@@ -55,8 +55,10 @@ Shared Desktop tab, and you can use the same window yourself: the tabs,
 cookies, and logins are shared.
 
 - Sign in to a site, pass a 2FA prompt, or solve a CAPTCHA in the window, and
-  the agent continues from that signed-in state. Anything you sign in to there
-  is available to the agent for the rest of the task.
+  the agent continues from that signed-in state. The sandbox is the trust
+  boundary: anything you sign in to there is available to the agent, and to
+  any code the task runs in its sandbox, for the rest of the task. Sign in
+  with the access you would give the task itself.
 - The window opens the first time the agent uses its browser and stays open
   for the life of the sandbox. The agent works in its own tab and leaves tabs
   it did not open alone.

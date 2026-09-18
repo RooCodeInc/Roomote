@@ -739,10 +739,35 @@ ensure_shared_browser() {
 # makes that binding strict, so every command fails with `tab_gone` once the
 # tab is closed. That happens whenever the shared browser restarts (every
 # sandbox wake-up starts a new one) and when a person closes the agent's tab.
-# A command that starts work on a page does not depend on the lost one, so it
-# gets a fresh tab first. This runs before cookie seeding, which would hit the
-# same error. Other commands keep failing with agent-browser's own recovery
-# hint, because the page they expected is gone either way.
+# A command that loads a page of its own does not depend on the lost one, so
+# it gets a fresh tab first. This runs before cookie seeding, which would hit
+# the same error. Other commands, including a recording of the current page,
+# keep failing with agent-browser's own recovery hint, because the page they
+# expected is gone either way.
+loads_its_own_page() {
+  case "$AGENT_BROWSER_COMMAND" in
+    open|goto|navigate)
+      return 0
+      ;;
+    record)
+      case "$AGENT_BROWSER_SUBCOMMAND" in
+        start|restart)
+          local arg
+          for arg in "${AGENT_BROWSER_EXEC_ARGS[@]}"; do
+            case "$arg" in
+              http://*|https://*)
+                return 0
+                ;;
+            esac
+          done
+          ;;
+      esac
+      ;;
+  esac
+
+  return 1
+}
+
 ensure_session_tab() {
   resolve_cli_paths
 
@@ -756,15 +781,52 @@ ensure_session_tab() {
   esac
 }
 
+has_command_word() {
+  local arg
+  for arg in ${AGENT_BROWSER_EXEC_ARGS[@]+"${AGENT_BROWSER_EXEC_ARGS[@]}"}; do
+    if [ "$arg" = "$1" ]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 # Commands that only observe the page stay available while a person drives.
+# Anything that acts on the page or changes the state the person's session
+# depends on (cookies, storage, request routing, a loaded state file) waits.
 is_input_command() {
   case "$AGENT_BROWSER_COMMAND" in
-    snapshot|screenshot|get|is|console|errors|network|cookies|storage|wait|diff|read|vitals|pdf|inspect|highlight|stream|state|record|trace|profiler|close|quit|exit)
+    snapshot|screenshot|get|is|console|errors|wait|diff|read|vitals|pdf|inspect|highlight|stream|record|trace|profiler|close|quit|exit)
       return 1
       ;;
     tab)
       case "$AGENT_BROWSER_SUBCOMMAND" in
         ""|list)
+          return 1
+          ;;
+      esac
+      ;;
+    cookies)
+      case "$AGENT_BROWSER_SUBCOMMAND" in
+        ""|get)
+          return 1
+          ;;
+      esac
+      ;;
+    storage)
+      if ! has_command_word set && ! has_command_word clear; then
+        return 1
+      fi
+      ;;
+    network)
+      if [ "$AGENT_BROWSER_SUBCOMMAND" = "requests" ] && ! has_command_word --clear; then
+        return 1
+      fi
+      ;;
+    state)
+      case "$AGENT_BROWSER_SUBCOMMAND" in
+        save|list|show)
           return 1
           ;;
       esac
@@ -825,7 +887,7 @@ if [ "$USE_SHARED_BROWSER" = true ]; then
   if is_input_command; then
     yield_to_human
   fi
-  if should_seed_preview_cookies; then
+  if loads_its_own_page; then
     ensure_session_tab
   fi
 else

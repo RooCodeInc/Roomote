@@ -286,6 +286,24 @@ describe('agent-browser wrapper shared browser', () => {
     ]);
   });
 
+  it.each([
+    [['record', 'start', '/tmp/demo.webm', 'https://example.com'], true],
+    [['record', 'start', '/tmp/demo.webm'], false],
+    [['record', 'restart', '/tmp/demo.webm'], false],
+  ])(
+    'only replaces a gone tab for a recording that loads its own page: %j',
+    async (args, probesTab) => {
+      const sandbox = await createSandbox({ browserRunning: true });
+
+      await sandbox.run(args);
+
+      expect(sandbox.calls()).toEqual([
+        ...(probesTab ? [`pin=1 --cdp ${sandbox.cdpPort} get url`] : []),
+        `pin=1 --cdp ${sandbox.cdpPort} ${args.join(' ')}`,
+      ]);
+    },
+  );
+
   it('reports a gone tab to commands that depended on its page', async () => {
     const sandbox = await createSandbox({ browserRunning: true });
 
@@ -359,6 +377,50 @@ describe('agent-browser wrapper shared browser', () => {
       `pin=1 --cdp ${sandbox.cdpPort} tab list`,
     ]);
   });
+
+  it.each([
+    [['cookies', 'set', 'sid', 'x', '--url', 'https://example.com']],
+    [['cookies', 'clear']],
+    [['storage', 'local', 'set', 'token', 'x']],
+    [['storage', 'session', 'clear']],
+    [['network', 'route', 'https://example.com/*', '--abort']],
+    [['state', 'load', '/tmp/state.json']],
+    [['tab', 'new']],
+  ])(
+    'holds commands that change the shared session while a person drives: %j',
+    async (args) => {
+      const sandbox = await createSandbox({
+        browserRunning: true,
+        metrics: { control_connected: true, control_idle_ms: 500 },
+      });
+
+      await expect(sandbox.run(args)).rejects.toMatchObject({ code: 75 });
+      expect(sandbox.calls()).toEqual([]);
+    },
+  );
+
+  it.each([
+    [['cookies']],
+    [['cookies', 'get']],
+    [['storage', 'local']],
+    [['storage', 'local', 'get', 'token']],
+    [['network', 'requests']],
+    [['state', 'save', '/tmp/state.json']],
+  ])(
+    'lets commands that only read the shared session through: %j',
+    async (args) => {
+      const sandbox = await createSandbox({
+        browserRunning: true,
+        metrics: { control_connected: true, control_idle_ms: 500 },
+      });
+
+      await sandbox.run(args);
+
+      expect(sandbox.calls()).toEqual([
+        `pin=1 --cdp ${sandbox.cdpPort} ${args.join(' ')}`,
+      ]);
+    },
+  );
 
   it.each([
     [{ control_connected: true, control_idle_ms: 60_000 }],
