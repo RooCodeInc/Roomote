@@ -3,8 +3,8 @@ import type { TaskMessageContentBlock } from '@roomote/types';
 import type { NonTaskPromptFile } from '../non-task-provider-usage';
 
 export const FAST_AGENT_TRANSCRIPT_IMAGE_MAX_MESSAGES = 12;
-export const FAST_AGENT_TRANSCRIPT_IMAGE_MAX_IMAGES = 20;
-export const FAST_AGENT_TRANSCRIPT_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
+const FAST_AGENT_TRANSCRIPT_IMAGE_MAX_IMAGES = 20;
+const FAST_AGENT_TRANSCRIPT_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
 export const FAST_AGENT_TRANSCRIPT_IMAGE_MAX_INSPECTION = 8;
 
 export type FastAgentTranscriptImage = {
