@@ -16,6 +16,7 @@ export {
   SESSION_PRESENCE_LEASE_MS,
   SESSION_BROWSER_ATTENTION_LEASE_MS,
   type SessionBrowserNotificationPermission,
+  type SessionBrowserAttentionLease,
 } from './session-presence';
 
 export const REDIS_KEYS = {

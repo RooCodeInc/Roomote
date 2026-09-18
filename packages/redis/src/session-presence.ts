@@ -20,6 +20,11 @@ type SessionPresenceLease = SessionPresenceIdentity & {
   clientId: string;
 };
 
+export type SessionBrowserAttentionLease = SessionPresenceLease & {
+  leaseId: string;
+  permission: SessionBrowserNotificationPermission;
+};
+
 type SessionVoiceCallLease = SessionPresenceLease & {
   generation: number;
 };
@@ -53,6 +58,14 @@ function sessionBrowserAttentionKey({
   userId,
 }: SessionPresenceIdentity) {
   return `session:browser-attention:${sessionId}:${userId}`;
+}
+
+function sessionBrowserAttentionMember({
+  clientId,
+  leaseId,
+  permission,
+}: SessionBrowserAttentionLease) {
+  return `${clientId}:${leaseId}:${permission}`;
 }
 
 async function refreshLease(
@@ -159,9 +172,7 @@ export async function isSessionUserPresent(
 
 /** Keeps one mounted Session/task page eligible for browser attention. */
 export async function refreshSessionBrowserAttentionLease(
-  lease: SessionPresenceLease & {
-    permission: SessionBrowserNotificationPermission;
-  },
+  lease: SessionBrowserAttentionLease,
   options: SessionPresenceOptions = {},
 ): Promise<{ expiresAt: number }> {
   const now = options.now ?? Date.now();
@@ -170,7 +181,7 @@ export async function refreshSessionBrowserAttentionLease(
   const key = sessionBrowserAttentionKey(lease);
   await redis
     .multi()
-    .zadd(key, expiresAt, `${lease.clientId}:${lease.permission}`)
+    .zadd(key, expiresAt, sessionBrowserAttentionMember(lease))
     .zremrangebyscore(key, '-inf', now)
     .pexpire(key, SESSION_BROWSER_ATTENTION_LEASE_MS * 2)
     .exec();
@@ -179,16 +190,12 @@ export async function refreshSessionBrowserAttentionLease(
 
 /** Best-effort release; expiry covers abrupt browser disconnects. */
 export async function disconnectSessionBrowserAttentionLease(
-  lease: SessionPresenceLease,
+  lease: SessionBrowserAttentionLease,
   options: Pick<SessionPresenceOptions, 'redis'> = {},
 ): Promise<void> {
   const redis = options.redis ?? getRedis();
   const key = sessionBrowserAttentionKey(lease);
-  const members = await redis.zrange(key, 0, -1);
-  const matching = members.filter((member) =>
-    member.startsWith(`${lease.clientId}:`),
-  );
-  if (matching.length > 0) await redis.zrem(key, ...matching);
+  await redis.zrem(key, sessionBrowserAttentionMember(lease));
 }
 
 /** Returns notification capabilities for every unexpired mounted tab. */
@@ -208,12 +215,14 @@ export async function getSessionBrowserAttentionCapabilities(
     unsupported: [],
   };
   for (const member of members) {
-    const separator = member.lastIndexOf(':');
-    if (separator < 0) continue;
-    const clientId = member.slice(0, separator);
-    const permission = member.slice(separator + 1);
+    const parts = member.split(':');
+    const clientId = parts[0];
+    const permission = parts.at(-1);
+    if (!clientId || !permission) continue;
     if (permission in result) {
-      result[permission as SessionBrowserNotificationPermission].push(clientId);
+      const clients =
+        result[permission as SessionBrowserNotificationPermission];
+      if (!clients.includes(clientId)) clients.push(clientId);
     }
   }
   return result;

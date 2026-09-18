@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { type NextRequest, NextResponse } from 'next/server';
 import { createResponse } from 'better-sse';
 import { z } from 'zod';
@@ -50,6 +52,8 @@ export async function GET(
     sessionId: session.id,
     userId: auth.userId,
     clientId: query.data.clientId,
+    leaseId: randomUUID(),
+    permission: query.data.permission,
   };
   const since = new Date();
 
@@ -62,7 +66,6 @@ export async function GET(
         if (now - lastLeaseRefresh >= LEASE_REFRESH_MS) {
           await refreshSessionBrowserAttentionLease({
             ...lease,
-            permission: query.data.permission,
           });
           lastLeaseRefresh = now;
         }

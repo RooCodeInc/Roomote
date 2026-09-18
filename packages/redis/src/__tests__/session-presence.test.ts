@@ -113,11 +113,21 @@ describe('Session presence leases', () => {
 
   it('tracks mounted browser tabs separately by notification permission', async () => {
     await refreshSessionBrowserAttentionLease(
-      { ...identity, clientId: 'tab-1', permission: 'granted' },
+      {
+        ...identity,
+        clientId: 'tab-1',
+        leaseId: 'lease-1',
+        permission: 'granted',
+      },
       { now: 1_000, redis },
     );
     await refreshSessionBrowserAttentionLease(
-      { ...identity, clientId: 'tab-2', permission: 'default' },
+      {
+        ...identity,
+        clientId: 'tab-2',
+        leaseId: 'lease-2',
+        permission: 'default',
+      },
       { now: 1_000, redis },
     );
 
@@ -134,17 +144,32 @@ describe('Session presence leases', () => {
     ).resolves.toBe(false);
   });
 
-  it('expires and disconnects browser attention tabs independently', async () => {
+  it('does not let replaced stream cleanup remove the replacement lease', async () => {
     await refreshSessionBrowserAttentionLease(
-      { ...identity, clientId: 'tab-1', permission: 'granted' },
+      {
+        ...identity,
+        clientId: 'tab-1',
+        leaseId: 'lease-old',
+        permission: 'default',
+      },
       { now: 1_000, redis },
     );
     await refreshSessionBrowserAttentionLease(
-      { ...identity, clientId: 'tab-2', permission: 'granted' },
-      { now: 1_000, redis },
+      {
+        ...identity,
+        clientId: 'tab-1',
+        leaseId: 'lease-new',
+        permission: 'granted',
+      },
+      { now: 2_000, redis },
     );
     await disconnectSessionBrowserAttentionLease(
-      { ...identity, clientId: 'tab-1' },
+      {
+        ...identity,
+        clientId: 'tab-1',
+        leaseId: 'lease-old',
+        permission: 'default',
+      },
       { redis },
     );
     expect(
@@ -154,11 +179,11 @@ describe('Session presence leases', () => {
           redis,
         })
       ).granted,
-    ).toEqual(['tab-2']);
+    ).toEqual(['tab-1']);
     expect(
       (
         await getSessionBrowserAttentionCapabilities(identity, {
-          now: 31_000,
+          now: 32_000,
           redis,
         })
       ).granted,
