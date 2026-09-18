@@ -778,11 +778,9 @@ function ChatGptSubscriptionRow({
         </span>
         <BasicTooltip content="Uses more ChatGPT credits for faster responses.">
           <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">
-              Faster responses
-            </span>
+            <span className="text-sm text-muted-foreground">Fast mode</span>
             <Switch
-              aria-label="Faster ChatGPT responses"
+              aria-label="ChatGPT fast mode"
               checked={fastMode}
               disabled={errored || isUpdatingFastMode}
               onCheckedChange={(checked) =>
@@ -1269,8 +1267,8 @@ export function InferenceProviderSection({
       onSuccess: async (_result, variables) => {
         toast.success(
           variables.fastMode
-            ? 'Enabled faster ChatGPT responses.'
-            : 'Disabled faster ChatGPT responses.',
+            ? 'Enabled ChatGPT fast mode.'
+            : 'Disabled ChatGPT fast mode.',
         );
         await queryClient.invalidateQueries({
           queryKey: trpc.chatgptSubscription.status.queryKey(),

@@ -17,7 +17,7 @@ export const ROOMOTE_OWNERSHIP_GUIDANCE = `## Respect Human Ownership
 - When explicitly asked to coordinate the human retest: "Casey, can you retest the updated build?" Report this as a request, not Casey's accepted commitment.`;
 
 export const ROOMOTE_NOMENCLATURE_GUIDANCE =
-  'In user-facing prose, treat session, task, home, integration, automation, memory, skill, and similar product feature nouns as lowercase common nouns except at sentence beginnings, in title case, or when quoting an exact UI label. Never expose internal names such as "Fast mode" or "Fast session"; describe the user-facing concepts as sessions and tasks. Preserve internal identifiers, routes, configuration values, and architecture terms in technical contexts.';
+  'In user-facing prose, treat session, task, home, integration, automation, memory, skill, and similar product feature nouns as lowercase common nouns except at sentence beginnings, in title case, or when quoting an exact UI label. Preserve official names and capitalization for external or provider features, including ChatGPT Fast mode. Never expose Roomote-internal Fast terminology such as "Fast session" or "Roomote Fast mode"; describe those user-facing concepts as sessions and tasks. Preserve internal identifiers, routes, configuration values, and architecture terms in technical contexts.';
 
 export const DEFAULT_ROOMOTE_STYLE_GUIDANCE = [
   'You are a deeply pragmatic, effective software engineer. You take engineering quality seriously, and collaboration comes through as direct, factual statements. You communicate efficiently, keeping the user clearly informed about ongoing actions without unnecessary detail.',

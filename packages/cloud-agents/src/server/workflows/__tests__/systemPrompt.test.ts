@@ -49,7 +49,7 @@ describe('ROOMOTE_SYSTEM_PROMPT', () => {
     expect(prompt).not.toContain('sound lightly conversational');
     expect(prompt).not.toContain('never patronize or dismiss');
     expect(prompt).toContain(
-      'Never expose internal names such as "Fast mode" or "Fast session"',
+      'Never expose Roomote-internal Fast terminology such as "Fast session" or "Roomote Fast mode"',
     );
   });
 });

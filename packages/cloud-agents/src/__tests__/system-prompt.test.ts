@@ -29,7 +29,10 @@ describe('ROOMOTE_SYSTEM_PROMPT', () => {
       'treat session, task, home, integration, automation, memory, skill, and similar product feature nouns as lowercase common nouns',
     );
     expect(ROOMOTE_SYSTEM_PROMPT).toContain(
-      'Never expose internal names such as "Fast mode" or "Fast session"',
+      'Preserve official names and capitalization for external or provider features, including ChatGPT Fast mode',
+    );
+    expect(ROOMOTE_SYSTEM_PROMPT).toContain(
+      'Never expose Roomote-internal Fast terminology such as "Fast session" or "Roomote Fast mode"',
     );
   });
 
@@ -40,6 +43,9 @@ describe('ROOMOTE_SYSTEM_PROMPT', () => {
 
     expect(prompt).toContain(
       'treat session, task, home, integration, automation, memory, skill, and similar product feature nouns as lowercase common nouns',
+    );
+    expect(prompt).toContain(
+      'Preserve official names and capitalization for external or provider features, including ChatGPT Fast mode',
     );
   });
 
