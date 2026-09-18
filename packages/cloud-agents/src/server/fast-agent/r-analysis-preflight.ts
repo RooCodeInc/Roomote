@@ -80,6 +80,18 @@ function skipWhitespace(source: string, start: number): number {
   return index;
 }
 
+function skipQuotedString(source: string, start: number): number {
+  const quote = source[start];
+  let escaped = false;
+  for (let index = start + 1; index < source.length; index++) {
+    const char = source[index]!;
+    if (escaped) escaped = false;
+    else if (char === '\\') escaped = true;
+    else if (char === quote) return index + 1;
+  }
+  return source.length;
+}
+
 function stripComments(source: string): string {
   let result = '';
   let quote: '"' | "'" | null = null;
@@ -202,6 +214,10 @@ export function inspectRAnalysisScript(source: string): RAnalysisPreflight {
   const unresolved = new Set<string>();
 
   for (let index = 0; index < code.length;) {
+    if (code[index] === '"' || code[index] === "'") {
+      index = skipQuotedString(code, index);
+      continue;
+    }
     if (!isIdentifierStart(code[index])) {
       index++;
       continue;
