@@ -626,7 +626,7 @@ it('enforces allowlists for auth-token actors too', async () => {
 const sessionKey = 'test-only-session-key/A+b=123';
 const sessionPolicy = {
   label: 'Session API key',
-  origin: 'https://api.example.com',
+  origin: 'https://1.1.1.1',
   headerName: 'x-api-key' as const,
   headerPrefix: '' as const,
   visibility: 'owner' as const,
@@ -1117,7 +1117,7 @@ it.each(['broker', 'run'] as const)(
     const prepared = await tool(token, 'prepare_integration_key', {
       ...noPrefixPolicy,
       label: 'Second API key',
-      origin: 'https://second-api.example.com',
+      origin: 'https://1.0.0.1',
     });
     expect(prepared.isError).not.toBe(true);
     const { pending, sessionUrl } = JSON.parse(prepared.content[0].text);

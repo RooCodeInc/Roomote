@@ -414,6 +414,35 @@ export function assertEgressUrlAllowed(
 }
 
 /**
+ * Resolve a destination and require every answer to be publicly routable.
+ * Callers must still use a guarded Agent when they later connect.
+ */
+export async function assertEgressUrlResolvesPublic(
+  target: string | URL,
+  options: { lookup?: DnsLookupFn } = {},
+): Promise<URL> {
+  const url = assertEgressUrlAllowed(target);
+  const hostname = url.hostname.replace(/^\[|\]$/g, '');
+  if (isIP(hostname) !== 0) return url;
+
+  const connect = createGuardedConnectOptions({
+    allowedPrivateCidrs: undefined,
+    lookup: options.lookup,
+  });
+  await new Promise<void>((resolve, reject) => {
+    connect.lookup(
+      hostname,
+      { all: true },
+      (error: NodeJS.ErrnoException | null) => {
+        if (error) reject(error);
+        else resolve();
+      },
+    );
+  });
+  return url;
+}
+
+/**
  * undici `connect` options that vet and pin every DNS answer. Exported so
  * callers with their own Agent needs (e.g. the API's long-lived-stream proxy
  * dispatcher) can compose the guard with other Agent options.

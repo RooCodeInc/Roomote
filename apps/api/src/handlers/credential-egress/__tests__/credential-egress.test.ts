@@ -56,7 +56,7 @@ import type { Variables } from '../../../types';
 import { createCredentialEgressControlPlane } from '../index';
 
 const secret = 'Real-Upstream-Key/A+b=<"&>123';
-const origin = 'https://api.example.com';
+const origin = 'https://1.1.1.1';
 const path = CREDENTIAL_EGRESS_CONTROL_PLANE_PATH;
 
 let app: Hono<{ Variables: Variables }>;
@@ -518,7 +518,7 @@ it('authorizes each phase live and resolves the credential only on the request p
       session_id: sessionId,
       actor_user_id: ownerId,
       secret_ref: secretRef,
-      destination: 'api.example.com:443',
+      destination: '1.1.1.1:443',
     });
   const serialized = JSON.stringify(audit);
   for (const forbidden of [
@@ -903,7 +903,7 @@ it('issues substitutes for grants approved after registration without rotating',
   });
   const pending = await prepareServiceCredential(context, {
     label: 'Second API',
-    origin: 'https://second.example.com:8443',
+    origin: 'https://1.0.0.1:8443',
     headerName: 'x-api-key',
     headerPrefix: '',
   });
@@ -923,7 +923,7 @@ it('issues substitutes for grants approved after registration without rotating',
   expect(registration.substitutes).toHaveLength(1);
   expect(registration.substitutes[0]).toMatchObject({
     secretRef: second.secretRef,
-    origin: 'https://second.example.com:8443',
+    origin: 'https://1.0.0.1:8443',
     headerName: 'x-api-key',
     headerPrefix: '',
   });
@@ -980,7 +980,7 @@ it('binds authorization to the grant method policy and rejects malformed input',
 it('allows write methods only for grants the owner explicitly acknowledged, without widening older grants', async () => {
   const pending = await prepareServiceCredential(context, {
     label: 'Write API',
-    origin: 'https://write.example.com',
+    origin: 'https://8.8.8.8',
     headerName: 'authorization',
     headerPrefix: 'Bearer ',
     allowedMethods: ['POST', 'GET'],
