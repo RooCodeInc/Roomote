@@ -16,6 +16,7 @@ import {
   ROOMOTE_TRIAL_MODEL_PRESET_ID,
   getSetupProviderTaskModelPrefix,
   normalizeDeploymentModelConfig,
+  providerRequiresModelSelection,
   REASONING_EFFORT_OPTIONS,
   resolveSetupModelProviderIdFromModel,
   SETUP_MODEL_PROVIDER_CATALOG,
@@ -761,6 +762,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         linkLabel: 'Open AWS Bedrock API keys',
       },
       defaultRoomoteModel: 'bedrock-mantle/anthropic.claude-sonnet-5',
+      requiresModelSelection: true,
     });
     expect(bedrockProvider?.additionalEnvFields).toEqual([
       {
@@ -771,6 +773,10 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         placeholder: 'us-east-1',
       },
     ]);
+    expect(providerRequiresModelSelection(bedrockProvider!)).toBe(true);
+    expect(
+      providerRequiresModelSelection(getSetupModelProvider('anthropic')),
+    ).toBe(false);
   });
 
   it('maps Google Gemini to the GEMINI_API_KEY env var', () => {

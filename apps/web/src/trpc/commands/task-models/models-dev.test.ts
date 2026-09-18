@@ -5,6 +5,7 @@ import {
   listXaiChatModelsFromCatalog,
   lookupModelMetadataFromCatalog,
   resolveModelsDevSlug,
+  suggestBedrockModelsFromCatalog,
   suggestModelsFromCatalog,
   type ModelsDevCatalog,
 } from './models-dev';
@@ -77,6 +78,66 @@ describe('resolveModelsDevSlug', () => {
 });
 
 describe('lookupModelMetadataFromCatalog', () => {
+  it.each([
+    'zai.glm-5',
+    'minimax.minimax-m2.5',
+    'moonshotai.kimi-k2.5',
+    'qwen.qwen3-coder-next',
+    'zai.glm-4.7',
+  ])('resolves exact native Bedrock metadata for %s', (slug) => {
+    const catalog = buildCatalog({
+      providers: {
+        'amazon-bedrock': {
+          models: {
+            [slug]: {
+              name: slug,
+              modalities: { input: ['text'], output: ['text'] },
+              limit: { context: 205_000 },
+              cost: { input: 1, output: 3.2 },
+            },
+          },
+        },
+      },
+    });
+
+    expect(
+      lookupModelMetadataFromCatalog(catalog, `amazon-bedrock/${slug}`),
+    ).toMatchObject({
+      displayName: slug,
+      metadata: {
+        contextWindow: 205_000,
+        inputPricePerToken: 1 / 1_000_000,
+        outputPricePerToken: 3.2 / 1_000_000,
+      },
+    });
+  });
+
+  it('prefers exact Bedrock provider metadata for Mantle IDs', () => {
+    const catalog = buildCatalog({
+      models: {
+        'zai/glm-5': { limit: { context: 100_000 } },
+      },
+      providers: {
+        'amazon-bedrock': {
+          models: {
+            'zai.glm-5': {
+              name: 'GLM-5',
+              modalities: { output: ['text'] },
+              limit: { context: 205_000 },
+            },
+          },
+        },
+      },
+    });
+
+    expect(
+      lookupModelMetadataFromCatalog(catalog, 'bedrock-mantle/zai.glm-5'),
+    ).toMatchObject({
+      displayName: 'GLM-5',
+      metadata: { contextWindow: 205_000 },
+    });
+  });
+
   it('returns openrouter pricing/context/modalities for an openrouter-routed model (case-insensitive)', () => {
     const catalog = buildCatalog({
       gatewayModelsByLowerSlug: {
@@ -539,6 +600,80 @@ describe('suggestModelsFromCatalog', () => {
         query: 'km3',
       }),
     ).toEqual([{ slug: 'moonshotai/kimi-k3', displayName: 'Kimi K3' }]);
+  });
+});
+
+describe('suggestBedrockModelsFromCatalog', () => {
+  it('finds native catalog entries alongside distinguished Mantle models', () => {
+    const catalog = buildCatalog({
+      providers: {
+        'amazon-bedrock': {
+          models: {
+            'zai.glm-5': {
+              name: 'GLM-5',
+              modalities: { output: ['text'] },
+              tool_call: true,
+            },
+            'amazon.titan-embed-text-v2:0': {
+              name: 'Titan Embeddings',
+              modalities: { output: ['embedding'] },
+            },
+          },
+        },
+      },
+    });
+
+    expect(
+      suggestBedrockModelsFromCatalog({
+        catalog,
+        mantleModels: [
+          {
+            id: 'bedrock-mantle/zai.glm-5',
+            displayName: 'GLM-5',
+          },
+        ],
+        query: 'glm 5',
+      }),
+    ).toEqual([
+      {
+        slug: 'amazon-bedrock/zai.glm-5',
+        displayName: 'GLM-5 (Native)',
+        route: 'native',
+      },
+      {
+        slug: 'bedrock-mantle/zai.glm-5',
+        displayName: 'GLM-5 (Mantle)',
+        route: 'mantle',
+      },
+    ]);
+  });
+
+  it('omits non-text and explicitly tool-less native entries', () => {
+    const catalog = buildCatalog({
+      providers: {
+        'amazon-bedrock': {
+          models: {
+            'amazon.titan-embed': {
+              name: 'Titan Embed',
+              modalities: { output: ['embedding'] },
+            },
+            'vendor.text-no-tools': {
+              name: 'Text without tools',
+              modalities: { output: ['text'] },
+              tool_call: false,
+            },
+          },
+        },
+      },
+    });
+
+    expect(
+      suggestBedrockModelsFromCatalog({
+        catalog,
+        mantleModels: [],
+        query: 't',
+      }),
+    ).toEqual([]);
   });
 });
 

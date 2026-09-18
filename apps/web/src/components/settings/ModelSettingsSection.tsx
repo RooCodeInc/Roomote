@@ -105,6 +105,7 @@ type TaskModelRoleDrafts = Record<TaskModelRole, TaskModelRoleDraft>;
 type TaskModelSuggestion = {
   slug: string;
   displayName: string;
+  route?: 'mantle' | 'native';
 };
 
 type ModelSettingsSectionDraft = {
@@ -133,6 +134,16 @@ const EMPTY_SUGGESTION_STATE: SuggestionState = {
   suggestions: [],
   highlightedIndex: -1,
 };
+
+function getBedrockRoute(modelId: string): 'Mantle' | 'Native' | null {
+  if (modelId.startsWith('bedrock-mantle/')) {
+    return 'Mantle';
+  }
+  if (modelId.startsWith('amazon-bedrock/')) {
+    return 'Native';
+  }
+  return null;
+}
 
 function useDebouncedValue<T>(value: T, delayMs: number) {
   const [debouncedValue, setDebouncedValue] = useState(value);
@@ -1889,7 +1900,7 @@ export function ModelSettingsSection({
         icon={Brain}
         title="Available Models"
         action={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             {isSaving && (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Spinner />
@@ -2140,6 +2151,11 @@ export function ModelSettingsSection({
                               {model.displayName}
                             </span>
                             {isDefault && <Badge>Default</Badge>}
+                            {getBedrockRoute(model.id) ? (
+                              <Badge variant="outline">
+                                {getBedrockRoute(model.id)}
+                              </Badge>
+                            ) : null}
                           </p>
                           <p className="text-xs text-muted-foreground">
                             {model.id}

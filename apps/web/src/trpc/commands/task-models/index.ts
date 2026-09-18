@@ -45,6 +45,7 @@ import {
   normalizeSetupNewState,
   normalizeTaskModelId,
   normalizeTaskModelSettings,
+  providerRequiresModelSelection,
 } from '@roomote/types';
 import type {
   CodingModelRoutingRule,
@@ -73,6 +74,7 @@ import {
   listXaiChatModelsFromCatalog,
   lookupModelMetadataFromCatalog,
   mergeMetadata,
+  suggestBedrockModelsFromCatalog,
   suggestModelsFromCatalog,
 } from './models-dev';
 import {
@@ -642,7 +644,7 @@ export async function saveTaskModelProviderCommand(
   // before any submitted credential is persisted. Dynamic endpoints have no
   // model to request at connection time, so a submitted connection is
   // qualified by listing the endpoint's models instead.
-  if (!provider.dynamicModels) {
+  if (!providerRequiresModelSelection(provider)) {
     await validateSetupModelProviderCredentials({
       provider,
       apiKey: input.apiKey,
@@ -652,7 +654,7 @@ export async function saveTaskModelProviderCommand(
         buildRecommendedDeploymentModelConfig(provider).roomoteModel ??
         provider.defaultRoomoteModel,
     });
-  } else {
+  } else if (provider.dynamicModels) {
     // UIs resubmit unchanged fields (connection names, keys echoed back
     // from saved state), so gate the probe on what the save would actually
     // alter, not on non-empty form fields.
@@ -1603,7 +1605,14 @@ async function lookupModelFromModelsDevCatalog(
   );
 
   if (!catalog) {
-    return { modelId, displayName: null, family: null, metadata: null };
+    return (
+      buildUnknownBedrockModelLookup(modelId) ?? {
+        modelId,
+        displayName: null,
+        family: null,
+        metadata: null,
+      }
+    );
   }
 
   const lookup = lookupModelMetadataFromCatalog(catalog, modelId);
@@ -1615,6 +1624,9 @@ async function lookupModelFromModelsDevCatalog(
   }
 
   if (!lookup.displayName) {
+    const bedrockFallback = buildUnknownBedrockModelLookup(modelId, metadata);
+    if (bedrockFallback) return bedrockFallback;
+
     return { modelId, displayName: null, family: null, metadata };
   }
 
@@ -1629,6 +1641,28 @@ async function lookupModelFromModelsDevCatalog(
     displayName: model.displayName,
     family: model.family,
     metadata: model.metadata ?? null,
+  };
+}
+
+function buildUnknownBedrockModelLookup(
+  modelId: string,
+  metadata: TaskModelMetadata | null = null,
+): TaskModelLookupResult | null {
+  const providerId = getTaskModelProviderId(modelId);
+  if (providerId !== 'amazon-bedrock' && providerId !== 'bedrock-mantle') {
+    return null;
+  }
+
+  const fallback = buildTaskModelOption({
+    id: modelId,
+    displayName: modelId.split('/').at(-1) ?? modelId,
+    metadata,
+  });
+  return {
+    modelId: fallback.id,
+    displayName: fallback.displayName,
+    family: fallback.family,
+    metadata: fallback.metadata ?? null,
   };
 }
 
@@ -1819,12 +1853,20 @@ export async function suggestTaskModelsCommand(
   const catalogProviderId = getSetupProviderTaskModelPrefix(provider.id);
 
   return {
-    suggestions: suggestModelsFromCatalog({
-      catalog,
-      providerId: catalogProviderId,
-      query,
-      limit: 8,
-    }),
+    suggestions:
+      provider.id === 'amazon-bedrock'
+        ? suggestBedrockModelsFromCatalog({
+            catalog,
+            mantleModels: provider.suggestedTaskModels,
+            query,
+            limit: 8,
+          })
+        : suggestModelsFromCatalog({
+            catalog,
+            providerId: catalogProviderId,
+            query,
+            limit: 8,
+          }),
   };
 }
 

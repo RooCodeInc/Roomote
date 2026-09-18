@@ -601,6 +601,19 @@ describe('lookupTaskModelCommand', () => {
     );
   });
 
+  it('keeps manual Bedrock ID entry available when catalog metadata is unknown', async () => {
+    await expect(
+      lookupTaskModelCommand(buildMockAuth(), {
+        modelId: 'amazon-bedrock/vendor.private-model',
+      }),
+    ).resolves.toEqual({
+      modelId: 'amazon-bedrock/vendor.private-model',
+      displayName: 'vendor.private-model',
+      family: 'vendor',
+      metadata: null,
+    });
+  });
+
   it('uses a timeout signal when refreshing models.dev metadata', async () => {
     fetchMock.mockResolvedValue(
       new Response(
@@ -2217,6 +2230,10 @@ describe('task model provider commands', () => {
           }),
         }),
       }),
+    );
+    expect(mockValidateSetupModelProviderCredentials).not.toHaveBeenCalled();
+    expect(txOnConflictDoUpdate.mock.calls[0]?.[0]?.set).not.toHaveProperty(
+      'taskModelSettings',
     );
   });
 

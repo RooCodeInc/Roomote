@@ -94,6 +94,7 @@ import {
   hasSetupChatHandoffDestination,
   isSetupProvisionableComputeProvider,
   normalizeSetupNewState,
+  providerRequiresModelSelection,
   presentSetupNewComputeProvisioning,
   resolveDerivedModalBaseImageRef,
   resolveTeamsBotCredentialEnvVarNames,
@@ -1632,28 +1633,38 @@ export async function saveSetupNewModelConfigCommand(
     );
   }
 
-  let selectedDynamicModel = input.modelId?.trim();
+  let selectedModelId = input.modelId?.trim();
 
   // Discovery in the wizard uses the catalog id `openai-compatible/...`.
   // After naming the connection, remap model ids onto the named provider.
   if (
-    selectedDynamicModel?.startsWith(`${OPENAI_COMPATIBLE_PROVIDER_ID}/`) &&
+    selectedModelId?.startsWith(`${OPENAI_COMPATIBLE_PROVIDER_ID}/`) &&
     provider.id !== OPENAI_COMPATIBLE_PROVIDER_ID &&
     isOpenAiCompatibleProviderId(provider.id)
   ) {
-    selectedDynamicModel = `${provider.id}/${selectedDynamicModel.slice(
+    selectedModelId = `${provider.id}/${selectedModelId.slice(
       OPENAI_COMPATIBLE_PROVIDER_ID.length + 1,
     )}`;
   }
 
-  if (provider.dynamicModels && !selectedDynamicModel) {
-    throw new Error(`Choose a discovered ${provider.label} model to continue.`);
+  const requiresModelSelection = providerRequiresModelSelection(provider);
+  if (requiresModelSelection && !selectedModelId) {
+    throw new Error(`Choose a model from ${provider.label} to continue.`);
   }
 
-  const runtimeModelConfig = provider.dynamicModels
+  if (
+    provider.requiresModelSelection &&
+    selectedModelId &&
+    !selectedModelId.startsWith('amazon-bedrock/') &&
+    !selectedModelId.startsWith('bedrock-mantle/')
+  ) {
+    throw new Error('Choose a native Bedrock or Bedrock Mantle model.');
+  }
+
+  const runtimeModelConfig = requiresModelSelection
     ? {
         ...createEmptyDeploymentModelConfig(),
-        roomoteModel: selectedDynamicModel!,
+        roomoteModel: selectedModelId!,
       }
     : buildRecommendedDeploymentModelConfig(provider);
 
@@ -1741,15 +1752,31 @@ export async function saveSetupNewModelConfigCommand(
       connectedProviderIds,
       metadataCatalog,
     });
-    const dynamicModelSettings = provider.dynamicModels
+    const selectedModelSettings = requiresModelSelection
       ? (() => {
+          const lookup =
+            provider.requiresModelSelection && metadataCatalog
+              ? lookupModelMetadataFromCatalog(
+                  metadataCatalog,
+                  selectedModelId!,
+                )
+              : null;
           const model = buildTaskModelOption({
-            id: selectedDynamicModel!,
-            displayName: selectedDynamicModel!.split('/').at(-1)!,
+            id: selectedModelId!,
+            displayName:
+              lookup?.displayName ?? selectedModelId!.split('/').at(-1)!,
+            ...(lookup?.metadata && Object.keys(lookup.metadata).length > 0
+              ? { metadata: mergeMetadata(null, lookup.metadata) }
+              : {}),
           });
-          const current = normalizeTaskModelSettings(
-            persistedTaskModelSettings,
-          );
+          const current =
+            persistedTaskModelSettings == null
+              ? {
+                  models: [],
+                  allowedModelIds: [],
+                  defaultModelId: selectedModelId!,
+                }
+              : normalizeTaskModelSettings(persistedTaskModelSettings);
 
           return normalizeTaskModelSettings({
             ...current,
@@ -1768,8 +1795,8 @@ export async function saveSetupNewModelConfigCommand(
     await Promise.all([
       savePersistedSetupNewState(setupNewState, tx),
       savePersistedRuntimeModelConfig(runtimeModelConfig, tx),
-      ...(dynamicModelSettings
-        ? [savePersistedTaskModelSettings(dynamicModelSettings, tx)]
+      ...(selectedModelSettings
+        ? [savePersistedTaskModelSettings(selectedModelSettings, tx)]
         : autoAdd
           ? [savePersistedTaskModelSettings(autoAdd.taskModelSettings, tx)]
           : []),

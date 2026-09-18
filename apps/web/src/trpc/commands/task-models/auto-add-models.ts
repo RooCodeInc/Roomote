@@ -8,6 +8,7 @@ import {
   isTaskModelIdDisabled,
   normalizeTaskModelId,
   normalizeTaskModelSettings,
+  providerRequiresModelSelection,
   taskModelSettingsSchema,
   type SetupModelProviderDescriptor,
   type SuggestedTaskModel,
@@ -201,7 +202,7 @@ export function buildAutoAddedTaskModelSettings(options: {
 } | null {
   // Endpoint-backed providers are populated by explicit discovery. Never seed
   // a guessed model id when the endpoint itself is the source of truth.
-  if (options.provider.dynamicModels) {
+  if (providerRequiresModelSelection(options.provider)) {
     return null;
   }
 

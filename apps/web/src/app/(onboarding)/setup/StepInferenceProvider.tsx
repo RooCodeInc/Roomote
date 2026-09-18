@@ -3,6 +3,7 @@
 import {
   type ReactNode,
   useCallback,
+  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
@@ -25,8 +26,16 @@ import {
   ArrowRight,
   Button,
   Check,
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandItem,
+  CommandList,
   Input,
   Lock,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
   Select,
   SelectContent,
   SelectItem,
@@ -116,6 +125,9 @@ export function StepInferenceProvider({
   const [additionalEnvValues, setAdditionalEnvValues] = useState<
     Record<string, string>
   >({});
+  const [catalogModelQuery, setCatalogModelQuery] = useState('');
+  const [selectedCatalogModelId, setSelectedCatalogModelId] = useState('');
+  const [catalogSuggestionsOpen, setCatalogSuggestionsOpen] = useState(false);
   const [editingSavedValue, setEditingSavedValue] = useState(false);
   const [isChatGptDialogOpen, setIsChatGptDialogOpen] = useState(false);
   const [isGitHubCopilotDialogOpen, setIsGitHubCopilotDialogOpen] =
@@ -167,6 +179,9 @@ export function StepInferenceProvider({
           : '',
     );
     setConnectionName('');
+    setCatalogModelQuery('');
+    setSelectedCatalogModelId('');
+    setCatalogSuggestionsOpen(false);
     // Seeded from the catalog rather than the fetched status so this effect
     // stays keyed on `selectedProvider` alone; depending on the status query
     // would reset in-progress input on every refetch.
@@ -209,6 +224,21 @@ export function StepInferenceProvider({
   const isGitHubCopilotProvider = selectedProvider === 'github-copilot';
   const isOAuthProvider = selectedProviderStatus?.authKind === 'oauth';
   const isEndpointProvider = selectedProviderStatus?.authKind === 'endpoint';
+  const requiresModelSelection =
+    selectedProviderStatus?.requiresModelSelection === true;
+  const deferredCatalogModelQuery = useDeferredValue(catalogModelQuery.trim());
+  const catalogSuggestionsQuery = useQuery(
+    trpc.taskModels.suggest.queryOptions(
+      {
+        providerId: selectedProvider ?? 'openrouter',
+        query: deferredCatalogModelQuery,
+      },
+      {
+        enabled: requiresModelSelection && deferredCatalogModelQuery.length > 0,
+      },
+    ),
+  );
+  const catalogSuggestions = catalogSuggestionsQuery.data?.suggestions ?? [];
   const chatgptConnected = Boolean(modelSetup.chatgptConnected);
   const githubCopilotConnected = Boolean(modelSetup.githubCopilotConnected);
   const xaiSubscriptionConnected = Boolean(
@@ -265,6 +295,7 @@ export function StepInferenceProvider({
     selectedProvider === null ||
     hasMissingRequiredFields ||
     hasMissingConnectionName ||
+    (requiresModelSelection && !selectedCatalogModelId) ||
     (!canContinueWithoutApiKey && apiKey.trim().length === 0);
   const isCheckingEndpoint =
     isEndpointProvider &&
@@ -275,7 +306,7 @@ export function StepInferenceProvider({
       return;
     }
 
-    let modelId: string | undefined;
+    let modelId = requiresModelSelection ? selectedCatalogModelId : undefined;
     let endpointConnectionMessage: string | undefined;
     let qualificationError: string | undefined;
     const submittedCredential = shouldShowConfiguredMask
@@ -567,6 +598,73 @@ export function StepInferenceProvider({
             </a>
             .
           </p>
+        ) : null}
+
+        {requiresModelSelection ? (
+          <div className="max-w-lg space-y-2">
+            <InferenceProviderRow>
+              <span className="w-44 shrink-0 text-sm text-muted-foreground">
+                Bedrock model
+              </span>
+              <Popover
+                open={catalogSuggestionsOpen && catalogSuggestions.length > 0}
+                onOpenChange={setCatalogSuggestionsOpen}
+              >
+                <PopoverTrigger asChild>
+                  <div className="w-full">
+                    <Input
+                      value={catalogModelQuery}
+                      onChange={(event) => {
+                        setCatalogModelQuery(event.target.value);
+                        setSelectedCatalogModelId('');
+                        setCatalogSuggestionsOpen(true);
+                      }}
+                      placeholder="Search GLM, Kimi, MiniMax, Qwen, or a model ID"
+                      aria-label="Bedrock model"
+                      disabled={saveModelConfig.isPending}
+                    />
+                  </div>
+                </PopoverTrigger>
+                <PopoverContent
+                  align="start"
+                  className="w-(--radix-popover-trigger-width) p-0"
+                  onOpenAutoFocus={(event) => event.preventDefault()}
+                >
+                  <Command shouldFilter={false}>
+                    <CommandList>
+                      <CommandEmpty>No catalog models found.</CommandEmpty>
+                      <CommandGroup heading="Catalog models">
+                        {catalogSuggestions.map((suggestion) => (
+                          <CommandItem
+                            key={suggestion.slug}
+                            value={suggestion.slug}
+                            onSelect={() => {
+                              setSelectedCatalogModelId(suggestion.slug);
+                              setCatalogModelQuery(suggestion.displayName);
+                              setCatalogSuggestionsOpen(false);
+                            }}
+                          >
+                            <div className="min-w-0">
+                              <p className="truncate font-medium">
+                                {suggestion.displayName}
+                              </p>
+                              <p className="truncate text-xs text-muted-foreground">
+                                {suggestion.slug}
+                              </p>
+                            </div>
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+            </InferenceProviderRow>
+            <p className="text-xs text-muted-foreground">
+              Choose a native Bedrock or Mantle model. Catalog availability does
+              not prove account access.
+            </p>
+          </div>
         ) : null}
 
         {selectedProvider === 'openrouter' && !hasRuntimeProviderKey && (
