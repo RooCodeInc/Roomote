@@ -21,7 +21,8 @@ vi.mock('@/lib/server/sessions', () => ({
   setSessionPinned: vi.fn(),
   updateSessionMetadata: vi.fn(),
 }));
-vi.mock('@roomote/db/server', () => ({
+vi.mock('@roomote/db/server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/db/server')>()),
   advanceSessionReadCursor: vi.fn(),
   db: {},
 }));

@@ -46,12 +46,9 @@ describe('getTaskAnalyticsRows', () => {
         row.dimensions.user?.key === ownerRow?.dimensions.user?.key,
     );
 
-    expect(ownerRows.reduce((sum, row) => sum + row.value, 0)).toBe(
-      adminRows.reduce((sum, row) => sum + row.value, 0),
-    );
-    expect(nonOwnerRows.reduce((sum, row) => sum + row.value, 0)).toBe(
-      adminRows.reduce((sum, row) => sum + row.value, 0),
-    );
+    expect(ownerRow?.value).toBe(1);
+    expect(adminRow?.value).toBe(1);
+    expect(nonOwnerRow?.value).toBe(adminRow?.value);
     expect(ownerRow).toMatchObject({
       id: privateTask.id,
       details: {
