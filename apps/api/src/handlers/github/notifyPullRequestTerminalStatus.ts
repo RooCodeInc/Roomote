@@ -39,11 +39,8 @@ import {
   getFastAgentParentFromPayload,
 } from '@roomote/types';
 
-/** Fixed Slack reaction for closed (not merged) PRs on the originating message. */
-export const SLACK_PR_CLOSED_REACTION_EMOJI = 'file_cabinet';
-
-/** Preserve Discord's existing thumbs-down reaction for closed PRs. */
-const DISCORD_PR_CLOSED_REACTION_EMOJI = '-1';
+/** Fixed reaction for closed (not merged) PRs on the originating message. */
+export const PR_CLOSED_REACTION_EMOJI = 'file_cabinet';
 
 const LINEAR_MCP_URL = 'https://mcp.linear.app/mcp';
 
@@ -311,7 +308,7 @@ async function deliverSlackTerminalStatus({
     formatStatus: (value) => `*${value}*`,
   });
   const terminalReaction =
-    status === 'closed' ? SLACK_PR_CLOSED_REACTION_EMOJI : completionEmoji;
+    status === 'closed' ? PR_CLOSED_REACTION_EMOJI : completionEmoji;
 
   for (const target of slackTargets) {
     const threadKey = `${target.slackChannelId}:${target.slackThreadTs}`;
@@ -581,9 +578,9 @@ async function deliverDiscordTerminalStatus({
     formatLink: formatDiscordPullRequestLink,
     formatStatus: (value) => `**${value}**`,
   });
-  // Keep Discord terminal reactions independent from the Slack mapping.
+  // Use the same terminal mapping as Slack for closed PRs.
   const terminalReaction =
-    status === 'closed' ? DISCORD_PR_CLOSED_REACTION_EMOJI : 'white_check_mark';
+    status === 'closed' ? PR_CLOSED_REACTION_EMOJI : 'white_check_mark';
   const ackEmoji = 'eyes';
 
   const notifiedConversations = new Set<string>();
