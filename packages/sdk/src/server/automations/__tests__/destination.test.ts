@@ -88,6 +88,7 @@ vi.mock('../../lib/user-direct-message', () => ({
 import {
   buildDestinationPromptContext,
   buildDestinationTaskPayloadFields,
+  hasAutomationEmailTarget,
   listConnectedCommunicationProviders,
   resolveAutomationRuntimeDestination,
   prepareAutomationReportDestination,
@@ -623,5 +624,48 @@ describe('payload fields and prompt context', () => {
       postToolName: 'post_to_channel',
       surfaceLabel: 'Discord',
     });
+  });
+});
+
+describe('hasAutomationEmailTarget', () => {
+  const emailDefault = {
+    provider: 'email' as const,
+    targetKind: 'email_user' as const,
+    externalRef: 'default-recipient',
+    metadata: { emailIdentityId: 'identity-1' },
+  };
+
+  it('applies an Email deployment default only without an explicit destination', () => {
+    expect(
+      hasAutomationEmailTarget({
+        targets: [],
+        defaultAutomationTarget: emailDefault,
+      }),
+    ).toBe(true);
+    expect(
+      hasAutomationEmailTarget({
+        targets: [
+          {
+            provider: 'slack',
+            targetKind: 'slack_channel',
+            externalRef: 'C-EXPLICIT',
+          },
+        ],
+        defaultAutomationTarget: emailDefault,
+      }),
+    ).toBe(false);
+  });
+
+  it('keeps an explicit Email target regardless of the deployment default', () => {
+    expect(
+      hasAutomationEmailTarget({
+        targets: [emailDefault],
+        defaultAutomationTarget: {
+          provider: 'slack',
+          targetKind: 'slack_channel',
+          externalRef: 'C-DEFAULT',
+        },
+      }),
+    ).toBe(true);
   });
 });

@@ -26,6 +26,7 @@ import {
   getManagerStatsWindowStart,
 } from '../lib/manager-stats';
 import {
+  getAutomationEmailTarget,
   listConnectedCommunicationProviders,
   resolveAutomationRuntimeDestination,
   sendAutomationEmailReport,
@@ -171,14 +172,7 @@ async function findEligibleDeployments(
     return [];
   }
 
-  const emailTarget =
-    runtime.targets.find(
-      (target) =>
-        target.provider === 'email' && target.targetKind === 'email_user',
-    ) ??
-    (runtime.defaultAutomationTarget?.provider === 'email'
-      ? runtime.defaultAutomationTarget
-      : null);
+  const emailTarget = getAutomationEmailTarget(runtime);
   if (emailTarget) {
     return [
       {

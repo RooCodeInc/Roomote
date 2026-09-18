@@ -17,7 +17,10 @@ const mocks = vi.hoisted(() => ({
   emailIdentities: vi.fn(),
 }));
 
-vi.mock('@roomote/db/server', () => ({
+vi.mock('@roomote/db/server', async (importOriginal) => ({
+  getEffectiveDefaultAutomationTarget: (
+    await importOriginal<typeof import('@roomote/db/server')>()
+  ).getEffectiveDefaultAutomationTarget,
   db: {
     query: { deploymentSettings: { findFirst: mocks.settings } },
     select: () => ({

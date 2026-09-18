@@ -923,6 +923,57 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
     }
   }, 15_000);
 
+  it('derives the legacy manager channel from a submitted channel default', async () => {
+    await insertAvailableDiscordChannel({
+      guildId: 'guild-1',
+      channelId: 'D111',
+      channelName: 'managers',
+    });
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'managerChannel',
+        managerSlackChannel: null,
+        managerDiscordChannel: null,
+        defaultDestinationProvider: 'discord',
+        defaultDestinationMode: 'channel',
+        defaultDestinationChannelId: 'D111',
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.settings.managerDiscordChannelId).toBe('D111');
+      expect(result.settings.defaultAutomationTarget).toEqual({
+        provider: 'discord',
+        targetKind: 'discord_channel',
+        externalRef: 'D111',
+      });
+    }
+  }, 15_000);
+
+  it('rejects a channel default on a provider without channel destinations', async () => {
+    await db.insert(deploymentSettings).values({
+      id: 'default',
+      managerSlackChannelId: 'C123OLD',
+    });
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'managerChannel',
+        defaultDestinationProvider: 'teams',
+        defaultDestinationMode: 'channel',
+        defaultDestinationChannelId: 'teams-conversation',
+      }),
+    );
+
+    expect(result.success).toBe(false);
+    const settings = await db.query.deploymentSettings.findFirst();
+    expect(settings?.managerSlackChannelId).toBe('C123OLD');
+  }, 15_000);
+
   it('saves a concrete Slack DM as the deployment default destination', async () => {
     await insertSlackInstallation();
 

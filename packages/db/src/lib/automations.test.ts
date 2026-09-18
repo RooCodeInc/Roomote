@@ -3,6 +3,7 @@ import { DEFAULT_PR_REVIEW_SETTINGS } from '@roomote/types';
 import type { Automation } from '../types';
 import {
   ensureAutomationRows,
+  getEffectiveDefaultAutomationTarget,
   normalizeBackgroundAgentSettings,
   normalizeReviewCodeAutomationSettings,
   resolveAutomationDestination,
@@ -138,7 +139,7 @@ describe('normalizeBackgroundAgentSettings channel auto-start', () => {
     });
   });
 
-  it('projects a concrete deployment Email default over legacy channels', () => {
+  it('projects a concrete deployment Email default', () => {
     const target = {
       provider: 'email' as const,
       targetKind: 'email_user' as const,
@@ -146,11 +147,51 @@ describe('normalizeBackgroundAgentSettings channel auto-start', () => {
       metadata: { emailIdentityId: 'identity-1' },
     };
     const settings = normalizeBackgroundAgentSettings({
-      managerSlackChannelId: 'C-LEGACY',
       defaultAutomationTarget: target,
     } as unknown as Parameters<typeof normalizeBackgroundAgentSettings>[0]);
 
     expect(settings.defaultAutomationTarget).toEqual(target);
+  });
+
+  it('lets legacy manager channels written by the previous release win over a stale default', () => {
+    const legacySlackTarget = {
+      provider: 'slack',
+      targetKind: 'slack_channel',
+      externalRef: 'C-LEGACY',
+    };
+
+    expect(
+      getEffectiveDefaultAutomationTarget({
+        managerSlackChannelId: 'C-LEGACY',
+        defaultAutomationTarget: {
+          provider: 'slack',
+          targetKind: 'slack_channel',
+          externalRef: 'C-STALE',
+        },
+      }),
+    ).toEqual(legacySlackTarget);
+    expect(
+      getEffectiveDefaultAutomationTarget({
+        managerSlackChannelId: 'C-LEGACY',
+        defaultAutomationTarget: {
+          provider: 'email',
+          targetKind: 'email_user',
+          externalRef: 'admin-user',
+        },
+      }),
+    ).toEqual(legacySlackTarget);
+    // The previous release cleared the manager channel after a rollback.
+    expect(
+      getEffectiveDefaultAutomationTarget({
+        managerSlackChannelId: null,
+        managerDiscordChannelId: null,
+        defaultAutomationTarget: {
+          provider: 'discord',
+          targetKind: 'discord_channel',
+          externalRef: 'D-STALE',
+        },
+      }),
+    ).toBeNull();
   });
 
   it('projects Slack and Discord auto-respond rows separately, ordered by metadata', () => {

@@ -8,6 +8,7 @@ import {
   type SlackInstallation,
 } from '@roomote/db/server';
 import { ensureSlackManagerChannel } from '@roomote/slack';
+import { buildChannelAutomationTarget } from '@roomote/types';
 
 export async function provisionSlackManagerChannel(
   installation: SlackInstallation,
@@ -35,6 +36,10 @@ export async function provisionSlackManagerChannel(
       installation.botAccessToken,
     );
     if (!channelId) return;
+    const defaultAutomationTarget = buildChannelAutomationTarget(
+      'slack',
+      channelId,
+    );
 
     await db.transaction(async (tx) => {
       await tx
@@ -49,21 +54,13 @@ export async function provisionSlackManagerChannel(
         .values({
           id: 'default',
           managerSlackChannelId: channelId,
-          defaultAutomationTarget: {
-            provider: 'slack',
-            targetKind: 'slack_channel',
-            externalRef: channelId,
-          },
+          defaultAutomationTarget,
         })
         .onConflictDoUpdate({
           target: deploymentSettings.id,
           set: {
             managerSlackChannelId: channelId,
-            defaultAutomationTarget: {
-              provider: 'slack',
-              targetKind: 'slack_channel',
-              externalRef: channelId,
-            },
+            defaultAutomationTarget,
             updatedAt: new Date(),
           },
           setWhere: and(

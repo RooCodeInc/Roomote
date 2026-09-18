@@ -5,7 +5,6 @@ import {
   buildManagerSlackChannelOptions,
   DISCORD_DESTINATION_OPTION_PREFIX,
   formatSlackChannelValue,
-  isManagerChannelSelectionDisabled,
   shouldShowManagerSlackChannelWarning,
 } from './channelOptions';
 
@@ -96,24 +95,5 @@ describe('manager channel options', () => {
         label: '#general',
       },
     ]);
-  });
-
-  it('allows configured values when the provider is disconnected', () => {
-    expect(
-      isManagerChannelSelectionDisabled({
-        slackConnected: false,
-        isFetching: false,
-        hasValue: true,
-        isConfigured: true,
-      }),
-    ).toBe(false);
-    expect(
-      isManagerChannelSelectionDisabled({
-        slackConnected: false,
-        isFetching: false,
-        hasValue: false,
-        isConfigured: false,
-      }),
-    ).toBe(true);
   });
 });

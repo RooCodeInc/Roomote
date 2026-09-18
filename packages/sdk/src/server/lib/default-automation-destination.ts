@@ -3,6 +3,7 @@ import {
   db,
   deploymentSettings,
   eq,
+  getEffectiveDefaultAutomationTarget,
   resolveDiscordRuntimeCredentials,
   resolveTeamsBotRuntimeCredentials,
   resolveTelegramRuntimeCredentials,
@@ -13,6 +14,7 @@ import {
 import { SlackNotifier } from '@roomote/slack';
 import {
   AUTOMATION_TARGET_EMAIL_IDENTITY_KEY,
+  buildChannelAutomationTarget,
   getAutomationTargetEmailIdentityId,
   getAutomationTargetKind,
   hasSetupChatHandoffDestination,
@@ -94,28 +96,42 @@ export async function resolveDefaultAutomationTarget({
     : null;
 
   const channelCandidates: AutomationTarget[] = [];
-  if (settings?.defaultAutomationTarget) {
+  const configuredDefault = getEffectiveDefaultAutomationTarget(settings);
+  if (configuredDefault) {
     const resolvedDefault = await resolveConfiguredTarget({
-      target: settings.defaultAutomationTarget,
+      target: configuredDefault,
       capabilities,
       client,
     });
     if (resolvedDefault) return resolvedDefault;
   }
-  if (settings?.managerSlackChannelId?.trim()) {
-    channelCandidates.push({
-      provider: 'slack',
-      targetKind: 'slack_channel',
-      externalRef: settings.managerSlackChannelId.trim(),
-    });
-  }
-  if (settings?.managerDiscordChannelId?.trim()) {
-    channelCandidates.push({
-      provider: 'discord',
-      targetKind: 'discord_channel',
-      externalRef: settings.managerDiscordChannelId.trim(),
-    });
-  }
+  // The configured default was already tried above, so only a legacy manager
+  // channel it does not mirror is still a candidate.
+  const legacyChannelCandidates: AutomationTarget[] = [
+    ...(settings?.managerSlackChannelId?.trim()
+      ? [
+          buildChannelAutomationTarget(
+            'slack',
+            settings.managerSlackChannelId.trim(),
+          ),
+        ]
+      : []),
+    ...(settings?.managerDiscordChannelId?.trim()
+      ? [
+          buildChannelAutomationTarget(
+            'discord',
+            settings.managerDiscordChannelId.trim(),
+          ),
+        ]
+      : []),
+  ];
+  channelCandidates.push(
+    ...legacyChannelCandidates.filter(
+      (candidate) =>
+        candidate.provider !== configuredDefault?.provider ||
+        candidate.externalRef !== configuredDefault.externalRef,
+    ),
+  );
 
   if (includeSetupHandoff) {
     const state = normalizeSetupNewState(settings?.setupNewState ?? {});

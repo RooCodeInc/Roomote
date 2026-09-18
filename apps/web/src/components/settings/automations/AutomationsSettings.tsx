@@ -79,7 +79,10 @@ import {
 } from './ScheduleOnlyAutomationContent';
 import { CustomAutomationsSection } from './CustomAutomationsSection';
 import { AutomationListRow, type AutomationListFilter } from './AutomationList';
-import { AutomationDestinationPicker } from './AutomationDestinationPicker';
+import {
+  AutomationDestinationPicker,
+  destinationValueFromAutomationTarget,
+} from './AutomationDestinationPicker';
 import { AutomationDefaultDestinationSetting } from './AutomationDefaultDestinationSetting';
 import { AutomationAdditionalRules } from './CiFailureTriageAdditionalRules';
 import {
@@ -864,6 +867,10 @@ function mapSettingsToFormState(
         | null;
     },
 ): FormState {
+  const defaultDestination = destinationValueFromAutomationTarget(
+    settings.defaultAutomationTarget,
+  );
+
   return {
     callRoomoteViaEmojiEnabled: settings.callRoomoteViaEmojiEnabled,
     callRoomoteViaEmojiName: settings.callRoomoteViaEmojiName ?? '',
@@ -922,23 +929,9 @@ function mapSettingsToFormState(
     managerSlackChannel:
       settings.managerSlackChannelName ?? settings.managerSlackChannelId ?? '',
     managerDiscordChannel: settings.managerDiscordChannelId ?? '',
-    defaultDestinationProvider:
-      settings.defaultAutomationTarget?.provider === 'sentry'
-        ? 'none'
-        : (settings.defaultAutomationTarget?.provider ?? 'none'),
-    defaultDestinationMode:
-      settings.defaultAutomationTarget?.targetKind.endsWith('_user') ||
-      settings.defaultAutomationTarget?.provider === 'email'
-        ? 'direct_message'
-        : 'channel',
-    defaultDestinationChannelId:
-      settings.defaultAutomationTarget?.provider === 'email'
-        ? ((settings.defaultAutomationTarget.metadata?.emailIdentityId as
-            | string
-            | undefined) ?? '')
-        : settings.defaultAutomationTarget?.targetKind.endsWith('_user')
-          ? ''
-          : (settings.defaultAutomationTarget?.externalRef ?? ''),
+    defaultDestinationProvider: defaultDestination.provider,
+    defaultDestinationMode: defaultDestination.mode,
+    defaultDestinationChannelId: defaultDestination.channelId,
     managerStatsFrequency: settings.managerStatsFrequency,
     managerStatsSlackChannel:
       settings.managerStatsSlackChannelName ??
@@ -2075,7 +2068,7 @@ export function AutomationsSettings({
   );
 
   const saveAgent = useCallback(
-    (automationId: AutomationId) => {
+    (automationId: AutomationId, onSaved?: () => void) => {
       if (!formState || !savedState) {
         return;
       }
@@ -2086,6 +2079,11 @@ export function AutomationsSettings({
 
       updateMutation.mutate(
         buildAutomationSettingsSaveInput(formState, savedState, automationId),
+        {
+          onSuccess: (result) => {
+            if (result.success) onSaved?.();
+          },
+        },
       );
     },
     [formState, savedState, updateMutation],
@@ -2831,8 +2829,8 @@ export function AutomationsSettings({
     callRoomoteViaEmoji: 'Emoji reaction → source thread',
     channelAutoStart: `${formState?.channelAutoStartChannels.length ?? 0} configured channel${formState?.channelAutoStartChannels.length === 1 ? '' : 's'} → Sessions`,
     managerChannel: managerChannelConfigured
-      ? `Shared output → ${managerSlackChannelId ? `Slack ${formState?.managerSlackChannel || managerSlackChannelId}` : `Discord ${formState?.managerDiscordChannel || managerDiscordChannelId}`}`
-      : 'No shared output destination',
+      ? 'Default destination configured'
+      : 'No default destination',
     managerStats: scheduledSummary(
       formState?.managerStatsFrequency,
       resolvedDestinationLabel('manager_stats'),
@@ -2995,6 +2993,14 @@ export function AutomationsSettings({
                     mode: savedState?.defaultDestinationMode ?? 'channel',
                     channelId: savedState?.defaultDestinationChannelId ?? '',
                   }}
+                  savedOwner={
+                    settingsQuery.data?.defaultDestinationOwner ?? null
+                  }
+                  error={
+                    fieldErrors.managerSlackChannel ??
+                    fieldErrors.managerDiscordChannel ??
+                    fieldErrors.general
+                  }
                   availableProviders={availableDestinationProviders}
                   slackOptions={buildSlackDestinationOptions(
                     formState.defaultDestinationProvider === 'slack'
@@ -3034,7 +3040,7 @@ export function AutomationsSettings({
                         : prev,
                     )
                   }
-                  onSave={() => saveAgent('managerChannel')}
+                  onSave={(onSaved) => saveAgent('managerChannel', onSaved)}
                   onReset={() => resetAgent('managerChannel')}
                 />
               )}

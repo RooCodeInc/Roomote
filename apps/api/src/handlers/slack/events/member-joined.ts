@@ -1,4 +1,7 @@
-import { formatErrorForLog } from '@roomote/types';
+import {
+  buildChannelAutomationTarget,
+  formatErrorForLog,
+} from '@roomote/types';
 import {
   db,
   and,
@@ -67,26 +70,22 @@ export async function maybePostSlackChannelWelcome(params: {
     publicChannelName?.toLowerCase() === MANAGER_CHANNEL_CANDIDATE_NAME
   ) {
     const now = new Date();
+    const defaultAutomationTarget = buildChannelAutomationTarget(
+      'slack',
+      event.channel,
+    );
     const [registered] = await db
       .insert(deploymentSettings)
       .values({
         managerSlackChannelId: event.channel,
-        defaultAutomationTarget: {
-          provider: 'slack',
-          targetKind: 'slack_channel',
-          externalRef: event.channel,
-        },
+        defaultAutomationTarget,
         updatedAt: now,
       })
       .onConflictDoUpdate({
         target: deploymentSettings.id,
         set: {
           managerSlackChannelId: event.channel,
-          defaultAutomationTarget: {
-            provider: 'slack',
-            targetKind: 'slack_channel',
-            externalRef: event.channel,
-          },
+          defaultAutomationTarget,
           updatedAt: now,
         },
         // A destination may have been chosen after the settings read.
