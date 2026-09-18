@@ -22,6 +22,7 @@ const {
   mockIsXaiSubscriptionConnected,
   mockValidateSetupModelProviderCredentials,
   mockCollectCandidateProviderCredentials,
+  mockValidateBedrockApiKey,
 } = vi.hoisted(() => ({
   mockFindDeploymentSettings: vi.fn(),
   mockInsertDeploymentSettings: vi.fn(),
@@ -37,12 +38,14 @@ const {
   mockIsXaiSubscriptionConnected: vi.fn(),
   mockValidateSetupModelProviderCredentials: vi.fn(),
   mockCollectCandidateProviderCredentials: vi.fn(),
+  mockValidateBedrockApiKey: vi.fn(),
 }));
 
 vi.mock('./provider-validation', () => ({
   validateSetupModelProviderCredentials:
     mockValidateSetupModelProviderCredentials,
   collectCandidateProviderCredentials: mockCollectCandidateProviderCredentials,
+  validateBedrockApiKey: mockValidateBedrockApiKey,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -599,6 +602,19 @@ describe('lookupTaskModelCommand', () => {
         signal: expect.any(AbortSignal),
       }),
     );
+  });
+
+  it('keeps manual Bedrock ID entry available when catalog metadata is unknown', async () => {
+    await expect(
+      lookupTaskModelCommand(buildMockAuth(), {
+        modelId: 'amazon-bedrock/vendor.private-model',
+      }),
+    ).resolves.toEqual({
+      modelId: 'amazon-bedrock/vendor.private-model',
+      displayName: 'vendor.private-model',
+      family: 'vendor',
+      metadata: null,
+    });
   });
 
   it('uses a timeout signal when refreshing models.dev metadata', async () => {
@@ -2218,6 +2234,29 @@ describe('task model provider commands', () => {
         }),
       }),
     );
+    expect(mockValidateSetupModelProviderCredentials).not.toHaveBeenCalled();
+    expect(txOnConflictDoUpdate.mock.calls[0]?.[0]?.set).not.toHaveProperty(
+      'taskModelSettings',
+    );
+  });
+
+  it('rejects a Bedrock API key the key probe does not accept before persisting it', async () => {
+    mockValidateBedrockApiKey.mockRejectedValueOnce(
+      new Error('Amazon Bedrock: the API key was not accepted in us-east-1.'),
+    );
+
+    await expect(
+      saveTaskModelProviderCommand(buildMockAuth(), {
+        provider: 'amazon-bedrock',
+        apiKey: 'wrong-key',
+      }),
+    ).rejects.toThrow('the API key was not accepted');
+
+    expect(mockValidateBedrockApiKey).toHaveBeenCalledWith(
+      expect.objectContaining({ apiKey: 'wrong-key' }),
+    );
+    expect(mockValidateSetupModelProviderCredentials).not.toHaveBeenCalled();
+    expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
   });
 
   it('rejects additional env values the provider does not declare', async () => {
@@ -2502,5 +2541,41 @@ describe('task model provider commands', () => {
       );
     }
     expect(updateSet.setupNewState.modelProvider).toBeNull();
+  });
+});
+
+describe('suggestTaskModelsCommand', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps curated Bedrock Mantle models searchable when models.dev is unreachable', async () => {
+    // A fresh module instance so no earlier test's cached catalog is served.
+    vi.resetModules();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('models.dev unreachable');
+      }),
+    );
+    const { suggestTaskModelsCommand } = await import('./index');
+
+    const bedrock = await suggestTaskModelsCommand(buildMockAuth(), {
+      providerId: 'amazon-bedrock',
+      query: 'sonnet',
+    });
+    expect(bedrock.suggestions.length).toBeGreaterThan(0);
+    expect(
+      bedrock.suggestions.every((suggestion) =>
+        suggestion.slug.startsWith('bedrock-mantle/'),
+      ),
+    ).toBe(true);
+
+    await expect(
+      suggestTaskModelsCommand(buildMockAuth(), {
+        providerId: 'anthropic',
+        query: 'sonnet',
+      }),
+    ).resolves.toEqual({ suggestions: [] });
   });
 });

@@ -17,8 +17,10 @@ creating it; model availability and the key are region-dependent.
 
 ## Configuration
 
-Add **Amazon Bedrock** in **Settings > Models**, enter the Mantle API key, and
-optionally specify its AWS region. Environment-variable configuration uses:
+Add **Amazon Bedrock** in **Settings > Models**, enter the Bedrock API key, and
+optionally specify its AWS region. New connections do not enable models
+automatically. Search the catalog and explicitly choose the native or Mantle
+models the deployment should use. Environment-variable configuration uses:
 
 ```sh
 AWS_BEARER_TOKEN_BEDROCK=...
@@ -34,20 +36,30 @@ continue to use Mantle's Responses endpoint automatically. Enable only models
 your account and configured region can access, then choose the default and role
 mappings.
 
-Roomote keeps Mantle models as the recommended defaults. Use native Bedrock
-models when you need standard Bedrock Runtime behavior or a regional inference
-profile that is not available through Mantle. Inference-profile ARNs are not
-supported through Roomote's hosted inference gateway; use the plain model or
-cross-region profile ID instead.
+Roomote labels Mantle models in search results and in the model list; Bedrock
+models without that label use the native route. Mantle models remain
+available in the recommended mapping preset, but applying that preset is an
+explicit action. Use native Bedrock models when you need standard Bedrock
+Runtime behavior or a regional inference profile that is not available through
+Mantle. Inference-profile ARNs are not supported through Roomote's hosted
+inference gateway; use the plain model or cross-region profile ID instead.
 
 ## Model discovery and access
 
 AWS exposes separate model catalogs for the two Bedrock endpoints. Mantle API
 keys can list the models on the regional Mantle `/models` endpoint. AWS
 documents native `ListFoundationModels` with AWS credentials and SigV4, not the
-Bedrock API key used by Roomote. Roomote therefore shows a curated Mantle list
-and preserves manually added `amazon-bedrock/` model IDs instead of requesting
-broader AWS credentials.
+Bedrock API key used by Roomote. Roomote therefore searches the public native
+Bedrock catalog, shows a curated Mantle list, and keeps manual model-ID entry as
+a fallback instead of requesting broader AWS credentials. The catalog search is
+best-effort: if it is unavailable or does not list a model, type the model ID.
+When nothing in the catalog matches, Roomote uses the ID as entered and treats
+an ID without a route prefix as a native model (`amazon-bedrock/<model-id>`);
+enter `bedrock-mantle/<model-id>` for the Mantle route.
+
+Saving a new or changed API key or region checks the key against the regional
+Mantle model listing and rejects a key that region does not accept. That check
+does not establish access to any particular model.
 
 A model appearing in either regional catalog does not prove that the configured
 identity can invoke it. Invocation still depends on the region, IAM
@@ -63,10 +75,10 @@ rates on the [Bedrock pricing page](https://aws.amazon.com/bedrock/pricing/).
 
 ## Verify setup
 
-1. save the Mantle API key and matching region
-2. confirm Amazon Bedrock models appear in **Settings > Models**
-3. enable a Mantle or native model available in that region and assign it to a role
-4. run a small task and confirm usage appears in the task and AWS account
+1. save the Bedrock API key and matching region; Roomote confirms the save and
+   scrolls to the model list because no Bedrock model is enabled yet
+2. search for and enable a native or Mantle model in **Settings > Models**
+3. assign the model to a role, run a small task, and confirm usage appears in the task and AWS account
 
 ## Common issues
 

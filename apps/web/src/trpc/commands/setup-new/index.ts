@@ -91,9 +91,12 @@ import {
   normalizeDeploymentComputeConfig,
   normalizeDeploymentModelConfig,
   getSetupNewComputeProvisioningState,
+  getSetupProviderModelIdPrefixes,
+  getTaskModelProviderId,
   hasSetupChatHandoffDestination,
   isSetupProvisionableComputeProvider,
   normalizeSetupNewState,
+  providerRequiresModelSelection,
   presentSetupNewComputeProvisioning,
   resolveDerivedModalBaseImageRef,
   resolveTeamsBotCredentialEnvVarNames,
@@ -1633,28 +1636,40 @@ export async function saveSetupNewModelConfigCommand(
     );
   }
 
-  let selectedDynamicModel = input.modelId?.trim();
+  let selectedModelId = input.modelId?.trim();
 
   // Discovery in the wizard uses the catalog id `openai-compatible/...`.
   // After naming the connection, remap model ids onto the named provider.
   if (
-    selectedDynamicModel?.startsWith(`${OPENAI_COMPATIBLE_PROVIDER_ID}/`) &&
+    selectedModelId?.startsWith(`${OPENAI_COMPATIBLE_PROVIDER_ID}/`) &&
     provider.id !== OPENAI_COMPATIBLE_PROVIDER_ID &&
     isOpenAiCompatibleProviderId(provider.id)
   ) {
-    selectedDynamicModel = `${provider.id}/${selectedDynamicModel.slice(
+    selectedModelId = `${provider.id}/${selectedModelId.slice(
       OPENAI_COMPATIBLE_PROVIDER_ID.length + 1,
     )}`;
   }
 
-  if (provider.dynamicModels && !selectedDynamicModel) {
-    throw new Error(`Choose a discovered ${provider.label} model to continue.`);
+  const requiresModelSelection = providerRequiresModelSelection(provider);
+  if (requiresModelSelection && !selectedModelId) {
+    throw new Error(`Choose a model from ${provider.label} to continue.`);
   }
 
-  const runtimeModelConfig = provider.dynamicModels
+  if (provider.requiresModelSelection && selectedModelId) {
+    const selectedModelPrefix = getTaskModelProviderId(selectedModelId);
+    if (
+      !selectedModelPrefix ||
+      !getSetupProviderModelIdPrefixes(provider).has(selectedModelPrefix) ||
+      !selectedModelId.slice(selectedModelPrefix.length + 1).trim()
+    ) {
+      throw new Error(`Choose a model served by ${provider.label}.`);
+    }
+  }
+
+  const nextRuntimeModelConfig = requiresModelSelection
     ? {
         ...createEmptyDeploymentModelConfig(),
-        roomoteModel: selectedDynamicModel!,
+        roomoteModel: selectedModelId!,
       }
     : buildRecommendedDeploymentModelConfig(provider);
 
@@ -1664,7 +1679,7 @@ export async function saveSetupNewModelConfigCommand(
       apiKey,
       additionalEnvValues,
       action: 'continue',
-      modelId: runtimeModelConfig.roomoteModel!,
+      modelId: nextRuntimeModelConfig.roomoteModel!,
     });
   }
 
@@ -1673,13 +1688,26 @@ export async function saveSetupNewModelConfigCommand(
   ).catch(() => null);
 
   return db.transaction(async (tx) => {
-    const [currentState, persistedEnvVarNames, persistedTaskModelSettings] =
-      await Promise.all([
-        getPersistedSetupNewState(tx),
-        getPersistedEnvironmentVariableNames(tx),
-        getPersistedRawTaskModelSettings(tx),
-      ]);
+    const [
+      currentState,
+      persistedEnvVarNames,
+      persistedTaskModelSettings,
+      persistedRuntimeModelConfig,
+    ] = await Promise.all([
+      getPersistedSetupNewState(tx),
+      getPersistedEnvironmentVariableNames(tx),
+      getPersistedRawTaskModelSettings(tx),
+      getPersistedRuntimeModelConfig(tx),
+    ]);
     const persistedEnvVarNameSet = new Set(persistedEnvVarNames);
+    // Re-confirming the model the deployment already runs must not reset the
+    // role mappings and model list an operator configured since.
+    const keepsPersistedModelConfig =
+      requiresModelSelection &&
+      persistedRuntimeModelConfig.roomoteModel === selectedModelId;
+    const runtimeModelConfig = keepsPersistedModelConfig
+      ? persistedRuntimeModelConfig
+      : nextRuntimeModelConfig;
 
     if (!isOauthProvider) {
       const { values: credentialValues, clearedEnvVarNames } =
@@ -1742,16 +1770,39 @@ export async function saveSetupNewModelConfigCommand(
       connectedProviderIds,
       metadataCatalog,
     });
-    const dynamicModelSettings = provider.dynamicModels
+    const selectedModelSettings = requiresModelSelection
       ? (() => {
-          const model = buildTaskModelOption({
-            id: selectedDynamicModel!,
-            displayName: selectedDynamicModel!.split('/').at(-1)!,
-          });
-          const current = normalizeTaskModelSettings(
-            persistedTaskModelSettings,
-          );
+          const current =
+            persistedTaskModelSettings == null
+              ? {
+                  models: [],
+                  allowedModelIds: [],
+                  defaultModelId: selectedModelId!,
+                }
+              : normalizeTaskModelSettings(persistedTaskModelSettings);
 
+          if (
+            keepsPersistedModelConfig &&
+            current.allowedModelIds.includes(selectedModelId!)
+          ) {
+            return null;
+          }
+
+          const lookup =
+            provider.requiresModelSelection && metadataCatalog
+              ? lookupModelMetadataFromCatalog(
+                  metadataCatalog,
+                  selectedModelId!,
+                )
+              : null;
+          const model = buildTaskModelOption({
+            id: selectedModelId!,
+            displayName:
+              lookup?.displayName ?? selectedModelId!.split('/').at(-1)!,
+            ...(lookup?.metadata && Object.keys(lookup.metadata).length > 0
+              ? { metadata: mergeMetadata(null, lookup.metadata) }
+              : {}),
+          });
           return normalizeTaskModelSettings({
             ...current,
             models: [
@@ -1769,8 +1820,8 @@ export async function saveSetupNewModelConfigCommand(
     await Promise.all([
       savePersistedSetupNewState(setupNewState, tx),
       savePersistedRuntimeModelConfig(runtimeModelConfig, tx),
-      ...(dynamicModelSettings
-        ? [savePersistedTaskModelSettings(dynamicModelSettings, tx)]
+      ...(selectedModelSettings
+        ? [savePersistedTaskModelSettings(selectedModelSettings, tx)]
         : autoAdd
           ? [savePersistedTaskModelSettings(autoAdd.taskModelSettings, tx)]
           : []),

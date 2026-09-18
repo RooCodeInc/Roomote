@@ -94,7 +94,10 @@ const { mockFetchModelsDevCatalog, mockLookupModelMetadataFromCatalog } =
   vi.hoisted(() => ({
     mockFetchModelsDevCatalog: vi.fn(async () => null),
     mockLookupModelMetadataFromCatalog: vi.fn(
-      (_catalog: unknown, _modelId: string): { metadata: object } => ({
+      (
+        _catalog: unknown,
+        _modelId: string,
+      ): { metadata: object; displayName?: string } => ({
         metadata: {},
       }),
     ),
@@ -303,6 +306,7 @@ import {
   saveSetupNewAuthConfigCommand,
   saveSetupNewComputeConfigCommand,
   saveSetupNewComputeProviderChoiceCommand,
+  saveSetupNewModelConfigCommand,
   saveSetupNewSourceControlConfigCommand,
   saveSetupNewSourceControlProviderChoiceCommand,
   startSetupRecommendationsCommand,
@@ -1914,5 +1918,136 @@ describe('chooseSetupTrialInferenceCommand', () => {
     expect(
       inserted.find((values) => 'runtimeModelConfig' in values),
     ).toBeDefined();
+  });
+
+  it('persists only the explicitly selected native Bedrock model during setup', async () => {
+    mockFetchModelsDevCatalog.mockResolvedValueOnce({
+      models: {},
+      providers: {
+        'amazon-bedrock': {
+          models: {
+            'zai.glm-5': {
+              name: 'GLM-5',
+              modalities: { output: ['text'] },
+              limit: { context: 205_000 },
+            },
+          },
+        },
+      },
+      gatewayModelsByLowerSlug: {},
+    } as never);
+    mockLookupModelMetadataFromCatalog.mockReturnValueOnce({
+      displayName: 'GLM-5',
+      metadata: { contextWindow: 205_000 },
+    });
+    const { tx, inserted } = createTxStub({
+      setupNewState: {},
+      runtimeModelConfig: null,
+      taskModelSettings: null,
+    });
+    mockDbTransaction.mockImplementation(
+      async (callback: (tx: unknown) => Promise<unknown>) => callback(tx),
+    );
+
+    await saveSetupNewModelConfigCommand(buildMockAuth(), {
+      provider: 'amazon-bedrock',
+      apiKey: 'bedrock-key',
+      additionalEnvValues: { AWS_REGION: 'us-west-2' },
+      modelId: 'amazon-bedrock/zai.glm-5',
+    });
+
+    expect(mockValidateSetupModelProviderCredentials).toHaveBeenCalledWith(
+      expect.objectContaining({
+        modelId: 'amazon-bedrock/zai.glm-5',
+      }),
+    );
+    expect(
+      inserted.find((values) => 'runtimeModelConfig' in values)
+        ?.runtimeModelConfig,
+    ).toMatchObject({
+      roomoteModel: 'amazon-bedrock/zai.glm-5',
+      roomoteSmallModel: null,
+      roomoteCodeReviewModel: null,
+    });
+    expect(
+      inserted.find((values) => 'taskModelSettings' in values)
+        ?.taskModelSettings,
+    ).toMatchObject({
+      models: [
+        expect.objectContaining({
+          id: 'amazon-bedrock/zai.glm-5',
+          displayName: 'GLM-5',
+        }),
+      ],
+      allowedModelIds: ['amazon-bedrock/zai.glm-5'],
+      defaultModelId: 'amazon-bedrock/zai.glm-5',
+    });
+  });
+
+  it('requires an explicit native or Mantle Bedrock model during setup', async () => {
+    await expect(
+      saveSetupNewModelConfigCommand(buildMockAuth(), {
+        provider: 'amazon-bedrock',
+        apiKey: 'bedrock-key',
+      }),
+    ).rejects.toThrow('Choose a model from Amazon Bedrock to continue.');
+
+    await expect(
+      saveSetupNewModelConfigCommand(buildMockAuth(), {
+        provider: 'amazon-bedrock',
+        apiKey: 'bedrock-key',
+        modelId: 'openrouter/z-ai/glm-5',
+      }),
+    ).rejects.toThrow('Choose a model served by Amazon Bedrock.');
+  });
+
+  it('keeps role mappings and model settings when setup re-confirms the saved Bedrock model', async () => {
+    const persistedRuntimeModelConfig = {
+      roomoteModel: 'amazon-bedrock/zai.glm-5',
+      roomoteSmallModel: 'amazon-bedrock/zai.glm-4.7',
+    };
+    const { tx, inserted } = createTxStub({
+      setupNewState: {},
+      runtimeModelConfig: persistedRuntimeModelConfig,
+      taskModelSettings: {
+        models: [
+          {
+            id: 'amazon-bedrock/zai.glm-5',
+            displayName: 'GLM-5',
+            family: 'GLM',
+          },
+          {
+            id: 'amazon-bedrock/zai.glm-4.7',
+            displayName: 'GLM-4.7',
+            family: 'GLM',
+          },
+        ],
+        allowedModelIds: [
+          'amazon-bedrock/zai.glm-5',
+          'amazon-bedrock/zai.glm-4.7',
+        ],
+        defaultModelId: 'amazon-bedrock/zai.glm-4.7',
+      },
+    });
+    mockDbTransaction.mockImplementation(
+      async (callback: (tx: unknown) => Promise<unknown>) => callback(tx),
+    );
+
+    mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+      'AWS_BEARER_TOKEN_BEDROCK',
+    ]);
+
+    await saveSetupNewModelConfigCommand(buildMockAuth(), {
+      provider: 'amazon-bedrock',
+      modelId: 'amazon-bedrock/zai.glm-5',
+    });
+
+    expect(
+      inserted.find((values) => 'runtimeModelConfig' in values)
+        ?.runtimeModelConfig,
+    ).toMatchObject(persistedRuntimeModelConfig);
+    expect(
+      inserted.find((values) => 'taskModelSettings' in values),
+    ).toBeUndefined();
   });
 });

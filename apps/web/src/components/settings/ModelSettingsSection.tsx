@@ -2140,6 +2140,9 @@ export function ModelSettingsSection({
                               {model.displayName}
                             </span>
                             {isDefault && <Badge>Default</Badge>}
+                            {model.id.startsWith('bedrock-mantle/') && (
+                              <Badge variant="outline">Mantle</Badge>
+                            )}
                           </p>
                           <p className="text-xs text-muted-foreground">
                             {model.id}

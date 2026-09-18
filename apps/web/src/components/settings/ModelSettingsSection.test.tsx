@@ -1868,4 +1868,47 @@ describe('ModelSettingsSection', () => {
       screen.getByRole('combobox', { name: 'Explore model reasoning level' }),
     ).toBeInTheDocument();
   });
+
+  it('labels Mantle models and leaves native Bedrock models unlabeled', () => {
+    const data = buildSettingsData();
+    data.models.push(
+      {
+        id: 'amazon-bedrock/zai.glm-5',
+        displayName: 'GLM-5',
+        family: 'GLM',
+        metadata: {
+          contextWindow: 205_000,
+          inputPricePerToken: 0.000001,
+          outputPricePerToken: 0.0000032,
+          inputTypes: ['text'],
+          lastRefreshedAt: null,
+        },
+        enabled: true,
+        isDefault: false,
+      },
+      {
+        id: 'bedrock-mantle/anthropic.claude-sonnet-5',
+        displayName: 'Claude Sonnet 5',
+        family: 'Claude',
+        metadata: {
+          contextWindow: 200_000,
+          inputPricePerToken: 0.000003,
+          outputPricePerToken: 0.000015,
+          inputTypes: ['text'],
+          lastRefreshedAt: null,
+        },
+        enabled: false,
+        isDefault: false,
+      },
+    );
+    settingsData.current = data;
+    providerSetupData.current = buildProviderSetupData({
+      connectedProviderIds: ['openrouter', 'amazon-bedrock'],
+    });
+
+    renderModelSettingsSection();
+
+    expect(screen.queryByText('Native')).not.toBeInTheDocument();
+    expect(screen.getByText('Mantle')).toBeInTheDocument();
+  });
 });

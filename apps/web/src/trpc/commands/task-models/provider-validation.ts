@@ -5,6 +5,7 @@ import {
   collectSetupModelProviderCredentialValues,
   getSetupModelProviderEnvVarNames,
   isConfiguredEnvValue,
+  resolveBedrockRegion,
 } from '@roomote/types';
 
 export class InferenceProviderValidationError extends Error {
@@ -160,4 +161,68 @@ export async function validateSetupModelProviderCredentials(
     clearedEnvVarNames,
     persistedEnv,
   });
+}
+
+const BEDROCK_API_KEY_ENV_VAR = 'AWS_BEARER_TOKEN_BEDROCK';
+const BEDROCK_KEY_PROBE_TIMEOUT_MS = 10_000;
+
+/**
+ * Qualifies a changed Bedrock API key or region before it is persisted.
+ * Bedrock has no model every account can invoke, and an access-denied
+ * inference probe is indistinguishable from a bad key, so the key is checked
+ * against the regional Mantle model listing instead: it needs no model
+ * access and answers 401 for a key the region does not accept. Only that
+ * answer blocks the save; an unreachable or unexpected endpoint must not
+ * lock an operator out of connecting a working provider.
+ */
+export async function validateBedrockApiKey(
+  params: Omit<CollectCredentialParams, 'isEnvVarSatisfied'>,
+): Promise<void> {
+  const { values, changedValues, clearedPersistedEnvVarNames, persistedEnv } =
+    await collectCandidateProviderCredentials(params);
+
+  if (changedValues.length === 0 && clearedPersistedEnvVarNames.length === 0) {
+    return;
+  }
+
+  const candidateEnv: Record<string, string | undefined> = {
+    ...persistedEnv,
+  };
+  for (const name of clearedPersistedEnvVarNames) {
+    delete candidateEnv[name];
+  }
+  for (const { name, value } of values) {
+    candidateEnv[name] = value;
+  }
+
+  const apiKey = candidateEnv[BEDROCK_API_KEY_ENV_VAR];
+  if (!apiKey) {
+    return;
+  }
+
+  // Throws on a malformed region, which also keeps it out of the host name.
+  const region = resolveBedrockRegion({
+    AWS_REGION: candidateEnv.AWS_REGION ?? process.env.AWS_REGION,
+  });
+  let status: number;
+  try {
+    const response = await fetch(
+      `https://bedrock-mantle.${region}.api.aws/v1/models`,
+      {
+        headers: { Authorization: `Bearer ${apiKey}` },
+        signal: AbortSignal.timeout(BEDROCK_KEY_PROBE_TIMEOUT_MS),
+      },
+    );
+    status = response.status;
+  } catch {
+    return;
+  }
+
+  if (status === 401) {
+    throw new InferenceProviderValidationError(
+      'invalid_credentials',
+      `${params.provider.label}: the API key was not accepted in ${region}. Check the key and that it was created in this region.`,
+      false,
+    );
+  }
 }

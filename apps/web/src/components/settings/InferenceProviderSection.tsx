@@ -12,6 +12,7 @@ import {
   XAI_SUBSCRIPTION_PROVIDER_ID,
   getDefaultAdditionalEnvValues,
   getModelProviderLabel,
+  getSetupModelProvider,
   isApiKeySubscriptionUsageProviderId,
 } from '@roomote/types';
 import type {
@@ -56,6 +57,7 @@ import { ChatGptConnectDialog } from '@/components/settings/ChatGptConnectDialog
 import { GitHubCopilotConnectDialog } from '@/components/settings/GitHubCopilotConnectDialog';
 import { XaiConnectDialog } from '@/components/settings/XaiConnectDialog';
 import { ProviderCreditBalanceLine } from '@/components/settings/ProviderCreditBalanceLine';
+import { getProviderSaveFeedback } from '@/components/settings/provider-save-feedback';
 import { SubscriptionUsageLine } from '@/components/settings/SubscriptionUsageLine';
 import { useDeleteTypeSafeKey } from '@/hooks/task-models/useDeleteTypeSafeKey';
 import { useJudgmentModelSettings } from '@/hooks/task-models/useJudgmentModelSettings';
@@ -1188,17 +1190,19 @@ export function InferenceProviderSection({
   const saveProvider = useMutation(
     trpc.taskModels.saveProvider.mutationOptions({
       onSuccess: async (result, variables) => {
-        const providerLabel = getModelProviderLabel(variables.provider);
-        const addedModelCount = result.addedRecommendedModelCount;
-        const addedDiscoveredModelCount = result.addedDiscoveredModelCount;
+        // Saving credentials never changes which models are enabled, so the
+        // list cached before the refetch below already answers whether this
+        // provider still needs a model.
+        const feedback = getProviderSaveFeedback({
+          provider: getSetupModelProvider(variables.provider),
+          providerLabel: getModelProviderLabel(variables.provider),
+          addedRecommendedModelCount: result.addedRecommendedModelCount,
+          addedDiscoveredModelCount: result.addedDiscoveredModelCount,
+          models: queryClient.getQueryData(trpc.taskModels.get.queryKey())
+            ?.models,
+        });
 
-        toast.success(
-          addedDiscoveredModelCount > 0
-            ? `Saved the ${providerLabel} API key and made ${addedDiscoveredModelCount} discovered ${addedDiscoveredModelCount === 1 ? 'model' : 'models'} available.`
-            : addedModelCount > 0
-              ? `Saved the ${providerLabel} API key and added ${addedModelCount} recommended ${addedModelCount === 1 ? 'model' : 'models'}.`
-              : `Saved the ${providerLabel} API key.`,
-        );
+        toast.success(feedback.message);
         setProviderDialog(null);
         if (result.discoveryError) {
           toast.error(result.discoveryError);
@@ -1213,19 +1217,18 @@ export function InferenceProviderSection({
           queryClient.invalidateQueries({
             queryKey: trpc.providerCredits.list.queryKey(),
           }),
-          ...(addedModelCount > 0 || addedDiscoveredModelCount > 0
-            ? [
-                queryClient.invalidateQueries({
-                  queryKey: trpc.taskModels.get.queryKey(),
-                }),
-                queryClient.invalidateQueries({
-                  queryKey: trpc.taskModels.launchOptions.queryKey(),
-                }),
-              ]
-            : []),
+          // A newly connected provider changes the Available Models list
+          // even when nothing was auto-added: its curated models are listed
+          // (disabled) for the operator to enable.
+          queryClient.invalidateQueries({
+            queryKey: trpc.taskModels.get.queryKey(),
+          }),
+          queryClient.invalidateQueries({
+            queryKey: trpc.taskModels.launchOptions.queryKey(),
+          }),
         ]);
 
-        if (addedModelCount > 0 || addedDiscoveredModelCount > 0) {
+        if (feedback.showModelList) {
           onRecommendedModelsAdded?.();
         }
       },

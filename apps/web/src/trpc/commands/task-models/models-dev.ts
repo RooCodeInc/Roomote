@@ -4,11 +4,13 @@ import {
   type TaskModelInputType,
   type TaskModelMetadata,
   type TaskModelOption,
+  type SuggestedTaskModel,
   rebaseRoomoteModelIdToUpstream,
 } from '@roomote/types';
 
 const MODELS_DEV_CATALOG_URL = 'https://models.dev/catalog.json';
 const BEDROCK_MANTLE_PROVIDER_PREFIX = 'bedrock-mantle/';
+const BEDROCK_NATIVE_PROVIDER_PREFIX = 'amazon-bedrock/';
 const MODELS_DEV_CATALOG_CACHE_TTL_MS = 5 * 60 * 1_000;
 // Failures are cached briefly so a models.dev outage does not make every
 // request that wants the catalog (e.g. the launch-options page load) block on
@@ -59,6 +61,13 @@ type ModelsDevProviderEntry = {
 type ModelsDevSuggestion = {
   slug: string;
   displayName: string;
+};
+
+type ModelSuggestionCandidate = ModelsDevSuggestion & {
+  /** Slug text to rank against when `slug` carries a provider prefix. */
+  searchSlug?: string;
+  /** Curated entries share result slots with catalog entries of equal rank. */
+  curated?: boolean;
 };
 
 type ModelsDevCatalogJson = {
@@ -288,6 +297,26 @@ export function lookupModelMetadataFromCatalog(
       catalog,
       `openrouter/${upstreamSlug}`,
     );
+  // Native ids resolve only through the Bedrock provider catalog: falling
+  // back to the model lab would report the lab's direct-API pricing as
+  // Bedrock cost. Mantle ids prefer the exact Bedrock entry and keep the lab
+  // fallback from `resolveModelsDevSlug`.
+  if (modelId.startsWith(BEDROCK_NATIVE_PROVIDER_PREFIX)) {
+    return extractMetadataFromEntry(
+      findBedrockCatalogEntry(
+        catalog,
+        modelId.slice(BEDROCK_NATIVE_PROVIDER_PREFIX.length),
+      ),
+    );
+  }
+  const bedrockEntry = extractMetadataFromEntry(
+    modelId.startsWith(BEDROCK_MANTLE_PROVIDER_PREFIX)
+      ? findBedrockCatalogEntry(
+          catalog,
+          modelId.slice(BEDROCK_MANTLE_PROVIDER_PREFIX.length),
+        )
+      : undefined,
+  );
   const slug = resolveModelsDevSlug(modelId);
   const gatewayProviderId = GATEWAY_TASK_MODEL_PROVIDER_IDS.find((providerId) =>
     modelId.startsWith(`${providerId}/`),
@@ -319,12 +348,34 @@ export function lookupModelMetadataFromCatalog(
   const mergedMetadata: Partial<TaskModelMetadata> = {
     ...labPricing.metadata,
     ...genericEntry.metadata,
+    ...bedrockEntry.metadata,
   };
 
   return {
     metadata: mergedMetadata,
-    displayName: genericEntry.displayName ?? labPricing.displayName,
+    displayName:
+      bedrockEntry.displayName ??
+      genericEntry.displayName ??
+      labPricing.displayName,
   };
+}
+
+// Cross-region inference profiles prefix the foundation model id with a
+// geography (`us.anthropic.claude-...`); the catalog may list only the plain id.
+const BEDROCK_INFERENCE_PROFILE_PREFIX_PATTERN =
+  /^(?:us|us-gov|eu|apac|au|ca|jp|global)\./u;
+
+function findBedrockCatalogEntry(
+  catalog: ModelsDevCatalog,
+  bedrockModelId: string,
+): ModelsDevModelEntry | undefined {
+  const models = catalog.providers['amazon-bedrock']?.models;
+  return (
+    models?.[bedrockModelId] ??
+    models?.[
+      bedrockModelId.replace(BEDROCK_INFERENCE_PROFILE_PREFIX_PATTERN, '')
+    ]
+  );
 }
 
 export function mergeMetadata(
@@ -416,20 +467,101 @@ export function suggestModelsFromCatalog(options: {
   query: string;
   limit?: number;
 }): ModelsDevSuggestion[] {
+  const providerModels =
+    options.catalog.providers[options.providerId]?.models ?? {};
+  return rankModelSuggestions({
+    candidates: Object.entries(providerModels).map(([slug, entry]) => ({
+      slug: slug.trim(),
+      displayName: entry.name?.trim() || slug.trim(),
+    })),
+    query: options.query,
+    limit: options.limit,
+  });
+}
+
+export function suggestBedrockModelsFromCatalog(options: {
+  /** Null when models.dev is unreachable; curated Mantle models still rank. */
+  catalog: ModelsDevCatalog | null;
+  mantleModels: readonly SuggestedTaskModel[];
+  query: string;
+  limit?: number;
+}): ModelsDevSuggestion[] {
+  const nativeModels = Object.entries(
+    options.catalog?.providers['amazon-bedrock']?.models ?? {},
+  ).flatMap(([slug, entry]): ModelSuggestionCandidate[] => {
+    if (!isBedrockTaskModelEntry(entry)) {
+      return [];
+    }
+
+    const trimmedSlug = slug.trim();
+    if (!trimmedSlug) {
+      return [];
+    }
+
+    return [
+      {
+        slug: `${BEDROCK_NATIVE_PROVIDER_PREFIX}${trimmedSlug}`,
+        searchSlug: trimmedSlug,
+        displayName: entry.name?.trim() || trimmedSlug,
+      },
+    ];
+  });
+  const mantleModels = options.mantleModels.map(
+    (model): ModelSuggestionCandidate => ({
+      slug: model.id,
+      searchSlug: model.id.startsWith(BEDROCK_MANTLE_PROVIDER_PREFIX)
+        ? model.id.slice(BEDROCK_MANTLE_PROVIDER_PREFIX.length)
+        : model.id,
+      displayName: `${model.displayName} (Mantle)`,
+      curated: true,
+    }),
+  );
+
+  return rankModelSuggestions({
+    candidates: [...nativeModels, ...mantleModels],
+    query: options.query,
+    limit: options.limit,
+  });
+}
+
+function isBedrockTaskModelEntry(entry: ModelsDevModelEntry): boolean {
+  if (entry.status === 'deprecated' || entry.tool_call === false) {
+    return false;
+  }
+
+  return entry.modalities?.output?.includes('text') ?? false;
+}
+
+function rankModelSuggestions(options: {
+  candidates: ModelSuggestionCandidate[];
+  query: string;
+  limit?: number;
+}): ModelsDevSuggestion[] {
   const normalizedQuery = options.query.trim().toLowerCase();
 
   if (normalizedQuery.length < 1) {
     return [];
   }
+  // Punctuation-only or non-ASCII queries normalize to '', which every string
+  // includes; only the raw comparisons may match those.
+  const normalizedSearchQuery = normalizeModelSearchText(normalizedQuery);
+  const hasSearchQuery = normalizedSearchQuery.length > 0;
+  // A provider prefix shared by every candidate must not rank: match the bare
+  // slug unless the query itself is a prefixed id.
+  const queryHasProviderPrefix = normalizedQuery.includes('/');
 
-  const providerModels =
-    options.catalog.providers[options.providerId]?.models ?? {};
-  const rankedSuggestions = Object.entries(providerModels)
-    .map(([slug, entry]) => {
-      const trimmedSlug = slug.trim();
-      const displayName = entry.name?.trim() || trimmedSlug;
-      const lowerSlug = trimmedSlug.toLowerCase();
+  const rankedSuggestions = options.candidates
+    .map((candidate) => {
+      const trimmedSlug = candidate.slug.trim();
+      const displayName = candidate.displayName.trim() || trimmedSlug;
+      const lowerSlug = (
+        queryHasProviderPrefix
+          ? trimmedSlug
+          : (candidate.searchSlug?.trim() ?? trimmedSlug)
+      ).toLowerCase();
       const lowerName = displayName.toLowerCase();
+      const searchableSlug = normalizeModelSearchText(lowerSlug);
+      const searchableName = normalizeModelSearchText(lowerName);
 
       let rank: number | null = null;
 
@@ -441,13 +573,25 @@ export function suggestModelsFromCatalog(options: {
         rank = 2;
       } else if (lowerName.startsWith(normalizedQuery)) {
         rank = 3;
-      } else if (lowerSlug.includes(normalizedQuery)) {
+      } else if (
+        lowerSlug.includes(normalizedQuery) ||
+        (hasSearchQuery && searchableSlug.includes(normalizedSearchQuery))
+      ) {
         rank = 4;
-      } else if (lowerName.includes(normalizedQuery)) {
+      } else if (
+        lowerName.includes(normalizedQuery) ||
+        (hasSearchQuery && searchableName.includes(normalizedSearchQuery))
+      ) {
         rank = 5;
-      } else {
-        const fuzzySlugRank = getFuzzyMatchRank(lowerSlug, normalizedQuery);
-        const fuzzyNameRank = getFuzzyMatchRank(lowerName, normalizedQuery);
+      } else if (hasSearchQuery) {
+        const fuzzySlugRank = getFuzzyMatchRank(
+          searchableSlug,
+          normalizedSearchQuery,
+        );
+        const fuzzyNameRank = getFuzzyMatchRank(
+          searchableName,
+          normalizedSearchQuery,
+        );
 
         if (fuzzySlugRank !== null || fuzzyNameRank !== null) {
           rank =
@@ -466,13 +610,11 @@ export function suggestModelsFromCatalog(options: {
       return {
         slug: trimmedSlug,
         displayName,
+        curated: candidate.curated === true,
         rank,
       };
     })
-    .filter(
-      (entry): entry is ModelsDevSuggestion & { rank: number } =>
-        entry !== null,
-    )
+    .filter((entry) => entry !== null)
     .sort((left, right) => {
       if (left.rank !== right.rank) {
         return left.rank - right.rank;
@@ -481,9 +623,27 @@ export function suggestModelsFromCatalog(options: {
       return left.slug.localeCompare(right.slug);
     });
 
+  // Alternate curated and catalog entries of equal rank (curated first) so a
+  // long run of one kind cannot push the other out of the result limit.
+  const turnByGroup = new Map<string, number>();
+  const interleavedSuggestions = rankedSuggestions
+    .map((entry) => {
+      const group = `${entry.rank}:${entry.curated}`;
+      const turn = turnByGroup.get(group) ?? 0;
+      turnByGroup.set(group, turn + 1);
+      return { ...entry, turn };
+    })
+    .sort(
+      (left, right) =>
+        left.rank - right.rank ||
+        left.turn - right.turn ||
+        Number(right.curated) - Number(left.curated) ||
+        left.slug.localeCompare(right.slug),
+    );
+
   const seenSlugs = new Set<string>();
 
-  return rankedSuggestions
+  return interleavedSuggestions
     .filter((entry) => {
       const normalizedSlug = entry.slug.toLowerCase();
 
@@ -496,6 +656,10 @@ export function suggestModelsFromCatalog(options: {
     })
     .slice(0, options.limit ?? 8)
     .map(({ slug, displayName }) => ({ slug, displayName }));
+}
+
+function normalizeModelSearchText(value: string): string {
+  return value.replace(/[^a-z0-9]+/gu, ' ').trim();
 }
 
 function getFuzzyMatchRank(candidate: string, query: string): number | null {

@@ -11,7 +11,6 @@ import {
   buildAutoAddedTaskModelSettings,
   collectConnectedTaskModelProviderIds,
 } from './auto-add-models';
-import type { ModelsDevCatalog } from './models-dev';
 
 const ANTHROPIC = getSetupModelProvider('anthropic');
 const OPENROUTER = getSetupModelProvider('openrouter');
@@ -239,36 +238,41 @@ describe('buildAutoAddedTaskModelSettings', () => {
     );
   });
 
-  it('adds recommended Bedrock models with the same catalog metadata used for manual additions', () => {
-    const bedrock = getSetupModelProvider('amazon-bedrock');
-    const metadataCatalog: ModelsDevCatalog = {
-      models: {
-        'anthropic/claude-sonnet-5': {
-          name: 'Claude Sonnet 5',
-          limit: { context: 205_000 },
-          cost: { input: 1, output: 3.2 },
-        },
-      },
-      providers: {},
-      gatewayModelsByLowerSlug: {},
-    };
-
-    const result = buildAutoAddedTaskModelSettings({
-      provider: bedrock,
-      persistedTaskModelSettings: null,
-      connectedProviderIds: new Set(['amazon-bedrock', 'bedrock-mantle']),
-      metadataCatalog,
-    });
-
+  it('does not auto-add or enable models for a new Bedrock connection', () => {
     expect(
-      result?.addedModels.find(
-        (model) => model.id === 'bedrock-mantle/anthropic.claude-sonnet-5',
-      )?.metadata,
-    ).toMatchObject({
-      contextWindow: 205_000,
-      inputPricePerToken: 1 / 1_000_000,
-      outputPricePerToken: 3.2 / 1_000_000,
+      buildAutoAddedTaskModelSettings({
+        provider: getSetupModelProvider('amazon-bedrock'),
+        persistedTaskModelSettings: null,
+        connectedProviderIds: new Set(['amazon-bedrock', 'bedrock-mantle']),
+        metadataCatalog: {
+          models: {},
+          providers: {
+            'amazon-bedrock': {
+              models: {
+                'zai.glm-5': {
+                  name: 'GLM-5',
+                  modalities: { output: ['text'] },
+                },
+              },
+            },
+          },
+          gatewayModelsByLowerSlug: {},
+        },
+      }),
+    ).toBeNull();
+  });
+
+  it('keeps auto-adding recommendations for providers without explicit selection', () => {
+    const result = buildAutoAddedTaskModelSettings({
+      provider: GOOGLE,
+      persistedTaskModelSettings: null,
+      connectedProviderIds: new Set(['google']),
     });
+
+    expect(result?.addedModels).not.toHaveLength(0);
+    expect(result?.taskModelSettings.allowedModelIds).toEqual(
+      expect.arrayContaining(result!.addedModels.map((model) => model.id)),
+    );
   });
 
   it('adds default-preset models without adding models unique to another preset', () => {

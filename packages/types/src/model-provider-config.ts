@@ -344,6 +344,8 @@ export type SetupModelProviderDescriptor = {
   suggestedTaskModels: readonly SuggestedTaskModel[];
   /** Models are discovered from the configured endpoint, not a static catalog. */
   dynamicModels?: boolean;
+  /** Setup must explicitly choose a catalog model instead of applying defaults. */
+  requiresModelSelection?: boolean;
   /**
    * Hides the provider from the setup wizard and settings connect surfaces
    * unless it is already connected (saved or runtime env). The catalog entry
@@ -365,6 +367,37 @@ export type SetupModelProviderDescriptor = {
   /** Optional reasoning levels for roles in the legacy single mapping. */
   recommendedRoleReasoningEfforts?: RecommendedRoleReasoningEfforts;
 };
+
+export function providerRequiresModelSelection(
+  provider: SetupModelProviderDescriptor,
+): boolean {
+  return (
+    provider.dynamicModels === true || provider.requiresModelSelection === true
+  );
+}
+
+/**
+ * Model-id prefixes a provider serves. Derived from the provider's own
+ * curated model ids so providers that serve another prefix's models
+ * (`chatgpt` -> `openai/`, `amazon-bedrock` -> `bedrock-mantle/`) stay covered
+ * without a hand-maintained mapping.
+ */
+export function getSetupProviderModelIdPrefixes(
+  provider: Pick<
+    SetupModelProviderDescriptor,
+    'id' | 'defaultRoomoteModel' | 'suggestedTaskModels'
+  >,
+): Set<string> {
+  return new Set(
+    [
+      `${getSetupProviderTaskModelPrefix(provider.id)}/`,
+      provider.defaultRoomoteModel,
+      ...provider.suggestedTaskModels.map((suggestion) => suggestion.id),
+    ]
+      .map((modelId) => getTaskModelProviderId(modelId))
+      .filter((prefix): prefix is string => prefix !== null),
+  );
+}
 
 export const DEFAULT_SETUP_MODEL_PROVIDER_ID: SetupModelProviderId =
   'openrouter';
@@ -933,6 +966,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     ],
     defaultRoomoteModel: 'bedrock-mantle/anthropic.claude-sonnet-5',
     authKind: 'api-key',
+    requiresModelSelection: true,
     suggestedTaskModels: mapRecommendedTaskModels({
       'claude-fable-5-1': 'bedrock-mantle/anthropic.claude-fable-5-1',
       'claude-fable-5': 'bedrock-mantle/anthropic.claude-fable-5',

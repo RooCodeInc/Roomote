@@ -3,12 +3,18 @@
 import {
   type ReactNode,
   useCallback,
+  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
@@ -16,6 +22,9 @@ import {
   OPENAI_COMPATIBLE_PROVIDER_ID,
   getDefaultAdditionalEnvValues,
   getSetupModelProvider,
+  getSetupProviderModelIdPrefixes,
+  getSetupProviderTaskModelPrefix,
+  getTaskModelProviderId,
   type SetupModelProviderId,
   type SetupModelStatus,
 } from '@roomote/types';
@@ -25,8 +34,16 @@ import {
   ArrowRight,
   Button,
   Check,
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandItem,
+  CommandList,
   Input,
   Lock,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
   Select,
   SelectContent,
   SelectItem,
@@ -116,6 +133,13 @@ export function StepInferenceProvider({
   const [additionalEnvValues, setAdditionalEnvValues] = useState<
     Record<string, string>
   >({});
+  const [catalogModelQuery, setCatalogModelQuery] = useState('');
+  const [selectedCatalogModelId, setSelectedCatalogModelId] = useState('');
+  // Until the operator edits the field it shows the model the deployment
+  // already runs, so revisiting this step does not force a new choice.
+  const [catalogModelTouched, setCatalogModelTouched] = useState(false);
+  const [catalogSuggestionsOpen, setCatalogSuggestionsOpen] = useState(false);
+  const [highlightedCatalogSlug, setHighlightedCatalogSlug] = useState('');
   const [editingSavedValue, setEditingSavedValue] = useState(false);
   const [isChatGptDialogOpen, setIsChatGptDialogOpen] = useState(false);
   const [isGitHubCopilotDialogOpen, setIsGitHubCopilotDialogOpen] =
@@ -167,6 +191,10 @@ export function StepInferenceProvider({
           : '',
     );
     setConnectionName('');
+    setCatalogModelQuery('');
+    setSelectedCatalogModelId('');
+    setCatalogModelTouched(false);
+    setCatalogSuggestionsOpen(false);
     // Seeded from the catalog rather than the fetched status so this effect
     // stays keyed on `selectedProvider` alone; depending on the status query
     // would reset in-progress input on every refetch.
@@ -209,6 +237,101 @@ export function StepInferenceProvider({
   const isGitHubCopilotProvider = selectedProvider === 'github-copilot';
   const isOAuthProvider = selectedProviderStatus?.authKind === 'oauth';
   const isEndpointProvider = selectedProviderStatus?.authKind === 'endpoint';
+  const requiresModelSelection =
+    selectedProviderStatus?.requiresModelSelection === true;
+  const providerModelIdPrefixes = useMemo(
+    () =>
+      selectedProviderStatus
+        ? getSetupProviderModelIdPrefixes(selectedProviderStatus)
+        : new Set<string>(),
+    [selectedProviderStatus],
+  );
+  // The model the deployment already runs (saved, or supplied by the runtime
+  // env) so revisiting this step does not force a new choice.
+  const persistedProviderModelId = useMemo(
+    () =>
+      [modelSetup.persistedRoomoteModel, modelSetup.runtimeRoomoteModel].find(
+        (modelId): modelId is string => {
+          const prefix = modelId ? getTaskModelProviderId(modelId) : null;
+          return prefix !== null && providerModelIdPrefixes.has(prefix);
+        },
+      ) ?? '',
+    [
+      modelSetup.persistedRoomoteModel,
+      modelSetup.runtimeRoomoteModel,
+      providerModelIdPrefixes,
+    ],
+  );
+  const trimmedCatalogModelQuery = catalogModelQuery.trim();
+  const deferredCatalogModelQuery = useDeferredValue(trimmedCatalogModelQuery);
+  const catalogSuggestionsQuery = useQuery(
+    trpc.taskModels.suggest.queryOptions(
+      {
+        providerId: selectedProvider ?? 'openrouter',
+        query: deferredCatalogModelQuery,
+      },
+      {
+        enabled: requiresModelSelection && deferredCatalogModelQuery.length > 0,
+        placeholderData: keepPreviousData,
+      },
+    ),
+  );
+  const catalogSuggestions = useMemo(
+    () =>
+      trimmedCatalogModelQuery.length > 0
+        ? (catalogSuggestionsQuery.data?.suggestions ?? [])
+        : [],
+    [catalogSuggestionsQuery.data, trimmedCatalogModelQuery],
+  );
+  const isCatalogSearchSettled =
+    deferredCatalogModelQuery === trimmedCatalogModelQuery &&
+    !catalogSuggestionsQuery.isFetching;
+  // The catalog is best-effort (models.dev may be unreachable or not list a
+  // private model). While it offers matches the text is a search and one must
+  // be picked; once it has none, the text is taken as the model id, with the
+  // provider prefix added to a bare id.
+  const manualModelId = useMemo(() => {
+    if (
+      !selectedProvider ||
+      !trimmedCatalogModelQuery ||
+      /\s/u.test(trimmedCatalogModelQuery)
+    ) {
+      return '';
+    }
+
+    const prefix = getTaskModelProviderId(trimmedCatalogModelQuery);
+    if (
+      trimmedCatalogModelQuery.includes('/') &&
+      prefix !== null &&
+      providerModelIdPrefixes.has(prefix)
+    ) {
+      return trimmedCatalogModelQuery.length > prefix.length + 1
+        ? trimmedCatalogModelQuery
+        : '';
+    }
+
+    return `${getSetupProviderTaskModelPrefix(selectedProvider)}/${trimmedCatalogModelQuery}`;
+  }, [providerModelIdPrefixes, selectedProvider, trimmedCatalogModelQuery]);
+  const typedModelId =
+    catalogSuggestions.find(
+      (suggestion) => suggestion.slug === trimmedCatalogModelQuery,
+    )?.slug ??
+    (isCatalogSearchSettled && catalogSuggestions.length === 0
+      ? manualModelId
+      : '');
+  const chosenModelId = catalogModelTouched
+    ? selectedCatalogModelId || typedModelId
+    : persistedProviderModelId;
+  const selectCatalogSuggestion = (suggestion: {
+    slug: string;
+    displayName: string;
+  }) => {
+    setSelectedCatalogModelId(suggestion.slug);
+    setCatalogModelQuery(suggestion.displayName);
+    setCatalogSuggestionsOpen(false);
+  };
+  const isCatalogListOpen =
+    catalogSuggestionsOpen && trimmedCatalogModelQuery.length > 0;
   const chatgptConnected = Boolean(modelSetup.chatgptConnected);
   const githubCopilotConnected = Boolean(modelSetup.githubCopilotConnected);
   const xaiSubscriptionConnected = Boolean(
@@ -265,6 +388,7 @@ export function StepInferenceProvider({
     selectedProvider === null ||
     hasMissingRequiredFields ||
     hasMissingConnectionName ||
+    (requiresModelSelection && !chosenModelId) ||
     (!canContinueWithoutApiKey && apiKey.trim().length === 0);
   const isCheckingEndpoint =
     isEndpointProvider &&
@@ -275,7 +399,7 @@ export function StepInferenceProvider({
       return;
     }
 
-    let modelId: string | undefined;
+    let modelId = requiresModelSelection ? chosenModelId : undefined;
     let endpointConnectionMessage: string | undefined;
     let qualificationError: string | undefined;
     const submittedCredential = shouldShowConfiguredMask
@@ -567,6 +691,132 @@ export function StepInferenceProvider({
             </a>
             .
           </p>
+        ) : null}
+
+        {requiresModelSelection ? (
+          <InferenceProviderRow>
+            <span className="w-44 shrink-0 text-sm text-muted-foreground">
+              Model
+            </span>
+            <Popover
+              open={isCatalogListOpen}
+              onOpenChange={setCatalogSuggestionsOpen}
+            >
+              {/* The input anchors the list; clicking into it must not
+                  toggle the popover closed. */}
+              <PopoverTrigger
+                asChild
+                onClick={(event) => event.preventDefault()}
+              >
+                <div className="w-full">
+                  <Input
+                    value={
+                      catalogModelTouched
+                        ? catalogModelQuery
+                        : persistedProviderModelId
+                    }
+                    onChange={(event) => {
+                      setCatalogModelTouched(true);
+                      setCatalogModelQuery(event.target.value);
+                      setSelectedCatalogModelId('');
+                      setHighlightedCatalogSlug('');
+                      setCatalogSuggestionsOpen(true);
+                    }}
+                    // Focus stays in the input while the list is open, so the
+                    // list is driven from here.
+                    onKeyDown={(event) => {
+                      if (!isCatalogListOpen) {
+                        return;
+                      }
+                      if (event.key === 'Escape') {
+                        setCatalogSuggestionsOpen(false);
+                        return;
+                      }
+                      if (catalogSuggestions.length === 0) {
+                        return;
+                      }
+                      const highlightedIndex = catalogSuggestions.findIndex(
+                        (suggestion) =>
+                          suggestion.slug === highlightedCatalogSlug,
+                      );
+                      if (
+                        event.key === 'ArrowDown' ||
+                        event.key === 'ArrowUp'
+                      ) {
+                        event.preventDefault();
+                        const step = event.key === 'ArrowDown' ? 1 : -1;
+                        const nextIndex =
+                          highlightedIndex === -1 && step === -1
+                            ? catalogSuggestions.length - 1
+                            : (highlightedIndex +
+                                step +
+                                catalogSuggestions.length) %
+                              catalogSuggestions.length;
+                        setHighlightedCatalogSlug(
+                          catalogSuggestions[nextIndex]!.slug,
+                        );
+                      } else if (
+                        event.key === 'Enter' &&
+                        highlightedIndex >= 0
+                      ) {
+                        event.preventDefault();
+                        selectCatalogSuggestion(
+                          catalogSuggestions[highlightedIndex]!,
+                        );
+                      }
+                    }}
+                    placeholder="Search or enter a model ID"
+                    role="combobox"
+                    aria-expanded={isCatalogListOpen}
+                    aria-autocomplete="list"
+                    aria-label={`${selectedProviderStatus?.label ?? 'Provider'} model`}
+                    disabled={saveModelConfig.isPending}
+                  />
+                </div>
+              </PopoverTrigger>
+              <PopoverContent
+                align="start"
+                className="w-(--radix-popover-trigger-width) p-0"
+                onOpenAutoFocus={(event) => event.preventDefault()}
+              >
+                <Command
+                  shouldFilter={false}
+                  value={highlightedCatalogSlug}
+                  onValueChange={setHighlightedCatalogSlug}
+                >
+                  <CommandList>
+                    <CommandEmpty>
+                      {!isCatalogSearchSettled
+                        ? 'Searching the catalog...'
+                        : typedModelId
+                          ? `No catalog match. Continue to use ${typedModelId} as entered.`
+                          : 'No catalog models found.'}
+                    </CommandEmpty>
+                    {catalogSuggestions.length > 0 ? (
+                      <CommandGroup>
+                        {catalogSuggestions.map((suggestion) => (
+                          <CommandItem
+                            key={suggestion.slug}
+                            value={suggestion.slug}
+                            onSelect={() => selectCatalogSuggestion(suggestion)}
+                          >
+                            <div className="min-w-0">
+                              <p className="truncate font-medium">
+                                {suggestion.displayName}
+                              </p>
+                              <p className="truncate text-xs text-muted-foreground">
+                                {suggestion.slug}
+                              </p>
+                            </div>
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    ) : null}
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+          </InferenceProviderRow>
         ) : null}
 
         {selectedProvider === 'openrouter' && !hasRuntimeProviderKey && (

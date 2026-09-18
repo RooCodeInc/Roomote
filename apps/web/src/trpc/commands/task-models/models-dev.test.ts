@@ -5,6 +5,7 @@ import {
   listXaiChatModelsFromCatalog,
   lookupModelMetadataFromCatalog,
   resolveModelsDevSlug,
+  suggestBedrockModelsFromCatalog,
   suggestModelsFromCatalog,
   type ModelsDevCatalog,
 } from './models-dev';
@@ -77,6 +78,97 @@ describe('resolveModelsDevSlug', () => {
 });
 
 describe('lookupModelMetadataFromCatalog', () => {
+  it.each([
+    'zai.glm-5',
+    'minimax.minimax-m2.5',
+    'moonshotai.kimi-k2.5',
+    'qwen.qwen3-coder-next',
+    'zai.glm-4.7',
+  ])('resolves exact native Bedrock metadata for %s', (slug) => {
+    const catalog = buildCatalog({
+      providers: {
+        'amazon-bedrock': {
+          models: {
+            [slug]: {
+              name: slug,
+              modalities: { input: ['text'], output: ['text'] },
+              limit: { context: 205_000 },
+              cost: { input: 1, output: 3.2 },
+            },
+          },
+        },
+      },
+    });
+
+    expect(
+      lookupModelMetadataFromCatalog(catalog, `amazon-bedrock/${slug}`),
+    ).toMatchObject({
+      displayName: slug,
+      metadata: {
+        contextWindow: 205_000,
+        inputPricePerToken: 1 / 1_000_000,
+        outputPricePerToken: 3.2 / 1_000_000,
+      },
+    });
+  });
+
+  it('resolves a cross-region profile id through the plain Bedrock entry and never through lab pricing', () => {
+    const catalog = buildCatalog({
+      models: {
+        'zai/glm-5': { name: 'GLM-5 direct', limit: { context: 100_000 } },
+      },
+      providers: {
+        'amazon-bedrock': {
+          models: {
+            'anthropic.claude-sonnet-5': {
+              name: 'Claude Sonnet 5',
+              limit: { context: 200_000 },
+            },
+          },
+        },
+      },
+    });
+
+    expect(
+      lookupModelMetadataFromCatalog(
+        catalog,
+        'amazon-bedrock/us.anthropic.claude-sonnet-5',
+      ),
+    ).toMatchObject({
+      displayName: 'Claude Sonnet 5',
+      metadata: { contextWindow: 200_000 },
+    });
+    expect(
+      lookupModelMetadataFromCatalog(catalog, 'amazon-bedrock/zai.glm-5'),
+    ).toEqual({ metadata: {}, displayName: undefined });
+  });
+
+  it('prefers exact Bedrock provider metadata for Mantle IDs', () => {
+    const catalog = buildCatalog({
+      models: {
+        'zai/glm-5': { limit: { context: 100_000 } },
+      },
+      providers: {
+        'amazon-bedrock': {
+          models: {
+            'zai.glm-5': {
+              name: 'GLM-5',
+              modalities: { output: ['text'] },
+              limit: { context: 205_000 },
+            },
+          },
+        },
+      },
+    });
+
+    expect(
+      lookupModelMetadataFromCatalog(catalog, 'bedrock-mantle/zai.glm-5'),
+    ).toMatchObject({
+      displayName: 'GLM-5',
+      metadata: { contextWindow: 205_000 },
+    });
+  });
+
   it('returns openrouter pricing/context/modalities for an openrouter-routed model (case-insensitive)', () => {
     const catalog = buildCatalog({
       gatewayModelsByLowerSlug: {
@@ -539,6 +631,169 @@ describe('suggestModelsFromCatalog', () => {
         query: 'km3',
       }),
     ).toEqual([{ slug: 'moonshotai/kimi-k3', displayName: 'Kimi K3' }]);
+  });
+});
+
+describe('suggestBedrockModelsFromCatalog', () => {
+  it('finds native catalog entries alongside distinguished Mantle models', () => {
+    const catalog = buildCatalog({
+      providers: {
+        'amazon-bedrock': {
+          models: {
+            'zai.glm-5': {
+              name: 'GLM-5',
+              modalities: { output: ['text'] },
+              tool_call: true,
+            },
+            'amazon.titan-embed-text-v2:0': {
+              name: 'Titan Embeddings',
+              modalities: { output: ['embedding'] },
+            },
+          },
+        },
+      },
+    });
+
+    expect(
+      suggestBedrockModelsFromCatalog({
+        catalog,
+        mantleModels: [
+          {
+            id: 'bedrock-mantle/zai.glm-5',
+            displayName: 'GLM-5',
+          },
+        ],
+        query: 'glm 5',
+      }),
+    ).toEqual([
+      { slug: 'bedrock-mantle/zai.glm-5', displayName: 'GLM-5 (Mantle)' },
+      { slug: 'amazon-bedrock/zai.glm-5', displayName: 'GLM-5' },
+    ]);
+  });
+
+  it('keeps curated Mantle models searchable without the catalog', () => {
+    expect(
+      suggestBedrockModelsFromCatalog({
+        catalog: null,
+        mantleModels: [
+          {
+            id: 'bedrock-mantle/anthropic.claude-sonnet-5',
+            displayName: 'Claude Sonnet 5',
+          },
+        ],
+        query: 'sonnet',
+      }),
+    ).toEqual([
+      {
+        slug: 'bedrock-mantle/anthropic.claude-sonnet-5',
+        displayName: 'Claude Sonnet 5 (Mantle)',
+      },
+    ]);
+  });
+
+  it('does not rank the shared provider prefix and shares slots with Mantle', () => {
+    const nativeClaudeModels = Object.fromEntries(
+      Array.from({ length: 10 }, (_, index) => [
+        `anthropic.claude-3-${index}`,
+        { name: `Claude 3.${index}`, modalities: { output: ['text'] } },
+      ]),
+    );
+    const catalog = buildCatalog({
+      providers: {
+        'amazon-bedrock': {
+          models: {
+            ...nativeClaudeModels,
+            'amazon.nova-pro-v1:0': {
+              name: 'Nova Pro',
+              modalities: { output: ['text'] },
+            },
+          },
+        },
+      },
+    });
+    const mantleModels = [
+      {
+        id: 'bedrock-mantle/anthropic.claude-sonnet-5',
+        displayName: 'Claude Sonnet 5',
+      },
+    ];
+
+    expect(
+      suggestBedrockModelsFromCatalog({
+        catalog,
+        mantleModels,
+        query: 'claude',
+      })[0],
+    ).toEqual({
+      slug: 'bedrock-mantle/anthropic.claude-sonnet-5',
+      displayName: 'Claude Sonnet 5 (Mantle)',
+    });
+    expect(
+      suggestBedrockModelsFromCatalog({
+        catalog,
+        mantleModels,
+        query: 'amazon',
+      }),
+    ).toEqual([
+      { slug: 'amazon-bedrock/amazon.nova-pro-v1:0', displayName: 'Nova Pro' },
+    ]);
+    expect(
+      suggestBedrockModelsFromCatalog({
+        catalog,
+        mantleModels,
+        query: 'amazon-bedrock/amazon.nova',
+      }),
+    ).toEqual([
+      { slug: 'amazon-bedrock/amazon.nova-pro-v1:0', displayName: 'Nova Pro' },
+    ]);
+  });
+
+  it('matches nothing for a query with no searchable characters', () => {
+    const catalog = buildCatalog({
+      providers: {
+        'amazon-bedrock': {
+          models: {
+            glm5: { name: 'GLM5', modalities: { output: ['text'] } },
+          },
+        },
+      },
+    });
+
+    expect(
+      suggestBedrockModelsFromCatalog({
+        catalog,
+        mantleModels: [],
+        query: '~',
+      }),
+    ).toEqual([]);
+  });
+
+  it('omits non-text and explicitly tool-less native entries', () => {
+    const catalog = buildCatalog({
+      providers: {
+        'amazon-bedrock': {
+          models: {
+            'amazon.titan-embed': {
+              name: 'Titan Embed',
+              modalities: { output: ['embedding'] },
+            },
+            'vendor.text-no-tools': {
+              name: 'Text without tools',
+              modalities: { output: ['text'] },
+              tool_call: false,
+            },
+          },
+        },
+      },
+    });
+
+    expect(
+      suggestBedrockModelsFromCatalog({
+        catalog,
+        mantleModels: [],
+        query: 't',
+      }),
+    ).toEqual([]);
   });
 });
 

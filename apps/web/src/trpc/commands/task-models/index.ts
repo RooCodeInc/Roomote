@@ -33,6 +33,7 @@ import {
   getSetupModelProviderAdditionalEnvFields,
   getSetupModelProviderEnvVarNames,
   getSetupModelProvider,
+  getSetupProviderModelIdPrefixes,
   getSetupProviderTaskModelPrefix,
   getTaskModelCatalog,
   getTaskModelProviderId,
@@ -45,11 +46,13 @@ import {
   normalizeSetupNewState,
   normalizeTaskModelId,
   normalizeTaskModelSettings,
+  providerRequiresModelSelection,
 } from '@roomote/types';
 import type {
   CodingModelRoutingRule,
   DeploymentModelConfig,
   ReasoningEffort,
+  SetupModelProviderDescriptor,
   SetupModelProviderId,
   SetupModelStatus,
   TaskModelInputType,
@@ -73,6 +76,7 @@ import {
   listXaiChatModelsFromCatalog,
   lookupModelMetadataFromCatalog,
   mergeMetadata,
+  suggestBedrockModelsFromCatalog,
   suggestModelsFromCatalog,
 } from './models-dev';
 import {
@@ -83,6 +87,7 @@ import {
 } from './auto-add-models';
 import {
   collectCandidateProviderCredentials,
+  validateBedrockApiKey,
   validateSetupModelProviderCredentials,
 } from './provider-validation';
 import {
@@ -642,7 +647,7 @@ export async function saveTaskModelProviderCommand(
   // before any submitted credential is persisted. Dynamic endpoints have no
   // model to request at connection time, so a submitted connection is
   // qualified by listing the endpoint's models instead.
-  if (!provider.dynamicModels) {
+  if (!providerRequiresModelSelection(provider)) {
     await validateSetupModelProviderCredentials({
       provider,
       apiKey: input.apiKey,
@@ -652,7 +657,14 @@ export async function saveTaskModelProviderCommand(
         buildRecommendedDeploymentModelConfig(provider).roomoteModel ??
         provider.defaultRoomoteModel,
     });
-  } else {
+  } else if (provider.id === 'amazon-bedrock') {
+    await validateBedrockApiKey({
+      provider,
+      apiKey: input.apiKey,
+      additionalEnvValues: suppliedAdditionalEnvValues,
+      action: 'save it',
+    });
+  } else if (provider.dynamicModels) {
     // UIs resubmit unchanged fields (connection names, keys echoed back
     // from saved state), so gate the probe on what the save would actually
     // alter, not on non-empty form fields.
@@ -1603,7 +1615,14 @@ async function lookupModelFromModelsDevCatalog(
   );
 
   if (!catalog) {
-    return { modelId, displayName: null, family: null, metadata: null };
+    return (
+      buildManualModelLookup(modelId) ?? {
+        modelId,
+        displayName: null,
+        family: null,
+        metadata: null,
+      }
+    );
   }
 
   const lookup = lookupModelMetadataFromCatalog(catalog, modelId);
@@ -1615,6 +1634,9 @@ async function lookupModelFromModelsDevCatalog(
   }
 
   if (!lookup.displayName) {
+    const manualFallback = buildManualModelLookup(modelId, metadata);
+    if (manualFallback) return manualFallback;
+
     return { modelId, displayName: null, family: null, metadata };
   }
 
@@ -1629,6 +1651,44 @@ async function lookupModelFromModelsDevCatalog(
     displayName: model.displayName,
     family: model.family,
     metadata: model.metadata ?? null,
+  };
+}
+
+/**
+ * Providers whose models are chosen explicitly rather than seeded from a
+ * catalog accept ids the catalog does not know (private or newly released
+ * models), so an unresolved id still yields an addable model.
+ */
+function buildManualModelLookup(
+  modelId: string,
+  metadata: TaskModelMetadata | null = null,
+): TaskModelLookupResult | null {
+  const providerId = getTaskModelProviderId(modelId);
+  const bareModelId = modelId.split('/').slice(1).join('/').trim();
+  if (
+    !providerId ||
+    !bareModelId ||
+    !(
+      SETUP_MODEL_PROVIDER_CATALOG as readonly SetupModelProviderDescriptor[]
+    ).some(
+      (provider) =>
+        provider.requiresModelSelection === true &&
+        getSetupProviderModelIdPrefixes(provider).has(providerId),
+    )
+  ) {
+    return null;
+  }
+
+  const fallback = buildTaskModelOption({
+    id: modelId,
+    displayName: modelId.split('/').at(-1) ?? modelId,
+    metadata,
+  });
+  return {
+    modelId: fallback.id,
+    displayName: fallback.displayName,
+    family: fallback.family,
+    metadata: fallback.metadata ?? null,
   };
 }
 
@@ -1812,16 +1872,27 @@ export async function suggestTaskModelsCommand(
     AbortSignal.timeout(MODEL_METADATA_FETCH_TIMEOUT_MS),
   );
 
+  // Bedrock's curated Mantle models are static, so they stay searchable when
+  // models.dev is unreachable; setup cannot finish without a model choice.
+  if (provider.id === 'amazon-bedrock') {
+    return {
+      suggestions: suggestBedrockModelsFromCatalog({
+        catalog,
+        mantleModels: provider.suggestedTaskModels,
+        query,
+        limit: 8,
+      }),
+    };
+  }
+
   if (!catalog) {
     return { suggestions: [] };
   }
 
-  const catalogProviderId = getSetupProviderTaskModelPrefix(provider.id);
-
   return {
     suggestions: suggestModelsFromCatalog({
       catalog,
-      providerId: catalogProviderId,
+      providerId: getSetupProviderTaskModelPrefix(provider.id),
       query,
       limit: 8,
     }),
