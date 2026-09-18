@@ -4,10 +4,13 @@ description: 'Connect MCP servers that are not in the built-in catalog'
 ---
 
 Custom MCP servers let agents use services that Roomote does not ship a
-built-in integration for. Deployment admins configure them under
-**Settings → Integrations → Custom MCP Servers**. Remote servers become
-available to both sessions and sandbox tasks. Local stdio servers need a
-task sandbox because Roomote launches their process inside that workspace.
+built-in integration for. Any member can add a remote server, the same way
+they add an [integration key](/integration-keys): shared with everyone under
+**Integrations**, or private under **Personal Settings → Personal MCP
+servers**. You can also ask Roomote in a Session to connect a service's MCP
+server. Remote servers become available to both sessions and sandbox tasks.
+Local stdio servers need a task sandbox because Roomote launches their
+process inside that workspace, and only deployment admins can add them.
 
 Most MCP servers publish a JSON snippet in their docs. The add dialog's
 **Import from JSON** button accepts a pasted `mcpServers` snippet (or a bare
@@ -76,13 +79,36 @@ arguments, and environment variables you configure. Two things to know:
 The sandbox image ships `node`, `npx`, `uvx`, and `python`, so
 `npx -y <package>` style servers work out of the box.
 
+## Who can use a server
+
+When you add a remote server you choose who can use it:
+
+- **Everyone in this deployment** (the default) shares it with every member.
+  Agents in every Session and task can use its tools, acting with the account
+  that authorized it. It appears under **Settings → Integrations**. The member
+  who added it and deployment admins can edit, connect, or remove it; everyone
+  else sees it read-only.
+- **Only me** keeps it private. Only your own Sessions and tasks receive it,
+  it appears under **Personal Settings → Personal MCP servers**, and nobody
+  else, admins included, can see or manage it. Roomote checks the owner on
+  every request, so a personal server's credentials are never used on another
+  member's behalf.
+
+The owner, or an admin for a shared server, can change this later from the
+server's dialog. Roomote moves it between the two pages and keeps its
+connection, so you do not authorize again. A shared server goes private to the
+member who added it. Personal server names only need to be unique among your
+own servers, and each member can keep up to 10. A personal server stops
+working if its owner's account is deactivated.
+
 ## Scoping and precedence
 
-Custom servers configured in Settings apply to every task. An environment's
-own [`mcpServers`](/environments/definition#mcp-servers) entry with the same
-name takes precedence in that environment, so the more specific scope wins.
-Names that collide with built-in integrations (for example `linear` or
-`github`) are reserved and rejected.
+Shared custom servers apply to every task. A personal server with the same
+name takes precedence for its owner, and an environment's own
+[`mcpServers`](/environments/definition#mcp-servers) entry with the same name
+takes precedence in that environment, so the more specific scope wins. Names
+that collide with built-in integrations (for example `linear` or `github`)
+are reserved and rejected.
 
 ## Private networks and self-hosting
 
@@ -103,7 +129,9 @@ operator-configured URLs. Redirects from custom servers are never followed.
 
 ## Operator controls
 
-- Custom servers are managed by deployment admins only.
+- Any member can add a remote server and manages the ones they added.
+  Deployment admins manage every shared server and are the only ones who can
+  add local (stdio) servers. Personal servers are managed by their owner alone.
 - `R_CUSTOM_MCP_DISABLED=true` disables the feature entirely: the Settings
   section, the proxy routes, and delivery to tasks. It is independent of
   `R_CURATED_INTEGRATIONS_DISABLED`, so a deployment can disable the built-in

@@ -1,4 +1,3 @@
-import { db, eq, customMcpServers } from '@roomote/db/server';
 import { decrypt } from '@roomote/db/encryption';
 import {
   customMcpServerIdFromConnectionId,
@@ -8,14 +7,20 @@ import {
 
 import { createBoundedCustomMcpFetch } from './custom-fetch';
 import {
+  findCustomMcpServerById,
+  storeCustomMcpServerMetadata,
+} from './custom-servers';
+import {
   discoverOAuthEndpoints,
   OAuthTokenRequestError,
   type OAuthRequestOptions,
 } from './oauth';
 
 /**
- * OAuth context for a deployment custom MCP server, resolved from its
- * `custom:<serverId>` connection id.
+ * OAuth context for a custom MCP server, deployment or personal, resolved
+ * from its `custom:<serverId>` connection id. `ownerUserId` is null for a
+ * deployment server; for a personal one it is the only member who may
+ * authorize or use the connection.
  *
  * Everything here differs from the catalog path on purpose:
  * - The server URL comes from the database row, not MCP_INTEGRATIONS.
@@ -31,6 +36,8 @@ import {
  */
 export interface CustomMcpAuthTarget {
   serverId: string;
+  ownerUserId: string | null;
+  createdByUserId: string | null;
   name: string;
   url: string;
   serverMetadata: OAuthServerMetadata | null;
@@ -47,9 +54,7 @@ export async function resolveCustomMcpAuthTarget(
     return null;
   }
 
-  const server = await db.query.customMcpServers.findFirst({
-    where: eq(customMcpServers.id, serverId),
-  });
+  const server = await findCustomMcpServerById(serverId);
 
   if (!server?.url || server.authType !== 'oauth') {
     return null;
@@ -57,6 +62,8 @@ export async function resolveCustomMcpAuthTarget(
 
   return {
     serverId,
+    ownerUserId: server.ownerUserId,
+    createdByUserId: server.createdByUserId,
     name: server.name,
     url: server.url,
     serverMetadata: server.oauthServerMetadata ?? null,
@@ -98,14 +105,10 @@ export async function ensureCustomMcpServerMetadata(
     target.oauthOptions,
   );
 
-  await db
-    .update(customMcpServers)
-    .set({
-      oauthServerMetadata: metadata,
-      oauthServerMetadataFetchedAt: new Date(),
-      updatedAt: new Date(),
-    })
-    .where(eq(customMcpServers.id, target.serverId));
+  await storeCustomMcpServerMetadata(
+    { id: target.serverId, ownerUserId: target.ownerUserId },
+    metadata,
+  );
 
   return metadata;
 }

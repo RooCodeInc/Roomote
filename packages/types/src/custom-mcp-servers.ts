@@ -77,6 +77,23 @@ export function customMcpServerIdFromConnectionId(
 }
 
 export const MAX_CUSTOM_MCP_SERVERS = 25;
+/**
+ * Personal servers are counted per owner, apart from the deployment budget,
+ * so one member's servers can never crowd out the deployment's.
+ */
+export const MAX_PERSONAL_MCP_SERVERS = 10;
+
+/**
+ * Who a custom remote MCP server is for, mirroring integration keys: `owner`
+ * is private to the member who added it and lives in Personal settings;
+ * `deployment` is shared with every member and lives in Settings →
+ * Integrations. The owner or an administrator manages either kind.
+ */
+export const customMcpServerVisibilitySchema = z.enum(['owner', 'deployment']);
+export type CustomMcpServerVisibility = z.infer<
+  typeof customMcpServerVisibilitySchema
+>;
+export const DEFAULT_CUSTOM_MCP_SERVER_VISIBILITY = 'deployment' as const;
 export const MAX_CUSTOM_MCP_HEADERS = 16;
 export const MAX_CUSTOM_MCP_HEADER_VALUE_LENGTH = 4096;
 export const MAX_CUSTOM_MCP_URL_LENGTH = 2048;

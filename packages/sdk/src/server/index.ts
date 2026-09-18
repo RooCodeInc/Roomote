@@ -594,8 +594,17 @@ export {
 } from './lib/mcp/custom-auth-target';
 
 export {
+  canManageCustomMcpServer,
+  customMcpConnectionWhere,
+  findCustomMcpServerById,
+  storeCustomMcpServerMetadata,
+  type ResolvedCustomMcpServer,
+} from './lib/mcp/custom-servers';
+
+export {
   addRemoteCustomMcpForFast,
   describeRegistrationRefusal,
+  prepareCustomMcpOAuthConnection,
   prepareDeploymentCustomMcpOAuthConnection,
   type AddRemoteCustomMcpResult,
 } from './lib/mcp/add-remote-custom-mcp';
