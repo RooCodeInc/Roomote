@@ -1,26 +1,12 @@
 'use client';
 
-import Image from 'next/image';
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { DiscordLogoIcon } from '@radix-ui/react-icons';
 import { useQuery } from '@tanstack/react-query';
 
 import { cn } from '@/lib/utils';
 import { useAuthorizedUser } from '@/hooks/useUser';
 import { useHomeComposerSuggestions } from '@/hooks/useHomeComposerSuggestions';
 import { useTRPC } from '@/trpc/client';
-import {
-  Button,
-  Calendar,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  Mail,
-  MessageCirclePlus,
-} from '@/components/system';
 import { NewTaskForm } from '@/components/tasks/NewTaskForm';
 
 import { OnboardingCard } from './OnboardingCard';
@@ -32,28 +18,6 @@ import {
 } from './promptPlaceholders';
 
 const FALLBACK_PROMPT_PLACEHOLDER = 'What do you want to do?';
-const FEEDBACK_DISMISSED_STORAGE_KEY = 'roomote-home-feedback-dismissed';
-const FEEDBACK_CALENDLY_URL =
-  'https://calendly.com/d/ctx9-f7q-6vr/roomote-feedback';
-const FEEDBACK_EMAIL_URL =
-  'mailto:help@roomote.dev?subject=My%20thoughts%20on%20Roomote%20so%20far';
-const FEEDBACK_DISCORD_URL = 'https://discord.gg/roomote';
-
-function isFeedbackPromptDismissed(): boolean {
-  try {
-    return window.localStorage.getItem(FEEDBACK_DISMISSED_STORAGE_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
-
-function persistFeedbackPromptDismissal(): void {
-  try {
-    window.localStorage.setItem(FEEDBACK_DISMISSED_STORAGE_KEY, '1');
-  } catch {
-    // Ignore storage failures; the prompt can still be dismissed for this session.
-  }
-}
 
 type HomeProps = {
   initialHeading?: (typeof HOME_HEADINGS)[number];
@@ -66,8 +30,6 @@ export function Home({
 }: HomeProps) {
   const [isExiting, setIsExiting] = useState(false);
   const [isBottomSheetExpanded, setIsBottomSheetExpanded] = useState(false);
-  const [isFeedbackPromptVisible, setIsFeedbackPromptVisible] = useState(false);
-  const [isFeedbackDialogOpen, setIsFeedbackDialogOpen] = useState(false);
   const [isShortViewport, setIsShortViewport] = useState(false);
   const [isPromptFocused, setIsPromptFocused] = useState(false);
   const [placeholderIndex, setPlaceholderIndex] = useState(() =>
@@ -139,10 +101,6 @@ export function Home({
 
     textarea.focus({ preventScroll: true });
   }, [homeComposerSuggestionsEnabled, homeComposerSuggestionsFlagLoading]);
-
-  useEffect(() => {
-    setIsFeedbackPromptVisible(!isFeedbackPromptDismissed());
-  }, []);
 
   useEffect(() => {
     setPlaceholderIndex(
@@ -294,16 +252,6 @@ export function Home({
 
             <div className="flex flex-col flex-wrap gap-2 md:flex-row md:flex-nowrap md:items-center animate-[fade-in_1s_1_750ms_backwards]">
               <OnboardingCard />
-              {isFeedbackPromptVisible ? (
-                <button
-                  type="button"
-                  onClick={() => setIsFeedbackDialogOpen(true)}
-                  className="inline-flex cursor-pointer items-center font-semibold whitespace-nowrap text-sm text-muted-foreground/80 hover:text-accent-foreground md:ml-auto"
-                >
-                  <MessageCirclePlus className="mr-1.5 size-4 shrink-0" />
-                  Feedback, please!
-                </button>
-              ) : null}
             </div>
           </div>
           <div className="shrink-0 pb-[env(safe-area-inset-bottom)]">
@@ -311,75 +259,6 @@ export function Home({
           </div>
         </div>
       </div>
-
-      <Dialog
-        open={isFeedbackDialogOpen}
-        onOpenChange={setIsFeedbackDialogOpen}
-      >
-        <DialogContent size="xl">
-          <DialogHeader>
-            <DialogTitle>What do you think of Roomote so far?</DialogTitle>
-            <DialogDescription>
-              We&apos;d love to hear about your experience. Anything helps.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="relative my-4 flex flex-col gap-2">
-            <Button
-              asChild
-              variant="default"
-              className="md:max-w-xs md:justify-start"
-            >
-              <a href={FEEDBACK_CALENDLY_URL} target="_blank" rel="noreferrer">
-                <Calendar className="size-3.5" />
-                Schedule time with the team
-              </a>
-            </Button>
-            <Button
-              asChild
-              variant="default"
-              className="md:max-w-xs md:justify-start"
-            >
-              <a href={FEEDBACK_EMAIL_URL}>
-                <Mail className="size-3.5" />
-                Email us
-              </a>
-            </Button>
-            <Button
-              asChild
-              variant="default"
-              className="md:max-w-xs md:justify-start"
-            >
-              <a href={FEEDBACK_DISCORD_URL} target="_blank" rel="noreferrer">
-                <DiscordLogoIcon className="size-3.5" />
-                Join the discord
-              </a>
-            </Button>
-            <Image
-              src="/elements/feedback.png"
-              alt=""
-              width={150}
-              height={150}
-              className="absolute -top-9 right-0 hidden size-44 md:block"
-            />
-          </div>
-
-          <DialogFooter className="md:justify-between">
-            <Button
-              type="button"
-              variant="link"
-              size="sm"
-              onClick={() => {
-                persistFeedbackPromptDismissal();
-                setIsFeedbackPromptVisible(false);
-              }}
-              aria-label="Dismiss feedback prompt"
-            >
-              Don&apos;t show this again
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </>
   );
 }
