@@ -77,7 +77,13 @@ describe('worker recipe registry', () => {
       expect(script).toContain('.libPaths(c(target, .libPaths()))');
       expect(script).not.toContain('unexpected library path');
     }
-    expect(scripts[1]).toContain('BiocManager::install(pkgs, lib=target');
+    expect(scripts[1]).toContain(
+      "system.file(package='BiocManager', lib.loc=target)",
+    );
+    expect(scripts[1]).toContain(
+      "BiocManager::install(unique(c('BiocVersion', pkgs)), lib=target",
+    );
+    expect(scripts[1]).toContain("system.file(package='renv', lib.loc=target)");
     expect(scripts[1]).toContain(
       'settings$bioconductor.version("3.21", project=\'/roomote-recipe\')',
     );
