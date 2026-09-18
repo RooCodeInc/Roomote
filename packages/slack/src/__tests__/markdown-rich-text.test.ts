@@ -288,6 +288,33 @@ describe('convertMarkdownToRichText', () => {
     });
   });
 
+  it('keeps an indented fenced block after a list item preformatted', () => {
+    expect(
+      convertMarkdownToRichText(
+        ['- Example', '  ```ts', '  const value = 1;', '  ```'].join('\n'),
+        { preserveParagraphs: true },
+      ),
+    ).toEqual({
+      type: 'rich_text',
+      elements: [
+        {
+          type: 'rich_text_list',
+          style: 'bullet',
+          elements: [
+            {
+              type: 'rich_text_section',
+              elements: [{ type: 'text', text: 'Example' }],
+            },
+          ],
+        },
+        {
+          type: 'rich_text_preformatted',
+          elements: [{ type: 'text', text: '  const value = 1;' }],
+        },
+      ],
+    });
+  });
+
   it('keeps code blank lines and empty input stable', () => {
     expect(
       convertMarkdownToRichText(

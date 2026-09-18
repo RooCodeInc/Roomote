@@ -288,6 +288,9 @@ export function convertMarkdownToRichText(
         index += 1;
         while (index < lines.length) {
           const continuation = lines[index]!;
+          if (FENCE.test(continuation)) {
+            break;
+          }
           if (pattern.test(continuation)) {
             break;
           }
