@@ -158,12 +158,12 @@ const SECONDARY_TASK_MODEL_ROLES = TASK_MODEL_ROLES.filter(
 const TASK_MODEL_ROLE_CONFIGS: readonly TaskModelRoleConfig[] = [
   {
     role: 'coding',
-    label: 'Default coding model',
+    label: 'Coding model',
     description:
       'Used for new task launches and persisted runtime coding model config.',
     icon: Code2,
     placeholder: 'Select a default coding model',
-    reasoningAriaLabel: 'Default coding model reasoning level',
+    reasoningAriaLabel: 'Coding model reasoning level',
   },
   {
     role: 'orchestration',
@@ -1775,8 +1775,9 @@ export function ModelSettingsSection({
                 TASK_MODEL_ROLE_DESCRIPTORS[config.role].runtimeStatusKey
               ];
 
-            const editor = (
+            return (
               <TaskModelRoleEditor
+                key={config.role}
                 config={config}
                 managedByEnv={status.managedByEnv}
                 reasoningManagedByEnv={status.reasoningManagedByEnv}
@@ -1810,15 +1811,6 @@ export function ModelSettingsSection({
                   />
                 ) : null}
               </TaskModelRoleEditor>
-            );
-
-            return config.role === 'coding' ? (
-              <div key={config.role}>
-                <p className="pt-1 text-sm font-semibold">Coding model</p>
-                {editor}
-              </div>
-            ) : (
-              <div key={config.role}>{editor}</div>
             );
           })}
           <JudgmentModelRow />

@@ -486,7 +486,7 @@ describe('ModelSettingsSection', () => {
     expect(screen.queryByText('Env-managed')).toBeNull();
     expect(screen.queryByText('Reasoning env-managed')).toBeNull();
     expect(
-      screen.getByLabelText('Default coding model is managed by R_MODEL'),
+      screen.getByLabelText('Coding model is managed by R_MODEL'),
     ).toBeInTheDocument();
     expect(
       screen.getByLabelText('Advisor model is managed by R_PLANNING_MODEL'),
@@ -515,7 +515,7 @@ describe('ModelSettingsSection', () => {
     expect(screen.queryByText('Reasoning env-managed')).toBeNull();
     expect(
       screen.getByLabelText(
-        'Default coding model reasoning is managed by R_MODEL_REASONING_EFFORT',
+        'Coding model reasoning is managed by R_MODEL_REASONING_EFFORT',
       ),
     ).toBeInTheDocument();
     expect(
@@ -535,15 +535,15 @@ describe('ModelSettingsSection', () => {
 
     expect(
       screen.getByLabelText(
-        'Default coding model and reasoning are managed by env vars',
+        'Coding model and reasoning are managed by env vars',
       ),
     ).toBeInTheDocument();
     expect(
-      screen.queryByLabelText('Default coding model is managed by R_MODEL'),
+      screen.queryByLabelText('Coding model is managed by R_MODEL'),
     ).not.toBeInTheDocument();
     expect(
       screen.queryByLabelText(
-        'Default coding model reasoning is managed by R_MODEL_REASONING_EFFORT',
+        'Coding model reasoning is managed by R_MODEL_REASONING_EFFORT',
       ),
     ).not.toBeInTheDocument();
   });
@@ -631,6 +631,18 @@ describe('ModelSettingsSection', () => {
     settingsData.current = buildSettingsData();
     renderModelSettingsSection();
 
+    const routingTrigger = screen.getByRole('button', {
+      name: 'Custom coding model routing rules',
+    });
+    expect(routingTrigger).toHaveAttribute('aria-expanded', 'false');
+    expect(routingTrigger.querySelector('svg')).toHaveStyle({
+      transform: 'rotate(-90deg)',
+    });
+    fireEvent.click(routingTrigger);
+    expect(routingTrigger).toHaveAttribute('aria-expanded', 'true');
+    expect(routingTrigger.querySelector('svg')).not.toHaveStyle({
+      transform: 'rotate(-90deg)',
+    });
     fireEvent.click(
       screen.getByRole('button', {
         name: 'Add a model routing rule',
@@ -689,6 +701,11 @@ describe('ModelSettingsSection', () => {
 
     fireEvent.click(
       screen.getByRole('button', {
+        name: 'Custom coding model routing rules',
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', {
         name: 'Add a model routing rule',
       }),
     );
@@ -709,6 +726,11 @@ describe('ModelSettingsSection', () => {
     settingsData.current = buildSettingsData();
     renderModelSettingsSection();
 
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Custom coding model routing rules',
+      }),
+    );
     fireEvent.click(
       screen.getByRole('button', {
         name: 'Add a model routing rule',
@@ -1385,9 +1407,7 @@ describe('ModelSettingsSection', () => {
     expect(
       within(dialog).getByText('Set this model mapping'),
     ).toBeInTheDocument();
-    expect(
-      within(dialog).getByText('Default coding model'),
-    ).toBeInTheDocument();
+    expect(within(dialog).getByText('Coding model')).toBeInTheDocument();
     expect(within(dialog).getByText('GLM 5.2')).toBeInTheDocument();
     expect(
       within(dialog).getByLabelText('Helper model is managed by R_SMALL_MODEL'),
