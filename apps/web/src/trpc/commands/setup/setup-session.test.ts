@@ -73,9 +73,11 @@ describe('optional setup integration discovery', () => {
   let ts: number;
   let actualFastSessions: typeof import('../fast-sessions');
 
+  // The actual fast-sessions module graph is heavy enough that a cold,
+  // loaded CI runner can exceed the default 10s hook timeout on this import.
   beforeAll(async () => {
     actualFastSessions = await vi.importActual('../fast-sessions');
-  });
+  }, 60_000);
 
   async function readState() {
     const [row] = await db
