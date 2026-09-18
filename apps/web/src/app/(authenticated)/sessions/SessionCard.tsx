@@ -2,27 +2,24 @@ import Link from 'next/link';
 import { formatDistanceToNow } from 'date-fns';
 
 import { formatInferenceCost, getUserDisplayName } from '@/lib';
+import {
+  getSessionArtifactsViewUrl,
+  getSessionArtifactViewUrl,
+  getSessionTaskArtifactViewUrl,
+} from '@/lib/artifact-view-urls';
 import { formatAutomationLabel } from '@/lib/task-creator-filter';
 import {
   Avatar,
-  BasicTooltip,
-  BrandIcon,
-  DollarSign,
-  Globe,
-  Mail,
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from '@/components/system';
-import { PullRequestBadge } from '@/components/sandbox';
+import { ArtifactsBadge, PullRequestBadge } from '@/components/sandbox';
 import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
 import { SessionSearchSnippet } from '@/components/sessions/SessionSearchSnippet';
 import { SessionInferenceCostBreakdown } from '@/components/sessions/SessionInferenceCostBreakdown';
 import { PrivateSessionIcon } from '@/components/sessions/PrivateSessionIcon';
-import {
-  getSessionSurfaceBrandIcon,
-  getSessionSurfaceLabel,
-} from '@/components/sessions/session-surfaces';
+import { getSessionSurfaceLabel } from '@/components/sessions/session-surfaces';
 import { TaskAutomationIcon } from '@/components/tasks/TaskAutomationIcon';
 
 type SessionCardData = {
@@ -42,6 +39,12 @@ type SessionCardData = {
   inferenceCostMicroUsd: number;
   directInferenceCostMicroUsd: number;
   unread: boolean;
+  artifactCount: number;
+  singleArtifact: {
+    taskId: string | null;
+    path: string;
+    version: number;
+  } | null;
   searchSnippet?: string | null;
   pullRequests: Array<{
     repository: string;
@@ -61,7 +64,6 @@ export function SessionCard({
   session,
   viewerUserId,
   query = '',
-  view = 'list',
 }: {
   session: SessionCardData;
   viewerUserId: string;
@@ -74,14 +76,29 @@ export function SessionCard({
       email: session.ownerEmail,
     }) ?? 'Roomote';
   const actorName =
-    session.ownerKind === 'user' && session.ownerUserId === viewerUserId
-      ? 'You'
-      : session.ownerKind === 'automation' && session.ownerAutomation
-        ? formatAutomationLabel(session.ownerAutomation)
-        : ownerDisplayName;
+    session.ownerKind === 'automation' && session.ownerAutomation
+      ? formatAutomationLabel(session.ownerAutomation)
+      : ownerDisplayName;
   const status = session.cachedStatus ?? 'ready';
   const surfaceLabel = getSessionSurfaceLabel(session.sourceSurface);
-  const surfaceBrandIcon = getSessionSurfaceBrandIcon(session.sourceSurface);
+  const hasOutputMetadata =
+    session.pullRequests.length > 0 || session.artifactCount > 0;
+  const artifactHref = session.singleArtifact
+    ? session.singleArtifact.taskId
+      ? getSessionTaskArtifactViewUrl(
+          '',
+          session.id,
+          session.singleArtifact.taskId,
+          session.singleArtifact.path,
+          session.singleArtifact.version,
+        )
+      : getSessionArtifactViewUrl(
+          '',
+          session.id,
+          session.singleArtifact.path,
+          session.singleArtifact.version,
+        )
+    : getSessionArtifactsViewUrl('', session.id);
 
   return (
     <div className="ph-no-capture group relative flex w-full items-start gap-3 p-4 transition-colors hover:bg-accent-foreground/10">
@@ -120,14 +137,33 @@ export function SessionCard({
       </div>
       <div className="pointer-events-none relative z-10 min-w-0 flex-1">
         <div className="flex items-start justify-between gap-2 text-xs text-muted-foreground/75 md:items-center">
-          <div className="flex min-w-0 flex-wrap items-center gap-1">
-            <span className="truncate">{actorName}</span>
-            {view === 'list' ? (
-              <span>
-                started {session.privacy === 'private' ? 'a private' : 'a'}{' '}
-                session
-              </span>
+          <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
+            {session.privacy === 'private' ? <PrivateSessionIcon /> : null}
+            <span className="truncate">
+              {actorName} from {surfaceLabel}
+            </span>
+            {session.inferenceCostMicroUsd > 0 ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="pointer-events-auto relative z-20 inline-flex cursor-default items-center before:mr-1.5 before:content-['·']">
+                    ${formatInferenceCost(session.inferenceCostMicroUsd)}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent className="p-3">
+                  <SessionInferenceCostBreakdown
+                    breakdown={{
+                      directInferenceCostMicroUsd:
+                        session.directInferenceCostMicroUsd,
+                      tasks: session.tasks,
+                    }}
+                    totalInferenceCostMicroUsd={session.inferenceCostMicroUsd}
+                  />
+                </TooltipContent>
+              </Tooltip>
             ) : null}
+            {status === 'active' || status === 'ready' ? null : (
+              <SessionStatusBadge status={status} className="capitalize" />
+            )}
           </div>
           <span className="shrink-0 text-xs text-muted-foreground">
             {formatDistanceToNow(new Date(session.activityAt * 1000), {
@@ -135,7 +171,7 @@ export function SessionCard({
             })}
           </span>
         </div>
-        <p className="mt-1 mb-2 line-clamp-2 wrap-anywhere text-base font-medium group-hover:underline">
+        <p className="mt-1 line-clamp-2 wrap-anywhere text-base font-medium group-hover:underline">
           {session.title}
         </p>
         <SessionSearchSnippet
@@ -143,56 +179,27 @@ export function SessionCard({
           query={query}
           className="line-clamp-2 wrap-anywhere"
         />
-        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          {session.privacy === 'private' ? <PrivateSessionIcon /> : null}
-          {status === 'active' || status === 'ready' ? null : (
-            <SessionStatusBadge status={status} className="capitalize" />
-          )}
-          <BasicTooltip content={surfaceLabel}>
-            <span
-              aria-label={surfaceLabel}
-              className="pointer-events-auto inline-flex items-center"
-            >
-              {surfaceBrandIcon ? (
-                <BrandIcon icon={surfaceBrandIcon} name="" className="size-3" />
-              ) : session.sourceSurface === 'agentmail' ? (
-                <Mail className="size-3" aria-hidden="true" />
-              ) : (
-                <Globe className="size-3" aria-hidden="true" />
-              )}
-            </span>
-          </BasicTooltip>
-          {session.pullRequests.map((pullRequest) => (
-            <PullRequestBadge
-              key={`${pullRequest.repository}:${pullRequest.number}`}
-              repo={pullRequest.repository}
-              prNumber={pullRequest.number}
-              url={pullRequest.url}
-              className="pointer-events-auto min-w-0 max-w-full"
-              iconClassName="size-3"
-            />
-          ))}
-          {session.inferenceCostMicroUsd > 0 ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="pointer-events-auto relative z-20 inline-flex cursor-default items-center gap-1">
-                  <DollarSign className="size-3" />
-                  {formatInferenceCost(session.inferenceCostMicroUsd)}
-                </span>
-              </TooltipTrigger>
-              <TooltipContent className="p-3">
-                <SessionInferenceCostBreakdown
-                  breakdown={{
-                    directInferenceCostMicroUsd:
-                      session.directInferenceCostMicroUsd,
-                    tasks: session.tasks,
-                  }}
-                  totalInferenceCostMicroUsd={session.inferenceCostMicroUsd}
-                />
-              </TooltipContent>
-            </Tooltip>
-          ) : null}
-        </div>
+        {hasOutputMetadata ? (
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            {session.pullRequests.map((pullRequest) => (
+              <PullRequestBadge
+                key={`${pullRequest.repository}:${pullRequest.number}`}
+                repo={pullRequest.repository}
+                prNumber={pullRequest.number}
+                url={pullRequest.url}
+                className="pointer-events-auto min-w-0 max-w-full"
+                iconClassName="size-3"
+              />
+            ))}
+            {session.artifactCount > 0 ? (
+              <ArtifactsBadge
+                count={session.artifactCount}
+                href={artifactHref}
+                className="pointer-events-auto min-w-0 max-w-full"
+              />
+            ) : null}
+          </div>
+        ) : null}
       </div>
     </div>
   );
