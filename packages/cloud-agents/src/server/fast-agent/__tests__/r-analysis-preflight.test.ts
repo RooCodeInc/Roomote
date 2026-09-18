@@ -56,4 +56,17 @@ describe('inspectRAnalysisScript', () => {
       unresolvedPackageExpressions: ['pkg'],
     });
   });
+
+  it('ignores package-like calls inside quoted strings', () => {
+    expect(
+      inspectRAnalysisScript(`
+        message("library(notAPackage)")
+        'require(alsoNotAPackage)'
+        library(DESeq2)
+      `),
+    ).toEqual({
+      packages: ['DESeq2'],
+      unresolvedPackageExpressions: [],
+    });
+  });
 });
