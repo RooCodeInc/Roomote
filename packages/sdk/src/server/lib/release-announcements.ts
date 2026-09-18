@@ -33,6 +33,7 @@ import {
   listConnectedCommunicationProviders,
   resolveAutomationRuntimeDestination,
   sendAutomationEmailReport,
+  type ResolvedAutomationDestination,
 } from '../automations/destination';
 
 const DEPLOYMENT_ID = 'default';
@@ -50,6 +51,12 @@ export type RecordInstalledReleaseResult =
   | 'announcement_disabled'
   | 'no_destination'
   | 'queued';
+
+type SendInstalledReleaseAnnouncementTestResult =
+  | 'sent'
+  | 'no_installed_release'
+  | 'no_previous_release'
+  | 'no_highlights';
 
 function retryDelayMs(attempts: number): number {
   return Math.min(MAX_RETRY_DELAY_MS, 60_000 * 2 ** Math.min(attempts, 8));
@@ -114,6 +121,104 @@ export function buildInstalledReleaseAnnouncement(input: {
     ...highlights,
     `[Read the full ${installedTag} release notes](${RELEASES_URL}/${installedTag})`,
   ].join('\n');
+}
+
+async function sendInstalledReleaseAnnouncement(input: {
+  destination: ResolvedAutomationDestination;
+  installedVersion: string;
+  text: string;
+  conversationKey: string;
+  idempotencyKey: string;
+}): Promise<string | null> {
+  const { destination } = input;
+  if (destination.provider === 'email') {
+    if (!destination.userId || !destination.identityId) {
+      throw new Error('Email release destination is incomplete');
+    }
+    await sendAutomationEmailReport(destination, {
+      subject: `Roomote ${toReleaseTag(input.installedVersion)} is installed`,
+      conversationKey: input.conversationKey,
+      text: input.text,
+      idempotencyKey: input.idempotencyKey,
+    });
+    return null;
+  }
+
+  const slackInstallation =
+    destination.provider === 'slack' && !destination.teamId
+      ? await findActiveSlackInstallationForChannel(destination.channelId)
+      : null;
+  const slackTeamId = destination.teamId ?? slackInstallation?.teamId;
+  if (destination.provider === 'slack' && !slackTeamId) {
+    throw new Error('No unambiguous active Slack installation for channel');
+  }
+  const adapter = await getCommunicationProviderAdapter(
+    destination.provider,
+    destination.provider === 'slack' ? { slackTeamId } : {},
+  );
+  if (!adapter) {
+    throw new Error(`No active ${destination.provider} connection`);
+  }
+  const serviceUrl =
+    destination.provider === 'teams'
+      ? (destination.serviceUrl ??
+        (await findTeamsConversationServiceUrl(destination.channelId)))
+      : null;
+  if (destination.provider === 'teams' && !serviceUrl) {
+    throw new Error('No Teams service URL for destination');
+  }
+  const result = await adapter.postMessage({
+    channelId: destination.channelId,
+    text: input.text,
+    textFormat: 'markdown',
+    idempotencyKey: input.idempotencyKey,
+    ...(serviceUrl ? { serviceUrl } : {}),
+    ...(destination.provider === 'slack'
+      ? { blocks: [{ type: 'markdown' as const, text: input.text }] }
+      : {}),
+  });
+  return result.messageId;
+}
+
+export async function sendInstalledReleaseAnnouncementTest(
+  destination: ResolvedAutomationDestination,
+  options: { changelogMarkdown?: string } = {},
+): Promise<SendInstalledReleaseAnnouncementTestResult> {
+  const settings = await db.query.deploymentSettings.findFirst({
+    where: eq(deploymentSettings.id, DEPLOYMENT_ID),
+    columns: { installedReleaseVersion: true },
+  });
+  const installedVersion = normalizeProductVersion(
+    settings?.installedReleaseVersion,
+  );
+  if (!installedVersion || !isParsableProductVersion(installedVersion)) {
+    return 'no_installed_release';
+  }
+
+  const changelog =
+    options.changelogMarkdown ?? (await readFile(CHANGELOG_PATH, 'utf8'));
+  const previousVersion = parseProductReleaseHistory(changelog)
+    .map((release) => release.version)
+    .filter((version) => compareProductVersions(version, installedVersion) < 0)
+    .sort((left, right) => compareProductVersions(right, left))[0];
+  if (!previousVersion) return 'no_previous_release';
+
+  const text = buildInstalledReleaseAnnouncement({
+    previousVersion,
+    installedVersion,
+    changelogMarkdown: changelog,
+  });
+  if (!text) return 'no_highlights';
+
+  const runId = randomUUID();
+  await sendInstalledReleaseAnnouncement({
+    destination,
+    installedVersion,
+    text,
+    conversationKey: `builtin-automation:release_announcements:test:${runId}`,
+    idempotencyKey: `release-test:${installedVersion}:${runId}`,
+  });
+  return 'sent';
 }
 
 export async function recordInstalledRelease(
@@ -290,65 +395,24 @@ export async function drainReleaseAnnouncementDeliveries(
         });
         continue;
       }
-      let providerMessageId: string | null = null;
-      if (claim.row.provider === 'email') {
-        if (!claim.row.recipientUserId || !claim.row.emailIdentityId) {
-          throw new Error('Email release destination is incomplete');
-        }
-        await sendAutomationEmailReport(
-          {
-            provider: 'email',
-            channelId: claim.row.recipientUserId,
-            userId: claim.row.recipientUserId,
-            identityId: claim.row.emailIdentityId,
-            source: 'automation_target',
-          },
-          {
-            subject: `Roomote ${toReleaseTag(claim.row.installedVersion)} is installed`,
-            conversationKey: `builtin-automation:release_announcements:${claim.row.id}`,
-            text,
-            idempotencyKey: `release:${claim.row.installedVersion}:${claim.row.destinationKey}`,
-          },
-        );
-      } else {
-        const slackInstallation =
-          claim.row.provider === 'slack'
-            ? await findActiveSlackInstallationForChannel(claim.row.channelId)
-            : null;
-        if (claim.row.provider === 'slack' && !slackInstallation) {
-          throw new Error(
-            'No unambiguous active Slack installation for channel',
-          );
-        }
-        const adapter = await getCommunicationProviderAdapter(
-          claim.row.provider,
-          claim.row.provider === 'slack'
-            ? { slackTeamId: slackInstallation?.teamId }
-            : {},
-        );
-        if (!adapter) {
-          throw new Error(`No active ${claim.row.provider} connection`);
-        }
-        const serviceUrl =
-          claim.row.provider === 'teams'
-            ? (claim.row.serviceUrl ??
-              (await findTeamsConversationServiceUrl(claim.row.channelId)))
-            : null;
-        if (claim.row.provider === 'teams' && !serviceUrl) {
-          throw new Error('No Teams service URL for destination');
-        }
-        const result = await adapter.postMessage({
+      const providerMessageId = await sendInstalledReleaseAnnouncement({
+        destination: {
+          provider: claim.row.provider,
           channelId: claim.row.channelId,
-          text,
-          textFormat: 'markdown',
-          idempotencyKey: `release:${claim.row.installedVersion}:${claim.row.destinationKey}`,
-          ...(serviceUrl ? { serviceUrl } : {}),
-          ...(claim.row.provider === 'slack'
-            ? { blocks: [{ type: 'markdown', text }] }
+          ...(claim.row.serviceUrl ? { serviceUrl: claim.row.serviceUrl } : {}),
+          ...(claim.row.recipientUserId
+            ? { userId: claim.row.recipientUserId }
             : {}),
-        });
-        providerMessageId = result.messageId;
-      }
+          ...(claim.row.emailIdentityId
+            ? { identityId: claim.row.emailIdentityId }
+            : {}),
+          source: 'automation_target',
+        },
+        installedVersion: claim.row.installedVersion,
+        text,
+        conversationKey: `builtin-automation:release_announcements:${claim.row.id}`,
+        idempotencyKey: `release:${claim.row.installedVersion}:${claim.row.destinationKey}`,
+      });
       await db
         .update(releaseAnnouncementDeliveries)
         .set({

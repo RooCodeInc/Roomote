@@ -21,6 +21,7 @@ import {
   buildInstalledReleaseAnnouncement,
   drainReleaseAnnouncementDeliveries,
   recordInstalledRelease,
+  sendInstalledReleaseAnnouncementTest,
 } from './release-announcements';
 
 const changelog = `# Changelog
@@ -219,6 +220,56 @@ describe('installed release transitions', () => {
 });
 
 describe('release announcement delivery', () => {
+  it('sends a representative installed-release test without changing automatic state', async () => {
+    await db
+      .update(deploymentSettings)
+      .set({ installedReleaseVersion: '1.2.0' })
+      .where(eq(deploymentSettings.id, 'default'));
+
+    await expect(
+      sendInstalledReleaseAnnouncementTest(
+        {
+          provider: 'discord',
+          channelId: 'release-channel',
+          source: 'automation_target',
+        },
+        { changelogMarkdown: changelog },
+      ),
+    ).resolves.toBe('sent');
+
+    expect(mocks.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'release-channel',
+        text: expect.stringContaining('Roomote v1.2.0 is installed'),
+        textFormat: 'markdown',
+        idempotencyKey: expect.stringMatching(/^release-test:1\.2\.0:/),
+      }),
+    );
+    await expect(
+      db.query.deploymentSettings.findFirst({
+        where: eq(deploymentSettings.id, 'default'),
+        columns: { installedReleaseVersion: true },
+      }),
+    ).resolves.toMatchObject({ installedReleaseVersion: '1.2.0' });
+    await expect(
+      db.query.releaseAnnouncementDeliveries.findMany(),
+    ).resolves.toHaveLength(0);
+  });
+
+  it('does not send a manual test before the installed release is recorded', async () => {
+    await expect(
+      sendInstalledReleaseAnnouncementTest(
+        {
+          provider: 'discord',
+          channelId: 'release-channel',
+          source: 'automation_target',
+        },
+        { changelogMarkdown: changelog },
+      ),
+    ).resolves.toBe('no_installed_release');
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+  });
+
   it('summarizes skipped releases from authored highlights without mass pings', () => {
     const message = buildInstalledReleaseAnnouncement({
       previousVersion: '1.0.0',

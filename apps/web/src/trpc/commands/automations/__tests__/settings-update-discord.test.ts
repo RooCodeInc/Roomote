@@ -954,6 +954,37 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
     });
   });
 
+  it('manually tests release announcements with the normal saved destination', async () => {
+    await insertAvailableDiscordChannel({
+      guildId: 'guild-1',
+      channelId: 'D-RELEASES',
+      channelName: 'releases',
+    });
+    await upsertAutomation(db, {
+      key: 'release_announcements',
+      enabled: true,
+      settings: { optedOut: false },
+      targets: [
+        {
+          provider: 'discord',
+          targetKind: 'discord_channel',
+          externalRef: 'D-RELEASES',
+        },
+      ],
+    });
+
+    await triggerAutomationCommand(adminAuth, {
+      automationKey: 'release_announcements',
+    });
+
+    expect(mockRunAutomationNow).toHaveBeenCalledWith('release_announcements', {
+      destination: expect.objectContaining({
+        provider: 'discord',
+        channelId: 'D-RELEASES',
+      }),
+    });
+  });
+
   it('switches a Discord manager channel to Slack and clears Discord', async () => {
     await upsertAutomation(db, {
       key: 'manager_stats',

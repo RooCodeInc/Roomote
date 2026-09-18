@@ -244,6 +244,16 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     supportedSourceControlProviders: [],
   },
   {
+    automationKey: 'release_announcements',
+    label: 'Announce Roomote Updates',
+    slackIcon: 'megaphone',
+    scheduleModes: [],
+    manualTriggerRequirements: [],
+    usesManagerChannel: true,
+    supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
+    supportedSourceControlProviders: [],
+  },
+  {
     automationKey: 'sentry_triage',
     label: 'Triage Sentry Issues',
     resultPriority: 'high',
@@ -434,7 +444,7 @@ const BACKGROUND_AUTOMATION_SETTINGS_CATALOG = [
   },
   {
     hash: RELEASE_ANNOUNCEMENTS_SETTINGS_HASH,
-    label: 'Announce Roomote Updates',
+    automationKey: 'release_announcements',
   },
   {
     hash: MANAGER_STATS_SETTINGS_HASH,
