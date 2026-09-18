@@ -103,9 +103,14 @@ function serverToFormValues(server: ListedServer): ServerFormValues {
 function importToFormValues(
   parsed: CustomMcpJsonImport,
   currentName: string,
+  currentVisibility: CustomMcpServerVisibility,
 ): ServerFormValues {
   return {
     ...EMPTY_FORM,
+    // Importing only fills in transport details; who can use the server stays
+    // whatever the dialog was opened with (the personal dialog hides the
+    // selector, so a reset to the default would silently share the server).
+    visibility: currentVisibility,
     name: parsed.name ?? currentName,
     transport: parsed.transport,
     url: parsed.url ?? '',
@@ -456,7 +461,13 @@ function ServerFormDialog({
                         try {
                           const parsed = parseCustomMcpServerJson(jsonText);
 
-                          reset(importToFormValues(parsed, watch('name')));
+                          reset(
+                            importToFormValues(
+                              parsed,
+                              watch('name'),
+                              watch('visibility'),
+                            ),
+                          );
                           setImportNotes(parsed.notes);
                           setImportError(null);
                           setJsonImportOpen(false);

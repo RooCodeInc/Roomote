@@ -651,6 +651,34 @@ describe('PersonalMcpServers', () => {
     });
   });
 
+  it('keeps a JSON-imported server private instead of sharing it', async () => {
+    renderSection();
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Add personal MCP server' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Import from JSON' }));
+    fireEvent.change(screen.getByLabelText('Paste a JSON config'), {
+      target: {
+        value: JSON.stringify({
+          mcpServers: {
+            'example-tools': { url: 'https://mcp.example.com/mcp' },
+          },
+        }),
+      },
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Fill form from JSON' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Add server' }));
+
+    await waitFor(() => expect(createMock).toHaveBeenCalledTimes(1));
+    expect(createMock.mock.calls[0]?.[0]).toMatchObject({
+      name: 'example-tools',
+      visibility: 'owner',
+    });
+  });
+
   it('renders nothing when the operator disabled custom MCP servers', async () => {
     state.availability = { enabled: false };
     const { container } = renderSection();
