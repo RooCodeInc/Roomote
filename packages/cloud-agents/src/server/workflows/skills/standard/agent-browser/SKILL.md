@@ -26,6 +26,24 @@ The CLI serves skill content that always matches the installed version,
 so instructions never go stale. The content in this stub cannot change
 between releases, which is why it just points at `skills get core`.
 
+## Shared browser
+
+In a sandbox that runs the Shared Desktop, `agent-browser` does not launch a
+hidden browser. It drives one visible Chrome window that the people following
+the task can watch and use through the Shared Desktop tab.
+
+- The window, its tabs, and its logins persist. `agent-browser close` only
+  detaches your session. Do not close tabs you did not open.
+- A person may have signed in to a site for you. Check the page before
+  assuming you need credentials, and ask them to sign in through the Shared
+  Desktop when you hit a login, 2FA prompt, or CAPTCHA.
+- While a person is clicking or typing there, commands that act on the page
+  exit with status 75 and a message saying so. Read-only commands
+  (`snapshot`, `screenshot`, `get`) still work. Wait and retry instead of
+  working around it.
+- Set `ROOMOTE_SHARED_BROWSER=0` on a command to use a private headless
+  browser instead, for example to test a logged-out flow.
+
 ## Specialized skills
 
 Load a specialized skill when the task falls outside browser web pages:

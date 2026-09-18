@@ -92,10 +92,13 @@ function estimateSpokenSeconds(text) {
   return Math.min(10, Math.max(1.8, words / 2.8));
 }
 
+// A demo records a clean browser at its own viewport, so it opts out of the
+// sandbox's shared browser (the visible window people may be using).
 const ab = (...args) =>
   execFileSync(AB, args, {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, ROOMOTE_SHARED_BROWSER: '0' },
   });
 
 const sleep = (ms) => execFileSync('sleep', [String(ms / 1000)]);

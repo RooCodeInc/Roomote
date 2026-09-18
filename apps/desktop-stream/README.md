@@ -26,6 +26,11 @@ reports measured rendered FPS and startup-to-first-frame time; encoder progress
 reports output FPS and bitrate. These measurements describe the current host
 and configuration, not a general 1080p60 or 1-vCPU guarantee.
 
+`/metrics` also reports `control_connected` and `control_idle_ms`, the time
+since the controlling viewer last clicked, scrolled, or typed (pointer moves
+are excluded). The sandbox's `agent-browser` wrapper reads these to hold the
+agent's page actions while a person is driving the shared browser.
+
 ### Reference 1-vCPU benchmark
 
 A sandbox-local benchmark pinned the Rust service and Ubuntu FFmpeg 6.1 to one

@@ -47,6 +47,28 @@ reading the stream is dropped rather than allowed to stall the encoder.
 The header's pop-out button opens the desktop in its own window and hands
 input control to it; the panel can take control back at any time.
 
+## Roomote's browser
+
+When a task has a Shared Desktop, the agent's browser is a Chrome window on
+that desktop rather than a hidden one. You watch the agent browse in the
+Shared Desktop tab, and you can use the same window yourself: the tabs,
+cookies, and logins are shared.
+
+- Sign in to a site, pass a 2FA prompt, or solve a CAPTCHA in the window, and
+  the agent continues from that signed-in state. Anything you sign in to there
+  is available to the agent for the rest of the task.
+- The window opens the first time the agent uses its browser and stays open
+  for the life of the sandbox. The agent works in its own tab and leaves tabs
+  it did not open alone.
+- You always win. While you are clicking, scrolling, or typing, the agent's
+  page actions wait, and resume about ten seconds after you stop. It can still
+  read the page and take screenshots in the meantime. Watching, including
+  moving the pointer over the video, does not pause it.
+- Recordings made by the feature demo skill use a separate headless browser so
+  they start from a clean state.
+
+Tasks without a Shared Desktop keep using a private headless browser.
+
 ## Verify performance
 
 Open **Shared Desktop** and select **Start remote desktop**. The statistics
@@ -80,4 +102,4 @@ picture arrives after the encode and network round trip.
   clock and freeze the picture
 - browser playback uses fragmented MP4 over HTTP, not adaptive bitrate or
   WebRTC congestion control
-- additional viewers create additional encoders and CPU load
+- every viewer sees the same desktop; there is one screen and one pointer

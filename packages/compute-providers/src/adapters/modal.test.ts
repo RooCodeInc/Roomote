@@ -1111,8 +1111,13 @@ describe('ModalClient', () => {
     expect(installBrowserAgentScript).not.toContain(
       'AGENT_BROWSER_WANT_HEADED',
     );
+    // The visible browser is the shared Chrome the wrapper attaches to over
+    // CDP on the Shared Desktop, never a headed agent-browser launch.
     expect(installBrowserAgentScript).toContain(
-      'exec "$AGENT_BROWSER_BIN" "${AGENT_BROWSER_FORWARD_ARGS[@]}"',
+      'AGENT_BROWSER_SHARED_ARGS=(--cdp "$SHARED_BROWSER_CDP_PORT")',
+    );
+    expect(installBrowserAgentScript).toContain(
+      'exec "$AGENT_BROWSER_BIN" ${AGENT_BROWSER_SHARED_ARGS[@]+"${AGENT_BROWSER_SHARED_ARGS[@]}"} "${AGENT_BROWSER_FORWARD_ARGS[@]}"',
     );
     expect(dockerfile).not.toContain(
       '--window-size=${DEFAULT_BROWSER_WIDTH},${DEFAULT_BROWSER_HEIGHT}',

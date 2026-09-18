@@ -372,6 +372,9 @@ struct Metrics {
     input_latency: Mutex<InputLatency>,
     /// Last pointer position applied through XTest, in screen pixels.
     last_motion: Mutex<Option<(i16, i16)>>,
+    /// When a viewer last clicked, scrolled, or typed. Pointer moves are
+    /// excluded: they happen while merely watching.
+    last_deliberate_input: Mutex<Option<Instant>>,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -649,6 +652,17 @@ enum ControlEvent {
         width: u16,
         height: u16,
     },
+}
+
+impl ControlEvent {
+    /// Whether the event shows a person actively driving the desktop, as
+    /// opposed to watching it with the pointer over the video.
+    fn is_deliberate_input(&self) -> bool {
+        matches!(
+            self,
+            Self::PointerButton { .. } | Self::Wheel { .. } | Self::Key { .. }
+        )
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -1210,6 +1224,10 @@ struct MetricsResponse {
     total_clients: u64,
     bytes_served: u64,
     control_connected: bool,
+    /// Milliseconds since a viewer last clicked, scrolled, or typed; absent
+    /// until someone has. Sandbox automation reads this to yield to a person
+    /// who is driving the desktop.
+    control_idle_ms: Option<u64>,
     encoder: EncoderProgress,
     browser: BrowserTelemetry,
     browser_to_x_input_latency: InputLatency,
@@ -1347,6 +1365,12 @@ async fn metrics(State(state): State<AppState>) -> Json<MetricsResponse> {
         total_clients: state.metrics.total_clients.load(Ordering::Relaxed),
         bytes_served: state.metrics.bytes_served.load(Ordering::Relaxed),
         control_connected: state.control_connected.load(Ordering::Relaxed),
+        control_idle_ms: state
+            .metrics
+            .last_deliberate_input
+            .lock()
+            .unwrap()
+            .map(|at| at.elapsed().as_millis() as u64),
         encoder: state.metrics.progress.lock().unwrap().clone(),
         browser: state.metrics.browser.lock().unwrap().clone(),
         browser_to_x_input_latency: state.metrics.input_latency.lock().unwrap().clone(),
@@ -1471,11 +1495,16 @@ async fn control_socket(
                         let _ = socket.send(Message::Text(payload.into())).await;
                     }
                     Ok(ControlEnvelope { event, sent_at_ms }) => {
+                        let deliberate = event.is_deliberate_input();
                         if let Err(error) = controller.apply(event) {
                             let payload = serde_json::json!({ "error": error }).to_string();
                             let _ = socket.send(Message::Text(payload.into())).await;
                         } else {
                             record_input_latency(&state.metrics, sent_at_ms);
+                            if deliberate {
+                                *state.metrics.last_deliberate_input.lock().unwrap() =
+                                    Some(Instant::now());
+                            }
                         }
                     }
                     Err(error) => {
@@ -2274,5 +2303,20 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn only_clicks_scrolls_and_keys_count_as_deliberate_input() {
+        let event = |payload: &str| {
+            serde_json::from_str::<ControlEnvelope>(payload)
+                .unwrap()
+                .event
+        };
+        assert!(event(r#"{"type":"pointer_button","button":0,"down":true}"#).is_deliberate_input());
+        assert!(event(r#"{"type":"wheel","delta_x":0,"delta_y":120}"#).is_deliberate_input());
+        assert!(event(r#"{"type":"key","code":"KeyA","down":true}"#).is_deliberate_input());
+        assert!(!event(r#"{"type":"pointer_move","x":0.5,"y":0.5}"#).is_deliberate_input());
+        assert!(!event(r#"{"type":"release_all"}"#).is_deliberate_input());
+        assert!(!event(r#"{"type":"resize","width":1280,"height":800}"#).is_deliberate_input());
     }
 }
