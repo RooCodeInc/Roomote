@@ -36,7 +36,8 @@ continue to use Mantle's Responses endpoint automatically. Enable only models
 your account and configured region can access, then choose the default and role
 mappings.
 
-Roomote labels native and Mantle choices separately. Mantle models remain
+Roomote labels Mantle models in search results and in the model list; Bedrock
+models without that label use the native route. Mantle models remain
 available in the recommended mapping preset, but applying that preset is an
 explicit action. Use native Bedrock models when you need standard Bedrock
 Runtime behavior or a regional inference profile that is not available through
@@ -50,7 +51,9 @@ keys can list the models on the regional Mantle `/models` endpoint. AWS
 documents native `ListFoundationModels` with AWS credentials and SigV4, not the
 Bedrock API key used by Roomote. Roomote therefore searches the public native
 Bedrock catalog, shows a curated Mantle list, and keeps manual model-ID entry as
-a fallback instead of requesting broader AWS credentials.
+a fallback instead of requesting broader AWS credentials. The catalog search is
+best-effort: if it is unavailable or does not list a model, type the model ID
+and choose to use it as entered.
 
 A model appearing in either regional catalog does not prove that the configured
 identity can invoke it. Invocation still depends on the region, IAM

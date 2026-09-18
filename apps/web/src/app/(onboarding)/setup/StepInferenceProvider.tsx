@@ -3,13 +3,17 @@
 import {
   type ReactNode,
   useCallback,
-  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
@@ -17,10 +21,14 @@ import {
   OPENAI_COMPATIBLE_PROVIDER_ID,
   getDefaultAdditionalEnvValues,
   getSetupModelProvider,
+  getSetupProviderModelIdPrefixes,
+  getSetupProviderTaskModelPrefix,
+  getTaskModelProviderId,
   type SetupModelProviderId,
   type SetupModelStatus,
 } from '@roomote/types';
 
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useTRPC } from '@/trpc/client';
 import {
   ArrowRight,
@@ -127,6 +135,9 @@ export function StepInferenceProvider({
   >({});
   const [catalogModelQuery, setCatalogModelQuery] = useState('');
   const [selectedCatalogModelId, setSelectedCatalogModelId] = useState('');
+  // Until the operator edits the field it shows the model the deployment
+  // already runs, so revisiting this step does not force a new choice.
+  const [catalogModelTouched, setCatalogModelTouched] = useState(false);
   const [catalogSuggestionsOpen, setCatalogSuggestionsOpen] = useState(false);
   const [editingSavedValue, setEditingSavedValue] = useState(false);
   const [isChatGptDialogOpen, setIsChatGptDialogOpen] = useState(false);
@@ -181,6 +192,7 @@ export function StepInferenceProvider({
     setConnectionName('');
     setCatalogModelQuery('');
     setSelectedCatalogModelId('');
+    setCatalogModelTouched(false);
     setCatalogSuggestionsOpen(false);
     // Seeded from the catalog rather than the fetched status so this effect
     // stays keyed on `selectedProvider` alone; depending on the status query
@@ -226,19 +238,72 @@ export function StepInferenceProvider({
   const isEndpointProvider = selectedProviderStatus?.authKind === 'endpoint';
   const requiresModelSelection =
     selectedProviderStatus?.requiresModelSelection === true;
-  const deferredCatalogModelQuery = useDeferredValue(catalogModelQuery.trim());
+  const providerModelIdPrefixes = useMemo(
+    () =>
+      selectedProviderStatus
+        ? getSetupProviderModelIdPrefixes(selectedProviderStatus)
+        : new Set<string>(),
+    [selectedProviderStatus],
+  );
+  const persistedProviderModelId = useMemo(() => {
+    const modelId = modelSetup.persistedRoomoteModel;
+    const prefix = modelId ? getTaskModelProviderId(modelId) : null;
+    return modelId && prefix && providerModelIdPrefixes.has(prefix)
+      ? modelId
+      : '';
+  }, [modelSetup.persistedRoomoteModel, providerModelIdPrefixes]);
+  const chosenModelId = catalogModelTouched
+    ? selectedCatalogModelId
+    : persistedProviderModelId;
+  const trimmedCatalogModelQuery = catalogModelQuery.trim();
+  const debouncedCatalogModelQuery = useDebouncedValue(
+    trimmedCatalogModelQuery,
+    150,
+  );
   const catalogSuggestionsQuery = useQuery(
     trpc.taskModels.suggest.queryOptions(
       {
         providerId: selectedProvider ?? 'openrouter',
-        query: deferredCatalogModelQuery,
+        query: debouncedCatalogModelQuery,
       },
       {
-        enabled: requiresModelSelection && deferredCatalogModelQuery.length > 0,
+        enabled:
+          requiresModelSelection && debouncedCatalogModelQuery.length > 0,
+        placeholderData: keepPreviousData,
       },
     ),
   );
-  const catalogSuggestions = catalogSuggestionsQuery.data?.suggestions ?? [];
+  const catalogSuggestions =
+    trimmedCatalogModelQuery.length > 0
+      ? (catalogSuggestionsQuery.data?.suggestions ?? [])
+      : [];
+  // The catalog is best-effort (models.dev may be unreachable or not list a
+  // private model), so a typed id can always be used as-is.
+  const manualModelId = useMemo(() => {
+    if (
+      !selectedProvider ||
+      !trimmedCatalogModelQuery ||
+      /\s/u.test(trimmedCatalogModelQuery)
+    ) {
+      return '';
+    }
+
+    const prefix = getTaskModelProviderId(trimmedCatalogModelQuery);
+    if (
+      trimmedCatalogModelQuery.includes('/') &&
+      prefix !== null &&
+      providerModelIdPrefixes.has(prefix)
+    ) {
+      return trimmedCatalogModelQuery.length > prefix.length + 1
+        ? trimmedCatalogModelQuery
+        : '';
+    }
+
+    return `${getSetupProviderTaskModelPrefix(selectedProvider)}/${trimmedCatalogModelQuery}`;
+  }, [providerModelIdPrefixes, selectedProvider, trimmedCatalogModelQuery]);
+  const showManualModelOption =
+    manualModelId.length > 0 &&
+    !catalogSuggestions.some((suggestion) => suggestion.slug === manualModelId);
   const chatgptConnected = Boolean(modelSetup.chatgptConnected);
   const githubCopilotConnected = Boolean(modelSetup.githubCopilotConnected);
   const xaiSubscriptionConnected = Boolean(
@@ -295,7 +360,7 @@ export function StepInferenceProvider({
     selectedProvider === null ||
     hasMissingRequiredFields ||
     hasMissingConnectionName ||
-    (requiresModelSelection && !selectedCatalogModelId) ||
+    (requiresModelSelection && !chosenModelId) ||
     (!canContinueWithoutApiKey && apiKey.trim().length === 0);
   const isCheckingEndpoint =
     isEndpointProvider &&
@@ -306,7 +371,7 @@ export function StepInferenceProvider({
       return;
     }
 
-    let modelId = requiresModelSelection ? selectedCatalogModelId : undefined;
+    let modelId = requiresModelSelection ? chosenModelId : undefined;
     let endpointConnectionMessage: string | undefined;
     let qualificationError: string | undefined;
     const submittedCredential = shouldShowConfiguredMask
@@ -604,23 +669,35 @@ export function StepInferenceProvider({
           <div className="max-w-lg space-y-2">
             <InferenceProviderRow>
               <span className="w-44 shrink-0 text-sm text-muted-foreground">
-                Bedrock model
+                Model
               </span>
               <Popover
-                open={catalogSuggestionsOpen && catalogSuggestions.length > 0}
+                open={
+                  catalogSuggestionsOpen && trimmedCatalogModelQuery.length > 0
+                }
                 onOpenChange={setCatalogSuggestionsOpen}
               >
-                <PopoverTrigger asChild>
+                {/* The input anchors the list; clicking into it must not
+                    toggle the popover closed. */}
+                <PopoverTrigger
+                  asChild
+                  onClick={(event) => event.preventDefault()}
+                >
                   <div className="w-full">
                     <Input
-                      value={catalogModelQuery}
+                      value={
+                        catalogModelTouched
+                          ? catalogModelQuery
+                          : persistedProviderModelId
+                      }
                       onChange={(event) => {
+                        setCatalogModelTouched(true);
                         setCatalogModelQuery(event.target.value);
                         setSelectedCatalogModelId('');
                         setCatalogSuggestionsOpen(true);
                       }}
-                      placeholder="Search GLM, Kimi, MiniMax, Qwen, or a model ID"
-                      aria-label="Bedrock model"
+                      placeholder="Search the catalog or enter a model ID"
+                      aria-label={`${selectedProviderStatus?.label ?? 'Provider'} model`}
                       disabled={saveModelConfig.isPending}
                     />
                   </div>
@@ -632,37 +709,60 @@ export function StepInferenceProvider({
                 >
                   <Command shouldFilter={false}>
                     <CommandList>
-                      <CommandEmpty>No catalog models found.</CommandEmpty>
-                      <CommandGroup heading="Catalog models">
-                        {catalogSuggestions.map((suggestion) => (
+                      <CommandEmpty>
+                        {catalogSuggestionsQuery.isFetching
+                          ? 'Searching the catalog...'
+                          : 'No catalog models found.'}
+                      </CommandEmpty>
+                      {catalogSuggestions.length > 0 ? (
+                        <CommandGroup heading="Catalog models">
+                          {catalogSuggestions.map((suggestion) => (
+                            <CommandItem
+                              key={suggestion.slug}
+                              value={suggestion.slug}
+                              onSelect={() => {
+                                setSelectedCatalogModelId(suggestion.slug);
+                                setCatalogModelQuery(suggestion.displayName);
+                                setCatalogSuggestionsOpen(false);
+                              }}
+                            >
+                              <div className="min-w-0">
+                                <p className="truncate font-medium">
+                                  {suggestion.displayName}
+                                </p>
+                                <p className="truncate text-xs text-muted-foreground">
+                                  {suggestion.slug}
+                                </p>
+                              </div>
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      ) : null}
+                      {showManualModelOption ? (
+                        <CommandGroup heading="Model ID">
                           <CommandItem
-                            key={suggestion.slug}
-                            value={suggestion.slug}
+                            value={`manual:${manualModelId}`}
                             onSelect={() => {
-                              setSelectedCatalogModelId(suggestion.slug);
-                              setCatalogModelQuery(suggestion.displayName);
+                              setSelectedCatalogModelId(manualModelId);
+                              setCatalogModelQuery(manualModelId);
                               setCatalogSuggestionsOpen(false);
                             }}
                           >
-                            <div className="min-w-0">
-                              <p className="truncate font-medium">
-                                {suggestion.displayName}
-                              </p>
-                              <p className="truncate text-xs text-muted-foreground">
-                                {suggestion.slug}
-                              </p>
-                            </div>
+                            <span className="truncate">
+                              Use &ldquo;{manualModelId}&rdquo; as the model ID
+                            </span>
                           </CommandItem>
-                        ))}
-                      </CommandGroup>
+                        </CommandGroup>
+                      ) : null}
                     </CommandList>
                   </Command>
                 </PopoverContent>
               </Popover>
             </InferenceProviderRow>
             <p className="text-xs text-muted-foreground">
-              Choose a native Bedrock or Mantle model. Catalog availability does
-              not prove account access.
+              Search the {selectedProviderStatus?.label ?? 'provider'} catalog
+              or enter a model ID. Catalog availability does not prove account
+              access.
             </p>
           </div>
         ) : null}

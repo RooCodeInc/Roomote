@@ -437,15 +437,16 @@ describe('StepInferenceProvider configured API key display', () => {
         target: { value: 'bedrock-key' },
       },
     );
-    fireEvent.change(screen.getByRole('textbox', { name: 'Bedrock model' }), {
-      target: { value: 'GLM-5' },
-    });
+    fireEvent.change(
+      screen.getByRole('textbox', { name: 'Amazon Bedrock model' }),
+      { target: { value: 'GLM-5' } },
+    );
     expect(
       screen.getByText(/Catalog availability does not prove account access/i),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Continue/ })).toBeDisabled();
 
-    fireEvent.click(await screen.findByRole('button', { name: /GLM-5/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /^GLM-5/ }));
     fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
 
     await waitFor(() => {
@@ -454,6 +455,75 @@ describe('StepInferenceProvider configured API key display', () => {
           provider: 'amazon-bedrock',
           apiKey: 'bedrock-key',
           modelId: 'amazon-bedrock/zai.glm-5',
+        }),
+      );
+    });
+  });
+
+  it('accepts a typed Bedrock model ID when the catalog has no match', async () => {
+    setupQueryMocks({ chatgptConnected: false, suggestions: [] });
+    render(
+      <StepInferenceProvider
+        modelSetup={buildModelSetup({
+          providers: [openrouterProviderStatus(), bedrockProviderStatus()],
+        })}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    selectProvider('amazon-bedrock');
+    fireEvent.change(
+      screen.getByPlaceholderText('API key for Amazon Bedrock'),
+      { target: { value: 'bedrock-key' } },
+    );
+    fireEvent.change(
+      screen.getByRole('textbox', { name: 'Amazon Bedrock model' }),
+      { target: { value: 'vendor.private-model' } },
+    );
+    expect(screen.getByRole('button', { name: /Continue/ })).toBeDisabled();
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /amazon-bedrock\/vendor\.private-model/,
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
+
+    await waitFor(() => {
+      expect(mutateAsyncMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          modelId: 'amazon-bedrock/vendor.private-model',
+        }),
+      );
+    });
+  });
+
+  it('keeps the saved Bedrock model when the step is revisited', async () => {
+    setupQueryMocks({ chatgptConnected: false });
+    render(
+      <StepInferenceProvider
+        modelSetup={buildModelSetup({
+          persistedRoomoteModel: 'bedrock-mantle/anthropic.claude-sonnet-5',
+          providers: [
+            openrouterProviderStatus(),
+            { ...bedrockProviderStatus(), savedApiKeySatisfied: true },
+          ],
+        })}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    selectProvider('amazon-bedrock');
+    expect(
+      screen.getByRole('textbox', { name: 'Amazon Bedrock model' }),
+    ).toHaveValue('bedrock-mantle/anthropic.claude-sonnet-5');
+    fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
+
+    await waitFor(() => {
+      expect(mutateAsyncMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: 'amazon-bedrock',
+          modelId: 'bedrock-mantle/anthropic.claude-sonnet-5',
         }),
       );
     });

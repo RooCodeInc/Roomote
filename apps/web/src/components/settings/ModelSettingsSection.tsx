@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useTRPC } from '@/trpc/client';
 
 import {
@@ -105,7 +106,6 @@ type TaskModelRoleDrafts = Record<TaskModelRole, TaskModelRoleDraft>;
 type TaskModelSuggestion = {
   slug: string;
   displayName: string;
-  route?: 'mantle' | 'native';
 };
 
 type ModelSettingsSectionDraft = {
@@ -134,29 +134,6 @@ const EMPTY_SUGGESTION_STATE: SuggestionState = {
   suggestions: [],
   highlightedIndex: -1,
 };
-
-function getBedrockRoute(modelId: string): 'Mantle' | null {
-  if (modelId.startsWith('bedrock-mantle/')) {
-    return 'Mantle';
-  }
-  return null;
-}
-
-function useDebouncedValue<T>(value: T, delayMs: number) {
-  const [debouncedValue, setDebouncedValue] = useState(value);
-
-  useEffect(() => {
-    const timeoutId = window.setTimeout(() => {
-      setDebouncedValue(value);
-    }, delayMs);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [delayMs, value]);
-
-  return debouncedValue;
-}
 
 const TASK_MODEL_ROLE_ORDER = TASK_MODEL_ROLES;
 const SECONDARY_TASK_MODEL_ROLES = TASK_MODEL_ROLES.filter(
@@ -2148,11 +2125,9 @@ export function ModelSettingsSection({
                               {model.displayName}
                             </span>
                             {isDefault && <Badge>Default</Badge>}
-                            {getBedrockRoute(model.id) ? (
-                              <Badge variant="outline">
-                                {getBedrockRoute(model.id)}
-                              </Badge>
-                            ) : null}
+                            {model.id.startsWith('bedrock-mantle/') && (
+                              <Badge variant="outline">Mantle</Badge>
+                            )}
                           </p>
                           <p className="text-xs text-muted-foreground">
                             {model.id}

@@ -1869,7 +1869,7 @@ describe('ModelSettingsSection', () => {
     ).toBeInTheDocument();
   });
 
-  it('labels Bedrock models with their native or Mantle route', () => {
+  it('labels Mantle models and leaves native Bedrock models unlabeled', () => {
     const data = buildSettingsData();
     data.models.push(
       {

@@ -91,6 +91,8 @@ import {
   normalizeDeploymentComputeConfig,
   normalizeDeploymentModelConfig,
   getSetupNewComputeProvisioningState,
+  getSetupProviderModelIdPrefixes,
+  getTaskModelProviderId,
   hasSetupChatHandoffDestination,
   isSetupProvisionableComputeProvider,
   normalizeSetupNewState,
@@ -1652,16 +1654,18 @@ export async function saveSetupNewModelConfigCommand(
     throw new Error(`Choose a model from ${provider.label} to continue.`);
   }
 
-  if (
-    provider.requiresModelSelection &&
-    selectedModelId &&
-    !selectedModelId.startsWith('amazon-bedrock/') &&
-    !selectedModelId.startsWith('bedrock-mantle/')
-  ) {
-    throw new Error('Choose a native Bedrock or Bedrock Mantle model.');
+  if (provider.requiresModelSelection && selectedModelId) {
+    const selectedModelPrefix = getTaskModelProviderId(selectedModelId);
+    if (
+      !selectedModelPrefix ||
+      !getSetupProviderModelIdPrefixes(provider).has(selectedModelPrefix) ||
+      !selectedModelId.slice(selectedModelPrefix.length + 1).trim()
+    ) {
+      throw new Error(`Choose a model served by ${provider.label}.`);
+    }
   }
 
-  const runtimeModelConfig = requiresModelSelection
+  const nextRuntimeModelConfig = requiresModelSelection
     ? {
         ...createEmptyDeploymentModelConfig(),
         roomoteModel: selectedModelId!,
@@ -1674,7 +1678,7 @@ export async function saveSetupNewModelConfigCommand(
       apiKey,
       additionalEnvValues,
       action: 'continue',
-      modelId: runtimeModelConfig.roomoteModel!,
+      modelId: nextRuntimeModelConfig.roomoteModel!,
     });
   }
 
@@ -1683,13 +1687,26 @@ export async function saveSetupNewModelConfigCommand(
   ).catch(() => null);
 
   return db.transaction(async (tx) => {
-    const [currentState, persistedEnvVarNames, persistedTaskModelSettings] =
-      await Promise.all([
-        getPersistedSetupNewState(tx),
-        getPersistedEnvironmentVariableNames(tx),
-        getPersistedRawTaskModelSettings(tx),
-      ]);
+    const [
+      currentState,
+      persistedEnvVarNames,
+      persistedTaskModelSettings,
+      persistedRuntimeModelConfig,
+    ] = await Promise.all([
+      getPersistedSetupNewState(tx),
+      getPersistedEnvironmentVariableNames(tx),
+      getPersistedRawTaskModelSettings(tx),
+      getPersistedRuntimeModelConfig(tx),
+    ]);
     const persistedEnvVarNameSet = new Set(persistedEnvVarNames);
+    // Re-confirming the model the deployment already runs must not reset the
+    // role mappings and model list an operator configured since.
+    const keepsPersistedModelConfig =
+      requiresModelSelection &&
+      persistedRuntimeModelConfig.roomoteModel === selectedModelId;
+    const runtimeModelConfig = keepsPersistedModelConfig
+      ? persistedRuntimeModelConfig
+      : nextRuntimeModelConfig;
 
     if (!isOauthProvider) {
       const { values: credentialValues, clearedEnvVarNames } =
@@ -1754,6 +1771,22 @@ export async function saveSetupNewModelConfigCommand(
     });
     const selectedModelSettings = requiresModelSelection
       ? (() => {
+          const current =
+            persistedTaskModelSettings == null
+              ? {
+                  models: [],
+                  allowedModelIds: [],
+                  defaultModelId: selectedModelId!,
+                }
+              : normalizeTaskModelSettings(persistedTaskModelSettings);
+
+          if (
+            keepsPersistedModelConfig &&
+            current.allowedModelIds.includes(selectedModelId!)
+          ) {
+            return null;
+          }
+
           const lookup =
             provider.requiresModelSelection && metadataCatalog
               ? lookupModelMetadataFromCatalog(
@@ -1769,15 +1802,6 @@ export async function saveSetupNewModelConfigCommand(
               ? { metadata: mergeMetadata(null, lookup.metadata) }
               : {}),
           });
-          const current =
-            persistedTaskModelSettings == null
-              ? {
-                  models: [],
-                  allowedModelIds: [],
-                  defaultModelId: selectedModelId!,
-                }
-              : normalizeTaskModelSettings(persistedTaskModelSettings);
-
           return normalizeTaskModelSettings({
             ...current,
             models: [

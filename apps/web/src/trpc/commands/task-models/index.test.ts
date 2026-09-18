@@ -2237,6 +2237,38 @@ describe('task model provider commands', () => {
     );
   });
 
+  it('qualifies changed Bedrock credentials against a model the operator already enabled', async () => {
+    mockPersistedSetupNewState(
+      {},
+      {
+        models: [
+          {
+            id: 'amazon-bedrock/zai.glm-5',
+            displayName: 'GLM-5',
+            family: 'GLM',
+          },
+        ],
+        allowedModelIds: ['amazon-bedrock/zai.glm-5'],
+        defaultModelId: 'amazon-bedrock/zai.glm-5',
+      },
+    );
+    mockValidateSetupModelProviderCredentials.mockRejectedValueOnce(
+      new Error('Amazon Bedrock: invalid credentials'),
+    );
+
+    await expect(
+      saveTaskModelProviderCommand(buildMockAuth(), {
+        provider: 'amazon-bedrock',
+        apiKey: 'rotated-but-wrong-key',
+      }),
+    ).rejects.toThrow('Amazon Bedrock: invalid credentials');
+
+    expect(mockValidateSetupModelProviderCredentials).toHaveBeenCalledWith(
+      expect.objectContaining({ modelId: 'amazon-bedrock/zai.glm-5' }),
+    );
+    expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
+  });
+
   it('rejects additional env values the provider does not declare', async () => {
     await expect(
       saveTaskModelProviderCommand(buildMockAuth(), {

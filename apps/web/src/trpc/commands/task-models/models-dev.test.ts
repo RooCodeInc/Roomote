@@ -112,6 +112,37 @@ describe('lookupModelMetadataFromCatalog', () => {
     });
   });
 
+  it('resolves a cross-region profile id through the plain Bedrock entry and never through lab pricing', () => {
+    const catalog = buildCatalog({
+      models: {
+        'zai/glm-5': { name: 'GLM-5 direct', limit: { context: 100_000 } },
+      },
+      providers: {
+        'amazon-bedrock': {
+          models: {
+            'anthropic.claude-sonnet-5': {
+              name: 'Claude Sonnet 5',
+              limit: { context: 200_000 },
+            },
+          },
+        },
+      },
+    });
+
+    expect(
+      lookupModelMetadataFromCatalog(
+        catalog,
+        'amazon-bedrock/us.anthropic.claude-sonnet-5',
+      ),
+    ).toMatchObject({
+      displayName: 'Claude Sonnet 5',
+      metadata: { contextWindow: 200_000 },
+    });
+    expect(
+      lookupModelMetadataFromCatalog(catalog, 'amazon-bedrock/zai.glm-5'),
+    ).toEqual({ metadata: {}, displayName: undefined });
+  });
+
   it('prefers exact Bedrock provider metadata for Mantle IDs', () => {
     const catalog = buildCatalog({
       models: {
@@ -635,17 +666,106 @@ describe('suggestBedrockModelsFromCatalog', () => {
         query: 'glm 5',
       }),
     ).toEqual([
+      { slug: 'bedrock-mantle/zai.glm-5', displayName: 'GLM-5 (Mantle)' },
+      { slug: 'amazon-bedrock/zai.glm-5', displayName: 'GLM-5' },
+    ]);
+  });
+
+  it('keeps curated Mantle models searchable without the catalog', () => {
+    expect(
+      suggestBedrockModelsFromCatalog({
+        catalog: null,
+        mantleModels: [
+          {
+            id: 'bedrock-mantle/anthropic.claude-sonnet-5',
+            displayName: 'Claude Sonnet 5',
+          },
+        ],
+        query: 'sonnet',
+      }),
+    ).toEqual([
       {
-        slug: 'amazon-bedrock/zai.glm-5',
-        displayName: 'GLM-5',
-        route: 'native',
-      },
-      {
-        slug: 'bedrock-mantle/zai.glm-5',
-        displayName: 'GLM-5 (Mantle)',
-        route: 'mantle',
+        slug: 'bedrock-mantle/anthropic.claude-sonnet-5',
+        displayName: 'Claude Sonnet 5 (Mantle)',
       },
     ]);
+  });
+
+  it('does not rank the shared provider prefix and shares slots with Mantle', () => {
+    const nativeClaudeModels = Object.fromEntries(
+      Array.from({ length: 10 }, (_, index) => [
+        `anthropic.claude-3-${index}`,
+        { name: `Claude 3.${index}`, modalities: { output: ['text'] } },
+      ]),
+    );
+    const catalog = buildCatalog({
+      providers: {
+        'amazon-bedrock': {
+          models: {
+            ...nativeClaudeModels,
+            'amazon.nova-pro-v1:0': {
+              name: 'Nova Pro',
+              modalities: { output: ['text'] },
+            },
+          },
+        },
+      },
+    });
+    const mantleModels = [
+      {
+        id: 'bedrock-mantle/anthropic.claude-sonnet-5',
+        displayName: 'Claude Sonnet 5',
+      },
+    ];
+
+    expect(
+      suggestBedrockModelsFromCatalog({
+        catalog,
+        mantleModels,
+        query: 'claude',
+      })[0],
+    ).toEqual({
+      slug: 'bedrock-mantle/anthropic.claude-sonnet-5',
+      displayName: 'Claude Sonnet 5 (Mantle)',
+    });
+    expect(
+      suggestBedrockModelsFromCatalog({
+        catalog,
+        mantleModels,
+        query: 'amazon',
+      }),
+    ).toEqual([
+      { slug: 'amazon-bedrock/amazon.nova-pro-v1:0', displayName: 'Nova Pro' },
+    ]);
+    expect(
+      suggestBedrockModelsFromCatalog({
+        catalog,
+        mantleModels,
+        query: 'amazon-bedrock/amazon.nova',
+      }),
+    ).toEqual([
+      { slug: 'amazon-bedrock/amazon.nova-pro-v1:0', displayName: 'Nova Pro' },
+    ]);
+  });
+
+  it('matches nothing for a query with no searchable characters', () => {
+    const catalog = buildCatalog({
+      providers: {
+        'amazon-bedrock': {
+          models: {
+            glm5: { name: 'GLM5', modalities: { output: ['text'] } },
+          },
+        },
+      },
+    });
+
+    expect(
+      suggestBedrockModelsFromCatalog({
+        catalog,
+        mantleModels: [],
+        query: '~',
+      }),
+    ).toEqual([]);
   });
 
   it('omits non-text and explicitly tool-less native entries', () => {

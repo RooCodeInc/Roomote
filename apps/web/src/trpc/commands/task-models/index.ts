@@ -33,6 +33,7 @@ import {
   getSetupModelProviderAdditionalEnvFields,
   getSetupModelProviderEnvVarNames,
   getSetupModelProvider,
+  getSetupProviderModelIdPrefixes,
   getSetupProviderTaskModelPrefix,
   getTaskModelCatalog,
   getTaskModelProviderId,
@@ -51,6 +52,7 @@ import type {
   CodingModelRoutingRule,
   DeploymentModelConfig,
   ReasoningEffort,
+  SetupModelProviderDescriptor,
   SetupModelProviderId,
   SetupModelStatus,
   TaskModelInputType,
@@ -654,7 +656,30 @@ export async function saveTaskModelProviderCommand(
         buildRecommendedDeploymentModelConfig(provider).roomoteModel ??
         provider.defaultRoomoteModel,
     });
-  } else if (provider.dynamicModels) {
+  } else if (!provider.dynamicModels) {
+    // Catalog-selection providers have no default model that every account
+    // can invoke, and an access-denied probe reads as invalid credentials.
+    // A model the operator already enabled is one the saved connection could
+    // invoke, so it qualifies a changed credential; a first connection has no
+    // such model and is qualified when its first model is chosen.
+    const providerModelPrefixes = getSetupProviderModelIdPrefixes(provider);
+    const enabledProviderModel = getEnabledTaskModels(
+      normalizeTaskModelSettings(await getPersistedRawTaskModelSettings()),
+    ).find((model) => {
+      const prefix = getTaskModelProviderId(model.id);
+      return prefix !== null && providerModelPrefixes.has(prefix);
+    });
+
+    if (enabledProviderModel) {
+      await validateSetupModelProviderCredentials({
+        provider,
+        apiKey: input.apiKey,
+        additionalEnvValues: suppliedAdditionalEnvValues,
+        action: 'save it',
+        modelId: enabledProviderModel.id,
+      });
+    }
+  } else {
     // UIs resubmit unchanged fields (connection names, keys echoed back
     // from saved state), so gate the probe on what the save would actually
     // alter, not on non-empty form fields.
@@ -1606,7 +1631,7 @@ async function lookupModelFromModelsDevCatalog(
 
   if (!catalog) {
     return (
-      buildUnknownBedrockModelLookup(modelId) ?? {
+      buildManualModelLookup(modelId) ?? {
         modelId,
         displayName: null,
         family: null,
@@ -1624,8 +1649,8 @@ async function lookupModelFromModelsDevCatalog(
   }
 
   if (!lookup.displayName) {
-    const bedrockFallback = buildUnknownBedrockModelLookup(modelId, metadata);
-    if (bedrockFallback) return bedrockFallback;
+    const manualFallback = buildManualModelLookup(modelId, metadata);
+    if (manualFallback) return manualFallback;
 
     return { modelId, displayName: null, family: null, metadata };
   }
@@ -1644,12 +1669,28 @@ async function lookupModelFromModelsDevCatalog(
   };
 }
 
-function buildUnknownBedrockModelLookup(
+/**
+ * Providers whose models are chosen explicitly rather than seeded from a
+ * catalog accept ids the catalog does not know (private or newly released
+ * models), so an unresolved id still yields an addable model.
+ */
+function buildManualModelLookup(
   modelId: string,
   metadata: TaskModelMetadata | null = null,
 ): TaskModelLookupResult | null {
   const providerId = getTaskModelProviderId(modelId);
-  if (providerId !== 'amazon-bedrock' && providerId !== 'bedrock-mantle') {
+  const bareModelId = modelId.split('/').slice(1).join('/').trim();
+  if (
+    !providerId ||
+    !bareModelId ||
+    !(
+      SETUP_MODEL_PROVIDER_CATALOG as readonly SetupModelProviderDescriptor[]
+    ).some(
+      (provider) =>
+        provider.requiresModelSelection === true &&
+        getSetupProviderModelIdPrefixes(provider).has(providerId),
+    )
+  ) {
     return null;
   }
 
@@ -1846,27 +1887,30 @@ export async function suggestTaskModelsCommand(
     AbortSignal.timeout(MODEL_METADATA_FETCH_TIMEOUT_MS),
   );
 
+  // Bedrock's curated Mantle models are static, so they stay searchable when
+  // models.dev is unreachable; setup cannot finish without a model choice.
+  if (provider.id === 'amazon-bedrock') {
+    return {
+      suggestions: suggestBedrockModelsFromCatalog({
+        catalog,
+        mantleModels: provider.suggestedTaskModels,
+        query,
+        limit: 8,
+      }),
+    };
+  }
+
   if (!catalog) {
     return { suggestions: [] };
   }
 
-  const catalogProviderId = getSetupProviderTaskModelPrefix(provider.id);
-
   return {
-    suggestions:
-      provider.id === 'amazon-bedrock'
-        ? suggestBedrockModelsFromCatalog({
-            catalog,
-            mantleModels: provider.suggestedTaskModels,
-            query,
-            limit: 8,
-          })
-        : suggestModelsFromCatalog({
-            catalog,
-            providerId: catalogProviderId,
-            query,
-            limit: 8,
-          }),
+    suggestions: suggestModelsFromCatalog({
+      catalog,
+      providerId: getSetupProviderTaskModelPrefix(provider.id),
+      query,
+      limit: 8,
+    }),
   };
 }
 

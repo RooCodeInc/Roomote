@@ -376,6 +376,29 @@ export function providerRequiresModelSelection(
   );
 }
 
+/**
+ * Model-id prefixes a provider serves. Derived from the provider's own
+ * curated model ids so providers that serve another prefix's models
+ * (`chatgpt` -> `openai/`, `amazon-bedrock` -> `bedrock-mantle/`) stay covered
+ * without a hand-maintained mapping.
+ */
+export function getSetupProviderModelIdPrefixes(
+  provider: Pick<
+    SetupModelProviderDescriptor,
+    'id' | 'defaultRoomoteModel' | 'suggestedTaskModels'
+  >,
+): Set<string> {
+  return new Set(
+    [
+      `${getSetupProviderTaskModelPrefix(provider.id)}/`,
+      provider.defaultRoomoteModel,
+      ...provider.suggestedTaskModels.map((suggestion) => suggestion.id),
+    ]
+      .map((modelId) => getTaskModelProviderId(modelId))
+      .filter((prefix): prefix is string => prefix !== null),
+  );
+}
+
 export const DEFAULT_SETUP_MODEL_PROVIDER_ID: SetupModelProviderId =
   'openrouter';
 

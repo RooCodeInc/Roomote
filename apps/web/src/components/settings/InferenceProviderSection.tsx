@@ -1213,16 +1213,15 @@ export function InferenceProviderSection({
           queryClient.invalidateQueries({
             queryKey: trpc.providerCredits.list.queryKey(),
           }),
-          ...(addedModelCount > 0 || addedDiscoveredModelCount > 0
-            ? [
-                queryClient.invalidateQueries({
-                  queryKey: trpc.taskModels.get.queryKey(),
-                }),
-                queryClient.invalidateQueries({
-                  queryKey: trpc.taskModels.launchOptions.queryKey(),
-                }),
-              ]
-            : []),
+          // A newly connected provider changes the Available Models list
+          // even when nothing was auto-added: its curated models are listed
+          // (disabled) for the operator to enable.
+          queryClient.invalidateQueries({
+            queryKey: trpc.taskModels.get.queryKey(),
+          }),
+          queryClient.invalidateQueries({
+            queryKey: trpc.taskModels.launchOptions.queryKey(),
+          }),
         ]);
 
         if (addedModelCount > 0 || addedDiscoveredModelCount > 0) {
