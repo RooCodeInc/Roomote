@@ -58,7 +58,7 @@ type ModelsDevProviderEntry = {
   models?: Record<string, ModelsDevModelEntry>;
 };
 
-export type ModelsDevSuggestion = {
+type ModelsDevSuggestion = {
   slug: string;
   displayName: string;
   route?: 'mantle' | 'native';
