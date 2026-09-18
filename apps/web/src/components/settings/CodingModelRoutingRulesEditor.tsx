@@ -1,0 +1,213 @@
+'use client';
+
+import { BasicTooltip, Button, Input, Plus, Trash2 } from '@/components/system';
+import { ReasoningEffortSelect } from '@/components/tasks/ReasoningEffortSelect';
+import {
+  TaskModelSelect,
+  type EditableRuntimeModelOption,
+} from './TaskModelSelect';
+import {
+  MAX_CODING_MODEL_ROUTING_RULES,
+  type CodingModelRoutingRule,
+  type DisplayModelProviderGroup,
+  type ReasoningEffort,
+  type TaskModelMetadata,
+} from '@roomote/types';
+
+export type CodingModelRoutingRulesDraft = CodingModelRoutingRule[];
+
+export type CodingModelRoutingRulesChange = {
+  rules: CodingModelRoutingRulesDraft;
+  saveDelayMs: number | null;
+  suppressSuccessToast: boolean;
+};
+
+type RoutingModel = {
+  id: string;
+  metadata?: TaskModelMetadata | null;
+};
+
+export function cloneCodingModelRoutingRules(
+  rules: CodingModelRoutingRulesDraft,
+): CodingModelRoutingRulesDraft {
+  return rules.map((rule) => ({ ...rule }));
+}
+
+export function codingModelRoutingRulesEqual(
+  left: CodingModelRoutingRulesDraft,
+  right: CodingModelRoutingRulesDraft,
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((rule, index) => {
+      const otherRule = right[index];
+      return (
+        otherRule !== undefined &&
+        rule.modelId === otherRule.modelId &&
+        rule.reasoningEffort === otherRule.reasoningEffort &&
+        rule.condition === otherRule.condition
+      );
+    })
+  );
+}
+
+export function prepareCodingModelRoutingRulesForSave(
+  rules: CodingModelRoutingRulesDraft,
+): CodingModelRoutingRule[] {
+  return rules.filter((rule) => rule.condition.trim().length > 0);
+}
+
+export function removeModelFromCodingModelRoutingRules(
+  rules: CodingModelRoutingRulesDraft,
+  modelId: string,
+): CodingModelRoutingRulesDraft {
+  return rules.filter((rule) => rule.modelId !== modelId);
+}
+
+function supportsReasoning(models: RoutingModel[], modelId: string): boolean {
+  return (
+    models.find((model) => model.id === modelId)?.metadata
+      ?.supportsReasoning !== false
+  );
+}
+
+export function CodingModelRoutingRulesEditor({
+  rules,
+  optionGroups,
+  models,
+  defaultModelId,
+  defaultReasoningEffort,
+  onChange,
+}: {
+  rules: CodingModelRoutingRulesDraft;
+  optionGroups: DisplayModelProviderGroup<EditableRuntimeModelOption>[];
+  models: RoutingModel[];
+  defaultModelId: string | null;
+  defaultReasoningEffort: ReasoningEffort | null;
+  onChange: (change: CodingModelRoutingRulesChange) => void;
+}) {
+  const updateRule = (index: number, rule: CodingModelRoutingRule) => {
+    onChange({
+      rules: rules.map((currentRule, currentIndex) =>
+        currentIndex === index ? rule : currentRule,
+      ),
+      saveDelayMs: 400,
+      suppressSuccessToast: true,
+    });
+  };
+
+  const addRule = () => {
+    if (!defaultModelId) return;
+
+    onChange({
+      rules: [
+        ...rules,
+        {
+          modelId: defaultModelId,
+          reasoningEffort: supportsReasoning(models, defaultModelId)
+            ? (defaultReasoningEffort ?? 'medium')
+            : null,
+          condition: '',
+        },
+      ],
+      saveDelayMs: null,
+      suppressSuccessToast: false,
+    });
+  };
+
+  const removeRule = (index: number) => {
+    onChange({
+      rules: rules.filter((_, currentIndex) => currentIndex !== index),
+      saveDelayMs: 0,
+      suppressSuccessToast: false,
+    });
+  };
+
+  return (
+    <div className="space-y-3 pb-3">
+      {rules.length > 0 ? (
+        <div className="space-y-2">
+          <p className="text-xs text-muted-foreground">
+            Use another coding model when a task matches a condition.
+          </p>
+          {rules.map((rule, index) => {
+            const modelSupportsReasoning = supportsReasoning(
+              models,
+              rule.modelId,
+            );
+
+            return (
+              <div
+                key={index}
+                className="flex flex-col gap-2 sm:flex-row sm:items-center"
+              >
+                <div className="flex items-center gap-2 sm:contents">
+                  <TaskModelSelect
+                    value={rule.modelId}
+                    optionGroups={optionGroups}
+                    placeholder="Select a coding model"
+                    ariaLabel={`Routing rule ${index + 1} model`}
+                    onValueChange={(modelId) =>
+                      updateRule(index, {
+                        ...rule,
+                        modelId,
+                        reasoningEffort: supportsReasoning(models, modelId)
+                          ? (rule.reasoningEffort ?? 'medium')
+                          : null,
+                      })
+                    }
+                  />
+                  <BasicTooltip content="Remove routing rule">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="shrink-0 text-muted-foreground sm:order-last"
+                      aria-label={`Remove routing rule ${index + 1}`}
+                      onClick={() => removeRule(index)}
+                    >
+                      <Trash2 />
+                    </Button>
+                  </BasicTooltip>
+                </div>
+                {modelSupportsReasoning ? (
+                  <ReasoningEffortSelect
+                    value={rule.reasoningEffort}
+                    defaultEffort="medium"
+                    onChange={(reasoningEffort) =>
+                      updateRule(index, { ...rule, reasoningEffort })
+                    }
+                    ariaLabel={`Routing rule ${index + 1} reasoning level`}
+                  />
+                ) : null}
+                <Input
+                  value={rule.condition}
+                  onChange={(event) =>
+                    updateRule(index, {
+                      ...rule,
+                      condition: event.target.value,
+                    })
+                  }
+                  aria-label={`Routing rule ${index + 1} condition`}
+                  placeholder="When should this model be used?"
+                  className="min-w-0 flex-1"
+                />
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="-ml-4"
+        disabled={rules.length >= MAX_CODING_MODEL_ROUTING_RULES}
+        onClick={addRule}
+      >
+        <Plus />
+        Add a model routing rule
+      </Button>
+    </div>
+  );
+}
