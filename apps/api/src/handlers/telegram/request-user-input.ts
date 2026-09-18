@@ -14,12 +14,8 @@ import {
   type AcpRequestUserInputAnswers,
 } from '@roomote/types';
 import { setTrustedRunActingUserOnSuccess } from '@roomote/db/server';
-import {
-  createTelegramCommunicationProviderFromRuntimeCredentials as createTelegramCommunicationProvider,
-  retireTelegramRequestUserInputPromptBestEffort,
-} from '@roomote/sdk/server';
+import { retireTelegramRequestUserInputPromptBestEffort } from '@roomote/sdk/server';
 
-import { apiLogger } from '../../logging.js';
 import {
   answerTelegramCallbackQueryBestEffort,
   postTelegramMessageBestEffort,
@@ -66,29 +62,14 @@ async function confirmAnswer(params: {
   const messageId =
     params.pendingRequest.promptMessageId ?? params.messageId ?? null;
   if (messageId) {
-    try {
-      await retireTelegramRequestUserInputPromptBestEffort({
-        channelId: params.chatId,
-        threadId: params.threadId,
-        messageId,
-      });
-      const provider = await createTelegramCommunicationProvider();
-      if (provider) {
-        await provider.editMessageText({
-          channelId: params.chatId,
-          messageId,
-          text: confirmationText,
-          textFormat: 'markdown',
-          buttons: [],
-        });
-        return;
-      }
-    } catch (error) {
-      apiLogger.warn(
-        `[telegram.request_user_input] Failed to update prompt: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
+    const updated = await retireTelegramRequestUserInputPromptBestEffort({
+      channelId: params.chatId,
+      threadId: params.threadId,
+      messageId,
+      replacementText: confirmationText,
+    });
+    if (updated) {
+      return;
     }
   }
 

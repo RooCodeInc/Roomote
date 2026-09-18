@@ -261,10 +261,11 @@ export async function retireTelegramRequestUserInputPromptBestEffort(params: {
   channelId: string;
   threadId?: string | null;
   messageId: string;
-}): Promise<void> {
+  replacementText?: string;
+}): Promise<boolean> {
   try {
     const adapter = await getCommunicationProviderAdapter('telegram');
-    if (!adapter || adapter.provider !== 'telegram') return;
+    if (!adapter || adapter.provider !== 'telegram') return false;
 
     const footerThreadId = params.threadId?.trim() || 'root';
     await withThreadReplyFooterLock({
@@ -276,27 +277,48 @@ export async function retireTelegramRequestUserInputPromptBestEffort(params: {
           footerThreadId,
         );
         await assertLock();
-        if (footer && footer.messageId === params.messageId && footer.buttons) {
+        if (
+          footer &&
+          footer.messageId === params.messageId &&
+          (footer.buttons || params.replacementText !== undefined)
+        ) {
           const { buttons: _buttons, ...withoutButtons } = footer;
           await setThreadReplyFooterRecord(
             'telegram',
             params.channelId,
             footerThreadId,
-            withoutButtons,
+            params.replacementText === undefined
+              ? withoutButtons
+              : {
+                  ...withoutButtons,
+                  textWithoutFooter: params.replacementText,
+                },
             { keepTtl: true, lock },
           );
         }
-        await adapter.editMessageReplyMarkup({
-          channelId: params.channelId,
-          messageId: params.messageId,
-        });
+        if (params.replacementText !== undefined) {
+          await adapter.editMessageText({
+            channelId: params.channelId,
+            messageId: params.messageId,
+            text: params.replacementText,
+            textFormat: 'markdown',
+            buttons: [],
+          });
+        } else {
+          await adapter.editMessageReplyMarkup({
+            channelId: params.channelId,
+            messageId: params.messageId,
+          });
+        }
       },
     });
+    return true;
   } catch (error) {
     console.warn(
       `[CommunicationRequestUserInput] Failed to retire Telegram prompt ${params.messageId}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
+    return false;
   }
 }

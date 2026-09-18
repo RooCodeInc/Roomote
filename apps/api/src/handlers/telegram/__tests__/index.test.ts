@@ -539,9 +539,7 @@ describe('Telegram webhook handler', () => {
     });
     enableAutoHandlePrReviewFeedbackMock.mockResolvedValue(undefined);
     retirePrReviewActionMessagesBestEffortMock.mockResolvedValue(undefined);
-    retireTelegramRequestUserInputPromptBestEffortMock.mockResolvedValue(
-      undefined,
-    );
+    retireTelegramRequestUserInputPromptBestEffortMock.mockResolvedValue(true);
   });
 
   it('logs receipt and an explicit terminal reason without message content', async () => {
@@ -1990,14 +1988,14 @@ describe('Telegram webhook handler', () => {
       }),
     );
     expect(redisEvalMock).toHaveBeenCalled();
-    expect(editMessageTextMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channelId: '222',
-        messageId: '900',
-        textFormat: 'markdown',
-        buttons: [],
-      }),
-    );
+    expect(
+      retireTelegramRequestUserInputPromptBestEffortMock,
+    ).toHaveBeenCalledWith({
+      channelId: '222',
+      threadId: undefined,
+      messageId: '900',
+      replacementText: 'What should I use?\n\n**Picked:** Image attachment',
+    });
   });
 
   it('does not let a losing image answer replace the winning actor or image', async () => {
