@@ -814,7 +814,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'call `list_integration_keys` first, reuse pending or ready entries',
     );
     expect(enabledPrompt).toContain(
-      'Share the returned secure Session link with a service-specific label',
+      'Share the returned secure session link with a service-specific label',
     );
     expect(enabledPrompt).toContain('never ask for the key in chat');
     expect(enabledPrompt).toContain(
@@ -830,7 +830,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'If available documentation cannot verify the API origin and credential header, say those details could not be verified and do not guess',
     );
     expect(enabledPrompt).toContain(
-      'tell the human to enable Integration keys while these tools are available',
+      'tell the human to enable integration keys while these tools are available',
     );
     expect(enabledPrompt).toContain(
       'service-specific label such as "Connect Figma securely"',
@@ -1314,6 +1314,12 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'The opening acknowledgement is already visible and needs no duplicate launch reply, but it does not suppress later useful updates while work continues',
     );
+    expect(prompt).toContain(
+      'Never expose Roomote-internal Fast terminology such as "Fast session" or "Roomote Fast mode"',
+    );
+    expect(prompt).toContain(
+      'Preserve official names and capitalization for external or provider features, including ChatGPT Fast mode',
+    );
   });
 
   it('provides repository-focused coding task acknowledgement guidance', () => {
@@ -1607,6 +1613,99 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(environmentlessPrompt).toContain(
       'No configured environments were found for this deployment',
+    );
+  });
+
+  it('lists active repositories when no environments are configured', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      activeRepositories: {
+        names: ['acme/app', 'octo/widgets'],
+        totalCount: 2,
+      },
+    });
+    const section = prompt.slice(prompt.indexOf('## All Environments'));
+
+    expect(section).toContain(
+      `- All repositories [id: ${ALL_REPOSITORIES}]: Every active repository is available; the task checks out only the ones it needs.\n  - Active repositories (2): acme/app, octo/widgets\n`,
+    );
+    expect(section).toContain(
+      'No configured environments were found for this deployment',
+    );
+    expect(section).not.toContain('more active repositories are not listed');
+  });
+
+  it('reports truncated, empty, and unavailable active repository lists', () => {
+    const truncated = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      activeRepositories: { names: ['acme/app'], totalCount: 149 },
+    });
+    expect(truncated).toContain('  - Active repositories (149): acme/app\n');
+    expect(truncated).toContain(
+      '  - 148 more active repositories are not listed here; an All repositories task can still resolve them by name.',
+    );
+
+    expect(
+      buildFastAgentSystemPrompt({
+        availableEnvironments: [],
+        activeRepositories: { names: [], totalCount: 0 },
+      }),
+    ).toContain('  - No active repositories are connected.');
+
+    expect(
+      buildFastAgentSystemPrompt({
+        availableEnvironments: [],
+        activeRepositories: null,
+      }),
+    ).toContain(
+      '  - The active repository list could not be loaded for this turn',
+    );
+
+    expect(
+      buildFastAgentSystemPrompt({ availableEnvironments: [] }),
+    ).not.toContain('Active repositories (');
+  });
+
+  it('keeps the active repository list alongside configured environments', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [
+        {
+          id: 'env-1',
+          name: 'App',
+          repositories: [{ id: 'repo-1', name: 'acme/app' }],
+          repositoryNames: ['acme/app'],
+        },
+      ],
+      activeRepositories: {
+        names: ['acme/app', 'octo/widgets'],
+        totalCount: 2,
+      },
+    });
+
+    expect(prompt).toContain(
+      '  - Active repositories (2): acme/app, octo/widgets',
+    );
+    expect(prompt).toContain('- App [id: env-1]: acme/app [id: repo-1]');
+  });
+
+  it('resolves a named repository through All repositories instead of asking for a URL', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+
+    expect(prompt).toContain(
+      'A single matching active repository is a suitable target even when no environment maps it: launch the task in All repositories and name that repository in the task prompt.',
+    );
+    expect(prompt).toContain(
+      'do not ask the user for a repository URL; launch an All repositories task',
+    );
+    expect(prompt).toContain(
+      'Ask only when several listed repositories plausibly match, including the same name listed more than once with different providers or hosts, and name the candidates.',
+    );
+    expect(
+      prompt.indexOf('When the user refers to a repository by name'),
+    ).toBeLessThan(
+      prompt.indexOf(
+        'If the work depends on a specific repository or environment and no suitable target is available',
+      ),
     );
   });
 
@@ -2036,7 +2135,7 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('Objective: Ship the complete release');
     expect(prompt).toContain('Continuations used: 2/5');
     expect(prompt).toContain(
-      'This goal belongs to the Fast Session, not to any delegated task',
+      'This goal belongs to the session, not to any delegated task',
     );
     expect(prompt).toContain('Use `manage_goal`');
   });

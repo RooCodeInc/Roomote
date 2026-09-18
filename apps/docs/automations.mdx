@@ -13,7 +13,7 @@ Automations are most useful when your team already trusts the normal task
 review flow and wants Roomote to keep an eye on repeated work.
 
 <Tip>
-  Unsure of how Automations can help? Get inspiration from the [Cookbook](/cookbook).
+  Unsure of how automations can help? Get inspiration from the [Cookbook](/cookbook).
 </Tip>
 
 ## Before you turn them on
@@ -32,11 +32,11 @@ a real team habit, tell the team where output will appear, then expand once
 the signal is good.
 
 Session-backed automations that post to a chat channel are replyable. Reply in
-the thread Roomote started and you continue the Session behind that report,
+the thread Roomote started and you continue the session behind that report,
 without needing to mention Roomote. That works on Slack, Discord, Teams, and
 Telegram, and it works after delegated tasks have finished. Deterministic alerts
-such as **Inference Provider Usage Alerts** do not create a task or Session, so
-their cards are informational rather than replyable Session threads.
+such as **Inference Provider Usage Alerts** do not create a task or session, so
+their cards are informational rather than replyable session threads.
 
 ## Recommended automations
 
@@ -54,9 +54,9 @@ Recommendations are a starting point rather than a fixed policy. After applying
 them, use **Settings > Automations** to adjust schedules, destinations, workspace
 targets, prompts, or models, and to create other automations from scratch.
 
-Members and admins can also ask Fast to create recurring work during a conversation. Roomote
+Members and admins can also ask Roomote to create recurring work during a conversation. Roomote
 confirms the schedule, checks for an existing matching automation, and asks for
-approval before it saves anything. After creation, Fast offers to run the
+approval before it saves anything. After creation, Roomote offers to run the
 automation immediately so you can verify the prompt and destination. Members
 manage the custom automations they create; managing someone else's automation
 requires an admin.
@@ -71,12 +71,12 @@ recency. Critical and high-priority findings appear before normal results.
 
 Use **Check** to open a result and review its full report and suggested work.
 From there, you can edit the prepared prompt, choose a model, and start it as a
-normal Session. The item is marked accepted only after the Session starts. Use
+normal session. The item is marked accepted only after the session starts. Use
 **Clear** when no follow-up is needed, or **Clear all** to dismiss the current
 queue.
 
 The inbox complements configured chat and Email report destinations rather
-than replacing them. Automation runs still keep their normal Sessions and
+than replacing them. Automation runs still keep their normal sessions and
 delivery behavior when the experiment is off.
 
 Results is shared across the deployment only for output Roomote can prove is
@@ -150,10 +150,10 @@ including those without a creator. These ownership rules apply in the dashboard
 and in Roomote chat.
 
 These management permissions are separate from viewing a run. Any signed-in
-deployment member with a Session link can view its timeline and linked task
+deployment member with a session link can view its timeline and linked task
 transcripts, logs, and artifacts, including runs of another member's custom
 automation. The link does not grant management or execution permissions, and
-does not make the Session public. Lists and filters retain their existing
+does not make the session public. Lists and filters retain their existing
 visibility restrictions.
 
 Create arbitrary scheduled agent runs with:
@@ -165,7 +165,7 @@ Create arbitrary scheduled agent runs with:
   repositories**, or **Blank slate**. Blank slate always delegates the run to a
   sandbox with no repositories checked out; leave it as **Let Roomote decide**
   to route normally
-- an optional **model** override for the automation's Fast session, including
+- an optional **model** override for the automation's session, including
   later turns; without an override, it uses the deployment orchestration default.
   Delegated coding tasks use their own model selection or deployment coding default
 - an optional **effort** override (`low`, `medium`, `high`, `extra high`, or
@@ -177,8 +177,8 @@ Create arbitrary scheduled agent runs with:
   email, not to receive automation reports
 
 Each custom automation row summarizes its cadence, workspace target, report
-destination, creator, and most recent run. Its runs also appear as Sessions in
-the normal Session history. Blank slate runs clone nothing up front; when
+destination, creator, and most recent run. Its runs also appear as sessions in
+the normal session history. Blank slate runs clone nothing up front; when
 source control is connected the agent can still check out any active repository
 on demand, and otherwise the run needs no source-control credentials. Named
 environment and repository-scoped runs prepare their selected repositories
@@ -190,7 +190,7 @@ When creating an automation through Roomote chat, ask for **suggested tasks** or
 teammates can start from the report. Asking only for a summary or list of action
 items keeps those actions as report text. Launchable suggestions require a chat
 report destination. Each suggestion can select its own named environment,
-**All repositories**, **Blank slate**, or **Fast** target, so one report can offer
+**All repositories**, **Blank slate**, or **Let Roomote decide** target, so one report can offer
 follow-ups for different workspaces and execution modes. Repository-specific suggestions from
 **All repositories** runs start in a matching named environment when one is
 available. Choosing **All repositories** is a delegation preference, not a
@@ -199,10 +199,10 @@ request to prepare every repository on every run: the sandbox starts with a
 only the ones the task needs. Use a named environment when the automation only
 needs a specific repository set.
 
-Suggestions can accompany the Session's report after a delegated task finishes,
+Suggestions can accompany the session's report after a delegated task finishes,
 not just its initial response. Accepting one keeps the follow-up in the
 originating report's context. In Slack, each accepted suggestion starts a
-separate top-level execution thread and Session instead of reusing the report
+separate top-level execution thread and session instead of reusing the report
 thread; retrying that same suggestion reuses its execution thread. Thread or
 topic placement on other providers depends on the provider and execution
 target.
@@ -213,27 +213,27 @@ five-field cron expression or a natural-language schedule such as “weekdays at
 clarification rather than guessing when the recurrence itself is ambiguous.
 Custom schedules do not support seconds or cron macros.
 
-Every run is a Session. On each due tick, Roomote opens a Session for the run
-and hands it the prompt exactly as if a teammate had typed it. The Session
+Every run is a session. On each due tick, Roomote opens a session for the run
+and hands it the prompt exactly as if a teammate had typed it. The session
 answers from integrations when that is enough, and delegates a normal task when
 repository or workspace work is needed, using the preferred environment as a
-routing hint when one is set. Delegated tasks report back to the Session, and
-the Session is what talks to the report destination.
+routing hint when one is set. Delegated tasks report back to the session, and
+the session is what talks to the report destination.
 
 Runs deliver to every custom-automation report destination: Slack, Discord,
 Microsoft Teams, Telegram, or Email. Chat providers support a channel/chat or
 a direct message to the automation owner; Email is private only. Each run keeps
-a distinct Session, and the report links
-back to that Session in the web app. The Session transcript shows the
+a distinct session, and the report links
+back to that session in the web app. The session transcript shows the
 automation's configured prompt and any delegated task cards, and its normal
 composer lets a signed-in teammate continue the run from the dashboard. Replies
-on chat providers continue the Session directly there. A reply to an Email
+on chat providers continue the session directly there. A reply to an email
 report continues it in the same mail thread only when it comes from the owner's
 account email and passes DMARC; if the address was not verified yet, the reply
 verifies it implicitly (the report carries the single-use reference token the
 reply quotes as proof of receipt). Roomote verifies the active provider
 installation, conversation, and linked user before resuming. Runs with no
-report destination remain stored Sessions and do not post externally.
+report destination remain stored sessions and do not post externally.
 
 Runs execute as the automation's creator. An automation without a creator
 cannot run until an administrator re-saves it.
@@ -248,9 +248,9 @@ that need input. Routine success, healthy status, and no-change results stay
 silent unless the automation prompt explicitly asks for a report in those
 cases. In Slack, the first report starts a thread and later updates continue
 that thread. On other providers, updates use the run's conversation or topic.
-Reply to the report to continue the Session. There is no progress chatter in
+Reply to the report to continue the session. There is no progress chatter in
 between. Without a destination, the run happens silently and its
-results remain in its stored web Session, including any delegated task cards.
+results remain in its stored web session, including any delegated task cards.
 
 Unless the prompt asks for a different presentation, custom automation reports
 lead with the result, stay concise, and use short Markdown headings and bullets
@@ -278,21 +278,21 @@ are not accepted.
 
 Use **Run now** on an enabled automation to test it immediately. Each card has
 its own run state, so starting one custom automation does not prevent you from
-running another. A queued result confirms that Roomote accepted a Session turn,
+running another. A queued result confirms that Roomote accepted a session turn,
 not that a coding task launched or the work completed. A task ID is not promised
-at this point; follow the Session or configured report destination for the final
+at this point; follow the session or configured report destination for the final
 result and any delegated tasks.
 
 ### Upgrading to 1.4
 
-Existing custom automations now use this Session-first flow. Review prompts
+Existing custom automations now use this session-first flow. Review prompts
 that assumed a sandbox would always start: specify the repository work you need,
-and check the preferred environment. Their model override now controls Fast;
+and check the preferred environment. Their model override now controls the session;
 delegated coding tasks use an explicitly selected model or the deployment coding
 default instead.
 
 Set an explicit report destination if you want external delivery. Without one,
-the run stays in a stored web Session rather than falling back to the owner's
+the run stays in a stored web session rather than falling back to the owner's
 direct messages or email.
 Existing automations with a creator do not need to be re-saved just to upgrade;
 only creatorless automations require an administrator to re-save them before
@@ -320,9 +320,9 @@ resolve a schedule, create, update, delete, or run an enabled automation
 immediately. List results omit
 stored prompts to keep the conversation focused; after choosing an automation,
 Roomote can inspect its prompt by exact ID. The tool is available both from a
-Roomote task and directly in a Fast session, so a quick chat message can handle
+Roomote task and directly in a session, so a quick chat message can handle
 the full automation lifecycle without launching a task.
-Fast sessions can also reach the deployment's enabled MCP servers, the
+Sessions can also reach the deployment's enabled MCP servers, the
 same ones delegated tasks use. Use the tool's model-list action to
 see the deployment's enabled model IDs and default before setting an override.
 Model IDs preserve the configured inference route: `openrouter/...` targets
@@ -356,7 +356,7 @@ Provider support differs slightly:
   `sad`, and `angry` reactions; choose an equivalent configured emoji such as
   `:thumbsup:` for Like or `:heart:` for Heart.
 
-Telegram reactions on Roomote Fast replies are supported, but Telegram is not
+Telegram reactions on Roomote session replies are supported, but Telegram is not
 available for **Call Roomote via emoji** on arbitrary messages. Its Bot API
 reaction updates are handled only for user-attributed reactions on Roomote
 replies and suggested-task cards.
@@ -365,9 +365,9 @@ replies and suggested-task cards.
 
 The channel section starts with **Auto-respond to channels**.
 
-Use it to let Roomote start a Fast Session from new top-level messages in
+Use it to let Roomote start a session from new top-level messages in
 selected Slack or Discord channels, even when nobody mentions Roomote directly.
-Fast can answer or delegate the work to a task; if Fast cannot accept an
+Roomote can answer or delegate the work to a task; if the session cannot accept an
 automated entry, Roomote falls back to a direct task launch so the request is
 not dropped. You can add multiple channels across both providers, and each one
 can include its own optional instructions and launch criteria.
@@ -389,7 +389,7 @@ A few provider-specific behaviors to know:
   to Roomote do not start tasks; Roomote sends them a direct message
   explaining how to link instead.
 - Messages posted by other bots or webhooks (for example a deploy or alert
-  feed) can start Fast Sessions too. Roomote uses the deployment's automation
+  feed) can start sessions too. Roomote uses the deployment's automation
   identity for these entries. Use launch criteria to keep noisy feeds in check
   — for example, only launching on new or worsening alerts.
 
@@ -466,7 +466,7 @@ Channel and then the supported primary Teams, Telegram, or Discord conversation
 fallback. The check is deterministic, supports **Run now**, and never starts a
 Roomote task or session.
 
-**Platform Issue Alerts** are enabled by default. Tasks and Fast Sessions use
+**Platform Issue Alerts** are enabled by default. Tasks and sessions use
 them for admin-fixable platform, configuration, and access defects. Their own
 Slack, Discord, or Email destination wins, followed by the shared Manager Channel. If
 neither channel is configured, Roomote sends the alert directly to active

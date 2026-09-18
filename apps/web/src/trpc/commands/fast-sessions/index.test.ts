@@ -1249,7 +1249,7 @@ describe('Fast session PR review actions', () => {
         deliveryId: '11111111-1111-4111-8111-111111111111',
         choice: 'yes',
       }),
-    ).rejects.toThrow('Fast session not found');
+    ).rejects.toThrow('Session not found');
     expect(mocks.handleReviewAction).not.toHaveBeenCalled();
     expect(mocks.updateOfferStatus).not.toHaveBeenCalled();
   });

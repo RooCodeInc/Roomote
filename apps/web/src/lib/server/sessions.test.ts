@@ -1766,6 +1766,110 @@ describe('unified Session queries', () => {
     );
   });
 
+  it('summarizes visible artifacts for list rows using gallery deduplication semantics', async () => {
+    const owner = await userFactory.create();
+    const [session, singleArtifactSession] = await Promise.all([
+      sessionFactory.create({
+        ownerKind: 'user',
+        ownerUserId: owner.id,
+        title: 'Multiple artifacts',
+      }),
+      sessionFactory.create({
+        ownerKind: 'user',
+        ownerUserId: owner.id,
+        title: 'One artifact',
+      }),
+    ]);
+    const [firstTask, secondTask] = await Promise.all([
+      taskFactory.create({ initiatorUserId: owner.id }),
+      taskFactory.create({ initiatorUserId: owner.id }),
+    ]);
+    await db.insert(sessionTasks).values([
+      {
+        sessionId: session.id,
+        taskId: firstTask.id,
+        origin: 'direct_launch',
+      },
+      {
+        sessionId: session.id,
+        taskId: secondTask.id,
+        origin: 'fast_delegation',
+      },
+    ]);
+    await db.insert(taskArtifacts).values([
+      {
+        taskId: firstTask.id,
+        path: 'reports/result.md',
+        version: 1,
+        contentType: 'text/markdown',
+        size: 100,
+        uploaded: true,
+      },
+      {
+        taskId: firstTask.id,
+        path: 'reports/result.md',
+        version: 2,
+        contentType: 'text/markdown',
+        size: 200,
+        uploaded: true,
+      },
+      {
+        taskId: secondTask.id,
+        path: 'reports/result.md',
+        version: 1,
+        contentType: 'text/markdown',
+        size: 300,
+        uploaded: true,
+      },
+      {
+        taskId: secondTask.id,
+        path: 'reports/pending.md',
+        version: 1,
+        contentType: 'text/markdown',
+        size: 0,
+        uploaded: false,
+      },
+      {
+        sessionId: session.id,
+        path: 'notes/session.md',
+        version: 1,
+        contentType: 'text/markdown',
+        size: 50,
+        uploaded: true,
+      },
+      {
+        sessionId: singleArtifactSession.id,
+        path: 'notes/only.md',
+        version: 3,
+        contentType: 'text/markdown',
+        size: 75,
+        uploaded: true,
+      },
+    ]);
+
+    const listed = await getSessions(
+      { userId: owner.id, isAdmin: false },
+      { ids: [session.id, singleArtifactSession.id] },
+    );
+    const multiple = listed.sessions.find((row) => row.id === session.id);
+    const single = listed.sessions.find(
+      (row) => row.id === singleArtifactSession.id,
+    );
+
+    expect(multiple).toMatchObject({
+      artifactCount: 3,
+      singleArtifact: null,
+    });
+    expect(single).toMatchObject({
+      artifactCount: 1,
+      singleArtifact: {
+        taskId: null,
+        path: 'notes/only.md',
+        version: 3,
+      },
+    });
+  });
+
   it('classifies failed starts separately from failures after task output', async () => {
     const owner = await userFactory.create();
     const session = await sessionFactory.create({

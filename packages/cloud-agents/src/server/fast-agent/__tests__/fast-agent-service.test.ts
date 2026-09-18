@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   setOpenCodeSession: vi.fn(),
   upsertMessage: vi.fn(),
   getEnvironments: vi.fn(),
+  getActiveRepositories: vi.fn(),
   listCustomSkills: vi.fn(),
   getCustomSkill: vi.fn(),
   scoreTypeSafeRelevance: vi.fn(),
@@ -188,6 +189,7 @@ vi.mock('../fast-agent-conversation-repository', () => ({
 }));
 
 vi.mock('../../available-environments', () => ({
+  getActiveRepositoryCatalog: mocks.getActiveRepositories,
   getAvailableEnvironments: mocks.getEnvironments,
 }));
 
@@ -611,6 +613,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.listCustomSkills.mockResolvedValue([]);
     mocks.getCustomSkill.mockResolvedValue(null);
     mocks.scoreTypeSafeRelevance.mockResolvedValue(null);
+    mocks.getActiveRepositories.mockResolvedValue({
+      names: ['acme/app'],
+      totalCount: 1,
+    });
     mocks.getEnvironments.mockResolvedValue([
       {
         id: 'env-1',
@@ -5274,6 +5280,41 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     await answerFastAgentQuestion({ ...baseParams, adapter });
 
     expect(adapter.postReply).toHaveBeenCalledOnce();
+  });
+
+  it('lists active repositories in the system prompt without any environments', async () => {
+    mocks.getEnvironments.mockResolvedValueOnce([]);
+    mocks.getActiveRepositories.mockResolvedValueOnce({
+      names: ['acme/app', 'octo/widgets'],
+      totalCount: 2,
+    });
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    const system = mocks.generateText.mock.calls[0]?.[0].system;
+    expect(system).toContain(
+      '  - Active repositories (2): acme/app, octo/widgets',
+    );
+    expect(system).toContain(
+      'No configured environments were found for this deployment',
+    );
+  });
+
+  it('keeps the turn running when the active repository lookup fails', async () => {
+    mocks.getActiveRepositories.mockRejectedValueOnce(new Error('db down'));
+    const adapter = callbacks();
+
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+
+    expect(adapter.postReply).toHaveBeenCalledOnce();
+    expect(mocks.generateText.mock.calls[0]?.[0].system).toContain(
+      'The active repository list could not be loaded for this turn',
+    );
+    expect(mocks.captureInferenceContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        degradedComponents: expect.arrayContaining(['repository_catalog']),
+      }),
+    );
   });
 
   it('records context loader failures as degraded inference components', async () => {

@@ -60,6 +60,7 @@ vi.mock('@/components/system', () => ({
   Menu: Icon,
   X: Icon,
   House: Icon,
+  Plug: Icon,
   Rows4: Icon,
   NotepadText: Icon,
   Plus: Icon,
@@ -140,7 +141,14 @@ describe('NavbarDrawer', () => {
         .getAllByRole('link')
         .map((link) => link.textContent?.trim())
         .filter(Boolean),
-    ).toEqual(['Home', 'Sessions', 'Automations', 'Analytics', 'Settings']);
+    ).toEqual([
+      'Home',
+      'Sessions',
+      'Automations',
+      'Integrations',
+      'Analytics',
+      'Settings',
+    ]);
     expect(
       screen.queryByRole('button', { name: /support/i }),
     ).not.toBeInTheDocument();

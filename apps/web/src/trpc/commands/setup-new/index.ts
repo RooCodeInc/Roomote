@@ -1667,6 +1667,10 @@ export async function saveSetupNewModelConfigCommand(
     });
   }
 
+  const metadataCatalog = await fetchModelsDevCatalog(
+    AbortSignal.timeout(10_000),
+  ).catch(() => null);
+
   return db.transaction(async (tx) => {
     const [currentState, persistedEnvVarNames, persistedTaskModelSettings] =
       await Promise.all([
@@ -1735,6 +1739,7 @@ export async function saveSetupNewModelConfigCommand(
       provider,
       persistedTaskModelSettings,
       connectedProviderIds,
+      metadataCatalog,
     });
     const dynamicModelSettings = provider.dynamicModels
       ? (() => {

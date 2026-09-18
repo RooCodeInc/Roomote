@@ -100,9 +100,7 @@ describe('connectIntegrationForFast', () => {
       status: 'configuration_required',
       id: 'granola',
       name: 'Granola',
-      settingsUrl: expect.stringContaining(
-        '/settings/integrations?highlight=granola',
-      ),
+      settingsUrl: expect.stringContaining('/integrations?highlight=granola'),
     });
   });
 
@@ -155,9 +153,7 @@ describe('connectIntegrationForFast', () => {
         'R_NOTION_CLIENT_ID',
         'R_NOTION_CLIENT_SECRET',
       ],
-      settingsUrl: expect.stringContaining(
-        '/settings/integrations?highlight=notion',
-      ),
+      settingsUrl: expect.stringContaining('/integrations?highlight=notion'),
     });
   });
 

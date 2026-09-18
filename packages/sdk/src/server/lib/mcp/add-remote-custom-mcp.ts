@@ -53,7 +53,7 @@ import {
 
 const MCP_PROTOCOL_VERSION = '2025-06-18';
 const OAUTH_REPLAY_TTL_MS = 24 * 60 * 60 * 1000;
-const SETTINGS_PATH = '/settings/integrations';
+const SETTINGS_PATH = '/integrations';
 const PERSONAL_SETTINGS_PATH = '/settings/personal';
 
 type RemoteMcpTool = { name: string; description: string | null };

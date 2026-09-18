@@ -73,9 +73,7 @@ export function useFastSessionLauncher(options?: {
         );
       } catch (error) {
         toast.error(
-          error instanceof Error
-            ? error.message
-            : 'Failed to start Fast session',
+          error instanceof Error ? error.message : 'Failed to start session',
         );
       }
     },

@@ -54,7 +54,7 @@ describe('PageNavigationShell', () => {
             id: 'integrations',
             label: 'Integrations',
             icon: mockIcon,
-            href: '/settings/integrations',
+            href: '/integrations',
           },
         ]}
         activeItemId="personal"

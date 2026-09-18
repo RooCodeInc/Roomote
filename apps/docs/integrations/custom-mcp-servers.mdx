@@ -6,10 +6,10 @@ description: 'Connect MCP servers that are not in the built-in catalog'
 Custom MCP servers let agents use services that Roomote does not ship a
 built-in integration for. Any member can add a remote server, the same way
 they add an [integration key](/integration-keys): shared with everyone under
-**Settings → Integrations**, or private under **Personal Settings → Personal
-MCP servers**. You can also ask Roomote in a Session to connect a service's
-MCP server. Remote servers become available to both Fast Sessions and sandbox
-tasks. Local stdio servers need a task sandbox because Roomote launches their
+**Integrations**, or private under **Personal Settings → Personal MCP
+servers**. You can also ask Roomote in a Session to connect a service's MCP
+server. Remote servers become available to both sessions and sandbox tasks.
+Local stdio servers need a task sandbox because Roomote launches their
 process inside that workspace, and only deployment admins can add them.
 
 Most MCP servers publish a JSON snippet in their docs. The add dialog's
@@ -31,7 +31,7 @@ Three kinds of servers are supported:
 ## How remote servers are reached
 
 Remote custom servers are never handed to the task sandbox directly. The
-sandbox and Fast use an authenticated Roomote proxy, and the proxy injects the
+sandbox agents and sessions use an authenticated Roomote proxy, and the proxy injects the
 real credentials per request. This means:
 
 - Header values and OAuth tokens never appear in sandbox-readable

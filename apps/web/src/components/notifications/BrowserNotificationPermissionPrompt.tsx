@@ -17,7 +17,7 @@ export function BrowserNotificationPermissionPrompt({
           <div>
             <p className="font-medium">Get notified when Roomote is ready</p>
             <p className="text-sm text-muted-foreground">
-              Allow desktop notifications while this Session or task page stays
+              Allow desktop notifications while this session or task page stays
               open in the background.
             </p>
           </div>

@@ -60,10 +60,10 @@ review in the mention (for example `@roomote review this`) and Roomote runs the
 Review Code automation's structured review on the current head, posts the
 findings on the pull request, and reports back in the same discussion.
 
-## API-first work in Fast
+## API-first work in sessions
 
 With an active Bitbucket OAuth connection and a synced, active Bitbucket Cloud
-repository, deployment members and admins can use Fast for bounded API operations
+repository, deployment members and admins can use sessions for bounded API operations
 without a repository clone or coding task:
 
 | Operation | Available tools |
@@ -110,7 +110,7 @@ prefer APIs; broad investigations do not require an API attempt first. An
 authorization or repository-scope denial must never be bypassed through a task.
 </Warning>
 
-The Fast API does not support reopening PRs, writing files, creating
+The session API does not support reopening PRs, writing files, creating
 commits or PRs, or review administration such as approvals, reviewer changes, and
 thread resolution. A request for an actual code review still uses Roomote's
 structured review workflow; reading or summarizing a diff does not require it.

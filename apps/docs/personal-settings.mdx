@@ -118,8 +118,8 @@ for every member.
 
 **Peer conversations** is a deployment-wide experiment controlled by admins
 under **Settings > Experimental**. When enabled, eligible human replies in
-established Slack or Discord Fast threads can continue reaching Fast after
-someone mentions another participant. Fast is instructed to stay quiet around
+established Slack or Discord session threads can continue reaching Roomote after
+someone mentions another participant. Roomote is instructed to stay quiet around
 peer discussion unless Roomote is addressed directly or the context clearly
 calls for its response. Direct Roomote mentions work normally with the experiment
 on or off.
@@ -127,10 +127,10 @@ on or off.
 The experiment does not monitor whole channels. Discord supplies messages from
 the established thread and resolved user mentions. Telegram is not included:
 bot privacy settings can prevent ambient group messages from reaching Roomote,
-and Telegram Fast conversations are isolated per linked sender. Microsoft Teams
-is also not included because its channel Fast conversations are isolated per
+and Telegram sessions are isolated per linked sender. Microsoft Teams
+is also not included because its channel sessions are isolated per
 linked sender; webhook delivery and delegated Graph history are not a single
-shared, owner-bound Fast conversation signal.
+shared, owner-bound session signal.
 
 ## Personalize how Roomote works with you
 
@@ -150,7 +150,7 @@ stops new automatic updates but keeps the instructions already shown in the
 text box active. **Reset** clears both edited and learned instructions. A reset
 does not rebuild them from older conversation history.
 
-Fast captures each participant's personalization when they first speak in a
+Roomote captures each participant's personalization when they first speak in a
 conversation and keeps that private snapshot for their later turns in the same
 conversation. New preferences stated in a message still guide that request and
 are saved for future conversations, but they do not rewrite the current

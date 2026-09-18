@@ -603,7 +603,7 @@ describe('addRemoteCustomMcpForFast', () => {
       reused: true,
     });
     expect((result as { settingsUrl: string }).settingsUrl).toContain(
-      '/settings/integrations',
+      '/integrations',
     );
     expect(guardedFetchMock).not.toHaveBeenCalled();
   });
@@ -668,7 +668,7 @@ describe('addRemoteCustomMcpForFast', () => {
     expect(result).toMatchObject({
       status: 'client_registration_required',
       name: 'accounting',
-      settingsUrl: expect.stringContaining('/settings/integrations'),
+      settingsUrl: expect.stringContaining('/integrations'),
       reason: expect.stringContaining('not in the allowlist'),
       reused: false,
     });
@@ -767,7 +767,7 @@ describe('addRemoteCustomMcpForFast', () => {
       reused: false,
     });
     expect((result as { settingsUrl: string }).settingsUrl).toContain(
-      '/settings/integrations',
+      '/integrations',
     );
     expect(result).not.toHaveProperty('id');
     expect(await db.query.customMcpServers.findMany()).toEqual([]);
@@ -931,7 +931,7 @@ describe('addRemoteCustomMcpForFast', () => {
 
     expect(result).toMatchObject({
       status: 'client_registration_required',
-      settingsUrl: expect.stringContaining('/settings/integrations'),
+      settingsUrl: expect.stringContaining('/integrations'),
     });
     expect(result).not.toHaveProperty('authorizeUrl');
   });
@@ -963,7 +963,7 @@ describe('addRemoteCustomMcpForFast', () => {
       '/api/mcp-oauth/replay/',
     );
     expect((result as { settingsUrl: string }).settingsUrl).toContain(
-      '/settings/integrations',
+      '/integrations',
     );
   });
 });

@@ -68,15 +68,17 @@ function AuthenticatedLayoutShell({ children }: { children: React.ReactNode }) {
     setupSessionPath !== null &&
     (pathname === setupSessionPath ||
       pathname.startsWith(`${setupSessionPath}/`));
-  const isSettingsRoute =
-    pathname === '/settings' || pathname.startsWith('/settings/');
+  const isSetupExemptRoute =
+    pathname === '/integrations' ||
+    pathname === '/settings' ||
+    pathname.startsWith('/settings/');
   // An incomplete administrator must not briefly see another authenticated
   // page while we look up their setup Session. A known setup Session remains
   // accessible during a background refresh.
   const isSetupSessionLookupPending =
     setupRedirectPath !== null &&
     isSetupSessionLoading &&
-    !isSettingsRoute &&
+    !isSetupExemptRoute &&
     !isOnKnownSetupSession;
   const effectiveSetupRedirectPath =
     setupRedirectPath === null ? null : (setupSessionPath ?? setupRedirectPath);
@@ -86,7 +88,7 @@ function AuthenticatedLayoutShell({ children }: { children: React.ReactNode }) {
   const isRedirectingForSetup =
     !isSetupSessionLookupPending &&
     effectiveSetupRedirectPath !== null &&
-    !isSettingsRoute &&
+    !isSetupExemptRoute &&
     pathname !== effectiveSetupRedirectPath &&
     !pathname.startsWith(`${effectiveSetupRedirectPath}/`);
   const isRedirectingForOnboarding =

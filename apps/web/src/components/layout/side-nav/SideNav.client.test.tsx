@@ -92,6 +92,7 @@ vi.mock('@/components/system', () => ({
   Container: () => <svg aria-hidden="true" />,
   GalleryVerticalEnd: () => <svg aria-hidden="true" />,
   House: () => <svg aria-hidden="true" />,
+  Plug: () => <svg aria-hidden="true" />,
   Lightbulb: () => <svg aria-hidden="true" />,
   ListChevronsUpDown: () => <svg aria-hidden="true" />,
   MessageCircleQuestionMark: () => <svg aria-hidden="true" />,

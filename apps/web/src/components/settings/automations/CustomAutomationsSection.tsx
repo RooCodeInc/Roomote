@@ -1229,8 +1229,8 @@ export function CustomAutomationsSection({
           />
           <p className="text-sm text-muted-foreground">
             {form.targetProvider === 'none'
-              ? 'Each run is a Session in the web app and does not send a report.'
-              : 'Each run is a Session that reports findings and failures here, and replies continue it.'}
+              ? 'Each run is a session in the web app and does not send a report.'
+              : 'Each run is a session that reports findings and failures here, and replies continue it.'}
           </p>
         </div>
 

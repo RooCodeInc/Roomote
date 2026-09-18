@@ -904,7 +904,7 @@ export function useCustomMcpServers(
     ),
   );
   const settingsPath =
-    scope === 'owner' ? '/settings/personal' : '/settings/integrations';
+    scope === 'owner' ? '/settings/personal' : '/integrations';
 
   const deleteServer = useMutation(
     trpc.customMcpServers.delete.mutationOptions(),

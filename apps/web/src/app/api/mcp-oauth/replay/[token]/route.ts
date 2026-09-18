@@ -96,7 +96,7 @@ export async function GET(
       replay.redirectTo.startsWith('/') &&
       !replay.redirectTo.startsWith('//')
         ? replay.redirectTo
-        : '/settings/integrations';
+        : '/integrations';
     return NextResponse.redirect(
       new URL(
         `/api/mcp-oauth/initiate/${connection.id}?redirectTo=${encodeURIComponent(

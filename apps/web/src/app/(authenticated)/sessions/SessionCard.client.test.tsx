@@ -24,6 +24,8 @@ describe('SessionCard', () => {
           inferenceCostMicroUsd: 10_000,
           directInferenceCostMicroUsd: 4_000,
           unread: false,
+          artifactCount: 2,
+          singleArtifact: null,
           pullRequests: [
             {
               repository: 'RooCodeInc/Roomote',
@@ -47,12 +49,10 @@ describe('SessionCard', () => {
     expect(
       screen.getByRole('link', { name: /Update homepage background/ }),
     ).toHaveAttribute('href', '/sessions/session-1');
-    expect(screen.getByText('You')).toBeInTheDocument();
-    expect(screen.getByText('started a session')).toBeInTheDocument();
-    expect(screen.getByLabelText('Web')).toBeInTheDocument();
-    expect(screen.queryByText('Web')).not.toBeInTheDocument();
-    expect(screen.getByText('0.01')).toBeInTheDocument();
-    fireEvent.focus(screen.getByText('0.01'));
+    expect(screen.getByText('Test User from Web')).toBeInTheDocument();
+    expect(screen.queryByText(/started a session/)).not.toBeInTheDocument();
+    expect(screen.getByText('$0.01')).toBeInTheDocument();
+    fireEvent.focus(screen.getByText('$0.01'));
     expect(
       (await screen.findAllByText('Inference cost breakdown')).length,
     ).toBeGreaterThan(0);
@@ -63,6 +63,10 @@ describe('SessionCard', () => {
     expect(screen.getByRole('link', { name: 'Roomote#1939' })).toHaveAttribute(
       'href',
       'https://github.com/RooCodeInc/Roomote/pull/1939',
+    );
+    expect(screen.getByRole('link', { name: '2 artifacts' })).toHaveAttribute(
+      'href',
+      '/sessions/session-1?panel=artifacts',
     );
     expect(screen.queryByText('Roomote')).not.toBeInTheDocument();
     expect(screen.queryByText('1 execution')).not.toBeInTheDocument();
@@ -90,6 +94,8 @@ describe('SessionCard', () => {
           inferenceCostMicroUsd: 0,
           directInferenceCostMicroUsd: 0,
           unread: false,
+          artifactCount: 0,
+          singleArtifact: null,
           pullRequests: [],
           searchSnippet: '...preserve the Heliotrope detail before release.',
           tasks: [],
@@ -122,6 +128,8 @@ describe('SessionCard', () => {
       inferenceCostMicroUsd: 0,
       directInferenceCostMicroUsd: 0,
       unread: true,
+      artifactCount: 0,
+      singleArtifact: null,
       pullRequests: [],
       tasks: [],
     };
@@ -135,7 +143,7 @@ describe('SessionCard', () => {
     expect(screen.getByLabelText('Unread activity')).toBeInTheDocument();
   });
 
-  it('only renders list and board indicators for attention states', () => {
+  it('only renders attention indicators for needs-input and blocked states', () => {
     const session = {
       id: 'session-4',
       title: 'Review status indicators',
@@ -153,6 +161,8 @@ describe('SessionCard', () => {
       inferenceCostMicroUsd: 0,
       directInferenceCostMicroUsd: 0,
       unread: false,
+      artifactCount: 0,
+      singleArtifact: null,
       pullRequests: [],
       tasks: [],
     };
@@ -210,51 +220,20 @@ describe('SessionCard', () => {
           inferenceCostMicroUsd: 0,
           directInferenceCostMicroUsd: 0,
           unread: false,
+          artifactCount: 0,
+          singleArtifact: null,
           pullRequests: [],
           tasks: [],
         }}
       />,
     );
 
-    expect(screen.getByText('Sentry Triage')).toBeInTheDocument();
-    expect(screen.getByText('started a session')).toBeInTheDocument();
+    expect(
+      screen.getByText('Sentry Triage from Automation'),
+    ).toBeInTheDocument();
     expect(
       screen.getByLabelText('Sentry Triage').querySelector('img'),
     ).toBeInTheDocument();
-  });
-
-  it('removes crowded attribution and source metadata only in board view', () => {
-    render(
-      <SessionCard
-        view="board"
-        viewerUserId="user-1"
-        session={{
-          id: 'session-board',
-          title: 'Board session',
-          ownerKind: 'user',
-          ownerAutomation: null,
-          ownerName: 'Test User',
-          ownerEmail: 'test@example.com',
-          ownerImageUrl: null,
-          ownerUserId: 'user-1',
-          privacy: 'shared',
-          sourceSurface: 'slack',
-          activityAt: Date.now() / 1000,
-          cachedStatus: 'ready',
-          executionCount: 0,
-          inferenceCostMicroUsd: 0,
-          directInferenceCostMicroUsd: 0,
-          unread: false,
-          pullRequests: [],
-          tasks: [],
-        }}
-      />,
-    );
-
-    expect(screen.getByText('You')).toBeInTheDocument();
-    expect(screen.queryByText('started a session')).not.toBeInTheDocument();
-    expect(screen.getByLabelText('Slack')).toBeInTheDocument();
-    expect(screen.queryByText('Slack')).not.toBeInTheDocument();
   });
 
   it('uses canonical identity for the viewer without changing other users', () => {
@@ -275,6 +254,8 @@ describe('SessionCard', () => {
       inferenceCostMicroUsd: 0,
       directInferenceCostMicroUsd: 0,
       unread: false,
+      artifactCount: 0,
+      singleArtifact: null,
       pullRequests: [],
       tasks: [],
     };
@@ -282,64 +263,127 @@ describe('SessionCard', () => {
     const { rerender } = render(
       <SessionCard session={session} viewerUserId="other-user" />,
     );
-    expect(screen.getByText('Same Display Name')).toBeInTheDocument();
+    expect(screen.getByText('Same Display Name from Web')).toBeInTheDocument();
     expect(screen.queryByText('You')).not.toBeInTheDocument();
 
     rerender(<SessionCard session={session} viewerUserId="owner-user" />);
-    expect(screen.getByText('You')).toBeInTheDocument();
-    expect(screen.getByLabelText('Same Display Name')).toHaveTextContent('SD');
-    expect(screen.queryByText('Y')).not.toBeInTheDocument();
-
-    rerender(
-      <SessionCard view="board" session={session} viewerUserId="owner-user" />,
-    );
-    expect(screen.getByText('You')).toBeInTheDocument();
+    expect(screen.getByText('Same Display Name from Web')).toBeInTheDocument();
     expect(screen.getByLabelText('Same Display Name')).toHaveTextContent('SD');
     expect(screen.queryByText('Y')).not.toBeInTheDocument();
   });
 
-  it.each(['list', 'board'] as const)(
-    'shows private and source metadata in %s view',
-    (view) => {
-      render(
-        <SessionCard
-          view={view}
-          viewerUserId="user-1"
-          session={{
-            id: `private-${view}`,
-            title: 'Private planning',
-            ownerKind: 'user',
-            ownerAutomation: null,
-            ownerName: 'Test User',
-            ownerEmail: 'test@example.com',
-            ownerImageUrl: null,
-            ownerUserId: 'user-1',
-            privacy: 'private',
-            sourceSurface: 'web',
-            activityAt: Date.now() / 1000,
-            cachedStatus: 'ready',
-            executionCount: 0,
-            inferenceCostMicroUsd: 0,
-            directInferenceCostMicroUsd: 0,
-            unread: false,
-            pullRequests: [],
-            tasks: [],
-          }}
-        />,
-      );
+  it('shows private and source metadata', () => {
+    render(
+      <SessionCard
+        viewerUserId="user-1"
+        session={{
+          id: 'private-session',
+          title: 'Private planning',
+          ownerKind: 'user',
+          ownerAutomation: null,
+          ownerName: 'Test User',
+          ownerEmail: 'test@example.com',
+          ownerImageUrl: null,
+          ownerUserId: 'user-1',
+          privacy: 'private',
+          sourceSurface: 'web',
+          activityAt: Date.now() / 1000,
+          cachedStatus: 'ready',
+          executionCount: 0,
+          inferenceCostMicroUsd: 0,
+          directInferenceCostMicroUsd: 0,
+          unread: false,
+          artifactCount: 0,
+          singleArtifact: null,
+          pullRequests: [],
+          tasks: [],
+        }}
+      />,
+    );
 
-      expect(screen.getByLabelText('Private session')).toBeInTheDocument();
-      expect(screen.getByLabelText('Web')).toBeInTheDocument();
-      expect(screen.queryByText('Web')).not.toBeInTheDocument();
-      if (view === 'list') {
-        expect(
-          screen.getByText('started a private session'),
-        ).toBeInTheDocument();
-      } else {
-        expect(
-          screen.queryByText('started a private session'),
-        ).not.toBeInTheDocument();
-      }
+    expect(screen.getByLabelText('Private session')).toBeInTheDocument();
+    expect(screen.getByText('Test User from Web')).toBeInTheDocument();
+    expect(
+      screen.queryByText(/started a private session/),
+    ).not.toBeInTheDocument();
+  });
+
+  it('omits the output metadata line when there are no PRs or artifacts', () => {
+    const { container } = render(
+      <SessionCard
+        viewerUserId="user-1"
+        session={{
+          id: 'session-compact',
+          title: 'Compact session',
+          ownerKind: 'user',
+          ownerAutomation: null,
+          ownerName: 'Bruno Bergher',
+          ownerEmail: 'bruno@example.com',
+          ownerImageUrl: null,
+          ownerUserId: 'user-1',
+          privacy: 'shared',
+          sourceSurface: 'web',
+          activityAt: Date.now() / 1000,
+          cachedStatus: 'ready',
+          executionCount: 0,
+          inferenceCostMicroUsd: 0,
+          directInferenceCostMicroUsd: 0,
+          unread: false,
+          artifactCount: 0,
+          singleArtifact: null,
+          pullRequests: [],
+          tasks: [],
+        }}
+      />,
+    );
+
+    expect(screen.getByText('Bruno Bergher from Web')).toBeInTheDocument();
+    expect(container.querySelectorAll('.mt-2')).toHaveLength(0);
+  });
+
+  it.each([
+    {
+      owner: { taskId: null, path: 'notes/decision.md', version: 2 },
+      expected: '/sessions/session-one?artifact=notes%2Fdecision.md&v=2',
     },
-  );
+    {
+      owner: { taskId: 'task-1', path: 'reports/result.md', version: 3 },
+      expected:
+        '/sessions/session-one?panel=artifacts&artifact=reports%2Fresult.md&artifactTask=task-1&v=3',
+    },
+  ])('deep-links one artifact to its Session viewer', ({ owner, expected }) => {
+    render(
+      <SessionCard
+        viewerUserId="user-1"
+        session={{
+          id: 'session-one',
+          title: 'One artifact',
+          ownerKind: 'user',
+          ownerAutomation: null,
+          ownerName: 'Dan Riccio',
+          ownerEmail: 'dan@example.com',
+          ownerImageUrl: null,
+          ownerUserId: 'user-1',
+          privacy: 'shared',
+          sourceSurface: 'slack',
+          activityAt: Date.now() / 1000,
+          cachedStatus: 'ready',
+          executionCount: 1,
+          inferenceCostMicroUsd: 0,
+          directInferenceCostMicroUsd: 0,
+          unread: false,
+          artifactCount: 1,
+          singleArtifact: owner,
+          pullRequests: [],
+          tasks: [],
+        }}
+      />,
+    );
+
+    expect(screen.getByText('Dan Riccio from Slack')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '1 artifact' })).toHaveAttribute(
+      'href',
+      expected,
+    );
+  });
 });
