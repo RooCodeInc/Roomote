@@ -419,6 +419,11 @@ describe('PromptInput', () => {
   });
 
   it('focuses an auto-focus composer once it is connected without stealing focus again', () => {
+    vi.mocked(window.matchMedia).mockReturnValue({
+      matches: true,
+      media: '(min-width: 768px)',
+    } as MediaQueryList);
+
     const composer = () => (
       <>
         <button type="button">Other control</button>
@@ -441,6 +446,18 @@ describe('PromptInput', () => {
     act(() => otherControl.focus());
     rerender(composer());
     expect(otherControl).toHaveFocus();
+
+    vi.mocked(window.matchMedia).mockReset();
+    vi.mocked(window.matchMedia).mockImplementation((query) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
   });
 
   it('opens command search when a slash is typed at the start of the prompt', () => {

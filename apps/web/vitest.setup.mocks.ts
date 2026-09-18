@@ -15,6 +15,8 @@ vi.mock('@roomote/redis', async () => {
       set: vi.fn().mockResolvedValue('OK'),
       setex: vi.fn().mockResolvedValue('OK'),
       del: vi.fn().mockResolvedValue(1),
+      sadd: vi.fn().mockResolvedValue(1),
+      expire: vi.fn().mockResolvedValue(1),
       quit: vi.fn().mockResolvedValue('OK'),
       disconnect: vi.fn().mockResolvedValue(undefined),
     })),
