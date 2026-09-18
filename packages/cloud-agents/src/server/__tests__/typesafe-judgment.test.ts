@@ -29,6 +29,7 @@ const questions = {
 
 function mockKeys(keys: {
   R_TYPESAFE_API_KEY?: string;
+  OPENROUTER_API_KEY?: string;
   AI_GATEWAY_API_KEY?: string;
 }) {
   mockResolveModelProviderEnvValue.mockImplementation(
@@ -165,6 +166,87 @@ describe('evaluateTypeSafeJudgments', () => {
     });
   });
 
+  it('calls the OpenRouter Decisions API and normalizes optional confidence', async () => {
+    mockGetJudgmentSelection.mockResolvedValue('openrouter');
+    mockKeys({ OPENROUTER_API_KEY: 'or-key' });
+    const fetchMock = mockFetchResponse({
+      model: 'typesafe/jev-1.13',
+      answers: {
+        urgent: { type: 'noul', noul: 0.92 },
+        team: {
+          type: 'choice',
+          choice: 'technical',
+          probabilities: { billing: 0.1, technical: 0.9 },
+        },
+      },
+    });
+
+    await expect(
+      evaluateTypeSafeJudgments({ state: 'hi', questions }),
+    ).resolves.toEqual({
+      ...directAnswers,
+      team: { ...directAnswers.team, confidence: 0.9 },
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://openrouter.ai/api/alpha/decisions');
+    expect(init.headers).toMatchObject({ Authorization: 'Bearer or-key' });
+    expect(JSON.parse(init.body as string)).toEqual({
+      state: 'hi',
+      model: 'typesafe/jev-1.13',
+      questions,
+    });
+  });
+
+  it('does not replace malformed OpenRouter confidence', async () => {
+    mockGetJudgmentSelection.mockResolvedValue('openrouter');
+    mockKeys({ OPENROUTER_API_KEY: 'or-key' });
+    mockFetchResponse({
+      answers: {
+        team: {
+          type: 'choice',
+          choice: 'technical',
+          probabilities: { billing: 0.1, technical: 0.9 },
+          confidence: 'high',
+        },
+      },
+    });
+
+    await expect(
+      evaluateTypeSafeJudgments({
+        state: 'hi',
+        questions: { team: questions.team },
+      }),
+    ).rejects.toThrow('missing a valid answer');
+  });
+
+  it('rejects malformed OpenRouter probabilities used to derive confidence', async () => {
+    mockGetJudgmentSelection.mockResolvedValue('openrouter');
+    mockKeys({ OPENROUTER_API_KEY: 'or-key' });
+    mockFetchResponse({
+      answers: {
+        severity: {
+          type: 'score',
+          score: 1.4,
+          probabilities: { low: 0.1, medium: '0.7', high: 0.2 },
+        },
+      },
+    });
+
+    await expect(
+      evaluateTypeSafeJudgments({
+        state: 'hi',
+        questions: {
+          severity: {
+            type: 'score',
+            instructions: 'How severe?',
+            criteria: ['Low', 'Medium', 'High'],
+          },
+        },
+      }),
+    ).rejects.toThrow('missing a valid answer');
+  });
+
   it('uses the top probability when the gateway reports no confidence', async () => {
     mockEnv.R_JUDGMENT_MODEL = 'vercel';
     mockKeys({ AI_GATEWAY_API_KEY: 'gw-key' });
@@ -188,6 +270,16 @@ describe('evaluateTypeSafeJudgments', () => {
 
   it('does not fall back to TypeSafe when AI Gateway is selected without a key', async () => {
     mockGetJudgmentSelection.mockResolvedValue('vercel');
+    const fetchMock = mockFetchResponse({});
+
+    await expect(
+      evaluateTypeSafeJudgments({ state: 'hi', questions }),
+    ).resolves.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('does not fall back to TypeSafe when OpenRouter is selected without a key', async () => {
+    mockGetJudgmentSelection.mockResolvedValue('openrouter');
     const fetchMock = mockFetchResponse({});
 
     await expect(
@@ -240,6 +332,7 @@ describe('evaluateTypeSafeJudgments', () => {
 
   describe.each([
     { label: 'TypeSafe direct', backend: 'typesafe' },
+    { label: 'OpenRouter', backend: 'openrouter' },
     { label: 'Vercel AI Gateway', backend: 'vercel' },
   ] as const)('$label choice answers', ({ backend }) => {
     it.each([
@@ -252,6 +345,9 @@ describe('evaluateTypeSafeJudgments', () => {
       if (backend === 'vercel') {
         mockEnv.R_JUDGMENT_MODEL = 'vercel';
         mockKeys({ AI_GATEWAY_API_KEY: 'gw-key' });
+      } else if (backend === 'openrouter') {
+        mockEnv.R_JUDGMENT_MODEL = 'openrouter';
+        mockKeys({ OPENROUTER_API_KEY: 'or-key' });
       }
 
       const providerMetadata =

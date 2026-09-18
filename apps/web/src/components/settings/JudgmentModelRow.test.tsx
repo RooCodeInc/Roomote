@@ -30,6 +30,7 @@ import { JudgmentModelRow } from './JudgmentModelRow';
 function buildSettings(overrides: Record<string, unknown> = {}) {
   return {
     typeSafe: { connected: false, source: null },
+    openRouterConnected: false,
     vercelGatewayConnected: false,
     storedSelection: null,
     envSelection: null,
@@ -78,6 +79,12 @@ describe('JudgmentModelRow', () => {
       screen.getByRole('option', { name: /Jev via TypeSafe/ }),
     ).toHaveAttribute('data-disabled');
     expect(
+      screen.getByRole('option', { name: /Jev via OpenRouter/ }),
+    ).toHaveTextContent('Connect OpenRouter');
+    expect(
+      screen.getByRole('option', { name: /Jev via OpenRouter/ }),
+    ).toHaveAttribute('data-disabled');
+    expect(
       screen.getByRole('option', { name: /Jev via Vercel AI Gateway/ }),
     ).toHaveTextContent('Connect Vercel AI Gateway');
     expect(
@@ -88,6 +95,7 @@ describe('JudgmentModelRow', () => {
   it('saves a new selection immediately', async () => {
     judgmentSettingsData.current = buildSettings({
       typeSafe: { connected: true, source: 'settings' },
+      openRouterConnected: true,
       vercelGatewayConnected: true,
       effectiveSelection: 'typesafe',
     });
@@ -110,6 +118,19 @@ describe('JudgmentModelRow', () => {
     expect(toast.success).toHaveBeenCalledWith(
       'Judgment model set to Jev via Vercel AI Gateway.',
     );
+  });
+
+  it('offers OpenRouter when its existing provider connection is available', () => {
+    judgmentSettingsData.current = buildSettings({
+      openRouterConnected: true,
+    });
+
+    render(<JudgmentModelRow />);
+    openSelect();
+
+    expect(
+      screen.getByRole('option', { name: 'Jev via OpenRouter' }),
+    ).not.toHaveAttribute('data-disabled');
   });
 
   it('surfaces a rejected selection as an error toast', async () => {

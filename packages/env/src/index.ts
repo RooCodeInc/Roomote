@@ -189,10 +189,12 @@ const serverSchema = {
   // triage judgments try one fast typed call first and keep their existing
   // behavior when it is unsure or fails. The key stays on the control plane.
   R_TYPESAFE_API_KEY: z.string().min(1).optional(),
-  // Selects the judgment model backend (`off`, `typesafe`, or `vercel` for
-  // Jev through Vercel AI Gateway). Overrides the Settings > Models choice.
+  // Selects the judgment model backend (`off`, `typesafe`, `openrouter`, or
+  // `vercel`). Overrides the Settings > Models choice.
   // Unset defers to Settings, where a TypeSafe key alone selects `typesafe`.
-  R_JUDGMENT_MODEL: z.enum(['off', 'typesafe', 'vercel']).optional(),
+  R_JUDGMENT_MODEL: z
+    .enum(['off', 'typesafe', 'openrouter', 'vercel'])
+    .optional(),
   R_INTERCOM_APP_ID: z.string().min(1).optional(),
   R_POSTHOG_PROJECT_KEY: z.string().min(1).optional(),
   R_POSTHOG_HOST: z.string().url().optional(),

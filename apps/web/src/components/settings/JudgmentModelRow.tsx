@@ -33,6 +33,7 @@ const MISSING_PROVIDER_HINTS: Record<
   string
 > = {
   typesafe: 'Connect TypeSafe',
+  openrouter: 'Connect OpenRouter',
   vercel: 'Connect Vercel AI Gateway',
 };
 
@@ -42,6 +43,8 @@ const UNUSABLE_SELECTION_MESSAGES: Record<
 > = {
   typesafe:
     'TypeSafe is not connected, so these decisions use the helper model.',
+  openrouter:
+    'OpenRouter is not connected, so these decisions use the helper model.',
   vercel:
     'Vercel AI Gateway is not connected, so these decisions use the helper model.',
 };
@@ -67,6 +70,8 @@ export function JudgmentModelRow() {
         return true;
       case 'typesafe':
         return settings.typeSafe.connected;
+      case 'openrouter':
+        return settings.openRouterConnected;
       case 'vercel':
         return settings.vercelGatewayConnected;
     }

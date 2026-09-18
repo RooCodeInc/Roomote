@@ -5,6 +5,7 @@ describe('resolveEffectiveJudgmentModelSelection', () => {
     [{ hasTypeSafeKey: false }, 'off'],
     [{ hasTypeSafeKey: true }, 'typesafe'],
     [{ storedSelection: 'off', hasTypeSafeKey: true }, 'off'],
+    [{ storedSelection: 'openrouter', hasTypeSafeKey: false }, 'openrouter'],
     [{ storedSelection: 'vercel', hasTypeSafeKey: true }, 'vercel'],
     [
       {
@@ -13,6 +14,14 @@ describe('resolveEffectiveJudgmentModelSelection', () => {
         hasTypeSafeKey: false,
       },
       'typesafe',
+    ],
+    [
+      {
+        envSelection: 'openrouter',
+        storedSelection: 'off',
+        hasTypeSafeKey: false,
+      },
+      'openrouter',
     ],
     [
       {
