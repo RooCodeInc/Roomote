@@ -229,7 +229,9 @@ automation's configured prompt and any delegated task cards, and its normal
 composer lets a signed-in teammate continue the run from the dashboard. Replies
 on chat providers continue the Session directly there. A reply to an Email
 report continues it in the same mail thread only when it comes from the owner's
-verified account email and passes DMARC. Roomote verifies the active provider
+account email and passes DMARC; if the address was not verified yet, the reply
+verifies it implicitly (the report carries the single-use reference token the
+reply quotes as proof of receipt). Roomote verifies the active provider
 installation, conversation, and linked user before resuming. Runs with no
 report destination remain stored Sessions and do not post externally.
 
@@ -266,7 +268,8 @@ Direct-message destinations require the automation owner to link an account for
 the selected communications provider and make the bot reachable there.
 Email destinations use the owner's one account email, including before it is
 verified. Verification is required to reply or initiate work by email, not to
-receive automation reports. If the address changes, is suppressed, the owner is
+receive automation reports — and replying to a report verifies the address
+implicitly. If the address changes, is suppressed, the owner is
 removed, or AgentMail becomes unavailable, delivery stops rather than switching
 to another address or communications provider.
 Microsoft Teams channel destinations must match an active conversation already

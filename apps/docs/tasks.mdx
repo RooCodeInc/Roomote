@@ -51,7 +51,8 @@ tries the Slack, Teams, Telegram, or Discord platform the user most recently
 chose to start a task or Session, then falls back through Slack, Teams, Telegram,
 Discord, and the user's account email without retrying the preferred platform.
 Email verification is required for inbound requests and replies, not for
-receiving these notifications. Later
+receiving these notifications — and replying to one of these emails verifies
+the account address implicitly. Later
 notifications reuse that Session's successful provider thread when it remains
 available, and the standard footer moves to the latest supported message.
 Roomote skips the notification while the initiator is present in the Session or

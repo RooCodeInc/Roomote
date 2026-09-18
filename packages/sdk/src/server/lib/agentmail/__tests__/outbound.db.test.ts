@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import {
   agentmailConversationParticipants,
   agentmailConversations,
+  agentmailReplyVerificationProofs,
   agentmailSuppressions,
   authUsers,
   db,
@@ -260,6 +261,9 @@ describe('startAgentMailConversation (real database, stubbed AgentMail API)', ()
       subject: 'Automation report',
       text: expect.stringContaining('Final report'),
     });
+    // The unverified recipient's first email carries the reply-verification
+    // token so their reply can verify the address implicitly.
+    expect(String(requests[0]!.body.text)).toMatch(/rvk_[A-Za-z0-9_-]{32}/);
     expect(String(requests[0]!.body.text)).not.toContain('is running');
     const conversation = await db.query.agentmailConversations.findFirst({
       where: eq(agentmailConversations.id, prepared!.conversationId),
@@ -352,6 +356,93 @@ describe('startAgentMailConversation (real database, stubbed AgentMail API)', ()
       role: 'owner',
       source: 'outbound',
     });
+  });
+
+  it('carries a single-use reply-verification token when the account email is unverified', async () => {
+    const accountEmail = uniqueEmail('unverified-recipient');
+    const user = await createAccountUser(accountEmail, false);
+    const threadId = `thread_${randomUUID()}`;
+    const requests: { url: string; body: Record<string, unknown> }[] = [];
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      requests.push({
+        url: String(input),
+        body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>,
+      });
+      return new Response(
+        JSON.stringify({
+          message_id: `<${randomUUID()}@agentmail.to>`,
+          thread_id: threadId,
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }) as typeof fetch;
+
+    const sent = await startAgentMailConversation({
+      userId: user.id,
+      subject: 'Your report is ready',
+      text: 'Report body.',
+      logContext: 'outbound-test',
+    });
+
+    expect(sent).toBe(true);
+    const text = String(requests[0]!.body.text);
+    const html = String(requests[0]!.body.html);
+    const token = text.match(/rvk_[A-Za-z0-9_-]{32}/)?.[0];
+    expect(token).toBeTruthy();
+    expect(html).toContain(token);
+
+    const proofs = await db.query.agentmailReplyVerificationProofs.findMany({
+      where: eq(agentmailReplyVerificationProofs.userId, user.id),
+    });
+    expect(proofs).toHaveLength(1);
+    expect(proofs[0]).toMatchObject({
+      emailAddress: accountEmail.toLowerCase(),
+      consumedAt: null,
+    });
+    // Only the hash is stored; the raw token never touches the database.
+    expect(proofs[0]!.tokenHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(proofs[0]!.tokenHash).not.toBe(token);
+    expect(proofs[0]!.expiresAt.getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it('omits the reply-verification token for an already verified account email', async () => {
+    const accountEmail = uniqueEmail('verified-recipient');
+    const user = await createVerifiedUser(accountEmail);
+    const requests: { url: string; body: Record<string, unknown> }[] = [];
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      requests.push({
+        url: String(input),
+        body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>,
+      });
+      return new Response(
+        JSON.stringify({
+          message_id: `<${randomUUID()}@agentmail.to>`,
+          thread_id: `thread_${randomUUID()}`,
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }) as typeof fetch;
+
+    const sent = await startAgentMailConversation({
+      userId: user.id,
+      subject: 'Your report is ready',
+      text: 'Report body.',
+      logContext: 'outbound-test',
+    });
+
+    expect(sent).toBe(true);
+    expect(String(requests[0]!.body.text)).not.toContain('rvk_');
+    expect(
+      await db.query.agentmailReplyVerificationProofs.findMany({
+        where: eq(agentmailReplyVerificationProofs.userId, user.id),
+      }),
+    ).toHaveLength(0);
   });
 
   it('does not call the API for a suppressed recipient', async () => {

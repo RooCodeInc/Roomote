@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 const mocks = vi.hoisted(() => ({
   continueWithLock: vi.fn(),
@@ -17,6 +17,7 @@ import {
   agentmailConversationParticipants,
   agentmailConversations,
   agentmailInboundTurns,
+  agentmailReplyVerificationProofs,
   agentmailSuppressions,
   agentmailWebhookEvents,
   asc,
@@ -24,6 +25,7 @@ import {
   db,
   eq,
   userFactory,
+  users,
 } from '@roomote/db/server';
 import { getRedis } from '@roomote/redis';
 
@@ -34,6 +36,10 @@ import {
   recoverPendingAgentMailWork,
 } from '../inbound';
 import { isAgentMailAddressSuppressed } from '../outbound';
+import {
+  AGENTMAIL_REPLY_VERIFICATION_TOKEN_PATTERN,
+  buildAgentMailReplyVerificationFooter,
+} from '../reply-verification';
 
 const INBOX = 'roomote-test@agentmail.to';
 
@@ -708,6 +714,334 @@ describe('agentmail webhook event outbox (real database)', () => {
   });
 });
 
+describe('agentmail implicit reply verification (real database)', () => {
+  beforeAll(() => {
+    process.env.R_EMAIL_CHANNEL_ENABLED = 'true';
+    process.env.R_AGENTMAIL_API_KEY = 'am_test_key';
+    process.env.R_AGENTMAIL_WEBHOOK_SECRET = 'whsec_dGVzdA==';
+    process.env.R_AGENTMAIL_INBOX_ID = INBOX;
+  });
+
+  beforeEach(() => {
+    mocks.evaluateTypeSafeJudgments.mockReset();
+    mocks.evaluateTypeSafeJudgments.mockResolvedValue(null);
+  });
+
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  /** Counts outbound sends (refusals) while the stub is installed. */
+  function stubOutboundSends() {
+    const state = { count: 0 };
+    globalThis.fetch = (async () => {
+      state.count += 1;
+      return new Response(JSON.stringify({ message_id: 'm-refusal' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+    return state;
+  }
+
+  async function createOutboundThread(
+    userId: string,
+    providerThreadId: string,
+  ) {
+    const [conversation] = await db
+      .insert(agentmailConversations)
+      .values({
+        inboxId: INBOX,
+        providerThreadId,
+        ownerUserId: userId,
+        subject: 'Roomote notification',
+      })
+      .returning();
+    await db.insert(agentmailConversationParticipants).values({
+      conversationId: conversation!.id,
+      inboxId: INBOX,
+      providerThreadId,
+      userId,
+      role: 'owner',
+      source: 'outbound',
+    });
+    return conversation!;
+  }
+
+  /** Create a live proof the way an outbound send would, returning its token. */
+  async function createReplyProof(userId: string, emailAddress: string) {
+    const footer = await buildAgentMailReplyVerificationFooter({
+      userId,
+      emailAddress,
+    });
+    expect(footer).not.toBeNull();
+    const token = footer!.textFooter.match(
+      AGENTMAIL_REPLY_VERIFICATION_TOKEN_PATTERN,
+    )?.[0];
+    expect(token).toBeTruthy();
+    return { token: token!, quotedFooter: footer!.textFooter };
+  }
+
+  async function deliverReply(input: {
+    threadId: string;
+    from: string;
+    text: string;
+    authenticationResults?: { spf?: string; dkim?: string; dmarc?: string };
+  }) {
+    const deliveryId = `msg_${randomUUID()}`;
+    await recordAgentMailWebhookEvent({
+      deliveryId,
+      eventId: null,
+      eventType: 'message.received',
+      payload: messageReceivedPayload({
+        eventId: `evt_${randomUUID()}`,
+        threadId: input.threadId,
+        messageId: `m-${randomUUID()}`,
+        from: input.from,
+        text: input.text,
+        ...(input.authenticationResults
+          ? { authenticationResults: input.authenticationResults }
+          : {}),
+      }),
+    });
+    await processAgentMailWebhookEvent(deliveryId);
+    return deliveryId;
+  }
+
+  async function isAccountVerified(userId: string) {
+    const row = await db.query.authUsers.findFirst({
+      where: eq(authUsers.id, userId),
+      columns: { emailVerified: true },
+    });
+    return row?.emailVerified ?? false;
+  }
+
+  async function loadProofByToken(token: string) {
+    const tokenHash = createHash('sha256').update(token).digest('hex');
+    return db.query.agentmailReplyVerificationProofs.findFirst({
+      where: eq(agentmailReplyVerificationProofs.tokenHash, tokenHash),
+    });
+  }
+
+  it('verifies an unverified account email on first reply and processes the reply', async () => {
+    const { user, senderEmail } = await createUnverifiedSender();
+    const providerThreadId = `thread-${randomUUID()}`;
+    const conversation = await createOutboundThread(user.id, providerThreadId);
+    const { quotedFooter } = await createReplyProof(user.id, senderEmail);
+    const sends = stubOutboundSends();
+
+    await deliverReply({
+      threadId: providerThreadId,
+      from: senderEmail,
+      text: `Thanks, looks good.\n\nOn Tue, Roomote wrote:${quotedFooter}`,
+    });
+
+    expect(await isAccountVerified(user.id)).toBe(true);
+    const turns = await db.query.agentmailInboundTurns.findMany({
+      where: eq(agentmailInboundTurns.conversationId, conversation.id),
+    });
+    expect(turns).toHaveLength(1);
+    expect(turns[0]).toMatchObject({
+      state: 'pending',
+      senderUserId: user.id,
+      senderEmail,
+    });
+    // No refusal went out: the reply itself was the verification.
+    expect(sends.count).toBe(0);
+  });
+
+  it('never verifies a different account that quotes the token on a shared thread', async () => {
+    const victim = await createUnverifiedSender();
+    const attacker = await createUnverifiedSender();
+    const victimThread = `thread-${randomUUID()}`;
+    await createOutboundThread(victim.user.id, victimThread);
+    const { token } = await createReplyProof(
+      victim.user.id,
+      victim.senderEmail,
+    );
+    const attackerThread = `thread-${randomUUID()}`;
+    const attackerConversation = await createOutboundThread(
+      attacker.user.id,
+      attackerThread,
+    );
+    const sends = stubOutboundSends();
+
+    // A forwarded thread leaked the token; the forward recipient replies with
+    // it on their own Roomote thread.
+    await deliverReply({
+      threadId: attackerThread,
+      from: attacker.senderEmail,
+      text: `Continue.\n\nForwarded:${token}`,
+    });
+
+    expect(await isAccountVerified(victim.user.id)).toBe(false);
+    expect(await isAccountVerified(attacker.user.id)).toBe(false);
+    expect(
+      await db.query.agentmailInboundTurns.findMany({
+        where: eq(
+          agentmailInboundTurns.conversationId,
+          attackerConversation.id,
+        ),
+      }),
+    ).toHaveLength(0);
+    expect(sends.count).toBe(1);
+    expect((await loadProofByToken(token))?.consumedAt).toBeNull();
+  });
+
+  it('rejects an expired proof', async () => {
+    const { user, senderEmail } = await createUnverifiedSender();
+    const providerThreadId = `thread-${randomUUID()}`;
+    await createOutboundThread(user.id, providerThreadId);
+    const token = `rvk_${randomUUID().replaceAll('-', '').slice(0, 32)}`;
+    await db.insert(agentmailReplyVerificationProofs).values({
+      userId: user.id,
+      emailAddress: senderEmail,
+      tokenHash: createHash('sha256').update(token).digest('hex'),
+      expiresAt: new Date(Date.now() - 60_000),
+    });
+    const sends = stubOutboundSends();
+
+    await deliverReply({
+      threadId: providerThreadId,
+      from: senderEmail,
+      text: `Late reply.\n\nQuoted: ${token}`,
+    });
+
+    expect(await isAccountVerified(user.id)).toBe(false);
+    expect((await loadProofByToken(token))?.consumedAt).toBeNull();
+    expect(sends.count).toBe(1);
+  });
+
+  it('processes a replayed-token follow-up through the normal verified path without re-consuming the proof', async () => {
+    const { user, senderEmail } = await createUnverifiedSender();
+    const providerThreadId = `thread-${randomUUID()}`;
+    const conversation = await createOutboundThread(user.id, providerThreadId);
+    const { token, quotedFooter } = await createReplyProof(
+      user.id,
+      senderEmail,
+    );
+    const sends = stubOutboundSends();
+
+    await deliverReply({
+      threadId: providerThreadId,
+      from: senderEmail,
+      text: `First reply.\n\nQuoted:${quotedFooter}`,
+    });
+    expect(await isAccountVerified(user.id)).toBe(true);
+    expect((await loadProofByToken(token))?.consumedAt).not.toBeNull();
+
+    // The same token quoted again is not a second verification; the sender is
+    // simply verified now, so the follow-up is admitted on its own.
+    await deliverReply({
+      threadId: providerThreadId,
+      from: senderEmail,
+      text: `Second reply.\n\nQuoted:${quotedFooter}`,
+    });
+    const turns = await db.query.agentmailInboundTurns.findMany({
+      where: eq(agentmailInboundTurns.conversationId, conversation.id),
+    });
+    expect(turns).toHaveLength(2);
+    expect(sends.count).toBe(0);
+  });
+
+  it('does not verify after membership is removed', async () => {
+    const { user, senderEmail } = await createUnverifiedSender();
+    const providerThreadId = `thread-${randomUUID()}`;
+    await createOutboundThread(user.id, providerThreadId);
+    const { token, quotedFooter } = await createReplyProof(
+      user.id,
+      senderEmail,
+    );
+    await db
+      .update(users)
+      .set({ deletedAt: new Date() })
+      .where(eq(users.id, user.id));
+    const sends = stubOutboundSends();
+
+    await deliverReply({
+      threadId: providerThreadId,
+      from: senderEmail,
+      text: `Reply.\n\nQuoted:${quotedFooter}`,
+    });
+
+    expect(await isAccountVerified(user.id)).toBe(false);
+    expect((await loadProofByToken(token))?.consumedAt).toBeNull();
+    expect(sends.count).toBe(1);
+  });
+
+  it('does not verify when the reply fails DMARC', async () => {
+    const { user, senderEmail } = await createUnverifiedSender();
+    const providerThreadId = `thread-${randomUUID()}`;
+    await createOutboundThread(user.id, providerThreadId);
+    const { token, quotedFooter } = await createReplyProof(
+      user.id,
+      senderEmail,
+    );
+    const sends = stubOutboundSends();
+
+    await deliverReply({
+      threadId: providerThreadId,
+      from: senderEmail,
+      text: `Reply.\n\nQuoted:${quotedFooter}`,
+      authenticationResults: { spf: 'fail', dkim: 'pass', dmarc: 'fail' },
+    });
+
+    expect(await isAccountVerified(user.id)).toBe(false);
+    expect((await loadProofByToken(token))?.consumedAt).toBeNull();
+    expect(sends.count).toBe(0);
+  });
+
+  it('does not verify unsolicited mail that quotes a live token', async () => {
+    const { user, senderEmail } = await createUnverifiedSender();
+    const providerThreadId = `thread-${randomUUID()}`;
+    await createOutboundThread(user.id, providerThreadId);
+    const { token, quotedFooter } = await createReplyProof(
+      user.id,
+      senderEmail,
+    );
+    const sends = stubOutboundSends();
+
+    // A brand-new thread has no Roomote conversation the account participates
+    // in, so even a genuine token verifies nothing here.
+    await deliverReply({
+      threadId: `thread-${randomUUID()}`,
+      from: senderEmail,
+      text: `Unsolicited request.\n\nQuoted:${quotedFooter}`,
+    });
+
+    expect(await isAccountVerified(user.id)).toBe(false);
+    expect((await loadProofByToken(token))?.consumedAt).toBeNull();
+    expect(sends.count).toBe(1);
+  });
+
+  it('does not verify when the account address changed after the proof was sent', async () => {
+    const { user, senderEmail } = await createUnverifiedSender();
+    const providerThreadId = `thread-${randomUUID()}`;
+    await createOutboundThread(user.id, providerThreadId);
+    const { token, quotedFooter } = await createReplyProof(
+      user.id,
+      senderEmail,
+    );
+    const newAddress = `${randomUUID()}@example.com`;
+    await db
+      .update(authUsers)
+      .set({ email: newAddress })
+      .where(eq(authUsers.id, user.id));
+    const sends = stubOutboundSends();
+
+    await deliverReply({
+      threadId: providerThreadId,
+      from: newAddress,
+      text: `Reply.\n\nQuoted:${quotedFooter}`,
+    });
+
+    expect(await isAccountVerified(user.id)).toBe(false);
+    expect((await loadProofByToken(token))?.consumedAt).toBeNull();
+    expect(sends.count).toBe(1);
+  });
+});
 describe('agentmail inbound turn drain (real database)', () => {
   beforeAll(() => {
     process.env.R_EMAIL_CHANNEL_ENABLED = 'true';
