@@ -1515,7 +1515,7 @@ describe('SlackNotifier', () => {
       expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(1);
     });
 
-    it('does not share an in-flight request across retry budgets', async () => {
+    it('isolates retry budgets while reusing a fresh response after delay', async () => {
       vi.useFakeTimers();
       vi.spyOn(Math, 'random').mockReturnValue(0);
 
@@ -1532,14 +1532,6 @@ describe('SlackNotifier', () => {
             Response.json({
               ok: true,
               messages: [{ ts: '111.000' }],
-            }),
-          )
-          .mockResolvedValueOnce(
-            Response.json({
-              ok: true,
-              messages: [
-                { ts: '111.000', type: 'message', bot_id: 'B123', blocks: [] },
-              ],
             }),
           );
 
@@ -1560,7 +1552,7 @@ describe('SlackNotifier', () => {
         await expect(existsPromise).resolves.toBe(true);
         await vi.advanceTimersByTimeAsync(1_000);
         await expect(blocksPromise).resolves.toEqual([]);
-        expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(3);
+        expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(2);
       } finally {
         vi.useRealTimers();
       }

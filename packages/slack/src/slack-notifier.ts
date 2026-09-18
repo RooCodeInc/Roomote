@@ -128,7 +128,7 @@ const MAX_SLACK_CONVERSATIONS_REPLIES_RATE_LIMIT_RETRIES = 3;
 const MAX_SLACK_CONVERSATIONS_REPLIES_RATE_LIMIT_WAIT_MS = 60_000;
 const DEFAULT_SLACK_CONVERSATIONS_REPLIES_BACKOFF_MS = 1_000;
 const SLACK_CONVERSATIONS_REPLIES_JITTER_MS = 250;
-const SLACK_CONVERSATIONS_REPLIES_CACHE_TTL_MS = 1_000;
+const SLACK_CONVERSATIONS_REPLIES_CACHE_TTL_MS = 2_000;
 const MAX_SLACK_CONVERSATIONS_REPLIES_CACHE_ENTRIES = 32;
 const MAX_SLACK_UPDATE_RETRIES = 2;
 const SLACK_UPDATE_RETRY_DELAY_MS = 250;
@@ -2269,11 +2269,16 @@ export class SlackNotifier {
         ? 1
         : MAX_SLACK_CONVERSATIONS_REPLIES_RATE_LIMIT_RETRIES;
     const requestKey = `${cacheKey}:retries=${maxRateLimitRetries}`;
-    const cached = this.threadResponseCache.get(cacheKey);
-    if (cached) {
+    const getCachedResponse = (): SlackApiThreadResponse | null => {
+      const cached = this.threadResponseCache.get(cacheKey);
+      if (!cached) return null;
       if (cached.expiresAt > Date.now()) return cached.response;
       this.threadResponseCache.delete(cacheKey);
-    }
+      return null;
+    };
+
+    const cached = getCachedResponse();
+    if (cached) return cached;
 
     const pending = this.threadResponseRequests.get(requestKey);
     if (pending) return pending;
@@ -2285,6 +2290,11 @@ export class SlackNotifier {
         retryCount += 1
       ) {
         try {
+          if (retryCount > 0) {
+            const cached = getCachedResponse();
+            if (cached) return cached;
+          }
+
           const response = await slackFetch(
             `${buildSlackApiUrl('conversations.replies')}?${query.toString()}`,
             {
