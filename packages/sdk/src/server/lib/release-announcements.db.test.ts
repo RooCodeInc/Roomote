@@ -358,35 +358,35 @@ describe('release announcement delivery', () => {
         textFormat: 'markdown',
         blocks: [
           expect.objectContaining({
-            type: 'context',
-            elements: expect.arrayContaining([
+            type: 'container',
+            icon: expect.objectContaining({
+              image_url: expect.stringContaining(
+                '/automation-icons/megaphone.png',
+              ),
+              alt_text: 'Announce Roomote Updates automation icon',
+            }),
+            title: expect.objectContaining({
+              type: 'plain_text',
+              text: 'Announce Roomote Updates',
+            }),
+            child_blocks: expect.arrayContaining([
+              expect.objectContaining({ type: 'rich_text' }),
               expect.objectContaining({
-                image_url: expect.stringContaining(
-                  '/automation-icons/megaphone.png',
-                ),
-                alt_text: 'Announce Roomote Updates automation icon',
-              }),
-              expect.objectContaining({
-                type: 'plain_text',
-                text: 'Announce Roomote Updates',
-              }),
-            ]),
-          }),
-          expect.objectContaining({
-            type: 'markdown',
-            text: expect.stringContaining("What's new in Roomote v1.2.0"),
-          }),
-          expect.objectContaining({
-            type: 'actions',
-            elements: expect.arrayContaining([
-              expect.objectContaining({
-                action_id: 'late_bound_automation_configure',
-                text: expect.objectContaining({ text: 'Configure' }),
+                type: 'actions',
+                elements: expect.arrayContaining([
+                  expect.objectContaining({
+                    action_id: 'late_bound_automation_configure',
+                    text: expect.objectContaining({ text: 'Configure' }),
+                  }),
+                ]),
               }),
             ]),
           }),
         ],
       }),
+    );
+    expect(JSON.stringify(message?.blocks)).toContain(
+      "What's new in Roomote v1.2.0",
     );
   });
 
