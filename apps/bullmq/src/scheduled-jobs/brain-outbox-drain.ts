@@ -1317,7 +1317,7 @@ export function buildPullRequestFactPage(fact: {
           ...changedFiles.map((path) => `- ${path}`),
           ...(fileCount > changedFiles.length
             ? [
-                `- … and ${fileCount - changedFiles.length}${filesCapped ? ' or more' : ''} more`,
+                `- … and ${fileCount - changedFiles.length} ${filesCapped ? 'or more' : 'more'}`,
               ]
             : []),
           ...(filesCapped
