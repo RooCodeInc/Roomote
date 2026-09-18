@@ -34,6 +34,7 @@ describe('reportToParentSession', () => {
     mocks.findRun.mockResolvedValue({
       id: 42,
       taskId: 'task-1',
+      actingUserId: 'u1',
       payload: { fastAgentParent: parent },
     });
     mocks.enqueueParentEvent.mockResolvedValue({ queued: true });
@@ -66,6 +67,7 @@ describe('reportToParentSession', () => {
         type: 'child_message',
         taskId: 'task-1',
         runId: 42,
+        actingUserId: 'u1',
         messageId: expect.stringMatching(/^[a-f0-9]{64}$/),
         admittedAtMs: expect.any(Number),
         purpose: 'progress',
