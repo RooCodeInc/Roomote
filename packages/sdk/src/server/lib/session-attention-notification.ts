@@ -8,6 +8,7 @@ import {
   desc,
   eq,
   getUserChatInitiationProvider,
+  isDeploymentExperimentEnabled,
   getSessionForTask,
   gt,
   isNotNull,
@@ -24,7 +25,11 @@ import {
   fastAgentMessages,
   users,
 } from '@roomote/db/server';
-import { isSessionUserPresent, isSessionVoiceCallActive } from '@roomote/redis';
+import {
+  getSessionBrowserAttentionCapabilities,
+  isSessionUserPresent,
+  isSessionVoiceCallActive,
+} from '@roomote/redis';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   extractAcpMessageText,
@@ -47,13 +52,16 @@ import { buildDeterministicMessageId } from './deterministic-message-id';
 
 const DELIVERY_LEASE_MS = 2 * 60 * 1_000;
 const RECOVERY_DELAY_MS = DELIVERY_LEASE_MS + 5_000;
+const BROWSER_ATTENTION_FALLBACK_MS = 10_000;
 const SHORT_WEB_GAP_MAX_MESSAGES = 4;
 
 type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 export type SessionAttentionKind = 'result_ready' | 'input_needed';
+export type SessionAttentionPresentationKind = 'response' | 'error' | 'input';
 export type SessionAttentionNotificationResult =
   | 'delivered'
+  | 'deferred'
   | 'skipped'
   | 'already_claimed'
   | 'not_applicable'
@@ -63,7 +71,9 @@ type NotificationSubject = {
   sessionId: string;
   userId: string;
   eventKey: string;
+  sourceEventId: string;
   kind: SessionAttentionKind;
+  presentationKind: SessionAttentionPresentationKind;
   taskId?: string;
   runId?: number;
   message?: string;
@@ -71,6 +81,34 @@ type NotificationSubject = {
   fastEventId?: string;
   initialPrompt?: string | null;
 };
+
+async function recordNotification(subject: NotificationSubject) {
+  const [inserted] = await db
+    .insert(sessionAttentionNotifications)
+    .values({
+      sessionId: subject.sessionId,
+      userId: subject.userId,
+      eventKey: subject.eventKey,
+      kind: subject.kind,
+      presentationKind: subject.presentationKind,
+      body: subject.message?.trim() || null,
+      taskId: subject.taskId ?? null,
+      runId: subject.runId ?? null,
+    })
+    .onConflictDoNothing()
+    .returning({
+      id: sessionAttentionNotifications.id,
+      outcome: sessionAttentionNotifications.outcome,
+    });
+  if (inserted) return inserted;
+  return db.query.sessionAttentionNotifications.findFirst({
+    where: and(
+      eq(sessionAttentionNotifications.sessionId, subject.sessionId),
+      eq(sessionAttentionNotifications.eventKey, subject.eventKey),
+    ),
+    columns: { id: true, outcome: true },
+  });
+}
 
 type SessionAttentionContinuation = {
   omittedMessageCount: number;
@@ -134,11 +172,13 @@ async function markOutcome(
   leaseToken: string,
   outcome: 'delivered' | 'skipped_present' | 'failed',
   executor: Pick<DbTransaction, 'update'>,
+  deliveryChannel?: 'browser' | 'personal_provider',
 ) {
   await executor
     .update(sessionAttentionNotifications)
     .set({
       outcome,
+      deliveryChannel: deliveryChannel ?? null,
       leaseToken: null,
       leaseExpiresAt: null,
       updatedAt: new Date(),
@@ -153,7 +193,9 @@ async function markOutcome(
 
 async function deliverNotification(
   subject: NotificationSubject,
+  options: { allowBrowserOffer: boolean } = { allowBrowserOffer: false },
 ): Promise<SessionAttentionNotificationResult> {
+  await recordNotification(subject);
   return db.transaction(async (tx) => {
     // Different attention events can settle concurrently. Serialize the
     // Session/recipient chain so each delivery observes the last successful
@@ -194,6 +236,71 @@ async function deliverNotification(
     if (voiceCallActive) {
       await markOutcome(claim.id, claim.leaseToken, 'skipped_present', tx);
       return 'skipped';
+    }
+
+    if (
+      options.allowBrowserOffer &&
+      (await isDeploymentExperimentEnabled('browserNotifications', tx))
+    ) {
+      const capabilities = await getSessionBrowserAttentionCapabilities({
+        sessionId: subject.sessionId,
+        userId: subject.userId,
+      }).catch(() => null);
+      if (capabilities?.granted.length) {
+        const now = new Date();
+        const offerExpiresAt = new Date(
+          now.getTime() + BROWSER_ATTENTION_FALLBACK_MS,
+        );
+        await tx
+          .update(sessionAttentionNotifications)
+          .set({
+            browserOfferedAt: now,
+            browserOfferExpiresAt: offerExpiresAt,
+            updatedAt: now,
+          })
+          .where(eq(sessionAttentionNotifications.id, claim.id));
+        const scheduled = await enqueueSessionAttentionNotification(
+          {
+            ...(subject.taskId && subject.runId !== undefined
+              ? {
+                  target: 'task' as const,
+                  runId: subject.runId,
+                  eventId: subject.sourceEventId,
+                  kind: subject.kind,
+                  presentationKind: subject.presentationKind,
+                  message: subject.message,
+                }
+              : {
+                  target: 'fast_session' as const,
+                  fastConversationId: subject.fastConversationId!,
+                  eventId: subject.fastEventId!,
+                  kind: subject.kind,
+                  presentationKind: subject.presentationKind,
+                  message: subject.message,
+                  manual: true,
+                }),
+            phase: 'browser_fallback',
+          },
+          { delay: BROWSER_ATTENTION_FALLBACK_MS },
+        );
+        if (scheduled) {
+          await tx
+            .update(sessionAttentionNotifications)
+            .set({ leaseToken: null, leaseExpiresAt: null })
+            .where(
+              and(
+                eq(sessionAttentionNotifications.id, claim.id),
+                eq(sessionAttentionNotifications.leaseToken, claim.leaseToken),
+              ),
+            );
+          return 'deferred';
+        }
+      } else if (capabilities?.default.length) {
+        await tx
+          .update(sessionAttentionNotifications)
+          .set({ browserPromptEligibleAt: new Date(), updatedAt: new Date() })
+          .where(eq(sessionAttentionNotifications.id, claim.id));
+      }
     }
 
     const responseText = subject.message?.trim();
@@ -257,6 +364,10 @@ async function deliverNotification(
       subject.userId,
       tx,
     );
+    if (!(await hasAnyUserDirectMessageIdentity(subject.userId))) {
+      await markOutcome(claim.id, claim.leaseToken, 'failed', tx);
+      return 'failed';
+    }
     const { receipts } = await sendUserDirectMessageBestEffortWithReceipts({
       userId: subject.userId,
       text: notificationText,
@@ -287,7 +398,13 @@ async function deliverNotification(
         })),
       )
       .onConflictDoNothing();
-    await markOutcome(claim.id, claim.leaseToken, 'delivered', tx);
+    await markOutcome(
+      claim.id,
+      claim.leaseToken,
+      'delivered',
+      tx,
+      'personal_provider',
+    );
     return 'delivered';
   });
 }
@@ -297,6 +414,7 @@ export async function notifyDirectWebTaskAttention(
     runId: number;
     eventId: string;
     kind: SessionAttentionKind;
+    presentationKind?: SessionAttentionPresentationKind;
     message?: string;
   },
   enqueueRetry = true,
@@ -331,10 +449,6 @@ export async function notifyDirectWebTaskAttention(
   }
   const session = await getSessionForTask(db, run.taskId);
   if (!session) return 'not_applicable';
-  if (!(await hasAnyUserDirectMessageIdentity(run.task.initiatorUserId))) {
-    return 'not_applicable';
-  }
-
   const recoveryScheduled = enqueueRetry
     ? await enqueueSessionAttentionNotification(
         { target: 'task', ...input },
@@ -342,18 +456,25 @@ export async function notifyDirectWebTaskAttention(
       )
     : true;
 
-  const result = await deliverNotification({
-    sessionId: session.id,
-    userId: run.task.initiatorUserId,
-    eventKey: `task:${run.id}:${input.kind}:${input.eventId}`,
-    kind: input.kind,
-    taskId: run.taskId,
-    runId: run.id,
-    initialPrompt: run.task.prompt,
-    message:
-      input.message ??
-      (await findTaskAttentionMessage(run.id, input.kind, input.eventId)),
-  });
+  const result = await deliverNotification(
+    {
+      sessionId: session.id,
+      userId: run.task.initiatorUserId,
+      eventKey: `task:${run.id}:${input.kind}:${input.eventId}`,
+      sourceEventId: input.eventId,
+      kind: input.kind,
+      presentationKind:
+        input.presentationKind ??
+        (input.kind === 'input_needed' ? 'input' : 'response'),
+      taskId: run.taskId,
+      runId: run.id,
+      initialPrompt: run.task.prompt,
+      message:
+        input.message ??
+        (await findTaskAttentionMessage(run.id, input.kind, input.eventId)),
+    },
+    { allowBrowserOffer: enqueueRetry },
+  );
   if (result === 'failed' && !recoveryScheduled) {
     await db
       .delete(sessionAttentionNotifications)
@@ -375,6 +496,7 @@ export async function notifyFastWebSessionAttention(
     fastConversationId: string;
     eventId: string;
     kind: SessionAttentionKind;
+    presentationKind?: SessionAttentionPresentationKind;
     message?: string;
     manual: boolean;
   },
@@ -397,24 +519,28 @@ export async function notifyFastWebSessionAttention(
   ) {
     return 'not_applicable';
   }
-  if (!(await hasAnyUserDirectMessageIdentity(session.ownerUserId))) {
-    return 'not_applicable';
-  }
   if (enqueueRetry) {
     await enqueueSessionAttentionNotification(
       { target: 'fast_session', ...input },
       { delay: RECOVERY_DELAY_MS },
     );
   }
-  const result = await deliverNotification({
-    sessionId: session.id,
-    userId: session.ownerUserId,
-    eventKey: `fast:${input.kind}:${input.eventId}`,
-    kind: input.kind,
-    message: input.message,
-    fastConversationId: input.fastConversationId,
-    fastEventId: input.eventId,
-  });
+  const result = await deliverNotification(
+    {
+      sessionId: session.id,
+      userId: session.ownerUserId,
+      eventKey: `fast:${input.kind}:${input.eventId}`,
+      sourceEventId: input.eventId,
+      kind: input.kind,
+      presentationKind:
+        input.presentationKind ??
+        (input.kind === 'input_needed' ? 'input' : 'response'),
+      message: input.message,
+      fastConversationId: input.fastConversationId,
+      fastEventId: input.eventId,
+    },
+    { allowBrowserOffer: enqueueRetry },
+  );
   return result;
 }
 
@@ -805,6 +931,148 @@ export async function processSessionAttentionNotificationJob(
   return job.target === 'task'
     ? notifyDirectWebTaskAttention(job, false)
     : notifyFastWebSessionAttention(job, false);
+}
+
+export type BrowserAttentionEvent = {
+  notificationId: string;
+  eventKey: string;
+  mode: 'notify' | 'prompt';
+  presentationKind: SessionAttentionPresentationKind;
+  title: string;
+  body: string;
+  href: string;
+  createdAt: Date;
+  offerExpiresAt: Date | null;
+};
+
+/** Returns browser attention events recorded after this tab opened. */
+export async function listSessionBrowserAttentionEvents(input: {
+  sessionId: string;
+  userId: string;
+  since: Date;
+}): Promise<BrowserAttentionEvent[]> {
+  const rows = await db
+    .select({
+      id: sessionAttentionNotifications.id,
+      eventKey: sessionAttentionNotifications.eventKey,
+      presentationKind: sessionAttentionNotifications.presentationKind,
+      body: sessionAttentionNotifications.body,
+      taskId: sessionAttentionNotifications.taskId,
+      outcome: sessionAttentionNotifications.outcome,
+      browserPromptEligibleAt:
+        sessionAttentionNotifications.browserPromptEligibleAt,
+      browserOfferedAt: sessionAttentionNotifications.browserOfferedAt,
+      browserOfferExpiresAt:
+        sessionAttentionNotifications.browserOfferExpiresAt,
+      browserAcceptedAt: sessionAttentionNotifications.browserAcceptedAt,
+      createdAt: sessionAttentionNotifications.createdAt,
+      sessionTitle: sessions.title,
+    })
+    .from(sessionAttentionNotifications)
+    .innerJoin(
+      sessions,
+      eq(sessions.id, sessionAttentionNotifications.sessionId),
+    )
+    .where(
+      and(
+        eq(sessionAttentionNotifications.sessionId, input.sessionId),
+        eq(sessionAttentionNotifications.userId, input.userId),
+        gt(sessionAttentionNotifications.createdAt, input.since),
+        or(
+          and(
+            isNotNull(sessionAttentionNotifications.browserOfferedAt),
+            isNull(sessionAttentionNotifications.browserAcceptedAt),
+            isNull(sessionAttentionNotifications.outcome),
+          ),
+          isNotNull(sessionAttentionNotifications.browserPromptEligibleAt),
+        ),
+      ),
+    )
+    .orderBy(asc(sessionAttentionNotifications.createdAt));
+
+  return rows.flatMap((row) => {
+    const presentationKind = row.presentationKind;
+    const body = row.body?.trim();
+    if (!presentationKind || !body) return [];
+    const notify =
+      row.browserOfferedAt !== null &&
+      row.browserAcceptedAt === null &&
+      row.outcome === null;
+    return [
+      {
+        notificationId: row.id,
+        eventKey: row.eventKey,
+        mode: notify ? ('notify' as const) : ('prompt' as const),
+        presentationKind,
+        title:
+          presentationKind === 'error'
+            ? 'I ran into a problem'
+            : presentationKind === 'input'
+              ? 'I need your input'
+              : row.sessionTitle || 'Roomote',
+        body,
+        href: row.taskId
+          ? `/task/${row.taskId}`
+          : `/sessions/${input.sessionId}`,
+        createdAt: row.createdAt,
+        offerExpiresAt: row.browserOfferExpiresAt,
+      },
+    ];
+  });
+}
+
+export async function acknowledgeSessionBrowserAttention(input: {
+  sessionId: string;
+  userId: string;
+  notificationId: string;
+  clientId: string;
+  action: 'accepted' | 'failed' | 'opened';
+}): Promise<'accepted' | 'recorded' | 'not_applicable'> {
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${`session-attention:${input.sessionId}:${input.userId}`}, 0))`,
+    );
+    if (input.action === 'opened') {
+      const updated = await tx
+        .update(sessionAttentionNotifications)
+        .set({ browserOpenedAt: new Date(), updatedAt: new Date() })
+        .where(
+          and(
+            eq(sessionAttentionNotifications.id, input.notificationId),
+            eq(sessionAttentionNotifications.sessionId, input.sessionId),
+            eq(sessionAttentionNotifications.userId, input.userId),
+            eq(sessionAttentionNotifications.deliveryChannel, 'browser'),
+          ),
+        )
+        .returning({ id: sessionAttentionNotifications.id });
+      return updated.length ? 'recorded' : 'not_applicable';
+    }
+    if (input.action === 'failed') return 'recorded';
+    const now = new Date();
+    const updated = await tx
+      .update(sessionAttentionNotifications)
+      .set({
+        outcome: 'delivered',
+        deliveryChannel: 'browser',
+        browserAcceptedAt: now,
+        browserClientId: input.clientId,
+        leaseToken: null,
+        leaseExpiresAt: null,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(sessionAttentionNotifications.id, input.notificationId),
+          eq(sessionAttentionNotifications.sessionId, input.sessionId),
+          eq(sessionAttentionNotifications.userId, input.userId),
+          isNull(sessionAttentionNotifications.outcome),
+          isNotNull(sessionAttentionNotifications.browserOfferedAt),
+          gt(sessionAttentionNotifications.browserOfferExpiresAt, now),
+        ),
+      )
+      .returning({ id: sessionAttentionNotifications.id });
+    return updated.length ? 'accepted' : 'not_applicable';
+  });
 }
 
 export async function hasTaskRunAttentionNotification(

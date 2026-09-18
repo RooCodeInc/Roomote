@@ -3155,11 +3155,13 @@ export async function answerFastAgentQuestion({
   let visibleUpdatePosted = false;
   let userAttention: {
     kind: 'result_ready' | 'input_needed';
+    presentationKind: 'response' | 'error' | 'input';
     eventId: string;
     message?: string;
     manual: boolean;
   } = {
     kind: 'result_ready',
+    presentationKind: 'response',
     eventId: turnId,
     // Human web turns and their delegated-task results are manual attention;
     // automation and scheduler platform events must never notify an absent user.
@@ -3755,6 +3757,8 @@ export async function answerFastAgentQuestion({
             replyWithImages.purpose === 'clarification'
               ? 'input_needed'
               : 'result_ready',
+          presentationKind:
+            replyWithImages.purpose === 'clarification' ? 'input' : 'response',
           eventId: turnId,
           message: replyWithImages.message,
           manual: userAttention.manual,
@@ -5508,6 +5512,7 @@ export async function answerFastAgentQuestion({
             });
             userAttention = {
               kind: 'input_needed',
+              presentationKind: 'input',
               eventId: requestId,
               message: questions
                 .map((question) => question.question)
@@ -5656,6 +5661,8 @@ export async function answerFastAgentQuestion({
             recordedCloseout.purpose === 'clarification'
               ? 'input_needed'
               : 'result_ready',
+          presentationKind:
+            recordedCloseout.purpose === 'clarification' ? 'input' : 'response',
           eventId: turnId,
           message: recordedCloseout.text,
           manual: userAttention.manual,
@@ -6490,7 +6497,11 @@ export async function answerFastAgentQuestion({
         inferenceRetryMessageIndex = undefined;
         inferenceRetryCanonicalEvent = undefined;
         lastVisibleMessage = message;
-        userAttention = { ...userAttention, message };
+        userAttention = {
+          ...userAttention,
+          presentationKind: 'error',
+          message,
+        };
         userAttentionReady = true;
       } catch (postError) {
         console.error(

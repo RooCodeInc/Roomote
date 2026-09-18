@@ -1193,6 +1193,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
     expect(notifyUserAttention).toHaveBeenCalledWith({
       kind: 'result_ready',
+      presentationKind: 'response',
       eventId: expect.any(String),
       message: 'It coordinates incoming requests.',
       manual: true,
@@ -2169,6 +2170,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       });
       expect(notifyUserAttention).toHaveBeenCalledWith({
         kind: 'input_needed',
+        presentationKind: 'input',
         eventId: expect.stringMatching(/^rui:/),
         message: 'Which tools would you like to connect?',
         manual: false,
@@ -6790,6 +6792,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(postReply).not.toHaveBeenCalled();
       expect(notifyUserAttention).toHaveBeenCalledWith({
         kind: 'result_ready',
+        presentationKind: 'response',
         eventId: expect.any(String),
         message: 'All done.',
         manual: true,
@@ -6819,6 +6822,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
       expect(notifyUserAttention).toHaveBeenCalledWith({
         kind: 'input_needed',
+        presentationKind: 'input',
         eventId: expect.any(String),
         message: 'Which environment?',
         manual: true,

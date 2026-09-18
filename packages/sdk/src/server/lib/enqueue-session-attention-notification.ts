@@ -9,16 +9,20 @@ export const SESSION_ATTENTION_NOTIFICATION_JOB =
 export type SessionAttentionNotificationJob =
   | {
       target: 'task';
+      phase?: 'recovery' | 'browser_fallback';
       runId: number;
       eventId: string;
       kind: SessionAttentionKind;
+      presentationKind?: import('./session-attention-notification').SessionAttentionPresentationKind;
       message?: string;
     }
   | {
       target: 'fast_session';
+      phase?: 'recovery' | 'browser_fallback';
       fastConversationId: string;
       eventId: string;
       kind: SessionAttentionKind;
+      presentationKind?: import('./session-attention-notification').SessionAttentionPresentationKind;
       message?: string;
       manual: boolean;
     };

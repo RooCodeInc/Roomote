@@ -58,6 +58,17 @@ available, and the standard footer moves to the latest supported message.
 Roomote skips the notification while the initiator is present in the Session or
 has an active Voice call there.
 
+When enabled by an administrator, Roomote first offers a desktop browser
+notification if the relevant Session or task page is still open in a background
+or unfocused tab. Permission is requested contextually after the first eligible
+attention event and only after you select **Enable notifications**; Roomote does
+not ask during setup or first run. If the browser does not accept the
+notification within ten seconds, permission is denied or unsupported, or the
+page is closed, Roomote continues through the configured personal-provider
+waterfall. Browser delivery only replaces that extra attention copy: normal
+replies continue in the Session or existing communication thread. Closed-page
+browser push is not supported.
+
 If you continue the conversation on the web and then leave again, the next
 notification in that same provider thread marks the messages that were not
 shown there. For gaps of up to four conversation messages, it also quotes the
