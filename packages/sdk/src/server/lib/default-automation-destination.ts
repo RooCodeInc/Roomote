@@ -3,7 +3,6 @@ import {
   db,
   deploymentSettings,
   eq,
-  getUserDefaultAutomationTarget,
   resolveDiscordRuntimeCredentials,
   resolveTeamsBotRuntimeCredentials,
   resolveTelegramRuntimeCredentials,
@@ -51,7 +50,6 @@ type DefaultAutomationTargetParams = {
   ownerUserId: string;
   capabilities: AutomationDestinationCapabilities;
   existingTarget?: OptionalAutomationTarget | null;
-  includePersonalPreference?: boolean;
   includeSharedChannels?: boolean;
   includeSetupHandoff?: boolean;
   client?: DatabaseOrTransaction;
@@ -59,15 +57,14 @@ type DefaultAutomationTargetParams = {
 
 /**
  * Selects a persisted default report target without replacing an existing
- * explicit target. An explicitly saved owner preference wins; otherwise
- * defaults follow the existing waterfall of usable configured channels, a
- * resolvable owner DM, supported Email, then no destination.
+ * explicit target. Defaults follow the existing waterfall of a usable
+ * deployment destination, a resolvable owner DM, supported Email, then no
+ * destination.
  */
 export async function resolveDefaultAutomationTarget({
   ownerUserId,
   capabilities,
   existingTarget,
-  includePersonalPreference = false,
   includeSharedChannels = true,
   includeSetupHandoff = false,
   client = db,
@@ -82,21 +79,6 @@ export async function resolveDefaultAutomationTarget({
     return supported ? existingTarget : null;
   }
 
-  const preferredTarget = includePersonalPreference
-    ? await getUserDefaultAutomationTarget(ownerUserId, client).catch(
-        () => null,
-      )
-    : null;
-  if (preferredTarget) {
-    const resolvedPreference = await resolvePreferredTarget({
-      target: preferredTarget,
-      ownerUserId,
-      capabilities,
-      client,
-    });
-    if (resolvedPreference) return resolvedPreference;
-  }
-
   const settings = includeSharedChannels
     ? await client.query.deploymentSettings
         .findFirst({
@@ -104,6 +86,7 @@ export async function resolveDefaultAutomationTarget({
           columns: {
             managerSlackChannelId: true,
             managerDiscordChannelId: true,
+            defaultAutomationTarget: true,
             setupNewState: true,
           },
         })
@@ -111,6 +94,14 @@ export async function resolveDefaultAutomationTarget({
     : null;
 
   const channelCandidates: AutomationTarget[] = [];
+  if (settings?.defaultAutomationTarget) {
+    const resolvedDefault = await resolveConfiguredTarget({
+      target: settings.defaultAutomationTarget,
+      capabilities,
+      client,
+    });
+    if (resolvedDefault) return resolvedDefault;
+  }
   if (settings?.managerSlackChannelId?.trim()) {
     channelCandidates.push({
       provider: 'slack',
@@ -246,29 +237,23 @@ export async function resolveDefaultAutomationTarget({
   }
 }
 
-async function resolvePreferredTarget({
+async function resolveConfiguredTarget({
   target,
-  ownerUserId,
   capabilities,
   client,
 }: {
   target: AutomationTarget;
-  ownerUserId: string;
   capabilities: AutomationDestinationCapabilities;
   client: DatabaseOrTransaction;
 }): Promise<AutomationTarget | null> {
   if (target.provider === 'email') {
-    if (
-      !capabilities.email ||
-      target.targetKind !== 'email_user' ||
-      target.externalRef !== ownerUserId
-    ) {
+    if (!capabilities.email || target.targetKind !== 'email_user') {
       return null;
     }
     const identityId = getAutomationTargetEmailIdentityId(target);
     if (!identityId) return null;
     const identities = await listAvailableAgentMailOutboundIdentities(
-      ownerUserId,
+      target.externalRef,
     ).catch(() => []);
     return identities.some((identity) => identity.id === identityId)
       ? target
@@ -281,8 +266,7 @@ async function resolvePreferredTarget({
     return resolveUsableChannelTarget(target, client);
   }
   if (
-    target.targetKind !== getAutomationTargetKind(provider, 'direct_message') ||
-    target.externalRef !== ownerUserId
+    target.targetKind !== getAutomationTargetKind(provider, 'direct_message')
   ) {
     return null;
   }
@@ -291,7 +275,10 @@ async function resolvePreferredTarget({
     await listConnectedCommunicationProviders().catch(() => []);
   if (!connectedProviders.includes(provider)) return null;
   try {
-    return (await findUserDirectMessageDestination(provider, ownerUserId))
+    return (await findUserDirectMessageDestination(
+      provider,
+      target.externalRef,
+    ))
       ? target
       : null;
   } catch {

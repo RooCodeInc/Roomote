@@ -16,6 +16,7 @@ import {
 } from '@roomote/types';
 import {
   buildDestinationTaskPayloadFields,
+  hasAutomationEmailTarget,
   listConnectedCommunicationProviders,
   prepareAutomationReportDestination,
   resolveAutomationRuntimeDestination,
@@ -57,7 +58,7 @@ async function findEligibleDeployments(
   if (!(await hasAnyActiveRepository())) {
     return [];
   }
-  if (runtime.targets?.some((target) => target.provider === 'email')) {
+  if (hasAutomationEmailTarget(runtime)) {
     return [{ slackBotToken: null, slackTeamId: null }];
   }
 

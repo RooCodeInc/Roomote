@@ -2,7 +2,6 @@
 
 import { AutomationsSettings } from '@/components/settings/automations';
 import { CustomAutomationsSection } from '@/components/settings/automations/CustomAutomationsSection';
-import { AutomationDefaultDestinationSetting } from '@/components/settings/automations/AutomationDefaultDestinationSetting';
 import { DeploymentTimeZoneSetting } from '@/components/settings/DeploymentTimeZoneSetting';
 import { useAuthorizedUser } from '@/hooks/useUser';
 import { DOCS_COOKBOOK_URL } from '@/lib/docs';
@@ -36,9 +35,7 @@ export function AutomationsSettingsPage() {
         {isAdmin ? (
           <AutomationsSettings toolbarLeading={<DeploymentTimeZoneSetting />} />
         ) : (
-          <CustomAutomationsSection
-            toolbarLeading={<AutomationDefaultDestinationSetting />}
-          />
+          <CustomAutomationsSection />
         )}
       </div>
     </div>

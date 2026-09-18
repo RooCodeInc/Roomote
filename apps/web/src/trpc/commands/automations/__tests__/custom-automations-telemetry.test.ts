@@ -6,7 +6,6 @@ import {
   listCustomAutomationsCommand,
   getCustomAutomationOptionsCommand,
   triggerCustomAutomationCommand,
-  updateCustomAutomationDefaultDestinationCommand,
   updateCustomAutomationCommand,
 } from '../custom-automations';
 import { listSlackChannelsCommand } from '../slack-channels';
@@ -25,8 +24,6 @@ const mocks = vi.hoisted(() => ({
   canStartAgentMailConversationWithUser: vi.fn(),
   listAvailableAgentMailOutboundIdentities: vi.fn(),
   resolveDefaultAutomationTarget: vi.fn(),
-  getUserDefaultAutomationTarget: vi.fn(),
-  setUserDefaultAutomationTarget: vi.fn(),
   captureActivationCustomAutomationChanged: vi.fn(),
 }));
 
@@ -39,8 +36,6 @@ vi.mock('@roomote/db/server', async (importOriginal) => ({
   getBackgroundAgentSettingsForDeployment:
     mocks.getBackgroundAgentSettingsForDeployment,
   updateCustomAutomation: mocks.updateCustomAutomation,
-  getUserDefaultAutomationTarget: mocks.getUserDefaultAutomationTarget,
-  setUserDefaultAutomationTarget: mocks.setUserDefaultAutomationTarget,
 }));
 
 vi.mock('@roomote/sdk/server', async (importOriginal) => ({
@@ -111,7 +106,6 @@ describe('custom automation activation telemetry', () => {
     mocks.canStartAgentMailConversationWithUser.mockResolvedValue(false);
     mocks.listAvailableAgentMailOutboundIdentities.mockResolvedValue([]);
     mocks.resolveDefaultAutomationTarget.mockResolvedValue(null);
-    mocks.getUserDefaultAutomationTarget.mockResolvedValue(null);
   });
 
   it('tracks creation with only the destination provider classification', async () => {
@@ -282,7 +276,6 @@ describe('custom automation ownership', () => {
     mocks.canStartAgentMailConversationWithUser.mockResolvedValue(false);
     mocks.listAvailableAgentMailOutboundIdentities.mockResolvedValue([]);
     mocks.resolveDefaultAutomationTarget.mockResolvedValue(null);
-    mocks.getUserDefaultAutomationTarget.mockResolvedValue(null);
   });
 
   it('returns only member-safe connection flags and timezone without reading admin settings', async () => {
@@ -305,7 +298,6 @@ describe('custom automation ownership', () => {
       },
       managerSlackChannelId: null,
       managerDiscordChannelId: null,
-      configuredDefaultTarget: null,
       defaultTarget: null,
       emailIdentities: [],
       effectiveTimeZone: 'America/New_York',
@@ -316,7 +308,6 @@ describe('custom automation ownership', () => {
     expect(mocks.resolveDefaultAutomationTarget).toHaveBeenCalledWith(
       expect.objectContaining({
         ownerUserId: 'member-1',
-        includePersonalPreference: true,
         includeSharedChannels: false,
       }),
     );
@@ -375,7 +366,6 @@ describe('custom automation ownership', () => {
       ],
       managerSlackChannelId: null,
       managerDiscordChannelId: null,
-      configuredDefaultTarget: null,
       defaultTarget: null,
       effectiveTimeZone: 'UTC',
     });
@@ -403,58 +393,11 @@ describe('custom automation ownership', () => {
         },
         managerSlackChannelId: 'private-slack',
         managerDiscordChannelId: 'private-discord',
-        configuredDefaultTarget: null,
         defaultTarget: null,
         emailIdentities: [],
         effectiveTimeZone: 'UTC',
       },
     );
-  });
-
-  it('saves member personal defaults only as DM or Email targets', async () => {
-    mocks.listConnectedCommunicationProviders.mockResolvedValue(['discord']);
-
-    await updateCustomAutomationDefaultDestinationCommand(memberAuth, {
-      targetProvider: 'discord',
-      targetMode: 'direct_message',
-    });
-
-    expect(mocks.setUserDefaultAutomationTarget).toHaveBeenCalledWith(
-      'member-1',
-      {
-        provider: 'discord',
-        targetKind: 'discord_user',
-        externalRef: 'member-1',
-      },
-    );
-
-    await expect(
-      updateCustomAutomationDefaultDestinationCommand(memberAuth, {
-        targetProvider: 'discord',
-        targetMode: 'channel',
-        targetChannelId: 'channel-1',
-      }),
-    ).rejects.toThrow('Personal defaults must use a DM or account email');
-    await expect(
-      updateCustomAutomationDefaultDestinationCommand(adminAuth, {
-        targetProvider: 'slack',
-        targetMode: 'channel',
-        targetChannelId: 'shared-channel',
-      }),
-    ).rejects.toThrow('Personal defaults must use a DM or account email');
-    expect(
-      mocks.getBackgroundAgentSettingsForDeployment,
-    ).not.toHaveBeenCalled();
-  });
-
-  it('clears a personal default without changing existing automations', async () => {
-    await updateCustomAutomationDefaultDestinationCommand(memberAuth, {});
-
-    expect(mocks.setUserDefaultAutomationTarget).toHaveBeenCalledWith(
-      'member-1',
-      null,
-    );
-    expect(mocks.updateCustomAutomation).not.toHaveBeenCalled();
   });
 
   it('continues denying bot-scoped channel catalogs to members', async () => {

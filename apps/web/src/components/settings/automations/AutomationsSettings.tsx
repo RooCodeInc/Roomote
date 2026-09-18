@@ -17,6 +17,7 @@ import {
   AUTOMATION_DESTINATION_DESCRIPTORS,
   type AutomationDestinationProvider,
   type AutomationDestinationEmailField,
+  type AutomationTarget,
   type BackgroundAutomationKey,
   type CommunicationProvider,
   communicationProviders,
@@ -86,7 +87,6 @@ import {
   buildManagerSlackChannelOptions,
   shouldShowManagerSlackChannelWarning,
 } from './channelOptions';
-import { ManagerChannelEditor } from './ManagerChannelEditor';
 
 import {
   Alert,
@@ -795,6 +795,7 @@ function mapSettingsToFormState(
     managerSlackChannelId: string | null;
     managerSlackChannelName?: string | null;
     managerDiscordChannelId: string | null;
+    defaultAutomationTarget: AutomationTarget | null;
     managerStatsFrequency: ManagerStatsFrequency;
     managerStatsSlackChannelId: string | null;
     managerStatsSlackChannelName?: string | null;
@@ -921,6 +922,23 @@ function mapSettingsToFormState(
     managerSlackChannel:
       settings.managerSlackChannelName ?? settings.managerSlackChannelId ?? '',
     managerDiscordChannel: settings.managerDiscordChannelId ?? '',
+    defaultDestinationProvider:
+      settings.defaultAutomationTarget?.provider === 'sentry'
+        ? 'none'
+        : (settings.defaultAutomationTarget?.provider ?? 'none'),
+    defaultDestinationMode:
+      settings.defaultAutomationTarget?.targetKind.endsWith('_user') ||
+      settings.defaultAutomationTarget?.provider === 'email'
+        ? 'direct_message'
+        : 'channel',
+    defaultDestinationChannelId:
+      settings.defaultAutomationTarget?.provider === 'email'
+        ? ((settings.defaultAutomationTarget.metadata?.emailIdentityId as
+            | string
+            | undefined) ?? '')
+        : settings.defaultAutomationTarget?.targetKind.endsWith('_user')
+          ? ''
+          : (settings.defaultAutomationTarget?.externalRef ?? ''),
     managerStatsFrequency: settings.managerStatsFrequency,
     managerStatsSlackChannel:
       settings.managerStatsSlackChannelName ??
@@ -2217,24 +2235,11 @@ export function AutomationsSettings({
       ),
     [formState?.channelAutoStartChannels],
   );
-  const managerChannelIsEnabled = Boolean(
-    formState?.managerSlackChannel.trim() ||
-    formState?.managerDiscordChannel.trim(),
-  );
+  const managerChannelIsEnabled =
+    formState?.defaultDestinationProvider !== 'none';
   const managerChannelConfigured = Boolean(
-    managerSlackChannelId || managerDiscordChannelId,
+    settingsQuery.data?.settings.defaultAutomationTarget,
   );
-  const sharedDestinationLabel = managerSlackChannelId
-    ? `Slack ${formState?.managerSlackChannel || managerSlackChannelId}`
-    : managerDiscordChannelId
-      ? `Discord ${
-          discordChannelsQuery.data?.channels.find(
-            (channel) => channel.id === managerDiscordChannelId,
-          )?.label ??
-          formState?.managerDiscordChannel ??
-          managerDiscordChannelId
-        }`
-      : null;
   const slackChannelChoices = useMemo(
     () => slackChannelsQuery.data?.channels ?? [],
     [slackChannelsQuery.data?.channels],
@@ -2442,16 +2447,6 @@ export function AutomationsSettings({
         slackChannelAccessWarnings.channelAutoStartSlackChannels,
       isDirty: isDirty.channelAutoStart,
     });
-  const showManagerChannelMigrationNote =
-    !formState?.managerSlackChannel &&
-    !formState?.managerDiscordChannel &&
-    new Set(
-      [
-        settingsQuery.data?.settings.suggesterSlackChannelId,
-        settingsQuery.data?.settings.announcerSlackChannelId,
-        settingsQuery.data?.settings.platformIssueSlackChannelId,
-      ].filter((value): value is string => Boolean(value)),
-    ).size > 1;
   const buildSlackDestinationOptions = useCallback(
     (selectedValue: string | null | undefined) =>
       buildManagerSlackChannelOptions({
@@ -2476,6 +2471,34 @@ export function AutomationsSettings({
     [emailOptions],
   );
   const discordConnected = capabilities?.discordConnected === true;
+  const defaultDestinationDiscordOptions = useMemo(() => {
+    const options = (discordChannelsQuery.data?.channels ?? []).map(
+      (channel) => ({
+        id: channel.id,
+        name: channel.name,
+        label: channel.label,
+      }),
+    );
+    const selectedChannelId =
+      formState?.defaultDestinationProvider === 'discord'
+        ? formState.defaultDestinationChannelId
+        : '';
+    return selectedChannelId &&
+      !options.some((option) => option.id === selectedChannelId)
+      ? [
+          ...options,
+          {
+            id: selectedChannelId,
+            name: selectedChannelId,
+            label: selectedChannelId,
+          },
+        ]
+      : options;
+  }, [
+    discordChannelsQuery.data?.channels,
+    formState?.defaultDestinationChannelId,
+    formState?.defaultDestinationProvider,
+  ]);
   // Unprefixed catalog options for the auto-respond editor's Discord rows
   // (provider is explicit per row, unlike the shared destination combobox).
   // A persisted channel missing from the catalog stays selectable by raw id.
@@ -2962,70 +2985,57 @@ export function AutomationsSettings({
                 <Skeleton className="h-5 w-64" />
               ) : (
                 <AutomationDefaultDestinationSetting
-                  sharedDestinationLabel={sharedDestinationLabel}
-                  sharedEditor={
-                    <ManagerChannelEditor
-                      value={{
-                        slackChannel: formState.managerSlackChannel,
-                        discordChannel: formState.managerDiscordChannel,
-                      }}
-                      savedSlackChannel={savedState?.managerSlackChannel ?? ''}
-                      savedSlackChannelId={managerSlackChannelId}
-                      savedDiscordChannelId={managerDiscordChannelId}
-                      slackChannels={slackChannelsQuery.data?.channels ?? []}
-                      discordChannels={
-                        discordChannelsQuery.data?.channels ?? []
-                      }
-                      slackConnected={capabilities?.slackConnected === true}
-                      discordConnected={capabilities?.discordConnected === true}
-                      channelsPending={
-                        slackChannelsQuery.isPending ||
-                        discordChannelsQuery.isPending
-                      }
-                      channelsFetching={
-                        slackChannelsQuery.isFetching ||
-                        discordChannelsQuery.isFetching
-                      }
-                      channelsError={
-                        slackChannelsQuery.isError ||
-                        discordChannelsQuery.isError
-                      }
-                      isDirty={isDirty.managerChannel}
-                      isSaving={
-                        updateMutation.isPending &&
-                        savingAutomation === 'managerChannel'
-                      }
-                      warningChannelId={
-                        slackChannelAccessWarnings.managerSlackChannel
-                      }
-                      slackAppMention={slackAppMention}
-                      fieldError={
-                        fieldErrors.managerSlackChannel ??
-                        fieldErrors.managerDiscordChannel
-                      }
-                      showMigrationNote={showManagerChannelMigrationNote}
-                      alwaysEditing
-                      onChange={({ slackChannel, discordChannel }) =>
-                        setFormState((prev) =>
-                          prev
-                            ? {
-                                ...prev,
-                                managerSlackChannel: slackChannel,
-                                managerDiscordChannel: discordChannel,
-                              }
-                            : prev,
-                        )
-                      }
-                      onRefresh={() => {
-                        void Promise.all([
-                          slackChannelsQuery.refetch(),
-                          discordChannelsQuery.refetch(),
-                        ]);
-                      }}
-                      onSave={() => saveAgent('managerChannel')}
-                      onReset={() => resetAgent('managerChannel')}
-                    />
+                  value={{
+                    provider: formState.defaultDestinationProvider,
+                    mode: formState.defaultDestinationMode,
+                    channelId: formState.defaultDestinationChannelId,
+                  }}
+                  savedValue={{
+                    provider: savedState?.defaultDestinationProvider ?? 'none',
+                    mode: savedState?.defaultDestinationMode ?? 'channel',
+                    channelId: savedState?.defaultDestinationChannelId ?? '',
+                  }}
+                  availableProviders={availableDestinationProviders}
+                  slackOptions={buildSlackDestinationOptions(
+                    formState.defaultDestinationProvider === 'slack'
+                      ? formState.defaultDestinationChannelId
+                      : null,
+                  )}
+                  discordOptions={defaultDestinationDiscordOptions}
+                  emailOptions={buildEmailDestinationOptions(
+                    formState.defaultDestinationProvider === 'email'
+                      ? formState.defaultDestinationChannelId
+                      : null,
+                  )}
+                  isDirty={isDirty.managerChannel}
+                  isSaving={
+                    updateMutation.isPending &&
+                    savingAutomation === 'managerChannel'
                   }
+                  onChange={(destination) =>
+                    setFormState((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            defaultDestinationProvider: destination.provider,
+                            defaultDestinationMode: destination.mode,
+                            defaultDestinationChannelId: destination.channelId,
+                            managerSlackChannel:
+                              destination.provider === 'slack' &&
+                              destination.mode === 'channel'
+                                ? destination.channelId
+                                : '',
+                            managerDiscordChannel:
+                              destination.provider === 'discord' &&
+                              destination.mode === 'channel'
+                                ? destination.channelId
+                                : '',
+                          }
+                        : prev,
+                    )
+                  }
+                  onSave={() => saveAgent('managerChannel')}
+                  onReset={() => resetAgent('managerChannel')}
                 />
               )}
             </div>

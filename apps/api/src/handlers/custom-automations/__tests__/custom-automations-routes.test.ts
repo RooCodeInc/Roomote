@@ -514,7 +514,6 @@ describe('custom-automations MCP routes', () => {
       expect(mockResolveDefaultAutomationTarget).toHaveBeenCalledWith(
         expect.objectContaining({
           ownerUserId: 'member-1',
-          includePersonalPreference: true,
           includeSharedChannels: false,
         }),
       );

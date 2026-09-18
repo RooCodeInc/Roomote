@@ -9,9 +9,7 @@ import {
   getDeploymentTaskModelOptions,
   getBackgroundAgentSettingsForDeployment,
   getCustomAutomationById,
-  getUserDefaultAutomationTarget,
   listCustomAutomations,
-  setUserDefaultAutomationTarget,
   inArray,
   updateCustomAutomation,
   type CustomAutomation,
@@ -36,7 +34,6 @@ import {
   NO_REPOSITORIES,
   getAutomationTargetEmailIdentityId,
   getAutomationTargetKind,
-  isConfiguredAutomationTarget,
   isScheduleOnlyBackgroundAutomationFrequency,
   type AutomationTarget,
   type BackgroundAutomationProvider,
@@ -186,10 +183,7 @@ function toListItem(
 }
 
 function buildTarget(
-  input: Pick<
-    CustomAutomationWriteInput,
-    'targetProvider' | 'targetMode' | 'targetChannelId'
-  >,
+  input: CustomAutomationWriteInput,
   ownerUserId: string,
 ): OptionalAutomationTarget {
   if (!input.targetProvider) {
@@ -360,27 +354,19 @@ export async function getCustomAutomationOptionsCommand(
     ? await getOwnedAutomation(auth, input.automationId)
     : null;
   const ownerUserId = automation?.createdByUserId ?? auth.userId;
-  const [
-    providers,
-    emailIdentities,
-    { timeZone },
-    settings,
-    configuredDefaultTarget,
-    defaultTarget,
-  ] = await Promise.all([
-    listConnectedCommunicationProviders(),
-    listAvailableAgentMailOutboundIdentities(ownerUserId),
-    resolveDeploymentTimeZone(),
-    auth.isAdmin ? getBackgroundAgentSettingsForDeployment() : null,
-    getUserDefaultAutomationTarget(ownerUserId),
-    resolveDefaultAutomationTarget({
-      ownerUserId,
-      capabilities: CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
-      existingTarget: automation?.target,
-      includePersonalPreference: true,
-      includeSharedChannels: auth.isAdmin,
-    }),
-  ]);
+  const [providers, emailIdentities, { timeZone }, settings, defaultTarget] =
+    await Promise.all([
+      listConnectedCommunicationProviders(),
+      listAvailableAgentMailOutboundIdentities(ownerUserId),
+      resolveDeploymentTimeZone(),
+      auth.isAdmin ? getBackgroundAgentSettingsForDeployment() : null,
+      resolveDefaultAutomationTarget({
+        ownerUserId,
+        capabilities: CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
+        existingTarget: automation?.target,
+        includeSharedChannels: auth.isAdmin,
+      }),
+    ]);
 
   return {
     capabilities: {
@@ -394,36 +380,9 @@ export async function getCustomAutomationOptionsCommand(
     // Channel catalogs are bot-scoped, not evidence of a member's access.
     managerSlackChannelId: settings?.managerSlackChannelId ?? null,
     managerDiscordChannelId: settings?.managerDiscordChannelId ?? null,
-    configuredDefaultTarget,
     defaultTarget,
     effectiveTimeZone: timeZone,
   };
-}
-
-export async function updateCustomAutomationDefaultDestinationCommand(
-  auth: UserAuthSuccess,
-  input: Pick<
-    CustomAutomationWriteInput,
-    'targetProvider' | 'targetMode' | 'targetChannelId'
-  >,
-) {
-  const target = buildTarget(input, auth.userId);
-  if (target.provider && target.targetKind.endsWith('_channel')) {
-    throw new Error('Personal defaults must use a DM or account email.');
-  }
-  if (input.targetProvider) {
-    await assertDestinationConnected(
-      input.targetProvider,
-      auth.userId,
-      input.targetChannelId,
-    );
-  }
-
-  await setUserDefaultAutomationTarget(
-    auth.userId,
-    isConfiguredAutomationTarget(target) ? target : null,
-  );
-  return { success: true as const };
 }
 
 export async function createCustomAutomationCommand(

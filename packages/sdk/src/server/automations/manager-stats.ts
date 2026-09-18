@@ -171,10 +171,14 @@ async function findEligibleDeployments(
     return [];
   }
 
-  const emailTarget = runtime.targets.find(
-    (target) =>
-      target.provider === 'email' && target.targetKind === 'email_user',
-  );
+  const emailTarget =
+    runtime.targets.find(
+      (target) =>
+        target.provider === 'email' && target.targetKind === 'email_user',
+    ) ??
+    (runtime.defaultAutomationTarget?.provider === 'email'
+      ? runtime.defaultAutomationTarget
+      : null);
   if (emailTarget) {
     return [
       {

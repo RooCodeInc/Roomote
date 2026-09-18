@@ -128,9 +128,29 @@ describe('normalizeBackgroundAgentSettings channel auto-start', () => {
   it('projects the Discord manager channel', () => {
     const settings = normalizeBackgroundAgentSettings({
       managerDiscordChannelId: 'D-MANAGER',
-    } as Parameters<typeof normalizeBackgroundAgentSettings>[0]);
+    } as unknown as Parameters<typeof normalizeBackgroundAgentSettings>[0]);
 
     expect(settings.managerDiscordChannelId).toBe('D-MANAGER');
+    expect(settings.defaultAutomationTarget).toEqual({
+      provider: 'discord',
+      targetKind: 'discord_channel',
+      externalRef: 'D-MANAGER',
+    });
+  });
+
+  it('projects a concrete deployment Email default over legacy channels', () => {
+    const target = {
+      provider: 'email' as const,
+      targetKind: 'email_user' as const,
+      externalRef: 'admin-user',
+      metadata: { emailIdentityId: 'identity-1' },
+    };
+    const settings = normalizeBackgroundAgentSettings({
+      managerSlackChannelId: 'C-LEGACY',
+      defaultAutomationTarget: target,
+    } as unknown as Parameters<typeof normalizeBackgroundAgentSettings>[0]);
+
+    expect(settings.defaultAutomationTarget).toEqual(target);
   });
 
   it('projects Slack and Discord auto-respond rows separately, ordered by metadata', () => {

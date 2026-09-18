@@ -139,7 +139,9 @@ export function AutomationDestinationPicker({
       <Label htmlFor={id}>{label}</Label>
       <div className="grid gap-2">
         <Select
-          value={value.provider}
+          value={
+            value.provider === 'none' && !allowNone ? undefined : value.provider
+          }
           disabled={disabled}
           handoffTargetOnSelect={nextDestinationRef}
           onValueChange={(provider) =>
@@ -162,7 +164,7 @@ export function AutomationDestinationPicker({
             aria-label="Destination provider"
             className="w-full sm:max-w-52"
           >
-            <SelectValue />
+            <SelectValue placeholder={noneLabel} />
           </SelectTrigger>
           <SelectContent>
             {allowNone ? (

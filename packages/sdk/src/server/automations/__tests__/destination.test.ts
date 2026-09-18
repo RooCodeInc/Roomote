@@ -218,6 +218,55 @@ describe('resolveAutomationRuntimeDestination', () => {
     );
   });
 
+  it('resolves a deployment DM default when no explicit target exists', async () => {
+    mockFindUserDirectMessageDestination.mockResolvedValue({
+      channelId: 'discord-default-dm',
+    });
+
+    await expect(
+      resolveAutomationRuntimeDestination({
+        runtime: {
+          destination: null,
+          defaultAutomationTarget: {
+            provider: 'discord',
+            targetKind: 'discord_user',
+            externalRef: 'default-recipient',
+          },
+        },
+        slackConnected: false,
+      }),
+    ).resolves.toEqual({
+      provider: 'discord',
+      channelId: 'discord-default-dm',
+      source: 'manager_channel',
+    });
+  });
+
+  it('resolves a deployment email default when no explicit target exists', async () => {
+    mockCanStartAgentMailConversationWithUser.mockResolvedValue(true);
+
+    await expect(
+      resolveAutomationRuntimeDestination({
+        runtime: {
+          destination: null,
+          defaultAutomationTarget: {
+            provider: 'email',
+            targetKind: 'email_user',
+            externalRef: 'default-recipient',
+            metadata: { emailIdentityId: 'identity-1' },
+          },
+        },
+        slackConnected: false,
+      }),
+    ).resolves.toEqual({
+      provider: 'email',
+      channelId: 'default-recipient',
+      userId: 'default-recipient',
+      identityId: 'identity-1',
+      source: 'manager_channel',
+    });
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
   });

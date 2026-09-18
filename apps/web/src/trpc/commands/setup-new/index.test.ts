@@ -1363,56 +1363,77 @@ describe('setup recommendation commands', () => {
     expect(result?.applicationState).toBe('applied');
   });
 
-  it('defaults a built-in report only within its declared capabilities', async () => {
-    const reportTarget = {
-      provider: 'slack' as const,
-      targetKind: 'slack_channel' as const,
-      externalRef: 'C123',
-    };
-    mockResolveDefaultAutomationTarget.mockResolvedValue(reportTarget);
-    mockRecommendationTransaction({
-      automationRecommendations: {
-        version: 1,
-        inputFingerprint: 'recommendation-fingerprint',
-        catalogVersion: 1,
-        status: 'ready',
-        startedAt: new Date().toISOString(),
-        completedAt: new Date().toISOString(),
-        partial: false,
-        errorCode: null,
-        dismissed: false,
-        recommendations: [
-          {
-            id: 'built-in.ci-failure-triage:1',
-            candidateId: 'built-in.ci-failure-triage',
-            rank: 1,
-            score: 1,
-            explanation: 'Fix broken builds.',
-            enabled: true,
-            lastRunTaskId: null,
-            automationId: null,
-          },
-        ],
+  it.each([
+    [
+      'channel',
+      {
+        provider: 'slack' as const,
+        targetKind: 'slack_channel' as const,
+        externalRef: 'C123',
       },
-    });
+    ],
+    [
+      'DM',
+      {
+        provider: 'discord' as const,
+        targetKind: 'discord_user' as const,
+        externalRef: 'setup-test-user',
+      },
+    ],
+    [
+      'Email',
+      {
+        provider: 'email' as const,
+        targetKind: 'email_user' as const,
+        externalRef: 'setup-test-user',
+        metadata: { emailIdentityId: 'verified:setup-test-user:hash' },
+      },
+    ],
+  ])(
+    'applies a configured deployment %s to a supported recommended built-in',
+    async (_kind, reportTarget) => {
+      mockResolveDefaultAutomationTarget.mockResolvedValue(reportTarget);
+      mockRecommendationTransaction({
+        automationRecommendations: {
+          version: 1,
+          inputFingerprint: 'recommendation-fingerprint',
+          catalogVersion: 1,
+          status: 'ready',
+          startedAt: new Date().toISOString(),
+          completedAt: new Date().toISOString(),
+          partial: false,
+          errorCode: null,
+          dismissed: false,
+          recommendations: [
+            {
+              id: 'built-in.ci-failure-triage:1',
+              candidateId: 'built-in.ci-failure-triage',
+              rank: 1,
+              score: 1,
+              explanation: 'Fix broken builds.',
+              enabled: true,
+              lastRunTaskId: null,
+              automationId: null,
+            },
+          ],
+        },
+      });
 
-    await applySetupRecommendationsCommand(buildMockAuth());
+      await applySetupRecommendationsCommand(buildMockAuth());
 
-    expect(mockResolveDefaultAutomationTarget).toHaveBeenCalledWith(
-      expect.objectContaining({
-        capabilities: expect.objectContaining({ email: false }),
-      }),
-    );
-    expect(mockResolveDefaultAutomationTarget).not.toHaveBeenCalledWith(
-      expect.objectContaining({ includePersonalPreference: true }),
-    );
-    expect(mockUpsertAutomation).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ targets: [reportTarget] }),
-    );
-  });
+      expect(mockResolveDefaultAutomationTarget).toHaveBeenCalledWith(
+        expect.objectContaining({
+          capabilities: expect.objectContaining({ email: true }),
+        }),
+      );
+      expect(mockUpsertAutomation).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ targets: [reportTarget] }),
+      );
+    },
+  );
 
-  it('uses the shared default for a recommended custom automation', async () => {
+  it('applies a configured deployment email to a recommended custom automation', async () => {
     const reportTarget = {
       provider: 'email' as const,
       targetKind: 'email_user' as const,
@@ -1451,7 +1472,6 @@ describe('setup recommendation commands', () => {
     expect(mockResolveDefaultAutomationTarget).toHaveBeenCalledWith(
       expect.objectContaining({
         ownerUserId: 'setup-test-user',
-        includePersonalPreference: true,
         includeSetupHandoff: true,
       }),
     );

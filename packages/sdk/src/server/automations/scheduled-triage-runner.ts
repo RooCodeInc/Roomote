@@ -11,6 +11,7 @@ import { TaskPayloadKind, type SuggestedTasksTask } from '@roomote/types';
 
 import {
   buildDestinationTaskPayloadFields,
+  hasAutomationEmailTarget,
   listConnectedCommunicationProviders,
   prepareAutomationReportDestination,
   resolveAutomationRuntimeDestination,
@@ -69,7 +70,7 @@ type ScheduledTriageAutomationConfig = {
 async function findEligibleDeploymentContexts(
   runtime: Pick<AutomationRuntime, 'targets'>,
 ): Promise<TriageDeploymentContext[]> {
-  if (runtime.targets?.some((target) => target.provider === 'email')) {
+  if (hasAutomationEmailTarget(runtime)) {
     return [{ slackBotToken: null, slackTeamId: null }];
   }
   const rows = await db

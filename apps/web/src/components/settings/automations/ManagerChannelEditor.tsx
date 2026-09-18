@@ -58,7 +58,6 @@ export function ManagerChannelEditor({
   slackAppMention,
   fieldError,
   showMigrationNote,
-  alwaysEditing = false,
   onChange,
   onRefresh,
   onSave,
@@ -81,7 +80,6 @@ export function ManagerChannelEditor({
   slackAppMention: string;
   fieldError?: string;
   showMigrationNote: boolean;
-  alwaysEditing?: boolean;
   onChange: (value: ManagerChannelValue) => void;
   onRefresh: () => void;
   onSave: () => void;
@@ -153,26 +151,20 @@ export function ManagerChannelEditor({
     slackChannels,
     discordChannels,
   });
-  const showForm = alwaysEditing || !configured || isEditing || isDirty;
+  const showForm = !configured || isEditing || isDirty;
 
   useEffect(() => {
-    if (
-      !alwaysEditing &&
-      wasSaving.current &&
-      !isSaving &&
-      !isDirty &&
-      configured
-    ) {
+    if (wasSaving.current && !isSaving && !isDirty && configured) {
       setIsEditing(false);
       setIsEnteringCustomChannel(false);
     }
     wasSaving.current = isSaving;
-  }, [alwaysEditing, configured, isDirty, isSaving]);
+  }, [configured, isDirty, isSaving]);
 
   if (!showForm) {
     return (
       <p className="text-sm text-muted-foreground">
-        Default destination:{' '}
+        Posting manager-facing updates to{' '}
         <Button
           type="button"
           variant="link"
@@ -188,10 +180,11 @@ export function ManagerChannelEditor({
 
   return (
     <div className="space-y-2">
-      <Label htmlFor="manager-channel">Shared channel</Label>
+      <Label htmlFor="manager-channel">
+        Where should Roomote post manager-facing updates?
+      </Label>
       <p className="text-sm text-muted-foreground">
-        Used across the deployment by built-in automations without an explicit
-        destination. Make sure the Roomote app is added to the channel.
+        Make sure the Roomote app is added to the channel.
       </p>
       <div className="max-w-md space-y-2">
         <div className="flex items-center gap-2">
@@ -330,8 +323,8 @@ export function ManagerChannelEditor({
         <Alert variant="light">
           <AlertDescription>
             Some older automations still point at different Slack channels. Pick
-            the shared default here to migrate future manager-facing posts onto
-            one destination.
+            the shared Manager Channel here to migrate future manager-facing
+            posts onto one destination.
           </AlertDescription>
         </Alert>
       ) : null}
@@ -367,7 +360,7 @@ export function ManagerChannelEditor({
             </Button>
           </div>
         ) : null}
-        {!alwaysEditing && configured && isEditing && !isDirty ? (
+        {configured && isEditing && !isDirty ? (
           <Button
             variant="outline"
             size="sm"

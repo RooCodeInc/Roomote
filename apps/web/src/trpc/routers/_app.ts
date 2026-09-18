@@ -425,7 +425,6 @@ import {
   resolveCustomAutomationScheduleCommand,
   listSlackChannelsCommand,
   triggerCustomAutomationCommand,
-  updateCustomAutomationDefaultDestinationCommand,
   updateBackgroundAgentSettingsCommand,
   triggerAutomationCommand,
   updateCustomAutomationCommand,
@@ -721,6 +720,19 @@ const automationsRouter = createRouter({
           .max(160)
           .nullable()
           .optional(),
+        defaultDestinationProvider: z
+          .enum(['slack', 'discord', 'teams', 'telegram', 'email'])
+          .nullable()
+          .optional(),
+        defaultDestinationMode: z
+          .enum(['channel', 'direct_message'])
+          .optional(),
+        defaultDestinationChannelId: z
+          .string()
+          .trim()
+          .max(255)
+          .nullable()
+          .optional(),
         managerStatsFrequency: z.enum(['off', 'weekly']),
         managerStatsSlackChannel: z.string().trim().min(1).max(160).nullable(),
         managerStatsDiscordChannel: z
@@ -911,20 +923,6 @@ const automationsRouter = createRouter({
     .input(z.object({ automationId: z.string().uuid().optional() }).optional())
     .query(({ ctx: { auth }, input }) =>
       getCustomAutomationOptionsCommand(auth, input ?? {}),
-    ),
-
-  updateCustomAutomationDefaultDestination: protectedProcedure
-    .input(
-      z.object({
-        targetProvider: z
-          .enum(['slack', 'discord', 'teams', 'telegram', 'email'])
-          .optional(),
-        targetMode: z.enum(['channel', 'direct_message']).optional(),
-        targetChannelId: z.string().trim().max(255).optional(),
-      }),
-    )
-    .mutation(({ ctx: { auth }, input }) =>
-      updateCustomAutomationDefaultDestinationCommand(auth, input),
     ),
 
   createCustomAutomation: protectedProcedure

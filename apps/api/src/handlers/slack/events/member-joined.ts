@@ -63,19 +63,37 @@ export async function maybePostSlackChannelWelcome(params: {
   if (
     !settings?.managerSlackChannelId &&
     !settings?.managerDiscordChannelId &&
+    !settings?.defaultAutomationTarget &&
     publicChannelName?.toLowerCase() === MANAGER_CHANNEL_CANDIDATE_NAME
   ) {
     const now = new Date();
     const [registered] = await db
       .insert(deploymentSettings)
-      .values({ managerSlackChannelId: event.channel, updatedAt: now })
+      .values({
+        managerSlackChannelId: event.channel,
+        defaultAutomationTarget: {
+          provider: 'slack',
+          targetKind: 'slack_channel',
+          externalRef: event.channel,
+        },
+        updatedAt: now,
+      })
       .onConflictDoUpdate({
         target: deploymentSettings.id,
-        set: { managerSlackChannelId: event.channel, updatedAt: now },
+        set: {
+          managerSlackChannelId: event.channel,
+          defaultAutomationTarget: {
+            provider: 'slack',
+            targetKind: 'slack_channel',
+            externalRef: event.channel,
+          },
+          updatedAt: now,
+        },
         // A destination may have been chosen after the settings read.
         setWhere: and(
           isNull(deploymentSettings.managerSlackChannelId),
           isNull(deploymentSettings.managerDiscordChannelId),
+          isNull(deploymentSettings.defaultAutomationTarget),
         ),
       })
       .returning({ id: deploymentSettings.id });

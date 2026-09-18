@@ -301,6 +301,9 @@ export interface UpdateBackgroundAgentSettingsInput
   channelAutoStartInstructions?: string | null;
   managerSlackChannel?: string | null;
   managerDiscordChannel?: string | null;
+  defaultDestinationProvider?: AutomationDestinationProvider | null;
+  defaultDestinationMode?: 'channel' | 'direct_message';
+  defaultDestinationChannelId?: string | null;
   managerStatsFrequency?: ManagerStatsFrequency;
   managerStatsSlackChannel?: string | null;
   managerStatsDiscordChannel?: string | null;

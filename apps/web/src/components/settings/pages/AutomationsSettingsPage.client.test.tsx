@@ -33,15 +33,6 @@ vi.mock('@/components/settings/DeploymentTimeZoneSetting', () => ({
   DeploymentTimeZoneSetting: () => <div>Deployment timezone controls</div>,
 }));
 
-vi.mock(
-  '@/components/settings/automations/AutomationDefaultDestinationSetting',
-  () => ({
-    AutomationDefaultDestinationSetting: () => (
-      <div>Automation default destination controls</div>
-    ),
-  }),
-);
-
 import AutomationsPage from '@/app/(authenticated)/automations/page';
 
 describe('Automations page access', () => {
@@ -61,9 +52,6 @@ describe('Automations page access', () => {
     expect(
       screen.queryByText('Deployment timezone controls'),
     ).not.toBeInTheDocument();
-    expect(
-      screen.getByText('Automation default destination controls'),
-    ).toBeInTheDocument();
   });
 
   it('preserves the full view and deployment timezone controls for admins', () => {
@@ -74,9 +62,6 @@ describe('Automations page access', () => {
     expect(
       screen.getByText('Deployment timezone controls'),
     ).toBeInTheDocument();
-    expect(
-      screen.queryByText('Automation default destination controls'),
-    ).not.toBeInTheDocument();
     expect(
       screen.queryByText('Custom automation management'),
     ).not.toBeInTheDocument();

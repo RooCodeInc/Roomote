@@ -108,6 +108,7 @@ import {
   type TaskModelSettings,
   AUTOMATION_RECOMMENDATIONS_CATALOG_VERSION,
   AUTOMATION_RECOMMENDATION_CATALOG,
+  AUTOMATION_DESTINATION_DESCRIPTORS,
   ALL_REPOSITORIES,
   getTriggerableBackgroundAutomationDescriptorByKey,
   isAutomationDestinationTarget,
@@ -2623,7 +2624,10 @@ async function applySetupRecommendationInTx(
             ownerUserId: auth.userId,
             capabilities: {
               chatProviders: descriptor.supportedCommunicationProviders,
-              email: false,
+              email: AUTOMATION_DESTINATION_DESCRIPTORS.some(
+                (destination) =>
+                  destination.automationKey === candidate.automationKey,
+              ),
             },
             includeSetupHandoff: true,
             client: tx,
@@ -2650,7 +2654,6 @@ async function applySetupRecommendationInTx(
       ? await resolveDefaultAutomationTarget({
           ownerUserId: existing?.createdByUserId ?? auth.userId,
           capabilities: CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
-          includePersonalPreference: true,
           includeSetupHandoff: true,
           client: tx,
         })

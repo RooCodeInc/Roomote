@@ -338,6 +338,31 @@ export function resolveAutomationSlackChannelId(
   return getAutomationSlackChannelTarget(automation) ?? managerSlackChannelId;
 }
 
+function getLegacyDefaultAutomationTarget(
+  settings:
+    | {
+        managerSlackChannelId?: string | null;
+        managerDiscordChannelId?: string | null;
+      }
+    | null
+    | undefined,
+): AutomationTarget | null {
+  if (settings?.managerSlackChannelId) {
+    return {
+      provider: 'slack',
+      targetKind: 'slack_channel',
+      externalRef: settings.managerSlackChannelId,
+    };
+  }
+  return settings?.managerDiscordChannelId
+    ? {
+        provider: 'discord',
+        targetKind: 'discord_channel',
+        externalRef: settings.managerDiscordChannelId,
+      }
+    : null;
+}
+
 /** Provider-neutral resolved destination an automation reports to. */
 export type AutomationDestination = {
   provider: 'slack' | 'teams' | 'telegram' | 'discord' | 'email';
@@ -804,6 +829,7 @@ export type AutomationRuntime = {
   slackChannelId: string | null;
   managerSlackChannelId: string | null;
   managerDiscordChannelId: string | null;
+  defaultAutomationTarget?: AutomationTarget | null;
   /**
    * Provider-neutral destination waterfall result (own target on any comms
    * provider, else the manager channel, preferring Slack over Discord). Null
@@ -819,9 +845,15 @@ function toAutomationRuntime(params: {
   automation: Automation | undefined;
   managerSlackChannelId: string | null;
   managerDiscordChannelId: string | null;
+  defaultAutomationTarget: AutomationTarget | null;
 }): AutomationRuntime {
-  const { key, automation, managerSlackChannelId, managerDiscordChannelId } =
-    params;
+  const {
+    key,
+    automation,
+    managerSlackChannelId,
+    managerDiscordChannelId,
+    defaultAutomationTarget,
+  } = params;
 
   return {
     key,
@@ -838,6 +870,7 @@ function toAutomationRuntime(params: {
     ),
     managerSlackChannelId,
     managerDiscordChannelId,
+    defaultAutomationTarget,
     destination: resolveAutomationDestination(
       automation ?? undefined,
       managerSlackChannelId,
@@ -857,6 +890,7 @@ export async function getAutomationRuntime(
       columns: {
         managerSlackChannelId: true,
         managerDiscordChannelId: true,
+        defaultAutomationTarget: true,
       },
     }),
   ]);
@@ -866,6 +900,9 @@ export async function getAutomationRuntime(
     automation,
     managerSlackChannelId: settingsRow?.managerSlackChannelId ?? null,
     managerDiscordChannelId: settingsRow?.managerDiscordChannelId ?? null,
+    defaultAutomationTarget:
+      settingsRow?.defaultAutomationTarget ??
+      getLegacyDefaultAutomationTarget(settingsRow),
   });
 }
 
@@ -889,6 +926,7 @@ export async function getAutomationRuntimes<
       columns: {
         managerSlackChannelId: true,
         managerDiscordChannelId: true,
+        defaultAutomationTarget: true,
       },
     }),
   ]);
@@ -896,6 +934,9 @@ export async function getAutomationRuntimes<
   const automationMap = buildAutomationMap(automationRows);
   const managerSlackChannelId = settingsRow?.managerSlackChannelId ?? null;
   const managerDiscordChannelId = settingsRow?.managerDiscordChannelId ?? null;
+  const defaultAutomationTarget =
+    settingsRow?.defaultAutomationTarget ??
+    getLegacyDefaultAutomationTarget(settingsRow);
 
   return Object.fromEntries(
     keys.map((key) => [
@@ -905,6 +946,7 @@ export async function getAutomationRuntimes<
         automation: automationMap.get(key),
         managerSlackChannelId,
         managerDiscordChannelId,
+        defaultAutomationTarget,
       }),
     ]),
   ) as Record<TKey, AutomationRuntime>;
@@ -973,6 +1015,8 @@ export function normalizeBackgroundAgentSettings(
 
   const managerSlackChannelId = row?.managerSlackChannelId ?? null;
   const managerDiscordChannelId = row?.managerDiscordChannelId ?? null;
+  const defaultAutomationTarget =
+    row?.defaultAutomationTarget ?? getLegacyDefaultAutomationTarget(row);
   const channelAutoStartTargets = getChannelAutoStartTargets(
     channelAutoStart,
     'slack',
@@ -993,6 +1037,7 @@ export function normalizeBackgroundAgentSettings(
     id: row?.id ?? 'default',
     managerSlackChannelId,
     managerDiscordChannelId,
+    defaultAutomationTarget,
     globalAgentInstructions: row?.globalAgentInstructions ?? null,
     timeZone: row?.timeZone ?? null,
     timeZoneUpdatedAt: row?.timeZoneUpdatedAt ?? null,

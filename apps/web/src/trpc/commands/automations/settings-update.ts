@@ -615,6 +615,14 @@ export async function updateBackgroundAgentSettingsCommand(
 
   const shouldUpdateManagerChannel =
     input.savingAutomation === 'managerChannel';
+  const defaultDestinationSubmitted =
+    shouldUpdateManagerChannel &&
+    input.defaultDestinationProvider !== undefined;
+  const defaultDestinationProvider = input.defaultDestinationProvider ?? null;
+  const defaultDestinationMode =
+    input.defaultDestinationMode ?? 'direct_message';
+  const defaultDestinationChannelId =
+    input.defaultDestinationChannelId?.trim() ?? '';
   const submittedManagerSlackChannel = normalizeOptionalText(
     input.managerSlackChannel ?? null,
   );
@@ -1141,9 +1149,33 @@ export async function updateBackgroundAgentSettingsCommand(
     input.releaseAnnouncementsTargetChannelId?.trim() ?? '';
   const connectedProviders =
     mergeAnnouncerDestinationSubmitted ||
-    releaseAnnouncementsDestinationSubmitted
+    releaseAnnouncementsDestinationSubmitted ||
+    defaultDestinationSubmitted
       ? await listConnectedCommunicationProviders()
       : [];
+  const defaultDestinationConnectedProviders = [
+    ...connectedProviders,
+    ...(defaultDestinationMode === 'channel' &&
+    defaultDestinationProvider === 'slack' &&
+    managerChannelResult.channelId
+      ? (['slack'] as const)
+      : []),
+    ...(defaultDestinationMode === 'channel' &&
+    defaultDestinationProvider === 'discord' &&
+    managerDiscordChannelResult.channelId
+      ? (['discord'] as const)
+      : []),
+  ];
+  const defaultDestinationTargetResult =
+    await buildSubmittedCommunicationTarget({
+      submitted: defaultDestinationSubmitted,
+      provider: defaultDestinationProvider,
+      mode: defaultDestinationMode,
+      channelId: defaultDestinationChannelId,
+      userId: auth.userId,
+      connectedProviders: defaultDestinationConnectedProviders,
+      existingTarget: existingSettings.defaultAutomationTarget,
+    });
   const mergeAnnouncerExistingTarget = (
     await getAutomationRuntime('merge_announcer')
   ).targets.find((target) => target.provider !== 'sentry');
@@ -1170,18 +1202,55 @@ export async function updateBackgroundAgentSettingsCommand(
       existingTarget: releaseAnnouncementsExistingTarget,
     });
   const communicationTargetError =
-    mergeAnnouncerTargetResult.error ?? releaseAnnouncementsTargetResult.error;
+    defaultDestinationTargetResult.error ??
+    mergeAnnouncerTargetResult.error ??
+    releaseAnnouncementsTargetResult.error;
   if (communicationTargetError) {
     fieldErrors.general ??= communicationTargetError;
   }
   const mergeAnnouncerTarget = mergeAnnouncerTargetResult.target;
   const releaseAnnouncementsTarget = releaseAnnouncementsTargetResult.target;
+  let defaultAutomationTarget = defaultDestinationSubmitted
+    ? defaultDestinationTargetResult.target
+    : existingSettings.defaultAutomationTarget;
+  if (shouldUpdateManagerChannel && !defaultDestinationSubmitted) {
+    defaultAutomationTarget = managerChannelResult.channelId
+      ? {
+          provider: 'slack',
+          targetKind: 'slack_channel',
+          externalRef: managerChannelResult.channelId,
+        }
+      : managerDiscordChannelResult.channelId
+        ? {
+            provider: 'discord',
+            targetKind: 'discord_channel',
+            externalRef: managerDiscordChannelResult.channelId,
+          }
+        : null;
+  }
+  if (defaultAutomationTarget?.targetKind === 'slack_channel') {
+    defaultAutomationTarget = managerChannelResult.channelId
+      ? {
+          ...defaultAutomationTarget,
+          externalRef: managerChannelResult.channelId,
+        }
+      : null;
+  } else if (defaultAutomationTarget?.targetKind === 'discord_channel') {
+    defaultAutomationTarget = managerDiscordChannelResult.channelId
+      ? {
+          ...defaultAutomationTarget,
+          externalRef: managerDiscordChannelResult.channelId,
+        }
+      : null;
+  }
 
   // Manager-channel automations resolve their destination as
   // automation target -> shared manager channel. Enabling one requires a
   // channel at one of those two levels.
   const sharedManagerChannelId =
-    managerChannelResult.channelId ?? managerDiscordChannelResult.channelId;
+    defaultAutomationTarget?.externalRef ??
+    managerChannelResult.channelId ??
+    managerDiscordChannelResult.channelId;
   const managerChannelAutomationValidations: Array<{
     automationId: UpdateBackgroundAgentSettingsInput['savingAutomation'];
     key: TriggerableBackgroundAutomationKey;
@@ -1563,6 +1632,7 @@ export async function updateBackgroundAgentSettingsCommand(
         id: 'default',
         managerSlackChannelId: managerChannelResult.channelId,
         managerDiscordChannelId: managerDiscordChannelResult.channelId,
+        defaultAutomationTarget,
         updatedAt: now,
       })
       .onConflictDoUpdate({
@@ -1570,6 +1640,7 @@ export async function updateBackgroundAgentSettingsCommand(
         set: {
           managerSlackChannelId: managerChannelResult.channelId,
           managerDiscordChannelId: managerDiscordChannelResult.channelId,
+          defaultAutomationTarget,
           updatedAt: now,
         },
       });

@@ -15,7 +15,6 @@ const mocks = vi.hoisted(() => ({
   connectedProviders: vi.fn(),
   directMessage: vi.fn(),
   emailIdentities: vi.fn(),
-  userDefaultTarget: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -45,7 +44,6 @@ vi.mock('@roomote/db/server', () => ({
   resolveTeamsBotRuntimeCredentials: mocks.teamsCredentials,
   resolveTelegramRuntimeCredentials: mocks.telegramCredentials,
   resolveDiscordRuntimeCredentials: mocks.discordCredentials,
-  getUserDefaultAutomationTarget: mocks.userDefaultTarget,
 }));
 
 vi.mock('@roomote/slack', () => ({
@@ -104,7 +102,6 @@ describe('resolveDefaultAutomationTarget', () => {
     });
     mocks.telegramCredentials.mockResolvedValue({ botToken: 'token' });
     mocks.emailIdentities.mockResolvedValue([]);
-    mocks.userDefaultTarget.mockResolvedValue(null);
   });
 
   it('prefers a usable configured channel over owner DM and Email', async () => {
@@ -123,7 +120,6 @@ describe('resolveDefaultAutomationTarget', () => {
       resolveDefaultAutomationTarget({
         ownerUserId: 'user-1',
         capabilities: CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
-        includePersonalPreference: true,
       }),
     ).resolves.toEqual({
       provider: 'slack',
@@ -152,7 +148,6 @@ describe('resolveDefaultAutomationTarget', () => {
       resolveDefaultAutomationTarget({
         ownerUserId: 'user-1',
         capabilities: CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
-        includePersonalPreference: true,
       }),
     ).resolves.toEqual({
       provider: 'teams',
@@ -216,7 +211,6 @@ describe('resolveDefaultAutomationTarget', () => {
       resolveDefaultAutomationTarget({
         ownerUserId: 'user-1',
         capabilities: CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
-        includePersonalPreference: true,
         includeSharedChannels: false,
       }),
     ).resolves.toEqual({
@@ -228,42 +222,14 @@ describe('resolveDefaultAutomationTarget', () => {
     expect(mocks.teamsPrimary).not.toHaveBeenCalled();
   });
 
-  it('does not apply personal defaults unless the caller opts in', async () => {
+  it('uses a usable configured DM default before the owner fallback', async () => {
     mocks.settings.mockResolvedValue({
-      managerSlackChannelId: 'C12345678',
+      defaultAutomationTarget: {
+        provider: 'discord',
+        targetKind: 'discord_user',
+        externalRef: 'default-recipient',
+      },
       setupNewState: {},
-    });
-    mocks.installations.mockResolvedValue([
-      { botAccessToken: 'token', teamId: 'T123' },
-    ]);
-    mocks.membership.mockResolvedValue(true);
-    mocks.userDefaultTarget.mockResolvedValue({
-      provider: 'discord',
-      targetKind: 'discord_user',
-      externalRef: 'user-1',
-    });
-
-    await expect(
-      resolveDefaultAutomationTarget({
-        ownerUserId: 'user-1',
-        capabilities: CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
-      }),
-    ).resolves.toMatchObject({
-      provider: 'slack',
-      externalRef: 'C12345678',
-    });
-    expect(mocks.userDefaultTarget).not.toHaveBeenCalled();
-  });
-
-  it('uses a usable personal default before the automatic waterfall', async () => {
-    mocks.settings.mockResolvedValue({
-      managerSlackChannelId: 'C12345678',
-      setupNewState: {},
-    });
-    mocks.userDefaultTarget.mockResolvedValue({
-      provider: 'discord',
-      targetKind: 'discord_user',
-      externalRef: 'user-1',
     });
     mocks.directMessage.mockResolvedValue({ channelId: 'discord-dm' });
 
@@ -271,22 +237,27 @@ describe('resolveDefaultAutomationTarget', () => {
       resolveDefaultAutomationTarget({
         ownerUserId: 'user-1',
         capabilities: CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
-        includePersonalPreference: true,
       }),
     ).resolves.toEqual({
       provider: 'discord',
       targetKind: 'discord_user',
-      externalRef: 'user-1',
+      externalRef: 'default-recipient',
     });
-    expect(mocks.settings).not.toHaveBeenCalled();
+    expect(mocks.directMessage).toHaveBeenCalledWith(
+      'discord',
+      'default-recipient',
+    );
   });
 
-  it('falls through when a personal default is no longer usable', async () => {
-    mocks.userDefaultTarget.mockResolvedValue({
-      provider: 'email',
-      targetKind: 'email_user',
-      externalRef: 'user-1',
-      metadata: { emailIdentityId: 'removed-identity' },
+  it('falls through when a configured default is no longer usable', async () => {
+    mocks.settings.mockResolvedValue({
+      defaultAutomationTarget: {
+        provider: 'email',
+        targetKind: 'email_user',
+        externalRef: 'default-recipient',
+        metadata: { emailIdentityId: 'removed-identity' },
+      },
+      setupNewState: {},
     });
     mocks.directMessage.mockResolvedValue({ channelId: 'D123' });
 
@@ -294,8 +265,6 @@ describe('resolveDefaultAutomationTarget', () => {
       resolveDefaultAutomationTarget({
         ownerUserId: 'user-1',
         capabilities: CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
-        includePersonalPreference: true,
-        includeSharedChannels: false,
       }),
     ).resolves.toEqual({
       provider: 'slack',

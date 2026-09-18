@@ -112,6 +112,29 @@ describe('AutomationDestinationPicker', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('renders an unconfigured placeholder without offering None as a destination', () => {
+    render(
+      <AutomationDestinationPicker
+        id="destination"
+        value={{ provider: 'none', mode: 'channel', channelId: '' }}
+        availableProviders={['slack', 'email']}
+        slackOptions={slackOptions}
+        discordOptions={discordOptions}
+        allowNone={false}
+        noneLabel="Select a destination"
+        noneDescription="No deployment default is configured."
+        onChange={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByRole('combobox', { name: 'Destination provider' }),
+    ).toHaveTextContent('Select a destination');
+    expect(
+      screen.getByText('No deployment default is configured.'),
+    ).toBeInTheDocument();
+  });
+
   it('shows provider-specific channel selection in channel mode', () => {
     render(
       <AutomationDestinationPicker

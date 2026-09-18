@@ -901,6 +901,9 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
       buildInput({
         savingAutomation: 'managerChannel',
         managerDiscordChannel: 'D111',
+        defaultDestinationProvider: 'discord',
+        defaultDestinationMode: 'channel',
+        defaultDestinationChannelId: 'D111',
       }),
     );
 
@@ -909,9 +912,65 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
     if (result.success) {
       expect(result.settings.managerDiscordChannelId).toBe('D111');
       expect(result.settings.managerSlackChannelId).toBeNull();
+      expect(result.settings.defaultAutomationTarget).toEqual({
+        provider: 'discord',
+        targetKind: 'discord_channel',
+        externalRef: 'D111',
+      });
       expect(result.settings.suggesterFrequency).toBe('off');
       expect(result.settings.announcerFrequency).toBe('off');
       expect(result.settings.managerStatsFrequency).toBe('off');
+    }
+  }, 15_000);
+
+  it('saves a concrete Slack DM as the deployment default destination', async () => {
+    await insertSlackInstallation();
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'managerChannel',
+        managerSlackChannel: null,
+        managerDiscordChannel: null,
+        defaultDestinationProvider: 'slack',
+        defaultDestinationMode: 'direct_message',
+        defaultDestinationChannelId: null,
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.settings.defaultAutomationTarget).toEqual({
+        provider: 'slack',
+        targetKind: 'slack_user',
+        externalRef: adminAuth.userId,
+      });
+      expect(result.settings.managerSlackChannelId).toBeNull();
+      expect(result.settings.managerDiscordChannelId).toBeNull();
+    }
+  }, 15_000);
+
+  it('saves a concrete Email recipient as the deployment default destination', async () => {
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'managerChannel',
+        managerSlackChannel: null,
+        managerDiscordChannel: null,
+        defaultDestinationProvider: 'email',
+        defaultDestinationMode: 'direct_message',
+        defaultDestinationChannelId: 'verified:admin:account',
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.settings.defaultAutomationTarget).toEqual({
+        provider: 'email',
+        targetKind: 'email_user',
+        externalRef: adminAuth.userId,
+        metadata: { emailIdentityId: 'verified:admin:account' },
+      });
     }
   }, 15_000);
 
