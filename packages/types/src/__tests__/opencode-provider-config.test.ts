@@ -238,7 +238,7 @@ describe('mergeOpenAiCompatibleProviderConfig', () => {
           'custom-model': {
             attachment: true,
             modalities: {
-              input: ['text', 'image', 'video'],
+              input: ['text', 'image'],
               output: ['text'],
             },
           },

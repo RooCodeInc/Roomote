@@ -1174,7 +1174,6 @@ async function runFastAgentInferenceWithRetries<T>(
       const maxRetries = resolveFastAgentInferenceMaxRetries(failure);
       const rejectionRetry =
         !failure.retryable &&
-        failure.reason === 'provider_error' &&
         !rejectionRetryUsed &&
         options.retryRejection?.(error, failure) === true;
       if (
@@ -6212,12 +6211,14 @@ export async function answerFastAgentQuestion({
               // transcript instead of the rejected native history.
               // A run that is itself the resumed retry gets no second one:
               // a rejection that survives a fresh session is terminal.
-              retryRejection: (error) =>
+              retryRejection: (error, failure) =>
                 !signal?.aborted &&
                 !isInstructionClosed() &&
                 !resumedAfterInferenceRetry &&
                 !isNonTaskOpenCodePromptTimeoutError(error) &&
                 !isNonTaskOpenCodeSessionValidationError(error) &&
+                (pendingImageHelperFallback !== null ||
+                  failure.reason === 'provider_error') &&
                 (!nativeToolInvoked || canParkDurableRetry()),
               // Grant a fresh bounded budget only when the failed attempt
               // advanced the turn and the next retry continues the same

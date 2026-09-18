@@ -8574,78 +8574,94 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
-  it('falls back through the image helper after the main model rejects image input', async () => {
-    vi.useFakeTimers();
-    try {
-      mocks.resolveImageDelivery
-        .mockResolvedValueOnce({
-          delivery: 'direct',
-          model: 'openai-compatible-local/custom-model',
-        })
-        .mockResolvedValueOnce({
-          delivery: 'helper',
-          model: 'openai-compatible-local/custom-model',
-          helperModel: 'openrouter/google/gemini-3.8-flash',
-          helperReasoningEffort: 'low',
+  it.each([
+    { statusCode: 400, reason: 'provider_error' },
+    { statusCode: 404, reason: 'model_unavailable' },
+  ])(
+    'falls back through the image helper after an HTTP $statusCode image rejection',
+    async ({ statusCode, reason }) => {
+      vi.useFakeTimers();
+      try {
+        mocks.classifyInferenceError.mockReturnValue({
+          message: 'The inference provider rejected the image input.',
+          reason,
+          retryable: false,
         });
-      mocks.generateHelperText.mockResolvedValue(
-        'A dashboard with a red deployment error.',
-      );
-      mocks.generateText
-        .mockRejectedValueOnce(
-          Object.assign(new Error('This model does not support image input.'), {
-            data: {
-              statusCode: 400,
-              message: 'This model does not support image input.',
-            },
-          }),
-        )
-        .mockImplementationOnce(async (_params, _session, options) => {
-          await options.onSessionReady('opencode-session-2');
-          const inspection = await invokeTool(nativeToolNames.inspectImages, {
-            question: 'What does the screenshot show?',
+        mocks.resolveImageDelivery
+          .mockResolvedValueOnce({
+            delivery: 'direct',
+            model: 'openai-compatible-local/custom-model',
+          })
+          .mockResolvedValueOnce({
+            delivery: 'helper',
+            model: 'openai-compatible-local/custom-model',
+            helperModel: 'openrouter/google/gemini-3.8-flash',
+            helperReasoningEffort: 'low',
           });
-          expect(inspection).toMatchObject({
-            success: true,
-            observations: 'A dashboard with a red deployment error.',
+        mocks.generateHelperText.mockResolvedValue(
+          'A dashboard with a red deployment error.',
+        );
+        mocks.generateText
+          .mockRejectedValueOnce(
+            Object.assign(
+              new Error('This model does not support image input.'),
+              {
+                data: {
+                  statusCode,
+                  message: 'This model does not support image input.',
+                },
+              },
+            ),
+          )
+          .mockImplementationOnce(async (_params, _session, options) => {
+            await options.onSessionReady('opencode-session-2');
+            const inspection = await invokeTool(nativeToolNames.inspectImages, {
+              question: 'What does the screenshot show?',
+            });
+            expect(inspection).toMatchObject({
+              success: true,
+              observations: 'A dashboard with a red deployment error.',
+            });
+            await invokeTool(nativeToolNames.sendChatReply, {
+              purpose: 'closeout',
+              message: 'The screenshot shows a deployment error.',
+            });
+            return '';
           });
-          await invokeTool(nativeToolNames.sendChatReply, {
-            purpose: 'closeout',
-            message: 'The screenshot shows a deployment error.',
-          });
-          return '';
+
+        const result = answerFastAgentQuestion({
+          ...baseParams,
+          images: ['data:image/png;base64,aGVsbG8='],
+          adapter: callbacks(),
         });
+        result.catch(() => undefined);
+        await vi.runAllTimersAsync();
+        vi.useRealTimers();
+        await expect(result).resolves.toBe(
+          'The screenshot shows a deployment error.',
+        );
 
-      const result = answerFastAgentQuestion({
-        ...baseParams,
-        images: ['data:image/png;base64,aGVsbG8='],
-        adapter: callbacks(),
-      });
-      result.catch(() => undefined);
-      await vi.runAllTimersAsync();
-      vi.useRealTimers();
-      await expect(result).resolves.toBe(
-        'The screenshot shows a deployment error.',
-      );
-
-      expect(mocks.generateText).toHaveBeenCalledTimes(2);
-      expect(mocks.generateText.mock.calls[0]?.[0]).toMatchObject({
-        files: [{ mime: 'image/png' }],
-      });
-      expect(mocks.generateText.mock.calls[1]?.[0]).not.toHaveProperty('files');
-      expect(mocks.generateText.mock.calls[1]?.[0].prompt).toContain(
-        'Image attachments: image-1 (image/png)',
-      );
-      expect(mocks.resolveImageDelivery).toHaveBeenLastCalledWith({
-        modality: 'image',
-        modelRole: 'orchestration',
-        skipSessionModel: true,
-      });
-      expect(mocks.generateHelperText).toHaveBeenCalledOnce();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
+        expect(mocks.generateText).toHaveBeenCalledTimes(2);
+        expect(mocks.generateText.mock.calls[0]?.[0]).toMatchObject({
+          files: [{ mime: 'image/png' }],
+        });
+        expect(mocks.generateText.mock.calls[1]?.[0]).not.toHaveProperty(
+          'files',
+        );
+        expect(mocks.generateText.mock.calls[1]?.[0].prompt).toContain(
+          'Image attachments: image-1 (image/png)',
+        );
+        expect(mocks.resolveImageDelivery).toHaveBeenLastCalledWith({
+          modality: 'image',
+          modelRole: 'orchestration',
+          skipSessionModel: true,
+        });
+        expect(mocks.generateHelperText).toHaveBeenCalledOnce();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it.each([
     {

@@ -89,26 +89,47 @@ describe('buildOpenCodeCliEnv', () => {
             apiKey: '{env:LITELLM_API_KEY}',
           },
           models: {
+            'qwen3.6:35b-unsloth': { name: 'qwen3.6:35b-unsloth' },
+            coding: { name: 'coding' },
+          },
+        },
+      },
+      permission: NON_TASK_TOOL_PERMISSION_DENIALS,
+    });
+  });
+
+  it('advertises image-only support for custom models in Fast sessions', () => {
+    const env = buildOpenCodeCliEnv(
+      {
+        R_MODEL: 'litellm/qwen3.6:35b-unsloth',
+        R_SMALL_MODEL: 'litellm/coding',
+        LITELLM_BASE_URL: 'https://litellm.example.com/v1',
+        LITELLM_API_KEY: 'secret',
+      },
+      { promptOnlySubagents: true },
+    );
+
+    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toMatchObject({
+      provider: {
+        litellm: {
+          models: {
             'qwen3.6:35b-unsloth': {
-              name: 'qwen3.6:35b-unsloth',
               attachment: true,
               modalities: {
-                input: ['text', 'image', 'video'],
+                input: ['text', 'image'],
                 output: ['text'],
               },
             },
             coding: {
-              name: 'coding',
               attachment: true,
               modalities: {
-                input: ['text', 'image', 'video'],
+                input: ['text', 'image'],
                 output: ['text'],
               },
             },
           },
         },
       },
-      permission: NON_TASK_TOOL_PERMISSION_DENIALS,
     });
   });
 

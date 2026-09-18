@@ -330,7 +330,9 @@ export function mergeOpenAiCompatibleProviderConfig(
                     ? {
                         attachment: true,
                         modalities: {
-                          input: ['text', 'image', 'video'],
+                          input: options.assumeImageSupport
+                            ? ['text', 'image']
+                            : ['text', 'image', 'video'],
                           output: ['text'],
                         },
                       }

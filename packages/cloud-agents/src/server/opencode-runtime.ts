@@ -175,7 +175,7 @@ function buildModelBackedOpenCodeConfigContent(
           visionModel,
           {},
           {},
-          { assumeImageSupport: true },
+          { assumeImageSupport: options.promptOnlySubagents },
         ),
         env,
         configuredModelIds,
