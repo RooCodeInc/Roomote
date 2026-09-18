@@ -19,7 +19,8 @@ export interface RoutableEnvironment {
 
 /** Active repository names the Fast Session can show, independent of environments. */
 export interface ActiveRepositoryCatalog {
-  /** Sorted, de-duplicated full names, capped to keep the prompt bounded. */
+  /** Sorted full names, capped to keep the prompt bounded. Names shared across
+   * providers or hosts are listed once each, qualified with both. */
   names: string[];
   /** Every active repository, including the ones omitted from `names`. */
   totalCount: number;
@@ -28,11 +29,43 @@ export interface ActiveRepositoryCatalog {
 /** Keeps the Fast prompt bounded on deployments with many connected repositories. */
 const ACTIVE_REPOSITORY_PROMPT_LIMIT = 200;
 
+interface ActiveRepositoryRow {
+  fullName: string;
+  sourceControlProvider: string;
+  host: string | null;
+}
+
+/**
+ * `fullName` is only unique per (provider, host): the same owner/repo can be
+ * connected from two providers or a self-managed host. Those entries stay
+ * separate and carry their provider and host, so a name that matches both
+ * reads as ambiguous instead of as a single match.
+ */
 export function buildActiveRepositoryCatalog(
-  fullNames: string[],
+  rows: ActiveRepositoryRow[],
   limit = ACTIVE_REPOSITORY_PROMPT_LIMIT,
 ): ActiveRepositoryCatalog {
-  const names = [...new Set(fullNames)].sort((a, b) => a.localeCompare(b));
+  const identities = new Map<string, ActiveRepositoryRow>();
+  for (const row of rows) {
+    identities.set(
+      [row.sourceControlProvider, row.host ?? '', row.fullName].join('\u0000'),
+      row,
+    );
+  }
+
+  const countsByFullName = new Map<string, number>();
+  for (const { fullName } of identities.values()) {
+    countsByFullName.set(fullName, (countsByFullName.get(fullName) ?? 0) + 1);
+  }
+
+  const names = [...identities.values()]
+    .map((row) =>
+      (countsByFullName.get(row.fullName) ?? 0) > 1
+        ? `${row.fullName} (${[row.sourceControlProvider, row.host].filter(Boolean).join(', ')})`
+        : row.fullName,
+    )
+    .sort((a, b) => a.localeCompare(b));
+
   return { names: names.slice(0, limit), totalCount: names.length };
 }
 
@@ -92,9 +125,13 @@ export async function getAvailableEnvironments(): Promise<
  */
 export async function getActiveRepositoryCatalog(): Promise<ActiveRepositoryCatalog> {
   const rows = await db
-    .select({ fullName: repositories.fullName })
+    .select({
+      fullName: repositories.fullName,
+      sourceControlProvider: repositories.sourceControlProvider,
+      host: repositories.host,
+    })
     .from(repositories)
     .where(eq(repositories.isActive, true));
 
-  return buildActiveRepositoryCatalog(rows.map((row) => row.fullName));
+  return buildActiveRepositoryCatalog(rows);
 }

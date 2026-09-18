@@ -1692,7 +1692,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'do not ask the user for a repository URL; launch an All repositories task',
     );
     expect(prompt).toContain(
-      'Ask only when several listed repositories plausibly match, and name the candidates.',
+      'Ask only when several listed repositories plausibly match, including the same name listed more than once with different providers or hosts, and name the candidates.',
     );
     expect(
       prompt.indexOf('When the user refers to a repository by name'),
