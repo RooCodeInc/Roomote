@@ -90,6 +90,7 @@ describe('useTaskSession', () => {
             prompt: null,
           },
           isLoading: false,
+          isFetching: false,
           refetch: sessionRefetchMock,
         };
       }
@@ -139,6 +140,18 @@ describe('useTaskSession', () => {
       url: 'http://sandbox-new.test',
       token: 'token-new',
     });
+  });
+
+  it('exposes a retry for the initial session load', async () => {
+    sessionRefetchMock.mockResolvedValue({ data: undefined });
+
+    const { result } = renderHook(() => useTaskSession('task-1'));
+
+    await act(async () => {
+      await result.current.retryInitialLoad();
+    });
+
+    expect(sessionRefetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('fetches artifacts using the canonical task id after alias resolution', () => {
