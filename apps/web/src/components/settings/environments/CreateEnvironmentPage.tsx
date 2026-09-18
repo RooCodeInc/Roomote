@@ -34,6 +34,7 @@ import {
   HandMetal,
   Info,
   Loader2,
+  RetryableLoadError,
   Textarea,
 } from '@/components/system';
 
@@ -202,6 +203,9 @@ export function CreateEnvironmentPage({
                   isEmpty: (repository as { isEmpty?: boolean }).isEmpty,
                 }))}
                 repositoriesLoading={repositories.isPending}
+                repositoriesError={repositories.isError}
+                repositoriesRetrying={repositories.isFetching}
+                onRetryRepositories={() => void repositories.refetch()}
                 onOpenCreateRepo={() => setCreateRepoDialogOpen(true)}
                 selectedRepositoryIds={selectedRepositoryIds}
                 onToggleRepository={(repositoryId) => {
@@ -264,6 +268,9 @@ type AgentViewRepository = {
 function AgentMasterView({
   repositories,
   repositoriesLoading,
+  repositoriesError,
+  repositoriesRetrying,
+  onRetryRepositories,
   selectedRepositoryIds,
   onToggleRepository,
   onStartAgent,
@@ -278,6 +285,9 @@ function AgentMasterView({
 }: {
   repositories: AgentViewRepository[];
   repositoriesLoading: boolean;
+  repositoriesError: boolean;
+  repositoriesRetrying: boolean;
+  onRetryRepositories: () => void;
   selectedRepositoryIds: string[];
   onToggleRepository: (repositoryId: string) => void;
   onStartAgent: () => void;
@@ -294,6 +304,9 @@ function AgentMasterView({
     <AgentRepositorySelectionSubview
       repositories={repositories}
       repositoriesLoading={repositoriesLoading}
+      repositoriesError={repositoriesError}
+      repositoriesRetrying={repositoriesRetrying}
+      onRetryRepositories={onRetryRepositories}
       selectedRepositoryIds={selectedRepositoryIds}
       onToggleRepository={onToggleRepository}
       onStartAgent={onStartAgent}
@@ -312,6 +325,9 @@ function AgentMasterView({
 function AgentRepositorySelectionSubview({
   repositories,
   repositoriesLoading,
+  repositoriesError,
+  repositoriesRetrying,
+  onRetryRepositories,
   selectedRepositoryIds,
   onToggleRepository,
   onStartAgent,
@@ -326,6 +342,9 @@ function AgentRepositorySelectionSubview({
 }: {
   repositories: AgentViewRepository[];
   repositoriesLoading: boolean;
+  repositoriesError: boolean;
+  repositoriesRetrying: boolean;
+  onRetryRepositories: () => void;
   selectedRepositoryIds: string[];
   onToggleRepository: (repositoryId: string) => void;
   onStartAgent: () => void;
@@ -360,7 +379,14 @@ function AgentRepositorySelectionSubview({
       <Card>
         <CardContent>
           <div className="space-y-4">
-            {repositoriesLoading ? (
+            {repositoriesError ? (
+              <RetryableLoadError
+                className="border"
+                message="Failed to load repositories."
+                isRetrying={repositoriesRetrying}
+                onRetry={onRetryRepositories}
+              />
+            ) : repositoriesLoading ? (
               <div className="flex items-center justify-center py-12 text-muted-foreground">
                 <Loader2 className="size-4 animate-spin" />
               </div>
@@ -434,7 +460,9 @@ function AgentRepositorySelectionSubview({
         <Button
           size="sm"
           onClick={onStartAgent}
-          disabled={isStartAgentPending || repositoriesLoading}
+          disabled={
+            isStartAgentPending || repositoriesLoading || repositoriesError
+          }
         >
           {isStartAgentPending && <Loader2 className="animate-spin" />}
           Start Agent
