@@ -179,9 +179,11 @@ export function AutomationDestinationPicker({
         </Select>
 
         {value.provider === 'none' ? (
-          <p className="self-center text-sm text-muted-foreground">
-            {noneDescription}
-          </p>
+          noneDescription ? (
+            <p className="self-center text-sm text-muted-foreground">
+              {noneDescription}
+            </p>
+          ) : null
         ) : (
           <div
             className={

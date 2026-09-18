@@ -122,7 +122,7 @@ describe('AutomationDestinationPicker', () => {
         discordOptions={discordOptions}
         allowNone={false}
         noneLabel="Select a destination"
-        noneDescription="No deployment default is configured."
+        noneDescription=""
         onChange={vi.fn()}
       />,
     );
@@ -131,8 +131,8 @@ describe('AutomationDestinationPicker', () => {
       screen.getByRole('combobox', { name: 'Destination provider' }),
     ).toHaveTextContent('Select a destination');
     expect(
-      screen.getByText('No deployment default is configured.'),
-    ).toBeInTheDocument();
+      screen.queryByText('Results appear only in the task view.'),
+    ).not.toBeInTheDocument();
   });
 
   it('shows provider-specific channel selection in channel mode', () => {

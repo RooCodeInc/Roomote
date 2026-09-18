@@ -110,7 +110,7 @@ export function AutomationDefaultDestinationSetting({
             defaultEmailIdentityId={emailOptions[0]?.id ?? ''}
             allowNone={false}
             noneLabel="Select a destination"
-            noneDescription="No deployment default is configured. Select a channel, DM, or email address. Existing owner fallback remains unchanged."
+            noneDescription=""
             disabled={isSaving}
             onChange={onChange}
           />
