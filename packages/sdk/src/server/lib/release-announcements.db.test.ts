@@ -214,6 +214,38 @@ describe('installed release transitions', () => {
     ).resolves.toHaveLength(1);
   });
 
+  it('does not repeat a release stored under a legacy patch-version delivery key', async () => {
+    await recordInstalledRelease('1.2.2');
+    await db
+      .update(deploymentSettings)
+      .set({ managerDiscordChannelId: 'manager-channel' })
+      .where(eq(deploymentSettings.id, 'default'));
+    await db.insert(releaseAnnouncementDeliveries).values({
+      previousVersion: '1.1.0',
+      installedVersion: '1.2.2',
+      provider: 'discord',
+      destinationKey: 'discord:manager-channel',
+      channelId: 'manager-channel',
+      status: 'delivered',
+      deliveredAt: new Date(),
+    });
+
+    await expect(recordInstalledRelease('1.1.4')).resolves.toBe(
+      'rollback_baselined',
+    );
+    await expect(recordInstalledRelease('1.2.3')).resolves.toBe(
+      'already_announced',
+    );
+    await expect(
+      db.query.releaseAnnouncementDeliveries.findMany(),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        installedVersion: '1.2.2',
+        status: 'delivered',
+      }),
+    ]);
+  });
+
   it('does not queue when disabled and silently resets a rollback baseline', async () => {
     await recordInstalledRelease('1.1.0');
     await db

@@ -290,13 +290,29 @@ export async function recordInstalledRelease(
     }
     if (!destination) return 'no_destination';
 
+    const destinationKey = `${destination.provider}:${destination.channelId}`;
+    const priorDeliveries =
+      await tx.query.releaseAnnouncementDeliveries.findMany({
+        where: eq(releaseAnnouncementDeliveries.destinationKey, destinationKey),
+        columns: { installedVersion: true },
+      });
+    if (
+      priorDeliveries.some(
+        (delivery) =>
+          toStableMajorMinorReleaseVersion(delivery.installedVersion) ===
+          selectedReleaseVersion,
+      )
+    ) {
+      return 'already_announced';
+    }
+
     const [delivery] = await tx
       .insert(releaseAnnouncementDeliveries)
       .values({
         previousVersion: previousSelectedReleaseVersion ?? previousVersion,
         installedVersion: selectedReleaseVersion,
         provider: destination.provider,
-        destinationKey: `${destination.provider}:${destination.channelId}`,
+        destinationKey,
         channelId: destination.channelId,
         serviceUrl: destination.serviceUrl ?? null,
         recipientUserId: destination.userId ?? null,
