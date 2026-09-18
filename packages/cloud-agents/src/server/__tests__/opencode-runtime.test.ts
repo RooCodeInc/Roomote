@@ -98,6 +98,41 @@ describe('buildOpenCodeCliEnv', () => {
     });
   });
 
+  it('advertises image-only support for custom models in Fast sessions', () => {
+    const env = buildOpenCodeCliEnv(
+      {
+        R_MODEL: 'litellm/qwen3.6:35b-unsloth',
+        R_SMALL_MODEL: 'litellm/coding',
+        LITELLM_BASE_URL: 'https://litellm.example.com/v1',
+        LITELLM_API_KEY: 'secret',
+      },
+      { promptOnlySubagents: true },
+    );
+
+    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toMatchObject({
+      provider: {
+        litellm: {
+          models: {
+            'qwen3.6:35b-unsloth': {
+              attachment: true,
+              modalities: {
+                input: ['text', 'image'],
+                output: ['text'],
+              },
+            },
+            coding: {
+              attachment: true,
+              modalities: {
+                input: ['text', 'image'],
+                output: ['text'],
+              },
+            },
+          },
+        },
+      },
+    });
+  });
+
   it('registers a distinct vision model with its configured provider', () => {
     const env = buildOpenCodeCliEnv({
       R_MODEL: 'openrouter/openai/gpt-5.6-terra',

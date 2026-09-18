@@ -139,6 +139,7 @@ import {
   FAST_AGENT_SESSION_TOOL_FILTER,
   generateTrackedNonTaskText,
   generateTrackedNonTaskTextInOpenCodeSession,
+  isNonTaskImageInputUnsupportedError,
   isNonTaskOpenCodePromptTimeoutError,
   isNonTaskOpenCodeSessionNotFoundError,
   isNonTaskOpenCodeSessionValidationError,
@@ -1173,7 +1174,6 @@ async function runFastAgentInferenceWithRetries<T>(
       const maxRetries = resolveFastAgentInferenceMaxRetries(failure);
       const rejectionRetry =
         !failure.retryable &&
-        failure.reason === 'provider_error' &&
         !rejectionRetryUsed &&
         options.retryRejection?.(error, failure) === true;
       if (
@@ -2170,6 +2170,11 @@ export async function answerFastAgentQuestion({
   const turnImages = new Map<string, NonTaskPromptFile>();
   let imageDeliveryPromise: Promise<FastAgentImageDelivery> | undefined;
   let resolvedImageDelivery: FastAgentImageDelivery | undefined;
+  let imageHelperFallbackUsed = false;
+  let pendingImageHelperFallback: Extract<
+    NonTaskInputModalityDelivery,
+    { delivery: 'helper' }
+  > | null = null;
   const resolveImageDelivery = (): Promise<FastAgentImageDelivery> => {
     imageDeliveryPromise ??= resolveNonTaskInputModalityDelivery({
       modality: 'image',
@@ -5073,8 +5078,8 @@ export async function answerFastAgentQuestion({
           case FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential:
           case FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials: {
             // The model only ever sees the generic message; the bounded reason
-            // goes to server logs so operators can distinguish a disabled
-            // experiment from a missing Session binding.
+            // goes to server logs so operators can distinguish the missing
+            // Session or actor binding.
             const unavailable = (reason: string, nameReason = false) => {
               console.warn(
                 `[Fast Agent] ${call.name} unavailable (reason=${reason})`,
@@ -5107,7 +5112,7 @@ export async function answerFastAgentQuestion({
                 return unavailable(reason, true);
               }
               if (!currentUser.serviceCredentialToolsEnabled) {
-                return unavailable('experiment_disabled');
+                return unavailable('inactive_actor');
               }
               if (
                 platformEvent &&
@@ -6127,6 +6132,26 @@ export async function answerFastAgentQuestion({
                 // handler records the outcome, not a failed attempt.
                 const parked = findFastAgentDurableRetryScheduledError(error);
                 if (parked) throw parked;
+                if (
+                  imageFilesForAttempt.length > 0 &&
+                  !nativeToolInvoked &&
+                  !imageHelperFallbackUsed &&
+                  isNonTaskImageInputUnsupportedError(error)
+                ) {
+                  // The optimistic direct request proved this model is
+                  // text-only. Resolve a positively capable helper once; the
+                  // normal fresh-session retry rebuilds without image parts.
+                  const fallback = await resolveNonTaskInputModalityDelivery({
+                    modality: 'image',
+                    modelRole: FAST_AGENT_MODEL_ROLE,
+                    ...(model ? { model } : {}),
+                    ...(reasoningEffort ? { reasoningEffort } : {}),
+                    skipSessionModel: true,
+                  }).catch(() => null);
+                  if (fallback?.delivery === 'helper') {
+                    pendingImageHelperFallback = fallback;
+                  }
+                }
                 const failure = classifyNonTaskInferenceError(error);
                 const attemptStage = !resolvedInferenceModel
                   ? 'model_resolution'
@@ -6186,12 +6211,14 @@ export async function answerFastAgentQuestion({
               // transcript instead of the rejected native history.
               // A run that is itself the resumed retry gets no second one:
               // a rejection that survives a fresh session is terminal.
-              retryRejection: (error) =>
+              retryRejection: (error, failure) =>
                 !signal?.aborted &&
                 !isInstructionClosed() &&
                 !resumedAfterInferenceRetry &&
                 !isNonTaskOpenCodePromptTimeoutError(error) &&
                 !isNonTaskOpenCodeSessionValidationError(error) &&
+                (pendingImageHelperFallback !== null ||
+                  failure.reason === 'provider_error') &&
                 (!nativeToolInvoked || canParkDurableRetry()),
               // Grant a fresh bounded budget only when the failed attempt
               // advanced the turn and the next retry continues the same
@@ -6209,6 +6236,32 @@ export async function answerFastAgentQuestion({
                 return true;
               },
               prepareRetry: () => {
+                if (pendingImageHelperFallback) {
+                  const fallback = pendingImageHelperFallback;
+                  pendingImageHelperFallback = null;
+                  imageHelperFallbackUsed = true;
+                  imageDeliveryPromise = Promise.resolve(fallback);
+                  resolvedImageDelivery = fallback;
+                  diagnostics.recordImageDelivery(fallback);
+                  const fallbackInput = holdImagesForPrompt(
+                    [...imageFiles, ...injectedHumanFollowUpFiles],
+                    serializeFastAgentMessages([
+                      ...bootstrapMessages,
+                      ...injectedHumanFollowUpMessages,
+                    ]),
+                    fallback,
+                  );
+                  commitTurnImages(fallbackInput.held);
+                  openCodeSession.id = undefined;
+                  promptForAttempt = fallbackInput.text;
+                  imageFilesForAttempt = [];
+                  promptKind = 'clean_retry_bootstrap';
+                  attemptSessionPath = 'cold_rebuild';
+                  diagnostics.recordSessionPath(attemptSessionPath);
+                  promptTimeoutMs =
+                    FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS;
+                  return;
+                }
                 if (nativeToolInvoked && openCodeSession.id) {
                   promptForAttempt = FAST_AGENT_PROVIDER_RECOVERY_PROMPT;
                   imageFilesForAttempt = [];

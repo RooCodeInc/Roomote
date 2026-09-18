@@ -24,11 +24,6 @@ integration key only when no supported MCP applies. An explicit request for the
 service's API goes directly to the integration-key route. A permission denial
 or pending or denied authorization is never bypassed with another route.
 
-<Note>
-  Integration keys are gated deployment-wide. An admin can turn on
-  **Integration keys** under **Settings → Experimental** for all members.
-</Note>
-
 ## How an approval works
 
 1. You ask for something that needs a service you hold a key for, such as
@@ -109,8 +104,8 @@ prevention guarantee.
 
 **Substitutes are capabilities.** A substitute token is bound to one task, one
 integration, and the task's current generation, and it stops working when the
-task ends, the integration expires or is revoked, or you turn integration key
-tools off. Within that window, a copy of the substitute could be used from elsewhere
+task ends, or the integration expires or is revoked. Within that window, a copy
+of the substitute could be used from elsewhere
 against the same origin. Roomote never logs substitutes or keys, strips them
 from snapshots, and refuses responses that echo the key.
 

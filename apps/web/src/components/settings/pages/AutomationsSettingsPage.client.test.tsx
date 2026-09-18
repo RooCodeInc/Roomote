@@ -17,7 +17,16 @@ vi.mock('@/components/settings/automations', () => ({
 }));
 
 vi.mock('@/components/settings/automations/CustomAutomationsSection', () => ({
-  CustomAutomationsSection: () => <div>Custom automation management</div>,
+  CustomAutomationsSection: ({
+    toolbarLeading,
+  }: {
+    toolbarLeading?: ReactNode;
+  }) => (
+    <>
+      {toolbarLeading}
+      <div>Custom automation management</div>
+    </>
+  ),
 }));
 
 vi.mock('@/components/settings/DeploymentTimeZoneSetting', () => ({

@@ -722,6 +722,19 @@ const automationsRouter = createRouter({
           .max(160)
           .nullable()
           .optional(),
+        defaultDestinationProvider: z
+          .enum(['slack', 'discord', 'teams', 'telegram', 'email'])
+          .nullable()
+          .optional(),
+        defaultDestinationMode: z
+          .enum(['channel', 'direct_message'])
+          .optional(),
+        defaultDestinationChannelId: z
+          .string()
+          .trim()
+          .max(255)
+          .nullable()
+          .optional(),
         managerStatsFrequency: z.enum(['off', 'weekly']),
         managerStatsSlackChannel: z.string().trim().min(1).max(160).nullable(),
         managerStatsDiscordChannel: z

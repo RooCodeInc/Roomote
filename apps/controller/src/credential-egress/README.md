@@ -9,7 +9,7 @@ control-plane contract is in `apps/api/src/handlers/credential-egress/CONTRACT.m
 ## Admission on every provider
 
 1. `CredentialEgressLifecycle.planApiProxy` preflights the run: a Session owner
-   with integration keys enabled, at least one live grant, and a provider
+   with at least one live grant and a provider
    whose capability is `api_proxy`. Nothing is minted at this point.
 2. The provider spawns the sandbox with the plan's bootstrap env
    (`ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_REQUIRED`, a per-attempt nonce) and
@@ -45,8 +45,7 @@ renewals for runs that ended or were reattached, so an outage lets the lease
 expire rather than failing open. Pending deliveries expire in 120 seconds and
 stale or terminated generations cannot read them.
 
-There is no deployment configuration: delivery is gated per Session owner by
-the `integration_keys_enabled` experiment, the same gate as the Fast and
-coding-run tools. An optional `R_CREDENTIAL_EGRESS_PROXY_HOST` serves the proxy
+There is no deployment configuration. An optional
+`R_CREDENTIAL_EGRESS_PROXY_HOST` serves the proxy
 at the root of a dedicated hostname for SDK clients that accept only a host
 override.

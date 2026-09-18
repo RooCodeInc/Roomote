@@ -88,6 +88,7 @@ vi.mock('../../lib/user-direct-message', () => ({
 import {
   buildDestinationPromptContext,
   buildDestinationTaskPayloadFields,
+  hasAutomationEmailTarget,
   listConnectedCommunicationProviders,
   resolveAutomationRuntimeDestination,
   prepareAutomationReportDestination,
@@ -216,6 +217,55 @@ describe('resolveAutomationRuntimeDestination', () => {
       'discord',
       'user-1',
     );
+  });
+
+  it('resolves a deployment DM default when no explicit target exists', async () => {
+    mockFindUserDirectMessageDestination.mockResolvedValue({
+      channelId: 'discord-default-dm',
+    });
+
+    await expect(
+      resolveAutomationRuntimeDestination({
+        runtime: {
+          destination: null,
+          defaultAutomationTarget: {
+            provider: 'discord',
+            targetKind: 'discord_user',
+            externalRef: 'default-recipient',
+          },
+        },
+        slackConnected: false,
+      }),
+    ).resolves.toEqual({
+      provider: 'discord',
+      channelId: 'discord-default-dm',
+      source: 'manager_channel',
+    });
+  });
+
+  it('resolves a deployment email default when no explicit target exists', async () => {
+    mockCanStartAgentMailConversationWithUser.mockResolvedValue(true);
+
+    await expect(
+      resolveAutomationRuntimeDestination({
+        runtime: {
+          destination: null,
+          defaultAutomationTarget: {
+            provider: 'email',
+            targetKind: 'email_user',
+            externalRef: 'default-recipient',
+            metadata: { emailIdentityId: 'identity-1' },
+          },
+        },
+        slackConnected: false,
+      }),
+    ).resolves.toEqual({
+      provider: 'email',
+      channelId: 'default-recipient',
+      userId: 'default-recipient',
+      identityId: 'identity-1',
+      source: 'manager_channel',
+    });
   });
 
   beforeEach(() => {
@@ -574,5 +624,48 @@ describe('payload fields and prompt context', () => {
       postToolName: 'post_to_channel',
       surfaceLabel: 'Discord',
     });
+  });
+});
+
+describe('hasAutomationEmailTarget', () => {
+  const emailDefault = {
+    provider: 'email' as const,
+    targetKind: 'email_user' as const,
+    externalRef: 'default-recipient',
+    metadata: { emailIdentityId: 'identity-1' },
+  };
+
+  it('applies an Email deployment default only without an explicit destination', () => {
+    expect(
+      hasAutomationEmailTarget({
+        targets: [],
+        defaultAutomationTarget: emailDefault,
+      }),
+    ).toBe(true);
+    expect(
+      hasAutomationEmailTarget({
+        targets: [
+          {
+            provider: 'slack',
+            targetKind: 'slack_channel',
+            externalRef: 'C-EXPLICIT',
+          },
+        ],
+        defaultAutomationTarget: emailDefault,
+      }),
+    ).toBe(false);
+  });
+
+  it('keeps an explicit Email target regardless of the deployment default', () => {
+    expect(
+      hasAutomationEmailTarget({
+        targets: [emailDefault],
+        defaultAutomationTarget: {
+          provider: 'slack',
+          targetKind: 'slack_channel',
+          externalRef: 'C-DEFAULT',
+        },
+      }),
+    ).toBe(true);
   });
 });

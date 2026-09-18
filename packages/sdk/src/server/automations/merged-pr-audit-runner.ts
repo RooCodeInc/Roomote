@@ -38,6 +38,7 @@ import {
   buildDestinationPromptContext,
   buildDestinationTaskPayloadFields,
   getAutomationDestinationCommunicationProvider,
+  hasAutomationEmailTarget,
   listConnectedCommunicationProviders,
   prepareAutomationReportDestination,
   resolveAutomationRuntimeDestination,
@@ -245,7 +246,7 @@ async function findEligibleDeploymentContext(
     return null;
   }
   const runtime = await getAutomationRuntime(automationKey);
-  if (runtime.targets?.some((target) => target.provider === 'email')) {
+  if (hasAutomationEmailTarget(runtime)) {
     return { slackConnected: false };
   }
 

@@ -2942,6 +2942,64 @@ describe('resolveOpenCodeSmallModel', () => {
     });
   });
 
+  it('defaults unknown custom session-model image capability to direct delivery', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'vllm/custom-model',
+      R_VISION_MODEL: 'openrouter/google/gemini-3.8-flash',
+      VLLM_BASE_URL: 'https://vllm.example.com/v1',
+      VLLM_API_KEY: 'secret',
+    });
+    configProvidersMock.mockResolvedValue({
+      data: {
+        providers: [
+          {
+            id: 'vllm',
+            models: {
+              'custom-model': {
+                capabilities: {
+                  // OpenCode normalizes omitted custom-provider modalities to
+                  // false, so this is unknown rather than an explicit denial.
+                  input: { text: true, image: false },
+                  output: { text: true },
+                },
+              },
+            },
+          },
+          {
+            id: 'openrouter',
+            models: {
+              'google/gemini-3.8-flash': {
+                capabilities: {
+                  input: { image: true },
+                  output: { text: true },
+                },
+              },
+            },
+          },
+        ],
+        default: {},
+      },
+      error: undefined,
+    });
+
+    const { resolveNonTaskInputModalityDelivery } =
+      await import('../non-task-provider-usage.js');
+
+    await expect(
+      resolveNonTaskInputModalityDelivery({
+        modality: 'image',
+        modelRole: 'primary',
+      }),
+    ).resolves.toEqual({
+      delivery: 'direct',
+      model: 'vllm/custom-model',
+    });
+  });
+
   it('hands images to the vision model as a helper when the session model cannot view them', async () => {
     process.env = {
       ...originalEnv,
@@ -3043,6 +3101,41 @@ describe('resolveOpenCodeSmallModel', () => {
       }),
     ).rejects.toBeInstanceOf(NonTaskInputModalityUnsupportedError);
   });
+
+  it.each([
+    'This model does not support image input.',
+    'Unsupported image_url content for the selected model.',
+    'Vision inputs are not supported by this endpoint.',
+  ])('recognizes an image-input provider rejection: %s', async (message) => {
+    const { isNonTaskImageInputUnsupportedError } =
+      await import('../non-task-provider-usage.js');
+
+    expect(
+      isNonTaskImageInputUnsupportedError({
+        name: 'ProviderError',
+        data: { statusCode: 400, message },
+      }),
+    ).toBe(true);
+  });
+
+  it.each([
+    'Invalid API key.',
+    'Rate limit exceeded.',
+    'Network error while uploading image bytes.',
+  ])(
+    'does not mistake an unrelated provider failure for image rejection: %s',
+    async (message) => {
+      const { isNonTaskImageInputUnsupportedError } =
+        await import('../non-task-provider-usage.js');
+
+      expect(
+        isNonTaskImageInputUnsupportedError({
+          name: 'ProviderError',
+          data: { statusCode: 400, message },
+        }),
+      ).toBe(false);
+    },
+  );
 
   it('rejects when the plain SDK prompt reports a message error', async () => {
     process.env = {

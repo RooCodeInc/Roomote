@@ -79,6 +79,62 @@ describe('AutomationDestinationPicker', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('keeps channel providers in personal defaults limited to DM mode', () => {
+    render(
+      <AutomationDestinationPicker
+        id="destination"
+        value={{ provider: 'slack', mode: 'direct_message', channelId: '' }}
+        availableProviders={['slack', 'email']}
+        channelProviders={[]}
+        slackOptions={slackOptions}
+        discordOptions={discordOptions}
+        emailOptions={[
+          {
+            id: 'email-1',
+            name: 'user@example.com',
+            label: 'user@example.com',
+          },
+        ]}
+        onChange={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText(
+        'Results are sent privately to your linked Slack account.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('combobox', { name: 'Slack destination type' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('combobox', { name: 'Destination channel' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('renders an unconfigured placeholder without offering None as a destination', () => {
+    render(
+      <AutomationDestinationPicker
+        id="destination"
+        value={{ provider: 'none', mode: 'channel', channelId: '' }}
+        availableProviders={['slack', 'email']}
+        slackOptions={slackOptions}
+        discordOptions={discordOptions}
+        allowNone={false}
+        noneLabel="Select a destination"
+        noneDescription=""
+        onChange={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByRole('combobox', { name: 'Destination provider' }),
+    ).toHaveTextContent('Select a destination');
+    expect(
+      screen.queryByText('Results appear only in the task view.'),
+    ).not.toBeInTheDocument();
+  });
+
   it('shows provider-specific channel selection in channel mode', () => {
     render(
       <AutomationDestinationPicker

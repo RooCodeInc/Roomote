@@ -8,6 +8,7 @@ import {
   type SlackInstallation,
 } from '@roomote/db/server';
 import { ensureSlackManagerChannel } from '@roomote/slack';
+import { buildChannelAutomationTarget } from '@roomote/types';
 
 export async function provisionSlackManagerChannel(
   installation: SlackInstallation,
@@ -17,11 +18,16 @@ export async function provisionSlackManagerChannel(
 
     const settings = await db.query.deploymentSettings.findFirst({
       where: eq(deploymentSettings.id, 'default'),
-      columns: { managerSlackChannelId: true, managerDiscordChannelId: true },
+      columns: {
+        managerSlackChannelId: true,
+        managerDiscordChannelId: true,
+        defaultAutomationTarget: true,
+      },
     });
     if (
       settings?.managerSlackChannelId != null ||
-      settings?.managerDiscordChannelId != null
+      settings?.managerDiscordChannelId != null ||
+      settings?.defaultAutomationTarget != null
     ) {
       return;
     }
@@ -30,6 +36,10 @@ export async function provisionSlackManagerChannel(
       installation.botAccessToken,
     );
     if (!channelId) return;
+    const defaultAutomationTarget = buildChannelAutomationTarget(
+      'slack',
+      channelId,
+    );
 
     await db.transaction(async (tx) => {
       await tx
@@ -41,13 +51,22 @@ export async function provisionSlackManagerChannel(
       // manager while Slack was responding. Never update automation targets.
       await tx
         .insert(deploymentSettings)
-        .values({ id: 'default', managerSlackChannelId: channelId })
+        .values({
+          id: 'default',
+          managerSlackChannelId: channelId,
+          defaultAutomationTarget,
+        })
         .onConflictDoUpdate({
           target: deploymentSettings.id,
-          set: { managerSlackChannelId: channelId, updatedAt: new Date() },
+          set: {
+            managerSlackChannelId: channelId,
+            defaultAutomationTarget,
+            updatedAt: new Date(),
+          },
           setWhere: and(
             isNull(deploymentSettings.managerSlackChannelId),
             isNull(deploymentSettings.managerDiscordChannelId),
+            isNull(deploymentSettings.defaultAutomationTarget),
           ),
         });
     });
