@@ -660,6 +660,13 @@ launch_shared_browser() {
   # lock is held and the CDP port is closed.
   rm -f "$profile_dir"/Singleton* 2>/dev/null || true
 
+  # The DevTools endpoint listens on loopback only, is a reserved environment
+  # port (it can never be published through the preview proxy), and keeps
+  # Chrome's default origin check because --remote-allow-origins is not passed,
+  # so a web page cannot connect to it. Processes inside the sandbox can: they
+  # run as the same user as the agent that drives this browser and can read
+  # its profile directory anyway. The sandbox is the trust boundary for
+  # anything a person signs in to here.
   local -a chrome_args=(
     "--remote-debugging-port=${SHARED_BROWSER_CDP_PORT}"
     "--user-data-dir=${profile_dir}"

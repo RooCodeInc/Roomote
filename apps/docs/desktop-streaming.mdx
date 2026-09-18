@@ -26,6 +26,8 @@ must open on the sandbox's inherited `DISPLAY`.
 
 The managed desktop port is reserved and authenticated by Roomote. Do not add a
 separate environment port for it or expose port `6080` as unauthenticated.
+Port `19222` is reserved the same way: it is the loopback DevTools endpoint of
+the shared browser described below, and an environment cannot publish it.
 
 Input control belongs to one viewer at a time. The panel header offers
 **Take control** and **Release control**; opening the desktop takes control,

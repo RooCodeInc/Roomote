@@ -122,4 +122,29 @@ describe('buildServiceContextForPreviewProxy', () => {
     );
     expect(notReserved?.appPorts).toEqual({ WEB: 3000 });
   });
+
+  it.each([6080, 19222])(
+    'refuses an environment that publishes reserved port %i',
+    (port) => {
+      expect(() =>
+        buildServiceContextForPreviewProxy(
+          { id: 1, taskId: 'task_1', proxyPorts: { DEBUG: 50001 } } as never,
+          {
+            type: 'environment',
+            environmentConfig: {
+              name: 'App',
+              repositories: [{ repository: 'Roomote/example-app' }],
+              ports: [{ name: 'debug', port }],
+            },
+          } as never,
+          {
+            previewAuthPublicKey: 'preview-public-key',
+            previewAuthCookieName: 'preview_auth',
+            roomoteAppUrl: 'https://app.roomote.dev',
+            trpcUrl: 'https://api.roomote.dev',
+          } as never,
+        ),
+      ).toThrow(`Port number '${port}' is reserved`);
+    },
+  );
 });

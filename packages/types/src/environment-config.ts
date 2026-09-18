@@ -290,7 +290,11 @@ const RESERVED_NAMED_PORT_NAMES = new Set([
   'SHARED_DESKTOP',
   'EDITOR',
 ]);
-const RESERVED_ENVIRONMENT_PORT_NUMBERS = new Set([6080]);
+// 6080 is the Shared Desktop service. 19222 is the DevTools endpoint of the
+// shared browser on that desktop (see .docker/sandbox/install-browser-agent.sh);
+// it controls a browser a person may have signed in to, so an environment must
+// never publish it through the preview proxy.
+const RESERVED_ENVIRONMENT_PORT_NUMBERS = new Set([6080, 19222]);
 
 export const namedPortSchema = z.object({
   name: z
