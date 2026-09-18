@@ -1,59 +1,90 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  R_BIOCONDUCTOR_RECIPE_BIOCONDUCTOR_VERSION,
-  R_BIOCONDUCTOR_RECIPE_CATALOG_ID,
-  R_BIOCONDUCTOR_RECIPE_IMAGE,
-  R_BIOCONDUCTOR_RECIPE_R_VERSION,
-  type EnvironmentConfig,
-} from '@roomote/types';
+import type { EnvironmentConfig, EnvironmentRecipe } from '@roomote/types';
 
 import {
-  isCompatibleRAnalysisEnvironment,
+  R_BIOCONDUCTOR_RECIPE_BIOCONDUCTOR_VERSION,
+  R_BIOCONDUCTOR_RECIPE_IMAGE,
+  R_BIOCONDUCTOR_RECIPE_R_VERSION,
+} from '../../environment-recipes/r-bioconductor-adapter';
+import {
+  isCompatibleRecipeEnvironment,
   isConfiguredEnvironmentId,
 } from '../r-analysis-environment';
 
-const config: EnvironmentConfig = {
-  name: 'R analysis',
-  repositories: [],
-  analysis_recipe: {
-    type: 'r-bioconductor',
-    schema_version: 1,
-    catalog_id: R_BIOCONDUCTOR_RECIPE_CATALOG_ID,
+const resolvedRecipe: EnvironmentRecipe = {
+  type: 'r-bioconductor',
+  schema_version: 1,
+  request: { packages: ['DESeq2', 'airway'] },
+  request_fingerprint: 'a'.repeat(64),
+  resolution: {
     image: R_BIOCONDUCTOR_RECIPE_IMAGE,
     r_version: R_BIOCONDUCTOR_RECIPE_R_VERSION,
     bioconductor_version: R_BIOCONDUCTOR_RECIPE_BIOCONDUCTOR_VERSION,
-    direct_packages: [
-      { name: 'DESeq2', source: 'bioconductor' },
-      { name: 'airway', source: 'bioconductor' },
+    packages: [
+      { name: 'DESeq2', version: '1.48.2', repository: 'bioconductor' },
+      { name: 'airway', version: '1.28.0', repository: 'bioconductor' },
     ],
-    renv_lock: JSON.stringify({
+    renv_lock: {
       R: { Version: R_BIOCONDUCTOR_RECIPE_R_VERSION },
       Bioconductor: {
         Version: R_BIOCONDUCTOR_RECIPE_BIOCONDUCTOR_VERSION,
       },
       Packages: { DESeq2: {}, airway: {} },
-    }),
+    },
+    resolution_fingerprint: 'b'.repeat(64),
   },
 };
 
-describe('isCompatibleRAnalysisEnvironment', () => {
-  it('accepts a verified package superset', () => {
+const config: EnvironmentConfig = {
+  name: 'R analysis',
+  repositories: [],
+  environment_recipe: resolvedRecipe,
+};
+
+describe('isCompatibleRecipeEnvironment', () => {
+  it('accepts a verified resolved recipe whose direct packages cover the request', () => {
     expect(
-      isCompatibleRAnalysisEnvironment({ isVerified: true, config }, [
-        'DESeq2',
-      ]),
+      isCompatibleRecipeEnvironment(
+        { isVerified: true, config },
+        { packages: ['DESeq2'] },
+      ),
     ).toBe(true);
   });
 
-  it('rejects unverified or incomplete environments', () => {
+  it('rejects unverified or incomplete environments and ignores display names', () => {
     expect(
-      isCompatibleRAnalysisEnvironment({ isVerified: false, config }, [
-        'DESeq2',
-      ]),
+      isCompatibleRecipeEnvironment(
+        { isVerified: false, config },
+        { packages: ['DESeq2'] },
+      ),
     ).toBe(false);
     expect(
-      isCompatibleRAnalysisEnvironment({ isVerified: true, config }, ['edgeR']),
+      isCompatibleRecipeEnvironment(
+        { isVerified: true, config },
+        { packages: ['edgeR'] },
+      ),
+    ).toBe(false);
+  });
+
+  it('rejects unresolved recipes', () => {
+    expect(
+      isCompatibleRecipeEnvironment(
+        {
+          isVerified: true,
+          config: {
+            name: 'R analysis',
+            repositories: [],
+            environment_recipe: {
+              type: 'r-bioconductor',
+              schema_version: 1,
+              request: { packages: ['DESeq2'] },
+              request_fingerprint: 'a'.repeat(64),
+            },
+          },
+        },
+        { packages: ['DESeq2'] },
+      ),
     ).toBe(false);
   });
 });

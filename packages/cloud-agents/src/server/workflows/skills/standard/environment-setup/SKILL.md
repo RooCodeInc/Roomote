@@ -75,7 +75,6 @@ Sandbox tasks cannot launch follow-up Roomote tasks. Do not use `manage_tasks` w
           <action>Do not invent mocked, stubbed, or fake replacement services just to get the app booting. If repository evidence and supported worker tooling still do not reveal how to run a required real service, stop and ask the user for help with that service.</action>
           <action>Identify the canonical test-suite command and any required wrappers (for example `dotenvx`, package filter, or workspace command) when tests exist.</action>
           <action>Inspect environment examples such as `.env.example` and `.env.local.example`.</action>
-          <action>For a progressive R analysis task with no repository, use the trusted `r-bioconductor-deseq2-v1` recipe instead of inventing a repository. Its immutable runtime is `bioconductor/bioconductor_docker@sha256:41ed449aa2181f330cdc8d0499a11a7435b04827ff926dc141584a34f65a12cb` with R 4.5.2 and Bioconductor 3.21. Infer direct packages only from the supplied R script, always include DESeq2 and airway for v1 verification, resolve and persist a canonical renv lock, and create an environment with no repositories using `analysis_recipe`. Never use a floating image tag or treat packages installed only in this setup sandbox as persisted state.</action>
           <action>Prefer correctness and evidence over completeness.</action>
           <action>Omit uncertain fields rather than guessing.</action>
         </actions>

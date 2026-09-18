@@ -118,19 +118,27 @@ Create the environment when validation is sufficient.`;
 
 /**
  * Prompt for a standalone environment verification task launched by the
- * verification-retry command. The task runs inside the target environment and
- * must record its result through the `record_verification` MCP action.
+ * verification-retry or recipe-provisioning flow. The task runs inside the
+ * target environment and must record its result through the
+ * `record_verification` MCP action. Recipe verification instructions come from
+ * the environment's control adapter; ordinary environments get the general
+ * workflow guidance.
  */
 export function buildEnvironmentVerificationPrompt(input: {
   environmentId: string;
   environmentName: string;
+  recipeVerificationInstructions?: string;
 }): string {
   return `Verify whether the persisted ${PRODUCT_NAME} environment "${input.environmentName}" (id ${input.environmentId}) is ready. This task is the current authorized environment-verification attempt.
 
 This is a read-only verification task. Do not invoke Doctor or another workflow skill, launch another task, repair or update the environment, edit repository files, create commits, or open a pull request. You may use an installed operational skill when needed to operate an applicable tool.
-
-When the environment provides \`roomote-rscript\`, verify its pinned R and Bioconductor versions, load every direct package in the environment recipe, then run a meaningful DESeq2 smoke test using the public \`airway\` data package: use four samples and a bounded gene subset, construct a \`DESeqDataSet\`, run \`DESeq\`, and require non-empty results. A package load, lock restore, version, or example failure means the environment is not ready.
-
+${
+  input.recipeVerificationInstructions
+    ? `
+${input.recipeVerificationInstructions}
+`
+    : ''
+}
 When .roomote/setup-status.json exists, wait for it to reach a terminal state before deciding readiness; preparing the environment can take 5 minutes or more. Wait with a single bounded blocking shell command (for example one \`timeout\`-wrapped poll loop in one tool call) instead of many separate short sleep calls across turns, and treat the platform's environment-setup update message as the completion signal when one arrives. Determine the intended developer workflow from the repository's own instructions and the available environment. Verify that workflow directly and report the exact attempted steps plus relevant secret-safe errors. Do not assume that a service, port, HTTP endpoint, browser preview, test suite, container, or long-running process exists. Report success only when the applicable workflow actually completes.
 
 Classify any test failures before deciding: failures that point to a setup or environment-definition problem (missing dependencies the environment should have installed, unwritable paths, missing toolchains, unavailable required services) mean the environment is not ready, but when setup completed cleanly and the only test failures are clearly pre-existing repository issues unrelated to the environment definition (for example failures also present in CI, missing optional data the environment intentionally omits, or upstream regressions), treat the environment as ready and list those failures explicitly as pre-existing.

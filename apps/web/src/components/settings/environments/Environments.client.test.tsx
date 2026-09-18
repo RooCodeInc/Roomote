@@ -554,7 +554,7 @@ describe('Environments', () => {
 
     render(<Environments />);
 
-    expect(screen.getByText('Verified')).toBeInTheDocument();
+    expect(screen.getByText('Ready')).toBeInTheDocument();
     expect(
       screen.queryByRole('link', { name: 'Open verification task' }),
     ).not.toBeInTheDocument();

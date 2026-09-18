@@ -666,6 +666,31 @@ export async function updateEnvironment(
 }
 
 /**
+ * Finalize a worker-resolved environment recipe through the trusted
+ * finalization endpoint. The bound verification task submits the resolution;
+ * the API preserves the verification binding and idempotently accepts or
+ * rejects.
+ */
+export async function finalizeEnvironmentRecipeResolution(
+  config: RoomoteConfig,
+  params: {
+    environmentId: string;
+    recipe: unknown;
+  },
+): Promise<{ success: boolean; environmentId: string }> {
+  return apiFetch(
+    config,
+    `/api/mcp/environments/${encodeURIComponent(params.environmentId)}/recipe_resolution`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recipe: params.recipe }),
+    },
+    'Failed to finalize the environment recipe',
+  );
+}
+
+/**
  * Record the terminal result of an environment verification task.
  */
 export async function recordEnvironmentVerification(

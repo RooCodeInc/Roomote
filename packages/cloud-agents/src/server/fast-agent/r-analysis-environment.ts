@@ -1,8 +1,9 @@
-import {
-  R_BIOCONDUCTOR_RECIPE_CATALOG_ID,
-  type EnvironmentConfig,
-} from '@roomote/types';
+import { type EnvironmentConfig } from '@roomote/types';
 import type { RoutableEnvironment } from '../available-environments';
+import {
+  getRecipeControlAdapter,
+  type EnvironmentRecipeControlAdapter,
+} from '../environment-recipes';
 
 export function isConfiguredEnvironmentId(
   environmentId: string | null | undefined,
@@ -14,21 +15,46 @@ export function isConfiguredEnvironmentId(
   );
 }
 
-export function isCompatibleRAnalysisEnvironment(
-  environment: { isVerified: boolean; config: EnvironmentConfig },
-  packages: string[],
+/**
+ * Recipe compatibility through the control registry. Matching ignores the
+ * display name and requires a verified, resolved recipe whose direct package
+ * set is a superset of the request.
+ */
+export function isCompatibleRecipeEnvironment(
+  environment: {
+    isVerified?: boolean;
+    config?: EnvironmentConfig;
+  },
+  request: { packages: string[] },
+  adapter?: EnvironmentRecipeControlAdapter,
 ): boolean {
-  const recipe = environment.config.analysis_recipe;
-  if (
-    !environment.isVerified ||
-    recipe?.type !== 'r-bioconductor' ||
-    recipe.catalog_id !== R_BIOCONDUCTOR_RECIPE_CATALOG_ID
-  ) {
+  const recipe = environment.config?.environment_recipe;
+  if (!recipe) {
     return false;
   }
-
-  const available = new Set(
-    recipe.direct_packages.map((pkg) => pkg.name.toLowerCase()),
+  const resolvedAdapter = adapter ?? getRecipeControlAdapter(recipe.type);
+  if (!resolvedAdapter) {
+    return false;
+  }
+  return resolvedAdapter.isCompatible(
+    {
+      isVerified: environment.isVerified,
+      config: { environment_recipe: recipe },
+    },
+    request,
   );
-  return packages.every((name) => available.has(name.toLowerCase()));
+}
+
+/**
+ * An unresolved or unverified recipe environment is never routable for
+ * normal work; environment_verification launches remain allowed.
+ */
+export function isRecipeEnvironmentBlockedFromLaunch(
+  environment: RoutableEnvironment,
+): boolean {
+  const recipe = environment.config?.environment_recipe;
+  if (!recipe) {
+    return false;
+  }
+  return !recipe.resolution || !environment.isVerified;
 }

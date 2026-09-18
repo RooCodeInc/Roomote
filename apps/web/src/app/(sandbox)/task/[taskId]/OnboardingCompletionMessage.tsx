@@ -1,5 +1,7 @@
 import Link from 'next/link';
 
+import type { EnvironmentRecipe } from '@roomote/types';
+
 import { ArrowRight, Button } from '@/components/system';
 import { Message, MessageContent } from '@/components/ai-elements';
 import {
@@ -17,6 +19,7 @@ export function OnboardingCompletionMessage({
     verificationTaskId: string | null;
     verificationTaskActive: boolean;
     verificationError: string | null;
+    config: { environment_recipe?: EnvironmentRecipe } | undefined;
   };
 }) {
   const state = getEnvironmentVerificationState(environment);
@@ -60,12 +63,17 @@ function getOnboardingCompletionCopy(
   environmentName: string,
 ) {
   switch (state) {
-    case 'verified':
+    case 'ready':
       return {
         title: `The ${environmentName} environment is set up and verified.`,
         body: 'You can start your first task now.',
       };
-    case 'in_progress':
+    case 'configuring':
+      return {
+        title: `The ${environmentName} environment is set up.`,
+        body: 'Roomote is still resolving the recipe packages. You can start your first task once it finishes.',
+      };
+    case 'verifying':
       return {
         title: `The ${environmentName} environment is set up.`,
         body: 'Roomote is still verifying it. You can start your first task now.',

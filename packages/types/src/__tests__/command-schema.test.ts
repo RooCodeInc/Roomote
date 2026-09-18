@@ -9,6 +9,10 @@ import {
   getDuplicateEnvironmentRepositoryConfigError,
   getMissingEnvironmentRepositoryError,
 } from '../environment-config';
+import {
+  getUnresolvedEnvironmentRecipeError,
+  UNRESOLVED_ENVIRONMENT_RECIPE_PUBLIC_ERROR,
+} from '../environment-recipe';
 import { workspaceRoutingSettingsSchema } from '../workspace-routing';
 
 describe('workspaceRoutingSettingsSchema', () => {
@@ -463,49 +467,113 @@ commands:
 });
 
 describe('environmentConfigSchema', () => {
-  it('accepts the pinned repository-free R/Bioconductor recipe', () => {
+  const resolvedRecipe = {
+    type: 'r-bioconductor' as const,
+    schema_version: 1 as const,
+    request: { packages: ['DESeq2', 'airway'] },
+    request_fingerprint: 'a'.repeat(64),
+    resolution: {
+      image:
+        'bioconductor/bioconductor_docker@sha256:41ed449aa2181f330cdc8d0499a11a7435b04827ff926dc141584a34f65a12cb',
+      r_version: '4.5.2',
+      bioconductor_version: '3.21',
+      packages: [
+        {
+          name: 'DESeq2',
+          version: '1.48.2',
+          repository: 'bioconductor' as const,
+        },
+        {
+          name: 'airway',
+          version: '1.28.0',
+          repository: 'bioconductor' as const,
+        },
+      ],
+      renv_lock: {
+        R: { Version: '4.5.2' },
+        Bioconductor: { Version: '3.21' },
+        Packages: { DESeq2: {}, airway: {} },
+      },
+      resolution_fingerprint: 'b'.repeat(64),
+    },
+  };
+
+  it('accepts a resolved R/Bioconductor environment recipe', () => {
     const result = environmentConfigSchema.safeParse({
       name: 'R analysis',
-      analysis_recipe: {
-        type: 'r-bioconductor',
-        schema_version: 1,
-        catalog_id: 'r-bioconductor-deseq2-v1',
-        image:
-          'bioconductor/bioconductor_docker@sha256:41ed449aa2181f330cdc8d0499a11a7435b04827ff926dc141584a34f65a12cb',
-        r_version: '4.5.2',
-        bioconductor_version: '3.21',
-        direct_packages: [
-          { name: 'DESeq2', source: 'bioconductor' },
-          { name: 'airway', source: 'bioconductor' },
-        ],
-        renv_lock: JSON.stringify({
-          R: { Version: '4.5.2' },
-          Bioconductor: { Version: '3.21' },
-          Packages: { DESeq2: {}, airway: {} },
-        }),
-      },
+      environment_recipe: resolvedRecipe,
     });
 
     expect(result.success).toBe(true);
     if (result.success) expect(result.data.repositories).toEqual([]);
   });
 
-  it('rejects floating or incompatible R/Bioconductor recipes', () => {
+  it('public surfaces reject unresolved recipes through the shared check', () => {
+    const unresolved = {
+      environment_recipe: {
+        type: 'r-bioconductor' as const,
+        schema_version: 1 as const,
+        request: { packages: ['DESeq2'] },
+        request_fingerprint: 'a'.repeat(64),
+      },
+    };
+
+    expect(getUnresolvedEnvironmentRecipeError(unresolved)).toBe(
+      UNRESOLVED_ENVIRONMENT_RECIPE_PUBLIC_ERROR,
+    );
+    expect(
+      getUnresolvedEnvironmentRecipeError({
+        environment_recipe: resolvedRecipe,
+      }),
+    ).toBeNull();
+  });
+
+  it('accepts an internal unresolved recipe request', () => {
     const result = environmentConfigSchema.safeParse({
       name: 'R analysis',
-      analysis_recipe: {
+      environment_recipe: {
         type: 'r-bioconductor',
         schema_version: 1,
-        catalog_id: 'r-bioconductor-deseq2-v1',
-        image: 'bioconductor/bioconductor_docker:RELEASE_3_21',
-        r_version: '4.5.2',
-        bioconductor_version: '3.21',
-        direct_packages: [{ name: 'DESeq2', source: 'bioconductor' }],
-        renv_lock: '{}',
+        request: { packages: ['DESeq2'] },
+        request_fingerprint: 'a'.repeat(64),
+      },
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects malformed fingerprints and duplicate direct packages', () => {
+    const result = environmentConfigSchema.safeParse({
+      name: 'R analysis',
+      environment_recipe: {
+        type: 'r-bioconductor',
+        schema_version: 1,
+        request: { packages: ['DESeq2', 'DESeq2'] },
+        request_fingerprint: 'not-a-sha256-hash',
+        resolution: {
+          ...resolvedRecipe.resolution,
+          resolution_fingerprint: 'short',
+        },
       },
     });
 
     expect(result.success).toBe(false);
+  });
+
+  it('does not accept the removed analysis_recipe alias', () => {
+    const result = environmentConfigSchema.safeParse({
+      name: 'R analysis',
+      analysis_recipe: {
+        type: 'r-bioconductor',
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(
+        (result.data as Record<string, unknown>).analysis_recipe,
+      ).toBeUndefined();
+    }
   });
 
   it('accepts a repository-free environment', () => {

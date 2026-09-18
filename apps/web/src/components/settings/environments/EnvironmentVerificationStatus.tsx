@@ -17,8 +17,9 @@ import {
 } from '@/components/system';
 
 export type EnvironmentVerificationState =
-  | 'verified'
-  | 'in_progress'
+  | 'ready'
+  | 'verifying'
+  | 'configuring'
   | 'failed'
   | 'configured';
 
@@ -30,18 +31,23 @@ export const environmentVerificationDisplay: Record<
     iconClassName?: string;
   }
 > = {
-  verified: {
+  ready: {
     Icon: Check,
-    label: 'Verified',
+    label: 'Ready',
   },
-  in_progress: {
+  verifying: {
     Icon: Loader2,
-    label: 'Verification in progress',
+    label: 'Verifying',
+    iconClassName: 'animate-spin',
+  },
+  configuring: {
+    Icon: Loader2,
+    label: 'Configuring',
     iconClassName: 'animate-spin',
   },
   failed: {
     Icon: X,
-    label: 'Verification failed',
+    label: 'Failed',
   },
   configured: {
     Icon: HelpCircle,
@@ -56,21 +62,31 @@ export function getEnvironmentVerificationState(
     | 'verificationTaskId'
     | 'verificationTaskActive'
     | 'verificationError'
-  >,
+  > & { config?: unknown },
 ): EnvironmentVerificationState {
   if (environment.isVerified) {
-    return 'verified';
+    return 'ready';
   }
 
   if (environment.verificationError) {
     return 'failed';
   }
 
-  // Only show "in progress" while the verification task actually has an active
+  const recipe = (
+    environment.config as EnvironmentWithMeta['config'] | undefined
+  )?.environment_recipe;
+
+  // An unresolved recipe with an active verification task is still resolving
+  // package versions; ordinary environments without a task are Configured.
+  if (recipe && !recipe.resolution) {
+    return 'configuring';
+  }
+
+  // Only show "verifying" while the verification task actually has an active
   // run. A stale task id from a crashed or unreported attempt falls back to
   // "configured" instead of appearing stuck forever.
   if (environment.verificationTaskId && environment.verificationTaskActive) {
-    return 'in_progress';
+    return 'verifying';
   }
 
   return 'configured';
@@ -99,7 +115,7 @@ export function EnvironmentVerificationBadge({
     );
 
   switch (state) {
-    case 'verified':
+    case 'ready':
       return (
         <BasicTooltip
           content={
@@ -130,13 +146,16 @@ export function EnvironmentVerificationBadge({
           )}
         </BasicTooltip>
       );
-    case 'in_progress':
+    case 'configuring':
+    case 'verifying':
       return (
         <BasicTooltip
           content={
             <div className="text-sm">
-              Roomote is checking that this environment works. You can keep
-              using it while verification finishes.
+              {state === 'configuring'
+                ? 'Roomote is resolving this environment recipe from official repositories.'
+                : 'Roomote is checking that this environment works.'}{' '}
+              You can keep using it while this finishes.
             </div>
           }
         >

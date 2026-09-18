@@ -2,6 +2,7 @@ import YAML from 'yaml';
 import { z } from 'zod';
 
 import { PRODUCT_NAME } from './constants';
+import { environmentRecipeSchema } from './environment-recipe';
 import { gitBranchNameSchema } from './git-ref';
 import { collectReservedEnvReferences } from './reserved-mcp-env-vars';
 import { SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME } from './sandbox-preview-inference';
@@ -194,96 +195,6 @@ export type DockerfileDockerProject = z.infer<
   typeof dockerfileDockerProjectSchema
 >;
 export type DockerProject = z.infer<typeof dockerProjectSchema>;
-
-export const R_BIOCONDUCTOR_RECIPE_CATALOG_ID =
-  'r-bioconductor-deseq2-v1' as const;
-export const R_BIOCONDUCTOR_RECIPE_IMAGE =
-  'bioconductor/bioconductor_docker@sha256:41ed449aa2181f330cdc8d0499a11a7435b04827ff926dc141584a34f65a12cb' as const;
-export const R_BIOCONDUCTOR_RECIPE_R_VERSION = '4.5.2' as const;
-export const R_BIOCONDUCTOR_RECIPE_BIOCONDUCTOR_VERSION = '3.21' as const;
-
-const rPackageNameSchema = z
-  .string()
-  .min(1)
-  .max(100)
-  .regex(/^[A-Za-z][A-Za-z0-9.]*$/, 'Invalid R package name');
-
-export const rBioconductorAnalysisRecipeSchema = z
-  .object({
-    type: z.literal('r-bioconductor'),
-    schema_version: z.literal(1),
-    catalog_id: z.literal(R_BIOCONDUCTOR_RECIPE_CATALOG_ID),
-    image: z.literal(R_BIOCONDUCTOR_RECIPE_IMAGE),
-    r_version: z.literal(R_BIOCONDUCTOR_RECIPE_R_VERSION),
-    bioconductor_version: z.literal(R_BIOCONDUCTOR_RECIPE_BIOCONDUCTOR_VERSION),
-    direct_packages: z
-      .array(
-        z.object({
-          name: rPackageNameSchema,
-          source: z.enum(['cran', 'bioconductor']),
-        }),
-      )
-      .min(1)
-      .max(100)
-      .superRefine((packages, ctx) => {
-        const names = new Set<string>();
-        for (const [index, pkg] of packages.entries()) {
-          const normalized = pkg.name.toLowerCase();
-          if (names.has(normalized)) {
-            ctx.addIssue({
-              code: z.ZodIssueCode.custom,
-              path: [index, 'name'],
-              message: `Duplicate R package: ${pkg.name}`,
-            });
-          }
-          names.add(normalized);
-        }
-      }),
-    renv_lock: z.string().min(2).max(1_000_000),
-  })
-  .superRefine((recipe, ctx) => {
-    let lock: {
-      R?: { Version?: unknown };
-      Bioconductor?: { Version?: unknown };
-      Packages?: Record<string, unknown>;
-    };
-    try {
-      lock = JSON.parse(recipe.renv_lock) as typeof lock;
-    } catch {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['renv_lock'],
-        message: 'renv_lock must be valid JSON',
-      });
-      return;
-    }
-    if (
-      lock.R?.Version !== R_BIOCONDUCTOR_RECIPE_R_VERSION ||
-      lock.Bioconductor?.Version !==
-        R_BIOCONDUCTOR_RECIPE_BIOCONDUCTOR_VERSION ||
-      !lock.Packages
-    ) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['renv_lock'],
-        message: 'renv_lock must match the pinned R and Bioconductor versions',
-      });
-      return;
-    }
-    for (const [index, pkg] of recipe.direct_packages.entries()) {
-      if (!lock.Packages[pkg.name]) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['direct_packages', index, 'name'],
-          message: `${pkg.name} is missing from renv_lock`,
-        });
-      }
-    }
-  });
-
-export type RBioconductorAnalysisRecipe = z.infer<
-  typeof rBioconductorAnalysisRecipeSchema
->;
 
 /**
  * Normalize a configured Docker project name into the Compose project name
@@ -812,8 +723,8 @@ export const environmentConfigSchema = z
      * their repositories have been prepared.
      */
     docker_projects: z.array(dockerProjectSchema).optional(),
-    /** Pinned, repository-free scientific runtime reconstructed for every task. */
-    analysis_recipe: rBioconductorAnalysisRecipeSchema.optional(),
+    /** On-demand recipe environment, resolved through a trusted worker. */
+    environment_recipe: environmentRecipeSchema.optional(),
     /**
      * Optional sandbox OIDC targets for this environment.
      * Tokens are minted by Roomote, written into the sandbox filesystem, and

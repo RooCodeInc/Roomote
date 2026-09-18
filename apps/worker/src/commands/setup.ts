@@ -52,7 +52,10 @@ import {
   setupOrganizationEnvironment,
   EnvironmentSetupStatusWriter,
 } from './setup/index';
-import { setupAnalysisRecipe } from './setup/workspace/analysis-recipe';
+import {
+  getEnvironmentRecipeSetupPlan,
+  setupEnvironmentRecipe,
+} from './setup/workspace/environment-recipe';
 
 export type SetupMode = 'full' | 'directDispatch';
 
@@ -489,22 +492,19 @@ async function runSetup({
         initializeRepositoriesResult.environment?.repoPaths,
       );
 
-      if (workspace.environmentConfig.analysis_recipe) {
-        const recipeName =
-          workspace.environmentConfig.analysis_recipe.catalog_id;
-        setupStatusWriter.addRecipeCommands(recipeName, [
-          'Pull pinned R/Bioconductor runtime',
-          'Restore pinned R packages',
-          'Verify pinned R packages',
-        ]);
+      const environmentRecipe = workspace.environmentConfig.environment_recipe;
+      if (environmentRecipe) {
+        const plan = getEnvironmentRecipeSetupPlan(environmentRecipe);
+        setupStatusWriter.addRecipeCommands(plan.planName, plan.commandNames);
         try {
-          await setupAnalysisRecipe(logger, {
-            recipe: workspace.environmentConfig.analysis_recipe,
+          await setupEnvironmentRecipe(logger, {
+            recipe: environmentRecipe,
             workspacePath: initializeRepositoriesResult.workspacePath,
+            environmentId: workspace.environmentId,
             envVars: workspaceOptions.envVars,
-            onCommandStart: (name) =>
+            onCommandStart: (recipeName, name) =>
               setupStatusWriter.markRecipeCommandRunning(recipeName, name),
-            onCommandResult: (result) =>
+            onCommandResult: (recipeName, result) =>
               setupStatusWriter.markRecipeCommandResult(recipeName, result),
           });
         } catch (error) {

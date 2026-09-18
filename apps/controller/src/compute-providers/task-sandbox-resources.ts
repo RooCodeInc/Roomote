@@ -20,7 +20,7 @@ export async function taskNeedsNestedDocker(
   if (environmentConfig) {
     return Boolean(
       environmentConfig.docker_projects?.length ||
-      environmentConfig.analysis_recipe,
+      environmentConfig.environment_recipe,
     );
   }
 
