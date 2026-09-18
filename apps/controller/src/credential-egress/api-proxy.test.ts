@@ -183,6 +183,23 @@ describe('API-proxy admission', () => {
     expect(silent.register).not.toHaveBeenCalled();
   });
 
+  it('stops waiting when the launched worker exits before bootstrap', async () => {
+    const controller = new AbortController();
+    const cycle = lifecycle();
+    const d = deps({
+      isBootstrapReady: vi.fn().mockResolvedValue(false),
+      sleep: vi.fn(async () => controller.abort()),
+    });
+
+    await expect(
+      admitCredentialEgressApiProxy(
+        { ...input(cycle), signal: controller.signal },
+        d,
+      ),
+    ).rejects.toThrow('bootstrap admission aborted');
+    expect(cycle.register).not.toHaveBeenCalled();
+  });
+
   it('retires the workload when delivery fails and refuses ineligible runs', async () => {
     const failing = lifecycle();
     await expect(

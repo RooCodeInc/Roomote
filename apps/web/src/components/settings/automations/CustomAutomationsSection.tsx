@@ -16,14 +16,11 @@ import {
   ALL_REPOSITORIES,
   FAST_EXECUTION,
   NO_REPOSITORIES,
-  getAutomationTargetEmailIdentityId,
-  isBackgroundAutomationUserTargetKind,
   MAX_CUSTOM_AUTOMATIONS,
   AUTOMATION_RESULT_PRIORITY_LABELS,
   AUTOMATION_RESULT_PRIORITIES,
   type AutomationResultPriority,
   type CustomAutomationScheduleMode,
-  type OptionalAutomationTarget,
   type ReasoningEffort,
 } from '@roomote/types';
 
@@ -68,6 +65,7 @@ import { useAuthorizedUser } from '@/hooks/useUser';
 import {
   AutomationDestinationPicker,
   type AutomationDestinationProvider,
+  destinationValueFromAutomationTarget,
 } from './AutomationDestinationPicker';
 import {
   AutomationListRow,
@@ -96,7 +94,9 @@ type CustomAutomationFormState = {
   targetChannelId: string;
 };
 
-type CustomAutomationFieldErrors = Partial<Record<'name' | 'prompt', string>>;
+type CustomAutomationFieldErrors = Partial<
+  Record<'name' | 'prompt' | 'schedule', string>
+>;
 
 const EMPTY_FORM: CustomAutomationFormState = {
   name: '',
@@ -295,42 +295,8 @@ function CustomAutomationRunButton({
   );
 }
 
-function targetFromAutomationTarget(target: OptionalAutomationTarget): {
-  provider: CustomAutomationFormState['targetProvider'];
-  mode: CustomAutomationFormState['targetMode'];
-  channelId: string;
-} {
-  if (!target.provider || !target.externalRef) {
-    return {
-      provider: 'none',
-      mode: 'channel',
-      channelId: '',
-    };
-  }
-
-  const provider =
-    target.provider === 'discord' ||
-    target.provider === 'teams' ||
-    target.provider === 'telegram' ||
-    target.provider === 'email'
-      ? target.provider
-      : 'slack';
-  return {
-    provider,
-    mode: isBackgroundAutomationUserTargetKind(target.targetKind)
-      ? 'direct_message'
-      : 'channel',
-    channelId:
-      target.provider === 'email'
-        ? (getAutomationTargetEmailIdentityId(target) ?? '')
-        : isBackgroundAutomationUserTargetKind(target.targetKind)
-          ? ''
-          : (target.externalRef ?? ''),
-  };
-}
-
 function targetFromRow(row: CustomAutomationListItem) {
-  return targetFromAutomationTarget(row.target);
+  return destinationValueFromAutomationTarget(row.target);
 }
 
 function formFromRow(
@@ -691,9 +657,13 @@ export function CustomAutomationsSection({
         if (result.status === 'ambiguous') {
           setResolvedCron(null);
           setScheduleSummary(null);
-          toast.message(result.clarification ?? 'Clarify the schedule.');
+          setFieldErrors((current) => ({
+            ...current,
+            schedule: result.clarification ?? 'Clarify the schedule.',
+          }));
           return;
         }
+        setFieldErrors((current) => ({ ...current, schedule: undefined }));
         setResolvedCron(result.cronExpression);
         setScheduleSummary(
           scheduleSummaryLine(result.summary, result.timeZone),
@@ -703,7 +673,10 @@ export function CustomAutomationsSection({
         if (variables.schedule !== form.cronExpression) {
           return;
         }
-        toast.error(error.message);
+        setFieldErrors((current) => ({
+          ...current,
+          schedule: error.message,
+        }));
       },
     }),
   );
@@ -887,20 +860,25 @@ export function CustomAutomationsSection({
       (requiredFieldErrors.name ? nameRef : promptRef).current?.focus();
       return;
     }
-    setFieldErrors({});
+    setFieldErrors((current) => ({ schedule: current.schedule }));
 
     if (!form.environmentId) {
       toast.error('Choose an environment.');
       return;
     }
     if (form.scheduleMode === 'cron' && !effectiveResolvedCron) {
-      toast.error(
-        resolveScheduleMutation.isPending
-          ? 'Still interpreting the schedule, try again in a moment.'
-          : 'Enter a valid schedule first.',
-      );
+      setFieldErrors((current) => ({
+        ...current,
+        schedule:
+          current.schedule ??
+          (resolveScheduleMutation.isPending
+            ? 'Still interpreting the schedule, try again in a moment.'
+            : 'Enter a valid schedule first.'),
+      }));
+      cronExpressionRef.current?.focus();
       return;
     }
+    setFieldErrors({});
     if (
       form.targetProvider !== 'none' &&
       (form.targetMode === 'channel' || form.targetProvider === 'email') &&
@@ -1033,6 +1011,10 @@ export function CustomAutomationsSection({
               onValueChange={(value) => {
                 setResolvedCron(null);
                 setScheduleSummary(null);
+                setFieldErrors((current) => ({
+                  ...current,
+                  schedule: undefined,
+                }));
                 setForm((current) => ({
                   ...current,
                   scheduleMode: value as CustomAutomationScheduleMode,
@@ -1063,9 +1045,21 @@ export function CustomAutomationsSection({
                 value={form.cronExpression}
                 disabled={busy}
                 placeholder="Weekdays at 9am or 0 9 * * 1-5"
+                aria-invalid={fieldErrors.schedule ? true : undefined}
+                aria-describedby={
+                  fieldErrors.schedule
+                    ? 'custom-automation-schedule-error'
+                    : undefined
+                }
                 onChange={(event) => {
                   setResolvedCron(null);
                   setScheduleSummary(null);
+                  if (fieldErrors.schedule) {
+                    setFieldErrors((current) => ({
+                      ...current,
+                      schedule: undefined,
+                    }));
+                  }
                   setForm((current) => ({
                     ...current,
                     cronExpression: event.target.value,
@@ -1090,7 +1084,15 @@ export function CustomAutomationsSection({
               />
             ) : null}
           </div>
-          {resolveScheduleMutation.isPending ? (
+          {fieldErrors.schedule ? (
+            <p
+              id="custom-automation-schedule-error"
+              role="alert"
+              className="text-sm text-destructive"
+            >
+              {fieldErrors.schedule}
+            </p>
+          ) : resolveScheduleMutation.isPending ? (
             <p className="text-sm text-muted-foreground">
               Interpreting schedule...
             </p>
@@ -1229,8 +1231,8 @@ export function CustomAutomationsSection({
           />
           <p className="text-sm text-muted-foreground">
             {form.targetProvider === 'none'
-              ? 'Each run is a Session in the web app and does not send a report.'
-              : 'Each run is a Session that reports findings and failures here, and replies continue it.'}
+              ? 'Each run is a session in the web app and does not send a report.'
+              : 'Each run is a session that reports findings and failures here, and replies continue it.'}
           </p>
         </div>
 
@@ -1275,7 +1277,7 @@ export function CustomAutomationsSection({
         size="sm"
         disabled={busy || atCap || !capabilitiesLoaded}
         onClick={() => {
-          const target = targetFromAutomationTarget(
+          const target = destinationValueFromAutomationTarget(
             optionsQuery.data?.defaultTarget ?? {},
           );
           setIsCreating(true);

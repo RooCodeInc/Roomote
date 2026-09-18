@@ -426,7 +426,7 @@ const CodeBlockContainer = ({
   return (
     <div
       className={cn(
-        'group relative w-full overflow-hidden',
+        'relative w-full overflow-hidden',
         isCompact
           ? 'text-foreground text-[12px]'
           : 'rounded-xl border bg-background text-foreground',
@@ -472,7 +472,7 @@ const CodeBlockHeaderContent = ({
   return (
     <div
       className={cn(
-        'group flex gap-2 justify-between text-xs',
+        'group/collapsible-icon-trigger flex gap-2 justify-between text-xs',
         isCompact ? 'p-0' : 'bg-muted/80 p-1 border-b text-muted-foreground',
         collapsible && 'cursor-pointer select-none',
         className,
@@ -588,7 +588,7 @@ export const CodeBlockCommand = ({
       className={cn(
         'font-mono text-foreground flex min-w-0 flex-1 gap-2 items-start',
         isCompact &&
-          'text-[12px] text-muted-foreground overflow-hidden group-data-[state=open]:mb-2 group-data-[state=open]:mt-1',
+          'text-[12px] text-muted-foreground overflow-hidden group-data-[state=open]/collapsible-icon-trigger:mb-2 group-data-[state=open]/collapsible-icon-trigger:mt-1',
         className,
       )}
       {...props}
@@ -607,7 +607,7 @@ export const CodeBlockCommand = ({
         />
       )}
       <span
-        className="block min-w-0 group-data-[state=closed]:truncate group-data-[state=open]:whitespace-pre-wrap group-data-[state=open]:break-words"
+        className="block min-w-0 group-data-[state=closed]/collapsible-icon-trigger:truncate group-data-[state=open]/collapsible-icon-trigger:whitespace-pre-wrap group-data-[state=open]/collapsible-icon-trigger:break-words"
         style={{ '--shiki-dark-bg': 'transparent' } as CSSProperties}
       >
         {highlight && allLines.length > 0

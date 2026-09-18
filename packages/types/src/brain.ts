@@ -80,6 +80,15 @@ export function brainNamespacePrefix(id: BrainNamespaceId): string {
   return BRAIN_NAMESPACES.find((namespace) => namespace.id === id)!.prefix;
 }
 
+/** Exact server-owned slugs for memories that deletion may safely retire. */
+export function taskMemorySlug(taskId: string, runId: number): string {
+  return `${brainNamespacePrefix('tasks')}${taskId}/runs/${runId}`;
+}
+
+export function fastConversationMemorySlug(conversationId: string): string {
+  return `${brainNamespacePrefix('memories')}fast/${conversationId}`;
+}
+
 export function resolveBrainNamespaceId(slug: string): BrainNamespaceBucketId {
   return (
     BRAIN_NAMESPACES.find((namespace) => slug.startsWith(namespace.prefix))

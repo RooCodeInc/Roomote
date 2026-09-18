@@ -331,6 +331,32 @@ describe('exchangeCodeForTokens', () => {
 
     expect(params.get('resource')).toBe('https://mcp.example.com/mcp');
   });
+
+  it('supports JSON token exchange without PKCE for Notion-style providers', async () => {
+    await exchangeCodeForTokens(
+      'https://api.notion.com/v1/oauth/token',
+      'auth-code',
+      'unused-verifier',
+      {
+        client_id: 'client-id',
+        client_secret: 'client-secret',
+        token_endpoint_auth_method: 'client_secret_basic',
+      },
+      'https://app.example.com/api/mcp-oauth/callback',
+      { tokenRequestFormat: 'json', usePkce: false },
+    );
+
+    const [, init] = mockFetch.mock.calls[0] ?? [];
+    expect(init?.headers).toMatchObject({
+      Authorization: `Basic ${Buffer.from('client-id:client-secret').toString('base64')}`,
+      'Content-Type': 'application/json',
+    });
+    expect(JSON.parse(String(init?.body))).toEqual({
+      grant_type: 'authorization_code',
+      code: 'auth-code',
+      redirect_uri: 'https://app.example.com/api/mcp-oauth/callback',
+    });
+  });
 });
 
 describe('refreshOAuthToken', () => {

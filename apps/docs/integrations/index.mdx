@@ -34,6 +34,20 @@ You will usually see one of these setup models:
   then individual users link their identity so Roomote can associate actions
   correctly
 
+You can also ask Roomote to connect any integration in this catalog from a
+Session. Roomote starts the provider's OAuth flow when the integration supports
+OAuth, opens the existing secure configuration form when an admin-managed key
+or certificate is required, and enables keyless integrations directly. The
+same admin, ownership, and deployment availability rules apply as in Settings.
+Credentials are never collected in chat.
+
+Roomote can list the full built-in catalog and current connection status without
+starting setup. A connection starts only after you ask to connect a provider.
+If you explicitly request a remote MCP server or direct API access instead,
+Roomote keeps that choice separate from the built-in integration path. A denied
+or pending authorization, unavailable integration, or permission failure is not
+silently bypassed with another connection method.
+
 ## Manage available tools
 
 Some connected integrations expose a **Manage tools** action in
@@ -71,16 +85,16 @@ from [Personal Settings](/personal-settings).
 | <IntegrationName href="/integrations/sentry" icon="sentry" name="Sentry" />                                       | Error and performance investigation               | Admin connection once                      |
 | <IntegrationName href="/integrations/snowflake" icon="snowflake" name="Snowflake" />                              | Data warehouse exploration                        | Admin connection once                      |
 | <IntegrationName href="/integrations/supabase" icon="supabase" name="Supabase" />                                 | Read-only database access in Supabase             | Enable first, then teammates link accounts |
-| <IntegrationName href="/integrations/supermemory" icon="/logo/integrations/supermemory.svg" name="Supermemory" /> | Shared memory across tasks and Fast sessions      | Admin connection once                      |
+| <IntegrationName href="/integrations/supermemory" icon="/logo/integrations/supermemory.svg" name="Supermemory" /> | Shared memory across tasks and sessions           | Admin connection once                      |
 | <IntegrationName href="/integrations/vercel" icon="vercel" name="Vercel" />                                       | Deployments, logs, and domain availability        | Admin connection once                      |
-| <IntegrationName href="/integrations/voice" icon="openai" name="Voice" />                               | Voice calls with Roomote on Fast Sessions         | Admin connection once                      |
+| <IntegrationName href="/integrations/voice" icon="openai" name="Voice" />                               | Voice calls with Roomote in sessions               | Admin connection once                      |
 | <IntegrationName href="/integrations/x" icon="x" name="X" />                                                      | Public X posts, users, trends, and news           | Admin connection once                      |
 | <IntegrationName href="/integrations/zero" icon="/logo/integrations/zero.svg" name="Zero" />                      | Paid external capabilities via Zero               | Admin connection once                      |
 
 ## HTTP APIs without an MCP server
 
 Deployment operators can configure [HTTP integrations](/integrations/http-integrations)
-for approved HTTPS APIs. Fast sessions and sandbox agents use the same actor
+for approved HTTPS APIs. Sessions and sandbox agents use the same actor
 access rules, while Roomote keeps credentials server-side and attaches them to
 authorized requests. This opt-in feature does not change sandbox networking.
 
@@ -123,7 +137,7 @@ For most teams, this order works well:
 5. one data integration, such as Snowflake, Supabase, or Neon, when tasks need
    database or warehouse context
 6. Supermemory when you want durable team context to carry across tasks and
-   Fast sessions
+   sessions
 
 After each connection, run a small task that uses the new context. For example,
 ask Roomote to summarize a linked issue, inspect a monitoring alert, or explain

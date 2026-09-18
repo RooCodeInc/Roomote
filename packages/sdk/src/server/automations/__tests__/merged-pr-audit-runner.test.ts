@@ -92,6 +92,12 @@ vi.mock('../automation-thread-feedback', () => ({
 }));
 
 vi.mock('../destination', () => ({
+  hasAutomationEmailTarget: vi.fn(
+    (runtime) =>
+      runtime.targets?.some(
+        (target: { provider?: string }) => target.provider === 'email',
+      ) || runtime.defaultAutomationTarget?.provider === 'email',
+  ),
   buildDestinationPromptContext: vi.fn(() => ({
     channelTag: 'slack_channel',
     postToolName: 'post_to_channel',

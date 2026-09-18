@@ -63,6 +63,7 @@ import {
   resolveOrCreateAgentMailConversation,
   type AgentMailConversationRow,
 } from './conversation-store';
+import { consumeAgentMailReplyVerification } from './reply-verification';
 import { findActiveCommunicationTaskRun } from '../communication/communication-task-run-lookup';
 import { continueFastAgentSurfaceReplyWithLock } from '../fast-agent-surface-reply';
 import {
@@ -314,7 +315,7 @@ function strangerRefusalDailyKey(now = new Date()): string {
  * start a reply loop, drain the send quota, or reach someone who complained.
  */
 const STRANGER_REFUSAL_TEXT = {
-  unverified: `This address isn't the verified email on a Roomote account, so I can't act on this email. Send it again from your account's verified email address, or verify this address under Settings > Personal > Linked Accounts first.`,
+  unverified: `This address isn't the verified email on a Roomote account, so I can't act on this email. Send it again from your account's verified email address, verify this address under Settings > Personal > Linked Accounts first, or reply to an email Roomote sent this address — replying verifies it automatically.`,
 } as const;
 
 async function maybeSendStrangerRefusal(input: {
@@ -556,7 +557,17 @@ export async function processAgentMailWebhookEvent(
       return;
     }
 
-    const senderUserId = await resolveAgentMailSenderUserId(senderAddress);
+    // A DMARC-passing reply to a Roomote-initiated email implicitly verifies
+    // an unverified account address when it quotes that email's single-use
+    // proof token, after which it is processed like any verified reply. An
+    // unsolicited email (no participant row, no token) still cannot verify.
+    let senderUserId = await resolveAgentMailSenderUserId(senderAddress);
+    senderUserId ??= await consumeAgentMailReplyVerification({
+      inboxId,
+      providerThreadId: message.thread_id,
+      senderEmail: senderAddress,
+      message,
+    });
     if (!senderUserId) {
       await maybeSendStrangerRefusal({
         client,

@@ -11,7 +11,6 @@ import {
   eq,
   inArray,
   isNull,
-  or,
   privateTaskAccess,
   sql,
 } from '@roomote/db/server';
@@ -32,7 +31,18 @@ import {
   getPullRequestKey,
   getTaskTypeDimensionValue,
 } from './dimensions';
-import { formatAnalyticsDateTime, getTimeCutoff } from './time-buckets';
+import {
+  formatAnalyticsDateTime,
+  formatPrivateAnalyticsDate,
+  getTimeCutoff,
+} from './time-buckets';
+import {
+  canViewPrivateAnalyticsDetails,
+  createPrivateAnalyticsIdMapper,
+  PRIVATE_SESSION_LABEL,
+  PRIVATE_TASK_LABEL,
+  privateAnalyticsDimensionValue,
+} from './privacy';
 
 const MULTIPLE_VALUES_LABEL = 'Multiple';
 
@@ -130,6 +140,8 @@ export async function getCostAnalyticsRows(
       environmentName: environments.name,
       taskTitle: tasks.title,
       taskDeletedAt: tasks.deletedAt,
+      taskPrivacy: tasks.privacy,
+      taskPrivateOwnerUserId: tasks.privateOwnerUserId,
       initiatorKind: tasks.initiatorKind,
       initiatorAutomation: tasks.initiatorAutomation,
       actorDisplayName: tasks.actorDisplayName,
@@ -151,9 +163,7 @@ export async function getCostAnalyticsRows(
     )
     .leftJoin(taskRuns, eq(taskRuns.id, llmUsageEvents.runId))
     .leftJoin(environments, eq(environments.id, llmUsageEvents.environmentId))
-    .where(
-      and(usageCutoffCondition, or(isNull(tasks.id), privateTaskAccess(auth))),
-    );
+    .where(usageCutoffCondition);
 
   const fallbackEnvironmentIds = [
     ...new Set(
@@ -230,15 +240,7 @@ export async function getCostAnalyticsRows(
   const fastNativeSessionIds = new Set(
     fastNativeRows
       .map((row) => row.nativeSessionId)
-      .filter(
-        (id): id is string =>
-          Boolean(id) && !inaccessiblePrivateNativeSessionIds.has(id!),
-      ),
-  );
-  const visibleUsageRows = usageRows.filter(
-    (row) =>
-      !row.harnessSessionId ||
-      !inaccessiblePrivateNativeSessionIds.has(row.harnessSessionId),
+      .filter((id): id is string => Boolean(id)),
   );
   const pullRequestRows = await db
     .select({
@@ -282,8 +284,24 @@ export async function getCostAnalyticsRows(
     prKeysByTaskId.set(pullRequest.taskId, keys);
   }
 
-  return visibleUsageRows.map((row) => {
+  const getPrivateUsageId = createPrivateAnalyticsIdMapper('private-cost');
+  const getPrivateTaskId = createPrivateAnalyticsIdMapper('private-task');
+
+  return usageRows.map((row) => {
     const isTask = Boolean(row.taskId);
+    const isPrivateTask =
+      isTask &&
+      !canViewPrivateAnalyticsDetails(auth, {
+        privacy: row.taskPrivacy ?? 'shared',
+        privateOwnerUserId: row.taskPrivateOwnerUserId,
+      });
+    const isPrivateSession =
+      !isTask &&
+      Boolean(
+        row.harnessSessionId &&
+        inaccessiblePrivateNativeSessionIds.has(row.harnessSessionId),
+      );
+    const isPrivate = isPrivateTask || isPrivateSession;
     const isDeletedTask = isTask && Boolean(row.taskDeletedAt);
     const isMemory = !isTask && row.source === 'brain_synthesis';
     const isSession =
@@ -326,6 +344,49 @@ export async function getCostAnalyticsRows(
       (row.runEnvironmentId
         ? (environmentNameById.get(row.runEnvironmentId) ?? NO_PROJECT_LABEL)
         : NO_PROJECT_LABEL);
+    if (isPrivate) {
+      const id = getPrivateUsageId(row.id);
+      const privateLabel = isPrivateTask
+        ? PRIVATE_TASK_LABEL
+        : PRIVATE_SESSION_LABEL;
+      const privateTaskId =
+        isPrivateTask && row.taskId ? getPrivateTaskId(row.taskId) : null;
+
+      return {
+        id,
+        timestamp,
+        value: cost,
+        tokens,
+        dimensions: {
+          user: userDimension,
+          taskType: createLabelBackedDimensionValue(privateLabel),
+          project: privateAnalyticsDimensionValue,
+          source: privateAnalyticsDimensionValue,
+          provider: createLabelBackedDimensionValue(provider),
+          model: createLabelBackedDimensionValue(model),
+        },
+        details: {
+          id,
+          values: {
+            date: formatPrivateAnalyticsDate(timestamp),
+            user: userDimension.label,
+            taskType: privateLabel,
+            project: privateLabel,
+            source: privateLabel,
+            provider,
+            model,
+            cost: cost.toFixed(2),
+            tokens: String(tokens),
+            taskTitle: privateLabel,
+          },
+        },
+        meta: {
+          canonicalTaskId: privateTaskId,
+          prKeys: [],
+        },
+      } satisfies AnalyticsRow;
+    }
+
     return {
       id: row.id,
       timestamp,

@@ -102,6 +102,62 @@ describe('buildSlackLiveTaskCardBlocks', () => {
     expect(text).toBe('Fix the button\nReady for review.');
   });
 
+  it('uses shared paragraph and list spacing for live task output', () => {
+    const { blocks } = buildSlackLiveTaskCardBlocks({
+      taskUpdateId: 'roomote-task-task-1',
+      title: 'Fix the button',
+      status: 'complete',
+      output: [
+        'Summary',
+        '',
+        '- First item',
+        '',
+        '- Second item',
+        '',
+        '```ts',
+        'const value = 1;',
+        '```',
+      ].join('\n'),
+    });
+
+    expect(blocks[0]).toMatchObject({
+      output: {
+        type: 'rich_text',
+        elements: [
+          {
+            type: 'rich_text_section',
+            elements: [
+              { type: 'text', text: 'Summary' },
+              { type: 'text', text: '\n\n' },
+            ],
+          },
+          {
+            type: 'rich_text_list',
+            style: 'bullet',
+            elements: [
+              {
+                type: 'rich_text_section',
+                elements: [{ type: 'text', text: 'First item' }],
+              },
+              {
+                type: 'rich_text_section',
+                elements: [{ type: 'text', text: 'Second item' }],
+              },
+            ],
+          },
+          {
+            type: 'rich_text_section',
+            elements: [{ type: 'text', text: '\n\n' }],
+          },
+          {
+            type: 'rich_text_preformatted',
+            elements: [{ type: 'text', text: 'const value = 1;' }],
+          },
+        ],
+      },
+    });
+  });
+
   it('renders an error result as output without task details', () => {
     const { blocks } = buildSlackLiveTaskCardBlocks({
       taskUpdateId: 'roomote-task-task-1',

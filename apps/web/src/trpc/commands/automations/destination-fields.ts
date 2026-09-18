@@ -2,6 +2,7 @@ import {
   AUTOMATION_DESTINATION_DESCRIPTORS,
   type AutomationDestinationDescriptorItem,
   type AutomationDestinationDiscordField,
+  type AutomationDestinationEmailField,
   type AutomationDestinationSlackField,
 } from '@roomote/types';
 
@@ -19,6 +20,9 @@ type SettingsChannelRecord = Partial<
 type SubmittedDestinationChannels = {
   slackChannel: string | null;
   discordChannel: string | null;
+  emailIdentityId: string | null;
+  /** Whether Email should be replaced instead of preserved for older clients. */
+  resolveEmail: boolean;
   /** Whether Discord should be resolved (vs keep-persisted for optional fields). */
   resolveDiscord: boolean;
 };
@@ -37,6 +41,8 @@ export function getSubmittedDestinationChannels(
     return {
       slackChannel: null,
       discordChannel: null,
+      emailIdentityId: null,
+      resolveEmail: false,
       resolveDiscord: false,
     };
   }
@@ -45,20 +51,30 @@ export function getSubmittedDestinationChannels(
     input[descriptor.discordField as AutomationDestinationDiscordField];
   const slackInput =
     input[descriptor.slackField as AutomationDestinationSlackField];
+  const emailInput =
+    input[descriptor.emailField as AutomationDestinationEmailField];
+  const emailIdentityId = normalizeOptionalText(emailInput);
   const slackSelected = normalizeOptionalText(slackInput) !== null;
+  const discordSelected = normalizeOptionalText(discordInput) !== null;
+  const resolveEmail =
+    emailInput !== undefined || slackSelected || discordSelected;
   const resolveDiscord = descriptor.optionalDiscordInput
     ? discordInput !== undefined || slackSelected
     : true;
-  const discordChannel = resolveDiscord
-    ? normalizeOptionalText(discordInput)
-    : null;
-  const slackChannel = !discordChannel
-    ? normalizeOptionalText(slackInput)
-    : null;
+  const discordChannel =
+    !emailIdentityId && resolveDiscord
+      ? normalizeOptionalText(discordInput)
+      : null;
+  const slackChannel =
+    !emailIdentityId && !discordChannel
+      ? normalizeOptionalText(slackInput)
+      : null;
 
   return {
     slackChannel,
     discordChannel,
+    emailIdentityId,
+    resolveEmail,
     resolveDiscord,
   };
 }

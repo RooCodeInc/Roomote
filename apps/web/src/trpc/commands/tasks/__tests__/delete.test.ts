@@ -9,6 +9,7 @@ const {
   mockMarkParallelCounts,
   mockGetSessionForTask,
   mockTouchSessionActivity,
+  mockEnqueueTaskMemoryRetirements,
   tasksTable,
   taskArtifactsTable,
   sessionsTable,
@@ -21,6 +22,7 @@ const {
   mockMarkParallelCounts: vi.fn(),
   mockGetSessionForTask: vi.fn(),
   mockTouchSessionActivity: vi.fn(),
+  mockEnqueueTaskMemoryRetirements: vi.fn(),
   tasksTable: { id: 'tasks.id', deletedAt: 'tasks.deletedAt' },
   taskArtifactsTable: {
     id: 'taskArtifacts.id',
@@ -105,6 +107,7 @@ vi.mock('@roomote/db/server', () => ({
   markTaskStartParallelCountsEndedAtForTaskIds: mockMarkParallelCounts,
   getSessionForTask: mockGetSessionForTask,
   touchSessionActivity: mockTouchSessionActivity,
+  enqueueTaskMemoryRetirements: mockEnqueueTaskMemoryRetirements,
   and: (...conditions: unknown[]) => ({ and: conditions }),
   eq: (left: unknown, right: unknown) => ({ eq: [left, right] }),
   inArray: (column: unknown, values: unknown) => ({
@@ -170,6 +173,9 @@ describe('deleteTasksCommand', () => {
       'session-1',
       100,
     );
+    expect(mockEnqueueTaskMemoryRetirements).toHaveBeenCalledWith(fakeTx, [
+      'task-1',
+    ]);
   });
 
   it('archives a session left with no live tasks', async () => {

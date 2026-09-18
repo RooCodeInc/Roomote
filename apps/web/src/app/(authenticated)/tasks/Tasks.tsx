@@ -703,8 +703,8 @@ export const Tasks = () => {
                 </DialogTitle>
                 <DialogDescription>
                   {selectedTasks.size === 1
-                    ? 'Are you sure you want to delete this task? This action cannot be undone.'
-                    : `Are you sure you want to delete ${selectedTasks.size} tasks? This action cannot be undone.`}
+                    ? 'This permanently deletes the task and its artifacts, and removes Brain memories saved directly from it. Independently collected Slack or pull request content and broader summaries are retained. This action cannot be undone.'
+                    : `This permanently deletes ${selectedTasks.size} tasks and their artifacts, and removes Brain memories saved directly from them. Independently collected Slack or pull request content and broader summaries are retained. This action cannot be undone.`}
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter className="flex gap-3">

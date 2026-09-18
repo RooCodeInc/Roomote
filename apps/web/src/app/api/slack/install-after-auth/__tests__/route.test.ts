@@ -65,7 +65,7 @@ describe('GET /api/slack/install-after-auth', () => {
 
     const response = await GET(
       new NextRequest(
-        'http://localhost:13000/api/slack/install-after-auth?redirect=%2Fsettings%2Fintegrations',
+        'http://localhost:13000/api/slack/install-after-auth?redirect=%2Fintegrations',
       ),
     );
 
@@ -74,7 +74,7 @@ describe('GET /api/slack/install-after-auth', () => {
       'https://slack.com/oauth/v2/authorize?client_id=C123',
     );
     expect(mockConnectApp).toHaveBeenCalledWith({
-      redirectPath: '/settings/integrations',
+      redirectPath: '/integrations',
     });
   });
 

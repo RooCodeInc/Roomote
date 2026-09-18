@@ -109,7 +109,6 @@ describe('fetchSnapshotEnv', () => {
     expect(mockCreateSourceControlTokenForTaskRun).toHaveBeenCalledWith(
       taskRun,
       '[fetchSnapshotEnv]',
-      { readOnly: false },
     );
   });
 

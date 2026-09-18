@@ -42,6 +42,7 @@ import {
 import { authorize } from '@/lib/server';
 import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
 import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
+import { canAuthorizeCustomMcpConnection } from '@/lib/server/custom-mcp-oauth-access';
 import { resolveDeploymentStaticOauthClientInformation } from '@/lib/server/deployment-static-oauth';
 import { buildRemoteMcpSetupFailedContinuation } from '@/lib/server/integration-saved-continuation';
 import { resumeFastSessionFromReplay } from '@/lib/server/mcp-oauth-replay-continuation';
@@ -217,7 +218,8 @@ export async function GET(
 
       if (
         !integration ||
-        !isSelfServeMcpIntegration(integration) ||
+        (!isSelfServeMcpIntegration(integration) &&
+          !integration.oauthEndpoints) ||
         !integration.url
       ) {
         return NextResponse.redirect(
@@ -226,19 +228,28 @@ export async function GET(
       }
     }
 
-    // Custom-server connections are deployment-scoped by construction.
+    // Catalog connections are deployment-scoped (admin) or the member's own.
+    // A custom server follows its own rule: its owner for a personal one, an
+    // administrator or its creator for a deployment one.
     const requiresOrgAdmin = customTarget
-      ? true
+      ? false
       : isDeploymentScopedMcpIntegration(
           integration!,
           connection.connectionRole,
         );
     const isAdmin = authResult.isAdmin;
+    const allowed = customTarget
+      ? canAuthorizeCustomMcpConnection({
+          target: customTarget,
+          connectionUserId: connection.userId,
+          userId,
+          isAdmin,
+        })
+      : requiresOrgAdmin
+        ? isAdmin
+        : connection.userId === userId;
 
-    if (
-      (requiresOrgAdmin && !isAdmin) ||
-      (!requiresOrgAdmin && connection.userId !== userId)
-    ) {
+    if (!allowed) {
       return NextResponse.redirect(
         withMcpQuery(webUrl, redirectPath, 'error', 'not_found'),
       );
@@ -395,8 +406,10 @@ export async function GET(
     authUrl.searchParams.set('response_type', 'code');
     authUrl.searchParams.set('redirect_uri', redirectUri);
     authUrl.searchParams.set('state', state);
-    authUrl.searchParams.set('code_challenge', codeChallenge);
-    authUrl.searchParams.set('code_challenge_method', 'S256');
+    if (customTarget || integration?.oauthPkce !== false) {
+      authUrl.searchParams.set('code_challenge', codeChallenge);
+      authUrl.searchParams.set('code_challenge_method', 'S256');
+    }
     if (requestedScope) {
       authUrl.searchParams.set('scope', requestedScope);
     }

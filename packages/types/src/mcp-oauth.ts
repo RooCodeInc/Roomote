@@ -449,6 +449,18 @@ export type EffectiveMcpIntegration = {
   };
 };
 
+export type NativeIntegrationCatalogEntry = {
+  id: string;
+  name: string;
+  description: string;
+  connectionScope: 'user' | 'deployment';
+  setupStrategy: 'oauth' | 'settings' | 'keyless';
+  status: EffectiveMcpIntegrationStatus;
+  enabled: boolean;
+  authStatus: 'pending' | 'authenticated' | 'error' | null;
+  canConnect: boolean;
+};
+
 export type McpIntegrationCategory = 'memory';
 
 export type McpIntegrationOAuthClientEnv = {
@@ -496,6 +508,10 @@ export type McpIntegration = {
   oauthScopes?: string[];
   oauthScopeSeparator?: ' ' | ',';
   oauthScopeMode?: McpIntegrationOauthScopeMode;
+  /** Provider token endpoints that require JSON instead of OAuth form encoding. */
+  oauthTokenRequestFormat?: 'form' | 'json';
+  /** Defaults to true. Disable only when the provider does not support PKCE. */
+  oauthPkce?: boolean;
   connectionMode?: McpIntegrationConnectionMode;
   serverMode?: McpIntegrationServerMode;
   /** The integration remains usable through its upstream MCP without credentials. */
@@ -545,11 +561,25 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
   {
     id: 'notion',
     name: 'Notion',
+    url: 'https://api.notion.com',
     description: `Connect Notion so your agents can find context and keep shared pages and data sources up to date from ${PRODUCT_NAME} tasks`,
     icon: 'notion',
     connectionScope: 'deployment',
     connectionMode: 'admin_configured',
     serverMode: 'native',
+    oauthClientEnv: {
+      clientIdEnv: 'R_NOTION_CLIENT_ID',
+      clientSecretEnv: 'R_NOTION_CLIENT_SECRET',
+      tokenEndpointAuthMethod: 'client_secret_basic',
+    },
+    oauthEndpoints: {
+      authorizationEndpoint: 'https://api.notion.com/v1/oauth/authorize',
+      tokenEndpoint: 'https://api.notion.com/v1/oauth/token',
+      tokenEndpointAuthMethod: 'client_secret_basic',
+    },
+    oauthTokenRequestFormat: 'json',
+    oauthPkce: false,
+    authorizationParameters: [{ name: 'owner', value: 'user' }],
     instructions:
       'Use Notion for pages and data sources explicitly shared with the deployment integration. Content outside that connection boundary, including unshared private pages, is unavailable. Notion controls whether the connection may read, update, insert, or comment.',
   },

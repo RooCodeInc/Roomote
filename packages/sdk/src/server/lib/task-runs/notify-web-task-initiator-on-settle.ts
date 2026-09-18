@@ -20,6 +20,7 @@ import {
   findLatestSessionAttentionReceipt,
   findTaskAttentionMessage,
   hasTaskRunAttentionNotification,
+  notifyDirectWebTaskAttention,
   resolveSessionAttentionPresentation,
 } from '../session-attention-notification';
 import { buildDeterministicMessageId } from '../deterministic-message-id';
@@ -94,6 +95,23 @@ export async function notifyWebTaskInitiatorOnSettle(
     getFastAgentParentFromPayload(settledRun?.payload)
   ) {
     return 'not_applicable';
+  }
+
+  if (status === RunStatus.Failed) {
+    const message =
+      (await findTaskAttentionMessage(
+        run.id,
+        'result_ready',
+        `settlement:${run.id}`,
+      )) ?? statusText(status);
+    const result = await notifyDirectWebTaskAttention({
+      runId: run.id,
+      eventId: `settlement:${run.id}`,
+      kind: 'result_ready',
+      presentationKind: 'error',
+      message,
+    });
+    return result === 'deferred' ? 'delivered' : result;
   }
 
   if (

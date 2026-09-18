@@ -49,6 +49,7 @@ describe('tool presentation resolver', () => {
     [{ kind: 'read' }, 'read', 'file'],
     [{ toolName: 'spill_grep' }, 'search', 'search'],
     [{ toolName: 'list_skills' }, 'list', 'folder'],
+    [{ toolName: 'list_repositories' }, 'list', 'folder'],
     [{ toolName: 'launch_task' }, 'task', 'task'],
     [{ toolName: 'save_memory' }, 'memory', 'memory'],
     [{ toolName: 'show_widget' }, 'widget', 'widget'],

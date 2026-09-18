@@ -27,11 +27,13 @@ import {
   JUDGMENT_MODEL_SELECTIONS,
   isOpenAiCompatibleProviderId,
   customMcpServerInputSchema,
+  customMcpServerVisibilitySchema,
   isOpenAiRealtimeVoiceId,
   prActions,
   sourceControlProviderSchema,
   sourceControlTokenBackedProviderSchema,
   sessionGoalInputSchema,
+  codingModelRoutingRuleSchema,
   taskModelMetadataSchema,
   type ScheduleOnlyBackgroundAutomationFrequencyField,
 } from '@roomote/types';
@@ -69,7 +71,7 @@ import {
   getSessions,
   getSessionTimeline,
   archiveSessionCommand,
-  deletePrivateSessionCommand,
+  deleteSessionCommand,
   listSessionPins,
   markSessionReadCommand,
   sessionIdInputSchema,
@@ -314,6 +316,7 @@ import {
   listCustomMcpServersCommand,
   setCustomMcpServerDisabledToolsCommand,
   setCustomMcpServerEnabledCommand,
+  setCustomMcpServerVisibilityCommand,
   updateCustomMcpServerCommand,
 } from '../commands/custom-mcp-servers';
 
@@ -428,7 +431,11 @@ import {
   triggerAutomationCommand,
   updateCustomAutomationCommand,
 } from '../commands/automations';
-import { mergeAnnouncerDestinationInputShape } from '../commands/automations/settings-schema';
+import {
+  automationEmailDestinationInputShape,
+  mergeAnnouncerDestinationInputShape,
+  releaseAnnouncementsDestinationInputShape,
+} from '../commands/automations/settings-schema';
 import {
   actOnResultCommand,
   clearResultsCommand,
@@ -559,6 +566,7 @@ const UPDATE_SETTINGS_SAVING_AUTOMATION_VALUES = [
   ...SCHEDULE_ONLY_BACKGROUND_AUTOMATION_IDS,
   'announcer',
   'platformIssueAlerts',
+  'releaseAnnouncements',
 ] as const;
 
 const SCHEDULE_ONLY_FREQUENCY_FIELD_SHAPE = Object.fromEntries(
@@ -714,6 +722,19 @@ const automationsRouter = createRouter({
           .max(160)
           .nullable()
           .optional(),
+        defaultDestinationProvider: z
+          .enum(['slack', 'discord', 'teams', 'telegram', 'email'])
+          .nullable()
+          .optional(),
+        defaultDestinationMode: z
+          .enum(['channel', 'direct_message'])
+          .optional(),
+        defaultDestinationChannelId: z
+          .string()
+          .trim()
+          .max(255)
+          .nullable()
+          .optional(),
         managerStatsFrequency: z.enum(['off', 'weekly']),
         managerStatsSlackChannel: z.string().trim().min(1).max(160).nullable(),
         managerStatsDiscordChannel: z
@@ -776,7 +797,9 @@ const automationsRouter = createRouter({
           .nullable()
           .optional(),
         ...SCHEDULE_ONLY_FREQUENCY_FIELD_SHAPE,
+        ...automationEmailDestinationInputShape,
         ...mergeAnnouncerDestinationInputShape,
+        ...releaseAnnouncementsDestinationInputShape,
         issueFixerInstructions: z.string().max(8_000).nullable().optional(),
         suggesterFrequency: z.enum(['off', 'daily', 'weekly']),
         suggesterSlackChannel: z.string().trim().min(1).max(160).nullable(),
@@ -819,6 +842,7 @@ const automationsRouter = createRouter({
           .max(160)
           .nullable()
           .optional(),
+        releaseAnnouncementsEnabled: z.boolean().optional(),
         securityAuditorSlackChannel: z
           .string()
           .trim()
@@ -1925,14 +1949,35 @@ export const appRouter = createRouter({
       getCustomMcpAvailabilityCommand(),
     ),
 
-    list: protectedProcedure.query(({ ctx: { auth } }) =>
-      listCustomMcpServersCommand(auth),
-    ),
+    list: protectedProcedure
+      .input(
+        z
+          .object({ scope: customMcpServerVisibilitySchema.optional() })
+          .optional(),
+      )
+      .query(({ ctx: { auth }, input }) =>
+        listCustomMcpServersCommand(auth, input ?? {}),
+      ),
 
     create: protectedProcedure
-      .input(customMcpServerInputSchema)
+      .input(
+        customMcpServerInputSchema.and(
+          z.object({ visibility: customMcpServerVisibilitySchema.optional() }),
+        ),
+      )
       .mutation(({ ctx: { auth }, input }) =>
         createCustomMcpServerCommand(auth, input),
+      ),
+
+    setVisibility: protectedProcedure
+      .input(
+        z.object({
+          id: z.string().uuid(),
+          visibility: customMcpServerVisibilitySchema,
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        setCustomMcpServerVisibilityCommand(auth, input),
       ),
 
     update: protectedProcedure
@@ -2644,6 +2689,7 @@ export const appRouter = createRouter({
           planningModelReasoningEffort: z
             .enum(REASONING_EFFORT_VALUES)
             .nullable(),
+          codingModelRoutingRules: z.array(codingModelRoutingRuleSchema),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>
@@ -3297,10 +3343,10 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         archiveSessionCommand(auth, input.sessionId),
       ),
-    deletePrivate: protectedProcedure
+    delete: protectedProcedure
       .input(sessionIdInputSchema)
       .mutation(({ ctx: { auth }, input }) =>
-        deletePrivateSessionCommand(auth, input.sessionId),
+        deleteSessionCommand(auth, input.sessionId),
       ),
     unarchive: protectedProcedure
       .input(sessionIdInputSchema)

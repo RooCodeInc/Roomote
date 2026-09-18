@@ -13,20 +13,16 @@ agent works with an opaque reference or a substitute token, and Roomote's API
 adds the real key on the way out. Integration keys are for HTTPS services, not
 a replacement for [connected integrations](/integrations).
 
-When you ask Roomote to connect a service without saying how, it uses a
-connected integration for that service if there is one, then the service's
-official remote MCP server when one exists, and an integration key otherwise or
-when you ask for the service's API. When it does not already know the service,
-it reads the provider's documentation first to find the MCP server and what
-connecting to it requires. If the provider must approve or allowlist clients,
-or access is limited to a beta or a plan, Roomote uses an integration key and
-mentions the MCP as an option. Otherwise it looks up the API origin, the key
-header, and where you create a key.
-
-<Note>
-  Integration keys are gated deployment-wide. An admin can turn on
-  **Integration keys** under **Settings → Experimental** for all members.
-</Note>
+When you ask Roomote to connect a service without saying how, it first checks
+the read-only built-in catalog, including providers that are off or not yet
+authorized. A matching built-in uses its native OAuth, secure Settings, or
+keyless path. If the provider is not built in, Roomote checks for the service's
+official remote MCP server and what connecting requires. If the provider must
+approve or allowlist clients, or access is limited to a beta or plan, Roomote
+uses an integration key and mentions the MCP as an option. Otherwise it uses an
+integration key only when no supported MCP applies. An explicit request for the
+service's API goes directly to the integration-key route. A permission denial
+or pending or denied authorization is never bypassed with another route.
 
 ## How an approval works
 
@@ -50,8 +46,9 @@ header, and where you create a key.
    Sessions and coding tasks. Deployment-wide integrations are available to
    active members while the integration owner remains active.
 
-If the service's remote MCP server is still waiting for authorization, Roomote
-shares that link again rather than opening a key approval.
+If a built-in integration or remote MCP server is still waiting for
+authorization, Roomote shares that link again rather than opening a key
+approval.
 
 You can also add a personal integration directly under **Personal Settings →
 Personal integrations**, naming the origin, header, methods, and key yourself.
@@ -66,11 +63,11 @@ temporary.
 
 ## What agents can do with it
 
-**In a human Session turn**, Fast can discover existing integration keys,
+**In a human session turn**, Roomote can discover existing integration keys,
 prepare secure approval requests, and make one or a few direct calls to an
 approved origin using any HTTP method approved for that integration. Roomote's
 API sends the request with the real key and returns the response. For scripts,
-SDKs, CLIs, or many calls, Fast launches an attached coding task instead.
+SDKs, CLIs, or many calls, Roomote launches an attached coding task instead.
 
 **In coding tasks launched from the Session**, the task receives each approved
 service as a substitute token in its environment, plus one base URL. The agent
@@ -107,8 +104,8 @@ prevention guarantee.
 
 **Substitutes are capabilities.** A substitute token is bound to one task, one
 integration, and the task's current generation, and it stops working when the
-task ends, the integration expires or is revoked, or you turn integration key
-tools off. Within that window, a copy of the substitute could be used from elsewhere
+task ends, or the integration expires or is revoked. Within that window, a copy
+of the substitute could be used from elsewhere
 against the same origin. Roomote never logs substitutes or keys, strips them
 from snapshots, and refuses responses that echo the key.
 

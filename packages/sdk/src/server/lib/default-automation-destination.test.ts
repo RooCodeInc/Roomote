@@ -17,7 +17,10 @@ const mocks = vi.hoisted(() => ({
   emailIdentities: vi.fn(),
 }));
 
-vi.mock('@roomote/db/server', () => ({
+vi.mock('@roomote/db/server', async (importOriginal) => ({
+  getEffectiveDefaultAutomationTarget: (
+    await importOriginal<typeof import('@roomote/db/server')>()
+  ).getEffectiveDefaultAutomationTarget,
   db: {
     query: { deploymentSettings: { findFirst: mocks.settings } },
     select: () => ({
@@ -220,6 +223,57 @@ describe('resolveDefaultAutomationTarget', () => {
     });
     expect(mocks.settings).not.toHaveBeenCalled();
     expect(mocks.teamsPrimary).not.toHaveBeenCalled();
+  });
+
+  it('uses a usable configured DM default before the owner fallback', async () => {
+    mocks.settings.mockResolvedValue({
+      defaultAutomationTarget: {
+        provider: 'discord',
+        targetKind: 'discord_user',
+        externalRef: 'default-recipient',
+      },
+      setupNewState: {},
+    });
+    mocks.directMessage.mockResolvedValue({ channelId: 'discord-dm' });
+
+    await expect(
+      resolveDefaultAutomationTarget({
+        ownerUserId: 'user-1',
+        capabilities: CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
+      }),
+    ).resolves.toEqual({
+      provider: 'discord',
+      targetKind: 'discord_user',
+      externalRef: 'default-recipient',
+    });
+    expect(mocks.directMessage).toHaveBeenCalledWith(
+      'discord',
+      'default-recipient',
+    );
+  });
+
+  it('falls through when a configured default is no longer usable', async () => {
+    mocks.settings.mockResolvedValue({
+      defaultAutomationTarget: {
+        provider: 'email',
+        targetKind: 'email_user',
+        externalRef: 'default-recipient',
+        metadata: { emailIdentityId: 'removed-identity' },
+      },
+      setupNewState: {},
+    });
+    mocks.directMessage.mockResolvedValue({ channelId: 'D123' });
+
+    await expect(
+      resolveDefaultAutomationTarget({
+        ownerUserId: 'user-1',
+        capabilities: CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
+      }),
+    ).resolves.toEqual({
+      provider: 'slack',
+      targetKind: 'slack_user',
+      externalRef: 'user-1',
+    });
   });
 
   it('preserves a supported explicit target without probing defaults', async () => {

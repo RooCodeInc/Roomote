@@ -1,7 +1,7 @@
 /**
  * Markdown → Slack `rich_text` conversion for surfaces that take a
- * rich_text entity instead of a `markdown` block (task cards). Covers the
- * inline and block syntax agents actually emit: `**bold**`, italic,
+ * rich_text entity instead of a `markdown` block (task and automation cards).
+ * Covers the inline and block syntax agents actually emit: `**bold**`, italic,
  * strikethrough, inline code, links, bullet/numbered lists, headings, and
  * fenced code blocks. Anything else stays literal text. `__bold__` is
  * deliberately not supported: agent prose mentions Python dunders
@@ -42,10 +42,14 @@ export interface SlackRichTextValue {
   elements: SlackRichTextBlockElement[];
 }
 
+type SlackRichTextConversionOptions = {
+  angleBracketLinkDestinations?: boolean;
+};
+
 // Every repetition is bounded so a pathological message (for example a
 // long run of "[" or "<http://|") cannot make matching superlinear.
 const INLINE_PATTERN =
-  /(`[^`\n]{1,500}`)|(\*\*[^*\n]{1,500}?\*\*)|(~~[^~\n]{1,500}?~~)|(\[[^\]\n]{1,500}\]\((?:https?:\/\/)(?:[^()\s]|\([^()\s]{0,200}\)){1,2000}\))|(<(?:https?:\/\/)[^>\s|]{1,2000}(?:\|[^>\n]{1,500})?>)|(\b(?:https?:\/\/)[^\s<>)]{1,2000})|((?<![\w*])\*(?!\s)[^*\n]{1,500}?(?<!\s)\*(?![\w*]))|((?<![\w_])_(?!\s)[^_\n]{1,500}?(?<!\s)_(?![\w_]))/g;
+  /(`[^`\n]{1,500}`)|(\*\*[^*\n]{1,500}?\*\*)|(~~[^~\n]{1,500}?~~)|(\[[^\]\n]{1,500}\]\((?:(?:https?:\/\/)(?:[^()<>\s]|\([^()<>\s]{0,200}\)){1,2000}|<(?:https?:\/\/)(?:[^()<>\s]|\([^()<>\s]{0,200}\)){1,2000}>)\))|(<(?:https?:\/\/)[^>\s|]{1,2000}(?:\|[^>\n]{1,500})?>)|(\b(?:https?:\/\/)[^\s<>)]{1,2000})|((?<![\w*])\*(?!\s)[^*\n]{1,500}?(?<!\s)\*(?![\w*]))|((?<![\w_])_(?!\s)[^_\n]{1,500}?(?<!\s)_(?![\w_]))/g;
 
 // Sentence punctuation that ends a bare URL belongs to the prose, not the
 // link: "see https://a.io/docs." must not link to "docs.".
@@ -81,6 +85,7 @@ function withStyle(
 export function convertMarkdownInlineToRichText(
   text: string,
   style: SlackRichTextStyle = {},
+  options: SlackRichTextConversionOptions = {},
 ): SlackRichTextInlineElement[] {
   const elements: SlackRichTextInlineElement[] = [];
   let last = 0;
@@ -127,25 +132,41 @@ export function convertMarkdownInlineToRichText(
       );
     } else if (bold) {
       elements.push(
-        ...convertMarkdownInlineToRichText(bold.slice(2, -2), {
-          ...style,
-          bold: true,
-        }),
+        ...convertMarkdownInlineToRichText(
+          bold.slice(2, -2),
+          {
+            ...style,
+            bold: true,
+          },
+          options,
+        ),
       );
     } else if (strike) {
       elements.push(
-        ...convertMarkdownInlineToRichText(strike.slice(2, -2), {
-          ...style,
-          strike: true,
-        }),
+        ...convertMarkdownInlineToRichText(
+          strike.slice(2, -2),
+          {
+            ...style,
+            strike: true,
+          },
+          options,
+        ),
       );
     } else if (markdownLink) {
       // Greedy to the final ")" so balanced parentheses in the URL survive.
       const parsed = markdownLink.match(/^\[([^\]]+)\]\((.+)\)$/);
       if (parsed) {
-        elements.push(
-          withStyle({ type: 'link', url: parsed[2]!, text: parsed[1]! }, style),
-        );
+        const destination = parsed[2]!;
+        const hasAngleBrackets =
+          destination.startsWith('<') && destination.endsWith('>');
+        if (hasAngleBrackets && !options.angleBracketLinkDestinations) {
+          pushText(markdownLink);
+        } else {
+          const url = hasAngleBrackets ? destination.slice(1, -1) : destination;
+          elements.push(
+            withStyle({ type: 'link', url, text: parsed[1]! }, style),
+          );
+        }
       }
     } else if (slackLink) {
       const [url, label] = slackLink.slice(1, -1).split('|', 2);
@@ -162,7 +183,11 @@ export function convertMarkdownInlineToRichText(
     } else if (italicStar || italicUnderscore) {
       const inner = (italicStar ?? italicUnderscore)!.slice(1, -1);
       elements.push(
-        ...convertMarkdownInlineToRichText(inner, { ...style, italic: true }),
+        ...convertMarkdownInlineToRichText(
+          inner,
+          { ...style, italic: true },
+          options,
+        ),
       );
     }
   }
@@ -174,8 +199,9 @@ export function convertMarkdownInlineToRichText(
 function section(
   text: string,
   style: SlackRichTextStyle = {},
+  options: SlackRichTextConversionOptions = {},
 ): SlackRichTextSection {
-  const elements = convertMarkdownInlineToRichText(text, style);
+  const elements = convertMarkdownInlineToRichText(text, style, options);
   return {
     type: 'rich_text_section',
     elements: elements.length > 0 ? elements : [{ type: 'text', text: '' }],
@@ -187,12 +213,47 @@ const ORDERED_ITEM = /^\s*\d+[.)]\s+(.*)$/;
 const HEADING = /^\s*#{1,6}\s+(.*)$/;
 const FENCE = /^\s*```/;
 
+type SlackRichTextListStyle = 'bullet' | 'ordered';
+
+function getListStyle(line: string): SlackRichTextListStyle | null {
+  return BULLET_ITEM.test(line)
+    ? 'bullet'
+    : ORDERED_ITEM.test(line)
+      ? 'ordered'
+      : null;
+}
+
+function listIndent(line: string): number {
+  const leadingWhitespace = line.match(/^\s*/)?.[0] ?? '';
+  const columns = [...leadingWhitespace].reduce(
+    (total, character) => total + (character === '\t' ? 4 : 1),
+    0,
+  );
+  return columns < 2 ? 0 : Math.ceil(columns / 2);
+}
+
 export function convertMarkdownToRichText(
   markdown: string,
+  options: SlackRichTextConversionOptions = {},
 ): SlackRichTextValue {
   const lines = markdown.replace(/\r\n/g, '\n').split('\n');
   const elements: SlackRichTextBlockElement[] = [];
   let index = 0;
+  let pendingBlankLine = false;
+
+  const preservePendingParagraph = () => {
+    if (!pendingBlankLine) return;
+    const previous = elements.at(-1);
+    if (previous?.type === 'rich_text_section') {
+      previous.elements.push({ type: 'text', text: '\n\n' });
+    } else {
+      elements.push({
+        type: 'rich_text_section',
+        elements: [{ type: 'text', text: '\n\n' }],
+      });
+    }
+    pendingBlankLine = false;
+  };
 
   while (index < lines.length) {
     const line = lines[index]!;
@@ -205,6 +266,7 @@ export function convertMarkdownToRichText(
         index += 1;
       }
       index += 1; // closing fence (or end of input)
+      preservePendingParagraph();
       elements.push({
         type: 'rich_text_preformatted',
         elements: [{ type: 'text', text: code.join('\n') }],
@@ -212,38 +274,96 @@ export function convertMarkdownToRichText(
       continue;
     }
 
-    const listStyle = BULLET_ITEM.test(line)
-      ? 'bullet'
-      : ORDERED_ITEM.test(line)
-        ? 'ordered'
-        : null;
+    const listStyle = getListStyle(line);
     if (listStyle) {
       const pattern = listStyle === 'bullet' ? BULLET_ITEM : ORDERED_ITEM;
+      const indent = listIndent(line);
       const items: SlackRichTextSection[] = [];
       while (index < lines.length) {
-        const item = lines[index]!.match(pattern);
-        if (!item) {
+        const itemLine = lines[index]!;
+        if (
+          getListStyle(itemLine) !== listStyle ||
+          listIndent(itemLine) !== indent
+        ) {
           break;
         }
-        items.push(section(item[1]!));
+        const item = itemLine.match(pattern)!;
+        const itemLines = [item[1] ?? ''];
         index += 1;
+        while (index < lines.length) {
+          const continuation = lines[index]!;
+          if (FENCE.test(continuation)) {
+            break;
+          }
+          if (getListStyle(continuation)) {
+            break;
+          }
+          if (continuation.trim().length === 0) {
+            let nextIndex = index + 1;
+            while (lines[nextIndex]?.trim().length === 0) {
+              nextIndex += 1;
+            }
+            if (getListStyle(lines[nextIndex] ?? '')) {
+              break;
+            }
+            if (/^\s+/.test(lines[nextIndex] ?? '')) {
+              itemLines.push('');
+              index = nextIndex;
+              continue;
+            }
+            break;
+          }
+          if (!/^\s+/.test(continuation)) {
+            break;
+          }
+          const value = continuation.trim();
+          if (itemLines.length === 1 && itemLines[0]?.trim().length === 0) {
+            itemLines[0] = value;
+          } else {
+            itemLines.push(value);
+          }
+          index += 1;
+        }
+        if (itemLines.some((value) => value.trim().length > 0)) {
+          items.push(section(itemLines.join('\n'), {}, options));
+        }
+        if (lines[index]?.trim().length === 0) {
+          let nextIndex = index;
+          while (lines[nextIndex]?.trim().length === 0) {
+            nextIndex += 1;
+          }
+          if (
+            getListStyle(lines[nextIndex] ?? '') === listStyle &&
+            listIndent(lines[nextIndex] ?? '') === indent
+          ) {
+            index = nextIndex;
+          }
+        }
       }
-      elements.push({
-        type: 'rich_text_list',
-        style: listStyle,
-        elements: items,
-      });
+      preservePendingParagraph();
+      if (items.length > 0) {
+        elements.push({
+          type: 'rich_text_list',
+          style: listStyle,
+          ...(indent > 0 ? { indent } : {}),
+          elements: items,
+        });
+      }
       continue;
     }
 
     index += 1;
     if (line.trim().length === 0) {
+      if (elements.length > 0) pendingBlankLine = true;
       continue;
     }
 
+    preservePendingParagraph();
     const heading = line.match(HEADING);
     elements.push(
-      heading ? section(heading[1]!, { bold: true }) : section(line.trim()),
+      heading
+        ? section(heading[1]!, { bold: true }, options)
+        : section(line.trim(), {}, options),
     );
   }
 

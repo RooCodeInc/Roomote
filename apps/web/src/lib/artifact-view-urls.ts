@@ -30,8 +30,33 @@ export function getSessionArtifactViewUrl(
   return `${origin}/sessions/${encodeURIComponent(sessionId)}?${search}`;
 }
 
+export function getSessionTaskArtifactViewUrl(
+  origin: string,
+  sessionId: string,
+  taskId: string,
+  path: string,
+  version: number,
+): string {
+  const search = new URLSearchParams({
+    panel: 'artifacts',
+    artifact: path,
+    artifactTask: taskId,
+    v: String(version),
+  });
+  return `${origin}/sessions/${encodeURIComponent(sessionId)}?${search}`;
+}
+
+export function getSessionArtifactsViewUrl(
+  origin: string,
+  sessionId: string,
+): string {
+  return `${origin}/sessions/${encodeURIComponent(sessionId)}?panel=artifacts`;
+}
+
 export type SessionArtifactSelection = {
   path: string;
+  /** Owning task when the artifact was produced by a task in the Session. */
+  taskId?: string;
   /** Requested version; omitted when the link points at the latest version. */
   version?: number;
 };
@@ -48,7 +73,17 @@ export function parseSessionArtifactSearchParams(
 
   const rawVersion = searchParams.get('v');
   const version = rawVersion === null ? Number.NaN : Number(rawVersion);
+  const taskId = searchParams.get('artifactTask') || undefined;
   return Number.isInteger(version) && version > 0
-    ? { path, version }
-    : { path };
+    ? { path, ...(taskId ? { taskId } : {}), version }
+    : { path, ...(taskId ? { taskId } : {}) };
+}
+
+export function hasSessionArtifactsSearchParams(
+  searchParams: URLSearchParams,
+): boolean {
+  return (
+    searchParams.get('panel') === 'artifacts' ||
+    parseSessionArtifactSearchParams(searchParams) !== null
+  );
 }

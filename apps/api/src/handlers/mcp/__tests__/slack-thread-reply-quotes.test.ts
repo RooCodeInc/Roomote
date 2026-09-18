@@ -411,7 +411,7 @@ describe('Slack thread reply quotes', () => {
     );
   });
 
-  it('preserves custom automation root report Markdown at the top level', async () => {
+  it('wraps a custom automation root report in the result container', async () => {
     taskRunFindFirstMock.mockResolvedValue({
       id: 42,
       actingUserId: null,
@@ -439,27 +439,25 @@ describe('Slack thread reply quotes', () => {
         channel: 'C123',
         blocks: [
           expect.objectContaining({
-            type: 'context',
-            elements: expect.arrayContaining([
-              expect.objectContaining({ text: 'Daily demo ideas' }),
+            type: 'container',
+            title: expect.objectContaining({ text: 'Daily demo ideas' }),
+            subtitle: expect.objectContaining({
+              text: 'Daily · GPT 5.6 High · $0.56 · 02:37s',
+            }),
+            child_blocks: expect.arrayContaining([
+              expect.objectContaining({ type: 'rich_text' }),
+              expect.objectContaining({ type: 'table' }),
               expect.objectContaining({
-                text: 'Daily · GPT 5.6 High · $0.56 · 02:37s',
-              }),
-            ]),
-          }),
-          {
-            type: 'markdown',
-            text: '**Summary**\n\n| Idea | Priority |\n| --- | --- |\n| Demo | High |',
-          },
-          expect.objectContaining({
-            type: 'actions',
-            elements: expect.arrayContaining([
-              expect.objectContaining({
-                action_id: 'late_bound_automation_view_task',
-              }),
-              expect.objectContaining({
-                action_id: 'late_bound_automation_configure',
-                url: 'https://app.example.com/automations#custom-automation-automation-1',
+                type: 'actions',
+                elements: expect.arrayContaining([
+                  expect.objectContaining({
+                    action_id: 'late_bound_automation_view_task',
+                  }),
+                  expect.objectContaining({
+                    action_id: 'late_bound_automation_configure',
+                    url: 'https://app.example.com/automations#custom-automation-automation-1',
+                  }),
+                ]),
               }),
             ]),
           }),
@@ -559,7 +557,7 @@ describe('Slack thread reply quotes', () => {
     expect(outbound.text).toBe('Search accounts for most visits.');
     expect(
       outbound.blocks.map((block: { type: string }) => block.type),
-    ).toEqual(['context', 'markdown', 'data_visualization', 'actions']);
+    ).toEqual(['container', 'data_visualization', 'container']);
     expect(outbound.blocks).toContainEqual(chart);
   });
 

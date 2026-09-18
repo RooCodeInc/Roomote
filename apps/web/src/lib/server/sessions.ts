@@ -574,6 +574,13 @@ type HydratedLinkedTask = {
   inferenceCostMicroUsd?: number;
 };
 
+type SessionListArtifact = {
+  sessionId: string;
+  taskId: string | null;
+  path: string;
+  version: number;
+};
+
 async function hydrateSessionRows(
   auth: SessionAuth,
   rows: Array<
@@ -599,6 +606,8 @@ async function hydrateSessionRows(
     legacyFastDirectUsage,
     externalFastActivity,
     pins,
+    linkedTaskArtifacts,
+    directSessionArtifacts,
   ] = await Promise.all([
     options.preloadedLinkedTasks ??
       db
@@ -719,9 +728,66 @@ async function hydrateSessionRows(
           inArray(sessionPins.sessionId, ids),
         ),
       ),
+    db
+      .selectDistinctOn(
+        [sessionTasks.sessionId, taskArtifacts.taskId, taskArtifacts.path],
+        {
+          sessionId: sessionTasks.sessionId,
+          taskId: taskArtifacts.taskId,
+          path: taskArtifacts.path,
+          version: taskArtifacts.version,
+        },
+      )
+      .from(sessionTasks)
+      .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
+      .innerJoin(taskArtifacts, eq(taskArtifacts.taskId, sessionTasks.taskId))
+      .where(
+        and(
+          inArray(sessionTasks.sessionId, ids),
+          isNull(tasks.deletedAt),
+          eq(taskArtifacts.uploaded, true),
+        ),
+      )
+      .orderBy(
+        sessionTasks.sessionId,
+        taskArtifacts.taskId,
+        taskArtifacts.path,
+        desc(taskArtifacts.version),
+      ),
+    db
+      .selectDistinctOn([taskArtifacts.sessionId, taskArtifacts.path], {
+        sessionId: taskArtifacts.sessionId,
+        taskId: taskArtifacts.taskId,
+        path: taskArtifacts.path,
+        version: taskArtifacts.version,
+      })
+      .from(taskArtifacts)
+      .where(
+        and(
+          inArray(taskArtifacts.sessionId, ids),
+          eq(taskArtifacts.uploaded, true),
+        ),
+      )
+      .orderBy(
+        taskArtifacts.sessionId,
+        taskArtifacts.path,
+        desc(taskArtifacts.version),
+      ),
   ]);
 
   const pinned = new Set(pins.map((pin) => pin.sessionId));
+  const artifactsBySession = new Map<string, SessionListArtifact[]>();
+  for (const artifact of [...linkedTaskArtifacts, ...directSessionArtifacts]) {
+    if (!artifact.sessionId) continue;
+    const sessionArtifacts = artifactsBySession.get(artifact.sessionId) ?? [];
+    sessionArtifacts.push({
+      sessionId: artifact.sessionId,
+      taskId: artifact.taskId,
+      path: artifact.path,
+      version: artifact.version,
+    });
+    artifactsBySession.set(artifact.sessionId, sessionArtifacts);
+  }
   return rows.map((row) => {
     const tasksForSession = linkedTasks.filter(
       (task) => task.sessionId === row.id,
@@ -763,6 +829,7 @@ async function hydrateSessionRows(
       (total, task) => total + task.inferenceCostMicroUsd,
       0,
     );
+    const sessionArtifacts = artifactsBySession.get(row.id) ?? [];
     return {
       ...row,
       tasks: tasksWithUsage,
@@ -778,6 +845,15 @@ async function hydrateSessionRows(
       directInferenceCostMicroUsd,
       inferenceCostMicroUsd:
         directInferenceCostMicroUsd + taskInferenceCostMicroUsd,
+      artifactCount: sessionArtifacts.length,
+      singleArtifact:
+        sessionArtifacts.length === 1
+          ? {
+              taskId: sessionArtifacts[0]!.taskId,
+              path: sessionArtifacts[0]!.path,
+              version: sessionArtifacts[0]!.version,
+            }
+          : null,
       unread: latestExternalEventAt > Number(cursor?.lastReadEventAt ?? 0),
       pinned: pinned.has(row.id),
     };

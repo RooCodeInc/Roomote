@@ -1,11 +1,15 @@
 import {
   db,
+  brainPageRetirements,
+  eq,
   fastAgentConversations,
+  fastAgentMemoryEvents,
   getSessionGoal,
   replaceSessionGoal,
   sessionFactory,
   userFactory,
 } from '@roomote/db/server';
+import { fastConversationMemorySlug } from '@roomote/types';
 import {
   acquireFastAgentTurnLock,
   fastAgentConversationRepository,
@@ -223,6 +227,31 @@ describe('archiveSessionCommand turn serialization', () => {
       archivedAt: expect.any(Date),
     });
     expect(mocks.acquireRedisLock).not.toHaveBeenCalled();
+  });
+
+  it('retains direct session memory when archiving', async () => {
+    const { auth, session, record } = await fixture();
+    await db.insert(fastAgentMemoryEvents).values({
+      conversationId: record!.id,
+      memory: '- keep this on archive',
+      status: 'done',
+    });
+
+    await archiveSessionCommand(auth, session.id);
+
+    await expect(
+      db.query.fastAgentMemoryEvents.findFirst({
+        where: eq(fastAgentMemoryEvents.conversationId, record!.id),
+      }),
+    ).resolves.toBeDefined();
+    await expect(
+      db.query.brainPageRetirements.findFirst({
+        where: eq(
+          brainPageRetirements.slug,
+          fastConversationMemorySlug(record!.id),
+        ),
+      }),
+    ).resolves.toBeUndefined();
   });
 
   it('fails closed if the conversation cannot be resolved', async () => {

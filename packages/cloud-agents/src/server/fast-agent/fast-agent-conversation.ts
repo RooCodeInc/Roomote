@@ -226,6 +226,7 @@ export type FastAgentTurnAdapter = {
   /** Called after a durable visible turn settles and requires user attention. */
   notifyUserAttention?: (attention: {
     kind: 'result_ready' | 'input_needed';
+    presentationKind: 'response' | 'error' | 'input';
     eventId: string;
     message?: string;
     manual: boolean;

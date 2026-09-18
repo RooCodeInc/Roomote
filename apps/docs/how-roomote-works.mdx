@@ -16,7 +16,7 @@ for most teams.
 
 ## Shared engineering work
 
-Most natural-language work starts as a Roomote Session. The recommended first
+Most natural-language work starts as a Roomote session. The recommended first
 path is to mention Roomote in chat with a scoped ask. Use it for
 implementation, debugging, investigation, small refactors, test fixes,
 documentation updates, planning, and codebase questions.
@@ -45,40 +45,40 @@ manage these in the web app under **Automations** — see
 [Automations](/automations).
 
 The same review is available on demand. Mention Roomote on a pull request and
-ask for a review, or ask in any Session, and the Review Code pipeline runs as a
-task inside that Session and reports back when it finishes.
+ask for a review, or ask in any session, and the Review Code pipeline runs as a
+task inside that session and reports back when it finishes.
 
-A pull request opened by a Roomote task stays part of the Session that asked
-for the work. Mentions on that pull request join that Session rather than
+A pull request opened by a Roomote task stays part of the session that asked
+for the work. Mentions on that pull request join that session rather than
 starting a new one, and Roomote answers both on the pull request and where the
-Session lives.
+session lives.
 
 ## Where work starts
 
 | Surface       | How work starts                                            | Where updates appear                    |
 | ------------- | ---------------------------------------------------------- | --------------------------------------- |
-| Slack         | Mention Roomote or reply in an active Roomote thread       | Slack thread and Session view           |
-| Teams         | Mention the bot in a channel or group chat, or message it directly in a personal chat | Teams thread and Session view           |
-| Telegram      | Mention the bot in a group chat, or message it directly in a private chat            | Telegram chat and Session view          |
+| Slack         | Mention Roomote or reply in an active Roomote thread       | Slack thread and session view           |
+| Teams         | Mention the bot in a channel or group chat, or message it directly in a personal chat | Teams thread and session view           |
+| Telegram      | Mention the bot in a group chat, or message it directly in a private chat            | Telegram chat and session view          |
 | Discord       | Mention the bot in a server or send it a direct message    | Discord thread, forum post, or DM       |
-| Email         | Email the deployment's AgentMail inbox from a verified account address | Replies in the same email thread and Session view |
+| Email         | Email the deployment's AgentMail inbox from a verified account address | Replies in the same email thread and session view |
 | Web dashboard | Submit a prompt from **Home**                              | Session view in Roomote                 |
-| Linear        | Start an agent session or mention Roomote on an issue      | Agent session replies and Session view  |
-| GitHub        | Pull request events or `@`-mentions in PR and issue comments | GitHub comments, reviews, and Session view |
-| GitLab        | Repository or merge request follow-up when configured      | GitLab activity and Session view        |
-| Gitea         | Repository or pull request follow-up when configured       | Gitea activity and Session view         |
-| Bitbucket     | Pull request events or `@`-mentions when configured        | Bitbucket activity and Session view     |
-| Azure DevOps  | Repository or pull request follow-up when configured       | Azure DevOps activity and Session view  |
+| Linear        | Start an agent session or mention Roomote on an issue      | Agent session replies and session view  |
+| GitHub        | Pull request events or `@`-mentions in PR and issue comments | GitHub comments, reviews, and session view |
+| GitLab        | Repository or merge request follow-up when configured      | GitLab activity and session view        |
+| Gitea         | Repository or pull request follow-up when configured       | Gitea activity and session view         |
+| Bitbucket     | Pull request events or `@`-mentions when configured        | Bitbucket activity and session view     |
+| Azure DevOps  | Repository or pull request follow-up when configured       | Azure DevOps activity and session view  |
 
-Chat is the recommended surface for the first Session after setup because it
+Chat is the recommended surface for the first session after setup because it
 makes Roomote visible inside an existing team conversation. Use the dashboard
-when you want to continue a Session or open delegated task details such as
+when you want to continue a session or open delegated task details such as
 logs, diffs, and previews.
 
 ## How Roomote stays reviewable
 
 Roomote runs delegated work in an isolated sandbox and keeps it visible. The
-Session holds the conversation and reports; each task view exposes its
+session holds the conversation and reports; each task view exposes its
 transcript, logs, diffs, previews, artifacts, and execution metadata before
 anything ships.
 
@@ -88,14 +88,14 @@ gives a clear answer or next step without pretending code was changed.
 
 ## Choosing an environment
 
-In chat, Roomote's Fast Session decides whether a request needs a workspace
+In chat, the session decides whether a request needs a workspace
 and which environment fits, and it says so before delegating. Reply in the
 same thread to redirect it. When you start from the dashboard, choose the
-environment yourself or leave the selector on **Fast** to let the Session
-decide. A Linear agent session works the same way: the Session reads the
+environment yourself or leave the selector unselected to let the session
+decide. A Linear agent session works the same way: the session reads the
 issue and chooses the environment before delegating.
 
-If a request is ambiguous, the Session asks a clarifying question in the same
+If a request is ambiguous, the session asks a clarifying question in the same
 thread before it delegates, so you can name the environment or repository in
 your reply. If the deployment's inference provider is unavailable, Roomote says
 so in the thread instead of silently doing nothing; ask an admin to check the

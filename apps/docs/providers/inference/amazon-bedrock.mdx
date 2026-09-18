@@ -40,6 +40,20 @@ profile that is not available through Mantle. Inference-profile ARNs are not
 supported through Roomote's hosted inference gateway; use the plain model or
 cross-region profile ID instead.
 
+## Model discovery and access
+
+AWS exposes separate model catalogs for the two Bedrock endpoints. Mantle API
+keys can list the models on the regional Mantle `/models` endpoint. AWS
+documents native `ListFoundationModels` with AWS credentials and SigV4, not the
+Bedrock API key used by Roomote. Roomote therefore shows a curated Mantle list
+and preserves manually added `amazon-bedrock/` model IDs instead of requesting
+broader AWS credentials.
+
+A model appearing in either regional catalog does not prove that the configured
+identity can invoke it. Invocation still depends on the region, IAM
+`bedrock:InvokeModel` permissions, AWS Marketplace requirements, and any model
+or account-specific access controls.
+
 ## Cost behavior
 
 Bedrock bills the AWS account according to the selected model, request type,

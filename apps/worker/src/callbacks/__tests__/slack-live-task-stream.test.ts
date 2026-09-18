@@ -107,7 +107,7 @@ describe('Slack live task card', () => {
 
     expect(mocks.renderCard).toHaveBeenCalledTimes(4);
     expect(mocks.renderCard.mock.calls.map((call) => call[0].details)).toEqual([
-      'Preparing the workspace…',
+      'Starting task…',
       'Starting the task…',
       'Connecting to the task…',
       'Task started, getting to work…',

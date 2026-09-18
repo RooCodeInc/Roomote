@@ -82,7 +82,7 @@ export const manageCustomAutomationsFieldSchemas = {
   targetChannelId: z
     .string()
     .describe(
-      'Channel identifier for channel destinations, or the opaque account identity id returned by list_destinations for Email. Never pass a raw email address. Account verification is required for inbound email commands and replies, not for receiving automation reports.',
+      'Channel identifier for channel destinations, or the opaque account identity id returned by list_destinations for Email. Never pass a raw email address. Account verification is required for inbound email commands and replies, not for receiving automation reports; replying to a Roomote email from the account address verifies it implicitly.',
     )
     .optional(),
 } satisfies z.ZodRawShape;

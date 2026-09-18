@@ -47,6 +47,7 @@ import {
   normalizeTaskModelSettings,
 } from '@roomote/types';
 import type {
+  CodingModelRoutingRule,
   DeploymentModelConfig,
   ReasoningEffort,
   SetupModelProviderId,
@@ -67,6 +68,7 @@ import {
   upsertDeploymentEnvironmentVariables,
 } from '../environment-variables';
 import {
+  applyModelsDevMetadata,
   fetchModelsDevCatalog,
   listXaiChatModelsFromCatalog,
   lookupModelMetadataFromCatalog,
@@ -136,6 +138,7 @@ type TaskModelSettingsResult = {
     displayName: string;
     family: string;
   }>;
+  codingModelRoutingRules: CodingModelRoutingRule[];
 };
 
 type TaskModelSuggestionResult = {
@@ -224,6 +227,7 @@ export async function getTaskModelSettingsCommand(
     chatgptConnected,
     githubCopilotConnected,
     xaiSubscriptionConnected,
+    metadataCatalog,
   ] = await Promise.all([
     getDeploymentTaskModelSettings(),
     getDeploymentRuntimeModelConfig(),
@@ -231,6 +235,9 @@ export async function getTaskModelSettingsCommand(
     isChatGptSubscriptionConnected(),
     isGitHubCopilotSubscriptionConnected(),
     isXaiSubscriptionConnected(),
+    fetchModelsDevCatalog(
+      AbortSignal.timeout(MODEL_METADATA_FETCH_TIMEOUT_MS),
+    ).catch(() => null),
   ]);
   // The Available Models list always shows the full recommended set for
   // every connected provider; entries that are not persisted yet render
@@ -260,7 +267,7 @@ export async function getTaskModelSettingsCommand(
   );
   // A provider must be connected before its models can be selected. This also
   // removes stale rows created by the old implicit OpenRouter default catalog.
-  const catalog = appendSelectedTaskModels({
+  const catalogWithoutMetadataRefresh = appendSelectedTaskModels({
     models: appendRecommendedTaskModels({
       models: getTaskModelCatalog(settings).filter((model) => {
         const providerId = getTaskModelProviderId(model.id);
@@ -268,10 +275,16 @@ export async function getTaskModelSettingsCommand(
         return providerId !== null && connectedProviderIds.has(providerId);
       }),
       connectedProviderIds,
+      metadataCatalog,
     }),
     selectedModelIds,
     connectedProviderIds,
   });
+  const catalog = metadataCatalog
+    ? catalogWithoutMetadataRefresh.map((model) =>
+        applyModelsDevMetadata(metadataCatalog, model),
+      )
+    : catalogWithoutMetadataRefresh;
 
   return {
     defaultModelId: settings.defaultModelId,
@@ -292,6 +305,7 @@ export async function getTaskModelSettingsCommand(
       displayName,
       family,
     })),
+    codingModelRoutingRules: settings.codingModelRoutingRules ?? [],
   };
 }
 
@@ -454,12 +468,19 @@ export async function autoAddConnectedSubscriptionTaskModels(
   providerId: SetupModelProviderId,
 ): Promise<number> {
   const provider = getSetupModelProvider(providerId);
-  const [chatgptConnected, githubCopilotConnected, xaiSubscriptionConnected] =
-    await Promise.all([
-      isChatGptSubscriptionConnected(),
-      isGitHubCopilotSubscriptionConnected(),
-      isXaiSubscriptionConnected(),
-    ]);
+  const [
+    chatgptConnected,
+    githubCopilotConnected,
+    xaiSubscriptionConnected,
+    metadataCatalog,
+  ] = await Promise.all([
+    isChatGptSubscriptionConnected(),
+    isGitHubCopilotSubscriptionConnected(),
+    isXaiSubscriptionConnected(),
+    fetchModelsDevCatalog(
+      AbortSignal.timeout(MODEL_METADATA_FETCH_TIMEOUT_MS),
+    ).catch(() => null),
+  ]);
 
   const addedRecommended = await db.transaction(async (tx) => {
     const [persistedEnvVarNames, persistedTaskModels] = await Promise.all([
@@ -480,6 +501,7 @@ export async function autoAddConnectedSubscriptionTaskModels(
       provider,
       persistedTaskModelSettings: persistedTaskModels,
       connectedProviderIds,
+      metadataCatalog,
     });
 
     if (!autoAdd) {
@@ -679,6 +701,9 @@ export async function saveTaskModelProviderCommand(
   }
 
   let addedRecommendedModelCount = 0;
+  const metadataCatalog = await fetchModelsDevCatalog(
+    AbortSignal.timeout(MODEL_METADATA_FETCH_TIMEOUT_MS),
+  ).catch(() => null);
 
   await db.transaction(async (tx) => {
     const [currentSetupNewState, persistedEnvVarNames, persistedTaskModels] =
@@ -736,6 +761,7 @@ export async function saveTaskModelProviderCommand(
       provider,
       persistedTaskModelSettings: persistedTaskModels,
       connectedProviderIds,
+      metadataCatalog,
     });
 
     addedRecommendedModelCount = autoAdd?.addedModels.length ?? 0;
@@ -940,6 +966,7 @@ function removeTaskModelsForProvider({
   );
 
   const taskModelSettings = normalizeTaskModelSettings({
+    ...settings,
     models,
     allowedModelIds,
     defaultModelId: removedModelIds.has(settings.defaultModelId)
@@ -1208,6 +1235,7 @@ export async function updateTaskModelSettingsCommand(
     codeReviewModelReasoningEffort: ReasoningEffort | null;
     exploreModelReasoningEffort?: ReasoningEffort | null;
     planningModelReasoningEffort: ReasoningEffort | null;
+    codingModelRoutingRules?: CodingModelRoutingRule[];
   },
 ): Promise<
   | {
@@ -1226,6 +1254,7 @@ export async function updateTaskModelSettingsCommand(
         codeReviewModelId?: string;
         exploreModelId?: string;
         planningModelId?: string;
+        codingModelRoutingRules?: string;
       };
     }
 > {
@@ -1241,6 +1270,7 @@ export async function updateTaskModelSettingsCommand(
     codeReviewModelId?: string;
     exploreModelId?: string;
     planningModelId?: string;
+    codingModelRoutingRules?: string;
   } = {};
   const models = (() => {
     try {
@@ -1288,6 +1318,13 @@ export async function updateTaskModelSettingsCommand(
       ];
     }),
   ) as Record<TaskModelRole, ReasoningEffort | null | undefined>;
+  const codingModelRoutingRules = input.codingModelRoutingRules?.map(
+    (rule) => ({
+      ...rule,
+      modelId: normalizeTaskModelId(rule.modelId),
+      condition: rule.condition.trim(),
+    }),
+  );
 
   if (models.length === 0) {
     fieldErrors.models = 'Add at least one model.';
@@ -1307,6 +1344,27 @@ export async function updateTaskModelSettingsCommand(
     fieldErrors.defaultModelId = 'Choose a valid default model.';
   } else if (!allowedModelIds.includes(normalizedDefaultModelId)) {
     fieldErrors.defaultModelId = 'The default model must be enabled.';
+  }
+
+  if (
+    codingModelRoutingRules?.some(
+      (rule) =>
+        !allowedModelIds.includes(rule.modelId) ||
+        !knownModelIds.has(rule.modelId),
+    )
+  ) {
+    fieldErrors.codingModelRoutingRules =
+      'Routing rules must use enabled models.';
+  } else if (
+    codingModelRoutingRules?.some(
+      (rule) =>
+        rule.reasoningEffort !== null &&
+        models.find((model) => model.id === rule.modelId)?.metadata
+          ?.supportsReasoning === false,
+    )
+  ) {
+    fieldErrors.codingModelRoutingRules =
+      'Routing rule reasoning requires a model that supports reasoning.';
   }
 
   for (const role of TASK_MODEL_ROLES) {
@@ -1388,6 +1446,10 @@ export async function updateTaskModelSettingsCommand(
       models,
       allowedModelIds,
       defaultModelId: normalizedDefaultModelId,
+      codingModelRoutingRules:
+        codingModelRoutingRules ??
+        normalizeTaskModelSettings(persisted?.taskModelSettings ?? null)
+          .codingModelRoutingRules,
       catalogSyncedModelIds: normalizeTaskModelSettings(
         persisted?.taskModelSettings ?? null,
       ).catalogSyncedModelIds,
@@ -1843,6 +1905,7 @@ export async function refreshTaskModelMetadataCommand(
   });
 
   const taskModelSettings = normalizeTaskModelSettings({
+    ...persistedSettings,
     models: refreshedModels,
     allowedModelIds,
     defaultModelId,

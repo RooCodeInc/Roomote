@@ -62,6 +62,14 @@ describe('getFastAgentNativeAcpKind', () => {
     ).toBe(true);
   });
 
+  it('offers list_repositories to the Fast parent on every surface but not to subagents', () => {
+    const name = FAST_AGENT_NATIVE_TOOL_NAMES.listRepositories;
+    expect(buildFastAgentToolFilter([], { surface: 'web' })[name]).toBe(true);
+    expect(buildFastAgentToolFilter([], { surface: 'slack' })[name]).toBe(true);
+    expect(FAST_AGENT_SUBAGENT_TOOL_FILTER[name]).toBe(false);
+    expect(getFastAgentNativeAcpKind(name)).toBe(ACP_TOOL_KINDS.list);
+  });
+
   it.each([
     [
       FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential,

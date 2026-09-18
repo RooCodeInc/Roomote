@@ -99,6 +99,7 @@ vi.mock('@/hooks/task-models/useJudgmentModelSettings', () => ({
   useJudgmentModelSettings: () => ({
     data: {
       typeSafe: { connected: false, source: null },
+      openRouterConnected: false,
       vercelGatewayConnected: false,
       storedSelection: null,
       envSelection: null,
@@ -170,6 +171,11 @@ function buildSettingsData(
     codingReasoningEffort?: ReasoningEffort | null;
     orchestrationReasoningEffort?: ReasoningEffort | null;
     helperReasoningEffort?: ReasoningEffort | null;
+    codingModelRoutingRules?: Array<{
+      modelId: string;
+      reasoningEffort: ReasoningEffort | null;
+      condition: string;
+    }>;
   } = {},
 ) {
   return {
@@ -293,6 +299,7 @@ function buildSettingsData(
         },
       },
     ],
+    codingModelRoutingRules: overrides.codingModelRoutingRules ?? [],
   };
 }
 
@@ -479,7 +486,7 @@ describe('ModelSettingsSection', () => {
     expect(screen.queryByText('Env-managed')).toBeNull();
     expect(screen.queryByText('Reasoning env-managed')).toBeNull();
     expect(
-      screen.getByLabelText('Default coding model is managed by R_MODEL'),
+      screen.getByLabelText('Coding model is managed by R_MODEL'),
     ).toBeInTheDocument();
     expect(
       screen.getByLabelText('Advisor model is managed by R_PLANNING_MODEL'),
@@ -508,7 +515,7 @@ describe('ModelSettingsSection', () => {
     expect(screen.queryByText('Reasoning env-managed')).toBeNull();
     expect(
       screen.getByLabelText(
-        'Default coding model reasoning is managed by R_MODEL_REASONING_EFFORT',
+        'Coding model reasoning is managed by R_MODEL_REASONING_EFFORT',
       ),
     ).toBeInTheDocument();
     expect(
@@ -528,15 +535,15 @@ describe('ModelSettingsSection', () => {
 
     expect(
       screen.getByLabelText(
-        'Default coding model and reasoning are managed by env vars',
+        'Coding model and reasoning are managed by env vars',
       ),
     ).toBeInTheDocument();
     expect(
-      screen.queryByLabelText('Default coding model is managed by R_MODEL'),
+      screen.queryByLabelText('Coding model is managed by R_MODEL'),
     ).not.toBeInTheDocument();
     expect(
       screen.queryByLabelText(
-        'Default coding model reasoning is managed by R_MODEL_REASONING_EFFORT',
+        'Coding model reasoning is managed by R_MODEL_REASONING_EFFORT',
       ),
     ).not.toBeInTheDocument();
   });
@@ -618,6 +625,126 @@ describe('ModelSettingsSection', () => {
     ).toBeInTheDocument();
     // Orchestration, helper, vision, and explore fall back to Low.
     expect(within(modelMappingSection).getAllByText('Low')).toHaveLength(4);
+  });
+
+  it('adds, saves, edits, and removes coding-model routing rules', async () => {
+    settingsData.current = buildSettingsData();
+    renderModelSettingsSection();
+
+    const routingTrigger = screen.getByRole('button', {
+      name: 'Custom coding model routing rules',
+    });
+    expect(routingTrigger).toHaveAttribute('aria-expanded', 'false');
+    expect(routingTrigger.querySelector('svg')).toHaveStyle({
+      transform: 'rotate(-90deg)',
+    });
+    fireEvent.click(routingTrigger);
+    expect(routingTrigger).toHaveAttribute('aria-expanded', 'true');
+    expect(routingTrigger.querySelector('svg')).not.toHaveStyle({
+      transform: 'rotate(-90deg)',
+    });
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Add a model routing rule',
+      }),
+    );
+    const condition = screen.getByLabelText('Routing rule 1 condition');
+    fireEvent.change(condition, {
+      target: { value: 'Routine tasks where speed matters' },
+    });
+
+    await waitFor(() => {
+      expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+    expect(updateMutateAsyncMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        codingModelRoutingRules: [
+          {
+            modelId: 'openrouter/openai/gpt-5.4',
+            reasoningEffort: 'medium',
+            condition: 'Routine tasks where speed matters',
+          },
+        ],
+      }),
+    );
+
+    updateMutateAsyncMock.mockClear();
+    fireEvent.change(condition, {
+      target: { value: 'Routine implementation tasks' },
+    });
+    await waitFor(() => {
+      expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+    expect(updateMutateAsyncMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        codingModelRoutingRules: [
+          expect.objectContaining({
+            condition: 'Routine implementation tasks',
+          }),
+        ],
+      }),
+    );
+
+    updateMutateAsyncMock.mockClear();
+    fireEvent.click(screen.getByLabelText('Remove routing rule 1'));
+    await waitFor(() => {
+      expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+    expect(updateMutateAsyncMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ codingModelRoutingRules: [] }),
+    );
+  });
+
+  it('does not show a success toast for each routing-rule condition edit', async () => {
+    settingsData.current = buildSettingsData();
+    renderModelSettingsSection();
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Custom coding model routing rules',
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Add a model routing rule',
+      }),
+    );
+    const condition = screen.getByLabelText('Routing rule 1 condition');
+
+    for (const value of ['a', 'ab', 'abc']) {
+      fireEvent.change(condition, { target: { value } });
+      await waitFor(() => {
+        expect(updateMutateAsyncMock).toHaveBeenCalledTimes(value.length);
+      });
+    }
+
+    expect(toast.success).not.toHaveBeenCalledWith('Updated model settings.');
+    expect(updateMutateAsyncMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('keeps success feedback when another setting joins a routing-rule save', async () => {
+    settingsData.current = buildSettingsData();
+    renderModelSettingsSection();
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Custom coding model routing rules',
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Add a model routing rule',
+      }),
+    );
+    fireEvent.change(screen.getByLabelText('Routing rule 1 condition'), {
+      target: { value: 'a' },
+    });
+    fireEvent.click(screen.getByRole('switch', { name: 'Toggle GLM 5.2' }));
+
+    await waitFor(() => {
+      expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+    expect(toast.success).toHaveBeenCalledWith('Updated model settings.');
   });
 
   it('hides the reasoning selector for models that do not support reasoning', () => {
@@ -1280,9 +1407,7 @@ describe('ModelSettingsSection', () => {
     expect(
       within(dialog).getByText('Set this model mapping'),
     ).toBeInTheDocument();
-    expect(
-      within(dialog).getByText('Default coding model'),
-    ).toBeInTheDocument();
+    expect(within(dialog).getByText('Coding model')).toBeInTheDocument();
     expect(within(dialog).getByText('GLM 5.2')).toBeInTheDocument();
     expect(
       within(dialog).getByLabelText('Helper model is managed by R_SMALL_MODEL'),

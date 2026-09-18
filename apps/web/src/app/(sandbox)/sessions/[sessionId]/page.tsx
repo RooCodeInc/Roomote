@@ -123,6 +123,11 @@ export default async function SessionDetailPage({
   if (unifiedSession) {
     const sessionInfo: SessionInfo = {
       id: unifiedSession.id,
+      canDelete:
+        unifiedSession.privacy === 'private'
+          ? unifiedSession.privateOwnerUserId === authorizedUser.userId
+          : authorizedUser.isAdmin ||
+            unifiedSession.ownerUserId === authorizedUser.userId,
       ownerName: unifiedSession.ownerName,
       ownerEmail: unifiedSession.ownerEmail,
       ownerImageUrl: unifiedSession.ownerImageUrl,
@@ -242,6 +247,7 @@ export default async function SessionDetailPage({
 
   const sessionInfo: SessionInfo = {
     id: session.id,
+    canDelete: false,
     ownerName: session.ownerName,
     ownerEmail: session.ownerEmail,
     ownerImageUrl: session.ownerImageUrl,

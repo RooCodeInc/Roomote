@@ -1963,6 +1963,7 @@ const DISCORD_REACTION_EMOJI_BY_NAME: Record<string, string> = {
   tada: '🎉',
   heart: '❤️',
   fire: '🔥',
+  file_cabinet: '🗄️',
   clap: '👏',
   think: '🤔',
   thinking_face: '🤔',

@@ -1,6 +1,6 @@
 ---
 title: TypeSafe
-icon: 'scale'
+icon: '/logo/integrations/typesafe.svg'
 description: Use TypeSafe's Jev as Roomote's judgment model for fast routing and triage decisions.
 ---
 
@@ -8,12 +8,14 @@ description: Use TypeSafe's Jev as Roomote's judgment model for fast routing and
 questions (yes or no, one of several options, or a graded score) with
 probabilities in a single fast call instead of generating text. Roomote can use
 it as the optional [judgment model](/models#judgment-model) for routing and
-triage decisions. Jev is not a chat model: it never runs tasks or Fast
+triage decisions. Jev is not a chat model: it never runs tasks or session
 Sessions and does not appear in model pickers.
 
-You can reach Jev two ways:
+You can reach Jev three ways:
 
 - **Jev via TypeSafe**, with a TypeSafe API key (this page)
+- **Jev via OpenRouter**, with the OpenRouter key a deployment already uses for
+  [OpenRouter](/providers/inference/openrouter)
 - **Jev via Vercel AI Gateway**, with the AI Gateway key a deployment already
   uses for [Vercel AI Gateway](/providers/inference/vercel-ai-gateway)
 
@@ -31,11 +33,11 @@ key in the environment instead:
 R_TYPESAFE_API_KEY=...
 ```
 
-A TypeSafe key alone turns on **Jev via TypeSafe**. To use Vercel AI Gateway
-instead, or to turn the judgment model off while keeping the key, choose the
-**Judgment model** in **Settings > Models**, or set `R_JUDGMENT_MODEL` to
-`typesafe`, `vercel`, or `off`. The environment variable overrides the
-Settings choice.
+A TypeSafe key alone turns on **Jev via TypeSafe**. To use OpenRouter or Vercel
+AI Gateway instead, or to turn the judgment model off while keeping the key,
+choose the **Judgment model** in **Settings > Models**, or set
+`R_JUDGMENT_MODEL` to `typesafe`, `openrouter`, `vercel`, or `off`. The
+environment variable overrides the Settings choice.
 
 ## What is sent to TypeSafe
 
@@ -58,7 +60,8 @@ TypeSafe's data terms before enabling it.
 - **The key is rejected when saving.** Confirm the key is active in your
   TypeSafe account.
 - **The judgment model is selected but unused.** The selected route needs its
-  key: a TypeSafe key for **Jev via TypeSafe**, or a Vercel AI Gateway key for
-  **Jev via Vercel AI Gateway**. Roomote never switches routes on its own.
+  key: a TypeSafe key for **Jev via TypeSafe**, an OpenRouter key for **Jev via
+  OpenRouter**, or a Vercel AI Gateway key for **Jev via Vercel AI Gateway**.
+  Roomote never switches routes on its own.
 - **Decisions look the same as before.** Roomote acts on the judgment model
   only when it is confident; everything else keeps the existing behavior.

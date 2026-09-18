@@ -1,7 +1,12 @@
 'use client';
 
 import { useRef } from 'react';
-import type { AutomationDestinationProvider as DestinationProvider } from '@roomote/types';
+import {
+  getAutomationTargetEmailIdentityId,
+  isBackgroundAutomationUserTargetKind,
+  type AutomationDestinationProvider as DestinationProvider,
+  type OptionalAutomationTarget,
+} from '@roomote/types';
 
 import {
   Input,
@@ -17,12 +22,39 @@ import {
 import { SlackChannelSelect } from './SlackChannelSelect';
 
 export type AutomationDestinationProvider = 'none' | DestinationProvider;
-type AutomationDestinationMode = 'channel' | 'direct_message';
-type AutomationDestinationValue = {
+export type AutomationDestinationMode = 'channel' | 'direct_message';
+export type AutomationDestinationValue = {
   provider: AutomationDestinationProvider;
   mode: AutomationDestinationMode;
   channelId: string;
 };
+
+export function destinationValueFromAutomationTarget(
+  target: OptionalAutomationTarget | null,
+): AutomationDestinationValue {
+  if (!target?.provider || !target.externalRef) {
+    return { provider: 'none', mode: 'channel', channelId: '' };
+  }
+
+  const provider =
+    target.provider === 'discord' ||
+    target.provider === 'teams' ||
+    target.provider === 'telegram' ||
+    target.provider === 'email'
+      ? target.provider
+      : 'slack';
+  const directMessage = isBackgroundAutomationUserTargetKind(target.targetKind);
+  return {
+    provider,
+    mode: directMessage ? 'direct_message' : 'channel',
+    channelId:
+      provider === 'email'
+        ? (getAutomationTargetEmailIdentityId(target) ?? '')
+        : directMessage
+          ? ''
+          : target.externalRef,
+  };
+}
 
 type DestinationOption = {
   id: string;
@@ -50,10 +82,13 @@ export function AutomationDestinationPicker({
   defaultSlackChannelId = '',
   defaultDiscordChannelId = '',
   defaultEmailIdentityId = '',
+  fixedDestinationLabels = {},
   noneLabel = 'None',
   noneDescription = 'Results appear only in the task view.',
   disabled = false,
   allowNone = true,
+  allowChannel = true,
+  channelProviders = availableProviders,
   allowDirectMessage = true,
   onChange,
 }: {
@@ -68,10 +103,13 @@ export function AutomationDestinationPicker({
   defaultSlackChannelId?: string;
   defaultDiscordChannelId?: string;
   defaultEmailIdentityId?: string;
+  fixedDestinationLabels?: Partial<Record<'teams' | 'telegram', string>>;
   noneLabel?: string;
   noneDescription?: string;
   disabled?: boolean;
   allowNone?: boolean;
+  allowChannel?: boolean;
+  channelProviders?: readonly DestinationProvider[];
   allowDirectMessage?: boolean;
   onChange: (value: AutomationDestinationValue) => void;
 }) {
@@ -101,13 +139,20 @@ export function AutomationDestinationPicker({
       <Label htmlFor={id}>{label}</Label>
       <div className="grid gap-2">
         <Select
-          value={value.provider}
+          value={
+            value.provider === 'none' && !allowNone ? undefined : value.provider
+          }
           disabled={disabled}
           handoffTargetOnSelect={nextDestinationRef}
           onValueChange={(provider) =>
             onChange({
               provider: provider as AutomationDestinationProvider,
-              mode: provider === 'email' ? 'direct_message' : 'channel',
+              mode:
+                provider === 'email' ||
+                !allowChannel ||
+                !channelProviders.includes(provider as DestinationProvider)
+                  ? 'direct_message'
+                  : 'channel',
               channelId: defaultChannelId(
                 provider as AutomationDestinationProvider,
               ),
@@ -119,7 +164,7 @@ export function AutomationDestinationPicker({
             aria-label="Destination provider"
             className="w-full sm:max-w-52"
           >
-            <SelectValue />
+            <SelectValue placeholder={noneLabel} />
           </SelectTrigger>
           <SelectContent>
             {allowNone ? (
@@ -134,18 +179,26 @@ export function AutomationDestinationPicker({
         </Select>
 
         {value.provider === 'none' ? (
-          <p className="self-center text-sm text-muted-foreground">
-            {noneDescription}
-          </p>
+          noneDescription ? (
+            <p className="self-center text-sm text-muted-foreground">
+              {noneDescription}
+            </p>
+          ) : null
         ) : (
           <div
             className={
-              allowDirectMessage && value.provider !== 'email'
+              allowChannel &&
+              allowDirectMessage &&
+              value.provider !== 'email' &&
+              channelProviders.includes(value.provider)
                 ? 'grid min-w-0 gap-2 sm:grid-cols-[9rem_minmax(0,1fr)] sm:items-center'
                 : 'grid min-w-0 gap-2'
             }
           >
-            {allowDirectMessage && value.provider !== 'email' ? (
+            {allowChannel &&
+            allowDirectMessage &&
+            value.provider !== 'email' &&
+            channelProviders.includes(value.provider) ? (
               <Select
                 value={value.mode}
                 disabled={disabled}
@@ -209,6 +262,11 @@ export function AutomationDestinationPicker({
                   longer eligible.
                 </p>
               </div>
+            ) : (value.provider === 'teams' || value.provider === 'telegram') &&
+              fixedDestinationLabels[value.provider] ? (
+              <p className="self-center text-sm text-muted-foreground">
+                {fixedDestinationLabels[value.provider]}
+              </p>
             ) : value.mode === 'direct_message' ? (
               <p className="self-center text-sm text-muted-foreground">
                 Results are sent privately to your linked {providerLabel}{' '}

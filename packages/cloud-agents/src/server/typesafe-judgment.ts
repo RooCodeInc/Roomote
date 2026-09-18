@@ -20,6 +20,9 @@ import {
  */
 const TYPESAFE_API_URL = 'https://api.typesafe.ai/v1/systemone';
 const TYPESAFE_MODEL = 'jev-latest';
+const OPENROUTER_API_KEY_ENV_VAR_NAMES = ['OPENROUTER_API_KEY'] as const;
+const OPENROUTER_DECISIONS_URL = 'https://openrouter.ai/api/alpha/decisions';
+const OPENROUTER_JEV_MODEL_ID = 'typesafe/jev-1.13';
 const VERCEL_AI_GATEWAY_ENV_VAR_NAMES = ['AI_GATEWAY_API_KEY'] as const;
 const DEFAULT_TYPESAFE_TIMEOUT_MS = 3_000;
 const BACKEND_CACHE_TTL_MS = 30_000;
@@ -87,11 +90,12 @@ type TypeSafeAnswers<TQuestions> = {
 
 /**
  * Where judgment requests go. `typesafe` calls TypeSafe's API directly with a
- * TypeSafe key; `vercel` calls Jev through Vercel AI Gateway with the
- * deployment's AI Gateway key.
+ * TypeSafe key; `openrouter` and `vercel` call Jev through their respective
+ * deployment gateway keys.
  */
 export type JudgmentBackend =
   | { provider: 'typesafe'; apiKey: string }
+  | { provider: 'openrouter'; apiKey: string }
   | { provider: 'vercel'; apiKey: string };
 
 let cachedBackend:
@@ -127,6 +131,15 @@ async function resolveJudgmentBackendUncached(): Promise<
       VERCEL_AI_GATEWAY_ENV_VAR_NAMES,
     );
     return gatewayKey ? { provider: 'vercel', apiKey: gatewayKey } : undefined;
+  }
+
+  if (selection === 'openrouter') {
+    const openRouterKey = await resolveModelProviderEnvValue(
+      OPENROUTER_API_KEY_ENV_VAR_NAMES,
+    );
+    return openRouterKey
+      ? { provider: 'openrouter', apiKey: openRouterKey }
+      : undefined;
   }
 
   return undefined;
@@ -233,15 +246,16 @@ async function postJson(
   return (await response.json()) as Record<string, unknown>;
 }
 
-async function requestTypeSafeDirect(
+async function requestNativeDecisions(
   apiKey: string,
   state: unknown,
   questions: Record<string, TypeSafeQuestion>,
   timeoutMs: number,
+  options: { url: string; model: string },
 ): Promise<Record<string, unknown> | undefined> {
-  const body = await postJson(TYPESAFE_API_URL, {
+  const body = await postJson(options.url, {
     headers: { Authorization: `Bearer ${apiKey}` },
-    body: { state, model: TYPESAFE_MODEL, questions },
+    body: { state, model: options.model, questions },
     timeoutMs,
   });
 
@@ -252,6 +266,45 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === 'object' && value !== null
     ? (value as Record<string, unknown>)
     : undefined;
+}
+
+function withDerivedConfidence(
+  answers: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (!answers) {
+    return undefined;
+  }
+
+  return Object.fromEntries(
+    Object.entries(answers).map(([id, raw]) => {
+      const answer = asRecord(raw);
+
+      if (
+        !answer ||
+        (answer.type !== 'choice' && answer.type !== 'score') ||
+        answer.confidence !== undefined
+      ) {
+        return [id, raw];
+      }
+
+      const probabilities = asRecord(answer.probabilities);
+      const probabilityValues = probabilities
+        ? Object.values(probabilities)
+        : [];
+
+      return [
+        id,
+        {
+          ...answer,
+          confidence:
+            probabilityValues.length > 0 &&
+            probabilityValues.every(isProbability)
+              ? Math.max(...probabilityValues)
+              : undefined,
+        },
+      ];
+    }),
+  );
 }
 
 /**
@@ -351,20 +404,41 @@ export async function evaluateTypeSafeJudgments<
   }
 
   const timeoutMs = params.timeoutMs ?? DEFAULT_TYPESAFE_TIMEOUT_MS;
-  const answers =
-    backend.provider === 'vercel'
-      ? await requestVercelGateway(
+  let answers: Record<string, unknown> | undefined;
+
+  switch (backend.provider) {
+    case 'typesafe':
+      answers = await requestNativeDecisions(
+        backend.apiKey,
+        params.state,
+        params.questions,
+        timeoutMs,
+        { url: TYPESAFE_API_URL, model: TYPESAFE_MODEL },
+      );
+      break;
+    case 'openrouter':
+      answers = withDerivedConfidence(
+        await requestNativeDecisions(
           backend.apiKey,
           params.state,
           params.questions,
           timeoutMs,
-        )
-      : await requestTypeSafeDirect(
-          backend.apiKey,
-          params.state,
-          params.questions,
-          timeoutMs,
-        );
+          {
+            url: OPENROUTER_DECISIONS_URL,
+            model: OPENROUTER_JEV_MODEL_ID,
+          },
+        ),
+      );
+      break;
+    case 'vercel':
+      answers = await requestVercelGateway(
+        backend.apiKey,
+        params.state,
+        params.questions,
+        timeoutMs,
+      );
+      break;
+  }
 
   for (const [questionId, question] of Object.entries(params.questions)) {
     if (!isValidAnswer(question, answers?.[questionId])) {

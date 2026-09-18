@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import {
   SafeFetchViolationError,
+  assertEgressUrlResolvesPublic,
   checkAddressAllowed,
   fetchPublicUrl,
   fetchPublicUrlForTesting,
@@ -326,6 +327,22 @@ describe('safeFetch', () => {
 
     await expect(
       safeFetch('http://mixed.example/', { lookup: mixedLookup }),
+    ).rejects.toThrow(SafeFetchViolationError);
+  });
+
+  it('refuses unresolved destinations when any DNS answer is non-public', async () => {
+    const mixedLookup = ((_hostname, _options, callback) => {
+      const cb = callback as (error: null, result: unknown) => void;
+      cb(null, [
+        { address: '93.184.216.34', family: 4 },
+        { address: '10.0.0.8', family: 4 },
+      ]);
+    }) as DnsLookupFn;
+
+    await expect(
+      assertEgressUrlResolvesPublic('https://mixed.example', {
+        lookup: mixedLookup,
+      }),
     ).rejects.toThrow(SafeFetchViolationError);
   });
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
@@ -41,9 +41,7 @@ import {
   ScanSearch,
   Select,
   SelectContent,
-  SelectGroup,
   SelectItem,
-  SelectLabel,
   SelectTrigger,
   SelectValue,
   Spinner,
@@ -54,7 +52,20 @@ import type { LucideIcon } from '@/components/system';
 import { Section } from '@/components/settings';
 import { ReasoningEffortSelect } from '@/components/tasks/ReasoningEffortSelect';
 import { JudgmentModelRow } from './JudgmentModelRow';
+import {
+  CodingModelRoutingRulesEditor,
+  cloneCodingModelRoutingRules,
+  codingModelRoutingRulesEqual,
+  prepareCodingModelRoutingRulesForSave,
+  removeModelFromCodingModelRoutingRules,
+  type CodingModelRoutingRulesChange,
+  type CodingModelRoutingRulesDraft,
+} from './CodingModelRoutingRulesEditor';
 import { formatMetadataSummary } from './model-metadata';
+import {
+  TaskModelSelect,
+  type EditableRuntimeModelOption,
+} from './TaskModelSelect';
 import {
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
   DEFAULT_MODEL_ROLE_REASONING_EFFORTS,
@@ -84,12 +95,6 @@ type EditableTaskModel = {
   metadata?: TaskModelMetadata | null;
 };
 
-type EditableRuntimeModelOption = {
-  id: string;
-  displayName: string;
-  family?: string;
-};
-
 type TaskModelRoleDraft = {
   modelId: string | null;
   reasoningEffort: ReasoningEffort | null;
@@ -106,6 +111,7 @@ type ModelSettingsSectionDraft = {
   models: EditableTaskModel[];
   enabledModelIds: string[];
   roles: TaskModelRoleDrafts;
+  codingModelRoutingRules: CodingModelRoutingRulesDraft;
 };
 
 type SuggestionState = {
@@ -152,12 +158,12 @@ const SECONDARY_TASK_MODEL_ROLES = TASK_MODEL_ROLES.filter(
 const TASK_MODEL_ROLE_CONFIGS: readonly TaskModelRoleConfig[] = [
   {
     role: 'coding',
-    label: 'Default coding model',
+    label: 'Coding model',
     description:
       'Used for new task launches and persisted runtime coding model config.',
     icon: Code2,
     placeholder: 'Select a default coding model',
-    reasoningAriaLabel: 'Default coding model reasoning level',
+    reasoningAriaLabel: 'Coding model reasoning level',
   },
   {
     role: 'orchestration',
@@ -224,6 +230,7 @@ function TaskModelRoleEditor({
   reasoningEffort,
   onModelChange,
   onReasoningChange,
+  children,
 }: {
   config: TaskModelRoleConfig;
   managedByEnv: boolean;
@@ -234,6 +241,7 @@ function TaskModelRoleEditor({
   reasoningEffort: ReasoningEffort | null;
   onModelChange: (value: string) => void;
   onReasoningChange: (value: ReasoningEffort | null) => void;
+  children?: ReactNode;
 }) {
   const Icon = config.icon;
   const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[config.role];
@@ -249,7 +257,6 @@ function TaskModelRoleEditor({
       : managedByEnv
         ? `Set by ${descriptor.modelEnvVar}, not changeable in the UI.`
         : `Set by ${descriptor.reasoningEnvVar}, not changeable in the UI.`;
-  const showProviderHeaders = optionGroups.length > 1;
 
   return (
     <div className="flex items-start gap-3 py-3 first:pt-0 last:pb-0">
@@ -272,40 +279,18 @@ function TaskModelRoleEditor({
           <p className="text-xs text-muted-foreground">{config.description}</p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Select
+          <TaskModelSelect
             value={selectValue}
-            onValueChange={onModelChange}
             disabled={managedByEnv || optionGroups.length === 0}
-          >
-            <SelectTrigger className="w-full sm:max-w-sm">
-              <SelectValue placeholder={config.placeholder} />
-            </SelectTrigger>
-            <SelectContent>
-              {descriptor.modelFallback === 'coding' && (
-                <SelectItem value={SAME_AS_CODING_MODEL_VALUE}>
-                  Same as coding model
-                </SelectItem>
-              )}
-              {showProviderHeaders
-                ? optionGroups.map((group) => (
-                    <SelectGroup key={group.providerId}>
-                      <SelectLabel>{group.label}</SelectLabel>
-                      {group.items.map((option) => (
-                        <SelectItem key={option.id} value={option.id}>
-                          {option.displayName}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  ))
-                : optionGroups.flatMap((group) =>
-                    group.items.map((option) => (
-                      <SelectItem key={option.id} value={option.id}>
-                        {option.displayName}
-                      </SelectItem>
-                    )),
-                  )}
-            </SelectContent>
-          </Select>
+            placeholder={config.placeholder}
+            optionGroups={optionGroups}
+            sameAsCodingModelValue={
+              descriptor.modelFallback === 'coding'
+                ? SAME_AS_CODING_MODEL_VALUE
+                : undefined
+            }
+            onValueChange={onModelChange}
+          />
           {supportsReasoning && (
             <ReasoningEffortSelect
               value={reasoningEffort}
@@ -316,6 +301,7 @@ function TaskModelRoleEditor({
             />
           )}
         </div>
+        {children}
       </div>
     </div>
   );
@@ -555,6 +541,9 @@ function cloneDraft(
     })),
     enabledModelIds: [...draft.enabledModelIds],
     roles: cloneTaskModelRoleDrafts(draft.roles),
+    codingModelRoutingRules: cloneCodingModelRoutingRules(
+      draft.codingModelRoutingRules,
+    ),
   };
 }
 
@@ -580,6 +569,15 @@ function draftsEqual(
     ) {
       return false;
     }
+  }
+
+  if (
+    !codingModelRoutingRulesEqual(
+      left.codingModelRoutingRules,
+      right.codingModelRoutingRules,
+    )
+  ) {
+    return false;
   }
 
   for (let index = 0; index < left.enabledModelIds.length; index += 1) {
@@ -723,17 +721,22 @@ export function ModelSettingsSection({
   const saveInFlightRef = useRef(false);
   const saveQueuedRef = useRef(false);
   const suppressNextSaveSuccessToastRef = useRef(false);
+  const suppressSuccessToastForDraftRef =
+    useRef<ModelSettingsSectionDraft | null>(null);
   const lastSyncedDraftRef = useRef<ModelSettingsSectionDraft | null>(null);
   const draftStateRef = useRef<ModelSettingsSectionDraft>({
     models: [],
     enabledModelIds: [],
     roles: createEmptyTaskModelRoleDrafts(),
+    codingModelRoutingRules: [],
   });
   const [models, setModels] = useState<EditableTaskModel[]>([]);
   const [enabledModelIds, setEnabledModelIds] = useState<string[]>([]);
   const [roleDrafts, setRoleDrafts] = useState<TaskModelRoleDrafts>(
     createEmptyTaskModelRoleDrafts,
   );
+  const [codingModelRoutingRules, setCodingModelRoutingRules] =
+    useState<CodingModelRoutingRulesDraft>([]);
   const [newModelId, setNewModelId] = useState('');
   const [newModelProvider, setNewModelProvider] =
     useState<SetupModelProviderId>('openrouter');
@@ -900,8 +903,9 @@ export function ModelSettingsSection({
       models,
       enabledModelIds,
       roles: roleDrafts,
+      codingModelRoutingRules,
     };
-  }, [enabledModelIds, models, roleDrafts]);
+  }, [codingModelRoutingRules, enabledModelIds, models, roleDrafts]);
 
   useEffect(() => {
     return () => {
@@ -966,6 +970,7 @@ export function ModelSettingsSection({
             settingsData.runtimeModels.planningModel.reasoningEffort,
         },
       },
+      codingModelRoutingRules: settingsData.codingModelRoutingRules ?? [],
     } satisfies ModelSettingsSectionDraft;
 
     const isLocallyClean = draftsEqual(
@@ -982,6 +987,7 @@ export function ModelSettingsSection({
     setModels(nextDraft.models);
     setEnabledModelIds(nextDraft.enabledModelIds);
     setRoleDrafts(nextDraft.roles);
+    setCodingModelRoutingRules(nextDraft.codingModelRoutingRules);
   }, [settingsData]);
 
   const enabledModelSet = useMemo(
@@ -1264,6 +1270,7 @@ export function ModelSettingsSection({
     setModels(clonedDraft.models);
     setEnabledModelIds(clonedDraft.enabledModelIds);
     setRoleDrafts(clonedDraft.roles);
+    setCodingModelRoutingRules(clonedDraft.codingModelRoutingRules);
   };
 
   const applyDraftUpdates = (
@@ -1274,6 +1281,8 @@ export function ModelSettingsSection({
       models: updates.models ?? models,
       enabledModelIds: updates.enabledModelIds ?? enabledModelIds,
       roles: updates.roles ?? roleDrafts,
+      codingModelRoutingRules:
+        updates.codingModelRoutingRules ?? codingModelRoutingRules,
     });
     scheduleSave(delayMs);
   };
@@ -1317,6 +1326,27 @@ export function ModelSettingsSection({
     );
   };
 
+  const handleCodingModelRoutingRulesChange = ({
+    rules,
+    saveDelayMs,
+    suppressSuccessToast,
+  }: CodingModelRoutingRulesChange) => {
+    if (saveDelayMs === null) {
+      applyDraftLocally({
+        ...draftStateRef.current,
+        codingModelRoutingRules: rules,
+      });
+    } else {
+      applyDraftUpdates({ codingModelRoutingRules: rules }, saveDelayMs);
+    }
+
+    if (suppressSuccessToast) {
+      suppressSuccessToastForDraftRef.current = cloneDraft(
+        draftStateRef.current,
+      );
+    }
+  };
+
   const commitDraft = async () => {
     if (saveInFlightRef.current) {
       saveQueuedRef.current = true;
@@ -1324,8 +1354,12 @@ export function ModelSettingsSection({
     }
 
     const draft = cloneDraft(draftStateRef.current);
-    const suppressSuccessToast = suppressNextSaveSuccessToastRef.current;
+    const suppressSuccessToast =
+      suppressNextSaveSuccessToastRef.current ||
+      (suppressSuccessToastForDraftRef.current !== null &&
+        draftsEqual(draft, suppressSuccessToastForDraftRef.current));
     suppressNextSaveSuccessToastRef.current = false;
+    suppressSuccessToastForDraftRef.current = null;
 
     if (draftsEqual(draft, lastSyncedDraftRef.current)) {
       return;
@@ -1359,6 +1393,9 @@ export function ModelSettingsSection({
         codeReviewModelReasoningEffort: draft.roles.codeReview.reasoningEffort,
         exploreModelReasoningEffort: draft.roles.explore.reasoningEffort,
         planningModelReasoningEffort: draft.roles.planning.reasoningEffort,
+        codingModelRoutingRules: prepareCodingModelRoutingRulesForSave(
+          draft.codingModelRoutingRules,
+        ),
       });
 
       if (!result.success) {
@@ -1378,6 +1415,7 @@ export function ModelSettingsSection({
             result.fieldErrors.codeReviewModelId ??
             result.fieldErrors.exploreModelId ??
             result.fieldErrors.planningModelId ??
+            result.fieldErrors.codingModelRoutingRules ??
             'Failed to update model settings.',
         );
         return;
@@ -1477,6 +1515,10 @@ export function ModelSettingsSection({
           modelId,
           nextEnabledModelIds[0] ?? '',
         ),
+        codingModelRoutingRules: removeModelFromCodingModelRoutingRules(
+          codingModelRoutingRules,
+          modelId,
+        ),
       },
       400,
     );
@@ -1543,6 +1585,10 @@ export function ModelSettingsSection({
           roleDrafts,
           deleteConfirmModelId,
           nextEnabledModelIds[0] ?? nextModels[0]?.id ?? '',
+        ),
+        codingModelRoutingRules: removeModelFromCodingModelRoutingRules(
+          codingModelRoutingRules,
+          deleteConfirmModelId,
         ),
       },
       0,
@@ -1751,7 +1797,20 @@ export function ModelSettingsSection({
                 onReasoningChange={(value) =>
                   updateRoleReasoningEffort(config.role, value)
                 }
-              />
+              >
+                {config.role === 'coding' ? (
+                  <CodingModelRoutingRulesEditor
+                    rules={codingModelRoutingRules}
+                    optionGroups={codingModelGroups}
+                    models={models}
+                    defaultModelId={
+                      roleDrafts.coding.modelId ?? enabledModelIds[0] ?? null
+                    }
+                    defaultReasoningEffort={roleDrafts.coding.reasoningEffort}
+                    onChange={handleCodingModelRoutingRulesChange}
+                  />
+                ) : null}
+              </TaskModelRoleEditor>
             );
           })}
           <JudgmentModelRow />

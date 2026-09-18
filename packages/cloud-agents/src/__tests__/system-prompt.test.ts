@@ -1,4 +1,7 @@
-import { ROOMOTE_SYSTEM_PROMPT } from '../system-prompt';
+import {
+  buildRoomoteSystemPrompt,
+  ROOMOTE_SYSTEM_PROMPT,
+} from '../system-prompt';
 
 describe('ROOMOTE_SYSTEM_PROMPT', () => {
   it('keeps Roomote identity without generic coding-agent policy', () => {
@@ -22,5 +25,36 @@ describe('ROOMOTE_SYSTEM_PROMPT', () => {
     expect(ROOMOTE_SYSTEM_PROMPT).not.toContain(
       'follow the shared workspace guidance for the prepared repositories',
     );
+    expect(ROOMOTE_SYSTEM_PROMPT).toContain(
+      'treat session, task, home, integration, automation, memory, skill, and similar product feature nouns as lowercase common nouns',
+    );
+    expect(ROOMOTE_SYSTEM_PROMPT).toContain(
+      'Preserve official names and capitalization for external or provider features, including ChatGPT Fast mode',
+    );
+    expect(ROOMOTE_SYSTEM_PROMPT).toContain(
+      'Never expose Roomote-internal Fast terminology such as "Fast session" or "Roomote Fast mode"',
+    );
+  });
+
+  it('keeps nomenclature guidance in orchestrator-owned coding tasks', () => {
+    const prompt = buildRoomoteSystemPrompt(undefined, {
+      reportConsumer: 'orchestrator',
+    });
+
+    expect(prompt).toContain(
+      'treat session, task, home, integration, automation, memory, skill, and similar product feature nouns as lowercase common nouns',
+    );
+    expect(prompt).toContain(
+      'Preserve official names and capitalization for external or provider features, including ChatGPT Fast mode',
+    );
+  });
+
+  it('tells private tasks to get owner approval before external actions', () => {
+    const prompt = buildRoomoteSystemPrompt(undefined, { privacy: 'private' });
+
+    expect(prompt).toContain('# Private Session');
+    expect(prompt).toContain('You keep your full tools and permissions.');
+    expect(prompt).toContain("get the owner's explicit approval");
+    expect(ROOMOTE_SYSTEM_PROMPT).not.toContain('Private Session');
   });
 });

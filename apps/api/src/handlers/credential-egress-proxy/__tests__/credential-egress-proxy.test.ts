@@ -22,7 +22,6 @@ import {
   sessionFactory,
   taskFactory,
   runFactory,
-  setDeploymentExperimentEnabled,
   registerCredentialEgressWorkload,
   terminateCredentialEgressWorkload,
   type ServiceCredentialContext,
@@ -60,7 +59,7 @@ vi.mock('undici', () => ({
 }));
 
 const secret = 'Real-Upstream-Key/A+b=<"&>123';
-const origin = 'https://api.example.com';
+const origin = 'https://1.1.1.1';
 const base = CREDENTIAL_EGRESS_PROXY_PATH;
 
 let app: Hono<{ Variables: Variables }>;
@@ -214,7 +213,6 @@ beforeEach(async () => {
   minted.length = 0;
   ownerId = (await userFactory.create()).id;
   userIds.push(ownerId);
-  await setDeploymentExperimentEnabled('serviceCredentialTools', true);
   const row = await session(ownerId);
   sessionId = row.id;
   context = { userId: ownerId, sessionId };
@@ -307,7 +305,7 @@ it('serves the same route at the root of a dedicated hostname through the full m
   );
   expect(aliased.status).toBe(200);
   expect(String(vi.mocked(fetch).mock.calls[0]![0])).toBe(
-    'https://api.example.com/v1/items?x=1',
+    'https://1.1.1.1/v1/items?x=1',
   );
   // The aliased request reached the policy gate exactly once, on the
   // re-rooted path, so rate limits and policy apply as on the path form.
@@ -366,7 +364,7 @@ it('forwards an allowed request with the real credential and relays a scrubbed r
   expect(fetch).toHaveBeenCalledOnce();
   const [url, init] = vi.mocked(fetch).mock.calls[0]!;
   expect(String(url)).toBe(
-    'https://api.example.com/v1/items?limit=3&q=private-query-marker',
+    'https://1.1.1.1/v1/items?limit=3&q=private-query-marker',
   );
   const sent = sentHeaders();
   expect(sent.authorization).toBe(`Bearer ${secret}`);
@@ -386,7 +384,7 @@ it('forwards an allowed request with the real credential and relays a scrubbed r
   ]);
   for (const row of rows)
     expect(row).toMatchObject({
-      destination: 'api.example.com:443',
+      destination: '1.1.1.1:443',
       workload_id: workloadId,
     });
 });
@@ -443,7 +441,7 @@ it('serves grants on service-specific headers and strips whichever header carrie
 it('routes each substitute to its own approved origin from one base URL', async () => {
   const { secretRef: otherRef } = await grant({
     label: 'Other API',
-    origin: 'https://api.other.example',
+    origin: 'https://1.0.0.1',
     headerPrefix: 'Token ',
   });
   // Registering again rotates the workload generation, so both tokens must
@@ -455,8 +453,8 @@ it('routes each substitute to its own approved origin from one base URL', async 
   await request('/v1/items', { token: tokenFor(secretRef) });
   await request('/v2/things', { token: tokenFor(otherRef) });
   expect(vi.mocked(fetch).mock.calls.map(([url]) => String(url))).toEqual([
-    'https://api.example.com/v1/items',
-    'https://api.other.example/v2/things',
+    'https://1.1.1.1/v1/items',
+    'https://1.0.0.1/v2/things',
   ]);
   expect(sentHeaders(1).authorization).toBe(`Token ${secret}`);
 });
@@ -543,7 +541,7 @@ it('enforces the grant method policy and forwards approved writes with their bod
 it('re-roots paths on the approved origin and refuses escapes', async () => {
   await request('/v1/./things/../items?x=1');
   expect(String(vi.mocked(fetch).mock.calls[0]![0])).toBe(
-    'https://api.example.com/v1/items?x=1',
+    'https://1.1.1.1/v1/items?x=1',
   );
   vi.mocked(fetch).mockClear();
   // Dot segments that climb above the mount are resolved by the URL layer
@@ -581,11 +579,6 @@ it.each([
     'detached run',
     'session_unavailable',
     () => db.delete(sessionTasks).where(eq(sessionTasks.sessionId, sessionId)),
-  ],
-  [
-    'run whose deployment turned integration keys off',
-    'session_unavailable',
-    () => setDeploymentExperimentEnabled('serviceCredentialTools', false),
   ],
 ])('denies a %s', async (_name, reason, mutate) => {
   await mutate();

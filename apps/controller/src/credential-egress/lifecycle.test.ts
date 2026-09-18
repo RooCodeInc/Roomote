@@ -43,7 +43,6 @@ function dependencies(): CredentialEgressLifecycleDependencies {
     findCandidate: vi.fn().mockResolvedValue({
       sessionId,
       grantCount: 1,
-      experimentEnabled: true,
     }),
     recordEvent: vi.fn(),
     logger: { log: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -170,32 +169,6 @@ describe('controller-owned Credential egress lifecycle', () => {
     }
   });
 
-  it.each(['modal', 'docker'] as const)(
-    'skips %s runs whose Session owner has not enabled integration keys',
-    async (provider) => {
-      const deps = dependencies();
-      vi.mocked(deps.findCandidate).mockResolvedValue({
-        sessionId,
-        grantCount: 2,
-        experimentEnabled: false,
-      });
-      const lifecycle = new CredentialEgressLifecycle(deps);
-      expect(await lifecycle.needsBootstrapAdmission(1, provider)).toBe(false);
-      await expect(
-        lifecycle.register({
-          taskRun: { id: 1, taskId: 'task1' },
-          provider,
-          resume: false,
-        }),
-      ).resolves.toEqual({ status: 'skipped', reason: 'disabled' });
-      expect(deps.client!.register).not.toHaveBeenCalled();
-      const events = vi.mocked(deps.recordEvent).mock.calls;
-      expect(events.at(-1)![0].message).toContain(
-        'has not enabled integration keys',
-      );
-    },
-  );
-
   it.each([
     'modal',
     'roomote',
@@ -295,7 +268,6 @@ describe('controller-owned Credential egress lifecycle', () => {
     vi.mocked(deps.findCandidate).mockResolvedValue({
       sessionId,
       grantCount: 0,
-      experimentEnabled: true,
     });
     const idle = await lifecycle.planApiProxy({ taskRun, provider: 'daytona' });
     expect(idle.required).toBe(false);

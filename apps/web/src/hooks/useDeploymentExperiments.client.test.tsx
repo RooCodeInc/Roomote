@@ -94,12 +94,15 @@ describe('useDeploymentExperiments', () => {
     mocks.getQueryData.mockReturnValue(previous);
     renderHook(() => useDeploymentExperiments('Save failed'));
 
-    const variables = { id: 'serviceCredentialTools', enabled: true } as const;
+    const variables = {
+      id: 'slackPeerConversations',
+      enabled: true,
+    } as const;
     const context = await mutationOptions.onMutate!(variables as never);
 
     expect(mocks.setQueryData).toHaveBeenCalledWith(
       ['deployment-experiments'],
-      { ...previous, serviceCredentialTools: true },
+      { ...previous, slackPeerConversations: true },
     );
 
     const updater = vi.fn((current) => current);

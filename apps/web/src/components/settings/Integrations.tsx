@@ -117,7 +117,7 @@ const DEEP_LINK_ENABLE_DESCRIPTIONS: Record<string, string> = {
   elevenlabs:
     'Roomote will use one deployment-wide ElevenLabs connection to narrate feature-demo videos. The key stays on the control plane; agents get no ElevenLabs tools.',
   voice:
-    'Roomote will use one deployment-wide OpenAI key with GPT-Live access to hold voice calls on Sessions. The key stays on the control plane; agents get no tools from it.',
+    'Roomote will use one deployment-wide OpenAI key with GPT-Live access to hold voice calls in sessions. The key stays on the control plane; agents get no tools from it.',
   github:
     'Roomote will be able to inspect PRs, issues, and repository context.',
   jira: 'Roomote will be able to inspect Jira issues, workflows, and JQL search results.',
@@ -129,7 +129,7 @@ const DEEP_LINK_ENABLE_DESCRIPTIONS: Record<string, string> = {
   notion:
     'Roomote will use one deployment-wide Notion internal integration. Notion controls its capabilities and which pages and data sources it can access.',
   rippling:
-    "Roomote will keep Memory's employee directory and reporting structure current from one deployment-wide Rippling connection.",
+    "Roomote will keep memory's employee directory and reporting structure current from one deployment-wide Rippling connection.",
   pylon:
     'Roomote will be able to inspect customer issues, message history, and account context.',
   posthog:
@@ -3126,7 +3126,11 @@ export function Integrations({
                     </div>
                   ) : null}
                   {displayedActiveItems.map((item) => (
-                    <IntegrationListRow key={item.id} item={item} />
+                    <IntegrationListRow
+                      key={item.id}
+                      item={item}
+                      showStatusInDescription
+                    />
                   ))}
                   {!apiKeyItemsLoading && displayedActiveItems.length === 0 ? (
                     <div className="flex min-h-64 flex-1 flex-col items-center justify-center gap-3 px-4 py-6">

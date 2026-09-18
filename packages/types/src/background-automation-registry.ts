@@ -33,6 +33,7 @@ export const CODE_QUALITY_AUDITOR_SETTINGS_HASH = 'code-quality-auditor';
 export const CI_FAILURE_TRIAGE_SETTINGS_HASH = 'ci-failure-triage';
 export const SUMMARIZE_MERGED_PRS_SETTINGS_HASH = 'summarize-merged-prs';
 export const PLATFORM_ISSUE_ALERTS_SETTINGS_HASH = 'platform-issue-alerts';
+export const RELEASE_ANNOUNCEMENTS_SETTINGS_HASH = 'release-announcements';
 export const PROVIDER_USAGE_LIMIT_SETTINGS_HASH = 'provider-usage-limit';
 export const MERGE_ANNOUNCER_SETTINGS_HASH = 'merge-announcer';
 
@@ -50,6 +51,7 @@ export type BackgroundAutomationSettingsHash =
   | typeof CI_FAILURE_TRIAGE_SETTINGS_HASH
   | typeof SUMMARIZE_MERGED_PRS_SETTINGS_HASH
   | typeof PLATFORM_ISSUE_ALERTS_SETTINGS_HASH
+  | typeof RELEASE_ANNOUNCEMENTS_SETTINGS_HASH
   | typeof PROVIDER_USAGE_LIMIT_SETTINGS_HASH
   | typeof MERGE_ANNOUNCER_SETTINGS_HASH;
 
@@ -236,6 +238,16 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     resultPriority: 'critical',
     slackIcon: 'battery-warning',
     scheduleModes: PROVIDER_USAGE_LIMIT_SCHEDULE_MODES,
+    manualTriggerRequirements: [],
+    usesManagerChannel: true,
+    supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
+    supportedSourceControlProviders: [],
+  },
+  {
+    automationKey: 'release_announcements',
+    label: 'Announce Roomote Updates',
+    slackIcon: 'megaphone',
+    scheduleModes: [],
     manualTriggerRequirements: [],
     usesManagerChannel: true,
     supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
@@ -429,6 +441,10 @@ const BACKGROUND_AUTOMATION_SETTINGS_CATALOG = [
   {
     hash: PLATFORM_ISSUE_ALERTS_SETTINGS_HASH,
     label: 'Alert on Config Errors',
+  },
+  {
+    hash: RELEASE_ANNOUNCEMENTS_SETTINGS_HASH,
+    automationKey: 'release_announcements',
   },
   {
     hash: MANAGER_STATS_SETTINGS_HASH,

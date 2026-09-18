@@ -1,5 +1,6 @@
 import {
   USER_FACING_AUTOMATION_KEYS,
+  isBackgroundAutomationUserTargetKind,
   type BackgroundAutomationKey,
   type PrReviewSettings,
   type TaskTrigger,
@@ -16,12 +17,15 @@ import {
   inArray,
   resolveTelegramRuntimeCredentials,
   tasks,
+  users,
   type Automation,
 } from '@roomote/db/server';
 import {
   findDiscordDestinationByChannelId,
   findTeamsConversationDisplayName,
   findTeamsPrimaryConversation,
+  getAutomationDestinationCommunicationProvider,
+  listAvailableAgentMailOutboundIdentities,
   resolveAutomationRuntimeDestination,
   type ResolvedAutomationDestination,
 } from '@roomote/sdk/server';
@@ -173,6 +177,7 @@ async function resolveDestinationDisplayName(
   destination: ResolvedAutomationDestination,
   notifier: SlackNotifier | null,
 ): Promise<string | null> {
+  if (destination.provider === 'email') return 'Email';
   if (destination.provider === 'slack') {
     const channelName = notifier
       ? await notifier.getChannelName(destination.channelId)
@@ -222,8 +227,8 @@ async function resolveAutomationDestinations(params: {
   const entries = await Promise.all(
     MANAGER_REPORTING_AUTOMATION_KEYS.map(async (key) => {
       const runtime = runtimes[key];
-      // Platform issue alerts use deployment-admin DMs as their final tail;
-      // unlike scheduled automations, they never post to a primary channel.
+      // These event-driven notifications stop at their explicit or shared
+      // manager channel instead of falling through to a primary conversation.
       const destination =
         key === 'platform_issue_alerts'
           ? runtime.destination
@@ -239,7 +244,7 @@ async function resolveAutomationDestinations(params: {
       return [
         key,
         {
-          provider: destination.provider,
+          provider: getAutomationDestinationCommunicationProvider(destination),
           channelId: destination.channelId,
           source: destination.source,
           displayName: await resolveDestinationDisplayName(
@@ -279,12 +284,14 @@ export async function getBackgroundAgentSettingsCommand(
     discordConnected: boolean;
     telegramConnected: boolean;
     teamsConnected: boolean;
+    emailConnected: boolean;
     sentryConnected: boolean;
     missingScopes: readonly string[];
     requiredScopes: string[];
     requiresSlackReconnect: boolean;
     slackWorkspaceDomain: string | null;
   };
+  emailIdentities: Array<{ id: string; emailAddress: string }>;
   slackChannelAccessWarnings: {
     channelAutoStartSlackChannels: string[];
     managerStatsSlackChannel: string | null;
@@ -307,6 +314,15 @@ export async function getBackgroundAgentSettingsCommand(
   automationStatus: Partial<
     Record<BackgroundAutomationKey, AutomationStatusSummary>
   >;
+  /**
+   * Recipient of a DM or Email default destination. Those targets are bound
+   * to the admin who saved them, who is not necessarily the viewer.
+   */
+  defaultDestinationOwner: {
+    userId: string;
+    name: string | null;
+    isViewer: boolean;
+  } | null;
 }> {
   assertAdmin(auth);
 
@@ -317,6 +333,7 @@ export async function getBackgroundAgentSettingsCommand(
     telegramCredentials,
     teamsPrimaryConversation,
     sentryConnected,
+    emailIdentities,
     recentRuns,
   ] = await Promise.all([
     getBackgroundAgentSettingsWithAutomationsForDeployment(),
@@ -328,9 +345,31 @@ export async function getBackgroundAgentSettingsCommand(
     resolveTelegramRuntimeCredentials(),
     findTeamsPrimaryConversation(),
     hasActiveSentryIntegration(),
+    listAvailableAgentMailOutboundIdentities(auth.userId),
     listRecentAutomationTasks(),
   ]);
   const status = buildAutomationStatus(automationRows);
+  const defaultDestinationOwnerId =
+    settings.defaultAutomationTarget &&
+    isBackgroundAutomationUserTargetKind(
+      settings.defaultAutomationTarget.targetKind,
+    )
+      ? settings.defaultAutomationTarget.externalRef
+      : null;
+  const defaultDestinationOwnerRow =
+    defaultDestinationOwnerId && defaultDestinationOwnerId !== auth.userId
+      ? await db.query.users.findFirst({
+          columns: { name: true },
+          where: eq(users.id, defaultDestinationOwnerId),
+        })
+      : null;
+  const defaultDestinationOwner = defaultDestinationOwnerId
+    ? {
+        userId: defaultDestinationOwnerId,
+        name: defaultDestinationOwnerRow?.name ?? null,
+        isViewer: defaultDestinationOwnerId === auth.userId,
+      }
+    : null;
   const visibleSettings = maskSlackChannelAutoStartSettings(auth, settings);
 
   const botScopes = extractSlackBotScopes(slackInstallation?.scopes).map(
@@ -430,6 +469,7 @@ export async function getBackgroundAgentSettingsCommand(
       discordConnected: Boolean(discordInstallation),
       telegramConnected: Boolean(telegramCredentials.botToken),
       teamsConnected: Boolean(teamsPrimaryConversation),
+      emailConnected: emailIdentities.length > 0,
       sentryConnected,
       missingScopes,
       requiredScopes: [...REQUIRED_BACKGROUND_AGENT_SCOPES],
@@ -438,10 +478,12 @@ export async function getBackgroundAgentSettingsCommand(
         ? slackInstallation.teamDomain
         : null,
     },
+    emailIdentities,
     slackChannelAccessWarnings,
     slackChannelDisplayNames,
     resolvedDestinations,
     recentRuns,
     automationStatus: status,
+    defaultDestinationOwner,
   };
 }

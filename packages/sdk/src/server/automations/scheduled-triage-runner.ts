@@ -11,7 +11,9 @@ import { TaskPayloadKind, type SuggestedTasksTask } from '@roomote/types';
 
 import {
   buildDestinationTaskPayloadFields,
+  hasAutomationEmailTarget,
   listConnectedCommunicationProviders,
+  prepareAutomationReportDestination,
   resolveAutomationRuntimeDestination,
   type ResolvedAutomationDestination,
 } from './destination';
@@ -65,9 +67,12 @@ type ScheduledTriageAutomationConfig = {
   }) => Promise<TriageScanBuild>;
 };
 
-async function findEligibleDeploymentContexts(): Promise<
-  TriageDeploymentContext[]
-> {
+async function findEligibleDeploymentContexts(
+  runtime: Pick<AutomationRuntime, 'targets'>,
+): Promise<TriageDeploymentContext[]> {
+  if (hasAutomationEmailTarget(runtime)) {
+    return [{ slackBotToken: null, slackTeamId: null }];
+  }
   const rows = await db
     .select({
       botAccessToken: slackInstallations.botAccessToken,
@@ -106,7 +111,8 @@ export function createScheduledTriageJob(
 
     const now = new Date();
     const result = emptyJobResult();
-    const eligibleDeployments = await findEligibleDeploymentContexts();
+    const runtime = await getAutomationRuntime(config.automationKey);
+    const eligibleDeployments = await findEligibleDeploymentContexts(runtime);
 
     if (eligibleDeployments.length === 0) {
       result.skippedReason = 'No connected communication provider.';
@@ -117,7 +123,6 @@ export function createScheduledTriageJob(
 
     for (const deployment of eligibleDeployments) {
       try {
-        const runtime = await getAutomationRuntime(config.automationKey);
         const frequency = runtime.enabled ? runtime.scheduleMode : 'off';
 
         if (!frequency || frequency === 'off') {
@@ -151,7 +156,7 @@ export function createScheduledTriageJob(
           continue;
         }
 
-        const channelId = destination.channelId;
+        let reportDestination = destination;
         const timezone = (await resolveDeploymentTimeZone()).timeZone;
 
         if (
@@ -170,10 +175,19 @@ export function createScheduledTriageJob(
           continue;
         }
 
+        reportDestination =
+          destination.provider === 'email'
+            ? await prepareAutomationReportDestination(destination, {
+                subject: `Roomote ${config.automationKey.replaceAll('_', ' ')} report - ${now.toISOString().slice(0, 10)}`,
+                conversationKey: `builtin-automation:${config.automationKey}:${now.toISOString()}`,
+              })
+            : destination;
+        const channelId = reportDestination.channelId;
+
         const scanTask = await config.buildScanTask({
           deployment,
           channelId,
-          destination,
+          destination: reportDestination,
           runtime,
           manualTrigger: opts.manualTrigger === true,
         });
@@ -208,7 +222,7 @@ export function createScheduledTriageJob(
               type: TaskPayloadKind.Scan,
               payload: {
                 ...payload,
-                ...buildDestinationTaskPayloadFields(destination),
+                ...buildDestinationTaskPayloadFields(reportDestination),
               },
             },
             initiator: { kind: 'automation', key: config.automationKey },
@@ -216,7 +230,7 @@ export function createScheduledTriageJob(
             surface: 'system',
             trigger: opts.manualTrigger ? 'manual' : 'schedule',
             visibility: 'hidden',
-            ...(destination.provider === 'slack'
+            ...(reportDestination.provider === 'slack'
               ? { channels: { slackChannelId: channelId } }
               : {}),
           });

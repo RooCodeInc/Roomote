@@ -80,7 +80,7 @@ These connections use metered API billing or a provider-managed gateway:
 | [OpenRouter](/providers/inference/openrouter) | OpenRouter API key | OpenRouter balance and key limit |
 | [Requesty](/providers/inference/requesty) | Requesty API key | Requesty organization |
 | [Together AI](/providers/inference/together-ai) | Together AI API key | Together AI account |
-| [TypeSafe](/providers/inference/typesafe) | TypeSafe API key, used only for the [judgment model](#judgment-model) | TypeSafe account |
+| <IntegrationName href="/providers/inference/typesafe" icon="typesafe" name="TypeSafe" /> | TypeSafe API key, used only for the [judgment model](#judgment-model) | TypeSafe account |
 | <IntegrationName href="/providers/inference/vercel-ai-gateway" icon="vercel" name="Vercel AI Gateway" /> | AI Gateway API key | Vercel team |
 | [xAI](/providers/inference/xai) | xAI API key | xAI API team |
 | [Z.AI](/providers/inference/zai) | Regional Z.AI platform key | Z.AI or BigModel API balance |
@@ -137,7 +137,7 @@ its slug from the add-model field.
 **GPT-6 Astra** is also recommended through [Vercel AI Gateway](/providers/inference/vercel-ai-gateway),
 [GitHub Copilot](/providers/inference/github-copilot), and
 [OpenCode Zen](/providers/inference/opencode). Connect the provider, enable Astra
-in **Available Models**, and assign it to a role or select it for a Session or
+in **Available Models**, and assign it to a role or select it for a session or
 task. Adding these routes does not change existing model defaults; access still
 depends on the connected provider account or plan.
 
@@ -266,7 +266,7 @@ where you want more speed, quality, or cost control.
 | Role                 | What it is for                                                                           | Optimize for                                                                              |
 | -------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
 | Default coding model | Normal Roomote tasks: code changes, debugging, tests, repo investigation, and follow-ups | Strong tool use, coding quality, long-context reliability, and good instruction following |
-| Orchestration model  | Fast answers and coordination of delegated task launches                                 | Low latency, conversational quality, and reliable tool routing                             |
+| Orchestration model  | Session answers and coordination of delegated task launches                              | Low latency, conversational quality, and reliable tool routing                             |
 | Helper model         | Lightweight routing, titles, summaries, and quick internal decisions                     | Low latency, low cost, and enough accuracy for short judgments                            |
 | Vision model         | Visual inspection, screenshots, UI review, and image-heavy work                          | Image understanding, layout reasoning, and concise visual feedback                        |
 | Code review model    | Initial PR or MR review tasks and review-sync work                                       | Careful reasoning, bug finding, security awareness, and willingness to cite evidence      |
@@ -278,23 +278,44 @@ You do not need a separate model for every role. Set a specialized role to
 strong default model, then split out a faster orchestration or helper model, or
 a stronger review model, after they can see real usage.
 
+### Coding model routing rules
+
+Admins can add natural-language routing rules below **Coding model** in
+**Settings > Models**. Each rule chooses an enabled coding model, an optional
+reasoning level, and a condition such as `Complex migrations and architecture
+work` or `Small documentation fixes where speed matters`.
+
+When a new session delegates coding work, Roomote evaluates every saved
+rule independently of its list position. It applies only the single strongest
+clear match. An explicit model or reasoning choice in the request takes
+precedence; weak, ambiguous, failed, or unmatched decisions keep the deployment
+defaults. Rules that point to a model that is no longer enabled are ignored.
+
+Model routing is separate from [environment routing](/environments/definition#natural-language-routing-rules):
+one chooses the model and reasoning level, while the other chooses the workspace
+that contains the relevant repositories and services. To verify a rule, start a
+new session with a request that clearly matches its condition and check the
+model shown on the delegated task.
+
 ### Judgment model
 
 The judgment model is optional. Many routing and triage steps are bounded
 decisions rather than text: whether a channel message should start work, which
 skill or tool fits a request, or whether a thread reply is meant for Roomote.
 A judgment model answers these as typed questions with probabilities in one
-fast call. Roomote currently supports TypeSafe's Jev, through either route:
+fast call. Roomote currently supports TypeSafe's Jev through these routes:
 
 | Judgment model | Requires |
 | --- | --- |
 | **Jev via TypeSafe** | a [TypeSafe](/providers/inference/typesafe) API key |
+| **Jev via OpenRouter** | an [OpenRouter](/providers/inference/openrouter) API key |
 | **Jev via Vercel AI Gateway** | a [Vercel AI Gateway](/providers/inference/vercel-ai-gateway) key |
 
 Choose it under **Judgment model** in **Settings > Models**, or set
-`R_JUDGMENT_MODEL` to `typesafe`, `vercel`, or `off`. A TypeSafe key alone
-turns on **Jev via TypeSafe**. Vercel AI Gateway is used only when you select
-it, because many deployments already have that key for task inference.
+`R_JUDGMENT_MODEL` to `typesafe`, `openrouter`, `vercel`, or `off`. A TypeSafe
+key alone turns on **Jev via TypeSafe**. OpenRouter and Vercel AI Gateway are
+used only when you select them, because many deployments already have those
+keys for task inference.
 
 When a judgment model is on, Roomote asks it first for:
 
@@ -305,11 +326,11 @@ When a judgment model is on, Roomote asks it first for:
 - whether an unmentioned reply in a Slack, Discord, or Teams thread is meant
   for Roomote after someone else spoke; it routes the reply only when
   confident, and otherwise Roomote still needs a mention
-- the environment that best fits the first request in a new Fast Session, as
-  an advisory hint the Session still verifies
+- the environment that best fits the first request in a new session, as
+  an advisory hint the session still verifies
 - a one-line hint naming a clearly relevant [skill](/skills), including skills
   beyond the prompt's skill list
-- ranking integration tools when a Fast `find_integration_tools` keyword search
+- ranking integration tools when a session `find_integration_tools` keyword search
   matches nothing or more than the result limit
 - ordering [Memory](/memory) search results, moving confidently relevant
   passages up and confidently irrelevant ones down without removing any
@@ -365,49 +386,49 @@ You can also just ask the agent — for example "switch to Fable 5 with max
 reasoning for the rest of this task". The agent applies the same change
 through its task-management tool, subject to the same allowed-models list.
 
-Viewing a custom automation's Session does not grant control over its task
+Viewing a custom automation's session does not grant control over its task
 model. Only the automation's creator or a deployment administrator can change
 model selection for those tasks.
 
-Conversational Sessions expose the same model and reasoning choices in their
-composer. New Sessions show the deployment's orchestration model by default;
+Conversational sessions expose the same model and reasoning choices in their
+composer. New sessions show the deployment's orchestration model by default;
 direct environment and repository tasks show the coding model. Leaving the
-Session selection untouched keeps deployment-default behavior, while an
+session selection untouched keeps deployment-default behavior, while an
 explicit selection is saved before the next message can be sent, persists
-across page refreshes, and applies to later Fast turns without changing a turn
+across page refreshes, and applies to later session turns without changing a turn
 that is already running.
 
-## Fast delegation and consultation
+## Session delegation and consultation
 
-Fast mode sees the exact coding models enabled for delegated tasks. When it
+The session sees the exact coding models enabled for delegated tasks. When it
 launches repository work, it can choose one of those models for that task or
 omit the choice to use the deployment default. An unavailable model is rejected
-before launch, so Fast can correct the selection without consuming its launch
+before launch, so Roomote can correct the selection without consuming its launch
 attempt. The chosen model applies to the delegated task just as if it had been
 selected when starting a task from the web app.
 
-For a structured pull request review, Fast can likewise choose an enabled model
+For a structured pull request review, Roomote can likewise choose an enabled model
 and a supported reasoning effort for the review task. Ask for those choices when
 the review needs a particular balance of speed and depth; omitted choices use
 the deployment's code review defaults.
 
-A single Fast turn can launch multiple independent tasks, so one request can
+A single session turn can launch multiple independent tasks, so one request can
 delegate separate workstreams without waiting for each task to finish first.
-Fast still posts a kickoff for every task and keeps repeated identical launch
+Roomote still posts a kickoff for every task and keeps repeated identical launch
 requests from creating duplicate work.
 
-Fast can also consult the advisor and judge roles for focused planning or
+Roomote can also consult the advisor and judge roles for focused planning or
 completion checks without launching a workspace-backed task. These consultations
 can read deployment integrations and task status for context, but they cannot
 inspect a repository workspace, post to chat, or launch, message, or cancel
-tasks. Fast remains responsible for the user-facing answer and any execution it
+tasks. Roomote remains responsible for the user-facing answer and any execution it
 delegates.
 
 OpenCode allows two levels of subagents: the main agent can delegate to a
 subagent, which can make one further nested delegation or consultation. This
-does not permit unbounded recursion or expand a role's permissions. Fast
+does not permit unbounded recursion or expand a role's permissions. Roomote
 consultants still cannot inspect a repository workspace or control tasks;
-Fast owns any workspace-backed execution.
+Roomote owns any workspace-backed execution.
 
 ## Choosing models
 

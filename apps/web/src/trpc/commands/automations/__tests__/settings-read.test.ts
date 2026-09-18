@@ -180,6 +180,12 @@ describe('getBackgroundAgentSettingsCommand Slack fan-out', () => {
     expect(result.resolvedDestinations.manager_stats?.channelId).toBe(
       STATS_CHANNEL_ID,
     );
+    expect(result.settings.releaseAnnouncementsEnabled).toBe(true);
+    expect(result.resolvedDestinations.release_announcements).toMatchObject({
+      provider: 'slack',
+      channelId: MANAGER_CHANNEL_ID,
+      source: 'manager_channel',
+    });
     expect(result.settings.managerDiscordChannelId).toBe(
       MANAGER_DISCORD_CHANNEL_ID,
     );

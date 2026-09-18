@@ -210,6 +210,32 @@ export interface SandboxPrepareRepositoryResult {
   manifestPath: string;
 }
 
+export interface SandboxListRepositoriesInput {
+  query?: string;
+  offset?: number;
+  limit?: number;
+}
+
+export interface SandboxListedRepository {
+  fullName: string;
+  sourceControlProvider: string;
+  defaultBranch: string;
+  private: boolean;
+  description?: string;
+  checkedOut: boolean;
+  /** Present when `checkedOut` is true. */
+  path?: string;
+}
+
+export interface SandboxListRepositoriesResult {
+  success: true;
+  repositories: SandboxListedRepository[];
+  /** Authorized repositories matching the query, across every page. */
+  totalCount: number;
+  /** Present when more matches follow; pass it back as `offset`. */
+  nextOffset?: number;
+}
+
 export interface SandboxSubscriptionObserver<TData> {
   onStarted?: () => void;
   onData?: (data: TData) => void;
@@ -256,6 +282,10 @@ export interface SandboxServerRpcClient {
       SandboxHarnessLogResult
     >;
     getSetupStatus: SandboxQuery<undefined, SandboxSetupStatusResult>;
+    listRepositories: SandboxQuery<
+      SandboxListRepositoriesInput,
+      SandboxListRepositoriesResult
+    >;
     sendPrompt: SandboxMutation<SandboxSendPromptInput, SandboxSuccessResult>;
     steerTask: SandboxMutation<SandboxSteerTaskInput, SandboxSuccessResult>;
     steerQueuedMessage: SandboxMutation<

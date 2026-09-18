@@ -64,6 +64,7 @@ export function ArtifactsSidePanel({ session }: ArtifactsSidePanelProps) {
           artifact={selectedArtifact}
           isLoading={artifactsMode === 'detail' && isArtifactPending}
           taskId={session.taskId}
+          isActive={artifactsMode === 'detail'}
         />
       </div>
     </div>

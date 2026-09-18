@@ -1,17 +1,17 @@
 import { Env } from '@roomote/env';
-import {
-  and,
-  db,
-  eq,
-  customMcpServers,
-  isNull,
-  mcpConnections,
-} from '@roomote/db/server';
+import { and, db, eq, mcpConnections } from '@roomote/db/server';
 import { decrypt } from '@roomote/db/encryption';
-import { getValidAccessToken } from '@roomote/sdk/server';
-import { customMcpConnectionId } from '@roomote/types';
+import {
+  customMcpConnectionWhere,
+  findCustomMcpServerById,
+  getValidAccessToken,
+} from '@roomote/sdk/server';
 
-import { createMcpProxy, McpProxyError } from './proxy-utils';
+import {
+  createMcpProxy,
+  McpProxyError,
+  resolveActingUserId,
+} from './proxy-utils';
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -23,7 +23,7 @@ const UUID_PATTERN =
 const MAX_CUSTOM_MCP_REQUEST_BODY_BYTES = 1024 * 1024;
 
 /**
- * Proxy for deployment-scoped custom MCP servers at
+ * Proxy for custom MCP servers, deployment and personal, at
  * `/api/mcp/custom/:serverId`.
  *
  * The upstream URL and credentials resolve per request from the
@@ -32,8 +32,10 @@ const MAX_CUSTOM_MCP_REQUEST_BODY_BYTES = 1024 * 1024;
  * blocked unless allowed via R_CUSTOM_MCP_ALLOWED_PRIVATE_CIDRS, DNS answers
  * pinned, redirects refused) because the upstream is operator-controlled.
  *
- * Custom-server connections are deployment-scoped: credential selection does
- * not depend on the acting user, so no acting-user resolution happens here.
+ * A deployment server's credentials do not depend on the acting user. A
+ * personal server's do: only its owner may reach it, checked here on every
+ * request against the human the call is acting for, and anyone else gets the
+ * same 404 as a server that does not exist.
  */
 export function createCustomMcpProxy() {
   return createMcpProxy({
@@ -43,21 +45,23 @@ export function createCustomMcpProxy() {
       allowedPrivateCidrs: Env.R_CUSTOM_MCP_ALLOWED_PRIVATE_CIDRS,
     },
     maxRequestBodyBytes: MAX_CUSTOM_MCP_REQUEST_BODY_BYTES,
-    resolveCredentials: async (_auth, routeParams) => {
+    resolveCredentials: async (auth, routeParams) => {
       const serverId = routeParams['serverId'];
 
       if (!serverId || !UUID_PATTERN.test(serverId)) {
         throw new McpProxyError(404, 'Custom MCP server not found');
       }
 
-      const server = await db.query.customMcpServers.findFirst({
-        where: and(
-          eq(customMcpServers.id, serverId),
-          eq(customMcpServers.enabled, true),
-        ),
-      });
+      const server = await findCustomMcpServerById(serverId);
 
-      if (!server || !server.url || server.stdio) {
+      if (!server || !server.enabled || !server.url || server.isStdio) {
+        throw new McpProxyError(404, 'Custom MCP server not found');
+      }
+
+      if (
+        server.ownerUserId &&
+        (await resolveActingUserId(auth)) !== server.ownerUserId
+      ) {
         throw new McpProxyError(404, 'Custom MCP server not found');
       }
 
@@ -75,9 +79,8 @@ export function createCustomMcpProxy() {
       } else if (server.authType === 'oauth') {
         const connection = await db.query.mcpConnections.findFirst({
           where: and(
-            eq(mcpConnections.mcpId, customMcpConnectionId(server.id)),
+            customMcpConnectionWhere(server),
             eq(mcpConnections.enabled, true),
-            isNull(mcpConnections.userId),
           ),
           columns: { id: true },
         });
@@ -89,7 +92,9 @@ export function createCustomMcpProxy() {
         if (!accessToken) {
           throw new McpProxyError(
             401,
-            `Custom MCP server '${server.name}' needs to be reconnected by a deployment admin in Settings > Integrations`,
+            server.ownerUserId
+              ? `Custom MCP server '${server.name}' needs to be reconnected in Personal settings`
+              : `Custom MCP server '${server.name}' needs to be reconnected by a deployment admin in Settings > Integrations`,
           );
         }
 

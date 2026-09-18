@@ -9,6 +9,9 @@ const {
   mockFindTelegramPrimaryChatId,
   mockFindDiscordDefaultDestination,
   mockFindUserDirectMessageDestination,
+  mockCanStartAgentMailConversationWithUser,
+  mockPrepareAgentMailConversation,
+  mockAgentMailPostMessage,
 } = vi.hoisted(() => ({
   mockFindFirstSlackInstallation: vi.fn(),
   mockFindActiveSlackInstallationForChannel: vi.fn(),
@@ -20,6 +23,21 @@ const {
   mockFindTelegramPrimaryChatId: vi.fn(),
   mockFindDiscordDefaultDestination: vi.fn(),
   mockFindUserDirectMessageDestination: vi.fn(),
+  mockCanStartAgentMailConversationWithUser: vi.fn(),
+  mockPrepareAgentMailConversation: vi.fn(),
+  mockAgentMailPostMessage: vi.fn(),
+}));
+
+vi.mock('../../lib/agentmail/outbound', () => ({
+  canStartAgentMailConversationWithUser:
+    mockCanStartAgentMailConversationWithUser,
+  prepareAgentMailConversation: mockPrepareAgentMailConversation,
+}));
+
+vi.mock('../../lib/agentmail-communication', () => ({
+  createAgentMailCommunicationProviderFromRuntimeCredentials: vi.fn(
+    async () => ({ postMessage: mockAgentMailPostMessage }),
+  ),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -70,13 +88,70 @@ vi.mock('../../lib/user-direct-message', () => ({
 import {
   buildDestinationPromptContext,
   buildDestinationTaskPayloadFields,
+  hasAutomationEmailTarget,
   listConnectedCommunicationProviders,
   resolveAutomationRuntimeDestination,
+  prepareAutomationReportDestination,
+  sendAutomationEmailReport,
 } from '../destination';
 
 describe('listConnectedCommunicationProviders', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockCanStartAgentMailConversationWithUser.mockResolvedValue(true);
+  });
+
+  it('resolves the exact Email identity before chat fallbacks', async () => {
+    await expect(
+      resolveAutomationRuntimeDestination({
+        runtime: {
+          destination: {
+            provider: 'slack',
+            channelId: 'C_MANAGER',
+            source: 'manager_channel',
+          },
+          targets: [
+            {
+              provider: 'email',
+              targetKind: 'email_user',
+              externalRef: 'user-1',
+              metadata: { emailIdentityId: 'verified:user-1:opaque' },
+            },
+          ],
+        },
+        slackConnected: true,
+      }),
+    ).resolves.toEqual({
+      provider: 'email',
+      channelId: 'user-1',
+      userId: 'user-1',
+      identityId: 'verified:user-1:opaque',
+      source: 'automation_target',
+    });
+  });
+
+  it('does not substitute chat when an explicit Email identity is unavailable', async () => {
+    mockCanStartAgentMailConversationWithUser.mockResolvedValue(false);
+    await expect(
+      resolveAutomationRuntimeDestination({
+        runtime: {
+          destination: {
+            provider: 'slack',
+            channelId: 'C_MANAGER',
+            source: 'manager_channel',
+          },
+          targets: [
+            {
+              provider: 'email',
+              targetKind: 'email_user',
+              externalRef: 'user-1',
+              metadata: { emailIdentityId: 'verified:user-1:opaque' },
+            },
+          ],
+        },
+        slackConnected: true,
+      }),
+    ).resolves.toBeNull();
   });
 
   it('lists providers in waterfall order', async () => {
@@ -142,6 +217,55 @@ describe('resolveAutomationRuntimeDestination', () => {
       'discord',
       'user-1',
     );
+  });
+
+  it('resolves a deployment DM default when no explicit target exists', async () => {
+    mockFindUserDirectMessageDestination.mockResolvedValue({
+      channelId: 'discord-default-dm',
+    });
+
+    await expect(
+      resolveAutomationRuntimeDestination({
+        runtime: {
+          destination: null,
+          defaultAutomationTarget: {
+            provider: 'discord',
+            targetKind: 'discord_user',
+            externalRef: 'default-recipient',
+          },
+        },
+        slackConnected: false,
+      }),
+    ).resolves.toEqual({
+      provider: 'discord',
+      channelId: 'discord-default-dm',
+      source: 'manager_channel',
+    });
+  });
+
+  it('resolves a deployment email default when no explicit target exists', async () => {
+    mockCanStartAgentMailConversationWithUser.mockResolvedValue(true);
+
+    await expect(
+      resolveAutomationRuntimeDestination({
+        runtime: {
+          destination: null,
+          defaultAutomationTarget: {
+            provider: 'email',
+            targetKind: 'email_user',
+            externalRef: 'default-recipient',
+            metadata: { emailIdentityId: 'identity-1' },
+          },
+        },
+        slackConnected: false,
+      }),
+    ).resolves.toEqual({
+      provider: 'email',
+      channelId: 'default-recipient',
+      userId: 'default-recipient',
+      identityId: 'identity-1',
+      source: 'manager_channel',
+    });
   });
 
   beforeEach(() => {
@@ -374,6 +498,63 @@ describe('resolveAutomationRuntimeDestination', () => {
 });
 
 describe('payload fields and prompt context', () => {
+  it('prepares a durable Email conversation and stamps its internal thread', async () => {
+    mockPrepareAgentMailConversation.mockResolvedValue({
+      conversationId: 'conversation-1',
+      inboxId: 'roomote@example.test',
+      messageId: null,
+    });
+    const prepared = await prepareAutomationReportDestination(
+      {
+        provider: 'email',
+        channelId: 'user-1',
+        userId: 'user-1',
+        identityId: 'verified:user-1:opaque',
+        source: 'automation_target',
+      },
+      { subject: 'Report', conversationKey: 'builtin:test:1' },
+    );
+    expect(buildDestinationTaskPayloadFields(prepared)).toEqual({
+      communicationProvider: 'agentmail',
+      communicationChannelId: 'roomote@example.test',
+      communicationThreadId: 'conversation-1',
+    });
+    expect(buildDestinationPromptContext(prepared)).toEqual({
+      channelTag: 'channel_id',
+      postToolName: 'send_chat_reply',
+      surfaceLabel: 'Email',
+    });
+  });
+
+  it('sends a first Email report through the prepared AgentMail thread', async () => {
+    mockPrepareAgentMailConversation.mockResolvedValue({
+      conversationId: 'conversation-1',
+      inboxId: 'roomote@example.test',
+      messageId: null,
+    });
+    await sendAutomationEmailReport(
+      {
+        provider: 'email',
+        channelId: 'user-1',
+        userId: 'user-1',
+        identityId: 'verified:user-1:opaque',
+        source: 'automation_target',
+      },
+      {
+        subject: 'Report',
+        conversationKey: 'builtin:test:1',
+        text: 'Finished',
+        idempotencyKey: 'builtin:test:1:report',
+      },
+    );
+    expect(mockAgentMailPostMessage).toHaveBeenCalledWith({
+      channelId: 'roomote@example.test',
+      threadId: 'conversation-1',
+      text: 'Finished',
+      textFormat: 'markdown',
+      idempotencyKey: 'builtin:test:1:report',
+    });
+  });
   it('stamps the resolved Slack team into task payloads', () => {
     expect(
       buildDestinationTaskPayloadFields({
@@ -443,5 +624,48 @@ describe('payload fields and prompt context', () => {
       postToolName: 'post_to_channel',
       surfaceLabel: 'Discord',
     });
+  });
+});
+
+describe('hasAutomationEmailTarget', () => {
+  const emailDefault = {
+    provider: 'email' as const,
+    targetKind: 'email_user' as const,
+    externalRef: 'default-recipient',
+    metadata: { emailIdentityId: 'identity-1' },
+  };
+
+  it('applies an Email deployment default only without an explicit destination', () => {
+    expect(
+      hasAutomationEmailTarget({
+        targets: [],
+        defaultAutomationTarget: emailDefault,
+      }),
+    ).toBe(true);
+    expect(
+      hasAutomationEmailTarget({
+        targets: [
+          {
+            provider: 'slack',
+            targetKind: 'slack_channel',
+            externalRef: 'C-EXPLICIT',
+          },
+        ],
+        defaultAutomationTarget: emailDefault,
+      }),
+    ).toBe(false);
+  });
+
+  it('keeps an explicit Email target regardless of the deployment default', () => {
+    expect(
+      hasAutomationEmailTarget({
+        targets: [emailDefault],
+        defaultAutomationTarget: {
+          provider: 'slack',
+          targetKind: 'slack_channel',
+          externalRef: 'C-DEFAULT',
+        },
+      }),
+    ).toBe(true);
   });
 });

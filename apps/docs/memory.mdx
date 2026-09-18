@@ -4,7 +4,7 @@ icon: book-open-text
 description: Give Roomote shared memory, so agents start each task knowing what your team already decided, shipped, and discussed.
 ---
 
-Memory is Roomote's shared memory. Without it, every Roomote task starts
+Roomote memory is shared across the deployment. Without it, every Roomote task starts
 from zero: it reads the repository, works out the conventions again, and has no
 idea that the same question was answered three weeks ago. With it, agents can
 recall what your deployment already knows, with citations back to the source.
@@ -20,7 +20,7 @@ metadata, or provenance fields.
 
 ## What goes into it
 
-Roomote fills Memory from what it can already see:
+Roomote fills memory from what it can already see:
 
 - **completed Roomote tasks**, including the request that started the task
   and a short memory the agent writes about its own work: what it decided,
@@ -67,16 +67,33 @@ details require additional provider requests, so Roomote enriches a bounded set
 of pull requests during each hourly analytics pass, prioritizing merged work.
 Older pages gain this context progressively as the sync reaches them.
 
-Turning Memory on also backfills history rather than starting from the
+Turning memory on also backfills history rather than starting from the
 moment you enabled it. Completed tasks are enqueued immediately, and each
 source drains its own deeper history in bounded background passes that resume
 after an interruption.
+
+## Deleting tasks and sessions
+
+Deleting a Roomote task removes the memory pages Roomote created directly for
+that task's runs. Deleting a session first stops its active tasks, then deletes
+its associated tasks and removes both those direct task memories and any Memory
+page saved directly from the session's conversation. If active work cannot be
+stopped safely, the session remains intact so deletion can be retried. Roomote
+records memory cleanup durably and retries it in the background if memory is
+temporarily unavailable. Pending ingestion and future task-history backfills
+exclude deleted tasks so those pages are not recreated.
+
+Archiving a session is reversible and does not remove its memories. Deletion is
+also deliberately narrower than complete forgetting: it does not remove pull
+request, Slack, or other pages collected independently from their source, and
+it does not rewrite broader daily or weekly summaries that may refer to the
+deleted work.
 
 Private Slack channels and DMs are never read. Adding the Roomote bot to a
 public channel is what designates that channel as a source, so the corpus stays
 inside what your team has already made visible company-wide. Slack directory
 cards contain names, handles, and job titles, but never copy profile email,
-status, timezone, or avatar fields into Memory.
+status, timezone, or avatar fields into memory.
 
 Discord collection follows the server's permission model: Roomote includes only
 channels visible to the server's `@everyone` role where the bot also has **View
@@ -104,31 +121,31 @@ Memory runs as its own service alongside Roomote, reachable only on your
 deployment's internal network. On the hosted templates (Railway, Render,
 Coolify) that service is already there after a deploy, sitting idle.
 
-New Roomote Cloud deployments enable Memory when initial setup completes.
+New Roomote Cloud deployments enable memory when initial setup completes.
 Existing deployments keep their current setting. Administrators can change it
 with the **Enable Memory** toggle at the top of **Settings → Memory**; no
 provider key is required. Synthesis runs through your deployment's helper model
 — the same small model that already writes task titles and summaries.
-Deployments that enabled Memory before the toggle existed, by setting
+Deployments that enabled memory before the toggle existed, by setting
 `R_BRAIN_OPENROUTER_API_KEY` or `R_BRAIN_OPENAI_API_KEY`, stay enabled without
 doing anything; using the toggle stores an explicit choice that wins over the
 key from then on.
 
 Semantic recall still needs embeddings. Those come from an OpenRouter or
-OpenAI key — a Memory-specific `R_BRAIN_*` key to bill Memory separately, or
-the deployment's general provider key once Memory is enabled — or from a
-self-run embeddings upstream (below). The Memory service holds no provider
+OpenAI key — a memory-specific `R_BRAIN_*` key to bill memory separately, or
+the deployment's general provider key once memory is enabled — or from a
+self-run embeddings upstream (below). The memory service holds no provider
 key of its own: it asks Roomote for embeddings and synthesis, and Roomote
-forwards them. Changing a key later takes effect on Memory's next request,
+forwards them. Changing a key later takes effect on memory's next request,
 with no redeploy.
 
-OpenRouter and OpenAI both support Memory's embedding calls.
+OpenRouter and OpenAI both support memory embedding calls.
 
 ### Run embeddings locally
 
 Self-hosted Compose deployments can keep embeddings on their own hardware
-while continuing to send chat synthesis to the configured Memory provider.
-Enable both services and point Memory at the bundled inference server:
+while continuing to send chat synthesis to the configured memory provider.
+Enable both services and point memory at the bundled inference server:
 
 ```sh
 COMPOSE_PROFILES=brain,local-inference
@@ -142,7 +159,7 @@ Its anonymous usage reporting is disabled by default in the Roomote Compose
 bundle. This is separate from Roomote's own optional anonymous analytics.
 For a smaller CPU host, `Alibaba-NLP/gte-multilingual-base` with `768`
 dimensions is a lighter embedding alternative. Choose the embedding model and
-dimensions before Memory's first boot; changing that pair later requires
+dimensions before memory's first boot; changing that pair later requires
 re-embedding the corpus.
 
 The upstream URL can instead target any OpenAI-compatible embedding server.
@@ -151,7 +168,7 @@ key. Roomote forwards model names unchanged to self-run upstreams, so
 `R_BRAIN_EMBEDDING_MODEL` must exactly match a model that server exposes,
 without a provider prefix.
 
-While Memory is disabled, it stays inert. Agents are not told it exists,
+While memory is disabled, it stays inert. Agents are not told it exists,
 and nothing is ingested.
 
 Roomote schedules one maintenance pass each night. It retrieves a bounded,
@@ -169,7 +186,7 @@ Beginning Tuesday, the same pass also updates
 decisions, unresolved blockers, commitments, and recurring or superseded
 information across the week's available daily digests. Roomote reads those
 digest pages by their exact slugs and supplies their content as the complete
-evidence set, so raw or historical Memory pages cannot enter the weekly pass.
+evidence set, so raw or historical memory pages cannot enter the weekly pass.
 
 The daily cutoff trails active ingestion and overlaps the previous pass so
 collector writes around the nightly boundary are reconsidered. gbrain's
@@ -180,9 +197,9 @@ that upstream feature requires an operator review workflow before proposals
 become canonical memory.
 
 <Note>
-  Self-hosted Compose deployments start Memory from the `brain` profile, so
+  Self-hosted Compose deployments start memory from the `brain` profile, so
   add `brain` to `COMPOSE_PROFILES` in your environment file to bring the
-  container up, then enable Memory in Settings. Production installs pull
+  container up, then enable memory in settings. Production installs pull
   `ghcr.io/roocodeinc/roomote-gbrain` with the same `v*` release tag as Roomote;
   a complete custom image reference can be pinned with `GBRAIN_IMAGE`.
   Everything after that is the same.
@@ -215,13 +232,13 @@ without a connected upstream integration are omitted.
 
 ## How agents use it
 
-Agents get the built-in Memory as an MCP server with read-only tools. They can
+Agents get the built-in memory as an MCP server with read-only tools. They can
 search it, recall relevant pages, browse what exists, and ask for a synthesized
-answer with sources. They cannot write to the built-in Memory directly.
+answer with sources. They cannot write to the built-in memory directly.
 
-For a substantive topic, agents query Memory before consulting overlapping
+For a substantive topic, agents query memory before consulting overlapping
 Slack, GitHub, task-history, meeting, or pull-request sources. They check those
-live sources when Memory coverage is insufficient, freshness could change the
+live sources when memory coverage is insufficient, freshness could change the
 answer, or you explicitly ask for live verification.
 
 Writes go through Roomote instead. When an agent finishes substantial work it
@@ -230,14 +247,14 @@ a slug it controls, after scrubbing credential-shaped strings. An agent can
 therefore contribute what only it knows without being able to touch any other
 page.
 
-Fast sessions use the same pipeline. Ask Fast to remember something — or
+Sessions use the same pipeline. Ask Roomote to remember something — or
 state a durable preference, decision, or correction — and it saves the fact to
 the session's own memory entry, which the platform redacts and files just
 like a task memory. Saved facts become searchable after the next ingestion
 pass, so they surface in later sessions rather than instantly.
 
 Additional memory integrations, such as Supermemory, can also provide shared
-context to tasks and Fast sessions. Roomote chooses one connected memory
+context to tasks and sessions. Roomote chooses one connected memory
 store for the initial recall so multiple stores do not repeat the same preflight.
 Agents can still consult another store when it has distinct context or you ask
 for it by name. Each integration uses its own available memory-writing tools;
@@ -248,14 +265,14 @@ in staging is distinguishable from one written against production.
 
 ## Choosing models
 
-Two settings pick Memory's models:
+Two settings pick the memory models:
 
 | Variable                      | What it does      | Written as                        | Changeable            |
 | ----------------------------- | ----------------- | --------------------------------- | --------------------- |
 | `R_BRAIN_MODEL`               | Sourced synthesis | your provider's naming            | any time              |
 | `R_BRAIN_EMBEDDING_MODEL`     | Semantic recall   | a plain model id                  | before the first boot |
 
-Leave them unset and Memory uses OpenAI's `gpt-5.6-luna` and
+Leave them unset and memory uses OpenAI's `gpt-5.6-luna` and
 `text-embedding-3-small` through whichever provider you configured.
 
 Memory search does not use a cross-encoder reranker: retrieval is hybrid
@@ -273,54 +290,54 @@ it takes effect on the next request with nothing to restart.
 
 <Warning>
   The embedding model works differently, and the difference matters. Its
-  output width sizes Memory's vector storage when Memory is first
+  output width sizes memory's vector storage when memory is first
   created, and that cannot be resized in place afterwards. So it is given to
-  Memory at creation rather than applied per request, written as a plain
+  memory at creation rather than applied per request, written as a plain
   model id (`text-embedding-3-large`) that Roomote translates for whichever
   provider is serving. Set it together with `R_BRAIN_EMBEDDING_DIMENSIONS`
   (1536 for `text-embedding-3-small`, 3072 for `text-embedding-3-large`)
-  before Memory's first boot, or leave both alone.
+  before memory's first boot, or leave both alone.
 
-  Changing it later is not silently applied: Memory keeps its original
+  Changing it later is not silently applied: memory keeps its original
   model and width, and reports the mismatch in its logs on every start.
-  Moving existing Memory to a different embedding model means re-embedding
+  Moving existing memory to a different embedding model means re-embedding
   the whole corpus with `gbrain migrate embeddings`.
 </Warning>
 
-## If you turned Memory on later
+## If you turned memory on later
 
 Memory that first boots without a provider key is created with semantic
 recall switched off, because the embedding model sizes its vector storage at
-creation time. Adding a key later is still fine: Memory notices on its next
+creation time. Adding a key later is still fine: memory notices on its next
 start, enables semantic recall, and embeds whatever it already holds. It logs
 `semantic recall enabled` when it does.
 
-That repair runs once and is safe, since Memory in this state has no
+That repair runs once and is safe, since memory in this state has no
 embeddings to lose and its pages are preserved. If it cannot complete, the
 service logs the commands to run by hand and keeps serving in the meantime,
 matching on keywords alone.
 
 ## Operating it
 
-- **Back up both Memory stores together.** The Railway template schedules
-  backups for the Memory volume. On supported self-hosted installs, `roomote
+- **Back up both memory stores together.** The Railway template schedules
+  backups for the memory volume. On supported self-hosted installs, `roomote
   backup` includes both the `gbrain_data` volume and the isolated `gbrain`
-  database when Memory is enabled. The volume holds the Markdown system of
+  database when memory is enabled. The volume holds the Markdown system of
   record; Postgres holds the searchable index, extracted facts, and durable
   maintenance jobs. Restoring only one can leave the storage layout and index
   inconsistent, so keep them at the same backup consistency point.
-- **Losing Memory is recoverable only from connected sources.** If both stores
+- **Losing memory is recoverable only from connected sources.** If both stores
   are recreated, Roomote can reset ingestion checkpoints and backfill task
   history and connected integrations, but user-saved facts and generated
   synthesis may not be reproducible. The deployment starts cold until the
   backfill finishes.
 - **The filesystem cutover rebuilds older memory once.** The first start of a
-  filesystem-backed image replaces a Postgres-only Memory service instead of
+  filesystem-backed image replaces a Postgres-only memory service instead of
   trying to merge the old index into an empty checkout. Roomote then repopulates
   it from its connected sources.
 - **Memory has no public service route.** It is never exposed to the internet,
   and task sandboxes reach it only through Roomote's API with their run token,
   which grants read access only.
-- **To run with no memory at all**, leave Memory disabled in Settings.
+- **To run with no memory at all**, leave memory disabled in settings.
   Deployments that want to reclaim the resources entirely can delete the
   Memory service from their compose file or template.

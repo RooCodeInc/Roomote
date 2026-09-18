@@ -54,7 +54,6 @@ describe('Home composer recommendations queue', () => {
       failureReason: null,
       timing: {
         totalMs: 120,
-        preferenceGuardMs: 2,
         eligibleReferenceLookupMs: 3,
         cacheStatus: 'miss',
         cacheMs: 1,
@@ -97,7 +96,6 @@ describe('Home composer recommendations queue', () => {
       failureReason: 'helper_error',
       timing: {
         totalMs: 120_000,
-        preferenceGuardMs: 2,
         eligibleReferenceLookupMs: 3,
         cacheStatus: 'miss',
         cacheMs: 1,

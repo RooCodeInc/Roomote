@@ -10,7 +10,6 @@ import {
   terminateCredentialEgressWorkloadsForRun,
   taskRuns,
   sessionFactory,
-  setDeploymentExperimentEnabled,
   sessionTasks,
   sessions,
   tasks,
@@ -39,7 +38,7 @@ import * as safeFetch from '../safe-fetch';
 
 const policy = {
   label: 'Test credential',
-  origin: 'https://api.example.com',
+  origin: 'https://1.1.1.1',
   headerName: 'authorization',
   headerPrefix: 'Bearer ',
   allowedMethods: ['GET', 'POST'],
@@ -52,7 +51,6 @@ let connectorIdentity: string;
 
 beforeEach(async () => {
   const owner = await userFactory.create();
-  await setDeploymentExperimentEnabled('serviceCredentialTools', true);
   const session = await sessionFactory.create({
     ownerKind: 'user',
     ownerUserId: owner.id,
@@ -333,7 +331,7 @@ it('withholds newly approved substitutes when origin policy tightens after regis
   });
   const allowed = await prepareServiceCredential(context, {
     ...policy,
-    origin: 'https://other.example.com',
+    origin: 'https://1.0.0.1',
   });
   const { secretRef } = await createServiceCredential(context, {
     pendingRef: allowed.pendingRef,
@@ -356,7 +354,7 @@ it('withholds newly approved substitutes when origin policy tightens after regis
   expect(issued.substitutes).toEqual([
     expect.objectContaining({
       secretRef,
-      origin: 'https://other.example.com',
+      origin: 'https://1.0.0.1',
       allowedMethods: ['GET', 'POST'],
     }),
   ]);

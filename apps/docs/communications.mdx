@@ -60,9 +60,9 @@ also needs an environment that can run the suggestion's target repository.
 Configured **Call Roomote via emoji** automations are separate from these
 suggestion reactions.
 
-When the suggestion is not pinned to an execution target, Fast-capable chat
-surfaces start it in Fast so Roomote can answer or delegate as needed. A pinned
-environment, repository-only surface, or provider without Fast support starts
+When the suggestion is not pinned to an execution target, conversation-capable chat
+surfaces start it in a session so Roomote can answer or delegate as needed. A pinned
+environment, repository-only surface, or provider without session support starts
 the coding task directly. On Slack, each accepted suggestion starts in its own
 top-level execution thread and Session, while retaining its connection to the
 report that proposed it. Separate suggestions therefore do not share execution
@@ -72,13 +72,13 @@ provider and execution target.
 
 ## React to Roomote replies
 
-When you react to a Roomote reply in an active Fast conversation, Roomote can
+When you react to a Roomote reply in an active session, Roomote can
 use that reaction as context, including as an answer to a question it asked.
-The linked user who owns the Fast conversation must add the reaction. Roomote
+The linked user who owns the session must add the reaction. Roomote
 posts a text reply when the reaction warrants a response and otherwise stays
 silent; it does not react to the reaction event itself.
 
-| Provider | Fast reply reactions | Provider limits |
+| Provider | Session reply reactions | Provider limits |
 | --- | --- | --- |
 | Slack | Supported | Slack sends standard and workspace custom `reaction_added` events. |
 | Discord | Supported | Discord Gateway sends standard and server custom reaction-add events, but the event does not include the reacted-to message text. |
@@ -87,7 +87,7 @@ silent; it does not react to the reaction event itself.
 | Email (AgentMail) | Not supported | Email has no reaction mechanism; reply in the thread instead. |
 
 These reaction paths apply only to Roomote replies that were recorded for the
-current Fast conversation. Reactions on older or unrelated messages do not gain
+current session. Reactions on older or unrelated messages do not gain
 access to that conversation. Suggested-task reactions keep their dedicated
 launch behavior described above.
 
@@ -110,7 +110,7 @@ and continue the right thread when someone replies later.
 
 If someone asks Roomote to do work from chat before their account is linked,
 Roomote prompts them to link the account. Slack resumes the original request
-through Fast after linking; on other providers, they may need to send the
+through the session after linking; on other providers, they may need to send the
 request again.
 
 Telegram and Discord use one-time link codes instead of acting as sign-in
@@ -118,7 +118,9 @@ providers. Generate a code under **Settings > Personal > Linked Accounts** and
 send the corresponding link command to the bot.
 
 Email needs no separate linking step: Roomote authorizes inbound task requests
-and replies only from verified email addresses on Roomote accounts. See
+and replies only from verified email addresses on Roomote accounts, and
+replying to an email Roomote sent the account address verifies it implicitly.
+See
 [Email (AgentMail)](/providers/communications/agentmail).
 
 ## Related setup

@@ -5,7 +5,7 @@ import type { UserAuthSuccess } from '@/types';
 import { getTaskAnalyticsRows } from './task-rows';
 
 describe('getTaskAnalyticsRows', () => {
-  it('excludes private tasks from non-owner admin analytics', async () => {
+  it('includes private tasks for every viewer while redacting non-owner details', async () => {
     const owner = await userFactory.create();
     const other = await userFactory.create();
     const privateTask = await taskFactory.create({
@@ -13,6 +13,7 @@ describe('getTaskAnalyticsRows', () => {
       privacy: 'private',
       privateOwnerUserId: owner.id,
       title: 'Owner analytics only',
+      repositoryName: 'secret/private-repository',
     });
 
     const ownerRows = await getTaskAnalyticsRows(
@@ -27,8 +28,57 @@ describe('getTaskAnalyticsRows', () => {
       new Date(),
       'tasks',
     );
+    const nonOwnerRows = await getTaskAnalyticsRows(
+      { userId: other.id, isAdmin: false } as UserAuthSuccess,
+      'all',
+      new Date(),
+      'tasks',
+    );
+    const ownerRow = ownerRows.find(({ id }) => id === privateTask.id);
+    const adminRow = adminRows.find(
+      (row) =>
+        row.details.values.taskTitle === 'Private task' &&
+        row.dimensions.user?.key === ownerRow?.dimensions.user?.key,
+    );
+    const nonOwnerRow = nonOwnerRows.find(
+      (row) =>
+        row.details.values.taskTitle === 'Private task' &&
+        row.dimensions.user?.key === ownerRow?.dimensions.user?.key,
+    );
 
-    expect(ownerRows.map(({ id }) => id)).toContain(privateTask.id);
-    expect(adminRows.map(({ id }) => id)).not.toContain(privateTask.id);
+    expect(ownerRow?.value).toBe(1);
+    expect(adminRow?.value).toBe(1);
+    expect(nonOwnerRow?.value).toBe(adminRow?.value);
+    expect(ownerRow).toMatchObject({
+      id: privateTask.id,
+      details: {
+        values: {
+          taskTitle: 'Owner analytics only',
+          task: 'View task',
+        },
+        links: { task: `/task/${privateTask.id}` },
+      },
+    });
+    expect(adminRow).toMatchObject({
+      id: expect.stringMatching(/^private-task:/),
+      dimensions: {
+        user: ownerRow?.dimensions.user,
+        project: { key: 'Private', label: 'Private' },
+        source: { key: 'Private', label: 'Private' },
+        taskType: { key: 'Private task', label: 'Private task' },
+      },
+      details: { values: { taskTitle: 'Private task' } },
+    });
+    expect(adminRow?.details.links).toBeUndefined();
+    expect(nonOwnerRow).toMatchObject({
+      id: expect.stringMatching(/^private-task:/),
+      dimensions: { user: ownerRow?.dimensions.user },
+      details: { values: { taskTitle: 'Private task' } },
+    });
+    expect(nonOwnerRow?.details.links).toBeUndefined();
+    expect(JSON.stringify(adminRow)).not.toContain(privateTask.id);
+    expect(JSON.stringify(adminRow)).not.toContain('Owner analytics only');
+    expect(JSON.stringify(adminRow)).not.toContain('secret/private-repository');
+    expect(adminRow?.details.values.user).toBe(ownerRow?.details.values.user);
   });
 });

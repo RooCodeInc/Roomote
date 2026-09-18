@@ -33,7 +33,9 @@ import {
   parseCustomMcpServerJson,
   type CustomMcpJsonImport,
 } from '@/lib/custom-mcp-json-import';
+import type { CustomMcpServerVisibility } from '@roomote/types';
 import type { CustomMcpServerListEntry } from '@/trpc/commands/custom-mcp-servers';
+import { useAuthorizedUser } from '@/hooks/useUser';
 
 import type { IntegrationItem } from './integration-card';
 import { useTRPC } from '@/trpc/client';
@@ -53,6 +55,8 @@ interface ServerFormValues {
   stdioCommand: string;
   stdioArgs: string;
   stdioEnv: { name: string; value: string }[];
+  /** Who can use it, mirroring integration keys. Remote servers only. */
+  visibility: CustomMcpServerVisibility;
 }
 
 type ListedServer = Omit<CustomMcpServerListEntry, 'createdAt' | 'updatedAt'>;
@@ -69,6 +73,7 @@ const EMPTY_FORM: ServerFormValues = {
   stdioCommand: '',
   stdioArgs: '',
   stdioEnv: [],
+  visibility: 'deployment',
 };
 
 function serverToFormValues(server: ListedServer): ServerFormValues {
@@ -84,6 +89,7 @@ function serverToFormValues(server: ListedServer): ServerFormValues {
     stdioCommand: server.stdioCommand ?? '',
     stdioArgs: server.stdioArgs.join('\n'),
     stdioEnv: server.stdioEnvNames.map((name) => ({ name, value: '' })),
+    visibility: server.visibility,
   };
 }
 
@@ -95,9 +101,14 @@ function serverToFormValues(server: ListedServer): ServerFormValues {
 function importToFormValues(
   parsed: CustomMcpJsonImport,
   currentName: string,
+  currentVisibility: CustomMcpServerVisibility,
 ): ServerFormValues {
   return {
     ...EMPTY_FORM,
+    // Importing only fills in transport details; who can use the server stays
+    // whatever the dialog was opened with (the personal dialog hides the
+    // selector, so a reset to the default would silently share the server).
+    visibility: currentVisibility,
     name: parsed.name ?? currentName,
     transport: parsed.transport,
     url: parsed.url ?? '',
@@ -200,7 +211,7 @@ function KeyValueRows({
           <div className="flex-1">
             <Input
               secret
-              className="font-mono"
+              className="ph-no-capture ph-mask font-mono sentry-mask"
               placeholder={
                 isEdit ? 'Leave blank to keep the existing value' : 'Value'
               }
@@ -253,9 +264,12 @@ function ServerFormDialog({
   onEnableServer,
   onEditServer,
   onSaved,
+  scope,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** `owner` adds a private server; `deployment` lets the member choose. */
+  scope: CustomMcpServerVisibility;
   editingServer: ListedServer | null;
   disabledServers: ListedServer[];
   enablingServerId: string | null;
@@ -264,6 +278,7 @@ function ServerFormDialog({
   onSaved: () => void;
 }) {
   const trpc = useTRPC();
+  const { isAdmin } = useAuthorizedUser();
   const isEdit = Boolean(editingServer);
 
   const form = useForm<ServerFormValues>({ defaultValues: EMPTY_FORM });
@@ -271,14 +286,18 @@ function ServerFormDialog({
 
   useEffect(() => {
     if (open) {
-      reset(editingServer ? serverToFormValues(editingServer) : EMPTY_FORM);
+      reset(
+        editingServer
+          ? serverToFormValues(editingServer)
+          : { ...EMPTY_FORM, visibility: scope },
+      );
       setError(null);
       setJsonImportOpen(false);
       setJsonText('');
       setImportError(null);
       setImportNotes([]);
     }
-  }, [open, editingServer, reset]);
+  }, [open, editingServer, reset, scope]);
 
   const [error, setError] = useState<string | null>(null);
   const [jsonImportOpen, setJsonImportOpen] = useState(false);
@@ -289,6 +308,7 @@ function ServerFormDialog({
   const authType = watch('authType');
   const headers = watch('headers');
   const stdioEnv = watch('stdioEnv');
+  const visibility = watch('visibility');
 
   const createServer = useMutation(
     trpc.customMcpServers.create.mutationOptions(),
@@ -296,8 +316,12 @@ function ServerFormDialog({
   const updateServer = useMutation(
     trpc.customMcpServers.update.mutationOptions(),
   );
+  const setVisibility = useMutation(
+    trpc.customMcpServers.setVisibility.mutationOptions(),
+  );
 
-  const isSaving = createServer.isPending || updateServer.isPending;
+  const isSaving =
+    createServer.isPending || updateServer.isPending || setVisibility.isPending;
 
   const onSubmit = form.handleSubmit(async (values) => {
     setError(null);
@@ -307,8 +331,28 @@ function ServerFormDialog({
 
       if (editingServer) {
         await updateServer.mutateAsync({ id: editingServer.id, server });
+        if (
+          values.transport === 'remote' &&
+          values.visibility !== editingServer.visibility
+        ) {
+          await setVisibility.mutateAsync({
+            id: editingServer.id,
+            visibility: values.visibility,
+          });
+          toast.success(
+            values.visibility === 'owner'
+              ? `${editingServer.name} moved to Personal settings.`
+              : `${editingServer.name} is now shared with everyone.`,
+          );
+        }
       } else {
-        await createServer.mutateAsync(server);
+        await createServer.mutateAsync({
+          ...server,
+          ...(values.transport === 'remote'
+            ? { visibility: values.visibility }
+            : {}),
+        });
+        toast.success(`Added ${values.name}.`);
       }
 
       onSaved();
@@ -323,16 +367,18 @@ function ServerFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="xl">
+      <DialogContent
+        size="xl"
+        className="ph-no-capture ph-mask ph-no-recording sentry-block"
+      >
         <DialogHeader>
           <DialogTitle>
             {isEdit ? 'Edit custom MCP server' : 'Add custom MCP server'}
           </DialogTitle>
           <DialogDescription>
-            Custom servers are available to agents in every task. Remote servers
-            are reached through an authenticated Roomote proxy, so credentials
-            stay server-side. Local servers run inside the task sandbox with the
-            same privileges as the agent.
+            {visibility === 'owner'
+              ? 'A personal server is available only to your own Sessions and tasks. It is reached through an authenticated Roomote proxy, so credentials stay server-side.'
+              : 'Custom servers are available to agents in every task. Remote servers are reached through an authenticated Roomote proxy, so credentials stay server-side. Local servers run inside the task sandbox with the same privileges as the agent.'}
           </DialogDescription>
         </DialogHeader>
 
@@ -417,7 +463,13 @@ function ServerFormDialog({
                         try {
                           const parsed = parseCustomMcpServerJson(jsonText);
 
-                          reset(importToFormValues(parsed, watch('name')));
+                          reset(
+                            importToFormValues(
+                              parsed,
+                              watch('name'),
+                              watch('visibility'),
+                            ),
+                          );
                           setImportNotes(parsed.notes);
                           setImportError(null);
                           setJsonImportOpen(false);
@@ -479,7 +531,7 @@ function ServerFormDialog({
             </p>
           </div>
 
-          {!isEdit && (
+          {!isEdit && isAdmin && scope === 'deployment' && (
             <div className="space-y-2">
               <Label>Type</Label>
               <RadioGroup
@@ -500,6 +552,38 @@ function ServerFormDialog({
               </RadioGroup>
             </div>
           )}
+
+          {transport === 'remote' && (isEdit || scope === 'deployment') ? (
+            <div className="space-y-2">
+              <Label id="mcp-visibility-label">Who can use this server?</Label>
+              <RadioGroup
+                aria-labelledby="mcp-visibility-label"
+                value={visibility}
+                onValueChange={(value) =>
+                  setValue('visibility', value as CustomMcpServerVisibility)
+                }
+                className="flex gap-6"
+              >
+                <div className="flex items-center gap-2">
+                  <RadioGroupItem
+                    value="deployment"
+                    id="visibility-deployment"
+                  />
+                  <Label htmlFor="visibility-deployment">
+                    Everyone in this deployment
+                  </Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <RadioGroupItem value="owner" id="visibility-owner" />
+                  <Label htmlFor="visibility-owner">Only me</Label>
+                </div>
+              </RadioGroup>
+              <p className="text-sm text-muted-foreground">
+                Anyone in this deployment can use a shared server. Its
+                credentials always stay server-side.
+              </p>
+            </div>
+          ) : null}
 
           {transport === 'remote' ? (
             <>
@@ -580,7 +664,7 @@ function ServerFormDialog({
                     <Label>Client secret (optional)</Label>
                     <Input
                       secret
-                      className="font-mono"
+                      className="ph-no-capture ph-mask font-mono sentry-mask"
                       placeholder={
                         isEdit ? 'Leave blank to keep the existing value' : ''
                       }
@@ -809,8 +893,17 @@ function CustomToolManagementDialog({
  * so this exposes items plus the dialogs they drive rather than owning a
  * section of its own.
  */
-export function useCustomMcpServers(): {
+/**
+ * `deployment` (the default) lists the servers everyone shares, for Settings
+ * → Integrations; `owner` lists the viewer's own private servers, for
+ * Personal settings. Members see shared servers they did not add read-only.
+ */
+export function useCustomMcpServers(
+  scope: CustomMcpServerVisibility = 'deployment',
+): {
   isEnabled: boolean;
+  isLoading: boolean;
+  error: string | null;
   items: IntegrationItem[];
   openAddDialog: () => void;
   dialogs: ReactNode;
@@ -824,8 +917,13 @@ export function useCustomMcpServers(): {
   const isEnabled = availability.data?.enabled !== false;
 
   const serversQuery = useQuery(
-    trpc.customMcpServers.list.queryOptions(undefined, { enabled: isEnabled }),
+    trpc.customMcpServers.list.queryOptions(
+      scope === 'owner' ? { scope } : undefined,
+      { enabled: isEnabled },
+    ),
   );
+  const settingsPath =
+    scope === 'owner' ? '/settings/personal' : '/integrations';
 
   const deleteServer = useMutation(
     trpc.customMcpServers.delete.mutationOptions(),
@@ -877,11 +975,29 @@ export function useCustomMcpServers(): {
         );
       };
 
+      if (!server.canManage) {
+        return {
+          id: `custom-${server.id}`,
+          name: server.name,
+          description,
+          icon: <Plug className="size-4" />,
+          enabled: server.enabled,
+          connected: server.enabled && !needsConnection,
+          configured: true,
+          isMcpBased: true,
+          isPending: false,
+          configureAction: null,
+          status: needsConnection
+            ? 'Waiting on the member who added it to connect it.'
+            : 'Added by another member.',
+        } satisfies IntegrationItem;
+      }
+
       return {
         id: `custom-${server.id}`,
         name: server.name,
         description,
-        icon: <Plug className="size-5" />,
+        icon: <Plug className="size-4" />,
         enabled: server.enabled,
         connected: server.enabled && !needsConnection,
         // Custom servers are always deployment-defined, so a disabled one
@@ -907,7 +1023,7 @@ export function useCustomMcpServers(): {
             ? async () => {
                 const initiateUrl = await connect.mutateAsync({
                   id: server.id,
-                  redirectTo: '/settings/integrations',
+                  redirectTo: settingsPath,
                 });
                 window.location.href = initiateUrl;
               }
@@ -961,7 +1077,7 @@ export function useCustomMcpServers(): {
               onAction: async () => {
                 const initiateUrl = await connect.mutateAsync({
                   id: server.id,
-                  redirectTo: '/settings/integrations',
+                  redirectTo: settingsPath,
                 });
                 window.location.href = initiateUrl;
               },
@@ -995,8 +1111,11 @@ export function useCustomMcpServers(): {
       <ServerFormDialog
         open={formOpen}
         onOpenChange={setFormOpen}
+        scope={scope}
         editingServer={editingServer}
-        disabledServers={servers.filter((server) => !server.enabled)}
+        disabledServers={servers.filter(
+          (server) => !server.enabled && server.canManage,
+        )}
         enablingServerId={
           setEnabled.isPending && setEnabled.variables?.enabled
             ? setEnabled.variables.id
@@ -1028,6 +1147,8 @@ export function useCustomMcpServers(): {
 
   return {
     isEnabled,
+    isLoading: serversQuery.isLoading,
+    error: serversQuery.isError ? 'MCP servers are unavailable.' : null,
     items,
     openAddDialog: () => {
       setEditingServer(null);

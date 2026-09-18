@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto';
 
 const {
   mockFindPrecomputeUser,
-  mockIsEnabled,
   mockListEligible,
   mockListRefs,
   mockReadMemories,
@@ -11,7 +10,6 @@ const {
   redisStore,
 } = vi.hoisted(() => ({
   mockFindPrecomputeUser: vi.fn(),
-  mockIsEnabled: vi.fn(),
   mockListEligible: vi.fn(),
   mockListRefs: vi.fn(),
   mockReadMemories: vi.fn(),
@@ -55,7 +53,6 @@ vi.mock('@roomote/redis', () => ({
 vi.mock('@roomote/db/server', () => ({
   db: {},
   findHomeComposerPrecomputeUserForRun: mockFindPrecomputeUser,
-  isHomeComposerSuggestionsEnabled: mockIsEnabled,
   listEligibleUserTaskMemoryRuns: mockListEligible,
 }));
 
@@ -139,7 +136,6 @@ describe('Home composer recommendations', () => {
     vi.clearAllMocks();
     redisStore.clear();
     resetHomeComposerRecommendationQueueForTests();
-    mockIsEnabled.mockResolvedValue(true);
     mockListRefs.mockResolvedValue(refs);
     mockListEligible.mockResolvedValue(refs);
     mockReadMemories.mockResolvedValue([
@@ -152,18 +148,6 @@ describe('Home composer recommendations', () => {
     ]);
     mockGenerate.mockResolvedValue({ object: { suggestions } });
     mockQueueAdd.mockResolvedValue(undefined);
-  });
-
-  it('does no cache, Brain, or helper work while the experiment is off', async () => {
-    mockIsEnabled.mockResolvedValue(false);
-
-    await expect(
-      getHomeComposerRecommendations('user-1'),
-    ).resolves.toMatchObject({ suggestions: [], outcome: 'flag_disabled' });
-    expect(mockListRefs).not.toHaveBeenCalled();
-    expect(redis.get).not.toHaveBeenCalled();
-    expect(mockReadMemories).not.toHaveBeenCalled();
-    expect(mockGenerate).not.toHaveBeenCalled();
   });
 
   it('generates five validated suggestions on a missing cache', async () => {
@@ -426,8 +410,8 @@ describe('Home composer recommendations', () => {
     const consoleErrorSpy = vi
       .spyOn(console, 'error')
       .mockImplementation(() => {});
-    mockIsEnabled
-      .mockResolvedValueOnce(true)
+    mockListRefs
+      .mockResolvedValueOnce(refs)
       .mockRejectedValueOnce(new Error('database unavailable'));
 
     const result = await getHomeComposerRecommendations('user-1');

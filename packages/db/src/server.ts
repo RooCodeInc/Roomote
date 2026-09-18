@@ -109,6 +109,7 @@ export * from './lib/invocation-identities';
 export * from './lib/webhook-retention';
 export * from './lib/brain';
 export * from './lib/fast-agent-memory';
+export * from './lib/brain-page-retirements';
 export * from './lib/managed-access';
 export * from './lib/user-personalization';
 export * from './lib/personal-preferences';
@@ -123,6 +124,7 @@ export {
   instanceSkills,
   userRelations,
   deploymentSettings,
+  releaseAnnouncementDeliveries,
   licenseUsageObservations,
   invites,
   authUsers,
@@ -214,6 +216,7 @@ export {
   agentmailConversationParticipantsRelations,
   agentmailWebhookEvents,
   agentmailInboundTurns,
+  agentmailReplyVerificationProofs,
   agentmailSuppressions,
   discordInstallations,
   discordInstallationsRelations,
@@ -272,6 +275,8 @@ export {
   deploymentMcpEnablementsRelations,
   customMcpServers,
   customMcpServersRelations,
+  personalMcpServers,
+  personalMcpServersRelations,
   mcpConnections,
   mcpConnectionsRelations,
   oauthState,
@@ -282,6 +287,7 @@ export {
   userApiKeysRelations,
   brainMemoryEvents,
   brainMemoryEventsRelations,
+  brainPageRetirements,
   brainCollectorItems,
   brainSyncState,
 } from './schema';

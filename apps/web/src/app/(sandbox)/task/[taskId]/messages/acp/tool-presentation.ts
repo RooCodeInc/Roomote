@@ -82,6 +82,7 @@ const LIST_TOOL_NAMES = new Set([
   'list_dir',
   'list_directory',
   'list_files',
+  'list_repositories',
   'list_skills',
 ]);
 const READ_TOOL_NAMES = new Set([

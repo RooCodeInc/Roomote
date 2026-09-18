@@ -15,10 +15,9 @@ export async function loadCommunicationLookupTaskRun(
       payload: true,
     },
     where: eq(taskRuns.id, runId),
-    with: { task: { columns: { privacy: true } } },
   });
 
-  if (!run || run.task?.privacy === 'private') return null;
+  if (!run) return null;
   const bindings = await getTaskChannelBindings(run.taskId);
   return {
     actingUserId: run.actingUserId,

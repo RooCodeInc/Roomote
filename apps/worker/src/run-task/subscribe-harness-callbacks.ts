@@ -454,6 +454,7 @@ export function subscribeHarnessCallbacks({
                 await sdk.taskRuns.notifyUserAttention({
                   id: taskRun.id,
                   kind: 'input_needed',
+                  presentationKind: 'input',
                   eventId: event.request.requestId,
                 });
               } catch (error) {

@@ -37,7 +37,7 @@ vi.mock('undici', () => ({
 }));
 
 const secret = 'Test-Key/A+b=<"&>123';
-const origin = 'https://api.example.com';
+const origin = 'https://1.1.1.1';
 type Auth = Parameters<typeof resolveServiceCredentialContext>[0];
 let ownerId: string;
 let otherId: string;

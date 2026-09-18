@@ -15,10 +15,17 @@ export const JUDGMENT_MODEL_ENV_VAR_NAME = 'R_JUDGMENT_MODEL';
  * Where judgment requests go:
  * - `off`: never use a judgment model.
  * - `typesafe`: Jev through TypeSafe's API with a TypeSafe key.
+ * - `openrouter`: Jev (`typesafe/jev-1.13`) through OpenRouter with the
+ *   deployment's OpenRouter key.
  * - `vercel`: Jev (`typesafe-ai/jev`) through Vercel AI Gateway with the
  *   deployment's AI Gateway key.
  */
-export const JUDGMENT_MODEL_SELECTIONS = ['off', 'typesafe', 'vercel'] as const;
+export const JUDGMENT_MODEL_SELECTIONS = [
+  'off',
+  'typesafe',
+  'openrouter',
+  'vercel',
+] as const;
 
 export type JudgmentModelSelection = (typeof JUDGMENT_MODEL_SELECTIONS)[number];
 
@@ -37,6 +44,7 @@ export const JUDGMENT_MODEL_SELECTION_LABELS: Record<
 > = {
   off: 'Off',
   typesafe: 'Jev via TypeSafe',
+  openrouter: 'Jev via OpenRouter',
   vercel: 'Jev via Vercel AI Gateway',
 };
 

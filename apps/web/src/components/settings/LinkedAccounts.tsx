@@ -451,6 +451,9 @@ function EmailChannelGuidance({
       <p className="text-sm text-muted-foreground">
         Email <span className="font-mono ph-no-capture">{inboxEmail}</span> from
         your verified address to start work by email.
+        {primaryEmailVerified === false
+          ? ' Replying to an email Roomote sends you verifies your address automatically.'
+          : ''}
       </p>
     );
   }

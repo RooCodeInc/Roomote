@@ -378,6 +378,64 @@ describe('optional setup integration discovery', () => {
     ).toEqual(expect.any(String));
   });
 
+  it('reconciles completion after source control and integrations are both skipped', async () => {
+    mocks.getStatus.mockImplementation(async () => ({
+      setupNewState: await readState(),
+      setupCompletedAt: null,
+      modelSetup: { setupSatisfied: true },
+      computeSetup: { setupSatisfied: false, providers: [] },
+      sourceControlSetup: { setupSatisfied: false, providers: [] },
+    }));
+    await skipSetupSourceControlCommand(auth, sessionId);
+    mocks.complete.mockClear();
+
+    const offerId = 'cap:integration-skip';
+    await db.insert(fastAgentMessages).values({
+      conversationId,
+      eventId: 'integration-skip-offer',
+      turnId: 'integration-skip-turn',
+      turnSeq: 1,
+      ts: Date.now(),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer,
+      role: 'assistant',
+      contentBlocks: [{ type: 'text', text: 'Connect useful tools.' }],
+      metadata: { visibleInTranscript: true },
+      payload: {
+        offerId,
+        capability: 'integrations',
+        message: 'Connect useful tools.',
+        integrationIds: ['notion'],
+        status: 'pending',
+      },
+      source: 'web',
+    });
+
+    await actualFastSessions.resolveFastSessionCapabilityOfferCommand(auth, {
+      sessionId,
+      offerId,
+      capability: 'integrations',
+      resolution: 'dismissed',
+    });
+
+    const setupSession = (await readState()).setupSession;
+    expect(setupSession).toMatchObject({
+      sourceControlSkippedAt: expect.any(String),
+      integrationDiscoveryCompletedAt: expect.any(String),
+    });
+    expect(mocks.complete).toHaveBeenCalledWith(
+      auth,
+      expect.objectContaining({
+        setupNewState: expect.objectContaining({
+          setupSession: expect.objectContaining({
+            sourceControlSkippedAt: expect.any(String),
+            integrationDiscoveryCompletedAt: expect.any(String),
+          }),
+        }),
+      }),
+      [],
+    );
+  });
+
   it('launches each selected starter task once when the sandbox is ready', async () => {
     const state = await readState();
     state.setupSession!.integrationDiscoveryCompletedAt =

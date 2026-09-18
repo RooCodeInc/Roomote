@@ -10,7 +10,14 @@ export function useAutoFocusOnce<T extends HTMLElement>(
 
   useEffect(() => {
     const element = elementRef.current;
-    if (!enabled || hasFocusedRef.current || !element) return;
+    if (
+      !enabled ||
+      hasFocusedRef.current ||
+      !element ||
+      !window.matchMedia('(min-width: 768px)').matches
+    ) {
+      return;
+    }
 
     element.focus();
     if (document.activeElement === element) {

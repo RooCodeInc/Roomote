@@ -8,7 +8,6 @@ import {
   GitMerge,
   IdCard,
   MessagesSquare,
-  PlugIcon,
   ScrollText,
   ServerCog,
   Users,
@@ -22,7 +21,6 @@ export type SettingsPageId =
   | 'environments'
   | 'agent-guidance'
   | 'automations'
-  | 'integrations'
   | 'comms'
   | 'compute'
   | 'source-control'
@@ -103,16 +101,6 @@ const SETTINGS_NAVIGATION_ITEMS: SettingsNavigationItem[] = [
     icon: GitMerge,
     adminOnly: true,
     matches: (pathname) => pathname.startsWith(SETTINGS_PATHS.sourceControl),
-  },
-  {
-    id: 'integrations',
-    label: 'Integrations',
-    title: 'Integrations',
-    description: 'Connect Roomote with tools your team uses.',
-    href: SETTINGS_PATHS.integrations,
-    icon: PlugIcon,
-    adminOnly: false,
-    matches: (pathname) => pathname.startsWith(SETTINGS_PATHS.integrations),
   },
   {
     id: 'memory',

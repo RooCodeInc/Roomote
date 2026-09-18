@@ -10,6 +10,8 @@ import {
   mcpConnections,
 } from '@roomote/db/server';
 import { isMcpConnectionNotionConfig } from '@roomote/types';
+import { getValidAccessToken } from '@roomote/sdk/server/mcp-data';
+import { NOTION_API_ORIGIN } from '@roomote/sdk/server/notion-api';
 
 import type { Variables } from '../../../types';
 
@@ -48,14 +50,18 @@ async function resolveNotionConnection() {
     );
   }
 
-  if (!isMcpConnectionNotionConfig(connection.authConfig)) {
-    throw new McpProxyError(
-      500,
-      'Notion connection is missing a valid internal integration configuration',
-    );
+  if (isMcpConnectionNotionConfig(connection.authConfig)) {
+    return connection.authConfig;
   }
-
-  return connection.authConfig;
+  const accessToken = await getValidAccessToken(
+    connection.id,
+    NOTION_API_ORIGIN,
+  );
+  if (accessToken) return { accessToken };
+  throw new McpProxyError(
+    500,
+    'Notion connection is missing valid authentication',
+  );
 }
 
 function createNotionMcpServer(

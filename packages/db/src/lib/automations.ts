@@ -22,12 +22,14 @@ import {
   AUTOMATION_DESTINATION_DESCRIPTORS,
   AUTO_RESOLVE_CONFLICTS_LABEL,
   BACKGROUND_AUTOMATION_KEYS,
+  buildChannelAutomationTarget,
   DEFAULT_CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS,
   DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
   DEFAULT_PROVIDER_USAGE_LIMIT_FREQUENCY,
   DEFAULT_PROVIDER_USAGE_LIMIT_THRESHOLD,
   DEFAULT_PR_REVIEW_SETTINGS,
   getTriggerableBackgroundAutomationDescriptorByKey,
+  getAutomationTargetEmailIdentityId,
   isChannelAutoStartLaunchMode,
   isConflictResolverMaxPrAgeDays,
   isInternalAutomationKey,
@@ -337,9 +339,58 @@ export function resolveAutomationSlackChannelId(
   return getAutomationSlackChannelTarget(automation) ?? managerSlackChannelId;
 }
 
+function getLegacyDefaultAutomationTarget(
+  settings:
+    | {
+        managerSlackChannelId?: string | null;
+        managerDiscordChannelId?: string | null;
+      }
+    | null
+    | undefined,
+): AutomationTarget | null {
+  if (settings?.managerSlackChannelId) {
+    return buildChannelAutomationTarget(
+      'slack',
+      settings.managerSlackChannelId,
+    );
+  }
+  return settings?.managerDiscordChannelId
+    ? buildChannelAutomationTarget('discord', settings.managerDiscordChannelId)
+    : null;
+}
+
+/**
+ * The deployment default destination, reconciled with the legacy manager
+ * channel columns.
+ *
+ * N-1: the previous release reads and writes only `managerSlackChannelId` and
+ * `managerDiscordChannelId`. This release mirrors channel defaults into those
+ * columns and nulls them for DM and Email defaults, so whenever they disagree
+ * with `defaultAutomationTarget` the previous release changed or cleared the
+ * manager channel after a rollback and the legacy columns win.
+ */
+export function getEffectiveDefaultAutomationTarget(
+  settings:
+    | {
+        managerSlackChannelId?: string | null;
+        managerDiscordChannelId?: string | null;
+        defaultAutomationTarget?: AutomationTarget | null;
+      }
+    | null
+    | undefined,
+): AutomationTarget | null {
+  const legacyTarget = getLegacyDefaultAutomationTarget(settings);
+  if (legacyTarget) return legacyTarget;
+  const storedTarget = settings?.defaultAutomationTarget ?? null;
+  return storedTarget?.targetKind === 'slack_channel' ||
+    storedTarget?.targetKind === 'discord_channel'
+    ? null
+    : storedTarget;
+}
+
 /** Provider-neutral resolved destination an automation reports to. */
 export type AutomationDestination = {
-  provider: 'slack' | 'teams' | 'telegram' | 'discord';
+  provider: 'slack' | 'teams' | 'telegram' | 'discord' | 'email';
   channelId: string;
   /** Which waterfall level produced this destination. */
   source: 'automation_target' | 'manager_channel';
@@ -350,6 +401,7 @@ const DESTINATION_TARGET_KINDS = [
   ['teams', 'teams_channel'],
   ['telegram', 'telegram_chat'],
   ['discord', 'discord_channel'],
+  ['email', 'email_user'],
 ] as const;
 
 function getAutomationCommunicationTarget(
@@ -507,6 +559,7 @@ export async function ensureAutomationRows(
         key,
         enabled:
           key === 'platform_issue_alerts' ||
+          key === 'release_announcements' ||
           key === 'provider_usage_limit' ||
           key === 'manager_stats',
         internal: isInternalAutomationKey(key),
@@ -801,6 +854,7 @@ export type AutomationRuntime = {
   slackChannelId: string | null;
   managerSlackChannelId: string | null;
   managerDiscordChannelId: string | null;
+  defaultAutomationTarget?: AutomationTarget | null;
   /**
    * Provider-neutral destination waterfall result (own target on any comms
    * provider, else the manager channel, preferring Slack over Discord). Null
@@ -816,9 +870,15 @@ function toAutomationRuntime(params: {
   automation: Automation | undefined;
   managerSlackChannelId: string | null;
   managerDiscordChannelId: string | null;
+  defaultAutomationTarget: AutomationTarget | null;
 }): AutomationRuntime {
-  const { key, automation, managerSlackChannelId, managerDiscordChannelId } =
-    params;
+  const {
+    key,
+    automation,
+    managerSlackChannelId,
+    managerDiscordChannelId,
+    defaultAutomationTarget,
+  } = params;
 
   return {
     key,
@@ -835,6 +895,7 @@ function toAutomationRuntime(params: {
     ),
     managerSlackChannelId,
     managerDiscordChannelId,
+    defaultAutomationTarget,
     destination: resolveAutomationDestination(
       automation ?? undefined,
       managerSlackChannelId,
@@ -854,6 +915,7 @@ export async function getAutomationRuntime(
       columns: {
         managerSlackChannelId: true,
         managerDiscordChannelId: true,
+        defaultAutomationTarget: true,
       },
     }),
   ]);
@@ -863,6 +925,7 @@ export async function getAutomationRuntime(
     automation,
     managerSlackChannelId: settingsRow?.managerSlackChannelId ?? null,
     managerDiscordChannelId: settingsRow?.managerDiscordChannelId ?? null,
+    defaultAutomationTarget: getEffectiveDefaultAutomationTarget(settingsRow),
   });
 }
 
@@ -886,6 +949,7 @@ export async function getAutomationRuntimes<
       columns: {
         managerSlackChannelId: true,
         managerDiscordChannelId: true,
+        defaultAutomationTarget: true,
       },
     }),
   ]);
@@ -893,6 +957,8 @@ export async function getAutomationRuntimes<
   const automationMap = buildAutomationMap(automationRows);
   const managerSlackChannelId = settingsRow?.managerSlackChannelId ?? null;
   const managerDiscordChannelId = settingsRow?.managerDiscordChannelId ?? null;
+  const defaultAutomationTarget =
+    getEffectiveDefaultAutomationTarget(settingsRow);
 
   return Object.fromEntries(
     keys.map((key) => [
@@ -902,6 +968,7 @@ export async function getAutomationRuntimes<
         automation: automationMap.get(key),
         managerSlackChannelId,
         managerDiscordChannelId,
+        defaultAutomationTarget,
       }),
     ]),
   ) as Record<TKey, AutomationRuntime>;
@@ -963,10 +1030,14 @@ export function normalizeBackgroundAgentSettings(
   const ciFailureTriage = automationMap.get('ci_failure_triage');
   const mergeAnnouncer = automationMap.get('merge_announcer');
   const platformIssueAlerts = automationMap.get('platform_issue_alerts');
+  const releaseAnnouncements = automationMap.get('release_announcements');
   const mergeAnnouncerTarget = getAutomationCommunicationTarget(mergeAnnouncer);
+  const releaseAnnouncementsTarget =
+    getAutomationCommunicationTarget(releaseAnnouncements);
 
   const managerSlackChannelId = row?.managerSlackChannelId ?? null;
   const managerDiscordChannelId = row?.managerDiscordChannelId ?? null;
+  const defaultAutomationTarget = getEffectiveDefaultAutomationTarget(row);
   const channelAutoStartTargets = getChannelAutoStartTargets(
     channelAutoStart,
     'slack',
@@ -987,6 +1058,7 @@ export function normalizeBackgroundAgentSettings(
     id: row?.id ?? 'default',
     managerSlackChannelId,
     managerDiscordChannelId,
+    defaultAutomationTarget,
     globalAgentInstructions: row?.globalAgentInstructions ?? null,
     timeZone: row?.timeZone ?? null,
     timeZoneUpdatedAt: row?.timeZoneUpdatedAt ?? null,
@@ -1034,6 +1106,28 @@ export function normalizeBackgroundAgentSettings(
     // keeps legacy rows whose enabled bit was derived from channel presence on.
     platformIssueAlertsEnabled:
       getAutomationSettingBoolean(platformIssueAlerts, 'optedOut') !== true,
+    releaseAnnouncementsEnabled:
+      getAutomationSettingBoolean(releaseAnnouncements, 'optedOut') !== true,
+    releaseAnnouncementsTargetProvider:
+      releaseAnnouncementsTarget?.provider === 'sentry'
+        ? null
+        : (releaseAnnouncementsTarget?.provider ?? null),
+    releaseAnnouncementsTargetMode: releaseAnnouncementsTarget
+      ? releaseAnnouncementsTarget.targetKind.endsWith('_user')
+        ? 'direct_message'
+        : 'channel'
+      : null,
+    releaseAnnouncementsTargetChannelId:
+      releaseAnnouncementsTarget?.provider === 'email'
+        ? getAutomationTargetEmailIdentityId(releaseAnnouncementsTarget)
+        : releaseAnnouncementsTarget &&
+            !releaseAnnouncementsTarget.targetKind.endsWith('_user')
+          ? releaseAnnouncementsTarget.externalRef
+          : null,
+    releaseAnnouncementsTargetUserId:
+      releaseAnnouncementsTarget?.provider === 'email'
+        ? releaseAnnouncementsTarget.externalRef
+        : null,
 
     callRoomoteViaEmojiEnabled:
       callRoomoteViaEmoji?.enabled === true &&
@@ -1154,7 +1248,14 @@ export function normalizeBackgroundAgentSettings(
         : 'channel'
       : null,
     mergeAnnouncerTargetChannelId:
-      mergeAnnouncerTarget && !mergeAnnouncerTarget.targetKind.endsWith('_user')
+      mergeAnnouncerTarget?.provider === 'email'
+        ? getAutomationTargetEmailIdentityId(mergeAnnouncerTarget)
+        : mergeAnnouncerTarget &&
+            !mergeAnnouncerTarget.targetKind.endsWith('_user')
+          ? mergeAnnouncerTarget.externalRef
+          : null,
+    mergeAnnouncerTargetUserId:
+      mergeAnnouncerTarget?.provider === 'email'
         ? mergeAnnouncerTarget.externalRef
         : null,
     mergeAnnouncerAdditionalRules:
@@ -1169,10 +1270,19 @@ export function normalizeBackgroundAgentSettings(
           ? resolveAutomationSlackChannelId(automation, managerSlackChannelId)
           : getAutomationSlackChannelTarget(automation);
         const discordChannelId = getAutomationDiscordChannelTarget(automation);
+        const emailTarget = automation?.targets.find(
+          (target) =>
+            target.provider === 'email' && target.targetKind === 'email_user',
+        );
 
         return [
           [descriptor.slackSettingsKey, slackChannelId],
           [descriptor.discordSettingsKey, discordChannelId],
+          [
+            descriptor.emailSettingsKey,
+            getAutomationTargetEmailIdentityId(emailTarget),
+          ],
+          [descriptor.emailUserSettingsKey, emailTarget?.externalRef ?? null],
         ];
       }),
     ),

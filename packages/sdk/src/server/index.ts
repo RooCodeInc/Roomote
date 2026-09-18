@@ -32,13 +32,17 @@ export {
 export { continueDirectTaskAttentionReply } from './lib/task-runs/continue-direct-task-attention-reply';
 export {
   findSessionAttentionNotificationReply,
+  acknowledgeSessionBrowserAttention,
   hasTaskRunAttentionNotification,
+  listSessionBrowserAttentionEvents,
   notifyDirectWebTaskAttention,
   notifyFastWebSessionAttention,
   processSessionAttentionNotificationJob,
   resolveSessionAttentionFastConversation,
   type SessionAttentionKind,
+  type SessionAttentionPresentationKind,
   type SessionAttentionNotificationResult,
+  type BrowserAttentionEvent,
 } from './lib/session-attention-notification';
 export {
   SESSION_ATTENTION_NOTIFICATION_JOB,
@@ -164,6 +168,12 @@ export {
   notifyFastAgentParentOnArtifact,
   type FastArtifactNotificationResult,
 } from './lib/artifacts/notify-fast-agent-parent';
+export {
+  buildReleaseAnnouncement,
+  drainReleaseAnnouncementDeliveries,
+  recordInstalledRelease,
+  type RecordInstalledReleaseResult,
+} from './lib/release-announcements';
 
 export {
   SLACK_ACCOUNT_LINK_EDUCATION_DELAY_MS,
@@ -584,11 +594,27 @@ export {
 } from './lib/mcp/custom-auth-target';
 
 export {
+  canManageCustomMcpServer,
+  customMcpConnectionWhere,
+  findCustomMcpServerById,
+  storeCustomMcpServerMetadata,
+  type ResolvedCustomMcpServer,
+} from './lib/mcp/custom-servers';
+
+export {
   addRemoteCustomMcpForFast,
   describeRegistrationRefusal,
+  prepareCustomMcpOAuthConnection,
   prepareDeploymentCustomMcpOAuthConnection,
   type AddRemoteCustomMcpResult,
 } from './lib/mcp/add-remote-custom-mcp';
+export {
+  connectIntegrationForFast,
+  listNativeIntegrationsForFast,
+  getNativeIntegrationSetupStrategy,
+  type NativeIntegrationSetupStrategy,
+  type ConnectIntegrationResult,
+} from './lib/mcp/connect-integration';
 
 export {
   LINEAR_ORG_CONNECTION_ROLE,

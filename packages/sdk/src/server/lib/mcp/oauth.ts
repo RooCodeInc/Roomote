@@ -78,6 +78,24 @@ export interface OAuthRequestOptions {
    * per-server opt-out exists because some servers reject unknown params.
    */
   resource?: string;
+  tokenRequestFormat?: 'form' | 'json';
+  usePkce?: boolean;
+}
+
+function serializeTokenRequest(
+  body: URLSearchParams,
+  options?: OAuthRequestOptions,
+): { body: string; contentType: string } {
+  if (options?.tokenRequestFormat === 'json') {
+    return {
+      body: JSON.stringify(Object.fromEntries(body)),
+      contentType: 'application/json',
+    };
+  }
+  return {
+    body: body.toString(),
+    contentType: 'application/x-www-form-urlencoded',
+  };
 }
 
 function resolveFetch(options?: OAuthRequestOptions) {
@@ -493,22 +511,24 @@ export async function exchangeCodeForTokens(
     grant_type: 'authorization_code',
     code,
     redirect_uri: redirectUri,
-    code_verifier: codeVerifier,
   });
+  if (options?.usePkce !== false) {
+    body.append('code_verifier', codeVerifier);
+  }
 
   if (options?.resource) {
     body.append('resource', options.resource);
   }
 
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/x-www-form-urlencoded',
-  };
+  const headers: Record<string, string> = {};
   applyTokenEndpointClientAuthentication(body, headers, clientInfo);
+  const serialized = serializeTokenRequest(body, options);
+  headers['Content-Type'] = serialized.contentType;
 
   const response = await resolveFetch(options)(tokenEndpoint, {
     method: 'POST',
     headers,
-    body: body.toString(),
+    body: serialized.body,
   });
 
   if (!response.ok) {
@@ -546,15 +566,15 @@ export async function refreshOAuthToken(
     body.append('resource', options.resource);
   }
 
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/x-www-form-urlencoded',
-  };
+  const headers: Record<string, string> = {};
   applyTokenEndpointClientAuthentication(body, headers, clientInfo);
+  const serialized = serializeTokenRequest(body, options);
+  headers['Content-Type'] = serialized.contentType;
 
   const response = await resolveFetch(options)(tokenEndpoint, {
     method: 'POST',
     headers,
-    body: body.toString(),
+    body: serialized.body,
   });
 
   if (!response.ok) {

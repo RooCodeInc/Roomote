@@ -10,6 +10,7 @@ const {
   mockEq,
   mockAnd,
   mockIsNull,
+  mockGetValidAccessToken,
 } = vi.hoisted(() => ({
   mockFindTaskRun: vi.fn(),
   mockFindConnection: vi.fn(),
@@ -17,6 +18,7 @@ const {
   mockEq: vi.fn((column: unknown, value: unknown) => ({ column, value })),
   mockAnd: vi.fn((...clauses: unknown[]) => clauses),
   mockIsNull: vi.fn((column: unknown) => ({ type: 'isNull', column })),
+  mockGetValidAccessToken: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -45,6 +47,10 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('@roomote/db/encryption', () => ({
   decrypt: vi.fn((value: string) => value.replace(/^enc:/, '')),
+}));
+
+vi.mock('@roomote/sdk/server/mcp-data', () => ({
+  getValidAccessToken: mockGetValidAccessToken,
 }));
 
 import { notionMcp } from '../notion';
@@ -109,6 +115,30 @@ describe('native Notion MCP', () => {
     mockFindEnablement.mockResolvedValue({
       mcpId: 'notion',
     });
+    mockGetValidAccessToken.mockResolvedValue('notion-oauth-token');
+  });
+
+  it('accepts a completed Notion OAuth connection', async () => {
+    mockFindConnection.mockResolvedValue({
+      id: 'conn-notion',
+      userId: null,
+      mcpId: 'notion',
+      enabled: true,
+      authStatus: 'authenticated',
+      authConfig: { type: 'oauth_client' },
+    });
+
+    const response = await postMcp(createApp(createRunToken()), {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/list',
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockGetValidAccessToken).toHaveBeenCalledWith(
+      'conn-notion',
+      'https://api.notion.com',
+    );
   });
 
   it('exposes tools whose permissions are enforced by Notion capabilities', async () => {
@@ -726,14 +756,18 @@ describe('native Notion MCP', () => {
     );
   });
 
-  it('rejects legacy hosted-MCP OAuth credentials', async () => {
+  it('rejects an OAuth connection without a usable access token', async () => {
     mockFindConnection.mockResolvedValue({
+      id: 'conn-notion',
+      userId: null,
+      mcpId: 'notion',
+      enabled: true,
+      authStatus: 'authenticated',
       authConfig: {
         type: 'oauth_client',
-        client_id: 'legacy',
-        registered_redirect_uri: 'https://example.com/callback',
       },
     });
+    mockGetValidAccessToken.mockResolvedValue(undefined);
 
     const response = await postMcp(createApp(createRunToken()), {
       jsonrpc: '2.0',
@@ -743,6 +777,6 @@ describe('native Notion MCP', () => {
     const body = (await response.json()) as { error: { message: string } };
 
     expect(response.status).toBe(500);
-    expect(body.error.message).toContain('internal integration configuration');
+    expect(body.error.message).toContain('valid authentication');
   });
 });

@@ -128,10 +128,10 @@ as per-task auth tokens or workspace paths.
 | `R_INSTANCE_ID`         | Optional             | Stable anonymous deployment identifier sent with telemetry and version checks. Use a random, non-identifying value when overriding it.                                                                                                                                                                                                                                                                                                  |
 | `R_STATUSPAGE_INCIDENTS_URL` | Optional        | URL of a Statuspage-compatible unresolved-incidents JSON feed. Setting it enables incident banners and Slack warnings; leaving it unset disables Statuspage checks.                                                                                                                                                                                                                                                                     |
 | `ROOMOTE_FORCE_TELEMETRY` | Development only   | Force-enables telemetry in development or preview environments when a Ping endpoint is explicitly configured.                                                                                                                                                                                                                                                                                                                           |
-| `ROOMOTE_APP_TMPFS_SIZE`  | Self-host Compose | Size of the temporary filesystem used by the web, API, controller, and bullmq services for Fast runtime files and caches. Defaults to `512m`; changing it requires recreating the affected containers.                                                                                                                                                                                                                                   |
-| `R_API_SHUTDOWN_DRAIN_MS` | Optional           | Milliseconds the API allows in-flight Fast turns to finish during shutdown before aborting the remainder so they resume on the next process. Defaults to `20000`; set to `0` to abort immediately. Keep it below the hosting platform's SIGTERM-to-SIGKILL grace period. Also the fallback for `R_BULLMQ_SHUTDOWN_DRAIN_MS`. |
-| `R_BULLMQ_SHUTDOWN_DRAIN_MS` | Optional        | Same window for the bullmq service, which executes the Fast turns the queue resumes. Defaults to `R_API_SHUTDOWN_DRAIN_MS`, then `20000`. |
-| `R_FAST_DURABLE_RETRY_DISABLED` | Optional       | Set to `true` to keep inference retry waits in the current process instead of parking in-flight Fast turns durably. Durable admission remains enabled.                                                                                                                                                                                                                                                                                 |
+| `ROOMOTE_APP_TMPFS_SIZE`  | Self-host Compose | Size of the temporary filesystem used by the web, API, controller, and bullmq services for session runtime files and caches. Defaults to `512m`; changing it requires recreating the affected containers.                                                                                                                                                                                                                                |
+| `R_API_SHUTDOWN_DRAIN_MS` | Optional           | Milliseconds the API allows in-flight session turns to finish during shutdown before aborting the remainder so they resume on the next process. Defaults to `20000`; set to `0` to abort immediately. Keep it below the hosting platform's SIGTERM-to-SIGKILL grace period. Also the fallback for `R_BULLMQ_SHUTDOWN_DRAIN_MS`. |
+| `R_BULLMQ_SHUTDOWN_DRAIN_MS` | Optional        | Same window for the bullmq service, which executes the session turns the queue resumes. Defaults to `R_API_SHUTDOWN_DRAIN_MS`, then `20000`. |
+| `R_FAST_DURABLE_RETRY_DISABLED` | Optional       | Set to `true` to keep inference retry waits in the current process instead of parking in-flight session turns durably. Durable admission remains enabled.                                                                                                                                                                                                                                                                              |
 | `R_CLOUD_ENABLED`       | Roomote Cloud only   | Deployment-managed switch for Roomote Cloud behavior, including required anonymous analytics and Cloud support integrations. Do not set this for self-hosted deployments.                                                                                                                                                                                                                                                                |
 | `R_CURATED_INTEGRATIONS_DISABLED` | Optional | Operator policy for the curated **Settings > Integrations** catalog, which is enabled by default. Set to `true` and restart Roomote to prevent those integrations from being configured or used. Existing connections remain stored while disabled and become available again once the value is unset. Communications, source-control, inference, sandbox providers, and environment-defined MCP servers are unaffected. |
 | `R_GITHUB_APP_SLUG`     | GitHub setup         | Primary GitHub App slug used by server-rendered setup, mentions, and GitHub integration flows.                                                                                                                                                                                                                                                                                                                                           |
@@ -145,7 +145,7 @@ as per-task auth tokens or workspace paths.
 ### HTTP integrations
 
 These opt-in settings configure [HTTP integrations](/integrations/http-integrations)
-for Fast and sandbox agents. They are independent of the curated integration
+for sessions and sandbox agents. They are independent of the curated integration
 catalog's enablement policy.
 
 | Env var | Required | Used for |
@@ -195,7 +195,7 @@ manifest changes.
 | Env var                                | Required     | Used for                                                                                                                                |
 | -------------------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
 | `R_MODEL`                              | Optional     | Env-level default coding model. Overrides the default selected in **Settings > Models** for new task starts.                            |
-| `R_ORCHESTRATION_MODEL`                | Optional     | Model for Fast answers and coordination of delegated task launches. Defaults to `R_MODEL`.                                              |
+| `R_ORCHESTRATION_MODEL`                | Optional     | Model for session answers and coordination of delegated task launches. Defaults to `R_MODEL`.                                           |
 | `R_SMALL_MODEL`                        | Optional     | Helper model for routing, titles, summaries, and lightweight model calls.                                                               |
 | `R_VISION_MODEL`                       | Optional     | Vision-capable model for visual inspection and screenshot/image work.                                                                   |
 | `R_CODE_REVIEW_MODEL`                  | Optional     | Model for initial PR/MR review and review-sync tasks.                                                                                   |
@@ -390,7 +390,7 @@ manifest changes.
 | `R_ELEVENLABS_VOICE_ID`        | Optional          | ElevenLabs voice ID used for feature-demo narration. Required alongside the API key for narration to be available.                                                       |
 | `R_VOICE_OPENAI_API_KEY`       | Optional          | OpenAI key dedicated to GPT-Live voice conversations. Requires project access to `gpt-live-1`; the general `OPENAI_API_KEY` is not used for Voice. The key stays on the control plane; browsers receive only a server-negotiated WebRTC session answer. |
 | `R_TYPESAFE_API_KEY`           | Optional          | TypeSafe key for the optional [judgment model](/models#judgment-model). A key alone turns on Jev via TypeSafe unless `R_JUDGMENT_MODEL` or Settings chooses otherwise. The key stays on the control plane. |
-| `R_JUDGMENT_MODEL`             | Optional          | Selects the [judgment model](/models#judgment-model): `typesafe`, `vercel` (Jev through Vercel AI Gateway, using `AI_GATEWAY_API_KEY`), or `off`. Overrides the choice in **Settings > Models**. |
+| `R_JUDGMENT_MODEL`             | Optional          | Selects the [judgment model](/models#judgment-model): `typesafe`, `openrouter` (using `OPENROUTER_API_KEY`), `vercel` (using `AI_GATEWAY_API_KEY`), or `off`. Overrides the choice in **Settings > Models**. |
 
 During Microsoft Teams setup, Roomote uses the Microsoft Entra app values for
 the Teams bot by default. Use **Show advanced config** after the Directory
@@ -405,6 +405,8 @@ app ID, or when you need to set the optional bot name or token overrides.
 | `R_LINEAR_CLIENT_SECRET`  | Linear   | Linear OAuth client secret.   |
 | `R_LINEAR_WEBHOOK_SECRET` | Linear   | Linear webhook secret.        |
 | `R_LINEAR_REDIRECT_URI`   | Optional | Linear redirect URI override. |
+| `R_NOTION_CLIENT_ID`      | Optional | Notion public-connection OAuth client ID. Set with `R_NOTION_CLIENT_SECRET` to allow Session-initiated Notion authorization. |
+| `R_NOTION_CLIENT_SECRET`  | Optional | Notion public-connection OAuth client secret. Register `<public Roomote URL>/api/mcp-oauth/callback` in Notion. |
 
 ### Declarative environments
 

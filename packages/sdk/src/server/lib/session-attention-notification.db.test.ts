@@ -9,6 +9,7 @@ import {
   runFactory,
   sessionFactory,
   sessionTasks,
+  setDeploymentExperimentEnabled,
   taskFactory,
   taskMessages,
   userFactory,
@@ -20,9 +21,11 @@ const mocks = vi.hoisted(() => ({
   isPresent: vi.fn(),
   send: vi.fn(),
   voiceActive: vi.fn(),
+  browserCapabilities: vi.fn(),
 }));
 
 vi.mock('@roomote/redis', () => ({
+  getSessionBrowserAttentionCapabilities: mocks.browserCapabilities,
   isSessionUserPresent: mocks.isPresent,
   isSessionVoiceCallActive: mocks.voiceActive,
 }));
@@ -35,10 +38,12 @@ vi.mock('./enqueue-session-attention-notification', () => ({
 }));
 
 import {
+  acknowledgeSessionBrowserAttention,
   findSessionAttentionNotificationReply,
   hasTaskRunAttentionNotification,
   notifyDirectWebTaskAttention,
   notifyFastWebSessionAttention,
+  listSessionBrowserAttentionEvents,
 } from './session-attention-notification';
 
 async function createDirectWebRun(payload: Record<string, unknown> = {}) {
@@ -143,12 +148,19 @@ async function insertFastMessage(input: {
 describe('session attention notifications', () => {
   let messageId: string;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
     mocks.isPresent.mockResolvedValue(false);
     mocks.hasAny.mockResolvedValue(true);
     mocks.enqueue.mockResolvedValue(true);
     mocks.voiceActive.mockResolvedValue(false);
+    mocks.browserCapabilities.mockResolvedValue({
+      granted: [],
+      default: [],
+      denied: [],
+      unsupported: [],
+    });
+    await setDeploymentExperimentEnabled('browserNotifications', false);
     messageId = crypto.randomUUID();
     mocks.send.mockResolvedValue({
       deliveredProviders: ['slack'],
@@ -160,6 +172,64 @@ describe('session attention notifications', () => {
           messageId,
         },
       ],
+    });
+  });
+
+  it('offers an open granted browser first and accepts it without a provider copy', async () => {
+    await setDeploymentExperimentEnabled('browserNotifications', true);
+    mocks.browserCapabilities.mockResolvedValue({
+      granted: ['00000000-0000-4000-8000-000000000001'],
+      default: [],
+      denied: [],
+      unsupported: [],
+    });
+    const { run, session, user } = await createDirectWebRun();
+    const since = new Date(Date.now() - 1_000);
+
+    await expect(
+      notifyDirectWebTaskAttention({
+        runId: run.id,
+        eventId: 'browser-ready',
+        kind: 'result_ready',
+        presentationKind: 'response',
+        message: 'The browser-first response.',
+      }),
+    ).resolves.toBe('deferred');
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: 'task',
+        phase: 'browser_fallback',
+        presentationKind: 'response',
+      }),
+      { delay: 10_000 },
+    );
+
+    const row = await db.query.sessionAttentionNotifications.findFirst({
+      where: (table, { eq }) => eq(table.runId, run.id),
+    });
+    expect(row?.browserOfferedAt).not.toBeNull();
+    await expect(
+      acknowledgeSessionBrowserAttention({
+        sessionId: session.id,
+        userId: user.id,
+        notificationId: row!.id,
+        clientId: '00000000-0000-4000-8000-000000000001',
+        action: 'accepted',
+      }),
+    ).resolves.toBe('accepted');
+    const events = await listSessionBrowserAttentionEvents({
+      sessionId: session.id,
+      userId: user.id,
+      since,
+    });
+    expect(events).toEqual([]);
+    const delivered = await db.query.sessionAttentionNotifications.findFirst({
+      where: (table, { eq }) => eq(table.id, row!.id),
+    });
+    expect(delivered).toMatchObject({
+      outcome: 'delivered',
+      deliveryChannel: 'browser',
     });
   });
 
@@ -181,7 +251,7 @@ describe('session attention notifications', () => {
       sessionId: session.id,
       userId: user.id,
     });
-    expect(mocks.hasAny).toHaveBeenCalledOnce();
+    expect(mocks.hasAny).not.toHaveBeenCalled();
     expect(mocks.enqueue).toHaveBeenCalledOnce();
     expect(mocks.send).not.toHaveBeenCalled();
 
@@ -323,7 +393,7 @@ describe('session attention notifications', () => {
     );
   });
 
-  it('does not claim or retry when the user has no personal destination', async () => {
+  it('records a failed event when no browser or personal destination accepts it', async () => {
     const { run } = await createDirectWebRun();
     mocks.hasAny.mockResolvedValue(false);
 
@@ -333,9 +403,9 @@ describe('session attention notifications', () => {
         kind: 'result_ready',
         eventId: 'completion-without-destination',
       }),
-    ).resolves.toBe('not_applicable');
+    ).resolves.toBe('failed');
 
-    expect(mocks.enqueue).not.toHaveBeenCalled();
+    expect(mocks.enqueue).toHaveBeenCalledOnce();
     expect(mocks.send).not.toHaveBeenCalled();
   });
 

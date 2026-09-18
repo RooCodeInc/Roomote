@@ -355,6 +355,16 @@ class FakeEventSource {
 }
 
 beforeEach(() => {
+  vi.spyOn(window, 'matchMedia').mockReturnValue({
+    matches: true,
+    media: '(min-width: 768px)',
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  } as MediaQueryList);
   window.location.hash = '';
   FakeEventSource.instances = [];
   replyMutate.mockReset();

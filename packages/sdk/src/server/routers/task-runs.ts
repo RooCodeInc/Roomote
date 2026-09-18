@@ -254,10 +254,17 @@ export const taskRunsRouter = router({
       id: z.number(),
       eventId: z.string().min(1),
       kind: z.enum(['result_ready', 'input_needed']),
+      presentationKind: z.enum(['response', 'error', 'input']).optional(),
     }),
     'id',
-  ).mutation(({ input: { id, eventId, kind } }) =>
-    notifyDirectWebTaskAttention({ runId: id, eventId, kind }),
+  ).mutation(({ input: { id, eventId, kind, presentationKind } }) =>
+    notifyDirectWebTaskAttention({
+      runId: id,
+      eventId,
+      kind,
+      presentationKind:
+        presentationKind ?? (kind === 'input_needed' ? 'input' : 'response'),
+    }),
   ),
   touchTaskRunHeartbeat: runScoped(
     z.object({

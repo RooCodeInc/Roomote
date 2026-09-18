@@ -19,11 +19,15 @@ import {
   serviceCredentialVisibilityUpdateSchema,
 } from '@roomote/types';
 
-import { assertEgressUrlAllowed } from './safe-fetch';
+import {
+  assertEgressUrlAllowed,
+  assertEgressUrlResolvesPublic,
+  type DnsLookupFn,
+} from './safe-fetch';
 
 const ERROR = 'Secret request unavailable' as const;
 
-function approvedOrigin(input: string): string {
+function normalizedApprovedOrigin(input: string): string {
   if (/[\s\\%]/.test(input)) throw new Error(ERROR);
   const url = assertEgressUrlAllowed(input);
   if (
@@ -37,6 +41,15 @@ function approvedOrigin(input: string): string {
     throw new Error(ERROR);
   }
   return url.origin;
+}
+
+async function approvedPublicOrigin(
+  input: string,
+  lookup?: DnsLookupFn,
+): Promise<string> {
+  const origin = normalizedApprovedOrigin(input);
+  await assertEgressUrlResolvesPublic(origin, { lookup });
+  return origin;
 }
 
 /**
@@ -140,10 +153,11 @@ export function redactEcho(
 export async function prepareServiceCredential(
   context: ServiceCredentialContext,
   rawArgs: unknown,
+  options: { lookup?: DnsLookupFn } = {},
 ) {
   try {
     const input = serviceCredentialPrepareSchema.parse(rawArgs);
-    const origin = approvedOrigin(input.origin);
+    const origin = await approvedPublicOrigin(input.origin, options.lookup);
     if (input.headerName !== 'authorization' && input.headerPrefix !== '')
       throw new Error(ERROR);
     return await insertServiceCredentialApproval(context, { ...input, origin });
@@ -160,7 +174,7 @@ export async function createServiceCredential(
     const input = serviceCredentialCreateSchema.parse(rawArgs);
     if (/[^\x21-\x7e]/.test(input.secret)) throw new Error(ERROR);
     return await finalizeServiceCredential(context, input, (pending) => {
-      const origin = approvedOrigin(pending.origin);
+      const origin = normalizedApprovedOrigin(pending.origin);
       if (pending.headerName !== 'authorization' && pending.headerPrefix !== '')
         throw new Error(ERROR);
       // Write-capable policy needs explicit consent: the approving client must
@@ -230,10 +244,14 @@ export async function listIntegrations(userId: string) {
 }
 
 /** Settings: policy and key together from the owner; the same checks as an approved key. */
-export async function createIntegration(userId: string, rawArgs: unknown) {
+export async function createIntegration(
+  userId: string,
+  rawArgs: unknown,
+  options: { lookup?: DnsLookupFn } = {},
+) {
   try {
     const input = integrationCreateSchema.parse(rawArgs);
-    const origin = approvedOrigin(input.origin);
+    const origin = await approvedPublicOrigin(input.origin, options.lookup);
     if (input.headerName !== 'authorization' && input.headerPrefix !== '')
       throw new Error(ERROR);
     if (/[^\x21-\x7e]/.test(input.secret)) throw new Error(ERROR);

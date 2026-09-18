@@ -29,7 +29,10 @@ import { loadAutomationThreadFeedbackContext } from './automation-thread-feedbac
 import {
   listConnectedCommunicationProviders,
   buildDestinationTaskPayloadFields,
+  getAutomationDestinationCommunicationProvider,
+  hasAutomationEmailTarget,
   buildDestinationPromptContext,
+  prepareAutomationReportDestination,
   resolveAutomationRuntimeDestination,
   type ResolvedAutomationDestination,
 } from './destination';
@@ -70,11 +73,16 @@ const WINDOW_DAYS: Record<AnnouncerFrequency, number> = {
 };
 const MAX_DETAIL_MESSAGE_CHARS = 3_000;
 
-async function findEligibleDeployments(): Promise<DeploymentContext[]> {
+async function findEligibleDeployments(
+  runtime: Awaited<ReturnType<typeof getAutomationRuntime>>,
+): Promise<DeploymentContext[]> {
   // Merged-PR data comes from the provider-neutral taskPullRequests table,
   // so any active repository qualifies regardless of source-control provider.
   if (!(await hasAnyActiveRepository())) {
     return [];
+  }
+  if (hasAutomationEmailTarget(runtime)) {
+    return [{ slackBotToken: null, slackTeamId: null }];
   }
 
   const rows = await db
@@ -319,7 +327,8 @@ export async function announcerJob(
 
   const now = new Date();
   const result = emptyJobResult();
-  const eligibleDeployments = await findEligibleDeployments();
+  const runtime = await getAutomationRuntime('announcer');
+  const eligibleDeployments = await findEligibleDeployments(runtime);
 
   if (eligibleDeployments.length === 0) {
     result.skippedReason =
@@ -332,7 +341,6 @@ export async function announcerJob(
 
   for (const deployment of eligibleDeployments) {
     try {
-      const runtime = await getAutomationRuntime('announcer');
       const frequency = runtime.enabled ? runtime.scheduleMode : 'off';
 
       if (!frequency || frequency === 'off' || !(frequency in WINDOW_DAYS)) {
@@ -452,12 +460,21 @@ export async function announcerJob(
       let launchedForDeployment = false;
       for (const [routeKey, group] of routeGroups) {
         if (launchedRouteGroups.has(routeKey)) continue;
-        const destination = group.destination;
+        const destination =
+          group.destination.provider === 'email'
+            ? await prepareAutomationReportDestination(group.destination, {
+                subject: `Roomote merged pull request digest - ${now.toISOString().slice(0, 10)}`,
+                conversationKey: `builtin-automation:announcer:${now.toISOString()}:${routeKey}`,
+              })
+            : group.destination;
         const channelId = destination.channelId;
         const recentThreadFeedback = await loadAutomationThreadFeedbackContext({
           automationKey: 'announcer',
           slackChannelId: channelId,
-          surface: destination.provider,
+          surface:
+            destination.provider === 'email'
+              ? getAutomationDestinationCommunicationProvider(destination)
+              : destination.provider,
           now,
         });
         const selectedRepositories = [

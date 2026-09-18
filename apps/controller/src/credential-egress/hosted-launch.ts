@@ -25,6 +25,7 @@ export async function prepareHostedWorkerLaunch(input: {
   >(
     environment: Record<string, string>,
     launch: (environment: Record<string, string>) => Promise<TResult>,
+    admissionSignal?: AbortSignal,
   ): Promise<TResult> {
     const result = await launch({
       ...environment,
@@ -40,7 +41,7 @@ export async function prepareHostedWorkerLaunch(input: {
 
     // The launched worker is waiting on its bootstrap nonce. Admission errors
     // propagate so the provider adapter applies its normal launch cleanup.
-    await plan?.admit();
+    await plan?.admit(admissionSignal);
 
     return result;
   };

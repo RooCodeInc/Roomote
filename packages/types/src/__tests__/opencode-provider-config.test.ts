@@ -217,4 +217,33 @@ describe('mergeOpenAiCompatibleProviderConfig', () => {
       },
     });
   });
+
+  it('can optimistically mark every configured custom model as image capable', () => {
+    expect(
+      mergeOpenAiCompatibleProviderConfig(
+        {},
+        {
+          VLLM_BASE_URL: 'https://vllm.example.com/v1',
+          VLLM_API_KEY: 'secret',
+        },
+        ['vllm/custom-model'],
+        undefined,
+        {},
+        {},
+        { assumeImageSupport: true },
+      ),
+    ).toMatchObject({
+      vllm: {
+        models: {
+          'custom-model': {
+            attachment: true,
+            modalities: {
+              input: ['text', 'image'],
+              output: ['text'],
+            },
+          },
+        },
+      },
+    });
+  });
 });

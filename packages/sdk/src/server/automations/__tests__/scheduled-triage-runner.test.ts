@@ -37,6 +37,12 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 vi.mock('../destination', () => ({
+  hasAutomationEmailTarget: vi.fn(
+    (runtime) =>
+      runtime.targets?.some(
+        (target: { provider?: string }) => target.provider === 'email',
+      ) || runtime.defaultAutomationTarget?.provider === 'email',
+  ),
   buildDestinationTaskPayloadFields: mockBuildDestinationTaskPayloadFields,
   listConnectedCommunicationProviders: mockListConnectedCommunicationProviders,
   resolveAutomationRuntimeDestination: mockResolveAutomationRuntimeDestination,

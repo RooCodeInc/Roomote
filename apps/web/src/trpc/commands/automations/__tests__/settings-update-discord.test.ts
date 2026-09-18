@@ -39,6 +39,7 @@ const mockRunAutomationNow = vi.hoisted(() =>
 );
 const mockResolveAutomationRepositoryDestination = vi.hoisted(() => vi.fn());
 const mockResolveAutomationRuntimeDestination = vi.hoisted(() => vi.fn());
+const mockCanStartAgentMailConversationWithUser = vi.hoisted(() => vi.fn());
 vi.mock('@roomote/sdk/server', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@roomote/sdk/server')>();
   mockResolveAutomationRepositoryDestination.mockImplementation(
@@ -54,6 +55,8 @@ vi.mock('@roomote/sdk/server', async (importOriginal) => {
       mockResolveAutomationRepositoryDestination,
     resolveAutomationRuntimeDestination:
       mockResolveAutomationRuntimeDestination,
+    canStartAgentMailConversationWithUser:
+      mockCanStartAgentMailConversationWithUser,
   };
 });
 
@@ -172,6 +175,10 @@ function buildInput(
     platformIssueAlertsEnabled: true,
     platformIssueSlackChannel: null,
     platformIssueDiscordChannel: null,
+    releaseAnnouncementsEnabled: true,
+    releaseAnnouncementsTargetProvider: null,
+    releaseAnnouncementsTargetMode: 'channel',
+    releaseAnnouncementsTargetChannelId: null,
     ...overrides,
   };
 }
@@ -255,7 +262,9 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
     mockRunAutomationNow.mockClear();
     mockResolveAutomationRepositoryDestination.mockClear();
     mockResolveAutomationRuntimeDestination.mockClear();
+    mockCanStartAgentMailConversationWithUser.mockClear();
     mockResolveRules.mockReset();
+    mockCanStartAgentMailConversationWithUser.mockResolvedValue(true);
     // Internal automation rows are referenced by other suites' task fixtures.
     await db
       .delete(automations)
@@ -273,6 +282,100 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
     await db.delete(discordInstallations);
     await db.delete(slackInstallations);
     await db.delete(users).where(eq(users.id, adminAuth.userId));
+  });
+
+  it('saves and reloads an exact owner-bound Email destination', async () => {
+    const identityId = 'verified:user-admin:opaque';
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'managerStats',
+        managerStatsFrequency: 'weekly',
+        managerStatsSlackChannel: null,
+        managerStatsDiscordChannel: null,
+        managerStatsEmailIdentityId: identityId,
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(mockCanStartAgentMailConversationWithUser).toHaveBeenCalledWith(
+      adminAuth.userId,
+      identityId,
+    );
+    const automation = await db.query.automations.findFirst({
+      where: eq(automations.key, 'manager_stats'),
+    });
+    expect(automation?.targets).toEqual([
+      {
+        provider: 'email',
+        targetKind: 'email_user',
+        externalRef: adminAuth.userId,
+        metadata: { emailIdentityId: identityId },
+      },
+    ]);
+    const settings = await getBackgroundAgentSettingsForDeployment();
+    expect(settings.managerStatsEmailIdentityId).toBe(identityId);
+    expect(settings.managerStatsEmailUserId).toBe(adminAuth.userId);
+  });
+
+  it('preserves an unchanged unavailable Email destination without substitution', async () => {
+    const identityId = 'verified:user-admin:old';
+    await upsertAutomation(db, {
+      key: 'provider_usage_limit',
+      enabled: true,
+      schedule: { mode: 'every_hour' },
+      targets: [
+        {
+          provider: 'email',
+          targetKind: 'email_user',
+          externalRef: adminAuth.userId,
+          metadata: { emailIdentityId: identityId },
+        },
+      ],
+    });
+    mockCanStartAgentMailConversationWithUser.mockResolvedValue(false);
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'providerUsageLimit',
+        providerUsageLimitFrequency: 'every_hour',
+        providerUsageLimitThreshold: 80,
+        providerUsageLimitEmailIdentityId: identityId,
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(mockCanStartAgentMailConversationWithUser).not.toHaveBeenCalled();
+    const automation = await db.query.automations.findFirst({
+      where: eq(automations.key, 'provider_usage_limit'),
+    });
+    expect(automation?.targets).toContainEqual({
+      provider: 'email',
+      targetKind: 'email_user',
+      externalRef: adminAuth.userId,
+      metadata: { emailIdentityId: identityId },
+    });
+  });
+
+  it('rejects a newly selected unavailable Email identity', async () => {
+    mockCanStartAgentMailConversationWithUser.mockResolvedValue(false);
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'managerStats',
+        managerStatsFrequency: 'weekly',
+        managerStatsEmailIdentityId: 'verified:user-admin:missing',
+      }),
+    );
+
+    expect(result).toEqual({
+      success: false,
+      fieldErrors: {
+        managerStatsEmailIdentityId:
+          'This Email destination is no longer available.',
+      },
+    });
   });
 
   it('tracks a built-in automation when its enabled state changes', async () => {
@@ -798,6 +901,9 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
       buildInput({
         savingAutomation: 'managerChannel',
         managerDiscordChannel: 'D111',
+        defaultDestinationProvider: 'discord',
+        defaultDestinationMode: 'channel',
+        defaultDestinationChannelId: 'D111',
       }),
     );
 
@@ -806,11 +912,192 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
     if (result.success) {
       expect(result.settings.managerDiscordChannelId).toBe('D111');
       expect(result.settings.managerSlackChannelId).toBeNull();
+      expect(result.settings.defaultAutomationTarget).toEqual({
+        provider: 'discord',
+        targetKind: 'discord_channel',
+        externalRef: 'D111',
+      });
       expect(result.settings.suggesterFrequency).toBe('off');
       expect(result.settings.announcerFrequency).toBe('off');
       expect(result.settings.managerStatsFrequency).toBe('off');
     }
   }, 15_000);
+
+  it('derives the legacy manager channel from a submitted channel default', async () => {
+    await insertAvailableDiscordChannel({
+      guildId: 'guild-1',
+      channelId: 'D111',
+      channelName: 'managers',
+    });
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'managerChannel',
+        managerSlackChannel: null,
+        managerDiscordChannel: null,
+        defaultDestinationProvider: 'discord',
+        defaultDestinationMode: 'channel',
+        defaultDestinationChannelId: 'D111',
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.settings.managerDiscordChannelId).toBe('D111');
+      expect(result.settings.defaultAutomationTarget).toEqual({
+        provider: 'discord',
+        targetKind: 'discord_channel',
+        externalRef: 'D111',
+      });
+    }
+  }, 15_000);
+
+  it('rejects a channel default on a provider without channel destinations', async () => {
+    await db.insert(deploymentSettings).values({
+      id: 'default',
+      managerSlackChannelId: 'C123OLD',
+    });
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'managerChannel',
+        defaultDestinationProvider: 'teams',
+        defaultDestinationMode: 'channel',
+        defaultDestinationChannelId: 'teams-conversation',
+      }),
+    );
+
+    expect(result.success).toBe(false);
+    const settings = await db.query.deploymentSettings.findFirst();
+    expect(settings?.managerSlackChannelId).toBe('C123OLD');
+  }, 15_000);
+
+  it('saves a concrete Slack DM as the deployment default destination', async () => {
+    await insertSlackInstallation();
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'managerChannel',
+        managerSlackChannel: null,
+        managerDiscordChannel: null,
+        defaultDestinationProvider: 'slack',
+        defaultDestinationMode: 'direct_message',
+        defaultDestinationChannelId: null,
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.settings.defaultAutomationTarget).toEqual({
+        provider: 'slack',
+        targetKind: 'slack_user',
+        externalRef: adminAuth.userId,
+      });
+      expect(result.settings.managerSlackChannelId).toBeNull();
+      expect(result.settings.managerDiscordChannelId).toBeNull();
+    }
+  }, 15_000);
+
+  it('saves a concrete Email recipient as the deployment default destination', async () => {
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'managerChannel',
+        managerSlackChannel: null,
+        managerDiscordChannel: null,
+        defaultDestinationProvider: 'email',
+        defaultDestinationMode: 'direct_message',
+        defaultDestinationChannelId: 'verified:admin:account',
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.settings.defaultAutomationTarget).toEqual({
+        provider: 'email',
+        targetKind: 'email_user',
+        externalRef: adminAuth.userId,
+        metadata: { emailIdentityId: 'verified:admin:account' },
+      });
+    }
+  }, 15_000);
+
+  it('configures and disables installed release announcements as a built-in automation', async () => {
+    await insertSlackInstallation();
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'releaseAnnouncements',
+        releaseAnnouncementsEnabled: false,
+        releaseAnnouncementsTargetProvider: 'slack',
+        releaseAnnouncementsTargetMode: 'channel',
+        releaseAnnouncementsTargetChannelId: 'C-RELEASES',
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.settings.releaseAnnouncementsEnabled).toBe(false);
+      expect(result.settings.releaseAnnouncementsTargetProvider).toBe('slack');
+      expect(result.settings.releaseAnnouncementsTargetChannelId).toBe(
+        'C-RELEASES',
+      );
+    }
+    await expect(
+      db.query.automations.findFirst({
+        where: eq(automations.key, 'release_announcements'),
+      }),
+    ).resolves.toMatchObject({
+      enabled: false,
+      settings: { optedOut: true },
+      targets: [
+        {
+          provider: 'slack',
+          targetKind: 'slack_channel',
+          externalRef: 'C-RELEASES',
+        },
+      ],
+    });
+    expect(mockCaptureActivationAutomationChanged).toHaveBeenCalledWith(
+      'disabled',
+      'release_announcements',
+    );
+  });
+
+  it('manually tests release announcements with the normal saved destination', async () => {
+    await insertAvailableDiscordChannel({
+      guildId: 'guild-1',
+      channelId: 'D-RELEASES',
+      channelName: 'releases',
+    });
+    await upsertAutomation(db, {
+      key: 'release_announcements',
+      enabled: true,
+      settings: { optedOut: false },
+      targets: [
+        {
+          provider: 'discord',
+          targetKind: 'discord_channel',
+          externalRef: 'D-RELEASES',
+        },
+      ],
+    });
+
+    await triggerAutomationCommand(adminAuth, {
+      automationKey: 'release_announcements',
+    });
+
+    expect(mockRunAutomationNow).toHaveBeenCalledWith('release_announcements', {
+      destination: expect.objectContaining({
+        provider: 'discord',
+        channelId: 'D-RELEASES',
+      }),
+    });
+  });
 
   it('switches a Discord manager channel to Slack and clears Discord', async () => {
     await upsertAutomation(db, {

@@ -55,6 +55,14 @@ vi.mock('@roomote/db/server', () => ({
 vi.mock('@roomote/sdk/server', () => ({
   getMcpOauthReplay: getMcpOauthReplayMock,
   resolveCustomMcpAuthTarget: resolveCustomMcpAuthTargetMock,
+  // The real rule, so these suites exercise who may authorize a custom server.
+  canManageCustomMcpServer: (
+    server: { ownerUserId: string | null; createdByUserId: string | null },
+    actor: { userId: string; isAdmin: boolean },
+  ) =>
+    server.ownerUserId
+      ? server.ownerUserId === actor.userId
+      : actor.isAdmin || server.createdByUserId === actor.userId,
   updateMcpOauthReplay: updateMcpOauthReplayMock,
 }));
 vi.mock('@roomote/types', () => ({
@@ -132,6 +140,8 @@ describe('GET /api/mcp-oauth/replay/[token]', () => {
     });
     resolveCustomMcpAuthTargetMock.mockResolvedValue({
       serverId: 'server-1',
+      ownerUserId: null,
+      createdByUserId: null,
       name: 'accounting',
       url: 'https://mcp.example.com/mcp',
     });
@@ -152,7 +162,7 @@ describe('GET /api/mcp-oauth/replay/[token]', () => {
     expect(updateMcpOauthReplayMock).not.toHaveBeenCalled();
   });
 
-  it('does not let a non-admin use a custom MCP replay', async () => {
+  it('does not let a member authorize a shared server they did not add', async () => {
     authorizeMock.mockResolvedValue({
       success: true,
       userId: 'user-1',
@@ -166,6 +176,8 @@ describe('GET /api/mcp-oauth/replay/[token]', () => {
     });
     resolveCustomMcpAuthTargetMock.mockResolvedValue({
       serverId: 'server-1',
+      ownerUserId: null,
+      createdByUserId: null,
       name: 'accounting',
       url: 'https://mcp.example.com/mcp',
     });
@@ -177,10 +189,89 @@ describe('GET /api/mcp-oauth/replay/[token]', () => {
     expect(response.headers.get('location')).toBe(
       'https://roomote.example/error?message=Unknown%20MCP%20integration',
     );
-    expect(mcpConnectionsFindFirstMock).not.toHaveBeenCalled();
   });
 
-  it('explains when a custom authorization link belongs to another admin', async () => {
+  it('lets the member who added a shared server authorize it', async () => {
+    authorizeMock.mockResolvedValue({
+      success: true,
+      userId: 'user-1',
+      isAdmin: false,
+    });
+    getMcpOauthReplayMock.mockResolvedValue({
+      mcpId: 'custom:server-1',
+      connectionId: 'connection-custom-1',
+      connectionRole: 'default',
+      userId: 'user-1',
+      redirectTo: '/sessions/s1',
+    });
+    resolveCustomMcpAuthTargetMock.mockResolvedValue({
+      serverId: 'server-1',
+      ownerUserId: null,
+      createdByUserId: 'user-1',
+      name: 'accounting',
+      url: 'https://mcp.example.com/mcp',
+    });
+    mcpConnectionsFindFirstMock.mockResolvedValue({
+      id: 'connection-custom-1',
+      userId: null,
+    });
+
+    const response = await GET(buildRequest(), {
+      params: Promise.resolve({ token: TOKEN }),
+    });
+
+    expect(response.headers.get('location')).toContain(
+      '/api/mcp-oauth/initiate/connection-custom-1',
+    );
+  });
+
+  it('lets an owner authorize their personal server and nobody else', async () => {
+    getMcpOauthReplayMock.mockResolvedValue({
+      mcpId: 'custom:server-1',
+      connectionId: 'connection-personal-1',
+      connectionRole: 'default',
+      userId: 'user-1',
+      redirectTo: '/sessions/s1',
+    });
+    resolveCustomMcpAuthTargetMock.mockResolvedValue({
+      serverId: 'server-1',
+      ownerUserId: 'user-1',
+      createdByUserId: 'user-1',
+      name: 'intercom',
+      url: 'https://mcp.example.com/mcp',
+    });
+
+    authorizeMock.mockResolvedValue({
+      success: true,
+      userId: 'user-1',
+      isAdmin: false,
+    });
+    mcpConnectionsFindFirstMock.mockResolvedValue({
+      id: 'connection-personal-1',
+      userId: 'user-1',
+    });
+    const asOwner = await GET(buildRequest(), {
+      params: Promise.resolve({ token: TOKEN }),
+    });
+    expect(asOwner.headers.get('location')).toContain(
+      '/api/mcp-oauth/initiate/connection-personal-1',
+    );
+
+    // A deployment connection posing as the personal server's is refused,
+    // even for the owner: the connection must be the owner's own row.
+    mcpConnectionsFindFirstMock.mockResolvedValue({
+      id: 'connection-personal-1',
+      userId: null,
+    });
+    const wrongConnection = await GET(buildRequest(), {
+      params: Promise.resolve({ token: TOKEN }),
+    });
+    expect(wrongConnection.headers.get('location')).toBe(
+      'https://roomote.example/error?message=Unknown%20MCP%20integration',
+    );
+  });
+
+  it('explains when a custom authorization link belongs to another member', async () => {
     authorizeMock.mockResolvedValue({
       success: true,
       userId: 'user-2',
@@ -198,7 +289,7 @@ describe('GET /api/mcp-oauth/replay/[token]', () => {
     });
 
     expect(response.headers.get('location')).toBe(
-      'https://roomote.example/error?message=This%20authorization%20link%20belongs%20to%20another%20administrator',
+      'https://roomote.example/error?message=This%20authorization%20link%20belongs%20to%20another%20member',
     );
     expect(resolveCustomMcpAuthTargetMock).not.toHaveBeenCalled();
   });

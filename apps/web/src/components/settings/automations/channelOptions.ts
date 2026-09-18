@@ -1,6 +1,6 @@
 export const DISCORD_DESTINATION_OPTION_PREFIX = 'discord:';
 
-export type SlackChannelOption = {
+type SlackChannelOption = {
   id: string;
   name: string;
   label: string;
@@ -24,7 +24,7 @@ export function formatSlackChannelValue(
   return `#${trimmedValue}`;
 }
 
-export function matchesSlackChannelOption(
+function matchesSlackChannelOption(
   value: string | null | undefined,
   option: SlackChannelOption,
 ): boolean {
@@ -103,18 +103,6 @@ export function buildAutomationDiscordDestinationOptions(params: {
     },
     ...options,
   ];
-}
-
-export function isManagerChannelSelectionDisabled(params: {
-  slackConnected: boolean;
-  isFetching: boolean;
-  hasValue: boolean;
-  isConfigured: boolean;
-}): boolean {
-  return (
-    params.isFetching ||
-    (!params.slackConnected && !params.hasValue && !params.isConfigured)
-  );
 }
 
 export function shouldShowManagerSlackChannelWarning({

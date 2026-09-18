@@ -1,7 +1,7 @@
 import {
   AUTOMATION_DESTINATION_DESCRIPTORS,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_LIST,
-  type AutomationCapableCommunicationProvider,
+  type AutomationDestinationProvider,
   type ChannelAutoStartLaunchMode,
   type ConflictResolverMaxPrAgeDays,
   type ScheduleOnlyBackgroundAutomationFrequency,
@@ -53,12 +53,14 @@ type DestinationChannelFormFields = {
   [K in
     | (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['slackField']
     | (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['discordField']]: string;
+} & {
+  [K in (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['emailField']]?: string;
 };
 
 const DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID = Object.fromEntries(
   AUTOMATION_DESTINATION_DESCRIPTORS.map((descriptor) => [
     descriptor.automationId,
-    [descriptor.slackField, descriptor.discordField],
+    [descriptor.slackField, descriptor.discordField, descriptor.emailField],
   ]),
 ) as Record<
   (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['automationId'],
@@ -98,6 +100,9 @@ export type FormState = {
   channelAutoStartEnabled: boolean;
   managerSlackChannel: string;
   managerDiscordChannel: string;
+  defaultDestinationProvider: 'none' | AutomationDestinationProvider;
+  defaultDestinationMode: 'channel' | 'direct_message';
+  defaultDestinationChannelId: string;
   managerStatsFrequency: ManagerStatsFrequency;
   providerUsageLimitFrequency: ProviderUsageLimitFrequency;
   providerUsageLimitThreshold: number;
@@ -120,7 +125,11 @@ export type FormState = {
   announcerFrequency: AnnouncerFrequency;
   announcerInstructions: string;
   platformIssueAlertsEnabled: boolean;
-  mergeAnnouncerTargetProvider: 'none' | AutomationCapableCommunicationProvider;
+  releaseAnnouncementsEnabled?: boolean;
+  releaseAnnouncementsTargetProvider: 'none' | AutomationDestinationProvider;
+  releaseAnnouncementsTargetMode: 'channel' | 'direct_message';
+  releaseAnnouncementsTargetChannelId: string;
+  mergeAnnouncerTargetProvider: 'none' | AutomationDestinationProvider;
   mergeAnnouncerTargetMode: 'channel' | 'direct_message';
   mergeAnnouncerTargetChannelId: string;
 } & DestinationChannelFormFields &
@@ -140,7 +149,8 @@ export type AutomationId =
   | 'conflictResolver'
   | 'suggester'
   | 'announcer'
-  | 'platformIssueAlerts';
+  | 'platformIssueAlerts'
+  | 'releaseAnnouncements';
 
 const REVIEWER_FIELDS: Array<keyof FormState> = [
   'reviewerEnabled',
@@ -179,6 +189,9 @@ const CHANNEL_AUTO_START_FIELDS: Array<keyof FormState> = [
 const MANAGER_CHANNEL_FIELDS: Array<keyof FormState> = [
   'managerSlackChannel',
   'managerDiscordChannel',
+  'defaultDestinationProvider',
+  'defaultDestinationMode',
+  'defaultDestinationChannelId',
 ];
 
 const MANAGER_STATS_FIELDS: Array<keyof FormState> = [
@@ -229,6 +242,13 @@ const PLATFORM_ISSUE_ALERT_FIELDS: Array<keyof FormState> = [
   ...DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID.platformIssueAlerts,
 ];
 
+const RELEASE_ANNOUNCEMENT_FIELDS: Array<keyof FormState> = [
+  'releaseAnnouncementsEnabled',
+  'releaseAnnouncementsTargetProvider',
+  'releaseAnnouncementsTargetMode',
+  'releaseAnnouncementsTargetChannelId',
+];
+
 const SCHEDULE_ONLY_AUTOMATION_FIELDS = Object.fromEntries(
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_LIST.map((automation) => [
     automation.id,
@@ -276,6 +296,7 @@ const AUTOMATION_FIELDS: Record<AutomationId, Array<keyof FormState>> = {
   suggester: SUGGESTER_FIELDS,
   announcer: ANNOUNCER_FIELDS,
   platformIssueAlerts: PLATFORM_ISSUE_ALERT_FIELDS,
+  releaseAnnouncements: RELEASE_ANNOUNCEMENT_FIELDS,
 };
 
 export function isAutomationDirty(
@@ -341,10 +362,12 @@ function buildDestinationChannelSaveInput(formState: FormState) {
         descriptor.discordField,
         formState[descriptor.discordField].trim() || null,
       ],
+      [descriptor.emailField, formState[descriptor.emailField]?.trim() || null],
     ]),
   ) as Record<
     | (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['slackField']
-    | (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['discordField'],
+    | (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['discordField']
+    | (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['emailField'],
     string | null
   >;
 }
@@ -418,6 +441,13 @@ export function buildAutomationSettingsSaveInput(
       })),
     managerSlackChannel: stateToSave.managerSlackChannel.trim() || null,
     managerDiscordChannel: stateToSave.managerDiscordChannel.trim() || null,
+    defaultDestinationProvider:
+      stateToSave.defaultDestinationProvider === 'none'
+        ? null
+        : stateToSave.defaultDestinationProvider,
+    defaultDestinationMode: stateToSave.defaultDestinationMode,
+    defaultDestinationChannelId:
+      stateToSave.defaultDestinationChannelId.trim() || null,
     managerStatsFrequency: stateToSave.managerStatsFrequency,
     providerUsageLimitFrequency: stateToSave.providerUsageLimitFrequency,
     providerUsageLimitThreshold: stateToSave.providerUsageLimitThreshold,
@@ -442,6 +472,15 @@ export function buildAutomationSettingsSaveInput(
     announcerFrequency: stateToSave.announcerFrequency,
     announcerInstructions: stateToSave.announcerInstructions.trim() || null,
     platformIssueAlertsEnabled: stateToSave.platformIssueAlertsEnabled,
+    releaseAnnouncementsEnabled:
+      stateToSave.releaseAnnouncementsEnabled ?? true,
+    releaseAnnouncementsTargetProvider:
+      stateToSave.releaseAnnouncementsTargetProvider === 'none'
+        ? null
+        : stateToSave.releaseAnnouncementsTargetProvider,
+    releaseAnnouncementsTargetMode: stateToSave.releaseAnnouncementsTargetMode,
+    releaseAnnouncementsTargetChannelId:
+      stateToSave.releaseAnnouncementsTargetChannelId.trim() || null,
     ...buildDestinationChannelSaveInput(stateToSave),
   };
 }
