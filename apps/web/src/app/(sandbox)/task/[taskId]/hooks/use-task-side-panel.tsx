@@ -12,7 +12,7 @@ import {
 import { usePathname, useSearchParams } from 'next/navigation';
 
 import type { TaskArtifact } from '@/types';
-import { groupArtifactsByPath } from '../sidebar-actions/utils';
+import { getArtifactGalleryGroups } from '../sidebar-actions/utils';
 
 type TaskSidePanelView =
   | 'preview'
@@ -260,7 +260,7 @@ export function TaskSidePanelProvider({
   );
   const [previewPath, setPreviewPath] = useState<string | null>(null);
   const artifactGroups = useMemo(
-    () => groupArtifactsByPath(artifacts),
+    () => getArtifactGalleryGroups(artifacts).ordered,
     [artifacts],
   );
 
@@ -450,13 +450,18 @@ export function TaskSidePanelProvider({
   // -------------------------------------------------------------------
   const goToRelativeArtifact = useCallback(
     (offset: -1 | 1) => {
-      const nextGroup = artifactGroups[selectedArtifactIndex + offset];
-
-      if (!nextGroup) {
+      if (artifactGroups.length < 2 || selectedArtifactIndex < 0) {
         return;
       }
 
-      openArtifactDetail(nextGroup.latest.path, nextGroup.latest.version);
+      const nextIndex =
+        (selectedArtifactIndex + offset + artifactGroups.length) %
+        artifactGroups.length;
+      const nextGroup = artifactGroups[nextIndex];
+
+      if (nextGroup) {
+        openArtifactDetail(nextGroup.latest.path, nextGroup.latest.version);
+      }
     },
     [artifactGroups, openArtifactDetail, selectedArtifactIndex],
   );
@@ -540,10 +545,10 @@ export function TaskSidePanelProvider({
       artifactsMode,
       selectedArtifactPath,
       selectedArtifactVersion,
-      canGoToPreviousArtifact: selectedArtifactIndex > 0,
+      canGoToPreviousArtifact:
+        selectedArtifactIndex >= 0 && artifactGroups.length > 1,
       canGoToNextArtifact:
-        selectedArtifactIndex >= 0 &&
-        selectedArtifactIndex < artifactGroups.length - 1,
+        selectedArtifactIndex >= 0 && artifactGroups.length > 1,
       previewServiceName,
       previewPath,
       openPreviewView,

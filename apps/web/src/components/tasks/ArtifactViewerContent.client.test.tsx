@@ -104,6 +104,8 @@ vi.mock('@/components/system', () => ({
   Globe: () => <svg aria-hidden="true" />,
   LucideLink: () => <svg aria-hidden="true" />,
   Loader2Icon: () => <svg aria-hidden="true" />,
+  ChevronLeftIcon: () => <svg aria-hidden="true" />,
+  ChevronRight: () => <svg aria-hidden="true" />,
   Button: ({
     children,
     asChild,
@@ -195,6 +197,99 @@ describe('ArtifactViewerContent', () => {
       title: 'Parent Session',
     });
     replyMutationMock.mockResolvedValue({ success: true });
+  });
+
+  const navigationArtifact = {
+    id: 'artifact-navigation',
+    taskId: 'task-1',
+    path: 'notes/navigation.md',
+    version: 1,
+    artifactType: 'general' as const,
+    contentType: 'text/markdown',
+    size: 128,
+    createdAt: new Date('2026-05-22T00:00:00.000Z'),
+    downloadUrl: 'https://example.test/navigation',
+    content: 'Navigation content',
+  };
+
+  it('navigates with buttons and focus-scoped unmodified arrow keys', () => {
+    const onPreviousArtifact = vi.fn();
+    const onNextArtifact = vi.fn();
+    render(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={navigationArtifact}
+        onPreviousArtifact={onPreviousArtifact}
+        onNextArtifact={onNextArtifact}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Previous artifact' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next artifact' }));
+
+    const viewer = screen.getByRole('region', { name: 'Artifact viewer' });
+    expect(viewer).toHaveFocus();
+    fireEvent.keyDown(viewer, { key: 'ArrowLeft' });
+    fireEvent.keyDown(viewer, { key: 'ArrowRight' });
+    fireEvent.keyDown(document.body, { key: 'ArrowRight' });
+
+    expect(onPreviousArtifact).toHaveBeenCalledTimes(2);
+    expect(onNextArtifact).toHaveBeenCalledTimes(2);
+  });
+
+  it('leaves modified keys, editable controls, media, and text selection alone', () => {
+    const onPreviousArtifact = vi.fn();
+    const onNextArtifact = vi.fn();
+    const { rerender } = render(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={navigationArtifact}
+        onPreviousArtifact={onPreviousArtifact}
+        onNextArtifact={onNextArtifact}
+      />,
+    );
+
+    const viewer = screen.getByRole('region', { name: 'Artifact viewer' });
+    fireEvent.keyDown(viewer, { key: 'ArrowLeft', altKey: true });
+    fireEvent.keyDown(screen.getByRole('checkbox'), { key: 'ArrowRight' });
+
+    const getSelectionSpy = vi
+      .spyOn(window, 'getSelection')
+      .mockReturnValue({ isCollapsed: false } as Selection);
+    fireEvent.keyDown(viewer, { key: 'ArrowRight' });
+    getSelectionSpy.mockRestore();
+
+    rerender(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={{
+          ...navigationArtifact,
+          path: 'proof/demo.mp4',
+          contentType: 'video/mp4',
+          content: undefined,
+        }}
+        onPreviousArtifact={onPreviousArtifact}
+        onNextArtifact={onNextArtifact}
+      />,
+    );
+    fireEvent.keyDown(document.querySelector('video')!, { key: 'ArrowLeft' });
+
+    expect(onPreviousArtifact).not.toHaveBeenCalled();
+    expect(onNextArtifact).not.toHaveBeenCalled();
+  });
+
+  it('omits artifact navigation for a single item', () => {
+    render(
+      <ArtifactViewerContent taskId="task-1" artifact={navigationArtifact} />,
+    );
+
+    expect(
+      screen.queryByRole('button', { name: 'Previous artifact' }),
+    ).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Next artifact' })).toBeNull();
+    expect(
+      screen.getByRole('region', { name: 'Artifact viewer' }),
+    ).not.toHaveAttribute('tabindex');
   });
 
   it.each([

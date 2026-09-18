@@ -152,12 +152,26 @@ vi.mock('@/components/tasks/ArtifactViewerContent', () => ({
   ArtifactViewerContent: ({
     artifact,
     isLoading,
+    onPreviousArtifact,
+    onNextArtifact,
   }: {
     artifact: { path: string } | null;
     isLoading?: boolean;
+    onPreviousArtifact?: () => void;
+    onNextArtifact?: () => void;
   }) => (
     <div data-loading={isLoading || undefined}>
       Artifact preview: {artifact?.path}
+      {onPreviousArtifact ? (
+        <button type="button" onClick={onPreviousArtifact}>
+          Previous artifact
+        </button>
+      ) : null}
+      {onNextArtifact ? (
+        <button type="button" onClick={onNextArtifact}>
+          Next artifact
+        </button>
+      ) : null}
     </div>
   ),
 }));
@@ -2136,6 +2150,91 @@ describe('SessionWorkspace', () => {
         name: 'Open Result from Second execution',
       }),
     ).toBeVisible();
+  });
+
+  it('cycles through the rendered artifact section order and wraps', () => {
+    const taskWithArtifacts = {
+      ...singleTask,
+      artifacts: [
+        {
+          id: 'file',
+          path: 'latest.txt',
+          version: 2,
+          artifactType: 'general' as const,
+          contentType: 'text/plain',
+          size: 100,
+          createdAt: new Date('2026-01-05T00:00:00.000Z'),
+        },
+        {
+          id: 'video',
+          path: 'demo.mp4',
+          version: 1,
+          artifactType: 'visual-proof' as const,
+          contentType: 'video/mp4',
+          size: 100,
+          createdAt: new Date('2026-01-04T00:00:00.000Z'),
+        },
+        {
+          id: 'image',
+          path: 'screen.png',
+          version: 1,
+          artifactType: 'visual-proof' as const,
+          contentType: 'image/png',
+          size: 100,
+          createdAt: new Date('2026-01-03T00:00:00.000Z'),
+        },
+      ],
+    };
+    renderWorkspace({
+      isMobile: false,
+      sessionOverride: { tasks: [taskWithArtifacts] },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Artifacts' }));
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Open Screen from Update homepage background',
+      }),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Previous artifact' }));
+    expect(screen.getByRole('heading', { name: 'Latest' })).toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next artifact' }));
+    expect(screen.getByRole('heading', { name: 'Screen' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Next artifact' }));
+    expect(screen.getByRole('heading', { name: 'Demo' })).toBeVisible();
+  });
+
+  it('omits artifact navigation when the gallery has one item', () => {
+    const taskWithArtifact = {
+      ...singleTask,
+      artifacts: [
+        {
+          id: 'only',
+          path: 'only.txt',
+          version: 1,
+          artifactType: 'general' as const,
+          contentType: 'text/plain',
+          size: 100,
+          createdAt: new Date('2026-01-05T00:00:00.000Z'),
+        },
+      ],
+    };
+    renderWorkspace({
+      isMobile: false,
+      sessionOverride: { tasks: [taskWithArtifact] },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Artifacts' }));
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Open Only from Update homepage background',
+      }),
+    );
+
+    expect(
+      screen.queryByRole('button', { name: 'Previous artifact' }),
+    ).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Next artifact' })).toBeNull();
   });
 
   it('disables the Live Preview control until a linked task has a live preview', () => {

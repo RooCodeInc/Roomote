@@ -4,71 +4,34 @@ import { useMemo } from 'react';
 import { Image, FileText, VideoIcon } from '@/components/system';
 
 import { humanizeFilename } from '@/lib';
-import { isMarkdownArtifact, isTabularArtifact } from '@/lib/artifact-types';
+import { isMarkdownArtifact } from '@/lib/artifact-types';
 import { MarkdownArtifactPreview } from '@/components/tasks/MarkdownArtifactPreview';
 import { TabularArtifactPreview } from '@/components/tasks/TabularArtifactPreview';
 
 import type { TaskSession, TaskArtifact } from '../../hooks';
-import type { ArtifactGroup } from '../../sidebar-actions/types';
 import { useTaskSidePanel } from '../../hooks';
-import { groupArtifactsByPath } from '../../sidebar-actions/utils';
+import { getArtifactGalleryGroups } from '../../sidebar-actions/utils';
 import { SidePanelHeader } from '../SidePanelHeader';
 
 interface ArtifactListProps {
   session: TaskSession;
 }
 
-function isScreenshotGroup(group: ArtifactGroup<TaskArtifact>): boolean {
-  return group.latest.contentType.startsWith('image/');
-}
-
-function isVideoGroup(group: ArtifactGroup<TaskArtifact>): boolean {
-  return group.latest.contentType.startsWith('video/');
-}
-
 export function ArtifactList({ session }: ArtifactListProps) {
   const { openArtifactDetail, closeSidePanel } = useTaskSidePanel();
 
-  const artifactGroups = useMemo(
-    () => groupArtifactsByPath(session.artifacts),
+  const galleryGroups = useMemo(
+    () => getArtifactGalleryGroups<TaskArtifact>(session.artifacts),
     [session.artifacts],
   );
-
-  const screenshotGroups = useMemo(
-    () => artifactGroups.filter(isScreenshotGroup),
-    [artifactGroups],
-  );
-
-  const otherGroups = useMemo(
-    () =>
-      artifactGroups.filter((g) => !isScreenshotGroup(g) && !isVideoGroup(g)),
-    [artifactGroups],
-  );
-
-  const previewGroups = useMemo(
-    () =>
-      otherGroups.filter(
-        (group) =>
-          isMarkdownArtifact(group.latest.contentType, group.latest.path) ||
-          isTabularArtifact(group.latest.contentType, group.latest.path),
-      ),
-    [otherGroups],
-  );
-
-  const fileGroups = useMemo(
-    () =>
-      otherGroups.filter(
-        (group) =>
-          !isMarkdownArtifact(group.latest.contentType, group.latest.path) &&
-          !isTabularArtifact(group.latest.contentType, group.latest.path),
-      ),
-    [otherGroups],
-  );
-
-  const videoGroups = useMemo(
-    () => artifactGroups.filter(isVideoGroup),
-    [artifactGroups],
-  );
+  const {
+    groups: artifactGroups,
+    screenshots: screenshotGroups,
+    videos: videoGroups,
+    files: otherGroups,
+    previews: previewGroups,
+    otherFiles: fileGroups,
+  } = galleryGroups;
 
   return (
     <>

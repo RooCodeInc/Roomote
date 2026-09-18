@@ -39,6 +39,8 @@ import {
   Label,
   BasicTooltip,
   Loader2Icon,
+  ChevronLeftIcon,
+  ChevronRight,
   MediaViewerImage,
   Table,
   TableBody,
@@ -133,6 +135,50 @@ interface ArtifactViewerContentProps {
   emptyMessage?: string;
   firstRowIsHeader?: boolean;
   onFirstRowIsHeaderChange?: (checked: boolean) => void;
+  onPreviousArtifact?: () => void;
+  onNextArtifact?: () => void;
+  navigationActive?: boolean;
+}
+
+const ARTIFACT_NAVIGATION_CONTROL_SELECTOR = [
+  'a',
+  'button',
+  'input',
+  'textarea',
+  'select',
+  'video',
+  'audio',
+  '[contenteditable="true"]',
+  '[role="button"]',
+  '[role="combobox"]',
+  '[role="listbox"]',
+  '[role="menu"]',
+  '[role="slider"]',
+  '[role="spinbutton"]',
+  '[role="textbox"]',
+].join(',');
+
+function shouldIgnoreArtifactNavigation(event: React.KeyboardEvent): boolean {
+  if (
+    event.defaultPrevented ||
+    event.altKey ||
+    event.ctrlKey ||
+    event.metaKey ||
+    event.shiftKey
+  ) {
+    return true;
+  }
+
+  const target = event.target;
+  if (
+    target instanceof Element &&
+    target.closest(ARTIFACT_NAVIGATION_CONTROL_SELECTOR)
+  ) {
+    return true;
+  }
+
+  const selection = window.getSelection();
+  return !!selection && !selection.isCollapsed;
 }
 
 function TabularArtifactPreview({
@@ -246,6 +292,9 @@ export function ArtifactViewerContent({
   emptyMessage = 'Select an artifact to inspect it here.',
   firstRowIsHeader: controlledFirstRowIsHeader,
   onFirstRowIsHeaderChange,
+  onPreviousArtifact,
+  onNextArtifact,
+  navigationActive = true,
 }: ArtifactViewerContentProps) {
   const artifactOwner = owner ?? { taskId: taskIdProp! };
   const taskId = 'taskId' in artifactOwner ? artifactOwner.taskId : undefined;
@@ -261,6 +310,7 @@ export function ArtifactViewerContent({
   const [isCopied, setIsCopied] = useState(false);
   const [isUrlCopied, setIsUrlCopied] = useState(false);
   const [isRawUrlCopied, setIsRawUrlCopied] = useState(false);
+  const viewerRef = useRef<HTMLDivElement | null>(null);
   const sendBuildMessage = useMutation({
     mutationFn: async () => {
       if (!artifact) return;
@@ -407,11 +457,36 @@ export function ArtifactViewerContent({
     setTimeout(() => setIsRawUrlCopied(false), 2000);
   };
 
+  const hasArtifactNavigation =
+    navigationActive && !!onPreviousArtifact && !!onNextArtifact;
+  useEffect(() => {
+    if (hasArtifactNavigation) {
+      viewerRef.current?.focus({ preventScroll: true });
+    }
+  }, [hasArtifactNavigation]);
+
+  const handleNavigationKeyDown = (event: React.KeyboardEvent) => {
+    if (!hasArtifactNavigation || shouldIgnoreArtifactNavigation(event)) return;
+
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      onPreviousArtifact();
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      onNextArtifact();
+    }
+  };
+
   return (
     <>
       <div
+        ref={viewerRef}
+        role="region"
+        aria-label="Artifact viewer"
+        tabIndex={hasArtifactNavigation ? 0 : undefined}
+        onKeyDown={handleNavigationKeyDown}
         className={cn(
-          'flex h-full min-h-0 flex-col overflow-hidden @container',
+          'group/artifact-viewer relative flex h-full min-h-0 flex-col overflow-hidden outline-none @container focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
           className,
         )}
       >
@@ -710,6 +785,34 @@ export function ArtifactViewerContent({
             </div>
           )}
         </div>
+        {hasArtifactNavigation ? (
+          <div className="pointer-events-none absolute inset-x-2 top-1/2 z-20 flex -translate-y-1/2 justify-between">
+            <BasicTooltip content="Previous artifact">
+              <Button
+                type="button"
+                variant="secondary"
+                size="icon"
+                aria-label="Previous artifact"
+                className="pointer-events-auto size-11 rounded-full bg-background/80 opacity-100 shadow-sm backdrop-blur-sm transition-opacity md:opacity-0 md:group-hover/artifact-viewer:opacity-100 md:group-focus-within/artifact-viewer:opacity-100"
+                onClick={onPreviousArtifact}
+              >
+                <ChevronLeftIcon />
+              </Button>
+            </BasicTooltip>
+            <BasicTooltip content="Next artifact">
+              <Button
+                type="button"
+                variant="secondary"
+                size="icon"
+                aria-label="Next artifact"
+                className="pointer-events-auto size-11 rounded-full bg-background/80 opacity-100 shadow-sm backdrop-blur-sm transition-opacity md:opacity-0 md:group-hover/artifact-viewer:opacity-100 md:group-focus-within/artifact-viewer:opacity-100"
+                onClick={onNextArtifact}
+              >
+                <ChevronRight />
+              </Button>
+            </BasicTooltip>
+          </div>
+        ) : null}
       </div>
     </>
   );
