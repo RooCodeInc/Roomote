@@ -486,6 +486,7 @@ export async function spawnModalWorker(
   const args = getWorkerLaunchArgs(taskRun, machine.machineId);
 
   let immediateExitDisposition: 'restart' | 'failed' | undefined;
+  let workerExitDisposition: 'ignore' | 'restart' | 'failed' | undefined;
 
   try {
     await updateTaskRunMachine({
@@ -555,6 +556,7 @@ export async function spawnModalWorker(
       `worker ${args.join(' ')} started on ${machine.machineId}`,
     );
 
+    const admissionAbortController = new AbortController();
     const result = await launchHostedWorker(
       buildModalWorkerEnv({
         authToken,
@@ -587,6 +589,10 @@ export async function spawnModalWorker(
           ...(onWorkerExit || computeLog
             ? {
                 onExit: async ({ exitCode }: { exitCode: number }) => {
+                  // A dead detached worker cannot ever satisfy credential-egress
+                  // bootstrap. Release the admission wait before scheduling the
+                  // already-guarded replacement.
+                  admissionAbortController.abort();
                   await computeLog?.append(
                     'command',
                     `worker exited with code ${exitCode}`,
@@ -597,6 +603,7 @@ export async function spawnModalWorker(
                   }
 
                   const disposition = await onWorkerExit({ exitCode });
+                  workerExitDisposition = disposition;
 
                   if (disposition === 'ignore') {
                     return;
@@ -703,6 +710,7 @@ export async function spawnModalWorker(
 
         return launchResult;
       },
+      admissionAbortController.signal,
     );
 
     return {
@@ -710,6 +718,15 @@ export async function spawnModalWorker(
       ...(result.commandId ? { sandboxCmdId: result.commandId } : {}),
     };
   } catch (error) {
+    // A detached worker exit already owns classification, cleanup, and any
+    // guarded restart. Its admission wait was aborted above, so do not turn
+    // that expected unwind into a second terminal failure.
+    if (workerExitDisposition) {
+      return {
+        machineId: machine.machineId,
+      };
+    }
+
     await computeLog?.append(
       'command',
       `worker launch failed: ${error instanceof Error ? error.message : String(error)}`,

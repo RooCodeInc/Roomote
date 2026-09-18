@@ -107,6 +107,7 @@ export async function admitCredentialEgressApiProxy(
     nonce: string;
     baseUrl: string;
     resume?: boolean;
+    signal?: AbortSignal;
   },
   deps: ApiProxyAdmissionDependencies = productionDependencies(),
 ): Promise<CredentialEgressWorkloadRegistration> {
@@ -114,12 +115,19 @@ export async function admitCredentialEgressApiProxy(
   // Setup completion is a request to transition, never authority: the run
   // must still be live when the controller registers it.
   for (;;) {
+    if (input.signal?.aborted) {
+      throw new Error('Credential egress bootstrap admission aborted');
+    }
     if (!(await deps.isRunActive(input.taskRun.id)))
       throw new Error('Credential egress bootstrap run is no longer active');
     if (await deps.isBootstrapReady(input.taskRun.id, input.nonce)) break;
     if (deps.now() >= deadline)
       throw new Error('Credential egress bootstrap admission timed out');
     await deps.sleep(BOOTSTRAP_POLL_MS);
+  }
+
+  if (input.signal?.aborted) {
+    throw new Error('Credential egress bootstrap admission aborted');
   }
 
   const outcome = await input.lifecycle.register({
