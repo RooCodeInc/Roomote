@@ -619,6 +619,15 @@ export async function spawnModalWorker(
                           onMutation: recordMutation,
                           ...mutationContext,
                         });
+                      } catch (error) {
+                        if (disposition !== 'restart') {
+                          throw error;
+                        }
+
+                        console.error(
+                          `[spawnModalWorker] Cleanup failed after scheduling worker bootstrap restart for task run #${taskRun.id}`,
+                          error,
+                        );
                       } finally {
                         // The restart decision is already durable. Do not strand it if
                         // provider cleanup fails; the new worker can still be launched

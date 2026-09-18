@@ -886,6 +886,10 @@ describe('spawnModalWorker', () => {
       bootstrapEnv: {},
       admit,
     });
+    const onWorkerRestart = vi.fn();
+    mockCleanupModalInstance.mockRejectedValueOnce(
+      new Error('cleanup unavailable'),
+    );
     mockRunCommand.mockImplementationOnce(async (input: RunCommandInput) => {
       queueMicrotask(() => void input.onExit?.({ exitCode: 1 }));
       return { exitCode: null, commandId: 'cmd_123' };
@@ -906,6 +910,7 @@ describe('spawnModalWorker', () => {
         modalTimeoutMs: 60_000,
         credentialEgress: { planApiProxy } as never,
         onWorkerExit,
+        onWorkerRestart,
       },
     );
 
@@ -921,6 +926,7 @@ describe('spawnModalWorker', () => {
     expect(mockCleanupModalInstance).toHaveBeenCalledWith(
       expect.objectContaining({ phase: 'worker_bootstrap_exit' }),
     );
+    expect(onWorkerRestart).toHaveBeenCalledOnce();
   });
 
   it('restarts after a claimed exit even when sandbox cleanup fails', async () => {
@@ -951,9 +957,9 @@ describe('spawnModalWorker', () => {
     const runCommandInput = mockRunCommand.mock.calls[0]?.[0] as {
       onExit?: (event: { exitCode: number }) => Promise<void>;
     };
-    await expect(runCommandInput.onExit?.({ exitCode: 1 })).rejects.toThrow(
-      'cleanup unavailable',
-    );
+    await expect(
+      runCommandInput.onExit?.({ exitCode: 1 }),
+    ).resolves.toBeUndefined();
 
     expect(onWorkerRestart).toHaveBeenCalledOnce();
   });
