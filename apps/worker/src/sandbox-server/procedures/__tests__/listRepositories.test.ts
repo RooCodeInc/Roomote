@@ -199,6 +199,31 @@ describe('listRepositories procedure', () => {
     expect(JSON.stringify(result)).not.toContain('acme/secret');
   });
 
+  it('drops stamped repositories that are no longer active under their stamped provider', async () => {
+    stubTaskRun({
+      repo: 'acme/api',
+      sourceControlProvider: 'github',
+      repositoryProviders: {
+        'acme/api': 'github',
+        'acme/deactivated': 'github',
+        'acme/moved': 'gitlab',
+      },
+    });
+    // The live listing returns active repositories only.
+    mockListRepositories.mockResolvedValue([
+      repository('acme/api'),
+      repository('acme/moved', { sourceControlProvider: 'github' }),
+    ]);
+
+    const result = await createCaller().commands.listRepositories();
+
+    expect(mockListRepositories).toHaveBeenCalledWith({});
+    expect(result.repositories.map(({ fullName }) => fullName)).toEqual([
+      'acme/api',
+    ]);
+    expect(result.totalCount).toBe(1);
+  });
+
   it('refuses runs without a repository scope or an active run', async () => {
     stubTaskRun({ repo: '__no_repositories__' });
     await expect(createCaller().commands.listRepositories()).rejects.toThrow(

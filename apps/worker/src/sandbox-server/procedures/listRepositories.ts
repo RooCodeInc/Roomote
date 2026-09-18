@@ -45,7 +45,11 @@ export const listRepositories = publicProcedure
     }
 
     const scope = await loadRepositoryScope(ctx.runId);
-    const repositories = await listOnDemandRepositories(scope);
+    // Same bar as `prepareRepository`: a stamped repository deactivated since
+    // launch could not be cloned, so it is not offered.
+    const repositories = await listOnDemandRepositories(scope, {
+      checkoutableOnly: true,
+    });
     const { workspaceRoot } = createWorkspaceManager(
       ctx.taskRuntime?.runtimeEnv ?? process.env,
     );

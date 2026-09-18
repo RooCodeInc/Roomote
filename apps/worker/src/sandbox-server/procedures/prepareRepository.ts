@@ -32,7 +32,7 @@ const prepareRepositoryInputSchema = z.object({
 
 type PrepareRepositoryResult = SandboxPrepareRepositoryResult;
 
-export interface RepositoryScope {
+interface RepositoryScope {
   sourceControlProvider: SourceControlProvider;
   repositoryProviders?: Record<string, SourceControlProvider>;
 }
