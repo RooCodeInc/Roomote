@@ -95,7 +95,40 @@ type ControlEvent =
   | { type: 'wheel'; delta_x: number; delta_y: number }
   | { type: 'key'; code: string; down: boolean }
   | { type: 'release_all' }
-  | { type: 'resize'; width: number; height: number };
+  | { type: 'resize'; width: number; height: number }
+  | { type: 'hand_back' }
+  | { type: 'paste'; text: string }
+  | { type: 'clipboard_read' };
+
+/** Matches the service's clipboard limit. */
+const MAX_CLIPBOARD_BYTES = 128 * 1024;
+/** Time for the sandbox application to own the clipboard after a copy. */
+const CLIPBOARD_READ_DELAY_MS = 150;
+
+/**
+ * The sandbox desktop is Linux, where Control drives the shortcuts that
+ * Command drives on a Mac. Sending Command as Control makes copy, cut, paste,
+ * select all, undo, and the rest work the way the viewer's hands expect.
+ */
+export function remoteKeyCode(code: string, isMac: boolean): string {
+  if (!isMac) {
+    return code;
+  }
+  if (code === 'MetaLeft') {
+    return 'ControlLeft';
+  }
+  if (code === 'MetaRight') {
+    return 'ControlRight';
+  }
+  return code;
+}
+
+function isMacPlatform(): boolean {
+  return (
+    typeof navigator !== 'undefined' &&
+    /Mac|iPhone|iPad/.test(navigator.platform)
+  );
+}
 
 /** Upper bound on remote pixels so encode cost stays near 1080p. */
 const MAX_REMOTE_PIXELS = 1920 * 1080;
@@ -239,6 +272,11 @@ export function DesktopStreamClient({
   const [isPlaying, setIsPlaying] = useState(false);
   const [controlReady, setControlReady] = useState(false);
   const [controlState, setControlState] = useState<ControlState>('off');
+  /**
+   * The sandbox service's view of whether this viewer is driving: they
+   * clicked, scrolled, or typed recently, so the agent's page actions wait.
+   */
+  const [driving, setDriving] = useState(false);
   const [showStats, setShowStats] = useState(false);
   useEffect(() => {
     setShowStats(readStatsPreference());
@@ -613,7 +651,19 @@ export function DesktopStreamClient({
           error?: string;
           ready?: boolean;
           resized?: RemoteSize;
+          driving?: boolean;
+          clipboard?: string;
         };
+        if (typeof message.driving === 'boolean') {
+          setDriving(message.driving);
+        }
+        if (typeof message.clipboard === 'string' && message.clipboard) {
+          navigator.clipboard?.writeText(message.clipboard).catch(() => {
+            setSessionError(
+              'Copied in the sandbox, but this browser blocked clipboard access',
+            );
+          });
+        }
         if (message.ready) {
           setControlReady(true);
           setControlState('on');
@@ -665,6 +715,7 @@ export function DesktopStreamClient({
     });
     socket.addEventListener('close', () => {
       setControlReady(false);
+      setDriving(false);
       controlOnRef.current = false;
       const wasCurrent = socketRef.current === socket;
       if (wasCurrent) {
@@ -703,7 +754,17 @@ export function DesktopStreamClient({
     });
   };
 
-  /** Give up input control on purpose; the stream keeps playing. */
+  /** Let the agent act again at once instead of after the idle window. */
+  const handBack = () => {
+    sendControl({ type: 'hand_back' });
+    setDriving(false);
+    videoRef.current?.focus();
+  };
+
+  /**
+   * Give up input control on purpose; the stream keeps playing. Used to hand
+   * the desktop to the pop-out window.
+   */
   const releaseControl = () => {
     releasedRef.current = true;
     clearControlReconnectTimer();
@@ -861,16 +922,26 @@ export function DesktopStreamClient({
       videoRef.current?.requestVideoFrameCallback(frameCallback) ?? null;
   };
 
+  // Control is implicit while this viewer has it: clicking or typing takes
+  // over from the agent and stopping hands back. The button only appears when
+  // there is something to take, from another viewer or after a handoff.
+  const canTakeControl =
+    controlState === 'taken' ||
+    controlState === 'released' ||
+    (controlState === 'off' && isPlaying);
+
   const headerActions = (
     <>
-      <Button
-        variant="outline"
-        size="sm"
-        disabled={!session || controlState === 'connecting'}
-        onClick={controlState === 'on' ? releaseControl : takeControl}
-      >
-        {controlState === 'on' ? 'Release control' : 'Take control'}
-      </Button>
+      {canTakeControl ? (
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={!session}
+          onClick={takeControl}
+        >
+          Take control
+        </Button>
+      ) : null}
       {popoutHref ? (
         <Button
           variant="ghost"
@@ -941,6 +1012,7 @@ export function DesktopStreamClient({
         <video
           ref={videoRef}
           aria-label="Remote desktop"
+          data-control-state={controlState}
           // No audio track is streamed; muted also keeps autoplay allowed in
           // the pop-out window.
           muted
@@ -953,13 +1025,50 @@ export function DesktopStreamClient({
           onContextMenu={(event) => event.preventDefault()}
           onKeyDown={(event) => {
             if (!controlReady) return;
+            const shortcut = event.metaKey || event.ctrlKey;
+            if (shortcut && event.code === 'KeyV') {
+              // Let the browser fire `paste`, which carries the clipboard
+              // text without a permission prompt; onPaste sends it on.
+              return;
+            }
             event.preventDefault();
-            sendControl({ type: 'key', code: event.code, down: true });
+            sendControl({
+              type: 'key',
+              code: remoteKeyCode(event.code, isMacPlatform()),
+              down: true,
+            });
+            if (
+              shortcut &&
+              !event.repeat &&
+              (event.code === 'KeyC' || event.code === 'KeyX')
+            ) {
+              window.setTimeout(
+                () => sendControl({ type: 'clipboard_read' }),
+                CLIPBOARD_READ_DELAY_MS,
+              );
+            }
           }}
           onKeyUp={(event) => {
             if (!controlReady) return;
             event.preventDefault();
-            sendControl({ type: 'key', code: event.code, down: false });
+            sendControl({
+              type: 'key',
+              code: remoteKeyCode(event.code, isMacPlatform()),
+              down: false,
+            });
+          }}
+          onPaste={(event) => {
+            if (!controlReady) return;
+            const text = event.clipboardData.getData('text/plain');
+            if (!text) return;
+            event.preventDefault();
+            if (new Blob([text]).size > MAX_CLIPBOARD_BYTES) {
+              setSessionError(
+                'That is too much text to paste into the sandbox',
+              );
+              return;
+            }
+            sendControl({ type: 'paste', text });
           }}
           onError={() => {
             if (restartPendingRef.current) {
@@ -1018,12 +1127,25 @@ export function DesktopStreamClient({
           }}
         />
 
+        {isPlaying && controlState === 'on' && driving ? (
+          <div className="absolute top-2 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded bg-zinc-950/80 py-1 pr-1 pl-2 text-xs text-zinc-200">
+            <span>You&apos;re driving. The agent waits until you stop.</span>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="h-6 px-2 text-xs"
+              onClick={handBack}
+            >
+              Hand back
+            </Button>
+          </div>
+        ) : null}
         {isPlaying && controlState !== 'on' && controlState !== 'off' ? (
           <div className="pointer-events-none absolute top-2 left-2 rounded bg-zinc-950/80 px-2 py-1 text-xs text-zinc-200">
             {controlState === 'connecting'
               ? 'Connecting control'
               : controlState === 'released'
-                ? 'Control released'
+                ? 'Control handed to another window'
                 : 'Another viewer has control'}
           </div>
         ) : null}

@@ -46,6 +46,7 @@ RUN apt-get update \
     ffmpeg \
     locales \
     tigervnc-standalone-server \
+    xclip \
     xvfb \
     fontconfig \
     fonts-noto-core \

@@ -14,6 +14,7 @@ import {
   STREAM_START_TIMEOUT_MS,
   computeRemoteSize,
   mapPointerToRemote,
+  remoteKeyCode,
   trackLiveEdge,
 } from './DesktopStreamClient';
 
@@ -73,6 +74,16 @@ class FakeWebSocket {
       listener(event);
     }
   }
+}
+
+/** Control is implicit in the UI, so tests read it off the desktop itself. */
+function controlIsOn() {
+  return waitFor(() =>
+    expect(screen.getByLabelText('Remote desktop')).toHaveAttribute(
+      'data-control-state',
+      'on',
+    ),
+  );
 }
 
 describe('DesktopStreamClient', () => {
@@ -174,7 +185,7 @@ describe('DesktopStreamClient', () => {
     const socket = FakeWebSocket.instances[0];
     expect(socket?.url).toContain('/control');
     act(() => socket?.open());
-    await screen.findByRole('button', { name: 'Release control' });
+    await controlIsOn();
 
     const video = screen.getByLabelText('Remote desktop');
     Object.defineProperties(video, {
@@ -341,7 +352,7 @@ describe('DesktopStreamClient', () => {
     fireEvent.click(start);
     const socket = FakeWebSocket.instances[0]!;
     act(() => socket.open());
-    await screen.findByRole('button', { name: 'Release control' });
+    await controlIsOn();
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Pop out Shared Desktop' }),
@@ -449,7 +460,7 @@ describe('DesktopStreamClient', () => {
     fireEvent.click(start);
     const first = FakeWebSocket.instances[0]!;
     act(() => first.open());
-    await screen.findByRole('button', { name: 'Release control' });
+    await controlIsOn();
 
     const video = screen.getByLabelText('Remote desktop');
     Object.defineProperties(video, {
@@ -480,10 +491,10 @@ describe('DesktopStreamClient', () => {
     });
     expect(FakeWebSocket.instances).toHaveLength(2);
     act(() => FakeWebSocket.instances[1]!.open());
-    await screen.findByRole('button', { name: 'Release control' });
+    await controlIsOn();
   });
 
-  it('offers release and take control in the header', async () => {
+  it('offers Take control only when another viewer holds the desktop', async () => {
     render(
       <DesktopStreamClient
         previewUrl="https://desktop.preview.test"
@@ -498,18 +509,143 @@ describe('DesktopStreamClient', () => {
     fireEvent.click(start);
     const first = FakeWebSocket.instances[0]!;
     act(() => first.open());
-    await screen.findByRole('button', { name: 'Release control' });
+    await controlIsOn();
+    expect(screen.queryByRole('button', { name: 'Take control' })).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: 'Release control' }),
+    ).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Release control' }));
-    expect(first.readyState).toBe(FakeWebSocket.CLOSED);
+    act(() => {
+      first.emit('message', {
+        data: '{"error":"another viewer took control of the desktop"}',
+      } as MessageEvent);
+      first.close();
+    });
     await screen.findByRole('button', { name: 'Take control' });
-    // A released viewer does not reconnect on its own.
+    // A superseded viewer does not fight the other one on its own.
     expect(FakeWebSocket.instances).toHaveLength(1);
 
     fireEvent.click(screen.getByRole('button', { name: 'Take control' }));
     expect(FakeWebSocket.instances).toHaveLength(2);
     act(() => FakeWebSocket.instances[1]!.open());
-    await screen.findByRole('button', { name: 'Release control' });
+    await controlIsOn();
+    expect(screen.queryByRole('button', { name: 'Take control' })).toBeNull();
+  });
+
+  it('shows when the viewer is driving and hands back to the agent', async () => {
+    render(
+      <DesktopStreamClient
+        previewUrl="https://desktop.preview.test"
+        runId={123}
+        onClose={() => {}}
+      />,
+    );
+    const start = await screen.findByRole('button', {
+      name: 'Start remote desktop',
+    });
+    await waitFor(() => expect(start).toBeEnabled());
+    fireEvent.click(start);
+    const socket = FakeWebSocket.instances[0]!;
+    act(() => socket.open());
+    await controlIsOn();
+    fireEvent.loadedData(screen.getByLabelText('Remote desktop'));
+    expect(screen.queryByText(/You're driving/)).toBeNull();
+
+    act(() =>
+      socket.emit('message', { data: '{"driving":true}' } as MessageEvent),
+    );
+    await screen.findByText(/You're driving/);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hand back' }));
+    expect(socket.sent.map((payload) => JSON.parse(payload).type)).toContain(
+      'hand_back',
+    );
+    expect(screen.queryByText(/You're driving/)).toBeNull();
+
+    // The service also ends it on its own once the viewer goes idle.
+    act(() =>
+      socket.emit('message', { data: '{"driving":true}' } as MessageEvent),
+    );
+    await screen.findByText(/You're driving/);
+    act(() =>
+      socket.emit('message', { data: '{"driving":false}' } as MessageEvent),
+    );
+    await waitFor(() =>
+      expect(screen.queryByText(/You're driving/)).toBeNull(),
+    );
+  });
+
+  it('pastes the local clipboard into the sandbox and copies back out', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const writeText = vi.fn(() => Promise.resolve());
+    vi.stubGlobal('navigator', {
+      ...navigator,
+      platform: 'MacIntel',
+      clipboard: { writeText },
+    });
+    try {
+      render(
+        <DesktopStreamClient
+          previewUrl="https://desktop.preview.test"
+          runId={123}
+          onClose={() => {}}
+        />,
+      );
+      const start = await screen.findByRole('button', {
+        name: 'Start remote desktop',
+      });
+      await waitFor(() => expect(start).toBeEnabled());
+      fireEvent.click(start);
+      const socket = FakeWebSocket.instances[0]!;
+      act(() => socket.open());
+      await controlIsOn();
+      const video = screen.getByLabelText('Remote desktop');
+      const sent = () => socket.sent.map((payload) => JSON.parse(payload));
+      socket.sent = [];
+
+      // Command is sent as Control; the V itself is left to the paste event.
+      fireEvent.keyDown(video, { code: 'MetaLeft', metaKey: true });
+      fireEvent.keyDown(video, { code: 'KeyV', metaKey: true });
+      fireEvent.paste(video, {
+        clipboardData: { getData: () => 'hello from my laptop' },
+      });
+      expect(sent()).toEqual([
+        expect.objectContaining({
+          type: 'key',
+          code: 'ControlLeft',
+          down: true,
+        }),
+        expect.objectContaining({
+          type: 'paste',
+          text: 'hello from my laptop',
+        }),
+      ]);
+
+      socket.sent = [];
+      fireEvent.keyDown(video, { code: 'KeyC', metaKey: true });
+      act(() => {
+        vi.advanceTimersByTime(200);
+      });
+      expect(sent().map((event) => event.type)).toEqual([
+        'key',
+        'clipboard_read',
+      ]);
+      act(() =>
+        socket.emit('message', {
+          data: '{"clipboard":"copied in the sandbox"}',
+        } as MessageEvent),
+      );
+      expect(writeText).toHaveBeenCalledWith('copied in the sandbox');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('only remaps Command on a Mac', () => {
+    expect(remoteKeyCode('MetaLeft', true)).toBe('ControlLeft');
+    expect(remoteKeyCode('MetaRight', true)).toBe('ControlRight');
+    expect(remoteKeyCode('KeyA', true)).toBe('KeyA');
+    expect(remoteKeyCode('MetaLeft', false)).toBe('MetaLeft');
   });
 
   it('reconnects control and reloads the stream after an unexpected drop', async () => {
@@ -529,7 +665,7 @@ describe('DesktopStreamClient', () => {
       fireEvent.click(start);
       const first = FakeWebSocket.instances[0]!;
       act(() => first.open());
-      await screen.findByRole('button', { name: 'Release control' });
+      await controlIsOn();
       const video = screen.getByLabelText('Remote desktop');
       fireEvent.loadedData(video);
 
@@ -602,6 +738,6 @@ describe('DesktopStreamClient', () => {
     // panel that opened it without another click.
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
     act(() => FakeWebSocket.instances[0]!.open());
-    await screen.findByRole('button', { name: 'Release control' });
+    await controlIsOn();
   });
 });

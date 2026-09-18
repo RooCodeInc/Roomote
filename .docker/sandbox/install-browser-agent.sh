@@ -251,9 +251,7 @@ SHARED_BROWSER_CDP_PORT="${ROOMOTE_SHARED_BROWSER_CDP_PORT:-19222}"
 SHARED_BROWSER_STATE_DIR="${ROOMOTE_SHARED_BROWSER_STATE_DIR:-${HOME}/.roomote/shared-browser}"
 SHARED_BROWSER_X11_SOCKET_DIR="${ROOMOTE_SHARED_BROWSER_X11_SOCKET_DIR:-/tmp/.X11-unix}"
 SHARED_BROWSER_LAUNCH_WAIT_SECONDS="${ROOMOTE_SHARED_BROWSER_LAUNCH_WAIT_SECONDS:-20}"
-# A person who clicked, scrolled, or typed on the Shared Desktop this recently
-# is treated as driving the browser.
-SHARED_BROWSER_HUMAN_IDLE_MS="${ROOMOTE_SHARED_BROWSER_HUMAN_IDLE_MS:-10000}"
+# How long a page action waits for a person driving the Shared Desktop.
 SHARED_BROWSER_HUMAN_WAIT_SECONDS="${ROOMOTE_SHARED_BROWSER_HUMAN_WAIT_SECONDS:-30}"
 
 resolve_cli_paths() {
@@ -844,20 +842,15 @@ is_input_command() {
 }
 
 # CDP input bypasses the Shared Desktop's control channel, so the agent could
-# type into a page a person is using. The desktop service reports how long ago
-# its controller last clicked, scrolled, or typed; watching alone (even with
-# the pointer over the video) does not count.
+# type into a page a person is using. The desktop service decides whether a
+# person is driving (they clicked, scrolled, or typed recently and have not
+# handed back; watching alone does not count) and shows them the same answer.
 human_is_driving() {
-  local metrics idle_ms
-  metrics="$(read_desktop_service /metrics)"
-
-  case "$metrics" in
-    *'"control_connected":true'*) ;;
-    *) return 1 ;;
+  case "$(read_desktop_service /metrics)" in
+    *'"human_driving":true'*) return 0 ;;
   esac
 
-  idle_ms="$(read_json_number "$metrics" control_idle_ms)"
-  [ -n "$idle_ms" ] && [ "$idle_ms" -lt "$SHARED_BROWSER_HUMAN_IDLE_MS" ]
+  return 1
 }
 
 yield_to_human() {

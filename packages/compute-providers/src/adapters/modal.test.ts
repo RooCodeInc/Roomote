@@ -1245,6 +1245,8 @@ describe('ModalClient', () => {
     expect(dockerfile).toContain('    ffmpeg \\');
     // Xvnc supports RandR screen resizes, which Xvfb does not.
     expect(dockerfile).toContain('    tigervnc-standalone-server \\');
+    // Shared Desktop copy and paste goes through the X clipboard.
+    expect(dockerfile).toContain('    xclip \\');
     // Audio is not streamed: a silent track would stall the browser clock.
     expect(dockerfile).not.toContain('pulseaudio');
   });

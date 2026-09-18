@@ -150,6 +150,9 @@ struct Config {
     video_bitrate_kbps: u32,
     audio_bitrate_kbps: u16,
     max_clients: usize,
+    /// How long after a viewer's last click, scroll, or key press they still
+    /// count as driving the desktop.
+    human_idle: Duration,
 }
 
 impl Config {
@@ -169,6 +172,10 @@ impl Config {
         // 0 means unlimited: viewers share one encoder, so each extra viewer
         // costs bandwidth, not CPU.
         let max_clients = parse_env("ROOMOTE_DESKTOP_STREAM_MAX_CLIENTS", 0_usize)?;
+        let human_idle = Duration::from_millis(parse_env(
+            "ROOMOTE_DESKTOP_STREAM_HUMAN_IDLE_MS",
+            10_000_u64,
+        )?);
 
         if width == 0
             || height == 0
@@ -208,6 +215,7 @@ impl Config {
             video_bitrate_kbps,
             audio_bitrate_kbps,
             max_clients,
+            human_idle,
         })
     }
 
@@ -652,7 +660,19 @@ enum ControlEvent {
         width: u16,
         height: u16,
     },
+    /// The viewer is done driving: sandbox automation may act again at once
+    /// instead of waiting out the idle window.
+    HandBack,
+    /// Put the viewer's clipboard text on the X clipboard and paste it.
+    Paste {
+        text: String,
+    },
+    /// Send the X clipboard text back, after the viewer copied or cut.
+    ClipboardRead,
 }
+
+/// Largest clipboard text accepted from or returned to a viewer.
+const MAX_CLIPBOARD_BYTES: usize = 128 * 1024;
 
 impl ControlEvent {
     /// Whether the event shows a person actively driving the desktop, as
@@ -660,7 +680,7 @@ impl ControlEvent {
     fn is_deliberate_input(&self) -> bool {
         matches!(
             self,
-            Self::PointerButton { .. } | Self::Wheel { .. } | Self::Key { .. }
+            Self::PointerButton { .. } | Self::Wheel { .. } | Self::Key { .. } | Self::Paste { .. }
         )
     }
 }
@@ -977,6 +997,44 @@ impl X11Controller {
             .map_err(|error| format!("failed to flush X11 input: {error}"))
     }
 
+    /// Presses Ctrl+V. Control stays down when the viewer is already holding
+    /// it, so their own key release still ends it.
+    fn press_paste_shortcut(&mut self) -> Result<(), String> {
+        const CONTROL_L: u32 = 0xffe3;
+        let control = self.keycodes.get(&CONTROL_L).copied();
+        let v = self.keycodes.get(&u32::from(b'v')).copied();
+        let (Some(control), Some(v)) = (control, v) else {
+            return Err("the paste shortcut is unavailable on this X11 layout".into());
+        };
+        let control_was_held = self.held.keys.contains(&control);
+        let mut actions = vec![
+            InputAction::Key {
+                keycode: control,
+                down: true,
+            },
+            InputAction::Key {
+                keycode: v,
+                down: true,
+            },
+            InputAction::Key {
+                keycode: v,
+                down: false,
+            },
+        ];
+        if !control_was_held {
+            actions.push(InputAction::Key {
+                keycode: control,
+                down: false,
+            });
+        }
+        for action in actions {
+            self.apply_action(action)?;
+        }
+        self.connection
+            .flush()
+            .map_err(|error| format!("failed to flush X11 input: {error}"))
+    }
+
     fn release_all(&mut self) {
         for action in self.held.drain_release_actions() {
             let _ = self.inject(action);
@@ -1104,6 +1162,9 @@ where
             Ok(vec![InputAction::Key { keycode, down }])
         }
         ControlEvent::ReleaseAll => Ok(Vec::new()),
+        ControlEvent::HandBack | ControlEvent::Paste { .. } | ControlEvent::ClipboardRead => {
+            Err("this event must be handled by the control session".into())
+        }
     }
 }
 
@@ -1228,6 +1289,10 @@ struct MetricsResponse {
     /// until someone has. Sandbox automation reads this to yield to a person
     /// who is driving the desktop.
     control_idle_ms: Option<u64>,
+    /// Whether a viewer holds control and used it within the idle window.
+    /// This is the single answer the viewer's status and the sandbox's
+    /// `agent-browser` wrapper both read.
+    human_driving: bool,
     encoder: EncoderProgress,
     browser: BrowserTelemetry,
     browser_to_x_input_latency: InputLatency,
@@ -1359,24 +1424,35 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
 }
 
 async fn metrics(State(state): State<AppState>) -> Json<MetricsResponse> {
+    let control_connected = state.control_connected.load(Ordering::Relaxed);
+    let control_idle = state
+        .metrics
+        .last_deliberate_input
+        .lock()
+        .unwrap()
+        .map(|at| at.elapsed());
     Json(MetricsResponse {
         uptime_seconds: state.started_at.elapsed().as_secs(),
         active_clients: state.active_clients(),
         total_clients: state.metrics.total_clients.load(Ordering::Relaxed),
         bytes_served: state.metrics.bytes_served.load(Ordering::Relaxed),
-        control_connected: state.control_connected.load(Ordering::Relaxed),
-        control_idle_ms: state
-            .metrics
-            .last_deliberate_input
-            .lock()
-            .unwrap()
-            .map(|at| at.elapsed().as_millis() as u64),
+        control_connected,
+        control_idle_ms: control_idle.map(|idle| idle.as_millis() as u64),
+        human_driving: is_human_driving(control_connected, control_idle, state.config.human_idle),
         encoder: state.metrics.progress.lock().unwrap().clone(),
         browser: state.metrics.browser.lock().unwrap().clone(),
         browser_to_x_input_latency: state.metrics.input_latency.lock().unwrap().clone(),
         last_injected_pointer: *state.metrics.last_motion.lock().unwrap(),
         x_pointer: query_x_pointer(&state.config),
     })
+}
+
+fn is_human_driving(
+    control_connected: bool,
+    control_idle: Option<Duration>,
+    human_idle: Duration,
+) -> bool {
+    control_connected && control_idle.is_some_and(|idle| idle < human_idle)
 }
 
 async fn telemetry(
@@ -1412,7 +1488,8 @@ async fn control(
     state.control_connected.store(true, Ordering::Release);
 
     websocket
-        .max_message_size(4 * 1024)
+        // Large enough for a pasted clipboard; every other event is tiny.
+        .max_message_size(MAX_CLIPBOARD_BYTES + 4 * 1024)
         .on_upgrade(move |socket| control_socket(socket, state, generation, superseded))
 }
 
@@ -1453,12 +1530,23 @@ async fn control_socket(
         };
     let _ = socket.send(Message::Text("{\"ready\":true}".into())).await;
 
+    // A new controller starts out watching, whatever the previous one did.
+    *state.metrics.last_deliberate_input.lock().unwrap() = None;
+    // When this viewer stops counting as driving; they are told on each change
+    // so their status matches what sandbox automation sees in /metrics.
+    let mut driving_until: Option<tokio::time::Instant> = None;
+
     loop {
         let message = tokio::select! {
             message = socket.next() => match message {
                 Some(message) => message,
                 None => break,
             },
+            _ = async { tokio::time::sleep_until(driving_until.unwrap()).await }, if driving_until.is_some() => {
+                driving_until = None;
+                let _ = socket.send(Message::Text("{\"driving\":false}".into())).await;
+                continue;
+            }
             _ = superseded.changed() => {
                 controller.release_all();
                 let _ = socket
@@ -1494,9 +1582,39 @@ async fn control_socket(
                         };
                         let _ = socket.send(Message::Text(payload.into())).await;
                     }
+                    Ok(ControlEnvelope {
+                        event: ControlEvent::HandBack,
+                        ..
+                    }) => {
+                        *state.metrics.last_deliberate_input.lock().unwrap() = None;
+                        if driving_until.take().is_some() {
+                            let _ = socket
+                                .send(Message::Text("{\"driving\":false}".into()))
+                                .await;
+                        }
+                    }
+                    Ok(ControlEnvelope {
+                        event: ControlEvent::ClipboardRead,
+                        ..
+                    }) => {
+                        let payload = match read_clipboard(&state.config.display).await {
+                            Ok(text) => serde_json::json!({ "clipboard": text }).to_string(),
+                            Err(error) => serde_json::json!({ "error": error }).to_string(),
+                        };
+                        let _ = socket.send(Message::Text(payload.into())).await;
+                    }
                     Ok(ControlEnvelope { event, sent_at_ms }) => {
                         let deliberate = event.is_deliberate_input();
-                        if let Err(error) = controller.apply(event) {
+                        let result = match event {
+                            ControlEvent::Paste { text } => {
+                                match write_clipboard(&state.config.display, &text).await {
+                                    Ok(()) => controller.press_paste_shortcut(),
+                                    Err(error) => Err(error),
+                                }
+                            }
+                            event => controller.apply(event),
+                        };
+                        if let Err(error) = result {
                             let payload = serde_json::json!({ "error": error }).to_string();
                             let _ = socket.send(Message::Text(payload.into())).await;
                         } else {
@@ -1504,6 +1622,13 @@ async fn control_socket(
                             if deliberate {
                                 *state.metrics.last_deliberate_input.lock().unwrap() =
                                     Some(Instant::now());
+                                if driving_until.is_none() {
+                                    let _ = socket
+                                        .send(Message::Text("{\"driving\":true}".into()))
+                                        .await;
+                                }
+                                driving_until =
+                                    Some(tokio::time::Instant::now() + state.config.human_idle);
                             }
                         }
                     }
@@ -1526,6 +1651,72 @@ async fn control_socket(
     }
 
     controller.release_all();
+}
+
+/// Puts text on the X clipboard. `xclip` forks a holder that owns the
+/// selection until something replaces it, so its output must not be piped or
+/// waiting on it would never end.
+async fn write_clipboard(display: &str, text: &str) -> Result<(), String> {
+    use tokio::io::AsyncWriteExt;
+
+    if text.len() > MAX_CLIPBOARD_BYTES {
+        return Err("the pasted text is too large for the remote clipboard".into());
+    }
+    let mut child = Command::new("xclip")
+        .args(["-selection", "clipboard", "-in"])
+        .env("DISPLAY", display)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| format!("clipboard support is unavailable in this sandbox: {error}"))?;
+    let mut stdin = child.stdin.take().expect("xclip stdin is piped");
+    stdin
+        .write_all(text.as_bytes())
+        .await
+        .map_err(|error| format!("failed to write the remote clipboard: {error}"))?;
+    drop(stdin);
+    match tokio::time::timeout(Duration::from_secs(2), child.wait()).await {
+        Ok(Ok(status)) if status.success() => Ok(()),
+        Ok(Ok(status)) => Err(format!(
+            "failed to write the remote clipboard: xclip {status}"
+        )),
+        Ok(Err(error)) => Err(format!("failed to write the remote clipboard: {error}")),
+        Err(_) => Err("timed out writing the remote clipboard".into()),
+    }
+}
+
+/// Reads the X clipboard as text. An empty or non-text clipboard is an empty
+/// string, not an error.
+async fn read_clipboard(display: &str) -> Result<String, String> {
+    let output = Command::new("xclip")
+        .args(["-selection", "clipboard", "-out"])
+        .env("DISPLAY", display)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .output();
+    let output = match tokio::time::timeout(Duration::from_secs(2), output).await {
+        Ok(Ok(output)) => output,
+        Ok(Err(error)) => {
+            return Err(format!(
+                "clipboard support is unavailable in this sandbox: {error}"
+            ));
+        }
+        Err(_) => return Err("timed out reading the remote clipboard".into()),
+    };
+    if !output.status.success() {
+        return Ok(String::new());
+    }
+    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
+    if text.len() > MAX_CLIPBOARD_BYTES {
+        let mut end = MAX_CLIPBOARD_BYTES;
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        text.truncate(end);
+    }
+    Ok(text)
 }
 
 /// Applies a viewer resize: validates the size, resizes the X screen, records
@@ -1961,6 +2152,7 @@ mod tests {
             video_bitrate_kbps: 6_000,
             audio_bitrate_kbps: 128,
             max_clients: 1,
+            human_idle: Duration::from_secs(10),
         }
     }
 
@@ -2318,5 +2510,41 @@ mod tests {
         assert!(!event(r#"{"type":"pointer_move","x":0.5,"y":0.5}"#).is_deliberate_input());
         assert!(!event(r#"{"type":"release_all"}"#).is_deliberate_input());
         assert!(!event(r#"{"type":"resize","width":1280,"height":800}"#).is_deliberate_input());
+        assert!(event(r#"{"type":"paste","text":"hello"}"#).is_deliberate_input());
+        assert!(!event(r#"{"type":"hand_back"}"#).is_deliberate_input());
+        assert!(!event(r#"{"type":"clipboard_read"}"#).is_deliberate_input());
+    }
+
+    #[test]
+    fn a_viewer_drives_only_while_connected_and_recently_active() {
+        let window = Duration::from_secs(10);
+        assert!(is_human_driving(true, Some(Duration::from_secs(2)), window));
+        assert!(!is_human_driving(
+            true,
+            Some(Duration::from_secs(10)),
+            window
+        ));
+        // Watching without ever clicking or typing is not driving.
+        assert!(!is_human_driving(true, None, window));
+        // Input from a viewer who has since left does not hold automation back.
+        assert!(!is_human_driving(
+            false,
+            Some(Duration::from_secs(2)),
+            window
+        ));
+    }
+
+    #[test]
+    fn session_events_never_reach_input_validation() {
+        for payload in [
+            r#"{"type":"hand_back"}"#,
+            r#"{"type":"paste","text":"hello"}"#,
+            r#"{"type":"clipboard_read"}"#,
+        ] {
+            let event = serde_json::from_str::<ControlEnvelope>(payload)
+                .unwrap()
+                .event;
+            assert!(validate_control_event(event, 1920, 1080, |_| Some(1)).is_err());
+        }
     }
 }

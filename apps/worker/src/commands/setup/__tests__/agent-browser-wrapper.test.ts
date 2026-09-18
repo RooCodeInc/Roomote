@@ -361,7 +361,7 @@ describe('agent-browser wrapper shared browser', () => {
   it('yields input commands to a person driving the desktop', async () => {
     const sandbox = await createSandbox({
       browserRunning: true,
-      metrics: { control_connected: true, control_idle_ms: 500 },
+      metrics: { control_connected: true, human_driving: true },
     });
 
     await expect(sandbox.run(['click', '@e1'])).rejects.toMatchObject({
@@ -391,7 +391,7 @@ describe('agent-browser wrapper shared browser', () => {
     async (args) => {
       const sandbox = await createSandbox({
         browserRunning: true,
-        metrics: { control_connected: true, control_idle_ms: 500 },
+        metrics: { control_connected: true, human_driving: true },
       });
 
       await expect(sandbox.run(args)).rejects.toMatchObject({ code: 75 });
@@ -411,7 +411,7 @@ describe('agent-browser wrapper shared browser', () => {
     async (args) => {
       const sandbox = await createSandbox({
         browserRunning: true,
-        metrics: { control_connected: true, control_idle_ms: 500 },
+        metrics: { control_connected: true, human_driving: true },
       });
 
       await sandbox.run(args);
@@ -423,9 +423,9 @@ describe('agent-browser wrapper shared browser', () => {
   );
 
   it.each([
-    [{ control_connected: true, control_idle_ms: 60_000 }],
+    [{ control_connected: true, human_driving: false }],
     [{ control_connected: true }],
-    [{ control_connected: false, control_idle_ms: 500 }],
+    [{ control_connected: false, human_driving: false }],
   ])('runs input commands when nobody is driving: %j', async (metrics) => {
     const sandbox = await createSandbox({ browserRunning: true, metrics });
 

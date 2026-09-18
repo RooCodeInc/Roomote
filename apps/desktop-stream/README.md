@@ -26,10 +26,18 @@ reports measured rendered FPS and startup-to-first-frame time; encoder progress
 reports output FPS and bitrate. These measurements describe the current host
 and configuration, not a general 1080p60 or 1-vCPU guarantee.
 
-`/metrics` also reports `control_connected` and `control_idle_ms`, the time
-since the controlling viewer last clicked, scrolled, or typed (pointer moves
-are excluded). The sandbox's `agent-browser` wrapper reads these to hold the
-agent's page actions while a person is driving the shared browser.
+`/metrics` also reports `human_driving`: a viewer holds control and clicked,
+scrolled, typed, or pasted within `ROOMOTE_DESKTOP_STREAM_HUMAN_IDLE_MS`
+(default 10000; pointer moves are excluded) and has not handed back. The
+service pushes the same state to that viewer as `{"driving":true|false}`, and
+the sandbox's `agent-browser` wrapper reads it to hold the agent's page
+actions, so the viewer's status and the agent's behavior cannot disagree.
+`control_connected` and `control_idle_ms` are the inputs, reported for
+diagnostics.
+
+The control channel also carries text clipboard transfer through `xclip`:
+`paste` sets the X clipboard and presses Ctrl+V, and `clipboard_read` returns
+the X clipboard after the viewer copies or cuts.
 
 ### Reference 1-vCPU benchmark
 

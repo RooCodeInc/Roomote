@@ -29,10 +29,10 @@ separate environment port for it or expose port `6080` as unauthenticated.
 Port `19222` is reserved the same way: it is the loopback DevTools endpoint of
 the shared browser described below, and an environment cannot publish it.
 
-Input control belongs to one viewer at a time. The panel header offers
-**Take control** and **Release control**; opening the desktop takes control,
-a newer viewer who takes control supersedes the previous one, and clicking
-the desktop takes it back. The sandbox display resizes to match the panel of
+Input control belongs to one viewer at a time. Opening the desktop takes
+control, and a newer viewer who opens it supersedes the previous one. When
+that happens the panel header shows **Take control**, and clicking it or the
+desktop takes control back. The sandbox display resizes to match the panel of
 the viewer who holds control, so the desktop fills that panel instead of
 being letterboxed and follows it when they resize it; other viewers see the
 desktop at that size. If the stream or the control connection drops, the
@@ -64,10 +64,13 @@ cookies, and logins are shared.
 - The window opens the first time the agent uses its browser and stays open
   for the life of the sandbox. The agent works in its own tab and leaves tabs
   it did not open alone.
-- You always win. While you are clicking, scrolling, or typing, the agent's
-  page actions wait, and resume about ten seconds after you stop. It can still
-  read the page and take screenshots in the meantime. Watching, including
-  moving the pointer over the video, does not pause it.
+- You always win, and there is nothing to press first. Clicking, scrolling,
+  or typing takes over: the panel shows **You're driving** and the agent's
+  page actions wait. They resume about ten seconds after you stop, or at once
+  when you select **Hand back**. The agent can still read the page and take
+  screenshots in the meantime. Watching, including moving the pointer over
+  the video, does not pause it. `ROOMOTE_DESKTOP_STREAM_HUMAN_IDLE_MS` sets
+  the ten-second window.
 - Recordings made by the feature demo skill use a separate headless browser so
   they start from a clean state.
 
@@ -94,13 +97,20 @@ encoder availability, and network conditions. The service does not imply a
 1080p60 or 1-vCPU guarantee; validate the actual environment before selecting
 production defaults.
 
+Copy and paste work across the boundary for text. Paste with your usual
+shortcut to send your clipboard into the focused sandbox application, and
+copy or cut in the sandbox to bring the selection back to your clipboard. On a
+Mac, Command is sent as Control, so Command+C, V, X, A, and Z do what you
+expect in the Linux desktop.
+
 The mouse pointer you see is your own browser cursor; the sandbox cursor is
 not painted into the video, so pointing feels immediate even though the
 picture arrives after the encode and network round trip.
 
 ## Limitations
 
-- clipboard transfer and file drag-and-drop are not included
+- the clipboard carries text only (up to 128 KiB); images, files, and file
+  drag-and-drop are not included
 - X11 is supported; Wayland and direct DRM capture are not yet supported
 - audio is not streamed; a silent audio track would stall the browser's media
   clock and freeze the picture
