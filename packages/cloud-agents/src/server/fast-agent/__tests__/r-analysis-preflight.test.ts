@@ -28,6 +28,17 @@ describe('inspectRAnalysisScript', () => {
       source,
     });
     expect(
+      parseRAttachmentText(
+        `File attachment: analysis.R (text/x-r-source)\n----- BEGIN ATTACHMENT -----\n${source}\n----- END ATTACHMENT -----`,
+      ),
+    ).toEqual({
+      filename: 'analysis.R',
+      source,
+    });
+    expect(
+      parseRAttachmentText(`File attachment: analysis.R.txt\n${source}`),
+    ).toBeNull();
+    expect(
       parseRAttachmentText(`Attachment:${'\t'.repeat(80_000)}`),
     ).toBeNull();
   });

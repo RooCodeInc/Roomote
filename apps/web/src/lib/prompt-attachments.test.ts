@@ -1,6 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { preparePromptAttachments } from './prompt-attachments';
+import {
+  ROOMOTE_FILE_ATTACHMENT_ACCEPT,
+  preparePromptAttachments,
+} from './prompt-attachments';
+
+describe('ROOMOTE_FILE_ATTACHMENT_ACCEPT', () => {
+  it('allows scientific source files in the browser picker', () => {
+    const accepted = new Set(ROOMOTE_FILE_ATTACHMENT_ACCEPT.split(','));
+
+    expect(accepted).toContain('.r');
+    expect(accepted).toContain('.ipynb');
+  });
+});
 
 describe('preparePromptAttachments', () => {
   afterEach(() => {

@@ -23,16 +23,37 @@ type RAnalysisPreflight = {
 export function parseRAttachmentText(
   text: string,
 ): { filename: string; source: string } | null {
-  const prefix = 'Attachment:';
-  if (!text.startsWith(prefix)) return null;
+  const prefix = text.startsWith('File attachment:')
+    ? 'File attachment:'
+    : text.startsWith('Attachment:')
+      ? 'Attachment:'
+      : null;
+  if (!prefix) return null;
 
   const newline = text.indexOf('\n', prefix.length);
   if (newline < 0) return null;
 
-  const filename = text.slice(prefix.length, newline).trim();
-  if (!filename || !filename.toLowerCase().endsWith('.r')) return null;
+  let filename = text.slice(prefix.length, newline).trim();
+  if (prefix === 'File attachment:' && filename.endsWith(')')) {
+    const mimeStart = filename.lastIndexOf(' (');
+    const mimeType = mimeStart >= 0 ? filename.slice(mimeStart + 2, -1) : '';
+    if (mimeType.includes('/')) {
+      filename = filename.slice(0, mimeStart).trim();
+    }
+  }
+  if (!filename.toLowerCase().endsWith('.r')) return null;
 
-  return { filename, source: text.slice(newline + 1) };
+  const rawSource = text.slice(newline + 1);
+  const beginMarker = '----- BEGIN ATTACHMENT -----\n';
+  const endMarker = '\n----- END ATTACHMENT -----';
+  const envelopedSource = rawSource.startsWith(beginMarker)
+    ? rawSource.slice(beginMarker.length)
+    : null;
+  const source = envelopedSource?.endsWith(endMarker)
+    ? envelopedSource.slice(0, -endMarker.length)
+    : (envelopedSource ?? rawSource);
+
+  return { filename, source };
 }
 
 function isIdentifierStart(char: string | undefined): boolean {

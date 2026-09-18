@@ -74,6 +74,36 @@ describe('extractPromptTextAttachments', () => {
     expect(result.attachmentTexts[0]).toContain('# Bug\nIt broke.');
   });
 
+  it('extracts R scripts and Jupyter notebooks as source text', async () => {
+    const notebook = JSON.stringify({
+      cells: [{ cell_type: 'code', source: ['library(DESeq2)'] }],
+      nbformat: 4,
+      nbformat_minor: 5,
+    });
+    const result = await extractPromptTextAttachments([
+      {
+        filename: 'analysis.R',
+        mimeType: 'text/x-r-source',
+        bytes: Buffer.from('library(DESeq2)', 'utf8'),
+      },
+      {
+        filename: 'analysis.ipynb',
+        mimeType: 'application/x-ipynb+json',
+        bytes: Buffer.from(notebook, 'utf8'),
+      },
+    ]);
+
+    expect(result.warnings).toEqual([]);
+    expect(result.attachmentTexts[0]).toContain(
+      'File attachment: analysis.R (text/x-r-source)',
+    );
+    expect(result.attachmentTexts[0]).toContain('library(DESeq2)');
+    expect(result.attachmentTexts[1]).toContain(
+      'File attachment: analysis.ipynb (application/x-ipynb+json)',
+    );
+    expect(result.attachmentTexts[1]).toContain('library(DESeq2)');
+  });
+
   it('extracts spreadsheet cells as text', async () => {
     const workbook = XLSX.utils.book_new();
     const worksheet = XLSX.utils.aoa_to_sheet([

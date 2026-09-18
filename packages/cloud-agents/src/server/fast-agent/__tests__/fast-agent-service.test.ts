@@ -11462,6 +11462,49 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
+  it('allows a trusted admin child continuation to launch environment verification', async () => {
+    const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
+      success: true,
+      taskId: 'verification-task',
+    }));
+    const adapter = callbacks({ launchTask });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.launchTask, {
+            mode: 'environment_verification',
+            prompt: 'Verify the environment.',
+            environmentId: 'env-1',
+          }),
+        ).resolves.toEqual({
+          success: true,
+          taskId: 'verification-task',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'The verification task is running.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      turnSource: 'platform_event',
+      serviceCredentialPlatformActorUserId: 'user-1',
+      adapter,
+    });
+
+    expect(mocks.getUserIdentity).toHaveBeenCalledWith('user-1');
+    expect(launchTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        environmentId: 'env-1',
+        verifiesEnvironmentId: 'env-1',
+      }),
+    );
+  });
+
   it('validates and forwards pull request review model overrides', async () => {
     const adapter = callbacks();
     mocks.generateText.mockImplementation(
