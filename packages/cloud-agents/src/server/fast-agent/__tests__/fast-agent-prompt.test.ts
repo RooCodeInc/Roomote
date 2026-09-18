@@ -2238,6 +2238,58 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
+  it('keeps native channel delivery separate from unrelated integration catalogs', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      availableIntegrations: [
+        {
+          id: 'roomote',
+          name: 'Roomote',
+          description: 'Native Roomote capabilities',
+          tools: [{ name: 'post_to_channel' }],
+        },
+        {
+          id: 'new-relic',
+          name: 'New Relic',
+          description: 'Observability data',
+          tools: [{ name: 'search_logs' }],
+        },
+        {
+          id: 'linear',
+          name: 'Linear',
+          description: 'Issue tracking',
+          tools: [{ name: 'get_issue' }],
+        },
+      ],
+      serviceCredentialToolsEnabled: true,
+    });
+
+    expect(prompt).toContain(
+      'The built-in and on-demand integration catalogs and the HTTP integrations list are not the full tool inventory',
+    );
+    expect(prompt).toContain(
+      'use an exposed channel-posting tool for a requested channel post',
+    );
+    expect(prompt).toContain(
+      "Slack's absence from an integration catalog or an empty HTTP integrations list does not make that exposed tool unavailable",
+    );
+    expect(prompt).toContain(
+      'Preserve explicit requests to configure a built-in integration, remote MCP, or direct API',
+    );
+    expect(prompt).toContain(
+      "treat the posting tool's provider and channel permission result as authoritative",
+    );
+    expect(prompt).toContain(
+      'When a delegated worker or subagent lacks a posting tool and prepares content that the user asked to deliver, it must return the completed content to the parent instead of posting it',
+    );
+    expect(prompt).toContain(
+      'The parent remains responsible for making exactly the requested delivery',
+    );
+    expect(prompt).toContain('Roomote [tool prefix: roomote_]');
+    expect(prompt).toContain('New Relic [id: new-relic]');
+    expect(prompt).toContain('Linear [id: linear]');
+  });
+
   it('does not bypass an applicable or indeterminate remote MCP with an integration key', () => {
     const adminPrompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
