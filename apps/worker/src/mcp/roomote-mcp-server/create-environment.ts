@@ -3,6 +3,7 @@ import YAML from 'yaml';
 import {
   type EnvironmentConfig,
   environmentConfigSchema,
+  getUnresolvedEnvironmentRecipeError,
 } from '@roomote/types';
 
 import {
@@ -115,6 +116,12 @@ function parseFinalDefinition(params: {
       `Invalid environment configuration: ${parsedConfig.error.issues.map((issue) => issue.message).join(', ')}`,
     );
   }
+  const unresolvedRecipeError = getUnresolvedEnvironmentRecipeError(
+    parsedConfig.data,
+  );
+  if (unresolvedRecipeError) {
+    throw new Error(unresolvedRecipeError);
+  }
   return applyOverrides(parsedConfig.data, params);
 }
 
@@ -124,7 +131,7 @@ function buildEnvironmentSummary(config: EnvironmentConfig): {
     repositories: number;
     setupCommands: number;
     dockerProjects: number;
-    analysisRecipe: string | null;
+    environmentRecipe: string | null;
     maximumConfiguredSetupMinutes: number;
   };
 } {
@@ -137,14 +144,14 @@ function buildEnvironmentSummary(config: EnvironmentConfig): {
       (total, project) => total + (project.startup_timeout_seconds ?? 600),
       0,
     ) +
-    (config.analysis_recipe ? 5_400 : 0);
+    (config.environment_recipe ? 5_400 : 0);
   return {
     summary: {
       name: config.name,
       repositories: config.repositories.length,
       setupCommands: setupCommands.length,
       dockerProjects: config.docker_projects?.length ?? 0,
-      analysisRecipe: config.analysis_recipe?.catalog_id ?? null,
+      environmentRecipe: config.environment_recipe?.type ?? null,
       maximumConfiguredSetupMinutes: Math.ceil(configuredSeconds / 60),
     },
   };

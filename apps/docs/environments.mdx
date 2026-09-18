@@ -255,6 +255,25 @@ the commands and services needed to run tests, start the app, and open
 previews. For UI work, [configure Live Previews](/live-previews#prerequisites)
 so teammates can inspect the result without pulling the branch locally.
 
+## Environment lifecycle
+
+Environment cards and detail pages derive their lifecycle from verification
+state:
+
+- **Configured** exists but is not verified for its current runtime
+  configuration.
+- **Configuring** is a recipe environment whose packages are still being
+  resolved by its verification task.
+- **Verifying** is a resolved environment with an active verification task.
+- **Ready** passed a verification task for its current configuration.
+- **Failed** is a resolution or verification error shown on the environment.
+
+Recipe environments are created on demand through the Fast session's
+`ensure_environment` tool after one user confirmation; creation is
+administrator-only, while previewing and reusing an existing environment is
+open to members. An unresolved or unverified recipe environment is never
+routable for normal work.
+
 ## How to tell an environment is healthy
 
 An environment is in good shape when Roomote can do more than clone code:

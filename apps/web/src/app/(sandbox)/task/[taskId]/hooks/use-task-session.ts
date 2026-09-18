@@ -7,6 +7,7 @@ import {
   type CodingHarness,
   isExitedRunStatus,
   DEFAULT_CODING_HARNESS,
+  type EnvironmentRecipe,
 } from '@roomote/types';
 
 import type { TaskWithAssociations } from '@/types';
@@ -91,6 +92,7 @@ export interface TaskSession {
     verificationTaskActive: boolean;
     verifiedAt: Date | null;
     verificationError: string | null;
+    config: { environment_recipe?: EnvironmentRecipe } | undefined;
   } | null;
 
   /** The initial prompt for the session, null if not yet loaded or not found. */

@@ -151,7 +151,7 @@ agentInstructions: |
 | `env`                     | map               | no       | Workspace environment variables available to every task.                                                                  |
 | `services`                | list              | no       | Managed services to start. See [Services](#services).                                                                     |
 | `docker_projects`         | list              | no       | Existing Compose or Dockerfile projects to build and start. See [Docker projects](#docker-projects).                      |
-| `analysis_recipe`         | map               | no       | A pinned repository-free analysis runtime created by Roomote. The first supported recipe is `r-bioconductor`.            |
+| `environment_recipe`      | map               | no       | A resolved on-demand runtime created by Roomote through `ensure_environment`. Unresolved recipes are an internal provisioning state and cannot be saved directly. See [Environment recipes](#environment-recipes). |
 | `ports`                   | list              | no       | Named preview ports. See [Ports](#ports).                                                                                 |
 | `oidc`                    | map               | no       | Sandbox OIDC targets. See [OIDC](#oidc).                                                                                  |
 | `mcpServers`              | map               | no       | Custom MCP servers for this environment. See [MCP servers](#mcp-servers).                                                 |
@@ -186,7 +186,42 @@ environment.
 GitHub repositories in one environment must belong to the same GitHub App
 installation.
 
+## Environment recipes
+
+Environment recipes give a Roomote task a reproducible runtime without a
+repository Dockerfile or lockfile. A recipe has a normalized `request` and
+`request_fingerprint`; once the trusted image-provided worker resolves it, a
+complete pinned `resolution` with its own `resolution_fingerprint` is
+persisted.
+
+The first supported type is `r-bioconductor`. Requested direct packages are
+dynamically resolved from the official CRAN and Bioconductor repositories
+inside a pinned image (R 4.5.2 / Bioconductor 3.21 on a digest-pinned
+bioconductor/bioconductor_docker image). GitHub remotes, local packages,
+private registries, and dynamically computed package names are out of scope:
+they fail with an actionable error rather than silently installing something
+unexpected.
+
+Recipe environments are created through the Fast session's
+`ensure_environment` tool after one user confirmation; only deployment
+administrators can create them, and read-only preview and reuse are available
+to members. The resolved portion of a recipe is system-managed — direct admin
+YAML/API edits invalidate verification like any other runtime-affecting
+change — while the environment lifecycle is derived from recipe and
+verification state:
+
+- **Configuring**: a request with an active verification task but no
+  persisted resolution yet.
+- **Verifying**: a resolved recipe with an active verification task.
+- **Ready**: successfully verified.
+- **Failed**: resolution or verification error.
+- **Configured**: an ordinary non-recipe environment.
+
+An unresolved or unverified recipe environment is never routable for normal
+work.
+
 ### Commands
+
 
 Each entry in a repository's `commands` list runs in order after the repository
 is cloned. Commands are the durable setup steps a teammate would run after
