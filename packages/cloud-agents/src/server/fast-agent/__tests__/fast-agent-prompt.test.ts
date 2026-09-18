@@ -2188,6 +2188,31 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).not.toContain('Only deployment administrators');
   });
 
+  it('does not let a deployment-wide built-in answer a request for a private connection', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      addRemoteMcpEnabled: true,
+      serviceCredentialToolsEnabled: true,
+    });
+
+    expect(prompt).toContain(
+      'A request to keep a connection private is about who may use it, not about which route to take',
+    );
+    expect(prompt).toContain(
+      'Never connect a `scope=deployment` built-in silently when the human asked for something only they can use',
+    );
+    expect(prompt).toContain(
+      'Say that this integration connects for everyone in the deployment',
+    );
+    expect(prompt).toContain(
+      'connect the built-in anyway only when they accept the shared connection',
+    );
+    // A per-user built-in is already private; it must not be routed elsewhere.
+    expect(prompt).toContain(
+      "`user` means the human's own credentials, so connecting it is already private to them",
+    );
+  });
+
   it('checks the full built-in catalog before fallback setup routes', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
