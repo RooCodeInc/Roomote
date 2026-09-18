@@ -44,7 +44,6 @@ export interface SlackRichTextValue {
 
 type SlackRichTextConversionOptions = {
   angleBracketLinkDestinations?: boolean;
-  preserveParagraphs?: boolean;
 };
 
 // Every repetition is bounded so a pathological message (for example a
@@ -224,7 +223,7 @@ export function convertMarkdownToRichText(
   let pendingBlankLine = false;
 
   const preservePendingParagraph = () => {
-    if (!options.preserveParagraphs || !pendingBlankLine) return;
+    if (!pendingBlankLine) return;
     const previous = elements.at(-1);
     if (previous?.type === 'rich_text_section') {
       previous.elements.push({ type: 'text', text: '\n\n' });
@@ -263,21 +262,6 @@ export function convertMarkdownToRichText(
         : null;
     if (listStyle) {
       const pattern = listStyle === 'bullet' ? BULLET_ITEM : ORDERED_ITEM;
-      if (!options.preserveParagraphs) {
-        const items: SlackRichTextSection[] = [];
-        while (index < lines.length) {
-          const item = lines[index]!.match(pattern);
-          if (!item) break;
-          items.push(section(item[1]!, {}, options));
-          index += 1;
-        }
-        elements.push({
-          type: 'rich_text_list',
-          style: listStyle,
-          elements: items,
-        });
-        continue;
-      }
       const items: SlackRichTextSection[] = [];
       while (index < lines.length) {
         const item = lines[index]!.match(pattern);

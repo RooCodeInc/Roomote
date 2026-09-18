@@ -155,7 +155,10 @@ describe('convertMarkdownToRichText', () => {
         },
         {
           type: 'rich_text_section',
-          elements: [{ type: 'text', text: 'First line.' }],
+          elements: [
+            { type: 'text', text: 'First line.' },
+            { type: 'text', text: '\n\n' },
+          ],
         },
         {
           type: 'rich_text_list',
@@ -196,13 +199,12 @@ describe('convertMarkdownToRichText', () => {
     });
   });
 
-  it('preserves bounded paragraph breaks when requested', () => {
+  it('preserves bounded paragraph breaks for every caller', () => {
     expect(
       convertMarkdownToRichText(
         ['# Heading', '', 'Intro.', '', '- one', '- two', '', 'Outro.'].join(
           '\n',
         ),
-        { preserveParagraphs: true },
       ),
     ).toEqual({
       type: 'rich_text',
@@ -260,7 +262,6 @@ describe('convertMarkdownToRichText', () => {
           '',
           '- Second item',
         ].join('\n'),
-        { preserveParagraphs: true },
       ),
     ).toEqual({
       type: 'rich_text',
@@ -292,7 +293,6 @@ describe('convertMarkdownToRichText', () => {
     expect(
       convertMarkdownToRichText(
         ['- Example', '  ```ts', '  const value = 1;', '  ```'].join('\n'),
-        { preserveParagraphs: true },
       ),
     ).toEqual({
       type: 'rich_text',
@@ -319,7 +319,6 @@ describe('convertMarkdownToRichText', () => {
     expect(
       convertMarkdownToRichText(
         ['```', 'first', '', 'second', '```', '', 'after'].join('\n'),
-        { preserveParagraphs: true },
       ).elements,
     ).toEqual([
       {
@@ -335,9 +334,7 @@ describe('convertMarkdownToRichText', () => {
         elements: [{ type: 'text', text: 'after' }],
       },
     ]);
-    expect(
-      convertMarkdownToRichText(' \n\n', { preserveParagraphs: true }),
-    ).toEqual({
+    expect(convertMarkdownToRichText(' \n\n')).toEqual({
       type: 'rich_text',
       elements: [
         { type: 'rich_text_section', elements: [{ type: 'text', text: '' }] },
