@@ -907,7 +907,7 @@ export function useCustomMcpServers(): {
             ? async () => {
                 const initiateUrl = await connect.mutateAsync({
                   id: server.id,
-                  redirectTo: '/settings/integrations',
+                  redirectTo: '/integrations',
                 });
                 window.location.href = initiateUrl;
               }
@@ -961,7 +961,7 @@ export function useCustomMcpServers(): {
               onAction: async () => {
                 const initiateUrl = await connect.mutateAsync({
                   id: server.id,
-                  redirectTo: '/settings/integrations',
+                  redirectTo: '/integrations',
                 });
                 window.location.href = initiateUrl;
               },

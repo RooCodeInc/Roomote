@@ -48,7 +48,7 @@ describe('GET /api/slack/callback', () => {
 
   it('redirects org installs back to the signed redirect path', async () => {
     const state = await createSignedSlackInstallState({
-      redirectPath: '/settings/integrations',
+      redirectPath: '/integrations',
     });
 
     const response = await GET(
@@ -59,7 +59,7 @@ describe('GET /api/slack/callback', () => {
 
     expect(response.status).toBe(307);
     expect(redirectPathAndSearch(response)).toBe(
-      '/settings/integrations?slack=connected',
+      '/integrations?slack=connected',
     );
     expect(mockExchangeOAuthCode).toHaveBeenCalledWith({
       code: 'oauth-code',

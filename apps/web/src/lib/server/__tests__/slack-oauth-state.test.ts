@@ -22,12 +22,12 @@ describe('slack-oauth-state', () => {
 
   it('round-trips signed install state', async () => {
     const state = await createSignedSlackInstallState({
-      redirectPath: '/settings/integrations',
+      redirectPath: '/integrations',
     });
 
     await expect(decodeSlackOAuthState(state)).resolves.toEqual({
       mode: 'install',
-      redirectPath: '/settings/integrations',
+      redirectPath: '/integrations',
     });
   });
 
@@ -40,7 +40,7 @@ describe('slack-oauth-state', () => {
       JSON.stringify({
         version: 1,
         mode: 'install',
-        redirectPath: '/settings/integrations',
+        redirectPath: '/integrations',
         issuedAt: Date.now(),
       }),
     ).toString('base64url');

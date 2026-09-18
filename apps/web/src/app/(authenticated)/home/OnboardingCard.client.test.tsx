@@ -368,9 +368,7 @@ it('opens the highlighted integration settings for admin setup', () => {
   dismissCard();
 
   fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
-  expect(mockPush).toHaveBeenCalledWith(
-    '/settings/integrations?highlight=notion',
-  );
+  expect(mockPush).toHaveBeenCalledWith('/integrations?highlight=notion');
 });
 
 it('does not offer deployment-scoped Notion setup to non-admins', () => {
