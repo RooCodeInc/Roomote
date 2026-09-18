@@ -6,7 +6,7 @@ import {
   ArrowRight,
   BasicTooltip,
   Button,
-  ChevronRight,
+  ChevronDown,
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
@@ -141,9 +141,9 @@ export function CodingModelRoutingRulesEditor({
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="space-y-3 pb-3">
       <CollapsibleTrigger className="group flex cursor-pointer items-center gap-1.5 text-left text-sm text-muted-foreground hover:text-foreground">
-        <ChevronRight
-          className={`size-4 shrink-0 transition-transform ${open ? 'rotate-90' : ''}`}
-          style={{ transform: open ? 'rotate(90deg)' : undefined }}
+        <ChevronDown
+          className="size-4 shrink-0 transition-transform"
+          style={{ transform: open ? undefined : 'rotate(-90deg)' }}
         />
         Custom coding model routing rules
       </CollapsibleTrigger>
@@ -174,7 +174,7 @@ export function CodingModelRoutingRulesEditor({
                     className="min-w-0 flex-1"
                   />
                   <ArrowRight className="size-4 shrink-0 self-center text-muted-foreground" />
-                  <div className="flex min-w-0 items-center gap-2">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
                     <TaskModelSelect
                       value={rule.modelId}
                       optionGroups={optionGroups}

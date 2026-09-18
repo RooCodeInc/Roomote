@@ -635,11 +635,13 @@ describe('ModelSettingsSection', () => {
       name: 'Custom coding model routing rules',
     });
     expect(routingTrigger).toHaveAttribute('aria-expanded', 'false');
-    expect(routingTrigger.querySelector('svg')).not.toHaveClass('rotate-90');
+    expect(routingTrigger.querySelector('svg')).toHaveStyle({
+      transform: 'rotate(-90deg)',
+    });
     fireEvent.click(routingTrigger);
     expect(routingTrigger).toHaveAttribute('aria-expanded', 'true');
-    expect(routingTrigger.querySelector('svg')).toHaveStyle({
-      transform: 'rotate(90deg)',
+    expect(routingTrigger.querySelector('svg')).not.toHaveStyle({
+      transform: 'rotate(-90deg)',
     });
     fireEvent.click(
       screen.getByRole('button', {
