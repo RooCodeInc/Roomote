@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -55,14 +55,17 @@ describe('worker recipe registry', () => {
     });
     const runs = commands.map((command) => command.run).join('\n');
     expect(runs).toContain('BiocManager::install');
-    expect(decodeShell(runs)).toContain("renv::snapshot(type='all'");
+    expect(decodeShell(runs)).toContain(
+      "renv::snapshot(project='/roomote-recipe'",
+    );
     expect(runs).toContain('rm -rf');
     expect(runs).toContain('renv::restore(lockfile');
-    expect(runs).toContain('requireNamespace("DESeq2"');
+    expect(runs).toContain('find.package(pkg, lib.loc=target)');
+    expect(runs).toContain('loadNamespace(pkg, lib.loc=target)');
     expect(commands.some((command) => command.timeout! >= 3600)).toBe(true);
   });
 
-  it('resolution commands assert pinned runtime and a clean library boundary inside the image', () => {
+  it('resolution commands assert pinned runtime and isolate recipe packages without rejecting R system libraries', () => {
     const commands = rBioconductorWorkerAdapter.buildResolutionCommands({
       recipe: unresolvedRecipe,
       recipePath: '/tmp/recipe',
@@ -71,8 +74,20 @@ describe('worker recipe registry', () => {
     for (const script of scripts.slice(1)) {
       expect(script).toContain('R.version$major == 4, R.version$minor');
       expect(script).toContain('BiocManager::version()');
-      expect(script).toContain('.libPaths(target)');
+      expect(script).toContain('.libPaths(c(target, .libPaths()))');
+      expect(script).not.toContain('unexpected library path');
     }
+    expect(scripts[1]).toContain(
+      "system.file(package='BiocManager', lib.loc=target)",
+    );
+    expect(scripts[1]).toContain(
+      "BiocManager::install(unique(c('BiocVersion', pkgs)), lib=target",
+    );
+    expect(scripts[1]).toContain("system.file(package='renv', lib.loc=target)");
+    expect(scripts[1]).toContain(
+      'settings$bioconductor.version("3.21", project=\'/roomote-recipe\')',
+    );
+    expect(scripts[1]).toContain("type='all', library=target");
   });
 
   it('labels CRAN provenance before Bioconductor and fails unsupported sources', () => {
@@ -125,7 +140,20 @@ describe('worker recipe registry', () => {
     const runs = commands.map((command) => command.run).join('\n');
     expect(decodeShell(runs)).toContain('renv::restore(lockfile');
     expect(decodeShell(runs)).not.toContain('BiocManager::install');
-    expect(decodeShell(runs)).not.toContain("renv::snapshot(type='all'");
+    expect(decodeShell(runs)).not.toContain('renv::snapshot(');
+  });
+
+  it('materializes the persisted lock into a fresh recipe workspace', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'roomote-recipe-'));
+
+    await rBioconductorWorkerAdapter.materializeResolution?.({
+      recipe: resolvedRecipe,
+      recipePath: dir,
+    });
+
+    await expect(readFile(join(dir, 'renv.lock'), 'utf8')).resolves.toBe(
+      `${JSON.stringify(resolvedRecipe.resolution!.renv_lock, null, 2)}\n`,
+    );
   });
 
   it('restore commands are empty for unresolved recipes', () => {

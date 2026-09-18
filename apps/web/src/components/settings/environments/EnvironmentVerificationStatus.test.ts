@@ -46,6 +46,22 @@ describe('getEnvironmentVerificationState', () => {
     ).toBe('configuring');
   });
 
+  it('does not leave an unresolved candidate configuring without an active task', () => {
+    expect(
+      getEnvironmentVerificationState({
+        isVerified: false,
+        verificationTaskId: null,
+        verificationTaskActive: false,
+        verificationError: null,
+        config: {
+          name: 'R analysis',
+          repositories: [],
+          environment_recipe: unresolvedRecipe,
+        },
+      }),
+    ).toBe('configured');
+  });
+
   it('derives Verifying for a resolved recipe with an active verification task', () => {
     expect(
       getEnvironmentVerificationState({

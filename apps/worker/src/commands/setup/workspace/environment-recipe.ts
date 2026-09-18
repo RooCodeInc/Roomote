@@ -115,6 +115,7 @@ export async function setupEnvironmentRecipe(
   await mkdir(recipePath, { recursive: true });
 
   let recipe = input.recipe;
+  let resolutionPreparedRuntime = false;
 
   if (!hasResolvedEnvironmentRecipe(recipe)) {
     logger.userLog.log(
@@ -148,18 +149,26 @@ export async function setupEnvironmentRecipe(
       recipe: resolved,
     });
     recipe = resolved;
+    // Resolution plans must prove the result from a clean restore before it is
+    // finalized, so the current workspace is already ready. Do not repeat the
+    // potentially hour-long restore immediately after resolution.
+    resolutionPreparedRuntime = true;
   }
 
-  // Resolved recipes restore from their persisted lock only; dependency
-  // resolution never reruns here.
-  await runRecipeCommandPlan(logger, {
-    planName,
-    commands: adapter.buildRestoreCommands({ recipe, recipePath }),
-    workspacePath: input.workspacePath,
-    envVars: input.envVars,
-    onCommandStart: input.onCommandStart,
-    onCommandResult: input.onCommandResult,
-  });
+  if (!resolutionPreparedRuntime) {
+    await adapter.materializeResolution?.({ recipe, recipePath });
+
+    // Resolved recipes restore from their persisted resolution only;
+    // dependency resolution never reruns in a fresh task.
+    await runRecipeCommandPlan(logger, {
+      planName,
+      commands: adapter.buildRestoreCommands({ recipe, recipePath }),
+      workspacePath: input.workspacePath,
+      envVars: input.envVars,
+      onCommandStart: input.onCommandStart,
+      onCommandResult: input.onCommandResult,
+    });
+  }
 
   await adapter.afterRestore?.({
     recipe,

@@ -76,6 +76,7 @@ import {
   getDeploymentTaskModelOptions,
   getSessionForFastConversation,
   getSessionForTask,
+  getActiveRecipeVerificationTaskId,
   inArray,
   isBrainEnabled,
   isPrivateSessionsExperimentEnabled,
@@ -84,6 +85,7 @@ import {
   releaseSessionGoalContinuation,
   sql,
   touchSessionActivity,
+  withEnvironmentVerificationRetryLock,
 } from '@roomote/db/server';
 import {
   buildFastSessionUrl,
@@ -118,6 +120,7 @@ import {
 import { requireRecipeControlAdapter } from '../environment-recipes';
 import {
   createEnvironmentRecipeCandidate,
+  launchEnvironmentRecipeVerification,
   previewEnsureEnvironment,
 } from './ensure-environment';
 import {
@@ -4821,19 +4824,27 @@ export async function answerFastAgentQuestion({
                 recipeAdapter.buildVerificationInstructions(recipe),
             });
 
-            let launchResult: Awaited<
-              ReturnType<typeof adapter.launchTask>
-            > | null = null;
+            let launchResult:
+              | (Awaited<ReturnType<typeof adapter.launchTask>> & {
+                  alreadyActive?: boolean;
+                })
+              | null = null;
             try {
-              launchResult = await adapter.launchTask({
-                prompt,
+              launchResult = await launchEnvironmentRecipeVerification({
                 environmentId: candidate.environmentId,
-                verifiesEnvironmentId: candidate.environmentId,
-                model: null,
-                reasoningEffort: null,
-                parentSessionId: session.id,
-                launchIdempotencyKey: `fast:ensure-environment:${candidate.environmentId}`,
-                postKickoff: async () => {},
+                withLock: withEnvironmentVerificationRetryLock,
+                findActiveTaskId: getActiveRecipeVerificationTaskId,
+                launch: () =>
+                  adapter.launchTask({
+                    prompt,
+                    environmentId: candidate.environmentId,
+                    verifiesEnvironmentId: candidate.environmentId,
+                    model: null,
+                    reasoningEffort: null,
+                    parentSessionId: session.id,
+                    launchIdempotencyKey: `fast:ensure-environment:${candidate.environmentId}:${randomUUID()}`,
+                    postKickoff: async () => {},
+                  }),
               });
             } catch (error) {
               // The candidate stays visible without a verification binding;
@@ -4863,7 +4874,9 @@ export async function answerFastAgentQuestion({
               verificationTaskId: launchResult.taskId,
               message: candidate.created
                 ? `Environment "${candidate.name}" created and its verification task started. When it reports success, launch the analysis without asking the user to restart.`
-                : `Environment "${candidate.name}" was reused and its verification task resubmitted.`,
+                : launchResult.alreadyActive
+                  ? `Environment "${candidate.name}" already has a verification task in progress.`
+                  : `Environment "${candidate.name}" was reused and its verification task resubmitted.`,
             };
           }
 

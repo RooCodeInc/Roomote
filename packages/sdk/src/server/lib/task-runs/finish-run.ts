@@ -37,6 +37,7 @@ import {
   deploymentSettings,
   markTaskStartParallelCountEndedAt,
   maybeEnqueueBrainMemoryEvent,
+  markEnvironmentVerificationFailedIfCurrent,
   recordTaskRunLifecycleEvent,
   resolveDefaultComputeProvider,
   slackInstallations,
@@ -413,6 +414,36 @@ export const finishRun = async ({
       console.error(
         `[finishRun] Failed to record environment snapshot failure for run ${id}: ${
           err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+
+  const verifiesEnvironmentId =
+    run.payload &&
+    typeof run.payload === 'object' &&
+    !Array.isArray(run.payload)
+      ? (run.payload as Record<string, unknown>).verifiesEnvironmentId
+      : null;
+  if (
+    typeof verifiesEnvironmentId === 'string' &&
+    (status === RunStatus.Failed || status === RunStatus.Canceled)
+  ) {
+    try {
+      await markEnvironmentVerificationFailedIfCurrent(db, {
+        environmentId: verifiesEnvironmentId,
+        verificationTaskId: run.taskId,
+        error:
+          status === RunStatus.Canceled
+            ? 'The verification task was canceled before reporting a result.'
+            : 'The verification task failed before reporting a result.',
+      });
+    } catch (verificationError) {
+      console.error(
+        `[finishRun] Failed to record environment verification failure for run ${id}: ${
+          verificationError instanceof Error
+            ? verificationError.message
+            : String(verificationError)
         }`,
       );
     }

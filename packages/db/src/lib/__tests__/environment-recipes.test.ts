@@ -220,5 +220,19 @@ describe('environment recipe provisioning and finalization', () => {
       where: eq(environments.id, environment.id),
     });
     expect(updated?.verificationError).toBe('bootstrap failed');
+
+    const alreadyReported = await markEnvironmentVerificationFailedIfCurrent(
+      db,
+      {
+        environmentId: environment.id,
+        verificationTaskId: 'task-current',
+        error: 'generic terminal failure',
+      },
+    );
+    expect(alreadyReported.marked).toBe(false);
+    const preserved = await db.query.environments.findFirst({
+      where: eq(environments.id, environment.id),
+    });
+    expect(preserved?.verificationError).toBe('bootstrap failed');
   });
 });
