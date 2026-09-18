@@ -75,8 +75,6 @@ export const CUSTOM_AUTOMATION_EXECUTION_MODES = [
 export type CustomAutomationExecutionMode =
   (typeof CUSTOM_AUTOMATION_EXECUTION_MODES)[number];
 
-export const MAX_CUSTOM_AUTOMATIONS = 25;
-
 export const CUSTOM_AUTOMATION_NAME_MAX_LENGTH = 100;
 
 export const CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH = 8_000;

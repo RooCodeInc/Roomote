@@ -178,7 +178,6 @@ const VALIDATION_ERROR_PATTERNS: RegExp[] = [
   /^Custom automation was not found\.$/,
   /^Automation owner is not configured\.$/,
   /^Report destination must include a provider, target kind, and reference\.$/,
-  /^You can create at most \d+ custom automations\.$/,
   /^targetChannelId is required when targetProvider is set\.$/,
   /^Email destinations must use direct_message mode\.$/,
   /^Choose an account Email identity\.$/,
