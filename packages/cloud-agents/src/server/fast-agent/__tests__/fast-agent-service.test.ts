@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os';
 const mocks = vi.hoisted(() => ({
   appendVisibleMessages: vi.fn(),
   publishReplyStream: vi.fn(),
+  previewEnsureEnvironment: vi.fn(),
+  createEnvironmentRecipeCandidate: vi.fn(),
   getActiveTasks: vi.fn(),
   getSession: vi.fn(),
   getNativeRuntime: vi.fn(),
@@ -109,6 +111,7 @@ const nativeToolNames = vi.hoisted(
       connectIntegration: 'connect_integration',
       cancelTask: 'cancel_task',
       createArtifact: 'create_artifact',
+      ensureEnvironment: 'ensure_environment',
       reportPlatformIssue: 'report_platform_issue',
       findIntegrationTools: 'find_integration_tools',
       ignoreEvent: 'ignore_event',
@@ -196,6 +199,12 @@ vi.mock('../../available-environments', () => ({
   getActiveRepositoryCatalog: mocks.getActiveRepositories,
   listActiveRepositories: mocks.listActiveRepositories,
   getAvailableEnvironments: mocks.getEnvironments,
+}));
+
+vi.mock('../ensure-environment', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../ensure-environment')>()),
+  previewEnsureEnvironment: mocks.previewEnsureEnvironment,
+  createEnvironmentRecipeCandidate: mocks.createEnvironmentRecipeCandidate,
 }));
 
 vi.mock('../../session-wakeups', async (importOriginal) => ({
@@ -10891,6 +10900,50 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         reasoningEffort: 'xhigh',
       }),
     );
+  });
+
+  it('honors a surface launch gate before provisioning a recipe environment', async () => {
+    const assertTaskLaunch = vi.fn(async () => {
+      throw new Error('Connect source control before starting work.');
+    });
+    const launchTask = vi.fn<LaunchFastAgentTask>();
+    const adapter = callbacks({ assertTaskLaunch, launchTask });
+    mocks.previewEnsureEnvironment.mockReturnValue({
+      status: 'proposal',
+      proposalFingerprint: 'f'.repeat(64),
+      setupTimeBoundMinutes: 90,
+      persistenceImpact: 'Creates one durable environment.',
+      impactSummary: 'Resolves 1 R package.',
+    });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’m checking whether the workspace is ready.',
+        });
+        await expect(
+          invokeTool(nativeToolNames.ensureEnvironment, {
+            action: 'create',
+            type: 'r-bioconductor',
+            packages: ['DESeq2'],
+            name: 'R + Bioconductor — Airway RNA-seq',
+            purpose: 'Airway RNA-seq',
+            proposalFingerprint: 'f'.repeat(64),
+          }),
+        ).resolves.toEqual({
+          success: false,
+          error: 'Connect source control before starting work.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+
+    expect(assertTaskLaunch).toHaveBeenCalledOnce();
+    expect(mocks.createEnvironmentRecipeCandidate).not.toHaveBeenCalled();
+    expect(launchTask).not.toHaveBeenCalled();
   });
 
   it('honors a surface launch gate before creating a task', async () => {
