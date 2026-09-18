@@ -51,6 +51,7 @@ describe('metadata descriptions', () => {
       serviceCredentialTools: false,
       privateSessions: false,
       browserNotifications: false,
+      toolApprovals: false,
     });
   });
 });

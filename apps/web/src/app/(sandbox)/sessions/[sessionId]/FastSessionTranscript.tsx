@@ -88,6 +88,9 @@ import { SESSION_HEADER_CONTENT_CLASS_NAME } from './session-header-layout';
 import { isRequestUserInputResponseRepresentedByCanonicalReceipt } from '@/lib/setup-receipt-transcript';
 import { CapabilityOfferCard } from './CapabilityOfferCard';
 import { PendingIntegrationKeys } from '@/components/sessions/PendingIntegrationKeys';
+import { PendingToolApprovals } from '@/components/sessions/PendingToolApprovals';
+import { useDeploymentExperiment } from '@/hooks/useDeploymentExperiments';
+import { useSessionToolApprovals } from '@/hooks/useSessionToolApprovals';
 import { openIntegrationKeyDialog } from '@/components/sessions/integration-key-dialog';
 
 import {
@@ -1783,6 +1786,15 @@ export function FastSessionTranscript({
     }
   }, [openIntegrationKeyRequestId, secretSessionId]);
 
+  const toolApprovalsExperiment = useDeploymentExperiment(
+    'toolApprovals',
+    'Failed to update the tool approvals experiment.',
+  );
+  const toolApprovals = useSessionToolApprovals(
+    secretSessionId,
+    toolApprovalsExperiment.enabled,
+  );
+
   useEffect(() => {
     if (pendingInputRequest && (liveVoiceActive || liveVoiceConnecting)) {
       stopLiveVoiceRef.current();
@@ -1930,6 +1942,12 @@ export function FastSessionTranscript({
               <PendingIntegrationKeys
                 sessionId={secretSessionId}
                 openRequest={openIntegrationKeyRequest}
+              />
+            ) : null}
+            {secretSessionId && toolApprovalsExperiment.enabled ? (
+              <PendingToolApprovals
+                sessionId={secretSessionId}
+                pending={toolApprovals.data?.pending ?? []}
               />
             ) : null}
           </ConversationContent>

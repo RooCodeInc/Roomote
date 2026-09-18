@@ -6,6 +6,7 @@ export const DEPLOYMENT_EXPERIMENT_IDS = [
   'serviceCredentialTools',
   'privateSessions',
   'browserNotifications',
+  'toolApprovals',
 ] as const;
 
 export type DeploymentExperimentId = (typeof DEPLOYMENT_EXPERIMENT_IDS)[number];
@@ -16,6 +17,7 @@ export const DEPLOYMENT_EXPERIMENT_METADATA_KEYS = {
   serviceCredentialTools: 'integration_keys_enabled',
   privateSessions: 'private_sessions_experiment_enabled',
   browserNotifications: 'browser_notifications_experiment_enabled',
+  toolApprovals: 'tool_approvals_experiment_enabled',
 } as const satisfies Record<DeploymentExperimentId, string>;
 
 export type DeploymentExperimentValues = Record<
@@ -70,5 +72,11 @@ export const DEPLOYMENT_METADATA_BOOLEAN_CONFIG: Record<
     group: null,
     description:
       'Offer desktop browser notifications while the relevant Session or task page remains open',
+  },
+  [DEPLOYMENT_EXPERIMENT_METADATA_KEYS.toolApprovals]: {
+    kind: 'deployment-control',
+    group: null,
+    description:
+      'Ask the Session requester to allow or reject each on-demand integration tool call before it runs. Disabled by default; absent means disabled.',
   },
 };

@@ -4573,6 +4573,54 @@ export const serviceCredentialAudit = pgTable('service_credential_audit', {
 });
 
 /**
+ * tool_call_approvals
+ *
+ * Experiment-gated (`tool_approvals_experiment_enabled`) per-call approvals
+ * for on-demand integration tool calls. One row is both the pending request
+ * and its redacted audit outcome: arguments are stored only as a redacted
+ * display summary plus a fingerprint that binds the decision to the exact
+ * call. Secret-looking values are redacted before insert; nothing here may
+ * carry raw credential material. Additive; N-1 code never reads or writes it.
+ */
+export const toolCallApprovals = pgTable(
+  'tool_call_approvals',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    /** The Session owner the agent acts for; only this user may decide. */
+    requesterUserId: text('requester_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    integrationId: text('integration_id').notNull(),
+    toolName: text('tool_name').notNull(),
+    /** SHA-256 hex of the canonical {integrationId, toolName, args} payload. */
+    argsFingerprint: text('args_fingerprint').notNull(),
+    /** Redacted argument preview for the approver and the audit trail. */
+    argsSummary: jsonb('args_summary').notNull(),
+    status: text('status')
+      .notNull()
+      .default('pending')
+      .$type<'pending' | 'approved' | 'rejected' | 'expired' | 'consumed'>(),
+    decidedByUserId: text('decided_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    decidedAt: timestamp('decided_at'),
+    /** The window for the requester to answer; unresolved rows fail closed. */
+    expiresAt: timestamp('expires_at').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('tool_call_approvals_session_requester_idx').on(
+      table.sessionId,
+      table.requesterUserId,
+      table.status,
+    ),
+  ],
+);
+
+/**
  * Credential egress control plane (additive, N-1 safe: previous releases never
  * read these tables). One row per attached run that a trusted controller
  * registered with the credential-substituting egress gateway. The

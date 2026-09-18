@@ -20,6 +20,11 @@ const mocks = vi.hoisted(() => ({
   appendLearnedPreference: vi.fn(),
   isBrainEnabled: vi.fn(),
   privateSessionsEnabled: vi.fn(),
+  toolApprovalsEnabled: vi.fn(),
+  insertToolCallApproval: vi.fn(),
+  getToolCallApproval: vi.fn(),
+  consumeToolCallApproval: vi.fn(),
+  expireToolCallApproval: vi.fn(),
   generateText: vi.fn(),
   generateHelperText: vi.fn(),
   generateTrackedObject: vi.fn(),
@@ -234,6 +239,13 @@ vi.mock('@roomote/db/server', () => ({
   getUserPersonalizationRuntimeContext: mocks.getPersonalization,
   isBrainEnabled: mocks.isBrainEnabled,
   isPrivateSessionsExperimentEnabled: mocks.privateSessionsEnabled,
+  isDeploymentExperimentEnabled: mocks.toolApprovalsEnabled,
+  insertToolCallApproval: mocks.insertToolCallApproval,
+  getToolCallApproval: mocks.getToolCallApproval,
+  consumeToolCallApproval: mocks.consumeToolCallApproval,
+  expireToolCallApproval: mocks.expireToolCallApproval,
+  fingerprintToolCallArgs: (input: unknown) => JSON.stringify(input),
+  redactToolCallArgs: (value: unknown) => value,
   db: {
     execute: mocks.executeDb,
     query: {
@@ -512,6 +524,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.touchSessionActivity.mockResolvedValue(undefined);
     mocks.getSessionForTask.mockResolvedValue(null);
     mocks.privateSessionsEnabled.mockResolvedValue(true);
+    // Default: the tool-approvals experiment is off, preserving existing
+    // dispatcher behavior unless a test opts in explicitly.
+    mocks.toolApprovalsEnabled.mockResolvedValue(false);
     mocks.getPendingHumanFollowUp.mockResolvedValue([]);
     mocks.ensureOwnTaskFollowThroughWakeup.mockResolvedValue(undefined);
     mocks.ensureSessionGoalContinuationWakeup.mockResolvedValue(undefined);
@@ -2062,6 +2077,151 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         },
       },
     );
+  });
+
+  describe('tool approvals experiment', () => {
+    const mockWriteIntegration = {
+      id: 'mockslack',
+      name: 'Mock Slack',
+      description: 'Controlled mock write action',
+      tools: [{ name: 'post_to_channel' }],
+    };
+    const writeCall = {
+      integrationId: 'mockslack',
+      toolName: 'post_to_channel',
+      args: { channel: 'C123', text: 'hello' },
+    };
+    const pendingApproval = {
+      approvalId: 'approval-1',
+      integrationId: writeCall.integrationId,
+      toolName: writeCall.toolName,
+      argsSummary: writeCall.args,
+      status: 'pending' as const,
+      expiresAt: new Date(Date.now() + 600_000).toISOString(),
+      createdAt: new Date().toISOString(),
+    };
+
+    function turnWithWriteCall(results: unknown[]) {
+      mocks.listIntegrations.mockResolvedValue([mockWriteIntegration]);
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+            message: 'Posting.',
+          });
+          results.push(
+            await invokeTool(nativeToolNames.callIntegrationTool, writeCall),
+          );
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Done.',
+          });
+          return '';
+        },
+      );
+    }
+
+    it('preserves existing dispatcher behavior when the experiment is disabled', async () => {
+      mocks.toolApprovalsEnabled.mockResolvedValue(false);
+      mocks.callIntegration.mockResolvedValue({ ok: true });
+      const results: unknown[] = [];
+      turnWithWriteCall(results);
+      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+      expect(results).toEqual([{ success: true, result: { ok: true } }]);
+      expect(mocks.insertToolCallApproval).not.toHaveBeenCalled();
+      expect(mocks.getToolCallApproval).not.toHaveBeenCalled();
+      expect(mocks.callIntegration).toHaveBeenCalledTimes(1);
+    });
+
+    it('runs the exact approved call once the requester allows it', async () => {
+      mocks.toolApprovalsEnabled.mockResolvedValue(true);
+      mocks.insertToolCallApproval.mockResolvedValue(pendingApproval);
+      mocks.getToolCallApproval.mockResolvedValue({
+        ...pendingApproval,
+        status: 'approved',
+      });
+      mocks.consumeToolCallApproval.mockResolvedValue(true);
+      mocks.callIntegration.mockResolvedValue({ ok: true });
+      const results: unknown[] = [];
+      turnWithWriteCall(results);
+      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+      expect(results).toEqual([{ success: true, result: { ok: true } }]);
+      expect(mocks.insertToolCallApproval).toHaveBeenCalledExactlyOnceWith(
+        { sessionId: 'conversation-1', userId: 'user-1' },
+        expect.objectContaining({
+          integrationId: 'mockslack',
+          toolName: 'post_to_channel',
+        }),
+      );
+      expect(mocks.consumeToolCallApproval).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ approvalId: 'approval-1' }),
+      );
+      expect(mocks.callIntegration).toHaveBeenCalledTimes(1);
+    });
+
+    it('fails closed without calling the integration when the requester rejects', async () => {
+      mocks.toolApprovalsEnabled.mockResolvedValue(true);
+      mocks.insertToolCallApproval.mockResolvedValue(pendingApproval);
+      mocks.getToolCallApproval.mockResolvedValue({
+        ...pendingApproval,
+        status: 'rejected',
+      });
+      const results: unknown[] = [];
+      turnWithWriteCall(results);
+      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+      expect(results).toEqual([
+        { success: false, error: 'The requester rejected this tool call.' },
+      ]);
+      expect(mocks.callIntegration).not.toHaveBeenCalled();
+    });
+
+    it('fails closed and expires the ask when the window lapses unanswered', async () => {
+      mocks.toolApprovalsEnabled.mockResolvedValue(true);
+      mocks.insertToolCallApproval.mockResolvedValue({
+        ...pendingApproval,
+        expiresAt: new Date(Date.now() - 1_000).toISOString(),
+      });
+      mocks.getToolCallApproval.mockResolvedValue(pendingApproval);
+      const results: unknown[] = [];
+      turnWithWriteCall(results);
+      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+      expect(results).toEqual([
+        {
+          success: false,
+          error:
+            'The requester did not answer in time; the tool call was not run.',
+        },
+      ]);
+      expect(mocks.expireToolCallApproval).toHaveBeenCalledExactlyOnceWith(
+        'approval-1',
+      );
+      expect(mocks.callIntegration).not.toHaveBeenCalled();
+    });
+
+    it('fails closed when the approval no longer binds the exact call', async () => {
+      // A changed-arguments or already-consumed approval cannot be consumed;
+      // the integration is never called. Binding itself is covered by the
+      // database tests (fingerprint mismatch, duplicate consumption).
+      mocks.toolApprovalsEnabled.mockResolvedValue(true);
+      mocks.insertToolCallApproval.mockResolvedValue(pendingApproval);
+      mocks.getToolCallApproval.mockResolvedValue({
+        ...pendingApproval,
+        status: 'approved',
+      });
+      mocks.consumeToolCallApproval.mockResolvedValue(false);
+      const results: unknown[] = [];
+      turnWithWriteCall(results);
+      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+      expect(results).toEqual([
+        {
+          success: false,
+          error: 'The approval for this tool call is no longer valid.',
+        },
+      ]);
+      expect(mocks.callIntegration).not.toHaveBeenCalled();
+    });
   });
 
   it.each([

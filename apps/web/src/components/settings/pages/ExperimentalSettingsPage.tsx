@@ -6,6 +6,7 @@ import { SlackPeerConversationsExperimentalSetting } from '@/components/settings
 import { ServiceCredentialToolsExperimentalSetting } from '@/components/settings/ServiceCredentialToolsExperimentalSetting';
 import { PrivateSessionsExperimentalSetting } from '@/components/settings/PrivateSessionsExperimentalSetting';
 import { BrowserNotificationsExperimentalSetting } from '@/components/settings/BrowserNotificationsExperimentalSetting';
+import { ToolApprovalsExperimentalSetting } from '@/components/settings/ToolApprovalsExperimentalSetting';
 import { RetryableLoadError } from '@/components/system';
 import { useDeploymentExperiments } from '@/hooks/useDeploymentExperiments';
 
@@ -26,6 +27,7 @@ export function ExperimentalSettingsPage() {
         <>
           <PrivateSessionsExperimentalSetting />
           <BrowserNotificationsExperimentalSetting />
+          <ToolApprovalsExperimentalSetting />
           <ResultsExperimentalSetting />
           <SlackPeerConversationsExperimentalSetting />
           <ServiceCredentialToolsExperimentalSetting />

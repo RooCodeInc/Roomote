@@ -68,6 +68,10 @@ vi.mock(
   }),
 );
 
+vi.mock('@/components/settings/ToolApprovalsExperimentalSetting', () => ({
+  ToolApprovalsExperimentalSetting: () => <div>Tool approvals setting</div>,
+}));
+
 import { ExperimentalSettingsPage } from './ExperimentalSettingsPage';
 
 describe('ExperimentalSettingsPage', () => {

@@ -76,8 +76,14 @@ import {
   getSessionForTask,
   inArray,
   isBrainEnabled,
+  isDeploymentExperimentEnabled,
   isPrivateSessionsExperimentEnabled,
   isNull,
+  consumeToolCallApproval,
+  expireToolCallApproval,
+  fingerprintToolCallArgs,
+  getToolCallApproval,
+  insertToolCallApproval,
   markSessionGoalForConversation,
   releaseSessionGoalContinuation,
   sql,
@@ -1921,6 +1927,7 @@ export async function answerFastAgentQuestion({
   let currentSessionPrivacy: 'shared' | 'private' = 'shared';
   let currentPrivateOwnerUserId: string | null = null;
   let privateSessionsExperimentEnabled = false;
+  let toolApprovalsExperimentEnabled = false;
   let availableIntegrations: FastAgentIntegration[] = [];
   let durableOpenCodeSessionId: string | null = null;
   let lastVisibleMessage = '';
@@ -3394,6 +3401,8 @@ export async function answerFastAgentQuestion({
       currentSessionPrivacy === 'private'
         ? await isPrivateSessionsExperimentEnabled()
         : false;
+    toolApprovalsExperimentEnabled =
+      await isDeploymentExperimentEnabled('toolApprovals');
     availableIntegrations = selectFastRoomoteChannelTools({
       integrations: discoveredIntegrations,
       conversation,
@@ -4037,9 +4046,81 @@ export async function answerFastAgentQuestion({
       call.toolName === 'integration_request' &&
       typeof call.args?.integrationId === 'string' &&
       call.args.integrationId.startsWith('session:');
+    /**
+     * Experiment-gated (`toolApprovals`) per-call approval for the on-demand
+     * integration dispatcher. The requester answers in the Session UI; the
+     * executor polls the approval row and fails closed on rejection, expiry,
+     * or any binding mismatch. Denials never echo arguments or actor detail.
+     */
+    const TOOL_CALL_APPROVAL_POLL_MS = 1_500;
+    const awaitToolCallApproval = async (input: {
+      integrationId: string;
+      toolName: string;
+      args: unknown;
+    }): Promise<{ success: false; error: string } | null> => {
+      const argsFingerprint = fingerprintToolCallArgs(input);
+      let approval;
+      try {
+        approval = await insertToolCallApproval(
+          { sessionId: session.id, userId },
+          {
+            integrationId: input.integrationId,
+            toolName: input.toolName,
+            argsFingerprint,
+            argsSummary: input.args,
+          },
+        );
+      } catch {
+        return {
+          success: false,
+          error: 'Approval for this tool call could not be requested.',
+        };
+      }
+      const deadline = Date.parse(approval.expiresAt);
+      for (;;) {
+        throwIfTurnCancelled();
+        const row = await getToolCallApproval(approval.approvalId);
+        if (!row || row.status === 'rejected') {
+          return {
+            success: false,
+            error: 'The requester rejected this tool call.',
+          };
+        }
+        if (row.status === 'expired') {
+          return {
+            success: false,
+            error:
+              'The requester did not answer in time; the tool call was not run.',
+          };
+        }
+        if (row.status === 'approved') {
+          const consumed = await consumeToolCallApproval({
+            approvalId: approval.approvalId,
+            requesterUserId: userId,
+            argsFingerprint,
+          });
+          if (consumed) return null;
+          return {
+            success: false,
+            error: 'The approval for this tool call is no longer valid.',
+          };
+        }
+        if (Date.now() >= deadline) {
+          await expireToolCallApproval(approval.approvalId);
+          return {
+            success: false,
+            error:
+              'The requester did not answer in time; the tool call was not run.',
+          };
+        }
+        await new Promise((resolve) =>
+          setTimeout(resolve, TOOL_CALL_APPROVAL_POLL_MS),
+        );
+      }
+    };
     const executeMcpTool = async (
       call: FastAgentMcpToolCall,
-      { acknowledgementExempt = false } = {},
+      { acknowledgementExempt = false, requireApproval = false } = {},
     ): Promise<unknown> => {
       activeToolExecutions += 1;
       let canonicalToolEvent:
@@ -4153,6 +4234,14 @@ export async function answerFastAgentQuestion({
         const sendsChatReaction =
           call.integrationId === ROOMOTE_MCP_ID &&
           call.toolName === CHAT_REACTION_EMOJI_TOOL_NAME;
+        if (requireApproval && toolApprovalsExperimentEnabled) {
+          const approvalDenial = await awaitToolCallApproval({
+            integrationId: call.integrationId,
+            toolName: call.toolName,
+            args: actorScopedIntegrationArguments,
+          });
+          if (approvalDenial) return approvalDenial;
+        }
         const signature = buildIntegrationCallSignature({
           integrationId: call.integrationId,
           toolName: call.toolName,
@@ -4338,11 +4427,14 @@ export async function answerFastAgentQuestion({
           if (isFastAgentNativeIntegration(args.integrationId)) {
             return nativeIntegrationError(args.integrationId);
           }
-          return await executeMcpTool({
-            integrationId: args.integrationId,
-            toolName: args.toolName,
-            args: args.args ?? {},
-          });
+          return await executeMcpTool(
+            {
+              integrationId: args.integrationId,
+              toolName: args.toolName,
+              args: args.args ?? {},
+            },
+            { requireApproval: true },
+          );
         }
       } catch (error) {
         return toolFailure(error);
@@ -5578,7 +5670,7 @@ export async function answerFastAgentQuestion({
                 toolName: args.toolName,
                 args: args.args ?? {},
               },
-              { acknowledgementExempt },
+              { acknowledgementExempt, requireApproval: true },
             );
           }
           case FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent: {
