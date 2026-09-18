@@ -123,6 +123,9 @@ export async function consumeAgentMailReplyVerification(input: {
     return null;
   }
 
+  // Cheap pre-checks: most unverified senders fail here without touching a
+  // transaction. Both conditions are re-verified INSIDE the transaction below
+  // so revocation (soft-delete) or a participant split cannot race the write.
   const member = await db.query.users.findFirst({
     where: and(eq(users.id, authUser.id), isNull(users.deletedAt)),
     columns: { id: true },
@@ -180,6 +183,34 @@ export async function consumeAgentMailReplyVerification(input: {
     }
 
     const verifiedUserId = await db.transaction(async (tx) => {
+      // Re-verify membership and participation inside the transaction: a
+      // soft-delete or participant split after the pre-checks must invalidate
+      // the proof rather than race the verification write.
+      const activeMember = await tx.query.users.findFirst({
+        where: and(eq(users.id, authUser.id), isNull(users.deletedAt)),
+        columns: { id: true },
+      });
+      if (!activeMember) {
+        return null;
+      }
+      const currentParticipation =
+        await tx.query.agentmailConversationParticipants.findFirst({
+          where: and(
+            eq(
+              agentmailConversationParticipants.inboxId,
+              normalizeEmailAddress(input.inboxId),
+            ),
+            eq(
+              agentmailConversationParticipants.providerThreadId,
+              input.providerThreadId,
+            ),
+            eq(agentmailConversationParticipants.userId, authUser.id),
+          ),
+          columns: { id: true },
+        });
+      if (!currentParticipation) {
+        return null;
+      }
       const updated = await tx
         .update(authUsers)
         .set({ emailVerified: true, updatedAt: new Date() })
