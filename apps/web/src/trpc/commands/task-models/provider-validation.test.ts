@@ -15,8 +15,9 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 import { getSetupModelProvider } from '@roomote/types';
 
 import {
-  assertInferenceProviderConnection,
   InferenceProviderValidationError,
+  assertInferenceProviderConnection,
+  validateBedrockApiKey,
   validateSetupModelProviderCredentials,
 } from './provider-validation';
 
@@ -187,5 +188,91 @@ describe('validateSetupModelProviderCredentials', () => {
       model: 'anthropic/claude-sonnet-5',
       runtimeEnv: { ANTHROPIC_API_KEY: 'candidate-key' },
     });
+  });
+});
+
+describe('validateBedrockApiKey', () => {
+  const originalEnv = process.env;
+  const fetchMock = vi.fn();
+  const bedrock = getSetupModelProvider('amazon-bedrock');
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env = { ...originalEnv };
+    delete process.env.AWS_BEARER_TOKEN_BEDROCK;
+    delete process.env.AWS_REGION;
+    vi.stubGlobal('fetch', fetchMock);
+    mockResolveEffectiveDeploymentEnvVars.mockResolvedValue({});
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+    vi.unstubAllGlobals();
+  });
+
+  it('rejects a key the regional Mantle listing answers 401 for', async () => {
+    fetchMock.mockResolvedValue(new Response('{}', { status: 401 }));
+
+    await expect(
+      validateBedrockApiKey({
+        provider: bedrock,
+        apiKey: 'wrong-key',
+        additionalEnvValues: { AWS_REGION: 'us-west-2' },
+        action: 'save it',
+      }),
+    ).rejects.toThrow('Amazon Bedrock: the API key was not accepted');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://bedrock-mantle.us-west-2.api.aws/v1/models',
+      expect.objectContaining({
+        headers: { Authorization: 'Bearer wrong-key' },
+      }),
+    );
+  });
+
+  it('does not block on answers that do not indict the key', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('{}', { status: 403 }));
+    await expect(
+      validateBedrockApiKey({
+        provider: bedrock,
+        apiKey: 'scoped-key',
+        action: 'save it',
+      }),
+    ).resolves.toBeUndefined();
+
+    fetchMock.mockRejectedValueOnce(new Error('network down'));
+    await expect(
+      validateBedrockApiKey({
+        provider: bedrock,
+        apiKey: 'scoped-key',
+        action: 'save it',
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('skips the probe when the save changes nothing', async () => {
+    mockResolveEffectiveDeploymentEnvVars.mockResolvedValue({
+      AWS_BEARER_TOKEN_BEDROCK: 'saved-key',
+    });
+
+    await validateBedrockApiKey({
+      provider: bedrock,
+      apiKey: 'saved-key',
+      action: 'save it',
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('refuses a malformed region before building the probe URL', async () => {
+    await expect(
+      validateBedrockApiKey({
+        provider: bedrock,
+        apiKey: 'key',
+        additionalEnvValues: { AWS_REGION: 'evil.example.com/x' },
+        action: 'save it',
+      }),
+    ).rejects.toThrow('AWS_REGION must be a valid AWS region');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

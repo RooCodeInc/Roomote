@@ -87,6 +87,7 @@ import {
 } from './auto-add-models';
 import {
   collectCandidateProviderCredentials,
+  validateBedrockApiKey,
   validateSetupModelProviderCredentials,
 } from './provider-validation';
 import {
@@ -656,30 +657,14 @@ export async function saveTaskModelProviderCommand(
         buildRecommendedDeploymentModelConfig(provider).roomoteModel ??
         provider.defaultRoomoteModel,
     });
-  } else if (!provider.dynamicModels) {
-    // Catalog-selection providers have no default model that every account
-    // can invoke, and an access-denied probe reads as invalid credentials.
-    // A model the operator already enabled is one the saved connection could
-    // invoke, so it qualifies a changed credential; a first connection has no
-    // such model and is qualified when its first model is chosen.
-    const providerModelPrefixes = getSetupProviderModelIdPrefixes(provider);
-    const enabledProviderModel = getEnabledTaskModels(
-      normalizeTaskModelSettings(await getPersistedRawTaskModelSettings()),
-    ).find((model) => {
-      const prefix = getTaskModelProviderId(model.id);
-      return prefix !== null && providerModelPrefixes.has(prefix);
+  } else if (provider.id === 'amazon-bedrock') {
+    await validateBedrockApiKey({
+      provider,
+      apiKey: input.apiKey,
+      additionalEnvValues: suppliedAdditionalEnvValues,
+      action: 'save it',
     });
-
-    if (enabledProviderModel) {
-      await validateSetupModelProviderCredentials({
-        provider,
-        apiKey: input.apiKey,
-        additionalEnvValues: suppliedAdditionalEnvValues,
-        action: 'save it',
-        modelId: enabledProviderModel.id,
-      });
-    }
-  } else {
+  } else if (provider.dynamicModels) {
     // UIs resubmit unchanged fields (connection names, keys echoed back
     // from saved state), so gate the probe on what the save would actually
     // alter, not on non-empty form fields.

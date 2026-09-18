@@ -52,8 +52,14 @@ documents native `ListFoundationModels` with AWS credentials and SigV4, not the
 Bedrock API key used by Roomote. Roomote therefore searches the public native
 Bedrock catalog, shows a curated Mantle list, and keeps manual model-ID entry as
 a fallback instead of requesting broader AWS credentials. The catalog search is
-best-effort: if it is unavailable or does not list a model, type the model ID
-and choose to use it as entered.
+best-effort: if it is unavailable or does not list a model, type the model ID.
+When nothing in the catalog matches, Roomote uses the ID as entered and treats
+an ID without a route prefix as a native model (`amazon-bedrock/<model-id>`);
+enter `bedrock-mantle/<model-id>` for the Mantle route.
+
+Saving a new or changed API key or region checks the key against the regional
+Mantle model listing and rejects a key that region does not accept. That check
+does not establish access to any particular model.
 
 A model appearing in either regional catalog does not prove that the configured
 identity can invoke it. Invocation still depends on the region, IAM

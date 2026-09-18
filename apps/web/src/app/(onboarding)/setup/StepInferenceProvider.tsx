@@ -23,6 +23,7 @@ import {
   getDefaultAdditionalEnvValues,
   getSetupModelProvider,
   getSetupProviderModelIdPrefixes,
+  getSetupProviderTaskModelPrefix,
   getTaskModelProviderId,
   type SetupModelProviderId,
   type SetupModelStatus,
@@ -138,6 +139,7 @@ export function StepInferenceProvider({
   // already runs, so revisiting this step does not force a new choice.
   const [catalogModelTouched, setCatalogModelTouched] = useState(false);
   const [catalogSuggestionsOpen, setCatalogSuggestionsOpen] = useState(false);
+  const [highlightedCatalogSlug, setHighlightedCatalogSlug] = useState('');
   const [editingSavedValue, setEditingSavedValue] = useState(false);
   const [isChatGptDialogOpen, setIsChatGptDialogOpen] = useState(false);
   const [isGitHubCopilotDialogOpen, setIsGitHubCopilotDialogOpen] =
@@ -244,51 +246,92 @@ export function StepInferenceProvider({
         : new Set<string>(),
     [selectedProviderStatus],
   );
-  const persistedProviderModelId = useMemo(() => {
-    const modelId = modelSetup.persistedRoomoteModel;
-    const prefix = modelId ? getTaskModelProviderId(modelId) : null;
-    return modelId && prefix && providerModelIdPrefixes.has(prefix)
-      ? modelId
-      : '';
-  }, [modelSetup.persistedRoomoteModel, providerModelIdPrefixes]);
+  // The model the deployment already runs (saved, or supplied by the runtime
+  // env) so revisiting this step does not force a new choice.
+  const persistedProviderModelId = useMemo(
+    () =>
+      [modelSetup.persistedRoomoteModel, modelSetup.runtimeRoomoteModel].find(
+        (modelId): modelId is string => {
+          const prefix = modelId ? getTaskModelProviderId(modelId) : null;
+          return prefix !== null && providerModelIdPrefixes.has(prefix);
+        },
+      ) ?? '',
+    [
+      modelSetup.persistedRoomoteModel,
+      modelSetup.runtimeRoomoteModel,
+      providerModelIdPrefixes,
+    ],
+  );
   const trimmedCatalogModelQuery = catalogModelQuery.trim();
-  const debouncedCatalogModelQuery = useDeferredValue(trimmedCatalogModelQuery);
+  const deferredCatalogModelQuery = useDeferredValue(trimmedCatalogModelQuery);
   const catalogSuggestionsQuery = useQuery(
     trpc.taskModels.suggest.queryOptions(
       {
         providerId: selectedProvider ?? 'openrouter',
-        query: debouncedCatalogModelQuery,
+        query: deferredCatalogModelQuery,
       },
       {
-        enabled:
-          requiresModelSelection && debouncedCatalogModelQuery.length > 0,
+        enabled: requiresModelSelection && deferredCatalogModelQuery.length > 0,
         placeholderData: keepPreviousData,
       },
     ),
   );
-  const catalogSuggestions =
-    trimmedCatalogModelQuery.length > 0
-      ? (catalogSuggestionsQuery.data?.suggestions ?? [])
-      : [];
+  const catalogSuggestions = useMemo(
+    () =>
+      trimmedCatalogModelQuery.length > 0
+        ? (catalogSuggestionsQuery.data?.suggestions ?? [])
+        : [],
+    [catalogSuggestionsQuery.data, trimmedCatalogModelQuery],
+  );
+  const isCatalogSearchSettled =
+    deferredCatalogModelQuery === trimmedCatalogModelQuery &&
+    !catalogSuggestionsQuery.isFetching;
   // The catalog is best-effort (models.dev may be unreachable or not list a
-  // private model), so a typed id can always be used as-is.
+  // private model). While it offers matches the text is a search and one must
+  // be picked; once it has none, the text is taken as the model id, with the
+  // provider prefix added to a bare id.
   const manualModelId = useMemo(() => {
-    if (!trimmedCatalogModelQuery || /\s/u.test(trimmedCatalogModelQuery)) {
+    if (
+      !selectedProvider ||
+      !trimmedCatalogModelQuery ||
+      /\s/u.test(trimmedCatalogModelQuery)
+    ) {
       return '';
     }
 
     const prefix = getTaskModelProviderId(trimmedCatalogModelQuery);
-    if (prefix !== null && providerModelIdPrefixes.has(prefix)) {
+    if (
+      trimmedCatalogModelQuery.includes('/') &&
+      prefix !== null &&
+      providerModelIdPrefixes.has(prefix)
+    ) {
       return trimmedCatalogModelQuery.length > prefix.length + 1
         ? trimmedCatalogModelQuery
         : '';
     }
 
-    return '';
-  }, [providerModelIdPrefixes, trimmedCatalogModelQuery]);
+    return `${getSetupProviderTaskModelPrefix(selectedProvider)}/${trimmedCatalogModelQuery}`;
+  }, [providerModelIdPrefixes, selectedProvider, trimmedCatalogModelQuery]);
+  const typedModelId =
+    catalogSuggestions.find(
+      (suggestion) => suggestion.slug === trimmedCatalogModelQuery,
+    )?.slug ??
+    (isCatalogSearchSettled && catalogSuggestions.length === 0
+      ? manualModelId
+      : '');
   const chosenModelId = catalogModelTouched
-    ? selectedCatalogModelId || manualModelId
+    ? selectedCatalogModelId || typedModelId
     : persistedProviderModelId;
+  const selectCatalogSuggestion = (suggestion: {
+    slug: string;
+    displayName: string;
+  }) => {
+    setSelectedCatalogModelId(suggestion.slug);
+    setCatalogModelQuery(suggestion.displayName);
+    setCatalogSuggestionsOpen(false);
+  };
+  const isCatalogListOpen =
+    catalogSuggestionsOpen && trimmedCatalogModelQuery.length > 0;
   const chatgptConnected = Boolean(modelSetup.chatgptConnected);
   const githubCopilotConnected = Boolean(modelSetup.githubCopilotConnected);
   const xaiSubscriptionConnected = Boolean(
@@ -656,9 +699,7 @@ export function StepInferenceProvider({
               Model
             </span>
             <Popover
-              open={
-                catalogSuggestionsOpen && trimmedCatalogModelQuery.length > 0
-              }
+              open={isCatalogListOpen}
               onOpenChange={setCatalogSuggestionsOpen}
             >
               {/* The input anchors the list; clicking into it must not
@@ -678,9 +719,56 @@ export function StepInferenceProvider({
                       setCatalogModelTouched(true);
                       setCatalogModelQuery(event.target.value);
                       setSelectedCatalogModelId('');
+                      setHighlightedCatalogSlug('');
                       setCatalogSuggestionsOpen(true);
                     }}
-                    placeholder="Search or enter a full model ID"
+                    // Focus stays in the input while the list is open, so the
+                    // list is driven from here.
+                    onKeyDown={(event) => {
+                      if (!isCatalogListOpen) {
+                        return;
+                      }
+                      if (event.key === 'Escape') {
+                        setCatalogSuggestionsOpen(false);
+                        return;
+                      }
+                      if (catalogSuggestions.length === 0) {
+                        return;
+                      }
+                      const highlightedIndex = catalogSuggestions.findIndex(
+                        (suggestion) =>
+                          suggestion.slug === highlightedCatalogSlug,
+                      );
+                      if (
+                        event.key === 'ArrowDown' ||
+                        event.key === 'ArrowUp'
+                      ) {
+                        event.preventDefault();
+                        const step = event.key === 'ArrowDown' ? 1 : -1;
+                        const nextIndex =
+                          highlightedIndex === -1 && step === -1
+                            ? catalogSuggestions.length - 1
+                            : (highlightedIndex +
+                                step +
+                                catalogSuggestions.length) %
+                              catalogSuggestions.length;
+                        setHighlightedCatalogSlug(
+                          catalogSuggestions[nextIndex]!.slug,
+                        );
+                      } else if (
+                        event.key === 'Enter' &&
+                        highlightedIndex >= 0
+                      ) {
+                        event.preventDefault();
+                        selectCatalogSuggestion(
+                          catalogSuggestions[highlightedIndex]!,
+                        );
+                      }
+                    }}
+                    placeholder="Search or enter a model ID"
+                    role="combobox"
+                    aria-expanded={isCatalogListOpen}
+                    aria-autocomplete="list"
                     aria-label={`${selectedProviderStatus?.label ?? 'Provider'} model`}
                     disabled={saveModelConfig.isPending}
                   />
@@ -691,12 +779,18 @@ export function StepInferenceProvider({
                 className="w-(--radix-popover-trigger-width) p-0"
                 onOpenAutoFocus={(event) => event.preventDefault()}
               >
-                <Command shouldFilter={false}>
+                <Command
+                  shouldFilter={false}
+                  value={highlightedCatalogSlug}
+                  onValueChange={setHighlightedCatalogSlug}
+                >
                   <CommandList>
                     <CommandEmpty>
-                      {catalogSuggestionsQuery.isFetching
+                      {!isCatalogSearchSettled
                         ? 'Searching the catalog...'
-                        : 'No catalog models found.'}
+                        : typedModelId
+                          ? `No catalog match. Continue to use ${typedModelId} as entered.`
+                          : 'No catalog models found.'}
                     </CommandEmpty>
                     {catalogSuggestions.length > 0 ? (
                       <CommandGroup>
@@ -704,11 +798,7 @@ export function StepInferenceProvider({
                           <CommandItem
                             key={suggestion.slug}
                             value={suggestion.slug}
-                            onSelect={() => {
-                              setSelectedCatalogModelId(suggestion.slug);
-                              setCatalogModelQuery(suggestion.displayName);
-                              setCatalogSuggestionsOpen(false);
-                            }}
+                            onSelect={() => selectCatalogSuggestion(suggestion)}
                           >
                             <div className="min-w-0">
                               <p className="truncate font-medium">

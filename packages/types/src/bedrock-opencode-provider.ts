@@ -26,7 +26,7 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function resolveBedrockRegion(runtimeEnv: RuntimeEnv): string {
+export function resolveBedrockRegion(runtimeEnv: RuntimeEnv): string {
   const region = runtimeEnv.AWS_REGION?.trim() || DEFAULT_BEDROCK_MANTLE_REGION;
 
   if (!INFERENCE_GATEWAY_REGION_PATTERN.test(region)) {

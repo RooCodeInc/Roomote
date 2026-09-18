@@ -438,11 +438,11 @@ describe('StepInferenceProvider configured API key display', () => {
       },
     );
     fireEvent.change(
-      screen.getByRole('textbox', { name: 'Amazon Bedrock model' }),
+      screen.getByRole('combobox', { name: 'Amazon Bedrock model' }),
       { target: { value: 'GLM-5' } },
     );
     expect(
-      screen.getByPlaceholderText('Search or enter a full model ID'),
+      screen.getByPlaceholderText('Search or enter a model ID'),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Continue/ })).toBeDisabled();
 
@@ -477,9 +477,14 @@ describe('StepInferenceProvider configured API key display', () => {
       { target: { value: 'bedrock-key' } },
     );
     fireEvent.change(
-      screen.getByRole('textbox', { name: 'Amazon Bedrock model' }),
-      { target: { value: 'amazon-bedrock/vendor.private-model' } },
+      screen.getByRole('combobox', { name: 'Amazon Bedrock model' }),
+      { target: { value: 'vendor.private-model' } },
     );
+    expect(
+      screen.getByText(
+        'No catalog match. Continue to use amazon-bedrock/vendor.private-model as entered.',
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Continue/ })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
 
@@ -488,6 +493,48 @@ describe('StepInferenceProvider configured API key display', () => {
         expect.objectContaining({
           modelId: 'amazon-bedrock/vendor.private-model',
         }),
+      );
+    });
+  });
+
+  it('selects a catalog suggestion from the keyboard and ignores partly typed text', async () => {
+    setupQueryMocks({
+      chatgptConnected: false,
+      suggestions: [
+        { slug: 'amazon-bedrock/zai.glm-5', displayName: 'GLM-5' },
+        { slug: 'amazon-bedrock/zai.glm-4.7', displayName: 'GLM-4.7' },
+      ],
+    });
+    render(
+      <StepInferenceProvider
+        modelSetup={buildModelSetup({
+          providers: [
+            openrouterProviderStatus(),
+            { ...bedrockProviderStatus(), savedApiKeySatisfied: true },
+          ],
+        })}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    selectProvider('amazon-bedrock');
+    const modelInput = screen.getByRole('combobox', {
+      name: 'Amazon Bedrock model',
+    });
+    fireEvent.change(modelInput, {
+      target: { value: 'amazon-bedrock/zai.gl' },
+    });
+    expect(screen.getByRole('button', { name: /Continue/ })).toBeDisabled();
+
+    fireEvent.keyDown(modelInput, { key: 'ArrowDown' });
+    fireEvent.keyDown(modelInput, { key: 'ArrowDown' });
+    fireEvent.keyDown(modelInput, { key: 'Enter' });
+    expect(modelInput).toHaveValue('GLM-4.7');
+    fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
+
+    await waitFor(() => {
+      expect(mutateAsyncMock).toHaveBeenCalledWith(
+        expect.objectContaining({ modelId: 'amazon-bedrock/zai.glm-4.7' }),
       );
     });
   });
@@ -509,7 +556,7 @@ describe('StepInferenceProvider configured API key display', () => {
 
     selectProvider('amazon-bedrock');
     expect(
-      screen.getByRole('textbox', { name: 'Amazon Bedrock model' }),
+      screen.getByRole('combobox', { name: 'Amazon Bedrock model' }),
     ).toHaveValue('bedrock-mantle/anthropic.claude-sonnet-5');
     fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
 

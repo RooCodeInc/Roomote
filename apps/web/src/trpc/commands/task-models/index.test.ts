@@ -22,6 +22,7 @@ const {
   mockIsXaiSubscriptionConnected,
   mockValidateSetupModelProviderCredentials,
   mockCollectCandidateProviderCredentials,
+  mockValidateBedrockApiKey,
 } = vi.hoisted(() => ({
   mockFindDeploymentSettings: vi.fn(),
   mockInsertDeploymentSettings: vi.fn(),
@@ -37,12 +38,14 @@ const {
   mockIsXaiSubscriptionConnected: vi.fn(),
   mockValidateSetupModelProviderCredentials: vi.fn(),
   mockCollectCandidateProviderCredentials: vi.fn(),
+  mockValidateBedrockApiKey: vi.fn(),
 }));
 
 vi.mock('./provider-validation', () => ({
   validateSetupModelProviderCredentials:
     mockValidateSetupModelProviderCredentials,
   collectCandidateProviderCredentials: mockCollectCandidateProviderCredentials,
+  validateBedrockApiKey: mockValidateBedrockApiKey,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -2237,35 +2240,22 @@ describe('task model provider commands', () => {
     );
   });
 
-  it('qualifies changed Bedrock credentials against a model the operator already enabled', async () => {
-    mockPersistedSetupNewState(
-      {},
-      {
-        models: [
-          {
-            id: 'amazon-bedrock/zai.glm-5',
-            displayName: 'GLM-5',
-            family: 'GLM',
-          },
-        ],
-        allowedModelIds: ['amazon-bedrock/zai.glm-5'],
-        defaultModelId: 'amazon-bedrock/zai.glm-5',
-      },
-    );
-    mockValidateSetupModelProviderCredentials.mockRejectedValueOnce(
-      new Error('Amazon Bedrock: invalid credentials'),
+  it('rejects a Bedrock API key the key probe does not accept before persisting it', async () => {
+    mockValidateBedrockApiKey.mockRejectedValueOnce(
+      new Error('Amazon Bedrock: the API key was not accepted in us-east-1.'),
     );
 
     await expect(
       saveTaskModelProviderCommand(buildMockAuth(), {
         provider: 'amazon-bedrock',
-        apiKey: 'rotated-but-wrong-key',
+        apiKey: 'wrong-key',
       }),
-    ).rejects.toThrow('Amazon Bedrock: invalid credentials');
+    ).rejects.toThrow('the API key was not accepted');
 
-    expect(mockValidateSetupModelProviderCredentials).toHaveBeenCalledWith(
-      expect.objectContaining({ modelId: 'amazon-bedrock/zai.glm-5' }),
+    expect(mockValidateBedrockApiKey).toHaveBeenCalledWith(
+      expect.objectContaining({ apiKey: 'wrong-key' }),
     );
+    expect(mockValidateSetupModelProviderCredentials).not.toHaveBeenCalled();
     expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
   });
 
@@ -2551,5 +2541,41 @@ describe('task model provider commands', () => {
       );
     }
     expect(updateSet.setupNewState.modelProvider).toBeNull();
+  });
+});
+
+describe('suggestTaskModelsCommand', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps curated Bedrock Mantle models searchable when models.dev is unreachable', async () => {
+    // A fresh module instance so no earlier test's cached catalog is served.
+    vi.resetModules();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('models.dev unreachable');
+      }),
+    );
+    const { suggestTaskModelsCommand } = await import('./index');
+
+    const bedrock = await suggestTaskModelsCommand(buildMockAuth(), {
+      providerId: 'amazon-bedrock',
+      query: 'sonnet',
+    });
+    expect(bedrock.suggestions.length).toBeGreaterThan(0);
+    expect(
+      bedrock.suggestions.every((suggestion) =>
+        suggestion.slug.startsWith('bedrock-mantle/'),
+      ),
+    ).toBe(true);
+
+    await expect(
+      suggestTaskModelsCommand(buildMockAuth(), {
+        providerId: 'anthropic',
+        query: 'sonnet',
+      }),
+    ).resolves.toEqual({ suggestions: [] });
   });
 });
