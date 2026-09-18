@@ -4,12 +4,52 @@ import {
   formatOpenCodeProviderErrorRetryNoticeText,
   getOpenCodeProviderErrorRecovery,
   isOpenCodeTerminalProviderError,
+  isOpenCodeUnsupportedResponseError,
   isOpenCodeRetryableTransportError,
   resolveOpenCodeProviderErrorRetryDelayMs,
   summarizeOpenCodeProviderError,
 } from './provider-error-recovery';
 
+// What OpenCode surfaces when the bundled AI SDK rejects a streamed provider
+// chunk it has no schema for. Captured from Amazon Bedrock streaming redacted
+// reasoning; the payload is shortened.
+const UNSUPPORTED_RESPONSE_ERROR = {
+  name: 'UnknownError',
+  data: {
+    message: [
+      'Type validation failed: Value: {"contentBlockDelta":{"contentBlockIndex":0,"delta":{"reasoningContent":{"redactedContent":"cnNuX2pR/404+429="}}}}.',
+      'Error message: [{"code":"invalid_union","path":["contentBlockDelta","delta"],"message":"Invalid input"}]',
+    ].join('\n'),
+  },
+};
+
 describe('getOpenCodeProviderErrorRecovery', () => {
+  it('does not retry a response the bundled SDK cannot parse', () => {
+    // The provider sends the same chunk shape on every request, so the
+    // bounded retry budget can only burn requests.
+    expect(getOpenCodeProviderErrorRecovery(UNSUPPORTED_RESPONSE_ERROR)).toBe(
+      null,
+    );
+    expect(isOpenCodeTerminalProviderError(UNSUPPORTED_RESPONSE_ERROR)).toBe(
+      true,
+    );
+    expect(isOpenCodeUnsupportedResponseError(UNSUPPORTED_RESPONSE_ERROR)).toBe(
+      true,
+    );
+  });
+
+  it('only matches the SDK message prefix, not the phrase in provider prose', () => {
+    expect(
+      getOpenCodeProviderErrorRecovery({
+        name: 'UnknownError',
+        data: {
+          message:
+            'Upstream said: type validation failed on their side, try again.',
+        },
+      }),
+    ).toMatchObject({ kind: 'provider_error', maxRetries: 6 });
+  });
+
   it('gives status-less policy codes the generic bounded retry budget', () => {
     // Only OpenCode's typed ContentFilterError selects the policy prompt;
     // provider policy code vocabulary is not classified.
@@ -193,6 +233,13 @@ describe('getOpenCodeProviderErrorRecovery', () => {
 });
 
 describe('summarizeOpenCodeProviderError', () => {
+  it('explains an unparseable response instead of dumping its schema error', () => {
+    const summary = summarizeOpenCodeProviderError(UNSUPPORTED_RESPONSE_ERROR);
+
+    expect(summary).toContain('cannot read yet');
+    expect(summary).not.toContain('contentBlockDelta');
+  });
+
   it('prefers nested provider messages over raw JSON wrappers', () => {
     expect(
       summarizeOpenCodeProviderError({

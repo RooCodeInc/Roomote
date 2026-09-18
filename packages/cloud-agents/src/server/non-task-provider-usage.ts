@@ -144,7 +144,8 @@ export type NonTaskInferenceValidationFailureReason =
   | 'model_unavailable'
   | 'provider_error'
   | 'rate_limited'
-  | 'timeout';
+  | 'timeout'
+  | 'unsupported_response';
 
 export type NonTaskInferenceValidationResult =
   | {
@@ -1989,6 +1990,21 @@ function isContentFilterInferenceError(error: unknown): boolean {
   return false;
 }
 
+/**
+ * The AI SDK validates every provider response chunk against a schema and
+ * throws a type-validation error when the provider sends a shape the bundled
+ * SDK does not model yet (for example Amazon Bedrock streaming
+ * `reasoningContent.redactedContent` for models with encrypted reasoning).
+ * The provider sends the same shape on every request, so resending cannot
+ * recover it — only a different model or a newer OpenCode release can.
+ */
+function isUnsupportedResponseInferenceError(detail: string): boolean {
+  return (
+    detail.includes('type validation failed') ||
+    detail.includes('typevalidationerror')
+  );
+}
+
 export function classifyNonTaskInferenceError(
   error: unknown,
 ): Pick<
@@ -2033,6 +2049,18 @@ export function classifyNonTaskInferenceError(
     return {
       message: 'The inference provider rejected the request.',
       reason: 'provider_error',
+      retryable: false,
+    };
+  }
+
+  // Checked before any substring heuristic below: the error quotes the raw
+  // provider chunk (often base64), which can contain arbitrary digits and
+  // words that would otherwise read as a status code or a timeout.
+  if (isUnsupportedResponseInferenceError(detail)) {
+    return {
+      message:
+        'Roomote could not read the response from this model. Its response format is not supported yet, so choose a different model.',
+      reason: 'unsupported_response',
       retryable: false,
     };
   }

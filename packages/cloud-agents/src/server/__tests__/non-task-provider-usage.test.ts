@@ -2184,6 +2184,28 @@ describe('resolveOpenCodeSmallModel', () => {
     },
   );
 
+  it('does not retry a provider response the bundled SDK cannot parse', async () => {
+    const { classifyNonTaskInferenceError } =
+      await import('../non-task-provider-usage.js');
+    // Captured from Amazon Bedrock streaming redacted reasoning to an AI SDK
+    // that predates it. The quoted chunk is base64 and deliberately carries
+    // digits that read as status codes to the substring heuristics.
+    const providerError = {
+      name: 'UnknownError',
+      data: {
+        message:
+          'Type validation failed: Value: {"contentBlockDelta":{"contentBlockIndex":0,"delta":{"reasoningContent":{"redactedContent":"cnNuX2pR/404+429/timeout="}}}}.\nError message: [{"code":"invalid_union","path":["contentBlockDelta","delta"],"message":"Invalid input"}]',
+      },
+    };
+
+    expect(classifyNonTaskInferenceError(providerError)).toEqual({
+      message:
+        'Roomote could not read the response from this model. Its response format is not supported yet, so choose a different model.',
+      reason: 'unsupported_response',
+      retryable: false,
+    });
+  });
+
   it('keeps named terminal OpenCode errors out of outer retry loops', async () => {
     const { classifyNonTaskInferenceError } =
       await import('../non-task-provider-usage.js');

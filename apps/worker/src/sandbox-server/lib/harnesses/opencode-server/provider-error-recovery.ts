@@ -33,6 +33,14 @@ const TERMINAL_ERROR_NAMES = new Set(['contextoverflowerror']);
 const POLICY_ERROR_NAMES = new Set(['contentfiltererror']);
 const CONNECTION_RESET_MESSAGE = 'connection reset by server';
 
+// The AI SDK's own client-side message (not provider prose) for a response
+// chunk that fails its schema, e.g. Amazon Bedrock streaming
+// `reasoningContent.redactedContent` to an SDK that predates it. The provider
+// sends the same shape on every request, so replaying cannot succeed.
+const UNSUPPORTED_RESPONSE_MESSAGE_PREFIX = 'type validation failed';
+const UNSUPPORTED_RESPONSE_SUMMARY =
+  'The model returned a response in a format Roomote cannot read yet, so retrying will not help. Choose a different model.';
+
 // Client errors are terminal because replaying the same request cannot
 // succeed, except timeouts (408) and rate limits (429) which are transient.
 const RETRYABLE_CLIENT_STATUS_CODES = new Set([408, 429]);
@@ -141,8 +149,27 @@ export function isOpenCodeRetryableTransportError(error: unknown): boolean {
   );
 }
 
+export function isOpenCodeUnsupportedResponseError(error: unknown): boolean {
+  return hasUnsupportedResponseMessage(collectProviderErrorValues(error));
+}
+
+function hasUnsupportedResponseMessage(values: unknown[]): boolean {
+  return values.some(
+    (value) =>
+      typeof value === 'string' &&
+      value
+        .trimStart()
+        .toLowerCase()
+        .startsWith(UNSUPPORTED_RESPONSE_MESSAGE_PREFIX),
+  );
+}
+
 function isExplicitlyTerminal(values: unknown[]): boolean {
   if (values.some((value) => asRecord(value)?.isRetryable === false)) {
+    return true;
+  }
+
+  if (hasUnsupportedResponseMessage(values)) {
     return true;
   }
 
@@ -222,6 +249,12 @@ const ERROR_SUMMARY_MAX_CHARS = 280;
  * envelopes (status codes, headers, nested provider JSON).
  */
 export function summarizeOpenCodeProviderError(error: unknown): string {
+  // The raw message is a schema dump of the provider chunk; say what it
+  // means instead.
+  if (isOpenCodeUnsupportedResponseError(error)) {
+    return UNSUPPORTED_RESPONSE_SUMMARY;
+  }
+
   const pending: Array<{ value: unknown; depth: number }> = [
     { value: error, depth: 0 },
   ];

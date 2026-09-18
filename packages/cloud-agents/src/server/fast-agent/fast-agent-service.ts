@@ -1073,6 +1073,11 @@ function formatFastAgentInferenceFailure(
   context: { detail?: string; model?: string } = {},
 ): string {
   const summary = formatFastAgentInferenceFailureSummary(failure, retried);
+  // An unreadable response is a property of the model, so name it. The raw
+  // detail is a schema dump of the provider chunk and helps nobody in chat.
+  if (failure.reason === 'unsupported_response') {
+    return context.model ? `${summary}\n\nModel: ${context.model}` : summary;
+  }
   // The specific reasons already say what happened. The generic rejection
   // is the one that leaves the reader guessing, so it carries the provider's
   // own status and message, and the model that produced them.
@@ -1110,6 +1115,8 @@ function formatFastAgentInferenceFailureSummary(
       return 'Could not authenticate with the configured inference provider. An administrator needs to reconnect or replace its credentials.';
     case 'model_unavailable':
       return 'The configured model is not available from the inference provider. An administrator needs to select an available model.';
+    case 'unsupported_response':
+      return 'Roomote could not read the response from the configured model, so retrying will not help. An administrator needs to select a different model.';
     default:
       return 'Could not complete the request because the inference provider returned an error. Please try again in a moment.';
   }

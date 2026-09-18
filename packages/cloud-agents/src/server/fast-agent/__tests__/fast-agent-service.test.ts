@@ -12544,6 +12544,39 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
+  it('names the model and fails fast when its response cannot be parsed', async () => {
+    mocks.classifyInferenceError.mockReturnValue({
+      message: 'Roomote could not read the response from this model.',
+      reason: 'unsupported_response',
+      retryable: false,
+    });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        options.onModelResolved?.('amazon-bedrock/us.xai.grok-4.6');
+        throw Object.assign(new Error('UnknownError'), {
+          name: 'UnknownError',
+          data: {
+            message:
+              'Type validation failed: Value: {"contentBlockDelta":{"contentBlockIndex":0,"delta":{"reasoningContent":{"redactedContent":"cnNuX2pR="}}}}.',
+          },
+        });
+      },
+    );
+    const adapter = callbacks();
+    const message =
+      'Roomote could not read the response from the configured model, so retrying will not help. An administrator needs to select a different model.\n\nModel: amazon-bedrock/us.xai.grok-4.6';
+
+    await expect(
+      answerFastAgentQuestion({ ...baseParams, adapter }),
+    ).resolves.toBe(message);
+    // Deterministic: no transient retries and no fresh-session retry.
+    expect(mocks.generateText).toHaveBeenCalledOnce();
+    expect(adapter.postReply).toHaveBeenCalledWith({
+      purpose: 'closeout',
+      message,
+    });
+  });
+
   it('does not surface a duplicate retry notice for repeated failures', async () => {
     vi.useFakeTimers();
     try {
