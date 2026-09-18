@@ -126,6 +126,22 @@ const MAX_SLACK_UPDATE_RATE_LIMIT_WAIT_MS = 5_000;
 /** Slack's top-level text fallback is limited to 40,000 characters. */
 export const SLACK_MESSAGE_TEXT_MAX_CHARS = 40_000;
 const SLACK_TEXT_TRUNCATION_MARKER = '[…truncated…]';
+const SLACK_TEXT_HEAD_CHARS = 20_000;
+
+function truncateSlackText(text: string): string {
+  if (text.length <= SLACK_MESSAGE_TEXT_MAX_CHARS) {
+    return text;
+  }
+
+  const characters = Array.from(text);
+  const tailChars =
+    SLACK_MESSAGE_TEXT_MAX_CHARS -
+    SLACK_TEXT_HEAD_CHARS -
+    Array.from(SLACK_TEXT_TRUNCATION_MARKER).length -
+    2;
+
+  return `${characters.slice(0, SLACK_TEXT_HEAD_CHARS).join('')}\n${SLACK_TEXT_TRUNCATION_MARKER}\n${characters.slice(-tailChars).join('')}`;
+}
 
 const SLACK_UPDATE_STALE_TARGET_ERRORS = new Set([
   'file_deleted',
@@ -230,9 +246,8 @@ function normalizeOutboundMessage<T extends object & SlackMessage>(
   message: T,
 ): T {
   const text =
-    typeof message.text === 'string' &&
-    message.text.length > SLACK_MESSAGE_TEXT_MAX_CHARS
-      ? `${message.text.slice(0, 20_000)}\n${SLACK_TEXT_TRUNCATION_MARKER}\n${message.text.slice(-(SLACK_MESSAGE_TEXT_MAX_CHARS - 20_000 - SLACK_TEXT_TRUNCATION_MARKER.length - 2))}`
+    typeof message.text === 'string'
+      ? truncateSlackText(message.text)
       : message.text;
 
   const normalizedMessage =
