@@ -2,4 +2,4 @@
 '@roomote/web': minor
 ---
 
-Announce successfully installed Roomote updates through a configurable built-in automation, with release highlights, durable retry-safe delivery, and a manual test action.
+Announce the latest stable major or minor Roomote release after a successful update through a configurable built-in automation, matching the in-app authored summary and complete highlights with durable retry-safe delivery and a manual test action.

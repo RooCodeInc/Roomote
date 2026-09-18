@@ -18,20 +18,24 @@ vi.mock('./communication-providers', () => ({
 }));
 
 import {
-  buildInstalledReleaseAnnouncement,
+  buildReleaseAnnouncement,
   drainReleaseAnnouncementDeliveries,
   recordInstalledRelease,
-  sendInstalledReleaseAnnouncementTest,
+  sendReleaseAnnouncementTest,
 } from './release-announcements';
 
 const changelog = `# Changelog
 
 ## 1.2.0
 
+Roomote 1.2 adds release summaries and safer setup guidance.
+
 ### Highlights
 
 - Added release summaries without @channel or <!here> notifications.
 - Improved setup guidance.
+- Added a third authored highlight.
+- Added a fourth authored highlight.
 
 ### Patch changes
 
@@ -150,12 +154,12 @@ describe('installed release transitions', () => {
     await expect(
       db.query.releaseAnnouncementDeliveries.findFirst(),
     ).resolves.toMatchObject({
-      previousVersion: '1.11.1',
-      installedVersion: '1.12.2',
+      previousVersion: '1.11.0',
+      installedVersion: '1.12.0',
     });
   });
 
-  it('announces minor and major crossings even when the installed release is a patch', async () => {
+  it('selects minor and major release identities when the installed release is a patch', async () => {
     await recordInstalledRelease('1.10.5');
     await db
       .update(deploymentSettings)
@@ -163,8 +167,51 @@ describe('installed release transitions', () => {
       .where(eq(deploymentSettings.id, 'default'));
 
     await expect(recordInstalledRelease('1.11.2')).resolves.toBe('queued');
+    await expect(
+      db.query.releaseAnnouncementDeliveries.findFirst(),
+    ).resolves.toMatchObject({ installedVersion: '1.11.0' });
     await db.delete(releaseAnnouncementDeliveries);
     await expect(recordInstalledRelease('2.0.1')).resolves.toBe('queued');
+    await expect(
+      db.query.releaseAnnouncementDeliveries.findFirst(),
+    ).resolves.toMatchObject({ installedVersion: '2.0.0' });
+  });
+
+  it('queues only the latest selected release when minor versions were skipped', async () => {
+    await recordInstalledRelease('1.10.5');
+    await db
+      .update(deploymentSettings)
+      .set({ managerDiscordChannelId: 'manager-channel' })
+      .where(eq(deploymentSettings.id, 'default'));
+
+    await expect(recordInstalledRelease('1.12.2')).resolves.toBe('queued');
+    await expect(
+      db.query.releaseAnnouncementDeliveries.findMany(),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        previousVersion: '1.10.0',
+        installedVersion: '1.12.0',
+      }),
+    ]);
+  });
+
+  it('does not repeat a selected release after a rollback and re-upgrade', async () => {
+    await recordInstalledRelease('1.0.0');
+    await db
+      .update(deploymentSettings)
+      .set({ managerDiscordChannelId: 'manager-channel' })
+      .where(eq(deploymentSettings.id, 'default'));
+
+    await expect(recordInstalledRelease('1.2.2')).resolves.toBe('queued');
+    await expect(recordInstalledRelease('1.1.4')).resolves.toBe(
+      'rollback_baselined',
+    );
+    await expect(recordInstalledRelease('1.2.3')).resolves.toBe(
+      'already_announced',
+    );
+    await expect(
+      db.query.releaseAnnouncementDeliveries.findMany(),
+    ).resolves.toHaveLength(1);
   });
 
   it('does not queue when disabled and silently resets a rollback baseline', async () => {
@@ -220,14 +267,9 @@ describe('installed release transitions', () => {
 });
 
 describe('release announcement delivery', () => {
-  it('sends a representative installed-release test without changing automatic state', async () => {
-    await db
-      .update(deploymentSettings)
-      .set({ installedReleaseVersion: '1.2.0' })
-      .where(eq(deploymentSettings.id, 'default'));
-
+  it('sends a representative release sample without requiring an installed baseline', async () => {
     await expect(
-      sendInstalledReleaseAnnouncementTest(
+      sendReleaseAnnouncementTest(
         {
           provider: 'discord',
           channelId: 'release-channel',
@@ -240,51 +282,150 @@ describe('release announcement delivery', () => {
     expect(mocks.postMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         channelId: 'release-channel',
-        text: expect.stringContaining('Roomote v1.2.0 is installed'),
+        text: expect.stringContaining("What's new in Roomote v1.2.0"),
         textFormat: 'markdown',
         idempotencyKey: expect.stringMatching(/^release-test:1\.2\.0:/),
       }),
+    );
+    expect(mocks.postMessage.mock.calls[0]?.[0]?.text).not.toContain(
+      'is installed',
+    );
+    expect(mocks.postMessage.mock.calls[0]?.[0]?.text).toContain(
+      'Roomote 1.2 adds release summaries and safer setup guidance.',
+    );
+    expect(mocks.postMessage.mock.calls[0]?.[0]?.text).toContain(
+      '- Added a fourth authored highlight.',
     );
     await expect(
       db.query.deploymentSettings.findFirst({
         where: eq(deploymentSettings.id, 'default'),
         columns: { installedReleaseVersion: true },
       }),
-    ).resolves.toMatchObject({ installedReleaseVersion: '1.2.0' });
+    ).resolves.toMatchObject({ installedReleaseVersion: null });
     await expect(
       db.query.releaseAnnouncementDeliveries.findMany(),
     ).resolves.toHaveLength(0);
   });
 
-  it('does not send a manual test before the installed release is recorded', async () => {
+  it('skips newer patch releases when selecting the sample release', async () => {
+    const changelogWithPatch = `# Changelog
+
+## 1.3.2
+
+### Highlights
+
+- Patch highlight that should not be sampled.
+
+## 1.3.0
+
+### Highlights
+
+- Latest minor highlight.
+
+## 1.2.0
+
+### Highlights
+
+- Older minor highlight.
+`;
+
     await expect(
-      sendInstalledReleaseAnnouncementTest(
+      sendReleaseAnnouncementTest(
         {
           provider: 'discord',
           channelId: 'release-channel',
           source: 'automation_target',
         },
-        { changelogMarkdown: changelog },
+        { changelogMarkdown: changelogWithPatch },
       ),
-    ).resolves.toBe('no_installed_release');
+    ).resolves.toBe('sent');
+    expect(mocks.postMessage.mock.calls[0]?.[0]?.text).toContain(
+      "What's new in Roomote v1.3.0",
+    );
+    expect(mocks.postMessage.mock.calls[0]?.[0]?.text).not.toContain('v1.3.2');
+  });
+
+  it('selects the highest stable major or minor release by version', async () => {
+    const unorderedChangelog = `# Changelog
+
+## 2.1.0-beta.1
+
+### Highlights
+
+- Prerelease highlight.
+
+## 1.9.0
+
+### Highlights
+
+- Minor highlight.
+
+## 2.0.0
+
+### Highlights
+
+- Major highlight.
+`;
+
+    await expect(
+      sendReleaseAnnouncementTest(
+        {
+          provider: 'discord',
+          channelId: 'release-channel',
+          source: 'automation_target',
+        },
+        { changelogMarkdown: unorderedChangelog },
+      ),
+    ).resolves.toBe('sent');
+    expect(mocks.postMessage.mock.calls[0]?.[0]?.text).toContain(
+      "What's new in Roomote v2.0.0",
+    );
+    expect(mocks.postMessage.mock.calls[0]?.[0]?.text).not.toContain(
+      'Prerelease highlight',
+    );
+  });
+
+  it('does not send when stable major or minor release notes are missing', async () => {
+    await expect(
+      sendReleaseAnnouncementTest(
+        {
+          provider: 'discord',
+          channelId: 'release-channel',
+          source: 'automation_target',
+        },
+        {
+          changelogMarkdown: `# Changelog
+
+## 1.3.2
+
+### Highlights
+
+- Patch-only highlight.
+`,
+        },
+      ),
+    ).resolves.toBe('no_release_notes');
     expect(mocks.postMessage).not.toHaveBeenCalled();
   });
 
-  it('summarizes skipped releases from authored highlights without mass pings', () => {
-    const message = buildInstalledReleaseAnnouncement({
-      previousVersion: '1.0.0',
-      installedVersion: '1.2.0',
+  it('matches the release modal summary and complete authored highlights', () => {
+    const announcement = buildReleaseAnnouncement({
+      releaseVersion: '1.2.0',
       changelogMarkdown: changelog,
     });
 
-    expect(message).toContain('Highlights across 2 releases');
-    expect(message).toContain('**v1.2.0:** Added release summaries');
-    expect(message).toContain(
-      '**v1.1.0:** Added durable notification delivery',
+    expect(announcement?.version).toBe('1.2.0');
+    expect(announcement?.text).toContain(
+      'Roomote 1.2 adds release summaries and safer setup guidance.',
     );
-    expect(message).not.toContain('@channel');
-    expect(message).not.toContain('<!here>');
-    expect(message).toContain(
+    expect(announcement?.text.match(/^- /gm)).toHaveLength(4);
+    expect(announcement?.text).toContain(
+      '- Added a fourth authored highlight.',
+    );
+    expect(announcement?.text).not.toContain('@channel');
+    expect(announcement?.text).not.toContain('<!here>');
+    expect(announcement?.text).not.toContain('durable notification delivery');
+    expect(announcement?.text).toContain(
       'https://github.com/RooCodeInc/Roomote/releases/tag/v1.2.0',
     );
   });
@@ -329,6 +470,26 @@ describe('release announcement delivery', () => {
       drainReleaseAnnouncementDeliveries({ changelogMarkdown: changelog }),
     ).resolves.toEqual({ delivered: 0, failed: 0 });
     expect(mocks.postMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it('uses the same authored summary and complete highlights for automatic delivery', async () => {
+    await db.insert(releaseAnnouncementDeliveries).values({
+      previousVersion: '1.1.0',
+      installedVersion: '1.2.0',
+      provider: 'discord',
+      destinationKey: 'discord:manager-channel',
+      channelId: 'manager-channel',
+    });
+
+    await expect(
+      drainReleaseAnnouncementDeliveries({ changelogMarkdown: changelog }),
+    ).resolves.toEqual({ delivered: 1, failed: 0 });
+    expect(mocks.postMessage.mock.calls[0]?.[0]?.text).toContain(
+      'Roomote 1.2 adds release summaries and safer setup guidance.',
+    );
+    expect(
+      mocks.postMessage.mock.calls[0]?.[0]?.text.match(/^- /gm),
+    ).toHaveLength(4);
   });
 
   it('delivers through a provider-neutral Telegram destination', async () => {
@@ -393,9 +554,8 @@ describe('release announcement delivery', () => {
 `;
 
     expect(
-      buildInstalledReleaseAnnouncement({
-        previousVersion: '1.1.0',
-        installedVersion: '1.2.0',
+      buildReleaseAnnouncement({
+        releaseVersion: '1.2.0',
         changelogMarkdown: changelogWithoutHighlights,
       }),
     ).toBeNull();

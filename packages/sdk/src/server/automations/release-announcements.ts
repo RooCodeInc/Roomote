@@ -1,6 +1,6 @@
 import { getAutomationRuntime } from '@roomote/db/server';
 
-import { sendInstalledReleaseAnnouncementTest } from '../lib/release-announcements';
+import { sendReleaseAnnouncementTest } from '../lib/release-announcements';
 import {
   listConnectedCommunicationProviders,
   resolveAutomationRuntimeDestination,
@@ -35,21 +35,18 @@ export async function releaseAnnouncementsJob(
     return result;
   }
 
-  const sendResult = await sendInstalledReleaseAnnouncementTest(destination);
+  const sendResult = await sendReleaseAnnouncementTest(destination);
   switch (sendResult) {
     case 'sent':
       result.completed = true;
       break;
-    case 'no_installed_release':
+    case 'no_release_notes':
       result.skippedReason =
-        'The installed Roomote release is not recorded yet.';
-      break;
-    case 'no_previous_release':
-      result.skippedReason = 'No previous release is available for comparison.';
+        'No stable major or minor release notes are available.';
       break;
     case 'no_highlights':
       result.skippedReason =
-        'The installed release has no authored highlights.';
+        'The selected release has no authored summary or highlights.';
       break;
   }
   return result;

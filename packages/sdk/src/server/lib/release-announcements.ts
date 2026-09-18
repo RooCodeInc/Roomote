@@ -20,7 +20,6 @@ import {
 } from '@roomote/db/server';
 import {
   compareProductVersions,
-  hasProductVersionMajorOrMinorChange,
   isParsableProductVersion,
   normalizeProductVersion,
   parseProductReleaseHistory,
@@ -50,12 +49,12 @@ export type RecordInstalledReleaseResult =
   | 'patch_baselined'
   | 'announcement_disabled'
   | 'no_destination'
+  | 'already_announced'
   | 'queued';
 
-type SendInstalledReleaseAnnouncementTestResult =
+type SendReleaseAnnouncementTestResult =
   | 'sent'
-  | 'no_installed_release'
-  | 'no_previous_release'
+  | 'no_release_notes'
   | 'no_highlights';
 
 function retryDelayMs(attempts: number): number {
@@ -68,64 +67,69 @@ function neutralizeMassMentions(text: string): string {
     .replace(/<!(channel|here|everyone)>/gi, '$1');
 }
 
-export function buildInstalledReleaseAnnouncement(input: {
-  previousVersion: string;
-  installedVersion: string;
-  changelogMarkdown: string;
-}): string | null {
-  const releases = parseProductReleaseHistory(input.changelogMarkdown)
-    .filter(
-      (release) =>
-        compareProductVersions(release.version, input.previousVersion) > 0 &&
-        compareProductVersions(release.version, input.installedVersion) <= 0,
-    )
-    .sort((left, right) => compareProductVersions(right.version, left.version));
-  if (!releases.some((release) => release.version === input.installedVersion)) {
-    throw new Error(
-      `No authoritative release notes found for ${input.installedVersion}`,
-    );
-  }
-
-  const selected: Array<{ version: string; text: string }> = [];
-  for (const release of releases) {
-    const highlight = release.highlights[0];
-    if (highlight) selected.push({ version: release.version, text: highlight });
-    if (selected.length === 3) break;
-  }
-  if (selected.length < 3) {
-    for (const release of releases) {
-      for (const highlight of release.highlights.slice(1)) {
-        selected.push({ version: release.version, text: highlight });
-        if (selected.length === 3) break;
-      }
-      if (selected.length === 3) break;
-    }
-  }
-  if (selected.length === 0) {
-    return null;
-  }
-
-  const installedTag = toReleaseTag(input.installedVersion);
-  const previousTag = toReleaseTag(input.previousVersion);
-  const spansMultipleReleases = releases.length > 1;
-  const highlights = selected.map(({ version, text }) => {
-    const prefix = spansMultipleReleases
-      ? `**${toReleaseTag(version)}:** `
-      : '';
-    return `- ${prefix}${neutralizeMassMentions(text)}`;
-  });
-
-  return [
-    `**Roomote ${installedTag} is installed**`,
-    `Updated from ${previousTag}.${spansMultipleReleases ? ` Highlights across ${releases.length} releases:` : ' Highlights:'}`,
-    ...highlights,
-    `[Read the full ${installedTag} release notes](${RELEASES_URL}/${installedTag})`,
-  ].join('\n');
+function toStableMajorMinorReleaseVersion(
+  version: string | null | undefined,
+): string | null {
+  const normalized = normalizeProductVersion(version);
+  const match = normalized?.match(/^(\d+)\.(\d+)\.\d+$/);
+  return match ? `${match[1]}.${match[2]}.0` : null;
 }
 
-async function sendInstalledReleaseAnnouncement(input: {
+function selectLatestStableMajorMinorRelease(
+  changelogMarkdown: string,
+  releaseVersion?: string,
+) {
+  const selectedVersion = releaseVersion
+    ? toStableMajorMinorReleaseVersion(releaseVersion)
+    : null;
+  const releases = parseProductReleaseHistory(changelogMarkdown).filter(
+    (release) =>
+      toStableMajorMinorReleaseVersion(release.version) === release.version,
+  );
+  return selectedVersion
+    ? releases.find((release) => release.version === selectedVersion)
+    : releases.sort((left, right) =>
+        compareProductVersions(right.version, left.version),
+      )[0];
+}
+
+export function buildReleaseAnnouncement(input: {
+  changelogMarkdown: string;
+  releaseVersion?: string;
+}): { version: string; text: string } | null {
+  const release = selectLatestStableMajorMinorRelease(
+    input.changelogMarkdown,
+    input.releaseVersion,
+  );
+  if (!release) {
+    const suffix = input.releaseVersion
+      ? ` for ${toStableMajorMinorReleaseVersion(input.releaseVersion) ?? input.releaseVersion}`
+      : '';
+    throw new Error(
+      `No authoritative stable major or minor release notes found${suffix}`,
+    );
+  }
+  if (!release.summary && release.highlights.length === 0) return null;
+
+  const releaseTag = toReleaseTag(release.version);
+  const lines = [
+    `**What's new in Roomote ${releaseTag}**`,
+    release.summary ? neutralizeMassMentions(release.summary) : null,
+    release.highlights.length > 0
+      ? `**Highlights for ${release.version}**`
+      : null,
+    ...release.highlights.map(
+      (highlight) => `- ${neutralizeMassMentions(highlight)}`,
+    ),
+    `[See all changes in ${releaseTag}](${RELEASES_URL}/${releaseTag})`,
+  ].filter((line): line is string => Boolean(line));
+
+  return { version: release.version, text: lines.join('\n\n') };
+}
+
+async function sendReleaseAnnouncement(input: {
   destination: ResolvedAutomationDestination;
-  installedVersion: string;
+  subject: string;
   text: string;
   conversationKey: string;
   idempotencyKey: string;
@@ -136,7 +140,7 @@ async function sendInstalledReleaseAnnouncement(input: {
       throw new Error('Email release destination is incomplete');
     }
     await sendAutomationEmailReport(destination, {
-      subject: `Roomote ${toReleaseTag(input.installedVersion)} is installed`,
+      subject: input.subject,
       conversationKey: input.conversationKey,
       text: input.text,
       idempotencyKey: input.idempotencyKey,
@@ -180,43 +184,27 @@ async function sendInstalledReleaseAnnouncement(input: {
   return result.messageId;
 }
 
-export async function sendInstalledReleaseAnnouncementTest(
+export async function sendReleaseAnnouncementTest(
   destination: ResolvedAutomationDestination,
   options: { changelogMarkdown?: string } = {},
-): Promise<SendInstalledReleaseAnnouncementTestResult> {
-  const settings = await db.query.deploymentSettings.findFirst({
-    where: eq(deploymentSettings.id, DEPLOYMENT_ID),
-    columns: { installedReleaseVersion: true },
-  });
-  const installedVersion = normalizeProductVersion(
-    settings?.installedReleaseVersion,
-  );
-  if (!installedVersion || !isParsableProductVersion(installedVersion)) {
-    return 'no_installed_release';
-  }
-
+): Promise<SendReleaseAnnouncementTestResult> {
   const changelog =
     options.changelogMarkdown ?? (await readFile(CHANGELOG_PATH, 'utf8'));
-  const previousVersion = parseProductReleaseHistory(changelog)
-    .map((release) => release.version)
-    .filter((version) => compareProductVersions(version, installedVersion) < 0)
-    .sort((left, right) => compareProductVersions(right, left))[0];
-  if (!previousVersion) return 'no_previous_release';
-
-  const text = buildInstalledReleaseAnnouncement({
-    previousVersion,
-    installedVersion,
-    changelogMarkdown: changelog,
-  });
-  if (!text) return 'no_highlights';
+  let announcement: ReturnType<typeof buildReleaseAnnouncement>;
+  try {
+    announcement = buildReleaseAnnouncement({ changelogMarkdown: changelog });
+  } catch {
+    return 'no_release_notes';
+  }
+  if (!announcement) return 'no_highlights';
 
   const runId = randomUUID();
-  await sendInstalledReleaseAnnouncement({
+  await sendReleaseAnnouncement({
     destination,
-    installedVersion,
-    text,
+    subject: `What's new in Roomote ${toReleaseTag(announcement.version)}`,
+    text: announcement.text,
     conversationKey: `builtin-automation:release_announcements:test:${runId}`,
-    idempotencyKey: `release-test:${installedVersion}:${runId}`,
+    idempotencyKey: `release-test:${announcement.version}:${runId}`,
   });
   return 'sent';
 }
@@ -225,7 +213,12 @@ export async function recordInstalledRelease(
   version: string,
 ): Promise<RecordInstalledReleaseResult> {
   const installedVersion = normalizeProductVersion(version);
-  if (!installedVersion || !isParsableProductVersion(installedVersion)) {
+  const selectedReleaseVersion = toStableMajorMinorReleaseVersion(version);
+  if (
+    !installedVersion ||
+    !isParsableProductVersion(installedVersion) ||
+    !selectedReleaseVersion
+  ) {
     return 'invalid_version';
   }
   const runtime = await getAutomationRuntime('release_announcements');
@@ -258,6 +251,8 @@ export async function recordInstalledRelease(
     const previousVersion = normalizeProductVersion(
       settings?.installedReleaseVersion,
     );
+    const previousSelectedReleaseVersion =
+      toStableMajorMinorReleaseVersion(previousVersion);
     const now = new Date();
 
     if (!previousVersion || !isParsableProductVersion(previousVersion)) {
@@ -287,9 +282,7 @@ export async function recordInstalledRelease(
       })
       .where(eq(deploymentSettings.id, DEPLOYMENT_ID));
     if (comparison < 0) return 'rollback_baselined';
-    if (
-      !hasProductVersionMajorOrMinorChange(previousVersion, installedVersion)
-    ) {
+    if (previousSelectedReleaseVersion === selectedReleaseVersion) {
       return 'patch_baselined';
     }
     if (!enabled) {
@@ -297,11 +290,11 @@ export async function recordInstalledRelease(
     }
     if (!destination) return 'no_destination';
 
-    await tx
+    const [delivery] = await tx
       .insert(releaseAnnouncementDeliveries)
       .values({
-        previousVersion,
-        installedVersion,
+        previousVersion: previousSelectedReleaseVersion ?? previousVersion,
+        installedVersion: selectedReleaseVersion,
         provider: destination.provider,
         destinationKey: `${destination.provider}:${destination.channelId}`,
         channelId: destination.channelId,
@@ -314,8 +307,9 @@ export async function recordInstalledRelease(
           releaseAnnouncementDeliveries.installedVersion,
           releaseAnnouncementDeliveries.destinationKey,
         ],
-      });
-    return 'queued';
+      })
+      .returning({ id: releaseAnnouncementDeliveries.id });
+    return delivery ? 'queued' : 'already_announced';
   });
 }
 
@@ -368,12 +362,11 @@ export async function drainReleaseAnnouncementDeliveries(
     try {
       const changelog =
         options.changelogMarkdown ?? (await readFile(CHANGELOG_PATH, 'utf8'));
-      const text = buildInstalledReleaseAnnouncement({
-        previousVersion: claim.row.previousVersion,
-        installedVersion: claim.row.installedVersion,
+      const announcement = buildReleaseAnnouncement({
         changelogMarkdown: changelog,
+        releaseVersion: claim.row.installedVersion,
       });
-      if (text === null) {
+      if (announcement === null) {
         await db
           .update(releaseAnnouncementDeliveries)
           .set({
@@ -395,7 +388,7 @@ export async function drainReleaseAnnouncementDeliveries(
         });
         continue;
       }
-      const providerMessageId = await sendInstalledReleaseAnnouncement({
+      const providerMessageId = await sendReleaseAnnouncement({
         destination: {
           provider: claim.row.provider,
           channelId: claim.row.channelId,
@@ -408,8 +401,8 @@ export async function drainReleaseAnnouncementDeliveries(
             : {}),
           source: 'automation_target',
         },
-        installedVersion: claim.row.installedVersion,
-        text,
+        subject: `What's new in Roomote ${toReleaseTag(announcement.version)}`,
+        text: announcement.text,
         conversationKey: `builtin-automation:release_announcements:${claim.row.id}`,
         idempotencyKey: `release:${claim.row.installedVersion}:${claim.row.destinationKey}`,
       });
