@@ -2353,6 +2353,7 @@ describe('Fast conversation repository', () => {
     const catalog = await listFastAgentTranscriptImages(first.id);
     const firstId = encodeFastAgentTranscriptImageId('100.1:user', 1);
     const secondId = encodeFastAgentTranscriptImageId('100.1:user', 2);
+    const legacyFirstId = `image:${Buffer.from('100.1:user').toString('base64url')}:1`;
     expect(catalog).toMatchObject({
       truncated: false,
       images: [
@@ -2378,5 +2379,18 @@ describe('Fast conversation repository', () => {
     await expect(
       loadFastAgentTranscriptImagesById(second.id, [firstId]),
     ).resolves.toEqual({ images: [], missingIds: [firstId] });
+    await expect(
+      loadFastAgentTranscriptImagesById(first.id, [legacyFirstId]),
+    ).resolves.toMatchObject({
+      missingIds: [],
+      images: [
+        {
+          id: legacyFirstId,
+          eventId: '100.1:user',
+          imageIndex: 1,
+          file: { mime: 'image/png', url: 'data:image/png;base64,Zmlyc3Q=' },
+        },
+      ],
+    });
   });
 });

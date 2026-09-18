@@ -39,6 +39,7 @@ import {
   type FastAgentConversation,
 } from './fast-agent-conversation';
 import {
+  encodeFastAgentTranscriptImageId,
   FAST_AGENT_TRANSCRIPT_IMAGE_MAX_MESSAGES,
   parseFastAgentTranscriptImageId,
   selectBoundedFastAgentTranscriptImages,
@@ -566,9 +567,14 @@ export async function loadFastAgentTranscriptImagesById(
       .flatMap(transcriptImagesFromRow)
       .map((image) => [image.id, image]),
   );
-  const images = ids.flatMap((id) => {
-    const image = available.get(id);
-    return image ? [image] : [];
+  const images = parsed.flatMap(({ id, parsed }) => {
+    if (!parsed) return [];
+    const canonicalId = encodeFastAgentTranscriptImageId(
+      parsed.eventId,
+      parsed.imageIndex,
+    );
+    const image = available.get(canonicalId);
+    return image ? [{ ...image, id }] : [];
   });
   const foundIds = new Set(images.map(({ id }) => id));
   return { images, missingIds: ids.filter((id) => !foundIds.has(id)) };
