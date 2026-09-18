@@ -92,6 +92,30 @@ function skipQuotedString(source: string, start: number): number {
   return source.length;
 }
 
+function skipRawString(source: string, start: number): number | null {
+  if (
+    (source[start] !== 'r' && source[start] !== 'R') ||
+    (source[start + 1] !== '"' && source[start + 1] !== "'")
+  ) {
+    return null;
+  }
+  const quote = source[start + 1]!;
+  let cursor = start + 2;
+  let delimiter = '';
+  while (source[cursor] === '-') {
+    delimiter += '-';
+    cursor++;
+  }
+  const opener = source[cursor];
+  const closer =
+    opener === '(' ? ')' : opener === '[' ? ']' : opener === '{' ? '}' : null;
+  if (!closer) return null;
+
+  const terminator = `${closer}${delimiter}${quote}`;
+  const end = source.indexOf(terminator, cursor + 1);
+  return end < 0 ? source.length : end + terminator.length;
+}
+
 function stripComments(source: string): string {
   let result = '';
   let quote: '"' | "'" | null = null;
@@ -109,6 +133,12 @@ function stripComments(source: string): string {
       if (escaped) escaped = false;
       else if (char === '\\') escaped = true;
       else if (char === quote) quote = null;
+      continue;
+    }
+    const rawStringEnd = skipRawString(source, index);
+    if (rawStringEnd !== null) {
+      result += source.slice(index, rawStringEnd);
+      index = rawStringEnd - 1;
       continue;
     }
     if (char === '"' || char === "'") {
@@ -214,6 +244,11 @@ export function inspectRAnalysisScript(source: string): RAnalysisPreflight {
   const unresolved = new Set<string>();
 
   for (let index = 0; index < code.length;) {
+    const rawStringEnd = skipRawString(code, index);
+    if (rawStringEnd !== null) {
+      index = rawStringEnd;
+      continue;
+    }
     if (code[index] === '"' || code[index] === "'") {
       index = skipQuotedString(code, index);
       continue;
