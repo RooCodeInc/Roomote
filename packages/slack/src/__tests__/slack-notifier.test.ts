@@ -1438,6 +1438,7 @@ describe('SlackNotifier', () => {
 
     it('retries transient conversations.replies rate limits before returning success', async () => {
       vi.useFakeTimers();
+      vi.spyOn(Math, 'random').mockReturnValue(0);
 
       try {
         getGlobalWithFetch().fetch = vi
@@ -1479,6 +1480,81 @@ describe('SlackNotifier', () => {
           'https://slack.com/api/conversations.replies?channel=C123&ts=111.000&oldest=111.000&latest=111.000&inclusive=true',
           expect.any(Object),
         );
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('coalesces concurrent identical conversations.replies checks', async () => {
+      let resolveFetch: ((value: Response) => void) | undefined;
+      getGlobalWithFetch().fetch = vi.fn().mockReturnValue(
+        new Promise<Response>((resolve) => {
+          resolveFetch = resolve;
+        }),
+      );
+
+      const first = notifier.hasMessageInThread({
+        channel: 'C123',
+        threadTs: '111.000',
+        messageTs: '111.000',
+      });
+      const second = notifier.hasMessageInThread({
+        channel: 'C123',
+        threadTs: '111.000',
+        messageTs: '111.000',
+      });
+
+      resolveFetch?.(
+        Response.json({
+          ok: true,
+          messages: [{ ts: '111.000' }],
+        }),
+      );
+
+      await expect(Promise.all([first, second])).resolves.toEqual([true, true]);
+      expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('fetchThreadMessages', () => {
+    it('retries rate limits with a bounded jittered wait', async () => {
+      vi.useFakeTimers();
+      vi.spyOn(Math, 'random').mockReturnValue(0);
+
+      try {
+        getGlobalWithFetch().fetch = vi
+          .fn()
+          .mockResolvedValueOnce({
+            ok: false,
+            status: 429,
+            statusText: 'Too Many Requests',
+            headers: { get: () => '120' },
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({
+              ok: true,
+              messages: [
+                {
+                  ts: '111.000',
+                  type: 'message',
+                  text: 'root message',
+                  bot_id: 'B123',
+                },
+              ],
+            }),
+          });
+
+        const resultPromise = notifier.fetchThreadMessages({
+          channel: 'C123',
+          threadTs: '111.000',
+        });
+
+        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(60_000);
+
+        await expect(resultPromise).resolves.toHaveLength(1);
+        expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(2);
       } finally {
         vi.useRealTimers();
       }
