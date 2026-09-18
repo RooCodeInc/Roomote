@@ -173,18 +173,6 @@ function SignedInUserMenu({
                 <div className="text-sm text-muted-foreground ph-no-capture">
                   {userEmail}
                 </div>
-                {deploymentHost ? (
-                  <div className="mt-1 max-w-full text-xs text-muted-foreground">
-                    <span className="mr-1">Deployment</span>
-                    <span
-                      className="font-mono break-all"
-                      title={deploymentHost}
-                      aria-label={`Deployment host: ${deploymentHost}`}
-                    >
-                      {deploymentHost}
-                    </span>
-                  </div>
-                ) : null}
               </div>
               {showPersonalSettings ? (
                 <DropdownMenuItem asChild className="size-8 justify-center p-0">
@@ -252,6 +240,19 @@ function SignedInUserMenu({
               </DialogDescription>
             )}
           </DialogHeader>
+
+          {deploymentHost ? (
+            <div className="text-sm">
+              <div className="text-muted-foreground">Deployment host</div>
+              <div
+                className="font-mono break-all"
+                title={deploymentHost}
+                aria-label={`Deployment host: ${deploymentHost}`}
+              >
+                {deploymentHost}
+              </div>
+            </div>
+          ) : null}
 
           <p className="max-w-54 min-h-14 md:max-w-none md:min-h-auto">
             Made with care by humans and robots.
