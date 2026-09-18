@@ -4,10 +4,11 @@ description: 'Connect MCP servers that are not in the built-in catalog'
 ---
 
 Custom MCP servers let agents use services that Roomote does not ship a
-built-in integration for. Deployment admins configure them under
-**Settings → Integrations → Custom MCP Servers**. Remote servers become
-available to both Fast Sessions and sandbox tasks. Local stdio servers need a
-task sandbox because Roomote launches their process inside that workspace.
+built-in integration for. Deployment admins can configure them under
+**Settings → Integrations → Custom MCP Servers** or add a remote server from a
+Fast Session. Remote servers become available to both Fast Sessions and sandbox
+tasks. Local stdio servers need a task sandbox because Roomote launches their
+process inside that workspace.
 
 Most MCP servers publish a JSON snippet in their docs. The add dialog's
 **Import from JSON** button accepts a pasted `mcpServers` snippet (or a bare
@@ -24,6 +25,19 @@ Three kinds of servers are supported:
 | Remote, header auth     | Streamable HTTP through the Roomote proxy                                  | Encrypted server-side; injected by the proxy    |
 | Remote, OAuth           | Streamable HTTP through the Roomote proxy                                  | Tokens stored and refreshed server-side         |
 | Local (stdio)           | Launched inside the task sandbox                                           | Encrypted at rest; visible inside the sandbox   |
+
+## Add a remote server from a Session
+
+A deployment admin can ask Fast to connect a service and provide its HTTPS
+Streamable HTTP MCP endpoint. Fast verifies the endpoint before saving it and
+reuses an existing server when its name or URL already matches. A server that
+needs no authentication is available immediately.
+
+For OAuth servers, Fast returns a secure authorization link. Complete the flow
+there; the Session resumes automatically after authorization. Servers that need
+static headers or manual OAuth client registration must be completed under
+**Settings → Integrations**. Never paste credentials into the conversation.
+Local stdio servers still require the Settings form.
 
 ## How remote servers are reached
 
