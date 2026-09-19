@@ -346,3 +346,96 @@ export function getSlackMcpSetupServiceDefinition(
 ): SlackMcpSetupServiceDefinition | undefined {
   return SLACK_MCP_SETUP_SERVICES.find((service) => service.id === id);
 }
+
+function hostMatchesService(hostname: string, suffix: string): boolean {
+  const normalizedSuffix = suffix.toLowerCase();
+  return (
+    hostname === normalizedSuffix || hostname.endsWith(`.${normalizedSuffix}`)
+  );
+}
+
+function pathMatchesServiceRule(
+  pathname: string,
+  rule: Pick<SlackMcpSetupServiceDefinition, 'pathPrefixes'> & {
+    pathRegexes?: RegExp[];
+  },
+): boolean {
+  if (
+    rule.pathPrefixes?.some((prefix) =>
+      pathname.startsWith(prefix.toLowerCase()),
+    )
+  ) {
+    return true;
+  }
+
+  if (rule.pathRegexes?.some((pattern) => pattern.test(pathname))) {
+    return true;
+  }
+
+  return !rule.pathPrefixes?.length && !rule.pathRegexes?.length;
+}
+
+export function matchSlackMcpSetupServiceUrl(
+  rawUrl: string,
+): SlackMcpSetupServiceDefinition | undefined {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl.startsWith('www.') ? `https://${rawUrl}` : rawUrl);
+  } catch {
+    return undefined;
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+  const pathname = parsed.pathname.toLowerCase();
+
+  for (const service of SLACK_MCP_SETUP_SERVICES) {
+    if (
+      service.excludedHostnames?.some(
+        (excluded) => excluded.toLowerCase() === hostname,
+      )
+    ) {
+      continue;
+    }
+
+    if (service.hostRules?.length) {
+      if (
+        service.hostRules.some(
+          (rule) =>
+            hostMatchesService(hostname, rule.hostSuffix) &&
+            pathMatchesServiceRule(pathname, rule),
+        )
+      ) {
+        return service;
+      }
+      continue;
+    }
+
+    if (
+      service.hostSuffixes.some((suffix) =>
+        hostMatchesService(hostname, suffix),
+      ) &&
+      pathMatchesServiceRule(pathname, service)
+    ) {
+      return service;
+    }
+  }
+
+  return undefined;
+}
+
+export function findSlackMcpSetupServicesInText(
+  text: string,
+): SlackMcpSetupServiceDefinition[] {
+  const services = new Map<string, SlackMcpSetupServiceDefinition>();
+  const urlPattern = /(?:https?:\/\/|www\.)[^\s<>()|]+/giu;
+
+  for (const match of text.matchAll(urlPattern)) {
+    const candidate = match[0].replace(/[,.!?]+$/u, '');
+    const service = matchSlackMcpSetupServiceUrl(candidate);
+    if (service) {
+      services.set(service.id, service);
+    }
+  }
+
+  return [...services.values()];
+}
