@@ -1,4 +1,5 @@
 import type { ModelMessage } from 'ai';
+import { decryptSecrets, encryptJSON } from '@roomote/db/encryption';
 import {
   and,
   type CreateFastAgentMessage,
@@ -37,6 +38,10 @@ import {
   FAST_AGENT_REACTION_INPUT_TYPE,
   type FastAgentConversation,
 } from './fast-agent-conversation';
+import {
+  parseOpenCodeSessionSnapshot,
+  type OpenCodeSessionSnapshot,
+} from '../opencode-session-snapshot';
 
 export type FastAgentConversationRecord = {
   id: string;
@@ -55,6 +60,8 @@ export type FastAgentConversationRecord = {
   compatibilityMessages: ModelMessage[];
   /** Last successfully completed native session; validated before cold resume. */
   openCodeSessionId: string | null;
+  /** Encrypted export-equivalent native state captured after a settled turn. */
+  openCodeSnapshot?: OpenCodeSessionSnapshot | null;
 };
 
 export type FastAgentConversationGetOrCreateResult =
@@ -856,6 +863,15 @@ export interface FastAgentConversationRepository {
     conversationId: string;
     openCodeSessionId: string | null;
   }): Promise<void>;
+  setOpenCodeSnapshot(input: {
+    conversationId: string;
+    expectedOpenCodeSessionId: string;
+    snapshot: OpenCodeSessionSnapshot;
+  }): Promise<boolean>;
+  consumeOpenCodeSnapshot(input: {
+    conversationId: string;
+    expectedOpenCodeSessionId: string;
+  }): Promise<boolean>;
 }
 
 function buildIdentityKey(conversation: FastAgentConversation): string {
@@ -970,6 +986,18 @@ async function loadConversationRecord(
       : (() => {
           throw new Error('Fast conversation has an invalid owner.');
         })();
+  let openCodeSnapshot: OpenCodeSessionSnapshot | null = null;
+  if (record.openCodeSnapshot) {
+    try {
+      openCodeSnapshot = parseOpenCodeSessionSnapshot(
+        await decryptSecrets<unknown>(record.openCodeSnapshot),
+      );
+    } catch (error) {
+      console.warn(
+        `[Fast Agent] Ignoring an unreadable OpenCode snapshot: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
 
   return {
     id: record.id,
@@ -983,6 +1011,7 @@ async function loadConversationRecord(
     conversation,
     compatibilityMessages: record.compatibilityMessages as ModelMessage[],
     openCodeSessionId: record.openCodeSessionId,
+    openCodeSnapshot,
   };
 }
 
@@ -1482,6 +1511,64 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
           .where(eq(fastAgentConversations.id, conversationId))
           .returning({ id: fastAgentConversations.id });
         if (!updated) throw new Error('Fast conversation was not found.');
+      });
+    },
+
+    async setOpenCodeSnapshot({
+      conversationId: requestedId,
+      expectedOpenCodeSessionId,
+      snapshot,
+    }) {
+      const encryptedSnapshot = encryptJSON(snapshot);
+      return db.transaction(async (tx) => {
+        const conversationId = await resolveCanonicalId(tx, requestedId);
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${`fast-agent-conversation:${conversationId}`}, 0))`,
+        );
+        const [updated] = await tx
+          .update(fastAgentConversations)
+          .set({
+            openCodeSnapshot: encryptedSnapshot,
+            updatedAt: sql`now()`,
+          })
+          .where(
+            and(
+              eq(fastAgentConversations.id, conversationId),
+              eq(
+                fastAgentConversations.openCodeSessionId,
+                expectedOpenCodeSessionId,
+              ),
+            ),
+          )
+          .returning({ id: fastAgentConversations.id });
+        return Boolean(updated);
+      });
+    },
+
+    async consumeOpenCodeSnapshot({
+      conversationId: requestedId,
+      expectedOpenCodeSessionId,
+    }) {
+      return db.transaction(async (tx) => {
+        const conversationId = await resolveCanonicalId(tx, requestedId);
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${`fast-agent-conversation:${conversationId}`}, 0))`,
+        );
+        const [updated] = await tx
+          .update(fastAgentConversations)
+          .set({ openCodeSnapshot: null, updatedAt: sql`now()` })
+          .where(
+            and(
+              eq(fastAgentConversations.id, conversationId),
+              eq(
+                fastAgentConversations.openCodeSessionId,
+                expectedOpenCodeSessionId,
+              ),
+              isNotNull(fastAgentConversations.openCodeSnapshot),
+            ),
+          )
+          .returning({ id: fastAgentConversations.id });
+        return Boolean(updated);
       });
     },
   };

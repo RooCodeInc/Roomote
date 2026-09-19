@@ -16,6 +16,7 @@ const {
   spawnMock,
   sessionChildrenMock,
   sessionCreateMock,
+  sessionGetMock,
   sessionMessagesMock,
   sessionPromptAsyncMock,
   sessionPromptMock,
@@ -32,6 +33,7 @@ const {
   spawnMock: vi.fn(),
   sessionChildrenMock: vi.fn(),
   sessionCreateMock: vi.fn(),
+  sessionGetMock: vi.fn(),
   sessionMessagesMock: vi.fn(),
   sessionPromptAsyncMock: vi.fn(),
   sessionPromptMock: vi.fn(),
@@ -57,6 +59,7 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 import {
+  captureNonTaskOpenCodeSessionSnapshot,
   createOpenCodeSdkFetch,
   resolveOpenCodeSmallModel,
 } from '../non-task-provider-usage';
@@ -146,6 +149,7 @@ describe('resolveOpenCodeSmallModel', () => {
         abort: sessionAbortMock,
         children: sessionChildrenMock,
         create: sessionCreateMock,
+        get: sessionGetMock,
         messages: sessionMessagesMock,
         promptAsync: sessionPromptAsyncMock,
         prompt: sessionPromptMock,
@@ -157,6 +161,7 @@ describe('resolveOpenCodeSmallModel', () => {
       error: undefined,
     });
     sessionChildrenMock.mockResolvedValue({ data: [], error: undefined });
+    sessionGetMock.mockResolvedValue({ data: undefined, error: undefined });
     sessionMessagesMock.mockResolvedValue({ data: [], error: undefined });
     sessionPromptAsyncMock.mockResolvedValue({
       data: undefined,
@@ -199,6 +204,92 @@ describe('resolveOpenCodeSmallModel', () => {
     expect(resolveOpenCodeSmallModel()).toBe(
       'openrouter/anthropic/claude-sonnet-4',
     );
+  });
+
+  it('captures a settled native session through the SDK read surface', async () => {
+    const sessionID = `ses_${'a'.repeat(26)}`;
+    const userID = `msg_${'b'.repeat(26)}`;
+    const assistantID = `msg_${'c'.repeat(26)}`;
+    sessionGetMock.mockResolvedValue({
+      data: {
+        id: sessionID,
+        slug: 'snapshot',
+        projectID: 'global',
+        directory: '/tmp/native',
+        title: 'Snapshot',
+        version: DEFAULT_OPENCODE_CLI_VERSION,
+        time: { created: 1, updated: 4 },
+      },
+      error: undefined,
+    });
+    sessionMessagesMock.mockResolvedValue({
+      data: [
+        {
+          info: {
+            id: userID,
+            sessionID,
+            role: 'user',
+            time: { created: 2 },
+            agent: 'build',
+            model: { providerID: 'test', modelID: 'test' },
+          },
+          parts: [
+            {
+              id: `prt_${'d'.repeat(26)}`,
+              sessionID,
+              messageID: userID,
+              type: 'text',
+              text: 'hello',
+            },
+          ],
+        },
+        {
+          info: {
+            id: assistantID,
+            sessionID,
+            role: 'assistant',
+            time: { created: 3, completed: 4 },
+            parentID: userID,
+            modelID: 'test',
+            providerID: 'test',
+            mode: 'build',
+            agent: 'build',
+            path: { cwd: '/tmp/native', root: '/tmp' },
+            cost: 0,
+            tokens: {
+              input: 1,
+              output: 1,
+              reasoning: 0,
+              cache: { read: 0, write: 0 },
+            },
+            finish: 'stop',
+          },
+          parts: [
+            {
+              id: `prt_${'e'.repeat(26)}`,
+              sessionID,
+              messageID: assistantID,
+              type: 'text',
+              text: 'world',
+            },
+          ],
+        },
+      ],
+      error: undefined,
+    });
+
+    await expect(
+      captureNonTaskOpenCodeSessionSnapshot({
+        baseUrl: 'http://127.0.0.1:4100',
+        directory: '/tmp/native',
+        sessionId: sessionID,
+        expectedCompletedMessageId: assistantID,
+      }),
+    ).resolves.toMatchObject({
+      version: 1,
+      sourceSessionId: sessionID,
+      messages: [{ info: { role: 'user' } }, { info: { role: 'assistant' } }],
+    });
   });
 
   it('reuses a managed OpenCode SDK server for matching structured object calls', async () => {

@@ -757,6 +757,13 @@
       "when": 1789753144299,
       "tag": "0107_married_tyger_tiger",
       "breakpoints": true
+    },
+    {
+      "idx": 108,
+      "version": "7",
+      "when": 1789841247202,
+      "tag": "0108_right_major_mapleleaf",
+      "breakpoints": true
     }
   ]
 }

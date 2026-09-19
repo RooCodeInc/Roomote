@@ -26,6 +26,11 @@ import {
   NON_TASK_TOOL_PERMISSION_DENIALS,
   readOpenCodeDebugConfig,
 } from './opencode-runtime';
+import {
+  createOpenCodeSessionSnapshot,
+  OPENCODE_SESSION_SNAPSHOT_MAX_MESSAGES,
+  type OpenCodeSessionSnapshot,
+} from './opencode-session-snapshot';
 
 const DEFAULT_OPENCODE_STRUCTURED_OUTPUT_RETRY_COUNT = 2;
 const NON_TASK_SESSION_ABORT_TIMEOUT_MS = 5_000;
@@ -699,6 +704,48 @@ export function createOpenCodeSdkFetch(
 }
 
 const openCodeSdkFetch = createOpenCodeSdkFetch();
+
+export async function captureNonTaskOpenCodeSessionSnapshot(input: {
+  baseUrl: string;
+  directory: string;
+  sessionId: string;
+  expectedCompletedMessageId: string;
+  signal?: AbortSignal;
+}): Promise<OpenCodeSessionSnapshot | null> {
+  const client = createOpencodeClient({
+    baseUrl: input.baseUrl,
+    fetch: openCodeSdkFetch,
+  });
+  const [sessionResult, messagesResult] = await Promise.all([
+    client.session.get(
+      { sessionID: input.sessionId, directory: input.directory },
+      { signal: input.signal },
+    ),
+    client.session.messages(
+      {
+        sessionID: input.sessionId,
+        directory: input.directory,
+        limit: OPENCODE_SESSION_SNAPSHOT_MAX_MESSAGES + 1,
+      },
+      { signal: input.signal },
+    ),
+  ]);
+  if (sessionResult.error || !sessionResult.data) {
+    throw new Error(
+      `OpenCode snapshot session read failed: ${formatOpenCodeSdkError(sessionResult.error)}`,
+    );
+  }
+  if (messagesResult.error || !messagesResult.data) {
+    throw new Error(
+      `OpenCode snapshot message read failed: ${formatOpenCodeSdkError(messagesResult.error)}`,
+    );
+  }
+  return createOpenCodeSessionSnapshot({
+    info: sessionResult.data,
+    messages: messagesResult.data,
+    expectedCompletedMessageId: input.expectedCompletedMessageId,
+  });
+}
 
 function buildOpenCodePrompt(params: {
   system?: string;

@@ -21,6 +21,7 @@ import {
   users,
 } from '@roomote/db/server';
 import type { FastAgentConversation, FastAgentSurface } from '@roomote/types';
+import type { OpenCodeSessionSnapshot } from '../../opencode-session-snapshot';
 
 import {
   fastAgentConversationRepository,
@@ -943,6 +944,67 @@ describe('Fast conversation repository', () => {
     ).resolves.toMatchObject({
       openCodeSessionId: 'opencode-session-1',
     });
+  });
+
+  it('encrypts and atomically claims a matching healthy OpenCode snapshot', async () => {
+    const user = await createUser();
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    const nativeSessionId = `ses_${'a'.repeat(26)}`;
+    const snapshot = {
+      version: 1,
+      sourceSessionId: nativeSessionId,
+      capturedAt: 10,
+      info: {
+        id: nativeSessionId,
+        slug: 'encrypted-snapshot',
+        projectID: 'global',
+        directory: '/tmp/native',
+        title: 'Encrypted snapshot',
+        version: '1.18.30',
+        time: { created: 1, updated: 10 },
+      },
+      messages: [],
+    } satisfies OpenCodeSessionSnapshot;
+    await fastAgentConversationRepository.setOpenCodeSession({
+      conversationId: session.id,
+      openCodeSessionId: nativeSessionId,
+    });
+
+    await expect(
+      fastAgentConversationRepository.setOpenCodeSnapshot({
+        conversationId: session.id,
+        expectedOpenCodeSessionId: nativeSessionId,
+        snapshot,
+      }),
+    ).resolves.toBe(true);
+    const raw = await db.query.fastAgentConversations.findFirst({
+      where: eq(fastAgentConversations.id, session.id),
+      columns: { openCodeSnapshot: true },
+    });
+    expect(raw?.openCodeSnapshot).toEqual(expect.any(String));
+    expect(raw?.openCodeSnapshot).not.toContain('encrypted-snapshot');
+    await expect(
+      fastAgentConversationRepository.findById({ id: session.id }),
+    ).resolves.toMatchObject({ openCodeSnapshot: snapshot });
+
+    await expect(
+      fastAgentConversationRepository.consumeOpenCodeSnapshot({
+        conversationId: session.id,
+        expectedOpenCodeSessionId: 'different-session',
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      fastAgentConversationRepository.consumeOpenCodeSnapshot({
+        conversationId: session.id,
+        expectedOpenCodeSessionId: nativeSessionId,
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      fastAgentConversationRepository.findById({ id: session.id }),
+    ).resolves.toMatchObject({ openCodeSnapshot: null });
   });
 
   it('resolves retained legacy IDs without consulting the alias table', async () => {

@@ -3616,6 +3616,10 @@ export const fastAgentConversations = pgTable(
       .default(sql`'[]'::jsonb`)
       .$type<Record<string, unknown>[]>(),
     openCodeSessionId: text('opencode_session_id'),
+    // Internal recovery material can contain provider-native tool payloads and
+    // is never a transcript/API surface, so keep it encrypted at rest.
+    openCodeSnapshot:
+      encryptedJson<Record<string, unknown>>('opencode_snapshot'),
     model: text('model'),
     reasoningEffort: text('reasoning_effort').$type<ReasoningEffort>(),
     title: text('title'),

@@ -126,8 +126,10 @@ import {
 } from '../user-personalization';
 import {
   appendFastAgentVisibleMessages,
+  consumeFastAgentOpenCodeSnapshot,
   getActiveFastAgentTasks,
   getOrCreateFastAgentSession,
+  setFastAgentOpenCodeSnapshot,
   setFastAgentOpenCodeSession,
   upsertFastAgentMessage,
   type FastAgentActiveTask,
@@ -135,6 +137,7 @@ import {
 import { refreshFastAgentSessionTitle } from './fast-agent-title';
 import {
   classifyNonTaskInferenceError,
+  captureNonTaskOpenCodeSessionSnapshot,
   FAST_AGENT_SESSION_PERMISSIONS,
   FAST_AGENT_SESSION_TOOL_FILTER,
   generateTrackedNonTaskText,
@@ -156,6 +159,8 @@ import {
   type NonTaskOpenCodeNativeSteer,
   type NonTaskOpenCodeTaskPart,
 } from '../non-task-provider-usage';
+import { importOpenCodeSessionSnapshot } from '../opencode-runtime';
+import { sanitizeOpenCodeSessionSnapshot } from '../opencode-session-snapshot';
 import { fastAgentOpenCodeSessionManager } from './fast-agent-opencode-session';
 import {
   createFastAgentReplyStreamPublisher,
@@ -5855,6 +5860,51 @@ export async function answerFastAgentQuestion({
       return lastVisibleMessage;
     }
     diagnostics.markInferenceQueued();
+    let nativeRuntime = await getFastAgentNativeToolRuntime(
+      session.id,
+      availableIntegrations,
+      {
+        surface: conversation.surface,
+        serviceCredentialToolsEnabled:
+          currentUser.serviceCredentialToolsEnabled,
+        serviceCredentialPrepareEnabled:
+          currentUser.serviceCredentialToolsEnabled && !platformEvent,
+        addRemoteMcpEnabled: !platformEvent,
+        codeModeIntegrationsEnabled: codeModeIntegrationsEffective,
+      },
+    );
+    let nativeRuntimeExecutionStarted = false;
+    let restorableSnapshot =
+      session.openCodeSnapshot &&
+      session.openCodeSessionId === session.openCodeSnapshot.sourceSessionId
+        ? session.openCodeSnapshot
+        : null;
+    if (session.openCodeSnapshot && !restorableSnapshot) {
+      console.info(
+        '[Fast Agent] Ignoring a stale OpenCode snapshot whose source session no longer matches the durable session.',
+      );
+      if (session.openCodeSessionId) {
+        await consumeFastAgentOpenCodeSnapshot({
+          sessionId: session.id,
+          expectedOpenCodeSessionId: session.openCodeSessionId,
+        });
+        session.openCodeSnapshot = null;
+      }
+    }
+    if (restorableSnapshot && session.openCodeSessionId) {
+      const consumed = await consumeFastAgentOpenCodeSnapshot({
+        sessionId: session.id,
+        expectedOpenCodeSessionId: session.openCodeSessionId,
+      });
+      if (!consumed) {
+        restorableSnapshot = null;
+        console.info(
+          '[Fast Agent] OpenCode snapshot changed before this turn could claim it; native resume will continue without snapshot recovery.',
+        );
+      } else {
+        session.openCodeSnapshot = null;
+      }
+    }
     const promptTextPromise = fastAgentOpenCodeSessionManager.run({
       conversationId: session.id,
       persistedSessionId: session.openCodeSessionId,
@@ -5866,6 +5916,20 @@ export async function answerFastAgentQuestion({
             ...injectedHumanFollowUpMessages,
           ]),
         ),
+      ...(restorableSnapshot
+        ? {
+            restoreSession: async () => {
+              const restoredSessionId = await importOpenCodeSessionSnapshot({
+                snapshot: restorableSnapshot,
+                directory: nativeRuntime.directory,
+              });
+              console.info(
+                '[Fast Agent] Imported a healthy OpenCode snapshot before cold resume.',
+              );
+              return restoredSessionId;
+            },
+          }
+        : {}),
       onPathSelected: (path) => {
         diagnostics.recordSessionPath(path);
         console.info(`[Fast Agent] OpenCode session path=${path}.`);
@@ -5876,6 +5940,22 @@ export async function answerFastAgentQuestion({
         { path: sessionPath, validateSession },
       ) => {
         diagnostics.markInferenceSetupStarted();
+        if (nativeRuntimeExecutionStarted) {
+          nativeRuntime = await getFastAgentNativeToolRuntime(
+            session.id,
+            availableIntegrations,
+            {
+              surface: conversation.surface,
+              serviceCredentialToolsEnabled:
+                currentUser.serviceCredentialToolsEnabled,
+              serviceCredentialPrepareEnabled:
+                currentUser.serviceCredentialToolsEnabled && !platformEvent,
+              addRemoteMcpEnabled: !platformEvent,
+              codeModeIntegrationsEnabled: codeModeIntegrationsEffective,
+            },
+          );
+        }
+        nativeRuntimeExecutionStarted = true;
         const spillBudget = createFastAgentSpillTurnBudget();
         const skillStore = new FastAgentSkillStore(
           undefined,
@@ -5890,19 +5970,6 @@ export async function answerFastAgentQuestion({
             ),
           }),
           new RemoteFastAgentInstanceSkillSource(userId),
-        );
-        const nativeRuntime = await getFastAgentNativeToolRuntime(
-          session.id,
-          availableIntegrations,
-          {
-            surface: conversation.surface,
-            serviceCredentialToolsEnabled:
-              currentUser.serviceCredentialToolsEnabled,
-            serviceCredentialPrepareEnabled:
-              currentUser.serviceCredentialToolsEnabled && !platformEvent,
-            addRemoteMcpEnabled: !platformEvent,
-            codeModeIntegrationsEnabled: codeModeIntegrationsEffective,
-          },
         );
         codeModeIntegrationsActiveForTurn =
           nativeRuntime.codeModeIntegrationsActive;
@@ -5937,6 +6004,67 @@ export async function answerFastAgentQuestion({
         let attemptSessionPath = sessionPath;
         let promptTimeoutMs: number | null = null;
         let resolvedInferenceModel: string | undefined;
+        let pendingOpenCodeSnapshot: Awaited<
+          ReturnType<typeof captureNonTaskOpenCodeSessionSnapshot>
+        > = null;
+        const captureSettledOpenCodeSnapshot = async () => {
+          const expectedCompletedMessageId = completedOpenCodeMessage?.id;
+          if (
+            !openCodeSession.id ||
+            !codeModeOpenCodeServerUrl ||
+            !expectedCompletedMessageId
+          ) {
+            return;
+          }
+          try {
+            const snapshot = await captureNonTaskOpenCodeSessionSnapshot({
+              baseUrl: codeModeOpenCodeServerUrl,
+              directory: nativeRuntime.directory,
+              sessionId: openCodeSession.id,
+              expectedCompletedMessageId,
+              signal: AbortSignal.timeout(10_000),
+            });
+            const privateIntegrationIds = new Set(
+              availableIntegrations
+                .filter(({ dataPolicy }) => dataPolicy === 'private')
+                .map(({ id }) => id),
+            );
+            pendingOpenCodeSnapshot = snapshot
+              ? sanitizeOpenCodeSessionSnapshot(snapshot, (part) => {
+                  if (currentSessionPrivacy === 'private') return true;
+                  if (
+                    part.tool ===
+                    FAST_AGENT_NATIVE_TOOL_NAMES.updatePersonalization
+                  ) {
+                    return true;
+                  }
+                  const input = part.state.input;
+                  if (
+                    part.tool ===
+                      FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool &&
+                    typeof input.integrationId === 'string' &&
+                    privateIntegrationIds.has(input.integrationId)
+                  ) {
+                    return true;
+                  }
+                  return [...privateIntegrationIds].some((id) =>
+                    part.tool.startsWith(
+                      `${id.replace(/[^a-zA-Z0-9_-]/gu, '_')}_`,
+                    ),
+                  );
+                })
+              : null;
+            if (!pendingOpenCodeSnapshot) {
+              console.warn(
+                '[Fast Agent] OpenCode snapshot was not persisted because the native session was unsettled or exceeded recovery bounds.',
+              );
+            }
+          } catch (error) {
+            console.warn(
+              `[Fast Agent] Could not capture the settled OpenCode snapshot: ${formatErrorForLog(error)}`,
+            );
+          }
+        };
         const captureInferenceContext = (
           attemptScope: 'prompt_submission' | 'provider_retry',
           providerRetryAttempt?: number,
@@ -6240,6 +6368,7 @@ export async function answerFastAgentQuestion({
                     },
                   );
                 const result = await resultPromise;
+                await captureSettledOpenCodeSnapshot();
                 noteInferenceRecoveryProgress();
                 captureFastAgentInferenceAttemptOutcome({
                   userId,
@@ -6278,6 +6407,7 @@ export async function answerFastAgentQuestion({
                     resolvedModel: resolvedInferenceModel,
                     providerRetryEventCount,
                   });
+                  await captureSettledOpenCodeSnapshot();
                   return '';
                 }
                 // A parked turn ended this prompt on purpose; the outer
@@ -6448,6 +6578,18 @@ export async function answerFastAgentQuestion({
           if (openCodeSession.id) {
             try {
               await persistOpenCodeSession(openCodeSession.id);
+              if (pendingOpenCodeSnapshot) {
+                const persisted = await setFastAgentOpenCodeSnapshot({
+                  sessionId: session.id,
+                  expectedOpenCodeSessionId: openCodeSession.id,
+                  snapshot: pendingOpenCodeSnapshot,
+                });
+                if (!persisted) {
+                  console.warn(
+                    '[Fast Agent] Discarded an OpenCode snapshot because the durable session changed before persistence.',
+                  );
+                }
+              }
             } catch (error) {
               console.error(
                 `[Fast Agent] Failed to persist OpenCode session identity: ${formatErrorForLog(error)}`,

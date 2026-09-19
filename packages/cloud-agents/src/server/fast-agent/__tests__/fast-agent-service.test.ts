@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   mountCodeModeIntegration: vi.fn(),
   serverNameCollision: vi.fn(),
   clearIntegrationToolCache: vi.fn(),
+  consumeOpenCodeSnapshot: vi.fn(),
+  setOpenCodeSnapshot: vi.fn(),
   setOpenCodeSession: vi.fn(),
   upsertMessage: vi.fn(),
   getEnvironments: vi.fn(),
@@ -28,6 +30,8 @@ const mocks = vi.hoisted(() => ({
   generateHelperText: vi.fn(),
   generateTrackedObject: vi.fn(),
   resolveImageDelivery: vi.fn(),
+  captureOpenCodeSnapshot: vi.fn(),
+  importOpenCodeSnapshot: vi.fn(),
   classifyInferenceError: vi.fn(),
   invalidateSession: vi.fn(),
   runSession: vi.fn(),
@@ -171,8 +175,10 @@ vi.mock('@roomote/telemetry/server', () => ({
 
 vi.mock('../fast-agent-session', () => ({
   appendFastAgentVisibleMessages: mocks.appendVisibleMessages,
+  consumeFastAgentOpenCodeSnapshot: mocks.consumeOpenCodeSnapshot,
   getActiveFastAgentTasks: mocks.getActiveTasks,
   getOrCreateFastAgentSession: mocks.getSession,
+  setFastAgentOpenCodeSnapshot: mocks.setOpenCodeSnapshot,
   setFastAgentOpenCodeSession: mocks.setOpenCodeSession,
   upsertFastAgentMessage: mocks.upsertMessage,
 }));
@@ -279,6 +285,7 @@ vi.mock('../../non-task-provider-usage', async (importOriginal) => {
       fastAgentQuestionAnswering: 'fast_agent',
     },
     NonTaskInputModalityUnsupportedError,
+    captureNonTaskOpenCodeSessionSnapshot: mocks.captureOpenCodeSnapshot,
     classifyNonTaskInferenceError: mocks.classifyInferenceError,
     generateTrackedNonTaskObject: mocks.generateTrackedObject,
     generateTrackedNonTaskText: mocks.generateHelperText,
@@ -303,6 +310,11 @@ vi.mock('../../non-task-provider-usage', async (importOriginal) => {
       error.name === 'NonTaskOpenCodeSessionValidationError',
   };
 });
+
+vi.mock('../../opencode-runtime', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../opencode-runtime')>()),
+  importOpenCodeSessionSnapshot: mocks.importOpenCodeSnapshot,
+}));
 
 vi.mock('../../typesafe-judgment', () => ({
   evaluateTypeSafeJudgments: mocks.evaluateJudgments,
@@ -605,6 +617,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       openCodeSessionId: null,
     });
     mocks.setOpenCodeSession.mockResolvedValue(undefined);
+    mocks.consumeOpenCodeSnapshot.mockResolvedValue(true);
+    mocks.setOpenCodeSnapshot.mockResolvedValue(true);
+    mocks.captureOpenCodeSnapshot.mockResolvedValue(null);
+    mocks.importOpenCodeSnapshot.mockResolvedValue('restored-session');
     mocks.upsertMessage.mockResolvedValue({ initialHumanTurn: true });
     mocks.evaluateJudgments.mockResolvedValue(null);
     mocks.reconcileRetryNotices.mockResolvedValue(0);
@@ -6111,6 +6127,149 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       openCodeSessionId: 'replacement-session',
     });
     expect(mocks.getNativeRuntime).toHaveBeenCalledTimes(2);
+  });
+
+  it('imports a claimed healthy snapshot and submits only the new turn after native loss', async () => {
+    const { FastAgentOpenCodeSessionManager } = await vi.importActual<
+      typeof import('../fast-agent-opencode-session')
+    >('../fast-agent-opencode-session');
+    const manager = new FastAgentOpenCodeSessionManager();
+    mocks.runSession.mockImplementation((input) => manager.run(input));
+    const snapshot = {
+      version: 1 as const,
+      sourceSessionId: 'missing-session',
+      capturedAt: 10,
+      info: { id: 'missing-session' },
+      messages: [],
+    };
+    mocks.getSession.mockResolvedValue({
+      id: 'conversation-1',
+      compatibilityMessages: [
+        { role: 'user', content: 'Earlier question' },
+        { role: 'assistant', content: 'Earlier answer' },
+      ],
+      openCodeSessionId: 'missing-session',
+      openCodeSnapshot: snapshot,
+    });
+    const prompts: string[] = [];
+    mocks.generateText.mockImplementation(async (params, session, options) => {
+      prompts.push(params.prompt);
+      if (session.id === 'missing-session') {
+        const error = new Error('Session not found');
+        error.name = 'NonTaskOpenCodeSessionNotFoundError';
+        throw error;
+      }
+      expect(session.id).toBe('restored-session');
+      expect(options.validateSession).toBe(true);
+      await options.onSessionReady(session.id);
+      await invokeTool(nativeToolNames.sendChatReply, {
+        purpose: 'closeout',
+        message: 'Recovered from structured history.',
+      });
+      return '';
+    });
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.consumeOpenCodeSnapshot).toHaveBeenCalledWith({
+      sessionId: 'conversation-1',
+      expectedOpenCodeSessionId: 'missing-session',
+    });
+    expect(mocks.importOpenCodeSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({
+        snapshot,
+        directory: '/tmp/fast-native-tools',
+      }),
+    );
+    expect(prompts).toHaveLength(2);
+    expect(prompts[0]).not.toContain('Earlier answer');
+    expect(prompts[1]).not.toContain('Earlier answer');
+    expect(mocks.setOpenCodeSession).toHaveBeenCalledWith({
+      sessionId: 'conversation-1',
+      openCodeSessionId: 'restored-session',
+    });
+  });
+
+  it('persists a bounded settled native snapshot after session identity', async () => {
+    const snapshot = {
+      version: 1 as const,
+      sourceSessionId: 'opencode-session-1',
+      capturedAt: 10,
+      info: { id: 'opencode-session-1' },
+      messages: [],
+    };
+    mocks.captureOpenCodeSnapshot.mockResolvedValue(snapshot);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        options.onServerLeased?.('http://127.0.0.1:4100');
+        await options.onSessionReady('opencode-session-1');
+        options.onMessageCompleted?.({
+          id: 'assistant-message-1',
+          sessionId: 'opencode-session-1',
+          createdAtMs: 1,
+          completedAtMs: 2,
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Snapshot captured.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.captureOpenCodeSnapshot).toHaveBeenCalledWith({
+      baseUrl: 'http://127.0.0.1:4100',
+      directory: '/tmp/fast-native-tools',
+      sessionId: 'opencode-session-1',
+      expectedCompletedMessageId: 'assistant-message-1',
+      signal: expect.any(AbortSignal),
+    });
+    expect(mocks.setOpenCodeSession).toHaveBeenCalledBefore(
+      mocks.setOpenCodeSnapshot,
+    );
+    expect(mocks.setOpenCodeSnapshot).toHaveBeenCalledWith({
+      sessionId: 'conversation-1',
+      expectedOpenCodeSessionId: 'opencode-session-1',
+      snapshot,
+    });
+  });
+
+  it('clears a stale snapshot without offering it to native recovery', async () => {
+    mocks.getSession.mockResolvedValue({
+      id: 'conversation-1',
+      compatibilityMessages: [],
+      openCodeSessionId: 'newer-session',
+      openCodeSnapshot: {
+        version: 1,
+        sourceSessionId: 'older-session',
+        capturedAt: 10,
+        info: { id: 'older-session' },
+        messages: [],
+      },
+    });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Used the live session.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.consumeOpenCodeSnapshot).toHaveBeenCalledWith({
+      sessionId: 'conversation-1',
+      expectedOpenCodeSessionId: 'newer-session',
+    });
+    expect(mocks.runSession).toHaveBeenCalledWith(
+      expect.not.objectContaining({ restoreSession: expect.any(Function) }),
+    );
+    expect(mocks.importOpenCodeSnapshot).not.toHaveBeenCalled();
   });
 
   it('mounts an integration connected mid-turn on the code-mode server', async () => {

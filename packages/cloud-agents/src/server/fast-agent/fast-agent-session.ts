@@ -23,6 +23,7 @@ import type {
 import { captureUserStartedSessionCreated } from '../session-telemetry';
 import type { FastAgentConversation } from './fast-agent-conversation';
 import { fastAgentConversationRepository } from './fast-agent-conversation-repository';
+import type { OpenCodeSessionSnapshot } from '../opencode-session-snapshot';
 import type {
   FastAgentMessageUpsertResult,
   FastAgentMessageWrite,
@@ -40,6 +41,7 @@ type FastAgentSessionRecord = {
   conversation: FastAgentConversation;
   compatibilityMessages: ModelMessage[];
   openCodeSessionId: string | null;
+  openCodeSnapshot?: OpenCodeSessionSnapshot | null;
   created: boolean;
 };
 
@@ -237,5 +239,34 @@ export async function setFastAgentOpenCodeSession({
   await fastAgentConversationRepository.setOpenCodeSession({
     conversationId: sessionId,
     openCodeSessionId,
+  });
+}
+
+export async function setFastAgentOpenCodeSnapshot({
+  sessionId,
+  expectedOpenCodeSessionId,
+  snapshot,
+}: {
+  sessionId: string;
+  expectedOpenCodeSessionId: string;
+  snapshot: OpenCodeSessionSnapshot;
+}): Promise<boolean> {
+  return fastAgentConversationRepository.setOpenCodeSnapshot({
+    conversationId: sessionId,
+    expectedOpenCodeSessionId,
+    snapshot,
+  });
+}
+
+export async function consumeFastAgentOpenCodeSnapshot({
+  sessionId,
+  expectedOpenCodeSessionId,
+}: {
+  sessionId: string;
+  expectedOpenCodeSessionId: string;
+}): Promise<boolean> {
+  return fastAgentConversationRepository.consumeOpenCodeSnapshot({
+    conversationId: sessionId,
+    expectedOpenCodeSessionId,
   });
 }
