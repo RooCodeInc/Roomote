@@ -45,6 +45,7 @@ import {
 import { callMcpTool, listMcpTools } from '../../mcp-tool-client';
 import { buildOpenCodeCliEnv } from '../../opencode-runtime';
 import { buildFastAgentToolFilter } from '../fast-agent-tool-policy';
+import type { FastAgentIntegration } from '../fast-agent-integration-broker';
 
 function stringWithSerializedByteLength(byteLength: number): string {
   return 'x'.repeat(byteLength - 2);
@@ -1271,6 +1272,68 @@ describe('Fast native OpenCode tool bridge', () => {
         { type: 'text', text: 'Image fetched successfully' },
         { type: 'image', data: 'aW1hZ2U=', mimeType: 'image/png' },
       ]);
+    } finally {
+      unbind();
+    }
+  });
+
+  it('serves integrations spliced into the capability list mid-turn', async () => {
+    const integrations: FastAgentIntegration[] = [
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: 'Deployment access',
+        tools: [{ name: 'manage_tasks' }],
+      },
+    ];
+    const runtime = await getFastAgentNativeToolRuntime(
+      'mid-turn-capability-refresh',
+      integrations,
+      { codeModeIntegrationsEnabled: true },
+    );
+    expect(runtime.codeModeIntegrationsActive).toBe(true);
+    const executor = vi.fn(async () => ({ found: true }));
+    const unbind = bindFastAgentMcpToolExecutor(
+      runtime.mcpCapability,
+      executor,
+    );
+    try {
+      // The connect handlers refresh integrations in place; the bridge
+      // capability shares this array, so the new server must answer on the
+      // same capability URL immediately.
+      integrations.splice(
+        0,
+        integrations.length,
+        {
+          id: 'roomote',
+          name: 'Roomote',
+          description: 'Deployment access',
+          tools: [{ name: 'manage_tasks' }],
+        },
+        {
+          id: 'notion',
+          name: 'Notion',
+          description: 'Docs access',
+          tools: [{ name: 'search_pages' }],
+        },
+      );
+      const bridgeBase = runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_URL!.replace(
+        /\/tool$/u,
+        '',
+      );
+      const url = `${bridgeBase}/mcp/${runtime.mcpCapability}/notion`;
+      const headers = {
+        Authorization: `Bearer ${runtime.mcpCapability}`,
+      };
+      await expect(listMcpTools({ url, headers })).resolves.toEqual([
+        { name: 'search_pages', inputSchema: { type: 'object' } },
+      ]);
+      await callMcpTool({ url, headers, toolName: 'search_pages', args: {} });
+      expect(executor).toHaveBeenCalledWith({
+        integrationId: 'notion',
+        toolName: 'search_pages',
+        args: {},
+      });
     } finally {
       unbind();
     }
