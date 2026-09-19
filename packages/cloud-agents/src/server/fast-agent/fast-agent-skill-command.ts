@@ -115,9 +115,7 @@ function conciseDescription(description: string): string {
 }
 
 function formatSkillDescription(skill: FastAgentSkillSummary): string {
-  return conciseDescription(
-    `${skill.description}${skill.repository ? ` (${skill.repository})` : ''}`,
-  );
+  return `${conciseDescription(skill.description)}${skill.repository ? ` (${skill.repository})` : ''}`;
 }
 
 export function formatUserCallableSkillsPage(input: {

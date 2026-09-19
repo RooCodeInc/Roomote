@@ -80,7 +80,7 @@ describe('Fast skill command', () => {
                 id: `repository:${environmentId}`,
                 name: 'deploy',
                 invocation: 'deploy',
-                description: `Deploy from ${environmentId}`,
+                description: `Deploy from ${environmentId}. `.repeat(12),
                 repository: `example/${environmentId}`,
                 source: 'repository',
               },
@@ -100,12 +100,12 @@ describe('Fast skill command', () => {
         invocation: 'deploy',
       }),
     ]);
-    expect(
-      formatUserCallableSkillsPage({
-        catalog,
-        command: '/skills',
-      }),
-    ).toContain('$deploy` — Deploy from env-a (example/env-a)');
+    const formatted = formatUserCallableSkillsPage({
+      catalog,
+      command: '/skills',
+    });
+    expect(formatted).toContain('… (example/env-a)');
+    expect(formatted).toContain('… (example/env-b)');
   });
 
   it('recognizes bounded skills command syntax', () => {
