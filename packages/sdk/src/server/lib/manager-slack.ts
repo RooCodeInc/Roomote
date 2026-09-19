@@ -19,7 +19,10 @@ import {
   buildAutomationResultBlocks,
   convertSlackLinksToMarkdown,
 } from '@roomote/slack';
-import { buildFastSessionUrl } from '@roomote/communication';
+import {
+  buildFastSessionUrl,
+  type AutomationResultLinkAction,
+} from '@roomote/communication';
 
 const DEFAULT_LOCAL_R_APP_URL = 'http://localhost:13000';
 
@@ -92,13 +95,8 @@ export function buildCustomAutomationSlackMessage(params: {
       additionalActions: params.sessionId
         ? [
             {
-              type: 'button',
-              action_id: 'late_bound_automation_view_session',
-              text: {
-                type: 'plain_text',
-                text: 'Follow',
-                emoji: false,
-              },
+              actionId: 'late_bound_automation_view_session',
+              text: 'Follow',
               url: buildFastSessionUrl('slack', params.sessionId),
             },
           ]
@@ -164,7 +162,7 @@ export function buildAutomationSettingsMessage(
     taskUrl?: string | null;
     slackIcon?: string;
     contentBlocks?: SlackBlock[];
-    additionalActions?: Record<string, unknown>[];
+    additionalActions?: AutomationResultLinkAction[];
   },
 ): SlackAutomationSettingsMessage {
   const trimmedText = text.trim();

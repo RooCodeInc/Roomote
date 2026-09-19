@@ -1,6 +1,7 @@
 export * from './agentmail-api-base-url';
 export * from './agentmail-event';
 export * from './agentmail-format';
+export * from './automation-result-actions';
 export * from './agentmail-provider';
 export * from './chat-messages';
 export * from './discord-event';

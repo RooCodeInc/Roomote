@@ -26,6 +26,7 @@ import {
   RELEASE_ANNOUNCEMENTS_SETTINGS_HASH,
   toReleaseTag,
 } from '@roomote/types';
+import { buildAutomationResultLinkButtonRows } from '@roomote/communication';
 import { buildAutomationResultBlocks } from '@roomote/slack';
 
 import { getCommunicationProviderAdapter } from './communication-providers';
@@ -150,6 +151,11 @@ async function sendReleaseAnnouncement(input: {
       conversationKey: input.conversationKey,
       text: input.text,
       idempotencyKey: input.idempotencyKey,
+      buttons: buildAutomationResultLinkButtonRows({
+        configureUrl: buildManagerSlackSettingsUrl(
+          RELEASE_ANNOUNCEMENTS_SETTINGS_HASH,
+        ),
+      }),
     });
     return null;
   }

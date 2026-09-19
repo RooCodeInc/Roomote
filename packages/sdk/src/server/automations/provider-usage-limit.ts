@@ -13,6 +13,7 @@ import {
   type ProviderUsageLimitSnapshot,
 } from '@roomote/db/server';
 import { getRedis } from '@roomote/redis';
+import { buildAutomationResultLinkButtonRows } from '@roomote/communication';
 import { buildAutomationResultBlocks, SlackNotifier } from '@roomote/slack';
 import {
   DEFAULT_PROVIDER_USAGE_LIMIT_THRESHOLD,
@@ -264,9 +265,8 @@ function buildProviderUsageLimitAlertBlock(
     configureLabel: 'Configure alert',
     additionalActions: [
       {
-        type: 'button',
-        action_id: 'provider_usage_limit_manage_models',
-        text: { type: 'plain_text', text: 'Manage models', emoji: false },
+        actionId: 'provider_usage_limit_manage_models',
+        text: 'Manage models',
         url: buildModelsSettingsUrl(),
       },
     ],
@@ -408,16 +408,19 @@ export async function providerUsageLimitJob(
             formatProviderUsageLimitWarningText({ alerts }),
           ),
           idempotencyKey: `provider-usage-limit:${now.toISOString()}`,
-          buttons: [
-            [
+          buttons: buildAutomationResultLinkButtonRows({
+            configureUrl: buildManagerSlackSettingsUrl(
+              PROVIDER_USAGE_LIMIT_SETTINGS_HASH,
+            ),
+            configureLabel: 'Configure alert',
+            additionalActions: [
               {
-                text: 'Automation settings',
-                url: buildManagerSlackSettingsUrl(
-                  PROVIDER_USAGE_LIMIT_SETTINGS_HASH,
-                ),
+                actionId: 'provider_usage_limit_manage_models',
+                text: 'Manage models',
+                url: buildModelsSettingsUrl(),
               },
             ],
-          ],
+          }),
         });
       } else if (destination.provider === 'slack') {
         const notifier = dependencies.createNotifier(slackBotToken!);
