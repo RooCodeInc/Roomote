@@ -65,6 +65,7 @@ const {
   isFastProviderMessageMock,
   finalizeWorkItemMock,
   releaseWorkItemMock,
+  buildSkillsReplyMock,
 } = vi.hoisted(() => ({
   authAccountsFindFirstMock: vi.fn(),
   authAccountsFindManyMock: vi.fn(),
@@ -134,6 +135,7 @@ const {
   isFastProviderMessageMock: vi.fn(),
   finalizeWorkItemMock: vi.fn(),
   releaseWorkItemMock: vi.fn(),
+  buildSkillsReplyMock: vi.fn(),
 }));
 
 vi.mock('@roomote/env', () => ({
@@ -341,6 +343,14 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   getOrCreateFastAgentSession: getFastSessionMock,
   getTaskUrl: getTaskUrlMock,
   launchPinnedFastSessionTask: launchPinnedMock,
+  parseSkillsCommandPage: (text: string) => {
+    const match = /^\/?skills(?:\s+(\d+))?$/u.exec(text.trim());
+    return match ? Number.parseInt(match[1] ?? '1', 10) : null;
+  },
+}));
+
+vi.mock('../../shared/skills-command.js', () => ({
+  buildSkillsCommandReply: buildSkillsReplyMock,
 }));
 
 vi.mock('../bot-framework-auth.js', () => ({
@@ -425,6 +435,7 @@ describe('Teams webhook handler', () => {
       workspaceId: 'tenant-1',
     });
     isFastProviderMessageMock.mockResolvedValue(false);
+    buildSkillsReplyMock.mockResolvedValue('skills page two');
     envMock.R_TEAMS_BOT_APP_ID = 'bot-app-id';
     envMock.R_MICROSOFT_CLIENT_ID = 'microsoft-client-id';
     envMock.R_MICROSOFT_CLIENT_SECRET = 'microsoft-client-secret';
@@ -530,6 +541,34 @@ describe('Teams webhook handler', () => {
     });
     expect(response.status).toBe(401);
     expect(insertMock).not.toHaveBeenCalled();
+  });
+
+  it('routes /skills from a linked addressed message without starting work', async () => {
+    teamsUserMappingFindFirstMock.mockResolvedValue({ userId: 'user-1' });
+    const response = await createApp().request('/teams', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer valid-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(
+        createTeamsActivity({ text: '<at>Roomote</at> /skills 2' }),
+      ),
+    });
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      skillsListed: true,
+    });
+    expect(buildSkillsReplyMock).toHaveBeenCalledWith({
+      userId: 'user-1',
+      page: 2,
+      command: '/skills',
+    });
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'skills page two' }),
+    );
+    expect(queueCommunicationMessageOnceMock).not.toHaveBeenCalled();
   });
 
   it('turns a configured reaction into a thread message', async () => {

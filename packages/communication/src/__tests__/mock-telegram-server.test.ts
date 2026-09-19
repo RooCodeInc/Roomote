@@ -90,6 +90,7 @@ describe('MockTelegramServer', () => {
         command: 'goal',
         description: 'Keep working toward an objective',
       },
+      { command: 'skills', description: 'List callable skills' },
     ]);
   });
 

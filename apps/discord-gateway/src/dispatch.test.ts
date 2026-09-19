@@ -721,7 +721,7 @@ describe('handleGatewayDispatch', () => {
     );
   });
 
-  it.each(['link', 'help'])(
+  it.each(['link', 'help', 'skills'])(
     'defers /%s commands ephemerally',
     async (commandName) => {
       const rest = { post: vi.fn().mockResolvedValue(undefined) };

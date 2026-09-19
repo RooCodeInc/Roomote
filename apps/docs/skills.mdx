@@ -183,6 +183,14 @@ Skills configured in Roomote settings are different:
   repository skills. Use distinct names for team skills. Skill instructions
   cannot grant permissions or override higher-priority policies.
 
+Linked users can list the skills available to them from any communications
+provider. Use `/skills` in Discord, Telegram, Microsoft Teams, or email; in
+Slack, send `skills` in a DM or immediately after mentioning Roomote. Add a
+page number, such as `/skills 2`, to continue a long list. Each entry shows the
+exact `$skill-name` token to place at the start of a request. The list applies
+the same precedence and authorization checks as invocation and reports when a
+scoped source could not be inspected instead of claiming that source's skills.
+
 Use repository-defined skills when the instruction should be reviewed and
 changed with the code. Use instance skills for shared playbooks without a
 repository change. Existing environment skills remain useful where an admin
