@@ -12,6 +12,26 @@ export function getArtifactViewUrl(
   return `${origin}/task/${encodeURIComponent(taskId)}/artifacts?${search}`;
 }
 
+export type ArtifactViewOwner = { taskId: string } | { sessionId: string };
+
+/**
+ * Direct link to an artifact without opening its parent task or Session UI.
+ * Access is still enforced by the artifact query used by the standalone page.
+ */
+export function getStandaloneArtifactViewUrl(
+  origin: string,
+  owner: ArtifactViewOwner,
+  path: string,
+  version: number,
+): string {
+  const ownerPath =
+    'taskId' in owner
+      ? `task/${encodeURIComponent(owner.taskId)}`
+      : `session/${encodeURIComponent(owner.sessionId)}`;
+  const search = new URLSearchParams({ path, v: String(version) });
+  return `${origin}/artifacts/${ownerPath}?${search}`;
+}
+
 /**
  * Deep link to a Session-owned artifact in the Session Artifacts panel:
  * `/sessions/<sessionId>?artifact=<path>&v=<version>`.

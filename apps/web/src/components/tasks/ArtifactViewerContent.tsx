@@ -14,7 +14,7 @@ import { useTRPC, useTRPCClient } from '@/trpc/client';
 
 import {
   getArtifactViewUrl,
-  getSessionArtifactViewUrl,
+  getStandaloneArtifactViewUrl,
 } from '@/lib/artifact-view-urls';
 import { cn } from '@/lib/utils';
 import {
@@ -428,20 +428,12 @@ export function ArtifactViewerContent({
   const handleCopyUrl = async () => {
     if (!artifact) return;
 
-    const url =
-      'taskId' in artifactOwner
-        ? getArtifactViewUrl(
-            window.location.origin,
-            artifactOwner.taskId,
-            artifact.path,
-            artifact.version,
-          )
-        : getSessionArtifactViewUrl(
-            window.location.origin,
-            artifactOwner.sessionId,
-            artifact.path,
-            artifact.version,
-          );
+    const url = getStandaloneArtifactViewUrl(
+      window.location.origin,
+      artifactOwner,
+      artifact.path,
+      artifact.version,
+    );
     await navigator.clipboard.writeText(url);
     setIsUrlCopied(true);
     toast.success('URL copied to clipboard');

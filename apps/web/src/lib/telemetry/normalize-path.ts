@@ -69,6 +69,17 @@ function normalizeTaskPath(pathname: string): string | null {
   return ['/task/[taskId]', ...restSegments].join('/');
 }
 
+function normalizeArtifactPath(pathname: string): string | null {
+  const match = pathname.match(/^\/artifacts\/(task|session)\/[^/]+$/);
+  if (!match) {
+    return null;
+  }
+
+  return match[1] === 'task'
+    ? '/artifacts/task/[taskId]'
+    : '/artifacts/session/[sessionId]';
+}
+
 function normalizeSessionPath(pathname: string): string | null {
   return /^\/sessions\/[^/]+$/.test(pathname) ? '/sessions/[sessionId]' : null;
 }
@@ -86,7 +97,9 @@ export function normalizePath(
   const pathname = rawPathname.split('?')[0] ?? '/';
 
   let path: string | null =
-    normalizeTaskPath(pathname) ?? normalizeSessionPath(pathname);
+    normalizeTaskPath(pathname) ??
+    normalizeArtifactPath(pathname) ??
+    normalizeSessionPath(pathname);
 
   if (path === null) {
     for (const matcher of DYNAMIC_ROUTE_MATCHERS) {

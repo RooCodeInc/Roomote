@@ -47,6 +47,15 @@ describe('normalizePath', () => {
     });
   });
 
+  it('redacts standalone artifact owner ids, including all-letter task ids', () => {
+    expect(normalizePath('/artifacts/task/qwertyuiopasd')).toEqual({
+      path: '/artifacts/task/[taskId]',
+    });
+    expect(
+      normalizePath('/artifacts/session/6b9df5a1-9e0f-4a1d-8a86-4242deadbeef'),
+    ).toEqual({ path: '/artifacts/session/[sessionId]' });
+  });
+
   it('keeps static routes intact', () => {
     expect(normalizePath('/')).toEqual({ path: '/' });
     expect(normalizePath('/tasks')).toEqual({ path: '/tasks' });
