@@ -121,6 +121,9 @@ export async function sendCommunicationMessage(params: {
       userId: params.actingUserId,
       text: params.message,
       logContext: 'roomote-mcp-chat-message',
+      ...(destination.provider === 'telegram'
+        ? { createTelegramTopic: true }
+        : {}),
     });
     return result.delivered
       ? jsonResponse({
