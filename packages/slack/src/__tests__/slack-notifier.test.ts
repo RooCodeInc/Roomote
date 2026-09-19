@@ -560,6 +560,93 @@ describe('SlackNotifier', () => {
       expect(result).toBe(true);
     });
 
+    it('bounds oversized text fallbacks while preserving both ends', async () => {
+      getGlobalWithFetch().fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ ok: true }),
+      });
+      const text = `${'start '.repeat(8_000)}END`;
+
+      const result = await notifier.updateMessage({
+        channel: 'C123',
+        ts: '123.000',
+        message: { text },
+      });
+
+      const [, request] = getGlobalWithFetch().fetch.mock.calls[0] as [
+        string,
+        RequestInit,
+      ];
+      const body = JSON.parse(request.body as string) as { text: string };
+      expect(body.text).toHaveLength(40_000);
+      expect(body.text.startsWith('start start')).toBe(true);
+      expect(body.text.endsWith('END')).toBe(true);
+      expect(body.text).toContain('[…truncated…]');
+      expect(result).toBe(true);
+    });
+
+    it.each([20_001, 25_000, 40_000])(
+      'preserves %i emoji without unnecessary truncation',
+      async (count) => {
+        getGlobalWithFetch().fetch = vi
+          .fn()
+          .mockResolvedValue(Response.json({ ok: true }));
+        const text = '😀'.repeat(count);
+        await notifier.updateMessage({
+          channel: 'C123',
+          ts: '123.000',
+          message: { text },
+        });
+        const request = getGlobalWithFetch().fetch.mock
+          .calls[0]?.[1] as RequestInit;
+        expect(JSON.parse(request.body as string).text).toBe(text);
+      },
+    );
+
+    it('bounds oversized emoji by code points without overlapping retained content', async () => {
+      getGlobalWithFetch().fetch = vi
+        .fn()
+        .mockResolvedValue(Response.json({ ok: true }));
+      const text = '😀'.repeat(40_001);
+      await notifier.updateMessage({
+        channel: 'C123',
+        ts: '123.000',
+        message: { text },
+      });
+      const request = getGlobalWithFetch().fetch.mock
+        .calls[0]?.[1] as RequestInit;
+      const result = JSON.parse(request.body as string).text as string;
+      expect(Array.from(result)).toHaveLength(40_000);
+      expect(result).toContain('[…truncated…]');
+      expect(result).not.toMatch(
+        /(?:^|[^\uD800-\uDBFF])[\uDC00-\uDFFF]|[\uD800-\uDBFF](?:$|[^\uDC00-\uDFFF])/u,
+      );
+    });
+
+    it('does not split surrogate pairs at truncation boundaries', async () => {
+      getGlobalWithFetch().fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ ok: true }),
+      });
+      const text = `${'a'.repeat(20_000)}x${'😀'.repeat(20_000)}END`;
+
+      await notifier.updateMessage({
+        channel: 'C123',
+        ts: '123.000',
+        message: { text },
+      });
+
+      const [, request] = getGlobalWithFetch().fetch.mock.calls[0] as [
+        string,
+        RequestInit,
+      ];
+      const body = JSON.parse(request.body as string) as { text: string };
+      expect(body.text).not.toMatch(
+        /(?:^|[^\uD800-\uDBFF])[\uDC00-\uDFFF]|[\uD800-\uDBFF](?:$|[^\uDC00-\uDFFF])/u,
+      );
+      expect(body.text.endsWith('END')).toBe(true);
+    });
+
     it('classifies authorization failures without retrying or logging message content', async () => {
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       getGlobalWithFetch().fetch = vi.fn().mockResolvedValue({
