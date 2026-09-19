@@ -67,27 +67,33 @@ describe('sendCommunicationMessage', () => {
     },
   );
 
-  it('does not let Telegram group or topic context override the linked self-DM destination', async () => {
-    await sendCommunicationMessage({
-      actingUserId: 'user-1',
-      taskRun: {
-        payload: {
-          communicationProvider: 'telegram',
-          communicationChannelId: '-1001234567890',
-          communicationThreadId: '18069',
+  it.each([
+    ['private topic', '5087578056', '18069'],
+    ['group topic', '-1001234567890', '77'],
+  ])(
+    'does not let Telegram %s context override the linked self-DM destination',
+    async (_context, channelId, threadId) => {
+      await sendCommunicationMessage({
+        actingUserId: 'user-1',
+        taskRun: {
+          payload: {
+            communicationProvider: 'telegram',
+            communicationChannelId: channelId,
+            communicationThreadId: threadId,
+          },
         },
-      },
-      destination: 'telegram:me',
-      message: 'Keep this exact.',
-    });
+        destination: 'telegram:me',
+        message: 'Keep this exact.',
+      });
 
-    expect(sendUserDirectMessageWithReceiptMock).toHaveBeenCalledWith({
-      provider: 'telegram',
-      userId: 'user-1',
-      text: 'Keep this exact.',
-      logContext: 'roomote-mcp-chat-message',
-    });
-  });
+      expect(sendUserDirectMessageWithReceiptMock).toHaveBeenCalledWith({
+        provider: 'telegram',
+        userId: 'user-1',
+        text: 'Keep this exact.',
+        logContext: 'roomote-mcp-chat-message',
+      });
+    },
+  );
 
   it('rejects unavailable self linkage without attempting delivery', async () => {
     hasUserDirectMessageIdentityMock.mockResolvedValue(false);
