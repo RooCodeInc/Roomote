@@ -8,6 +8,8 @@ import {
   isResumableTaskPayloadKind,
   ACTIVE_TASK_PHASES,
   SNAPSHOT_CHECK_THRESHOLD_MS,
+  ORPHANED_AFTER_DEQUEUE_THRESHOLD_MS,
+  WAITING_FOR_SANDBOX_PROVIDER_TASK_PHASE,
   WORKER_HEARTBEAT_STALE_MS,
 } from '@roomote/types';
 import {
@@ -28,6 +30,7 @@ import {
   desc,
   gt,
   lte,
+  ne,
   markTaskStartParallelCountEndedAt,
   resolveComputeProviderEnvValues,
   syncTaskStateFromRuns,
@@ -63,6 +66,35 @@ const STALE_WORKER_STATUSES = [
 ];
 
 const SLEEP_CHECK_PROVIDERS = sleepCheckManagedComputeProviders;
+
+/**
+ * How long a run may sit between being dequeued and its worker first
+ * reporting in. `startedAt` is written by the worker's first call, so a
+ * worker that never boots leaves it null and the run looks "started" to
+ * nothing. The spawn budget plus one orphan scan is the longest a healthy
+ * launch takes, and it keeps this recovery ahead of the controller health
+ * check, which flags the same runs one scan later.
+ */
+const NEVER_STARTED_THRESHOLD_MS = ORPHANED_AFTER_DEQUEUE_THRESHOLD_MS;
+
+/**
+ * A booting run whose worker never reported, measured from when its sandbox
+ * was ready or, failing that, from when it was dequeued. Two typed column
+ * comparisons rather than a COALESCE, so the cutoff binds as a timestamp.
+ */
+function neverStartedSince(cutoff: Date) {
+  return and(
+    isNull(taskRuns.startedAt),
+    isNotNull(taskRuns.dequeuedAt),
+    or(
+      and(
+        isNotNull(taskRuns.provisionReadyAt),
+        lte(taskRuns.provisionReadyAt, cutoff),
+      ),
+      and(isNull(taskRuns.provisionReadyAt), lte(taskRuns.dequeuedAt, cutoff)),
+    ),
+  );
+}
 
 type SleepCheckPath =
   | 'due_sleep'
@@ -242,6 +274,40 @@ function getSleepCheckCandidateKey(
   return `${job.vendor}:${job.machineId}`;
 }
 
+/**
+ * Booting runs with an instance and no worker heartbeat: either the worker
+ * claimed the run and then missed its first heartbeat, or it never reported
+ * at all.
+ */
+export function findBootingRunsWithoutHeartbeat(now: Date) {
+  return db
+    .select(SLEEP_CHECK_JOB_COLUMNS)
+    .from(taskRuns)
+    .where(
+      and(
+        ...getBaseSleepCheckCandidateConditions(BOOTING_NO_HEARTBEAT_STATUSES, {
+          ownClaimCondition: true,
+        }),
+        isNull(taskRuns.workerHeartbeatAt),
+        or(
+          and(
+            isNull(taskRuns.sleepRequestedAt),
+            isNotNull(taskRuns.startedAt),
+            lte(
+              taskRuns.startedAt,
+              new Date(now.getTime() - WORKER_HEARTBEAT_STALE_MS),
+            ),
+          ),
+          // The worker never reported at all, so there is no `startedAt` to
+          // measure from and the run would otherwise never be recovered.
+          neverStartedWithInstanceEligible(now),
+        ),
+      ),
+    )
+    .orderBy(asc(taskRuns.startedAt), asc(taskRuns.createdAt))
+    .limit(SLEEP_CHECK_BATCH_LIMIT);
+}
+
 export const sleepCheckJob = async () => {
   const now = new Date();
   const dueJobs = await db
@@ -273,22 +339,7 @@ export const sleepCheckJob = async () => {
     .orderBy(asc(taskRuns.workerHeartbeatAt), asc(taskRuns.createdAt))
     .limit(SLEEP_CHECK_BATCH_LIMIT);
 
-  const bootingNoHeartbeatJobs = await db
-    .select(SLEEP_CHECK_JOB_COLUMNS)
-    .from(taskRuns)
-    .where(
-      and(
-        ...getBaseSleepCheckCandidateConditions(BOOTING_NO_HEARTBEAT_STATUSES),
-        isNotNull(taskRuns.startedAt),
-        isNull(taskRuns.workerHeartbeatAt),
-        lte(
-          taskRuns.startedAt,
-          new Date(now.getTime() - WORKER_HEARTBEAT_STALE_MS),
-        ),
-      ),
-    )
-    .orderBy(asc(taskRuns.startedAt), asc(taskRuns.createdAt))
-    .limit(SLEEP_CHECK_BATCH_LIMIT);
+  const bootingNoHeartbeatJobs = await findBootingRunsWithoutHeartbeat(now);
 
   const hardLimitCandidateJobs = await db
     .select(SLEEP_CHECK_JOB_COLUMNS)
@@ -301,6 +352,8 @@ export const sleepCheckJob = async () => {
     )
     .orderBy(desc(taskRuns.createdAt))
     .limit(SLEEP_CHECK_BATCH_LIMIT);
+
+  const failedWithoutInstance = await failNeverStartedRunsWithoutInstance(now);
 
   warnIfSleepCheckBatchLimitReached('due sleep', dueJobs.length);
   warnIfSleepCheckBatchLimitReached('stale worker', staleWorkerJobs.length);
@@ -324,7 +377,7 @@ export const sleepCheckJob = async () => {
 
   let snapshotted = 0;
   let shutDown = 0;
-  let failed = 0;
+  let failed = failedWithoutInstance;
 
   const candidateJobsByMachineId = new Map<string, SleepCheckCandidateSet>();
   const providerClients = new Map<
@@ -435,6 +488,19 @@ export const sleepCheckJob = async () => {
     }
 
     try {
+      // Every outcome for a never-started run settles it (instance gone,
+      // instance not running, or destroyed), and none of them preserves it
+      // through a claiming snapshot. Claim it once, before the provider is
+      // asked anything, so whichever outcome follows happens in one sweep
+      // only. If recovery throws, the handler below releases the claim.
+      if (
+        preferredJob === candidates.bootingNoHeartbeatJob &&
+        !preferredJob.startedAt &&
+        !(await claimNeverStartedRun(preferredJob, new Date()))
+      ) {
+        continue;
+      }
+
       await recordSleepCheckEvent(
         preferredJob,
         'started',
@@ -501,7 +567,9 @@ export const sleepCheckJob = async () => {
           job: candidates.bootingNoHeartbeatJob,
           status,
           client,
-          config: BOOTING_NO_HEARTBEAT_RECOVERY,
+          config: candidates.bootingNoHeartbeatJob.startedAt
+            ? BOOTING_NO_HEARTBEAT_RECOVERY
+            : NEVER_STARTED_RECOVERY,
         });
         snapshotted += result.snapshotted;
         failed += result.failed;
@@ -570,13 +638,169 @@ export const sleepCheckJob = async () => {
   );
 };
 
+/**
+ * A run that was dequeued but never got an instance and never started has
+ * nothing to inspect or destroy, so the instance-keyed recovery above cannot
+ * reach it. It is simply failed. A run still waiting for sandbox capacity is
+ * left alone: that wait is deliberate and has its own handling.
+ */
+/**
+ * How long a claim on a never-started run holds. Long enough for the
+ * recovery to finish, short enough that a process that died mid-recovery
+ * does not leave the run stuck again: the next sweep takes the claim over.
+ */
+const NEVER_STARTED_CLAIM_LEASE_MS = 10 * 60 * 1_000;
+
+/** Unclaimed, or claimed by a sweep that never finished. */
+function neverStartedClaimAvailable(now: Date) {
+  return or(
+    isNull(taskRuns.sleepRequestedAt),
+    lte(
+      taskRuns.sleepRequestedAt,
+      new Date(now.getTime() - NEVER_STARTED_CLAIM_LEASE_MS),
+    ),
+  );
+}
+
+/**
+ * Everything that makes a never-started run with no instance recoverable.
+ * One predicate serves both the selection and the claim, so a run that stops
+ * being eligible between the two (it is assigned an instance, or starts
+ * waiting for sandbox capacity) cannot be settled on stale grounds.
+ */
+function neverStartedWithoutInstanceEligible(now: Date) {
+  return and(
+    inArray(taskRuns.status, BOOTING_NO_HEARTBEAT_STATUSES),
+    isNull(taskRuns.machineId),
+    isNull(taskRuns.workerHeartbeatAt),
+    isNull(taskRuns.completedAt),
+    isNull(taskRuns.canceledAt),
+    neverStartedClaimAvailable(now),
+    // A run waiting for sandbox capacity is waiting on purpose.
+    or(
+      isNull(taskRuns.taskPhase),
+      ne(taskRuns.taskPhase, WAITING_FOR_SANDBOX_PROVIDER_TASK_PHASE),
+    ),
+    neverStartedSince(new Date(now.getTime() - NEVER_STARTED_THRESHOLD_MS)),
+  );
+}
+
+/** The same, for a never-started run that does have an instance. */
+function neverStartedWithInstanceEligible(now: Date) {
+  return and(
+    ...getBaseSleepCheckCandidateConditions(BOOTING_NO_HEARTBEAT_STATUSES, {
+      ownClaimCondition: true,
+    }),
+    isNull(taskRuns.workerHeartbeatAt),
+    isNull(taskRuns.completedAt),
+    isNull(taskRuns.canceledAt),
+    // Its claim is a lease, so a sweep that died mid-recovery is retried.
+    neverStartedClaimAvailable(now),
+    neverStartedSince(new Date(now.getTime() - NEVER_STARTED_THRESHOLD_MS)),
+  );
+}
+
+/**
+ * Sleep checks overlap, and settling a run has side effects (its lifecycle
+ * event, the task-settled notice) that must happen once. Only the sweep that
+ * wins this conditional update goes on to settle the run.
+ *
+ * The update re-asserts the full eligibility the selection established, not
+ * just that the row is unclaimed, and pins the instance the sweep saw: the
+ * recovery that follows is chosen by whether the run has an instance and
+ * which one, so a run that gained, lost, or changed its instance since it
+ * was selected must not be claimed.
+ */
+export async function claimNeverStartedRun(
+  job: SleepCheckJob,
+  now: Date,
+): Promise<boolean> {
+  const [claimed] = await db
+    .update(taskRuns)
+    .set({ sleepRequestedAt: now })
+    .where(
+      and(
+        eq(taskRuns.id, job.id),
+        eq(taskRuns.status, job.status),
+        job.machineId === null
+          ? neverStartedWithoutInstanceEligible(now)
+          : and(
+              eq(taskRuns.machineId, job.machineId),
+              neverStartedWithInstanceEligible(now),
+            ),
+      ),
+    )
+    .returning({ id: taskRuns.id });
+  return Boolean(claimed);
+}
+
+export function findNeverStartedRunsWithoutInstance(now: Date) {
+  return db
+    .select(SLEEP_CHECK_JOB_COLUMNS)
+    .from(taskRuns)
+    .where(neverStartedWithoutInstanceEligible(now))
+    .orderBy(asc(taskRuns.createdAt))
+    .limit(SLEEP_CHECK_BATCH_LIMIT);
+}
+
+async function failNeverStartedRunsWithoutInstance(now: Date): Promise<number> {
+  const runs = await findNeverStartedRunsWithoutInstance(now);
+
+  let failed = 0;
+  for (const job of runs) {
+    if (!(await claimNeverStartedRun(job, now))) {
+      continue;
+    }
+    try {
+      const finalStatus = await resolveSweptJobFinalStatus(job.id);
+      await finishRun({
+        id: job.id,
+        status: finalStatus,
+        error: 'Worker never started and no sandbox instance was assigned',
+      });
+      await recordSleepCheckEvent(
+        job,
+        finalStatus === RunStatus.Canceled ? 'decision' : 'failed',
+        finalStatus === RunStatus.Canceled
+          ? `Canceled task run #${job.id} after its stop request; it never started and had no instance.`
+          : `Failed task run #${job.id} because it never started and no sandbox instance was assigned.`,
+        {
+          path: 'booting_no_heartbeat',
+          decision: 'never_started_without_instance',
+          ...buildSleepCheckDetails(job),
+        },
+      );
+      console.warn(
+        `[sleepCheck] Settled task run #${job.id} (${finalStatus}): never started and no instance was assigned`,
+      );
+      failed += 1;
+    } catch (error) {
+      // Release the claim so the next sweep retries instead of waiting out
+      // the lease.
+      await db
+        .update(taskRuns)
+        .set({ sleepRequestedAt: null })
+        .where(eq(taskRuns.id, job.id))
+        .catch(() => {});
+      console.error(
+        `[sleepCheck] Failed to settle never-started task run #${job.id}:`,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+  return failed;
+}
+
 function getBaseSleepCheckCandidateConditions(
   statuses: RunStatus[] = ACTIVE_SLEEP_CHECK_STATUSES,
+  // A caller that applies its own claim condition (one that lets an expired
+  // claim be taken over) opts out of the plain "unclaimed" guard.
+  options: { ownClaimCondition?: boolean } = {},
 ) {
   return [
     inArray(taskRuns.status, statuses),
     isNotNull(taskRuns.machineId),
-    isNull(taskRuns.sleepRequestedAt),
+    ...(options.ownClaimCondition ? [] : [isNull(taskRuns.sleepRequestedAt)]),
     isNull(taskRuns.snapshotId),
     isNull(taskRuns.snapshotRequestedAt),
     inArray(taskRuns.vendor, SLEEP_CHECK_PROVIDERS),
@@ -1353,6 +1577,12 @@ interface HeartbeatRecoveryConfig {
   destroyReason: DestroyInstanceReason;
   /** Idle sessions only occur on the stale-worker path; booting jobs are never Idle. */
   completeIdleInsteadOfFailing: boolean;
+  /**
+   * Whether a resumable run's instance is preserved. A worker that never
+   * started has done no work, so there is nothing to keep: its instance is
+   * destroyed like a non-resumable one.
+   */
+  preserveResumable: boolean;
   notRunning: {
     failureError: (machineId: string | null, status: string) => string;
     eventMessage: (
@@ -1378,6 +1608,7 @@ const STALE_WORKER_RECOVERY: HeartbeatRecoveryConfig = {
   path: 'stale_worker',
   destroyReason: 'worker_heartbeat_stale',
   completeIdleInsteadOfFailing: true,
+  preserveResumable: true,
   notRunning: {
     failureError: (machineId, status) =>
       `Worker heartbeat stale and instance ${machineId} is ${status}`,
@@ -1402,6 +1633,7 @@ const BOOTING_NO_HEARTBEAT_RECOVERY: HeartbeatRecoveryConfig = {
   path: 'booting_no_heartbeat',
   destroyReason: 'booting_no_heartbeat',
   completeIdleInsteadOfFailing: false,
+  preserveResumable: true,
   notRunning: {
     failureError: (machineId, status) =>
       `Initial worker heartbeat missing and instance ${machineId} is ${status}`,
@@ -1419,6 +1651,35 @@ const BOOTING_NO_HEARTBEAT_RECOVERY: HeartbeatRecoveryConfig = {
       `Destroyed instance ${machineId} and failed booting task run #${jobId} after the worker missed its initial heartbeat.`,
     consoleMessage: (jobId) =>
       `[sleepCheck] Destroyed instance and failed booting task run #${jobId} after missing initial heartbeat`,
+  },
+};
+
+/**
+ * The worker never reported at all: no claim on the run, no heartbeat. Same
+ * decision tree as a missed first heartbeat, except that nothing is preserved.
+ */
+const NEVER_STARTED_RECOVERY: HeartbeatRecoveryConfig = {
+  path: 'booting_no_heartbeat',
+  destroyReason: 'booting_no_heartbeat',
+  completeIdleInsteadOfFailing: false,
+  preserveResumable: false,
+  notRunning: {
+    failureError: (machineId, status) =>
+      `Worker never started and instance ${machineId} is ${status}`,
+    eventMessage: (jobId, machineId, status) =>
+      `Failed task run #${jobId} because its worker never started and instance ${machineId} was ${status}.`,
+    consoleMessage: (jobId, machineId, status) =>
+      `[sleepCheck] Failed task run #${jobId}: worker never started and instance ${machineId} is ${status}`,
+  },
+  snapshottedConsoleMessage: (jobId) =>
+    `[sleepCheck] Snapshotted task run #${jobId} whose worker never started`,
+  destroyAndFail: {
+    failureError: (machineId) =>
+      `Worker never started on instance ${machineId}`,
+    eventMessage: (jobId, machineId) =>
+      `Destroyed instance ${machineId} and failed task run #${jobId} because its worker never started.`,
+    consoleMessage: (jobId) =>
+      `[sleepCheck] Destroyed instance and failed task run #${jobId} because its worker never started`,
   },
 };
 
@@ -1495,7 +1756,7 @@ async function handleHeartbeatRecoveryCandidate(params: {
     return { snapshotted: 0, failed: 1 };
   }
 
-  if (isResumable) {
+  if (isResumable && config.preserveResumable) {
     // Terminal cancels stamp cancelRequestedAt. Never snapshot or standby them.
     const stopRequestedStatus = await resolveSweptJobFinalStatus(job.id);
     if (stopRequestedStatus === RunStatus.Canceled) {
