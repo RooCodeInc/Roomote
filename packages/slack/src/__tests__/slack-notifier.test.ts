@@ -1515,7 +1515,7 @@ describe('SlackNotifier', () => {
       expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(1);
     });
 
-    it('isolates retry budgets while reusing a fresh response after delay', async () => {
+    it('keeps block-read retries independent of concurrent existence checks', async () => {
       vi.useFakeTimers();
       vi.spyOn(Math, 'random').mockReturnValue(0);
 
@@ -1535,6 +1535,20 @@ describe('SlackNotifier', () => {
             }),
           );
 
+        getGlobalWithFetch().fetch.mockResolvedValueOnce(
+          Response.json({
+            ok: true,
+            messages: [
+              {
+                ts: '111.000',
+                blocks: [
+                  { type: 'section', text: { type: 'mrkdwn', text: 'fresh' } },
+                ],
+              },
+            ],
+          }),
+        );
+
         const blocksPromise = notifier.getMessageBlocks({
           channel: 'C123',
           messageTs: '111.000',
@@ -1551,8 +1565,10 @@ describe('SlackNotifier', () => {
 
         await expect(existsPromise).resolves.toBe(true);
         await vi.advanceTimersByTimeAsync(1_000);
-        await expect(blocksPromise).resolves.toEqual([]);
-        expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(2);
+        await expect(blocksPromise).resolves.toEqual([
+          { type: 'section', text: { type: 'mrkdwn', text: 'fresh' } },
+        ]);
+        expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(3);
       } finally {
         vi.useRealTimers();
       }
@@ -1560,6 +1576,111 @@ describe('SlackNotifier', () => {
   });
 
   describe('fetchThreadMessages', () => {
+    it('expires thread snapshots and bounds the cache to 32 entries', async () => {
+      vi.useFakeTimers();
+      try {
+        getGlobalWithFetch().fetch = vi
+          .fn()
+          .mockImplementation(async () =>
+            Response.json({ ok: true, messages: [] }),
+          );
+        const input = { channel: 'C123', threadTs: '0.000' };
+        await notifier.fetchThreadMessages(input);
+        await notifier.fetchThreadMessages(input);
+        expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(1);
+        await vi.advanceTimersByTimeAsync(2001);
+        await notifier.fetchThreadMessages(input);
+        expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(2);
+        for (let i = 1; i <= 32; i++)
+          await notifier.fetchThreadMessages({
+            channel: 'C123',
+            threadTs: `${i}.000`,
+          });
+        await notifier.fetchThreadMessages(input);
+        expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(35);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('does not coalesce block reads that may protect separate edits', async () => {
+      const responses: Array<(response: Response) => void> = [];
+      getGlobalWithFetch().fetch = vi
+        .fn()
+        .mockImplementation(
+          () => new Promise<Response>((resolve) => responses.push(resolve)),
+        );
+      const input = {
+        channel: 'C123',
+        threadTs: '111.000',
+        messageTs: '111.000',
+      };
+      const first = notifier.getMessageBlocks(input);
+      const second = notifier.getMessageBlocks(input);
+      expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(2);
+      responses[0]!(
+        Response.json({ ok: true, messages: [{ ts: '111.000', blocks: [] }] }),
+      );
+      responses[1]!(
+        Response.json({ ok: true, messages: [{ ts: '111.000', blocks: [] }] }),
+      );
+      await Promise.all([first, second]);
+    });
+
+    it('does not let a pre-write request replace newer cached or in-flight data', async () => {
+      let releaseOld!: (response: Response) => void;
+      let releaseNew!: (response: Response) => void;
+      getGlobalWithFetch().fetch = vi
+        .fn()
+        .mockImplementationOnce(
+          () =>
+            new Promise<Response>((resolve) => {
+              releaseOld = resolve;
+            }),
+        )
+        .mockResolvedValueOnce(Response.json({ ok: true }))
+        .mockImplementationOnce(
+          () =>
+            new Promise<Response>((resolve) => {
+              releaseNew = resolve;
+            }),
+        );
+      const input = { channel: 'C123', threadTs: '111.000' };
+      const oldRead = notifier.fetchThreadMessages(input);
+      await notifier.updateMessage({
+        channel: 'C123',
+        ts: '111.000',
+        message: { text: 'new' },
+      });
+      const newRead = notifier.fetchThreadMessages(input);
+      releaseOld(
+        Response.json({
+          ok: true,
+          messages: [
+            { ts: '111.000', type: 'message', bot_id: 'B123', text: 'old' },
+          ],
+        }),
+      );
+      await oldRead;
+      const joined = notifier.fetchThreadMessages(input);
+      expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(3);
+      releaseNew(
+        Response.json({
+          ok: true,
+          messages: [
+            { ts: '111.000', type: 'message', bot_id: 'B123', text: 'new' },
+          ],
+        }),
+      );
+      const results = await Promise.all([
+        newRead,
+        joined,
+        notifier.fetchThreadMessages(input),
+      ]);
+      for (const result of results) expect(result[0]?.text).toBe('new');
+      expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(3);
+    });
+
     it('retries rate limits with a bounded jittered wait', async () => {
       vi.useFakeTimers();
       vi.spyOn(Math, 'random').mockReturnValue(0);

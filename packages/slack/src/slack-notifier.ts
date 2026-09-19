@@ -260,6 +260,7 @@ export class SlackNotifier {
     string,
     { expiresAt: number; response: SlackApiThreadResponse }
   >();
+  private threadResponseGeneration = 0;
   private readonly threadResponseRequests = new Map<
     string,
     Promise<SlackApiThreadResponse | null>
@@ -1086,6 +1087,7 @@ export class SlackNotifier {
         );
       }
 
+      if (result.ok) this.invalidateThreadResponses();
       return result;
     } catch (error) {
       console.error(
@@ -1206,6 +1208,7 @@ export class SlackNotifier {
         const result: SlackResponse = await response.json();
 
         if (result.ok) {
+          this.invalidateThreadResponses();
           return true;
         }
 
@@ -1799,6 +1802,7 @@ export class SlackNotifier {
         return false;
       }
 
+      this.invalidateThreadResponses();
       return true;
     } catch (error) {
       console.error(
@@ -2254,6 +2258,12 @@ export class SlackNotifier {
     }
   }
 
+  private invalidateThreadResponses(): void {
+    this.threadResponseGeneration += 1;
+    this.threadResponseCache.clear();
+    this.threadResponseRequests.clear();
+  }
+
   private async fetchThreadResponse(
     query: URLSearchParams,
     context:
@@ -2263,6 +2273,12 @@ export class SlackNotifier {
       | 'getMessageMetadata'
       | 'getMessage',
   ): Promise<SlackApiThreadResponse | null> {
+    // Full thread snapshots tolerate a short cache. Existence/identity checks
+    // must see current state, and block reads protect read-modify-write callers
+    // (including a second read under a lock) from overwriting newer content.
+    const cacheable = context === 'fetchThreadMessages';
+    const freshRead = context === 'fetchMessageBlocks';
+    const generation = this.threadResponseGeneration;
     const cacheKey = query.toString();
     const maxRateLimitRetries =
       context === 'fetchMessageBlocks'
@@ -2270,6 +2286,7 @@ export class SlackNotifier {
         : MAX_SLACK_CONVERSATIONS_REPLIES_RATE_LIMIT_RETRIES;
     const requestKey = `${cacheKey}:retries=${maxRateLimitRetries}`;
     const getCachedResponse = (): SlackApiThreadResponse | null => {
+      if (!cacheable) return null;
       const cached = this.threadResponseCache.get(cacheKey);
       if (!cached) return null;
       if (cached.expiresAt > Date.now()) return cached.response;
@@ -2280,7 +2297,9 @@ export class SlackNotifier {
     const cached = getCachedResponse();
     if (cached) return cached;
 
-    const pending = this.threadResponseRequests.get(requestKey);
+    const pending = freshRead
+      ? undefined
+      : this.threadResponseRequests.get(requestKey);
     if (pending) return pending;
 
     const request = (async () => {
@@ -2344,7 +2363,11 @@ export class SlackNotifier {
           }
 
           const result = (await response.json()) as SlackApiThreadResponse;
-          if (result.ok) {
+          if (
+            result.ok &&
+            cacheable &&
+            generation === this.threadResponseGeneration
+          ) {
             this.threadResponseCache.set(cacheKey, {
               expiresAt: Date.now() + SLACK_CONVERSATIONS_REPLIES_CACHE_TTL_MS,
               response: result,
@@ -2370,11 +2393,13 @@ export class SlackNotifier {
       return null;
     })();
 
-    this.threadResponseRequests.set(requestKey, request);
+    if (!freshRead) this.threadResponseRequests.set(requestKey, request);
     try {
       return await request;
     } finally {
-      this.threadResponseRequests.delete(requestKey);
+      if (this.threadResponseRequests.get(requestKey) === request) {
+        this.threadResponseRequests.delete(requestKey);
+      }
     }
   }
 
