@@ -4577,7 +4577,7 @@ export async function answerFastAgentQuestion({
               ...result,
               ...(codeModeIntegrationsActiveForTurn
                 ? {
-                    note: 'Connected. Its tools become available through the execute runner, discovered with tools.$codemode.search; call them as tools.<server>.<tool>(input), using bracket notation like tools["my-server"].<tool>(input) when a name is not a plain identifier; if probes still show them missing, they are usable from a follow-up turn.',
+                    note: 'Connected. Its tools become available through the execute runner, discovered with tools.$codemode.search; call them as tools.<server>.<tool>(input), using bracket notation for either segment like tools["my-server"]["my-tool"](input) when a name is not a plain identifier; if probes still show them missing, they are usable from a follow-up turn.',
                   }
                 : {}),
             };
@@ -4614,7 +4614,7 @@ export async function answerFastAgentQuestion({
               ...result,
               ...(codeModeIntegrationsActiveForTurn
                 ? {
-                    note: 'Connected. Its tools become available through the execute runner, discovered with tools.$codemode.search; call them as tools.<server>.<tool>(input), using bracket notation like tools["my-server"].<tool>(input) when a name is not a plain identifier; if probes still show them missing, they are usable from a follow-up turn.',
+                    note: 'Connected. Its tools become available through the execute runner, discovered with tools.$codemode.search; call them as tools.<server>.<tool>(input), using bracket notation for either segment like tools["my-server"]["my-tool"](input) when a name is not a plain identifier; if probes still show them missing, they are usable from a follow-up turn.',
                   }
                 : {}),
             };

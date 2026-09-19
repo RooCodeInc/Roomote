@@ -1249,9 +1249,11 @@ describe('buildFastAgentSystemPrompt', () => {
     // Hyphenated and otherwise non-identifier server names must get bracket
     // notation; `tools.smoke-one.read_item(...)` would be invalid JavaScript.
     expect(prompt).toContain('tools["smoke-one"].read_item(...)');
+    // Non-identifier tool names need the same treatment on the tool segment.
+    expect(prompt).toContain('tools.exa["web-search"](...)');
     // The global mechanics rule must not contradict that with unconditional
     // dot notation.
-    expect(prompt).toContain('tools["my-server"].<tool>(input)');
+    expect(prompt).toContain('tools["my-server"]["my-tool"](input)');
     expect(prompt).not.toContain('### On-demand servers');
     expect(prompt).not.toContain('GitHub [tool prefix: github_]');
   });
