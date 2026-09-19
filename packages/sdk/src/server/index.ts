@@ -596,8 +596,15 @@ export {
 export {
   canManageCustomMcpServer,
   customMcpConnectionWhere,
+  customMcpServerStore,
+  deleteCustomMcpServer,
   findCustomMcpServerById,
+  moveCustomMcpServer,
   storeCustomMcpServerMetadata,
+  updateCustomMcpServer,
+  type CustomMcpServerScope,
+  type CustomMcpServerUpdate,
+  type CustomMcpServerWrite,
   type ResolvedCustomMcpServer,
 } from './lib/mcp/custom-servers';
 
