@@ -37,24 +37,29 @@ function mergeSkillCatalogs(
     for (const warning of catalog.warnings) warnings.add(warning);
   }
 
-  const skillsByInvocation = new Map<string, FastAgentSkillSummary>();
+  const precedenceByInvocation = new Map<string, number>();
   for (const skill of skillsById.values()) {
     const invocation = skill.invocation ?? skill.name;
-    const current = skillsByInvocation.get(invocation);
-    if (
-      !current ||
-      SOURCE_PRECEDENCE[skill.source] < SOURCE_PRECEDENCE[current.source]
-    ) {
-      skillsByInvocation.set(invocation, skill);
+    const precedence = SOURCE_PRECEDENCE[skill.source];
+    const current = precedenceByInvocation.get(invocation);
+    if (current === undefined || precedence < current) {
+      precedenceByInvocation.set(invocation, precedence);
     }
   }
 
   return {
-    skills: [...skillsByInvocation.values()].sort((left, right) =>
-      (left.invocation ?? left.name).localeCompare(
-        right.invocation ?? right.name,
-      ),
-    ),
+    skills: [...skillsById.values()]
+      .filter(
+        (skill) =>
+          SOURCE_PRECEDENCE[skill.source] ===
+          precedenceByInvocation.get(skill.invocation ?? skill.name),
+      )
+      .sort((left, right) => {
+        const invocationDifference = (
+          left.invocation ?? left.name
+        ).localeCompare(right.invocation ?? right.name);
+        return invocationDifference || left.id.localeCompare(right.id);
+      }),
     warnings: [...warnings],
   };
 }
@@ -109,6 +114,12 @@ function conciseDescription(description: string): string {
     : `${normalized.slice(0, SKILL_DESCRIPTION_MAX_LENGTH - 1).trimEnd()}…`;
 }
 
+function formatSkillDescription(skill: FastAgentSkillSummary): string {
+  return conciseDescription(
+    `${skill.description}${skill.repository ? ` (${skill.repository})` : ''}`,
+  );
+}
+
 export function formatUserCallableSkillsPage(input: {
   catalog: UserCallableSkillCatalog;
   page?: number;
@@ -126,7 +137,7 @@ export function formatUserCallableSkillsPage(input: {
     `**Available skills (${input.catalog.skills.length}) — page ${page}/${pageCount}**`,
     ...skills.map(
       (skill) =>
-        `- \`$${skill.invocation ?? skill.name}\` — ${conciseDescription(skill.description)}`,
+        `- \`$${skill.invocation ?? skill.name}\` — ${formatSkillDescription(skill)}`,
     ),
     '',
     'Invoke a skill by starting your request with its exact token, for example: `$review-code review these changes`.',

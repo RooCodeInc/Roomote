@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   getSlackSkillsCommandPage,
   isRemovedEvalCommandInvocation,
+  shouldHandleSlackSkillsCommand,
 } from './message-entry.js';
 
 describe('removed Slack commands', () => {
@@ -32,5 +33,45 @@ describe('Slack skills command', () => {
     expect(
       getSlackSkillsCommandPage('<@U_OTHER> please show skills'),
     ).toBeNull();
+  });
+
+  it('only intercepts direct messages or explicit Roomote mentions', () => {
+    const event = (input: {
+      channelType: string;
+      text: string;
+    }): Parameters<typeof shouldHandleSlackSkillsCommand>[0] =>
+      ({
+        type: 'message',
+        channel: 'C1',
+        channel_type: input.channelType,
+        text: input.text,
+        ts: '1',
+        user: 'U1',
+      }) as Parameters<typeof shouldHandleSlackSkillsCommand>[0];
+
+    expect(
+      shouldHandleSlackSkillsCommand(
+        event({ channelType: 'im', text: 'skills' }),
+        'U_ROOMOTE',
+      ),
+    ).toBe(true);
+    expect(
+      shouldHandleSlackSkillsCommand(
+        event({ channelType: 'channel', text: '<@U_ROOMOTE> skills' }),
+        'U_ROOMOTE',
+      ),
+    ).toBe(true);
+    expect(
+      shouldHandleSlackSkillsCommand(
+        event({ channelType: 'channel', text: 'skills' }),
+        'U_ROOMOTE',
+      ),
+    ).toBe(false);
+    expect(
+      shouldHandleSlackSkillsCommand(
+        event({ channelType: 'channel', text: '<@U_OTHER> skills' }),
+        'U_ROOMOTE',
+      ),
+    ).toBe(false);
   });
 });

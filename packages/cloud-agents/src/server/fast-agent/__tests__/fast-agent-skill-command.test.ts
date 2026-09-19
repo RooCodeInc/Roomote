@@ -70,6 +70,44 @@ describe('Fast skill command', () => {
     expect(text).not.toContain('$skill-10` —');
   });
 
+  it('keeps same-invocation scoped skills at the winning precedence', async () => {
+    const catalog = await listUserCallableFastAgentSkills('user-1', {
+      environmentIds: ['env-b', 'env-a'],
+      list: async (environmentId) => ({
+        skills: environmentId
+          ? [
+              {
+                id: `repository:${environmentId}`,
+                name: 'deploy',
+                invocation: 'deploy',
+                description: `Deploy from ${environmentId}`,
+                repository: `example/${environmentId}`,
+                source: 'repository',
+              },
+            ]
+          : [],
+        warnings: [],
+      }),
+    });
+
+    expect(catalog.skills).toEqual([
+      expect.objectContaining({
+        id: 'repository:env-a',
+        invocation: 'deploy',
+      }),
+      expect.objectContaining({
+        id: 'repository:env-b',
+        invocation: 'deploy',
+      }),
+    ]);
+    expect(
+      formatUserCallableSkillsPage({
+        catalog,
+        command: '/skills',
+      }),
+    ).toContain('$deploy` — Deploy from env-a (example/env-a)');
+  });
+
   it('recognizes bounded skills command syntax', () => {
     expect(parseSkillsCommandPage('/skills')).toBe(1);
     expect(parseSkillsCommandPage('skills 3')).toBe(3);

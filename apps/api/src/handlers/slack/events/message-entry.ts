@@ -127,6 +127,16 @@ export function getSlackSkillsCommandPage(text: string): number | null {
   return parseSkillsCommandPage(text.replace(/^\s*<@[^>]+>[\s,:;.-]*/u, ''));
 }
 
+export function shouldHandleSlackSkillsCommand(
+  event: SlackEvent,
+  botUserId: string | null | undefined,
+): boolean {
+  return (
+    event.channel_type === 'im' ||
+    mentionsSlackBot(event, botUserId ?? undefined)
+  );
+}
+
 async function postRemovedEvalCommandMessage(params: {
   event: SlackEvent;
   slack: SlackNotifier;
@@ -1165,7 +1175,10 @@ async function handleSlackEntryEvent(params: {
   const skillsPage = getSlackSkillsCommandPage(
     event.authoredText ?? event.text,
   );
-  if (skillsPage !== null) {
+  if (
+    skillsPage !== null &&
+    shouldHandleSlackSkillsCommand(event, slackInstallation.botUserId)
+  ) {
     await postSlackThreadMarkdownMessage({
       slack,
       channel: event.channel,
