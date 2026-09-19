@@ -129,6 +129,22 @@ describe('FastAgentSkillStore', () => {
     expect(reference.content).toContain('Authentication');
   });
 
+  it('reports source timings without changing catalog results', async () => {
+    const onSourceTiming = vi.fn();
+    const store = new FastAgentSkillStore(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      onSourceTiming,
+    );
+
+    const catalog = await store.list();
+
+    expect(catalog.skills.length).toBeGreaterThan(0);
+    expect(onSourceTiming).toHaveBeenCalledWith('packaged', expect.any(Number));
+  });
+
   it('discovers delegation exploration as an unscoped packaged skill', async () => {
     const store = new FastAgentSkillStore();
 

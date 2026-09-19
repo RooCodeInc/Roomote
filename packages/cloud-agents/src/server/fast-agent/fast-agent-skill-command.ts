@@ -10,6 +10,8 @@ import {
 
 const SKILLS_PER_PAGE = 8;
 const SKILL_DESCRIPTION_MAX_LENGTH = 120;
+const SKILL_COMMAND_CATALOG_CACHE_TTL_MS = 30_000;
+const SKILL_COMMAND_CATALOG_CACHE_MAX_ENTRIES = 100;
 const SOURCE_PRECEDENCE = {
   packaged: 0,
   instance: 1,
@@ -23,9 +25,85 @@ export type UserCallableSkillCatalog = {
 };
 
 type SkillCatalogDependencies = {
+  cache?: UserCallableSkillCatalogCache;
   environmentIds?: string[];
   list?: (environmentId?: string) => Promise<FastAgentSkillListResult>;
+  log?: (message: string) => void;
 };
+
+type UserCallableSkillCatalogCacheEntry = {
+  expiresAt: number;
+  promise: Promise<UserCallableSkillCatalog>;
+};
+
+export class UserCallableSkillCatalogCache {
+  private readonly entries = new Map<
+    string,
+    UserCallableSkillCatalogCacheEntry
+  >();
+
+  constructor(
+    private readonly ttlMs = SKILL_COMMAND_CATALOG_CACHE_TTL_MS,
+    maxEntries = SKILL_COMMAND_CATALOG_CACHE_MAX_ENTRIES,
+    private readonly now = Date.now,
+  ) {
+    this.maxEntries = Math.max(1, maxEntries);
+  }
+
+  private readonly maxEntries: number;
+
+  async get(
+    key: string,
+    load: () => Promise<UserCallableSkillCatalog>,
+  ): Promise<{
+    catalog: UserCallableSkillCatalog;
+    status: 'hit' | 'joined' | 'miss';
+  }> {
+    const now = this.now();
+    for (const [entryKey, entry] of this.entries) {
+      if (entry.expiresAt <= now) this.entries.delete(entryKey);
+    }
+
+    const current = this.entries.get(key);
+    if (current) {
+      const status = current.expiresAt === Infinity ? 'joined' : 'hit';
+      return { catalog: await current.promise, status };
+    }
+
+    while (this.entries.size >= this.maxEntries) {
+      const oldestKey = this.entries.keys().next().value as string | undefined;
+      if (!oldestKey) break;
+      this.entries.delete(oldestKey);
+    }
+
+    const entry: UserCallableSkillCatalogCacheEntry = {
+      expiresAt: Infinity,
+      promise: Promise.resolve().then(load),
+    };
+    entry.promise = entry.promise.then(
+      (catalog) => {
+        if (this.entries.get(key) === entry) {
+          entry.expiresAt = this.now() + this.ttlMs;
+        }
+        return catalog;
+      },
+      (error: unknown) => {
+        if (this.entries.get(key) === entry) this.entries.delete(key);
+        throw error;
+      },
+    );
+    this.entries.set(key, entry);
+    return { catalog: await entry.promise, status: 'miss' };
+  }
+}
+
+// Catalogs contain actor-visible instance and scoped skills. Actor-specific keys
+// prevent cross-user reuse; the short TTL bounds permission/config staleness.
+const userCallableSkillCatalogCache = new UserCallableSkillCatalogCache();
+
+function formatTiming(value: number): string {
+  return value.toFixed(1);
+}
 
 function mergeSkillCatalogs(
   catalogs: FastAgentSkillListResult[],
@@ -68,42 +146,94 @@ export async function listUserCallableFastAgentSkills(
   userId: string,
   dependencies: SkillCatalogDependencies = {},
 ): Promise<UserCallableSkillCatalog> {
-  const environmentIds =
-    dependencies.environmentIds ??
-    (await getAvailableEnvironments()).map((environment) => environment.id);
-  if (dependencies.list) {
-    return mergeSkillCatalogs(
-      await Promise.all([
-        dependencies.list(),
-        ...environmentIds.map((environmentId) =>
-          dependencies.list!(environmentId),
-        ),
-      ]),
-    );
-  }
+  const startedAt = performance.now();
+  const log = dependencies.log ?? ((message: string) => console.info(message));
+  const cache =
+    dependencies.cache ??
+    (dependencies.list ? undefined : userCallableSkillCatalogCache);
+  const load = async () => {
+    const environmentStartedAt = performance.now();
+    const environmentIds =
+      dependencies.environmentIds ??
+      (await getAvailableEnvironments()).map((environment) => environment.id);
+    const environmentDurationMs = performance.now() - environmentStartedAt;
+    if (dependencies.list) {
+      const catalogStartedAt = performance.now();
+      const catalog = mergeSkillCatalogs(
+        await Promise.all([
+          dependencies.list(),
+          ...environmentIds.map((environmentId) =>
+            dependencies.list!(environmentId),
+          ),
+        ]),
+      );
+      log(
+        `[skills-command-source-timing] environments_ms=${formatTiming(environmentDurationMs)} catalog_ms=${formatTiming(performance.now() - catalogStartedAt)} skills=${catalog.skills.length} warnings=${catalog.warnings.length}`,
+      );
+      return catalog;
+    }
 
-  const skillStore = new FastAgentSkillStore(
-    undefined,
-    new RemoteFastAgentRepositorySkillSource({
-      allowedEnvironmentIds: environmentIds,
-    }),
-    new RemoteFastAgentSettingsSkillSource({
-      allowedEnvironmentIds: environmentIds,
-    }),
-    new RemoteFastAgentInstanceSkillSource(userId),
-  );
-  try {
-    return mergeSkillCatalogs(
-      await Promise.all([
-        skillStore.list(),
-        ...environmentIds.map((environmentId) =>
-          skillStore.list({ environmentId }),
-        ),
-      ]),
+    const sourceTimings = new Map<
+      string,
+      { calls: number; maxMs: number; totalMs: number }
+    >();
+    const skillStore = new FastAgentSkillStore(
+      undefined,
+      new RemoteFastAgentRepositorySkillSource({
+        allowedEnvironmentIds: environmentIds,
+      }),
+      new RemoteFastAgentSettingsSkillSource({
+        allowedEnvironmentIds: environmentIds,
+      }),
+      new RemoteFastAgentInstanceSkillSource(userId),
+      (source, durationMs) => {
+        const timing = sourceTimings.get(source) ?? {
+          calls: 0,
+          maxMs: 0,
+          totalMs: 0,
+        };
+        timing.calls += 1;
+        timing.maxMs = Math.max(timing.maxMs, durationMs);
+        timing.totalMs += durationMs;
+        sourceTimings.set(source, timing);
+      },
     );
-  } finally {
-    await skillStore.dispose();
-  }
+    const catalogStartedAt = performance.now();
+    try {
+      const catalog = mergeSkillCatalogs(
+        await Promise.all([
+          skillStore.list(),
+          ...environmentIds.map((environmentId) =>
+            skillStore.list({ environmentId }),
+          ),
+        ]),
+      );
+      const sourceSummary = [...sourceTimings.entries()]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(
+          ([source, timing]) =>
+            `${source}_calls=${timing.calls} ${source}_max_ms=${formatTiming(timing.maxMs)} ${source}_total_ms=${formatTiming(timing.totalMs)}`,
+        )
+        .join(' ');
+      log(
+        `[skills-command-source-timing] environments_ms=${formatTiming(environmentDurationMs)} catalog_ms=${formatTiming(performance.now() - catalogStartedAt)} ${sourceSummary} skills=${catalog.skills.length} warnings=${catalog.warnings.length}`,
+      );
+      return catalog;
+    } finally {
+      await skillStore.dispose();
+    }
+  };
+
+  const cacheContext = dependencies.environmentIds
+    ? `environments:${JSON.stringify([...dependencies.environmentIds].sort())}`
+    : 'all-authorized-environments';
+  const result = cache
+    ? await cache.get(`actor:${userId}:${cacheContext}`, load)
+    : { catalog: await load(), status: 'miss' as const };
+  log(
+    `[skills-command-timing] cache_status=${result.status} total_ms=${formatTiming(performance.now() - startedAt)} skills=${result.catalog.skills.length} warnings=${result.catalog.warnings.length}`,
+  );
+  return result.catalog;
 }
 
 function conciseDescription(description: string): string {
