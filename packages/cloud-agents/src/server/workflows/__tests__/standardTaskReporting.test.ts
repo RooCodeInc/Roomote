@@ -94,5 +94,8 @@ describe('standardTask reporting consumer', () => {
       'acknowledge it immediately to the user',
     );
     expect(harnessInstructions).toContain('<user_input_elicitation>');
+    expect(harnessInstructions).toContain(
+      'Creation returns the canonical standalone authenticated viewer link; do not construct a task or Session artifact URL.',
+    );
   });
 });

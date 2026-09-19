@@ -358,7 +358,7 @@ roomoteMcpServer.registerTool(
     title: 'Manage Artifacts',
     description:
       'Create, upload, download, and list artifacts in Roomote. ' +
-      'Use action "create_plan" to create a markdown plan artifact (requires title and content). Returns viewUrl for sharing. ' +
+      'Use action "create_plan" to create a markdown plan artifact (requires title and content). Creation results return viewUrl for the standalone authenticated artifact viewer; share that returned URL rather than constructing a task or Session artifact URL. ' +
       'Use action "upload" to upload a workspace-relative file or an absolute file under /tmp (requires path and type). Use type "general" for ordinary files. ' +
       (isFastAgentChild()
         ? 'Use type "visual-proof" for uploaded screenshots or proof artifacts that should be treated as visual proof. Visual-proof uploads are not sent to the parent Session automatically; pass returned artifact IDs to `report_to_parent_session` via `imageArtifactIds` when they belong in the report (or include `viewUrl`/`rawUrl` in the report text for non-images). '
