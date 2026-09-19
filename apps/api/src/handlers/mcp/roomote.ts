@@ -409,7 +409,13 @@ function createRoomoteMcpServer(
   if (registerMemberTools) {
     registerRoomoteMemberTools(server, toolAuth);
     if (actingUserId) {
-      registerRoomoteCommunicationTools(server, actingUserId);
+      registerRoomoteCommunicationTools(
+        server,
+        actingUserId,
+        auth.tokenType === 'run' && auth.runId
+          ? () => requireCommunicationLookupTaskRun(auth.runId!)
+          : undefined,
+      );
     }
   }
   registerRoomoteCustomAutomationsTool(server, toolAuth);

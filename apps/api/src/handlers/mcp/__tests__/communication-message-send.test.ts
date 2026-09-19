@@ -1,16 +1,16 @@
 const {
   hasUserDirectMessageIdentityMock,
   sendCommunicationChannelPostMock,
-  sendUserDirectMessageMock,
+  sendUserDirectMessageWithReceiptMock,
 } = vi.hoisted(() => ({
   hasUserDirectMessageIdentityMock: vi.fn(),
   sendCommunicationChannelPostMock: vi.fn(),
-  sendUserDirectMessageMock: vi.fn(),
+  sendUserDirectMessageWithReceiptMock: vi.fn(),
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
   hasUserDirectMessageIdentity: hasUserDirectMessageIdentityMock,
-  sendUserDirectMessage: sendUserDirectMessageMock,
+  sendUserDirectMessageWithReceipt: sendUserDirectMessageWithReceiptMock,
 }));
 
 vi.mock('../communication-channel-posts', () => ({
@@ -23,7 +23,15 @@ describe('sendCommunicationMessage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     hasUserDirectMessageIdentityMock.mockResolvedValue(true);
-    sendUserDirectMessageMock.mockResolvedValue(true);
+    sendUserDirectMessageWithReceiptMock.mockResolvedValue({
+      delivered: true,
+      receipt: {
+        provider: 'telegram',
+        workspaceId: 'workspace-1',
+        channelId: 'channel-1',
+        messageId: 'message-1',
+      },
+    });
     sendCommunicationChannelPostMock.mockResolvedValue(
       Response.json({ channelId: 'C1', messageTs: '100.1' }),
     );
@@ -43,14 +51,50 @@ describe('sendCommunicationMessage', () => {
         provider,
         'user-1',
       );
-      expect(sendUserDirectMessageMock).toHaveBeenCalledWith({
+      expect(sendUserDirectMessageWithReceiptMock).toHaveBeenCalledWith({
         provider,
         userId: 'user-1',
         text: 'Keep this exact.',
         logContext: 'roomote-mcp-chat-message',
       });
+      await expect(response.json()).resolves.toMatchObject({
+        delivered: true,
+        receipt: {
+          channelId: 'channel-1',
+          messageId: 'message-1',
+        },
+      });
     },
   );
+
+  it('keeps a Telegram self-DM in the trusted current topic', async () => {
+    await sendCommunicationMessage({
+      actingUserId: 'user-1',
+      taskRun: {
+        payload: {
+          communicationProvider: 'telegram',
+          communicationChannelId: '5087578056',
+          communicationThreadId: '18069',
+        },
+      },
+      destination: 'telegram:me',
+      message: 'Keep this exact.',
+    });
+
+    expect(sendUserDirectMessageWithReceiptMock).toHaveBeenCalledWith({
+      provider: 'telegram',
+      userId: 'user-1',
+      text: 'Keep this exact.',
+      logContext: 'roomote-mcp-chat-message',
+      replyAnchor: {
+        provider: 'telegram',
+        workspaceId: '5087578056',
+        channelId: '5087578056',
+        messageId: '18069',
+        threadId: '18069',
+      },
+    });
+  });
 
   it('rejects unavailable self linkage without attempting delivery', async () => {
     hasUserDirectMessageIdentityMock.mockResolvedValue(false);
@@ -62,7 +106,7 @@ describe('sendCommunicationMessage', () => {
     });
 
     expect(response.status).toBe(404);
-    expect(sendUserDirectMessageMock).not.toHaveBeenCalled();
+    expect(sendUserDirectMessageWithReceiptMock).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({
       code: 'recipient_not_linked',
       provider: 'telegram',
@@ -138,7 +182,7 @@ describe('sendCommunicationMessage', () => {
     });
 
     expect(response.status).toBe(400);
-    expect(sendUserDirectMessageMock).not.toHaveBeenCalled();
+    expect(sendUserDirectMessageWithReceiptMock).not.toHaveBeenCalled();
   });
 
   it('allows a non-Slack current destination only when it matches task context', async () => {
@@ -208,7 +252,7 @@ describe('sendCommunicationMessage', () => {
     });
 
     expect(response.status).toBe(400);
-    expect(sendUserDirectMessageMock).not.toHaveBeenCalled();
+    expect(sendUserDirectMessageWithReceiptMock).not.toHaveBeenCalled();
     expect(sendCommunicationChannelPostMock).not.toHaveBeenCalled();
   });
 });
