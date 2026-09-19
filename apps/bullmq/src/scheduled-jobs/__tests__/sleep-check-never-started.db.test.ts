@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { db, inArray, taskFactory, taskRuns } from '@roomote/db/server';
+import { db, eq, inArray, taskFactory, taskRuns } from '@roomote/db/server';
 import {
   ORPHANED_AFTER_DEQUEUE_THRESHOLD_MS,
   RunStatus,
@@ -9,6 +9,7 @@ import {
 } from '@roomote/types';
 
 import {
+  claimNeverStartedRun,
   findBootingRunsWithoutHeartbeat,
   findNeverStartedRunsWithoutInstance,
 } from '../sleep-check';
@@ -115,6 +116,63 @@ describe('sleep check selection of runs whose worker never started (real databas
     expect(selected).not.toContain(reporting);
     expect(selected).not.toContain(finished);
     expect(selected).not.toContain(alreadySnapshotting);
+  });
+
+  it('lets exactly one of two overlapping sweeps claim a run', async () => {
+    const id = await insertRun({ machineId: null, dequeuedAt: overdue });
+    const [job] = (await findNeverStartedRunsWithoutInstance(now)).filter(
+      (row) => row.id === id,
+    );
+
+    const claims = await Promise.all([
+      claimNeverStartedRun(job!, now),
+      claimNeverStartedRun(job!, now),
+    ]);
+
+    expect(claims.filter(Boolean)).toHaveLength(1);
+    // Claimed, so the next sweep does not select it again...
+    await expect(
+      selectedIds(findNeverStartedRunsWithoutInstance),
+    ).resolves.not.toContain(id);
+  });
+
+  it('takes over a claim whose sweep never finished', async () => {
+    // A process that died between claiming and settling must not leave the
+    // run stuck again: the claim is a lease.
+    const abandonedWithoutInstance = await insertRun({
+      machineId: null,
+      dequeuedAt: overdue,
+      sleepRequestedAt: minutesAgo(60),
+    });
+    const abandonedWithInstance = await insertRun({
+      dequeuedAt: overdue,
+      sleepRequestedAt: minutesAgo(60),
+    });
+    const freshlyClaimed = await insertRun({
+      dequeuedAt: overdue,
+      sleepRequestedAt: minutesAgo(1),
+    });
+
+    await expect(
+      selectedIds(findNeverStartedRunsWithoutInstance),
+    ).resolves.toContain(abandonedWithoutInstance);
+    const withInstance = await selectedIds(findBootingRunsWithoutHeartbeat);
+    expect(withInstance).toContain(abandonedWithInstance);
+    expect(withInstance).not.toContain(freshlyClaimed);
+  });
+
+  it('does not claim a run that changed after it was selected', async () => {
+    const id = await insertRun({ machineId: null, dequeuedAt: overdue });
+    const [job] = (await findNeverStartedRunsWithoutInstance(now)).filter(
+      (row) => row.id === id,
+    );
+    // The worker reported in between the select and the claim.
+    await db
+      .update(taskRuns)
+      .set({ startedAt: new Date() })
+      .where(eq(taskRuns.id, id));
+
+    await expect(claimNeverStartedRun(job!, now)).resolves.toBe(false);
   });
 
   it('selects a never-started run with no instance separately, and not one waiting for capacity', async () => {

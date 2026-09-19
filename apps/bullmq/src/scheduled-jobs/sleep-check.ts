@@ -285,10 +285,13 @@ export function findBootingRunsWithoutHeartbeat(now: Date) {
     .from(taskRuns)
     .where(
       and(
-        ...getBaseSleepCheckCandidateConditions(BOOTING_NO_HEARTBEAT_STATUSES),
+        ...getBaseSleepCheckCandidateConditions(BOOTING_NO_HEARTBEAT_STATUSES, {
+          ownClaimCondition: true,
+        }),
         isNull(taskRuns.workerHeartbeatAt),
         or(
           and(
+            isNull(taskRuns.sleepRequestedAt),
             isNotNull(taskRuns.startedAt),
             lte(
               taskRuns.startedAt,
@@ -296,9 +299,13 @@ export function findBootingRunsWithoutHeartbeat(now: Date) {
             ),
           ),
           // The worker never reported at all, so there is no `startedAt` to
-          // measure from and the run would otherwise never be recovered.
-          neverStartedSince(
-            new Date(now.getTime() - NEVER_STARTED_THRESHOLD_MS),
+          // measure from and the run would otherwise never be recovered. Its
+          // claim is a lease, so a sweep that died mid-recovery is retried.
+          and(
+            neverStartedClaimAvailable(now),
+            neverStartedSince(
+              new Date(now.getTime() - NEVER_STARTED_THRESHOLD_MS),
+            ),
           ),
         ),
       ),
@@ -630,6 +637,52 @@ export const sleepCheckJob = async () => {
  * reach it. It is simply failed. A run still waiting for sandbox capacity is
  * left alone: that wait is deliberate and has its own handling.
  */
+/**
+ * How long a claim on a never-started run holds. Long enough for the
+ * recovery to finish, short enough that a process that died mid-recovery
+ * does not leave the run stuck again: the next sweep takes the claim over.
+ */
+const NEVER_STARTED_CLAIM_LEASE_MS = 10 * 60 * 1_000;
+
+/** Unclaimed, or claimed by a sweep that never finished. */
+function neverStartedClaimAvailable(now: Date) {
+  return or(
+    isNull(taskRuns.sleepRequestedAt),
+    lte(
+      taskRuns.sleepRequestedAt,
+      new Date(now.getTime() - NEVER_STARTED_CLAIM_LEASE_MS),
+    ),
+  );
+}
+
+/**
+ * Sleep checks overlap, and settling a run has side effects (its lifecycle
+ * event, the task-settled notice) that must happen once. Only the sweep that
+ * wins this conditional update goes on to settle the run; the row must still
+ * be exactly what the sweep selected.
+ */
+export async function claimNeverStartedRun(
+  job: SleepCheckJob,
+  now: Date,
+): Promise<boolean> {
+  const [claimed] = await db
+    .update(taskRuns)
+    .set({ sleepRequestedAt: now })
+    .where(
+      and(
+        eq(taskRuns.id, job.id),
+        eq(taskRuns.status, job.status),
+        isNull(taskRuns.startedAt),
+        isNull(taskRuns.workerHeartbeatAt),
+        isNull(taskRuns.completedAt),
+        isNull(taskRuns.canceledAt),
+        neverStartedClaimAvailable(now),
+      ),
+    )
+    .returning({ id: taskRuns.id });
+  return Boolean(claimed);
+}
+
 export function findNeverStartedRunsWithoutInstance(now: Date) {
   return db
     .select(SLEEP_CHECK_JOB_COLUMNS)
@@ -641,6 +694,7 @@ export function findNeverStartedRunsWithoutInstance(now: Date) {
         isNull(taskRuns.workerHeartbeatAt),
         isNull(taskRuns.completedAt),
         isNull(taskRuns.canceledAt),
+        neverStartedClaimAvailable(now),
         or(
           isNull(taskRuns.taskPhase),
           ne(taskRuns.taskPhase, WAITING_FOR_SANDBOX_PROVIDER_TASK_PHASE),
@@ -657,6 +711,9 @@ async function failNeverStartedRunsWithoutInstance(now: Date): Promise<number> {
 
   let failed = 0;
   for (const job of runs) {
+    if (!(await claimNeverStartedRun(job, now))) {
+      continue;
+    }
     try {
       const finalStatus = await resolveSweptJobFinalStatus(job.id);
       await finishRun({
@@ -681,6 +738,13 @@ async function failNeverStartedRunsWithoutInstance(now: Date): Promise<number> {
       );
       failed += 1;
     } catch (error) {
+      // Release the claim so the next sweep retries instead of waiting out
+      // the lease.
+      await db
+        .update(taskRuns)
+        .set({ sleepRequestedAt: null })
+        .where(eq(taskRuns.id, job.id))
+        .catch(() => {});
       console.error(
         `[sleepCheck] Failed to settle never-started task run #${job.id}:`,
         error instanceof Error ? error.message : String(error),
@@ -692,11 +756,14 @@ async function failNeverStartedRunsWithoutInstance(now: Date): Promise<number> {
 
 function getBaseSleepCheckCandidateConditions(
   statuses: RunStatus[] = ACTIVE_SLEEP_CHECK_STATUSES,
+  // A caller that applies its own claim condition (one that lets an expired
+  // claim be taken over) opts out of the plain "unclaimed" guard.
+  options: { ownClaimCondition?: boolean } = {},
 ) {
   return [
     inArray(taskRuns.status, statuses),
     isNotNull(taskRuns.machineId),
-    isNull(taskRuns.sleepRequestedAt),
+    ...(options.ownClaimCondition ? [] : [isNull(taskRuns.sleepRequestedAt)]),
     isNull(taskRuns.snapshotId),
     isNull(taskRuns.snapshotRequestedAt),
     inArray(taskRuns.vendor, SLEEP_CHECK_PROVIDERS),
@@ -1587,6 +1654,16 @@ async function handleHeartbeatRecoveryCandidate(params: {
 }): Promise<{ snapshotted: number; failed: number }> {
   const { job, status, client, config } = params;
   const isResumable = isResumableSleepCandidate(job);
+
+  // The preserving paths claim the run when they snapshot it. This one
+  // destroys and settles instead, so it takes its claim up front; the
+  // caller's error handling clears it again if recovery throws.
+  if (
+    !config.preserveResumable &&
+    !(await claimNeverStartedRun(job, new Date()))
+  ) {
+    return { snapshotted: 0, failed: 0 };
+  }
 
   if (status === 'snapshotting') {
     await recordSnapshotInProgressDecision({

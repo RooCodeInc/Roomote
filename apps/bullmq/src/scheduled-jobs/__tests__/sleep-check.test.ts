@@ -1589,6 +1589,7 @@ describe('sleepCheckJob', () => {
         status: 'running',
         timeoutRemainingMs: 30 * 60 * 1_000,
       });
+      returningFn.mockResolvedValueOnce([{ id: 141 }]);
 
       await sleepCheckJob();
 
@@ -1612,6 +1613,7 @@ describe('sleepCheckJob', () => {
         status: 'stopped',
         timeoutRemainingMs: 0,
       });
+      returningFn.mockResolvedValueOnce([{ id: 141 }]);
 
       await sleepCheckJob();
 
@@ -1649,12 +1651,34 @@ describe('sleepCheckJob', () => {
       expect(mockFinishRun).not.toHaveBeenCalled();
     });
 
+    it('leaves a run alone when an overlapping sweep already claimed it', async () => {
+      // Sleep checks run concurrently; settling has side effects (the
+      // lifecycle event, the task-settled notice) that must happen once.
+      mockJobQueries({
+        bootingJobs: [neverStartedJob()],
+        neverStartedWithoutInstance: [
+          neverStartedJob({ id: 143, machineId: null }),
+        ],
+      });
+      mockGetInstanceStatus.mockResolvedValue({
+        status: 'running',
+        timeoutRemainingMs: 30 * 60 * 1_000,
+      });
+      returningFn.mockResolvedValue([]);
+
+      await sleepCheckJob();
+
+      expect(mockDestroyInstance).not.toHaveBeenCalled();
+      expect(mockFinishRun).not.toHaveBeenCalled();
+    });
+
     it('fails a never-started run that was never assigned an instance', async () => {
       mockJobQueries({
         neverStartedWithoutInstance: [
           neverStartedJob({ id: 143, machineId: null }),
         ],
       });
+      returningFn.mockResolvedValueOnce([{ id: 143 }]);
 
       await sleepCheckJob();
 
