@@ -629,7 +629,8 @@ describe('deliverFastAgentParentEvent', () => {
             currentMessageId: 'web-message-1',
             userId: 'user-2',
             senderDisplayName: 'Dana',
-            question: 'Continue from web',
+            question:
+              '<integration_saved>Call list_integration_keys and continue.</integration_saved>\nContinue from web',
             webFollowUp: true,
           },
         },

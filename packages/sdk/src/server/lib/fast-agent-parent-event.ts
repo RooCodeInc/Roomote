@@ -75,6 +75,7 @@ import {
   type SourceControlProvider,
   type StandardTask,
   isFastAgentSourceControlConversation,
+  stripLeadingIntegrationSavedBlock,
 } from '@roomote/types';
 
 import { resolveUserMcpServerConfigs } from '../routers/mcp-connections';
@@ -2570,7 +2571,7 @@ async function createFastAgentHomeParentTurn(params: {
     params.event.type === 'human_follow_up' && params.event.webFollowUp
       ? {
           senderDisplayName: params.event.senderDisplayName ?? null,
-          text: params.event.question,
+          text: stripLeadingIntegrationSavedBlock(params.event.question),
         }
       : null,
   );
