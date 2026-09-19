@@ -161,18 +161,83 @@ describe('sleep check selection of runs whose worker never started (real databas
     expect(withInstance).not.toContain(freshlyClaimed);
   });
 
-  it('does not claim a run that changed after it was selected', async () => {
-    const id = await insertRun({ machineId: null, dequeuedAt: overdue });
-    const [job] = (await findNeverStartedRunsWithoutInstance(now)).filter(
-      (row) => row.id === id,
-    );
-    // The worker reported in between the select and the claim.
-    await db
-      .update(taskRuns)
-      .set({ startedAt: new Date() })
-      .where(eq(taskRuns.id, id));
+  describe('a run that changed between selection and claim', () => {
+    const selectWithoutInstance = async () => {
+      const id = await insertRun({ machineId: null, dequeuedAt: overdue });
+      const [job] = (await findNeverStartedRunsWithoutInstance(now)).filter(
+        (row) => row.id === id,
+      );
+      return { id, job: job! };
+    };
+    const selectWithInstance = async () => {
+      const id = await insertRun({ dequeuedAt: overdue });
+      const [job] = (await findBootingRunsWithoutHeartbeat(now)).filter(
+        (row) => row.id === id,
+      );
+      return { id, job: job! };
+    };
+    const change = (
+      id: number,
+      values: Partial<typeof taskRuns.$inferInsert>,
+    ) => db.update(taskRuns).set(values).where(eq(taskRuns.id, id));
 
-    await expect(claimNeverStartedRun(job!, now)).resolves.toBe(false);
+    it('is not claimed once its worker reports in', async () => {
+      const { id, job } = await selectWithoutInstance();
+      await change(id, { startedAt: new Date() });
+
+      await expect(claimNeverStartedRun(job, now)).resolves.toBe(false);
+    });
+
+    it('is not claimed as instance-less once it is assigned an instance', async () => {
+      // Settling it on the no-instance path would fail the run and leave the
+      // newly assigned sandbox running.
+      const { id, job } = await selectWithoutInstance();
+      await change(id, { machineId: `sb-${randomUUID()}` });
+
+      await expect(claimNeverStartedRun(job, now)).resolves.toBe(false);
+    });
+
+    it('is not claimed once it starts waiting for sandbox capacity', async () => {
+      const { id, job } = await selectWithoutInstance();
+      await change(id, { taskPhase: WAITING_FOR_SANDBOX_PROVIDER_TASK_PHASE });
+
+      await expect(claimNeverStartedRun(job, now)).resolves.toBe(false);
+    });
+
+    it('is not claimed when its instance is no longer the one the sweep saw', async () => {
+      // The recovery destroys the instance it was handed; a run relaunched
+      // onto another sandbox must not have that one destroyed or be failed.
+      const replaced = await selectWithInstance();
+      await change(replaced.id, { machineId: `sb-${randomUUID()}` });
+      await expect(claimNeverStartedRun(replaced.job, now)).resolves.toBe(
+        false,
+      );
+
+      const released = await selectWithInstance();
+      await change(released.id, { machineId: null });
+      await expect(claimNeverStartedRun(released.job, now)).resolves.toBe(
+        false,
+      );
+    });
+
+    it('is not claimed once a snapshot of it has been requested', async () => {
+      const { id, job } = await selectWithInstance();
+      await change(id, { snapshotRequestedAt: new Date() });
+
+      await expect(claimNeverStartedRun(job, now)).resolves.toBe(false);
+    });
+
+    it('is still claimed when nothing changed', async () => {
+      const withoutInstance = await selectWithoutInstance();
+      const withInstance = await selectWithInstance();
+
+      await expect(
+        claimNeverStartedRun(withoutInstance.job, now),
+      ).resolves.toBe(true);
+      await expect(claimNeverStartedRun(withInstance.job, now)).resolves.toBe(
+        true,
+      );
+    });
   });
 
   it('selects a never-started run with no instance separately, and not one waiting for capacity', async () => {

@@ -299,14 +299,8 @@ export function findBootingRunsWithoutHeartbeat(now: Date) {
             ),
           ),
           // The worker never reported at all, so there is no `startedAt` to
-          // measure from and the run would otherwise never be recovered. Its
-          // claim is a lease, so a sweep that died mid-recovery is retried.
-          and(
-            neverStartedClaimAvailable(now),
-            neverStartedSince(
-              new Date(now.getTime() - NEVER_STARTED_THRESHOLD_MS),
-            ),
-          ),
+          // measure from and the run would otherwise never be recovered.
+          neverStartedWithInstanceEligible(now),
         ),
       ),
     )
@@ -494,6 +488,19 @@ export const sleepCheckJob = async () => {
     }
 
     try {
+      // Every outcome for a never-started run settles it (instance gone,
+      // instance not running, or destroyed), and none of them preserves it
+      // through a claiming snapshot. Claim it once, before the provider is
+      // asked anything, so whichever outcome follows happens in one sweep
+      // only. If recovery throws, the handler below releases the claim.
+      if (
+        preferredJob === candidates.bootingNoHeartbeatJob &&
+        !preferredJob.startedAt &&
+        !(await claimNeverStartedRun(preferredJob, new Date()))
+      ) {
+        continue;
+      }
+
       await recordSleepCheckEvent(
         preferredJob,
         'started',
@@ -656,10 +663,53 @@ function neverStartedClaimAvailable(now: Date) {
 }
 
 /**
+ * Everything that makes a never-started run with no instance recoverable.
+ * One predicate serves both the selection and the claim, so a run that stops
+ * being eligible between the two (it is assigned an instance, or starts
+ * waiting for sandbox capacity) cannot be settled on stale grounds.
+ */
+function neverStartedWithoutInstanceEligible(now: Date) {
+  return and(
+    inArray(taskRuns.status, BOOTING_NO_HEARTBEAT_STATUSES),
+    isNull(taskRuns.machineId),
+    isNull(taskRuns.workerHeartbeatAt),
+    isNull(taskRuns.completedAt),
+    isNull(taskRuns.canceledAt),
+    neverStartedClaimAvailable(now),
+    // A run waiting for sandbox capacity is waiting on purpose.
+    or(
+      isNull(taskRuns.taskPhase),
+      ne(taskRuns.taskPhase, WAITING_FOR_SANDBOX_PROVIDER_TASK_PHASE),
+    ),
+    neverStartedSince(new Date(now.getTime() - NEVER_STARTED_THRESHOLD_MS)),
+  );
+}
+
+/** The same, for a never-started run that does have an instance. */
+function neverStartedWithInstanceEligible(now: Date) {
+  return and(
+    ...getBaseSleepCheckCandidateConditions(BOOTING_NO_HEARTBEAT_STATUSES, {
+      ownClaimCondition: true,
+    }),
+    isNull(taskRuns.workerHeartbeatAt),
+    isNull(taskRuns.completedAt),
+    isNull(taskRuns.canceledAt),
+    // Its claim is a lease, so a sweep that died mid-recovery is retried.
+    neverStartedClaimAvailable(now),
+    neverStartedSince(new Date(now.getTime() - NEVER_STARTED_THRESHOLD_MS)),
+  );
+}
+
+/**
  * Sleep checks overlap, and settling a run has side effects (its lifecycle
  * event, the task-settled notice) that must happen once. Only the sweep that
- * wins this conditional update goes on to settle the run; the row must still
- * be exactly what the sweep selected.
+ * wins this conditional update goes on to settle the run.
+ *
+ * The update re-asserts the full eligibility the selection established, not
+ * just that the row is unclaimed, and pins the instance the sweep saw: the
+ * recovery that follows is chosen by whether the run has an instance and
+ * which one, so a run that gained, lost, or changed its instance since it
+ * was selected must not be claimed.
  */
 export async function claimNeverStartedRun(
   job: SleepCheckJob,
@@ -672,11 +722,12 @@ export async function claimNeverStartedRun(
       and(
         eq(taskRuns.id, job.id),
         eq(taskRuns.status, job.status),
-        isNull(taskRuns.startedAt),
-        isNull(taskRuns.workerHeartbeatAt),
-        isNull(taskRuns.completedAt),
-        isNull(taskRuns.canceledAt),
-        neverStartedClaimAvailable(now),
+        job.machineId === null
+          ? neverStartedWithoutInstanceEligible(now)
+          : and(
+              eq(taskRuns.machineId, job.machineId),
+              neverStartedWithInstanceEligible(now),
+            ),
       ),
     )
     .returning({ id: taskRuns.id });
@@ -687,21 +738,7 @@ export function findNeverStartedRunsWithoutInstance(now: Date) {
   return db
     .select(SLEEP_CHECK_JOB_COLUMNS)
     .from(taskRuns)
-    .where(
-      and(
-        inArray(taskRuns.status, BOOTING_NO_HEARTBEAT_STATUSES),
-        isNull(taskRuns.machineId),
-        isNull(taskRuns.workerHeartbeatAt),
-        isNull(taskRuns.completedAt),
-        isNull(taskRuns.canceledAt),
-        neverStartedClaimAvailable(now),
-        or(
-          isNull(taskRuns.taskPhase),
-          ne(taskRuns.taskPhase, WAITING_FOR_SANDBOX_PROVIDER_TASK_PHASE),
-        ),
-        neverStartedSince(new Date(now.getTime() - NEVER_STARTED_THRESHOLD_MS)),
-      ),
-    )
+    .where(neverStartedWithoutInstanceEligible(now))
     .orderBy(asc(taskRuns.createdAt))
     .limit(SLEEP_CHECK_BATCH_LIMIT);
 }
@@ -1654,16 +1691,6 @@ async function handleHeartbeatRecoveryCandidate(params: {
 }): Promise<{ snapshotted: number; failed: number }> {
   const { job, status, client, config } = params;
   const isResumable = isResumableSleepCandidate(job);
-
-  // The preserving paths claim the run when they snapshot it. This one
-  // destroys and settles instead, so it takes its claim up front; the
-  // caller's error handling clears it again if recovery throws.
-  if (
-    !config.preserveResumable &&
-    !(await claimNeverStartedRun(job, new Date()))
-  ) {
-    return { snapshotted: 0, failed: 0 };
-  }
 
   if (status === 'snapshotting') {
     await recordSnapshotInProgressDecision({

@@ -518,9 +518,24 @@ describe('sleepCheckJob', () => {
       RunStatus.Spawning,
       RunStatus.Connecting,
     ]);
+    // Its never-started arm re-asserts the same statuses, because that
+    // eligibility is shared with the claim that follows selection.
     expect(inArrayFn).toHaveBeenNthCalledWith(7, 'status', [
+      RunStatus.Processing,
+      RunStatus.Preparing,
+      RunStatus.Spawning,
+      RunStatus.Connecting,
+    ]);
+    expect(inArrayFn).toHaveBeenNthCalledWith(9, 'status', [
       RunStatus.Running,
       RunStatus.Idle,
+    ]);
+    // Never-started runs with no instance are booting runs too.
+    expect(inArrayFn).toHaveBeenNthCalledWith(11, 'status', [
+      RunStatus.Processing,
+      RunStatus.Preparing,
+      RunStatus.Spawning,
+      RunStatus.Connecting,
     ]);
   });
 
@@ -1648,6 +1663,41 @@ describe('sleepCheckJob', () => {
       expect(mockCreateSnapshot).toHaveBeenCalledWith(
         expect.objectContaining({ runId: 142 }),
       );
+      expect(mockFinishRun).not.toHaveBeenCalled();
+    });
+
+    it('settles a run whose instance no longer exists only under its claim', async () => {
+      // The likeliest outcome for a run that has been stuck for a long time:
+      // the provider has no record of the sandbox at all.
+      const azureJob = () =>
+        neverStartedJob({ vendor: 'azure', machineId: 'sb-never-started' });
+      const { AzureDataPlaneError } =
+        await import('@roomote/compute-providers');
+      const notFound = new AzureDataPlaneError(
+        'Requested document not found.',
+        404,
+      );
+
+      mockJobQueries({ bootingJobs: [azureJob()] });
+      mockGetInstanceStatus.mockRejectedValue(notFound);
+      returningFn.mockResolvedValueOnce([{ id: 141 }]);
+      await sleepCheckJob();
+      expect(mockFinishRun).toHaveBeenCalledTimes(1);
+      expect(mockFinishRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 141,
+          error: expect.stringContaining('no longer exists'),
+        }),
+      );
+
+      // An overlapping sweep that lost the claim never reaches the provider.
+      mockFinishRun.mockClear();
+      mockGetInstanceStatus.mockClear();
+      mockJobQueries({ bootingJobs: [azureJob()] });
+      mockGetInstanceStatus.mockRejectedValue(notFound);
+      returningFn.mockResolvedValue([]);
+      await sleepCheckJob();
+      expect(mockGetInstanceStatus).not.toHaveBeenCalled();
       expect(mockFinishRun).not.toHaveBeenCalled();
     });
 
