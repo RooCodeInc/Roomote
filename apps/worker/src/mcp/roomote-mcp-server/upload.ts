@@ -45,6 +45,9 @@ export async function handleUpload(
       artifactId: result.artifactId,
       artifactType: result.artifactType,
       viewUrl: result.viewUrl,
+      ...(result.standaloneViewUrl && {
+        standaloneViewUrl: result.standaloneViewUrl,
+      }),
       ...(result.rawUrl && { rawUrl: result.rawUrl }),
       ...(input.deleteAfterUpload && { deleted: true }),
     });

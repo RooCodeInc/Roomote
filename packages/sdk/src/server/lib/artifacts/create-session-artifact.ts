@@ -103,7 +103,9 @@ export async function createFastAgentSessionArtifact(
     artifactType: artifact.artifactType as 'general' | 'plan',
     contentType: artifact.contentType,
     size: artifact.size,
-    viewUrl: buildStandaloneArtifactViewUrl(
+    // Keep the contextual link aligned with getSessionArtifactViewUrl in apps/web.
+    viewUrl: `${baseUrl}/sessions/${input.sessionId}?artifact=${encodeURIComponent(artifact.path)}&v=${artifact.version}`,
+    standaloneViewUrl: buildStandaloneArtifactViewUrl(
       baseUrl,
       { sessionId: input.sessionId },
       artifact.path,

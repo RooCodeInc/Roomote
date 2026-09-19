@@ -239,6 +239,7 @@ export async function uploadArtifact(
   artifactId: string;
   version: number;
   viewUrl: string;
+  standaloneViewUrl?: string;
   artifactType: TaskArtifactType;
   rawUrl?: string;
 }> {
@@ -261,6 +262,9 @@ export async function uploadArtifact(
     artifactId: record.id,
     version: record.version,
     viewUrl: record.viewUrl,
+    ...(record.standaloneViewUrl && {
+      standaloneViewUrl: record.standaloneViewUrl,
+    }),
     artifactType: record.artifactType,
     ...(record.rawUrl && { rawUrl: record.rawUrl }),
   };

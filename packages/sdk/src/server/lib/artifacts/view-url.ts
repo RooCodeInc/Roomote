@@ -10,10 +10,15 @@ export function buildStandaloneArtifactViewUrl(
   path: string,
   version: number,
 ): string {
+  let baseUrlEnd = baseUrl.length;
+  while (baseUrlEnd > 0 && baseUrl.charCodeAt(baseUrlEnd - 1) === 47) {
+    baseUrlEnd -= 1;
+  }
+  const normalizedBaseUrl = baseUrl.slice(0, baseUrlEnd);
   const ownerPath =
     'taskId' in owner
       ? `task/${encodeURIComponent(owner.taskId)}`
       : `session/${encodeURIComponent(owner.sessionId)}`;
   const search = new URLSearchParams({ path, v: String(version) });
-  return `${baseUrl.replace(/\/+$/u, '')}/artifacts/${ownerPath}?${search}`;
+  return `${normalizedBaseUrl}/artifacts/${ownerPath}?${search}`;
 }

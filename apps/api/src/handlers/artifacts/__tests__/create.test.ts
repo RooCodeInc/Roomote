@@ -159,6 +159,8 @@ describe('createArtifact', () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
       viewUrl:
+        'https://public.example.com/task/task-1/artifacts/tmp/capture.png?v=1',
+      standaloneViewUrl:
         'https://public.example.com/artifacts/task/task-1?path=tmp%2Fcapture.png&v=1',
       rawUrl:
         'https://public.example.com/api/artifacts/art-1/raw?sig=signed&ts=1234',

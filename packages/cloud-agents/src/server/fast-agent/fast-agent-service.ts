@@ -4800,7 +4800,7 @@ export async function answerFastAgentQuestion({
                 success: true,
                 artifact,
                 guidance:
-                  'The artifact viewUrl is the canonical standalone authenticated viewer link. Share it unchanged when useful instead of constructing a Session or task artifact URL.',
+                  'The artifact viewUrl opens in its Session; standaloneViewUrl opens only the artifact. Share whichever returned URL fits the context, unchanged, instead of constructing an artifact URL.',
               };
             } catch (error) {
               completedTaskActions.delete(`artifact:${signature}`);

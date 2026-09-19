@@ -139,7 +139,8 @@ async function createArtifactRecord(
     /\/+$/,
     '',
   );
-  const viewUrl = buildStandaloneArtifactViewUrl(
+  const viewUrl = `${artifactUrlBase}/task/${taskId}/artifacts/${path}?v=${artifact.version}`;
+  const standaloneViewUrl = buildStandaloneArtifactViewUrl(
     artifactUrlBase,
     { taskId },
     path,
@@ -150,6 +151,7 @@ async function createArtifactRecord(
     version: number;
     uploadUrl: string;
     viewUrl: string;
+    standaloneViewUrl: string;
     artifactType: string;
     rawUrl?: string;
   } = {
@@ -157,6 +159,7 @@ async function createArtifactRecord(
     version: artifact.version,
     uploadUrl,
     viewUrl,
+    standaloneViewUrl,
     artifactType: artifact.artifactType,
   };
 

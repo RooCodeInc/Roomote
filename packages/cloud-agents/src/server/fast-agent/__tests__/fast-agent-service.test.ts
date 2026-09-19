@@ -5545,6 +5545,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       contentType: 'text/markdown',
       size: 8,
       viewUrl:
+        'https://roomote.example/sessions/session-1?artifact=notes%2Fdecision.md&v=1',
+      standaloneViewUrl:
         'https://roomote.example/artifacts/session/session-1?path=notes%2Fdecision.md&v=1',
     });
     const adapter = callbacks({ createArtifact });
@@ -5565,10 +5567,12 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
             id: 'artifact-1',
             contentType: 'text/markdown',
             viewUrl:
+              'https://roomote.example/sessions/session-1?artifact=notes%2Fdecision.md&v=1',
+            standaloneViewUrl:
               'https://roomote.example/artifacts/session/session-1?path=notes%2Fdecision.md&v=1',
           },
           guidance:
-            'The artifact viewUrl is the canonical standalone authenticated viewer link. Share it unchanged when useful instead of constructing a Session or task artifact URL.',
+            'The artifact viewUrl opens in its Session; standaloneViewUrl opens only the artifact. Share whichever returned URL fits the context, unchanged, instead of constructing an artifact URL.',
         });
         await invokeTool(nativeToolNames.sendChatReply, {
           purpose: 'closeout',

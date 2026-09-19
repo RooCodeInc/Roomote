@@ -39,6 +39,9 @@ export async function handleCreatePlan(
       version: result.version,
       path,
       viewUrl: result.viewUrl,
+      ...(result.standaloneViewUrl && {
+        standaloneViewUrl: result.standaloneViewUrl,
+      }),
     });
   } catch (error) {
     return catchError(error);

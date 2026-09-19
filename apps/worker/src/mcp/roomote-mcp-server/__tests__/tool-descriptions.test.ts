@@ -618,7 +618,7 @@ describe('roomote MCP tool descriptions', () => {
       'Use it to reuse previously uploaded artifact links (for example visual-proof links) instead of relying on transcript memory or re-uploading.',
     );
     expect(artifactsTool.config.description).toContain(
-      'Creation results return viewUrl for the standalone authenticated artifact viewer; share that returned URL rather than constructing a task or Session artifact URL.',
+      'Creation results return viewUrl for the artifact in its task or Session and standaloneViewUrl for the standalone authenticated viewer; share whichever returned URL fits the context rather than constructing an artifact URL.',
     );
     expect(artifactTypeField.description).toBe(
       'Optional artifact type filter for list (one of "general", "plan", "visual-proof"). Omit to list all artifact types.',

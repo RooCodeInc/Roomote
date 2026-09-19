@@ -253,6 +253,7 @@ export interface CreateArtifactResponse {
   version: number;
   uploadUrl: string;
   viewUrl: string;
+  standaloneViewUrl?: string;
   artifactType: TaskArtifactType;
   rawUrl?: string;
 }

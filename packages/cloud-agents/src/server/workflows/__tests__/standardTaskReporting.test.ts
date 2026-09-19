@@ -95,7 +95,7 @@ describe('standardTask reporting consumer', () => {
     );
     expect(harnessInstructions).toContain('<user_input_elicitation>');
     expect(harnessInstructions).toContain(
-      'Creation returns the canonical standalone authenticated viewer link; do not construct a task or Session artifact URL.',
+      'The returned `viewUrl` opens the artifact in its task and `standaloneViewUrl` opens only the artifact; share whichever returned URL fits the context, unchanged, rather than constructing an artifact URL.',
     );
   });
 });

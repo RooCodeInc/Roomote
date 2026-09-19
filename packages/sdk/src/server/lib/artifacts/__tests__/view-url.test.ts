@@ -13,7 +13,7 @@ describe('buildStandaloneArtifactViewUrl', () => {
   ])('builds a standalone viewer URL for owner %o', (owner, expected) => {
     expect(
       buildStandaloneArtifactViewUrl(
-        'https://roomote.example/',
+        'https://roomote.example///',
         owner,
         'notes/a b.md',
         2,
