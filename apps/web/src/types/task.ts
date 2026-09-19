@@ -99,7 +99,7 @@ export type TaskRunWithPullRequest = TaskRun & {
 /** Public SSE progress; result.error is folded into error on the server. */
 export type TaskRunProgress = Pick<
   TaskRun,
-  'id' | 'taskId' | 'sourceRunId' | 'status' | 'vendor' | 'error' | 'errorCode'
+  'id' | 'taskId' | 'status' | 'vendor' | 'error' | 'errorCode'
 >;
 
 export type TaskWithAssociations = Task & {

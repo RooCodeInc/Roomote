@@ -16,7 +16,7 @@ import { useRetryFailedTaskStart } from '@/hooks/task-runs';
 interface StartupProps {
   runId: number;
   taskId?: string;
-  initialTaskRun?: TaskRunProgress;
+  initialTaskRun?: TaskRunProgress & Pick<TaskRun, 'sourceRunId'>;
   canRetryFailedStart?: boolean;
   newTaskHref?: string;
   onStatusChange?: (status: RunStatusValue) => void;
@@ -57,7 +57,7 @@ export const Startup = ({
 interface StartupInnerProps {
   runId: number;
   taskId?: string;
-  initialTaskRun?: TaskRunProgress;
+  initialTaskRun?: TaskRunProgress & Pick<TaskRun, 'sourceRunId'>;
   canRetryFailedStart?: boolean;
   newTaskHref?: string;
   onStatusChange?: (status: RunStatusValue) => void;

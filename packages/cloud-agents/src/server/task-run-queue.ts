@@ -2257,6 +2257,15 @@ export type FailedStartRetryResult =
       error: string;
     };
 
+export async function countFailedStartRetries(taskId: string): Promise<number> {
+  const [{ freshRunCount = 0 } = {}] = await db
+    .select({ freshRunCount: sql<number>`count(*)::int` })
+    .from(taskRuns)
+    .where(and(eq(taskRuns.taskId, taskId), eq(taskRuns.kind, 'fresh')));
+
+  return Math.max(0, freshRunCount - 1);
+}
+
 /**
  * Canonical failed-start retry admission. Automatic and parent-requested
  * retries share one bounded budget; explicit user retries remain available
@@ -2275,16 +2284,7 @@ export async function retryFailedTaskStart(input: {
     };
   }
 
-  const [{ freshRunCount = 0 } = {}] = await db
-    .select({ freshRunCount: sql<number>`count(*)::int` })
-    .from(taskRuns)
-    .where(
-      and(
-        eq(taskRuns.taskId, input.sourceRun.taskId),
-        eq(taskRuns.kind, 'fresh'),
-      ),
-    );
-  const retries = Math.max(0, freshRunCount - 1);
+  const retries = await countFailedStartRetries(input.sourceRun.taskId);
   const isAutomatic = input.trigger !== 'manual';
 
   if (isAutomatic && retries >= FAILED_START_AUTO_RETRY_MAX_RETRIES) {

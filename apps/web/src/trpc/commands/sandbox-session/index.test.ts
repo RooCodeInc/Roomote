@@ -11,6 +11,39 @@ import {
   shouldExposeOnboardingEnvironment,
   shouldPollForFirstHarnessMessage,
 } from './session-state';
+import { shouldPollForAutomaticFailedStartRetry } from '.';
+
+describe('shouldPollForAutomaticFailedStartRetry', () => {
+  it('polls while an ordinary failed start still has automatic attempts', () => {
+    expect(
+      shouldPollForAutomaticFailedStartRetry({
+        sessionState: 'boot-failed',
+        canRetryFailedStart: true,
+        failedStartRetryCount: 1,
+        hasFastAgentParent: false,
+      }),
+    ).toBe(true);
+  });
+
+  it('stops after exhaustion and leaves Fast retry judgment to the parent', () => {
+    expect(
+      shouldPollForAutomaticFailedStartRetry({
+        sessionState: 'boot-failed',
+        canRetryFailedStart: true,
+        failedStartRetryCount: 2,
+        hasFastAgentParent: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldPollForAutomaticFailedStartRetry({
+        sessionState: 'boot-failed',
+        canRetryFailedStart: true,
+        failedStartRetryCount: 0,
+        hasFastAgentParent: true,
+      }),
+    ).toBe(false);
+  });
+});
 
 function createTaskRunDetail(
   overrides: Partial<TaskRunDetail> = {},
