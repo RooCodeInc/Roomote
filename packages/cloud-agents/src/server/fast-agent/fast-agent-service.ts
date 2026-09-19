@@ -4799,7 +4799,8 @@ export async function answerFastAgentQuestion({
               return {
                 success: true,
                 artifact,
-                guidance: 'Link the artifact viewUrl when it is useful.',
+                guidance:
+                  'The artifact viewUrl opens in its Session; standaloneViewUrl opens only the artifact. Share whichever returned URL fits the context, unchanged, instead of constructing an artifact URL.',
               };
             } catch (error) {
               completedTaskActions.delete(`artifact:${signature}`);

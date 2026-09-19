@@ -61,6 +61,14 @@ Stripe uses an admin-managed restricted API key:
 
 Once connected, I can inspect Stripe accounts, payments, billing data, API details, analytics, and documentation. The general stripe_api_write tool stays disabled until an administrator enables it from Manage tools. Stripe's own human-confirmation requirements still apply to sensitive writes.
 
+# Cloudflare
+
+Cloudflare uses OAuth:
+1. A deployment operator enables Cloudflare from Settings > Integrations.
+2. That operator connects Cloudflare once for the deployment via OAuth.
+
+Once connected, I can search and inspect Cloudflare resources. The execute tool can also call write APIs, so I only make changes when the user explicitly requests the specific mutation and the OAuth connection permits it.
+
 # Pylon
 
 Pylon uses OAuth:

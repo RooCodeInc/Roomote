@@ -7,6 +7,7 @@ import {
 
 import {
   buildSignedArtifactRawUrl,
+  buildStandaloneArtifactViewUrl,
   authorizeTaskArtifactUpload,
   createTaskArtifactRecord,
   currentEpochSeconds,
@@ -139,11 +140,18 @@ async function createArtifactRecord(
     '',
   );
   const viewUrl = `${artifactUrlBase}/task/${taskId}/artifacts/${path}?v=${artifact.version}`;
+  const standaloneViewUrl = buildStandaloneArtifactViewUrl(
+    artifactUrlBase,
+    { taskId },
+    path,
+    artifact.version,
+  );
   const response: {
     id: string;
     version: number;
     uploadUrl: string;
     viewUrl: string;
+    standaloneViewUrl: string;
     artifactType: string;
     rawUrl?: string;
   } = {
@@ -151,6 +159,7 @@ async function createArtifactRecord(
     version: artifact.version,
     uploadUrl,
     viewUrl,
+    standaloneViewUrl,
     artifactType: artifact.artifactType,
   };
 

@@ -14,6 +14,7 @@ import {
 } from '@roomote/types';
 
 import { createArtifactRecord } from './create-record';
+import { buildStandaloneArtifactViewUrl } from './view-url';
 
 const MAX_FAST_ARTIFACT_BYTES = 128 * 1024;
 let s3Client: S3Client | undefined;
@@ -102,9 +103,14 @@ export async function createFastAgentSessionArtifact(
     artifactType: artifact.artifactType as 'general' | 'plan',
     contentType: artifact.contentType,
     size: artifact.size,
-    // Deep link into the Session Artifacts panel; mirrors
-    // getSessionArtifactViewUrl in apps/web/src/lib/artifact-view-urls.ts.
+    // Keep the contextual link aligned with getSessionArtifactViewUrl in apps/web.
     viewUrl: `${baseUrl}/sessions/${input.sessionId}?artifact=${encodeURIComponent(artifact.path)}&v=${artifact.version}`,
+    standaloneViewUrl: buildStandaloneArtifactViewUrl(
+      baseUrl,
+      { sessionId: input.sessionId },
+      artifact.path,
+      artifact.version,
+    ),
   };
 }
 

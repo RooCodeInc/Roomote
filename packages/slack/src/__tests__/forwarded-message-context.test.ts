@@ -8,6 +8,7 @@ import {
   formatSlackBlockLinkContext,
   formatSlackBlockTextContext,
   formatSlackForwardedMessageContext,
+  formatSlackMcpSetupRecommendationContext,
 } from '../forwarded-message-context';
 import type { SlackFile } from '../types';
 
@@ -200,6 +201,33 @@ describe('forwarded-message-context', () => {
         '- e: https://example.sentry.io/issues/7454501897/?referrer=slack&environment=production',
       ].join('\n'),
     );
+  });
+
+  it('adds a setup recommendation for pasted Cloudflare dashboard URLs', () => {
+    expect(
+      formatSlackMcpSetupRecommendationContext(
+        'Can you inspect https://dash.cloudflare.com/example/workers/services/view/api?',
+      ),
+    ).toBe(
+      [
+        'Slack integration setup recommendations:',
+        '- Cloudflare: if it is unavailable, offer to connect the built-in integration from /integrations.',
+      ].join('\n'),
+    );
+  });
+
+  it('adds the recommendation to active Slack agent context', () => {
+    expect(
+      formatSlackAttachmentContext('Can you inspect this?', undefined, [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: '<https://dash.cloudflare.com/example/workers|Worker>',
+          },
+        },
+      ]),
+    ).toContain('Slack integration setup recommendations:\n- Cloudflare:');
   });
 
   it('extracts Sentry-style block and attachment context without action labels', () => {

@@ -119,6 +119,21 @@ describe('Stripe restricted key connection', () => {
   });
 });
 
+describe('Cloudflare OAuth', () => {
+  it('uses the hosted API MCP with a deployment-scoped DCR connection', () => {
+    expect(getMcpIntegration('cloudflare')).toMatchObject({
+      name: 'Cloudflare',
+      url: 'https://mcp.cloudflare.com/mcp',
+      connectionScope: 'deployment',
+      oauthResource: 'https://mcp.cloudflare.com/mcp',
+    });
+    expect(getMcpIntegration('cloudflare')?.oauthClientEnv).toBeUndefined();
+    expect(getMcpIntegration('cloudflare')?.instructions).toContain(
+      'only when the user explicitly requests the specific mutation',
+    );
+  });
+});
+
 describe('Notion internal integration', () => {
   it('uses a deployment-scoped native MCP with admin-managed credentials', () => {
     expect(getMcpIntegration('notion')).toMatchObject({

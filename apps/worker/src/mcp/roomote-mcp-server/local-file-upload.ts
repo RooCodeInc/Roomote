@@ -126,6 +126,7 @@ export async function uploadPreparedArtifact(
   artifactId: string;
   version: number;
   viewUrl: string;
+  standaloneViewUrl?: string;
   artifactType: TaskArtifactType;
   rawUrl?: string;
 }> {

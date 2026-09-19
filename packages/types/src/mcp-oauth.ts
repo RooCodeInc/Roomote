@@ -675,6 +675,17 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
       'Use Stripe to inspect account, payment, billing, and API data through a deployment restricted key. The general stripe_api_write tool is disabled until an administrator enables it in Manage tools. When enabled, use writes only for explicit user requests and preserve Stripe human-confirmation requirements for sensitive actions.',
   },
   {
+    id: 'cloudflare',
+    name: 'Cloudflare',
+    url: 'https://mcp.cloudflare.com/mcp',
+    description: `Inspect and operate Cloudflare resources from ${PRODUCT_NAME} tasks`,
+    icon: 'cloudflare',
+    connectionScope: 'deployment',
+    oauthResource: 'https://mcp.cloudflare.com/mcp',
+    instructions:
+      "Use Cloudflare to search and inspect the deployment's Cloudflare resources. The execute tool can call both read and write Cloudflare APIs; make changes only when the user explicitly requests the specific mutation, and preserve the permissions granted during OAuth consent.",
+  },
+  {
     id: 'pylon',
     name: 'Pylon',
     url: 'https://mcp.usepylon.com',

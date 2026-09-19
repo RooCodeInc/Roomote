@@ -1,4 +1,9 @@
-import { dataVisualizationBlockSchema } from '@roomote/types';
+import {
+  dataVisualizationBlockSchema,
+  findSlackMcpSetupServicesInText,
+  matchSlackMcpSetupServiceUrl,
+  type SlackMcpSetupServiceDefinition,
+} from '@roomote/types';
 
 import type { SlackFile } from './types';
 
@@ -1165,6 +1170,44 @@ export function formatSlackBlockLinkContext(
   ].join('\n');
 }
 
+export function formatSlackMcpSetupRecommendationContext(
+  text: string,
+  blocks?: unknown[],
+  attachments?: unknown[],
+): string | undefined {
+  const services = new Map<string, SlackMcpSetupServiceDefinition>();
+  for (const service of findSlackMcpSetupServicesInText(text)) {
+    services.set(service.id, service);
+  }
+
+  const links: SlackBlockLink[] = [];
+  const seenKeys = new Set<string>();
+  extractBlockLinks(blocks, links, seenKeys);
+  for (const attachment of attachments ?? []) {
+    if (isRecord(attachment)) {
+      extractBlockLinks(attachment.blocks, links, seenKeys);
+    }
+  }
+  for (const link of links) {
+    const service = matchSlackMcpSetupServiceUrl(link.url);
+    if (service) {
+      services.set(service.id, service);
+    }
+  }
+
+  if (services.size === 0) {
+    return undefined;
+  }
+
+  return [
+    'Slack integration setup recommendations:',
+    ...[...services.values()].map(
+      (service) =>
+        `- ${service.name}: if it is unavailable, offer to connect the built-in integration from ${service.deploymentSettingsPath}.`,
+    ),
+  ].join('\n');
+}
+
 export function formatSlackBlockTextContext(
   blocks?: unknown[],
   existingText = '',
@@ -1303,11 +1346,17 @@ export function formatSlackAttachmentContext(
     textWithForwardedContext,
   );
   const blockLinkContext = formatSlackBlockLinkContext(blocks, attachments);
+  const integrationSetupContext = formatSlackMcpSetupRecommendationContext(
+    text,
+    blocks,
+    attachments,
+  );
   const additionalContexts = [
     formatSlackForwardedMessageContext(attachments),
     attachmentTitleContext,
     blockTextContext,
     blockLinkContext,
+    integrationSetupContext,
   ].filter((context): context is string => Boolean(context));
 
   if (additionalContexts.length === 0) {

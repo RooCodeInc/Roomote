@@ -45,6 +45,13 @@ export const MCP_SETUP_INTEGRATION_METADATA: Record<
       'Opt in to the general Stripe write tool only when needed',
     ],
   },
+  cloudflare: {
+    capabilities: [
+      'Search the Cloudflare API for available operations',
+      'Inspect zones, Workers, DNS, security, and account resources',
+      'Run explicitly requested Cloudflare API operations with the connected permissions',
+    ],
+  },
   asana: {
     capabilities: [
       'Inspect Asana workspaces, projects, and tasks',
