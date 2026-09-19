@@ -13,7 +13,12 @@ describe('Slack MCP setup service detection', () => {
 
     expect(
       findSlackMcpSetupServicesInText(
-        'Check <https://buildkite.com/acme/pipelines/api|this pipeline>!!!!',
+        'Check <https://buildkite.com/acme/pipelines/api|this pipeline>.',
+      ).map((service) => service.id),
+    ).toEqual(['buildkite']);
+    expect(
+      findSlackMcpSetupServicesInText(
+        'Check https://buildkite.com/acme/pipelines/api!!!!',
       ).map((service) => service.id),
     ).toEqual(['buildkite']);
   });
