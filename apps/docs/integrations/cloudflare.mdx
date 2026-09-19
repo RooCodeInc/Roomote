@@ -1,0 +1,28 @@
+---
+title: Cloudflare
+description: Inspect and operate Cloudflare resources from Roomote tasks.
+icon: 'https://api.iconify.design/simple-icons:cloudflare.svg?color=currentColor'
+---
+
+Connect Cloudflare when tasks need account, zone, DNS, Workers, security, or
+other Cloudflare API context.
+
+## How setup works
+
+A deployment operator connects Cloudflare once from **Settings > Integrations**
+using OAuth. Cloudflare uses dynamic client registration and asks the operator
+to approve the permissions available to the shared deployment connection.
+
+## Permissions and changes
+
+Cloudflare exposes one tool for finding API operations and one tool for running
+them. The same execution tool can call read and write APIs, so Roomote treats
+mutations as explicit actions: it only changes Cloudflare resources when the
+request clearly asks for that specific change. Cloudflare still enforces the
+permissions granted during OAuth consent.
+
+## Verify the connection
+
+Start with a read-only request, such as listing zones or inspecting a Worker.
+If the request is denied, reconnect Cloudflare and review the permissions made
+available during consent.
