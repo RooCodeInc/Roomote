@@ -74,6 +74,25 @@ describe('event-normalization', () => {
     );
   });
 
+  it('adds Buildkite setup guidance to the active Slack agent context', () => {
+    const event = {
+      type: 'app_mention',
+      channel: 'C123',
+      user: 'U123',
+      ts: '1712345678.000150',
+      text: '<@U_ROOMOTE> inspect https://buildkite.com/acme/pipelines/api',
+    } as SlackEvent;
+
+    enrichSlackMessageEvent(event);
+
+    expect(event.agentContext).toContain(
+      'Slack integration setup recommendations:\n- Buildkite:',
+    );
+    expect(event.text).toContain(
+      'Slack integration setup recommendations:\n- Buildkite:',
+    );
+  });
+
   it('routes an external bot message that explicitly mentions Roomote', () => {
     const event = {
       type: 'message',

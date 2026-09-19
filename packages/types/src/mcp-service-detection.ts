@@ -89,6 +89,24 @@ const X_POST_PATH_REGEX = /^\/[a-z0-9_]{1,15}\/status\/\d+/;
 const X_APP_PATH_REGEX =
   /^\/(?:search|explore)(?:\/|$)|^\/i\/(?:lists|communities|spaces)\//;
 
+const BUILDKITE_PUBLIC_ROOT_SEGMENTS = [
+  'about',
+  'blog',
+  'changelog',
+  'community',
+  'customers',
+  'docs',
+  'features',
+  'legal',
+  'pricing',
+  'resources',
+  'security',
+  'support',
+] as const;
+const BUILDKITE_ORGANIZATION_PATH_REGEX = new RegExp(
+  `^/(?!(?:${BUILDKITE_PUBLIC_ROOT_SEGMENTS.join('|')})(?:/|$))[^/]+(?:/|$)`,
+);
+
 export const SLACK_MCP_SETUP_SERVICES: SlackMcpSetupServiceDefinition[] = [
   {
     id: 'buildkite',
@@ -96,10 +114,15 @@ export const SLACK_MCP_SETUP_SERVICES: SlackMcpSetupServiceDefinition[] = [
     availabilityKind: 'curated_oauth',
     hostSuffixes: ['buildkite.com'],
     excludedHostnames: [
-      'buildkite.com',
       'www.buildkite.com',
       'api.buildkite.com',
       'mcp.buildkite.com',
+    ],
+    hostRules: [
+      {
+        hostSuffix: 'buildkite.com',
+        pathRegexes: [BUILDKITE_ORGANIZATION_PATH_REGEX],
+      },
     ],
     deploymentSettingsPath: '/integrations',
     userSettingsPath: '/settings/personal',
@@ -351,4 +374,97 @@ export function getSlackMcpSetupServiceDefinition(
   id: string,
 ): SlackMcpSetupServiceDefinition | undefined {
   return SLACK_MCP_SETUP_SERVICES.find((service) => service.id === id);
+}
+
+function hostMatchesService(hostname: string, suffix: string): boolean {
+  const normalizedSuffix = suffix.toLowerCase();
+  return (
+    hostname === normalizedSuffix || hostname.endsWith(`.${normalizedSuffix}`)
+  );
+}
+
+function pathMatchesServiceRule(
+  pathname: string,
+  rule: Pick<SlackMcpSetupServiceDefinition, 'pathPrefixes'> & {
+    pathRegexes?: RegExp[];
+  },
+): boolean {
+  if (
+    rule.pathPrefixes?.some((prefix) =>
+      pathname.startsWith(prefix.toLowerCase()),
+    )
+  ) {
+    return true;
+  }
+
+  if (rule.pathRegexes?.some((pattern) => pattern.test(pathname))) {
+    return true;
+  }
+
+  return !rule.pathPrefixes?.length && !rule.pathRegexes?.length;
+}
+
+export function matchSlackMcpSetupServiceUrl(
+  rawUrl: string,
+): SlackMcpSetupServiceDefinition | undefined {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl.startsWith('www.') ? `https://${rawUrl}` : rawUrl);
+  } catch {
+    return undefined;
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+  const pathname = parsed.pathname.toLowerCase();
+
+  for (const service of SLACK_MCP_SETUP_SERVICES) {
+    if (
+      service.excludedHostnames?.some(
+        (excluded) => excluded.toLowerCase() === hostname,
+      )
+    ) {
+      continue;
+    }
+
+    if (service.hostRules?.length) {
+      if (
+        service.hostRules.some(
+          (rule) =>
+            hostMatchesService(hostname, rule.hostSuffix) &&
+            pathMatchesServiceRule(pathname, rule),
+        )
+      ) {
+        return service;
+      }
+      continue;
+    }
+
+    if (
+      service.hostSuffixes.some((suffix) =>
+        hostMatchesService(hostname, suffix),
+      ) &&
+      pathMatchesServiceRule(pathname, service)
+    ) {
+      return service;
+    }
+  }
+
+  return undefined;
+}
+
+export function findSlackMcpSetupServicesInText(
+  text: string,
+): SlackMcpSetupServiceDefinition[] {
+  const services = new Map<string, SlackMcpSetupServiceDefinition>();
+  const urlPattern = /(?:https?:\/\/|www\.)[^\s<>()|]+/giu;
+
+  for (const match of text.matchAll(urlPattern)) {
+    const candidate = match[0].replace(/[,.!?]+$/u, '');
+    const service = matchSlackMcpSetupServiceUrl(candidate);
+    if (service) {
+      services.set(service.id, service);
+    }
+  }
+
+  return [...services.values()];
 }
