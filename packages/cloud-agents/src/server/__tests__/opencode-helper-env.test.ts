@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { DEFAULT_MODEL_PROVIDER_ENV_KEYS } from '@roomote/types';
+import {
+  CONTROL_PLANE_ENV_VAR_NAMES,
+  DEFAULT_MODEL_PROVIDER_ENV_KEYS,
+} from '@roomote/types';
 
 import { scrubOpenCodeHelperEnv } from '../opencode-helper-env';
 
@@ -27,21 +30,56 @@ describe('scrubOpenCodeHelperEnv', () => {
     expect(env).toEqual({ PATH: '/usr/bin', HOME: '/home/roomote' });
   });
 
+  it('removes every name on the shared control-plane list', () => {
+    // Includes credentials that are neither model-provider keys nor caught by
+    // the suffix rule, such as the media and judgment-model API keys.
+    const env: NodeJS.ProcessEnv = Object.fromEntries(
+      [...CONTROL_PLANE_ENV_VAR_NAMES].map((key) => [key, `${key}-value`]),
+    );
+
+    scrubOpenCodeHelperEnv(env);
+
+    expect(CONTROL_PLANE_ENV_VAR_NAMES.has('R_ELEVENLABS_API_KEY')).toBe(true);
+    expect(CONTROL_PLANE_ENV_VAR_NAMES.has('R_VOICE_OPENAI_API_KEY')).toBe(
+      true,
+    );
+    expect(CONTROL_PLANE_ENV_VAR_NAMES.has('R_TYPESAFE_API_KEY')).toBe(true);
+    // The hosting-managed inference key is on both lists; it only survives
+    // when a caller passes it explicitly, which this call did not.
+    expect(
+      Object.keys(env).filter(
+        (key) => !DEFAULT_MODEL_PROVIDER_ENV_KEYS.includes(key),
+      ),
+    ).toEqual([]);
+  });
+
+  it('removes service tokens the control-plane list does not carry', () => {
+    const env: NodeJS.ProcessEnv = {
+      R_BRAIN_GATEWAY_TOKEN: 'brain-gateway-token',
+      R_GBRAIN_AGENT_TOKEN: 'gbrain-agent-token',
+      PATH: '/usr/bin',
+    };
+
+    scrubOpenCodeHelperEnv(env);
+
+    expect(env).toEqual({ PATH: '/usr/bin' });
+  });
+
   it('removes unlisted configuration by its suffix', () => {
     const env: NodeJS.ProcessEnv = {
       R_FUTURE_CLIENT_SECRET: 'client-secret',
       R_FUTURE_APP_PRIVATE_KEY: 'private-key',
       R_FUTURE_REGISTRY_PASSWORD: 'password',
-      // Public keys and ordinary config are kept.
-      JOB_AUTH_PUBLIC_KEY: 'job-public-key',
+      // Ordinary config that is on no list is kept.
       R_APP_URL: 'https://roomote.example.com',
+      NODE_ENV: 'production',
     };
 
     scrubOpenCodeHelperEnv(env);
 
     expect(env).toEqual({
-      JOB_AUTH_PUBLIC_KEY: 'job-public-key',
       R_APP_URL: 'https://roomote.example.com',
+      NODE_ENV: 'production',
     });
   });
 

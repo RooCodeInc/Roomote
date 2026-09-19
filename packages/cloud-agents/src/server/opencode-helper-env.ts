@@ -1,4 +1,5 @@
 import {
+  CONTROL_PLANE_ENV_VAR_NAMES,
   DEFAULT_MODEL_PROVIDER_ENV_KEYS,
   parseModelProviderEnvKeys,
 } from '@roomote/types';
@@ -9,49 +10,27 @@ import {
  * The helper is a model client. Roomote's native tools call back to the
  * launching service over the tool bridge, so the helper itself only needs
  * model-provider credentials and the variables passed to it explicitly.
- * Mirrors the intent of the task sandbox block-list in
- * `@roomote/compute-providers` (`BLOCKED_WORKER_ENV_KEYS`).
+ *
+ * The shared control-plane list is the source of truth, the same one that
+ * keeps these values out of task sandboxes, so the two cannot drift apart.
+ * The names below are service tokens that list does not carry because they
+ * are never offered through the environment editor.
  */
-const HELPER_BLOCKED_ENV_KEYS: ReadonlySet<string> = new Set([
-  // Data stores.
-  'DATABASE_URL',
-  'REDIS_URL',
-  'ENCRYPTION_KEY',
-  // Signing keys.
-  'JOB_AUTH_PRIVATE_KEY',
-  'PREVIEW_AUTH_PRIVATE_KEY',
-  'SANDBOX_OIDC_PRIVATE_KEY',
-  'ARTIFACT_SIGNING_KEY',
-  'ARTIFACT_SIGNING_KEY_PREVIOUS',
-  'BETTER_AUTH_SECRET',
-  // Operator and control-plane configuration.
-  'DASHBOARD_PASSWORD',
-  'SETUP_TOKEN',
-  'R_LICENSE_KEY',
-  'ROOMOTE_CLOUD_TOKEN_ID',
-  'ROOMOTE_CLOUD_TOKEN_SECRET',
-  // Storage and compute-provider credentials.
-  'S3_ACCESS_KEY_ID',
-  'S3_SECRET_ACCESS_KEY',
-  'MODAL_TOKEN_ID',
-  'MODAL_TOKEN_SECRET',
-  'AZURE_SANDBOX_REGISTRY_TOKEN',
-  'DAYTONA_API_KEY',
-  'E2B_API_KEY',
-  'BL_API_KEY',
-  'BOX_API_KEY',
-  // Integration credentials used by the launching service.
-  'R_GITHUB_APP_PRIVATE_KEY',
-  'R_DISCORD_BOT_TOKEN',
-  'R_TELEGRAM_BOT_TOKEN',
-  'R_AGENTMAIL_API_KEY',
+const HELPER_ONLY_BLOCKED_ENV_KEYS: ReadonlySet<string> = new Set([
   'R_BRAIN_GATEWAY_TOKEN',
   'R_GBRAIN_ADMIN_TOKEN',
   'R_GBRAIN_AGENT_TOKEN',
   'R_GBRAIN_INGEST_TOKEN',
   'R_GBRAIN_MAINTENANCE_TOKEN',
-  'GITLAB_WEBHOOK_SIGNING_TOKEN',
 ]);
+
+function isBlockedHelperEnvKey(key: string): boolean {
+  return (
+    CONTROL_PLANE_ENV_VAR_NAMES.has(key) ||
+    HELPER_ONLY_BLOCKED_ENV_KEYS.has(key) ||
+    hasSensitiveSuffix(key)
+  );
+}
 
 /**
  * Same suffix rule the sandbox filter applies, so configuration added later
@@ -87,7 +66,7 @@ export function scrubOpenCodeHelperEnv(
       continue;
     }
 
-    if (HELPER_BLOCKED_ENV_KEYS.has(key) || hasSensitiveSuffix(key)) {
+    if (isBlockedHelperEnvKey(key)) {
       delete env[key];
     }
   }
