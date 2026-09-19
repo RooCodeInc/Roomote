@@ -9515,7 +9515,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
             name: ':eyes:',
           }),
         ).resolves.toMatchObject({ success: true });
-        await invokeMcpTool('roomote', 'list_chat_destinations', {});
+        await invokeMcpTool('roomote', 'list_chat_destinations', {
+          provider: 'slack',
+          kind: 'channel',
+          query: 'shipping',
+        });
         await invokeMcpTool('roomote', 'send_chat_message', {
           destination: 'slack:team-1:channel:channel-2:thread:199.9',
           message: 'Release is ready.',
@@ -9573,7 +9577,12 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       {
         integrationId: 'roomote',
         toolName: 'list_chat_destinations',
-        args: { workspaceId: 'team-1' },
+        args: {
+          provider: 'slack',
+          kind: 'channel',
+          query: 'shipping',
+          workspaceId: 'team-1',
+        },
       },
     );
     expect(mocks.callIntegration).toHaveBeenCalledWith(
@@ -9586,6 +9595,48 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           destination: 'slack:team-1:channel:channel-2:thread:199.9',
           message: 'Release is ready.',
         },
+      },
+    );
+  });
+
+  it('keeps Slack self lookup provider-scoped without workspace injection', async () => {
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: 'Manage Roomote',
+        tools: [{ name: 'list_chat_destinations' }],
+      },
+    ]);
+    mocks.callIntegration.mockResolvedValue({ destinations: [] });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’ll check your linked Slack destination.',
+        });
+        await invokeMcpTool('roomote', 'list_chat_destinations', {
+          provider: 'slack',
+          kind: 'self',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Checked the linked destination.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.callIntegration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      {
+        integrationId: 'roomote',
+        toolName: 'list_chat_destinations',
+        args: { provider: 'slack', kind: 'self' },
       },
     );
   });

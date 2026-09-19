@@ -1009,7 +1009,14 @@ describe('roomote MCP tool descriptions', () => {
       vi.fn().mockResolvedValue({
         ok: true,
         json: async () => ({
-          destinationCount: 0,
+          provider: 'slack',
+          kind: 'channel',
+          totalCount: 0,
+          returnedCount: 0,
+          offset: 0,
+          limit: 20,
+          hasMore: false,
+          truncated: false,
           destinations: [],
           limitations: [],
         }),
@@ -1026,16 +1033,39 @@ describe('roomote MCP tool descriptions', () => {
     );
 
     expect(listTool.config.description).toBe(
-      'List authorized destinations for a new standalone message. Returns exact destination references for the authenticated member on linked Slack or Telegram, linked people in shared Slack workspaces, and discoverable Slack channels. Pass a returned destination unchanged to send_chat_message. Provider limitations are reported explicitly.',
+      'Find authorized destinations for a new standalone message. Provider and destination kind are required. Self lookup supports Slack or Telegram and resolves only the authenticated member without enumerating directories. Slack person and channel lookup requires either a targeted query or an exact destination reference. Results are bounded and paginated; pass a returned destination unchanged to send_chat_message.',
     );
+    expect(Object.keys(listTool.config.inputSchema)).toEqual([
+      'provider',
+      'kind',
+      'query',
+      'destination',
+      'workspaceId',
+      'offset',
+      'limit',
+    ]);
     expect(listTool.handler).toBeDefined();
-    await listTool.handler?.({});
+    await listTool.handler?.({
+      provider: 'slack',
+      kind: 'channel',
+      query: 'shipping',
+      workspaceId: 'T1',
+      offset: 20,
+      limit: 10,
+    });
 
     expect(fetch).toHaveBeenCalledWith(
       'https://platform.example.com/api/mcp/communication/destinations',
       expect.objectContaining({
         method: 'POST',
-        body: '{}',
+        body: JSON.stringify({
+          provider: 'slack',
+          kind: 'channel',
+          query: 'shipping',
+          workspaceId: 'T1',
+          offset: 20,
+          limit: 10,
+        }),
       }),
     );
   });

@@ -4129,10 +4129,16 @@ export async function answerFastAgentQuestion({
         const actorScopedIntegrationArguments =
           call.integrationId === ROOMOTE_MCP_ID &&
           conversation.surface === 'slack'
-            ? call.toolName === CHAT_DESTINATIONS_TOOL.name
+            ? call.toolName === CHAT_DESTINATIONS_TOOL.name &&
+              call.args.provider === 'slack' &&
+              call.args.kind !== 'self'
               ? {
                   ...chatScopedIntegrationArguments,
-                  workspaceId: conversation.workspaceId,
+                  workspaceId:
+                    typeof call.args.workspaceId === 'string' &&
+                    call.args.workspaceId.trim()
+                      ? call.args.workspaceId
+                      : conversation.workspaceId,
                 }
               : call.toolName === CHAT_REACTION_EMOJI_TOOL_NAME
                 ? {

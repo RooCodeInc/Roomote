@@ -1,4 +1,5 @@
 import type {
+  ChatDestinationLookupResponse,
   CommunicationProvider,
   SourceControlProvider,
   TaskArtifactType,
@@ -146,21 +147,7 @@ export interface ChannelPostResponse {
 
 export type CommunicationSendResponse = Record<string, unknown>;
 
-export interface CommunicationDestinationsResponse {
-  destinationCount: number;
-  destinations: Array<{
-    destination: string;
-    provider: 'slack' | 'telegram';
-    kind: 'self' | 'channel' | 'person';
-    name: string;
-    workspaceId?: string;
-    workspaceName?: string;
-  }>;
-  limitations: Array<{
-    provider: CommunicationProvider;
-    reason: string;
-  }>;
-}
+export type CommunicationDestinationsResponse = ChatDestinationLookupResponse;
 
 export interface SlackMutationResponse {
   success: boolean;

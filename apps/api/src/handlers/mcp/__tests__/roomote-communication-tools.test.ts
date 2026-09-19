@@ -21,11 +21,14 @@ vi.mock('../communication-thread-replies', () => ({
 }));
 
 import { registerRoomoteCommunicationTools } from '../roomote-communication-tools';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 
 type RegisteredTool = {
   name: string;
   config: { description?: string; inputSchema?: Record<string, unknown> };
-  handler: (params: Record<string, string>) => Promise<unknown>;
+  handler: (params: Record<string, unknown>) => Promise<unknown>;
 };
 
 function registerTools(): RegisteredTool[] {
@@ -45,7 +48,14 @@ describe('Roomote member communication tools', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     listCommunicationDestinationsMock.mockResolvedValue({
-      destinationCount: 0,
+      provider: 'slack',
+      kind: 'person',
+      totalCount: 0,
+      returnedCount: 0,
+      offset: 0,
+      limit: 20,
+      hasMore: false,
+      truncated: false,
       destinations: [],
       limitations: [],
     });
@@ -68,7 +78,20 @@ describe('Roomote member communication tools', () => {
     expect(
       tools.find(({ name }) => name === 'list_chat_destinations')?.config
         .description,
-    ).toContain('Pass a returned destination unchanged');
+    ).toContain('Provider and destination kind are required');
+    expect(
+      tools.find(({ name }) => name === 'list_chat_destinations')?.config
+        .inputSchema,
+    ).toEqual(
+      expect.objectContaining({
+        provider: expect.anything(),
+        kind: expect.anything(),
+        query: expect.anything(),
+        destination: expect.anything(),
+        offset: expect.anything(),
+        limit: expect.anything(),
+      }),
+    );
     expect(
       tools.find(({ name }) => name === 'send_chat_message')?.config
         .description,
@@ -96,17 +119,52 @@ describe('Roomote member communication tools', () => {
     },
   );
 
-  it('binds destination discovery to the acting user and optional workspace', async () => {
+  it('binds targeted destination discovery to the acting user and workspace', async () => {
     const lookup = registerTools().find(
       ({ name }) => name === 'list_chat_destinations',
     )!;
 
-    await lookup.handler({ workspaceId: 'T1' });
+    await lookup.handler({
+      provider: 'slack',
+      kind: 'person',
+      query: 'alice',
+      workspaceId: 'T1',
+      offset: 20,
+      limit: 10,
+    });
 
     expect(listCommunicationDestinationsMock).toHaveBeenCalledWith({
       actingUserId: 'user-1',
-      slackTeamId: 'T1',
+      provider: 'slack',
+      kind: 'person',
+      query: 'alice',
+      workspaceId: 'T1',
+      offset: 20,
+      limit: 10,
     });
+  });
+
+  it('rejects an unfiltered MCP lookup before invoking discovery', async () => {
+    const server = new McpServer({ name: 'communication-test', version: '1' });
+    const client = new Client({ name: 'communication-test', version: '1' });
+    registerRoomoteCommunicationTools(server, 'user-1');
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+
+      const result = await client.callTool({
+        name: 'list_chat_destinations',
+        arguments: {},
+      });
+
+      expect(result.isError).toBe(true);
+      expect(listCommunicationDestinationsMock).not.toHaveBeenCalled();
+    } finally {
+      await client.close();
+      await server.close();
+    }
   });
 
   it('routes reactions through the shared communication handler', async () => {

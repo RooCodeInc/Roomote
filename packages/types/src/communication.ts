@@ -16,8 +16,149 @@ export const CHAT_DESTINATIONS_TOOL = {
   name: 'list_chat_destinations',
   title: 'List Chat Destinations',
   description:
-    'List authorized destinations for a new standalone message. Returns exact destination references for the authenticated member on linked Slack or Telegram, linked people in shared Slack workspaces, and discoverable Slack channels. Pass a returned destination unchanged to send_chat_message. Provider limitations are reported explicitly.',
+    'Find authorized destinations for a new standalone message. Provider and destination kind are required. Self lookup supports Slack or Telegram and resolves only the authenticated member without enumerating directories. Slack person and channel lookup requires either a targeted query or an exact destination reference. Results are bounded and paginated; pass a returned destination unchanged to send_chat_message.',
 } as const;
+
+export const CHAT_DESTINATION_LOOKUP_PROVIDERS = ['slack', 'telegram'] as const;
+export const CHAT_DESTINATION_LOOKUP_KINDS = [
+  'self',
+  'person',
+  'channel',
+] as const;
+export const CHAT_DESTINATION_LOOKUP_DEFAULT_LIMIT = 20;
+export const CHAT_DESTINATION_LOOKUP_MAX_LIMIT = 50;
+export const CHAT_DESTINATION_LOOKUP_QUERY_MIN_LENGTH = 2;
+export const CHAT_DESTINATION_LOOKUP_QUERY_MAX_LENGTH = 100;
+
+export const chatDestinationLookupFieldSchemas = {
+  provider: z
+    .enum(CHAT_DESTINATION_LOOKUP_PROVIDERS)
+    .describe(
+      'Destination provider. Use slack or telegram for self; person and channel currently require slack.',
+    ),
+  kind: z
+    .enum(CHAT_DESTINATION_LOOKUP_KINDS)
+    .describe('Destination kind: self, person, or channel.'),
+  query: z
+    .string()
+    .trim()
+    .min(CHAT_DESTINATION_LOOKUP_QUERY_MIN_LENGTH)
+    .max(CHAT_DESTINATION_LOOKUP_QUERY_MAX_LENGTH)
+    .optional()
+    .describe(
+      'Targeted case-insensitive search. Every whitespace-separated term must match the destination name, workspace name, or stable destination reference. Required for person/channel lookup when destination is omitted.',
+    ),
+  destination: z
+    .string()
+    .trim()
+    .min(1)
+    .optional()
+    .describe(
+      'Exact stable destination reference to revalidate. Required for person/channel lookup when query is omitted.',
+    ),
+  workspaceId: z
+    .string()
+    .trim()
+    .min(1)
+    .optional()
+    .describe('Optional Slack workspace ID for person/channel lookup.'),
+  offset: z
+    .number()
+    .int()
+    .nonnegative()
+    .optional()
+    .describe(
+      'Continuation offset returned as nextOffset; omit for the first page.',
+    ),
+  limit: z
+    .number()
+    .int()
+    .positive()
+    .max(CHAT_DESTINATION_LOOKUP_MAX_LIMIT)
+    .optional()
+    .describe(
+      `Maximum destinations to return (default ${CHAT_DESTINATION_LOOKUP_DEFAULT_LIMIT}, at most ${CHAT_DESTINATION_LOOKUP_MAX_LIMIT}).`,
+    ),
+} as const;
+
+export const chatDestinationLookupInputSchema = z
+  .object(chatDestinationLookupFieldSchemas)
+  .strict()
+  .superRefine((input, context) => {
+    if (input.kind === 'self') {
+      if (input.query || input.destination || input.workspaceId) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            'Self lookup accepts only provider, kind, offset, and limit.',
+        });
+      }
+      return;
+    }
+    if (input.provider !== 'slack') {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Person and channel lookup currently require provider slack.',
+      });
+    }
+    if (Boolean(input.query) === Boolean(input.destination)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          'Person and channel lookup requires exactly one of query or destination.',
+      });
+    }
+    if (input.destination) {
+      const expectedKind = input.kind === 'person' ? 'member' : 'channel';
+      const match = input.destination.match(
+        /^slack:([^:]+):(member|channel):([^:]+)$/u,
+      );
+      if (!match || match[2] !== expectedKind) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Exact ${input.kind} lookup requires a slack workspace ${expectedKind} destination reference.`,
+        });
+      } else if (input.workspaceId && match[1] !== input.workspaceId) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'workspaceId must match the exact destination reference.',
+        });
+      }
+    }
+  });
+
+export type ChatDestinationLookupInput = z.infer<
+  typeof chatDestinationLookupInputSchema
+>;
+
+export type ChatDestinationLookupProvider =
+  (typeof CHAT_DESTINATION_LOOKUP_PROVIDERS)[number];
+export type ChatDestinationKind =
+  (typeof CHAT_DESTINATION_LOOKUP_KINDS)[number];
+export type ChatDestination = {
+  destination: string;
+  provider: ChatDestinationLookupProvider;
+  kind: ChatDestinationKind;
+  name: string;
+  workspaceId?: string;
+  workspaceName?: string;
+};
+export type ChatDestinationLookupResponse = {
+  provider: ChatDestinationLookupProvider;
+  kind: ChatDestinationKind;
+  destinations: ChatDestination[];
+  totalCount: number;
+  returnedCount: number;
+  offset: number;
+  limit: number;
+  hasMore: boolean;
+  truncated: boolean;
+  nextOffset?: number;
+  limitations: Array<{
+    provider: ChatDestinationLookupProvider;
+    reason: string;
+  }>;
+};
 
 export const CHAT_MESSAGE_SEND_TOOL = {
   name: 'send_chat_message',

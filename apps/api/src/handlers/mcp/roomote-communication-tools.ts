@@ -3,6 +3,8 @@ import {
   CHAT_DESTINATIONS_TOOL,
   CHAT_MESSAGE_SEND_TOOL,
   CHAT_REACTION_EMOJI_TOOL_NAME,
+  chatDestinationLookupFieldSchemas,
+  chatDestinationLookupInputSchema,
 } from '@roomote/types';
 import { z } from 'zod';
 
@@ -28,14 +30,7 @@ export function registerRoomoteCommunicationTools(
     {
       title: CHAT_DESTINATIONS_TOOL.title,
       description: CHAT_DESTINATIONS_TOOL.description,
-      inputSchema: {
-        workspaceId: z
-          .string()
-          .optional()
-          .describe(
-            'Optional Slack workspace ID to limit channel and linked-person discovery.',
-          ),
-      },
+      inputSchema: chatDestinationLookupFieldSchemas,
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -43,13 +38,21 @@ export function registerRoomoteCommunicationTools(
         openWorldHint: false,
       },
     },
-    async ({ workspaceId }) =>
-      toMcpToolResult(
+    async (params) => {
+      const parsed = chatDestinationLookupInputSchema.safeParse(params);
+      if (!parsed.success) {
+        return toolError({
+          code: 'invalid_destination_lookup',
+          error: parsed.error.issues.map(({ message }) => message).join(' '),
+        });
+      }
+      return toMcpToolResult(
         await listCommunicationDestinations({
           actingUserId,
-          slackTeamId: workspaceId,
+          ...parsed.data,
         }),
-      ),
+      );
+    },
   );
 
   server.registerTool(

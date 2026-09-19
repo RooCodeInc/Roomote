@@ -108,7 +108,10 @@ describe('createIntegrationMcpInstructions', () => {
       'The built-in and on-demand integration catalogs and the HTTP integrations list are not the full tool inventory',
     );
     expect(instructions).toContain(
-      'call `list_chat_destinations`, select the exact authorized destination the user named, then pass that reference unchanged to `send_chat_message`',
+      'call `list_chat_destinations` with the exact provider and kind',
+    );
+    expect(instructions).toContain(
+      'Slack person/channel lookup requires a targeted query or exact destination reference',
     );
     expect(instructions).toContain(
       "Slack or Telegram's absence from an integration catalog, or an empty HTTP integrations list, does not make these exposed tools unavailable",

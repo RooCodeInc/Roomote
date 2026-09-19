@@ -239,8 +239,10 @@ can provide a Slack link or explicitly name Slack to read authorized context,
 then ask Roomote to send an update to an explicit workspace and destination.
 Roomote uses the same destination lookup and send action for your own linked Slack
 account, an explicitly named linked member, or an authorized Slack channel or
-thread. A self destination is always resolved from your authenticated identity;
-it is not a caller-supplied user ID. Public channels require app membership;
+thread. People and channel lookups require a targeted search or exact destination,
+return bounded pages, and can be limited to one workspace. A self destination is
+always resolved from your authenticated identity without enumerating the Slack
+directory; it is not a caller-supplied user ID. Public channels require app membership;
 private channels also require your linked Slack account to be a member, and
 direct messages to another member require workspace-scoped linked identities for
 both participants. Reactions remain scoped to the current inbound message. Roomote

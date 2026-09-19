@@ -230,7 +230,7 @@ describe('slackAppMention', () => {
       'Keep Slack-visible replies in the originating thread by default, even when the context references a customer message, linked feedback thread, or another Slack channel.',
     );
     expect(result.harnessInstructions).toContain(
-      'Use `send_chat_message` only when the current user explicitly asks you to send or relay a standalone message to a destination returned by `list_chat_destinations`. Do not use it to answer third parties just because another conversation appears in context.',
+      'Use `send_chat_message` only when the current user explicitly asks you to send or relay a standalone message to a destination returned by a provider-and-kind-scoped `list_chat_destinations` lookup. For people and channels, use a targeted query or exact destination reference; never request an unfiltered directory. Do not use it to answer third parties just because another conversation appears in context.',
     );
     expect(result.harnessInstructions).toContain(
       'When a blocker, delivery update, input request, useful progress update, or closeout would otherwise leave the Slack thread hanging, post the concise Slack lifecycle reply before finalizing.',

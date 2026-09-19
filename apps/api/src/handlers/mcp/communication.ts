@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
+import { chatDestinationLookupInputSchema } from '@roomote/types';
 
 import type { Variables } from '../../types';
 
@@ -114,9 +115,23 @@ communicationMcp.post('/destinations', async (c) => {
     );
   }
 
+  const parsed = chatDestinationLookupInputSchema.safeParse(
+    await c.req.json().catch(() => null),
+  );
+  if (!parsed.success) {
+    return c.json(
+      {
+        code: 'invalid_destination_lookup',
+        error: parsed.error.issues.map(({ message }) => message).join(' '),
+      },
+      400,
+    );
+  }
+
   return c.json(
     await listCommunicationDestinations({
       actingUserId: taskRun.actingUserId,
+      ...parsed.data,
     }),
   );
 });

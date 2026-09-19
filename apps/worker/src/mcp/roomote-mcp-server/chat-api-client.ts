@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { ChatDestinationLookupInput } from '@roomote/types';
 
 import { buildApiHeaders, fetchWithTimeout } from './api-client.js';
 import { ChatDeliveryError } from './chat-delivery-error.js';
@@ -198,11 +199,12 @@ export async function getChatMessageContext(
 
 export async function listChatDestinations(
   config: RoomoteConfig,
+  input: ChatDestinationLookupInput,
 ): Promise<CommunicationDestinationsResponse> {
   return postToCommunicationLookupEndpoint<CommunicationDestinationsResponse>(
     config,
     'destinations',
-    {},
+    input,
     'Failed to list chat destinations',
   );
 }

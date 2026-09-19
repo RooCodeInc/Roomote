@@ -12,6 +12,8 @@ import {
   CHAT_CHANNEL_MESSAGES_TOOL,
   CHAT_MESSAGE_SEND_TOOL,
   CHAT_MESSAGE_CONTEXT_TOOL,
+  chatDestinationLookupFieldSchemas,
+  chatDestinationLookupInputSchema,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
   CREATE_CUSTOM_SKILL_TOOL,
   UPDATE_CUSTOM_SKILL_TOOL,
@@ -1516,7 +1518,7 @@ if (!isFastAgentChild()) {
     {
       title: CHAT_DESTINATIONS_TOOL.title,
       description: CHAT_DESTINATIONS_TOOL.description,
-      inputSchema: {},
+      inputSchema: chatDestinationLookupFieldSchemas,
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -1524,13 +1526,20 @@ if (!isFastAgentChild()) {
         openWorldHint: false,
       },
     },
-    async (): Promise<ToolResult> => {
+    async (params): Promise<ToolResult> => {
       const roomoteConfig = getRoomoteConfig();
       if (!roomoteConfig) {
         return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
       }
 
-      return handleListChatDestinations(roomoteConfig);
+      const parsed = chatDestinationLookupInputSchema.safeParse(params);
+      if (!parsed.success) {
+        return errorResult(
+          parsed.error.issues.map(({ message }) => message).join(' '),
+          { code: 'invalid_destination_lookup' },
+        );
+      }
+      return handleListChatDestinations(parsed.data, roomoteConfig);
     },
   );
 

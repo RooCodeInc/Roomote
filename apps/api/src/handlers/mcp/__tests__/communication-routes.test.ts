@@ -80,7 +80,14 @@ describe('communication MCP channel routes', () => {
   it('lists normalized destinations for the task acting user', async () => {
     loadTaskRunMock.mockResolvedValue({ actingUserId: 'user-1', payload: {} });
     listCommunicationDestinationsMock.mockResolvedValue({
-      destinationCount: 1,
+      provider: 'telegram',
+      kind: 'self',
+      totalCount: 1,
+      returnedCount: 1,
+      offset: 0,
+      limit: 20,
+      hasMore: false,
+      truncated: false,
       destinations: [{ destination: 'telegram:me' }],
       limitations: [],
     });
@@ -91,12 +98,40 @@ describe('communication MCP channel routes', () => {
       userId: 'user-1',
       principal: 'user',
       version: 1,
-    }).request('/communication/destinations', { method: 'POST' });
+    }).request('/communication/destinations', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ provider: 'telegram', kind: 'self' }),
+    });
 
     expect(response.status).toBe(200);
     expect(listCommunicationDestinationsMock).toHaveBeenCalledWith({
       actingUserId: 'user-1',
+      provider: 'telegram',
+      kind: 'self',
     });
+  });
+
+  it('rejects an unfiltered destination request', async () => {
+    loadTaskRunMock.mockResolvedValue({ actingUserId: 'user-1', payload: {} });
+
+    const response = await createApp({
+      tokenType: 'run',
+      runId: 42,
+      userId: 'user-1',
+      principal: 'user',
+      version: 1,
+    }).request('/communication/destinations', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      code: 'invalid_destination_lookup',
+    });
+    expect(listCommunicationDestinationsMock).not.toHaveBeenCalled();
   });
 
   it('sends destination and message through the task acting user', async () => {

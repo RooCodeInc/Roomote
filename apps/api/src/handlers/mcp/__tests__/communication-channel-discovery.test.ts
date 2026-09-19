@@ -328,52 +328,112 @@ describe('listCommunicationChannels', () => {
     expect(findSlackUserMappingsMock).toHaveBeenCalledTimes(2);
   });
 
-  it('normalizes linked self, Slack channel, and linked-person destinations', async () => {
-    hasUserDirectMessageIdentityMock.mockImplementation(
-      async (provider: string) => provider === 'telegram',
-    );
-    findSlackInstallationsMock.mockResolvedValue([
-      { botAccessToken: 'token-1', teamId: 'T1', teamName: 'One' },
-    ]);
-    findSlackUserMappingsMock
-      .mockResolvedValueOnce([{ slackTeamId: 'T1' }])
-      .mockResolvedValueOnce([
-        {
-          slackUserId: 'U-LINKED',
-          userId: 'user-2',
-          user: { name: 'Linked Member', deletedAt: null },
-        },
-      ]);
-    listPublicChannelsMock.mockResolvedValue([
-      {
-        id: 'C1',
-        name: 'shipping',
-        isPrivate: false,
-        isMember: true,
-      },
-    ]);
+  it('resolves only the requested Telegram self destination without enumerating Slack', async () => {
+    hasUserDirectMessageIdentityMock.mockResolvedValue(true);
 
     await expect(
-      listCommunicationDestinations({ actingUserId: 'user-1' }),
+      listCommunicationDestinations({
+        actingUserId: 'user-1',
+        provider: 'telegram',
+        kind: 'self',
+      }),
     ).resolves.toMatchObject({
-      destinationCount: 3,
+      provider: 'telegram',
+      kind: 'self',
+      totalCount: 1,
+      returnedCount: 1,
+      hasMore: false,
+      truncated: false,
       destinations: [
         {
           destination: 'telegram:me',
           provider: 'telegram',
           kind: 'self',
         },
-        {
-          destination: 'slack:T1:channel:C1',
-          provider: 'slack',
-          kind: 'channel',
-        },
-        {
-          destination: 'slack:T1:member:U-LINKED',
-          provider: 'slack',
-          kind: 'person',
-        },
       ],
     });
+
+    expect(hasUserDirectMessageIdentityMock).toHaveBeenCalledWith(
+      'telegram',
+      'user-1',
+    );
+    expect(findSlackInstallationsMock).not.toHaveBeenCalled();
+    expect(findSlackUserMappingsMock).not.toHaveBeenCalled();
+    expect(listPublicChannelsMock).not.toHaveBeenCalled();
+  });
+
+  it('bounds and paginates targeted Slack channel search', async () => {
+    findSlackInstallationsMock.mockResolvedValue([
+      { botAccessToken: 'token-1', teamId: 'T1', teamName: 'One' },
+    ]);
+    listPublicChannelsMock.mockResolvedValue(
+      Array.from({ length: 75 }, (_, index) => ({
+        id: `C${index}`,
+        name: `shipping-${String(index).padStart(3, '0')}`,
+        isPrivate: false,
+        isMember: true,
+      })),
+    );
+
+    const result = await listCommunicationDestinations({
+      actingUserId: 'user-1',
+      provider: 'slack',
+      kind: 'channel',
+      query: 'shipping',
+    });
+
+    expect(result).toMatchObject({
+      provider: 'slack',
+      kind: 'channel',
+      totalCount: 75,
+      returnedCount: 20,
+      offset: 0,
+      limit: 20,
+      hasMore: true,
+      truncated: true,
+      nextOffset: 20,
+    });
+    expect(result.destinations).toHaveLength(20);
+    expect(findSlackUserMappingsMock).not.toHaveBeenCalled();
+  });
+
+  it('paginates targeted linked-person search inside one Slack workspace', async () => {
+    findSlackInstallationsMock.mockResolvedValue([
+      { botAccessToken: 'token-1', teamId: 'T1', teamName: 'One' },
+      { botAccessToken: 'token-2', teamId: 'T2', teamName: 'Two' },
+    ]);
+    findSlackUserMappingsMock
+      .mockResolvedValueOnce([{ slackTeamId: 'T1' }])
+      .mockResolvedValueOnce(
+        Array.from({ length: 55 }, (_, index) => ({
+          slackUserId: `U${index}`,
+          userId: `user-${index + 2}`,
+          user: { name: `Linked Member ${index}`, deletedAt: null },
+        })),
+      );
+
+    const result = await listCommunicationDestinations({
+      actingUserId: 'user-1',
+      provider: 'slack',
+      kind: 'person',
+      query: 'linked member',
+      workspaceId: 'T1',
+      offset: 20,
+      limit: 20,
+    });
+
+    expect(result).toMatchObject({
+      totalCount: 55,
+      returnedCount: 20,
+      offset: 20,
+      limit: 20,
+      hasMore: true,
+      truncated: true,
+      nextOffset: 40,
+    });
+    expect(
+      result.destinations.every(({ workspaceId }) => workspaceId === 'T1'),
+    ).toBe(true);
+    expect(listPublicChannelsMock).not.toHaveBeenCalled();
   });
 });

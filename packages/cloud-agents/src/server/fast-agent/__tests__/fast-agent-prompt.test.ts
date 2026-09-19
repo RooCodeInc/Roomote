@@ -2268,7 +2268,10 @@ describe('buildFastAgentSystemPrompt', () => {
       'The built-in and on-demand integration catalogs and the HTTP integrations list are not the full tool inventory',
     );
     expect(prompt).toContain(
-      'call `list_chat_destinations`, select the exact authorized destination the user named, then pass that reference unchanged to `send_chat_message`',
+      'call `list_chat_destinations` with the exact provider and kind',
+    );
+    expect(prompt).toContain(
+      'follow `nextOffset` only when more candidates are genuinely needed',
     );
     expect(prompt).toContain(
       'A `slack:me` or `telegram:me` destination always resolves from the authenticated member',

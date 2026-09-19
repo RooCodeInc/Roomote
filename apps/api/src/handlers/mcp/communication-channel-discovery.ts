@@ -13,8 +13,15 @@ import {
   hasUserDirectMessageIdentity,
 } from '@roomote/sdk/server';
 import {
+  CHAT_DESTINATION_LOOKUP_DEFAULT_LIMIT,
   communicationProviders,
   getCommunicationProviderDisplayName,
+  chatDestinationLookupInputSchema,
+  type ChatDestination,
+  type ChatDestinationKind,
+  type ChatDestinationLookupInput,
+  type ChatDestinationLookupProvider,
+  type ChatDestinationLookupResponse,
   type CommunicationProvider,
 } from '@roomote/types';
 
@@ -50,24 +57,6 @@ type CommunicationChannelsPayload = {
   platforms: CommunicationPlatformChannels[];
 };
 
-type CommunicationDestination = {
-  destination: string;
-  provider: 'slack' | 'telegram';
-  kind: 'self' | 'channel' | 'person';
-  name: string;
-  workspaceId?: string;
-  workspaceName?: string;
-};
-
-type CommunicationDestinationsPayload = {
-  destinationCount: number;
-  destinations: CommunicationDestination[];
-  limitations: Array<{
-    provider: CommunicationProvider;
-    reason: string;
-  }>;
-};
-
 const DISCORD_CHANNEL_KINDS: Record<number, string> = {
   0: 'text',
   5: 'announcement',
@@ -75,11 +64,14 @@ const DISCORD_CHANNEL_KINDS: Record<number, string> = {
   16: 'forum',
 };
 
-async function listSlackChannels(
-  actingUserId: string | null,
-  slackTeamId: string | null,
-): Promise<CommunicationPlatformChannels> {
-  const installations = (
+async function getSlackInstallations(slackTeamId: string | null): Promise<
+  Array<{
+    botAccessToken: string;
+    teamId: string;
+    teamName: string;
+  }>
+> {
+  return (
     await db.query.slackInstallations.findMany({
       columns: {
         botAccessToken: true,
@@ -91,34 +83,16 @@ async function listSlackChannels(
   ).filter(
     (installation) => !slackTeamId || installation.teamId === slackTeamId,
   );
-  const actingWorkspaceIds = new Set(
-    actingUserId
-      ? (
-          await db.query.slackUserMappings.findMany({
-            columns: { slackTeamId: true },
-            where: eq(slackUserMappings.userId, actingUserId),
-          })
-        ).map(({ slackTeamId }) => slackTeamId)
-      : [],
-  );
-  const destinations = await Promise.all(
-    installations.map(async (installation) => {
-      const slack = new SlackNotifier(installation.botAccessToken);
-      const [visibleChannels, linkedRecipients] = await Promise.all([
-        slack.listPublicChannels(),
-        actingWorkspaceIds.has(installation.teamId)
-          ? db.query.slackUserMappings.findMany({
-              columns: { slackUserId: true, userId: true },
-              where: eq(slackUserMappings.slackTeamId, installation.teamId),
-              with: {
-                user: { columns: { name: true, deletedAt: true } },
-              },
-            })
-          : [],
-      ]);
+}
 
-      return {
-        channels: visibleChannels
+async function discoverSlackChannels(
+  installations: Awaited<ReturnType<typeof getSlackInstallations>>,
+): Promise<DiscoveredCommunicationChannel[]> {
+  return (
+    await Promise.all(
+      installations.map(async (installation) => {
+        const slack = new SlackNotifier(installation.botAccessToken);
+        return (await slack.listPublicChannels())
           .filter(
             (channel) =>
               channel.isMember === true && channel.isPrivate === false,
@@ -129,8 +103,38 @@ async function listSlackChannels(
             kind: channel.isPrivate ? 'private' : 'public',
             workspaceId: installation.teamId,
             workspaceName: installation.teamName,
-          })),
-        directMessageRecipients: linkedRecipients.flatMap((mapping) =>
+          }));
+      }),
+    )
+  ).flat();
+}
+
+async function discoverSlackRecipients(
+  installations: Awaited<ReturnType<typeof getSlackInstallations>>,
+  actingUserId: string | null,
+): Promise<DiscoveredDirectMessageRecipient[]> {
+  const actingWorkspaceIds = new Set(
+    actingUserId
+      ? (
+          await db.query.slackUserMappings.findMany({
+            columns: { slackTeamId: true },
+            where: eq(slackUserMappings.userId, actingUserId),
+          })
+        ).map(({ slackTeamId }) => slackTeamId)
+      : [],
+  );
+  return (
+    await Promise.all(
+      installations.map(async (installation) => {
+        if (!actingWorkspaceIds.has(installation.teamId)) return [];
+        const linkedRecipients = await db.query.slackUserMappings.findMany({
+          columns: { slackUserId: true, userId: true },
+          where: eq(slackUserMappings.slackTeamId, installation.teamId),
+          with: {
+            user: { columns: { name: true, deletedAt: true } },
+          },
+        });
+        return linkedRecipients.flatMap((mapping) =>
           mapping.userId !== actingUserId &&
           mapping.user &&
           !mapping.user.deletedAt
@@ -143,20 +147,29 @@ async function listSlackChannels(
                 },
               ]
             : [],
-        ),
-      };
-    }),
-  );
+        );
+      }),
+    )
+  ).flat();
+}
+
+async function listSlackChannels(
+  actingUserId: string | null,
+  slackTeamId: string | null,
+): Promise<CommunicationPlatformChannels> {
+  const installations = await getSlackInstallations(slackTeamId);
+  const [channels, directMessageRecipients] = await Promise.all([
+    discoverSlackChannels(installations),
+    discoverSlackRecipients(installations, actingUserId),
+  ]);
 
   return {
     provider: 'slack',
     platform: getCommunicationProviderDisplayName('slack'),
     connected: installations.length > 0,
     discoverySupported: true,
-    channels: destinations.flatMap(({ channels }) => channels),
-    directMessageRecipients: destinations.flatMap(
-      ({ directMessageRecipients }) => directMessageRecipients,
-    ),
+    channels,
+    directMessageRecipients,
   };
 }
 
@@ -304,76 +317,138 @@ export async function listCommunicationChannels(options: {
   };
 }
 
-export async function listCommunicationDestinations(options: {
-  actingUserId: string;
-  slackTeamId?: string | null;
-}): Promise<CommunicationDestinationsPayload> {
-  const actingUserId = options.actingUserId.trim();
-  const [catalog, hasSlackSelf, hasTelegramSelf] = await Promise.all([
-    listCommunicationChannels(options),
-    hasUserDirectMessageIdentity('slack', actingUserId),
-    hasUserDirectMessageIdentity('telegram', actingUserId),
-  ]);
-  const slack = catalog.platforms.find(({ provider }) => provider === 'slack');
-  const destinations: CommunicationDestination[] = [
-    ...(hasSlackSelf
-      ? [
-          {
-            destination: 'slack:me',
-            provider: 'slack' as const,
-            kind: 'self' as const,
-            name: 'Me on Slack',
-          },
-        ]
-      : []),
-    ...(hasTelegramSelf
-      ? [
-          {
-            destination: 'telegram:me',
-            provider: 'telegram' as const,
-            kind: 'self' as const,
-            name: 'Me on Telegram',
-          },
-        ]
-      : []),
-    ...(slack?.channels.flatMap((channel) =>
-      channel.workspaceId
+function matchesDestinationQuery(
+  destination: ChatDestination,
+  query: string,
+): boolean {
+  const searchable = [
+    destination.name,
+    destination.workspaceName,
+    destination.destination,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return query
+    .toLowerCase()
+    .split(/\s+/u)
+    .every((term) => searchable.includes(term));
+}
+
+function paginateDestinations(params: {
+  provider: ChatDestinationLookupProvider;
+  kind: ChatDestinationKind;
+  destinations: ChatDestination[];
+  offset?: number;
+  limit?: number;
+  limitations?: ChatDestinationLookupResponse['limitations'];
+}): ChatDestinationLookupResponse {
+  const offset = params.offset ?? 0;
+  const limit = params.limit ?? CHAT_DESTINATION_LOOKUP_DEFAULT_LIMIT;
+  const sorted = [...params.destinations].sort((left, right) =>
+    [left.workspaceName ?? '', left.name, left.destination]
+      .join('\u0000')
+      .localeCompare(
+        [right.workspaceName ?? '', right.name, right.destination].join(
+          '\u0000',
+        ),
+      ),
+  );
+  const destinations = sorted.slice(offset, offset + limit);
+  const nextOffset =
+    offset + destinations.length < sorted.length
+      ? offset + destinations.length
+      : undefined;
+  return {
+    provider: params.provider,
+    kind: params.kind,
+    destinations,
+    totalCount: sorted.length,
+    returnedCount: destinations.length,
+    offset,
+    limit,
+    hasMore: nextOffset !== undefined,
+    truncated: offset > 0 || nextOffset !== undefined,
+    ...(nextOffset !== undefined ? { nextOffset } : {}),
+    limitations: params.limitations ?? [],
+  };
+}
+
+export async function listCommunicationDestinations(
+  options: ChatDestinationLookupInput & { actingUserId: string },
+): Promise<ChatDestinationLookupResponse> {
+  const { actingUserId: rawActingUserId, ...rawInput } = options;
+  const input = chatDestinationLookupInputSchema.parse(rawInput);
+  const actingUserId = rawActingUserId.trim();
+
+  if (input.kind === 'self') {
+    const linked = await hasUserDirectMessageIdentity(
+      input.provider,
+      actingUserId,
+    );
+    return paginateDestinations({
+      provider: input.provider,
+      kind: input.kind,
+      destinations: linked
         ? [
             {
-              destination: `slack:${channel.workspaceId}:channel:${channel.id}`,
-              provider: 'slack' as const,
-              kind: 'channel' as const,
-              name: channel.name,
-              workspaceId: channel.workspaceId,
-              workspaceName: channel.workspaceName,
+              destination: `${input.provider}:me`,
+              provider: input.provider,
+              kind: 'self',
+              name: `Me on ${getCommunicationProviderDisplayName(input.provider)}`,
             },
           ]
         : [],
-    ) ?? []),
-    ...(slack?.directMessageRecipients?.map((recipient) => ({
-      destination: `slack:${recipient.workspaceId}:member:${recipient.id}`,
-      provider: 'slack' as const,
-      kind: 'person' as const,
-      name: recipient.name,
-      workspaceId: recipient.workspaceId,
-      workspaceName: recipient.workspaceName,
-    })) ?? []),
-  ];
+      offset: input.offset,
+      limit: input.limit,
+      limitations: linked
+        ? []
+        : [
+            {
+              provider: input.provider,
+              reason: `The authenticated member does not have a linked ${getCommunicationProviderDisplayName(input.provider)} identity.`,
+            },
+          ],
+    });
+  }
 
-  return {
-    destinationCount: destinations.length,
-    destinations,
-    limitations: catalog.platforms.flatMap((platform) => {
-      if (platform.provider === 'slack') return [];
-      if (platform.limitation) {
-        return [{ provider: platform.provider, reason: platform.limitation }];
-      }
-      return [
-        {
-          provider: platform.provider,
-          reason: `${platform.platform} destinations are not available through this lookup. Only a trusted task-configured current destination may be used when the task already targets that provider.`,
-        },
-      ];
-    }),
-  };
+  const installations = await getSlackInstallations(input.workspaceId ?? null);
+  const destinations: ChatDestination[] =
+    input.kind === 'channel'
+      ? (await discoverSlackChannels(installations)).flatMap((channel) =>
+          channel.workspaceId
+            ? [
+                {
+                  destination: `slack:${channel.workspaceId}:channel:${channel.id}`,
+                  provider: 'slack',
+                  kind: 'channel',
+                  name: channel.name,
+                  workspaceId: channel.workspaceId,
+                  workspaceName: channel.workspaceName,
+                },
+              ]
+            : [],
+        )
+      : (await discoverSlackRecipients(installations, actingUserId)).map(
+          (recipient) => ({
+            destination: `slack:${recipient.workspaceId}:member:${recipient.id}`,
+            provider: 'slack',
+            kind: 'person',
+            name: recipient.name,
+            workspaceId: recipient.workspaceId,
+            workspaceName: recipient.workspaceName,
+          }),
+        );
+  const filtered = destinations.filter((destination) =>
+    input.destination
+      ? destination.destination === input.destination
+      : matchesDestinationQuery(destination, input.query!),
+  );
+  return paginateDestinations({
+    provider: input.provider,
+    kind: input.kind,
+    destinations: filtered,
+    offset: input.offset,
+    limit: input.limit,
+  });
 }
