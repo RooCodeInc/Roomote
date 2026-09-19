@@ -11,7 +11,7 @@ Roomote 1.12 expands self-service integrations and repository discovery, adds br
 - Connect built-in integrations and personal or shared remote MCP servers directly from Sessions, with integration keys available to every active member.
 - Find connected repositories live by name or description from Fast Sessions and task sandboxes, including deployments without configured environments.
 - Receive browser attention alerts and automation reports by email, with secure implicit verification when replying to Roomote-initiated email.
-- Use Kimi for Coding again after its upstream catalog rename, with saved model selections moved to Kimi's documented model id.
+- Delete Sessions with their direct Memory, cycle through artifacts, and recover more reliably from setup, worker, and initial page-loading failures.
 
 ### Minor changes
 
