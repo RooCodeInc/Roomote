@@ -13,7 +13,12 @@ describe('Slack MCP setup service detection', () => {
 
     expect(
       findSlackMcpSetupServicesInText(
-        'Check <https://dash.cloudflare.com/example/workers|this Worker>!!!!',
+        'Check <https://dash.cloudflare.com/example/workers|this Worker>.',
+      ).map((service) => service.id),
+    ).toEqual(['cloudflare']);
+    expect(
+      findSlackMcpSetupServicesInText(
+        'Check https://dash.cloudflare.com/example/workers!!!!',
       ).map((service) => service.id),
     ).toEqual(['cloudflare']);
   });
