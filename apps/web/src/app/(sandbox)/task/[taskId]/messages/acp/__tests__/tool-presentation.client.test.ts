@@ -74,6 +74,7 @@ describe('tool presentation resolver', () => {
     ['request_environment_variables', 'terminal'],
     ['report_platform_issue', 'alert'],
     ['submit_automation_work_items', 'task'],
+    ['list_chat_destinations', 'messages'],
     ['list_chat_channels', 'messages'],
     ['get_chat_channel_messages', 'messages'],
     ['get_chat_message_context', 'messages'],

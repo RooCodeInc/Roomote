@@ -2,6 +2,29 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.12.1 (2026-09-19)
+
+Roomote 1.12.1 restores model and messaging reliability, strengthens Fast Session evidence and credential handling, and improves automation delivery.
+
+### Highlights
+
+- Restore Kimi for Coding and resolve saved provider credentials for models selected on individual Sessions.
+- Keep Slack and Telegram messaging reliable with bounded provider handling, authenticated destinations, and traceable self-DM delivery.
+- Deliver complete automation outcomes and email actions while verifying delegated-task reports against concrete evidence.
+- Restore integration authentication for self-hosted Fast Sessions and limit helper processes to the environment values they need.
+
+### Patch changes
+
+- Self-hosted Fast Sessions running through BullMQ can mint the authentication tokens required by structured review and deployment integrations instead of starting with no available integration tools. Thanks to @pridemusvaire for contributing this fix.
+- Automation reports now wait for delegated work to finish instead of publishing an internal handoff, and email reports include the same relevant navigation and configuration actions as Slack whenever those actions are available.
+- Fast Sessions now verify delegated-task completion and blocker reports against concrete evidence, reuse sufficient proof already supplied, and make one bounded recovery attempt when the reported result is incomplete or inconsistent.
+- Picking a model for a single Session from a provider that none of the deployment's default models use no longer fails with a missing API key error. The provider credential saved in Settings is now resolved for the picked model.
+- Kimi for Coding works again in sessions and tasks. The public model catalog OpenCode reads at runtime renamed this provider, so every request failed before it was sent. Roomote now registers the provider itself instead of depending on that catalog entry. Saved `kimi-for-coding/k2p7` selections move to `kimi-for-coding/kimi-for-coding`, the id Kimi now documents for that model.
+- Keep Slack messages reliable under provider limits by safely truncating oversized content, bounding rate-limit retries, and preventing cached thread reads from overwriting newer edits or hiding deletions.
+- Standalone Telegram messages to your linked account now use a managed private topic when Threaded Mode is enabled and return provider delivery details, so accepted self-DMs are reliably received and traceable without inheriting an unrelated chat or topic.
+- The OpenCode helper process used for Fast Sessions and helper model calls now receives only the environment it uses: model-provider credentials (including any declared in `R_MODEL_ENV_KEYS`) and the variables passed to it explicitly.
+- Explicit messaging requests now use one provider-neutral destination lookup and send flow across Fast Sessions and tasks, with bounded Slack discovery, authenticated self destinations for Slack and Telegram, and the existing provider access checks.
+
 ## 1.12.0 (2026-09-18)
 
 Roomote 1.12 expands self-service integrations and repository discovery, adds browser and email delivery options, and improves Session reliability across web and Slack.

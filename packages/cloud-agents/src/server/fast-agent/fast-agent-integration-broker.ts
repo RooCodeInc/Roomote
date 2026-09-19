@@ -28,6 +28,11 @@ import { resolveGitLabInstanceHost } from '@roomote/gitlab';
 import {
   createMemoryMcpInstructions,
   BRAIN_MCP_ID,
+  CHAT_DESTINATIONS_TOOL,
+  CHAT_MESSAGE_SEND_TOOL_NAME,
+  LEGACY_CHAT_CHANNELS_TOOL_NAME,
+  LEGACY_CHAT_CHANNEL_POST_TOOL_NAME,
+  LEGACY_CHAT_SELF_DIRECT_MESSAGE_TOOL_NAME,
   MCP_INTEGRATION_PROXY_PATH_PREFIX,
   MCP_ROUTING_PROXY_PATH_PREFIX,
   ROOMOTE_MCP_ID,
@@ -63,6 +68,20 @@ export type FastAgentIntegration = {
     deploymentProxy?: boolean;
   };
 };
+
+function normalizeDisabledToolNames(names: string[]): Set<string> {
+  const disabled = new Set(names);
+  if (disabled.has(LEGACY_CHAT_CHANNELS_TOOL_NAME)) {
+    disabled.add(CHAT_DESTINATIONS_TOOL.name);
+  }
+  if (
+    disabled.has(LEGACY_CHAT_CHANNEL_POST_TOOL_NAME) ||
+    disabled.has(LEGACY_CHAT_SELF_DIRECT_MESSAGE_TOOL_NAME)
+  ) {
+    disabled.add(CHAT_MESSAGE_SEND_TOOL_NAME);
+  }
+  return disabled;
+}
 
 type FastAgentIntegrationCandidate = Omit<FastAgentIntegration, 'tools'> & {
   disabledTools: Set<string>;
@@ -526,7 +545,7 @@ export async function listFastAgentIntegrations(
       integrationId: id,
       config,
     }),
-    disabledTools: new Set(config.disabledTools ?? []),
+    disabledTools: normalizeDisabledToolNames(config.disabledTools ?? []),
   }));
 
   if (githubInstallation && !configuredServers.github) {

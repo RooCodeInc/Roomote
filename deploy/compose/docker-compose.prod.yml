@@ -257,6 +257,9 @@ x-roomote-bullmq-env: &roomote-bullmq-env
   REDIS_URL: ${REDIS_URL:-redis://redis:6379}
   DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:?DASHBOARD_PASSWORD is required}
   ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY is required}
+  # Fast Agent mints MCP/auth tokens on this service.
+  JOB_AUTH_PRIVATE_KEY: ${JOB_AUTH_PRIVATE_KEY:?JOB_AUTH_PRIVATE_KEY is required}
+  JOB_AUTH_PUBLIC_KEY: ${JOB_AUTH_PUBLIC_KEY:?JOB_AUTH_PUBLIC_KEY is required}
   DEFAULT_COMPUTE_PROVIDER: ${DEFAULT_COMPUTE_PROVIDER:-docker}
   # Mirrors the controller's worker image/release resolution so the
   # "Validate environment" checks report what task boots will actually use.

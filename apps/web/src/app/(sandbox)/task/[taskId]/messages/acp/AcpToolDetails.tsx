@@ -251,6 +251,7 @@ function getVisibleToolInput(
       ? 'query'
       : toolName === 'send_task_message' ||
           toolName === 'send_chat_reply' ||
+          toolName === 'send_chat_message' ||
           toolName === 'report_to_parent_session'
         ? 'message'
         : toolName === 'inspect_images'

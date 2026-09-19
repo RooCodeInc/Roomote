@@ -521,6 +521,7 @@ describe('payload fields and prompt context', () => {
     });
     expect(buildDestinationPromptContext(prepared)).toEqual({
       channelTag: 'channel_id',
+      destinationRef: 'roomote@example.test',
       postToolName: 'send_chat_reply',
       surfaceLabel: 'Email',
     });
@@ -563,7 +564,11 @@ describe('payload fields and prompt context', () => {
         teamId: 'T-B',
         source: 'manager_channel',
       }),
-    ).toEqual({ teamId: 'T-B' });
+    ).toEqual({
+      communicationProvider: 'slack',
+      communicationChannelId: 'C123',
+      teamId: 'T-B',
+    });
   });
   it('stamps nothing for slack destinations', () => {
     expect(
@@ -572,7 +577,10 @@ describe('payload fields and prompt context', () => {
         channelId: 'C123',
         source: 'manager_channel',
       }),
-    ).toEqual({});
+    ).toEqual({
+      communicationProvider: 'slack',
+      communicationChannelId: 'C123',
+    });
   });
 
   it('stamps communication fields for teams destinations', () => {
@@ -598,8 +606,9 @@ describe('payload fields and prompt context', () => {
         source: 'manager_channel',
       }),
     ).toEqual({
-      channelTag: 'slack_channel_id',
-      postToolName: 'post_to_channel',
+      channelTag: 'chat_destination',
+      destinationRef: 'slack:current',
+      postToolName: 'send_chat_message',
       surfaceLabel: 'Slack',
     });
     expect(
@@ -609,8 +618,9 @@ describe('payload fields and prompt context', () => {
         source: 'automation_target',
       }),
     ).toEqual({
-      channelTag: 'channel_id',
-      postToolName: 'post_to_channel',
+      channelTag: 'chat_destination',
+      destinationRef: 'telegram:current',
+      postToolName: 'send_chat_message',
       surfaceLabel: 'Telegram',
     });
     expect(
@@ -620,8 +630,9 @@ describe('payload fields and prompt context', () => {
         source: 'automation_target',
       }),
     ).toEqual({
-      channelTag: 'channel_id',
-      postToolName: 'post_to_channel',
+      channelTag: 'chat_destination',
+      destinationRef: 'discord:current',
+      postToolName: 'send_chat_message',
       surfaceLabel: 'Discord',
     });
   });

@@ -127,9 +127,11 @@ vi.mock('../destination', () => ({
     teamId?: string;
   }) =>
     destination.provider === 'slack'
-      ? destination.teamId
-        ? { teamId: destination.teamId }
-        : {}
+      ? {
+          communicationProvider: 'slack',
+          communicationChannelId: destination.channelId,
+          ...(destination.teamId ? { teamId: destination.teamId } : {}),
+        }
       : {
           communicationProvider: destination.provider,
           communicationChannelId: destination.channelId,
@@ -138,9 +140,9 @@ vi.mock('../destination', () => ({
             : {}),
         },
   buildDestinationPromptContext: (destination: { provider: string }) => ({
-    channelTag:
-      destination.provider === 'slack' ? 'slack_channel_id' : 'channel_id',
-    postToolName: 'post_to_channel',
+    channelTag: 'chat_destination',
+    destinationRef: `${destination.provider}:current`,
+    postToolName: 'send_chat_message',
     surfaceLabel: destination.provider,
   }),
 }));

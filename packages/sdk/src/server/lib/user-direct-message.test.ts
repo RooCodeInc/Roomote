@@ -13,6 +13,8 @@ const {
   mockSlackUserMappingsFindFirst,
   mockTeamsUserMappingsFindFirst,
   mockTelegramPostMessage,
+  mockTelegramGetBotInfo,
+  mockTelegramCreateForumTopic,
   mockTelegramUserMappingsFindFirst,
   mockStartAgentMailConversation,
   mockCanStartAgentMailConversation,
@@ -36,6 +38,8 @@ const {
   mockSlackUserMappingsFindFirst: vi.fn(),
   mockTeamsUserMappingsFindFirst: vi.fn(),
   mockTelegramPostMessage: vi.fn(),
+  mockTelegramGetBotInfo: vi.fn(),
+  mockTelegramCreateForumTopic: vi.fn(),
   mockTelegramUserMappingsFindFirst: vi.fn(),
   mockStartAgentMailConversation: vi.fn(),
   mockCanStartAgentMailConversation: vi.fn(),
@@ -125,7 +129,11 @@ vi.mock('./teams-communication', () => ({
 
 vi.mock('./telegram-communication', () => ({
   createTelegramCommunicationProviderFromRuntimeCredentials: vi.fn(
-    async () => ({ postMessage: mockTelegramPostMessage }),
+    async () => ({
+      postMessage: mockTelegramPostMessage,
+      getBotInfo: mockTelegramGetBotInfo,
+      createForumTopic: mockTelegramCreateForumTopic,
+    }),
   ),
 }));
 
@@ -155,6 +163,7 @@ import {
   findUserDirectMessageDestination,
   hasAnyUserDirectMessageIdentity,
   sendUserDirectMessage,
+  sendUserDirectMessageWithReceipt,
   sendUserDirectMessageBestEffort,
   sendUserDirectMessageBestEffortWithReceipts,
 } from './user-direct-message';
@@ -284,6 +293,132 @@ describe('sendUserDirectMessage', () => {
       text: 'hello',
       textFormat: 'markdown',
     });
+  });
+
+  it('sends a Telegram self-DM to the linked private chat and returns its receipt', async () => {
+    mockTelegramUserMappingsFindFirst.mockResolvedValue({
+      telegramChatId: '424242',
+    });
+    mockTelegramPostMessage.mockResolvedValue({
+      messageId: 'telegram-message-1',
+    });
+
+    await expect(
+      sendUserDirectMessageWithReceipt({
+        provider: 'telegram',
+        userId: 'user-1',
+        text: 'hello',
+        logContext: 'test',
+      }),
+    ).resolves.toEqual({
+      delivered: true,
+      receipt: {
+        provider: 'telegram',
+        workspaceId: '424242',
+        channelId: '424242',
+        messageId: 'telegram-message-1',
+      },
+    });
+    expect(mockTelegramUserMappingsFindFirst).toHaveBeenCalledWith({
+      where: undefined,
+      columns: { telegramChatId: true },
+    });
+    expect(mockTelegramPostMessage).toHaveBeenCalledWith({
+      channelId: '424242',
+      text: 'hello',
+      textFormat: 'markdown',
+    });
+  });
+
+  it('uses a fresh managed topic for a standalone Telegram self-DM', async () => {
+    mockTelegramUserMappingsFindFirst.mockResolvedValue({
+      telegramChatId: '424242',
+    });
+    mockTelegramGetBotInfo.mockResolvedValue({ hasTopicsEnabled: true });
+    mockTelegramCreateForumTopic.mockResolvedValue({
+      messageThreadId: '77',
+      name: 'Delivery update',
+    });
+    mockTelegramPostMessage.mockResolvedValue({
+      messageId: 'telegram-message-2',
+      threadId: '77',
+    });
+
+    await expect(
+      sendUserDirectMessageWithReceipt({
+        provider: 'telegram',
+        userId: 'user-1',
+        text: 'Delivery update',
+        logContext: 'test',
+        createTelegramTopic: true,
+      }),
+    ).resolves.toEqual({
+      delivered: true,
+      receipt: {
+        provider: 'telegram',
+        workspaceId: '424242',
+        channelId: '424242',
+        messageId: 'telegram-message-2',
+        threadId: '77',
+      },
+    });
+    expect(mockTelegramCreateForumTopic).toHaveBeenCalledWith({
+      channelId: '424242',
+      name: 'Delivery update',
+    });
+    expect(mockTelegramPostMessage).toHaveBeenCalledWith({
+      channelId: '424242',
+      text: 'Delivery update',
+      textFormat: 'markdown',
+      threadId: '77',
+    });
+  });
+
+  it('keeps root delivery when the Telegram bot does not use Threaded Mode', async () => {
+    mockTelegramUserMappingsFindFirst.mockResolvedValue({
+      telegramChatId: '424242',
+    });
+    mockTelegramGetBotInfo.mockResolvedValue({ hasTopicsEnabled: false });
+    mockTelegramPostMessage.mockResolvedValue({
+      messageId: 'telegram-message-3',
+    });
+
+    await expect(
+      sendUserDirectMessageWithReceipt({
+        provider: 'telegram',
+        userId: 'user-1',
+        text: 'Delivery update',
+        logContext: 'test',
+        createTelegramTopic: true,
+      }),
+    ).resolves.toMatchObject({ delivered: true });
+    expect(mockTelegramCreateForumTopic).not.toHaveBeenCalled();
+    expect(mockTelegramPostMessage).toHaveBeenCalledWith({
+      channelId: '424242',
+      text: 'Delivery update',
+      textFormat: 'markdown',
+    });
+  });
+
+  it('fails a threaded standalone Telegram self-DM instead of posting at the chat root', async () => {
+    mockTelegramUserMappingsFindFirst.mockResolvedValue({
+      telegramChatId: '424242',
+    });
+    mockTelegramGetBotInfo.mockResolvedValue({ hasTopicsEnabled: true });
+    mockTelegramCreateForumTopic.mockRejectedValue(
+      new Error('Topic creation failed'),
+    );
+
+    await expect(
+      sendUserDirectMessageWithReceipt({
+        provider: 'telegram',
+        userId: 'user-1',
+        text: 'Delivery update',
+        logContext: 'test',
+        createTelegramTopic: true,
+      }),
+    ).resolves.toEqual({ delivered: false, receipt: null });
+    expect(mockTelegramPostMessage).not.toHaveBeenCalled();
   });
 
   it('treats an accepted email without a recorded receipt as delivered', async () => {

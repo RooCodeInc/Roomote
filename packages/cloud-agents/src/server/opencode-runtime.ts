@@ -14,6 +14,7 @@ import {
   mergeAmazonBedrockProviderConfig,
   mergeBedrockMantleOpenAiProviderConfig,
   mergeBedrockMantleProviderConfig,
+  mergeKimiForCodingProviderConfig,
   mergeOpenAiCompatibleProviderConfig,
   mergeOpenCodeModelReasoningOptions,
   mergeOpenCodeChatGptFastModeOptions,
@@ -36,6 +37,7 @@ import {
 } from '../opencode-prompt-subagents';
 import { OPENCODE_IDENTITY_PLUGIN_SCRIPT } from '../opencode-identity-plugin';
 import { FAST_AGENT_SUBAGENT_TOOL_FILTER } from './fast-agent/fast-agent-tool-policy';
+import { scrubOpenCodeHelperEnv } from './opencode-helper-env';
 import { seedOpenCodePluginDependenciesForEnv } from './opencode-plugin-seed';
 
 const ESCAPE_CHARACTER = String.fromCharCode(27);
@@ -166,9 +168,14 @@ function buildModelBackedOpenCodeConfigContent(
     mergeBedrockMantleProviderConfig(
       mergeBedrockMantleOpenAiProviderConfig(
         mergeOpenAiCompatibleProviderConfig(
-          mergeOpenRouterVariantAliasModels(
-            providerModelConfig,
-            variantAliases,
+          // Kimi for Coding is registered in full rather than left to
+          // OpenCode's runtime catalog, which has renamed the provider id.
+          mergeKimiForCodingProviderConfig(
+            mergeOpenRouterVariantAliasModels(
+              providerModelConfig,
+              variantAliases,
+            ),
+            configuredModelIds,
           ),
           env,
           configuredModelIds,
@@ -424,7 +431,7 @@ function mergeBedrockRegistrationsIntoConfigContent(
     const provider = mergeAmazonBedrockProviderConfig(
       mergeBedrockMantleProviderConfig(
         mergeBedrockMantleOpenAiProviderConfig(
-          existingProvider,
+          mergeKimiForCodingProviderConfig(existingProvider, roleModelIds),
           env,
           roleModelIds,
         ),
@@ -611,6 +618,10 @@ export function buildOpenCodeCliEnv(
   // credentials from a stale shared env file. Helper launches already receive
   // an explicit environment, so they must not source ambient shell state.
   delete env.BASH_ENV;
+
+  // Last, so nothing above can reintroduce them: the helper does not use the
+  // launching service's own configuration.
+  scrubOpenCodeHelperEnv(env, extraEnv);
 
   return env;
 }

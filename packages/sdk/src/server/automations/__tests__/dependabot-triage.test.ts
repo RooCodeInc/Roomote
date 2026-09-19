@@ -196,7 +196,7 @@ describe('dependabotTriageJob buildScanTask', () => {
     }
 
     expect(result.payloads[0]?.description).toContain(
-      '<channel_id>discord-manager-channel</channel_id>',
+      '<chat_destination>discord:current</chat_destination>',
     );
     expect(result.payloads[0]?.description).toContain(
       'standard automation result thread in the configured Discord conversation',

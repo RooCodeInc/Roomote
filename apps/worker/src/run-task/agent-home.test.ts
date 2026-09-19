@@ -108,18 +108,21 @@ describe('createIntegrationMcpInstructions', () => {
       'The built-in and on-demand integration catalogs and the HTTP integrations list are not the full tool inventory',
     );
     expect(instructions).toContain(
-      'use an exposed channel-posting tool for a requested channel post',
+      'call `list_chat_destinations` with the exact provider and kind',
     );
     expect(instructions).toContain(
-      "Slack's absence from an integration catalog or an empty HTTP integrations list does not make that exposed tool unavailable",
+      'Slack person/channel lookup requires a targeted query or exact destination reference',
     );
     expect(instructions).toContain(
-      'When a delegated worker or subagent lacks a posting tool and prepares content that the user asked to deliver, it must return the completed content to the parent instead of posting it',
+      "Slack or Telegram's absence from an integration catalog, or an empty HTTP integrations list, does not make these exposed tools unavailable",
+    );
+    expect(instructions).toContain(
+      'When a delegated worker or subagent lacks `send_chat_message` and prepares content that the user asked to deliver, it must return the completed content to the parent instead of sending it',
     );
     expect(instructions).toContain(
       'The parent remains responsible for making exactly the requested delivery',
     );
-    expect(instructions).toContain('Never duplicate a successful post');
+    expect(instructions).toContain('Never duplicate a successful send');
   });
   it.each(['gbrain', 'supermemory'])(
     'injects shared memory lifecycle guidance for %s',
@@ -854,6 +857,63 @@ describe('generateOpenCodeConfig provider support', () => {
       apiKey: '{env:OPENCODE_GO_API_KEY}',
     });
     expect(result.configContent).not.toContain('go-key');
+  });
+
+  it('registers the Kimi for Coding provider without relying on the OpenCode catalog', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'kimi-for-coding/k3',
+        R_SMALL_MODEL: 'kimi-for-coding/kimi-for-coding',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<
+        string,
+        { models: Record<string, unknown> } & Record<string, unknown>
+      >;
+    };
+
+    // Direct mode: OpenCode reads the key from `env` and the URL from `api`.
+    expect(config.provider['kimi-for-coding']).toMatchObject({
+      npm: '@ai-sdk/anthropic',
+      api: 'https://api.kimi.com/coding/v1',
+      env: ['KIMI_API_KEY'],
+    });
+    expect(config.provider['kimi-for-coding']?.options).toBeUndefined();
+    expect(
+      Object.keys(config.provider['kimi-for-coding']!.models).sort(),
+    ).toEqual([
+      'k3',
+      'k3-256k',
+      'kimi-for-coding',
+      'kimi-for-coding-highspeed',
+    ]);
+  });
+
+  it('rebases Kimi for Coding onto its gateway route while keeping the Anthropic SDK', () => {
+    // The gateway route only allows the Anthropic Messages paths, so the
+    // provider must stay on @ai-sdk/anthropic: an OpenAI-compatible fallback
+    // would call /chat/completions and be rejected.
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'kimi-for-coding/k3',
+        R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
+        R_INFERENCE_GATEWAY_KEYS: 'KIMI_API_KEY',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, Record<string, unknown>>;
+    };
+
+    expect(config.provider['kimi-for-coding']).toMatchObject({
+      npm: '@ai-sdk/anthropic',
+      options: {
+        baseURL: 'https://api.example.com/api/inference/kimi-for-coding/v1',
+        apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
+      },
+    });
   });
 
   it('rebases OpenCode Go onto its inference gateway route', () => {

@@ -297,6 +297,42 @@ describe('buildFastAgentSystemPrompt', () => {
       'Do not stop at acknowledgement, agreement, speculation, restatement, or a plan when meaningful investigation or execution is possible',
     );
   });
+
+  it('requires evidence for task claims and bounds recovery', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+
+    expect(prompt).toContain('## Delegated Task Evidence and Recovery');
+    expect(prompt).toContain(
+      'completion labels, and settled status as reported claims, not proof by themselves',
+    );
+    expect(prompt).toContain(
+      'concrete claim-specific evidence proportional to the claim',
+    );
+    expect(prompt).toContain(
+      'actual check results, artifacts, authoritative provider state, or relevant logs or source',
+    );
+    expect(prompt).toContain('use it without a mandatory redundant recheck');
+    expect(prompt).toContain(
+      'When evidence is missing, inconsistent, or insufficient, inspect the underlying task details',
+    );
+    expect(prompt).toContain(
+      'distinguish what the task reported from what you independently confirmed',
+    );
+    expect(prompt).toContain(
+      'pursue one specific reasonable retry or alternative with available capabilities during authorized follow-through',
+    );
+    expect(prompt).toContain(
+      'avoid repeating an attempt that already failed for the same reason',
+    );
+    expect(prompt).toContain('stop after bounded non-repetitive recovery');
+    expect(prompt).toContain(
+      'a human-authored follow-through may resume a resumable settled task',
+    );
+    expect(prompt).toContain(
+      'automatic follow-through may steer only currently running work and must never reactivate stopped, waiting, settled, failed, or canceled work',
+    );
+  });
+
   it.each(['production', 'preview', 'development', undefined])(
     'shares build identity with normal prompts for %s',
     (appEnv) => {
@@ -414,6 +450,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(eventPrompt).toContain('unless the prompt names a different one');
     expect(eventPrompt).toContain(
       `A \`${NO_REPOSITORIES}\` preference is an explicit request for sandbox execution`,
+    );
+    expect(eventPrompt).toContain(
+      'That handoff is retained in the Session but is not the automation result',
     );
   });
 
@@ -2238,7 +2277,7 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
-  it('keeps native channel delivery separate from unrelated integration catalogs', () => {
+  it('keeps native message delivery separate from unrelated integration catalogs', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
       availableIntegrations: [
@@ -2246,7 +2285,7 @@ describe('buildFastAgentSystemPrompt', () => {
           id: 'roomote',
           name: 'Roomote',
           description: 'Native Roomote capabilities',
-          tools: [{ name: 'post_to_channel' }],
+          tools: [{ name: 'send_chat_message' }],
         },
         {
           id: 'new-relic',
@@ -2268,19 +2307,28 @@ describe('buildFastAgentSystemPrompt', () => {
       'The built-in and on-demand integration catalogs and the HTTP integrations list are not the full tool inventory',
     );
     expect(prompt).toContain(
-      'use an exposed channel-posting tool for a requested channel post',
+      'call `list_chat_destinations` with the exact provider and kind',
     );
     expect(prompt).toContain(
-      "Slack's absence from an integration catalog or an empty HTTP integrations list does not make that exposed tool unavailable",
+      'follow `nextOffset` only when more candidates are genuinely needed',
+    );
+    expect(prompt).toContain(
+      'A `slack:me` or `telegram:me` destination always resolves from the authenticated member',
+    );
+    expect(prompt).toContain(
+      'Do not infer destination references or message another person without an explicit request',
+    );
+    expect(prompt).toContain(
+      "Slack or Telegram's absence from an integration catalog",
     );
     expect(prompt).toContain(
       'Preserve explicit requests to configure a built-in integration, remote MCP, or direct API',
     );
     expect(prompt).toContain(
-      "treat the posting tool's provider and channel permission result as authoritative",
+      "treat each communication tool's provider, linkage, and destination permission result as authoritative",
     );
     expect(prompt).toContain(
-      'When a delegated worker or subagent lacks a posting tool and prepares content that the user asked to deliver, it must return the completed content to the parent instead of posting it',
+      'When a delegated worker or subagent lacks `send_chat_message` and prepares content that the user asked to deliver, it must return the completed content to the parent instead of sending it',
     );
     expect(prompt).toContain(
       'The parent remains responsible for making exactly the requested delivery',

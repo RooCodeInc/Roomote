@@ -19,7 +19,6 @@ import {
 import { createScheduledTriageJob } from './scheduled-triage-runner';
 
 function buildCodeqlTriagePrompt({
-  channelId,
   destination,
   repositoryFullNames,
   repositoryCoverage,
@@ -63,7 +62,7 @@ If there are no actionable alerts, no eligible configured-environment candidates
   <run_mode>read_only</run_mode>
   <trigger>${manualTrigger ? 'manual' : 'scheduled'}</trigger>
   <alert_scope>current_open_codeql_code_scanning_alerts</alert_scope>
-  <${promptContext.channelTag}>${channelId}</${promptContext.channelTag}>
+  <${promptContext.channelTag}>${promptContext.destinationRef}</${promptContext.channelTag}>
   <repository_scope>
 ${repositoryScope}
   </repository_scope>

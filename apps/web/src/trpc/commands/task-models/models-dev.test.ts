@@ -33,6 +33,15 @@ describe('resolveModelsDevSlug', () => {
     );
   });
 
+  it('maps Kimi for Coding ids onto the provider id models.dev renamed it to', () => {
+    expect(resolveModelsDevSlug('kimi-for-coding/k3')).toBe(
+      'kimi-code-plan-cn/k3',
+    );
+    expect(resolveModelsDevSlug('kimi-for-coding/kimi-for-coding')).toBe(
+      'kimi-code-plan-cn/kimi-for-coding',
+    );
+  });
+
   it('strips the vercel/ prefix for AI Gateway routed models', () => {
     expect(resolveModelsDevSlug('vercel/openai/gpt-5.4')).toBe(
       'openai/gpt-5.4',
@@ -539,6 +548,24 @@ describe('suggestModelsFromCatalog', () => {
         query: 'km3',
       }),
     ).toEqual([{ slug: 'moonshotai/kimi-k3', displayName: 'Kimi K3' }]);
+  });
+
+  it('suggests Kimi for Coding models from the provider id models.dev renamed it to', () => {
+    const catalog = buildCatalog({
+      providers: {
+        'kimi-code-plan-cn': {
+          models: { k3: { name: 'Kimi K3' } },
+        },
+      },
+    });
+
+    expect(
+      suggestModelsFromCatalog({
+        catalog,
+        providerId: 'kimi-for-coding',
+        query: 'k3',
+      }),
+    ).toEqual([{ slug: 'k3', displayName: 'Kimi K3' }]);
   });
 });
 

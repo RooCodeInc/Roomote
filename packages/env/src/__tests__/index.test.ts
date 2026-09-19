@@ -572,6 +572,45 @@ describe('Env', () => {
     expect(env.PREVIEW_AUTH_PRIVATE_KEY).toBe('');
   });
 
+  it('requires job auth keys for bullmq because Fast Agent mints MCP tokens', () => {
+    const runtimeEnv: NodeJS.ProcessEnv = {
+      NODE_ENV: 'production',
+      R_APP_ENV: 'production',
+      ROOMOTE_SERVICE: 'bullmq',
+      R_APP_URL: 'https://roomote.example.com',
+      DATABASE_URL: 'postgres://postgres:password@postgres:5432/roomote',
+      REDIS_URL: 'redis://redis:6379',
+      DASHBOARD_PASSWORD: 'dashboard-password',
+      ENCRYPTION_KEY: '12345678901234567890123456789012',
+      JOB_AUTH_PUBLIC_KEY: 'job-public-key',
+    };
+
+    expect(() => createRoomoteEnv(runtimeEnv)).toThrow(
+      /JOB_AUTH_PRIVATE_KEY must be configured/,
+    );
+  });
+
+  it('accepts the bullmq job-auth contract without preview private keys', () => {
+    const runtimeEnv: NodeJS.ProcessEnv = {
+      NODE_ENV: 'production',
+      R_APP_ENV: 'production',
+      ROOMOTE_SERVICE: 'bullmq',
+      R_APP_URL: 'https://roomote.example.com',
+      DATABASE_URL: 'postgres://postgres:password@postgres:5432/roomote',
+      REDIS_URL: 'redis://redis:6379',
+      DASHBOARD_PASSWORD: 'dashboard-password',
+      ENCRYPTION_KEY: '12345678901234567890123456789012',
+      JOB_AUTH_PRIVATE_KEY: 'job-private-key',
+      JOB_AUTH_PUBLIC_KEY: 'job-public-key',
+    };
+
+    const env = createRoomoteEnv(runtimeEnv);
+
+    expect(env.JOB_AUTH_PRIVATE_KEY).toBe('job-private-key');
+    expect(env.JOB_AUTH_PUBLIC_KEY).toBe('job-public-key');
+    expect(env.PREVIEW_AUTH_PRIVATE_KEY).toBe('');
+  });
+
   it('allows the preview proxy to receive public verification keys only', () => {
     const runtimeEnv: NodeJS.ProcessEnv = {
       NODE_ENV: 'production',

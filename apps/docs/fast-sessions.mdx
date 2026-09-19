@@ -237,11 +237,18 @@ Roomote resolves the target provider independently of the conversation you are
 using and applies the target provider's installation, linked-account, and
 channel-access checks. It does not infer access from the originating chat.
 
-Roomote can also post an explicitly requested update to Slack from another chat
-surface. Outside a Slack conversation, name the Slack workspace and destination.
+Roomote uses one destination lookup and one send action for explicitly requested
+standalone messages. The lookup can return your linked Slack or Telegram account,
+linked people in shared Slack workspaces, and accessible Slack channels. Each
+lookup names one provider and destination kind. Self lookup resolves only your
+authenticated identity; people and channel lookup requires a targeted search or
+an exact destination reference. Results are bounded and include a continuation
+offset when more matches exist. Roomote passes the selected destination reference
+through provider-specific delivery and access checks. Outside a Slack conversation,
+name the Slack workspace and destination.
 Public channels require the Roomote app to be a member; private channels also
-require your linked Slack account to be a member, and direct messages require
-workspace-scoped linked identities for both participants.
+require your linked Slack account to be a member, and direct messages to another
+member require workspace-scoped linked identities for both participants.
 
 Follow-ups sent while Roomote is responding are retained before Roomote reports
 that they were accepted. A correction from the same person can steer the active

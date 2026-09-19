@@ -1557,12 +1557,12 @@ describe('fast-agent integration broker', () => {
     ]);
   });
 
-  it('keeps deployment-disabled Roomote channel tools out of Fast inventory', async () => {
+  it('maps legacy disabled messaging tools to the unified Fast inventory', async () => {
     mocks.configuredServers = {
       roomote: {
         url: 'https://app.example.test/mcp',
         headers: {},
-        disabledTools: ['post_to_channel'],
+        disabledTools: ['list_chat_channels', 'send_direct_message_to_self'],
       },
     };
     mocks.listMcpTools.mockResolvedValue([
@@ -1575,8 +1575,8 @@ describe('fast-agent integration broker', () => {
           },
         },
       },
-      { name: 'list_chat_channels' },
-      { name: 'post_to_channel' },
+      { name: 'list_chat_destinations' },
+      { name: 'send_chat_message' },
       { name: 'send_chat_reaction_emoji' },
     ]);
 
@@ -1587,7 +1587,6 @@ describe('fast-agent integration broker', () => {
 
     expect(integrations[0]?.tools.map(({ name }) => name)).toEqual([
       'manage_tasks',
-      'list_chat_channels',
       'send_chat_reaction_emoji',
     ]);
   });

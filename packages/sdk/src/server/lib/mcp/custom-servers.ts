@@ -1,5 +1,6 @@
 import {
   and,
+  count,
   customMcpServers,
   db,
   eq,
@@ -7,19 +8,23 @@ import {
   mcpConnections,
   personalMcpServers,
   users,
+  type DatabaseOrTransaction,
 } from '@roomote/db/server';
 import {
+  MAX_CUSTOM_MCP_SERVERS,
+  MAX_PERSONAL_MCP_SERVERS,
   customMcpConnectionId,
   type CustomMcpServerAuthType,
+  type CustomMcpServerStdioConfig,
+  type CustomMcpServerVisibility,
   type OAuthServerMetadata,
 } from '@roomote/types';
 
-/**
- * A custom MCP server from either table, in one shape. `ownerUserId` is the
- * whole ownership story: null means a deployment server every member shares,
- * a user id means a personal server only that member may reach. Callers that
- * resolve credentials must check it; nothing here does that for them.
- */
+export type CustomMcpServerScope =
+  | { visibility: 'deployment' }
+  | { visibility: 'owner'; ownerUserId: string };
+
+/** One persistence-facing shape for rows stored in either custom MCP table. */
 export interface ResolvedCustomMcpServer {
   id: string;
   ownerUserId: string | null;
@@ -31,6 +36,7 @@ export interface ResolvedCustomMcpServer {
   name: string;
   /** Null only for deployment stdio servers. */
   url: string | null;
+  stdio: CustomMcpServerStdioConfig | null;
   isStdio: boolean;
   authType: CustomMcpServerAuthType;
   headers: Record<string, string> | null;
@@ -38,9 +44,200 @@ export interface ResolvedCustomMcpServer {
   manualClientId: string | null;
   manualClientSecret: string | null;
   oauthServerMetadata: OAuthServerMetadata | null;
+  oauthServerMetadataFetchedAt: Date | null;
   oauthResourceIndicatorDisabled: boolean;
   enabled: boolean;
+  createdAt: Date;
   updatedAt: Date;
+}
+
+export type CustomMcpServerWrite = {
+  id?: string;
+  name: string;
+  url: string | null;
+  stdio?: CustomMcpServerStdioConfig | null;
+  authType: CustomMcpServerAuthType;
+  headers?: Record<string, string> | null;
+  disabledTools?: string[] | null;
+  manualClientId?: string | null;
+  manualClientSecret?: string | null;
+  oauthServerMetadata?: OAuthServerMetadata | null;
+  oauthServerMetadataFetchedAt?: Date | null;
+  oauthResourceIndicatorDisabled?: boolean;
+  enabled?: boolean;
+  createdByUserId: string;
+};
+
+export type CustomMcpServerUpdate = Partial<
+  Pick<
+    CustomMcpServerWrite,
+    | 'url'
+    | 'stdio'
+    | 'authType'
+    | 'headers'
+    | 'disabledTools'
+    | 'manualClientId'
+    | 'manualClientSecret'
+    | 'oauthServerMetadata'
+    | 'oauthServerMetadataFetchedAt'
+    | 'oauthResourceIndicatorDisabled'
+    | 'enabled'
+  >
+> & { updatedAt?: Date };
+
+function resolveDeploymentRow(
+  row: typeof customMcpServers.$inferSelect,
+): ResolvedCustomMcpServer {
+  return {
+    id: row.id,
+    ownerUserId: null,
+    createdByUserId: row.createdByUserId,
+    name: row.name,
+    url: row.url,
+    stdio: row.stdio ?? null,
+    isStdio: Boolean(row.stdio),
+    authType: row.authType,
+    headers: row.headers ?? null,
+    disabledTools: row.disabledTools ?? null,
+    manualClientId: row.manualClientId,
+    manualClientSecret: row.manualClientSecret,
+    oauthServerMetadata: row.oauthServerMetadata ?? null,
+    oauthServerMetadataFetchedAt: row.oauthServerMetadataFetchedAt,
+    oauthResourceIndicatorDisabled: row.oauthResourceIndicatorDisabled,
+    enabled: row.enabled,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function resolvePersonalRow(
+  row: typeof personalMcpServers.$inferSelect,
+): ResolvedCustomMcpServer {
+  return {
+    id: row.id,
+    ownerUserId: row.ownerUserId,
+    createdByUserId: row.ownerUserId,
+    name: row.name,
+    url: row.url,
+    stdio: null,
+    isStdio: false,
+    authType: row.authType,
+    headers: row.headers ?? null,
+    disabledTools: row.disabledTools ?? null,
+    manualClientId: row.manualClientId,
+    manualClientSecret: row.manualClientSecret,
+    oauthServerMetadata: row.oauthServerMetadata ?? null,
+    oauthServerMetadataFetchedAt: row.oauthServerMetadataFetchedAt,
+    oauthResourceIndicatorDisabled: row.oauthResourceIndicatorDisabled,
+    enabled: row.enabled,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+/**
+ * The scoped persistence boundary for custom MCP servers. Feature flows choose
+ * a product scope once; only this module chooses the physical table.
+ */
+export function customMcpServerStore(
+  scope: CustomMcpServerScope,
+  client: DatabaseOrTransaction = db,
+) {
+  return {
+    scope,
+
+    async list(options: { enabledOnly?: boolean } = {}) {
+      if (scope.visibility === 'owner') {
+        const rows = await client.query.personalMcpServers.findMany({
+          where: options.enabledOnly
+            ? and(
+                eq(personalMcpServers.ownerUserId, scope.ownerUserId),
+                eq(personalMcpServers.enabled, true),
+              )
+            : eq(personalMcpServers.ownerUserId, scope.ownerUserId),
+          orderBy: (table, { asc }) => [asc(table.name)],
+        });
+        return rows.map(resolvePersonalRow);
+      }
+
+      const rows = await client.query.customMcpServers.findMany({
+        where: options.enabledOnly
+          ? eq(customMcpServers.enabled, true)
+          : undefined,
+        orderBy: (table, { asc }) => [asc(table.name)],
+      });
+      return rows.map(resolveDeploymentRow);
+    },
+
+    async count() {
+      const [row] =
+        scope.visibility === 'owner'
+          ? await client
+              .select({ value: count() })
+              .from(personalMcpServers)
+              .where(eq(personalMcpServers.ownerUserId, scope.ownerUserId))
+          : await client.select({ value: count() }).from(customMcpServers);
+      return row?.value ?? 0;
+    },
+
+    async create(input: CustomMcpServerWrite): Promise<{ id: string } | null> {
+      if (scope.visibility === 'owner') {
+        if (!input.url || input.stdio) {
+          throw new Error('Personal MCP servers must be remote.');
+        }
+        const [created] = await client
+          .insert(personalMcpServers)
+          .values({
+            id: input.id,
+            ownerUserId: scope.ownerUserId,
+            name: input.name,
+            url: input.url,
+            authType: input.authType,
+            headers: input.headers,
+            disabledTools: input.disabledTools,
+            manualClientId: input.manualClientId,
+            manualClientSecret: input.manualClientSecret,
+            oauthServerMetadata: input.oauthServerMetadata,
+            oauthServerMetadataFetchedAt: input.oauthServerMetadataFetchedAt,
+            oauthResourceIndicatorDisabled:
+              input.oauthResourceIndicatorDisabled,
+            enabled: input.enabled,
+          })
+          .onConflictDoNothing({
+            target: [personalMcpServers.ownerUserId, personalMcpServers.name],
+          })
+          .returning({ id: personalMcpServers.id });
+        return created ?? null;
+      }
+
+      if (Boolean(input.url) === Boolean(input.stdio)) {
+        throw new Error(
+          'Deployment MCP servers must configure exactly one transport.',
+        );
+      }
+      const [created] = await client
+        .insert(customMcpServers)
+        .values({
+          id: input.id,
+          name: input.name,
+          url: input.url,
+          stdio: input.stdio,
+          authType: input.authType,
+          headers: input.headers,
+          disabledTools: input.disabledTools,
+          manualClientId: input.manualClientId,
+          manualClientSecret: input.manualClientSecret,
+          oauthServerMetadata: input.oauthServerMetadata,
+          oauthServerMetadataFetchedAt: input.oauthServerMetadataFetchedAt,
+          oauthResourceIndicatorDisabled: input.oauthResourceIndicatorDisabled,
+          enabled: input.enabled,
+          createdByUserId: input.createdByUserId,
+        })
+        .onConflictDoNothing({ target: [customMcpServers.name] })
+        .returning({ id: customMcpServers.id });
+      return created ?? null;
+    },
+  };
 }
 
 /**
@@ -54,25 +251,7 @@ export async function findCustomMcpServerById(
   const deployment = await db.query.customMcpServers.findFirst({
     where: eq(customMcpServers.id, id),
   });
-  if (deployment) {
-    return {
-      id: deployment.id,
-      ownerUserId: null,
-      createdByUserId: deployment.createdByUserId,
-      name: deployment.name,
-      url: deployment.url,
-      isStdio: Boolean(deployment.stdio),
-      authType: deployment.authType,
-      headers: deployment.headers ?? null,
-      disabledTools: deployment.disabledTools ?? null,
-      manualClientId: deployment.manualClientId,
-      manualClientSecret: deployment.manualClientSecret,
-      oauthServerMetadata: deployment.oauthServerMetadata ?? null,
-      oauthResourceIndicatorDisabled: deployment.oauthResourceIndicatorDisabled,
-      enabled: deployment.enabled,
-      updatedAt: deployment.updatedAt,
-    };
-  }
+  if (deployment) return resolveDeploymentRow(deployment);
 
   const [personal] = await db
     .select({ server: personalMcpServers })
@@ -80,33 +259,10 @@ export async function findCustomMcpServerById(
     .innerJoin(users, eq(users.id, personalMcpServers.ownerUserId))
     .where(and(eq(personalMcpServers.id, id), isNull(users.deletedAt)))
     .limit(1);
-  if (!personal) return null;
-
-  const { server } = personal;
-  return {
-    id: server.id,
-    ownerUserId: server.ownerUserId,
-    createdByUserId: server.ownerUserId,
-    name: server.name,
-    url: server.url,
-    isStdio: false,
-    authType: server.authType,
-    headers: server.headers ?? null,
-    disabledTools: server.disabledTools ?? null,
-    manualClientId: server.manualClientId,
-    manualClientSecret: server.manualClientSecret,
-    oauthServerMetadata: server.oauthServerMetadata ?? null,
-    oauthResourceIndicatorDisabled: server.oauthResourceIndicatorDisabled,
-    enabled: server.enabled,
-    updatedAt: server.updatedAt,
-  };
+  return personal ? resolvePersonalRow(personal.server) : null;
 }
 
-/**
- * The OAuth connection that belongs to a server: deployment-scoped (no user)
- * for a deployment server, the owner's own row for a personal one. Using
- * this everywhere is what keeps one member's tokens out of another's calls.
- */
+/** The OAuth connection owned by a resolved server. */
 export function customMcpConnectionWhere(server: {
   id: string;
   ownerUserId: string | null;
@@ -119,32 +275,130 @@ export function customMcpConnectionWhere(server: {
   );
 }
 
-/** Persist discovered authorization-server metadata on whichever row owns it. */
-export async function storeCustomMcpServerMetadata(
-  server: { id: string; ownerUserId: string | null },
-  metadata: OAuthServerMetadata,
+export async function updateCustomMcpServer(
+  server: Pick<ResolvedCustomMcpServer, 'id' | 'ownerUserId'>,
+  changes: CustomMcpServerUpdate,
+  client: DatabaseOrTransaction = db,
 ): Promise<void> {
-  const set = {
-    oauthServerMetadata: metadata,
-    oauthServerMetadataFetchedAt: new Date(),
-    updatedAt: new Date(),
-  };
   if (server.ownerUserId) {
-    await db
+    const { stdio: _stdio, url, ...personalChanges } = changes;
+    if (url === null || _stdio) {
+      throw new Error('Personal MCP servers must be remote.');
+    }
+    await client
       .update(personalMcpServers)
-      .set(set)
+      .set({
+        ...personalChanges,
+        ...(url === undefined ? {} : { url }),
+      })
       .where(eq(personalMcpServers.id, server.id));
     return;
   }
-  await db
+  await client
     .update(customMcpServers)
-    .set(set)
+    .set(changes)
     .where(eq(customMcpServers.id, server.id));
 }
 
+export async function deleteCustomMcpServer(
+  server: Pick<ResolvedCustomMcpServer, 'id' | 'ownerUserId'>,
+  client: DatabaseOrTransaction = db,
+): Promise<void> {
+  if (server.ownerUserId) {
+    await client
+      .delete(personalMcpServers)
+      .where(eq(personalMcpServers.id, server.id));
+    return;
+  }
+  await client
+    .delete(customMcpServers)
+    .where(eq(customMcpServers.id, server.id));
+}
+
+/** Persist discovered authorization-server metadata on the resolved row. */
+export async function storeCustomMcpServerMetadata(
+  server: Pick<ResolvedCustomMcpServer, 'id' | 'ownerUserId'>,
+  metadata: OAuthServerMetadata,
+): Promise<void> {
+  await updateCustomMcpServer(server, {
+    oauthServerMetadata: metadata,
+    oauthServerMetadataFetchedAt: new Date(),
+    updatedAt: new Date(),
+  });
+}
+
 /**
- * Who may manage or authorize a custom server, mirroring integration keys:
- * a personal server belongs to its owner alone; a deployment server is
+ * Atomically move a server and its OAuth connection between product scopes.
+ * The server id remains stable, preserving its proxy and connection identity.
+ */
+export async function moveCustomMcpServer(
+  server: ResolvedCustomMcpServer,
+  visibility: CustomMcpServerVisibility,
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    if (visibility === 'owner') {
+      const ownerUserId = server.createdByUserId;
+      if (!ownerUserId) {
+        throw new Error(
+          'This server has no owner to move it to. Remove it and add a personal one instead.',
+        );
+      }
+      if (server.isStdio || !server.url) {
+        throw new Error('Local (stdio) servers cannot be personal.');
+      }
+      const target = customMcpServerStore(
+        { visibility: 'owner', ownerUserId },
+        tx,
+      );
+      if ((await target.count()) >= MAX_PERSONAL_MCP_SERVERS) {
+        throw new Error(
+          `At most ${MAX_PERSONAL_MCP_SERVERS} personal MCP servers are supported.`,
+        );
+      }
+      const moved = await target.create({
+        ...server,
+        createdByUserId: ownerUserId,
+      });
+      if (!moved) {
+        throw new Error(
+          `Its owner already has a personal MCP server named '${server.name}'.`,
+        );
+      }
+      await tx
+        .update(mcpConnections)
+        .set({ userId: ownerUserId, updatedAt: new Date() })
+        .where(customMcpConnectionWhere(server));
+      await deleteCustomMcpServer(server, tx);
+      return;
+    }
+
+    const ownerUserId = server.ownerUserId;
+    if (!ownerUserId) return;
+    const target = customMcpServerStore({ visibility: 'deployment' }, tx);
+    if ((await target.count()) >= MAX_CUSTOM_MCP_SERVERS) {
+      throw new Error(
+        `At most ${MAX_CUSTOM_MCP_SERVERS} custom MCP servers are supported.`,
+      );
+    }
+    const moved = await target.create({
+      ...server,
+      createdByUserId: ownerUserId,
+    });
+    if (!moved) {
+      throw new Error(
+        `A shared MCP server named '${server.name}' already exists.`,
+      );
+    }
+    await tx
+      .update(mcpConnections)
+      .set({ userId: null, updatedAt: new Date() })
+      .where(customMcpConnectionWhere(server));
+    await deleteCustomMcpServer(server, tx);
+  });
+}
+
+/**
+ * A personal server belongs to its owner alone; a deployment server is
  * managed by administrators and by the member who added it.
  */
 export function canManageCustomMcpServer(

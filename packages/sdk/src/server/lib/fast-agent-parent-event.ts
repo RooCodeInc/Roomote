@@ -46,6 +46,8 @@ import {
   SlackNotifier,
 } from '@roomote/slack';
 import {
+  buildAutomationResultLinkButtonRows,
+  buildFastSessionUrl,
   buildFastSessionReplyFooterText,
   deliverManagedThreadReplyFooter,
   postTextThreadReplyWithFooter,
@@ -90,7 +92,10 @@ import {
   buildSourceControlReplyQuote,
   type SourceControlFastDiscussion,
 } from './source-control-fast-delivery';
-import { buildCustomAutomationSlackMessage } from './manager-slack';
+import {
+  buildCustomAutomationSettingsUrl,
+  buildCustomAutomationSlackMessage,
+} from './manager-slack';
 import { resolveCustomAutomationResultVisibility } from './automation-result-visibility';
 import {
   appendFastAutomationSuggestionInstruction,
@@ -1857,6 +1862,10 @@ async function createAgentMailFastAgentParentTurn(
     );
   }
   const { session, conversation, actorUserId } = parent;
+  const automation = await resolveFastAutomationLaunchContext({
+    event: params.event,
+    conversation,
+  });
   return {
     userId: actorUserId,
     conversation,
@@ -1864,22 +1873,38 @@ async function createAgentMailFastAgentParentTurn(
       launchTask: createFastAgentCommunicationTaskLauncher({
         userId: actorUserId,
         conversation,
-        automation: await resolveFastAutomationLaunchContext({
-          event: params.event,
-          conversation,
-        }),
+        automation,
       }),
       // Email is a low-frequency surface: one coalesced reply per event, no
       // suggestion buttons or reactions. The adapter resolves the reply
       // anchor and recipient from the durable conversation row; threadId
       // carries the internal conversation id.
-      postReply: async ({ message }) => {
+      postReply: async ({ message, kickoff }) => {
+        const buttons =
+          automation && isFastAutomationReportEvent(params.event) && !kickoff
+            ? buildAutomationResultLinkButtonRows({
+                configureUrl: buildCustomAutomationSettingsUrl(
+                  automation.automationId,
+                ),
+                additionalActions: [
+                  {
+                    actionId: 'late_bound_automation_view_session',
+                    text: 'Follow',
+                    url: buildFastSessionUrl(
+                      'agentmail',
+                      params.parent.sessionId,
+                    ),
+                  },
+                ],
+              })
+            : undefined;
         const posted = await provider
           .postMessage({
             channelId: conversation.replyTarget.channelId,
             threadId: conversation.conversationId,
             text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'agentmail', sessionId: params.parent.sessionId, ...params.footerContext })}`,
             textFormat: 'markdown',
+            ...(buttons ? { buttons } : {}),
             // Durable parent events retry after crashes that may land AFTER the
             // provider accepted the email; the event's stable identity makes
             // the replay a no-op instead of a duplicate result email.
@@ -2784,10 +2809,12 @@ export async function deliverFastAgentParentEventWithLock(
         adapter: {
           ...baseAdapter,
           postReply: async (reply) => {
+            if (reply.kickoff) {
+              return;
+            }
             if (
-              !reply.kickoff &&
-              (reply.purpose === 'closeout' ||
-                reply.purpose === 'clarification')
+              reply.purpose === 'closeout' ||
+              reply.purpose === 'clarification'
             ) {
               await recordCustomAutomationResult({
                 automationId,

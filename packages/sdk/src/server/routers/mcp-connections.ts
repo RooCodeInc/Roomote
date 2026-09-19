@@ -12,18 +12,20 @@ import {
   demoSeedDevelopmentIntegration,
   mcpConnections,
   deploymentMcpEnablements,
-  customMcpServers,
-  personalMcpServers,
   eq,
   and,
   inArray,
   isBrainEnabled,
   isNull,
-  isNotNull,
   or,
 } from '@roomote/db/server';
 import { decrypt } from '@roomote/db/encryption';
 import { getValidAccessToken, hasValidOAuthTokens } from '../lib/mcp/data';
+import {
+  customMcpConnectionWhere,
+  customMcpServerStore,
+  type CustomMcpServerScope,
+} from '../lib/mcp/custom-servers';
 import {
   getMcpIntegrationUpstreamUrl,
   MCP_INTEGRATIONS,
@@ -45,7 +47,6 @@ import {
   CUSTOM_MCP_PROXY_PATH_PREFIX,
   MCP_INTEGRATION_PROXY_PATH_PREFIX,
   ROOMOTE_MCP_ID,
-  customMcpConnectionId,
   PRODUCT_NAME,
 } from '@roomote/types';
 
@@ -142,9 +143,9 @@ async function resolveMcpServerConfigs(options: {
     // first, so the more specific scope wins a name shared with a
     // deployment server.
     if (actorContext.userId) {
-      const personal = await buildPersonalMcpServerConfigs(
+      const personal = await buildScopedCustomMcpServerConfigs(
         options.requestOrigin,
-        actorContext.userId,
+        { visibility: 'owner', ownerUserId: actorContext.userId },
         logInfo,
       );
       for (const [name, config] of Object.entries(personal)) {
@@ -152,8 +153,9 @@ async function resolveMcpServerConfigs(options: {
       }
     }
 
-    const custom = await buildCustomMcpServerConfigs(
+    const custom = await buildScopedCustomMcpServerConfigs(
       options.requestOrigin,
+      { visibility: 'deployment' },
       logInfo,
     );
 
@@ -348,12 +350,11 @@ export const mcpConnectionsRouter = router({
       return { servers: {} };
     }
 
-    const rows = await db.query.customMcpServers.findMany({
-      where: and(
-        eq(customMcpServers.enabled, true),
-        isNotNull(customMcpServers.stdio),
-      ),
-    });
+    const rows = (
+      await customMcpServerStore({ visibility: 'deployment' }).list({
+        enabledOnly: true,
+      })
+    ).filter((server) => server.isStdio);
 
     const servers: Record<
       string,
@@ -385,21 +386,14 @@ export const mcpConnectionsRouter = router({
   }),
 });
 
-/**
- * Proxy entries for enabled deployment custom remote servers. Secret-free by
- * construction: credentials are injected by the API proxy per request, so
- * this is safe to serve to any authenticated principal and to re-serve on
- * actor refreshes (the entries are actor-independent).
- */
-async function buildCustomMcpServerConfigs(
+/** Build secret-free proxy entries for one resolved custom-server scope. */
+async function buildScopedCustomMcpServerConfigs(
   requestOrigin: string | null,
+  scope: CustomMcpServerScope,
   logInfo: InfoLogger,
 ): Promise<ResolvedMcpServerConfigs> {
   const servers: ResolvedMcpServerConfigs = {};
-
-  const rows = await db.query.customMcpServers.findMany({
-    where: eq(customMcpServers.enabled, true),
-  });
+  const rows = await customMcpServerStore(scope).list({ enabledOnly: true });
 
   for (const row of rows) {
     // stdio servers ride the worker merge path via getCustomStdioMcpServers.
@@ -420,69 +414,13 @@ async function buildCustomMcpServerConfigs(
     let connectionUpdatedAt: Date | undefined;
     if (row.authType === 'oauth') {
       const connection = await db.query.mcpConnections.findFirst({
-        where: and(
-          eq(mcpConnections.mcpId, customMcpConnectionId(row.id)),
-          isNull(mcpConnections.userId),
-        ),
+        where: customMcpConnectionWhere(row),
         columns: { authStatus: true, updatedAt: true },
       });
 
       if (connection?.authStatus !== 'authenticated') {
         logInfo(
-          `[getMcpServerConfigs] Skipping custom server '${row.name}': OAuth connection not authenticated`,
-        );
-        continue;
-      }
-      connectionUpdatedAt = connection.updatedAt;
-    }
-
-    const proxyPath = `${CUSTOM_MCP_PROXY_PATH_PREFIX}${row.id}`;
-
-    servers[row.name] = {
-      url: requestOrigin ? `${requestOrigin}${proxyPath}` : proxyPath,
-      headers: { 'X-MCP-Client': PRODUCT_NAME },
-      cacheRevision: `${row.updatedAt?.getTime() ?? 0}:${connectionUpdatedAt?.getTime() ?? ''}`,
-    };
-  }
-
-  return servers;
-}
-
-/**
- * Proxy entries for the acting member's enabled personal servers. Secret-free
- * like the deployment entries, but actor-dependent: only the owner ever
- * receives them, and the proxy checks the owner again on every call.
- */
-async function buildPersonalMcpServerConfigs(
-  requestOrigin: string | null,
-  ownerUserId: string,
-  logInfo: InfoLogger,
-): Promise<ResolvedMcpServerConfigs> {
-  const servers: ResolvedMcpServerConfigs = {};
-
-  // The acting member is the owner, so there is no separate owner to vet
-  // here; the proxy confirms the owner is still active on every call.
-  const rows = await db.query.personalMcpServers.findMany({
-    where: and(
-      eq(personalMcpServers.ownerUserId, ownerUserId),
-      eq(personalMcpServers.enabled, true),
-    ),
-  });
-
-  for (const row of rows) {
-    let connectionUpdatedAt: Date | undefined;
-    if (row.authType === 'oauth') {
-      const connection = await db.query.mcpConnections.findFirst({
-        where: and(
-          eq(mcpConnections.mcpId, customMcpConnectionId(row.id)),
-          eq(mcpConnections.userId, ownerUserId),
-        ),
-        columns: { authStatus: true, updatedAt: true },
-      });
-
-      if (connection?.authStatus !== 'authenticated') {
-        logInfo(
-          `[getMcpServerConfigs] Skipping personal server '${row.name}': OAuth connection not authenticated`,
+          `[getMcpServerConfigs] Skipping ${scope.visibility === 'owner' ? 'personal' : 'custom'} server '${row.name}': OAuth connection not authenticated`,
         );
         continue;
       }

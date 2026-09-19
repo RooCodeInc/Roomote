@@ -12,12 +12,8 @@ import {
  * matching provider's token so it can reach its own repository (see
  * `redactSourceControlProviderEnvVars`), so these are NOT control-plane names.
  */
-const SOURCE_CONTROL_ACCESS_TOKEN_ENV_VARS: ReadonlySet<string> = new Set([
-  'GITHUB_TOKEN',
-  'GITLAB_TOKEN',
-  'GITEA_TOKEN',
-  'ADO_TOKEN',
-]);
+export const SOURCE_CONTROL_ACCESS_TOKEN_ENV_VARS: ReadonlySet<string> =
+  new Set(['GITHUB_TOKEN', 'GITLAB_TOKEN', 'GITEA_TOKEN', 'ADO_TOKEN']);
 
 /**
  * Source-control app + webhook secrets, derived from the `secret` fields of the

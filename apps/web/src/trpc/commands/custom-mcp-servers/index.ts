@@ -1,21 +1,22 @@
 import {
   and,
-  count,
-  customMcpServers,
   db,
   eq,
   inArray,
   isNull,
   mcpConnections,
-  personalMcpServers,
 } from '@roomote/db/server';
 import { decrypt, encrypt } from '@roomote/db/encryption';
 import {
   canManageCustomMcpServer,
   customMcpConnectionWhere,
+  customMcpServerStore,
+  deleteCustomMcpServer,
   findCustomMcpServerById,
   getValidAccessToken,
+  moveCustomMcpServer,
   prepareCustomMcpOAuthConnection,
+  updateCustomMcpServer,
   type ResolvedCustomMcpServer,
 } from '@roomote/sdk/server';
 import { safeFetch } from '@roomote/sdk/server/safe-fetch';
@@ -119,64 +120,20 @@ export async function listCustomMcpServersCommand(
   input: { scope?: CustomMcpServerVisibility } = {},
 ): Promise<CustomMcpServerListEntry[]> {
   const scope = input.scope ?? 'deployment';
-
-  if (scope === 'owner') {
-    const servers = await db.query.personalMcpServers.findMany({
-      where: eq(personalMcpServers.ownerUserId, auth.userId),
-      orderBy: (table, { asc }) => [asc(table.name)],
-    });
-    const connectionRows =
-      servers.length > 0
-        ? await db.query.mcpConnections.findMany({
-            where: and(
-              eq(mcpConnections.userId, auth.userId),
-              inArray(
-                mcpConnections.mcpId,
-                servers.map((server) => customMcpConnectionId(server.id)),
-              ),
-            ),
-            columns: { mcpId: true, authStatus: true },
-          })
-        : [];
-    const authStatusByMcpId = new Map(
-      connectionRows.map((row) => [row.mcpId, row.authStatus]),
-    );
-
-    return servers.map((server) => ({
-      id: server.id,
-      name: server.name,
-      transport: 'remote' as const,
-      url: server.url,
-      authType: server.authType,
-      headerNames: Object.keys(server.headers ?? {}),
-      stdioCommand: null,
-      stdioArgs: [],
-      stdioEnvNames: [],
-      disabledTools: server.disabledTools ?? [],
-      hasManualClient: Boolean(server.manualClientId),
-      oauthResourceIndicatorDisabled: server.oauthResourceIndicatorDisabled,
-      authStatus:
-        server.authType === 'oauth'
-          ? (authStatusByMcpId.get(customMcpConnectionId(server.id)) ??
-            'pending')
-          : null,
-      enabled: server.enabled,
-      visibility: 'owner' as const,
-      canManage: true,
-      createdAt: server.createdAt,
-      updatedAt: server.updatedAt,
-    }));
-  }
-
-  const servers = await db.query.customMcpServers.findMany({
-    orderBy: (table, { asc }) => [asc(table.name)],
-  });
+  const store = customMcpServerStore(
+    scope === 'owner'
+      ? { visibility: 'owner', ownerUserId: auth.userId }
+      : { visibility: 'deployment' },
+  );
+  const servers = await store.list();
 
   const connectionRows =
     servers.length > 0
       ? await db.query.mcpConnections.findMany({
           where: and(
-            isNull(mcpConnections.userId),
+            scope === 'owner'
+              ? eq(mcpConnections.userId, auth.userId)
+              : isNull(mcpConnections.userId),
             inArray(
               mcpConnections.mcpId,
               servers.map((server) => customMcpConnectionId(server.id)),
@@ -193,7 +150,7 @@ export async function listCustomMcpServersCommand(
   return servers.map((server) => ({
     id: server.id,
     name: server.name,
-    transport: server.stdio ? 'stdio' : 'remote',
+    transport: server.isStdio ? 'stdio' : 'remote',
     url: server.url,
     authType: server.authType,
     headerNames: Object.keys(server.headers ?? {}),
@@ -208,8 +165,11 @@ export async function listCustomMcpServersCommand(
         ? (authStatusByMcpId.get(customMcpConnectionId(server.id)) ?? 'pending')
         : null,
     enabled: server.enabled,
-    visibility: 'deployment' as const,
-    canManage: auth.isAdmin || server.createdByUserId === auth.userId,
+    visibility: scope,
+    canManage: canManageCustomMcpServer(server, {
+      userId: auth.userId,
+      isAdmin: auth.isAdmin,
+    }),
     createdAt: server.createdAt,
     updatedAt: server.updatedAt,
   }));
@@ -324,97 +284,47 @@ export async function createCustomMcpServerCommand(
     }
   }
 
-  if (visibility === 'owner' && server.transport === 'remote') {
-    return createPersonalMcpServer(auth, server);
-  }
-
-  return createDeploymentMcpServer(auth, server);
+  return createCustomMcpServer(auth, server, visibility);
 }
 
-async function createPersonalMcpServer(
-  auth: UserAuthSuccess,
-  input: CustomMcpRemoteServerInput,
-) {
-  const [countRow] = await db
-    .select({ value: count() })
-    .from(personalMcpServers)
-    .where(eq(personalMcpServers.ownerUserId, auth.userId));
-
-  if ((countRow?.value ?? 0) >= MAX_PERSONAL_MCP_SERVERS) {
-    throw new Error(
-      `At most ${MAX_PERSONAL_MCP_SERVERS} personal MCP servers are supported.`,
-    );
-  }
-
-  const { stdio: _stdio, url, ...columns } = remoteColumns(input);
-  const [created] = await db
-    .insert(personalMcpServers)
-    .values({ name: input.name, url, ...columns, ownerUserId: auth.userId })
-    .onConflictDoNothing({
-      target: [personalMcpServers.ownerUserId, personalMcpServers.name],
-    })
-    .returning({ id: personalMcpServers.id });
-
-  if (!created) {
-    throw new Error(
-      `You already have a personal MCP server named '${input.name}'.`,
-    );
-  }
-
-  console.log(
-    `[custom-mcp-servers] created personal '${input.name}' by user ${auth.userId}`,
-  );
-
-  const integrationId = customMcpConnectionId(created.id);
-  captureIntegrationLifecycleEvent(
-    'integration_enabled',
-    integrationId,
-    auth.userId,
-  );
-  if (input.authType !== 'oauth') {
-    captureIntegrationLifecycleEvent(
-      'integration_connected',
-      integrationId,
-      auth.userId,
-    );
-  }
-
-  return { id: created.id };
-}
-
-async function createDeploymentMcpServer(
+async function createCustomMcpServer(
   auth: UserAuthSuccess,
   input: CustomMcpServerInput,
+  visibility: CustomMcpServerVisibility,
 ) {
-  const [countRow] = await db.select({ value: count() }).from(customMcpServers);
-
-  if ((countRow?.value ?? 0) >= MAX_CUSTOM_MCP_SERVERS) {
+  const store = customMcpServerStore(
+    visibility === 'owner'
+      ? { visibility: 'owner', ownerUserId: auth.userId }
+      : { visibility: 'deployment' },
+  );
+  const limit =
+    visibility === 'owner' ? MAX_PERSONAL_MCP_SERVERS : MAX_CUSTOM_MCP_SERVERS;
+  if ((await store.count()) >= limit) {
     throw new Error(
-      `At most ${MAX_CUSTOM_MCP_SERVERS} custom MCP servers are supported.`,
+      visibility === 'owner'
+        ? `At most ${limit} personal MCP servers are supported.`
+        : `At most ${limit} custom MCP servers are supported.`,
     );
   }
 
   const columns =
     input.transport === 'remote' ? remoteColumns(input) : stdioColumns(input);
-
-  const [created] = await db
-    .insert(customMcpServers)
-    .values({
-      name: input.name,
-      ...columns,
-      createdByUserId: auth.userId,
-    })
-    .onConflictDoNothing({ target: [customMcpServers.name] })
-    .returning({ id: customMcpServers.id });
+  const created = await store.create({
+    name: input.name,
+    ...columns,
+    createdByUserId: auth.userId,
+  });
 
   if (!created) {
     throw new Error(
-      `A custom MCP server named '${input.name}' already exists.`,
+      visibility === 'owner'
+        ? `You already have a personal MCP server named '${input.name}'.`
+        : `A custom MCP server named '${input.name}' already exists.`,
     );
   }
 
   console.log(
-    `[custom-mcp-servers] created '${input.name}' (${input.transport}) by user ${auth.userId}`,
+    `[custom-mcp-servers] created${visibility === 'owner' ? ' personal' : ''} '${input.name}' by user ${auth.userId}`,
   );
 
   const integrationId = customMcpConnectionId(created.id);
@@ -441,54 +351,50 @@ export async function updateCustomMcpServerCommand(
   assertCustomMcpEnabled();
   const manageable = await loadManageableServer(auth, input.id);
 
-  if (manageable.ownerUserId) {
-    return updatePersonalMcpServer(auth, manageable, input.server);
+  if (manageable.ownerUserId && input.server.transport !== 'remote') {
+    throw new Error('Personal MCP servers must be remote.');
   }
+
   // A member may edit the remote server they added; only an administrator
   // may turn a server into, or edit, a local (stdio) one.
   if (input.server.transport === 'stdio' || manageable.isStdio) {
     assertAdmin(auth);
   }
 
-  const existing = await db.query.customMcpServers.findFirst({
-    where: eq(customMcpServers.id, input.id),
-  });
-
-  if (!existing) {
-    throw new Error(NOT_FOUND_MESSAGE);
-  }
-
-  if (existing.name !== input.server.name) {
+  if (manageable.name !== input.server.name) {
     throw new Error('Custom MCP server names cannot be changed.');
   }
 
   const columns =
     input.server.transport === 'remote'
       ? remoteColumns(input.server, {
-          headers: existing.headers,
-          manualClientSecret: existing.manualClientSecret,
+          headers: manageable.headers,
+          manualClientSecret: manageable.manualClientSecret,
         })
-      : stdioColumns(input.server, { stdioEnv: existing.stdio?.env ?? null });
+      : stdioColumns(input.server, {
+          stdioEnv: manageable.stdio?.env ?? null,
+        });
 
   // Editing the URL or auth mode of a connected server re-targets the stored
   // credentials: without this reset, the proxy would inject the old server's
   // Bearer token into the new URL on the next task — a one-field
   // credential-exfiltration primitive. Force a reconnect instead.
   const credentialTargetChanged =
-    columns.url !== existing.url || columns.authType !== existing.authType;
+    columns.url !== manageable.url || columns.authType !== manageable.authType;
 
   let removedConnection = false;
   await db.transaction(async (tx) => {
-    await tx
-      .update(customMcpServers)
-      .set({
+    await updateCustomMcpServer(
+      manageable,
+      {
         ...columns,
         ...(credentialTargetChanged
           ? { oauthServerMetadata: null, oauthServerMetadataFetchedAt: null }
           : {}),
         updatedAt: new Date(),
-      })
-      .where(eq(customMcpServers.id, input.id));
+      },
+      tx,
+    );
 
     if (credentialTargetChanged) {
       const deleted = await tx
@@ -500,7 +406,7 @@ export async function updateCustomMcpServerCommand(
   });
 
   console.log(
-    `[custom-mcp-servers] updated '${existing.name}' by user ${auth.userId}` +
+    `[custom-mcp-servers] updated '${manageable.name}' by user ${auth.userId}` +
       (credentialTargetChanged
         ? ' (credential target changed; tokens cleared)'
         : ''),
@@ -529,15 +435,7 @@ export async function deleteCustomMcpServerCommand(
 
   await db.transaction(async (tx) => {
     await tx.delete(mcpConnections).where(customMcpConnectionWhere(existing));
-    if (existing.ownerUserId) {
-      await tx
-        .delete(personalMcpServers)
-        .where(eq(personalMcpServers.id, input.id));
-    } else {
-      await tx
-        .delete(customMcpServers)
-        .where(eq(customMcpServers.id, input.id));
-    }
+    await deleteCustomMcpServer(existing, tx);
   });
 
   console.log(
@@ -850,19 +748,10 @@ export async function setCustomMcpServerEnabledCommand(
 ) {
   assertCustomMcpEnabled();
   const server = await loadManageableServer(auth, input.id);
-  const set = { enabled: input.enabled, updatedAt: new Date() };
-
-  if (server.ownerUserId) {
-    await db
-      .update(personalMcpServers)
-      .set(set)
-      .where(eq(personalMcpServers.id, input.id));
-  } else {
-    await db
-      .update(customMcpServers)
-      .set(set)
-      .where(eq(customMcpServers.id, input.id));
-  }
+  await updateCustomMcpServer(server, {
+    enabled: input.enabled,
+    updatedAt: new Date(),
+  });
 
   captureIntegrationLifecycleEvent(
     input.enabled ? 'integration_enabled' : 'integration_disabled',
@@ -882,88 +771,12 @@ export async function setCustomMcpServerDisabledToolsCommand(
 
   // Deliberately no enabled filter: adjusting the deny list on a disabled
   // server is a natural part of preparing it for re-enablement.
-  const set = { disabledTools: input.disabledTools, updatedAt: new Date() };
-
-  if (server.ownerUserId) {
-    await db
-      .update(personalMcpServers)
-      .set(set)
-      .where(eq(personalMcpServers.id, input.id));
-  } else {
-    await db
-      .update(customMcpServers)
-      .set(set)
-      .where(eq(customMcpServers.id, input.id));
-  }
+  await updateCustomMcpServer(server, {
+    disabledTools: input.disabledTools,
+    updatedAt: new Date(),
+  });
 
   return { disabledTools: input.disabledTools };
-}
-
-async function updatePersonalMcpServer(
-  auth: UserAuthSuccess,
-  existing: ResolvedCustomMcpServer,
-  input: CustomMcpServerInput,
-) {
-  if (input.transport !== 'remote') {
-    throw new Error('Personal MCP servers must be remote.');
-  }
-  if (existing.name !== input.name) {
-    throw new Error('Custom MCP server names cannot be changed.');
-  }
-
-  const {
-    stdio: _stdio,
-    url,
-    ...columns
-  } = remoteColumns(input, {
-    headers: existing.headers,
-    manualClientSecret: existing.manualClientSecret,
-  });
-
-  // Same rule as deployment servers: a new URL or auth mode must never
-  // inherit the old target's tokens.
-  const credentialTargetChanged =
-    url !== existing.url || columns.authType !== existing.authType;
-
-  let removedConnection = false;
-  await db.transaction(async (tx) => {
-    await tx
-      .update(personalMcpServers)
-      .set({
-        url,
-        ...columns,
-        ...(credentialTargetChanged
-          ? { oauthServerMetadata: null, oauthServerMetadataFetchedAt: null }
-          : {}),
-        updatedAt: new Date(),
-      })
-      .where(eq(personalMcpServers.id, existing.id));
-
-    if (credentialTargetChanged) {
-      const deleted = await tx
-        .delete(mcpConnections)
-        .where(customMcpConnectionWhere(existing))
-        .returning({ id: mcpConnections.id });
-      removedConnection = deleted.length > 0;
-    }
-  });
-
-  console.log(
-    `[custom-mcp-servers] updated personal '${existing.name}' by user ${auth.userId}` +
-      (credentialTargetChanged
-        ? ' (credential target changed; tokens cleared)'
-        : ''),
-  );
-
-  if (removedConnection) {
-    captureIntegrationLifecycleEvent(
-      'integration_removed',
-      customMcpConnectionId(existing.id),
-      auth.userId,
-    );
-  }
-
-  return { credentialsCleared: credentialTargetChanged };
 }
 
 /**
@@ -985,104 +798,7 @@ export async function setCustomMcpServerVisibilityCommand(
     : 'deployment';
   if (current === input.visibility) return { visibility: current };
 
-  if (input.visibility === 'owner') {
-    const ownerUserId = server.createdByUserId;
-    if (!ownerUserId) {
-      throw new Error(
-        'This server has no owner to move it to. Remove it and add a personal one instead.',
-      );
-    }
-    if (server.isStdio || !server.url) {
-      throw new Error('Local (stdio) servers cannot be personal.');
-    }
-    const url = server.url;
-
-    await db.transaction(async (tx) => {
-      const [countRow] = await tx
-        .select({ value: count() })
-        .from(personalMcpServers)
-        .where(eq(personalMcpServers.ownerUserId, ownerUserId));
-      if ((countRow?.value ?? 0) >= MAX_PERSONAL_MCP_SERVERS) {
-        throw new Error(
-          `At most ${MAX_PERSONAL_MCP_SERVERS} personal MCP servers are supported.`,
-        );
-      }
-      const [moved] = await tx
-        .insert(personalMcpServers)
-        .values({
-          id: server.id,
-          ownerUserId,
-          name: server.name,
-          url,
-          authType: server.authType,
-          headers: server.headers,
-          disabledTools: server.disabledTools,
-          manualClientId: server.manualClientId,
-          manualClientSecret: server.manualClientSecret,
-          oauthServerMetadata: server.oauthServerMetadata,
-          oauthResourceIndicatorDisabled: server.oauthResourceIndicatorDisabled,
-          enabled: server.enabled,
-        })
-        .onConflictDoNothing({
-          target: [personalMcpServers.ownerUserId, personalMcpServers.name],
-        })
-        .returning({ id: personalMcpServers.id });
-      if (!moved) {
-        throw new Error(
-          `Its owner already has a personal MCP server named '${server.name}'.`,
-        );
-      }
-      await tx
-        .update(mcpConnections)
-        .set({ userId: ownerUserId, updatedAt: new Date() })
-        .where(customMcpConnectionWhere(server));
-      await tx
-        .delete(customMcpServers)
-        .where(eq(customMcpServers.id, server.id));
-    });
-  } else {
-    const ownerUserId = server.ownerUserId!;
-    await db.transaction(async (tx) => {
-      const [countRow] = await tx
-        .select({ value: count() })
-        .from(customMcpServers);
-      if ((countRow?.value ?? 0) >= MAX_CUSTOM_MCP_SERVERS) {
-        throw new Error(
-          `At most ${MAX_CUSTOM_MCP_SERVERS} custom MCP servers are supported.`,
-        );
-      }
-      const [moved] = await tx
-        .insert(customMcpServers)
-        .values({
-          id: server.id,
-          name: server.name,
-          url: server.url,
-          authType: server.authType,
-          headers: server.headers,
-          disabledTools: server.disabledTools,
-          manualClientId: server.manualClientId,
-          manualClientSecret: server.manualClientSecret,
-          oauthServerMetadata: server.oauthServerMetadata,
-          oauthResourceIndicatorDisabled: server.oauthResourceIndicatorDisabled,
-          enabled: server.enabled,
-          createdByUserId: ownerUserId,
-        })
-        .onConflictDoNothing({ target: [customMcpServers.name] })
-        .returning({ id: customMcpServers.id });
-      if (!moved) {
-        throw new Error(
-          `A shared MCP server named '${server.name}' already exists.`,
-        );
-      }
-      await tx
-        .update(mcpConnections)
-        .set({ userId: null, updatedAt: new Date() })
-        .where(customMcpConnectionWhere(server));
-      await tx
-        .delete(personalMcpServers)
-        .where(eq(personalMcpServers.id, server.id));
-    });
-  }
+  await moveCustomMcpServer(server, input.visibility);
 
   console.log(
     `[custom-mcp-servers] '${server.name}' is now ${input.visibility} (by user ${auth.userId})`,
