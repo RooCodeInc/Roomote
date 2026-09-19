@@ -616,6 +616,30 @@ const environmentInitialUrlSchema = z.union([
   z.string().url(),
 ]);
 
+const computerUseBrowserOriginSchema = z
+  .string()
+  .url()
+  .refine((value) => {
+    try {
+      const url = new URL(value);
+      return (
+        (url.protocol === 'http:' || url.protocol === 'https:') &&
+        url.origin === value
+      );
+    } catch {
+      return false;
+    }
+  }, 'Must be an HTTP(S) origin without a path, query, or fragment');
+
+export const environmentComputerUseSchema = z.object({
+  provider: z.literal('cua-driver'),
+  browser_origins: z.array(computerUseBrowserOriginSchema).min(1).max(20),
+});
+
+export type EnvironmentComputerUse = z.infer<
+  typeof environmentComputerUseSchema
+>;
+
 function validatePortLimits(ports: NamedPort[]): boolean {
   const proxiedPorts = ports.filter((port) => port.proxied !== false);
   const nonProxiedPorts = ports.filter((port) => port.proxied === false);
@@ -730,6 +754,12 @@ export const environmentConfigSchema = z
      * their repositories have been prepared.
      */
     docker_projects: z.array(dockerProjectSchema).optional(),
+    /**
+     * Opt-in, origin-bounded computer use inside the sandbox's Linux desktop.
+     * The worker exposes a Cua Driver MCP only after the Shared Desktop is
+     * healthy, and keeps generic desktop capture/input disabled.
+     */
+    computer_use: environmentComputerUseSchema.optional(),
     /**
      * Optional sandbox OIDC targets for this environment.
      * Tokens are minted by Roomote, written into the sandbox filesystem, and

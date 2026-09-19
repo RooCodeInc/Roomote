@@ -73,6 +73,34 @@ describe('resolveBuiltInMcpServers', () => {
     expect(Object.keys(BUILT_IN_MCPS).sort()).toEqual(expectedBuiltInMcpNames);
   });
 
+  it('mounts the guarded Cua Driver MCP only after the desktop configured it', () => {
+    const disabled = resolveBuiltInMcpServers({ DISPLAY: ':99' });
+    expect(disabled).not.toHaveProperty('cua-driver');
+
+    const enabled = resolveBuiltInMcpServers({
+      DISPLAY: ':99',
+      ROOMOTE_CUA_DRIVER_BINARY: '/usr/local/bin/cua-driver',
+      ROOMOTE_CUA_DRIVER_MANIFEST_PATH:
+        '/home/roomote/.roomote/cua-driver/capabilities.yaml',
+      ROOMOTE_CUA_DRIVER_HUMAN_CONTROL_URL: 'http://127.0.0.1:6080/metrics',
+    });
+
+    expect(enabled['cua-driver']).toEqual({
+      type: 'stdio',
+      command: 'node',
+      args: [expect.stringMatching(/mcp\/cua-driver-proxy\/index\.js$/)],
+      env: {
+        MISE_DATA_DIR: '/opt/mise',
+        MISE_CACHE_DIR: '/opt/mise/cache',
+        DISPLAY: ':99',
+        ROOMOTE_CUA_DRIVER_BINARY: '/usr/local/bin/cua-driver',
+        ROOMOTE_CUA_DRIVER_MANIFEST_PATH:
+          '/home/roomote/.roomote/cua-driver/capabilities.yaml',
+        ROOMOTE_CUA_DRIVER_HUMAN_CONTROL_URL: 'http://127.0.0.1:6080/metrics',
+      },
+    });
+  });
+
   it.each([
     '/api/mcp/http-integrations',
     'https://web.test/api/mcp/http-integrations',

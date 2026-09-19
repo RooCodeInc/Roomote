@@ -9,6 +9,7 @@ FROM ubuntu:24.04 AS runtime
 LABEL org.opencontainers.image.source=https://github.com/RooCodeInc/Roomote
 
 ARG AGENT_BROWSER_VERSION=0.37.0
+ARG CUA_DRIVER_VERSION=0.28.2
 ARG OPENCODE_CLI_VERSION=1.18.10
 ARG FFMPEG_INSTALLER_VERSION=1.1.0
 # @ffprobe-installer (not ffprobe-static, which ships no linux/arm64 binary
@@ -69,9 +70,11 @@ RUN apt-get update \
     libx11-xcb1 \
     libxcomposite1 \
     libxdamage1 \
+    libxi6 \
     libxkbcommon0 \
     libxrandr2 \
     libxss1 \
+    at-spi2-core \
   && ln -sf "$(command -v python3)" /usr/local/bin/python \
   && docker compose version \
   && rm -rf /var/lib/apt/lists/*
@@ -210,6 +213,24 @@ ENV SHELL=/bin/bash
 
 RUN bash /tmp/install-browser-agent.sh \
   && sudo rm -rf /var/lib/apt/lists/*
+
+# Cua Driver is dormant unless an environment explicitly enables bounded
+# computer use. Pin the exact release and verify the platform archive before
+# exposing the binary to task MCP configuration.
+RUN ARCH="$(dpkg --print-architecture)" \
+  && case "$ARCH" in \
+    amd64) CUA_ARCH="x86_64"; CUA_SHA256="a1d99fd04bb4927ef5ffdbe60eb91ed8b51a2bab60e10fc604a75bd59ce69c3e" ;; \
+    arm64) CUA_ARCH="arm64"; CUA_SHA256="55e8a32839a4ac369a773df4dac87b345bd4567779221ade4a5e39223a45a2e8" ;; \
+    *) echo "Unsupported architecture for Cua Driver: $ARCH" >&2; exit 1 ;; \
+  esac \
+  && CUA_ARCHIVE="cua-driver-rs-${CUA_DRIVER_VERSION}-linux-${CUA_ARCH}-binary.tar.gz" \
+  && curl -fsSL "https://github.com/trycua/cua/releases/download/cua-driver-rs-v${CUA_DRIVER_VERSION}/${CUA_ARCHIVE}" -o "/tmp/${CUA_ARCHIVE}" \
+  && printf '%s  %s\n' "$CUA_SHA256" "/tmp/${CUA_ARCHIVE}" | sha256sum -c - \
+  && mkdir -p /tmp/cua-driver \
+  && tar -xzf "/tmp/${CUA_ARCHIVE}" -C /tmp/cua-driver \
+  && sudo install -m 0755 /tmp/cua-driver/cua-driver /usr/local/bin/cua-driver \
+  && test "$(cua-driver --version)" = "cua-driver ${CUA_DRIVER_VERSION}" \
+  && rm -rf /tmp/cua-driver "/tmp/${CUA_ARCHIVE}"
 
 RUN sudo mkdir -p /opt/ffmpeg/bin \
   && sudo chown -R roomote:roomote /opt/ffmpeg \

@@ -37,6 +37,16 @@ const roomoteMcpPath = process.argv[1]
       'worker/dist/mcp/roomote-mcp-server/index.js',
     );
 
+const cuaDriverProxyPath = process.argv[1]
+  ? path.join(
+      path.dirname(path.resolve(process.argv[1])),
+      'mcp/cua-driver-proxy/index.js',
+    )
+  : path.join(
+      process.env.HOME || '/home/roomote',
+      'worker/dist/mcp/cua-driver-proxy/index.js',
+    );
+
 /**
  * Built-in MCP servers enabled for all cloud agents.
  * Add entries here to make them available to the active OpenCode runtime.
@@ -407,6 +417,27 @@ export function resolveBuiltInMcpServers(
     } else {
       resolvedMcps[name] = config;
     }
+  }
+
+  if (
+    taskEnv?.ROOMOTE_CUA_DRIVER_BINARY &&
+    taskEnv.ROOMOTE_CUA_DRIVER_MANIFEST_PATH &&
+    taskEnv.ROOMOTE_CUA_DRIVER_HUMAN_CONTROL_URL
+  ) {
+    resolvedMcps['cua-driver'] = {
+      type: 'stdio',
+      command: 'node',
+      args: [cuaDriverProxyPath],
+      env: {
+        ...stdioEnvExtras,
+        DISPLAY: taskEnv.DISPLAY ?? '',
+        ROOMOTE_CUA_DRIVER_BINARY: taskEnv.ROOMOTE_CUA_DRIVER_BINARY,
+        ROOMOTE_CUA_DRIVER_MANIFEST_PATH:
+          taskEnv.ROOMOTE_CUA_DRIVER_MANIFEST_PATH,
+        ROOMOTE_CUA_DRIVER_HUMAN_CONTROL_URL:
+          taskEnv.ROOMOTE_CUA_DRIVER_HUMAN_CONTROL_URL,
+      },
+    };
   }
 
   // Add integration-provided MCP servers.

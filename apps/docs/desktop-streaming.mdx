@@ -81,6 +81,40 @@ cookies, and logins are shared.
 
 Tasks without a Shared Desktop keep using a private headless browser.
 
+## Opt in to bounded computer use
+
+Environment owners can expose the Cua Driver MCP to the Roomote agent for an
+initial browser-only computer-use preview. Add `computer_use` to the
+environment definition and list every HTTP(S) origin that the agent may open:
+
+```yaml
+computer_use:
+  provider: cua-driver
+  browser_origins:
+    - http://127.0.0.1:3000
+    - https://staging.example.com
+```
+
+Each entry must be an origin only, with no path, query, or fragment. Computer
+use is not enabled unless this section is present. The worker starts Cua Driver
+in bounded mode with a short-lived generated manifest, typed browser tools,
+and the configured origin list. It attaches to Roomote's existing shared
+browser profile; it cannot launch other applications or a separate browser.
+Generic desktop capture and generic native mouse or keyboard tools stay
+disabled.
+
+Cua Driver uses the same X11 display as Shared Desktop. When a person clicks,
+scrolls, types, or pastes through Shared Desktop, read-only Cua observations
+remain available but Cua actions are refused until control returns to the
+agent. Actions also fail closed when the handoff state cannot be read. Stopping
+the task closes the MCP process through the normal agent-runtime cancellation
+path.
+
+This preview does not send a provider credential into the sandbox and does not
+connect Roomote's Jev judgment calls to the computer-use loop. It uses Cua
+Driver's released semantic accessibility and Chromium DOM routes. Cua's
+optional visual-perception extension and its model artifacts are not installed.
+
 ## Verify performance
 
 Open **Shared Desktop**. (A **Start remote desktop** button appears only if
@@ -123,3 +157,9 @@ picture arrives after the encode and network round trip.
 - browser playback uses fragmented MP4 over HTTP, not adaptive bitrate or
   WebRTC congestion control
 - every viewer sees the same desktop; there is one screen and one pointer
+- the computer-use preview is Linux X11 and browser-only; it does not control a
+  person's computer, enable generic native desktop input, or support macOS,
+  Windows, or Wayland sandboxes
+- configured origins bound navigation and typed browser actions, but the
+  capability manifest is not a sandbox around processes already running in the
+  task workspace

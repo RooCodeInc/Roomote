@@ -9,6 +9,7 @@ import {
 import type { StartupLogger } from '../../../logging';
 import {
   type ServiceContext,
+  configureCuaDriver,
   ServiceManager,
   startPortProxies,
   startSharedDesktop,
@@ -143,6 +144,7 @@ async function startEnvironmentServices({
   logger: StartupLogger;
 }): Promise<ServiceInfo[]> {
   const services: ServiceInfo[] = [];
+  let sharedDesktopStarted = false;
 
   if (
     environmentConfig &&
@@ -151,12 +153,15 @@ async function startEnvironmentServices({
     // Shared Desktop is optional: a failure here must not prevent the port
     // proxies below from starting, or Live Preview breaks alongside it.
     try {
-      await timedStep(logger, 'start shared desktop', () =>
-        startSharedDesktop({
-          cwd: workspaceRoot,
-          env: envVars,
-          allowedControlOrigin: serviceContext.appOrigin,
-        }),
+      sharedDesktopStarted = await timedStep(
+        logger,
+        'start shared desktop',
+        () =>
+          startSharedDesktop({
+            cwd: workspaceRoot,
+            env: envVars,
+            allowedControlOrigin: serviceContext.appOrigin,
+          }),
       );
     } catch (error) {
       logger.userLog.warn(
@@ -165,6 +170,33 @@ async function startEnvironmentServices({
         }`,
       );
     }
+  }
+
+  const computerUseConfig = environmentConfig?.computer_use;
+  if (computerUseConfig && sharedDesktopStarted) {
+    try {
+      const configured = await timedStep(logger, 'configure computer use', () =>
+        configureCuaDriver({
+          config: computerUseConfig,
+          env: envVars,
+        }),
+      );
+      if (!configured) {
+        logger.userLog.warn(
+          'Computer use is unavailable because this worker image does not include Cua Driver',
+        );
+      }
+    } catch (error) {
+      logger.userLog.warn(
+        `Computer use is unavailable for this task: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  } else if (computerUseConfig) {
+    logger.userLog.warn(
+      'Computer use is unavailable because the Shared Desktop did not start',
+    );
   }
 
   // Start port proxies if proxyPorts are configured.
