@@ -56,7 +56,7 @@ OAuth client for the callback URL shown in the dialog
 secret manually.
 
 If a token refresh is rejected by the server, the connection is marked as
-needing reconnection: agents get a clear error pointing at Settings, and the
+needing reconnection: agents get a clear error pointing at Integrations, and the
 server card shows **Connect** again.
 
 Roomote sends the RFC 8707 `resource` indicator by default, as required by
@@ -85,7 +85,7 @@ When you add a remote server you choose who can use it:
 
 - **Everyone in this deployment** (the default) shares it with every member.
   Agents in every Session and task can use its tools, acting with the account
-  that authorized it. It appears under **Settings → Integrations**. The member
+  that authorized it. It appears under **Integrations**. The member
   who added it and deployment admins can edit, connect, or remove it; everyone
   else sees it read-only.
 - **Only me** keeps it private. Only your own Sessions and tasks receive it,
@@ -132,7 +132,7 @@ operator-configured URLs. Redirects from custom servers are never followed.
 - Any member can add a remote server and manages the ones they added.
   Deployment admins manage every shared server and are the only ones who can
   add local (stdio) servers. Personal servers are managed by their owner alone.
-- `R_CUSTOM_MCP_DISABLED=true` disables the feature entirely: the Settings
+- `R_CUSTOM_MCP_DISABLED=true` disables the feature entirely: the Integrations
   section, the proxy routes, and delivery to tasks. It is independent of
   `R_CURATED_INTEGRATIONS_DISABLED`, so a deployment can disable the built-in
   catalog while still using its own custom servers.

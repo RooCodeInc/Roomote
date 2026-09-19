@@ -26,7 +26,7 @@ MCP servers defined on an environment.
 You will usually see one of these setup models:
 
 - **Admin connection once**: an admin connects the integration for the
-  deployment from **Settings > Integrations**
+  deployment from **Integrations**
 - **Enable first, then teammates link accounts**: an admin enables the
   integration, then each teammate links their own account from
   [Personal Settings](/personal-settings) when they need it
@@ -38,7 +38,8 @@ You can also ask Roomote to connect any integration in this catalog from a
 Session. Roomote starts the provider's OAuth flow when the integration supports
 OAuth, opens the existing secure configuration form when an admin-managed key
 or certificate is required, and enables keyless integrations directly. The
-same admin, ownership, and deployment availability rules apply as in Settings.
+same admin, ownership, and deployment availability rules apply as on the
+**Integrations** page.
 Credentials are never collected in chat.
 
 Roomote can list the full built-in catalog and current connection status without
@@ -51,7 +52,7 @@ silently bypassed with another connection method.
 ## Manage available tools
 
 Some connected integrations expose a **Manage tools** action in
-**Settings > Integrations**. Admins can use it to restrict the types of
+**Integrations**. Admins can use it to restrict the types of
 operations Roomote can make with the service.
 
 Use this as a coarse permissions system, for example allowing only read
@@ -103,7 +104,7 @@ authorized requests. This opt-in feature does not change sandbox networking.
 Beyond the built-in catalog, you can connect your own MCP servers at two
 scopes:
 
-- **Deployment-wide**, under Settings → Integrations →
+- **Deployment-wide**, under **Integrations** →
   [Custom MCP Servers](/integrations/custom-mcp-servers): remote servers
   (with header or OAuth authentication, credentials held server-side) and
   local stdio servers, available to agents in every task.
