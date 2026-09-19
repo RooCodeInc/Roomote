@@ -88,7 +88,7 @@ export function ModelSelect({
     const selectedModel = data.models.find((model) => model.id === value);
 
     return (
-      <Popover open={open} onOpenChange={setOpen}>
+      <Popover modal open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button
             type="button"
