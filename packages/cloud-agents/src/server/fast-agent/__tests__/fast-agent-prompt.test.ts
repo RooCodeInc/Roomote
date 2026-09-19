@@ -297,6 +297,42 @@ describe('buildFastAgentSystemPrompt', () => {
       'Do not stop at acknowledgement, agreement, speculation, restatement, or a plan when meaningful investigation or execution is possible',
     );
   });
+
+  it('requires evidence for task claims and bounds recovery', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+
+    expect(prompt).toContain('## Delegated Task Evidence and Recovery');
+    expect(prompt).toContain(
+      'completion labels, and settled status as reported claims, not proof by themselves',
+    );
+    expect(prompt).toContain(
+      'concrete claim-specific evidence proportional to the claim',
+    );
+    expect(prompt).toContain(
+      'actual check results, artifacts, authoritative provider state, or relevant logs or source',
+    );
+    expect(prompt).toContain('use it without a mandatory redundant recheck');
+    expect(prompt).toContain(
+      'When evidence is missing, inconsistent, or insufficient, inspect the underlying task details',
+    );
+    expect(prompt).toContain(
+      'distinguish what the task reported from what you independently confirmed',
+    );
+    expect(prompt).toContain(
+      'pursue one specific reasonable retry or alternative with available capabilities during authorized follow-through',
+    );
+    expect(prompt).toContain(
+      'avoid repeating an attempt that already failed for the same reason',
+    );
+    expect(prompt).toContain('stop after bounded non-repetitive recovery');
+    expect(prompt).toContain(
+      'a human-authored follow-through may resume a resumable settled task',
+    );
+    expect(prompt).toContain(
+      'automatic follow-through may steer only currently running work and must never reactivate stopped, waiting, settled, failed, or canceled work',
+    );
+  });
+
   it.each(['production', 'preview', 'development', undefined])(
     'shares build identity with normal prompts for %s',
     (appEnv) => {
