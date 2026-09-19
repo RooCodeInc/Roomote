@@ -1,4 +1,21 @@
-import { render } from '@testing-library/react';
+import { render as renderComponent, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { ReactNode } from 'react';
+const queryKey = [['preferences', 'getPersonal']];
+let client: QueryClient;
+function render(children: ReactNode) {
+  return renderComponent(children, {
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    ),
+  });
+}
+vi.mock('@/trpc/client', () => ({
+  useTRPC: () => ({
+    preferences: { getPersonal: { queryKey: () => queryKey } },
+  }),
+}));
+afterEach(() => client.clear());
 
 type PersonalColorTheme = 'light' | 'dark' | 'system';
 
@@ -8,7 +25,9 @@ const { personalPreferencesState, themeState, userState } = vi.hoisted(() => ({
       colorTheme: 'system' as PersonalColorTheme,
       narrationMode: false,
     },
+    hasLoadedPreferences: true,
     isLoading: false,
+    refetch: vi.fn(),
   },
   themeState: {
     theme: 'system',
@@ -36,6 +55,7 @@ import { PersonalThemeSync } from './PersonalThemeSync';
 
 describe('PersonalThemeSync', () => {
   beforeEach(() => {
+    client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     vi.clearAllMocks();
     window.localStorage.clear();
     personalPreferencesState.preferences = {
@@ -43,11 +63,19 @@ describe('PersonalThemeSync', () => {
       narrationMode: false,
     };
     personalPreferencesState.isLoading = false;
+    personalPreferencesState.hasLoadedPreferences = true;
+    personalPreferencesState.refetch.mockReset();
+    personalPreferencesState.refetch.mockImplementation(() =>
+      client.fetchQuery({
+        queryKey,
+        queryFn: async () => personalPreferencesState.preferences,
+      }),
+    );
     themeState.theme = 'system';
     userState.isSignedIn = true;
   });
 
-  it('applies the saved theme after preferences have loaded', () => {
+  it('applies the saved theme after preferences have loaded', async () => {
     personalPreferencesState.preferences = {
       colorTheme: 'dark' as PersonalColorTheme,
       narrationMode: false,
@@ -56,10 +84,12 @@ describe('PersonalThemeSync', () => {
 
     render(<PersonalThemeSync />);
 
-    expect(themeState.setTheme).toHaveBeenCalledWith('dark');
+    await waitFor(() => {
+      expect(themeState.setTheme).toHaveBeenCalledWith('dark');
+    });
   });
 
-  it('does not sync while preferences are still loading', () => {
+  it('does not sync while preferences are still loading', async () => {
     personalPreferencesState.isLoading = true;
     personalPreferencesState.preferences = {
       colorTheme: 'dark' as PersonalColorTheme,
@@ -69,7 +99,50 @@ describe('PersonalThemeSync', () => {
 
     render(<PersonalThemeSync />);
 
+    await waitFor(() => {
+      expect(personalPreferencesState.refetch).toHaveBeenCalled();
+    });
     expect(themeState.setTheme).not.toHaveBeenCalled();
+  });
+
+  it('preserves the cached theme through an initial load failure, optimistic updates, and recovery', async () => {
+    personalPreferencesState.refetch.mockResolvedValue({ isSuccess: false });
+    personalPreferencesState.hasLoadedPreferences = false;
+    themeState.theme = 'dark';
+    window.localStorage.setItem('roomote-color-theme', 'dark');
+
+    const { rerender, unmount } = render(<PersonalThemeSync />);
+
+    await waitFor(() => {
+      expect(personalPreferencesState.refetch).toHaveBeenCalled();
+    });
+
+    expect(themeState.setTheme).not.toHaveBeenCalled();
+    expect(window.localStorage.getItem('roomote-color-theme')).toBe('dark');
+
+    personalPreferencesState.hasLoadedPreferences = true;
+    rerender(<PersonalThemeSync />);
+
+    expect(themeState.setTheme).not.toHaveBeenCalled();
+    expect(window.localStorage.getItem('roomote-color-theme')).toBe('dark');
+
+    unmount();
+    personalPreferencesState.refetch.mockReset();
+    personalPreferencesState.refetch.mockImplementation(() =>
+      client.fetchQuery({
+        queryKey,
+        queryFn: async () => personalPreferencesState.preferences,
+      }),
+    );
+    personalPreferencesState.preferences = {
+      colorTheme: 'light',
+      narrationMode: false,
+    };
+    render(<PersonalThemeSync />);
+
+    await waitFor(() => {
+      expect(themeState.setTheme).toHaveBeenCalledWith('light');
+    });
   });
 
   it('does not override browser storage when the viewer is signed out', () => {
@@ -94,7 +167,7 @@ describe('PersonalThemeSync', () => {
     expect(window.localStorage.getItem('roomote-color-theme')).toBeNull();
   });
 
-  it('backfills the Roomote theme storage key when the page theme already matches the saved preference', () => {
+  it('backfills the Roomote theme storage key when the page theme already matches the saved preference', async () => {
     personalPreferencesState.preferences = {
       colorTheme: 'light' as PersonalColorTheme,
       narrationMode: false,
@@ -104,7 +177,21 @@ describe('PersonalThemeSync', () => {
 
     render(<PersonalThemeSync />);
 
+    await waitFor(() => {
+      expect(window.localStorage.getItem('roomote-color-theme')).toBe('light');
+    });
     expect(themeState.setTheme).not.toHaveBeenCalled();
-    expect(window.localStorage.getItem('roomote-color-theme')).toBe('light');
+  });
+
+  it('backfills a legitimate system preference after it has loaded', async () => {
+    themeState.theme = 'system';
+    window.localStorage.setItem('roomote-color-theme', 'dark');
+
+    render(<PersonalThemeSync />);
+
+    await waitFor(() => {
+      expect(window.localStorage.getItem('roomote-color-theme')).toBe('system');
+    });
+    expect(themeState.setTheme).not.toHaveBeenCalled();
   });
 });
