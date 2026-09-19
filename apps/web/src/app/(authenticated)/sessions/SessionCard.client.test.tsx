@@ -344,46 +344,48 @@ describe('SessionCard', () => {
   it.each([
     {
       owner: { taskId: null, path: 'notes/decision.md', version: 2 },
-      expected: '/sessions/session-one?artifact=notes%2Fdecision.md&v=2',
+      expected: '/artifacts/session/session-one?path=notes%2Fdecision.md&v=2',
     },
     {
       owner: { taskId: 'task-1', path: 'reports/result.md', version: 3 },
-      expected:
-        '/sessions/session-one?panel=artifacts&artifact=reports%2Fresult.md&artifactTask=task-1&v=3',
+      expected: '/artifacts/task/task-1?path=reports%2Fresult.md&v=3',
     },
-  ])('deep-links one artifact to its Session viewer', ({ owner, expected }) => {
-    render(
-      <SessionCard
-        viewerUserId="user-1"
-        session={{
-          id: 'session-one',
-          title: 'One artifact',
-          ownerKind: 'user',
-          ownerAutomation: null,
-          ownerName: 'Dan Riccio',
-          ownerEmail: 'dan@example.com',
-          ownerImageUrl: null,
-          ownerUserId: 'user-1',
-          privacy: 'shared',
-          sourceSurface: 'slack',
-          activityAt: Date.now() / 1000,
-          cachedStatus: 'ready',
-          executionCount: 1,
-          inferenceCostMicroUsd: 0,
-          directInferenceCostMicroUsd: 0,
-          unread: false,
-          artifactCount: 1,
-          singleArtifact: owner,
-          pullRequests: [],
-          tasks: [],
-        }}
-      />,
-    );
+  ])(
+    'deep-links one artifact to its standalone viewer',
+    ({ owner, expected }) => {
+      render(
+        <SessionCard
+          viewerUserId="user-1"
+          session={{
+            id: 'session-one',
+            title: 'One artifact',
+            ownerKind: 'user',
+            ownerAutomation: null,
+            ownerName: 'Dan Riccio',
+            ownerEmail: 'dan@example.com',
+            ownerImageUrl: null,
+            ownerUserId: 'user-1',
+            privacy: 'shared',
+            sourceSurface: 'slack',
+            activityAt: Date.now() / 1000,
+            cachedStatus: 'ready',
+            executionCount: 1,
+            inferenceCostMicroUsd: 0,
+            directInferenceCostMicroUsd: 0,
+            unread: false,
+            artifactCount: 1,
+            singleArtifact: owner,
+            pullRequests: [],
+            tasks: [],
+          }}
+        />,
+      );
 
-    expect(screen.getByText('Dan Riccio from Slack')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '1 artifact' })).toHaveAttribute(
-      'href',
-      expected,
-    );
-  });
+      expect(screen.getByText('Dan Riccio from Slack')).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: '1 artifact' })).toHaveAttribute(
+        'href',
+        expected,
+      );
+    },
+  );
 });
