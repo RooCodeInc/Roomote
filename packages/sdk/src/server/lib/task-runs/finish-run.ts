@@ -12,6 +12,7 @@ import {
   parseConflictResolutionSummary,
   resolveComputeProviderTarget,
   stripRunErrorMarkers,
+  activeRunStatuses,
   type TaskRunErrorCode,
 } from '@roomote/types';
 import {
@@ -47,6 +48,7 @@ import {
   asc,
   eq,
   and,
+  inArray,
   isNotNull,
   tasks,
   resolveDiscordRuntimeCredentials,
@@ -219,6 +221,7 @@ export const finishRun = async ({
   status,
   error,
   errorCode,
+  preserveExistingOutcome = false,
 }: {
   id: number;
   status:
@@ -229,6 +232,8 @@ export const finishRun = async ({
   error?: string;
   /** Machine-readable failure category persisted alongside the error text. */
   errorCode?: TaskRunErrorCode;
+  /** Do not overwrite or repeat side effects for a run another path settled. */
+  preserveExistingOutcome?: boolean;
 }) => {
   const run = await db.query.taskRuns.findFirst({
     where: eq(taskRuns.id, id),
@@ -236,7 +241,16 @@ export const finishRun = async ({
   });
 
   if (!run) {
-    return;
+    return preserveExistingOutcome
+      ? { outcome: 'run_not_found' as const }
+      : undefined;
+  }
+
+  if (
+    preserveExistingOutcome &&
+    !activeRunStatuses.some((activeStatus) => activeStatus === run.status)
+  ) {
+    return { outcome: 'already_settled' as const };
   }
 
   const task = run.task;
@@ -301,8 +315,8 @@ export const finishRun = async ({
                 'Task run transitioned to idle while the machine remained alive.',
             };
 
-  await db.transaction(async (tx) => {
-    await tx
+  const finalized = await db.transaction(async (tx) => {
+    const update = tx
       .update(taskRuns)
       .set({
         status,
@@ -313,7 +327,20 @@ export const finishRun = async ({
         canceledAt: status === RunStatus.Canceled ? now : run.canceledAt,
         completedAt: status === RunStatus.Canceled ? null : now,
       })
-      .where(eq(taskRuns.id, id));
+      .where(
+        preserveExistingOutcome
+          ? and(
+              eq(taskRuns.id, id),
+              inArray(taskRuns.status, [...activeRunStatuses]),
+            )
+          : eq(taskRuns.id, id),
+      );
+    if (preserveExistingOutcome) {
+      const updated = await update.returning({ id: taskRuns.id });
+      if (updated.length === 0) return false;
+    } else {
+      await update;
+    }
 
     // Derive the durable task state from all of the task's runs via the shared
     // @roomote/db helper. This is one of several writers (cancel/dequeue/sleep/
@@ -380,7 +407,12 @@ export const finishRun = async ({
         tx,
       );
     }
+    return true;
   });
+
+  if (!finalized) {
+    return { outcome: 'already_settled' as const };
+  }
 
   if (status !== RunStatus.Idle) {
     try {
@@ -656,6 +688,9 @@ export const finishRun = async ({
       );
     }
   }
+  return preserveExistingOutcome
+    ? { outcome: 'finalized' as const }
+    : undefined;
 };
 
 /**

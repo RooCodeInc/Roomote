@@ -4,6 +4,7 @@ import type { CredentialEgressWorkloadRegistration } from '@roomote/types';
 import {
   admitCredentialEgressApiProxy,
   buildCredentialEgressApiProxyWorkerEnv,
+  CredentialEgressBootstrapRunInactiveError,
   resolveCredentialEgressApiProxyBaseUrl,
   type ApiProxyAdmissionDependencies,
 } from './api-proxy';
@@ -169,7 +170,7 @@ describe('API-proxy admission', () => {
         input(stopped),
         deps({ isRunActive: vi.fn().mockResolvedValue(false) }),
       ),
-    ).rejects.toThrow('no longer active');
+    ).rejects.toBeInstanceOf(CredentialEgressBootstrapRunInactiveError);
     expect(stopped.register).not.toHaveBeenCalled();
 
     const silent = lifecycle();
@@ -217,7 +218,10 @@ describe('API-proxy admission', () => {
     );
     expect(failing.startLeaseRenewal).not.toHaveBeenCalled();
 
-    const skipped = lifecycle({ status: 'skipped', reason: 'no_grants' });
+    const skipped = lifecycle({
+      status: 'skipped',
+      reason: 'run_not_eligible',
+    });
     await expect(
       admitCredentialEgressApiProxy(input(skipped), deps()),
     ).rejects.toThrow('no longer eligible');

@@ -185,6 +185,7 @@ export const Header = ({ session: { taskRun, task, taskId } }: HeaderProps) => {
             </h1>
             <TaskHeaderMetadata
               model={model}
+              privacy={task?.privacy}
               environmentId={environmentId}
               repo={repo}
               pullRequests={pullRequests}

@@ -47,6 +47,7 @@ import {
 } from './compute-providers/docker-sandbox-security';
 import { resolveFromWorkspaceRoot } from './repo-paths';
 import { findPersistedWorkerBootstrapRestarts } from './worker-bootstrap-restarts';
+import { CredentialEgressBootstrapRunInactiveError } from './credential-egress/api-proxy';
 
 type WorkerBootstrapExitDisposition = 'ignore' | 'restart' | 'failed';
 
@@ -595,7 +596,12 @@ export abstract class BaseController {
       `[BaseController] ❌ Error spawning ${taskRun.payloadKind} worker for task run #${taskRun.id}: ${errorMessage}`,
     );
 
-    await this.finishFailedTaskRun(taskRun, errorMessage, errorCode);
+    // Credential admission observes live run state. If it reports that another
+    // lifecycle path already settled the run, preserve that path's causal
+    // status and error instead of replacing it with this downstream symptom.
+    if (!(error instanceof CredentialEgressBootstrapRunInactiveError)) {
+      await this.finishFailedTaskRun(taskRun, errorMessage, errorCode);
+    }
 
     throw reportError;
   }
@@ -810,7 +816,9 @@ export abstract class BaseController {
     );
 
     try {
-      await this.finishFailedTaskRun(taskRun, errorMessage);
+      // This path already claimed Failed atomically; run the remaining
+      // terminal side effects instead of treating that status as a lost race.
+      await this.finishFailedTaskRun(taskRun, errorMessage, undefined, false);
     } catch (error) {
       captureControllerException(error, {
         runId: taskRun.id,
@@ -924,6 +932,7 @@ export abstract class BaseController {
     taskRun: TaskRun,
     errorMessage: string,
     errorCode?: TaskRunErrorCodeValue,
+    preserveExistingOutcome = true,
   ): Promise<void> {
     // Use the centralized termination path so all side-effects (email, Slack,
     // Linear notifications, lock release, snapshot pending→failed, etc.) are
@@ -932,6 +941,7 @@ export abstract class BaseController {
       id: taskRun.id,
       status: RunStatus.Failed,
       error: errorMessage,
+      ...(preserveExistingOutcome ? { preserveExistingOutcome: true } : {}),
       ...(errorCode ? { errorCode } : {}),
     });
   }

@@ -130,6 +130,7 @@ vi.mock('../monitoring/sentry', () => ({
 
 import { BaseController } from '../BaseController';
 import { DockerBootError } from '../compute-providers/docker-sandbox-security';
+import { CredentialEgressBootstrapRunInactiveError } from '../credential-egress/api-proxy';
 
 // Create a concrete subclass for testing the abstract BaseController.
 class TestController extends BaseController {
@@ -282,7 +283,21 @@ describe('BaseController.handleSpawnTaskRunError', () => {
       id: 42,
       status: RunStatus.Failed,
       error: 'Machine unavailable',
+      preserveExistingOutcome: true,
     });
+  });
+
+  it('preserves a run already settled before credential admission', async () => {
+    const job = makeTaskRun({ id: 42 });
+
+    await expect(
+      controller.testHandleSpawnTaskRunError(
+        job,
+        new CredentialEgressBootstrapRunInactiveError(),
+      ),
+    ).rejects.toThrow('Credential egress bootstrap run is no longer active');
+
+    expect(mockFinishRun).not.toHaveBeenCalled();
   });
 
   it('routes SnapshotEnvironment spawn failures through finishRun, which owns the snapshot pending→failed flip', async () => {
@@ -311,6 +326,7 @@ describe('BaseController.handleSpawnTaskRunError', () => {
       id: 99,
       status: RunStatus.Failed,
       error: 'Snapshot failed',
+      preserveExistingOutcome: true,
     });
 
     // The environment_snapshots pending→failed transition lives inside
@@ -362,6 +378,7 @@ describe('BaseController.handleSpawnTaskRunError', () => {
       id: 7,
       status: RunStatus.Failed,
       error: 'string error',
+      preserveExistingOutcome: true,
     });
   });
 
@@ -554,6 +571,7 @@ describe('BaseController.dequeueTaskRun', () => {
       error:
         'New tasks are paused due to a billing issue. Please check billing.',
       errorCode: TaskRunErrorCode.DeploymentReadOnly,
+      preserveExistingOutcome: true,
     });
     expect(mockDbTransaction).not.toHaveBeenCalled();
   });
