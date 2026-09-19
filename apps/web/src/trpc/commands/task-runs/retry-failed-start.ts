@@ -1,7 +1,7 @@
 import {
   DeploymentReadOnlyError,
-  enqueueTaskRelaunch,
   isRelaunchableFailedStartPayloadKind,
+  retryFailedTaskStart,
 } from '@roomote/cloud-agents/server';
 import { and, db, desc, eq, isNull, taskRuns, tasks } from '@roomote/db/server';
 import { RunStatus, TaskPayloadKind } from '@roomote/types';
@@ -39,11 +39,6 @@ export async function retryFailedTaskStartCommand(
               eq(taskRuns.id, input.runId),
               eq(taskRuns.taskId, input.taskId),
             ),
-            columns: {
-              id: true,
-              status: true,
-              payloadKind: true,
-            },
           })
         : await db.query.taskRuns.findFirst({
             where: and(
@@ -51,11 +46,6 @@ export async function retryFailedTaskStartCommand(
               eq(taskRuns.status, RunStatus.Failed),
             ),
             orderBy: [desc(taskRuns.id)],
-            columns: {
-              id: true,
-              status: true,
-              payloadKind: true,
-            },
           });
 
     if (!failedRun) {
@@ -83,15 +73,20 @@ export async function retryFailedTaskStartCommand(
       };
     }
 
-    const relaunchedRun = await enqueueTaskRelaunch({
-      sourceRunId: failedRun.id,
+    const result = await retryFailedTaskStart({
+      sourceRun: failedRun,
       actingUserId: auth.userId,
+      trigger: 'manual',
     });
+
+    if (!result.success) {
+      return { success: false, error: result.error };
+    }
 
     return {
       success: true,
-      runId: relaunchedRun.id,
-      taskId: relaunchedRun.taskId,
+      runId: result.run.id,
+      taskId: result.run.taskId,
     };
   } catch (error) {
     console.error('retryFailedTaskStart error:', error);

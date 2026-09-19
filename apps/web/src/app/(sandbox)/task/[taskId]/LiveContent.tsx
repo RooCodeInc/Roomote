@@ -275,7 +275,11 @@ function LiveContentInner({
                         <>
                           <Startup
                             runId={bootingTaskRun.id}
+                            taskId={session.taskId}
                             initialTaskRun={bootingTaskRun}
+                            canRetryFailedStart={
+                              bootingTaskRun.canRetryFailedStart
+                            }
                             newTaskHref={newTaskHref}
                             onStatusChange={onBootStatusChange}
                           />

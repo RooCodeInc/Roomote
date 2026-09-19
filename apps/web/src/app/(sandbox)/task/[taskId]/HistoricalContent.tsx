@@ -2,8 +2,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { RunStatus } from '@roomote/types';
-import { MessageSquareWarning, RotateCcw } from 'lucide-react';
-import { Button, Sun } from '@/components/system';
+import { MessageSquareWarning, Sun } from '@/components/system';
 import { Message, MessageContent, Shimmer } from '@/components/ai-elements';
 import { WorkspaceSurface } from '@/components/layout';
 
@@ -27,6 +26,7 @@ import { PreviewPaneLayout } from './PreviewPaneLayout';
 import { WakeTaskInput } from './WakeTaskInput';
 import { OnboardingCompletionMessage } from './OnboardingCompletionMessage';
 import { TaskRobotIconScope } from './TaskRobotIconScope';
+import { RetryFailedStartButton } from './startup/StartupMessage';
 
 interface HistoricalContentProps {
   session: TaskSession;
@@ -192,17 +192,10 @@ function TaskFailureMessage({
               {error}
             </div>
             {onRetry && (
-              <div className="pt-1">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={onRetry}
-                  disabled={retryPending}
-                >
-                  <RotateCcw className="size-4" />
-                  Retry
-                </Button>
-              </div>
+              <RetryFailedStartButton
+                onRetry={onRetry}
+                retryPending={retryPending}
+              />
             )}
           </div>
         </div>

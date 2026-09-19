@@ -62,6 +62,7 @@ import {
   TaskRunQueue,
   enqueueTask,
   enqueueTaskRelaunch,
+  retryFailedTaskStart,
   DeploymentReadOnlyError,
   SnapshotResumeAlreadyExistsError,
   persistEarlyGeneratedTaskTitle,
@@ -3171,6 +3172,81 @@ describe('pr_review queue scope dedup', () => {
         now,
       }),
     ).toEqual({});
+  });
+
+  it('durably delays two automatic failed-start retries, then leaves manual retry available', async () => {
+    const userId = await createUser();
+    const failedRun = await launchFresh({
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+
+    await db
+      .update(taskRuns)
+      .set({ status: RunStatus.Failed, completedAt: new Date() })
+      .where(eq(taskRuns.id, failedRun.id));
+
+    const first = await retryFailedTaskStart({
+      sourceRun: { ...failedRun, status: RunStatus.Failed },
+      actingUserId: userId,
+      trigger: 'automatic',
+    });
+    expect(first).toMatchObject({
+      success: true,
+      retryNumber: 1,
+      delayMs: 1_000,
+    });
+    if (!first.success) throw new Error(first.error);
+    const firstEntry = JSON.parse(
+      (await queueRedis.hget(
+        'queue:cloud-jobs:v2:entries',
+        String(first.run.id),
+      ))!,
+    ) as { availableAt?: number };
+    expect(firstEntry.availableAt).toBeGreaterThan(Date.now());
+
+    await db
+      .update(taskRuns)
+      .set({ status: RunStatus.Failed, completedAt: new Date() })
+      .where(eq(taskRuns.id, first.run.id));
+    const second = await retryFailedTaskStart({
+      sourceRun: { ...first.run, status: RunStatus.Failed },
+      actingUserId: userId,
+      trigger: 'automatic',
+    });
+    expect(second).toMatchObject({
+      success: true,
+      retryNumber: 2,
+      delayMs: 2_000,
+    });
+    if (!second.success) throw new Error(second.error);
+
+    await db
+      .update(taskRuns)
+      .set({ status: RunStatus.Failed, completedAt: new Date() })
+      .where(eq(taskRuns.id, second.run.id));
+    const exhausted = await retryFailedTaskStart({
+      sourceRun: { ...second.run, status: RunStatus.Failed },
+      actingUserId: userId,
+      trigger: 'automatic',
+    });
+    expect(exhausted).toMatchObject({
+      success: false,
+      reason: 'limit_reached',
+    });
+
+    const manual = await retryFailedTaskStart({
+      sourceRun: { ...second.run, status: RunStatus.Failed },
+      actingUserId: userId,
+      trigger: 'manual',
+    });
+    expect(manual).toMatchObject({
+      success: true,
+      retryNumber: 3,
+      delayMs: 0,
+    });
   });
 
   it('gives non-pr-review launches unique scopes', () => {
