@@ -272,6 +272,8 @@ export const fastAgentHumanFollowUpEventSchema = z.object({
   attachmentTexts: z.array(z.string()).optional(),
   senderDisplayName: z.string().min(1).optional(),
   senderExternalId: z.string().min(1).optional(),
+  /** The message was entered on the web and should be quoted on its side-surface reply. */
+  webFollowUp: z.boolean().optional(),
   /**
    * Whether the surface classified the message as addressed to Roomote (a
    * mention, a DM, a reply to it) rather than ambient conversation between

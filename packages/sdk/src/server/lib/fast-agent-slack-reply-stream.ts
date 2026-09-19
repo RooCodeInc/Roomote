@@ -56,12 +56,13 @@ export function createSlackFastReplyStream(params: {
       if (!messageTs) {
         if (opened) return;
         opened = true;
+        const quote = params.getQuote?.() ?? null;
         messageTs = await params.slack.startMessageStream({
           channel: params.channelId,
           threadTs: params.threadTs,
           recipientTeamId: params.recipientTeamId,
           recipientUserId: params.recipientUserId,
-          markdownText: text,
+          markdownText: quote ? `${quote}\n${text}` : text,
         });
         if (!messageTs) failed = true;
         return;
