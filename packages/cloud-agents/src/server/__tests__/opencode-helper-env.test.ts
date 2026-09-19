@@ -87,6 +87,27 @@ describe('scrubOpenCodeHelperEnv', () => {
     expect(env).toEqual({ SERVICE_FQDN_WEB: 'roomote.example.com' });
   });
 
+  it('removes inherited source-control access tokens unless passed explicitly', () => {
+    const inherited: NodeJS.ProcessEnv = {
+      GITHUB_TOKEN: 'github-token',
+      GITLAB_TOKEN: 'gitlab-token',
+      GITEA_TOKEN: 'gitea-token',
+      ADO_TOKEN: 'ado-token',
+      PATH: '/usr/bin',
+    };
+
+    const env = { ...inherited };
+    scrubOpenCodeHelperEnv(env);
+    expect(env).toEqual({ PATH: '/usr/bin' });
+
+    const explicit = { ...inherited };
+    scrubOpenCodeHelperEnv(explicit, { GITHUB_TOKEN: 'github-token' });
+    expect(explicit).toEqual({
+      GITHUB_TOKEN: 'github-token',
+      PATH: '/usr/bin',
+    });
+  });
+
   it('removes unlisted configuration by its suffix', () => {
     const env: NodeJS.ProcessEnv = {
       R_FUTURE_CLIENT_SECRET: 'client-secret',

@@ -2,6 +2,7 @@ import {
   CONTROL_PLANE_ENV_VAR_NAMES,
   DEFAULT_MODEL_PROVIDER_ENV_KEYS,
   SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
+  SOURCE_CONTROL_ACCESS_TOKEN_ENV_VARS,
   parseModelProviderEnvKeys,
 } from '@roomote/types';
 
@@ -31,9 +32,15 @@ const HELPER_BLOCKED_ENV_KEY_PREFIXES = [
   'SERVICE_BASE64_',
 ] as const;
 
-/** Launcher-only key for environment workspaces; helpers never use it. */
+/**
+ * Names the shared list leaves out on purpose because task sandboxes need
+ * them, but helpers do not: the launcher-only workspace key, and the
+ * source-control access tokens (helpers reach source control through the
+ * tool bridge, not with a token of their own).
+ */
 const HELPER_BLOCKED_ENV_KEYS: ReadonlySet<string> = new Set([
   SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
+  ...SOURCE_CONTROL_ACCESS_TOKEN_ENV_VARS,
 ]);
 
 function isBlockedHelperEnvKey(key: string): boolean {
