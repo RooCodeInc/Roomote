@@ -216,43 +216,52 @@ function buildEmailTaskUrl(taskId: string): string {
 async function buildAgentMailAutomationReportButtons(
   taskRun: CommunicationReplyTaskRun,
 ): Promise<Array<Array<{ text: string; url: string }>> | undefined> {
-  const automationKey = await getTaskAutomationInitiatorKey(taskRun.taskId);
-  if (!automationKey) return undefined;
+  try {
+    const automationKey = await getTaskAutomationInitiatorKey(taskRun.taskId);
+    if (!automationKey) return undefined;
 
-  let configureUrl: string | null = null;
-  if (automationKey === 'custom_automation') {
-    const customAutomationId = getCustomAutomationIdFromPayload(
-      taskRun.payload,
-    );
-    if (customAutomationId) {
-      const automation = await getCustomAutomationById(customAutomationId);
-      if (automation) {
-        configureUrl = buildCustomAutomationSettingsUrl(automation.id);
+    let configureUrl: string | null = null;
+    if (automationKey === 'custom_automation') {
+      const customAutomationId = getCustomAutomationIdFromPayload(
+        taskRun.payload,
+      );
+      if (customAutomationId) {
+        const automation = await getCustomAutomationById(customAutomationId);
+        if (automation) {
+          configureUrl = buildCustomAutomationSettingsUrl(automation.id);
+        }
+      }
+    } else {
+      const descriptor =
+        getTriggerableBackgroundAutomationDescriptorByKey(automationKey);
+      const settingsHash = descriptor
+        ? getTriggerableBackgroundAutomationSettingsHash(
+            descriptor.automationKey,
+          )
+        : null;
+      if (settingsHash) {
+        configureUrl = buildManagerSlackSettingsUrl(settingsHash);
       }
     }
-  } else {
-    const descriptor =
-      getTriggerableBackgroundAutomationDescriptorByKey(automationKey);
-    const settingsHash = descriptor
-      ? getTriggerableBackgroundAutomationSettingsHash(descriptor.automationKey)
-      : null;
-    if (settingsHash) {
-      configureUrl = buildManagerSlackSettingsUrl(settingsHash);
-    }
-  }
-  if (!configureUrl) return undefined;
+    if (!configureUrl) return undefined;
 
-  const context = await resolveThreadReplyFooterContext({
-    taskId: taskRun.taskId,
-    prRepo: taskRun.prRepo,
-    prNumber: taskRun.prNumber,
-    includeRunningTasks: false,
-  });
-  return buildAutomationResultLinkButtonRows({
-    configureUrl,
-    linkedPrUrls: context.linkedPrs.map((pullRequest) => pullRequest.prUrl),
-    taskUrl: buildEmailTaskUrl(taskRun.taskId),
-  });
+    const context = await resolveThreadReplyFooterContext({
+      taskId: taskRun.taskId,
+      prRepo: taskRun.prRepo,
+      prNumber: taskRun.prNumber,
+      includeRunningTasks: false,
+    });
+    return buildAutomationResultLinkButtonRows({
+      configureUrl,
+      linkedPrUrls: context.linkedPrs.map((pullRequest) => pullRequest.prUrl),
+      taskUrl: buildEmailTaskUrl(taskRun.taskId),
+    });
+  } catch (error) {
+    console.error(
+      `[${LOG_CONTEXT}] Failed to build optional AgentMail automation report actions for task ${taskRun.taskId}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return undefined;
+  }
 }
 
 async function bindLateCommunicationReportThread(params: {

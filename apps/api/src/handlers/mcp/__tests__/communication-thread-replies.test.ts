@@ -315,6 +315,35 @@ describe('maybeSendCommunicationThreadReply (AgentMail)', () => {
     );
   });
 
+  it('sends the report without buttons when optional action lookup fails', async () => {
+    const consoleError = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => {});
+    getTaskAutomationInitiatorKeyMock.mockRejectedValue(
+      new Error('database unavailable'),
+    );
+
+    const response = await maybeSendCommunicationThreadReply({
+      taskRun: agentmailTaskRun,
+      parsedBody: { text: 'Report still delivered', images: [] },
+    });
+
+    expect(response?.status).toBe(200);
+    expect(agentmailPostMessageMock).toHaveBeenCalledWith({
+      channelId: 'inbox-1',
+      threadId: 'conversation-1',
+      text: 'Report still delivered',
+      textFormat: 'markdown',
+      idempotencyKey: expect.any(String),
+    });
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'Failed to build optional AgentMail automation report actions for task task-4: database unavailable',
+      ),
+    );
+    consoleError.mockRestore();
+  });
+
   it('links a task-generated custom automation report to its own configuration', async () => {
     getTaskAutomationInitiatorKeyMock.mockResolvedValue('custom_automation');
     getCustomAutomationByIdMock.mockResolvedValue({ id: 'automation-1' });
