@@ -43,6 +43,7 @@ describe('handleUpload', () => {
           version: 1,
           uploadUrl: 'https://s3.example.com/upload',
           viewUrl: 'https://test-api.example.com/view',
+          standaloneViewUrl: 'https://test-api.example.com/standalone',
           artifactType: 'general',
         }),
       })
@@ -63,6 +64,9 @@ describe('handleUpload', () => {
     expect(parsed.artifactId).toBe('art-1');
     expect(parsed.artifactType).toBe('general');
     expect(parsed.viewUrl).toBe('https://test-api.example.com/view');
+    expect(parsed.standaloneViewUrl).toBe(
+      'https://test-api.example.com/standalone',
+    );
     expect(parsed.rawUrl).toBeUndefined();
   });
 

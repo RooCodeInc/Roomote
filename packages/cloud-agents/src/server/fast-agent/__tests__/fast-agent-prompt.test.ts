@@ -686,6 +686,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'provide an accessible artifact viewer link when available and accurately say that the image could not be attached',
     );
+    expect(prompt).toContain(
+      'Its returned `viewUrl` opens the artifact in its Session and `standaloneViewUrl` opens only the artifact; share whichever returned URL fits the context, unchanged, rather than constructing an artifact URL.',
+    );
     expect(prompt).toContain('send_chat_reaction');
     expect(prompt).toContain(
       'recover stable video artifact IDs and viewer links',
