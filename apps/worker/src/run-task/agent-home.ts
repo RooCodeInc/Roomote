@@ -52,6 +52,7 @@ import {
   mergeAmazonBedrockProviderConfig,
   mergeBedrockMantleOpenAiProviderConfig,
   mergeBedrockMantleProviderConfig,
+  mergeKimiForCodingProviderConfig,
   mergeOpenAiCompatibleProviderConfig,
   mergeOpenCodeModelReasoningOptions,
   mergeOpenCodeChatGptFastModeOptions,
@@ -1856,9 +1857,15 @@ function resolveModelBackedOpenCodeConfig(
           mergeBedrockMantleProviderConfig(
             mergeBedrockMantleOpenAiProviderConfig(
               mergeOpenAiCompatibleProviderConfig(
-                mergeOpenRouterVariantAliasModels(
-                  providerModelConfig,
-                  variantAliases,
+                // Registered in full so it does not depend on OpenCode's
+                // runtime catalog; the gateway rebase below still replaces
+                // the base URL and credential in gateway mode.
+                mergeKimiForCodingProviderConfig(
+                  mergeOpenRouterVariantAliasModels(
+                    providerModelConfig,
+                    variantAliases,
+                  ),
+                  configuredModelIds,
                 ),
                 runtimeEnv,
                 openAiCompatibleModelIds,

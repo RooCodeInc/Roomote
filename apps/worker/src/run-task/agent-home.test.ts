@@ -856,6 +856,63 @@ describe('generateOpenCodeConfig provider support', () => {
     expect(result.configContent).not.toContain('go-key');
   });
 
+  it('registers the Kimi for Coding provider without relying on the OpenCode catalog', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'kimi-for-coding/k3',
+        R_SMALL_MODEL: 'kimi-for-coding/kimi-for-coding',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<
+        string,
+        { models: Record<string, unknown> } & Record<string, unknown>
+      >;
+    };
+
+    // Direct mode: OpenCode reads the key from `env` and the URL from `api`.
+    expect(config.provider['kimi-for-coding']).toMatchObject({
+      npm: '@ai-sdk/anthropic',
+      api: 'https://api.kimi.com/coding/v1',
+      env: ['KIMI_API_KEY'],
+    });
+    expect(config.provider['kimi-for-coding']?.options).toBeUndefined();
+    expect(
+      Object.keys(config.provider['kimi-for-coding']!.models).sort(),
+    ).toEqual([
+      'k3',
+      'k3-256k',
+      'kimi-for-coding',
+      'kimi-for-coding-highspeed',
+    ]);
+  });
+
+  it('rebases Kimi for Coding onto its gateway route while keeping the Anthropic SDK', () => {
+    // The gateway route only allows the Anthropic Messages paths, so the
+    // provider must stay on @ai-sdk/anthropic: an OpenAI-compatible fallback
+    // would call /chat/completions and be rejected.
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'kimi-for-coding/k3',
+        R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
+        R_INFERENCE_GATEWAY_KEYS: 'KIMI_API_KEY',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, Record<string, unknown>>;
+    };
+
+    expect(config.provider['kimi-for-coding']).toMatchObject({
+      npm: '@ai-sdk/anthropic',
+      options: {
+        baseURL: 'https://api.example.com/api/inference/kimi-for-coding/v1',
+        apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
+      },
+    });
+  });
+
   it('rebases OpenCode Go onto its inference gateway route', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),

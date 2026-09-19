@@ -358,6 +358,55 @@ describe('buildOpenCodeCliEnv', () => {
     });
   });
 
+  it('registers the Kimi for Coding provider without relying on the OpenCode catalog', () => {
+    // The runtime catalog renamed this provider id. Left to the catalog,
+    // OpenCode falls back to an OpenAI-compatible SDK with no base URL and
+    // fails with `"undefined/chat/completions" cannot be parsed as a URL`.
+    const env = buildOpenCodeCliEnv({
+      R_MODEL: 'kimi-for-coding/k3',
+      R_SMALL_MODEL: 'kimi-for-coding/kimi-for-coding',
+    });
+    const config = JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}') as {
+      model: string;
+      small_model: string;
+      provider: Record<
+        string,
+        { models: Record<string, unknown> } & Record<string, unknown>
+      >;
+    };
+
+    expect(config.model).toBe('kimi-for-coding/k3');
+    expect(config.small_model).toBe('kimi-for-coding/kimi-for-coding');
+    expect(config.provider['kimi-for-coding']).toMatchObject({
+      npm: '@ai-sdk/anthropic',
+      api: 'https://api.kimi.com/coding/v1',
+      env: ['KIMI_API_KEY'],
+    });
+    expect(
+      Object.keys(config.provider['kimi-for-coding']!.models).sort(),
+    ).toEqual([
+      'k3',
+      'k3-256k',
+      'kimi-for-coding',
+      'kimi-for-coding-highspeed',
+    ]);
+  });
+
+  it('adds the Kimi for Coding registration to operator-supplied config content', () => {
+    const env = buildOpenCodeCliEnv({
+      R_MODEL: 'kimi-for-coding/k3',
+      OPENCODE_CONFIG_CONTENT: JSON.stringify({ model: 'kimi-for-coding/k3' }),
+    });
+    const config = JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}') as {
+      provider?: Record<string, Record<string, unknown>>;
+    };
+
+    expect(config.provider?.['kimi-for-coding']).toMatchObject({
+      npm: '@ai-sdk/anthropic',
+      api: 'https://api.kimi.com/coding/v1',
+    });
+  });
+
   it('registers bearer-token credentials on the native Bedrock provider', () => {
     const env = buildOpenCodeCliEnv({
       R_MODEL: 'amazon-bedrock/anthropic.claude-sonnet-5-v1:0',
