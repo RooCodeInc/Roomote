@@ -474,13 +474,16 @@ describe('Fast native OpenCode tool bridge', () => {
     try {
       const mounted = await mountFastAgentIntegrationOnCodeModeServer({
         serverUrl: 'http://127.0.0.1:4107',
+        directory: '/tmp/fast-runtime-dir',
         mcpCapability: 'cap-1',
         integrationId: 'notion',
       });
 
       expect(mounted).toBe(true);
       expect(requests).toHaveLength(1);
-      expect(requests[0]!.url).toBe('http://127.0.0.1:4107/mcp');
+      expect(requests[0]!.url).toBe(
+        'http://127.0.0.1:4107/mcp?directory=%2Ftmp%2Ffast-runtime-dir',
+      );
       expect(requests[0]!.body).toMatchObject({
         name: 'notion',
         config: {

@@ -208,6 +208,7 @@ import {
 } from './fast-agent-tool-policy';
 import {
   callFastAgentIntegration,
+  clearFastAgentIntegrationToolCache,
   listFastAgentIntegrations,
   type FastAgentIntegration,
 } from './fast-agent-integration-broker';
@@ -1928,6 +1929,7 @@ export async function answerFastAgentQuestion({
    * runtime and leased server are known, read by mid-turn connect handlers. */
   let codeModeIntegrationsActiveForTurn = false;
   let codeModeMcpCapabilityForTurn: string | null = null;
+  let codeModeDirectoryForTurn: string | null = null;
   let codeModeMountedIntegrationIdsForTurn = new Set<string>();
   let codeModeOpenCodeServerUrl: string | null = null;
   let durableOpenCodeSessionId: string | null = null;
@@ -4067,12 +4069,17 @@ export async function answerFastAgentQuestion({
       if (
         !codeModeIntegrationsActiveForTurn ||
         !codeModeOpenCodeServerUrl ||
-        !codeModeMcpCapabilityForTurn
+        !codeModeMcpCapabilityForTurn ||
+        !codeModeDirectoryForTurn
       ) {
+        console.warn(
+          `[Fast Agent] Skipping mid-turn code-mode mount: active=${codeModeIntegrationsActiveForTurn} serverUrl=${codeModeOpenCodeServerUrl ? 'set' : 'null'} capability=${codeModeMcpCapabilityForTurn ? 'set' : 'null'} directory=${codeModeDirectoryForTurn ? 'set' : 'null'}.`,
+        );
         return;
       }
       const serverUrl = codeModeOpenCodeServerUrl;
       const mcpCapability = codeModeMcpCapabilityForTurn;
+      const directory = codeModeDirectoryForTurn;
       for (const integration of refreshedIntegrations) {
         if (codeModeMountedIntegrationIdsForTurn.has(integration.id)) {
           continue;
@@ -4081,10 +4088,15 @@ export async function answerFastAgentQuestion({
         try {
           const mounted = await mountFastAgentIntegrationOnCodeModeServer({
             serverUrl,
+            directory,
             mcpCapability,
             integrationId: integration.id,
           });
-          if (!mounted) {
+          if (mounted) {
+            console.info(
+              `[Fast Agent] Mounted integration ${integration.id} on the code-mode server mid-turn (server=${serverUrl} directory=${directory}).`,
+            );
+          } else {
             console.warn(
               `[Fast Agent] Code-mode server rejected the mid-turn mount of integration ${integration.id}; it becomes callable next turn.`,
             );
@@ -4095,6 +4107,46 @@ export async function answerFastAgentQuestion({
           );
         }
       }
+    };
+    /**
+     * A successful connect must make the integration usable in this same
+     * turn: the per-user tool cache otherwise keeps serving the pre-connect
+     * (empty) tool list for up to five minutes, and the built-in catalog
+     * keeps reporting the integration as not connected. Clear and refresh
+     * both, then mount the new server on the code-mode server when the
+     * experiment is active.
+     */
+    const refreshIntegrationsAfterConnect = async (): Promise<void> => {
+      clearFastAgentIntegrationToolCache();
+      const refreshedIntegrations = await listFastAgentIntegrations(
+        { userId, apiBaseUrl },
+        adapter.resolveMcpServerConfigs,
+      );
+      availableIntegrations.splice(
+        0,
+        availableIntegrations.length,
+        ...refreshedIntegrations,
+      );
+      onDemandIntegrations.splice(
+        0,
+        onDemandIntegrations.length,
+        ...refreshedIntegrations.filter(
+          (integration) => !isFastAgentNativeIntegration(integration.id),
+        ),
+      );
+      const refreshedCatalog = await listNativeIntegrationsForFast({
+        userId,
+      }).catch(() => null);
+      if (refreshedCatalog) {
+        nativeIntegrationCatalog.splice(
+          0,
+          nativeIntegrationCatalog.length,
+          ...refreshedCatalog,
+        );
+      }
+      await mountNewlyConnectedCodeModeIntegrations(refreshedIntegrations);
+      // Next-turn durability is automatic: the refreshed integrations flow
+      // into the runtime config written at the next turn's setup.
     };
     const executeMcpTool = async (
       call: FastAgentMcpToolCall,
@@ -4476,28 +4528,17 @@ export async function answerFastAgentQuestion({
               integrationId: args.integrationId,
             });
             if (result.status === 'connected') {
-              const refreshedIntegrations = await listFastAgentIntegrations(
-                { userId, apiBaseUrl },
-                adapter.resolveMcpServerConfigs,
-              );
-              availableIntegrations.splice(
-                0,
-                availableIntegrations.length,
-                ...refreshedIntegrations,
-              );
-              onDemandIntegrations.splice(
-                0,
-                onDemandIntegrations.length,
-                ...refreshedIntegrations.filter(
-                  (integration) =>
-                    !isFastAgentNativeIntegration(integration.id),
-                ),
-              );
-              await mountNewlyConnectedCodeModeIntegrations(
-                refreshedIntegrations,
-              );
+              await refreshIntegrationsAfterConnect();
             }
-            return { success: true, ...result };
+            return {
+              success: true,
+              ...result,
+              ...(codeModeIntegrationsActiveForTurn
+                ? {
+                    note: 'Connected. Its tools become available through the execute runner, discovered with tools.$codemode.search; if probes still show them missing, they are usable from a follow-up turn.',
+                  }
+                : {}),
+            };
           }
           case FAST_AGENT_NATIVE_TOOL_NAMES.addRemoteMcp: {
             if (platformEvent) {
@@ -4524,28 +4565,17 @@ export async function answerFastAgentQuestion({
               ...args,
             });
             if (result.status === 'connected') {
-              const refreshedIntegrations = await listFastAgentIntegrations(
-                { userId, apiBaseUrl },
-                adapter.resolveMcpServerConfigs,
-              );
-              availableIntegrations.splice(
-                0,
-                availableIntegrations.length,
-                ...refreshedIntegrations,
-              );
-              onDemandIntegrations.splice(
-                0,
-                onDemandIntegrations.length,
-                ...refreshedIntegrations.filter(
-                  (integration) =>
-                    !isFastAgentNativeIntegration(integration.id),
-                ),
-              );
-              await mountNewlyConnectedCodeModeIntegrations(
-                refreshedIntegrations,
-              );
+              await refreshIntegrationsAfterConnect();
             }
-            return { success: true, ...result };
+            return {
+              success: true,
+              ...result,
+              ...(codeModeIntegrationsActiveForTurn
+                ? {
+                    note: 'Connected. Its tools become available through the execute runner, discovered with tools.$codemode.search; if probes still show them missing, they are usable from a follow-up turn.',
+                  }
+                : {}),
+            };
           }
           case FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply: {
             const args = chatReplyArgsSchema.parse(call.args);
@@ -5835,6 +5865,9 @@ export async function answerFastAgentQuestion({
           nativeRuntime.codeModeIntegrationsActive;
         codeModeMcpCapabilityForTurn = nativeRuntime.codeModeIntegrationsActive
           ? nativeRuntime.mcpCapability
+          : null;
+        codeModeDirectoryForTurn = nativeRuntime.codeModeIntegrationsActive
+          ? nativeRuntime.directory
           : null;
         codeModeMountedIntegrationIdsForTurn = new Set(
           nativeRuntime.codeModeIntegrationsActive

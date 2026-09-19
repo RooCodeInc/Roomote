@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   getSession: vi.fn(),
   getNativeRuntime: vi.fn(),
   mountCodeModeIntegration: vi.fn(),
+  clearIntegrationToolCache: vi.fn(),
   setOpenCodeSession: vi.fn(),
   upsertMessage: vi.fn(),
   getEnvironments: vi.fn(),
@@ -333,6 +334,7 @@ vi.mock('../fast-agent-native-tool-bridge', () => ({
 vi.mock('../fast-agent-integration-broker', () => ({
   listFastAgentIntegrations: mocks.listIntegrations,
   callFastAgentIntegration: mocks.callIntegration,
+  clearFastAgentIntegrationToolCache: mocks.clearIntegrationToolCache,
 }));
 
 vi.mock('../fast-agent-context-telemetry', () => ({
@@ -6149,9 +6151,14 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.mountCodeModeIntegration).toHaveBeenCalledTimes(1);
     expect(mocks.mountCodeModeIntegration).toHaveBeenCalledWith({
       serverUrl: 'http://127.0.0.1:9999',
+      directory: '/tmp/fast-native-tools',
       mcpCapability: 'mcp-capability-1',
       integrationId: 'notion',
     });
+    // The tool cache is cleared so discovery stops serving the pre-connect
+    // empty tool list, and the connect result points at the execute runner.
+    expect(mocks.clearIntegrationToolCache).toHaveBeenCalled();
+    expect(mocks.listNativeIntegrations).toHaveBeenCalled();
   });
 
   it('does not mount mid-turn connections when the code-mode experiment is off', async () => {

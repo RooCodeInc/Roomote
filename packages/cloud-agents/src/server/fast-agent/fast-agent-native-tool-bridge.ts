@@ -1157,16 +1157,21 @@ async function handleMcpRequest(
     { name: `roomote-fast-${integration.id}`, version: '1.0.0' },
     { capabilities: { tools: {} }, instructions: integration.instructions },
   );
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: integration.tools.map((tool) => ({
-      name: tool.name,
-      ...(tool.description ? { description: tool.description } : {}),
-      inputSchema:
-        tool.inputSchema && typeof tool.inputSchema === 'object'
-          ? tool.inputSchema
-          : { type: 'object' as const },
-    })),
-  }));
+  server.setRequestHandler(ListToolsRequestSchema, async () => {
+    console.info(
+      `[Fast Agent] MCP bridge ListTools integration=${integration.id} toolCount=${integration.tools.length} tools=${integration.tools.map((tool) => tool.name).join(',')}`,
+    );
+    return {
+      tools: integration.tools.map((tool) => ({
+        name: tool.name,
+        ...(tool.description ? { description: tool.description } : {}),
+        inputSchema:
+          tool.inputSchema && typeof tool.inputSchema === 'object'
+            ? tool.inputSchema
+            : { type: 'object' as const },
+      })),
+    };
+  });
   server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
     const executor = capability.executor;
     const generation = capability.generation;
@@ -1766,27 +1771,48 @@ export async function getFastAgentNativeToolRuntime(
  */
 export async function mountFastAgentIntegrationOnCodeModeServer(input: {
   serverUrl: string;
+  directory: string;
   mcpCapability: string;
   integrationId: string;
 }): Promise<boolean> {
   bridgePromise ??= startBridge();
   const bridge = await bridgePromise;
-  const response = await fetch(`${input.serverUrl}/mcp`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      name: input.integrationId,
-      config: {
-        type: 'remote',
-        url: `${bridge.url}/mcp/${input.mcpCapability}/${encodeURIComponent(input.integrationId)}`,
-        enabled: true,
-        oauth: false,
-        headers: { Authorization: `Bearer ${input.mcpCapability}` },
-      },
-    }),
-    signal: AbortSignal.timeout(10_000),
-  });
-  return response.ok;
+  // OpenCode instances are per-directory: without the workspace routing the
+  // server would land on the default instance and stay invisible to the
+  // session's code-mode catalog.
+  const response = await fetch(
+    `${input.serverUrl}/mcp?directory=${encodeURIComponent(input.directory)}`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: input.integrationId,
+        config: {
+          type: 'remote',
+          url: `${bridge.url}/mcp/${input.mcpCapability}/${encodeURIComponent(input.integrationId)}`,
+          enabled: true,
+          oauth: false,
+          headers: { Authorization: `Bearer ${input.mcpCapability}` },
+        },
+      }),
+      signal: AbortSignal.timeout(10_000),
+    },
+  );
+  if (!response.ok) return false;
+  // A 200 still carries a per-server status map; a failed connect there means
+  // the server never enters the code-mode catalog this turn.
+  const status = (await response.json().catch(() => null)) as Record<
+    string,
+    { status?: string; error?: string }
+  > | null;
+  const entry = status?.[input.integrationId];
+  if (entry && entry.status !== 'connected') {
+    console.warn(
+      `[Fast Agent] Code-mode mid-turn mount of ${input.integrationId} reports status=${entry.status ?? 'unknown'}${entry.error ? ` error=${entry.error}` : ''}.`,
+    );
+    return false;
+  }
+  return true;
 }
 
 export function bindFastAgentMcpToolExecutor(
