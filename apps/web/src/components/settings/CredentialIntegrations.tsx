@@ -17,6 +17,8 @@ import {
   useSaveNotionConnection,
   useSaveRipplingConnection,
   useSaveXConnection,
+  useSaveStripeConnection,
+  useStripeConnection,
   useXConnection,
   type useEffectiveMcpIntegrations,
 } from '@/hooks/mcp-connections';
@@ -26,6 +28,7 @@ import {
   saveNotionConnectionSchema,
   saveRipplingConnectionSchema,
   saveXConnectionSchema,
+  saveStripeConnectionSchema,
 } from '@/types';
 import {
   Button,
@@ -53,6 +56,7 @@ type CredentialIntegrationId =
   | 'notion'
   | 'rippling'
   | 'granola'
+  | 'stripe'
   | 'x';
 
 type CredentialConnection = {
@@ -131,6 +135,20 @@ function useXCredentialMutation(): CredentialMutation<{
   bearerToken: string;
 }> {
   const mutation = useSaveXConnection();
+  return {
+    isPending: mutation.isPending,
+    mutate: (input, options) =>
+      mutation.mutate(input, {
+        onSuccess: options.onSuccess,
+        onError: options.onError,
+      }),
+  };
+}
+
+function useStripeCredentialMutation(): CredentialMutation<{
+  apiKey: string;
+}> {
+  const mutation = useSaveStripeConnection();
   return {
     isPending: mutation.isPending,
     mutate: (input, options) =>
@@ -744,6 +762,44 @@ const credentialDefinitions = {
           } as const);
     },
   },
+  stripe: {
+    id: 'stripe',
+    fieldId: 'stripe-restricted-api-key',
+    fieldLabel: 'Stripe Restricted API Key',
+    fieldPlaceholder: 'rk_...',
+    help: (
+      <p className="text-sm text-muted-foreground">
+        Create a restricted key in the{' '}
+        <a
+          href="https://dashboard.stripe.com/apikeys"
+          target="_blank"
+          rel="noreferrer"
+          className="text-primary underline hover:no-underline"
+        >
+          Stripe Dashboard
+        </a>{' '}
+        with only the read permissions Roomote needs. Start with a sandbox or
+        test-mode key before connecting live data.
+      </p>
+    ),
+    blankHelp: 'Leave blank to keep the existing restricted key.',
+    dialogDescription:
+      'Store a deployment-wide Stripe restricted API key. The key stays encrypted server-side and the general Stripe write tool starts disabled.',
+    requiredMessage: 'Restricted API key is required',
+    connectedMessage: 'Stripe connected for this deployment.',
+    updatedMessage: 'Stripe connection updated for this deployment.',
+    canManageTools: true,
+    getCredential: (input) => input.apiKey ?? '',
+    parse: (secret: string) => {
+      const result = saveStripeConnectionSchema.safeParse({ apiKey: secret });
+      return result.success
+        ? ({ success: true, data: result.data } as const)
+        : ({
+            success: false,
+            errors: result.error.flatten().fieldErrors.apiKey,
+          } as const);
+    },
+  },
 } satisfies {
   [Id in CredentialIntegrationId]: CredentialDefinition<Record<string, string>>;
 };
@@ -836,7 +892,13 @@ export function useCredentialIntegrations({
     useConnection: useXConnection,
     useSave: useXCredentialMutation,
   });
-  const runtimes = [asana, notion, rippling, granola, x];
+  const stripe = useCredentialIntegration({
+    ...buildRuntimeOptions('stripe'),
+    definition: credentialDefinitions.stripe,
+    useConnection: useStripeConnection,
+    useSave: useStripeCredentialMutation,
+  });
+  const runtimes = [asana, notion, rippling, granola, stripe, x];
 
   return {
     itemsById: new Map(runtimes.map((runtime) => [runtime.id, runtime.item])),

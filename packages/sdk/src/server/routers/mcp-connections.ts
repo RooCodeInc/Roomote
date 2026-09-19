@@ -41,6 +41,7 @@ import {
   isMcpConnectionSnowflakeConfig,
   isMcpConnectionVercelConfig,
   isMcpConnectionXConfig,
+  isMcpConnectionStripeConfig,
   isDeploymentScopedMcpIntegration,
   BRAIN_MCP_ID,
   BRAIN_PROXY_PATH,
@@ -671,6 +672,7 @@ async function buildCuratedMcpServerConfigs(ctx: {
         isMcpConnectionGrafanaConfig(authConfig) ||
         isMcpConnectionGbrainConfig(authConfig) ||
         isMcpConnectionExaConfig(authConfig) ||
+        isMcpConnectionStripeConfig(authConfig) ||
         isMcpConnectionXConfig(authConfig)
       ) {
         servers[connection.mcpId] = {

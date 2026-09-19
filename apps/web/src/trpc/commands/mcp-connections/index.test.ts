@@ -8,6 +8,7 @@ import {
 } from '@roomote/db/server';
 import {
   isMcpConnectionExaConfig,
+  isMcpConnectionStripeConfig,
   isMcpConnectionVoiceConfig,
 } from '@roomote/types';
 
@@ -48,6 +49,7 @@ import {
   removeExaApiKeyCommand,
   saveAsanaConnectionCommand,
   saveExaConnectionCommand,
+  saveStripeConnectionCommand,
   saveVoiceConnectionCommand,
   setDeploymentMcpEnabledCommand,
 } from './index';
@@ -64,7 +66,15 @@ const memberAuth = {
   isAdmin: false,
 } as UserAuthSuccess;
 
-const testMcpIds = ['asana', 'exa', 'linear', 'monday', 'sentry', 'voice'];
+const testMcpIds = [
+  'asana',
+  'exa',
+  'linear',
+  'monday',
+  'sentry',
+  'stripe',
+  'voice',
+];
 
 async function cleanup() {
   await db
@@ -130,6 +140,31 @@ describe('MCP connection lifecycle telemetry', () => {
       .from(deploymentMcpEnablements)
       .where(eq(deploymentMcpEnablements.mcpId, 'exa'));
     expect(enablements).toHaveLength(0);
+  });
+
+  it('encrypts a Stripe restricted key and starts with writes disabled', async () => {
+    await saveStripeConnectionCommand(adminAuth, {
+      apiKey: 'rk_test_restricted',
+    });
+
+    const [connection] = await db
+      .select()
+      .from(mcpConnections)
+      .where(eq(mcpConnections.mcpId, 'stripe'));
+    expect(connection?.authStatus).toBe('authenticated');
+    expect(isMcpConnectionStripeConfig(connection?.authConfig)).toBe(true);
+    expect(JSON.stringify(connection?.authConfig)).not.toContain(
+      'rk_test_restricted',
+    );
+
+    const [enablement] = await db
+      .select()
+      .from(deploymentMcpEnablements)
+      .where(eq(deploymentMcpEnablements.mcpId, 'stripe'));
+    expect(enablement).toMatchObject({
+      enabled: true,
+      disabledTools: ['stripe_api_write'],
+    });
   });
 
   it('does not persist an Exa connection when upstream validation fails', async () => {

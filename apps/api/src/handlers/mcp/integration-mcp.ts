@@ -14,6 +14,7 @@ import {
   getAllowedIntegrationMcpToolNames,
   isMcpConnectionExaConfig,
   isMcpConnectionXConfig,
+  isMcpConnectionStripeConfig,
   type McpIntegration,
 } from '@roomote/types';
 
@@ -85,6 +86,12 @@ async function resolveUpstreamCredentials(
     return {
       authHeader: bearerToken.length > 0 ? bearerToken : null,
     };
+  }
+
+  if (isMcpConnectionStripeConfig(connection.authConfig)) {
+    const apiKey = decrypt(connection.authConfig.encryptedApiKey).trim();
+
+    return { authHeader: apiKey.length > 0 ? apiKey : null };
   }
 
   return {

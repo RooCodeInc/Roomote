@@ -47,6 +47,8 @@ const SLACK_ENABLE_DESCRIPTIONS: Record<string, string> = {
   pylon:
     'Roomote will be able to inspect customer issues, message history, and account context.',
   supabase: 'Roomote will get read-only database access and platform context.',
+  stripe:
+    'Roomote will use one deployment-wide restricted Stripe key to inspect account, payment, and billing data. The general write tool starts disabled.',
   supermemory:
     'Roomote will be able to save shared memories and recall context from earlier tasks.',
   betterstack:

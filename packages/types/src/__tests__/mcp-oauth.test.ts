@@ -13,11 +13,13 @@ import {
   isMcpConnectionElevenLabsConfig,
   isMcpConnectionVoiceConfig,
   isMcpConnectionExaConfig,
+  isMcpConnectionStripeConfig,
   OPENAI_REALTIME_VOICE_OPTIONS,
   isMcpConnectionGbrainConfig,
   LINEAR_APP_OAUTH_SCOPES,
   MONDAY_MCP_READ_ONLY_OAUTH_SCOPES,
   RESEND_DEFAULT_DISABLED_TOOL_NAMES,
+  STRIPE_DEFAULT_DISABLED_TOOL_NAMES,
 } from '../mcp-oauth';
 
 describe('integration data policy', () => {
@@ -85,6 +87,34 @@ describe('monday.com OAuth', () => {
     );
     expect(getMcpIntegrationOauthScopes('monday')).not.toContain(
       'webhooks:read',
+    );
+  });
+});
+
+describe('Stripe restricted key connection', () => {
+  it('uses the hosted MCP with a deployment-scoped encrypted key', () => {
+    expect(getMcpIntegration('stripe')).toMatchObject({
+      name: 'Stripe',
+      url: 'https://mcp.stripe.com',
+      connectionScope: 'deployment',
+      connectionMode: 'admin_configured',
+      serverMode: 'upstream_proxy',
+    });
+    expect(getMcpIntegrationDefaultDisabledTools('stripe')).toEqual(
+      STRIPE_DEFAULT_DISABLED_TOOL_NAMES,
+    );
+    expect(STRIPE_DEFAULT_DISABLED_TOOL_NAMES).toEqual(['stripe_api_write']);
+  });
+
+  it('recognizes only encrypted Stripe key configs', () => {
+    expect(
+      isMcpConnectionStripeConfig({
+        type: 'stripe',
+        encryptedApiKey: 'encrypted',
+      }),
+    ).toBe(true);
+    expect(isMcpConnectionStripeConfig({ type: 'stripe' } as never)).toBe(
+      false,
     );
   });
 });

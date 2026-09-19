@@ -1,0 +1,33 @@
+---
+title: Stripe
+description: Inspect Stripe payments, billing, and API context from Roomote tasks.
+icon: 'https://api.iconify.design/simple-icons:stripe.svg?color=currentColor'
+---
+
+Connect Stripe when tasks need account, payment, customer, billing, analytics,
+or Stripe API context.
+
+## How setup works
+
+A deployment operator creates a restricted API key in the Stripe Dashboard and
+stores it through **Settings > Integrations**. The key is encrypted at rest and
+forwarded only from Roomote's control-plane proxy to Stripe's hosted MCP server.
+
+Grant the key only the read permissions Roomote needs. Stripe administrators
+can also disable MCP access for the team in the Stripe Dashboard.
+
+## Safer defaults
+
+Roomote disables `stripe_api_write` by default. The API search, details, and
+read tools remain available along with account, analytics, documentation, and
+implementation-planning tools. An admin can opt in to the general write tool
+from **Settings > Integrations > Stripe > Manage tools**.
+
+When writes are enabled, Stripe may still require human confirmation for
+sensitive actions such as refunds or outbound payments.
+
+## Verify the connection
+
+Start with a sandbox or test-mode key and ask Roomote to retrieve account
+information or list a non-sensitive resource. Live account access depends on
+the restricted key's permissions.

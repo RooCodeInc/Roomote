@@ -32,6 +32,7 @@ import {
   isMcpConnectionSnowflakeConfig,
   isMcpConnectionVercelConfig,
   isMcpConnectionXConfig,
+  isMcpConnectionStripeConfig,
   isSelfServeMcpIntegration,
   isMcpToolAllowed,
   isDeploymentScopedMcpIntegration,
@@ -66,6 +67,7 @@ import type {
   SaveSnowflakeConnectionInput,
   SaveVercelConnectionInput,
   SaveXConnectionInput,
+  SaveStripeConnectionInput,
 } from '@/types';
 
 type VercelConnectionData = {
@@ -235,6 +237,14 @@ async function resolveUpstreamCatalogAuth(
 
     return bearerToken.length > 0
       ? { headers: { authorization: `Bearer ${bearerToken}` } }
+      : null;
+  }
+
+  if (isMcpConnectionStripeConfig(connection?.authConfig)) {
+    const apiKey = decrypt(connection.authConfig.encryptedApiKey).trim();
+
+    return apiKey.length > 0
+      ? { headers: { authorization: `Bearer ${apiKey}` } }
       : null;
   }
 
@@ -1137,6 +1147,27 @@ export async function getXConnectionCommand(auth: UserAuthSuccess) {
   return {
     authStatus: connection.authStatus,
   };
+}
+
+export async function getStripeConnectionCommand(auth: UserAuthSuccess) {
+  assertAdmin(auth);
+
+  const connection = await db.query.mcpConnections.findFirst({
+    where: and(
+      eq(mcpConnections.mcpId, 'stripe'),
+      isNull(mcpConnections.userId),
+    ),
+    columns: {
+      authConfig: true,
+      authStatus: true,
+    },
+  });
+
+  if (!connection || !isMcpConnectionStripeConfig(connection.authConfig)) {
+    return null;
+  }
+
+  return { authStatus: connection.authStatus };
 }
 
 export async function getVercelConnectionCommand(
@@ -2102,6 +2133,101 @@ export async function saveXConnectionCommand(
   return {
     authStatus: 'authenticated' as const,
   };
+}
+
+export async function saveStripeConnectionCommand(
+  auth: UserAuthSuccess,
+  input: SaveStripeConnectionInput,
+) {
+  assertAdmin(auth);
+  assertCuratedIntegrationsEnabled();
+
+  const existingConnection = await db.query.mcpConnections.findFirst({
+    where: and(
+      eq(mcpConnections.mcpId, 'stripe'),
+      isNull(mcpConnections.userId),
+    ),
+    columns: { authConfig: true },
+  });
+  const existingConfig = isMcpConnectionStripeConfig(
+    existingConnection?.authConfig,
+  )
+    ? existingConnection.authConfig
+    : null;
+  const nextEncryptedApiKey =
+    input.apiKey.length > 0
+      ? encrypt(input.apiKey)
+      : existingConfig?.encryptedApiKey;
+
+  if (!nextEncryptedApiKey) {
+    throw new Error(
+      'Stripe restricted API key is required when no Stripe key is already stored.',
+    );
+  }
+
+  const authConfig = {
+    type: 'stripe' as const,
+    encryptedApiKey: nextEncryptedApiKey,
+  };
+
+  await db
+    .insert(mcpConnections)
+    .values({
+      userId: null,
+      mcpId: 'stripe',
+      connectionRole: 'default',
+      authConfig,
+      enabled: true,
+      authStatus: 'authenticated',
+    })
+    .onConflictDoUpdate({
+      target: [
+        mcpConnections.userId,
+        mcpConnections.mcpId,
+        mcpConnections.connectionRole,
+      ],
+      set: {
+        connectionRole: 'default',
+        authConfig,
+        enabled: true,
+        authStatus: 'authenticated',
+        updatedAt: new Date(),
+      },
+    });
+
+  const defaultDisabledTools = getMcpIntegrationDefaultDisabledTools('stripe');
+  await db
+    .insert(deploymentMcpEnablements)
+    .values({
+      mcpId: 'stripe',
+      enabled: true,
+      enabledByUserId: auth.userId,
+      disabledTools:
+        defaultDisabledTools.length > 0 ? [...defaultDisabledTools] : null,
+    })
+    .onConflictDoUpdate({
+      target: [deploymentMcpEnablements.mcpId],
+      set: {
+        enabled: true,
+        enabledByUserId: auth.userId,
+        updatedAt: new Date(),
+      },
+    });
+
+  if (!existingConnection) {
+    captureIntegrationLifecycleEvent(
+      'integration_connected',
+      'stripe',
+      auth.userId,
+    );
+    captureIntegrationLifecycleEvent(
+      'integration_enabled',
+      'stripe',
+      auth.userId,
+    );
+  }
+
+  return { authStatus: 'authenticated' as const };
 }
 
 export async function saveVercelConnectionCommand(

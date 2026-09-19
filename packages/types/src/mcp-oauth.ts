@@ -246,6 +246,12 @@ export interface McpConnectionXConfig {
   encryptedBearerToken: string;
 }
 
+/** Deployment-scoped Stripe restricted API key stored encrypted at rest. */
+export interface McpConnectionStripeConfig {
+  type: 'stripe';
+  encryptedApiKey: string;
+}
+
 /**
  * Deployment-scoped Exa connection config stored in mcpConnections.authConfig.
  *
@@ -329,6 +335,7 @@ export type McpConnectionAuthConfig =
   | McpConnectionGrafanaConfig
   | McpConnectionGbrainConfig
   | McpConnectionXConfig
+  | McpConnectionStripeConfig
   | McpConnectionExaConfig
   | Record<string, never>;
 
@@ -547,6 +554,8 @@ export const RESEND_DEFAULT_DISABLED_TOOL_NAMES = [
   'update-webhook',
 ] as const;
 
+export const STRIPE_DEFAULT_DISABLED_TOOL_NAMES = ['stripe_api_write'] as const;
+
 /**
  * Path prefixes of the API-hosted MCP proxy mounts. URL producers build proxy
  * URLs from these, and consumers (e.g. the Fast integration broker) use the
@@ -651,6 +660,19 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     connectionScope: 'deployment',
     instructions:
       'Sentry advertises only a few tools directly (find_organizations, find_projects, search_issues, search_events, get_sentry_resource). Reach everything else (issue details, event stack traces, breadcrumbs, tag values, issue events, releases, traces, replays, attachments, monitors, alert rules, docs) by calling search_sentry_tools with a short query, then execute_sentry_tool with the returned tool name and arguments. Which tools exist depends on the access the admin granted when connecting. Treat Sentry as read-only unless the request explicitly asks to change Sentry state: do not resolve, assign, ignore, or otherwise update issues, and do not create or modify projects, teams, DSNs, or monitors on your own initiative.',
+  },
+  {
+    id: 'stripe',
+    name: 'Stripe',
+    url: 'https://mcp.stripe.com',
+    description: `Inspect Stripe accounts, payments, billing, and API documentation from ${PRODUCT_NAME} tasks`,
+    icon: 'stripe',
+    connectionScope: 'deployment',
+    connectionMode: 'admin_configured',
+    serverMode: 'upstream_proxy',
+    defaultDisabledTools: [...STRIPE_DEFAULT_DISABLED_TOOL_NAMES],
+    instructions:
+      'Use Stripe to inspect account, payment, billing, and API data through a deployment restricted key. The general stripe_api_write tool is disabled until an administrator enables it in Manage tools. When enabled, use writes only for explicit user requests and preserve Stripe human-confirmation requirements for sensitive actions.',
   },
   {
     id: 'pylon',
@@ -1262,6 +1284,19 @@ export function isMcpConnectionXConfig(
     authConfig.type === 'x' &&
     'encryptedBearerToken' in authConfig &&
     typeof authConfig.encryptedBearerToken === 'string',
+  );
+}
+
+export function isMcpConnectionStripeConfig(
+  authConfig: McpConnectionAuthConfig | null | undefined,
+): authConfig is McpConnectionStripeConfig {
+  return Boolean(
+    authConfig &&
+    typeof authConfig === 'object' &&
+    'type' in authConfig &&
+    authConfig.type === 'stripe' &&
+    'encryptedApiKey' in authConfig &&
+    typeof authConfig.encryptedApiKey === 'string',
   );
 }
 

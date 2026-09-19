@@ -171,6 +171,7 @@
           "integrations/rippling",
           "integrations/sentry",
           "integrations/snowflake",
+          "integrations/stripe",
           "integrations/supabase",
           "integrations/supermemory",
           "integrations/vercel",
