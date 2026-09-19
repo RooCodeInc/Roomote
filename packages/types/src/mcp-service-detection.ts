@@ -91,6 +91,14 @@ const X_APP_PATH_REGEX =
 
 export const SLACK_MCP_SETUP_SERVICES: SlackMcpSetupServiceDefinition[] = [
   {
+    id: 'circleci',
+    name: 'CircleCI',
+    availabilityKind: 'curated_oauth',
+    hostSuffixes: ['app.circleci.com'],
+    deploymentSettingsPath: '/integrations',
+    userSettingsPath: '/settings/personal',
+  },
+  {
     id: 'asana',
     name: 'Asana',
     availabilityKind: 'admin_configured',

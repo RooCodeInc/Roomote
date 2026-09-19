@@ -18,6 +18,7 @@ import {
   LINEAR_APP_OAUTH_SCOPES,
   MONDAY_MCP_READ_ONLY_OAUTH_SCOPES,
   RESEND_DEFAULT_DISABLED_TOOL_NAMES,
+  CIRCLECI_DEFAULT_DISABLED_TOOL_NAMES,
 } from '../mcp-oauth';
 
 describe('integration data policy', () => {
@@ -86,6 +87,25 @@ describe('monday.com OAuth', () => {
     expect(getMcpIntegrationOauthScopes('monday')).not.toContain(
       'webhooks:read',
     );
+  });
+});
+
+describe('CircleCI OAuth', () => {
+  it('uses the hosted MCP with deployment-scoped DCR and safe defaults', () => {
+    expect(getMcpIntegration('circleci')).toMatchObject({
+      name: 'CircleCI',
+      url: 'https://mcp.circleci.com/v1/mcp',
+      connectionScope: 'deployment',
+      oauthResource: 'https://mcp.circleci.com/v1/mcp',
+    });
+    expect(getMcpIntegration('circleci')?.oauthClientEnv).toBeUndefined();
+    expect(getMcpIntegrationDefaultDisabledTools('circleci')).toEqual(
+      CIRCLECI_DEFAULT_DISABLED_TOOL_NAMES,
+    );
+    expect(CIRCLECI_DEFAULT_DISABLED_TOOL_NAMES).toEqual([
+      'rerun_workflow',
+      'cancel_workflow',
+    ]);
   });
 });
 

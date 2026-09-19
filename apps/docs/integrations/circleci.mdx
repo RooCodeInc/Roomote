@@ -1,0 +1,29 @@
+---
+title: CircleCI
+description: Inspect CircleCI runs, logs, tests, and artifacts from Roomote tasks.
+icon: 'https://api.iconify.design/simple-icons:circleci.svg?color=currentColor'
+---
+
+Connect CircleCI when tasks need CI run status, job details, logs, test results,
+artifacts, or organization usage data.
+
+## How setup works
+
+A deployment operator connects CircleCI once from **Settings > Integrations**
+using OAuth. CircleCI uses dynamic client registration and grants access based
+on the projects available to the authorizing account.
+
+This integration uses CircleCI's hosted MCP server. It does not install the
+CircleCI CLI MCP, and it does not use CircleCI's deprecated local `npx` server.
+
+## Safer defaults
+
+Roomote enables diagnostic tools by default. Workflow reruns and cancellations
+start disabled because they change shared CI state. An admin can opt in to
+either tool from **Settings > Integrations > CircleCI > Manage tools**.
+
+## Verify the connection
+
+Start by listing recent runs or reading logs for a failed job. If a project is
+missing, confirm that the connected CircleCI account can access it, then
+reconnect if its permissions changed.

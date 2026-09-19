@@ -109,6 +109,8 @@ const DEEP_LINK_ENABLE_DESCRIPTIONS: Record<string, string> = {
     'Roomote will be able to inspect monitoring, incidents, and telemetry.',
   braintrust:
     'Roomote will be able to inspect prompts, evaluations, and AI run history.',
+  circleci:
+    'Roomote will be able to inspect CircleCI runs, workflows, jobs, logs, tests, and artifacts. Reruns and cancellations start disabled.',
   grafana:
     'Roomote will be able to inspect dashboards, alert rules, live alert state, annotations, and data sources.',
   granola:

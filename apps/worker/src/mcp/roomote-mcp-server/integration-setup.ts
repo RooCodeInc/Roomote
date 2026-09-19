@@ -53,6 +53,14 @@ Sentry uses the workspace MCP integration:
 
 Once connected, tasks can inspect Sentry issue and project context, and scheduled Sentry triage automation uses the same read-only MCP connection.
 
+# CircleCI
+
+CircleCI uses OAuth:
+1. A deployment operator enables CircleCI from Settings > Integrations.
+2. That operator connects CircleCI once for the deployment via OAuth.
+
+Once connected, I can inspect runs, workflows, jobs, logs, tests, artifacts, and usage data for projects available to the connected account. Workflow reruns and cancellations stay disabled until an administrator enables those tools from Manage tools.
+
 # Pylon
 
 Pylon uses OAuth:

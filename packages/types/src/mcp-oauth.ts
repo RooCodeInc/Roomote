@@ -547,6 +547,11 @@ export const RESEND_DEFAULT_DISABLED_TOOL_NAMES = [
   'update-webhook',
 ] as const;
 
+export const CIRCLECI_DEFAULT_DISABLED_TOOL_NAMES = [
+  'rerun_workflow',
+  'cancel_workflow',
+] as const;
+
 /**
  * Path prefixes of the API-hosted MCP proxy mounts. URL producers build proxy
  * URLs from these, and consumers (e.g. the Fast integration broker) use the
@@ -651,6 +656,18 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     connectionScope: 'deployment',
     instructions:
       'Sentry advertises only a few tools directly (find_organizations, find_projects, search_issues, search_events, get_sentry_resource). Reach everything else (issue details, event stack traces, breadcrumbs, tag values, issue events, releases, traces, replays, attachments, monitors, alert rules, docs) by calling search_sentry_tools with a short query, then execute_sentry_tool with the returned tool name and arguments. Which tools exist depends on the access the admin granted when connecting. Treat Sentry as read-only unless the request explicitly asks to change Sentry state: do not resolve, assign, ignore, or otherwise update issues, and do not create or modify projects, teams, DSNs, or monitors on your own initiative.',
+  },
+  {
+    id: 'circleci',
+    name: 'CircleCI',
+    url: 'https://mcp.circleci.com/v1/mcp',
+    description: `Inspect CircleCI runs, workflows, jobs, logs, tests, and artifacts from ${PRODUCT_NAME} tasks`,
+    icon: 'circleci',
+    connectionScope: 'deployment',
+    oauthResource: 'https://mcp.circleci.com/v1/mcp',
+    defaultDisabledTools: [...CIRCLECI_DEFAULT_DISABLED_TOOL_NAMES],
+    instructions:
+      'Use CircleCI to inspect runs, workflows, jobs, logs, tests, artifacts, and usage data. Workflow reruns and cancellations are disabled until an administrator enables them in Manage tools; when enabled, invoke them only for an explicit user request.',
   },
   {
     id: 'pylon',

@@ -57,6 +57,8 @@ const SLACK_ENABLE_DESCRIPTIONS: Record<string, string> = {
     'Roomote will be able to inspect and manage shared email infrastructure.',
   braintrust:
     'Roomote will be able to inspect prompts, evaluations, and AI run history.',
+  circleci:
+    'Roomote will be able to inspect CircleCI runs, workflows, jobs, logs, tests, and artifacts. Reruns and cancellations start disabled.',
   linear:
     'Roomote will be able to pull issue, project, and roadmap context into tasks.',
   monday:
