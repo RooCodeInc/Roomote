@@ -204,7 +204,9 @@ function NestedTaskTranscript({
         <div className="mx-auto flex w-full max-w-4xl flex-col gap-2">
           <Startup
             runId={session.taskRun.id}
+            taskId={session.taskId}
             initialTaskRun={session.taskRun}
+            canRetryFailedStart={session.taskRun.canRetryFailedStart}
           />
         </div>
       </div>
@@ -221,14 +223,24 @@ function NestedTaskTranscript({
     return (
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
         <div className="mx-auto flex w-full max-w-4xl flex-col gap-2">
-          <Startup runId={bootingTaskRun.id} initialTaskRun={bootingTaskRun} />
+          <Startup
+            runId={bootingTaskRun.id}
+            taskId={session.taskId}
+            initialTaskRun={bootingTaskRun}
+            canRetryFailedStart={bootingTaskRun.canRetryFailedStart}
+          />
         </div>
       </div>
     );
   }
 
   const footer = bootingTaskRun ? (
-    <Startup runId={bootingTaskRun.id} initialTaskRun={bootingTaskRun} />
+    <Startup
+      runId={bootingTaskRun.id}
+      taskId={session.taskId}
+      initialTaskRun={bootingTaskRun}
+      canRetryFailedStart={bootingTaskRun.canRetryFailedStart}
+    />
   ) : null;
   const historicalTranscript = (
     <ArtifactLinkProvider session={session} onOpenArtifact={onOpenArtifact}>

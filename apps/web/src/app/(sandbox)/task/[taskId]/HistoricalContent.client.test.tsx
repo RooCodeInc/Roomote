@@ -27,6 +27,8 @@ vi.mock('@/components/system', () => ({
   Check: () => <svg aria-hidden="true" />,
   HelpCircle: () => <svg aria-hidden="true" />,
   Loader2: () => <svg aria-hidden="true" />,
+  MessageSquareWarning: () => <svg aria-hidden="true" />,
+  RotateCcw: () => <svg aria-hidden="true" />,
   Sun: () => <svg aria-hidden="true" />,
   X: () => <svg aria-hidden="true" />,
 }));

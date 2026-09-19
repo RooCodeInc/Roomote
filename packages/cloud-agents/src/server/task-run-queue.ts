@@ -75,6 +75,7 @@ import {
   isNull,
   lt,
   recordSnapshotResumeEvent,
+  recordTaskRunLifecycleEvent,
   resolveDefaultComputeProvider,
   resolveWorkspaceRepositoryProviders,
   resolveWorkspaceSourceControlHost,
@@ -920,6 +921,8 @@ export interface EnqueueTaskOptions {
    * controller queue. If this throws, the run is canceled and never queued.
    */
   beforeEnqueue?: (taskRun: TaskRun) => Promise<void>;
+  /** Delay controller admission while keeping the pending run visible. */
+  queueAvailableAt?: number;
 }
 
 /**
@@ -1268,6 +1271,9 @@ async function pushRunOntoQueue(params: {
       id: taskRun.id,
       scope,
       ...queuePolicy,
+      ...(options.queueAvailableAt !== undefined
+        ? { availableAt: options.queueAvailableAt }
+        : {}),
     });
 
     await cancelEvictedTaskRuns(
@@ -2233,6 +2239,99 @@ export function isRelaunchableFailedStartPayloadKind(
   return RELAUNCHABLE_FAILED_START_PAYLOAD_KINDS.has(payloadKind);
 }
 
+export const FAILED_START_AUTO_RETRY_MAX_RETRIES = 2;
+export const FAILED_START_AUTO_RETRY_BASE_DELAY_MS = 1_000;
+
+export type FailedStartRetryTrigger = 'automatic' | 'fast_parent' | 'manual';
+
+export type FailedStartRetryResult =
+  | {
+      success: true;
+      run: TaskRun;
+      retryNumber: number;
+      delayMs: number;
+    }
+  | {
+      success: false;
+      reason: 'ineligible' | 'limit_reached';
+      error: string;
+    };
+
+/**
+ * Canonical failed-start retry admission. Automatic and parent-requested
+ * retries share one bounded budget; explicit user retries remain available
+ * after that budget is exhausted.
+ */
+export async function retryFailedTaskStart(input: {
+  sourceRun: TaskRun;
+  actingUserId: string | null;
+  trigger: FailedStartRetryTrigger;
+}): Promise<FailedStartRetryResult> {
+  if (!(await canRetryFailedStart(input.sourceRun))) {
+    return {
+      success: false,
+      reason: 'ineligible',
+      error: 'This task is not eligible for a failed-start retry.',
+    };
+  }
+
+  const [{ freshRunCount = 0 } = {}] = await db
+    .select({ freshRunCount: sql<number>`count(*)::int` })
+    .from(taskRuns)
+    .where(
+      and(
+        eq(taskRuns.taskId, input.sourceRun.taskId),
+        eq(taskRuns.kind, 'fresh'),
+      ),
+    );
+  const retries = Math.max(0, freshRunCount - 1);
+  const isAutomatic = input.trigger !== 'manual';
+
+  if (isAutomatic && retries >= FAILED_START_AUTO_RETRY_MAX_RETRIES) {
+    return {
+      success: false,
+      reason: 'limit_reached',
+      error: 'The failed-start retry limit has been reached.',
+    };
+  }
+
+  const retryNumber = retries + 1;
+  const delayMs = isAutomatic
+    ? FAILED_START_AUTO_RETRY_BASE_DELAY_MS * 2 ** retries
+    : 0;
+  const relaunchedRun = await enqueueTaskRelaunch(
+    {
+      sourceRunId: input.sourceRun.id,
+      actingUserId: input.actingUserId,
+    },
+    delayMs > 0 ? { queueAvailableAt: Date.now() + delayMs } : {},
+  );
+
+  await recordTaskRunLifecycleEvent(db, {
+    runId: input.sourceRun.id,
+    taskId: input.sourceRun.taskId,
+    eventType: 'decision',
+    message:
+      input.trigger === 'manual'
+        ? 'User retried sandbox startup.'
+        : `Retrying sandbox startup (${retryNumber}/${FAILED_START_AUTO_RETRY_MAX_RETRIES}).`,
+    details: {
+      reason: 'failed_start_retry',
+      trigger: input.trigger,
+      retryNumber,
+      maxAutomaticRetries: FAILED_START_AUTO_RETRY_MAX_RETRIES,
+      delayMs,
+      relaunchedRunId: relaunchedRun.id,
+    },
+  }).catch((error) => {
+    console.warn(
+      `[FailedStartRetry] Failed to record ${input.trigger} startup retry for run ${input.sourceRun.id}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  });
+
+  return { success: true, run: relaunchedRun, retryNumber, delayMs };
+}
+
 function reconstructFreshTaskFromFailedRun(sourceRun: TaskRun): FreshTask {
   const payload = {
     ...(sourceRun.payload as Record<string, unknown>),
@@ -2439,12 +2538,24 @@ export async function enqueueTaskRelaunch(
     task.type,
   );
 
-  const taskRun = await db.transaction(async (tx) => {
+  const { taskRun, created } = await db.transaction(async (tx) => {
     // Serialize concurrent retries on the same task so two retries cannot both
     // observe an empty active-run set and insert separate pending runs.
     await tx.execute(
       sql`SELECT id FROM tasks WHERE id = ${existingTask.id} FOR UPDATE`,
     );
+
+    const existingRetry = await tx.query.taskRuns.findFirst({
+      where: and(
+        eq(taskRuns.taskId, existingTask.id),
+        eq(taskRuns.sourceRunId, sourceRun.id),
+        eq(taskRuns.kind, 'fresh'),
+      ),
+    });
+
+    if (existingRetry) {
+      return { taskRun: existingRetry, created: false };
+    }
 
     const activeRun = await tx.query.taskRuns.findFirst({
       where: and(
@@ -2503,8 +2614,12 @@ export async function enqueueTaskRelaunch(
 
     await syncTaskStateFromRuns(tx, existingTask.id);
 
-    return insertedRun;
+    return { taskRun: insertedRun, created: true };
   });
+
+  if (!created) {
+    return taskRun;
+  }
 
   void captureEvent('task_created', {
     ...(input.actingUserId ? { userId: input.actingUserId } : {}),

@@ -33,6 +33,7 @@ export async function GET(
       columns: {
         id: true,
         taskId: true,
+        sourceRunId: true,
         status: true,
         vendor: true,
         error: true,
@@ -46,6 +47,7 @@ export async function GET(
     return {
       id: run.id,
       taskId: run.taskId,
+      sourceRunId: run.sourceRunId,
       status: run.status,
       vendor: run.vendor,
       error: getTaskRunError(run) ?? null,
