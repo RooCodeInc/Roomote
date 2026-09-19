@@ -255,6 +255,14 @@ export type FastAgentParentEvent =
       pullRequests: FastAgentPullRequestContext[];
     }
   | {
+      type: 'task_turn_provider_error';
+      taskId: string;
+      runId: number;
+      messageTs: number;
+      error: string;
+      taskUrl: string;
+    }
+  | {
       type: 'pull_request_opened';
       taskId: string;
       runId: number;
@@ -426,6 +434,8 @@ export function buildEventClientMessageSeed(
       return `fast-parent-pr-conflict:${event.taskId}:${event.pullRequest.url}:${event.conflictDetectedAt}`;
     case 'task_settled':
       return `fast-parent-settle:${event.runId}`;
+    case 'task_turn_provider_error':
+      return `fast-parent-task-turn-provider-error:${event.runId}:${event.messageTs}`;
   }
 }
 
@@ -2935,7 +2945,8 @@ export async function deliverFastAgentParentEventWithLock(
         : {}),
       platformEventHandling:
         params.event.type === 'pull_request_feedback' ||
-        params.event.type === 'pull_request_conflict_detected'
+        params.event.type === 'pull_request_conflict_detected' ||
+        params.event.type === 'task_turn_provider_error'
           ? 'present_only'
           : 'default',
       platformEventVisibility:
@@ -2943,6 +2954,7 @@ export async function deliverFastAgentParentEventWithLock(
         (params.event.type === 'pull_request_feedback' ||
         params.event.type === 'pull_request_conflict_detected' ||
         params.event.type === 'automation_triggered' ||
+        params.event.type === 'task_turn_provider_error' ||
         (params.event.type === 'task_settled' &&
           params.parent.conversation.surface === 'web') ||
         (params.event.type === 'scheduled_wakeup' &&
