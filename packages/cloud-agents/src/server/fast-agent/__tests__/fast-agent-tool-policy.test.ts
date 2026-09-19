@@ -4,6 +4,7 @@ import {
   FAST_AGENT_NATIVE_TOOL_NAMES,
   FAST_AGENT_NATIVE_TOOL_FILTER,
   FAST_AGENT_SUBAGENT_TOOL_FILTER,
+  buildFastAgentSubagentToolFilter,
   buildFastAgentToolFilter,
   getFastAgentNativeAcpKind,
 } from '../fast-agent-tool-policy';
@@ -60,6 +61,60 @@ describe('getFastAgentNativeAcpKind', () => {
         FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool
       ],
     ).toBe(true);
+  });
+
+  it('keeps the dispatcher path unchanged when the code-mode experiment is off', () => {
+    const filter = buildFastAgentToolFilter(['github'], {
+      surface: 'web',
+      codeModeIntegrationsEnabled: false,
+    });
+
+    expect(filter.execute).not.toBe(true);
+    expect(filter[FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool]).toBe(true);
+    expect(filter[FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools]).toBe(
+      true,
+    );
+    expect(filter['github_*']).toBe(true);
+  });
+
+  it('retires call_integration_tool and exposes execute when the experiment is on', () => {
+    const filter = buildFastAgentToolFilter(['github'], {
+      surface: 'web',
+      codeModeIntegrationsEnabled: true,
+    });
+
+    expect(filter.execute).toBe(true);
+    expect(filter[FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool]).toBe(
+      false,
+    );
+    // Discovery stays for the built-in integration catalog and statuses.
+    expect(filter[FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools]).toBe(
+      true,
+    );
+    expect(filter['github_*']).toBe(true);
+    // The fail-closed posture for everything else is unchanged.
+    expect(filter['*']).toBe(false);
+    expect(filter.bash).not.toBe(true);
+  });
+
+  it('drops call_integration_tool for helper subagents only when the experiment is on', () => {
+    expect(buildFastAgentSubagentToolFilter()).toBe(
+      FAST_AGENT_SUBAGENT_TOOL_FILTER,
+    );
+    expect(
+      buildFastAgentSubagentToolFilter({ codeModeIntegrationsEnabled: false }),
+    ).toBe(FAST_AGENT_SUBAGENT_TOOL_FILTER);
+
+    const filter = buildFastAgentSubagentToolFilter({
+      codeModeIntegrationsEnabled: true,
+    });
+    expect(filter[FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool]).toBe(
+      false,
+    );
+    expect(filter[FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools]).toBe(
+      true,
+    );
+    expect(filter['*']).toBe(true);
   });
 
   it('offers list_repositories to the Fast parent on every surface but not to subagents', () => {

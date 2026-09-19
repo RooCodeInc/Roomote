@@ -98,6 +98,26 @@ describe('buildOpenCodeCliEnv', () => {
     });
   });
 
+  it('keeps call_integration_tool for helper subagents by default and drops it under the code-mode experiment', () => {
+    const readSubagentTools = (
+      options: Parameters<typeof buildOpenCodeCliEnv>[1],
+    ) => {
+      const env = buildOpenCodeCliEnv({}, options);
+      const config = JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}');
+      return config.agent.advisor.tools as Record<string, boolean>;
+    };
+
+    expect(
+      readSubagentTools({ promptOnlySubagents: true }).call_integration_tool,
+    ).toBe(true);
+    expect(
+      readSubagentTools({
+        promptOnlySubagents: true,
+        codeModeIntegrations: true,
+      }).call_integration_tool,
+    ).toBe(false);
+  });
+
   it('advertises image-only support for custom models in Fast sessions', () => {
     const env = buildOpenCodeCliEnv(
       {

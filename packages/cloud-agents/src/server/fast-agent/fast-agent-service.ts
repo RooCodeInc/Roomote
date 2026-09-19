@@ -76,6 +76,7 @@ import {
   getSessionForTask,
   inArray,
   isBrainEnabled,
+  isDeploymentExperimentEnabled,
   isPrivateSessionsExperimentEnabled,
   isNull,
   markSessionGoalForConversation,
@@ -3399,6 +3400,9 @@ export async function answerFastAgentQuestion({
       currentSessionPrivacy === 'private'
         ? await isPrivateSessionsExperimentEnabled()
         : false;
+    const codeModeIntegrationsEnabled = await isDeploymentExperimentEnabled(
+      'codeModeIntegrations',
+    );
     availableIntegrations = selectFastRoomoteChannelTools({
       integrations: discoveredIntegrations,
       conversation,
@@ -3683,6 +3687,7 @@ export async function answerFastAgentQuestion({
       setupSession,
       serviceCredentialToolsEnabled: currentUser.serviceCredentialToolsEnabled,
       addRemoteMcpEnabled: !platformEvent,
+      codeModeIntegrationsEnabled,
       personalizationContext,
       globalAgentInstructions: agentBehaviorSettings?.globalAgentInstructions,
       workspaceRoutingRules:
@@ -5768,6 +5773,7 @@ export async function answerFastAgentQuestion({
             serviceCredentialPrepareEnabled:
               currentUser.serviceCredentialToolsEnabled && !platformEvent,
             addRemoteMcpEnabled: !platformEvent,
+            codeModeIntegrationsEnabled,
           },
         );
         const unbindExecutors = new Set<() => void>();
@@ -5944,6 +5950,7 @@ export async function answerFastAgentQuestion({
                     {
                       directory: nativeRuntime.directory,
                       env: nativeRuntime.env,
+                      codeModeIntegrations: codeModeIntegrationsEnabled,
                       permission: FAST_AGENT_SESSION_PERMISSIONS,
                       signal: promptSignal,
                       promptOnlySubagents: true,

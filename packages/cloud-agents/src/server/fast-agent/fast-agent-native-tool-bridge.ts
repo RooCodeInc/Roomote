@@ -1609,6 +1609,28 @@ function pruneSessionRuntimes(): void {
   }
 }
 
+/**
+ * OpenCode prefixes MCP tools with the sanitized server name
+ * (`[^a-zA-Z0-9_-]` becomes `_`). Two distinct integration ids that sanitize
+ * to the same server name would merge their tool namespaces under code mode,
+ * so the experiment refuses to activate for that conversation instead of
+ * exposing an ambiguous catalog.
+ */
+function findSanitizedMcpServerNameCollision(
+  integrations: FastAgentIntegration[],
+): { first: string; second: string; sanitized: string } | null {
+  const seen = new Map<string, string>();
+  for (const integration of integrations) {
+    const sanitized = integration.id.replace(/[^a-zA-Z0-9_-]/gu, '_');
+    const first = seen.get(sanitized);
+    if (first !== undefined && first !== integration.id) {
+      return { first, second: integration.id, sanitized };
+    }
+    seen.set(sanitized, integration.id);
+  }
+  return null;
+}
+
 export async function getFastAgentNativeToolRuntime(
   sessionId: string,
   integrations: FastAgentIntegration[],
@@ -1617,6 +1639,7 @@ export async function getFastAgentNativeToolRuntime(
     serviceCredentialToolsEnabled?: boolean;
     serviceCredentialPrepareEnabled?: boolean;
     addRemoteMcpEnabled?: boolean;
+    codeModeIntegrationsEnabled?: boolean;
   } = {},
 ): Promise<FastAgentNativeToolRuntime> {
   bridgePromise ??= startBridge();
@@ -1657,9 +1680,31 @@ export async function getFastAgentNativeToolRuntime(
   // reachable through the capability (find_integration_tools and
   // call_integration_tool route to the same executor) without their schemas
   // being sent on every model request.
-  const nativeIntegrations = integrations.filter((integration) =>
+  let mountedIntegrations = integrations.filter((integration) =>
     isFastAgentNativeIntegration(integration.id),
   );
+  // The code-mode integrations experiment instead mounts every
+  // actor-authorized server and lets OpenCode's confined `execute` runner
+  // discover and call their tools individually. Calls flow through the same
+  // capability executor as call_integration_tool, so authorization,
+  // visibility, credential mediation, and refresh behavior are unchanged.
+  let codeModeIntegrationsActive = false;
+  if (options.codeModeIntegrationsEnabled === true) {
+    const collision = findSanitizedMcpServerNameCollision(integrations);
+    if (collision) {
+      console.warn(
+        `[Fast Agent] Code-mode integrations skipped: integration ids ${collision.first} and ${collision.second} collide as OpenCode MCP server names (${collision.sanitized}).`,
+      );
+    } else {
+      codeModeIntegrationsActive = true;
+      mountedIntegrations = integrations;
+    }
+  }
+  if (codeModeIntegrationsActive) {
+    runtime.env.OPENCODE_EXPERIMENTAL_CODE_MODE = '1';
+  } else {
+    delete runtime.env.OPENCODE_EXPERIMENTAL_CODE_MODE;
+  }
   writeFileSync(
     join(runtime.directory, 'opencode.json'),
     JSON.stringify({
@@ -1670,7 +1715,7 @@ export async function getFastAgentNativeToolRuntime(
       agent: {
         build: {
           tools: buildFastAgentToolFilter(
-            nativeIntegrations.map((integration) => integration.id),
+            mountedIntegrations.map((integration) => integration.id),
             {
               surface: options.surface ?? 'web',
               serviceCredentialToolsEnabled:
@@ -1678,12 +1723,13 @@ export async function getFastAgentNativeToolRuntime(
               serviceCredentialPrepareEnabled:
                 options.serviceCredentialPrepareEnabled,
               addRemoteMcpEnabled: options.addRemoteMcpEnabled,
+              codeModeIntegrationsEnabled: codeModeIntegrationsActive,
             },
           ),
         },
       },
       mcp: Object.fromEntries(
-        nativeIntegrations.map((integration) => [
+        mountedIntegrations.map((integration) => [
           integration.id,
           {
             type: 'remote',

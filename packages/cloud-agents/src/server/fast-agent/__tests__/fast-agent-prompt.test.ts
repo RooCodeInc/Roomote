@@ -1178,6 +1178,57 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('`call_integration_tool`');
   });
 
+  it('describes every server as code-mode mounted when the experiment is on', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      codeModeIntegrationsEnabled: true,
+      availableIntegrations: [
+        {
+          id: 'roomote',
+          name: 'Roomote',
+          description: 'Deployment access',
+          tools: [{ name: 'manage_tasks' }],
+        },
+        {
+          id: 'github',
+          name: 'GitHub',
+          description: 'Repository access',
+          tools: [{ name: 'search_code' }, { name: 'list_issues' }],
+        },
+      ],
+    });
+
+    expect(prompt).toContain('reached only through the `execute` tool');
+    expect(prompt).toContain('tools.$codemode.search');
+    expect(prompt).toContain('### GitHub [server: github]');
+    expect(prompt).toContain('### Roomote [server: roomote]');
+    expect(prompt).toContain('Tools: search_code, list_issues');
+    expect(prompt).toContain(
+      '`call_integration_tool` is unavailable in this conversation',
+    );
+    expect(prompt).toContain('`find_integration_tools` remains read-only');
+    expect(prompt).not.toContain('### On-demand servers');
+    expect(prompt).not.toContain('GitHub [tool prefix: github_]');
+  });
+
+  it('keeps the dispatcher description when the experiment is off', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      codeModeIntegrationsEnabled: false,
+      availableIntegrations: [
+        {
+          id: 'github',
+          name: 'GitHub',
+          description: 'Repository access',
+          tools: [{ name: 'search_code' }],
+        },
+      ],
+    });
+
+    expect(prompt).toContain('### On-demand servers');
+    expect(prompt).not.toContain('reached only through the `execute` tool');
+  });
+
   it('prefers discovered provider APIs without bypassing task and structured review delegation', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],

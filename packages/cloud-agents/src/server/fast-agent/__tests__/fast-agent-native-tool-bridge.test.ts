@@ -340,6 +340,125 @@ describe('Fast native OpenCode tool bridge', () => {
     }
   });
 
+  it('mounts only native integrations and hides execute when the code-mode experiment is off', async () => {
+    const runtime = await getFastAgentNativeToolRuntime(
+      'code-mode-integrations-off',
+      [
+        {
+          id: 'roomote',
+          name: 'Roomote',
+          description: 'Deployment access',
+          tools: [{ name: 'manage_tasks' }],
+        },
+        {
+          id: 'github',
+          name: 'GitHub',
+          description: 'Repository access',
+          tools: [{ name: 'search_code' }],
+        },
+      ],
+      { codeModeIntegrationsEnabled: false },
+    );
+
+    expect(runtime.env).not.toHaveProperty('OPENCODE_EXPERIMENTAL_CODE_MODE');
+    const config = JSON.parse(
+      await readFile(join(runtime.directory, 'opencode.json'), 'utf8'),
+    );
+    expect(Object.keys(config.mcp)).toEqual(['roomote']);
+    expect(config.agent.build.tools.execute).not.toBe(true);
+    expect(config.agent.build.tools.call_integration_tool).toBe(true);
+    expect(config.agent.build.tools['roomote_*']).toBe(true);
+    expect(config.agent.build.tools['github_*']).not.toBe(true);
+  });
+
+  it('mounts every authorized integration and enables code mode when the experiment is on', async () => {
+    const runtime = await getFastAgentNativeToolRuntime(
+      'code-mode-integrations-on',
+      [
+        {
+          id: 'roomote',
+          name: 'Roomote',
+          description: 'Deployment access',
+          tools: [{ name: 'manage_tasks' }],
+        },
+        {
+          id: 'github',
+          name: 'GitHub',
+          description: 'Repository access',
+          tools: [{ name: 'search_code' }],
+        },
+        {
+          id: 'exa',
+          name: 'Exa',
+          description: 'Web search',
+          tools: [{ name: 'search' }],
+        },
+      ],
+      { codeModeIntegrationsEnabled: true },
+    );
+
+    expect(runtime.env.OPENCODE_EXPERIMENTAL_CODE_MODE).toBe('1');
+    const config = JSON.parse(
+      await readFile(join(runtime.directory, 'opencode.json'), 'utf8'),
+    );
+    expect(Object.keys(config.mcp).sort()).toEqual([
+      'exa',
+      'github',
+      'roomote',
+    ]);
+    for (const id of ['roomote', 'github', 'exa']) {
+      expect(config.mcp[id].type).toBe('remote');
+      expect(config.mcp[id].url).toContain(`/mcp/${runtime.mcpCapability}/`);
+      expect(config.mcp[id].headers.Authorization).toBe(
+        `Bearer ${runtime.mcpCapability}`,
+      );
+    }
+    expect(config.agent.build.tools.execute).toBe(true);
+    expect(config.agent.build.tools.call_integration_tool).toBe(false);
+    expect(config.agent.build.tools.find_integration_tools).toBe(true);
+    expect(config.agent.build.tools['github_*']).toBe(true);
+    expect(config.agent.build.tools['*']).toBe(false);
+  });
+
+  it('falls back to the dispatcher path when integration ids collide as MCP server names', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const runtime = await getFastAgentNativeToolRuntime(
+        'code-mode-integrations-collision',
+        [
+          {
+            id: 'foo.bar',
+            name: 'Foo Dot Bar',
+            description: 'First',
+            tools: [{ name: 'search' }],
+          },
+          {
+            id: 'foo_bar',
+            name: 'Foo Underscore Bar',
+            description: 'Second',
+            tools: [{ name: 'read' }],
+          },
+        ],
+        { codeModeIntegrationsEnabled: true },
+      );
+
+      expect(runtime.env).not.toHaveProperty('OPENCODE_EXPERIMENTAL_CODE_MODE');
+      const config = JSON.parse(
+        await readFile(join(runtime.directory, 'opencode.json'), 'utf8'),
+      );
+      expect(Object.keys(config.mcp)).toEqual([]);
+      expect(config.agent.build.tools.execute).not.toBe(true);
+      expect(config.agent.build.tools.call_integration_tool).toBe(true);
+      expect(
+        warn.mock.calls.some(([message]) =>
+          String(message).includes('foo.bar'),
+        ),
+      ).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('overrides inherited project config only for a Roomote-on-Roomote Fast host', async () => {
     const inheritedProjectConfigMode =
       process.env.OPENCODE_DISABLE_PROJECT_CONFIG;

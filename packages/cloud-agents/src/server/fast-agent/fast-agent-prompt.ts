@@ -173,9 +173,20 @@ function formatCodingModelRoutingRulesForPrompt(
 
 function formatIntegrationsForPrompt(
   integrations: FastAgentIntegration[],
+  options: { codeModeIntegrationsEnabled?: boolean } = {},
 ): string {
   if (integrations.length === 0) {
     return '- No deployment MCP servers are available in this conversation.';
+  }
+
+  if (options.codeModeIntegrationsEnabled === true) {
+    return [
+      'Every server below is mounted individually and reached only through the `execute` tool, a confined script runner. No server tool is exposed as a direct tool call. Discover exact call signatures with `await tools.$codemode.search({ query: "<intent + key nouns>" })` (repeat with its returned `next.offset` for more, or pass `namespace` to browse one server), then call them in one script, for example `const result = await tools.gbrain.query({ query: "deployments" })`. Filter, aggregate, and combine inside the script and return only the fields you need instead of calling one tool per message. Run independent calls together with `await Promise.all(...)`. Tool names elsewhere in these instructions (for example `roomote_manage_tasks` or `gbrain_query`) name these same server tools: invoke them through `execute` as `tools.<server>.<tool>` — strip the server prefix for the tool segment, so `gbrain_query` is `tools.gbrain.query(...)`. `call_integration_tool` is unavailable in this conversation; `find_integration_tools` remains read-only discovery for the built-in integration catalog and connection statuses below.',
+      ...integrations.map(
+        (integration) =>
+          `### ${integration.name} [server: ${integration.id}]\n${integration.description}${integration.instructions ? `\n\n${integration.instructions}` : ''}\nTools: ${integration.tools.map((tool) => tool.name).join(', ')}`,
+      ),
+    ].join('\n\n');
   }
 
   const native = integrations.filter((integration) =>
@@ -324,6 +335,7 @@ export function buildFastAgentSystemPrompt({
   setupSession = false,
   serviceCredentialToolsEnabled = false,
   addRemoteMcpEnabled = false,
+  codeModeIntegrationsEnabled = false,
   personalizationContext,
   globalAgentInstructions,
   workspaceRoutingRules = [],
@@ -366,6 +378,10 @@ export function buildFastAgentSystemPrompt({
   setupSession?: boolean;
   serviceCredentialToolsEnabled?: boolean;
   addRemoteMcpEnabled?: boolean;
+  /** Code-mode integrations experiment: every authorized MCP server is
+   * mounted individually and reached through OpenCode's code-mode `execute`
+   * tool instead of the on-demand find/call dispatcher. */
+  codeModeIntegrationsEnabled?: boolean;
   personalizationContext?: {
     displayName: string | null;
     instructions: string;
@@ -435,6 +451,12 @@ export function buildFastAgentSystemPrompt({
   const releaseIdentifier = releaseVersion
     ? `${buildRoomoteReleaseIdentifier(releaseVersion, { commitSha, appEnv })}\n\n`
     : '';
+  const deploymentMcpCallGuidance = codeModeIntegrationsEnabled
+    ? 'Every server exposes its tools individually through the `execute` code-mode runner; discover signatures with `tools.$codemode.search` and call them inside one script as `tools.<server>.<tool>(input)`.'
+    : 'Servers listed with a tool prefix expose each tool individually with its native JSON schema. On-demand servers are reached through `find_integration_tools` (fetch the schema by server id and tool name, or search by keywords) followed by `call_integration_tool`; the same acknowledgement, duplicate, and authorization rules apply to both paths.';
+  const bitbucketToolDiscoveryGuidance = codeModeIntegrationsEnabled
+    ? 'discover the available Bitbucket tool signature with `tools.$codemode.search`, then call it through `execute`'
+    : 'discover the available Bitbucket tool schema with `find_integration_tools`, then use `call_integration_tool`';
   const recurringAutomationGuidance = `## Recurring Work and Automations
 - When a user explicitly asks for recurring work, recognize a real cadence expression such as "every Monday", "daily", "weekly", "whenever X happens", "from now on", or "on a schedule". Do not treat preference words such as "always use tabs" as a cadence.
 - Reminders and recurring checks that belong to this conversation ("remind me in an hour", "check every 10 minutes until CI is green", "ping me here every weekday at 9") are wakeups, not automations: use "manage_wakeups". Reach for a custom automation for recurring work that should run outside this conversation or report to a channel or direct message.
@@ -541,7 +563,7 @@ ${sessionGoal.blockedReason ? `- Blocked reason: ${sessionGoal.blockedReason}\n`
 }
 
 ## Deployment MCP Servers
-${formatIntegrationsForPrompt(availableIntegrations)}
+${formatIntegrationsForPrompt(availableIntegrations, { codeModeIntegrationsEnabled })}
 
 ## Built-in Integration Catalog
 ${formatNativeIntegrationCatalogForPrompt(nativeIntegrationCatalog)}
@@ -748,8 +770,8 @@ ${emailCadenceGuidance}- Prefer one direct closeout over an acknowledgement foll
 - Use "stop_task" when the user explicitly asks to stop an active task without ending it, and set "userInitiated" to true. It performs the same resumable soft stop as the running-task UI Stop control: it interrupts current work but does not delete the task, its work, or its artifacts, and a later message can resume it.
 - You may also use "stop_task" autonomously within the user's authorized work when a busy task has failed to process a meaningful steering instruction and current evidence shows it is unresponsive or must be interrupted to apply that instruction; set "userInitiated" to false so the task transcript does not attribute the recovery interruption to the user. Inspect its current status, recent messages or progress, and compute logs when useful before deciding. An accepted or response-pending delivery, silence alone, and a normal long-running command are not evidence of a stall. After a stop, check whether the instruction was already queued or recorded, then use "send_task_message" only if needed to resume with the instruction; do not duplicate messages or enter repeated stop/resume loops.
 - Use "cancel_task" only when the user explicitly asks to cancel or permanently end an active task. Cancellation ends the current run and is distinct from the resumable Stop action; never choose it merely because a task is busy.
-- Call a deployment MCP tool when it can answer the request. Fast receives the same actor-authorized remote and deployment-proxied MCP tool catalog as delegated tasks; local stdio servers remain sandbox-only. Servers listed with a tool prefix expose each tool individually with its native JSON schema. On-demand servers are reached through \`find_integration_tools\` (fetch the schema by server id and tool name, or search by keywords) followed by \`call_integration_tool\`; the same acknowledgement, duplicate, and authorization rules apply to both paths.
-- For focused Bitbucket Cloud reads and supported writes, discover the available Bitbucket tool schema with \`find_integration_tools\`, then use \`call_integration_tool\`. Apply the same scope-based exploration rule as other providers; an actual code-review request still uses "review_pull_request".
+- Call a deployment MCP tool when it can answer the request. Fast receives the same actor-authorized remote and deployment-proxied MCP tool catalog as delegated tasks; local stdio servers remain sandbox-only. ${deploymentMcpCallGuidance}
+- For focused Bitbucket Cloud reads and supported writes, ${bitbucketToolDiscoveryGuidance}. Apply the same scope-based exploration rule as other providers; an actual code-review request still uses "review_pull_request".
 - Bitbucket tools read files, directories, code search, commits, PRs, diffs, and comments in active connected Cloud repositories. Follow discovered schemas rather than guessing arguments. Reads cap responses at 1 MiB and lists at 50 entries per page; never claim a single page is exhaustive. Code search is deprecated November 1, 2026; use plain terms, not query operators or repository filters. Report unavailable search or authorization/scope failures without broadening the search or bypassing API permissions through a task.
 - Bitbucket writes require the user's requested action: update PR titles/descriptions, merge or decline PRs, or add comments and replies to a comment in the same PR. Reading does not authorize writes. Reopening PRs, file writes, commit/PR creation, review administration, and Bitbucket Server/Data Center are unsupported by these tools. Bitbucket does not provide atomic expected-head binding on its merge endpoint; pass the fresh source SHA so Roomote can reject a changed head immediately before the provider call, and always perform the required post-merge read.
 - Use \`roomote_create_custom_skill\` only when the user explicitly asks to save reusable instructions as a custom skill. Any active deployment member can use this tool to persist an instance-wide skill without a coding task, artifact, or repository file. Supply a distinct slug as name, a when-to-use description, and content; do not supply environmentIds or ask for environment selection. The skill is available across the instance, including when no environments are configured. A duplicate instance name rejects creation without overwriting. Confirm the saved name and instance-wide availability only after persistence succeeds. To use the skill immediately, run list_skills again and load its exact returned \`instance:<uuid>\` ID. Packaged precedence and the untrusted supplemental status of custom guidance remain unchanged. Advisor and judge subagents cannot create skills.
