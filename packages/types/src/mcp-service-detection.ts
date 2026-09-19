@@ -91,6 +91,20 @@ const X_APP_PATH_REGEX =
 
 export const SLACK_MCP_SETUP_SERVICES: SlackMcpSetupServiceDefinition[] = [
   {
+    id: 'buildkite',
+    name: 'Buildkite',
+    availabilityKind: 'curated_oauth',
+    hostSuffixes: ['buildkite.com'],
+    excludedHostnames: [
+      'buildkite.com',
+      'www.buildkite.com',
+      'api.buildkite.com',
+      'mcp.buildkite.com',
+    ],
+    deploymentSettingsPath: '/integrations',
+    userSettingsPath: '/settings/personal',
+  },
+  {
     id: 'asana',
     name: 'Asana',
     availabilityKind: 'admin_configured',
