@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 const resolveThreadReplyLinkedPrsMock = vi.hoisted(() => vi.fn());
 
-vi.mock('@roomote/communication', () => ({
+vi.mock('@roomote/communication', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/communication')>()),
   resolveThreadReplyLinkedPrs: resolveThreadReplyLinkedPrsMock,
 }));
 
