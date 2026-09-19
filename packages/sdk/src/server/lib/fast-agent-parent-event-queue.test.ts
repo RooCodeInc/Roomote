@@ -49,6 +49,17 @@ vi.mock('@roomote/redis', () => ({ getRedis: vi.fn(() => ({})) }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireLock,
+  findTerminalFastAgentInferenceFailure: (error: unknown) => {
+    for (
+      let current: unknown = error, depth = 0;
+      depth < 6 && current && typeof current === 'object';
+      current = (current as { cause?: unknown }).cause, depth += 1
+    ) {
+      const failure = (current as { failure?: { terminal?: boolean } }).failure;
+      if (failure) return failure.terminal ? failure : null;
+    }
+    return null;
+  },
   publishFastAgentSessionRefresh: mocks.publishRefresh,
   findFastAgentDurableRetryScheduledError: (error: unknown) =>
     error instanceof Error &&
@@ -88,6 +99,7 @@ vi.mock('@roomote/db/server', () => ({
   isNull: vi.fn((value: unknown) => value),
   lt: vi.fn((...values: unknown[]) => values),
   lte: vi.fn((...values: unknown[]) => values),
+  ne: vi.fn((...values: unknown[]) => values),
   or: vi.fn((...values: unknown[]) => values),
   recordCustomAutomationRunOutcome: mocks.recordAutomationOutcome,
   recordSessionWakeupOutcome: mocks.recordWakeupOutcome,
@@ -133,7 +145,10 @@ import {
   drainFastAgentParentEvents,
   enqueueFastAgentParentEvent,
   enqueueFastAgentParentEventForRun,
+  FAST_AGENT_PARENT_EVENT_MAX_AGE_MS,
+  FAST_AGENT_PARENT_EVENT_MAX_ATTEMPTS,
   FastAgentParentBusyError,
+  getFastAgentParentEventRetryDelayMs,
   recoverPendingFastAgentParentEvents,
   wakeFastAgentParentEventsOnTurnRelease,
 } from './fast-agent-parent-event-queue';
@@ -182,7 +197,20 @@ function pendingRow(id: string, queuedEvent: FastAgentParentEvent = event) {
     parent,
     event: queuedEvent,
     retryTaskStartRunId: null,
+    attempts: 0,
+    lastError: null as string | null,
+    createdAt: new Date(),
   };
+}
+
+/** What the Fast Session throws when the model call itself failed. */
+function inferenceError(reason: string, terminal: boolean) {
+  return new mocks.DeliveryError(`Fast mode inference failed (${reason})`, {
+    replyPosted: false,
+    cause: Object.assign(new Error(reason), {
+      failure: { reason, terminal, message: reason },
+    }),
+  });
 }
 
 describe('Fast parent event durable queue', () => {
@@ -1073,7 +1101,7 @@ describe('Fast parent event durable queue', () => {
     expect(mocks.releaseLock).toHaveBeenCalledOnce();
   });
 
-  it('keeps later events pending when the head has a transient failure', async () => {
+  it('parks a transiently failing head with backoff and holds the events behind it', async () => {
     const first = pendingRow('event-1');
     const second = pendingRow('event-2', { ...event, messageId: 'message-2' });
     mocks.findPending
@@ -1081,15 +1109,193 @@ describe('Fast parent event durable queue', () => {
       .mockResolvedValueOnce(first)
       .mockResolvedValueOnce(second);
     mocks.deliver.mockRejectedValueOnce(new Error('provider offline'));
+    const before = Date.now();
+
+    // Resolves: failing the job would retry it within seconds.
+    await drainFastAgentParentEvents({
+      conversationId: parent.sessionId,
+      eventKey: first.eventKey,
+    });
+
+    // Order is preserved: the second event is not delivered around the head.
+    expect(mocks.deliver).toHaveBeenCalledOnce();
+    const parked = mocks.updateSet.mock.calls
+      .map(([values]) => values as { retryAt?: Date; lastError?: string })
+      .find((values) => values.retryAt);
+    expect(parked?.lastError).toBe('provider offline');
+    expect(parked!.retryAt!.getTime() - before).toBeGreaterThanOrEqual(
+      getFastAgentParentEventRetryDelayMs(1) - 50,
+    );
+    expect(mocks.queueAdd).toHaveBeenCalledWith(
+      'deliver',
+      { conversationId: parent.sessionId, eventKey: first.eventKey },
+      expect.objectContaining({ delay: expect.any(Number) }),
+    );
+    expect(mocks.releaseLock).toHaveBeenCalledOnce();
+  });
+
+  it('does not deliver an event held behind a parked head', async () => {
+    const second = pendingRow('event-2', { ...event, messageId: 'message-2' });
+    mocks.findPending.mockResolvedValue(second);
+    // An older worker-queued event in this conversation is waiting out its
+    // backoff.
+    mocks.selectRows.mockResolvedValue([{ id: 'event-1' }]);
+
+    await drainFastAgentParentEvents({
+      conversationId: parent.sessionId,
+      eventKey: second.eventKey,
+    });
+
+    expect(mocks.acquireLock).not.toHaveBeenCalled();
+    expect(mocks.deliver).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['invalid_credentials'],
+    ['insufficient_credits'],
+    ['model_unavailable'],
+  ])(
+    'discards an event whose inference failure cannot succeed on retry (%s) and continues',
+    async (reason) => {
+      const first = pendingRow('event-1');
+      const second = pendingRow('event-2', {
+        ...event,
+        messageId: 'message-2',
+      });
+      mocks.findPending
+        .mockResolvedValueOnce(first)
+        .mockResolvedValueOnce(first)
+        .mockResolvedValueOnce(second)
+        .mockResolvedValueOnce(undefined);
+      mocks.deliver
+        .mockRejectedValueOnce(inferenceError(reason, true))
+        .mockResolvedValueOnce('delivered');
+
+      await drainFastAgentParentEvents({
+        conversationId: parent.sessionId,
+        eventKey: first.eventKey,
+      });
+
+      const discarded = mocks.updateSet.mock.calls
+        .map(([values]) => values as { discardedAt?: Date; retryAt?: Date })
+        .filter((values) => values.discardedAt);
+      expect(discarded).toHaveLength(1);
+      // Settled, not parked: nothing schedules another attempt.
+      expect(
+        mocks.updateSet.mock.calls.some(
+          ([values]) => (values as { retryAt?: Date }).retryAt,
+        ),
+      ).toBe(false);
+      expect(mocks.deliver).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it('retries an inference failure that is not terminal instead of discarding it', async () => {
+    const first = pendingRow('event-1');
+    mocks.findPending.mockResolvedValueOnce(first).mockResolvedValueOnce(first);
+    // Includes a generic provider rejection: a rebuilt session can still
+    // succeed, so it is retried within the attempt budget.
+    mocks.deliver.mockRejectedValueOnce(
+      inferenceError('provider_error', false),
+    );
+
+    await drainFastAgentParentEvents({
+      conversationId: parent.sessionId,
+      eventKey: first.eventKey,
+    });
+
+    const writes = mocks.updateSet.mock.calls.map(
+      ([values]) => values as { discardedAt?: Date; retryAt?: Date },
+    );
+    expect(writes.some((values) => values.discardedAt)).toBe(false);
+    expect(writes.some((values) => values.retryAt)).toBe(true);
+  });
+
+  it('abandons an event that has used its attempt budget without delivering it again', async () => {
+    const spent = {
+      ...pendingRow('event-1'),
+      attempts: FAST_AGENT_PARENT_EVENT_MAX_ATTEMPTS,
+      lastError: 'provider offline',
+    };
+    mocks.findPending
+      .mockResolvedValueOnce(spent)
+      .mockResolvedValueOnce(spent)
+      .mockResolvedValueOnce(undefined);
+
+    await drainFastAgentParentEvents({
+      conversationId: parent.sessionId,
+      eventKey: spent.eventKey,
+    });
+
+    expect(mocks.deliver).not.toHaveBeenCalled();
+    const discarded = mocks.updateSet.mock.calls
+      .map(([values]) => values as { discardedAt?: Date; lastError?: string })
+      .find((values) => values.discardedAt);
+    expect(discarded?.lastError).toContain(
+      `Gave up after ${FAST_AGENT_PARENT_EVENT_MAX_ATTEMPTS} delivery attempts.`,
+    );
+    expect(discarded?.lastError).toContain('provider offline');
+  });
+
+  it('abandons an attempted event once it is too old, but still delivers one never attempted', async () => {
+    const old = new Date(Date.now() - FAST_AGENT_PARENT_EVENT_MAX_AGE_MS - 1);
+    const attempted = { ...pendingRow('event-1'), attempts: 3, createdAt: old };
+    // The worker never reached this one (for example it was down), so it is
+    // still owed its first delivery however long it waited.
+    const neverAttempted = {
+      ...pendingRow('event-2', { ...event, messageId: 'message-2' }),
+      createdAt: old,
+    };
+    mocks.findPending
+      .mockResolvedValueOnce(attempted)
+      .mockResolvedValueOnce(attempted)
+      .mockResolvedValueOnce(neverAttempted)
+      .mockResolvedValueOnce(undefined);
+
+    await drainFastAgentParentEvents({
+      conversationId: parent.sessionId,
+      eventKey: attempted.eventKey,
+    });
+
+    expect(mocks.deliver).toHaveBeenCalledOnce();
+    expect(mocks.deliver.mock.calls[0]![0]).toMatchObject({
+      event: { messageId: 'message-2' },
+    });
+  });
+
+  it('leaves a failing inline turn to its own retry scheduling', async () => {
+    const inline = { ...pendingRow('event-1'), admission: 'inline' as const };
+    mocks.findPending
+      .mockResolvedValueOnce(inline)
+      .mockResolvedValueOnce(inline);
+    mocks.deliver.mockRejectedValueOnce(new Error('provider offline'));
 
     await expect(
       drainFastAgentParentEvents({
         conversationId: parent.sessionId,
-        eventKey: first.eventKey,
+        eventKey: inline.eventKey,
       }),
     ).rejects.toThrow('provider offline');
-    expect(mocks.deliver).toHaveBeenCalledOnce();
-    expect(mocks.releaseLock).toHaveBeenCalledOnce();
+    expect(
+      mocks.updateSet.mock.calls.some(
+        ([values]) => (values as { retryAt?: Date }).retryAt,
+      ),
+    ).toBe(false);
+  });
+
+  it('backs off exponentially from 30 seconds up to two hours', () => {
+    expect(getFastAgentParentEventRetryDelayMs(1)).toBe(30_000);
+    expect(getFastAgentParentEventRetryDelayMs(2)).toBe(60_000);
+    expect(getFastAgentParentEventRetryDelayMs(5)).toBe(480_000);
+    expect(getFastAgentParentEventRetryDelayMs(9)).toBe(2 * 60 * 60 * 1_000);
+    expect(getFastAgentParentEventRetryDelayMs(500)).toBe(2 * 60 * 60 * 1_000);
+    // The whole budget spans more than a day, so a provider outage is ridden
+    // out, and is still finite.
+    const total = Array.from(
+      { length: FAST_AGENT_PARENT_EVENT_MAX_ATTEMPTS },
+      (_, index) => getFastAgentParentEventRetryDelayMs(index + 1),
+    ).reduce((sum, delay) => sum + delay, 0);
+    expect(total).toBeGreaterThan(24 * 60 * 60 * 1_000);
   });
 
   it('discards a permanent head failure and continues to the next event', async () => {
