@@ -13,7 +13,7 @@ import {
 import { useArtifactByPath } from '@/hooks/use-artifact-by-path';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { ArtifactViewerContent } from '@/components/tasks/ArtifactViewerContent';
-import { ArrowUpRightIcon, Button } from '@/components/system';
+import { ArrowUpRightIcon, BasicTooltip, Button } from '@/components/system';
 
 export function StandaloneArtifactViewer({
   owner,
@@ -78,12 +78,18 @@ export function StandaloneArtifactViewer({
           ) : null}
         </div>
         {sourceUrl ? (
-          <Button asChild variant="outline" size="sm">
-            <Link href={sourceUrl}>
-              Open source {'taskId' in owner ? 'task' : 'session'}
-              <ArrowUpRightIcon />
-            </Link>
-          </Button>
+          <BasicTooltip
+            content={`Open source ${'taskId' in owner ? 'task' : 'session'}`}
+          >
+            <Button asChild variant="ghost" size="icon">
+              <Link
+                href={sourceUrl}
+                aria-label={`Open source ${'taskId' in owner ? 'task' : 'session'}`}
+              >
+                <ArrowUpRightIcon />
+              </Link>
+            </Button>
+          </BasicTooltip>
         ) : null}
       </header>
       <div className="min-h-0 flex-1">

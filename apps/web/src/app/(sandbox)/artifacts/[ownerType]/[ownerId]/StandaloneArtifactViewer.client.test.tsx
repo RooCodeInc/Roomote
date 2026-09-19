@@ -32,6 +32,7 @@ vi.mock('@/components/tasks/ArtifactViewerContent', () => ({
 
 vi.mock('@/components/system', () => ({
   ArrowUpRightIcon: () => <svg aria-hidden="true" />,
+  BasicTooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
   Button: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 
@@ -77,7 +78,7 @@ describe('StandaloneArtifactViewer', () => {
     expect(screen.getByRole('heading', { name: 'Result' })).toBeVisible();
     expect(screen.getByText('Version 2')).toBeVisible();
     expect(
-      screen.getByRole('link', { name: /Open source task/ }),
+      screen.getByRole('link', { name: 'Open source task' }),
     ).toHaveAttribute(
       'href',
       '/task/task-1/artifacts?path=reports%2Fresult.md&v=2',
