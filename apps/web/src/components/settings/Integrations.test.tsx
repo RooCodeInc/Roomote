@@ -2019,6 +2019,21 @@ describe('Integrations settings', () => {
     );
   });
 
+  it('rejects unrestricted Stripe secret keys before saving', () => {
+    render(<Integrations />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Configure Stripe' }));
+    fireEvent.change(screen.getByLabelText('Stripe Restricted API Key'), {
+      target: { value: 'sk_live_unrestricted' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Stripe' }));
+
+    expect(
+      screen.getByText('Use a Stripe restricted API key starting with rk_'),
+    ).toBeInTheDocument();
+    expect(mutations.saveStripeConnection).not.toHaveBeenCalled();
+  });
+
   it('keeps Exa off by default and enables keyless access explicitly', () => {
     render(<Integrations />);
 
