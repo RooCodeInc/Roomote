@@ -53,6 +53,14 @@ Sentry uses the workspace MCP integration:
 
 Once connected, tasks can inspect Sentry issue and project context, and scheduled Sentry triage automation uses the same read-only MCP connection.
 
+# Cloudflare
+
+Cloudflare uses OAuth:
+1. A deployment operator enables Cloudflare from Settings > Integrations.
+2. That operator connects Cloudflare once for the deployment via OAuth.
+
+Once connected, I can search and inspect Cloudflare resources. The execute tool can also call write APIs, so I only make changes when the user explicitly requests the specific mutation and the OAuth connection permits it.
+
 # Pylon
 
 Pylon uses OAuth:

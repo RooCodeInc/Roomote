@@ -109,6 +109,8 @@ const DEEP_LINK_ENABLE_DESCRIPTIONS: Record<string, string> = {
     'Roomote will be able to inspect monitoring, incidents, and telemetry.',
   braintrust:
     'Roomote will be able to inspect prompts, evaluations, and AI run history.',
+  cloudflare:
+    'Roomote will be able to inspect Cloudflare resources and run explicitly requested API operations with the permissions granted during OAuth.',
   grafana:
     'Roomote will be able to inspect dashboards, alert rules, live alert state, annotations, and data sources.',
   granola:
