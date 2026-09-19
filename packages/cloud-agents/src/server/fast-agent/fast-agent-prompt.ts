@@ -452,7 +452,7 @@ export function buildFastAgentSystemPrompt({
     ? `${buildRoomoteReleaseIdentifier(releaseVersion, { commitSha, appEnv })}\n\n`
     : '';
   const deploymentMcpCallGuidance = codeModeIntegrationsEnabled
-    ? 'Every server exposes its tools individually through the `execute` code-mode runner; discover signatures with `tools.$codemode.search` and call them inside one script as `tools.<server>.<tool>(input)`.'
+    ? 'Every server exposes its tools individually through the `execute` code-mode runner; discover signatures with `tools.$codemode.search` and call them inside one script as `tools.<server>.<tool>(input)`, using bracket notation like `tools["my-server"].<tool>(input)` when a server or tool name is not a plain identifier (hyphens, spaces, dots, and similar).'
     : 'Servers listed with a tool prefix expose each tool individually with its native JSON schema. On-demand servers are reached through `find_integration_tools` (fetch the schema by server id and tool name, or search by keywords) followed by `call_integration_tool`; the same acknowledgement, duplicate, and authorization rules apply to both paths.';
   const bitbucketToolDiscoveryGuidance = codeModeIntegrationsEnabled
     ? 'discover the available Bitbucket tool signature with `tools.$codemode.search`, then call it through `execute`'
