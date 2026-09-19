@@ -89,6 +89,21 @@ describe('monday.com OAuth', () => {
   });
 });
 
+describe('Buildkite OAuth', () => {
+  it('uses the provider-enforced read-only MCP endpoint with DCR', () => {
+    expect(getMcpIntegration('buildkite')).toMatchObject({
+      name: 'Buildkite',
+      url: 'https://mcp.buildkite.com/mcp/readonly',
+      connectionScope: 'deployment',
+      oauthResource: 'https://mcp.buildkite.com/mcp/readonly',
+      oauthScopes: ['read'],
+      oauthScopeMode: 'read-only',
+    });
+    expect(getMcpIntegration('buildkite')?.oauthClientEnv).toBeUndefined();
+    expect(getMcpIntegrationDefaultDisabledTools('buildkite')).toEqual([]);
+  });
+});
+
 describe('Cloudflare OAuth', () => {
   it('uses the hosted API MCP with a deployment-scoped DCR connection', () => {
     expect(getMcpIntegration('cloudflare')).toMatchObject({
