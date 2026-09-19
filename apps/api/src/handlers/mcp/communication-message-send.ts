@@ -1,7 +1,6 @@
 import {
   getCommunicationChannelFromTaskPayload,
   getCommunicationProviderFromTaskPayload,
-  getCommunicationThreadIdFromTaskPayload,
 } from '@roomote/types';
 import {
   hasUserDirectMessageIdentity,
@@ -10,7 +9,7 @@ import {
 
 import { sendCommunicationChannelPost } from './communication-channel-posts';
 
-export type MessageTaskRun = {
+type MessageTaskRun = {
   id?: number;
   taskId?: string;
   actingUserId?: string | null;
@@ -117,34 +116,11 @@ export async function sendCommunicationMessage(params: {
       );
     }
 
-    const currentProvider = params.taskRun
-      ? getCommunicationProviderFromTaskPayload(params.taskRun.payload)
-      : null;
-    const currentChannel = params.taskRun
-      ? getCommunicationChannelFromTaskPayload(params.taskRun.payload)
-      : null;
-    const currentThread = params.taskRun
-      ? getCommunicationThreadIdFromTaskPayload(params.taskRun.payload)
-      : null;
-    const replyAnchor =
-      destination.provider === 'telegram' &&
-      currentProvider === 'telegram' &&
-      currentChannel &&
-      currentThread
-        ? {
-            provider: 'telegram' as const,
-            workspaceId: currentChannel,
-            channelId: currentChannel,
-            messageId: currentThread,
-            threadId: currentThread,
-          }
-        : undefined;
     const result = await sendUserDirectMessageWithReceipt({
       provider: destination.provider,
       userId: params.actingUserId,
       text: params.message,
       logContext: 'roomote-mcp-chat-message',
-      ...(replyAnchor ? { replyAnchor } : {}),
     });
     return result.delivered
       ? jsonResponse({

@@ -31,9 +31,7 @@ type RegisteredTool = {
   handler: (params: Record<string, unknown>) => Promise<unknown>;
 };
 
-function registerTools(options?: {
-  resolveTaskRun?: () => Promise<{ payload: unknown }>;
-}): RegisteredTool[] {
+function registerTools(): RegisteredTool[] {
   const tools: RegisteredTool[] = [];
   const server = {
     registerTool: (
@@ -42,11 +40,7 @@ function registerTools(options?: {
       handler: RegisteredTool['handler'],
     ) => tools.push({ name, config, handler }),
   };
-  registerRoomoteCommunicationTools(
-    server as never,
-    'user-1',
-    options?.resolveTaskRun,
-  );
+  registerRoomoteCommunicationTools(server as never, 'user-1');
   return tools;
 }
 
@@ -124,31 +118,6 @@ describe('Roomote member communication tools', () => {
       });
     },
   );
-
-  it('passes trusted run context to standalone sends', async () => {
-    const taskRun = {
-      payload: {
-        communicationProvider: 'telegram',
-        communicationChannelId: '5087578056',
-        communicationThreadId: '18069',
-      },
-    };
-    const send = registerTools({
-      resolveTaskRun: vi.fn(async () => taskRun),
-    }).find(({ name }) => name === 'send_chat_message')!;
-
-    await send.handler({
-      destination: 'telegram:me',
-      message: 'Exact message.',
-    });
-
-    expect(sendCommunicationMessageMock).toHaveBeenCalledWith({
-      actingUserId: 'user-1',
-      taskRun,
-      destination: 'telegram:me',
-      message: 'Exact message.',
-    });
-  });
 
   it('binds targeted destination discovery to the acting user and workspace', async () => {
     const lookup = registerTools().find(

@@ -9,10 +9,7 @@ import {
 import { z } from 'zod';
 
 import { listCommunicationDestinations } from './communication-channel-discovery';
-import {
-  sendCommunicationMessage,
-  type MessageTaskRun,
-} from './communication-message-send';
+import { sendCommunicationMessage } from './communication-message-send';
 import { maybeAddCommunicationReaction } from './communication-thread-replies';
 import { toolError } from './in-process-api';
 import { toMcpToolResult } from './proxy-utils';
@@ -27,7 +24,6 @@ async function responseToToolResult(response: Response) {
 export function registerRoomoteCommunicationTools(
   server: McpServer,
   actingUserId: string,
-  resolveTaskRun?: () => Promise<MessageTaskRun | undefined>,
 ): void {
   server.registerTool(
     CHAT_DESTINATIONS_TOOL.name,
@@ -85,7 +81,6 @@ export function registerRoomoteCommunicationTools(
       responseToToolResult(
         await sendCommunicationMessage({
           actingUserId,
-          ...(resolveTaskRun ? { taskRun: await resolveTaskRun() } : {}),
           destination,
           message,
         }),

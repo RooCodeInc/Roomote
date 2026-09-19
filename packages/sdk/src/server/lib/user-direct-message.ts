@@ -744,7 +744,6 @@ type SendUserDirectMessageInput = {
   slackBlocks?: unknown[];
   logContext: string;
   idempotencyKey?: string;
-  replyAnchor?: UserDirectMessageReceipt;
 };
 
 export async function sendUserDirectMessageWithReceipt({
@@ -754,7 +753,6 @@ export async function sendUserDirectMessageWithReceipt({
   slackBlocks,
   logContext,
   idempotencyKey,
-  replyAnchor,
 }: SendUserDirectMessageInput): Promise<UserDirectMessageResult> {
   switch (provider) {
     case 'slack': {
@@ -764,7 +762,6 @@ export async function sendUserDirectMessageWithReceipt({
         logContext,
         slackBlocks,
         idempotencyKey,
-        replyAnchor,
       );
       return { delivered: Boolean(receipt), receipt };
     }
@@ -773,7 +770,6 @@ export async function sendUserDirectMessageWithReceipt({
         userId,
         text,
         logContext,
-        replyAnchor,
       );
       return { delivered: Boolean(receipt), receipt };
     }
@@ -783,7 +779,6 @@ export async function sendUserDirectMessageWithReceipt({
         text,
         logContext,
         idempotencyKey,
-        replyAnchor,
       );
       return { delivered: Boolean(receipt), receipt };
     }
@@ -793,7 +788,6 @@ export async function sendUserDirectMessageWithReceipt({
         text,
         logContext,
         idempotencyKey,
-        replyAnchor,
       );
       return { delivered: Boolean(receipt), receipt };
     }
@@ -803,7 +797,6 @@ export async function sendUserDirectMessageWithReceipt({
         text,
         logContext,
         idempotencyKey,
-        replyAnchor,
       );
   }
 }

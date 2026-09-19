@@ -67,13 +67,13 @@ describe('sendCommunicationMessage', () => {
     },
   );
 
-  it('keeps a Telegram self-DM in the trusted current topic', async () => {
+  it('does not let Telegram group or topic context override the linked self-DM destination', async () => {
     await sendCommunicationMessage({
       actingUserId: 'user-1',
       taskRun: {
         payload: {
           communicationProvider: 'telegram',
-          communicationChannelId: '5087578056',
+          communicationChannelId: '-1001234567890',
           communicationThreadId: '18069',
         },
       },
@@ -86,13 +86,6 @@ describe('sendCommunicationMessage', () => {
       userId: 'user-1',
       text: 'Keep this exact.',
       logContext: 'roomote-mcp-chat-message',
-      replyAnchor: {
-        provider: 'telegram',
-        workspaceId: '5087578056',
-        channelId: '5087578056',
-        messageId: '18069',
-        threadId: '18069',
-      },
     });
   });
 
