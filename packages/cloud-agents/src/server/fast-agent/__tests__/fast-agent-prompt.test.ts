@@ -415,6 +415,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(eventPrompt).toContain(
       `A \`${NO_REPOSITORIES}\` preference is an explicit request for sandbox execution`,
     );
+    expect(eventPrompt).toContain(
+      'That handoff is retained in the Session but is not the automation result',
+    );
   });
 
   it('offers suggestions on an automation task-settled report only', () => {

@@ -1415,6 +1415,32 @@ function findRecordedCloseout(
   return text ? { kind: 'lost', purpose, text } : null;
 }
 
+function hasRecordedSuccessfulTaskLaunch(
+  events: FastAgentTurnAttemptSummary['events'],
+): boolean {
+  return events.some((event) => {
+    if (
+      event.kind !== 'action' ||
+      event.tool !== FAST_AGENT_NATIVE_TOOL_NAMES.launchTask ||
+      event.status !== 'completed' ||
+      !event.result
+    ) {
+      return false;
+    }
+    try {
+      const result: unknown = JSON.parse(event.result);
+      return (
+        typeof result === 'object' &&
+        result !== null &&
+        'success' in result &&
+        result.success === true
+      );
+    } catch {
+      return false;
+    }
+  });
+}
+
 function clipText(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max)}…` : text;
 }
@@ -3713,6 +3739,11 @@ export async function answerFastAgentQuestion({
     let substantiveWorkAcknowledged = resumedWithDeliveredAcknowledgement;
     let nativeToolInvoked = false;
     let retriedTaskStart = false;
+    let automationWorkDelegated = Boolean(
+      (platformEventKind === 'automation' || automationReport) &&
+      previousAttempt &&
+      hasRecordedSuccessfulTaskLaunch(previousAttempt.events),
+    );
     const mirrorPendingMessages = async (strict = false) => {
       const pending = turnVisibleMessages.slice(mirroredMessageCount);
       if (pending.length === 0) return;
@@ -3739,12 +3770,22 @@ export async function answerFastAgentQuestion({
       streamedEvent?: { eventId: string; turnSeq: number },
     ) => {
       startSurfaceActivity();
+      // A successful automation delegation makes this turn's closeout a
+      // handoff, not the report. Persist that distinction so replay cannot
+      // publish it before the delegated task settles.
+      const eligibleReply =
+        automationWorkDelegated &&
+        (platformEventKind === 'automation' || automationReport) &&
+        reply.purpose === 'closeout'
+          ? { ...reply, kickoff: true }
+          : reply;
       const replyWithImages = {
-        ...reply,
-        ...(!reply.imageArtifactIds?.length && defaultImageArtifactIds.length
+        ...eligibleReply,
+        ...(!eligibleReply.imageArtifactIds?.length &&
+        defaultImageArtifactIds.length
           ? { imageArtifactIds: defaultImageArtifactIds }
           : {}),
-        ...(!reply.charts?.length && defaultCharts.length
+        ...(!eligibleReply.charts?.length && defaultCharts.length
           ? { charts: defaultCharts }
           : {}),
       };
@@ -4889,6 +4930,7 @@ export async function answerFastAgentQuestion({
               completedTaskActions.delete(signature);
             }
             if (result.success) {
+              automationWorkDelegated = true;
               currentTasks.set(result.taskId, { taskId: result.taskId });
               if (substantiveHumanInput) {
                 try {

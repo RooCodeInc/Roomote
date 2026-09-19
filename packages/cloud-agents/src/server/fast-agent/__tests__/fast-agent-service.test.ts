@@ -7026,6 +7026,48 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
     });
 
+    it('keeps a resumed automation handoff suppressed after a lost closeout call', async () => {
+      mocks.loadTurnAttempt.mockResolvedValueOnce({
+        ...attemptCounters,
+        events: [
+          {
+            kind: 'action',
+            tool: nativeToolNames.launchTask,
+            arguments: { prompt: 'Investigate the automation result.' },
+            status: 'completed',
+            result: '{"success":true,"taskId":"task-automation"}',
+          },
+          {
+            kind: 'action',
+            tool: nativeToolNames.sendChatReply,
+            arguments: {
+              purpose: 'closeout',
+              message: 'I’m checking the result now.',
+            },
+            status: 'unknown',
+          },
+        ],
+      });
+      const postReply = vi.fn().mockResolvedValue(undefined);
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply }),
+        durableAdmission,
+        resumedAfterInterruption: true,
+        turnSource: 'platform_event',
+        platformEventKind: 'automation',
+        platformEventVisibility: 'required',
+      });
+
+      expect(postReply).toHaveBeenCalledWith({
+        purpose: 'closeout',
+        message: 'I’m checking the result now.',
+        kickoff: true,
+      });
+      expect(mocks.generateText).not.toHaveBeenCalled();
+    });
+
     it('lets the model finish a resumed turn whose lost closeout carried no explicit text', async () => {
       mocks.loadTurnAttempt.mockResolvedValueOnce({
         ...attemptCounters,
@@ -10557,6 +10599,118 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       });
     },
   );
+
+  it('marks an automation closeout as a handoff after delegated work starts', async () => {
+    const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
+      success: true,
+      taskId: 'task-automation',
+      kickoffDelivered: true,
+    }));
+    const adapter = callbacks({ launchTask });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.launchTask, {
+          prompt: 'Investigate the automation result.',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'I’m checking the result now.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter,
+      turnSource: 'platform_event',
+      platformEventKind: 'automation',
+      platformEventVisibility: 'required',
+    });
+
+    expect(adapter.postReply).toHaveBeenLastCalledWith({
+      purpose: 'closeout',
+      message: 'I’m checking the result now.',
+      kickoff: true,
+    });
+    expect(mocks.upsertMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          payload: expect.objectContaining({ kickoff: true }),
+        }),
+      }),
+    );
+  });
+
+  it('keeps an automation clarification eligible after delegated work starts', async () => {
+    const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
+      success: true,
+      taskId: 'task-automation',
+      kickoffDelivered: true,
+    }));
+    const adapter = callbacks({ launchTask });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.launchTask, {
+          prompt: 'Investigate the automation result.',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'clarification',
+          message: 'Which repository should I inspect?',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter,
+      turnSource: 'platform_event',
+      platformEventKind: 'automation',
+      platformEventVisibility: 'required',
+    });
+
+    expect(adapter.postReply).toHaveBeenLastCalledWith({
+      purpose: 'clarification',
+      message: 'Which repository should I inspect?',
+    });
+  });
+
+  it('keeps a launch failure eligible as the direct automation result', async () => {
+    const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
+      success: false,
+      error: 'No worker is available.',
+    }));
+    const adapter = callbacks({ launchTask });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.launchTask, {
+          prompt: 'Investigate the automation result.',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'The automation could not start: no worker is available.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter,
+      turnSource: 'platform_event',
+      platformEventKind: 'automation',
+      platformEventVisibility: 'required',
+    });
+
+    expect(adapter.postReply).toHaveBeenLastCalledWith({
+      purpose: 'closeout',
+      message: 'The automation could not start: no worker is available.',
+    });
+  });
 
   it('marks automation-delegated task results in a web Session as non-manual attention', async () => {
     const notifyUserAttention = vi.fn();
