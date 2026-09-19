@@ -153,13 +153,13 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
     expect(mocks.postMessageDetailed).toHaveBeenCalledWith({
       channel: 'C123',
       thread_ts: '100.001',
-      text: 'Preparing workspace…\n<https://roomote.example/task/task-1|Open in Roomote>',
+      text: 'Starting task…\n<https://roomote.example/task/task-1|Open in Roomote>',
       blocks: [
         {
           type: 'task_card',
           block_id: 'roomote-task-task-1-card',
           task_id: 'roomote-task-task-1',
-          title: 'Preparing workspace…',
+          title: 'Starting task…',
           status: 'in_progress',
           sources: [
             {

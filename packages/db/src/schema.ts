@@ -270,6 +270,11 @@ export const deploymentSettings = pgTable('deployment_settings', {
   // Read by the in-app "update available" notice for self-host admins.
   latestKnownVersion: text('latest_known_version'),
   latestVersionCheckedAt: timestamp('latest_version_checked_at'),
+  // Last release positively recorded by the deployment workflow after its
+  // readiness checks passed. This is intentionally separate from the latest
+  // release advertised by Ping above.
+  installedReleaseVersion: text('installed_release_version'),
+  installedReleaseRecordedAt: timestamp('installed_release_recorded_at'),
   setupCompletedAt: timestamp('setup_completed_at'),
   setupNewState: jsonb('setup_new_state').$type<SetupNewState>(),
   slackOnboardingStage: text('slack_onboarding_stage').$type<
@@ -286,6 +291,9 @@ export const deploymentSettings = pgTable('deployment_settings', {
   // projection (built from the automations table) on top.
   managerSlackChannelId: text('manager_slack_channel_id'),
   managerDiscordChannelId: text('manager_discord_channel_id'),
+  defaultAutomationTarget: jsonb(
+    'default_automation_target',
+  ).$type<AutomationTarget>(),
   globalAgentInstructions: text('global_agent_instructions'),
   // Null preserves the legacy Slack-workspace timezone lookup (UTC fallback)
   // until an admin explicitly pins a deployment-wide scheduling timezone.
@@ -319,6 +327,57 @@ export const deploymentSettings = pgTable('deployment_settings', {
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
+
+/** Durable, per-destination attempts for installed-release announcements. */
+export const releaseAnnouncementDeliveries = pgTable(
+  'release_announcement_deliveries',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    previousVersion: text('previous_version').notNull(),
+    installedVersion: text('installed_version').notNull(),
+    provider: text('provider')
+      .$type<'slack' | 'teams' | 'telegram' | 'discord' | 'email'>()
+      .notNull(),
+    destinationKey: text('destination_key').notNull(),
+    channelId: text('channel_id').notNull(),
+    serviceUrl: text('service_url'),
+    recipientUserId: text('recipient_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    emailIdentityId: text('email_identity_id'),
+    status: text('status')
+      .$type<'pending' | 'delivered' | 'skipped'>()
+      .notNull()
+      .default('pending'),
+    leaseToken: uuid('lease_token'),
+    leaseExpiresAt: timestamp('lease_expires_at'),
+    attempts: integer('attempts').notNull().default(0),
+    nextAttemptAt: timestamp('next_attempt_at').notNull().defaultNow(),
+    providerMessageId: text('provider_message_id'),
+    lastError: text('last_error'),
+    deliveredAt: timestamp('delivered_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex(
+      'release_announcement_deliveries_version_destination_unique',
+    ).on(table.installedVersion, table.destinationKey),
+    index('release_announcement_deliveries_due_idx').on(
+      table.status,
+      table.nextAttemptAt,
+      table.leaseExpiresAt,
+    ),
+    check(
+      'release_announcement_deliveries_status_check',
+      sql`${table.status} in ('pending', 'delivered', 'skipped')`,
+    ),
+    check(
+      'release_announcement_deliveries_provider_check',
+      sql`${table.provider} in ('slack', 'teams', 'telegram', 'discord', 'email')`,
+    ),
+  ],
+);
 
 /**
  * Immutable active-user observations awaiting delivery to Roomote Cloud.
@@ -3224,6 +3283,44 @@ export const agentmailSuppressions = pgTable(
 );
 
 /**
+ * agentmail_reply_verification_proofs
+ *
+ * Single-use, expiring proof that lets a reply to a Roomote-initiated email
+ * implicitly verify the account email it was sent to. Each Roomote-initiated
+ * email to an unverified account address carries a random reference token in
+ * its footer; the raw token never touches the database (only its SHA-256
+ * hash), and it authorizes exactly one thing: marking the bound (user,
+ * address) pair verified, and only alongside a DMARC-passing reply from that
+ * exact address on a conversation the user already participates in.
+ */
+export const agentmailReplyVerificationProofs = pgTable(
+  'agentmail_reply_verification_proofs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** The exact account address the proof may verify (normalized). */
+    emailAddress: text('email_address').notNull(),
+    /** SHA-256 hex of the bearer token mailed to the recipient. */
+    tokenHash: text('token_hash').notNull(),
+    expiresAt: timestamp('expires_at').notNull(),
+    /** Set when the proof is spent; a consumed proof never verifies again. */
+    consumedAt: timestamp('consumed_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    unique('agentmail_reply_verification_proofs_token_unique').on(
+      table.tokenHash,
+    ),
+    index('agentmail_reply_verification_proofs_user_idx').on(
+      table.userId,
+      table.emailAddress,
+    ),
+  ],
+);
+
+/**
  * discord_installations
  *
  * One row per Discord guild where the deployment's bot is installed. The
@@ -3771,11 +3868,24 @@ export const sessionAttentionNotifications = pgTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     eventKey: text('event_key').notNull(),
     kind: text('kind').notNull().$type<'result_ready' | 'input_needed'>(),
+    presentationKind: text('presentation_kind').$type<
+      'response' | 'error' | 'input'
+    >(),
+    body: text('body'),
     leaseToken: uuid('lease_token'),
     leaseExpiresAt: timestamp('lease_expires_at'),
     outcome: text('outcome').$type<
       'delivered' | 'skipped_present' | 'failed'
     >(),
+    deliveryChannel: text('delivery_channel').$type<
+      'browser' | 'personal_provider'
+    >(),
+    browserPromptEligibleAt: timestamp('browser_prompt_eligible_at'),
+    browserOfferedAt: timestamp('browser_offered_at'),
+    browserOfferExpiresAt: timestamp('browser_offer_expires_at'),
+    browserAcceptedAt: timestamp('browser_accepted_at'),
+    browserOpenedAt: timestamp('browser_opened_at'),
+    browserClientId: uuid('browser_client_id'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
@@ -3792,6 +3902,14 @@ export const sessionAttentionNotifications = pgTable(
     check(
       'session_attention_notifications_outcome_check',
       sql`${table.outcome} IS NULL OR ${table.outcome} in ('delivered', 'skipped_present', 'failed')`,
+    ),
+    check(
+      'session_attention_notifications_presentation_kind_check',
+      sql`${table.presentationKind} IS NULL OR ${table.presentationKind} in ('response', 'error', 'input')`,
+    ),
+    check(
+      'session_attention_notifications_delivery_channel_check',
+      sql`${table.deliveryChannel} IS NULL OR ${table.deliveryChannel} in ('browser', 'personal_provider')`,
     ),
   ],
 );
@@ -5525,6 +5643,69 @@ export const customMcpServersRelations = relations(
 );
 
 /**
+ * personalMcpServers
+ *
+ * Remote MCP servers private to the member who added them ("Only me"),
+ * shown under Personal settings. They are a separate table from
+ * customMcpServers on purpose: every deployment-scoped query, the N-1
+ * release included, keeps seeing only deployment rows, so a code path that
+ * has not been taught about ownership fails closed instead of handing one
+ * member's credentials to another. Names are unique per owner.
+ *
+ * A row keeps its id when its visibility changes, so it moves between this
+ * table and customMcpServers without breaking its proxy URL
+ * (`/api/mcp/custom/<id>`) or its `custom:<id>` connection. The OAuth
+ * connection for a personal server is the mcpConnections row whose userId is
+ * the owner. Remote transport only: a stdio server would put the owner's env
+ * values inside a sandbox.
+ */
+export const personalMcpServers = pgTable(
+  'personal_mcp_servers',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    ownerUserId: text('owner_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    url: text('url').notNull(),
+    authType: text('auth_type')
+      .notNull()
+      .default('none')
+      .$type<CustomMcpServerAuthType>(),
+    headers: jsonb('headers').$type<Record<string, string>>(),
+    disabledTools: text('disabled_tools').array(),
+    manualClientId: text('manual_client_id'),
+    manualClientSecret: encryptedText('manual_client_secret'),
+    oauthServerMetadata: jsonb(
+      'oauth_server_metadata',
+    ).$type<OAuthServerMetadata>(),
+    oauthServerMetadataFetchedAt: timestamp('oauth_server_metadata_fetched_at'),
+    oauthResourceIndicatorDisabled: boolean('oauth_resource_indicator_disabled')
+      .notNull()
+      .default(false),
+    enabled: boolean('enabled').notNull().default(true),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    unique('personal_mcp_servers_owner_name_unique').on(
+      table.ownerUserId,
+      table.name,
+    ),
+  ],
+);
+
+export const personalMcpServersRelations = relations(
+  personalMcpServers,
+  ({ one }) => ({
+    owner: one(users, {
+      fields: [personalMcpServers.ownerUserId],
+      references: [users.id],
+    }),
+  }),
+);
+
+/**
  * mcpConnections
  */
 
@@ -5741,6 +5922,36 @@ export const fastAgentMemoryEvents = pgTable(
       table.conversationId,
     ),
     index('fast_agent_memory_events_status_created_idx').on(
+      table.status,
+      table.createdAt,
+    ),
+  ],
+);
+
+/**
+ * Durable exact-page retirement requests for direct Roomote memories. Rows are
+ * retained after success as tombstones so an ingestion write that races a
+ * deletion can re-arm the same slug without widening deletion to a namespace.
+ */
+export const brainPageRetirements = pgTable(
+  'brain_page_retirements',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slug: text('slug').notNull(),
+    status: text('status')
+      .notNull()
+      .default('pending')
+      .$type<'pending' | 'processing' | 'done' | 'skipped' | 'failed'>(),
+    revision: integer('revision').notNull().default(0),
+    attempts: integer('attempts').notNull().default(0),
+    lastError: text('last_error'),
+    processedAt: timestamp('processed_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    unique('brain_page_retirements_slug_unique').on(table.slug),
+    index('brain_page_retirements_status_created_idx').on(
       table.status,
       table.createdAt,
     ),

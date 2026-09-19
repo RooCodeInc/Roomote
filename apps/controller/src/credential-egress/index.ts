@@ -17,8 +17,8 @@ export * from './hosted-launch';
  * Production wiring: the typed SDK control-plane client against the API
  * origin the controller already uses, the proxy base URL sandboxes call, and
  * lifecycle events on the run so the Session sees a nonsecret status. No
- * deployment configuration exists; the per-owner experiment decides whether
- * a run gets tokens.
+ * deployment configuration exists; live run, Session, owner, and grant state
+ * decide whether a run gets tokens.
  */
 export function createCredentialEgressLifecycle(): CredentialEgressLifecycle {
   return new CredentialEgressLifecycle({

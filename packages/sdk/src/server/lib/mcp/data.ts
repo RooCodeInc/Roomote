@@ -455,7 +455,24 @@ export async function getValidAccessToken(
               getMcpIntegrationOauthEndpoints(integration)?.tokenEndpoint ??
               (await discoverOAuthEndpoints(mcpUrl)).token_endpoint;
             const resource = getMcpIntegrationOauthResource(integration);
-            oauthOptions = resource ? { resource } : undefined;
+            oauthOptions =
+              integration &&
+              (resource ||
+                integration.oauthTokenRequestFormat ||
+                integration.oauthPkce === false)
+                ? {
+                    ...(resource ? { resource } : {}),
+                    ...(integration.oauthTokenRequestFormat
+                      ? {
+                          tokenRequestFormat:
+                            integration.oauthTokenRequestFormat,
+                        }
+                      : {}),
+                    ...(integration.oauthPkce === false
+                      ? { usePkce: false }
+                      : {}),
+                  }
+                : undefined;
           }
 
           const newTokens = await refreshOAuthToken(

@@ -82,6 +82,7 @@ import {
   useSandboxLayout,
 } from '../../use-sandbox-layout';
 import { NestedTaskSidePanel } from './NestedTaskSidePanel';
+import { SessionDeleteAction } from './SessionDeleteAction';
 import {
   OpenSessionArtifactViewerContext,
   OpenSessionTaskPanelContext,
@@ -176,6 +177,7 @@ type SessionTaskPreview = {
 
 export type SessionInfo = {
   id: string;
+  canDelete: boolean;
   ownerName: string | null;
   ownerEmail: string | null;
   ownerImageUrl: string | null;
@@ -384,12 +386,16 @@ function SessionArtifactViewer({
   closeLabel,
   onBack,
   onClose,
+  onPreviousArtifact,
+  onNextArtifact,
 }: {
   selection: SessionArtifactViewerSelection;
   backLabel: string;
   closeLabel: string;
   onBack: () => void;
   onClose: () => void;
+  onPreviousArtifact?: () => void;
+  onNextArtifact?: () => void;
 }) {
   const {
     data: artifact,
@@ -418,6 +424,8 @@ function SessionArtifactViewer({
           className="h-full border-0"
           isLoading={isPending}
           emptyMessage={isError ? 'This artifact is unavailable.' : undefined}
+          onPreviousArtifact={onPreviousArtifact}
+          onNextArtifact={onNextArtifact}
         />
       </div>
     </>
@@ -436,8 +444,8 @@ function SessionArtifactsPanel({
   sessionId: string;
   sessionArtifacts: SessionArtifact[];
   /**
-   * Session-owned artifact requested by the page URL. Preselects the matching
-   * gallery entry on mount; an unmatched request falls back to the gallery.
+   * Artifact requested by the page URL. Preselects the matching gallery entry
+   * on mount; an unmatched request falls back to the gallery.
    */
   initialSelection?: SessionArtifactSelection | null;
   /** Called when the viewer returns to the gallery. */
@@ -454,7 +462,10 @@ function SessionArtifactsPanel({
       if (!initialSelection) return null;
       const entry = artifacts.find(
         ({ owner, artifact }) =>
-          'sessionId' in owner && artifact.path === initialSelection.path,
+          artifact.path === initialSelection.path &&
+          (initialSelection.taskId
+            ? 'taskId' in owner && owner.taskId === initialSelection.taskId
+            : 'sessionId' in owner),
       );
       return entry
         ? {
@@ -486,6 +497,35 @@ function SessionArtifactsPanel({
       ),
     },
   ];
+  const navigableArtifacts = artifactSections.flatMap(
+    ({ artifacts: sectionArtifacts }) => sectionArtifacts,
+  );
+  const selectedArtifactIndex = selectedArtifact
+    ? navigableArtifacts.findIndex(
+        ({ owner, artifact }) =>
+          artifact.path === selectedArtifact.path &&
+          ('taskId' in owner
+            ? 'taskId' in selectedArtifact.owner &&
+              owner.taskId === selectedArtifact.owner.taskId
+            : 'sessionId' in selectedArtifact.owner),
+      )
+    : -1;
+  const selectRelativeArtifact = (offset: -1 | 1) => {
+    if (navigableArtifacts.length < 2 || selectedArtifactIndex < 0) return;
+
+    const nextEntry =
+      navigableArtifacts[
+        (selectedArtifactIndex + offset + navigableArtifacts.length) %
+          navigableArtifacts.length
+      ];
+    if (!nextEntry) return;
+
+    setSelectedArtifact({
+      owner: nextEntry.owner,
+      path: nextEntry.artifact.path,
+      version: nextEntry.artifact.version,
+    });
+  };
 
   return (
     <FramedSurface
@@ -502,6 +542,16 @@ function SessionArtifactsPanel({
             onDeselect?.();
           }}
           onClose={onClose}
+          onPreviousArtifact={
+            navigableArtifacts.length > 1
+              ? () => selectRelativeArtifact(-1)
+              : undefined
+          }
+          onNextArtifact={
+            navigableArtifacts.length > 1
+              ? () => selectRelativeArtifact(1)
+              : undefined
+          }
         />
       ) : (
         <>
@@ -1044,7 +1094,15 @@ export function SessionWorkspace({
           className="relative"
           sideActions={
             <>
-              <SandboxSideActions isPanelOpen={panelOpen} onShowMain={showMain}>
+              <SandboxSideActions
+                isPanelOpen={panelOpen}
+                onShowMain={showMain}
+                footer={
+                  session.canDelete ? (
+                    <SessionDeleteAction sessionId={session.id} />
+                  ) : null
+                }
+              >
                 <SideNavItem
                   side="right"
                   label="Tasks"

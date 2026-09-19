@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   MCP_INTEGRATIONS,
@@ -29,6 +29,7 @@ export function CapabilityOfferCard({
   offer: FastAgentCapabilityOfferPayload;
 }) {
   const trpc = useTRPC();
+  const queryClient = useQueryClient();
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>(
     SETUP_STARTER_TASKS.map((task) => task.id),
   );
@@ -51,6 +52,19 @@ export function CapabilityOfferCard({
     : [...SETUP_INTEGRATION_RECOMMENDATIONS];
   const resolve = useMutation(
     trpc.fastSessions.resolveCapabilityOffer.mutationOptions({
+      onSuccess: async () => {
+        await Promise.all([
+          queryClient.invalidateQueries({
+            queryKey: trpc.setup.status.queryKey(),
+          }),
+          queryClient.invalidateQueries({
+            queryKey: trpc.setup.sessionStatus.queryKey(),
+          }),
+          queryClient.invalidateQueries({
+            queryKey: trpc.setupNew.status.queryKey(),
+          }),
+        ]);
+      },
       onError: (error) => toast.error(error.message),
     }),
   );

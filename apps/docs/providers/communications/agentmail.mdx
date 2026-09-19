@@ -77,10 +77,13 @@ optional overrides of the settings UI:
 ## Email Roomote
 
 Send an email to the deployment inbox from an email address on your Roomote
-account. The address must be verified. Roomote replies in the same email
-thread, and follow-up emails in that thread continue the same conversation; a
-running delegated task receives them as follow-ups. Start a new request with a
-new email so it opens a new thread.
+account. Verified addresses can start work immediately. An unverified address
+can also reply to a Roomote-initiated email when the reply passes DMARC and
+quotes its single-use reference token; that reply verifies the address
+automatically. Roomote replies in the same email thread, and follow-up emails in
+that thread continue the same conversation; a running delegated task receives
+them as follow-ups. Start a new request with a new email so it opens a new
+thread.
 
 Roomote also requires AgentMail to report a passing DMARC result before it
 trusts the sender address. Sender domains therefore need a published DMARC
@@ -133,23 +136,34 @@ integration linked. Strict consent rules are enforced in code:
   Discord), broadcast-style notices go there instead of email — email is the
   fallback reach, not another copy.
 
-Custom automations can explicitly select **Email** as their report destination.
-This is opt-in, never a fallback. The picker offers the automation owner's
-account email, even when it has not been verified yet. Each run uses that exact
-selected identity for its initial message and threaded report. If membership is
-removed, the address changes, delivery is suppressed, or AgentMail is disabled
-or unconfigured, Roomote records a delivery failure and does not substitute
-another address or provider.
+Custom automations and built-in automations with a **Destination** control can
+explicitly select **Email** as their report destination. This is opt-in, never
+a fallback. Custom automations offer the owner's account email; built-in
+automations offer the account email of the admin selecting the destination,
+even when that address has not been verified yet. Each run uses that exact
+selected identity for its initial message and threaded report. If membership
+is removed, the address changes, delivery is suppressed, or AgentMail is
+disabled or unconfigured, Roomote records a delivery failure and does not
+substitute another address or provider.
 
-Replying to a Roomote-initiated email works like any other inbound message: the
-sender address must first be verified on the account and pass DMARC. Until then,
-the reply cannot continue the conversation or start a task.
+Replying to a Roomote-initiated email verifies an unverified account address
+implicitly: each email Roomote sends to an unverified address carries a
+single-use reference token, and a reply from that exact address that passes
+DMARC and quotes the token proves the mailbox received it. Roomote marks the
+address verified and processes the reply like any other verified reply — no
+separate verification message or Settings visit is needed. The token expires
+after 30 days and can verify only the account and address it was sent to, so
+a forwarded thread cannot verify anyone else, and unsolicited email from an
+unverified address is still refused. If the quote is missing (some clients
+strip it) or the token has expired, verify from **Personal settings > Linked
+Accounts** instead.
 
 ## Account email verification
 
 Roomote requires verification before an account email can initiate work or
 reply on the email channel. Receiving Roomote-initiated email does not require
-verification. With the email channel enabled:
+verification — and replying to it verifies the address implicitly, as
+described above. With the email channel enabled:
 
 - New email-and-password sign-ups receive a verification email. Confirming
   it lets Roomote recognize the address on the email channel; signing in
@@ -180,8 +194,9 @@ Current limitations:
 - Email automation destinations are private; channel-style posting is not
   supported
 - each account has one email address for outbound delivery; that login email
-  must be verified before it can send commands or replies to Roomote, and there
-  is no way to add other sender addresses
+  must be verified before it can send commands or replies to Roomote (replying
+  to an email Roomote sent it verifies it), and there is no way to add other
+  sender addresses
 - reactions are not supported
 - attachments from inbound email are not yet processed
 - each deployment has one inbox

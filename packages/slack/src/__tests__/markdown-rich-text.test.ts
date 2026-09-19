@@ -70,6 +70,48 @@ describe('convertMarkdownInlineToRichText', () => {
     ]);
   });
 
+  it('normalizes angle-bracket Markdown link destinations', () => {
+    expect(
+      convertMarkdownInlineToRichText(
+        '[Finding](<https://x.com/example/status/1>)',
+      ),
+    ).toEqual([
+      {
+        type: 'text',
+        text: '[Finding](<https://x.com/example/status/1>)',
+      },
+    ]);
+    expect(
+      convertMarkdownInlineToRichText(
+        '[Finding](<https://x.com/example/status/1>)',
+        {},
+        { angleBracketLinkDestinations: true },
+      ),
+    ).toEqual([
+      {
+        type: 'link',
+        url: 'https://x.com/example/status/1',
+        text: 'Finding',
+      },
+    ]);
+  });
+
+  it('does not create links from one-sided angle-bracket destinations', () => {
+    const elements = convertMarkdownInlineToRichText(
+      '[Finding](<https://x.com/example/status/1)',
+      {},
+      { angleBracketLinkDestinations: true },
+    );
+
+    expect(elements).toContainEqual({
+      type: 'link',
+      url: 'https://x.com/example/status/1',
+    });
+    expect(elements).not.toContainEqual(
+      expect.objectContaining({ url: '<https://x.com/example/status/1' }),
+    );
+  });
+
   it('leaves sentence punctuation after a bare URL out of the link', () => {
     expect(
       convertMarkdownInlineToRichText(
@@ -113,7 +155,10 @@ describe('convertMarkdownToRichText', () => {
         },
         {
           type: 'rich_text_section',
-          elements: [{ type: 'text', text: 'First line.' }],
+          elements: [
+            { type: 'text', text: 'First line.' },
+            { type: 'text', text: '\n\n' },
+          ],
         },
         {
           type: 'rich_text_list',
@@ -150,6 +195,198 @@ describe('convertMarkdownToRichText', () => {
           type: 'rich_text_preformatted',
           elements: [{ type: 'text', text: 'const x = 1;' }],
         },
+      ],
+    });
+  });
+
+  it('preserves bounded paragraph breaks for every caller', () => {
+    expect(
+      convertMarkdownToRichText(
+        ['# Heading', '', 'Intro.', '', '- one', '- two', '', 'Outro.'].join(
+          '\n',
+        ),
+      ),
+    ).toEqual({
+      type: 'rich_text',
+      elements: [
+        {
+          type: 'rich_text_section',
+          elements: [
+            { type: 'text', text: 'Heading', style: { bold: true } },
+            { type: 'text', text: '\n\n' },
+          ],
+        },
+        {
+          type: 'rich_text_section',
+          elements: [
+            { type: 'text', text: 'Intro.' },
+            { type: 'text', text: '\n\n' },
+          ],
+        },
+        {
+          type: 'rich_text_list',
+          style: 'bullet',
+          elements: [
+            {
+              type: 'rich_text_section',
+              elements: [{ type: 'text', text: 'one' }],
+            },
+            {
+              type: 'rich_text_section',
+              elements: [{ type: 'text', text: 'two' }],
+            },
+          ],
+        },
+        {
+          type: 'rich_text_section',
+          elements: [{ type: 'text', text: '\n\n' }],
+        },
+        {
+          type: 'rich_text_section',
+          elements: [{ type: 'text', text: 'Outro.' }],
+        },
+      ],
+    });
+  });
+
+  it('keeps blank-line-separated bullets in one list with item paragraphs', () => {
+    expect(
+      convertMarkdownToRichText(
+        [
+          '- First line',
+          '  wrapped continuation',
+          '',
+          '  Second paragraph',
+          '',
+          '- ',
+          '',
+          '- Second item',
+        ].join('\n'),
+      ),
+    ).toEqual({
+      type: 'rich_text',
+      elements: [
+        {
+          type: 'rich_text_list',
+          style: 'bullet',
+          elements: [
+            {
+              type: 'rich_text_section',
+              elements: [
+                {
+                  type: 'text',
+                  text: 'First line\nwrapped continuation\n\nSecond paragraph',
+                },
+              ],
+            },
+            {
+              type: 'rich_text_section',
+              elements: [{ type: 'text', text: 'Second item' }],
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  it('preserves indented ordered sublists as nested rich-text lists', () => {
+    expect(
+      convertMarkdownToRichText(
+        ['- Parent', '  1. First child', '  2. Second child', '- Sibling'].join(
+          '\n',
+        ),
+      ),
+    ).toEqual({
+      type: 'rich_text',
+      elements: [
+        {
+          type: 'rich_text_list',
+          style: 'bullet',
+          elements: [
+            {
+              type: 'rich_text_section',
+              elements: [{ type: 'text', text: 'Parent' }],
+            },
+          ],
+        },
+        {
+          type: 'rich_text_list',
+          style: 'ordered',
+          indent: 1,
+          elements: [
+            {
+              type: 'rich_text_section',
+              elements: [{ type: 'text', text: 'First child' }],
+            },
+            {
+              type: 'rich_text_section',
+              elements: [{ type: 'text', text: 'Second child' }],
+            },
+          ],
+        },
+        {
+          type: 'rich_text_list',
+          style: 'bullet',
+          elements: [
+            {
+              type: 'rich_text_section',
+              elements: [{ type: 'text', text: 'Sibling' }],
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  it('keeps an indented fenced block after a list item preformatted', () => {
+    expect(
+      convertMarkdownToRichText(
+        ['- Example', '  ```ts', '  const value = 1;', '  ```'].join('\n'),
+      ),
+    ).toEqual({
+      type: 'rich_text',
+      elements: [
+        {
+          type: 'rich_text_list',
+          style: 'bullet',
+          elements: [
+            {
+              type: 'rich_text_section',
+              elements: [{ type: 'text', text: 'Example' }],
+            },
+          ],
+        },
+        {
+          type: 'rich_text_preformatted',
+          elements: [{ type: 'text', text: '  const value = 1;' }],
+        },
+      ],
+    });
+  });
+
+  it('keeps code blank lines and empty input stable', () => {
+    expect(
+      convertMarkdownToRichText(
+        ['```', 'first', '', 'second', '```', '', 'after'].join('\n'),
+      ).elements,
+    ).toEqual([
+      {
+        type: 'rich_text_preformatted',
+        elements: [{ type: 'text', text: 'first\n\nsecond' }],
+      },
+      {
+        type: 'rich_text_section',
+        elements: [{ type: 'text', text: '\n\n' }],
+      },
+      {
+        type: 'rich_text_section',
+        elements: [{ type: 'text', text: 'after' }],
+      },
+    ]);
+    expect(convertMarkdownToRichText(' \n\n')).toEqual({
+      type: 'rich_text',
+      elements: [
+        { type: 'rich_text_section', elements: [{ type: 'text', text: '' }] },
       ],
     });
   });

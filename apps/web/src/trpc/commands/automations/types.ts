@@ -1,6 +1,7 @@
 import type {
   AnnouncerFrequency,
-  AutomationCapableCommunicationProvider,
+  AutomationDestinationEmailField,
+  AutomationDestinationProvider,
   BackgroundAutomationKey,
   ChannelAutoStartLaunchMode,
   CommunicationProvider,
@@ -59,6 +60,7 @@ export type BackgroundAgentFieldErrorKey =
   | 'securityAuditorDiscordChannel'
   | 'codeQualityAuditorDiscordChannel'
   | 'ciFailureTriageDiscordChannel'
+  | AutomationDestinationEmailField
   | 'suggesterDiscordChannel'
   | 'announcerDiscordChannel'
   | 'platformIssueDiscordChannel'
@@ -167,6 +169,7 @@ export const MANAGER_REPORTING_AUTOMATION_KEYS = [
   'suggester',
   'announcer',
   'platform_issue_alerts',
+  'release_announcements',
 ] as const satisfies readonly BackgroundAutomationKey[];
 
 export type ManagerReportingAutomationKey =
@@ -220,6 +223,10 @@ type ScheduleOnlyAutomationInputFields = Partial<
   >
 >;
 
+type AutomationDestinationEmailInputFields = Partial<
+  Record<AutomationDestinationEmailField, string | null>
+>;
+
 export interface ResolvedChannelAutoStartRow {
   channelId: string;
   channelName: string | null;
@@ -235,7 +242,10 @@ export interface ResolvedChannelAutoStartDiscordRow {
   launchCriteria: string | null;
 }
 
-export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomationInputFields {
+export interface UpdateBackgroundAgentSettingsInput
+  extends
+    ScheduleOnlyAutomationInputFields,
+    AutomationDestinationEmailInputFields {
   savingAutomation:
     | 'callRoomoteViaEmoji'
     | 'channelAutoStart'
@@ -250,7 +260,8 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
     | 'codeqlTriage'
     | ScheduleOnlyBackgroundAutomationId
     | 'announcer'
-    | 'platformIssueAlerts';
+    | 'platformIssueAlerts'
+    | 'releaseAnnouncements';
   reviewerEnabled: boolean;
   reviewerEnvironmentScope: NonNullable<PrReviewSettings['environmentScope']>;
   reviewerEnvironmentIds: string[];
@@ -290,6 +301,9 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
   channelAutoStartInstructions?: string | null;
   managerSlackChannel?: string | null;
   managerDiscordChannel?: string | null;
+  defaultDestinationProvider?: AutomationDestinationProvider | null;
+  defaultDestinationMode?: 'channel' | 'direct_message';
+  defaultDestinationChannelId?: string | null;
   managerStatsFrequency?: ManagerStatsFrequency;
   managerStatsSlackChannel?: string | null;
   managerStatsDiscordChannel?: string | null;
@@ -322,13 +336,17 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
   platformIssueAlertsEnabled?: boolean;
   platformIssueSlackChannel: string | null;
   platformIssueDiscordChannel?: string | null;
+  releaseAnnouncementsEnabled?: boolean;
+  releaseAnnouncementsTargetProvider?: AutomationDestinationProvider | null;
+  releaseAnnouncementsTargetMode?: 'channel' | 'direct_message';
+  releaseAnnouncementsTargetChannelId?: string | null;
   securityAuditorSlackChannel?: string | null;
   securityAuditorDiscordChannel?: string | null;
   codeQualityAuditorSlackChannel?: string | null;
   codeQualityAuditorDiscordChannel?: string | null;
   ciFailureTriageSlackChannel?: string | null;
   ciFailureTriageDiscordChannel?: string | null;
-  mergeAnnouncerTargetProvider?: AutomationCapableCommunicationProvider | null;
+  mergeAnnouncerTargetProvider?: AutomationDestinationProvider | null;
   mergeAnnouncerTargetMode?: 'channel' | 'direct_message';
   mergeAnnouncerTargetChannelId?: string | null;
 }

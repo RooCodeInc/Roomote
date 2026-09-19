@@ -22,11 +22,12 @@ import {
   revokeServiceCredential,
   updateIntegrationVisibility,
 } from '../service-credentials';
+import type { DnsLookupFn } from '../safe-fetch';
 
 const secret = 'Test-Key/A+b=<"&>123';
 const policy = {
   label: 'Test credential',
-  origin: 'https://api.example.com',
+  origin: 'https://1.1.1.1',
   headerName: 'authorization' as const,
   headerPrefix: 'Bearer ' as const,
 };
@@ -476,7 +477,7 @@ it('keeps integrations until revoked unless a lifetime is set, and manages them 
 
   const added = await createIntegration(context.userId!, {
     label: 'From settings',
-    origin: 'https://settings.example.com',
+    origin: 'https://1.0.0.1',
     headerName: 'x-api-key',
     headerPrefix: '',
     allowedMethods: ['GET', 'POST'],
@@ -484,7 +485,7 @@ it('keeps integrations until revoked unless a lifetime is set, and manages them 
     secret,
   });
   expect(added).toMatchObject({
-    origin: 'https://settings.example.com',
+    origin: 'https://1.0.0.1',
     allowedMethods: ['GET', 'POST'],
     expiresAt: null,
   });
@@ -575,9 +576,35 @@ it('rejects unsafe origins with the real egress validator and normalizes default
   expect(
     await prepareServiceCredential(context, {
       ...policy,
-      origin: 'https://api.github.com:443',
+      origin: 'https://1.0.0.1:443',
       headerName: 'x-api-key',
       headerPrefix: '',
     }),
-  ).toMatchObject({ origin: 'https://api.github.com', headerPrefix: '' });
+  ).toMatchObject({ origin: 'https://1.0.0.1', headerPrefix: '' });
+});
+
+it('rejects prepared and directly saved integrations that resolve internally', async () => {
+  const lookup = ((_hostname, _options, callback) => {
+    const cb = callback as (error: null, result: unknown) => void;
+    cb(null, [{ address: '10.0.0.8', family: 4 }]);
+  }) as DnsLookupFn;
+
+  await expect(
+    prepareServiceCredential(
+      context,
+      { ...policy, origin: 'https://internal.example' },
+      { lookup },
+    ),
+  ).rejects.toThrow('Secret request unavailable');
+  await expect(
+    createIntegration(
+      context.userId!,
+      {
+        ...policy,
+        origin: 'https://internal.example',
+        secret,
+      },
+      { lookup },
+    ),
+  ).rejects.toThrow('Secret request unavailable');
 });

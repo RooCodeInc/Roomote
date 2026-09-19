@@ -37,7 +37,10 @@ import { loadAutomationThreadFeedbackReport } from './automation-thread-feedback
 import {
   buildDestinationPromptContext,
   buildDestinationTaskPayloadFields,
+  getAutomationDestinationCommunicationProvider,
+  hasAutomationEmailTarget,
   listConnectedCommunicationProviders,
+  prepareAutomationReportDestination,
   resolveAutomationRuntimeDestination,
   type ResolvedAutomationDestination,
 } from './destination';
@@ -234,11 +237,17 @@ type AuditDeploymentContext = {
   slackConnected: boolean;
 };
 
-async function findEligibleDeploymentContext(): Promise<AuditDeploymentContext | null> {
+async function findEligibleDeploymentContext(
+  automationKey: MergedPullRequestAuditConfig['automationKey'],
+): Promise<AuditDeploymentContext | null> {
   // Provider-agnostic gate: merged-PR audits read the pull_request_facts
   // table, which is populated for every synced source-control provider.
   if (!(await hasAnyActiveRepository())) {
     return null;
+  }
+  const runtime = await getAutomationRuntime(automationKey);
+  if (hasAutomationEmailTarget(runtime)) {
+    return { slackConnected: false };
   }
 
   const [slackInstallation] = await db
@@ -614,11 +623,21 @@ async function processDeployment(
         destination,
         pullRequests: partitionPullRequests,
       } = partition;
-      const channelId = destination.channelId;
+      const reportDestination =
+        destination.provider === 'email'
+          ? await prepareAutomationReportDestination(destination, {
+              subject: `Roomote ${config.automationKey.replaceAll('_', ' ')} report - ${now.toISOString().slice(0, 10)}`,
+              conversationKey: `builtin-automation:${config.automationKey}:${now.toISOString()}:${provider}:${host ?? ''}`,
+            })
+          : destination;
+      const channelId = reportDestination.channelId;
       const recentThreadFeedback = await loadAutomationThreadFeedbackReport({
         automationKey: config.automationKey,
         slackChannelId: channelId,
-        surface: destination.provider,
+        surface:
+          reportDestination.provider === 'email'
+            ? getAutomationDestinationCommunicationProvider(reportDestination)
+            : reportDestination.provider,
         now,
       });
 
@@ -654,7 +673,7 @@ async function processDeployment(
             ...(host ? { sourceControlHost: host } : {}),
             description: config.buildPrompt({
               channelId,
-              destination,
+              destination: reportDestination,
               hasMorePullRequests: pullRequestBatch.hasMore,
               mergedPullRequests: partitionPullRequests,
               manualTrigger: opts.manualTrigger === true,
@@ -664,13 +683,13 @@ async function processDeployment(
               additionalInstructions: rules?.instructions,
             }),
             trigger: 'scheduled',
-            ...(destination.provider === 'slack'
+            ...(reportDestination.provider === 'slack'
               ? {
                   notifySlack: config.notifySlack ?? true,
                   slackChannel: channelId,
                 }
               : {}),
-            ...buildDestinationTaskPayloadFields(destination),
+            ...buildDestinationTaskPayloadFields(reportDestination),
             suggestionSource: config.suggestionSource ?? config.automationKey,
             historicalThreadFeedbackDebugSnippet:
               recentThreadFeedback.debugSnippet,
@@ -682,7 +701,7 @@ async function processDeployment(
         surface: 'system',
         trigger: opts.manualTrigger ? 'manual' : 'schedule',
         visibility: 'hidden',
-        ...(destination.provider === 'slack'
+        ...(reportDestination.provider === 'slack'
           ? { channels: { slackChannelId: channelId } }
           : {}),
       });
@@ -757,7 +776,9 @@ export function createMergedPullRequestAuditJob(
     let processed = 0;
     let skipped = 0;
 
-    const deployment = await findEligibleDeploymentContext();
+    const deployment = await findEligibleDeploymentContext(
+      config.automationKey,
+    );
 
     if (deployment) {
       const outcome = await processDeployment(config, deployment, opts);

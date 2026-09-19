@@ -9,15 +9,17 @@ live there and Roomote should use that material during tasks and automations.
 
 ## Access boundary
 
-Roomote uses a Notion **internal integration**, not Notion's hosted MCP OAuth
-connection. Notion itself restricts the token to pages and data sources that
-have been explicitly shared with the internal integration. Unshared content,
-including private pages, is unavailable to Roomote.
+Roomote connects to Notion's public API with either a deployment-owned internal
+integration secret or a deployment-owned Notion public connection authorized
+through OAuth. This is separate from Notion's hosted MCP. In both cases,
+Notion restricts access to the pages and data sources shared during or after
+authorization. Unshared content, including private pages, is unavailable to
+Roomote.
 
 Sharing a parent page may also grant access to its children. Review the content
 access list in Notion whenever the page hierarchy changes.
 
-## Set up Notion
+## Set up with an internal integration
 
 1. In [Notion integrations](https://www.notion.so/profile/integrations/internal),
    create an internal integration for Roomote.
@@ -35,6 +37,26 @@ access list in Notion whenever the page hierarchy changes.
    and paste the secret.
 
 The secret is encrypted server-side and is never sent to task sandboxes.
+
+## Set up with OAuth
+
+Self-hosted operators can configure a Notion public connection so an admin can
+ask Roomote to connect Notion from a Session:
+
+1. Create a public connection in Notion's developer portal and configure the
+   capabilities Roomote should receive.
+2. Register your public Roomote URL followed by
+   `/api/mcp-oauth/callback` as a redirect URI.
+3. Set `R_NOTION_CLIENT_ID` and `R_NOTION_CLIENT_SECRET` from that public
+   connection, then restart Roomote.
+4. Ask Roomote to connect Notion from a Session and complete Notion's page
+   selection and authorization screen.
+
+Roomote binds the authorization state to the requesting admin and Session,
+stores access and refresh tokens encrypted, and resumes the Session after a
+successful, canceled, or failed authorization attempt. If the operator has not
+configured the OAuth client, Roomote offers the existing internal-integration
+setup instead.
 
 When Memory is enabled, Roomote also backfills the pages shared with this
 integration and keeps their Markdown snapshots current. Notion pages are
@@ -84,9 +106,8 @@ direct public-API operations that work with a restricted internal
 integration token.
 
 <Note>
-  A previous hosted-MCP OAuth connection is not reused because it inherits the
-  authorizing person's full Notion permissions. Configure an internal
-  integration before enabling this deployment-wide connection.
+  A Notion hosted-MCP connection is not reused. Roomote's native integration
+  uses either its own public-API OAuth client or an internal integration secret.
 </Note>
 
 ## Control capabilities

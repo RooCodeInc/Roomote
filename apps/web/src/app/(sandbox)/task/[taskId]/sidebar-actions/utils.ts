@@ -3,6 +3,7 @@ import { TaskPayloadKind } from '@roomote/types';
 import type { TaskRunDetail } from '@/lib/server/task-runs';
 
 import type { ArtifactGroup } from './types';
+import { isMarkdownArtifact, isTabularArtifact } from '@/lib/artifact-types';
 
 const TASK_TOOLS_HIDDEN_PAYLOAD_KINDS: ReadonlySet<string> = new Set<string>([
   TaskPayloadKind.GithubPrReview,
@@ -58,7 +59,7 @@ export function isTaskRunSnapshotting(
  * Returns an array of ArtifactGroup objects sorted by latest artifact's
  * createdAt desc.
  */
-export function groupArtifactsByPath<
+function groupArtifactsByPath<
   T extends { path: string; version: number; createdAt: Date | string },
 >(artifacts: T[]): ArtifactGroup<T>[] {
   const groupMap = new Map<string, T[]>();
@@ -91,4 +92,42 @@ export function groupArtifactsByPath<
   );
 
   return groups;
+}
+
+export function getArtifactGalleryGroups<
+  T extends {
+    path: string;
+    version: number;
+    createdAt: Date | string;
+    contentType: string;
+  },
+>(artifacts: T[]) {
+  const groups = groupArtifactsByPath(artifacts);
+  const screenshots = groups.filter((group) =>
+    group.latest.contentType.startsWith('image/'),
+  );
+  const videos = groups.filter((group) =>
+    group.latest.contentType.startsWith('video/'),
+  );
+  const files = groups.filter(
+    (group) =>
+      !group.latest.contentType.startsWith('image/') &&
+      !group.latest.contentType.startsWith('video/'),
+  );
+  const previews = files.filter(
+    (group) =>
+      isMarkdownArtifact(group.latest.contentType, group.latest.path) ||
+      isTabularArtifact(group.latest.contentType, group.latest.path),
+  );
+  const otherFiles = files.filter((group) => !previews.includes(group));
+
+  return {
+    groups,
+    screenshots,
+    videos,
+    files,
+    previews,
+    otherFiles,
+    ordered: [...screenshots, ...videos, ...previews, ...otherFiles],
+  };
 }

@@ -7,8 +7,10 @@ import {
 import {
   activeRunStatuses,
   ARTIFACT_UPLOAD_URL_MAX_AGE_SECONDS,
-  type RunStatus,
+  RunStatus,
   SESSION_STATUSES,
+  fastConversationMemorySlug,
+  isExitedRunStatus,
 } from '@roomote/types';
 import {
   and,
@@ -27,8 +29,13 @@ import {
   taskArtifacts,
   taskRuns,
   tasks,
+  enqueueBrainPageRetirements,
+  enqueueTaskMemoryRetirements,
+  isNull,
+  markTaskStartParallelCountsEndedAtForTaskIds,
 } from '@roomote/db/server';
 import { captureEvent } from '@roomote/telemetry/server';
+import { settleLiveTaskMessageOnExit, stopTaskRun } from '@roomote/sdk/server';
 
 import type { UserAuthSuccess } from '@/types';
 import {
@@ -50,21 +57,38 @@ import { deleteArtifactsBatch } from '@/lib/server/s3-client';
 
 // Keep polled session payloads stable for the raw route's one-hour cache lifetime.
 const ARTIFACT_SIGNATURE_CACHE_WINDOW_SECONDS = 60 * 60;
+const TASK_STOP_WAIT_MS = 15_000;
+const TASK_STOP_POLL_MS = 100;
 
 export const sessionIdInputSchema = z.object({ sessionId: z.string().uuid() });
 
-export async function deletePrivateSessionCommand(
+export async function deleteSessionCommand(
   auth: UserAuthSuccess,
   sessionId: string,
 ) {
   const readableSession = await findAccessibleSession(auth, sessionId);
+  if (!readableSession) {
+    return { deleted: false };
+  }
+  const isPrivate = readableSession.privacy === 'private';
   if (
-    !readableSession ||
-    readableSession.privacy !== 'private' ||
-    readableSession.privateOwnerUserId !== auth.userId
+    isPrivate
+      ? readableSession.privateOwnerUserId !== auth.userId
+      : !auth.isAdmin && readableSession.ownerUserId !== auth.userId
   ) {
     return { deleted: false };
   }
+  const sessionOwnership = isPrivate
+    ? and(
+        eq(sessions.privacy, 'private'),
+        eq(sessions.privateOwnerUserId, auth.userId),
+      )
+    : auth.isAdmin
+      ? eq(sessions.privacy, 'shared')
+      : and(
+          eq(sessions.privacy, 'shared'),
+          eq(sessions.ownerUserId, auth.userId),
+        );
 
   let releaseTurnLock;
   if (readableSession.fastConversationId) {
@@ -83,6 +107,74 @@ export async function deletePrivateSessionCommand(
   }
 
   try {
+    const runsToStop = await db.transaction(async (tx) => {
+      const [session] = await tx
+        .select({ id: sessions.id })
+        .from(sessions)
+        .where(and(eq(sessions.id, sessionId), sessionOwnership))
+        .for('update');
+      if (!session) return null;
+
+      const linkedTasks = await tx
+        .select({ taskId: sessionTasks.taskId })
+        .from(sessionTasks)
+        .where(eq(sessionTasks.sessionId, session.id));
+      const taskIds = linkedTasks.map(({ taskId }) => taskId);
+      if (taskIds.length === 0) return [];
+
+      return tx
+        .select({
+          id: taskRuns.id,
+          taskId: taskRuns.taskId,
+          payload: taskRuns.payload,
+          status: taskRuns.status,
+          sandboxServerUrl: taskRuns.sandboxServerUrl,
+          actingUserId: taskRuns.actingUserId,
+        })
+        .from(taskRuns)
+        .where(
+          and(
+            inArray(taskRuns.taskId, taskIds),
+            inArray(taskRuns.status, activeRunStatuses as readonly RunStatus[]),
+          ),
+        );
+    });
+    if (!runsToStop) return { deleted: false };
+
+    for (const run of runsToStop) {
+      const stopped = await stopTaskRun({
+        run,
+        authUserId: auth.userId,
+        terminate: true,
+        allowDirectCancelWithoutSandbox: true,
+        cancelledBy: { name: auth.name ?? undefined, source: 'web' },
+      }).catch(() => null);
+      if (!stopped?.success) {
+        const current = await db.query.taskRuns.findFirst({
+          where: eq(taskRuns.id, run.id),
+          columns: { status: true },
+        });
+        if (current && !isExitedRunStatus(current.status)) {
+          return { deleted: false, reason: 'stop_failed' as const };
+        }
+      } else if (stopped.mode === 'direct_cancel') {
+        void settleLiveTaskMessageOnExit(run, RunStatus.Canceled);
+      }
+
+      const deadline = Date.now() + TASK_STOP_WAIT_MS;
+      for (;;) {
+        const current = await db.query.taskRuns.findFirst({
+          where: eq(taskRuns.id, run.id),
+          columns: { status: true },
+        });
+        if (!current || isExitedRunStatus(current.status)) break;
+        if (Date.now() >= deadline) {
+          return { deleted: false, reason: 'stop_failed' as const };
+        }
+        await new Promise((resolve) => setTimeout(resolve, TASK_STOP_POLL_MS));
+      }
+    }
+
     const prepared = await db.transaction(async (tx) => {
       const [session] = await tx
         .select({
@@ -90,13 +182,7 @@ export async function deletePrivateSessionCommand(
           fastConversationId: sessions.fastConversationId,
         })
         .from(sessions)
-        .where(
-          and(
-            eq(sessions.id, sessionId),
-            eq(sessions.privacy, 'private'),
-            eq(sessions.privateOwnerUserId, auth.userId),
-          ),
-        )
+        .where(and(eq(sessions.id, sessionId), sessionOwnership))
         .for('update');
       if (!session) return { deleted: false };
 
@@ -113,8 +199,10 @@ export async function deletePrivateSessionCommand(
               .where(
                 and(
                   inArray(tasks.id, linkedTaskIds),
-                  eq(tasks.privacy, 'private'),
-                  eq(tasks.privateOwnerUserId, auth.userId),
+                  isPrivate ? eq(tasks.privacy, 'private') : undefined,
+                  isPrivate
+                    ? eq(tasks.privateOwnerUserId, auth.userId)
+                    : undefined,
                 ),
               )
               .orderBy(asc(tasks.id))
@@ -138,7 +226,7 @@ export async function deletePrivateSessionCommand(
               )
               .limit(1);
       if (activeRuns.length > 0) {
-        return { deleted: false, reason: 'active_runs' as const };
+        return { deleted: false, reason: 'stop_failed' as const };
       }
       const artifacts = await tx
         .select({
@@ -206,8 +294,26 @@ export async function deletePrivateSessionCommand(
       );
       if (result.errors > 0) {
         throw new Error(
-          `Failed to delete ${result.errors} private Session artifact object(s).`,
+          `Failed to delete ${result.errors} session artifact object(s).`,
         );
+      }
+
+      if (deletion.artifacts.length > 0) {
+        await db
+          .delete(taskArtifacts)
+          .where(
+            or(
+              ...deletion.artifacts.map((artifact) =>
+                and(
+                  eq(taskArtifacts.id, artifact.id),
+                  eq(taskArtifacts.version, artifact.version),
+                ),
+              ),
+            ),
+          );
+        // Rows that changed version or arrived during object deletion remain
+        // visible to the final recheck and are deleted on the next loop.
+        deletion = { ...deletion, artifacts: [] };
       }
 
       const finalized = await db.transaction(async (tx) => {
@@ -217,13 +323,7 @@ export async function deletePrivateSessionCommand(
             fastConversationId: sessions.fastConversationId,
           })
           .from(sessions)
-          .where(
-            and(
-              eq(sessions.id, sessionId),
-              eq(sessions.privacy, 'private'),
-              eq(sessions.privateOwnerUserId, auth.userId),
-            ),
-          )
+          .where(and(eq(sessions.id, sessionId), sessionOwnership))
           .for('update');
         if (!session) return { deleted: false };
 
@@ -241,8 +341,10 @@ export async function deletePrivateSessionCommand(
                 .where(
                   and(
                     inArray(tasks.id, linkedTaskIds),
-                    eq(tasks.privacy, 'private'),
-                    eq(tasks.privateOwnerUserId, auth.userId),
+                    isPrivate ? eq(tasks.privacy, 'private') : undefined,
+                    isPrivate
+                      ? eq(tasks.privateOwnerUserId, auth.userId)
+                      : undefined,
                   ),
                 )
                 .orderBy(asc(tasks.id))
@@ -269,7 +371,7 @@ export async function deletePrivateSessionCommand(
                 )
                 .limit(1);
         if (activeRuns.length > 0) {
-          return { deleted: false, reason: 'active_runs' as const };
+          return { deleted: false, reason: 'stop_failed' as const };
         }
 
         const artifacts = await tx
@@ -317,27 +419,38 @@ export async function deletePrivateSessionCommand(
         }
 
         if (taskIds.length > 0) {
-          await tx
-            .delete(tasks)
-            .where(
-              and(
-                inArray(tasks.id, taskIds),
-                eq(tasks.privacy, 'private'),
-                eq(tasks.privateOwnerUserId, auth.userId),
-              ),
-            );
+          await enqueueTaskMemoryRetirements(tx, taskIds);
+          if (isPrivate) {
+            await tx
+              .delete(tasks)
+              .where(
+                and(
+                  inArray(tasks.id, taskIds),
+                  eq(tasks.privacy, 'private'),
+                  eq(tasks.privateOwnerUserId, auth.userId),
+                ),
+              );
+          } else {
+            await markTaskStartParallelCountsEndedAtForTaskIds(tx, {
+              taskIds,
+              endedAt: now,
+            });
+            await tx
+              .update(tasks)
+              .set({ deletedAt: now, updatedAt: now })
+              .where(and(inArray(tasks.id, taskIds), isNull(tasks.deletedAt)));
+          }
+        }
+        if (session.fastConversationId) {
+          await enqueueBrainPageRetirements(tx, [
+            fastConversationMemorySlug(session.fastConversationId),
+          ]);
         }
         await tx.delete(sessions).where(eq(sessions.id, session.id));
         if (session.fastConversationId) {
           await tx
             .delete(fastAgentConversations)
-            .where(
-              and(
-                eq(fastAgentConversations.id, session.fastConversationId),
-                eq(fastAgentConversations.privacy, 'private'),
-                eq(fastAgentConversations.privateOwnerUserId, auth.userId),
-              ),
-            );
+            .where(eq(fastAgentConversations.id, session.fastConversationId));
         }
         return { deleted: true };
       });

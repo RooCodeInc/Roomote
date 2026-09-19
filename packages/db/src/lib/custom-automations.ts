@@ -1,4 +1,4 @@
-import { and, asc, count, eq, isNull, lt, or } from 'drizzle-orm';
+import { and, asc, eq, isNull, lt, or } from 'drizzle-orm';
 
 import {
   ALL_REPOSITORIES,
@@ -14,7 +14,6 @@ import {
   CUSTOM_AUTOMATION_MODEL_MAX_LENGTH,
   FAST_EXECUTION,
   NO_REPOSITORIES,
-  MAX_CUSTOM_AUTOMATIONS,
   type ReasoningEffort,
   type AutomationResultPriority,
 } from '@roomote/types';
@@ -27,7 +26,6 @@ import type { AutomationRunOutcomeStatus } from './automations';
 export {
   CUSTOM_AUTOMATION_NAME_MAX_LENGTH,
   CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH,
-  MAX_CUSTOM_AUTOMATIONS,
 };
 
 /** Stale launch claims older than this may be reclaimed by a later launcher. */
@@ -195,27 +193,12 @@ export async function getCustomAutomationById(
   return row ?? null;
 }
 
-export async function countCustomAutomations(
-  client: DatabaseOrTransaction = db,
-): Promise<number> {
-  const [row] = await client.select({ value: count() }).from(customAutomations);
-
-  return Number(row?.value ?? 0);
-}
-
 export async function createCustomAutomation(
   input: CustomAutomationWriteInput,
   client: DatabaseOrTransaction = db,
 ): Promise<CustomAutomation> {
   const { name, prompt, cronExpression, model, reasoningEffort } =
     assertValidWriteInput(input);
-
-  const existingCount = await countCustomAutomations(client);
-  if (existingCount >= MAX_CUSTOM_AUTOMATIONS) {
-    throw new Error(
-      `You can create at most ${MAX_CUSTOM_AUTOMATIONS} custom automations.`,
-    );
-  }
 
   const { executionMode, allRepositories, noRepositories } = getExecutionTarget(
     input.environmentId,

@@ -3,7 +3,7 @@ import { render } from '@testing-library/react';
 const { navigationState, toastErrorMock, toastSuccessMock } = vi.hoisted(
   () => ({
     navigationState: {
-      pathname: '/settings/integrations',
+      pathname: '/integrations',
       searchParams: '',
     },
     toastErrorMock: vi.fn(),
@@ -32,7 +32,7 @@ import { McpOAuthResultFeedback } from './McpOAuthResultFeedback';
 describe('McpOAuthResultFeedback', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    navigationState.pathname = '/settings/integrations';
+    navigationState.pathname = '/integrations';
     navigationState.searchParams = '';
     window.history.replaceState(null, '', navigationState.pathname);
   });
@@ -55,7 +55,7 @@ describe('McpOAuthResultFeedback', () => {
     expect(replaceState).toHaveBeenLastCalledWith(
       null,
       '',
-      '/settings/integrations?service=linear&tab=accounts',
+      '/integrations?service=linear&tab=accounts',
     );
   });
 

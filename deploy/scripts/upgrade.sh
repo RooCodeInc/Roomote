@@ -272,6 +272,10 @@ if ! docker compose --env-file .env -f docker-compose.prod.yml run --rm db-migra
   exit 1
 fi
 docker compose --env-file .env -f docker-compose.prod.yml up -d --wait --wait-timeout 600
+if ! docker compose --env-file .env -f docker-compose.prod.yml exec -T bullmq \
+  /roomote/.docker/app/entrypoint.sh release-announcement; then
+  echo "warning: release announcement was not recorded; the healthy upgrade remains installed" >&2
+fi
 systemctl enable roomote-compose.service
 REMOTE
 

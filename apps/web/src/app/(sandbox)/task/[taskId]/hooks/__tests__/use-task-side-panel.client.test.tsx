@@ -6,6 +6,7 @@ import {
   TaskSidePanelProvider,
   useTaskSidePanel,
 } from '../use-task-side-panel';
+import type { TaskArtifact } from '@/types';
 
 let pathname = '/task/task-1';
 let searchParams = new URLSearchParams();
@@ -22,10 +23,10 @@ function replaceLocation(path: string) {
   window.history.replaceState(null, '', path);
 }
 
-function createWrapper() {
+function createWrapper(artifacts: TaskArtifact[] = []) {
   return function Wrapper({ children }: { children: ReactNode }) {
     return (
-      <TaskSidePanelProvider taskId="task-1" artifacts={[]}>
+      <TaskSidePanelProvider taskId="task-1" artifacts={artifacts}>
         {children}
       </TaskSidePanelProvider>
     );
@@ -106,6 +107,77 @@ describe('useTaskSidePanel URL sync', () => {
       '',
       '/task/task-1/artifacts?path=plans%2F.%2Fdraft.md&v=2',
     );
+  });
+
+  it('cycles in rendered gallery order and wraps at both ends', async () => {
+    const artifact = (
+      path: string,
+      contentType: string,
+      createdAt: string,
+    ): TaskArtifact => ({
+      id: path,
+      path,
+      version: 1,
+      artifactType: 'general',
+      contentType,
+      size: 1,
+      createdAt: new Date(createdAt),
+    });
+    const artifacts = [
+      artifact('newest.txt', 'text/plain', '2026-01-04T00:00:00Z'),
+      artifact('notes.md', 'text/markdown', '2026-01-03T00:00:00Z'),
+      artifact('demo.mp4', 'video/mp4', '2026-01-02T00:00:00Z'),
+      artifact('shot.png', 'image/png', '2026-01-01T00:00:00Z'),
+    ];
+    const { result } = renderHook(() => useTaskSidePanel(), {
+      wrapper: createWrapper(artifacts),
+    });
+
+    act(() => result.current.openArtifactDetail('shot.png', 1));
+    await waitFor(() =>
+      expect(result.current.selectedArtifactPath).toBe('shot.png'),
+    );
+    act(() => result.current.goToPreviousArtifact());
+    await waitFor(() =>
+      expect(result.current.selectedArtifactPath).toBe('newest.txt'),
+    );
+
+    act(() => result.current.goToNextArtifact());
+    await waitFor(() =>
+      expect(result.current.selectedArtifactPath).toBe('shot.png'),
+    );
+    act(() => result.current.goToNextArtifact());
+    await waitFor(() =>
+      expect(result.current.selectedArtifactPath).toBe('demo.mp4'),
+    );
+    act(() => result.current.goToNextArtifact());
+    await waitFor(() =>
+      expect(result.current.selectedArtifactPath).toBe('notes.md'),
+    );
+  });
+
+  it('does not expose navigation for a single artifact', async () => {
+    const { result } = renderHook(() => useTaskSidePanel(), {
+      wrapper: createWrapper([
+        {
+          id: 'only',
+          path: 'only.txt',
+          version: 3,
+          artifactType: 'general',
+          contentType: 'text/plain',
+          size: 1,
+          createdAt: new Date('2026-01-01T00:00:00Z'),
+        },
+      ]),
+    });
+
+    act(() => result.current.openArtifactDetail('only.txt', 3));
+    await waitFor(() =>
+      expect(result.current.selectedArtifactPath).toBe('only.txt'),
+    );
+
+    expect(result.current.canGoToPreviousArtifact).toBe(false);
+    expect(result.current.canGoToNextArtifact).toBe(false);
   });
 
   it('parses the terminal route as an active side panel view', async () => {

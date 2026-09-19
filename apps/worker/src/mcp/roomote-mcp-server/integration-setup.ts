@@ -25,10 +25,7 @@ GitHub is connected via a GitHub App installation. An admin installs the Roomote
 
 # Notion
 
-Notion uses one deployment-wide internal integration whose content access is enforced by Notion:
-1. A deployment operator opens Settings > Integrations.
-2. In Notion, that operator creates an internal integration, selects its capabilities, and shares only approved pages and data sources with it.
-3. The operator stores the internal integration secret in Roomote.
+Notion uses one deployment-wide native integration whose content access is enforced by Notion. A deployment operator can either authorize a Roomote public connection through OAuth when the deployment has configured its Notion OAuth client, or create an internal integration, select its capabilities, share only approved pages and data sources with it, and store its secret through the secure integration form.
 
 Once connected, I can use the permitted Notion tools during both interactive tasks and automations. Notion remains the source of truth for both capabilities and content access. Unshared content, including private pages, is unavailable.
 

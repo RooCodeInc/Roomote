@@ -35,6 +35,7 @@ import {
 import {
   listConnectedCommunicationProviders,
   resolveAutomationRuntimeDestination,
+  sendAutomationEmailReport,
   type ResolvedAutomationDestination,
 } from './destination';
 import { escapeSlackMrkdwnText } from '../lib/task-runs/channel-provider-error-text';
@@ -205,9 +206,11 @@ const defaultDependencies: MergeAnnouncerDependencies = {
     ).object,
   getAnonymousMediaType: getAnonymousImageMediaType,
   getAdapter: (destination) =>
-    getCommunicationProviderAdapter(destination.provider, {
-      slackTeamId: destination.teamId,
-    }),
+    destination.provider === 'email'
+      ? Promise.resolve(null)
+      : getCommunicationProviderAdapter(destination.provider, {
+          slackTeamId: destination.teamId,
+        }),
   getRuntime: () => getAutomationRuntime('merge_announcer'),
   listConnectedProviders: listConnectedCommunicationProviders,
   recordOutcome: (executor, params) =>
@@ -609,7 +612,7 @@ export async function handleMergeAnnouncerPush(
     }
 
     const adapter = await dependencies.getAdapter(destination);
-    if (!adapter) {
+    if (!adapter && destination.provider !== 'email') {
       throw new Error(`${destination.provider} is not connected.`);
     }
 
@@ -656,9 +659,27 @@ export async function handleMergeAnnouncerPush(
       pusher,
       summary,
     };
+    if (destination.provider === 'email') {
+      const notification = buildMergeAnnouncerNotification({
+        ...notificationParams,
+        representativeImage,
+      });
+      await sendAutomationEmailReport(destination, {
+        subject: `Roomote update: ${repository.fullName}`,
+        conversationKey: `builtin-automation:merge_announcer:${repository.id}:${event.commits.at(-1)?.id ?? event.commits[0]!.id}`,
+        text: notification.markdownText,
+        idempotencyKey: `merge-announcer:${repository.id}:${event.commits.at(-1)?.id ?? event.commits[0]!.id}`,
+        buttons: notification.buttons,
+      });
+      await recordOutcomeSafely(dependencies, {
+        key: 'merge_announcer',
+        status: 'succeeded',
+      });
+      return { status: 'ok', message: 'Merge announcement emailed' };
+    }
     try {
       await postAnnouncement({
-        adapter,
+        adapter: adapter!,
         destination,
         notification: buildMergeAnnouncerNotification({
           ...notificationParams,
@@ -678,7 +699,7 @@ export async function handleMergeAnnouncerPush(
         `${LOG_PREFIX} Slack image delivery failed for ${repository.fullName}; retrying without the image: ${error instanceof Error ? error.message : String(error)}`,
       );
       await postAnnouncement({
-        adapter,
+        adapter: adapter!,
         destination,
         notification: buildMergeAnnouncerNotification(notificationParams),
       });

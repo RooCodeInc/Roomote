@@ -81,7 +81,7 @@ const TELEGRAM_COMMAND_HELP = [
   '`/start` — show this welcome message.',
   '`/help` — show command help.',
   '`/new <request>` — start a fresh conversation instead of continuing the current one; when topics are available, it opens a new topic.',
-  '`/goal <objective>` — keep this Session working toward an objective.',
+  '`/goal <objective>` — keep this session working toward an objective.',
 ].join('\n');
 
 const TELEGRAM_WELCOME_MESSAGE = [

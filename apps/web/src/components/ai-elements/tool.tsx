@@ -38,7 +38,7 @@ const TOOL_STATE_LABELS: Record<ToolState, string> = {
 type ToolProps = ComponentProps<typeof Collapsible>;
 
 export const Tool = ({ className, ...props }: ToolProps) => (
-  <Collapsible className={cn('group not-prose', className)} {...props} />
+  <Collapsible className={cn('not-prose', className)} {...props} />
 );
 
 type ToolHeaderProps = {
@@ -152,7 +152,7 @@ export const ToolHeader = ({
         (isRunning ? (
           <Spinner size="sm" className="shrink-0" />
         ) : collapsible ? (
-          <CollapsibleIconTrigger icon={ActionIcon} scopeToTrigger />
+          <CollapsibleIconTrigger icon={ActionIcon} />
         ) : (
           <ActionIcon className="size-3 shrink-0" />
         ))}

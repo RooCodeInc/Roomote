@@ -3,9 +3,8 @@ import type { MetadataBooleanDescriptor } from './types';
 export const DEPLOYMENT_EXPERIMENT_IDS = [
   'results',
   'slackPeerConversations',
-  'homeComposerSuggestions',
-  'serviceCredentialTools',
   'privateSessions',
+  'browserNotifications',
 ] as const;
 
 export type DeploymentExperimentId = (typeof DEPLOYMENT_EXPERIMENT_IDS)[number];
@@ -13,9 +12,8 @@ export type DeploymentExperimentId = (typeof DEPLOYMENT_EXPERIMENT_IDS)[number];
 export const DEPLOYMENT_EXPERIMENT_METADATA_KEYS = {
   results: 'results_page_enabled',
   slackPeerConversations: 'slack_peer_conversations_experiment_enabled',
-  homeComposerSuggestions: 'home_composer_suggestions_enabled',
-  serviceCredentialTools: 'integration_keys_enabled',
   privateSessions: 'private_sessions_experiment_enabled',
+  browserNotifications: 'browser_notifications_experiment_enabled',
 } as const satisfies Record<DeploymentExperimentId, string>;
 
 export type DeploymentExperimentValues = Record<
@@ -54,20 +52,16 @@ export const DEPLOYMENT_METADATA_BOOLEAN_CONFIG: Record<
     description:
       'Allow Fast to observe human-to-human discussion in established Slack and Discord threads',
   },
-  [DEPLOYMENT_EXPERIMENT_METADATA_KEYS.homeComposerSuggestions]: {
-    kind: 'deployment-control',
-    group: null,
-    description: 'Suggest personalized tasks on Home for every member',
-  },
-  [DEPLOYMENT_EXPERIMENT_METADATA_KEYS.serviceCredentialTools]: {
-    kind: 'deployment-control',
-    group: null,
-    description: 'Allow members to use approved integration keys',
-  },
   [DEPLOYMENT_EXPERIMENT_METADATA_KEYS.privateSessions]: {
     kind: 'deployment-control',
     group: null,
     description:
       'Allow members to create owner-only private Sessions. Disabled by default; absent means disabled.',
+  },
+  [DEPLOYMENT_EXPERIMENT_METADATA_KEYS.browserNotifications]: {
+    kind: 'deployment-control',
+    group: null,
+    description:
+      'Offer desktop browser notifications while the relevant Session or task page remains open',
   },
 };

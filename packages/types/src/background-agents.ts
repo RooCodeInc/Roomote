@@ -75,8 +75,6 @@ export const CUSTOM_AUTOMATION_EXECUTION_MODES = [
 export type CustomAutomationExecutionMode =
   (typeof CUSTOM_AUTOMATION_EXECUTION_MODES)[number];
 
-export const MAX_CUSTOM_AUTOMATIONS = 25;
-
 export const CUSTOM_AUTOMATION_NAME_MAX_LENGTH = 100;
 
 export const CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH = 8_000;
@@ -116,6 +114,7 @@ export const USER_FACING_AUTOMATION_KEYS = [
   'manager_stats',
   'provider_usage_limit',
   'platform_issue_alerts',
+  'release_announcements',
   'sentry_triage',
   'dependabot_triage',
   'codeql_triage',
@@ -259,6 +258,18 @@ export function isCommunicationAutomationTarget(
     target.targetKind === kinds.channel ||
     target.targetKind === kinds.direct_message
   );
+}
+
+/** Channel-level report target on a communication provider. */
+export function buildChannelAutomationTarget(
+  provider: Exclude<AutomationDestinationProvider, 'email'>,
+  channelId: string,
+): AutomationTarget {
+  return {
+    provider,
+    targetKind: getCommunicationAutomationTargetKind(provider, 'channel'),
+    externalRef: channelId,
+  };
 }
 
 export function isAutomationDestinationTarget(

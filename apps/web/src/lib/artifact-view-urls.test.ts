@@ -1,6 +1,9 @@
 import {
   getArtifactViewUrl,
+  getSessionArtifactsViewUrl,
   getSessionArtifactViewUrl,
+  getSessionTaskArtifactViewUrl,
+  hasSessionArtifactsSearchParams,
   parseSessionArtifactSearchParams,
 } from './artifact-view-urls';
 
@@ -37,6 +40,39 @@ describe('getSessionArtifactViewUrl', () => {
       path: 'a b/c.md',
       version: 3,
     });
+  });
+});
+
+describe('Session artifact panel URLs', () => {
+  it('links to the Session artifacts gallery', () => {
+    expect(
+      getSessionArtifactsViewUrl('https://roomote.example', 'session-1'),
+    ).toBe('https://roomote.example/sessions/session-1?panel=artifacts');
+  });
+
+  it('round-trips a task-owned artifact in the Session viewer', () => {
+    const url = new URL(
+      getSessionTaskArtifactViewUrl(
+        'https://roomote.example',
+        'session-1',
+        'task-1',
+        'reports/result.md',
+        2,
+      ),
+    );
+
+    expect(parseSessionArtifactSearchParams(url.searchParams)).toEqual({
+      path: 'reports/result.md',
+      taskId: 'task-1',
+      version: 2,
+    });
+    expect(hasSessionArtifactsSearchParams(url.searchParams)).toBe(true);
+  });
+
+  it('recognizes a gallery-only link without selecting an artifact', () => {
+    const params = new URLSearchParams('panel=artifacts');
+    expect(hasSessionArtifactsSearchParams(params)).toBe(true);
+    expect(parseSessionArtifactSearchParams(params)).toBeNull();
   });
 });
 

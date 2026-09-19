@@ -157,6 +157,28 @@ describe('custom automations helpers', () => {
     await deleteCustomAutomation(created.id);
   });
 
+  it('creates custom automations beyond the former deployment cap', async () => {
+    const createdIds: string[] = [];
+
+    try {
+      for (let index = 0; index < 26; index += 1) {
+        const created = await createCustomAutomation({
+          name: `Beyond cap ${Date.now()} ${index}`,
+          prompt: 'Verify that custom automation creation remains available.',
+          enabled: false,
+          scheduleMode: 'daily',
+          environmentId: FAST_EXECUTION,
+          target: {},
+        });
+        createdIds.push(created.id);
+      }
+
+      expect(createdIds).toHaveLength(26);
+    } finally {
+      await Promise.all(createdIds.map((id) => deleteCustomAutomation(id)));
+    }
+  });
+
   it('persists canonical cron schedules and rejects invalid mode combinations', async () => {
     const [environment] = await db
       .insert(environments)

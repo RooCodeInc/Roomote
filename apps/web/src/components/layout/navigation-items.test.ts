@@ -8,6 +8,7 @@ describe('getVisiblePrimaryNavItems', () => {
       '/',
       '/sessions',
       '/automations',
+      '/integrations',
       '/analytics',
     ]);
   });
@@ -29,6 +30,7 @@ describe('getVisiblePrimaryNavItems', () => {
       '/',
       '/sessions',
       '/automations',
+      '/integrations',
     ]);
   });
 
@@ -52,6 +54,7 @@ describe('getVisiblePrimaryNavItems', () => {
       '/',
       '/sessions',
       '/automations',
+      '/integrations',
       '/results',
     ]);
     expect(items.find((item) => item.href === '/results')).toMatchObject({

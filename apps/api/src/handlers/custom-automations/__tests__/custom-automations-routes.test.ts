@@ -1077,20 +1077,6 @@ describe('custom-automations MCP routes', () => {
       );
     });
 
-    it('returns 400 with the message when the automation cap is reached', async () => {
-      const { app } = createApp();
-      mockCreateCustomAutomation.mockRejectedValue(
-        new Error('You can create at most 25 custom automations.'),
-      );
-
-      const res = await postCreate(app, createBody());
-
-      expect(res.status).toBe(400);
-      expect(await res.json()).toEqual({
-        error: 'You can create at most 25 custom automations.',
-      });
-    });
-
     it('rethrows unexpected errors so the app-level handler returns 500', async () => {
       const { app, onError } = createApp();
       const unexpected = new Error('connection refused');

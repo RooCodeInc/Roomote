@@ -108,6 +108,7 @@ import {
   type TaskModelSettings,
   AUTOMATION_RECOMMENDATIONS_CATALOG_VERSION,
   AUTOMATION_RECOMMENDATION_CATALOG,
+  AUTOMATION_DESTINATION_DESCRIPTORS,
   ALL_REPOSITORIES,
   getTriggerableBackgroundAutomationDescriptorByKey,
   isAutomationDestinationTarget,
@@ -1667,6 +1668,10 @@ export async function saveSetupNewModelConfigCommand(
     });
   }
 
+  const metadataCatalog = await fetchModelsDevCatalog(
+    AbortSignal.timeout(10_000),
+  ).catch(() => null);
+
   return db.transaction(async (tx) => {
     const [currentState, persistedEnvVarNames, persistedTaskModelSettings] =
       await Promise.all([
@@ -1735,6 +1740,7 @@ export async function saveSetupNewModelConfigCommand(
       provider,
       persistedTaskModelSettings,
       connectedProviderIds,
+      metadataCatalog,
     });
     const dynamicModelSettings = provider.dynamicModels
       ? (() => {
@@ -2623,7 +2629,10 @@ async function applySetupRecommendationInTx(
             ownerUserId: auth.userId,
             capabilities: {
               chatProviders: descriptor.supportedCommunicationProviders,
-              email: false,
+              email: AUTOMATION_DESTINATION_DESCRIPTORS.some(
+                (destination) =>
+                  destination.automationKey === candidate.automationKey,
+              ),
             },
             includeSetupHandoff: true,
             client: tx,

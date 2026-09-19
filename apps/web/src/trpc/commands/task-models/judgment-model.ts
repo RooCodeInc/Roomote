@@ -36,6 +36,7 @@ import type { UserAuthSuccess } from '@/types';
  */
 
 const VERCEL_AI_GATEWAY_ENV_VAR_NAMES = ['AI_GATEWAY_API_KEY'] as const;
+const OPENROUTER_ENV_VAR_NAMES = ['OPENROUTER_API_KEY'] as const;
 const TYPESAFE_KEY_CHECK_URL = 'https://api.typesafe.ai/v1/systemone';
 const TYPESAFE_KEY_CHECK_TIMEOUT_MS = 5_000;
 
@@ -46,6 +47,7 @@ type JudgmentModelSettings = {
     connected: boolean;
     source: TypeSafeKeySource | null;
   };
+  openRouterConnected: boolean;
   vercelGatewayConnected: boolean;
   storedSelection: JudgmentModelSelection | null;
   /** Set when `R_JUDGMENT_MODEL` manages the selection; the UI is locked. */
@@ -93,17 +95,26 @@ async function isVercelGatewayConnected(): Promise<boolean> {
   );
 }
 
+async function isOpenRouterConnected(): Promise<boolean> {
+  return Boolean(await resolveModelProviderEnvValue(OPENROUTER_ENV_VAR_NAMES));
+}
+
 export async function getJudgmentModelSettingsCommand(
   auth: UserAuthSuccess,
 ): Promise<JudgmentModelSettings> {
   assertAdmin(auth);
 
-  const [typeSafeSource, vercelGatewayConnected, storedSelection] =
-    await Promise.all([
-      resolveTypeSafeKeySource(),
-      isVercelGatewayConnected(),
-      getDeploymentJudgmentModelSelection(),
-    ]);
+  const [
+    typeSafeSource,
+    openRouterConnected,
+    vercelGatewayConnected,
+    storedSelection,
+  ] = await Promise.all([
+    resolveTypeSafeKeySource(),
+    isOpenRouterConnected(),
+    isVercelGatewayConnected(),
+    getDeploymentJudgmentModelSelection(),
+  ]);
   const envSelection = resolveEnvJudgmentModelSelection();
   const typeSafeConnected = typeSafeSource !== null;
   const effectiveSelection = resolveEffectiveJudgmentModelSelection({
@@ -114,6 +125,7 @@ export async function getJudgmentModelSettingsCommand(
 
   return {
     typeSafe: { connected: typeSafeConnected, source: typeSafeSource },
+    openRouterConnected,
     vercelGatewayConnected,
     storedSelection,
     envSelection,
@@ -121,6 +133,7 @@ export async function getJudgmentModelSettingsCommand(
     effectiveSelectionUsable:
       effectiveSelection === 'off' ||
       (effectiveSelection === 'typesafe' && typeSafeConnected) ||
+      (effectiveSelection === 'openrouter' && openRouterConnected) ||
       (effectiveSelection === 'vercel' && vercelGatewayConnected),
   };
 }
@@ -252,6 +265,12 @@ export async function setJudgmentModelSelectionCommand(
   if (input.selection === 'vercel' && !(await isVercelGatewayConnected())) {
     throw new Error(
       `Connect Vercel AI Gateway before choosing ${JUDGMENT_MODEL_SELECTION_LABELS.vercel}.`,
+    );
+  }
+
+  if (input.selection === 'openrouter' && !(await isOpenRouterConnected())) {
+    throw new Error(
+      `Connect OpenRouter before choosing ${JUDGMENT_MODEL_SELECTION_LABELS.openrouter}.`,
     );
   }
 

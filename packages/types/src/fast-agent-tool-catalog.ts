@@ -6,6 +6,7 @@ import { ACP_TOOL_KINDS, type KnownAcpToolKind } from './acp';
  */
 export const FAST_AGENT_NATIVE_TOOL_NAMES = {
   addRemoteMcp: 'add_remote_mcp',
+  connectIntegration: 'connect_integration',
   callIntegrationTool: 'call_integration_tool',
   cancelTask: 'cancel_task',
   createArtifact: 'create_artifact',
@@ -13,6 +14,7 @@ export const FAST_AGENT_NATIVE_TOOL_NAMES = {
   ignoreEvent: 'ignore_event',
   inspectImages: 'inspect_images',
   launchTask: 'launch_task',
+  listRepositories: 'list_repositories',
   manageWakeups: 'manage_wakeups',
   manageGoal: 'manage_goal',
   retryTaskStart: 'retry_task_start',
@@ -41,6 +43,10 @@ export type FastAgentNativeToolName =
 export const FAST_AGENT_NATIVE_TOOL_CATALOG = [
   {
     name: FAST_AGENT_NATIVE_TOOL_NAMES.addRemoteMcp,
+    kind: ACP_TOOL_KINDS.tool,
+  },
+  {
+    name: FAST_AGENT_NATIVE_TOOL_NAMES.connectIntegration,
     kind: ACP_TOOL_KINDS.tool,
   },
   {
@@ -100,6 +106,10 @@ export const FAST_AGENT_NATIVE_TOOL_CATALOG = [
   {
     name: FAST_AGENT_NATIVE_TOOL_NAMES.sendTaskMessage,
     kind: ACP_TOOL_KINDS.task,
+  },
+  {
+    name: FAST_AGENT_NATIVE_TOOL_NAMES.listRepositories,
+    kind: ACP_TOOL_KINDS.list,
   },
   { name: FAST_AGENT_NATIVE_TOOL_NAMES.listSkills, kind: ACP_TOOL_KINDS.list },
   { name: FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill, kind: ACP_TOOL_KINDS.read },

@@ -20,7 +20,7 @@ const updateQueues = new Map<number, Promise<void>>();
  * launcher's booting steps (the controller-side Pending/Dequeued stretch is
  * covered by the launcher's "Starting task…" placeholder). */
 const STARTUP_STATUS_MESSAGES: Partial<Record<RunStatus, string>> = {
-  [RunStatus.Preparing]: 'Preparing the workspace…',
+  [RunStatus.Preparing]: 'Starting task…',
   [RunStatus.Spawning]: 'Starting the task…',
   [RunStatus.Connecting]: 'Connecting to the task…',
   [RunStatus.Running]: 'Task started, getting to work…',

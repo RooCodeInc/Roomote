@@ -114,6 +114,14 @@ vi.mock('@roomote/sdk/server', () => ({
   storeClientInformation: storeClientInformationMock,
   getClientInformation: getClientInformationMock,
   resolveCustomMcpAuthTarget: resolveCustomMcpAuthTargetMock,
+  // The real rule, so these suites exercise who may authorize a custom server.
+  canManageCustomMcpServer: (
+    server: { ownerUserId: string | null; createdByUserId: string | null },
+    actor: { userId: string; isAdmin: boolean },
+  ) =>
+    server.ownerUserId
+      ? server.ownerUserId === actor.userId
+      : actor.isAdmin || server.createdByUserId === actor.userId,
   ensureCustomMcpServerMetadata: ensureCustomMcpServerMetadataMock,
   updateAuthStatus: updateAuthStatusMock,
 }));
@@ -202,6 +210,53 @@ describe('GET /api/mcp-oauth/initiate/[connectionId]', () => {
     updateAuthStatusMock.mockResolvedValue(undefined);
   });
 
+  it('starts a deployment Notion OAuth flow with the provider parameters', async () => {
+    mcpConnectionsFindFirstMock.mockResolvedValue({
+      id: 'conn-notion-1',
+      mcpId: 'notion',
+      userId: null,
+      connectionRole: 'default',
+    });
+    getMcpIntegrationMock.mockReturnValue({
+      id: 'notion',
+      name: 'Notion',
+      url: 'https://api.notion.com',
+      oauthEndpoints: {
+        authorizationEndpoint: 'https://api.notion.com/v1/oauth/authorize',
+        tokenEndpoint: 'https://api.notion.com/v1/oauth/token',
+      },
+      oauthPkce: false,
+    });
+    getMcpIntegrationOauthEndpointsMock.mockReturnValue({
+      authorizationEndpoint: 'https://api.notion.com/v1/oauth/authorize',
+      tokenEndpoint: 'https://api.notion.com/v1/oauth/token',
+    });
+    getMcpIntegrationAuthorizationParametersMock.mockReturnValue([
+      { name: 'owner', value: 'user' },
+    ]);
+    isSelfServeMcpIntegrationMock.mockReturnValue(false);
+    isDeploymentScopedMcpIntegrationMock.mockReturnValue(true);
+    resolveDeploymentStaticOauthClientInformationMock.mockResolvedValue({
+      client_id: 'notion-client',
+      client_secret: 'notion-secret',
+      token_endpoint_auth_method: 'client_secret_basic',
+    });
+
+    const response = await GET(
+      buildRequest('/api/mcp-oauth/initiate/conn-notion-1'),
+      { params: Promise.resolve({ connectionId: 'conn-notion-1' }) },
+    );
+    const location = new URL(response.headers.get('location')!);
+
+    expect(location.origin + location.pathname).toBe(
+      'https://api.notion.com/v1/oauth/authorize',
+    );
+    expect(location.searchParams.get('client_id')).toBe('notion-client');
+    expect(location.searchParams.get('owner')).toBe('user');
+    expect(location.searchParams.get('redirect_uri')).toBe(PUBLIC_CALLBACK);
+    expect(location.searchParams.has('code_challenge')).toBe(false);
+  });
+
   it('marks a custom connection errored when dynamic registration is refused', async () => {
     mcpConnectionsFindFirstMock.mockResolvedValue({
       id: CONNECTION_ID,
@@ -212,6 +267,8 @@ describe('GET /api/mcp-oauth/initiate/[connectionId]', () => {
     getMcpIntegrationMock.mockReturnValue(undefined);
     resolveCustomMcpAuthTargetMock.mockResolvedValue({
       serverId: 'server-1',
+      ownerUserId: null,
+      createdByUserId: null,
       name: 'accounting',
       url: 'https://mcp.example.com/mcp',
       manualClient: null,
@@ -252,6 +309,8 @@ describe('GET /api/mcp-oauth/initiate/[connectionId]', () => {
     getMcpIntegrationMock.mockReturnValue(undefined);
     resolveCustomMcpAuthTargetMock.mockResolvedValue({
       serverId: 'server-1',
+      ownerUserId: null,
+      createdByUserId: null,
       name: 'intercom',
       url: 'https://mcp.example.com/mcp',
       manualClient: null,
@@ -308,6 +367,8 @@ describe('GET /api/mcp-oauth/initiate/[connectionId]', () => {
     getMcpIntegrationMock.mockReturnValue(undefined);
     resolveCustomMcpAuthTargetMock.mockResolvedValue({
       serverId: 'server-1',
+      ownerUserId: null,
+      createdByUserId: null,
       name: 'intercom',
       url: 'https://mcp.example.com/mcp',
       manualClient: null,
@@ -340,6 +401,8 @@ describe('GET /api/mcp-oauth/initiate/[connectionId]', () => {
     getMcpIntegrationMock.mockReturnValue(undefined);
     resolveCustomMcpAuthTargetMock.mockResolvedValue({
       serverId: 'server-1',
+      ownerUserId: null,
+      createdByUserId: null,
       name: 'accounting',
       url: 'https://mcp.example.com/mcp',
       manualClient: null,

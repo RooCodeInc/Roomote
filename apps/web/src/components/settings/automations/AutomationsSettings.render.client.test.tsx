@@ -12,6 +12,12 @@ const managerInstructionsPlaceholder =
   /Optional guidance for which ideas to prioritize or avoid/;
 
 const state = vi.hoisted(() => ({
+  latestScheduleOptions: null as {
+    onSuccess: (
+      result: { status: 'ambiguous'; clarification: string },
+      variables: { schedule: string },
+    ) => void;
+  } | null,
   isAdmin: true,
   catalogQueryOptions: [] as Array<{ enabled?: boolean }>,
   queriedKeys: [] as unknown[],
@@ -84,11 +90,18 @@ const state = vi.hoisted(() => ({
         discordConnected: false,
         telegramConnected: false,
         teamsConnected: false,
+        emailConnected: true,
         requiresSlackReconnect: false,
         missingScopes: [],
         slackWorkspaceDomain: 'acme',
         sentryConnected: false,
       },
+      emailIdentities: [
+        {
+          id: 'verified:user-admin:account',
+          emailAddress: 'admin@example.com',
+        },
+      ],
       settings: {
         reviewer: {
           enabled: false,
@@ -120,6 +133,11 @@ const state = vi.hoisted(() => ({
         channelAutoStartDiscordChannels: [],
         managerSlackChannelId: 'C123MANAGER',
         managerDiscordChannelId: null as string | null,
+        defaultAutomationTarget: {
+          provider: 'slack' as const,
+          targetKind: 'slack_channel' as const,
+          externalRef: 'C123MANAGER',
+        },
         managerStatsFrequency: 'off' as const,
         managerStatsSlackChannelId: null,
         managerStatsDiscordChannelId: null,
@@ -361,6 +379,7 @@ vi.mock('@tanstack/react-query', () => ({
           capabilities: state.settingsQuery.data.capabilities,
           managerSlackChannelId,
           managerDiscordChannelId,
+          emailIdentities: state.settingsQuery.data.emailIdentities,
           defaultTarget:
             state.customAutomationDefaultTarget !== undefined
               ? state.customAutomationDefaultTarget
@@ -563,7 +582,11 @@ vi.mock('@/trpc/client', () => ({
         },
       },
       resolveCustomAutomationSchedule: {
-        mutationOptions: (options?: Record<string, unknown>) => options ?? {},
+        mutationOptions: (options?: Record<string, unknown>) => {
+          state.latestScheduleOptions =
+            options as typeof state.latestScheduleOptions;
+          return options ?? {};
+        },
       },
       updateSettings: {
         mutationOptions: (options?: Record<string, unknown>) => {
@@ -761,12 +784,26 @@ describe('AutomationsSettings', () => {
     state.settingsQuery.data.capabilities.discordConnected = false;
     state.settingsQuery.data.capabilities.telegramConnected = false;
     state.settingsQuery.data.capabilities.teamsConnected = false;
+    state.settingsQuery.data.capabilities.emailConnected = true;
+    state.settingsQuery.data.emailIdentities = [
+      {
+        id: 'verified:user-admin:account',
+        emailAddress: 'admin@example.com',
+      },
+    ];
+    delete (state.settingsQuery.data.settings as Record<string, unknown>)
+      .managerStatsEmailIdentityId;
     state.discordChannelsQuery.data.channels = [];
     state.settingsQuery.data.settings.managerStatsDiscordChannelId = null;
     state.settingsQuery.data.settings.suggesterDiscordChannelId = null;
     state.settingsQuery.data.settings.announcerDiscordChannelId = null;
     state.settingsQuery.data.settings.platformIssueDiscordChannelId = null;
     state.settingsQuery.data.settings.managerSlackChannelId = 'C123MANAGER';
+    state.settingsQuery.data.settings.defaultAutomationTarget = {
+      provider: 'slack',
+      targetKind: 'slack_channel',
+      externalRef: 'C123MANAGER',
+    };
     state.settingsQuery.data.slackChannelDisplayNames.managerSlackChannel =
       '#roomote-managers';
     state.settingsQuery.data.settings.managerDiscordChannelId = null;
@@ -839,7 +876,7 @@ describe('AutomationsSettings', () => {
 
     expect(screen.getByRole('switch', { name: 'Enabled' })).toBeChecked();
     expect(
-      screen.getByLabelText('Post alerts to this Slack channel'),
+      screen.getByLabelText('Post alerts to this destination'),
     ).toBeInTheDocument();
     const thresholdSlider = screen.getByRole('slider', {
       name: 'Provider usage alert threshold',
@@ -905,6 +942,7 @@ describe('AutomationsSettings', () => {
 
   it('shows per-automation Slack destinations without requiring a manager channel', async () => {
     state.settingsQuery.data.settings.managerSlackChannelId = null as never;
+    state.settingsQuery.data.settings.defaultAutomationTarget = null as never;
     state.settingsQuery.data.settings.managerStatsFrequency = 'weekly' as never;
     state.settingsQuery.data.settings.sentryTriageFrequency = 'daily' as never;
     state.settingsQuery.data.settings.dependabotTriageFrequency =
@@ -923,7 +961,7 @@ describe('AutomationsSettings', () => {
       }),
     );
     expect(
-      screen.getByLabelText('Post summaries to this Slack channel'),
+      screen.getByLabelText('Post summaries to this destination'),
     ).toBeInTheDocument();
     expect(
       screen.getByText('Reports to: not configured — set a Manager Channel.'),
@@ -935,7 +973,7 @@ describe('AutomationsSettings', () => {
       }),
     );
     expect(
-      screen.getByLabelText('Post follow-up work to this Slack channel'),
+      screen.getByLabelText('Post follow-up work to this destination'),
     ).toBeInTheDocument();
     closeAutomationDialog();
     fireEvent.click(
@@ -945,12 +983,35 @@ describe('AutomationsSettings', () => {
     );
 
     expect(
-      screen.getByLabelText('Post follow-up work to this Slack channel'),
+      screen.getByLabelText('Post follow-up work to this destination'),
     ).toBeInTheDocument();
-    expect(screen.getByText('Select a Slack channel')).toBeInTheDocument();
+    expect(
+      screen.getByRole('combobox', { name: 'Destination provider' }),
+    ).toHaveTextContent('Default');
     expect(
       screen.getByText('Reports to: not configured — set a Manager Channel.'),
     ).toBeInTheDocument();
+  });
+
+  it('loads a built-in Email destination in the shared picker', async () => {
+    state.settingsQuery.data.settings.managerStatsFrequency = 'weekly' as never;
+    (
+      state.settingsQuery.data.settings as Record<string, unknown>
+    ).managerStatsEmailIdentityId = 'verified:user-admin:account';
+
+    render(<AutomationsSettings />);
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: /(?:Set up|Configure) Weekly Manager Stats/,
+      }),
+    );
+
+    expect(
+      screen.getByRole('combobox', { name: 'Destination provider' }),
+    ).toHaveTextContent('Email');
+    expect(
+      screen.getByRole('combobox', { name: 'Email address' }),
+    ).toHaveTextContent('admin@example.com · Account email');
   });
 
   it('shows a saved Discord destination and a provider-neutral placeholder when Discord is connected', async () => {
@@ -978,7 +1039,10 @@ describe('AutomationsSettings', () => {
       }),
     );
     expect(
-      screen.getByText('#automation-reports (Discord)'),
+      screen.getByRole('combobox', { name: 'Destination provider' }),
+    ).toHaveTextContent('Discord');
+    expect(
+      screen.getByRole('combobox', { name: 'Destination channel' }),
     ).toBeInTheDocument();
     closeAutomationDialog();
     fireEvent.click(
@@ -987,19 +1051,26 @@ describe('AutomationsSettings', () => {
       }),
     );
 
-    // The saved Discord channel is the selected destination.
-    // Pickers without a saved value use the provider-neutral placeholder.
-    expect(screen.getByText('Select a channel')).toBeInTheDocument();
+    // Pickers without an explicit value show the standard destination.
     expect(
-      screen.queryByText('Select a Slack channel'),
+      screen.getByRole('combobox', { name: 'Destination provider' }),
+    ).toHaveTextContent('Default');
+    expect(
+      screen.queryByRole('combobox', { name: 'Destination channel' }),
     ).not.toBeInTheDocument();
   });
 
   it('shows Discord as the shared manager destination', async () => {
     state.settingsQuery.data.capabilities.discordConnected = true;
     state.settingsQuery.data.settings.managerSlackChannelId = null as never;
+    state.settingsQuery.data.settings.defaultAutomationTarget = null as never;
     state.settingsQuery.data.settings.managerDiscordChannelId =
       '111222333444555666';
+    state.settingsQuery.data.settings.defaultAutomationTarget = {
+      provider: 'discord',
+      targetKind: 'discord_channel',
+      externalRef: '111222333444555666',
+    } as never;
     state.discordChannelsQuery.data.channels = [
       {
         id: '111222333444555666',
@@ -1012,21 +1083,31 @@ describe('AutomationsSettings', () => {
 
     render(<AutomationsSettings />);
 
-    fireEvent.click(
-      await screen.findByRole('button', {
+    expect(await screen.findByText('#automation-reports')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    expect(
+      screen.getByRole('combobox', { name: 'Destination provider' }),
+    ).toHaveTextContent('Discord');
+    expect(
+      screen.getByRole('combobox', { name: 'Destination channel' }),
+    ).toHaveTextContent('#automation-reports');
+    expect(
+      screen.queryByRole('button', {
         name: /(?:Set up|Configure) Automation output/,
       }),
-    );
-    const destination = await screen.findByRole('button', {
-      name: /#automation-reports \(Discord\)/,
-    });
-    expect(destination).toBeInTheDocument();
+    ).not.toBeInTheDocument();
+  });
 
-    fireEvent.click(destination);
-    expect(screen.getByLabelText('Select manager channel')).toBeInTheDocument();
-    expect(
-      screen.getByText('Make sure the Roomote app is added to the channel.'),
-    ).toBeInTheDocument();
+  it('shows an explicit unconfigured state instead of an automatic destination', async () => {
+    state.settingsQuery.data.settings.managerSlackChannelId = null as never;
+    state.settingsQuery.data.settings.managerDiscordChannelId = null;
+    state.settingsQuery.data.settings.defaultAutomationTarget = null as never;
+
+    render(<AutomationsSettings />);
+
+    expect(screen.getByText('Not configured')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Select' })).toBeInTheDocument();
+    expect(screen.queryByText(/Automatic · Shared/)).not.toBeInTheDocument();
   });
 
   it('offers the platform issue alerts destination picker with a saved Discord channel selected', async () => {
@@ -1053,10 +1134,13 @@ describe('AutomationsSettings', () => {
     );
 
     expect(
-      screen.getByLabelText('Post alerts to this channel'),
+      screen.getByLabelText('Post alerts to this destination'),
     ).toBeInTheDocument();
     expect(
-      screen.getByText('#automation-reports (Discord)'),
+      screen.getByRole('combobox', { name: 'Destination provider' }),
+    ).toHaveTextContent('Discord');
+    expect(
+      screen.getByRole('combobox', { name: 'Destination channel' }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole('switch', { name: 'Alert on Config Errors enabled' }),
@@ -1117,6 +1201,16 @@ describe('AutomationsSettings', () => {
     expect(
       screen.getByText("Summary of Roomote's activity during the week"),
     ).toBeInTheDocument();
+  });
+
+  it('offers the shared run-now action for installed release announcements', async () => {
+    render(<AutomationsSettings />);
+
+    expect(
+      await screen.findByRole('button', {
+        name: 'Run Announce Roomote Updates now',
+      }),
+    ).toBeEnabled();
   });
 
   it('shows provider support as plain text instead of badges', async () => {
@@ -1303,6 +1397,101 @@ describe('AutomationsSettings', () => {
     expect(mutations.updateSettings).not.toHaveBeenCalled();
   });
 
+  it('preserves the resolver clarification after another submission', async () => {
+    render(<CustomAutomationsSection />);
+    fireEvent.click(screen.getByRole('button', { name: 'New' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), {
+      target: { value: 'Review' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Prompt' }), {
+      target: { value: 'Review prompt' },
+    });
+    fireEvent.click(
+      screen.getByRole('combobox', { name: 'Preferred environment' }),
+    );
+    fireEvent.click(screen.getByRole('option', { name: 'Let Roomote decide' }));
+    fireEvent.click(screen.getByRole('combobox', { name: 'Schedule' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Custom schedule' }));
+    const input = screen.getByRole('textbox', { name: 'Custom schedule' });
+    fireEvent.change(input, { target: { value: 'Every weekday' } });
+    await act(async () =>
+      state.latestScheduleOptions!.onSuccess(
+        { status: 'ambiguous', clarification: 'What time on weekdays?' },
+        { schedule: 'Every weekday' },
+      ),
+    );
+    expect(screen.getByText('What time on weekdays?')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    expect(screen.getByText('What time on weekdays?')).toBeVisible();
+  });
+
+  it('focuses and describes an invalid custom schedule before creating', () => {
+    render(<CustomAutomationsSection />);
+    fireEvent.click(screen.getByRole('button', { name: 'New' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), {
+      target: { value: 'Schedule validation' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Prompt' }), {
+      target: { value: 'Verify custom schedule recovery.' },
+    });
+    fireEvent.click(
+      screen.getByRole('combobox', { name: 'Preferred environment' }),
+    );
+    fireEvent.click(screen.getByRole('option', { name: 'Let Roomote decide' }));
+    fireEvent.click(screen.getByRole('combobox', { name: 'Schedule' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Custom schedule' }));
+
+    const schedule = screen.getByRole('textbox', { name: 'Custom schedule' });
+    mutations.updateSettings.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+    expect(mutations.updateSettings).not.toHaveBeenCalled();
+    expect(schedule).toHaveFocus();
+    expect(schedule).toHaveAttribute('aria-invalid', 'true');
+    expect(schedule).toHaveAccessibleDescription(
+      'Enter a valid schedule first.',
+    );
+    expect(screen.getByText('Enter a valid schedule first.')).toHaveAttribute(
+      'role',
+      'alert',
+    );
+
+    fireEvent.change(schedule, { target: { value: '0 9 * * 1-5' } });
+    expect(schedule).not.toHaveAttribute('aria-invalid');
+    expect(
+      screen.queryByText('Enter a valid schedule first.'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText('At 09:00 AM, Monday through Friday (UTC)'),
+    ).toBeInTheDocument();
+  });
+
+  it('uses the same invalid custom schedule recovery while editing', async () => {
+    setRunnableCustomAutomation();
+    render(<AutomationsSettings />);
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Configure Daily scan' }),
+    );
+    fireEvent.click(screen.getByRole('combobox', { name: 'Schedule' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Custom schedule' }));
+
+    const schedule = screen.getByRole('textbox', { name: 'Custom schedule' });
+    mutations.updateSettings.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(mutations.updateSettings).not.toHaveBeenCalled();
+    expect(schedule).toHaveFocus();
+    expect(schedule).toHaveAccessibleDescription(
+      'Enter a valid schedule first.',
+    );
+
+    fireEvent.click(screen.getByRole('combobox', { name: 'Schedule' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Daily' }));
+    expect(
+      screen.queryByText('Enter a valid schedule first.'),
+    ).not.toBeInTheDocument();
+  });
+
   it('disables a scheduled automation directly', async () => {
     state.settingsQuery.data.settings.managerStatsFrequency = 'weekly' as never;
     render(<AutomationsSettings />);
@@ -1426,6 +1615,7 @@ describe('AutomationsSettings', () => {
   it('keeps platform issue alerts enabled by default while showing the custom empty state', async () => {
     state.settingsQuery.data.settings.channelAutoStartSlackChannels = [];
     state.settingsQuery.data.settings.managerSlackChannelId = null as never;
+    state.settingsQuery.data.settings.defaultAutomationTarget = null as never;
     state.settingsQuery.data.slackChannelDisplayNames.managerSlackChannel =
       null as never;
 
@@ -1807,7 +1997,7 @@ describe('AutomationsSettings', () => {
     ).toHaveTextContent('High');
     expect(
       screen.getByText(
-        'Each run is a Session in the web app and does not send a report.',
+        'Each run is a session in the web app and does not send a report.',
       ),
     ).toBeInTheDocument();
     fireEvent.click(
@@ -2017,7 +2207,7 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        'Each run is a Session that reports findings and failures here, and replies continue it.',
+        'Each run is a session that reports findings and failures here, and replies continue it.',
       ),
     ).toBeInTheDocument();
   });
@@ -2068,7 +2258,7 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        'Each run is a Session that reports findings and failures here, and replies continue it.',
+        'Each run is a session that reports findings and failures here, and replies continue it.',
       ),
     ).toBeInTheDocument();
   });
@@ -2111,7 +2301,7 @@ describe('AutomationsSettings', () => {
 
     expect(
       screen.getByText(
-        'Each run is a Session that reports findings and failures here, and replies continue it.',
+        'Each run is a session that reports findings and failures here, and replies continue it.',
       ),
     ).toBeInTheDocument();
   });
@@ -2154,7 +2344,7 @@ describe('AutomationsSettings', () => {
 
     expect(
       screen.getByText(
-        'Each run is a Session that reports findings and failures here, and replies continue it.',
+        'Each run is a session that reports findings and failures here, and replies continue it.',
       ),
     ).toBeInTheDocument();
   });
@@ -2164,6 +2354,7 @@ describe('AutomationsSettings', () => {
     state.settingsQuery.data.capabilities.discordConnected = true;
     state.settingsQuery.data.capabilities.teamsConnected = true;
     state.settingsQuery.data.settings.managerSlackChannelId = null as never;
+    state.settingsQuery.data.settings.defaultAutomationTarget = null as never;
     state.customAutomationDefaultTarget = {
       provider: 'discord',
       targetKind: 'discord_user',
@@ -2228,8 +2419,9 @@ describe('AutomationsSettings', () => {
     });
     expect(destination).toHaveTextContent('None');
     fireEvent.click(destination);
-    expect(screen.getAllByRole('option')).toHaveLength(1);
+    expect(screen.getAllByRole('option')).toHaveLength(2);
     expect(screen.getByRole('option', { name: 'None' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Email' })).toBeInTheDocument();
   });
 
   it('preserves in-progress edits when capabilities finish loading', async () => {

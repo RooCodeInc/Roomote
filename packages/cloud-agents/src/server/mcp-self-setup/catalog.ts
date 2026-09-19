@@ -188,7 +188,7 @@ export const MCP_SETUP_INTEGRATION_METADATA: Record<
   },
   voice: {
     capabilities: [
-      'Talk to Roomote on a voice call from any Fast Session',
+      'Talk to Roomote on a voice call from any session',
       'Keep the OpenAI key on the control plane, never exposed to agents',
       'Configure once per deployment with a key that has GPT-Live access',
     ],

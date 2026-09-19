@@ -28,7 +28,6 @@ import {
   sessionFactory,
   taskFactory,
   runFactory,
-  setDeploymentExperimentEnabled,
   hashCredentialEgressSubstitute,
   type ServiceCredentialContext,
 } from '@roomote/db/server';
@@ -56,7 +55,7 @@ import type { Variables } from '../../../types';
 import { createCredentialEgressControlPlane } from '../index';
 
 const secret = 'Real-Upstream-Key/A+b=<"&>123';
-const origin = 'https://api.example.com';
+const origin = 'https://1.1.1.1';
 const path = CREDENTIAL_EGRESS_CONTROL_PLANE_PATH;
 
 let app: Hono<{ Variables: Variables }>;
@@ -239,7 +238,6 @@ beforeEach(async () => {
   minted.length = 0;
   for (let i = 0; i < 2; i++) userIds.push((await userFactory.create()).id);
   [ownerId, otherId] = userIds as [string, string];
-  await setDeploymentExperimentEnabled('serviceCredentialTools', true);
   const row = await session(ownerId);
   sessionId = row.id;
   context = { userId: ownerId, sessionId };
@@ -518,7 +516,7 @@ it('authorizes each phase live and resolves the credential only on the request p
       session_id: sessionId,
       actor_user_id: ownerId,
       secret_ref: secretRef,
-      destination: 'api.example.com:443',
+      destination: '1.1.1.1:443',
     });
   const serialized = JSON.stringify(audit);
   for (const forbidden of [
@@ -903,7 +901,7 @@ it('issues substitutes for grants approved after registration without rotating',
   });
   const pending = await prepareServiceCredential(context, {
     label: 'Second API',
-    origin: 'https://second.example.com:8443',
+    origin: 'https://1.0.0.1:8443',
     headerName: 'x-api-key',
     headerPrefix: '',
   });
@@ -923,7 +921,7 @@ it('issues substitutes for grants approved after registration without rotating',
   expect(registration.substitutes).toHaveLength(1);
   expect(registration.substitutes[0]).toMatchObject({
     secretRef: second.secretRef,
-    origin: 'https://second.example.com:8443',
+    origin: 'https://1.0.0.1:8443',
     headerName: 'x-api-key',
     headerPrefix: '',
   });
@@ -980,7 +978,7 @@ it('binds authorization to the grant method policy and rejects malformed input',
 it('allows write methods only for grants the owner explicitly acknowledged, without widening older grants', async () => {
   const pending = await prepareServiceCredential(context, {
     label: 'Write API',
-    origin: 'https://write.example.com',
+    origin: 'https://8.8.8.8',
     headerName: 'authorization',
     headerPrefix: 'Bearer ',
     allowedMethods: ['POST', 'GET'],
@@ -1075,30 +1073,4 @@ it('drives the controller flow through the typed SDK client', async () => {
   await expect(
     client.renewLease(registration.workloadId, { leaseSeconds: 300 }),
   ).rejects.toThrow(/404 workload_not_found/);
-});
-
-it('treats a deployment that turned integration keys off as ineligible everywhere', async () => {
-  const base = await registered();
-  await setDeploymentExperimentEnabled('serviceCredentialTools', false);
-  // Registration and rotation refuse inside the minting transaction.
-  expect(await register()).toMatchObject({
-    status: 409,
-    json: { error: 'run_not_eligible' },
-  });
-  // Existing substitutes stop authorizing, and the workload is no longer live.
-  expect(await authorize(authorizeBody(base))).toEqual({
-    allowed: false,
-    reason: 'session_unavailable',
-  });
-  expect(
-    (
-      await call(`/workloads/${base.registration.workloadId}/lease`, {
-        token: await createCredentialEgressControllerToken(),
-        body: {},
-      })
-    ).status,
-  ).toBe(404);
-  // Turning it back on restores the same workload without a new registration.
-  await setDeploymentExperimentEnabled('serviceCredentialTools', true);
-  expect((await authorize(authorizeBody(base))).allowed).toBe(true);
 });

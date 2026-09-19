@@ -863,6 +863,72 @@ describe('spawnModalWorker', () => {
     expect(onWorkerRestart).toHaveBeenCalledOnce();
   });
 
+  it('waits for exit classification before unwinding an aborted admission', async () => {
+    let resolveClassification!: (value: 'restart') => void;
+    const classification = new Promise<'restart'>((resolve) => {
+      resolveClassification = resolve;
+    });
+    const onWorkerExit = vi.fn().mockReturnValue(classification);
+    const admit = vi.fn(
+      (signal?: AbortSignal) =>
+        new Promise<null>((_resolve, reject) => {
+          if (signal?.aborted) {
+            reject(new Error('admission aborted'));
+            return;
+          }
+          signal?.addEventListener('abort', () => {
+            reject(new Error('admission aborted'));
+          });
+        }),
+    );
+    const planApiProxy = vi.fn().mockResolvedValue({
+      required: true,
+      bootstrapEnv: {},
+      admit,
+    });
+    const onWorkerRestart = vi.fn();
+    mockCleanupModalInstance.mockRejectedValueOnce(
+      new Error('cleanup unavailable'),
+    );
+    mockRunCommand.mockImplementationOnce(async (input: RunCommandInput) => {
+      queueMicrotask(() => void input.onExit?.({ exitCode: 1 }));
+      return { exitCode: null, commandId: 'cmd_123' };
+    });
+
+    const spawnPromise = spawnModalWorker(
+      mockTaskRun({
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload: { repo: 'test/repo', environmentId: 'env_1' },
+      }),
+      'auth_token',
+      {
+        deploymentSlug: 'roomote',
+        modalTokenId: 'token-id',
+        modalTokenSecret: 'token-secret',
+        modalBaseImageRef: 'ghcr.io/roomote/modal-worker:test',
+        modalVmMemoryMiB: 8192,
+        modalTimeoutMs: 60_000,
+        credentialEgress: { planApiProxy } as never,
+        onWorkerExit,
+        onWorkerRestart,
+      },
+    );
+
+    await vi.waitFor(() => {
+      expect(onWorkerExit).toHaveBeenCalledWith({ exitCode: 1 });
+    });
+    resolveClassification('restart');
+
+    await expect(spawnPromise).resolves.toEqual({
+      machineId: 'modal-machine-123',
+    });
+    expect(admit).toHaveBeenCalledOnce();
+    expect(mockCleanupModalInstance).toHaveBeenCalledWith(
+      expect.objectContaining({ phase: 'worker_bootstrap_exit' }),
+    );
+    expect(onWorkerRestart).toHaveBeenCalledOnce();
+  });
+
   it('restarts after a claimed exit even when sandbox cleanup fails', async () => {
     const onWorkerExit = vi.fn().mockResolvedValue('restart');
     const onWorkerRestart = vi.fn();
@@ -891,9 +957,9 @@ describe('spawnModalWorker', () => {
     const runCommandInput = mockRunCommand.mock.calls[0]?.[0] as {
       onExit?: (event: { exitCode: number }) => Promise<void>;
     };
-    await expect(runCommandInput.onExit?.({ exitCode: 1 })).rejects.toThrow(
-      'cleanup unavailable',
-    );
+    await expect(
+      runCommandInput.onExit?.({ exitCode: 1 }),
+    ).resolves.toBeUndefined();
 
     expect(onWorkerRestart).toHaveBeenCalledOnce();
   });

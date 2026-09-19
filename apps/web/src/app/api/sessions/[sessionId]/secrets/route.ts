@@ -1,11 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import {
-  db,
-  eq,
-  isDeploymentExperimentEnabled,
-  sessions,
-} from '@roomote/db/server';
+import { db, eq, sessions } from '@roomote/db/server';
 import { replyToFastSessionCommand } from '@/trpc/commands/fast-sessions';
 
 import {
@@ -88,18 +83,15 @@ async function handle(
       const secret = await createServiceCredential(context, args.data);
       let resumed = false;
       try {
-        const [session, serviceCredentialToolsEnabled] = await Promise.all([
-          db.query.sessions.findFirst({
-            where: eq(sessions.id, context.sessionId),
-            columns: {
-              fastConversationId: true,
-              ownerKind: true,
-              ownerUserId: true,
-              archivedAt: true,
-            },
-          }),
-          isDeploymentExperimentEnabled('serviceCredentialTools'),
-        ]);
+        const session = await db.query.sessions.findFirst({
+          where: eq(sessions.id, context.sessionId),
+          columns: {
+            fastConversationId: true,
+            ownerKind: true,
+            ownerUserId: true,
+            archivedAt: true,
+          },
+        });
         if (
           session?.fastConversationId &&
           session.ownerKind === 'user' &&
@@ -108,9 +100,7 @@ async function handle(
         ) {
           await replyToFastSessionCommand(auth, {
             sessionId: session.fastConversationId,
-            text: buildIntegrationSavedContinuation(
-              serviceCredentialToolsEnabled,
-            ),
+            text: buildIntegrationSavedContinuation(),
           });
           resumed = true;
         }

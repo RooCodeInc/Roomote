@@ -29,11 +29,10 @@ vi.mock('./RecentSessionsList', () => ({
 import { BottomSheetTabs } from './BottomSheetTabs';
 
 beforeEach(() => {
-  window.localStorage.clear();
   useQueryMock.mockReturnValue({ data: undefined });
 });
 
-it('renders the home tabs without the feedback prompt', () => {
+it('renders the home tabs', () => {
   render(<BottomSheetTabs />);
 
   expect(
@@ -42,7 +41,6 @@ it('renders the home tabs without the feedback prompt', () => {
   expect(
     screen.getByRole('button', { name: 'Recent PRs' }),
   ).toBeInTheDocument();
-  expect(screen.queryByText('Feedback, please!')).not.toBeInTheDocument();
 });
 
 it('shows the loaded open PR count before the tab is selected', () => {

@@ -38,10 +38,10 @@ vi.mock('@/components/settings/PrivateSessionsExperimentalSetting', () => ({
 }));
 
 vi.mock(
-  '@/components/settings/HomeComposerSuggestionsExperimentalSetting',
+  '@/components/settings/BrowserNotificationsExperimentalSetting',
   () => ({
-    HomeComposerSuggestionsExperimentalSetting: () => (
-      <div>Home suggestions setting</div>
+    BrowserNotificationsExperimentalSetting: () => (
+      <div>Browser notifications setting</div>
     ),
   }),
 );
@@ -55,15 +55,6 @@ vi.mock(
   () => ({
     SlackPeerConversationsExperimentalSetting: () => (
       <div>Slack peer conversations setting</div>
-    ),
-  }),
-);
-
-vi.mock(
-  '@/components/settings/ServiceCredentialToolsExperimentalSetting',
-  () => ({
-    ServiceCredentialToolsExperimentalSetting: () => (
-      <div>Integration keys setting</div>
     ),
   }),
 );
@@ -113,12 +104,13 @@ describe('ExperimentalSettingsPage', () => {
     state.hasLoadedExperiments = true;
     rerender(<ExperimentalSettingsPage />);
 
-    expect(screen.getByText('Home suggestions setting')).toBeInTheDocument();
+    expect(
+      screen.queryByText('Home suggestions setting'),
+    ).not.toBeInTheDocument();
     expect(screen.getByText('Results setting')).toBeInTheDocument();
     expect(
       screen.getByText('Slack peer conversations setting'),
     ).toBeInTheDocument();
-    expect(screen.getByText('Integration keys setting')).toBeInTheDocument();
     expect(
       screen.queryByText('Failed to load experimental settings.'),
     ).not.toBeInTheDocument();
@@ -144,12 +136,13 @@ describe('ExperimentalSettingsPage', () => {
 
     render(<ExperimentalSettingsPage />);
 
-    expect(screen.getByText('Home suggestions setting')).toBeInTheDocument();
+    expect(
+      screen.queryByText('Home suggestions setting'),
+    ).not.toBeInTheDocument();
     expect(screen.getByText('Results setting')).toBeInTheDocument();
     expect(
       screen.getByText('Slack peer conversations setting'),
     ).toBeInTheDocument();
-    expect(screen.getByText('Integration keys setting')).toBeInTheDocument();
     expect(
       screen.queryByText('Failed to load experimental settings.'),
     ).not.toBeInTheDocument();

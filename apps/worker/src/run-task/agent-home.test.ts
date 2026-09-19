@@ -16,7 +16,10 @@ import {
   seedRuntimeHomeMiseGlobalConfig,
 } from './agent-home';
 import { OPENCODE_IDENTITY_PLUGIN_SCRIPT } from '@roomote/cloud-agents';
-import { HTTP_INTEGRATIONS_INSTRUCTIONS } from '@roomote/sdk/client';
+import {
+  HTTP_INTEGRATIONS_INSTRUCTIONS,
+  NATIVE_ROOMOTE_TOOL_SELECTION_INSTRUCTIONS,
+} from '@roomote/sdk/client';
 import {
   callOnDemandIntegrationTool,
   findOnDemandIntegrationTools,
@@ -94,6 +97,29 @@ describe('createIntegrationMcpInstructions', () => {
     expect(instructions).toContain(
       'does not restrict other network access available inside the coding sandbox',
     );
+  });
+  it('keeps requested channel delivery with the parent task', () => {
+    const instructions = createIntegrationMcpInstructions([
+      { type: 'local', name: 'roomote', command: 'node' },
+    ]);
+
+    expect(instructions).toContain(NATIVE_ROOMOTE_TOOL_SELECTION_INSTRUCTIONS);
+    expect(instructions).toContain(
+      'The built-in and on-demand integration catalogs and the HTTP integrations list are not the full tool inventory',
+    );
+    expect(instructions).toContain(
+      'use an exposed channel-posting tool for a requested channel post',
+    );
+    expect(instructions).toContain(
+      "Slack's absence from an integration catalog or an empty HTTP integrations list does not make that exposed tool unavailable",
+    );
+    expect(instructions).toContain(
+      'When a delegated worker or subagent lacks a posting tool and prepares content that the user asked to deliver, it must return the completed content to the parent instead of posting it',
+    );
+    expect(instructions).toContain(
+      'The parent remains responsible for making exactly the requested delivery',
+    );
+    expect(instructions).toContain('Never duplicate a successful post');
   });
   it.each(['gbrain', 'supermemory'])(
     'injects shared memory lifecycle guidance for %s',
@@ -1486,6 +1512,12 @@ describe('generateOpenCodeConfig provider support', () => {
     );
     expect(integrationInstructions).toContain('# On-demand integrations');
     expect(integrationInstructions).toContain('- Pylon [id: pylon]');
+    expect(integrationInstructions).toContain(
+      'The built-in and on-demand integration catalogs and the HTTP integrations list are not the full tool inventory',
+    );
+    expect(integrationInstructions).toContain(
+      'The parent remains responsible for making exactly the requested delivery',
+    );
     expect(integrationInstructions).toContain('roomote_find_integration_tools');
     expect(integrationInstructions).toContain('roomote_call_integration_tool');
     expect(integrationInstructions).toContain('- github [id: github]');

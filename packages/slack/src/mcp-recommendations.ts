@@ -103,7 +103,7 @@ function buildSetupUrl(
     return baseUrl.toString();
   }
 
-  baseUrl.pathname = '/settings/integrations';
+  baseUrl.pathname = '/integrations';
   baseUrl.searchParams.set('highlight', params.id);
 
   return baseUrl.toString();

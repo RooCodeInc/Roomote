@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
-import { CircleSlash, TriangleAlert } from '@/components/system';
+import { Button, CircleSlash, TriangleAlert } from '@/components/system';
 
 import {
   TaskPayloadKind,
@@ -194,12 +194,23 @@ export default function SandboxPage() {
         frameClassName="pb-0 md:pb-2"
         surfaceClassName="flex items-center justify-center"
       >
-        <EmptyState
-          icon={<TriangleAlert className="size-6" />}
-          iconClassName="text-amber-500 pt-0"
-          containerClassName="[&>div]:items-center"
-          description="This task could not be loaded. Refresh the page or try again in a moment."
-        />
+        <div className="flex flex-col items-center gap-3">
+          <EmptyState
+            icon={<TriangleAlert className="size-6" />}
+            iconClassName="text-amber-500 pt-0"
+            containerClassName="[&>div]:items-center"
+            description="This task could not be loaded. Refresh the page or try again in a moment."
+          />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            loading={session.isSessionFetching}
+            onClick={() => void session.retryInitialLoad()}
+          >
+            Retry
+          </Button>
+        </div>
       </FramedSurface>
     );
   }

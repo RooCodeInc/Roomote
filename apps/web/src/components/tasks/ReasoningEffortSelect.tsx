@@ -34,7 +34,7 @@ export function ReasoningEffortSelect({
   emptyOptionLabel,
 }: {
   value: ReasoningEffort | null;
-  defaultEffort: ReasoningEffort;
+  defaultEffort?: ReasoningEffort | null;
   onChange: (value: ReasoningEffort | null) => void;
   disabled?: boolean;
   ariaLabel: string;
@@ -48,7 +48,7 @@ export function ReasoningEffortSelect({
       value={
         emptyOptionLabel && value === null
           ? EMPTY_OPTION_VALUE
-          : (value ?? defaultEffort)
+          : (value ?? defaultEffort ?? undefined)
       }
       onValueChange={(nextValue) =>
         onChange(
@@ -60,7 +60,7 @@ export function ReasoningEffortSelect({
       disabled={disabled}
     >
       <SelectTrigger className={className} aria-label={ariaLabel} size={size}>
-        <SelectValue />
+        <SelectValue placeholder="Reasoning" />
       </SelectTrigger>
       <SelectContent align="end">
         <SelectGroup>

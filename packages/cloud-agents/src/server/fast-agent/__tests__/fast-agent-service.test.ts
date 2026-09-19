@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   setOpenCodeSession: vi.fn(),
   upsertMessage: vi.fn(),
   getEnvironments: vi.fn(),
+  getActiveRepositories: vi.fn(),
+  listActiveRepositories: vi.fn(),
   listCustomSkills: vi.fn(),
   getCustomSkill: vi.fn(),
   scoreTypeSafeRelevance: vi.fn(),
@@ -59,6 +61,8 @@ const mocks = vi.hoisted(() => ({
   prepareServiceCredential: vi.fn(),
   listServiceCredentialApprovals: vi.fn(),
   addRemoteMcp: vi.fn(),
+  connectIntegration: vi.fn(),
+  listNativeIntegrations: vi.fn(),
   createPlatformIssueReport: vi.fn(),
   touchSessionActivity: vi.fn(),
   getSessionForTask: vi.fn(),
@@ -100,6 +104,7 @@ const nativeToolNames = vi.hoisted(
     ({
       callIntegrationTool: 'call_integration_tool',
       addRemoteMcp: 'add_remote_mcp',
+      connectIntegration: 'connect_integration',
       cancelTask: 'cancel_task',
       createArtifact: 'create_artifact',
       reportPlatformIssue: 'report_platform_issue',
@@ -107,6 +112,7 @@ const nativeToolNames = vi.hoisted(
       ignoreEvent: 'ignore_event',
       inspectImages: 'inspect_images',
       launchTask: 'launch_task',
+      listRepositories: 'list_repositories',
       manageGoal: 'manage_goal',
       manageWakeups: 'manage_wakeups',
       reviewPullRequest: 'review_pull_request',
@@ -132,7 +138,10 @@ const nativeToolNames = vi.hoisted(
 const fastAgentSessionPermissions = vi.hoisted(() => [
   { permission: 'task', pattern: '*', action: 'allow' },
 ]);
-const fastAgentSessionToolFilter = vi.hoisted(() => ({ task: true }));
+const fastAgentSessionToolFilter = vi.hoisted(() => ({
+  task: true,
+  connect_integration: true,
+}));
 
 vi.mock('@roomote/sdk/server/service-credentials', () => ({
   prepareServiceCredential: mocks.prepareServiceCredential,
@@ -141,6 +150,11 @@ vi.mock('@roomote/sdk/server/service-credentials', () => ({
 
 vi.mock('@roomote/sdk/server/add-remote-custom-mcp', () => ({
   addRemoteCustomMcpForFast: mocks.addRemoteMcp,
+}));
+
+vi.mock('@roomote/sdk/server/connect-integration', () => ({
+  connectIntegrationForFast: mocks.connectIntegration,
+  listNativeIntegrationsForFast: mocks.listNativeIntegrations,
 }));
 
 vi.mock('@roomote/sdk/server/platform-issue-reporting', () => ({
@@ -177,6 +191,8 @@ vi.mock('../fast-agent-conversation-repository', () => ({
 }));
 
 vi.mock('../../available-environments', () => ({
+  getActiveRepositoryCatalog: mocks.getActiveRepositories,
+  listActiveRepositories: mocks.listActiveRepositories,
   getAvailableEnvironments: mocks.getEnvironments,
 }));
 
@@ -247,35 +263,41 @@ const NonTaskInputModalityUnsupportedError = vi.hoisted(
     },
 );
 
-vi.mock('../../non-task-provider-usage', () => ({
-  FAST_AGENT_SESSION_PERMISSIONS: fastAgentSessionPermissions,
-  FAST_AGENT_SESSION_TOOL_FILTER: fastAgentSessionToolFilter,
-  NON_TASK_INFERENCE_SURFACES: {
-    fastAgentImageInspection: 'fast_agent_image_inspection',
-    fastAgentQuestionAnswering: 'fast_agent',
-  },
-  NonTaskInputModalityUnsupportedError,
-  classifyNonTaskInferenceError: mocks.classifyInferenceError,
-  generateTrackedNonTaskObject: mocks.generateTrackedObject,
-  generateTrackedNonTaskText: mocks.generateHelperText,
-  generateTrackedNonTaskTextInOpenCodeSession: mocks.generateText,
-  resolveNonTaskInputModalityDelivery: mocks.resolveImageDelivery,
-  NonTaskOpenCodePromptTimeoutError: class extends Error {
-    constructor(timeoutMs: number) {
-      super(`Timed out waiting for OpenCode output after ${timeoutMs}ms.`);
-      this.name = 'NonTaskOpenCodePromptTimeoutError';
-    }
-  },
-  isNonTaskOpenCodePromptTimeoutError: (error: unknown) =>
-    error instanceof Error &&
-    error.name === 'NonTaskOpenCodePromptTimeoutError',
-  isNonTaskOpenCodeSessionNotFoundError: (error: unknown) =>
-    error instanceof Error &&
-    error.name === 'NonTaskOpenCodeSessionNotFoundError',
-  isNonTaskOpenCodeSessionValidationError: (error: unknown) =>
-    error instanceof Error &&
-    error.name === 'NonTaskOpenCodeSessionValidationError',
-}));
+vi.mock('../../non-task-provider-usage', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../non-task-provider-usage')>();
+  return {
+    FAST_AGENT_SESSION_PERMISSIONS: fastAgentSessionPermissions,
+    FAST_AGENT_SESSION_TOOL_FILTER: fastAgentSessionToolFilter,
+    NON_TASK_INFERENCE_SURFACES: {
+      fastAgentImageInspection: 'fast_agent_image_inspection',
+      fastAgentQuestionAnswering: 'fast_agent',
+    },
+    NonTaskInputModalityUnsupportedError,
+    classifyNonTaskInferenceError: mocks.classifyInferenceError,
+    generateTrackedNonTaskObject: mocks.generateTrackedObject,
+    generateTrackedNonTaskText: mocks.generateHelperText,
+    generateTrackedNonTaskTextInOpenCodeSession: mocks.generateText,
+    isNonTaskImageInputUnsupportedError:
+      actual.isNonTaskImageInputUnsupportedError,
+    resolveNonTaskInputModalityDelivery: mocks.resolveImageDelivery,
+    NonTaskOpenCodePromptTimeoutError: class extends Error {
+      constructor(timeoutMs: number) {
+        super(`Timed out waiting for OpenCode output after ${timeoutMs}ms.`);
+        this.name = 'NonTaskOpenCodePromptTimeoutError';
+      }
+    },
+    isNonTaskOpenCodePromptTimeoutError: (error: unknown) =>
+      error instanceof Error &&
+      error.name === 'NonTaskOpenCodePromptTimeoutError',
+    isNonTaskOpenCodeSessionNotFoundError: (error: unknown) =>
+      error instanceof Error &&
+      error.name === 'NonTaskOpenCodeSessionNotFoundError',
+    isNonTaskOpenCodeSessionValidationError: (error: unknown) =>
+      error instanceof Error &&
+      error.name === 'NonTaskOpenCodeSessionValidationError',
+  };
+});
 
 vi.mock('../../typesafe-judgment', () => ({
   evaluateTypeSafeJudgments: mocks.evaluateJudgments,
@@ -294,6 +316,7 @@ vi.mock('../fast-agent-native-tool-bridge', () => ({
   FAST_AGENT_NATIVE_TOOL_FILTER: {
     '*': false,
     send_chat_reply: true,
+    connect_integration: true,
     task: true,
   },
   getFastAgentNativeToolRuntime: mocks.getNativeRuntime,
@@ -394,6 +417,7 @@ import {
   FastAgentDurableRetryScheduledError,
   FAST_AGENT_DURABLE_RETRY_HORIZON_MS,
   FAST_AGENT_DURABLE_RETRY_MAX_PARKS,
+  FAST_AGENT_INFERENCE_MAX_RETRIES,
   FAST_AGENT_MAX_INFERENCE_RETRIES_PER_TURN,
 } from '../fast-agent-service';
 import {
@@ -482,6 +506,7 @@ async function invokeMcpTool(
 describe('answerFastAgentQuestion native OpenCode tools', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.listNativeIntegrations.mockResolvedValue([]);
     mocks.refreshTitle.mockResolvedValue(null);
     mocks.resolveImageDelivery.mockResolvedValue({
       delivery: 'direct',
@@ -598,6 +623,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.listCustomSkills.mockResolvedValue([]);
     mocks.getCustomSkill.mockResolvedValue(null);
     mocks.scoreTypeSafeRelevance.mockResolvedValue(null);
+    mocks.getActiveRepositories.mockResolvedValue({
+      names: ['acme/app'],
+      totalCount: 1,
+    });
     mocks.getEnvironments.mockResolvedValue([
       {
         id: 'env-1',
@@ -1180,6 +1209,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
     expect(notifyUserAttention).toHaveBeenCalledWith({
       kind: 'result_ready',
+      presentationKind: 'response',
       eventId: expect.any(String),
       message: 'It coordinates incoming requests.',
       manual: true,
@@ -2156,6 +2186,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       });
       expect(notifyUserAttention).toHaveBeenCalledWith({
         kind: 'input_needed',
+        presentationKind: 'input',
         eventId: expect.stringMatching(/^rui:/),
         message: 'Which tools would you like to connect?',
         manual: false,
@@ -5261,6 +5292,121 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(adapter.postReply).toHaveBeenCalledOnce();
   });
 
+  it('lists active repositories in the system prompt without any environments', async () => {
+    mocks.getEnvironments.mockResolvedValueOnce([]);
+    mocks.getActiveRepositories.mockResolvedValueOnce({
+      names: ['acme/app', 'octo/widgets'],
+      totalCount: 2,
+    });
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    const system = mocks.generateText.mock.calls[0]?.[0].system;
+    expect(system).toContain(
+      '  - Active repositories (2): acme/app, octo/widgets',
+    );
+    expect(system).toContain(
+      'No configured environments were found for this deployment',
+    );
+  });
+
+  it('answers list_repositories before any acknowledgement and drops null arguments', async () => {
+    const page = {
+      repositories: [
+        {
+          id: 'repo-2',
+          fullName: 'octo/widgets',
+          sourceControlProvider: 'github',
+          host: 'github.com',
+          defaultBranch: 'main',
+          private: true,
+          url: 'https://github.com/octo/widgets',
+          environments: [],
+        },
+      ],
+      totalCount: 1,
+    };
+    mocks.listActiveRepositories.mockResolvedValue(page);
+    const results: unknown[] = [];
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        results.push(
+          await invokeTool(nativeToolNames.listRepositories, {
+            query: ' widgets ',
+            offset: null,
+            limit: null,
+          }),
+          await invokeTool(nativeToolNames.listRepositories, {
+            query: null,
+            offset: 50,
+            limit: 25,
+          }),
+        );
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Found it.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(results).toEqual([
+      { success: true, ...page },
+      { success: true, ...page },
+    ]);
+    expect(mocks.listActiveRepositories.mock.calls).toEqual([
+      [{ query: 'widgets' }],
+      [{ offset: 50, limit: 25 }],
+    ]);
+  });
+
+  it('rejects a list_repositories page size above the cap', async () => {
+    let result: unknown;
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        result = await invokeTool(nativeToolNames.listRepositories, {
+          limit: 500,
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Done.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.listActiveRepositories).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      success: false,
+      error: expect.stringContaining('limit'),
+    });
+  });
+
+  it('keeps the turn running when the active repository lookup fails', async () => {
+    mocks.getActiveRepositories.mockRejectedValueOnce(new Error('db down'));
+    const adapter = callbacks();
+
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+
+    expect(adapter.postReply).toHaveBeenCalledOnce();
+    expect(mocks.generateText.mock.calls[0]?.[0].system).toContain(
+      'The active repository list could not be loaded for this turn',
+    );
+    expect(mocks.captureInferenceContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        degradedComponents: expect.arrayContaining(['repository_catalog']),
+      }),
+    );
+  });
+
   it('records context loader failures as degraded inference components', async () => {
     mocks.getTaskModelOptions.mockRejectedValueOnce(new Error('models down'));
     mocks.listIntegrations.mockRejectedValueOnce(new Error('MCP down'));
@@ -5670,6 +5816,88 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     ]);
   });
 
+  it('starts native integration setup against the canonical Session', async () => {
+    mocks.getUnifiedSession.mockResolvedValue({ id: 'canonical-session-1' });
+    mocks.listNativeIntegrations.mockResolvedValue([
+      {
+        id: 'notion',
+        name: 'Notion',
+        description: 'Shared docs',
+        connectionScope: 'deployment',
+        setupStrategy: 'oauth',
+        status: 'needs_connection',
+        enabled: true,
+        authStatus: null,
+        canConnect: true,
+      },
+      {
+        id: 'granola',
+        name: 'Granola',
+        description: 'Meeting notes',
+        connectionScope: 'deployment',
+        setupStrategy: 'settings',
+        status: 'not_enabled',
+        enabled: false,
+        authStatus: null,
+        canConnect: true,
+      },
+    ]);
+    mocks.connectIntegration.mockResolvedValue({
+      status: 'authorization_required',
+      id: 'notion',
+      name: 'Notion',
+      authorizeUrl: 'https://roomote.example/api/mcp-oauth/replay/token',
+    });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.findIntegrationTools, {}),
+        ).resolves.toMatchObject({
+          success: true,
+          integrations: [
+            expect.objectContaining({
+              id: 'notion',
+              status: 'needs_connection',
+            }),
+            expect.objectContaining({
+              id: 'granola',
+              status: 'not_enabled',
+            }),
+          ],
+        });
+        expect(mocks.connectIntegration).not.toHaveBeenCalled();
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’ll check the built-in integration.',
+        });
+        const result = await invokeTool(nativeToolNames.connectIntegration, {
+          integrationId: 'notion',
+        });
+        expect(result).toEqual({
+          success: true,
+          status: 'authorization_required',
+          id: 'notion',
+          name: 'Notion',
+          authorizeUrl: 'https://roomote.example/api/mcp-oauth/replay/token',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Authorize Notion securely.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.connectIntegration).toHaveBeenCalledWith({
+      userId: 'user-1',
+      sessionId: 'canonical-session-1',
+      integrationId: 'notion',
+    });
+  });
+
   it('saves a conversation memory through the outbox', async () => {
     mocks.isBrainEnabled.mockResolvedValue(true);
     mocks.appendMemory.mockResolvedValue({ saved: true });
@@ -6045,7 +6273,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     ).toMatchObject({ allowSkillAccess: false, allowSpillRecovery: false });
   });
 
-  it('does not enable remote MCP setup for a non-admin', async () => {
+  it('enables remote MCP setup for any member, like integration keys', async () => {
     mocks.getUserIdentity.mockResolvedValue({
       displayName: 'Member',
       githubLogin: null,
@@ -6058,7 +6286,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.getNativeRuntime).toHaveBeenCalledWith(
       'conversation-1',
       expect.any(Array),
-      expect.objectContaining({ addRemoteMcpEnabled: false }),
+      expect.objectContaining({ addRemoteMcpEnabled: true }),
     );
   });
 
@@ -6695,6 +6923,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(postReply).not.toHaveBeenCalled();
       expect(notifyUserAttention).toHaveBeenCalledWith({
         kind: 'result_ready',
+        presentationKind: 'response',
         eventId: expect.any(String),
         message: 'All done.',
         manual: true,
@@ -6724,6 +6953,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
       expect(notifyUserAttention).toHaveBeenCalledWith({
         kind: 'input_needed',
+        presentationKind: 'input',
         eventId: expect.any(String),
         message: 'Which environment?',
         manual: true,
@@ -8343,6 +8573,156 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       'What does the screenshot show?',
     );
   });
+
+  it.each([
+    { statusCode: 400, reason: 'provider_error' },
+    { statusCode: 404, reason: 'model_unavailable' },
+  ])(
+    'falls back through the image helper after an HTTP $statusCode image rejection',
+    async ({ statusCode, reason }) => {
+      vi.useFakeTimers();
+      try {
+        mocks.classifyInferenceError.mockReturnValue({
+          message: 'The inference provider rejected the image input.',
+          reason,
+          retryable: false,
+        });
+        mocks.resolveImageDelivery
+          .mockResolvedValueOnce({
+            delivery: 'direct',
+            model: 'openai-compatible-local/custom-model',
+          })
+          .mockResolvedValueOnce({
+            delivery: 'helper',
+            model: 'openai-compatible-local/custom-model',
+            helperModel: 'openrouter/google/gemini-3.8-flash',
+            helperReasoningEffort: 'low',
+          });
+        mocks.generateHelperText.mockResolvedValue(
+          'A dashboard with a red deployment error.',
+        );
+        mocks.generateText
+          .mockRejectedValueOnce(
+            Object.assign(
+              new Error('This model does not support image input.'),
+              {
+                data: {
+                  statusCode,
+                  message: 'This model does not support image input.',
+                },
+              },
+            ),
+          )
+          .mockImplementationOnce(async (_params, _session, options) => {
+            await options.onSessionReady('opencode-session-2');
+            const inspection = await invokeTool(nativeToolNames.inspectImages, {
+              question: 'What does the screenshot show?',
+            });
+            expect(inspection).toMatchObject({
+              success: true,
+              observations: 'A dashboard with a red deployment error.',
+            });
+            await invokeTool(nativeToolNames.sendChatReply, {
+              purpose: 'closeout',
+              message: 'The screenshot shows a deployment error.',
+            });
+            return '';
+          });
+
+        const result = answerFastAgentQuestion({
+          ...baseParams,
+          images: ['data:image/png;base64,aGVsbG8='],
+          adapter: callbacks(),
+        });
+        result.catch(() => undefined);
+        await vi.runAllTimersAsync();
+        vi.useRealTimers();
+        await expect(result).resolves.toBe(
+          'The screenshot shows a deployment error.',
+        );
+
+        expect(mocks.generateText).toHaveBeenCalledTimes(2);
+        expect(mocks.generateText.mock.calls[0]?.[0]).toMatchObject({
+          files: [{ mime: 'image/png' }],
+        });
+        expect(mocks.generateText.mock.calls[1]?.[0]).not.toHaveProperty(
+          'files',
+        );
+        expect(mocks.generateText.mock.calls[1]?.[0].prompt).toContain(
+          'Image attachments: image-1 (image/png)',
+        );
+        expect(mocks.resolveImageDelivery).toHaveBeenLastCalledWith({
+          modality: 'image',
+          modelRole: 'orchestration',
+          skipSessionModel: true,
+        });
+        expect(mocks.generateHelperText).toHaveBeenCalledOnce();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it.each([
+    {
+      label: 'authentication',
+      error: Object.assign(new Error('Invalid API key.'), {
+        data: { statusCode: 401, message: 'Invalid API key.' },
+      }),
+      failure: {
+        message: 'The inference provider rejected these credentials.',
+        reason: 'invalid_credentials',
+        retryable: false,
+      },
+      attempts: 1,
+    },
+    {
+      label: 'rate limit',
+      error: new Error('429 Rate limit exceeded.'),
+      failure: {
+        message: 'The inference provider is rate limiting requests.',
+        reason: 'rate_limited',
+        retryable: true,
+      },
+      attempts: FAST_AGENT_INFERENCE_MAX_RETRIES + 1,
+    },
+    {
+      label: 'network',
+      error: new TypeError('fetch failed'),
+      failure: {
+        message: 'Roomote could not reach the inference provider endpoint.',
+        reason: 'endpoint_unreachable',
+        retryable: true,
+      },
+      attempts: 7,
+    },
+  ])(
+    'does not use the image helper for unrelated $label failures',
+    async ({ error, failure, attempts }) => {
+      vi.useFakeTimers();
+      try {
+        mocks.classifyInferenceError.mockReturnValue(failure);
+        mocks.generateText.mockRejectedValue(error);
+
+        const result = answerFastAgentQuestion({
+          ...baseParams,
+          images: ['data:image/png;base64,aGVsbG8='],
+          adapter: callbacks(),
+        }).catch(() => undefined);
+        await vi.runAllTimersAsync();
+        await result;
+
+        expect(mocks.generateText).toHaveBeenCalledTimes(attempts);
+        expect(mocks.resolveImageDelivery).toHaveBeenCalledOnce();
+        expect(mocks.resolveImageDelivery).not.toHaveBeenCalledWith(
+          expect.objectContaining({ skipSessionModel: true }),
+        );
+        expect(mocks.generateHelperText).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it('rejects unknown attachment IDs passed to inspect_images', async () => {
     mocks.resolveImageDelivery.mockResolvedValue({

@@ -19,7 +19,11 @@ import {
   setJudgmentModelSelectionCommand,
 } from './judgment-model';
 
-const MANAGED_ENV_VAR_NAMES = ['R_TYPESAFE_API_KEY', 'AI_GATEWAY_API_KEY'];
+const MANAGED_ENV_VAR_NAMES = [
+  'R_TYPESAFE_API_KEY',
+  'OPENROUTER_API_KEY',
+  'AI_GATEWAY_API_KEY',
+];
 
 let adminAuth: UserAuthSuccess;
 let memberAuth: UserAuthSuccess;
@@ -63,6 +67,7 @@ describe('judgment model settings commands', () => {
     await cleanup();
     vi.stubEnv('R_TYPESAFE_API_KEY', '');
     vi.stubEnv('R_JUDGMENT_MODEL', '');
+    vi.stubEnv('OPENROUTER_API_KEY', '');
     vi.stubEnv('AI_GATEWAY_API_KEY', '');
     const admin = await userFactory.create();
     adminAuth = {
@@ -83,6 +88,7 @@ describe('judgment model settings commands', () => {
   it('reports nothing connected and Off by default', async () => {
     await expect(getJudgmentModelSettingsCommand(adminAuth)).resolves.toEqual({
       typeSafe: { connected: false, source: null },
+      openRouterConnected: false,
       vercelGatewayConnected: false,
       storedSelection: null,
       envSelection: null,
@@ -219,6 +225,9 @@ describe('judgment model settings commands', () => {
     ).rejects.toThrow(
       'Connect Vercel AI Gateway before choosing Jev via Vercel AI Gateway.',
     );
+    await expect(
+      setJudgmentModelSelectionCommand(adminAuth, { selection: 'openrouter' }),
+    ).rejects.toThrow('Connect OpenRouter before choosing Jev via OpenRouter.');
 
     // Off is always allowed, even before a deployment settings row exists.
     await expect(
@@ -239,6 +248,19 @@ describe('judgment model settings commands', () => {
       effectiveSelectionUsable: true,
     });
     expect(JSON.stringify(settings)).not.toContain('gateway-key');
+
+    vi.stubEnv('OPENROUTER_API_KEY', 'openrouter-key');
+    const openRouterSettings = await setJudgmentModelSelectionCommand(
+      adminAuth,
+      { selection: 'openrouter' },
+    );
+    expect(openRouterSettings).toMatchObject({
+      openRouterConnected: true,
+      storedSelection: 'openrouter',
+      effectiveSelection: 'openrouter',
+      effectiveSelectionUsable: true,
+    });
+    expect(JSON.stringify(openRouterSettings)).not.toContain('openrouter-key');
   });
 
   it('keeps other deployment metadata when saving a selection', async () => {

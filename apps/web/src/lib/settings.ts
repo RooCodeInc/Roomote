@@ -6,7 +6,7 @@ export const SETTINGS_PATHS = {
   sourceControl: '/settings/source-control',
   automations: '/automations',
   agentGuidance: '/settings/agent-guidance',
-  integrations: '/settings/integrations',
+  integrations: '/integrations',
   comms: '/settings/comms',
   compute: '/settings/sandboxes',
   models: '/settings/models',

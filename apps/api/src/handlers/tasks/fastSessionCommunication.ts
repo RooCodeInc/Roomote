@@ -135,7 +135,7 @@ export async function sendMessageToFastSessionForUser(params: {
     return {
       success: false,
       status: 409,
-      error: "This Fast session's chat surface is not connected",
+      error: "This session's chat surface is not connected",
     };
   }
 

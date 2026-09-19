@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { resolve } from 'node:path';
+import { readFileSync } from 'node:fs';
 
 const validationRunner = resolve(
   import.meta.dirname,
@@ -46,5 +47,24 @@ test('deployment domains use valid DNS labels', () => {
     const result = validateDomain(domain);
     assert.equal(result.status, 1, `${domain} was accepted`);
     assert.match(result.stderr, /error: invalid domain:/);
+  }
+});
+
+test('successful deploys record the installed release after readiness', () => {
+  for (const script of ['deploy.sh', 'upgrade.sh']) {
+    const source = readFileSync(
+      resolve(import.meta.dirname, '..', 'scripts', script),
+      'utf8',
+    );
+    const readiness = source.indexOf('up -d --wait --wait-timeout 600');
+    const announcement = source.indexOf(
+      '/roomote/.docker/app/entrypoint.sh release-announcement',
+    );
+
+    assert.notEqual(readiness, -1, `${script} must wait for readiness`);
+    assert.ok(
+      announcement > readiness,
+      `${script} must record the release only after readiness`,
+    );
   }
 });

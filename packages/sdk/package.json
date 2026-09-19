@@ -76,6 +76,10 @@
       "import": "./src/server/lib/mcp/add-remote-custom-mcp.ts",
       "require": "./src/server/lib/mcp/add-remote-custom-mcp.ts"
     },
+    "./server/connect-integration": {
+      "import": "./src/server/lib/mcp/connect-integration.ts",
+      "require": "./src/server/lib/mcp/connect-integration.ts"
+    },
     "./server/platform-issue-reporting": {
       "import": "./src/server/lib/platform-issue-reporting.ts",
       "require": "./src/server/lib/platform-issue-reporting.ts"
@@ -87,6 +91,10 @@
     "./server/notion-api": {
       "import": "./src/server/lib/notion-api.ts",
       "require": "./src/server/lib/notion-api.ts"
+    },
+    "./server/mcp-data": {
+      "import": "./src/server/lib/mcp/data.ts",
+      "require": "./src/server/lib/mcp/data.ts"
     },
     "./server/rippling-api": {
       "import": "./src/server/lib/rippling-api.ts",

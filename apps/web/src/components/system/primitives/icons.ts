@@ -131,7 +131,6 @@ export {
   Maximize2,
   Medal,
   Menu,
-  MessageCirclePlus,
   MessageCircleQuestionMark,
   MessageSquareCode,
   MessageSquareIcon,
@@ -227,6 +226,7 @@ export {
   Zap,
   BellElectric,
   BatteryWarning,
+  PackageCheck,
 } from 'lucide-react';
 
 export type { LucideIcon } from 'lucide-react';

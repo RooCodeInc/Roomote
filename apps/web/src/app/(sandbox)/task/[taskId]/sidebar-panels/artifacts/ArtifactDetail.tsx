@@ -5,8 +5,6 @@ import { useQuery } from '@tanstack/react-query';
 import { format as formatDate } from 'date-fns';
 
 import {
-  ChevronLeftIcon,
-  ChevronRight,
   Maximize2,
   ChevronDown,
   Check,
@@ -33,6 +31,7 @@ interface ArtifactDetailProps {
   artifact: ArtifactWithContent | null;
   isLoading: boolean;
   taskId: string;
+  isActive: boolean;
 }
 
 function formatArtifactVersionDate(
@@ -53,6 +52,7 @@ export function ArtifactDetail({
   artifact,
   isLoading,
   taskId,
+  isActive,
 }: ArtifactDetailProps) {
   const [isFullscreenOpen, setIsFullscreenOpen] = useState(false);
   const [firstRowIsHeader, setFirstRowIsHeader] = useState(false);
@@ -148,28 +148,6 @@ export function ArtifactDetail({
         }
         actions={
           <>
-            <BasicTooltip content="Previous artifact">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-5 shrink-0 hover:scale-120 hover:text-accent-foreground"
-                disabled={!canGoToPreviousArtifact}
-                onClick={goToPreviousArtifact}
-              >
-                <ChevronLeftIcon className="size-3.5" />
-              </Button>
-            </BasicTooltip>
-            <BasicTooltip content="Next artifact">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-5 shrink-0 hover:scale-120 hover:text-accent-foreground"
-                disabled={!canGoToNextArtifact}
-                onClick={goToNextArtifact}
-              >
-                <ChevronRight className="size-3.5" />
-              </Button>
-            </BasicTooltip>
             <BasicTooltip content="View fullscreen">
               <Button
                 variant="ghost"
@@ -194,6 +172,11 @@ export function ArtifactDetail({
             isLoading={isLoading}
             firstRowIsHeader={firstRowIsHeader}
             onFirstRowIsHeaderChange={setFirstRowIsHeader}
+            onPreviousArtifact={
+              canGoToPreviousArtifact ? goToPreviousArtifact : undefined
+            }
+            onNextArtifact={canGoToNextArtifact ? goToNextArtifact : undefined}
+            navigationActive={isActive}
           />
         ) : null}
       </div>
@@ -215,6 +198,13 @@ export function ArtifactDetail({
               className="h-full border-0"
               firstRowIsHeader={firstRowIsHeader}
               showToolbar={false}
+              onPreviousArtifact={
+                canGoToPreviousArtifact ? goToPreviousArtifact : undefined
+              }
+              onNextArtifact={
+                canGoToNextArtifact ? goToNextArtifact : undefined
+              }
+              navigationActive={isActive}
             />
           </div>
         </div>

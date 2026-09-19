@@ -18,7 +18,6 @@ import { getHomeComposerSuggestionsCommand } from './composer-suggestions';
 const auth = { userId: 'user-1' } as UserAuthSuccess;
 const timing = {
   totalMs: 12,
-  preferenceGuardMs: 1,
   eligibleReferenceLookupMs: 2,
   cacheMs: 3,
   cacheStatus: 'fresh' as const,
@@ -56,7 +55,7 @@ describe('getHomeComposerSuggestionsCommand', () => {
     expect(mockGetRecommendations).toHaveBeenCalledWith('user-1');
     expect(mockLoggerInfo).toHaveBeenCalledWith(
       expect.stringMatching(
-        /^\[home-suggestion-timing\] outcome=fresh_cache total_ms=.+ preference_guard_ms=1 eligible_reference_lookup_ms=2 context_cache_status=fresh context_cache_ms=3 cached_source_validation_ms=n\/a brain_reads_ms=n\/a helper_generation_ms=n\/a post_generation_validation_ms=n\/a failure_reason=n\/a eligible_reference_count=5 readable_memory_count=n\/a suggestion_count=5$/u,
+        /^\[home-suggestion-timing\] outcome=fresh_cache total_ms=.+ eligible_reference_lookup_ms=2 context_cache_status=fresh context_cache_ms=3 cached_source_validation_ms=n\/a brain_reads_ms=n\/a helper_generation_ms=n\/a post_generation_validation_ms=n\/a failure_reason=n\/a eligible_reference_count=5 readable_memory_count=n\/a suggestion_count=5$/u,
       ),
     );
 
@@ -64,29 +63,6 @@ describe('getHomeComposerSuggestionsCommand', () => {
     expect(logged).not.toContain('user-1');
     for (const suggestion of suggestions)
       expect(logged).not.toContain(suggestion);
-  });
-
-  it('returns no suggestions when the shared preference guard is off', async () => {
-    mockGetRecommendations.mockResolvedValue({
-      suggestions: [],
-      outcome: 'flag_disabled',
-      timing: {
-        ...timing,
-        cacheStatus: 'not_checked',
-        eligibleReferenceLookupMs: null,
-        cacheMs: null,
-      },
-      eligibleReferenceCount: null,
-      readableMemoryCount: null,
-      failureReason: null,
-    });
-
-    await expect(getHomeComposerSuggestionsCommand(auth)).resolves.toEqual({
-      suggestions: [],
-    });
-    expect(mockLoggerInfo).toHaveBeenCalledWith(
-      expect.stringContaining('outcome=flag_disabled'),
-    );
   });
 
   it('fails soft when the shared service is unavailable', async () => {

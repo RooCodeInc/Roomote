@@ -1,7 +1,10 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, relative } from 'node:path';
 
-import type { SourceControlProvider } from '@roomote/types';
+import {
+  LIST_REPOSITORIES_TOOL_NAME,
+  type SourceControlProvider,
+} from '@roomote/types';
 
 /**
  * Markdown manifest written to the shared workspace root for tasks with an
@@ -84,6 +87,15 @@ export function discoverClonedRepositoryPaths(
   return repoPaths;
 }
 
+/** Single-line, length-capped description for JSON tool output. */
+function summarizeDescription(description: string | null): string {
+  const singleLine = (description ?? '').replace(/\s+/g, ' ').trim();
+
+  return singleLine.length <= MAX_DESCRIPTION_LENGTH
+    ? singleLine
+    : `${singleLine.slice(0, MAX_DESCRIPTION_LENGTH - 1).trimEnd()}…`;
+}
+
 function formatDescription(description: string | null): string {
   // Backslashes first: a raw `\|` would otherwise become `\\|`, which
   // Markdown reads as an escaped backslash followed by a live column break.
@@ -98,6 +110,58 @@ function formatDescription(description: string | null): string {
   }
 
   return `${singleLine.slice(0, MAX_DESCRIPTION_LENGTH - 1).trimEnd()}…`;
+}
+
+/**
+ * One page of the run's authorized repositories for the `list_repositories`
+ * tool. Every whitespace-separated query term must appear in the full name or
+ * the description, case-insensitively.
+ */
+export function pageOnDemandRepositories({
+  repositories,
+  clonedPaths,
+  query,
+  offset = 0,
+  limit,
+}: {
+  repositories: readonly OnDemandRepository[];
+  clonedPaths: Record<string, string>;
+  query?: string;
+  offset?: number;
+  limit: number;
+}) {
+  const terms = (query ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+  const matches = repositories
+    .filter((repository) => {
+      const haystack =
+        `${repository.fullName}\n${repository.description ?? ''}`.toLowerCase();
+      return terms.every((term) => haystack.includes(term));
+    })
+    .sort(
+      (left, right) =>
+        left.fullName.localeCompare(right.fullName) ||
+        left.sourceControlProvider.localeCompare(right.sourceControlProvider),
+    );
+  const page = matches.slice(offset, offset + limit);
+  const nextOffset = offset + page.length;
+
+  return {
+    repositories: page.map((repository) => {
+      const description = summarizeDescription(repository.description);
+      const path = clonedPaths[repository.fullName];
+      return {
+        fullName: repository.fullName,
+        sourceControlProvider: repository.sourceControlProvider,
+        defaultBranch: repository.defaultBranch,
+        private: repository.private,
+        ...(description ? { description } : {}),
+        checkedOut: Boolean(path),
+        ...(path ? { path } : {}),
+      };
+    }),
+    totalCount: matches.length,
+    ...(page.length > 0 && nextOffset < matches.length ? { nextOffset } : {}),
+  };
 }
 
 export function buildRepositoriesManifest({
@@ -128,6 +192,8 @@ export function buildRepositoriesManifest({
     `${repositories.length} ${repositories.length === 1 ? 'repository is' : 'repositories are'} available to this task; ${clonedCount} ${clonedCount === 1 ? 'is' : 'are'} checked out.`,
     '',
     `Repositories marked "no" are not cloned up front. Call the \`${CLONE_REPOSITORY_TOOL_NAME}\` tool with \`repositoryFullName\` (for example \`${sorted[0]?.fullName ?? 'owner/repo'}\`) to check one out; it is cloned into \`${join(workspaceRoot, '<owner>', '<repo>')}\` and the tool returns the path. Only checked-out repositories exist on disk. Do not run \`git clone\` yourself.`,
+    '',
+    `This file is a snapshot. The \`${LIST_REPOSITORIES_TOOL_NAME}\` tool reads the same repositories live and can search them by name or description.`,
     '',
     '| Repository | Checked out | Default branch | Visibility | Description |',
     '| --- | --- | --- | --- | --- |',

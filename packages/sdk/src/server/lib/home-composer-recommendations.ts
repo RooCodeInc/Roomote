@@ -6,7 +6,6 @@ import { z } from 'zod';
 import {
   db,
   findHomeComposerPrecomputeUserForRun,
-  isHomeComposerSuggestionsEnabled,
   listEligibleUserTaskMemoryRuns,
 } from '@roomote/db/server';
 import {
@@ -95,7 +94,6 @@ type CacheStatus = 'not_checked' | 'miss' | 'fresh' | 'stale' | 'invalid';
 
 export type HomeComposerRecommendationTiming = {
   totalMs: number;
-  preferenceGuardMs: number;
   eligibleReferenceLookupMs: number | null;
   cacheMs: number | null;
   cacheStatus: CacheStatus;
@@ -108,7 +106,6 @@ export type HomeComposerRecommendationTiming = {
 export type HomeComposerRecommendationResult = {
   suggestions: string[];
   outcome:
-    | 'flag_disabled'
     | 'no_eligible_memories'
     | 'fresh_cache'
     | 'stale_cache'
@@ -335,7 +332,6 @@ async function resolveHomeComposerRecommendations(input: {
 }): Promise<HomeComposerRecommendationResult> {
   const startedAt = performance.now();
   const timing: Omit<HomeComposerRecommendationTiming, 'totalMs'> = {
-    preferenceGuardMs: 0,
     eligibleReferenceLookupMs: null,
     cacheMs: null,
     cacheStatus: 'not_checked',
@@ -358,14 +354,6 @@ async function resolveHomeComposerRecommendations(input: {
     readableMemoryCount,
     failureReason,
   });
-
-  const preferenceStartedAt = performance.now();
-  const enabled = await isHomeComposerSuggestionsEnabled(db);
-  timing.preferenceGuardMs = performance.now() - preferenceStartedAt;
-
-  if (!enabled) {
-    return finish('flag_disabled');
-  }
 
   const refsStartedAt = performance.now();
   const refs = await listRecentBrainTaskMemoryRefs({
@@ -453,15 +441,12 @@ async function resolveHomeComposerRecommendations(input: {
   }
 
   const validationStartedAt = performance.now();
-  let latestState: [boolean, RecentBrainTaskMemoryRef[]] | null = null;
+  let latestState: RecentBrainTaskMemoryRef[] | null = null;
   try {
-    latestState = await Promise.all([
-      isHomeComposerSuggestionsEnabled(db),
-      listRecentBrainTaskMemoryRefs({
-        userId: input.userId,
-        limit: RECENT_MEMORY_LIMIT,
-      }),
-    ]);
+    latestState = await listRecentBrainTaskMemoryRefs({
+      userId: input.userId,
+      limit: RECENT_MEMORY_LIMIT,
+    });
   } catch {
     failureReason = 'post_generation_validation_error';
     console.error(
@@ -472,9 +457,7 @@ async function resolveHomeComposerRecommendations(input: {
   }
 
   if (latestState === null) return finish('fallback');
-  const [stillEnabled, latestRefs] = latestState;
-
-  if (!stillEnabled || sourceRevision(latestRefs) !== revision) {
+  if (sourceRevision(latestState) !== revision) {
     return finish('stale_discarded');
   }
 
