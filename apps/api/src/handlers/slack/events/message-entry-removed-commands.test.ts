@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { isRemovedEvalCommandInvocation } from './message-entry.js';
+import {
+  getSlackSkillsCommandPage,
+  isRemovedEvalCommandInvocation,
+} from './message-entry.js';
 
 describe('removed Slack commands', () => {
   it.each([
@@ -18,4 +21,16 @@ describe('removed Slack commands', () => {
       expect(isRemovedEvalCommandInvocation(text)).toBe(false);
     },
   );
+});
+
+describe('Slack skills command', () => {
+  it('accepts DM-style and mention-prefixed commands only', () => {
+    expect(getSlackSkillsCommandPage('skills')).toBe(1);
+    expect(getSlackSkillsCommandPage('/skills 2')).toBe(2);
+    expect(getSlackSkillsCommandPage('<@U_ROOMOTE> skills 3')).toBe(3);
+    expect(getSlackSkillsCommandPage('please show skills')).toBeNull();
+    expect(
+      getSlackSkillsCommandPage('<@U_OTHER> please show skills'),
+    ).toBeNull();
+  });
 });

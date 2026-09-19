@@ -4,6 +4,7 @@ import {
   getNewTelegramMessageReactions,
   getTelegramGoalCommand,
   getTelegramNewTaskCommand,
+  getTelegramSkillsCommand,
   getTelegramUpdateCallbackQuery,
   getTelegramUpdateCommunicationMetadata,
   getTelegramUpdateMessageReaction,
@@ -62,6 +63,41 @@ describe('Telegram update helpers', () => {
     expect(isTelegramHelpCommand(parse('/help@my_bot'))).toBe(true);
     expect(isTelegramHelpCommand(parse('/help me'))).toBe(false);
     expect(isTelegramHelpCommand(parse('/help', 'group'))).toBe(false);
+  });
+
+  it('parses skills pages without weakening group bot targeting', () => {
+    const parse = (text: string, chatType = 'private') =>
+      parseTelegramUpdate({
+        update_id: 1,
+        message: {
+          message_id: 2,
+          chat: { id: 3, type: chatType },
+          text,
+          entities: [
+            {
+              type: 'bot_command',
+              offset: 0,
+              length: text.split(' ')[0]!.length,
+            },
+          ],
+        },
+      }).data!;
+
+    expect(getTelegramSkillsCommand(parse('/skills 2'))).toEqual({
+      command: 'skills',
+      page: 2,
+    });
+    expect(
+      getTelegramSkillsCommand(parse('/skills@roomote_bot', 'group'), {
+        botUsername: 'roomote_bot',
+      }),
+    ).toEqual({ command: 'skills', page: 1 });
+    expect(
+      getTelegramSkillsCommand(parse('/skills@other_bot', 'group'), {
+        botUsername: 'roomote_bot',
+      }),
+    ).toBeNull();
+    expect(getTelegramSkillsCommand(parse('/skills nope'))).toBeNull();
   });
 
   it('parses callback_query updates', () => {

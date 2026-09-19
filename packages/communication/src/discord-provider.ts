@@ -1259,6 +1259,20 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
             },
           ],
         },
+        {
+          name: 'skills',
+          description: 'List skills you can invoke with $name',
+          type: 1,
+          options: [
+            {
+              type: 4,
+              name: 'page',
+              description: 'Page number',
+              required: false,
+              min_value: 1,
+            },
+          ],
+        },
         { name: 'help', description: 'Show Roomote command help', type: 1 },
       ],
       { retryNetworkErrors: true, retryServerErrors: true },

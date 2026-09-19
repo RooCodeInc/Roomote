@@ -90,6 +90,7 @@ import {
   transcribeAudioAttachment,
   type FastAgentReactionExternalInput,
   type RoutingWorkspace,
+  parseSkillsCommandPage,
 } from '@roomote/cloud-agents/server';
 
 import { apiLogger } from '../../logging.js';
@@ -127,6 +128,7 @@ import {
 } from '../tasks/suggestion-launch.js';
 import { continueSessionAttentionReply } from '../tasks/continue-session-attention-reply.js';
 import { shouldRouteUnmentionedTeamsThreadReplyToAgent } from './unmentioned-thread-reply.js';
+import { buildSkillsCommandReply } from '../shared/skills-command.js';
 
 const TEAMS_ACTIVITY_DEDUP_PREFIX = 'teams:activity:';
 const TEAMS_ACTIVITY_DEDUP_TTL_SECONDS = 5 * 60;
@@ -2142,6 +2144,30 @@ teams.post('/', async (c) => {
   c.set('claimedActivityId', queuedMessage.ts);
 
   const metadata = getTeamsActivityCommunicationMetadata(activity);
+  const skillsPage = isTeamsTaskEntryActivity(activity)
+    ? parseSkillsCommandPage(queuedMessage.text)
+    : null;
+  if (skillsPage !== null) {
+    if (!mappedUserId) {
+      await postTeamsAccountLinkPrompt({ activity, metadata });
+      return c.json({
+        ok: true,
+        skillsListed: false,
+        reason: 'account_link_required',
+      });
+    }
+    await postTeamsMessageBestEffort({
+      conversationId: metadata.communicationChannelId,
+      threadId: metadata.communicationThreadId,
+      serviceUrl: metadata.communicationServiceUrl,
+      text: await buildSkillsCommandReply({
+        userId: mappedUserId,
+        page: skillsPage,
+        command: '/skills',
+      }),
+    });
+    return c.json({ ok: true, skillsListed: true });
+  }
   if (claimedSuggestionReaction) {
     const suggestionTarget = resolveSuggestedTaskLaunchTarget(
       claimedSuggestionReaction,

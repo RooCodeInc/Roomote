@@ -343,6 +343,32 @@ describe('Discord Gateway event normalization', () => {
     expect(discordEventToQueuedCommunicationMessage(event)).toBeNull();
   });
 
+  it('parses paged skills commands without queueing them as agent work', () => {
+    const event = parse({
+      op: 0,
+      t: 'INTERACTION_CREATE',
+      d: {
+        id: 'interaction-skills',
+        application_id: 'application-1',
+        type: 2,
+        token: 'token',
+        channel_id: 'channel-1',
+        user: { id: 'user-1', username: 'matt' },
+        data: {
+          name: 'skills',
+          options: [{ name: 'page', type: 4, value: 2 }],
+        },
+      },
+    });
+
+    expect(getDiscordInteractionCommand(event)).toEqual({
+      name: 'skills',
+      page: 2,
+    });
+    expect(isDiscordTaskEntryEvent(event)).toBe(true);
+    expect(discordEventToQueuedCommunicationMessage(event)).toBeNull();
+  });
+
   it('does not treat removed fast interactions as task entry', () => {
     const event = parse({
       op: 0,

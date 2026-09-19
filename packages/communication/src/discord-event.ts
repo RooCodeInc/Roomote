@@ -538,6 +538,7 @@ export function getDiscordInteractionCommand(
   request?: string;
   code?: string;
   objective?: string;
+  page?: number;
 } | null {
   const interaction = isDiscordGatewayEventValue(eventOrInteraction)
     ? getDiscordInteractionCreate(eventOrInteraction)
@@ -554,6 +555,7 @@ export function getDiscordInteractionCommand(
     interaction.data.options,
     'objective',
   )?.value;
+  const page = findInteractionOption(interaction.data.options, 'page')?.value;
   return {
     name: interaction.data.name.toLowerCase(),
     ...(typeof request === 'string' && request.trim()
@@ -563,6 +565,7 @@ export function getDiscordInteractionCommand(
     ...(typeof objective === 'string' && objective.trim()
       ? { objective: objective.trim() }
       : {}),
+    ...(typeof page === 'number' ? { page } : {}),
   };
 }
 
@@ -586,7 +589,9 @@ export function isDiscordTaskEntryEvent(
     );
   }
   const commandName = getDiscordInteractionCommand(event)?.name;
-  return commandName === 'new' || commandName === 'goal';
+  return (
+    commandName === 'new' || commandName === 'goal' || commandName === 'skills'
+  );
 }
 
 function formatDiscordUser(input: {
