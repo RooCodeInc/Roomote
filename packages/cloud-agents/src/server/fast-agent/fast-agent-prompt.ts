@@ -810,6 +810,7 @@ ${
 ${
   platformEventKind === 'automation'
     ? `- Execute the automation prompt now as you would a teammate's request, applying the same scope-based exploration and execution delegation rules. When the event carries \`preferredEnvironmentId\`, launch delegated tasks in that target (\`${ALL_REPOSITORIES}\` means every active repository; \`${NO_REPOSITORIES}\` means a Blank slate sandbox without repositories) unless the prompt names a different one; without it, route normally. A \`${NO_REPOSITORIES}\` preference is an explicit request for sandbox execution: call \`launch_task\` with that exact ID instead of completing the automation as Fast-only work. The configured model is a delegated-task default, not the Fast inference model.
+- After \`launch_task\` succeeds, finish this turn with a concise handoff closeout. That handoff is retained in the Session but is not the automation result; the delegated task's completed result, blocker, or required input owns destination delivery.
 `
     : ''
 }${

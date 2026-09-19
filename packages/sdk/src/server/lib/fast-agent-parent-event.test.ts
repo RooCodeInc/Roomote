@@ -1649,6 +1649,76 @@ describe('deliverFastAgentParentEvent', () => {
     );
   });
 
+  it('does not publish an automation handoff as its result', async () => {
+    const pendingParent = {
+      sessionId: parent.sessionId,
+      conversation: {
+        surface: 'slack' as const,
+        workspaceId: 'T123',
+        conversationId: 'automation-1:occurrence-1',
+        replyTarget: { channelId: 'C123' },
+      },
+    };
+    mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) =>
+      adapter.postReply({
+        purpose: 'closeout',
+        message: 'I’m checking the result now.',
+        kickoff: true,
+      }),
+    );
+
+    await deliverFastAgentParentEvent({
+      parent: pendingParent,
+      event: {
+        type: 'automation_triggered',
+        eventId: 'automation-1:occurrence-1',
+        automationId: 'automation-1',
+        automationName: 'Weekly scan',
+        prompt: 'Find flaky tests.',
+        trigger: 'schedule',
+      },
+    });
+
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+    expect(mocks.updateMessage).not.toHaveBeenCalled();
+    expect(mocks.recordCustomAutomationResult).not.toHaveBeenCalled();
+  });
+
+  it('suppresses automation handoffs before provider-specific delivery', async () => {
+    const discordParent = {
+      sessionId: parent.sessionId,
+      conversation: {
+        surface: 'discord' as const,
+        workspaceId: 'guild-1',
+        conversationId: 'automation-1:occurrence-1',
+        replyTarget: { channelId: 'channel-1' },
+      },
+    };
+    mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) =>
+      adapter.postReply({
+        purpose: 'closeout',
+        message: 'I’m checking the result now.',
+        kickoff: true,
+      }),
+    );
+
+    await deliverFastAgentParentEvent({
+      parent: discordParent,
+      event: {
+        type: 'automation_triggered',
+        eventId: 'automation-1:occurrence-1',
+        automationId: 'automation-1',
+        automationName: 'Weekly scan',
+        prompt: 'Find flaky tests.',
+        trigger: 'schedule',
+      },
+    });
+
+    expect(mocks.discordPostMessage).not.toHaveBeenCalled();
+    expect(mocks.discordEditMessage).not.toHaveBeenCalled();
+    expect(mocks.recordCustomAutomationResult).not.toHaveBeenCalled();
+  });
+
   it('posts suggestions beneath the Slack report when an automation task settles', async () => {
     const pendingParent = {
       sessionId: parent.sessionId,
@@ -2464,71 +2534,46 @@ describe('deliverFastAgentParentEvent', () => {
     });
   });
 
-  it.each([
-    {
-      kickoff: true,
-      eventType: 'automation_triggered' as const,
-    },
-    {
-      kickoff: false,
-      eventType: 'task_settled' as const,
-    },
-  ])(
-    'renders the automation title as a Telegram heading for $eventType messages',
-    async ({ kickoff, eventType }) => {
-      const message = kickoff
-        ? 'Starting the repository scan.'
-        : 'No issues found.';
-      const telegramParent = {
-        ...parent,
-        conversation: {
-          surface: 'telegram' as const,
-          workspaceId: 'telegram-chat-1',
-          conversationId: 'automation-1:occurrence-1',
-          replyTarget: { channelId: 'telegram-chat-1' },
-        },
-      };
-      mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) =>
-        adapter.postReply({
-          purpose: kickoff ? 'progress' : 'closeout',
-          message,
-          kickoff,
-        }),
-      );
+  it('renders the automation title as a Telegram heading for a settled task report', async () => {
+    const message = 'No issues found.';
+    const telegramParent = {
+      ...parent,
+      conversation: {
+        surface: 'telegram' as const,
+        workspaceId: 'telegram-chat-1',
+        conversationId: 'automation-1:occurrence-1',
+        replyTarget: { channelId: 'telegram-chat-1' },
+      },
+    };
+    mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) =>
+      adapter.postReply({
+        purpose: 'closeout',
+        message,
+      }),
+    );
 
-      await deliverFastAgentParentEvent({
-        parent: telegramParent,
-        event:
-          eventType === 'automation_triggered'
-            ? {
-                type: eventType,
-                eventId: 'automation-1:occurrence-1',
-                automationId: 'automation-1',
-                automationName: 'Weekly scan',
-                prompt: 'Find actionable regressions.',
-                trigger: 'schedule',
-              }
-            : {
-                type: eventType,
-                taskId: 'child-task-1',
-                runId: 42,
-                customAutomationId: 'automation-1',
-                status: 'completed',
-                taskUrl: 'https://roomote.example/task/child-task-1',
-                pullRequests: [],
-              },
-      });
+    await deliverFastAgentParentEvent({
+      parent: telegramParent,
+      event: {
+        type: 'task_settled',
+        taskId: 'child-task-1',
+        runId: 42,
+        customAutomationId: 'automation-1',
+        status: 'completed',
+        taskUrl: 'https://roomote.example/task/child-task-1',
+        pullRequests: [],
+      },
+    });
 
-      expect(mocks.telegramPostMessage).toHaveBeenCalledWith(
-        expect.objectContaining({
-          channelId: 'telegram-chat-1',
-          text: `<h3>Weekly scan</h3>\n\n${message}`,
-          footerText: `Reply anytime · [Open in Roomote](https://api.roomote.example/sessions/${parent.sessionId}?utm_source=telegram&utm_medium=link&utm_campaign=telegram.fast_reply)`,
-          textFormat: 'markdown',
-        }),
-      );
-    },
-  );
+    expect(mocks.telegramPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'telegram-chat-1',
+        text: `<h3>Weekly scan</h3>\n\n${message}`,
+        footerText: `Reply anytime · [Open in Roomote](https://api.roomote.example/sessions/${parent.sessionId}?utm_source=telegram&utm_medium=link&utm_campaign=telegram.fast_reply)`,
+        textFormat: 'markdown',
+      }),
+    );
+  });
 
   it('renders Markdown-sensitive automation names as literal Telegram heading text', async () => {
     const telegramParent = {

@@ -2784,10 +2784,12 @@ export async function deliverFastAgentParentEventWithLock(
         adapter: {
           ...baseAdapter,
           postReply: async (reply) => {
+            if (reply.kickoff) {
+              return;
+            }
             if (
-              !reply.kickoff &&
-              (reply.purpose === 'closeout' ||
-                reply.purpose === 'clarification')
+              reply.purpose === 'closeout' ||
+              reply.purpose === 'clarification'
             ) {
               await recordCustomAutomationResult({
                 automationId,
