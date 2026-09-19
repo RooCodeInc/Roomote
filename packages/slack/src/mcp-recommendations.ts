@@ -59,6 +59,8 @@ const SLACK_ENABLE_DESCRIPTIONS: Record<string, string> = {
     'Roomote will be able to inspect prompts, evaluations, and AI run history.',
   buildkite:
     'Roomote will be able to inspect Buildkite pipelines, builds, jobs, logs, tests, artifacts, and agents through a read-only connection.',
+  cloudflare:
+    'Roomote will be able to inspect Cloudflare resources and run explicitly requested API operations with the connected permissions.',
   linear:
     'Roomote will be able to pull issue, project, and roadmap context into tasks.',
   monday:

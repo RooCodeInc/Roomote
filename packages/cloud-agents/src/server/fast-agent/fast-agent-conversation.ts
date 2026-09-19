@@ -116,6 +116,7 @@ export type CreateFastAgentArtifact = (params: {
   contentType: string;
   size: number;
   viewUrl: string;
+  standaloneViewUrl: string;
 }>;
 
 export type LaunchFastAgentTask = (params: {

@@ -45,6 +45,13 @@ export const MCP_SETUP_INTEGRATION_METADATA: Record<
       'Keep hosted MCP access read-only at the provider endpoint',
     ],
   },
+  cloudflare: {
+    capabilities: [
+      'Search the Cloudflare API for available operations',
+      'Inspect zones, Workers, DNS, security, and account resources',
+      'Run explicitly requested Cloudflare API operations with the connected permissions',
+    ],
+  },
   asana: {
     capabilities: [
       'Inspect Asana workspaces, projects, and tasks',

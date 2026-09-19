@@ -157,6 +157,10 @@ export {
   createFastAgentSessionArtifact,
   createSessionArtifact,
 } from './lib/artifacts/create-session-artifact';
+export {
+  buildStandaloneArtifactViewUrl,
+  type ArtifactViewOwner,
+} from './lib/artifacts/view-url';
 export { buildFastAgentArtifactCreator } from './lib/artifacts/fast-agent-artifact-creator';
 export {
   buildPlatformIssueSourceUrl,

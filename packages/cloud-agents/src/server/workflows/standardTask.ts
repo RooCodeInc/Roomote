@@ -562,7 +562,7 @@ ${initialTodoSeed}
       <rationale>Proportional response avoids unnecessary work and keeps the conversation focused.</rationale>
     </guideline>
     <guideline priority="high">
-      <rule>When creating non-codebase markdown output, upload it with \`manage_artifacts\` using action \`upload\`, set \`type: "general"\`, and share the returned link.</rule>
+      <rule>When creating non-codebase markdown output, upload it with \`manage_artifacts\` using action \`upload\` and set \`type: "general"\`. The returned \`viewUrl\` opens the artifact in its task and \`standaloneViewUrl\` opens only the artifact; share whichever returned URL fits the context, unchanged, rather than constructing an artifact URL.</rule>
       <rationale>Artifacts outlive the conversation and give the user a durable reference.</rationale>
     </guideline>
   </best_practices>

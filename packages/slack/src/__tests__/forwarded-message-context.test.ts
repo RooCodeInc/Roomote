@@ -216,7 +216,20 @@ describe('forwarded-message-context', () => {
     );
   });
 
-  it('adds the recommendation to active Slack agent context', () => {
+  it('adds a setup recommendation for pasted Cloudflare dashboard URLs', () => {
+    expect(
+      formatSlackMcpSetupRecommendationContext(
+        'Can you inspect https://dash.cloudflare.com/example/workers/services/view/api?',
+      ),
+    ).toBe(
+      [
+        'Slack integration setup recommendations:',
+        '- Cloudflare: if it is unavailable, offer to connect the built-in integration from /integrations.',
+      ].join('\n'),
+    );
+  });
+
+  it('adds the Buildkite recommendation to active Slack agent context', () => {
     expect(
       formatSlackAttachmentContext('Can you inspect this?', undefined, [
         {
@@ -239,6 +252,20 @@ describe('forwarded-message-context', () => {
         },
       ]),
     ).toContain('Slack integration setup recommendations:\n- Buildkite:');
+  });
+
+  it('adds the Cloudflare recommendation to active Slack agent context', () => {
+    expect(
+      formatSlackAttachmentContext('Can you inspect this?', undefined, [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: '<https://dash.cloudflare.com/example/workers|Worker>',
+          },
+        },
+      ]),
+    ).toContain('Slack integration setup recommendations:\n- Cloudflare:');
   });
 
   it('extracts Sentry-style block and attachment context without action labels', () => {

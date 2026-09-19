@@ -128,6 +128,14 @@ export const SLACK_MCP_SETUP_SERVICES: SlackMcpSetupServiceDefinition[] = [
     userSettingsPath: '/settings/personal',
   },
   {
+    id: 'cloudflare',
+    name: 'Cloudflare',
+    availabilityKind: 'curated_oauth',
+    hostSuffixes: ['dash.cloudflare.com'],
+    deploymentSettingsPath: '/integrations',
+    userSettingsPath: '/settings/personal',
+  },
+  {
     id: 'asana',
     name: 'Asana',
     availabilityKind: 'admin_configured',

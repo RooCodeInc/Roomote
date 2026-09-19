@@ -156,6 +156,7 @@
           "integrations/better-stack",
           "integrations/buildkite",
           "integrations/braintrust",
+          "integrations/cloudflare",
           "integrations/elevenlabs",
           "integrations/exa",
           "integrations/grafana",

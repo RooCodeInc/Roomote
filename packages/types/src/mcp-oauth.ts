@@ -666,6 +666,17 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
       "Use Buildkite to inspect organizations, pipelines, builds, jobs, logs, artifacts, annotations, tests, clusters, agents, and queues. This connection uses Buildkite's provider-enforced read-only MCP endpoint; do not assume mutation tools are available.",
   },
   {
+    id: 'cloudflare',
+    name: 'Cloudflare',
+    url: 'https://mcp.cloudflare.com/mcp',
+    description: `Inspect and operate Cloudflare resources from ${PRODUCT_NAME} tasks`,
+    icon: 'cloudflare',
+    connectionScope: 'deployment',
+    oauthResource: 'https://mcp.cloudflare.com/mcp',
+    instructions:
+      "Use Cloudflare to search and inspect the deployment's Cloudflare resources. The execute tool can call both read and write Cloudflare APIs; make changes only when the user explicitly requests the specific mutation, and preserve the permissions granted during OAuth consent.",
+  },
+  {
     id: 'pylon',
     name: 'Pylon',
     url: 'https://mcp.usepylon.com',

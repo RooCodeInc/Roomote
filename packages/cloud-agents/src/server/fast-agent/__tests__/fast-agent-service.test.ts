@@ -5544,7 +5544,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       artifactType: 'general',
       contentType: 'text/markdown',
       size: 8,
-      viewUrl: 'https://roomote.example/sessions/session-1',
+      viewUrl:
+        'https://roomote.example/sessions/session-1?artifact=notes%2Fdecision.md&v=1',
+      standaloneViewUrl:
+        'https://roomote.example/artifacts/session/session-1?path=notes%2Fdecision.md&v=1',
     });
     const adapter = callbacks({ createArtifact });
     mocks.generateText.mockImplementation(
@@ -5560,7 +5563,16 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         });
         expect(result).toMatchObject({
           success: true,
-          artifact: { id: 'artifact-1', contentType: 'text/markdown' },
+          artifact: {
+            id: 'artifact-1',
+            contentType: 'text/markdown',
+            viewUrl:
+              'https://roomote.example/sessions/session-1?artifact=notes%2Fdecision.md&v=1',
+            standaloneViewUrl:
+              'https://roomote.example/artifacts/session/session-1?path=notes%2Fdecision.md&v=1',
+          },
+          guidance:
+            'The artifact viewUrl opens in its Session; standaloneViewUrl opens only the artifact. Share whichever returned URL fits the context, unchanged, instead of constructing an artifact URL.',
         });
         await invokeTool(nativeToolNames.sendChatReply, {
           purpose: 'closeout',
