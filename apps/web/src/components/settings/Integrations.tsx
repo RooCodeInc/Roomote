@@ -141,6 +141,8 @@ const DEEP_LINK_ENABLE_DESCRIPTIONS: Record<string, string> = {
   sentry:
     'Roomote will be able to inspect Sentry issue context and run scheduled Sentry triage through MCP.',
   supabase: 'Roomote will get read-only database access and platform context.',
+  stripe:
+    'Roomote will use one deployment-wide restricted Stripe key to inspect account, payment, and billing data. The general write tool starts disabled.',
   supermemory:
     'Roomote will be able to save shared memories and recall context from earlier tasks.',
   vercel:

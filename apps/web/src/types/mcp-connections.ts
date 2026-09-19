@@ -109,6 +109,14 @@ export const saveXConnectionSchema = z.object({
 
 export type SaveXConnectionInput = z.infer<typeof saveXConnectionSchema>;
 
+export const saveStripeConnectionSchema = z.object({
+  apiKey: z.string().transform((value) => value.trim()),
+});
+
+export type SaveStripeConnectionInput = z.infer<
+  typeof saveStripeConnectionSchema
+>;
+
 export const saveGrafanaConnectionSchema = z.object({
   baseUrl: z
     .string()

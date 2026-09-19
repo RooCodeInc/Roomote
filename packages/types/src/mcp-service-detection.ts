@@ -91,6 +91,14 @@ const X_APP_PATH_REGEX =
 
 export const SLACK_MCP_SETUP_SERVICES: SlackMcpSetupServiceDefinition[] = [
   {
+    id: 'stripe',
+    name: 'Stripe',
+    availabilityKind: 'admin_configured',
+    hostSuffixes: ['dashboard.stripe.com'],
+    deploymentSettingsPath: '/integrations',
+    userSettingsPath: '/settings/personal',
+  },
+  {
     id: 'asana',
     name: 'Asana',
     availabilityKind: 'admin_configured',

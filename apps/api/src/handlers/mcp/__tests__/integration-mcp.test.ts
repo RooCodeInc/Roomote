@@ -296,6 +296,30 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
     expect(body.error.message).toContain('valid credentials');
   });
 
+  it('forwards the decrypted Stripe restricted API key upstream', async () => {
+    mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
+    mockFindConnection.mockResolvedValue({
+      id: 'conn-stripe',
+      userId: null,
+      authConfig: { type: 'stripe', encryptedApiKey: 'encrypted-key' },
+    });
+    mockDecrypt.mockReturnValue('rk_test_restricted');
+    const fetchMock = stubUpstreamFetch();
+
+    const response = await postMcp(
+      createApp('stripe', createRunToken()),
+      createInitializeRequest(1),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockDecrypt).toHaveBeenCalledWith('encrypted-key');
+    expect(mockGetValidAccessToken).not.toHaveBeenCalled();
+    const upstreamHeaders = fetchMock.mock.calls[0]?.[1]?.headers as Headers;
+    expect(upstreamHeaders.get('authorization')).toBe(
+      'Bearer rk_test_restricted',
+    );
+  });
+
   it('forwards the decrypted Exa API key only as x-api-key', async () => {
     mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
     mockFindConnection.mockResolvedValue({

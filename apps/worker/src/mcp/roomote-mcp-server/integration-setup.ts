@@ -53,6 +53,14 @@ Sentry uses the workspace MCP integration:
 
 Once connected, tasks can inspect Sentry issue and project context, and scheduled Sentry triage automation uses the same read-only MCP connection.
 
+# Stripe
+
+Stripe uses an admin-managed restricted API key:
+1. A deployment operator enables Stripe from Settings > Integrations.
+2. That operator connects Stripe once for the deployment with a restricted key that grants only the required read permissions.
+
+Once connected, I can inspect Stripe accounts, payments, billing data, API details, analytics, and documentation. The general stripe_api_write tool stays disabled until an administrator enables it from Manage tools. Stripe's own human-confirmation requirements still apply to sensitive writes.
+
 # Pylon
 
 Pylon uses OAuth:
