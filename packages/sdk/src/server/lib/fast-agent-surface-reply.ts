@@ -771,6 +771,7 @@ function buildSurfaceHumanFollowUpEvent(
     ...(params.senderDisplayName
       ? { senderDisplayName: params.senderDisplayName }
       : {}),
+    ...(params.webFollowUp ? { webFollowUp: true } : {}),
     ...(params.agentContext ? { agentContext: params.agentContext } : {}),
     ...(params.activeTasks?.length ? { activeTasks: params.activeTasks } : {}),
     ...(params.deliveryConversation

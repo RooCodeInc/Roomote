@@ -275,6 +275,7 @@ describe('setup context on ordinary Fast session input', () => {
       event: expect.objectContaining({
         setupSession: true,
         setupContext: setupContext.setupContext,
+        webFollowUp: true,
       }),
     });
   });

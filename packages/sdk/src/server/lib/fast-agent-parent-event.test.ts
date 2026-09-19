@@ -558,6 +558,92 @@ describe('deliverFastAgentParentEvent', () => {
     );
   });
 
+  it.each([
+    {
+      surface: 'slack' as const,
+      workspaceId: 'T123',
+      channelId: 'C123',
+      threadId: '100.001',
+      post: mocks.postMessage,
+      expectedQuote: '>*Dana:* Continue from web\nThe proof is ready.',
+    },
+    {
+      surface: 'discord' as const,
+      workspaceId: 'guild-1',
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+      post: mocks.discordPostMessage,
+      expectedQuote: '> **Dana:** Continue from web\n\nThe proof is ready.',
+    },
+    {
+      surface: 'teams' as const,
+      workspaceId: 'tenant-1',
+      channelId: 'teams-channel-1',
+      threadId: 'teams-root-1',
+      post: mocks.teamsPostMessage,
+      expectedQuote: '> **Dana:** Continue from web\n\nThe proof is ready.',
+    },
+    {
+      surface: 'telegram' as const,
+      workspaceId: 'telegram-chat-1',
+      channelId: 'telegram-chat-1',
+      threadId: undefined,
+      post: mocks.telegramPostMessage,
+      expectedQuote: '> **Dana:** Continue from web\n\nThe proof is ready.',
+    },
+    {
+      surface: 'agentmail' as const,
+      workspaceId: 'roomote@agentmail.test',
+      channelId: 'roomote@agentmail.test',
+      threadId: undefined,
+      post: mocks.agentMailPostMessage,
+      expectedQuote: '> **Dana:** Continue from web\n\nThe proof is ready.',
+    },
+  ])(
+    'restores a durable web follow-up quote on $surface',
+    async ({
+      surface,
+      workspaceId,
+      channelId,
+      threadId,
+      post,
+      expectedQuote,
+    }) => {
+      await deliverFastAgentParentEventWithLock(
+        {
+          parent: {
+            ...parent,
+            conversation: {
+              surface,
+              workspaceId,
+              conversationId: `${surface}-conversation-1`,
+              replyTarget: {
+                channelId,
+                ...(threadId ? { threadId } : {}),
+              },
+            },
+          },
+          event: {
+            type: 'human_follow_up',
+            eventId: 'web-message-1',
+            currentMessageId: 'web-message-1',
+            userId: 'user-2',
+            senderDisplayName: 'Dana',
+            question: 'Continue from web',
+            webFollowUp: true,
+          },
+        },
+        mocks.releaseTurnLock,
+      );
+
+      expect(post).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: expect.stringContaining(expectedQuote),
+        }),
+      );
+    },
+  );
+
   it.each([false, true])(
     'preserves explicit queued provider quiet eligibility (allowed=%s)',
     async (allowSilentAmbientReply) => {

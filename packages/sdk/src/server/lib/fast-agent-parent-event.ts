@@ -145,6 +145,11 @@ import {
 } from './fast-agent-reply-replacement';
 import { buildFastAgentSlackReplyBodyBlocks } from './fast-agent-slack-reply-blocks';
 import {
+  buildMarkdownReplyQuote,
+  buildSlackReplyQuote,
+  createPendingFastAgentReplyQuote,
+} from './fast-agent-reply-quote';
+import {
   attachPendingPrReviewActionMessageWithRetirement,
   retirePrReviewActionMessagesBestEffort,
   setPendingPrReviewAction,
@@ -489,6 +494,7 @@ type FastAgentParentTurnParams = {
   onReplyPosted: () => void;
   footerContext: FastSessionReplyFooterContext;
   deliveryConversation?: FastAgentConversation;
+  pendingReplyQuote?: ReturnType<typeof createPendingFastAgentReplyQuote>;
 };
 
 type CommunicationParentSurface =
@@ -1149,11 +1155,12 @@ async function createSlackFastAgentParentTurn(
             followUpPrompt: action.followUpPrompt,
           });
         }
+        const quote = params.pendingReplyQuote?.peek(buildSlackReplyQuote);
         const messageTs = await postSlackThreadMessageWithFooterText({
           slack,
           channel: conversation.replyTarget.channelId,
           threadTs: threadId!,
-          text: message,
+          text: quote ? `${quote}\n${message}` : message,
           bodyBlocks: action
             ? [
                 ...buildSlackPrReviewActionBlocks({
@@ -1164,6 +1171,7 @@ async function createSlackFastAgentParentTurn(
               ]
             : buildFastAgentSlackReplyBodyBlocks({
                 message,
+                quote,
                 charts,
                 images,
               }),
@@ -1181,6 +1189,7 @@ async function createSlackFastAgentParentTurn(
             'Slack did not return a Fast parent event timestamp.',
           );
         }
+        params.pendingReplyQuote?.markDelivered();
         await recordFastAgentConversationMessageBestEffort({
           sessionId: session.id,
           conversation,
@@ -1573,7 +1582,9 @@ async function createDiscordFastAgentParentTurn(
             suggestions.length > 0,
           )
         : message;
-      const textWithFooter = `${reportMessage}\n\n${footerText}`;
+      const quote = params.pendingReplyQuote?.peek(buildMarkdownReplyQuote);
+      const bodyText = quote ? `${quote}\n\n${reportMessage}` : reportMessage;
+      const textWithFooter = `${bodyText}\n\n${footerText}`;
       const posted = await postDiscordFastParentMessageWithFooter({
         provider,
         conversation,
@@ -1618,6 +1629,7 @@ async function createDiscordFastAgentParentTurn(
               : {}),
           }),
       });
+      params.pendingReplyQuote?.markDelivered();
       activity.reassert();
       await recordFastAgentConversationMessageBestEffort({
         sessionId: session.id,
@@ -1748,6 +1760,8 @@ async function createTeamsFastAgentParentTurn(
                 suggestions.length > 0,
               )
             : message;
+        const quote = params.pendingReplyQuote?.peek(buildMarkdownReplyQuote);
+        const bodyText = quote ? `${quote}\n\n${reportMessage}` : reportMessage;
         const footerText = buildFastSessionReplyFooterText({
           provider: 'teams',
           sessionId: params.parent.sessionId,
@@ -1807,11 +1821,12 @@ async function createTeamsFastAgentParentTurn(
                   replyToMessageId: conversation.replyTarget.threadId,
                 }
               : {}),
-            text: reportMessage,
+            text: bodyText,
             textFormat: 'markdown',
             images,
           },
         });
+        params.pendingReplyQuote?.markDelivered();
         if (
           isFastAutomationReportEvent(params.event) &&
           !kickoff &&
@@ -1880,6 +1895,8 @@ async function createAgentMailFastAgentParentTurn(
       // anchor and recipient from the durable conversation row; threadId
       // carries the internal conversation id.
       postReply: async ({ message, kickoff }) => {
+        const quote = params.pendingReplyQuote?.peek(buildMarkdownReplyQuote);
+        const bodyText = quote ? `${quote}\n\n${message}` : message;
         const buttons =
           automation && isFastAutomationReportEvent(params.event) && !kickoff
             ? buildAutomationResultLinkButtonRows({
@@ -1902,13 +1919,13 @@ async function createAgentMailFastAgentParentTurn(
           .postMessage({
             channelId: conversation.replyTarget.channelId,
             threadId: conversation.conversationId,
-            text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'agentmail', sessionId: params.parent.sessionId, ...params.footerContext })}`,
+            text: `${bodyText}\n\n${buildFastSessionReplyFooterText({ provider: 'agentmail', sessionId: params.parent.sessionId, ...params.footerContext })}`,
             textFormat: 'markdown',
             ...(buttons ? { buttons } : {}),
             // Durable parent events retry after crashes that may land AFTER the
             // provider accepted the email; the event's stable identity makes
             // the replay a no-op instead of a duplicate result email.
-            idempotencyKey: `agentmail:${conversation.conversationId}:parent-event:${createHash('sha256').update(buildEventClientMessageSeed(params.event)).update('\0').update(message).digest('hex').slice(0, 24)}`,
+            idempotencyKey: `agentmail:${conversation.conversationId}:parent-event:${createHash('sha256').update(buildEventClientMessageSeed(params.event)).update('\0').update(bodyText).digest('hex').slice(0, 24)}`,
           })
           .catch((error: unknown) => {
             // A revoked recipient identity does not recover on retry.
@@ -1920,6 +1937,7 @@ async function createAgentMailFastAgentParentTurn(
             }
             throw error;
           });
+        params.pendingReplyQuote?.markDelivered();
         await recordFastAgentConversationMessageBestEffort({
           sessionId: session.id,
           conversation,
@@ -2032,6 +2050,10 @@ async function createTelegramFastAgentParentTurn(
                 message: reportMessage,
               })
             : reportMessage;
+        const quote = params.pendingReplyQuote?.peek(buildMarkdownReplyQuote);
+        const bodyText = quote
+          ? `${quote}\n\n${displayedMessage}`
+          : displayedMessage;
         const action =
           params.event.type === 'pull_request_feedback' &&
           params.event.suggestedActionQuestion &&
@@ -2068,7 +2090,7 @@ async function createTelegramFastAgentParentTurn(
             ...(conversation.replyTarget.threadId
               ? { threadId: conversation.replyTarget.threadId }
               : {}),
-            text: displayedMessage,
+            text: bodyText,
             textFormat: 'markdown',
             images,
             ...(action
@@ -2109,6 +2131,7 @@ async function createTelegramFastAgentParentTurn(
             ...params.footerContext,
           }),
         });
+        params.pendingReplyQuote?.markDelivered();
         activity.reassert();
         await recordFastAgentConversationMessageBestEffort({
           sessionId: session.id,
@@ -2543,7 +2566,15 @@ async function createFastAgentHomeParentTurn(params: {
     pullRequest,
     pullRequests,
   });
-  const turnParams = { ...params, footerContext };
+  const pendingReplyQuote = createPendingFastAgentReplyQuote(
+    params.event.type === 'human_follow_up' && params.event.webFollowUp
+      ? {
+          senderDisplayName: params.event.senderDisplayName ?? null,
+          text: params.event.question,
+        }
+      : null,
+  );
+  const turnParams = { ...params, footerContext, pendingReplyQuote };
 
   switch (conversation.surface) {
     case 'slack':

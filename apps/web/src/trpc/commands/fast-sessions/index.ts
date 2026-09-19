@@ -296,6 +296,7 @@ async function runWebFastAgentTurn({
               currentMessageId: turnMessageId,
               userId,
               question,
+              webFollowUp: true,
               ...(images?.length ? { images } : {}),
               ...(senderDisplayName ? { senderDisplayName } : {}),
               ...(turnSource === 'platform_event'
