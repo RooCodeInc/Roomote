@@ -313,6 +313,7 @@ vi.mock('./source-control-fast-delivery', async (importOriginal) => ({
 import { ALL_REPOSITORIES, NO_REPOSITORIES } from '@roomote/types';
 
 import {
+  buildEventClientMessageSeed,
   deliverFastAgentParentEvent,
   deliverFastAgentParentEventWithLock,
   FastAgentParentEventDeliveryError,
@@ -4251,6 +4252,43 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({ platformEventVisibility: 'required' }),
     );
+  });
+
+  it('presents task provider errors immediately without treating the task as settled', async () => {
+    const event = {
+      type: 'task_turn_provider_error' as const,
+      taskId: 'task-1',
+      runId: 42,
+      messageTs: 1_789_790_000_000,
+      error:
+        'The provider returned an error: Our servers are currently overloaded.',
+      taskUrl: 'https://roomote.example/task/task-1',
+    };
+    await deliverFastAgentParentEvent({
+      parent,
+      event,
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: expect.stringContaining('"type":"task_turn_provider_error"'),
+        platformEventHandling: 'present_only',
+        platformEventVisibility: 'required',
+        turnSource: 'platform_event',
+      }),
+    );
+    expect(buildEventClientMessageSeed(event)).toBe(
+      'fast-parent-task-turn-provider-error:42:1789790000000',
+    );
+    expect(
+      buildEventClientMessageSeed({
+        ...event,
+        error: 'Same turn, new wording',
+      }),
+    ).toBe(buildEventClientMessageSeed(event));
+    expect(
+      buildEventClientMessageSeed({ ...event, messageTs: event.messageTs + 1 }),
+    ).not.toBe(buildEventClientMessageSeed(event));
   });
 
   it('skips a claimed pull request event that became terminal before delivery', async () => {
