@@ -1246,6 +1246,9 @@ describe('buildFastAgentSystemPrompt', () => {
       '`call_integration_tool` is unavailable in this conversation',
     );
     expect(prompt).toContain('`find_integration_tools` remains read-only');
+    // Hyphenated and otherwise non-identifier server names must get bracket
+    // notation; `tools.smoke-one.read_item(...)` would be invalid JavaScript.
+    expect(prompt).toContain('tools["smoke-one"].read_item(...)');
     expect(prompt).not.toContain('### On-demand servers');
     expect(prompt).not.toContain('GitHub [tool prefix: github_]');
   });
