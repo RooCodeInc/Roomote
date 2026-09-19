@@ -230,6 +230,17 @@ describe('forwarded-message-context', () => {
     ).toContain('Slack integration setup recommendations:\n- Buildkite:');
   });
 
+  it('detects Buildkite URLs exposed only through attachment title links', () => {
+    expect(
+      formatSlackAttachmentContext('Can you inspect this?', [
+        {
+          title: 'Build #42',
+          title_link: 'https://buildkite.com/acme/pipelines/api/builds/42',
+        },
+      ]),
+    ).toContain('Slack integration setup recommendations:\n- Buildkite:');
+  });
+
   it('extracts Sentry-style block and attachment context without action labels', () => {
     const context = appendSlackAttachmentContext(
       'investigate this sentry error',
