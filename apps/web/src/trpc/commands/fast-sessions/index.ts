@@ -783,6 +783,7 @@ export async function replyToFastSessionCommand(
       userId: auth.userId,
       senderDisplayName,
       question: input.text,
+      webFollowUp: true,
     }),
   ]);
   if (!delivery) {
