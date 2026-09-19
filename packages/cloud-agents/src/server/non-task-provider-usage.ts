@@ -330,6 +330,8 @@ export type NonTaskOpenCodeNativeSessionOptions = {
     message: NonTaskOpenCodeCompletedMessage,
   ) => Promise<void> | void;
   onPromptStarted?: (setup: NonTaskOpenCodePromptSetupTiming) => void;
+  /** Called with the leased server's base URL before the prompt starts. */
+  onServerLeased?: (url: string) => void;
   onNativeSteerReady?: (steer: NonTaskOpenCodeNativeSteer) => void;
   onNativeSteerClosed?: () => void;
   onSessionReady?: (sessionID: string) => Promise<void> | void;
@@ -1126,6 +1128,8 @@ async function runNonTaskSdkPrompt(
     env?: Partial<Record<string, string>>;
     codeModeIntegrations?: boolean;
     onPromptStarted?: (setup: NonTaskOpenCodePromptSetupTiming) => void;
+    /** Called with the leased server's base URL before the prompt starts. */
+    onServerLeased?: (url: string) => void;
     onNativeSteerReady?: (steer: NonTaskOpenCodeNativeSteer) => void;
     onNativeSteerClosed?: () => void;
     onMessageCompleted?: (
@@ -1186,6 +1190,7 @@ async function runNonTaskSdkPrompt(
     useConfiguredServer: options.useConfiguredServer,
   });
   setupTiming.serverLeaseMs = Date.now() - setupStartedAtMs;
+  options.onServerLeased?.(server.url);
   const abortController = new AbortController();
   const timeout =
     timeoutMs === null
@@ -1864,6 +1869,7 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
       codeModeIntegrations: options.codeModeIntegrations,
       onPromptStarted: options.onPromptStarted,
       onNativeSteerReady: options.onNativeSteerReady,
+      onServerLeased: options.onServerLeased,
       onNativeSteerClosed: options.onNativeSteerClosed,
       onAssistantMessageStarted: options.onAssistantMessageStarted,
       onAssistantMessageCompleted: options.onAssistantMessageCompleted,

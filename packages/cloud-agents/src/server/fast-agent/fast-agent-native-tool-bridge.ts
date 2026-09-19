@@ -108,6 +108,12 @@ type FastAgentNativeToolRuntime = {
   directory: string;
   env: Record<string, string>;
   mcpCapability: string;
+  /**
+   * True when the code-mode integrations experiment actually activated for
+   * this runtime (flag on and no server-name collision fallback). The service
+   * uses it to mount integrations connected mid-turn onto the leased server.
+   */
+  codeModeIntegrationsActive: boolean;
 };
 
 export type FastAgentMcpToolCall = {
@@ -1660,6 +1666,7 @@ export async function getFastAgentNativeToolRuntime(
           : {}),
       },
       mcpCapability: randomBytes(32).toString('hex'),
+      codeModeIntegrationsActive: false,
     };
     sessionRuntimes.set(sessionId, runtime);
   } else {
@@ -1705,6 +1712,7 @@ export async function getFastAgentNativeToolRuntime(
   } else {
     delete runtime.env.OPENCODE_EXPERIMENTAL_CODE_MODE;
   }
+  runtime.codeModeIntegrationsActive = codeModeIntegrationsActive;
   writeFileSync(
     join(runtime.directory, 'opencode.json'),
     JSON.stringify({
@@ -1744,6 +1752,41 @@ export async function getFastAgentNativeToolRuntime(
     'utf8',
   );
   return runtime;
+}
+
+/**
+ * Mount one integration on a running code-mode OpenCode server mid-turn.
+ * Used when connect_integration or add_remote_mcp succeeds after the turn's
+ * config was generated: without this the new server would be absent from
+ * tools.$codemode.search and uncalleable through execute until the next turn.
+ * The mounted endpoint is the same capability-scoped bridge URL the
+ * turn-start config uses, so authorization and credential mediation are
+ * unchanged. Returns false (caller keeps the successful connect result) when
+ * the server rejects the add; the next turn mounts it from config instead.
+ */
+export async function mountFastAgentIntegrationOnCodeModeServer(input: {
+  serverUrl: string;
+  mcpCapability: string;
+  integrationId: string;
+}): Promise<boolean> {
+  bridgePromise ??= startBridge();
+  const bridge = await bridgePromise;
+  const response = await fetch(`${input.serverUrl}/mcp`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      name: input.integrationId,
+      config: {
+        type: 'remote',
+        url: `${bridge.url}/mcp/${input.mcpCapability}/${encodeURIComponent(input.integrationId)}`,
+        enabled: true,
+        oauth: false,
+        headers: { Authorization: `Bearer ${input.mcpCapability}` },
+      },
+    }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  return response.ok;
 }
 
 export function bindFastAgentMcpToolExecutor(

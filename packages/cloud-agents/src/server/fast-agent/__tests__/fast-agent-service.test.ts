@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   getActiveTasks: vi.fn(),
   getSession: vi.fn(),
   getNativeRuntime: vi.fn(),
+  mountCodeModeIntegration: vi.fn(),
   setOpenCodeSession: vi.fn(),
   upsertMessage: vi.fn(),
   getEnvironments: vi.fn(),
@@ -322,6 +323,7 @@ vi.mock('../fast-agent-native-tool-bridge', () => ({
     task: true,
   },
   getFastAgentNativeToolRuntime: mocks.getNativeRuntime,
+  mountFastAgentIntegrationOnCodeModeServer: mocks.mountCodeModeIntegration,
   bindFastAgentNativeToolExecutor: mocks.bindExecutor,
   createFastAgentSpillTurnBudget: () => ({ calls: 0, outputBytes: 0 }),
   bindFastAgentMcpToolExecutor: mocks.bindMcpExecutor,
@@ -6074,6 +6076,119 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       openCodeSessionId: 'replacement-session',
     });
     expect(mocks.getNativeRuntime).toHaveBeenCalledTimes(2);
+  });
+
+  it('mounts an integration connected mid-turn on the code-mode server', async () => {
+    mocks.deploymentExperimentEnabled.mockImplementation(
+      async (id: string) => id === 'codeModeIntegrations',
+    );
+    mocks.getNativeRuntime.mockImplementation(async () => {
+      mocks.mcpCapabilityAvailable = true;
+      return {
+        directory: '/tmp/fast-native-tools',
+        mcpCapability: 'mcp-capability-1',
+        codeModeIntegrationsActive: true,
+        env: {
+          ROOMOTE_FAST_TOOL_BRIDGE_URL: 'http://127.0.0.1:4321/tool',
+          ROOMOTE_FAST_TOOL_BRIDGE_TOKEN: 'test-token',
+        },
+      };
+    });
+    mocks.listIntegrations
+      .mockResolvedValueOnce([
+        {
+          id: 'github',
+          name: 'GitHub',
+          description: 'Repository access',
+          tools: [{ name: 'search_code' }],
+        },
+      ])
+      .mockResolvedValue([
+        {
+          id: 'github',
+          name: 'GitHub',
+          description: 'Repository access',
+          tools: [{ name: 'search_code' }],
+        },
+        {
+          id: 'notion',
+          name: 'Notion',
+          description: 'Docs access',
+          tools: [{ name: 'search_pages' }],
+        },
+      ]);
+    mocks.getUnifiedSession.mockResolvedValue({ id: 'session-1' });
+    mocks.connectIntegration.mockResolvedValue({ status: 'connected' });
+    mocks.mountCodeModeIntegration.mockResolvedValue(true);
+
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        options.onServerLeased?.('http://127.0.0.1:9999');
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’ll connect that.',
+        });
+        const result = await invokeTool(nativeToolNames.connectIntegration, {
+          integrationId: 'notion',
+        });
+        expect(result).toMatchObject({ success: true, status: 'connected' });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Connected.',
+        });
+        return '';
+      },
+    );
+
+    await expect(
+      answerFastAgentQuestion({ ...baseParams, adapter: callbacks() }),
+    ).resolves.toBe('Connected.');
+    // Only the newly connected server is mounted mid-turn; github was already
+    // in the turn-start mount set.
+    expect(mocks.mountCodeModeIntegration).toHaveBeenCalledTimes(1);
+    expect(mocks.mountCodeModeIntegration).toHaveBeenCalledWith({
+      serverUrl: 'http://127.0.0.1:9999',
+      mcpCapability: 'mcp-capability-1',
+      integrationId: 'notion',
+    });
+  });
+
+  it('does not mount mid-turn connections when the code-mode experiment is off', async () => {
+    mocks.getUnifiedSession.mockResolvedValue({ id: 'session-1' });
+    mocks.connectIntegration.mockResolvedValue({ status: 'connected' });
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'notion',
+        name: 'Notion',
+        description: 'Docs access',
+        tools: [{ name: 'search_pages' }],
+      },
+    ]);
+
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        options.onServerLeased?.('http://127.0.0.1:9999');
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’ll connect that.',
+        });
+        await invokeTool(nativeToolNames.connectIntegration, {
+          integrationId: 'notion',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Connected.',
+        });
+        return '';
+      },
+    );
+
+    await expect(
+      answerFastAgentQuestion({ ...baseParams, adapter: callbacks() }),
+    ).resolves.toBe('Connected.');
+    expect(mocks.mountCodeModeIntegration).not.toHaveBeenCalled();
   });
 
   it('keeps Fast-native tools parent-only while MCP tools use the shared broker', async () => {

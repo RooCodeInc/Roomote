@@ -30,6 +30,7 @@ import {
   formatFastAgentMcpResultForModel,
   formatFastAgentSkillDocumentForModel,
   getFastAgentNativeToolRuntime,
+  mountFastAgentIntegrationOnCodeModeServer,
   revokeFastAgentMcpCapabilitiesForConversation,
   shouldSpillFastAgentModelOutput,
 } from '../fast-agent-native-tool-bridge';
@@ -456,6 +457,41 @@ describe('Fast native OpenCode tool bridge', () => {
       ).toBe(true);
     } finally {
       warn.mockRestore();
+    }
+  });
+
+  it('posts the capability-scoped bridge config when mounting an integration mid-turn', async () => {
+    const requests: { url: string; body: unknown }[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+      requests.push({
+        url: String(input),
+        body: JSON.parse(String(init?.body ?? '{}')),
+      });
+      return new Response('{}', { status: 200 });
+    }) as typeof fetch;
+    try {
+      const mounted = await mountFastAgentIntegrationOnCodeModeServer({
+        serverUrl: 'http://127.0.0.1:4107',
+        mcpCapability: 'cap-1',
+        integrationId: 'notion',
+      });
+
+      expect(mounted).toBe(true);
+      expect(requests).toHaveLength(1);
+      expect(requests[0]!.url).toBe('http://127.0.0.1:4107/mcp');
+      expect(requests[0]!.body).toMatchObject({
+        name: 'notion',
+        config: {
+          type: 'remote',
+          enabled: true,
+          oauth: false,
+          url: expect.stringContaining('/mcp/cap-1/notion'),
+          headers: { Authorization: 'Bearer cap-1' },
+        },
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
     }
   });
 

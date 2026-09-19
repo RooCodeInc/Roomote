@@ -198,6 +198,7 @@ import {
   bindFastAgentMcpToolExecutor,
   FAST_AGENT_NATIVE_TOOL_NAMES,
   getFastAgentNativeToolRuntime,
+  mountFastAgentIntegrationOnCodeModeServer,
   type FastAgentMcpToolCall,
   type FastAgentNativeToolCall,
 } from './fast-agent-native-tool-bridge';
@@ -1923,6 +1924,12 @@ export async function answerFastAgentQuestion({
   let currentPrivateOwnerUserId: string | null = null;
   let privateSessionsExperimentEnabled = false;
   let availableIntegrations: FastAgentIntegration[] = [];
+  /** Code-mode integrations experiment turn state: set once the turn's
+   * runtime and leased server are known, read by mid-turn connect handlers. */
+  let codeModeIntegrationsActiveForTurn = false;
+  let codeModeMcpCapabilityForTurn: string | null = null;
+  let codeModeMountedIntegrationIdsForTurn = new Set<string>();
+  let codeModeOpenCodeServerUrl: string | null = null;
   let durableOpenCodeSessionId: string | null = null;
   let lastVisibleMessage = '';
   /** Last model OpenCode resolved for this turn, for the failure closeout. */
@@ -4047,6 +4054,48 @@ export async function answerFastAgentQuestion({
       call.toolName === 'integration_request' &&
       typeof call.args?.integrationId === 'string' &&
       call.args.integrationId.startsWith('session:');
+    /**
+     * Code-mode integrations experiment: a server connected mid-turn is not
+     * in the mounted set the leased OpenCode server booted with, so mount it
+     * live; otherwise tools.$codemode.search cannot see it until the next
+     * turn. Failures keep the successful connect result; the next turn mounts
+     * the server from the regenerated config instead.
+     */
+    const mountNewlyConnectedCodeModeIntegrations = async (
+      refreshedIntegrations: FastAgentIntegration[],
+    ): Promise<void> => {
+      if (
+        !codeModeIntegrationsActiveForTurn ||
+        !codeModeOpenCodeServerUrl ||
+        !codeModeMcpCapabilityForTurn
+      ) {
+        return;
+      }
+      const serverUrl = codeModeOpenCodeServerUrl;
+      const mcpCapability = codeModeMcpCapabilityForTurn;
+      for (const integration of refreshedIntegrations) {
+        if (codeModeMountedIntegrationIdsForTurn.has(integration.id)) {
+          continue;
+        }
+        codeModeMountedIntegrationIdsForTurn.add(integration.id);
+        try {
+          const mounted = await mountFastAgentIntegrationOnCodeModeServer({
+            serverUrl,
+            mcpCapability,
+            integrationId: integration.id,
+          });
+          if (!mounted) {
+            console.warn(
+              `[Fast Agent] Code-mode server rejected the mid-turn mount of integration ${integration.id}; it becomes callable next turn.`,
+            );
+          }
+        } catch (error) {
+          console.warn(
+            `[Fast Agent] Failed to mount integration ${integration.id} on the code-mode server mid-turn: ${formatErrorForLog(error)}`,
+          );
+        }
+      }
+    };
     const executeMcpTool = async (
       call: FastAgentMcpToolCall,
       { acknowledgementExempt = false } = {},
@@ -4444,6 +4493,9 @@ export async function answerFastAgentQuestion({
                     !isFastAgentNativeIntegration(integration.id),
                 ),
               );
+              await mountNewlyConnectedCodeModeIntegrations(
+                refreshedIntegrations,
+              );
             }
             return { success: true, ...result };
           }
@@ -4488,6 +4540,9 @@ export async function answerFastAgentQuestion({
                   (integration) =>
                     !isFastAgentNativeIntegration(integration.id),
                 ),
+              );
+              await mountNewlyConnectedCodeModeIntegrations(
+                refreshedIntegrations,
               );
             }
             return { success: true, ...result };
@@ -5776,6 +5831,17 @@ export async function answerFastAgentQuestion({
             codeModeIntegrationsEnabled,
           },
         );
+        codeModeIntegrationsActiveForTurn =
+          nativeRuntime.codeModeIntegrationsActive;
+        codeModeMcpCapabilityForTurn = nativeRuntime.codeModeIntegrationsActive
+          ? nativeRuntime.mcpCapability
+          : null;
+        codeModeMountedIntegrationIdsForTurn = new Set(
+          nativeRuntime.codeModeIntegrationsActive
+            ? availableIntegrations.map((integration) => integration.id)
+            : [],
+        );
+        codeModeOpenCodeServerUrl = null;
         const unbindExecutors = new Set<() => void>();
         const boundSubagentSessionIDs = new Set<string>();
         const unbindAllExecutors = () => {
@@ -5951,6 +6017,9 @@ export async function answerFastAgentQuestion({
                       directory: nativeRuntime.directory,
                       env: nativeRuntime.env,
                       codeModeIntegrations: codeModeIntegrationsEnabled,
+                      onServerLeased: (url) => {
+                        codeModeOpenCodeServerUrl = url;
+                      },
                       permission: FAST_AGENT_SESSION_PERMISSIONS,
                       signal: promptSignal,
                       promptOnlySubagents: true,
