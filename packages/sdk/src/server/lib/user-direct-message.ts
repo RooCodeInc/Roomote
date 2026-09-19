@@ -17,6 +17,7 @@ import {
   getDiscordFooterlessFinalChunk,
   postTextThreadReplyWithFooter,
 } from '@roomote/communication';
+import { buildCommunicationTaskThreadName } from '@roomote/communication/task-thread-title';
 import {
   postSlackRootMessageWithFooterText,
   postSlackThreadMessageWithFooterText,
@@ -495,6 +496,7 @@ async function sendTelegramUserDirectMessage(
   idempotencyKey?: string,
   replyAnchor?: UserDirectMessageReceipt,
   presentation?: UserDirectMessagePresentation,
+  createTopic = false,
 ): Promise<UserDirectMessageReceipt | null> {
   try {
     const mapping = replyAnchor
@@ -515,6 +517,18 @@ async function sendTelegramUserDirectMessage(
       return null;
     }
 
+    const standaloneThreadId =
+      !replyAnchor &&
+      createTopic &&
+      (await provider.getBotInfo()).hasTopicsEnabled
+        ? (
+            await provider.createForumTopic({
+              channelId: mapping.telegramChatId,
+              name: buildCommunicationTaskThreadName(text),
+            })
+          ).messageThreadId
+        : undefined;
+    const threadId = replyAnchor?.threadId ?? standaloneThreadId;
     const presented = presentDirectMessage('telegram', text, presentation);
     const posted = presentation
       ? await postTextThreadReplyWithFooter({
@@ -523,9 +537,7 @@ async function sendTelegramUserDirectMessage(
             channelId: mapping.telegramChatId,
             text: presented.bodyText,
             textFormat: 'markdown',
-            ...(replyAnchor?.threadId
-              ? { threadId: replyAnchor.threadId }
-              : {}),
+            ...(threadId ? { threadId } : {}),
             ...(idempotencyKey ? { idempotencyKey } : {}),
           },
           footerText: presented.footerText!,
@@ -534,7 +546,7 @@ async function sendTelegramUserDirectMessage(
           channelId: mapping.telegramChatId,
           text,
           textFormat: 'markdown',
-          ...(replyAnchor?.threadId ? { threadId: replyAnchor.threadId } : {}),
+          ...(threadId ? { threadId } : {}),
           ...(idempotencyKey ? { idempotencyKey } : {}),
         });
 
@@ -744,6 +756,7 @@ type SendUserDirectMessageInput = {
   slackBlocks?: unknown[];
   logContext: string;
   idempotencyKey?: string;
+  createTelegramTopic?: boolean;
 };
 
 export async function sendUserDirectMessageWithReceipt({
@@ -753,6 +766,7 @@ export async function sendUserDirectMessageWithReceipt({
   slackBlocks,
   logContext,
   idempotencyKey,
+  createTelegramTopic,
 }: SendUserDirectMessageInput): Promise<UserDirectMessageResult> {
   switch (provider) {
     case 'slack': {
@@ -779,6 +793,9 @@ export async function sendUserDirectMessageWithReceipt({
         text,
         logContext,
         idempotencyKey,
+        undefined,
+        undefined,
+        createTelegramTopic,
       );
       return { delivered: Boolean(receipt), receipt };
     }

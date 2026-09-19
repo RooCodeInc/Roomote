@@ -56,6 +56,7 @@ describe('sendCommunicationMessage', () => {
         userId: 'user-1',
         text: 'Keep this exact.',
         logContext: 'roomote-mcp-chat-message',
+        ...(provider === 'telegram' ? { createTelegramTopic: true } : {}),
       });
       await expect(response.json()).resolves.toMatchObject({
         delivered: true,
@@ -91,6 +92,7 @@ describe('sendCommunicationMessage', () => {
         userId: 'user-1',
         text: 'Keep this exact.',
         logContext: 'roomote-mcp-chat-message',
+        createTelegramTopic: true,
       });
     },
   );
