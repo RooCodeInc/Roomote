@@ -12,6 +12,10 @@ vi.mock('./PreviewSidePanel', () => ({
   PreviewSidePanel: () => <div data-testid="preview-side-panel" />,
 }));
 
+vi.mock('./SharedDesktopSidePanel', () => ({
+  SharedDesktopSidePanel: () => <div data-testid="shared-desktop-side-panel" />,
+}));
+
 vi.mock('./DiffSidePanel', () => ({
   DiffSidePanel: () => <div data-testid="diff-side-panel" />,
 }));
@@ -87,6 +91,20 @@ describe('TaskSidePanelDesktop', () => {
 
     expect(screen.getByTestId('preview-side-panel')).toBeInTheDocument();
     expect(screen.queryByTestId('diff-side-panel')).not.toBeInTheDocument();
+  });
+
+  it('mounts Shared Desktop separately from Live Preview', () => {
+    useTaskSidePanelMock.mockReturnValue({
+      activeView: 'shared-desktop',
+      closeSidePanel: vi.fn(),
+    });
+
+    render(
+      <TaskSidePanelDesktop activeView="shared-desktop" session={session} />,
+    );
+
+    expect(screen.getByTestId('shared-desktop-side-panel')).toBeInTheDocument();
+    expect(screen.queryByTestId('preview-side-panel')).not.toBeInTheDocument();
   });
 
   it('keeps the retained view mounted when the context closes during exit', () => {

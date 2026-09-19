@@ -2,6 +2,7 @@ import {
   type EnvironmentConfig,
   type ServiceInfo,
   TaskPayloadKind,
+  SHARED_DESKTOP_NAMED_PORT,
   isServicesEnabledTaskPayloadKind,
 } from '@roomote/types';
 
@@ -10,6 +11,7 @@ import {
   type ServiceContext,
   ServiceManager,
   startPortProxies,
+  startSharedDesktop,
 } from '../../../services';
 
 import { timedStep } from '../logging';
@@ -128,10 +130,10 @@ async function startSystemServices({
 }
 
 async function startEnvironmentServices({
-  workspaceRoot: _workspaceRoot,
-  envVars: _envVars,
+  workspaceRoot,
+  envVars,
   serviceContext,
-  environmentConfig: _environmentConfig,
+  environmentConfig,
   logger,
 }: {
   workspaceRoot: string;
@@ -141,6 +143,29 @@ async function startEnvironmentServices({
   logger: StartupLogger;
 }): Promise<ServiceInfo[]> {
   const services: ServiceInfo[] = [];
+
+  if (
+    environmentConfig &&
+    serviceContext?.appPorts?.[SHARED_DESKTOP_NAMED_PORT.name]
+  ) {
+    // Shared Desktop is optional: a failure here must not prevent the port
+    // proxies below from starting, or Live Preview breaks alongside it.
+    try {
+      await timedStep(logger, 'start shared desktop', () =>
+        startSharedDesktop({
+          cwd: workspaceRoot,
+          env: envVars,
+          allowedControlOrigin: serviceContext.appOrigin,
+        }),
+      );
+    } catch (error) {
+      logger.userLog.warn(
+        `Shared Desktop is unavailable for this task: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
 
   // Start port proxies if proxyPorts are configured.
   // These proxies forward from the externally exposed proxy port to the internal app port.

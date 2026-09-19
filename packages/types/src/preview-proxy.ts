@@ -5,7 +5,12 @@
 export const DEFAULT_PREVIEW_PROXY_BASE_URL =
   'http://roomotepreview.localhost:18081';
 
-const NON_USER_FACING_PORT_NAMES = new Set(['SANDBOX_SERVER', 'EDITOR', 'GUI']);
+const NON_USER_FACING_PORT_NAMES = new Set([
+  'SANDBOX_SERVER',
+  'SHARED_DESKTOP',
+  'EDITOR',
+  'GUI',
+]);
 
 /**
  * Default header name for preview auth bypass.
