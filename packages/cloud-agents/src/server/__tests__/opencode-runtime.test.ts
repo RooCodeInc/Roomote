@@ -57,6 +57,46 @@ describe('buildOpenCodeCliEnv', () => {
     }
   });
 
+  it("does not pass the launching service's deployment secrets to the helper", () => {
+    const inherited = {
+      DATABASE_URL: 'postgres://postgres:password@postgres:5432/roomote',
+      ENCRYPTION_KEY: 'encryption-key',
+      JOB_AUTH_PRIVATE_KEY: 'job-private-key',
+      R_GITHUB_CLIENT_SECRET: 'github-client-secret',
+      ANTHROPIC_API_KEY: 'anthropic-key',
+    };
+    const previous = new Map(
+      Object.keys(inherited).map((key) => [key, process.env[key]]),
+    );
+    Object.assign(process.env, inherited);
+
+    try {
+      const env = buildOpenCodeCliEnv({
+        R_MODEL: 'anthropic/claude-sonnet-5',
+        ROOMOTE_FAST_TOOL_BRIDGE_TOKEN: 'bridge-token',
+      });
+
+      // The helper keeps what it needs to call the model and reach the tool
+      // bridge.
+      expect(env.DATABASE_URL).toBeUndefined();
+      expect(env.ENCRYPTION_KEY).toBeUndefined();
+      expect(env.JOB_AUTH_PRIVATE_KEY).toBeUndefined();
+      expect(env.R_GITHUB_CLIENT_SECRET).toBeUndefined();
+      expect(env.ANTHROPIC_API_KEY).toBe('anthropic-key');
+      expect(env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN).toBe('bridge-token');
+      // The launching service itself is untouched.
+      expect(process.env.JOB_AUTH_PRIVATE_KEY).toBe('job-private-key');
+    } finally {
+      for (const [key, value] of previous) {
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+    }
+  });
+
   it('builds a model-backed config without reasoning options by default', () => {
     const env = buildOpenCodeCliEnv({
       R_MODEL: 'openrouter/openai/gpt-5.4',
