@@ -21,7 +21,7 @@ type JsonRpcRequest = {
   params?: { name?: unknown };
 };
 
-export type HumanControlState = 'agent' | 'human' | 'unavailable';
+type HumanControlState = 'agent' | 'human' | 'unavailable';
 
 export async function readHumanControlState(
   metricsUrl: string,
