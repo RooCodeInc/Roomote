@@ -4,14 +4,14 @@ This file tracks product releases for Roomote (single monorepo version). Automat
 
 ## 1.12.0 (2026-09-18)
 
-Roomote 1.12 expands self-service integrations and repository discovery, adds browser and email delivery options, and improves Session reliability across web and Slack.
+Roomote 1.12 expands self-service integrations and repository discovery, adds browser and email delivery options, restores Kimi for Coding, and improves Session reliability.
 
 ### Highlights
 
 - Connect built-in integrations and personal or shared remote MCP servers directly from Sessions, with integration keys available to every active member.
 - Find connected repositories live by name or description from Fast Sessions and task sandboxes, including deployments without configured environments.
 - Receive browser attention alerts and automation reports by email, with secure implicit verification when replying to Roomote-initiated email.
-- Delete Sessions with their direct Memory, cycle through artifacts, and recover more reliably from setup, worker, and initial page-loading failures.
+- Use Kimi for Coding again after its upstream catalog rename, with saved model selections moved to Kimi's documented model id.
 
 ### Minor changes
 
@@ -41,6 +41,7 @@ Roomote 1.12 expands self-service integrations and repository discovery, adds br
 - Make Roomote interfaces clearer with condensed Session metadata, independent nested disclosures, accessible task-log controls, a less cluttered list-focused Home experience, standardized product terminology, and the current deployment host in About.
 - Make Slack automation and release-announcement cards consistent and easier to read by preserving paragraph spacing, compacting unordered lists, and using the standard automation result layout.
 - Include attached screenshots in the first reply sent to a vision-capable model instead of making the model wait for a later turn to see them.
+- Kimi for Coding works again in sessions and tasks. The public model catalog OpenCode reads at runtime renamed this provider, so every request failed before it was sent. Roomote now registers the provider itself instead of depending on that catalog entry. Saved `kimi-for-coding/k2p7` selections move to `kimi-for-coding/kimi-for-coding`, the id Kimi now documents for that model.
 
 ## 1.11.0 (2026-09-17)
 
