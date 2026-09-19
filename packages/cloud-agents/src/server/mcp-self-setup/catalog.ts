@@ -38,6 +38,13 @@ export const MCP_SETUP_INTEGRATION_METADATA: Record<
   string,
   SetupMcpIntegrationMetadata
 > = {
+  circleci: {
+    capabilities: [
+      'Inspect CircleCI runs, workflows, jobs, and step results',
+      'Read job logs, test results, artifacts, and usage exports',
+      'Opt in to workflow reruns and cancellations when needed',
+    ],
+  },
   asana: {
     capabilities: [
       'Inspect Asana workspaces, projects, and tasks',
