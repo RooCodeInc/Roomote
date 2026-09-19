@@ -89,12 +89,49 @@ const X_POST_PATH_REGEX = /^\/[a-z0-9_]{1,15}\/status\/\d+/;
 const X_APP_PATH_REGEX =
   /^\/(?:search|explore)(?:\/|$)|^\/i\/(?:lists|communities|spaces)\//;
 
+const BUILDKITE_PUBLIC_ROOT_SEGMENTS = [
+  'about',
+  'blog',
+  'changelog',
+  'community',
+  'customers',
+  'docs',
+  'features',
+  'legal',
+  'pricing',
+  'resources',
+  'security',
+  'support',
+] as const;
+const BUILDKITE_ORGANIZATION_PATH_REGEX = new RegExp(
+  `^/(?!(?:${BUILDKITE_PUBLIC_ROOT_SEGMENTS.join('|')})(?:/|$))[^/]+(?:/|$)`,
+);
+
 export const SLACK_MCP_SETUP_SERVICES: SlackMcpSetupServiceDefinition[] = [
   {
     id: 'stripe',
     name: 'Stripe',
     availabilityKind: 'admin_configured',
     hostSuffixes: ['dashboard.stripe.com'],
+    deploymentSettingsPath: '/integrations',
+    userSettingsPath: '/settings/personal',
+  },
+  {
+    id: 'buildkite',
+    name: 'Buildkite',
+    availabilityKind: 'curated_oauth',
+    hostSuffixes: ['buildkite.com'],
+    excludedHostnames: [
+      'www.buildkite.com',
+      'api.buildkite.com',
+      'mcp.buildkite.com',
+    ],
+    hostRules: [
+      {
+        hostSuffix: 'buildkite.com',
+        pathRegexes: [BUILDKITE_ORGANIZATION_PATH_REGEX],
+      },
+    ],
     deploymentSettingsPath: '/integrations',
     userSettingsPath: '/settings/personal',
   },

@@ -1185,6 +1185,10 @@ export function formatSlackMcpSetupRecommendationContext(
   extractBlockLinks(blocks, links, seenKeys);
   for (const attachment of attachments ?? []) {
     if (isRecord(attachment)) {
+      const titleLink = getStringField(attachment, 'title_link');
+      if (titleLink) {
+        appendUniqueSlackBlockLink(links, seenKeys, { url: titleLink });
+      }
       extractBlockLinks(attachment.blocks, links, seenKeys);
     }
   }

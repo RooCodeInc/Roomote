@@ -675,6 +675,19 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
       'Use Stripe to inspect account, payment, billing, and API data through a deployment restricted key. The general stripe_api_write tool is disabled until an administrator enables it in Manage tools. When enabled, use writes only for explicit user requests and preserve Stripe human-confirmation requirements for sensitive actions.',
   },
   {
+    id: 'buildkite',
+    name: 'Buildkite',
+    url: 'https://mcp.buildkite.com/mcp/readonly',
+    description: `Inspect Buildkite pipelines, builds, jobs, tests, and agents from ${PRODUCT_NAME} tasks`,
+    icon: 'buildkite',
+    connectionScope: 'deployment',
+    oauthResource: 'https://mcp.buildkite.com/mcp/readonly',
+    oauthScopes: ['read'],
+    oauthScopeMode: 'read-only',
+    instructions:
+      "Use Buildkite to inspect organizations, pipelines, builds, jobs, logs, artifacts, annotations, tests, clusters, agents, and queues. This connection uses Buildkite's provider-enforced read-only MCP endpoint; do not assume mutation tools are available.",
+  },
+  {
     id: 'cloudflare',
     name: 'Cloudflare',
     url: 'https://mcp.cloudflare.com/mcp',

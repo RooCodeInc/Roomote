@@ -5,6 +5,7 @@ import { Queue } from 'bullmq';
 import {
   acquireFastAgentTurnLock,
   findFastAgentDurableRetryScheduledError,
+  findTerminalFastAgentInferenceFailure,
   publishFastAgentSessionRefresh,
   type FastAgentTurnLockHandle,
 } from '@roomote/cloud-agents/server';
@@ -20,6 +21,7 @@ import {
   isNull,
   lt,
   lte,
+  ne,
   or,
   recordCustomAutomationRunOutcome,
   recordSessionWakeupOutcome,
@@ -46,6 +48,23 @@ import { retryFastAgentStartup } from './task-runs/fast-agent-startup-retry';
 
 export const FAST_AGENT_PARENT_EVENT_QUEUE_NAME = 'fast-agent-parent-events';
 const MAX_DIAGNOSTIC_DURATION_MS = 24 * 60 * 60 * 1_000;
+
+/**
+ * Delivery attempts an event gets before the queue gives up on it. With the
+ * backoff below this spans a little over a day, long enough to ride out a
+ * provider outage and short enough that nothing is retried indefinitely.
+ */
+export const FAST_AGENT_PARENT_EVENT_MAX_ATTEMPTS = 20;
+/** An event that has been attempted is abandoned once it is this old. */
+export const FAST_AGENT_PARENT_EVENT_MAX_AGE_MS = 3 * 24 * 60 * 60 * 1_000;
+const RETRY_BACKOFF_BASE_MS = 30_000;
+const RETRY_BACKOFF_MAX_MS = 2 * 60 * 60 * 1_000;
+
+/** Exponential from 30 seconds, capped at two hours. */
+export function getFastAgentParentEventRetryDelayMs(attempts: number): number {
+  const exponent = Math.max(0, Math.min(attempts - 1, 20));
+  return Math.min(RETRY_BACKOFF_BASE_MS * 2 ** exponent, RETRY_BACKOFF_MAX_MS);
+}
 const parentEventWakeBindings = new WeakMap<
   FastAgentTurnLockHandle,
   Set<string>
@@ -384,14 +403,42 @@ function scheduledRetryPredicate() {
   );
 }
 
+/**
+ * A worker-queued event parked for a later attempt. It holds the events
+ * queued behind it in the same conversation until it is delivered, discarded,
+ * or due again. Inline turns schedule their own retries and hold nothing.
+ */
+function parkedHeadPredicate() {
+  return and(
+    isNull(fastAgentParentEvents.deliveredAt),
+    isNull(fastAgentParentEvents.discardedAt),
+    isNull(fastAgentParentEvents.admission),
+    gt(fastAgentParentEvents.retryAt, new Date()),
+  );
+}
+
 async function getNextPendingEvent(conversationId: string) {
-  return db.query.fastAgentParentEvents.findFirst({
+  const next = await db.query.fastAgentParentEvents.findFirst({
     where: pendingPredicate(conversationId),
     orderBy: [
       asc(fastAgentParentEvents.createdAt),
       asc(fastAgentParentEvents.id),
     ],
   });
+  if (!next) return undefined;
+
+  const heldBy = await db
+    .select({ id: fastAgentParentEvents.id })
+    .from(fastAgentParentEvents)
+    .where(
+      and(
+        eq(fastAgentParentEvents.conversationId, conversationId),
+        parkedHeadPredicate(),
+        lte(fastAgentParentEvents.createdAt, next.createdAt),
+        ne(fastAgentParentEvents.id, next.id),
+      ),
+    );
+  return heldBy.length > 0 ? undefined : next;
 }
 
 function isFastAgentParentEvent(value: unknown): value is FastAgentParentEvent {
@@ -412,6 +459,34 @@ async function buildRetryTaskStart(
     where: eq(taskRuns.id, runId),
   });
   return run ? () => retryFastAgentStartup(run, parent) : undefined;
+}
+
+/**
+ * Why the queue should stop attempting an event, if it should. Only an event
+ * that has already been attempted can age out: one the worker never reached
+ * is still owed its first delivery however long it waited.
+ */
+function getAbandonReason(row: {
+  attempts: number;
+  createdAt: Date | string | null;
+}): string | null {
+  if (row.attempts >= FAST_AGENT_PARENT_EVENT_MAX_ATTEMPTS) {
+    return `Gave up after ${row.attempts} delivery attempts.`;
+  }
+  const createdAtMs =
+    row.createdAt instanceof Date
+      ? row.createdAt.getTime()
+      : row.createdAt
+        ? Date.parse(row.createdAt)
+        : Number.NaN;
+  if (
+    row.attempts > 0 &&
+    Number.isFinite(createdAtMs) &&
+    Date.now() - createdAtMs > FAST_AGENT_PARENT_EVENT_MAX_AGE_MS
+  ) {
+    return `Gave up after ${row.attempts} delivery attempts over more than ${Math.round(FAST_AGENT_PARENT_EVENT_MAX_AGE_MS / 3_600_000)} hours.`;
+  }
+  return null;
 }
 
 async function isStillPending(id: string): Promise<boolean> {
@@ -538,6 +613,22 @@ export async function drainFastAgentParentEvents(
         continue;
       }
 
+      const abandonReason = getAbandonReason(row);
+      if (abandonReason) {
+        const abandonError = new Error(
+          row.lastError
+            ? `${abandonReason} Last error: ${row.lastError}`
+            : abandonReason,
+        );
+        console.error(
+          `[FastAgentParentEventQueue] Abandoning event ${row.id}: ${abandonError.message}`,
+        );
+        await finalizeAutomationLaunch(row.event, 'failed', abandonError);
+        await finalizeScheduledWakeup(row.event, 'failed', abandonError);
+        await markDiscarded(row.id, abandonError);
+        continue;
+      }
+
       await db
         .update(fastAgentParentEvents)
         .set({
@@ -658,14 +749,55 @@ export async function drainFastAgentParentEvents(
           continue;
         }
 
+        // A failure that will repeat identically (rejected credentials, no
+        // credits, an unavailable model) is settled rather than retried.
+        const inferenceFailure = findTerminalFastAgentInferenceFailure(error);
+        if (inferenceFailure) {
+          console.error(
+            `[FastAgentParentEventQueue] Event ${row.id} cannot succeed on retry (${inferenceFailure.reason}); discarding.`,
+          );
+          await finalizeAutomationLaunch(row.event, 'failed', error);
+          await finalizeScheduledWakeup(row.event, 'failed', error);
+          await markDiscarded(row.id, error);
+          continue;
+        }
+
+        const lastError =
+          error instanceof Error ? error.message : String(error);
+        if (row.admission === 'inline') {
+          // A resumed turn schedules its own inference retries and reads
+          // `retryAt` to tell a retry from an interruption, so the queue does
+          // not set it; the attempt budget above still bounds the row.
+          await db
+            .update(fastAgentParentEvents)
+            .set({ lastError, updatedAt: new Date() })
+            .where(eq(fastAgentParentEvents.id, row.id));
+          throw error;
+        }
+
+        // Park the event for a later attempt. It keeps holding the events
+        // queued behind it, because a conversation's events are delivered in
+        // order; failing the job instead would retry within seconds.
+        const retryAt = new Date(
+          Date.now() + getFastAgentParentEventRetryDelayMs(row.attempts + 1),
+        );
+        console.error(
+          `[FastAgentParentEventQueue] Event ${row.id} failed (attempt ${row.attempts + 1}); next attempt at ${retryAt.toISOString()}: ${lastError}`,
+        );
         await db
           .update(fastAgentParentEvents)
-          .set({
-            lastError: error instanceof Error ? error.message : String(error),
-            updatedAt: new Date(),
-          })
+          .set({ lastError, retryAt, updatedAt: new Date() })
           .where(eq(fastAgentParentEvents.id, row.id));
-        throw error;
+        await wakeFastAgentParentEventAt(
+          { conversationId: request.conversationId, eventKey: row.eventKey },
+          retryAt,
+        ).catch((wakeError) => {
+          // The recovery sweep re-adds the delayed wakeup.
+          console.warn(
+            `[FastAgentParentEventQueue] Failed to schedule retry wakeup for ${row.id}: ${wakeError instanceof Error ? wakeError.message : String(wakeError)}`,
+          );
+        });
+        return;
       } finally {
         // The same lock carries every row this drain delivers; a settled or
         // handed-back row must not stay bound to it.
@@ -699,6 +831,12 @@ const queueEligibleSince = () => sql`GREATEST(
  * and without a live inline claim, measured from the moment the queue became
  * responsible rather than from creation. A non-zero count means the queue
  * worker is not draining, which is what `/health/bullmq` reports.
+ *
+ * An event the worker attempted and could not deliver is not counted: it is
+ * either settled or parked with a future `retryAt`. Events held behind a
+ * parked one are not counted either, since the worker is deliberately not
+ * delivering them yet. Both count again once the retry comes due and the
+ * worker still does not pick them up.
  */
 export async function countOverdueQueuedFastAgentParentEvents(
   olderThan: Date,
@@ -707,11 +845,27 @@ export async function countOverdueQueuedFastAgentParentEvents(
   // rejects; the drizzle column serializer only runs for column-typed
   // comparisons. Bind the ISO text and cast to the columns' own type.
   const olderThanParam = sql`${olderThan.toISOString()}::timestamp`;
+  // Compared against `retry_at`, which the application clock wrote; the
+  // database clock and session time zone are deliberately not consulted.
+  const nowParam = sql`${new Date().toISOString()}::timestamp`;
   const [row] = await db
     .select({ count: count() })
     .from(fastAgentParentEvents)
     .where(
-      and(pendingPredicate(), sql`${queueEligibleSince()} < ${olderThanParam}`),
+      and(
+        pendingPredicate(),
+        sql`${queueEligibleSince()} < ${olderThanParam}`,
+        sql`NOT EXISTS (
+          SELECT 1 FROM fast_agent_parent_events AS head
+          WHERE head.conversation_id = ${fastAgentParentEvents.conversationId}
+            AND head.id <> ${fastAgentParentEvents.id}
+            AND head.delivered_at IS NULL
+            AND head.discarded_at IS NULL
+            AND head.admission IS NULL
+            AND head.retry_at > ${nowParam}
+            AND head.created_at <= ${fastAgentParentEvents.createdAt}
+        )`,
+      ),
     );
   return row?.count ?? 0;
 }

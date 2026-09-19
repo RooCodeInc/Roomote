@@ -45,6 +45,13 @@ export const MCP_SETUP_INTEGRATION_METADATA: Record<
       'Opt in to the general Stripe write tool only when needed',
     ],
   },
+  buildkite: {
+    capabilities: [
+      'Inspect Buildkite pipelines, builds, jobs, and logs',
+      'Review artifacts, annotations, tests, agents, and queues',
+      'Keep hosted MCP access read-only at the provider endpoint',
+    ],
+  },
   cloudflare: {
     capabilities: [
       'Search the Cloudflare API for available operations',

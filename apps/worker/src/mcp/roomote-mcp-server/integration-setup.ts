@@ -61,6 +61,14 @@ Stripe uses an admin-managed restricted API key:
 
 Once connected, I can inspect Stripe accounts, payments, billing data, API details, analytics, and documentation. The general stripe_api_write tool stays disabled until an administrator enables it from Manage tools. Stripe's own human-confirmation requirements still apply to sensitive writes.
 
+# Buildkite
+
+Buildkite uses OAuth:
+1. A deployment operator enables Buildkite from Settings > Integrations.
+2. That operator connects Buildkite once for the deployment via OAuth.
+
+Once connected, I can inspect pipelines, builds, jobs, logs, artifacts, tests, clusters, agents, and queues through Buildkite's read-only hosted MCP endpoint. Organizations that restrict API access by IP must allowlist Buildkite's published MCP egress addresses. Organization selection during OAuth is a convenience, not an access-control boundary.
+
 # Cloudflare
 
 Cloudflare uses OAuth:
