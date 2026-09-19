@@ -48,6 +48,7 @@ describe('metadata descriptions', () => {
       slackPeerConversations: false,
       privateSessions: false,
       browserNotifications: false,
+      codeModeIntegrations: false,
     });
   });
 });

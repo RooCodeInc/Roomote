@@ -5,6 +5,7 @@ import { ResultsExperimentalSetting } from '@/components/settings/ResultsExperim
 import { SlackPeerConversationsExperimentalSetting } from '@/components/settings/SlackPeerConversationsExperimentalSetting';
 import { PrivateSessionsExperimentalSetting } from '@/components/settings/PrivateSessionsExperimentalSetting';
 import { BrowserNotificationsExperimentalSetting } from '@/components/settings/BrowserNotificationsExperimentalSetting';
+import { CodeModeIntegrationsExperimentalSetting } from '@/components/settings/CodeModeIntegrationsExperimentalSetting';
 import { RetryableLoadError } from '@/components/system';
 import { useDeploymentExperiments } from '@/hooks/useDeploymentExperiments';
 
@@ -24,6 +25,7 @@ export function ExperimentalSettingsPage() {
       ) : (
         <>
           <PrivateSessionsExperimentalSetting />
+          <CodeModeIntegrationsExperimentalSetting />
           <BrowserNotificationsExperimentalSetting />
           <ResultsExperimentalSetting />
           <SlackPeerConversationsExperimentalSetting />

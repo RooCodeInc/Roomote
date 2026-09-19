@@ -75,6 +75,7 @@ import {
   getSessionForTask,
   inArray,
   isBrainEnabled,
+  isDeploymentExperimentEnabled,
   isPrivateSessionsExperimentEnabled,
   isNull,
   markSessionGoalForConversation,
@@ -196,6 +197,8 @@ import {
   bindFastAgentMcpToolExecutor,
   FAST_AGENT_NATIVE_TOOL_NAMES,
   getFastAgentNativeToolRuntime,
+  hasFastAgentCodeModeServerNameCollision,
+  mountFastAgentIntegrationOnCodeModeServer,
   type FastAgentMcpToolCall,
   type FastAgentNativeToolCall,
 } from './fast-agent-native-tool-bridge';
@@ -205,6 +208,7 @@ import {
 } from './fast-agent-tool-policy';
 import {
   callFastAgentIntegration,
+  clearFastAgentIntegrationToolCache,
   listFastAgentIntegrations,
   type FastAgentIntegration,
 } from './fast-agent-integration-broker';
@@ -1944,6 +1948,13 @@ export async function answerFastAgentQuestion({
   let currentPrivateOwnerUserId: string | null = null;
   let privateSessionsExperimentEnabled = false;
   let availableIntegrations: FastAgentIntegration[] = [];
+  /** Code-mode integrations experiment turn state: set once the turn's
+   * runtime and leased server are known, read by mid-turn connect handlers. */
+  let codeModeIntegrationsActiveForTurn = false;
+  let codeModeMcpCapabilityForTurn: string | null = null;
+  let codeModeDirectoryForTurn: string | null = null;
+  let codeModeMountedIntegrationIdsForTurn = new Set<string>();
+  let codeModeOpenCodeServerUrl: string | null = null;
   let durableOpenCodeSessionId: string | null = null;
   let lastVisibleMessage = '';
   /** Last model OpenCode resolved for this turn, for the failure closeout. */
@@ -3421,6 +3432,9 @@ export async function answerFastAgentQuestion({
       currentSessionPrivacy === 'private'
         ? await isPrivateSessionsExperimentEnabled()
         : false;
+    const codeModeIntegrationsEnabled = await isDeploymentExperimentEnabled(
+      'codeModeIntegrations',
+    );
     availableIntegrations = selectFastRoomoteChannelTools({
       integrations: discoveredIntegrations,
       conversation,
@@ -3677,6 +3691,11 @@ export async function answerFastAgentQuestion({
       Env.RELEASE_VERSION,
       packageJson.version,
     );
+    // Colliding sanitized server names keep the classic dispatcher at
+    // runtime; prompt, config mounting, and the lease must all agree.
+    const codeModeIntegrationsEffective =
+      codeModeIntegrationsEnabled &&
+      !hasFastAgentCodeModeServerNameCollision(availableIntegrations);
     const system = buildFastAgentSystemPrompt({
       availableEnvironments,
       activeRepositories,
@@ -3705,6 +3724,7 @@ export async function answerFastAgentQuestion({
       setupSession,
       serviceCredentialToolsEnabled: currentUser.serviceCredentialToolsEnabled,
       addRemoteMcpEnabled: !platformEvent,
+      codeModeIntegrationsEnabled: codeModeIntegrationsEffective,
       personalizationContext,
       globalAgentInstructions: agentBehaviorSettings?.globalAgentInstructions,
       workspaceRoutingRules:
@@ -4079,6 +4099,98 @@ export async function answerFastAgentQuestion({
       call.toolName === 'integration_request' &&
       typeof call.args?.integrationId === 'string' &&
       call.args.integrationId.startsWith('session:');
+    /**
+     * Code-mode integrations experiment: a server connected mid-turn is not
+     * in the mounted set the leased OpenCode server booted with, so mount it
+     * live; otherwise tools.$codemode.search cannot see it until the next
+     * turn. Failures keep the successful connect result; the next turn mounts
+     * the server from the regenerated config instead.
+     */
+    const mountNewlyConnectedCodeModeIntegrations = async (
+      refreshedIntegrations: FastAgentIntegration[],
+    ): Promise<void> => {
+      if (
+        !codeModeIntegrationsActiveForTurn ||
+        !codeModeOpenCodeServerUrl ||
+        !codeModeMcpCapabilityForTurn ||
+        !codeModeDirectoryForTurn
+      ) {
+        console.warn(
+          `[Fast Agent] Skipping mid-turn code-mode mount: active=${codeModeIntegrationsActiveForTurn} serverUrl=${codeModeOpenCodeServerUrl ? 'set' : 'null'} capability=${codeModeMcpCapabilityForTurn ? 'set' : 'null'} directory=${codeModeDirectoryForTurn ? 'set' : 'null'}.`,
+        );
+        return;
+      }
+      const serverUrl = codeModeOpenCodeServerUrl;
+      const mcpCapability = codeModeMcpCapabilityForTurn;
+      const directory = codeModeDirectoryForTurn;
+      for (const integration of refreshedIntegrations) {
+        if (codeModeMountedIntegrationIdsForTurn.has(integration.id)) {
+          continue;
+        }
+        codeModeMountedIntegrationIdsForTurn.add(integration.id);
+        try {
+          const mounted = await mountFastAgentIntegrationOnCodeModeServer({
+            serverUrl,
+            directory,
+            mcpCapability,
+            integrationId: integration.id,
+          });
+          if (mounted) {
+            console.info(
+              `[Fast Agent] Mounted integration ${integration.id} on the code-mode server mid-turn (server=${serverUrl} directory=${directory}).`,
+            );
+          } else {
+            console.warn(
+              `[Fast Agent] Code-mode server rejected the mid-turn mount of integration ${integration.id}; it becomes callable next turn.`,
+            );
+          }
+        } catch (error) {
+          console.warn(
+            `[Fast Agent] Failed to mount integration ${integration.id} on the code-mode server mid-turn: ${formatErrorForLog(error)}`,
+          );
+        }
+      }
+    };
+    /**
+     * A successful connect must make the integration usable in this same
+     * turn: the per-user tool cache otherwise keeps serving the pre-connect
+     * (empty) tool list for up to five minutes, and the built-in catalog
+     * keeps reporting the integration as not connected. Clear and refresh
+     * both, then mount the new server on the code-mode server when the
+     * experiment is active.
+     */
+    const refreshIntegrationsAfterConnect = async (): Promise<void> => {
+      clearFastAgentIntegrationToolCache();
+      const refreshedIntegrations = await listFastAgentIntegrations(
+        { userId, apiBaseUrl },
+        adapter.resolveMcpServerConfigs,
+      );
+      availableIntegrations.splice(
+        0,
+        availableIntegrations.length,
+        ...refreshedIntegrations,
+      );
+      onDemandIntegrations.splice(
+        0,
+        onDemandIntegrations.length,
+        ...refreshedIntegrations.filter(
+          (integration) => !isFastAgentNativeIntegration(integration.id),
+        ),
+      );
+      const refreshedCatalog = await listNativeIntegrationsForFast({
+        userId,
+      }).catch(() => null);
+      if (refreshedCatalog) {
+        nativeIntegrationCatalog.splice(
+          0,
+          nativeIntegrationCatalog.length,
+          ...refreshedCatalog,
+        );
+      }
+      await mountNewlyConnectedCodeModeIntegrations(refreshedIntegrations);
+      // Next-turn durability is automatic: the refreshed integrations flow
+      // into the runtime config written at the next turn's setup.
+    };
     const executeMcpTool = async (
       call: FastAgentMcpToolCall,
       { acknowledgementExempt = false } = {},
@@ -4458,25 +4570,17 @@ export async function answerFastAgentQuestion({
               integrationId: args.integrationId,
             });
             if (result.status === 'connected') {
-              const refreshedIntegrations = await listFastAgentIntegrations(
-                { userId, apiBaseUrl },
-                adapter.resolveMcpServerConfigs,
-              );
-              availableIntegrations.splice(
-                0,
-                availableIntegrations.length,
-                ...refreshedIntegrations,
-              );
-              onDemandIntegrations.splice(
-                0,
-                onDemandIntegrations.length,
-                ...refreshedIntegrations.filter(
-                  (integration) =>
-                    !isFastAgentNativeIntegration(integration.id),
-                ),
-              );
+              await refreshIntegrationsAfterConnect();
             }
-            return { success: true, ...result };
+            return {
+              success: true,
+              ...result,
+              ...(codeModeIntegrationsActiveForTurn
+                ? {
+                    note: 'Connected. Its tools become available through the execute runner, discovered with tools.$codemode.search; call them as tools.<server>.<tool>(input), using bracket notation for either segment like tools["my-server"]["my-tool"](input) when a name is not a plain identifier; if probes still show them missing, they are usable from a follow-up turn.',
+                  }
+                : {}),
+            };
           }
           case FAST_AGENT_NATIVE_TOOL_NAMES.addRemoteMcp: {
             if (platformEvent) {
@@ -4503,25 +4607,17 @@ export async function answerFastAgentQuestion({
               ...args,
             });
             if (result.status === 'connected') {
-              const refreshedIntegrations = await listFastAgentIntegrations(
-                { userId, apiBaseUrl },
-                adapter.resolveMcpServerConfigs,
-              );
-              availableIntegrations.splice(
-                0,
-                availableIntegrations.length,
-                ...refreshedIntegrations,
-              );
-              onDemandIntegrations.splice(
-                0,
-                onDemandIntegrations.length,
-                ...refreshedIntegrations.filter(
-                  (integration) =>
-                    !isFastAgentNativeIntegration(integration.id),
-                ),
-              );
+              await refreshIntegrationsAfterConnect();
             }
-            return { success: true, ...result };
+            return {
+              success: true,
+              ...result,
+              ...(codeModeIntegrationsActiveForTurn
+                ? {
+                    note: 'Connected. Its tools become available through the execute runner, discovered with tools.$codemode.search; call them as tools.<server>.<tool>(input), using bracket notation for either segment like tools["my-server"]["my-tool"](input) when a name is not a plain identifier; if probes still show them missing, they are usable from a follow-up turn.',
+                  }
+                : {}),
+            };
           }
           case FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply: {
             const args = chatReplyArgsSchema.parse(call.args);
@@ -5805,8 +5901,23 @@ export async function answerFastAgentQuestion({
             serviceCredentialPrepareEnabled:
               currentUser.serviceCredentialToolsEnabled && !platformEvent,
             addRemoteMcpEnabled: !platformEvent,
+            codeModeIntegrationsEnabled: codeModeIntegrationsEffective,
           },
         );
+        codeModeIntegrationsActiveForTurn =
+          nativeRuntime.codeModeIntegrationsActive;
+        codeModeMcpCapabilityForTurn = nativeRuntime.codeModeIntegrationsActive
+          ? nativeRuntime.mcpCapability
+          : null;
+        codeModeDirectoryForTurn = nativeRuntime.codeModeIntegrationsActive
+          ? nativeRuntime.directory
+          : null;
+        codeModeMountedIntegrationIdsForTurn = new Set(
+          nativeRuntime.codeModeIntegrationsActive
+            ? availableIntegrations.map((integration) => integration.id)
+            : [],
+        );
+        codeModeOpenCodeServerUrl = null;
         const unbindExecutors = new Set<() => void>();
         const boundSubagentSessionIDs = new Set<string>();
         const unbindAllExecutors = () => {
@@ -5981,6 +6092,10 @@ export async function answerFastAgentQuestion({
                     {
                       directory: nativeRuntime.directory,
                       env: nativeRuntime.env,
+                      codeModeIntegrations: codeModeIntegrationsEffective,
+                      onServerLeased: (url) => {
+                        codeModeOpenCodeServerUrl = url;
+                      },
                       permission: FAST_AGENT_SESSION_PERMISSIONS,
                       signal: promptSignal,
                       promptOnlySubagents: true,

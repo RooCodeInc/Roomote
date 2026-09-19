@@ -30,6 +30,7 @@ import {
   formatFastAgentMcpResultForModel,
   formatFastAgentSkillDocumentForModel,
   getFastAgentNativeToolRuntime,
+  mountFastAgentIntegrationOnCodeModeServer,
   revokeFastAgentMcpCapabilitiesForConversation,
   shouldSpillFastAgentModelOutput,
 } from '../fast-agent-native-tool-bridge';
@@ -44,6 +45,7 @@ import {
 import { callMcpTool, listMcpTools } from '../../mcp-tool-client';
 import { buildOpenCodeCliEnv } from '../../opencode-runtime';
 import { buildFastAgentToolFilter } from '../fast-agent-tool-policy';
+import type { FastAgentIntegration } from '../fast-agent-integration-broker';
 
 function stringWithSerializedByteLength(byteLength: number): string {
   return 'x'.repeat(byteLength - 2);
@@ -337,6 +339,163 @@ describe('Fast native OpenCode tool bridge', () => {
       FAST_AGENT_NATIVE_TOOL_NAMES.spillRead,
     ]) {
       expect(FAST_AGENT_SUBAGENT_TOOL_FILTER[parentOnlyTool]).not.toBe(true);
+    }
+  });
+
+  it('mounts only native integrations and hides execute when the code-mode experiment is off', async () => {
+    const runtime = await getFastAgentNativeToolRuntime(
+      'code-mode-integrations-off',
+      [
+        {
+          id: 'roomote',
+          name: 'Roomote',
+          description: 'Deployment access',
+          tools: [{ name: 'manage_tasks' }],
+        },
+        {
+          id: 'github',
+          name: 'GitHub',
+          description: 'Repository access',
+          tools: [{ name: 'search_code' }],
+        },
+      ],
+      { codeModeIntegrationsEnabled: false },
+    );
+
+    expect(runtime.env).not.toHaveProperty('OPENCODE_EXPERIMENTAL_CODE_MODE');
+    const config = JSON.parse(
+      await readFile(join(runtime.directory, 'opencode.json'), 'utf8'),
+    );
+    expect(Object.keys(config.mcp)).toEqual(['roomote']);
+    expect(config.agent.build.tools.execute).not.toBe(true);
+    expect(config.agent.build.tools.call_integration_tool).toBe(true);
+    expect(config.agent.build.tools['roomote_*']).toBe(true);
+    expect(config.agent.build.tools['github_*']).not.toBe(true);
+  });
+
+  it('mounts every authorized integration and enables code mode when the experiment is on', async () => {
+    const runtime = await getFastAgentNativeToolRuntime(
+      'code-mode-integrations-on',
+      [
+        {
+          id: 'roomote',
+          name: 'Roomote',
+          description: 'Deployment access',
+          tools: [{ name: 'manage_tasks' }],
+        },
+        {
+          id: 'github',
+          name: 'GitHub',
+          description: 'Repository access',
+          tools: [{ name: 'search_code' }],
+        },
+        {
+          id: 'exa',
+          name: 'Exa',
+          description: 'Web search',
+          tools: [{ name: 'search' }],
+        },
+      ],
+      { codeModeIntegrationsEnabled: true },
+    );
+
+    expect(runtime.env.OPENCODE_EXPERIMENTAL_CODE_MODE).toBe('1');
+    const config = JSON.parse(
+      await readFile(join(runtime.directory, 'opencode.json'), 'utf8'),
+    );
+    expect(Object.keys(config.mcp).sort()).toEqual([
+      'exa',
+      'github',
+      'roomote',
+    ]);
+    for (const id of ['roomote', 'github', 'exa']) {
+      expect(config.mcp[id].type).toBe('remote');
+      expect(config.mcp[id].url).toContain(`/mcp/${runtime.mcpCapability}/`);
+      expect(config.mcp[id].headers.Authorization).toBe(
+        `Bearer ${runtime.mcpCapability}`,
+      );
+    }
+    expect(config.agent.build.tools.execute).toBe(true);
+    expect(config.agent.build.tools.call_integration_tool).toBe(false);
+    expect(config.agent.build.tools.find_integration_tools).toBe(true);
+    expect(config.agent.build.tools['github_*']).toBe(true);
+    expect(config.agent.build.tools['*']).toBe(false);
+  });
+
+  it('falls back to the dispatcher path when integration ids collide as MCP server names', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const runtime = await getFastAgentNativeToolRuntime(
+        'code-mode-integrations-collision',
+        [
+          {
+            id: 'foo.bar',
+            name: 'Foo Dot Bar',
+            description: 'First',
+            tools: [{ name: 'search' }],
+          },
+          {
+            id: 'foo_bar',
+            name: 'Foo Underscore Bar',
+            description: 'Second',
+            tools: [{ name: 'read' }],
+          },
+        ],
+        { codeModeIntegrationsEnabled: true },
+      );
+
+      expect(runtime.env).not.toHaveProperty('OPENCODE_EXPERIMENTAL_CODE_MODE');
+      const config = JSON.parse(
+        await readFile(join(runtime.directory, 'opencode.json'), 'utf8'),
+      );
+      expect(Object.keys(config.mcp)).toEqual([]);
+      expect(config.agent.build.tools.execute).not.toBe(true);
+      expect(config.agent.build.tools.call_integration_tool).toBe(true);
+      expect(
+        warn.mock.calls.some(([message]) =>
+          String(message).includes('foo.bar'),
+        ),
+      ).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('posts the capability-scoped bridge config when mounting an integration mid-turn', async () => {
+    const requests: { url: string; body: unknown }[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+      requests.push({
+        url: String(input),
+        body: JSON.parse(String(init?.body ?? '{}')),
+      });
+      return new Response('{}', { status: 200 });
+    }) as typeof fetch;
+    try {
+      const mounted = await mountFastAgentIntegrationOnCodeModeServer({
+        serverUrl: 'http://127.0.0.1:4107',
+        directory: '/tmp/fast-runtime-dir',
+        mcpCapability: 'cap-1',
+        integrationId: 'notion',
+      });
+
+      expect(mounted).toBe(true);
+      expect(requests).toHaveLength(1);
+      expect(requests[0]!.url).toBe(
+        'http://127.0.0.1:4107/mcp?directory=%2Ftmp%2Ffast-runtime-dir',
+      );
+      expect(requests[0]!.body).toMatchObject({
+        name: 'notion',
+        config: {
+          type: 'remote',
+          enabled: true,
+          oauth: false,
+          url: expect.stringContaining('/mcp/cap-1/notion'),
+          headers: { Authorization: 'Bearer cap-1' },
+        },
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
     }
   });
 
@@ -1116,6 +1275,68 @@ describe('Fast native OpenCode tool bridge', () => {
         { type: 'text', text: 'Image fetched successfully' },
         { type: 'image', data: 'aW1hZ2U=', mimeType: 'image/png' },
       ]);
+    } finally {
+      unbind();
+    }
+  });
+
+  it('serves integrations spliced into the capability list mid-turn', async () => {
+    const integrations: FastAgentIntegration[] = [
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: 'Deployment access',
+        tools: [{ name: 'manage_tasks' }],
+      },
+    ];
+    const runtime = await getFastAgentNativeToolRuntime(
+      'mid-turn-capability-refresh',
+      integrations,
+      { codeModeIntegrationsEnabled: true },
+    );
+    expect(runtime.codeModeIntegrationsActive).toBe(true);
+    const executor = vi.fn(async () => ({ found: true }));
+    const unbind = bindFastAgentMcpToolExecutor(
+      runtime.mcpCapability,
+      executor,
+    );
+    try {
+      // The connect handlers refresh integrations in place; the bridge
+      // capability shares this array, so the new server must answer on the
+      // same capability URL immediately.
+      integrations.splice(
+        0,
+        integrations.length,
+        {
+          id: 'roomote',
+          name: 'Roomote',
+          description: 'Deployment access',
+          tools: [{ name: 'manage_tasks' }],
+        },
+        {
+          id: 'notion',
+          name: 'Notion',
+          description: 'Docs access',
+          tools: [{ name: 'search_pages' }],
+        },
+      );
+      const bridgeBase = runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_URL!.replace(
+        /\/tool$/u,
+        '',
+      );
+      const url = `${bridgeBase}/mcp/${runtime.mcpCapability}/notion`;
+      const headers = {
+        Authorization: `Bearer ${runtime.mcpCapability}`,
+      };
+      await expect(listMcpTools({ url, headers })).resolves.toEqual([
+        { name: 'search_pages', inputSchema: { type: 'object' } },
+      ]);
+      await callMcpTool({ url, headers, toolName: 'search_pages', args: {} });
+      expect(executor).toHaveBeenCalledWith({
+        integrationId: 'notion',
+        toolName: 'search_pages',
+        args: {},
+      });
     } finally {
       unbind();
     }
