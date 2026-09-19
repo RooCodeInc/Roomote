@@ -2,13 +2,10 @@ import { randomUUID } from 'node:crypto';
 
 import {
   and,
-  count,
-  customMcpServers,
   db,
   eq,
   mcpConnections,
   mcpOauthReplays,
-  personalMcpServers,
   sql,
   users,
 } from '@roomote/db/server';
@@ -39,8 +36,10 @@ import { createBoundedCustomMcpFetch } from './custom-fetch';
 import {
   canManageCustomMcpServer,
   customMcpConnectionWhere,
+  customMcpServerStore,
   findCustomMcpServerById,
   storeCustomMcpServerMetadata,
+  type CustomMcpServerScope,
   type ResolvedCustomMcpServer,
 } from './custom-servers';
 import {
@@ -805,9 +804,16 @@ export async function addRemoteCustomMcpForFast(input: {
   });
   const normalizedUrl = normalizeFastRemoteMcpUrl(parsed.url);
 
-  return visibility === 'owner'
-    ? addPersonalRemoteMcp({ ...input, actor, parsed, normalizedUrl })
-    : addDeploymentRemoteMcp({ ...input, actor, parsed, normalizedUrl });
+  return addScopedRemoteMcp({
+    ...input,
+    actor,
+    parsed,
+    normalizedUrl,
+    scope:
+      visibility === 'owner'
+        ? { visibility: 'owner', ownerUserId: actor.userId }
+        : { visibility: 'deployment' },
+  });
 }
 
 type AddRemoteMcpContext = {
@@ -815,15 +821,16 @@ type AddRemoteMcpContext = {
   actor: { userId: string; isAdmin: boolean };
   parsed: { name: string };
   normalizedUrl: string;
+  scope: CustomMcpServerScope;
 };
 
-async function addPersonalRemoteMcp(
+async function addScopedRemoteMcp(
   input: AddRemoteMcpContext,
 ): Promise<AddRemoteCustomMcpResult> {
-  const { actor, parsed, normalizedUrl } = input;
-  const ownedWhere = eq(personalMcpServers.ownerUserId, actor.userId);
+  const { actor, parsed, normalizedUrl, scope } = input;
+  const store = customMcpServerStore(scope);
   const existing = findMatchingRemoteMcpServer(
-    await db.query.personalMcpServers.findMany({ where: ownedWhere }),
+    await store.list(),
     parsed.name,
     normalizedUrl,
   );
@@ -841,143 +848,59 @@ async function addPersonalRemoteMcp(
     return {
       status: 'needs_static_headers',
       name: parsed.name,
-      settingsUrl: publicUrl(PERSONAL_SETTINGS_PATH),
+      settingsUrl: publicUrl(
+        scope.visibility === 'owner' ? PERSONAL_SETTINGS_PATH : SETTINGS_PATH,
+      ),
       reused: false,
     };
   }
   const selected = await db.transaction(async (tx) => {
-    // Scope the lock to the owner: two members adding the same URL privately
-    // never wait on, or collide with, each other.
+    const lockKey =
+      scope.visibility === 'owner'
+        ? `${scope.ownerUserId}:${normalizedUrl}`
+        : normalizedUrl;
     await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${actor.userId}:${normalizedUrl}`}, 0))`,
+      sql`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`,
     );
-    const owned = await tx.query.personalMcpServers.findMany({
-      where: ownedWhere,
-    });
+    const transactionStore = customMcpServerStore(scope, tx);
+    const scopedServers = await transactionStore.list();
     const lockedExisting = findMatchingRemoteMcpServer(
-      owned,
+      scopedServers,
       parsed.name,
       normalizedUrl,
     );
     if (lockedExisting) {
       return { id: lockedExisting.id, reused: true as const };
     }
-    if (owned.length >= MAX_PERSONAL_MCP_SERVERS) {
+    const limit =
+      scope.visibility === 'owner'
+        ? MAX_PERSONAL_MCP_SERVERS
+        : MAX_CUSTOM_MCP_SERVERS;
+    if (scopedServers.length >= limit) {
       throw new Error(
-        `At most ${MAX_PERSONAL_MCP_SERVERS} personal MCP servers are supported.`,
+        scope.visibility === 'owner'
+          ? `At most ${limit} personal MCP servers are supported.`
+          : `At most ${limit} custom MCP servers are supported.`,
       );
     }
-    const [created] = await tx
-      .insert(personalMcpServers)
-      .values({
-        ownerUserId: actor.userId,
-        name: parsed.name,
-        url: normalizedUrl,
-        authType:
-          probe.status === 'oauth' ? ('oauth' as const) : ('none' as const),
-        ...(probe.status === 'oauth'
-          ? {
-              oauthServerMetadata: probe.metadata,
-              oauthServerMetadataFetchedAt: new Date(),
-            }
-          : {}),
-      })
-      .onConflictDoNothing({
-        target: [personalMcpServers.ownerUserId, personalMcpServers.name],
-      })
-      .returning({ id: personalMcpServers.id });
-    if (!created) {
-      throw new Error(
-        `You already have a personal MCP server named '${parsed.name}'.`,
-      );
-    }
-    return { id: created.id, reused: false as const };
-  });
-
-  if (!selected.reused && probe.status === 'connected') {
-    return {
-      status: 'connected',
-      ...serverResultIdentity({ name: parsed.name, ownerUserId: actor.userId }),
-      tools: probe.tools,
-      reused: false,
-    };
-  }
-  return resultForServer({
-    server: await requireServer(selected.id),
-    actor,
-    sessionId: input.sessionId,
-    reused: selected.reused,
-  });
-}
-
-async function addDeploymentRemoteMcp(
-  input: AddRemoteMcpContext,
-): Promise<AddRemoteCustomMcpResult> {
-  const { actor, parsed, normalizedUrl } = input;
-  const existing = findMatchingRemoteMcpServer(
-    await db.query.customMcpServers.findMany(),
-    parsed.name,
-    normalizedUrl,
-  );
-  if (existing) {
-    return resultForServer({
-      server: await requireServer(existing.id),
-      actor,
-      sessionId: input.sessionId,
-      reused: true,
-    });
-  }
-
-  const probe = await probeRemoteMcp(normalizedUrl);
-  if (probe.status === 'needs_static_headers') {
-    return {
-      status: 'needs_static_headers',
+    const created = await transactionStore.create({
       name: parsed.name,
-      settingsUrl: publicUrl(SETTINGS_PATH),
-      reused: false,
-    };
-  }
-  const selected = await db.transaction(async (tx) => {
-    await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(hashtextextended(${normalizedUrl}, 0))`,
-    );
-    const lockedExisting = findMatchingRemoteMcpServer(
-      await tx.query.customMcpServers.findMany(),
-      parsed.name,
-      normalizedUrl,
-    );
-    if (lockedExisting) {
-      return { id: lockedExisting.id, reused: true as const };
-    }
-
-    const [countRow] = await tx
-      .select({ value: count() })
-      .from(customMcpServers);
-    if ((countRow?.value ?? 0) >= MAX_CUSTOM_MCP_SERVERS) {
-      throw new Error(
-        `At most ${MAX_CUSTOM_MCP_SERVERS} custom MCP servers are supported.`,
-      );
-    }
-    const [created] = await tx
-      .insert(customMcpServers)
-      .values({
-        name: parsed.name,
-        url: normalizedUrl,
-        authType:
-          probe.status === 'oauth' ? ('oauth' as const) : ('none' as const),
-        createdByUserId: actor.userId,
-        ...(probe.status === 'oauth'
-          ? {
-              oauthServerMetadata: probe.metadata,
-              oauthServerMetadataFetchedAt: new Date(),
-            }
-          : {}),
-      })
-      .onConflictDoNothing({ target: [customMcpServers.name] })
-      .returning({ id: customMcpServers.id });
+      url: normalizedUrl,
+      authType:
+        probe.status === 'oauth' ? ('oauth' as const) : ('none' as const),
+      createdByUserId: actor.userId,
+      ...(probe.status === 'oauth'
+        ? {
+            oauthServerMetadata: probe.metadata,
+            oauthServerMetadataFetchedAt: new Date(),
+          }
+        : {}),
+    });
     if (!created) {
       throw new Error(
-        `A custom MCP server named '${parsed.name}' already exists.`,
+        scope.visibility === 'owner'
+          ? `You already have a personal MCP server named '${parsed.name}'.`
+          : `A custom MCP server named '${parsed.name}' already exists.`,
       );
     }
     return { id: created.id, reused: false as const };
@@ -986,7 +909,10 @@ async function addDeploymentRemoteMcp(
   if (!selected.reused && probe.status === 'connected') {
     return {
       status: 'connected',
-      ...serverResultIdentity({ name: parsed.name, ownerUserId: null }),
+      ...serverResultIdentity({
+        name: parsed.name,
+        ownerUserId: scope.visibility === 'owner' ? scope.ownerUserId : null,
+      }),
       tools: probe.tools,
       reused: false,
     };
