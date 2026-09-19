@@ -26,6 +26,9 @@ type FastAgentOpenCodeSessionRunInput<T> = {
     selectedPrompt: string,
     context: { path: FastAgentOpenCodeSessionPath; validateSession: boolean },
   ) => Promise<T>;
+  /** Import a healthy snapshot before cold validation. Returning a fresh id
+   * switches this run to the imported transcript; null keeps normal resume. */
+  restoreSession?: (session: NonTaskOpenCodeSession) => Promise<string | null>;
   onPathSelected?: (path: FastAgentOpenCodeSessionPath) => void;
 };
 
@@ -77,6 +80,7 @@ export class FastAgentOpenCodeSessionManager {
     prompt,
     bootstrapPrompt,
     execute,
+    restoreSession,
     onPathSelected,
   }: FastAgentOpenCodeSessionRunInput<T>): Promise<T> {
     const entry = this.acquire(conversationId);
@@ -137,6 +141,25 @@ export class FastAgentOpenCodeSessionManager {
       } catch (error) {
         if (!isNonTaskOpenCodeSessionNotFoundError(error)) {
           throw error;
+        }
+
+        if (restoreSession) {
+          let restoredSessionId: string | null = null;
+          try {
+            restoredSessionId = await restoreSession(entry.session);
+          } catch (restoreError) {
+            console.warn(
+              `[Fast Agent] OpenCode snapshot import failed; using compatibility fallback. ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
+            );
+          }
+          if (restoredSessionId) {
+            entry.session.id = restoredSessionId;
+            onPathSelected?.('cold_resume');
+            return await executeAndInvalidateOnFailure(prompt, {
+              path: 'cold_resume',
+              validateSession: true,
+            });
+          }
         }
 
         onPathSelected?.('fallback_rebuild');

@@ -318,4 +318,93 @@ describe('FastAgentOpenCodeSessionManager', () => {
       context: { path: 'fallback_rebuild', validateSession: false },
     });
   });
+
+  it('imports a snapshot only after durable native validation reports loss', async () => {
+    const manager = new FastAgentOpenCodeSessionManager();
+    const restoreSession = vi.fn(async () => 'restored-session');
+    const execute = vi
+      .fn()
+      .mockRejectedValueOnce(new NonTaskOpenCodeSessionNotFoundError())
+      .mockImplementationOnce(async (session, prompt, context) => ({
+        sessionId: session.id,
+        prompt,
+        context,
+      }));
+
+    await expect(
+      manager.run({
+        conversationId: 'restored',
+        persistedSessionId: 'missing-session',
+        prompt: 'new turn only',
+        bootstrapPrompt: 'compatibility history',
+        restoreSession,
+        execute,
+      }),
+    ).resolves.toEqual({
+      sessionId: 'restored-session',
+      prompt: 'new turn only',
+      context: { path: 'cold_resume', validateSession: true },
+    });
+    expect(restoreSession).toHaveBeenCalledOnce();
+    expect(execute).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not import when the durable native session still validates', async () => {
+    const manager = new FastAgentOpenCodeSessionManager();
+    const restoreSession = vi.fn(async () => 'restored-session');
+    const execute = vi.fn(async (_session, prompt) => prompt);
+
+    await expect(
+      manager.run({
+        conversationId: 'healthy',
+        persistedSessionId: 'healthy-session',
+        prompt: 'new turn only',
+        bootstrapPrompt: 'compatibility history',
+        restoreSession,
+        execute,
+      }),
+    ).resolves.toBe('new turn only');
+    expect(restoreSession).not.toHaveBeenCalled();
+  });
+
+  it('uses compatibility history when snapshot import fails', async () => {
+    const manager = new FastAgentOpenCodeSessionManager();
+    const execute = vi
+      .fn()
+      .mockRejectedValueOnce(new NonTaskOpenCodeSessionNotFoundError())
+      .mockImplementationOnce(async (_session, prompt) => prompt);
+
+    await expect(
+      manager.run({
+        conversationId: 'import-failure',
+        persistedSessionId: 'missing-session',
+        prompt: 'new turn only',
+        bootstrapPrompt: 'compatibility history',
+        restoreSession: async () => {
+          throw new Error('import failed');
+        },
+        execute,
+      }),
+    ).resolves.toBe('compatibility history');
+  });
+
+  it('does not replay through compatibility history after restored execution starts', async () => {
+    const manager = new FastAgentOpenCodeSessionManager();
+    const execute = vi
+      .fn()
+      .mockRejectedValueOnce(new NonTaskOpenCodeSessionNotFoundError())
+      .mockRejectedValueOnce(new Error('provider failed after tool activity'));
+
+    await expect(
+      manager.run({
+        conversationId: 'restored-failure',
+        persistedSessionId: 'missing-session',
+        prompt: 'new turn only',
+        bootstrapPrompt: 'compatibility history',
+        restoreSession: async () => 'restored-session',
+        execute,
+      }),
+    ).rejects.toThrow('provider failed after tool activity');
+    expect(execute).toHaveBeenCalledTimes(2);
+  });
 });

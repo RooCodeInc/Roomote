@@ -1,10 +1,16 @@
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import {
+  execFile,
+  execFileSync,
+  spawn,
+  type ChildProcess,
+} from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { promisify } from 'node:util';
 
 import {
   collectOpenRouterVariantModelAlias,
@@ -42,6 +48,10 @@ import {
 } from './fast-agent/fast-agent-tool-policy';
 import { scrubOpenCodeHelperEnv } from './opencode-helper-env';
 import { seedOpenCodePluginDependenciesForEnv } from './opencode-plugin-seed';
+import {
+  cloneOpenCodeSessionSnapshotForImport,
+  type OpenCodeSessionSnapshot,
+} from './opencode-session-snapshot';
 
 const ESCAPE_CHARACTER = String.fromCharCode(27);
 const BELL_CHARACTER = String.fromCharCode(7);
@@ -59,6 +69,7 @@ const DEFAULT_OPENCODE_SDK_SERVER_IDLE_TTL_MS = 10 * 60_000;
 const OPENCODE_SDK_SERVER_HOSTNAME = '127.0.0.1';
 const OPENCODE_SDK_SERVER_READY_POLL_INTERVAL_MS = 100;
 const OPENCODE_SDK_SERVER_READY_FETCH_TIMEOUT_MS = 1_000;
+const execFileAsync = promisify(execFile);
 
 function buildModelBackedOpenCodeConfigContent(
   env: NodeJS.ProcessEnv = process.env,
@@ -693,6 +704,40 @@ export function readOpenCodeDebugConfig(): string {
     maxBuffer: 1024 * 1024,
     timeout: 30_000,
   });
+}
+
+/**
+ * Restore a snapshot through OpenCode's supported CLI import surface before
+ * the restored session receives its first prompt. Fresh native ids make a
+ * failed partial import an unreachable orphan instead of poisoning the
+ * durable session being replaced.
+ */
+export async function importOpenCodeSessionSnapshot(input: {
+  snapshot: OpenCodeSessionSnapshot;
+  directory: string;
+}): Promise<string> {
+  const snapshot = cloneOpenCodeSessionSnapshotForImport(input.snapshot);
+  const tempDirectory = mkdtempSync(join(tmpdir(), 'roomote-opencode-import-'));
+  const snapshotPath = join(tempDirectory, 'session.json');
+  writeFileSync(snapshotPath, JSON.stringify(snapshot), {
+    encoding: 'utf8',
+    mode: 0o600,
+  });
+
+  try {
+    const command = resolveOpenCodeCommand(['import', snapshotPath, '--pure']);
+    await execFileAsync(command.command, command.args, {
+      cwd: input.directory,
+      // Import needs OpenCode's storage location, inherited from the service,
+      // but no model or native-tool capability credentials.
+      env: buildOpenCodeCliEnv(),
+      maxBuffer: 1024 * 1024,
+      timeout: 30_000,
+    });
+    return snapshot.sourceSessionId;
+  } finally {
+    rmSync(tempDirectory, { recursive: true, force: true });
+  }
 }
 
 function signalProcessTree(proc: ChildProcess, signal: NodeJS.Signals): void {

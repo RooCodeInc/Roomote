@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   buildOpenCodeCliEnv,
+  importOpenCodeSessionSnapshot,
   killOpenCodeSdkServerProcessesForShutdown,
   leaseOpenCodeSdkServer,
   NON_TASK_TOOL_PERMISSION_DENIALS,
@@ -823,6 +824,52 @@ describe('buildOpenCodeCliEnv', () => {
       rmSync(fixtureDir, { recursive: true, force: true });
     }
   });
+
+  it('imports a cloned snapshot through the configured OpenCode CLI', async () => {
+    const fixtureDir = mkdtempSync(
+      path.join(tmpdir(), 'opencode-import-test-'),
+    );
+    const commandPath = path.join(fixtureDir, 'import.cjs');
+    const capturedPath = path.join(fixtureDir, 'captured.json');
+    writeFileSync(
+      commandPath,
+      `const { readFileSync, writeFileSync } = require('node:fs');
+const importIndex = process.argv.indexOf('import');
+if (importIndex === -1 || process.argv.at(-1) !== '--pure') process.exit(2);
+writeFileSync(process.argv[2], readFileSync(process.argv[importIndex + 1]));`,
+    );
+    process.env.OPENCODE_COMMAND = `${process.execPath} ${commandPath} ${capturedPath}`;
+
+    try {
+      const sourceSessionId = `ses_${'a'.repeat(26)}`;
+      const restoredSessionId = await importOpenCodeSessionSnapshot({
+        directory: fixtureDir,
+        snapshot: {
+          version: 1,
+          sourceSessionId,
+          capturedAt: 1,
+          info: {
+            id: sourceSessionId,
+            slug: 'source',
+            projectID: 'global',
+            directory: fixtureDir,
+            title: 'Source',
+            version: '1.18.30',
+            time: { created: 1, updated: 1 },
+          },
+          messages: [],
+        },
+      });
+      const imported = JSON.parse(readFileSync(capturedPath, 'utf8'));
+
+      expect(restoredSessionId).toMatch(/^ses_[a-f0-9]{26}$/u);
+      expect(restoredSessionId).not.toBe(sourceSessionId);
+      expect(imported.info.id).toBe(restoredSessionId);
+      expect(imported.sourceSessionId).toBe(restoredSessionId);
+    } finally {
+      rmSync(fixtureDir, { recursive: true, force: true });
+    }
+  });
 });
 
 // Fake `opencode serve`: answers the readiness probe on the requested port,
@@ -975,6 +1022,7 @@ describe('OpenCode SDK server shutdown', () => {
       env: {
         OPENCODE_FIXTURE_PID_FILE: pidFilePath,
         HOME: home,
+        XDG_CONFIG_HOME: undefined,
         OPENCODE_CONFIG_DIR: sharedTools,
         [OPENCODE_PLUGIN_SEED_DIR_ENV]: seedDir,
       },

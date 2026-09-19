@@ -1,0 +1,1 @@
+ALTER TABLE "fast_agent_conversations" ADD COLUMN "opencode_snapshot" text;
