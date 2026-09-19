@@ -585,6 +585,44 @@ describe('SlackNotifier', () => {
       expect(result).toBe(true);
     });
 
+    it.each([20_001, 25_000, 40_000])(
+      'preserves %i emoji without unnecessary truncation',
+      async (count) => {
+        getGlobalWithFetch().fetch = vi
+          .fn()
+          .mockResolvedValue(Response.json({ ok: true }));
+        const text = '😀'.repeat(count);
+        await notifier.updateMessage({
+          channel: 'C123',
+          ts: '123.000',
+          message: { text },
+        });
+        const request = getGlobalWithFetch().fetch.mock
+          .calls[0]?.[1] as RequestInit;
+        expect(JSON.parse(request.body as string).text).toBe(text);
+      },
+    );
+
+    it('bounds oversized emoji by code points without overlapping retained content', async () => {
+      getGlobalWithFetch().fetch = vi
+        .fn()
+        .mockResolvedValue(Response.json({ ok: true }));
+      const text = '😀'.repeat(40_001);
+      await notifier.updateMessage({
+        channel: 'C123',
+        ts: '123.000',
+        message: { text },
+      });
+      const request = getGlobalWithFetch().fetch.mock
+        .calls[0]?.[1] as RequestInit;
+      const result = JSON.parse(request.body as string).text as string;
+      expect(Array.from(result)).toHaveLength(40_000);
+      expect(result).toContain('[…truncated…]');
+      expect(result).not.toMatch(
+        /(?:^|[^\uD800-\uDBFF])[\uDC00-\uDFFF]|[\uD800-\uDBFF](?:$|[^\uDC00-\uDFFF])/u,
+      );
+    });
+
     it('does not split surrogate pairs at truncation boundaries', async () => {
       getGlobalWithFetch().fetch = vi.fn().mockResolvedValue({
         ok: true,

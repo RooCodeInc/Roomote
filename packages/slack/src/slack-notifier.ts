@@ -134,6 +134,10 @@ function truncateSlackText(text: string): string {
   }
 
   const characters = Array.from(text);
+  if (characters.length <= SLACK_MESSAGE_TEXT_MAX_CHARS) {
+    return text;
+  }
+
   const tailChars =
     SLACK_MESSAGE_TEXT_MAX_CHARS -
     SLACK_TEXT_HEAD_CHARS -
