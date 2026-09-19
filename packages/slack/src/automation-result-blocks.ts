@@ -1,4 +1,8 @@
 import type { SlackBlock, SlackTableCell } from '@roomote/types';
+import {
+  buildAutomationResultLinkActionRows,
+  type AutomationResultLinkAction,
+} from '@roomote/communication';
 
 import {
   convertMarkdownInlineToRichText,
@@ -290,51 +294,22 @@ export function buildAutomationResultBlocks(params: {
   subtitle?: { type: string; text: string };
   taskUrl?: string | null;
   linkedPrUrls?: string[];
-  additionalActions?: Record<string, unknown>[];
+  additionalActions?: AutomationResultLinkAction[];
   configureLabel?: string;
 }): SlackBlock[] {
-  const actionElements = [...(params.additionalActions ?? [])];
-  const linkedPrUrls = params.linkedPrUrls ?? [];
-  const reservedActions = actionElements.length + (params.taskUrl ? 1 : 0);
-
-  for (const [index, linkedPrUrl] of linkedPrUrls
-    .slice(0, 25 - reservedActions)
-    .entries()) {
-    actionElements.push({
-      type: 'button',
-      action_id: `late_bound_automation_view_pr_${index + 1}`,
-      text: {
-        type: 'plain_text',
-        text: linkedPrUrls.length === 1 ? 'See PR' : `See PR ${index + 1}`,
-        emoji: false,
-      },
-      url: linkedPrUrl,
-    });
-  }
-
-  if (params.taskUrl) {
-    actionElements.push({
-      type: 'button',
-      action_id: 'late_bound_automation_view_task',
-      text: { type: 'plain_text', text: 'Go to task', emoji: false },
-      url: params.taskUrl,
-    });
-  }
-  actionElements.push({
-    type: 'button',
-    action_id: 'late_bound_automation_configure',
-    text: {
-      type: 'plain_text',
-      text: params.configureLabel ?? 'Configure',
-      emoji: false,
-    },
-    url: params.configureUrl,
-  });
-  const configureAction = actionElements.pop();
-  const actionGroups =
-    actionElements.length === 25 && configureAction
-      ? [actionElements, [configureAction]]
-      : [[...actionElements, ...(configureAction ? [configureAction] : [])]];
+  const actionGroups = buildAutomationResultLinkActionRows(params).map(
+    (actions) =>
+      actions.map((action) => ({
+        type: 'button',
+        action_id: action.actionId,
+        text: {
+          type: 'plain_text',
+          text: action.text,
+          emoji: false,
+        },
+        url: action.url,
+      })),
+  );
 
   const contentBlocks = normalizeContentBlocks(
     params.contentBlocks

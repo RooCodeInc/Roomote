@@ -1,4 +1,5 @@
 import { Env } from '@roomote/env';
+import { buildAutomationResultLinkButtonRows } from '@roomote/communication';
 import {
   db,
   getAutomationRuntime,
@@ -357,14 +358,11 @@ export async function managerStatsJob(
           conversationKey: `builtin-automation:manager_stats:${now.toISOString()}`,
           text,
           idempotencyKey: `manager-stats:${now.toISOString()}`,
-          buttons: [
-            [
-              {
-                text: 'Automation settings',
-                url: buildManagerSlackSettingsUrl(MANAGER_STATS_SETTINGS_HASH),
-              },
-            ],
-          ],
+          buttons: buildAutomationResultLinkButtonRows({
+            configureUrl: buildManagerSlackSettingsUrl(
+              MANAGER_STATS_SETTINGS_HASH,
+            ),
+          }),
         });
       } else if (destination.provider === 'slack') {
         if (!deployment.slackBotToken) {

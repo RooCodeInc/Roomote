@@ -12,6 +12,7 @@ const {
   discordPostMessageMock,
   dbTransactionMock,
   envMock,
+  getCustomAutomationByIdMock,
   getTaskAutomationInitiatorKeyMock,
   getLatestInboundMessageIdMock,
   getLatestUserMessageForReplyQuoteMock,
@@ -35,6 +36,7 @@ const {
   discordPostMessageMock: vi.fn(),
   dbTransactionMock: vi.fn(),
   envMock: { R_APP_URL: 'https://app.example.com' },
+  getCustomAutomationByIdMock: vi.fn(),
   getTaskAutomationInitiatorKeyMock: vi.fn(),
   getLatestInboundMessageIdMock: vi.fn(),
   getLatestUserMessageForReplyQuoteMock: vi.fn(),
@@ -76,6 +78,7 @@ vi.mock('@roomote/db/server', () => ({
   and: vi.fn(),
   db: { transaction: dbTransactionMock },
   eq: vi.fn(),
+  getCustomAutomationById: getCustomAutomationByIdMock,
   getTaskAutomationInitiatorKey: getTaskAutomationInitiatorKeyMock,
   resolveDiscordRuntimeCredentials: resolveDiscordRuntimeCredentialsMock,
   resolveTelegramRuntimeCredentials: resolveTelegramRuntimeCredentialsMock,
@@ -86,6 +89,18 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 vi.mock('@roomote/communication', () => ({
+  buildAutomationResultLinkButtonRows: ({
+    configureUrl,
+    taskUrl,
+  }: {
+    configureUrl: string;
+    taskUrl?: string;
+  }) => [
+    [
+      ...(taskUrl ? [{ text: 'Go to task', url: taskUrl }] : []),
+      { text: 'Configure', url: configureUrl },
+    ],
+  ],
   buildThreadReplyFooterText: vi.fn().mockReturnValue(null),
   formatMarkdownLink: vi.fn(),
   getThreadReplyFooterRecord: getThreadReplyFooterRecordMock,
@@ -137,6 +152,10 @@ vi.mock('@roomote/communication/thread-reply-footer-state', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  buildCustomAutomationSettingsUrl: (id: string) =>
+    `https://app.example.com/automations#custom-automation-${id}`,
+  buildManagerSlackSettingsUrl: (hash: string) =>
+    `https://app.example.com/automations#${hash}`,
   resolveAgentMailReplyRoute: vi.fn(async () => ({
     inboxId: 'inbox-1',
     replyToMessageId: 'anchor-1',
@@ -244,6 +263,7 @@ describe('maybeSendCommunicationThreadReply (AgentMail)', () => {
       postMessage: agentmailPostMessageMock,
     });
     agentmailPostMessageMock.mockResolvedValue({ messageId: 'msg-1' });
+    getTaskAutomationInitiatorKeyMock.mockResolvedValue(null);
   });
 
   it('replies through the durable conversation route with a stable Idempotency-Key', async () => {
@@ -267,6 +287,91 @@ describe('maybeSendCommunicationThreadReply (AgentMail)', () => {
     // Email is not live: no typing heartbeat is triggered.
     expect(sendChatActionMock).not.toHaveBeenCalled();
     await expect(response!.json()).resolves.toEqual({ messageTs: 'msg-1' });
+  });
+
+  it('adds the same task and Configure links as a built-in Slack automation report', async () => {
+    getTaskAutomationInitiatorKeyMock.mockResolvedValue('ci_failure_triage');
+
+    await maybeSendCommunicationThreadReply({
+      taskRun: agentmailTaskRun,
+      parsedBody: { text: 'CI is healthy again', images: [] },
+    });
+
+    expect(agentmailPostMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        buttons: [
+          [
+            {
+              text: 'Go to task',
+              url: 'https://app.example.com/task/task-4?utm_source=agentmail&utm_medium=link&utm_campaign=agentmail.thread_reply',
+            },
+            {
+              text: 'Configure',
+              url: expect.stringContaining('#ci-failure-triage'),
+            },
+          ],
+        ],
+      }),
+    );
+  });
+
+  it('sends the report without buttons when optional action lookup fails', async () => {
+    const consoleError = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => {});
+    getTaskAutomationInitiatorKeyMock.mockRejectedValue(
+      new Error('database unavailable'),
+    );
+
+    const response = await maybeSendCommunicationThreadReply({
+      taskRun: agentmailTaskRun,
+      parsedBody: { text: 'Report still delivered', images: [] },
+    });
+
+    expect(response?.status).toBe(200);
+    expect(agentmailPostMessageMock).toHaveBeenCalledWith({
+      channelId: 'inbox-1',
+      threadId: 'conversation-1',
+      text: 'Report still delivered',
+      textFormat: 'markdown',
+      idempotencyKey: expect.any(String),
+    });
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'Failed to build optional AgentMail automation report actions for task task-4: database unavailable',
+      ),
+    );
+    consoleError.mockRestore();
+  });
+
+  it('links a task-generated custom automation report to its own configuration', async () => {
+    getTaskAutomationInitiatorKeyMock.mockResolvedValue('custom_automation');
+    getCustomAutomationByIdMock.mockResolvedValue({ id: 'automation-1' });
+
+    await maybeSendCommunicationThreadReply({
+      taskRun: {
+        ...agentmailTaskRun,
+        payload: {
+          ...agentmailTaskRun.payload,
+          customAutomationId: 'automation-1',
+        },
+      },
+      parsedBody: { text: 'Custom report complete', images: [] },
+    });
+
+    expect(agentmailPostMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        buttons: [
+          [
+            expect.objectContaining({ text: 'Go to task' }),
+            {
+              text: 'Configure',
+              url: 'https://app.example.com/automations#custom-automation-automation-1',
+            },
+          ],
+        ],
+      }),
+    );
   });
 
   it('keys replies by run, text, and inbound anchor', async () => {

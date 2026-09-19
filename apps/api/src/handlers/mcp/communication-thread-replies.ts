@@ -2,9 +2,11 @@ import {
   UnsupportedCommunicationOperationError,
   clearLatestUserMessageForReplyQuoteIfId,
   chunkDiscordMessage,
+  buildAutomationResultLinkButtonRows,
   getLatestInboundMessageId,
   getLatestUserMessageForReplyQuote,
   postTextThreadReplyWithFooter,
+  resolveThreadReplyFooterContext,
   type DiscordCommunicationProvider,
   type TelegramCommunicationProvider,
 } from '@roomote/communication';
@@ -12,6 +14,7 @@ import {
   db,
   and,
   eq,
+  getCustomAutomationById,
   getTaskAutomationInitiatorKey,
   sql,
   taskRuns,
@@ -24,8 +27,13 @@ import {
   getCommunicationServiceUrlFromTaskPayload,
   getCommunicationTeamIdFromTaskPayload,
   getCommunicationThreadIdFromTaskPayload,
+  getTriggerableBackgroundAutomationDescriptorByKey,
+  getTriggerableBackgroundAutomationSettingsHash,
 } from '@roomote/types';
+import { Env } from '@roomote/env';
 import {
+  buildCustomAutomationSettingsUrl,
+  buildManagerSlackSettingsUrl,
   createDiscordCommunicationProviderFromRuntimeCredentials as createDiscordCommunicationProvider,
   createTeamsCommunicationProviderFromRuntimeCredentials as createTeamsCommunicationProvider,
   createTelegramCommunicationProviderFromRuntimeCredentials as createTelegramCommunicationProvider,
@@ -188,6 +196,73 @@ function startTelegramTypingHeartbeat(
 // so "typing…" spans the whole reply delivery instead of lapsing partway
 // through.
 const DISCORD_TYPING_HEARTBEAT_MS = 8_000;
+
+function getCustomAutomationIdFromPayload(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return null;
+  }
+  const value = (payload as Record<string, unknown>).customAutomationId;
+  return typeof value === 'string' && value.trim() ? value : null;
+}
+
+function buildEmailTaskUrl(taskId: string): string {
+  const url = new URL(`/task/${taskId}`, Env.R_APP_URL);
+  url.searchParams.set('utm_source', 'agentmail');
+  url.searchParams.set('utm_medium', 'link');
+  url.searchParams.set('utm_campaign', 'agentmail.thread_reply');
+  return url.toString();
+}
+
+async function buildAgentMailAutomationReportButtons(
+  taskRun: CommunicationReplyTaskRun,
+): Promise<Array<Array<{ text: string; url: string }>> | undefined> {
+  try {
+    const automationKey = await getTaskAutomationInitiatorKey(taskRun.taskId);
+    if (!automationKey) return undefined;
+
+    let configureUrl: string | null = null;
+    if (automationKey === 'custom_automation') {
+      const customAutomationId = getCustomAutomationIdFromPayload(
+        taskRun.payload,
+      );
+      if (customAutomationId) {
+        const automation = await getCustomAutomationById(customAutomationId);
+        if (automation) {
+          configureUrl = buildCustomAutomationSettingsUrl(automation.id);
+        }
+      }
+    } else {
+      const descriptor =
+        getTriggerableBackgroundAutomationDescriptorByKey(automationKey);
+      const settingsHash = descriptor
+        ? getTriggerableBackgroundAutomationSettingsHash(
+            descriptor.automationKey,
+          )
+        : null;
+      if (settingsHash) {
+        configureUrl = buildManagerSlackSettingsUrl(settingsHash);
+      }
+    }
+    if (!configureUrl) return undefined;
+
+    const context = await resolveThreadReplyFooterContext({
+      taskId: taskRun.taskId,
+      prRepo: taskRun.prRepo,
+      prNumber: taskRun.prNumber,
+      includeRunningTasks: false,
+    });
+    return buildAutomationResultLinkButtonRows({
+      configureUrl,
+      linkedPrUrls: context.linkedPrs.map((pullRequest) => pullRequest.prUrl),
+      taskUrl: buildEmailTaskUrl(taskRun.taskId),
+    });
+  } catch (error) {
+    console.error(
+      `[${LOG_CONTEXT}] Failed to build optional AgentMail automation report actions for task ${taskRun.taskId}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return undefined;
+  }
+}
 
 async function bindLateCommunicationReportThread(params: {
   taskRun: CommunicationReplyTaskRun;
@@ -664,11 +739,13 @@ async function sendAgentMailThreadReply(params: {
   // footer edits (a sent email cannot be updated). The reply text is already
   // composed by the worker; delivery only needs the durable conversation
   // route plus an Idempotency-Key so retries never double-send.
+  const buttons = await buildAgentMailAutomationReportButtons(params.taskRun);
   const reply = await provider.postMessage({
     channelId,
     threadId: conversationId,
     text,
     textFormat: 'markdown',
+    ...(buttons ? { buttons } : {}),
     idempotencyKey: buildAgentMailThreadReplyIdempotencyKey({
       conversationId,
       runId: params.taskRun.id,

@@ -3377,6 +3377,22 @@ describe('deliverFastAgentParentEvent', () => {
         channelId: 'roomote@agentmail.test',
         threadId: 'agentmail-conversation-1',
         text: expect.stringContaining(expectedText),
+        buttons: [
+          [
+            {
+              text: 'Follow',
+              url: expect.stringContaining(
+                `/sessions/${parent.sessionId}?utm_source=agentmail`,
+              ),
+            },
+            {
+              text: 'Configure',
+              url: expect.stringContaining(
+                '/automations#custom-automation-automation-1',
+              ),
+            },
+          ],
+        ],
       }),
     );
   });
