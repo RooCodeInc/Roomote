@@ -1621,6 +1621,19 @@ function pruneSessionRuntimes(): void {
 }
 
 /**
+ * True when two authorized integrations would collide as sanitized OpenCode
+ * server names, so the code-mode integrations experiment cannot activate for
+ * this set. The service checks this before building the system prompt so a
+ * colliding conversation keeps the classic dispatcher described in its
+ * prompt, matching the runtime fallback in getFastAgentNativeToolRuntime.
+ */
+export function hasFastAgentCodeModeServerNameCollision(
+  integrations: FastAgentIntegration[],
+): boolean {
+  return findSanitizedMcpServerNameCollision(integrations) !== null;
+}
+
+/**
  * OpenCode prefixes MCP tools with the sanitized server name
  * (`[^a-zA-Z0-9_-]` becomes `_`). Two distinct integration ids that sanitize
  * to the same server name would merge their tool namespaces under code mode,

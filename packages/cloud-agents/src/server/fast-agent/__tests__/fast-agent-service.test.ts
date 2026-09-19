@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   getSession: vi.fn(),
   getNativeRuntime: vi.fn(),
   mountCodeModeIntegration: vi.fn(),
+  serverNameCollision: vi.fn(),
   clearIntegrationToolCache: vi.fn(),
   setOpenCodeSession: vi.fn(),
   upsertMessage: vi.fn(),
@@ -325,6 +326,7 @@ vi.mock('../fast-agent-native-tool-bridge', () => ({
   },
   getFastAgentNativeToolRuntime: mocks.getNativeRuntime,
   mountFastAgentIntegrationOnCodeModeServer: mocks.mountCodeModeIntegration,
+  hasFastAgentCodeModeServerNameCollision: mocks.serverNameCollision,
   bindFastAgentNativeToolExecutor: mocks.bindExecutor,
   createFastAgentSpillTurnBudget: () => ({ calls: 0, outputBytes: 0 }),
   bindFastAgentMcpToolExecutor: mocks.bindMcpExecutor,
@@ -1053,6 +1055,37 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(secondSystemPrompt).toContain('Updated guidance.');
     expect(secondSystemPrompt).not.toContain('First guidance.');
     expect(mocks.getDeploymentSettings).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the dispatcher in the prompt when integration ids collide under the code-mode experiment', async () => {
+    mocks.deploymentExperimentEnabled.mockImplementation(
+      async (id: string) => id === 'codeModeIntegrations',
+    );
+    mocks.serverNameCollision.mockReturnValue(true);
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'foo.bar',
+        name: 'Foo Dot Bar',
+        description: 'First',
+        tools: [{ name: 'search' }],
+      },
+      {
+        id: 'foo_bar',
+        name: 'Foo Underscore Bar',
+        description: 'Second',
+        tools: [{ name: 'read' }],
+      },
+    ]);
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    const systemPrompt = mocks.generateText.mock.calls[0]?.[0].system as
+      | string
+      | undefined;
+    expect(systemPrompt).toContain('### On-demand servers');
+    expect(systemPrompt).not.toContain(
+      'reached only through the `execute` tool',
+    );
   });
 
   it('includes saved routing rules in the Fast system prompt', async () => {
