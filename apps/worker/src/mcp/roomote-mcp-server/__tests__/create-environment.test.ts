@@ -1,5 +1,6 @@
 import {
   handleCreateEnvironment,
+  handlePreviewEnvironment,
   handleRecordVerification,
   handleUpdateEnvironment,
 } from '../create-environment.js';
@@ -12,6 +13,31 @@ const config: RoomoteConfig = {
   token: 'test-token',
   platformApiUrl: 'https://test-api.example.com',
 };
+
+const projectDefinition = {
+  name: 'My Project',
+  repositories: [{ repository: 'owner/repo' }],
+};
+
+describe('handlePreviewEnvironment', () => {
+  it('returns a concrete summary and asks for confirmation without mutating', async () => {
+    const result = await handlePreviewEnvironment({
+      definition: projectDefinition,
+    });
+    const parsed = JSON.parse(result.content[0]?.text ?? '');
+
+    expect(parsed).toMatchObject({
+      success: true,
+      action: 'create',
+      confirmationRequired: true,
+      summary: { name: 'My Project', repositories: 1, setupCommands: 0 },
+    });
+    expect(parsed).not.toHaveProperty('proposalHash');
+    expect(parsed).not.toHaveProperty('approvalQuestionId');
+    expect(parsed.message).toContain('ask whether to proceed');
+    expect(tasksApiClient.createEnvironment).not.toHaveBeenCalled();
+  });
+});
 
 describe('handleCreateEnvironment', () => {
   beforeEach(() => {
@@ -108,8 +134,7 @@ repositories:
     const result = await handleCreateEnvironment(
       {
         definition: {
-          name: 'My Project',
-          repositories: [{ repository: 'owner/repo' }],
+          ...projectDefinition,
         },
       },
       config,

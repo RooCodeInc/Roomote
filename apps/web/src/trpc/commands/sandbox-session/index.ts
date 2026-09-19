@@ -895,6 +895,7 @@ export async function getSandboxSessionByTaskIdCommand(
           verificationTaskId: true,
           verifiedAt: true,
           verificationError: true,
+          config: true,
         },
       })
     : null;

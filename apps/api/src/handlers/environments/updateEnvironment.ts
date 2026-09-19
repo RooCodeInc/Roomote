@@ -13,6 +13,7 @@ import {
   environmentConfigSchema,
   getDuplicateEnvironmentRepositoryConfigError,
   getMissingEnvironmentRepositoryError,
+  getUnresolvedEnvironmentRecipeError,
 } from '@roomote/types';
 
 import type { Variables } from '../../types';
@@ -68,7 +69,10 @@ export async function updateEnvironment(
     return c.json({ error: 'config is required' }, 400);
   }
 
-  const requestBody = body as { config?: unknown; isEval?: unknown };
+  const requestBody = body as {
+    config?: unknown;
+    isEval?: unknown;
+  };
   const hasConfig = Object.prototype.hasOwnProperty.call(requestBody, 'config');
   const hasIsEval = Object.prototype.hasOwnProperty.call(requestBody, 'isEval');
 
@@ -93,6 +97,12 @@ export async function updateEnvironment(
     }
 
     const config = parsedConfig.data;
+
+    const unresolvedRecipeError = getUnresolvedEnvironmentRecipeError(config);
+    if (unresolvedRecipeError) {
+      return c.json({ error: unresolvedRecipeError }, 400);
+    }
+
     const duplicateRepositoryError =
       getDuplicateEnvironmentRepositoryConfigError(config.repositories);
 

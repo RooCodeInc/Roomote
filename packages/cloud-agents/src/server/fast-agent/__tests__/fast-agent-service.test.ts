@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os';
 const mocks = vi.hoisted(() => ({
   appendVisibleMessages: vi.fn(),
   publishReplyStream: vi.fn(),
+  previewEnsureEnvironment: vi.fn(),
+  createEnvironmentRecipeCandidate: vi.fn(),
   getActiveTasks: vi.fn(),
   getSession: vi.fn(),
   getNativeRuntime: vi.fn(),
@@ -79,6 +81,8 @@ const mocks = vi.hoisted(() => ({
   updateParentEventWhere: vi.fn(),
   nativeSteer: vi.fn(),
   executeDb: vi.fn(),
+  getActiveRecipeVerificationTaskId: vi.fn(),
+  withEnvironmentVerificationRetryLock: vi.fn(),
   evaluateJudgments: vi.fn(),
   nativeExecutor: undefined as
     | ((call: {
@@ -107,6 +111,7 @@ const nativeToolNames = vi.hoisted(
       connectIntegration: 'connect_integration',
       cancelTask: 'cancel_task',
       createArtifact: 'create_artifact',
+      ensureEnvironment: 'ensure_environment',
       reportPlatformIssue: 'report_platform_issue',
       findIntegrationTools: 'find_integration_tools',
       ignoreEvent: 'ignore_event',
@@ -196,6 +201,12 @@ vi.mock('../../available-environments', () => ({
   getAvailableEnvironments: mocks.getEnvironments,
 }));
 
+vi.mock('../ensure-environment', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../ensure-environment')>()),
+  previewEnsureEnvironment: mocks.previewEnsureEnvironment,
+  createEnvironmentRecipeCandidate: mocks.createEnvironmentRecipeCandidate,
+}));
+
 vi.mock('../../session-wakeups', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../session-wakeups')>()),
   ensureOwnTaskFollowThroughWakeup: mocks.ensureOwnTaskFollowThroughWakeup,
@@ -247,6 +258,9 @@ vi.mock('@roomote/db/server', () => ({
   getSessionForFastConversation: mocks.getUnifiedSession,
   getSessionForTask: mocks.getSessionForTask,
   touchSessionActivity: mocks.touchSessionActivity,
+  getActiveRecipeVerificationTaskId: mocks.getActiveRecipeVerificationTaskId,
+  withEnvironmentVerificationRetryLock:
+    mocks.withEnvironmentVerificationRetryLock,
   getSessionGoalForConversation: mocks.getSessionGoal,
   claimSessionGoalContinuation: mocks.claimSessionGoalContinuation,
   releaseSessionGoalContinuation: mocks.releaseSessionGoalContinuation,
@@ -517,6 +531,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.mcpCapabilityAvailable = false;
     mocks.getUnifiedSession.mockResolvedValue(null);
     mocks.touchSessionActivity.mockResolvedValue(undefined);
+    mocks.getActiveRecipeVerificationTaskId.mockResolvedValue(null);
+    mocks.withEnvironmentVerificationRetryLock.mockImplementation(
+      async (_environmentId, mutation) => mutation({}),
+    );
     mocks.getSessionForTask.mockResolvedValue(null);
     mocks.privateSessionsEnabled.mockResolvedValue(true);
     mocks.getPendingHumanFollowUp.mockResolvedValue([]);
@@ -11287,6 +11305,49 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
+  it('allows a trusted admin child continuation to launch environment verification', async () => {
+    const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
+      success: true,
+      taskId: 'verification-task',
+    }));
+    const adapter = callbacks({ launchTask });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.launchTask, {
+            mode: 'environment_verification',
+            prompt: 'Verify the environment.',
+            environmentId: 'env-1',
+          }),
+        ).resolves.toEqual({
+          success: true,
+          taskId: 'verification-task',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'The verification task is running.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      turnSource: 'platform_event',
+      serviceCredentialPlatformActorUserId: 'user-1',
+      adapter,
+    });
+
+    expect(mocks.getUserIdentity).toHaveBeenCalledWith('user-1');
+    expect(launchTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        environmentId: 'env-1',
+        verifiesEnvironmentId: 'env-1',
+      }),
+    );
+  });
+
   it('validates and forwards pull request review model overrides', async () => {
     const adapter = callbacks();
     mocks.generateText.mockImplementation(
@@ -11333,6 +11394,50 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         reasoningEffort: 'xhigh',
       }),
     );
+  });
+
+  it('honors a surface launch gate before provisioning a recipe environment', async () => {
+    const assertTaskLaunch = vi.fn(async () => {
+      throw new Error('Connect source control before starting work.');
+    });
+    const launchTask = vi.fn<LaunchFastAgentTask>();
+    const adapter = callbacks({ assertTaskLaunch, launchTask });
+    mocks.previewEnsureEnvironment.mockReturnValue({
+      status: 'proposal',
+      proposalFingerprint: 'f'.repeat(64),
+      setupTimeBoundMinutes: 90,
+      persistenceImpact: 'Creates one durable environment.',
+      impactSummary: 'Resolves 1 R package.',
+    });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’m checking whether the workspace is ready.',
+        });
+        await expect(
+          invokeTool(nativeToolNames.ensureEnvironment, {
+            action: 'create',
+            type: 'r-bioconductor',
+            packages: ['DESeq2'],
+            name: 'R + Bioconductor — Airway RNA-seq',
+            purpose: 'Airway RNA-seq',
+            proposalFingerprint: 'f'.repeat(64),
+          }),
+        ).resolves.toEqual({
+          success: false,
+          error: 'Connect source control before starting work.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+
+    expect(assertTaskLaunch).toHaveBeenCalledOnce();
+    expect(mocks.createEnvironmentRecipeCandidate).not.toHaveBeenCalled();
+    expect(launchTask).not.toHaveBeenCalled();
   });
 
   it('honors a surface launch gate before creating a task', async () => {

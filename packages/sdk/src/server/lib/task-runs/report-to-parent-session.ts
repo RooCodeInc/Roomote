@@ -27,7 +27,13 @@ export async function reportToParentSession(input: {
 }): Promise<{ relayed: boolean }> {
   const run = await db.query.taskRuns.findFirst({
     where: and(eq(taskRuns.id, input.runId), eq(taskRuns.taskId, input.taskId)),
-    columns: { id: true, taskId: true, payload: true, payloadKind: true },
+    columns: {
+      id: true,
+      taskId: true,
+      actingUserId: true,
+      payload: true,
+      payloadKind: true,
+    },
   });
   const parent = getFastAgentParentFromPayload(run?.payload);
 
@@ -52,6 +58,7 @@ export async function reportToParentSession(input: {
       type: 'child_message',
       taskId: run.taskId,
       runId: run.id,
+      ...(run.actingUserId ? { actingUserId: run.actingUserId } : {}),
       messageId,
       admittedAtMs,
       purpose: input.purpose,
