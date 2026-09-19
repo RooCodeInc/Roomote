@@ -3197,6 +3197,67 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
+  it('bounds OpenCode retry statuses that omit the attempt count', async () => {
+    const { client, harness } = createHarness();
+    const taskEvents: TaskEvent[] = [];
+
+    harness.subscribe((event) => taskEvents.push(event));
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: {
+            text: 'Start work.',
+            visibleInTranscript: true,
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      const retryStatus = {
+        type: 'session.status',
+        properties: {
+          sessionID: 'ses_1',
+          status: {
+            type: 'retry',
+            message: 'Provider credentials are unavailable.',
+          },
+        },
+      } as const;
+
+      await client.emit(retryStatus);
+      await client.emit(retryStatus);
+
+      expect(client.abort).not.toHaveBeenCalled();
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskAborted,
+        ),
+      ).toBe(false);
+
+      await client.emit(retryStatus);
+
+      expect(client.abort).toHaveBeenCalledWith({
+        sessionId: 'ses_1',
+        signal: expect.any(AbortSignal),
+      });
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskAborted,
+        ),
+      ).toBe(true);
+      expect(client.promptAsync).toHaveBeenCalledTimes(1);
+    } finally {
+      harness.dispose();
+    }
+  });
+
   it('hands an exhausted OpenCode connection reset retry to bounded Roomote recovery', async () => {
     vi.useFakeTimers();
     const { client, harness } = createHarness(undefined, {
