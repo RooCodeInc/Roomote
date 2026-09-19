@@ -3,6 +3,7 @@ import {
   DEFAULT_MODEL_PROVIDER_ENV_KEYS,
   SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
   SOURCE_CONTROL_ACCESS_TOKEN_ENV_VARS,
+  getSourceControlTokenEnvVars,
   parseModelProviderEnvKeys,
 } from '@roomote/types';
 
@@ -30,6 +31,8 @@ const HELPER_BLOCKED_ENV_KEY_PREFIXES = [
   'GBRAIN_',
   'SERVICE_PASSWORD_',
   'SERVICE_BASE64_',
+  // Per-grant run tokens; only a task's own tools use them.
+  'ROOMOTE_SERVICE_TOKEN_',
 ] as const;
 
 /**
@@ -40,7 +43,13 @@ const HELPER_BLOCKED_ENV_KEY_PREFIXES = [
  */
 const HELPER_BLOCKED_ENV_KEYS: ReadonlySet<string> = new Set([
   SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
+  // The per-provider names task runs receive, plus the legacy spellings.
+  ...getSourceControlTokenEnvVars(),
   ...SOURCE_CONTROL_ACCESS_TOKEN_ENV_VARS,
+  // Run-scoped tokens present when a helper is launched inside a task.
+  'ROOMOTE_CLOUD_TOKEN',
+  'AUTH_TOKEN',
+  'NGROK_AUTH_TOKEN',
 ]);
 
 function isBlockedHelperEnvKey(key: string): boolean {

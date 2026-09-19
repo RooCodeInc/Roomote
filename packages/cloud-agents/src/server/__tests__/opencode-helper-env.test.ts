@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CONTROL_PLANE_ENV_VAR_NAMES,
   DEFAULT_MODEL_PROVIDER_ENV_KEYS,
+  getSourceControlTokenEnvVars,
 } from '@roomote/types';
 
 import { scrubOpenCodeHelperEnv } from '../opencode-helper-env';
@@ -73,11 +74,14 @@ describe('scrubOpenCodeHelperEnv', () => {
     expect(env).toEqual({ PATH: '/usr/bin' });
   });
 
-  it('removes platform-generated service values and the launcher-only key', () => {
+  it('removes platform-generated values, the launcher-only key, and run tokens', () => {
     const env: NodeJS.ProcessEnv = {
       SERVICE_PASSWORD_POSTGRES: 'generated-password',
       SERVICE_BASE64_64_ENCRYPTIONKEY: 'generated-key',
       SANDBOX_OPENROUTER_API_KEY: 'launcher-only-key',
+      ROOMOTE_SERVICE_TOKEN_STRIPE: 'run-grant-token',
+      ROOMOTE_CLOUD_TOKEN: 'run-token',
+      AUTH_TOKEN: 'run-token',
       // Non-secret platform values are left alone.
       SERVICE_FQDN_WEB: 'roomote.example.com',
     };
@@ -89,10 +93,15 @@ describe('scrubOpenCodeHelperEnv', () => {
 
   it('removes inherited source-control access tokens unless passed explicitly', () => {
     const inherited: NodeJS.ProcessEnv = {
+      // Every per-provider name task runs receive, so a provider added later
+      // is covered by this test without editing it.
+      ...Object.fromEntries(
+        getSourceControlTokenEnvVars().map((key) => [key, `${key}-value`]),
+      ),
+      GH_TOKEN: 'gh-token',
+      BITBUCKET_OAUTH: 'bitbucket-oauth',
+      // Legacy spelling.
       GITHUB_TOKEN: 'github-token',
-      GITLAB_TOKEN: 'gitlab-token',
-      GITEA_TOKEN: 'gitea-token',
-      ADO_TOKEN: 'ado-token',
       PATH: '/usr/bin',
     };
 
