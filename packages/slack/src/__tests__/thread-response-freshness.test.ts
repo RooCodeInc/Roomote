@@ -95,3 +95,35 @@ it('invalidates cached thread snapshots after updates and deletions', async () =
   await notifier.deleteMessage({ channel: input.channel, ts: input.messageTs });
   expect(await notifier.fetchThreadMessages(input)).toEqual([]);
 });
+
+it('refreshes prefetched context after starting, appending and stopping a stream', async () => {
+  expect(await notifier.fetchThreadMessages(input)).toHaveLength(1);
+  const ts = await notifier.startMessageStream({
+    channel: input.channel,
+    threadTs: input.threadTs,
+    recipientTeamId: 'TLOCAL',
+    recipientUserId: 'UBOT',
+    markdownText: 'first',
+  });
+  expect(ts).not.toBeNull();
+  const streamInput = { channel: input.channel, ts: ts! };
+  const streamText = async () =>
+    (await notifier.fetchThreadMessages(input)).find(
+      (message) => message.ts === ts,
+    )?.text;
+  expect(await streamText()).toBe('first');
+  expect(
+    await notifier.appendMessageStream({
+      ...streamInput,
+      markdownText: ' second',
+    }),
+  ).toBe(true);
+  expect(await streamText()).toBe('first second');
+  expect(
+    await notifier.stopMessageStream({
+      ...streamInput,
+      markdownText: ' final',
+    }),
+  ).toBe(true);
+  expect(await streamText()).toBe('first second final');
+});

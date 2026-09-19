@@ -1341,6 +1341,7 @@ export class SlackNotifier {
         recipient_user_id: params.recipientUserId,
         markdown_text: params.markdownText,
       });
+      if (response.ok) this.invalidateThreadResponses();
       return response.ok && typeof response.ts === 'string'
         ? response.ts
         : null;
@@ -1363,6 +1364,7 @@ export class SlackNotifier {
         ts: params.ts,
         markdown_text: params.markdownText,
       });
+      if (response.ok) this.invalidateThreadResponses();
       return response.ok === true;
     } catch (error) {
       console.error(
@@ -1387,6 +1389,7 @@ export class SlackNotifier {
           ? { session_status: params.sessionStatus }
           : {}),
       });
+      if (response.ok) this.invalidateThreadResponses();
       return response.ok === true;
     } catch (error) {
       console.error(
