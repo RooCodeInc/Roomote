@@ -53,16 +53,38 @@ describe('scrubOpenCodeHelperEnv', () => {
     ).toEqual([]);
   });
 
-  it('removes service tokens the control-plane list does not carry', () => {
+  it('removes all Brain service configuration, including file-backed tokens', () => {
     const env: NodeJS.ProcessEnv = {
       R_BRAIN_GATEWAY_TOKEN: 'brain-gateway-token',
+      R_BRAIN_GATEWAY_TOKEN_FILE: '/run/secrets/brain-gateway-token',
+      R_BRAIN_OPENROUTER_API_KEY: 'brain-openrouter-key',
+      R_BRAIN_OPENAI_API_KEY: 'brain-openai-key',
+      R_BRAIN_INFERENCE_UPSTREAM_API_KEY: 'brain-upstream-key',
+      R_BRAIN_MODEL: 'openrouter/example',
+      R_GBRAIN_ADMIN_TOKEN: 'gbrain-admin-token',
+      R_GBRAIN_ADMIN_TOKEN_FILE: '/run/secrets/gbrain-admin-token',
       R_GBRAIN_AGENT_TOKEN: 'gbrain-agent-token',
+      R_GBRAIN_URL: 'http://gbrain:8931',
       PATH: '/usr/bin',
     };
 
     scrubOpenCodeHelperEnv(env);
 
     expect(env).toEqual({ PATH: '/usr/bin' });
+  });
+
+  it('removes platform-generated service values and the launcher-only key', () => {
+    const env: NodeJS.ProcessEnv = {
+      SERVICE_PASSWORD_POSTGRES: 'generated-password',
+      SERVICE_BASE64_64_ENCRYPTIONKEY: 'generated-key',
+      SANDBOX_OPENROUTER_API_KEY: 'launcher-only-key',
+      // Non-secret platform values are left alone.
+      SERVICE_FQDN_WEB: 'roomote.example.com',
+    };
+
+    scrubOpenCodeHelperEnv(env);
+
+    expect(env).toEqual({ SERVICE_FQDN_WEB: 'roomote.example.com' });
   });
 
   it('removes unlisted configuration by its suffix', () => {
@@ -101,6 +123,7 @@ describe('scrubOpenCodeHelperEnv', () => {
       AWS_ACCESS_KEY_ID: 'aws-access-key-id',
       AWS_SECRET_ACCESS_KEY: 'aws-secret-access-key',
       AWS_SESSION_TOKEN: 'aws-session-token',
+      AWS_WEB_IDENTITY_TOKEN_FILE: '/var/run/secrets/aws/token',
       HTTPS_PROXY: 'http://proxy.internal:3128',
     };
     const before = { ...env };

@@ -1,6 +1,7 @@
 import {
   CONTROL_PLANE_ENV_VAR_NAMES,
   DEFAULT_MODEL_PROVIDER_ENV_KEYS,
+  SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
   parseModelProviderEnvKeys,
 } from '@roomote/types';
 
@@ -13,21 +14,33 @@ import {
  *
  * The shared control-plane list is the source of truth, the same one that
  * keeps these values out of task sandboxes, so the two cannot drift apart.
- * The names below are service tokens that list does not carry because they
- * are never offered through the environment editor.
  */
-const HELPER_ONLY_BLOCKED_ENV_KEYS: ReadonlySet<string> = new Set([
-  'R_BRAIN_GATEWAY_TOKEN',
-  'R_GBRAIN_ADMIN_TOKEN',
-  'R_GBRAIN_AGENT_TOKEN',
-  'R_GBRAIN_INGEST_TOKEN',
-  'R_GBRAIN_MAINTENANCE_TOKEN',
+
+/**
+ * Configuration the shared list does not carry because it is never offered
+ * through the environment editor, excluded by prefix so `_FILE` path variants
+ * and names added later are covered too:
+ * - Brain service settings: Brain calls go through the launching service.
+ * - Platform-generated service values some hosts inject into every container.
+ */
+const HELPER_BLOCKED_ENV_KEY_PREFIXES = [
+  'R_BRAIN_',
+  'R_GBRAIN_',
+  'GBRAIN_',
+  'SERVICE_PASSWORD_',
+  'SERVICE_BASE64_',
+] as const;
+
+/** Launcher-only key for environment workspaces; helpers never use it. */
+const HELPER_BLOCKED_ENV_KEYS: ReadonlySet<string> = new Set([
+  SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
 ]);
 
 function isBlockedHelperEnvKey(key: string): boolean {
   return (
     CONTROL_PLANE_ENV_VAR_NAMES.has(key) ||
-    HELPER_ONLY_BLOCKED_ENV_KEYS.has(key) ||
+    HELPER_BLOCKED_ENV_KEYS.has(key) ||
+    HELPER_BLOCKED_ENV_KEY_PREFIXES.some((prefix) => key.startsWith(prefix)) ||
     hasSensitiveSuffix(key)
   );
 }
