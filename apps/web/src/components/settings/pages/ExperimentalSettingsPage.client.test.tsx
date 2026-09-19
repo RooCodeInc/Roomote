@@ -55,6 +55,15 @@ vi.mock(
   }),
 );
 
+vi.mock(
+  '@/components/settings/IntegrationToolApprovalsExperimentalSetting',
+  () => ({
+    IntegrationToolApprovalsExperimentalSetting: () => (
+      <div>Integration tool approvals setting</div>
+    ),
+  }),
+);
+
 vi.mock('@/components/settings/ResultsExperimentalSetting', () => ({
   ResultsExperimentalSetting: () => <div>Results setting</div>,
 }));
@@ -88,6 +97,9 @@ describe('ExperimentalSettingsPage', () => {
     expect(screen.getByText('Private Sessions setting')).toBeInTheDocument();
     expect(
       screen.getByText('Code mode integrations setting'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('Integration tool approvals setting'),
     ).toBeInTheDocument();
   });
 

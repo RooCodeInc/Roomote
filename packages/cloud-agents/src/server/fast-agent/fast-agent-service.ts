@@ -207,6 +207,10 @@ import {
   isFastAgentNativeIntegration,
 } from './fast-agent-tool-policy';
 import {
+  createFastAgentToolApprovalBridge,
+  resolveFastAgentToolApprovalRules,
+} from './fast-agent-tool-approvals';
+import {
   callFastAgentIntegration,
   clearFastAgentIntegrationToolCache,
   listFastAgentIntegrations,
@@ -347,6 +351,16 @@ const FAST_AGENT_HUMAN_STEER_QUERY_LIMIT =
 const FAST_AGENT_HUMAN_STEER_MAX_TEXT_BYTES = 64 * 1024;
 const FAST_AGENT_HUMAN_STEER_MAX_FILES = 16;
 const FAST_AGENT_HUMAN_STEER_MAX_FILE_BYTES = 24 * 1024 * 1024;
+
+/**
+ * Process-local record of the compiled tool-approval rules hash each live
+ * OpenCode session was created with. Entries die with the process, exactly
+ * like the warm sessions they describe; a resumed or warm session whose
+ * recorded hash differs from the current turn's rules is rebuilt instead of
+ * running under stale approvals (or stale ungated behavior after the
+ * experiment is disabled).
+ */
+const fastAgentToolApprovalRulesHashes = new Map<string, string>();
 
 function buildFastAgentNativeSteerMessageId(
   rowId: string,
@@ -3696,6 +3710,14 @@ export async function answerFastAgentQuestion({
     const codeModeIntegrationsEffective =
       codeModeIntegrationsEnabled &&
       !hasFastAgentCodeModeServerNameCollision(availableIntegrations);
+    // Experiment-gated (`integrationToolApprovals`) per-tool approval rules,
+    // layered on code mode: native ask rules pause gated tools behind a
+    // requester decision and deny rules hide rejected tools. Undefined when
+    // either experiment is inactive, which keeps today's ungated behavior.
+    const toolApprovalRules = await resolveFastAgentToolApprovalRules({
+      codeModeIntegrationsEffective,
+      integrations: availableIntegrations,
+    });
     const system = buildFastAgentSystemPrompt({
       availableEnvironments,
       activeRepositories,
@@ -5856,6 +5878,42 @@ export async function answerFastAgentQuestion({
       return lastVisibleMessage;
     }
     diagnostics.markInferenceQueued();
+    // OpenCode fixes a session's permission ruleset at creation. When the
+    // compiled tool-approval rules change (policy edit, experiment toggle),
+    // a warm or resumed session would keep running under the old rules, so
+    // rebuild it instead of silently applying stale approvals — or stale
+    // ungated behavior after the experiment turns off.
+    const toolApprovalRulesHash = toolApprovalRules?.hash ?? null;
+    const previousToolApprovalRulesHash =
+      fastAgentToolApprovalRulesHashes.get(session.id) ?? null;
+    if (previousToolApprovalRulesHash !== toolApprovalRulesHash) {
+      // A persisted or warm session made under different rules must not run
+      // this turn. When nothing rebuildable exists yet there is nothing to
+      // invalidate; the fresh session is simply created with the new rules.
+      if (durableOpenCodeSessionId ?? session.openCodeSessionId) {
+        console.info(
+          `[Fast Agent] Tool approval rules changed for session ${session.id}; rebuilding the OpenCode session.`,
+        );
+        try {
+          await setFastAgentOpenCodeSession({
+            sessionId: session.id,
+            openCodeSessionId: null,
+          });
+          durableOpenCodeSessionId = null;
+          session.openCodeSessionId = null;
+          fastAgentOpenCodeSessionManager.invalidate(session.id);
+        } catch (error) {
+          console.warn(
+            `[Fast Agent] Failed to rebuild the OpenCode session after a tool approval rules change: ${formatErrorForLog(error)}`,
+          );
+        }
+      }
+      if (toolApprovalRulesHash === null) {
+        fastAgentToolApprovalRulesHashes.delete(session.id);
+      } else {
+        fastAgentToolApprovalRulesHashes.set(session.id, toolApprovalRulesHash);
+      }
+    }
     const promptTextPromise = fastAgentOpenCodeSessionManager.run({
       conversationId: session.id,
       persistedSessionId: session.openCodeSessionId,
@@ -6018,6 +6076,37 @@ export async function answerFastAgentQuestion({
                 inferenceAttemptNumber += 1;
                 resolvedInferenceModel = undefined;
                 captureInferenceContext('prompt_submission');
+                // Native per-tool approval bridge for gated code-mode
+                // integration calls. Web conversations surface the pending
+                // card in the Session transcript; chat-originated
+                // conversations additionally get a posted notification with
+                // the decision link so a gated call is never stranded
+                // silently. Deliberately direct adapter posts, like the
+                // retry notice: a system notification must not satisfy the
+                // model's acknowledgement gate or close the turn.
+                const toolApprovalBridge = toolApprovalRules
+                  ? createFastAgentToolApprovalBridge({
+                      sessionId: session.id,
+                      userId,
+                      integrations: availableIntegrations,
+                      signal: promptSignal,
+                      ...(conversation.surface === 'slack' ||
+                      conversation.surface === 'discord'
+                        ? {
+                            notify: async (approval) => {
+                              const sessionUrl = buildFastSessionUrl(
+                                conversation.surface as 'slack' | 'discord',
+                                session.id,
+                              );
+                              await adapter.postReply({
+                                purpose: 'progress',
+                                message: `Approval needed: ${approval.integrationId} wants to run ${approval.toolName}. Allow or reject it in the Session: ${sessionUrl}`,
+                              });
+                            },
+                          }
+                        : {}),
+                    })
+                  : undefined;
                 const resultPromise =
                   generateTrackedNonTaskTextInOpenCodeSession(
                     {
@@ -6097,7 +6186,13 @@ export async function answerFastAgentQuestion({
                       onServerLeased: (url) => {
                         codeModeOpenCodeServerUrl = url;
                       },
-                      permission: FAST_AGENT_SESSION_PERMISSIONS,
+                      permission: [
+                        ...FAST_AGENT_SESSION_PERMISSIONS,
+                        ...(toolApprovalRules?.rules ?? []),
+                      ],
+                      ...(toolApprovalBridge
+                        ? { onPermissionAsked: toolApprovalBridge.handleAsk }
+                        : {}),
                       signal: promptSignal,
                       promptOnlySubagents: true,
                       trackSessionTreeUsage: true,

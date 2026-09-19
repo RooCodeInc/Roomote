@@ -49,6 +49,7 @@ describe('metadata descriptions', () => {
       privateSessions: false,
       browserNotifications: false,
       codeModeIntegrations: false,
+      integrationToolApprovals: false,
     });
   });
 });

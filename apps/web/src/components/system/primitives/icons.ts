@@ -179,6 +179,7 @@ export {
   SettingsIcon,
   Share2,
   Shapes,
+  ShieldQuestion,
   SlidersHorizontal,
   Slack,
   Slash,

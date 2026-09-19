@@ -88,6 +88,9 @@ import { SESSION_HEADER_CONTENT_CLASS_NAME } from './session-header-layout';
 import { isRequestUserInputResponseRepresentedByCanonicalReceipt } from '@/lib/setup-receipt-transcript';
 import { CapabilityOfferCard } from './CapabilityOfferCard';
 import { PendingIntegrationKeys } from '@/components/sessions/PendingIntegrationKeys';
+import { PendingIntegrationToolApprovals } from '@/components/sessions/PendingIntegrationToolApprovals';
+import { useIntegrationToolApprovalsExperiment } from '@/hooks/useIntegrationToolApprovalsExperiment';
+import { useSessionIntegrationToolApprovals } from '@/hooks/useSessionIntegrationToolApprovals';
 import { openIntegrationKeyDialog } from '@/components/sessions/integration-key-dialog';
 
 import {
@@ -1783,6 +1786,12 @@ export function FastSessionTranscript({
     }
   }, [openIntegrationKeyRequestId, secretSessionId]);
 
+  const toolApprovalsExperiment = useIntegrationToolApprovalsExperiment();
+  const toolApprovals = useSessionIntegrationToolApprovals(
+    secretSessionId,
+    toolApprovalsExperiment.enabled,
+  );
+
   useEffect(() => {
     if (pendingInputRequest && (liveVoiceActive || liveVoiceConnecting)) {
       stopLiveVoiceRef.current();
@@ -1930,6 +1939,12 @@ export function FastSessionTranscript({
               <PendingIntegrationKeys
                 sessionId={secretSessionId}
                 openRequest={openIntegrationKeyRequest}
+              />
+            ) : null}
+            {secretSessionId && toolApprovalsExperiment.enabled ? (
+              <PendingIntegrationToolApprovals
+                sessionId={secretSessionId}
+                pending={toolApprovals.data?.pending ?? []}
               />
             ) : null}
           </ConversationContent>

@@ -341,6 +341,16 @@ export type NonTaskOpenCodeNativeSessionOptions = {
   ) => Promise<void> | void;
   /** Live assistant text from the parent session, part by part. */
   onAssistantTextUpdated?: (text: NonTaskOpenCodeAssistantText) => void;
+  /**
+   * Native permission ask for the session tree (parent and helper
+   * subagents). Fire-and-forget: the handler owns the decision wait and the
+   * eventual reply through the supplied helpers; errors must be absorbed by
+   * the handler so an approval failure never rejects the prompt stream.
+   */
+  onPermissionAsked?: (
+    ask: NonTaskOpenCodePermissionAsk,
+    helpers: NonTaskOpenCodePermissionAskHelpers,
+  ) => void;
   permission?: PermissionRuleset;
   promptOnlySubagents?: boolean;
   signal?: AbortSignal;
@@ -348,6 +358,35 @@ export type NonTaskOpenCodeNativeSessionOptions = {
   tools: Record<string, boolean>;
   validateSession?: boolean;
 };
+
+/** One native OpenCode `permission.asked` event, normalized for consumers. */
+export interface NonTaskOpenCodePermissionAsk {
+  requestId: string;
+  sessionId: string;
+  permission: string;
+  messageId?: string;
+  callId?: string;
+}
+
+/** Bounded OpenCode client operations handed to permission-ask consumers. */
+export interface NonTaskOpenCodePermissionAskHelpers {
+  fetchCallArgs: (input: {
+    sessionId: string;
+    messageId?: string;
+    callId?: string;
+  }) => Promise<
+    | {
+        input?: unknown;
+        toolCalls?: Array<{ tool?: unknown; input?: unknown }>;
+      }
+    | undefined
+  >;
+  reply: (
+    requestId: string,
+    response: 'once' | 'reject',
+    message?: string,
+  ) => Promise<void>;
+}
 
 export class NonTaskOpenCodeSessionNotFoundError extends Error {
   constructor() {
@@ -1155,6 +1194,10 @@ async function runNonTaskSdkPrompt(
       part: NonTaskOpenCodeTaskPart,
     ) => Promise<void> | void;
     onAssistantTextUpdated?: (text: NonTaskOpenCodeAssistantText) => void;
+    onPermissionAsked?: (
+      ask: NonTaskOpenCodePermissionAsk,
+      helpers: NonTaskOpenCodePermissionAskHelpers,
+    ) => void;
     permission?: PermissionRuleset;
     preserveReasoning?: boolean;
     promptOnlySubagents?: boolean;
@@ -1228,6 +1271,53 @@ async function runNonTaskSdkPrompt(
       baseUrl: server.url,
       fetch: openCodeSdkFetch,
     });
+    const permissionAskHelpers: NonTaskOpenCodePermissionAskHelpers = {
+      // Native asks identify the paused call (messageID/callID) but carry no
+      // arguments. Recover them from the asking session's own transcript so
+      // the approval surface can show a redacted view of exactly what is
+      // about to run. Under code mode the paused part is the outer `execute`
+      // call; its metadata carries the child tool calls with their
+      // structured inputs, so consumers can still show the real arguments.
+      fetchCallArgs: async ({ sessionId: askSessionId, callId }) => {
+        if (!callId) return undefined;
+        const result = await client.session.messages({
+          sessionID: askSessionId,
+          directory: sessionDirectory,
+        });
+        for (const message of result.data ?? []) {
+          for (const part of message.parts ?? []) {
+            const record = asRecord(part);
+            if (!record || record.callID !== callId) continue;
+            const state = asRecord(record.state);
+            const metadata = asRecord(state?.metadata);
+            const toolCalls = Array.isArray(metadata?.toolCalls)
+              ? metadata.toolCalls
+                  .map((entry) => asRecord(entry))
+                  .filter(
+                    (entry): entry is Record<string, unknown> =>
+                      entry !== undefined,
+                  )
+                  .map((entry) => ({ tool: entry.tool, input: entry.input }))
+              : undefined;
+            return { input: state?.input, toolCalls };
+          }
+        }
+        return undefined;
+      },
+      reply: async (requestId, response, message) => {
+        const result = await client.permission.reply({
+          requestID: requestId,
+          directory: sessionDirectory,
+          reply: response,
+          ...(message ? { message } : {}),
+        });
+        if (result.error) {
+          console.warn(
+            `[NonTaskProviderUsage] OpenCode permission reply failed: ${formatOpenCodeSdkError(result.error)}`,
+          );
+        }
+      },
+    };
     let sessionId = options.session?.id;
     if (sessionId && options.validateSession) {
       const validateStartedAtMs = Date.now();
@@ -1350,6 +1440,7 @@ async function runNonTaskSdkPrompt(
       options.onSubagentSessionReady ||
       options.onParentTaskPartUpdated ||
       options.onAssistantTextUpdated ||
+      options.onPermissionAsked ||
       options.trackSessionTreeUsage,
     );
 
@@ -1513,6 +1604,32 @@ async function runNonTaskSdkPrompt(
                     ),
                   );
                   return;
+                }
+              } else if (event.type === 'permission.asked') {
+                // Permission asks are owned by the consumer (decision wait
+                // and native reply), never by this monitor: a consumer
+                // failure must not reject the prompt stream, and the pause
+                // itself is the intended behavior.
+                try {
+                  const properties = event.properties;
+                  options.onPermissionAsked?.(
+                    {
+                      requestId: properties.id,
+                      sessionId: properties.sessionID,
+                      permission: properties.permission,
+                      ...(properties.tool?.messageID
+                        ? { messageId: properties.tool.messageID }
+                        : {}),
+                      ...(properties.tool?.callID
+                        ? { callId: properties.tool.callID }
+                        : {}),
+                    },
+                    permissionAskHelpers,
+                  );
+                } catch (error) {
+                  console.warn(
+                    `[NonTaskProviderUsage] OpenCode permission ask handler failed: ${formatOpenCodeSdkError(error)}`,
+                  );
                 }
               } else if (
                 event.type === 'session.error' &&
@@ -1886,6 +2003,7 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
       onSubagentSessionReady: options.onSubagentSessionReady,
       onParentTaskPartUpdated: options.onParentTaskPartUpdated,
       onAssistantTextUpdated: options.onAssistantTextUpdated,
+      onPermissionAsked: options.onPermissionAsked,
       permission: options.permission,
       preserveReasoning: true,
       promptOnlySubagents: options.promptOnlySubagents,
