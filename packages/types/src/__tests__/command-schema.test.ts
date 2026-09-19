@@ -486,6 +486,43 @@ describe('environmentConfigSchema', () => {
     });
   });
 
+  it('accepts opt-in origin-bounded Cua Driver computer use', () => {
+    expect(
+      environmentConfigSchema.parse({
+        name: 'Computer-use workspace',
+        computer_use: {
+          provider: 'cua-driver',
+          browser_origins: ['http://127.0.0.1:3000', 'https://example.test'],
+        },
+      }).computer_use,
+    ).toEqual({
+      provider: 'cua-driver',
+      browser_origins: ['http://127.0.0.1:3000', 'https://example.test'],
+    });
+  });
+
+  const unsafeComputerUseOrigins: string[][] = [
+    [],
+    ['file:///tmp/fixture.html'],
+    ['https://example.test/path'],
+    ['https://example.test?query=value'],
+  ];
+
+  it.each(unsafeComputerUseOrigins)(
+    'rejects an unsafe computer-use origin list: %j',
+    (browserOrigins) => {
+      expect(
+        environmentConfigSchema.safeParse({
+          name: 'Computer-use workspace',
+          computer_use: {
+            provider: 'cua-driver',
+            browser_origins: browserOrigins,
+          },
+        }).success,
+      ).toBe(false);
+    },
+  );
+
   it.each([
     {
       label: 'top-level env',
