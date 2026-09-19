@@ -9,6 +9,10 @@ import {
 
 const MODELS_DEV_CATALOG_URL = 'https://models.dev/catalog.json';
 const BEDROCK_MANTLE_PROVIDER_PREFIX = 'bedrock-mantle/';
+// models.dev renamed Roomote's `kimi-for-coding` provider; this is the entry
+// for the same api.kimi.com endpoint, so metadata keeps resolving.
+const KIMI_FOR_CODING_PROVIDER_PREFIX = 'kimi-for-coding/';
+const KIMI_FOR_CODING_MODELS_DEV_PROVIDER_PREFIX = 'kimi-code-plan-cn/';
 const MODELS_DEV_CATALOG_CACHE_TTL_MS = 5 * 60 * 1_000;
 // Failures are cached briefly so a models.dev outage does not make every
 // request that wants the catalog (e.g. the launch-options page load) block on
@@ -242,6 +246,7 @@ export async function fetchModelsDevCatalog(
  * `requesty/`, `baseten/`, `togetherai/`) and any leading `~` alias marker.
  * Mantle's `lab.model` identifiers are converted to models.dev's `lab/model`
  * slugs so metadata continues to resolve through the underlying model lab.
+ * Kimi for Coding ids map onto the provider id models.dev renamed it to.
  */
 export function resolveModelsDevSlug(modelId: string): string {
   let slug = modelId;
@@ -254,6 +259,9 @@ export function resolveModelsDevSlug(modelId: string): string {
   }
   if (slug.startsWith('~')) {
     slug = slug.slice(1);
+  }
+  if (slug.startsWith(KIMI_FOR_CODING_PROVIDER_PREFIX)) {
+    return `${KIMI_FOR_CODING_MODELS_DEV_PROVIDER_PREFIX}${slug.slice(KIMI_FOR_CODING_PROVIDER_PREFIX.length)}`;
   }
   if (slug.startsWith(BEDROCK_MANTLE_PROVIDER_PREFIX)) {
     const mantleModelId = slug.slice(BEDROCK_MANTLE_PROVIDER_PREFIX.length);
@@ -422,8 +430,14 @@ export function suggestModelsFromCatalog(options: {
     return [];
   }
 
+  // Suggestions keep Roomote's provider id; only the catalog lookup follows
+  // the models.dev rename.
+  const catalogProviderId =
+    `${options.providerId}/` === KIMI_FOR_CODING_PROVIDER_PREFIX
+      ? KIMI_FOR_CODING_MODELS_DEV_PROVIDER_PREFIX.slice(0, -1)
+      : options.providerId;
   const providerModels =
-    options.catalog.providers[options.providerId]?.models ?? {};
+    options.catalog.providers[catalogProviderId]?.models ?? {};
   const rankedSuggestions = Object.entries(providerModels)
     .map(([slug, entry]) => {
       const trimmedSlug = slug.trim();

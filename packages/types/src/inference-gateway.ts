@@ -365,8 +365,10 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
       id: 'kimi-for-coding',
       name: 'Kimi for Coding',
       envVarNames: ['KIMI_API_KEY'],
-      // models.dev registers Kimi For Coding as @ai-sdk/anthropic against
-      // https://api.kimi.com/coding/v1 (membership keys, not Open Platform).
+      // Roomote registers Kimi for Coding as @ai-sdk/anthropic against
+      // https://api.kimi.com/coding/v1 (membership keys, not Open Platform);
+      // see mergeKimiForCodingProviderConfig. Keep this route on the
+      // Anthropic Messages surface to match.
       upstreamBaseUrl: 'https://api.kimi.com/coding',
       authHeader: { name: 'x-api-key' },
       allowedPaths: ANTHROPIC_COMPATIBLE_INFERENCE_PATHS,

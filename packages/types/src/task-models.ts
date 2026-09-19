@@ -257,6 +257,8 @@ export function isTaskModelIdDisabled(modelId: string): boolean {
 const TASK_MODEL_ID_ALIASES: Readonly<Record<string, string>> = {
   // OpenCode Zen serves this dated release through an undated stable alias.
   'opencode/deepseek-v4-flash-0731': 'opencode/deepseek-v4-flash',
+  // Kimi renamed this model to its documented id; the old one is rejected.
+  'kimi-for-coding/k2p7': 'kimi-for-coding/kimi-for-coding',
 };
 
 /** Rewrites model IDs that Roomote persisted before a provider slug changed. */

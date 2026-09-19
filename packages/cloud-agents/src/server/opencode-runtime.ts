@@ -14,6 +14,7 @@ import {
   mergeAmazonBedrockProviderConfig,
   mergeBedrockMantleOpenAiProviderConfig,
   mergeBedrockMantleProviderConfig,
+  mergeKimiForCodingProviderConfig,
   mergeOpenAiCompatibleProviderConfig,
   mergeOpenCodeModelReasoningOptions,
   mergeOpenCodeChatGptFastModeOptions,
@@ -166,9 +167,14 @@ function buildModelBackedOpenCodeConfigContent(
     mergeBedrockMantleProviderConfig(
       mergeBedrockMantleOpenAiProviderConfig(
         mergeOpenAiCompatibleProviderConfig(
-          mergeOpenRouterVariantAliasModels(
-            providerModelConfig,
-            variantAliases,
+          // Kimi for Coding is registered in full rather than left to
+          // OpenCode's runtime catalog, which has renamed the provider id.
+          mergeKimiForCodingProviderConfig(
+            mergeOpenRouterVariantAliasModels(
+              providerModelConfig,
+              variantAliases,
+            ),
+            configuredModelIds,
           ),
           env,
           configuredModelIds,
@@ -424,7 +430,7 @@ function mergeBedrockRegistrationsIntoConfigContent(
     const provider = mergeAmazonBedrockProviderConfig(
       mergeBedrockMantleProviderConfig(
         mergeBedrockMantleOpenAiProviderConfig(
-          existingProvider,
+          mergeKimiForCodingProviderConfig(existingProvider, roleModelIds),
           env,
           roleModelIds,
         ),

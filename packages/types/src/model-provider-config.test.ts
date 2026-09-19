@@ -100,6 +100,22 @@ describe('normalizeDeploymentModelConfig', () => {
     });
   });
 
+  it('migrates persisted Kimi for Coding role models to the documented id', () => {
+    // Kimi renamed `k2p7` to `kimi-for-coding` and rejects the old id, so a
+    // deployment that saved it must keep working without being reconfigured.
+    expect(
+      normalizeDeploymentModelConfig({
+        roomoteModel: 'kimi-for-coding/k3',
+        roomoteSmallModel: 'kimi-for-coding/k2p7',
+        roomoteExploreModel: 'kimi-for-coding/k2p7',
+      }),
+    ).toMatchObject({
+      roomoteModel: 'kimi-for-coding/k3',
+      roomoteSmallModel: 'kimi-for-coding/kimi-for-coding',
+      roomoteExploreModel: 'kimi-for-coding/kimi-for-coding',
+    });
+  });
+
   it('coerces missing fields to null without dropping model keys', () => {
     expect(
       normalizeDeploymentModelConfig({ roomoteModel: 'openai/gpt-5.4' }),
@@ -1356,10 +1372,10 @@ describe('buildRecommendedDeploymentModelConfig', () => {
     ).toEqual({
       roomoteModel: 'kimi-for-coding/k3',
       roomoteOrchestrationModel: null,
-      roomoteSmallModel: 'kimi-for-coding/k2p7',
+      roomoteSmallModel: 'kimi-for-coding/kimi-for-coding',
       roomoteVisionModel: 'kimi-for-coding/k3',
       roomoteCodeReviewModel: 'kimi-for-coding/k3',
-      roomoteExploreModel: 'kimi-for-coding/k2p7',
+      roomoteExploreModel: 'kimi-for-coding/kimi-for-coding',
       roomotePlanningModel: 'kimi-for-coding/k3',
       roomoteModelReasoningEffort: null,
       roomoteOrchestrationModelReasoningEffort: null,
