@@ -11937,6 +11937,30 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(adapter.postReply).not.toHaveBeenCalled();
   });
 
+  it('silently ignores an optional automation platform event', async () => {
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.ignoreEvent, {
+          reason: 'No qualifying result to report.',
+        });
+        return '';
+      },
+    );
+    const adapter = callbacks();
+
+    await expect(
+      answerFastAgentQuestion({
+        ...baseParams,
+        turnSource: 'platform_event',
+        platformEventKind: 'automation',
+        platformEventVisibility: 'optional',
+        adapter,
+      }),
+    ).resolves.toBe('');
+    expect(adapter.postReply).not.toHaveBeenCalled();
+  });
+
   it('rejects reaction side effects on non-reactable human reaction input', async () => {
     let reactionResult: unknown;
     mocks.generateText.mockImplementation(

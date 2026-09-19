@@ -1183,7 +1183,7 @@ describe('deliverFastAgentParentEvent', () => {
       expect.objectContaining({
         conversation: automationParent.conversation,
         platformEventKind: 'automation',
-        platformEventVisibility: 'required',
+        platformEventVisibility: 'optional',
         turnSource: 'platform_event',
       }),
     );
