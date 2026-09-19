@@ -155,6 +155,7 @@ import {
   findUserDirectMessageDestination,
   hasAnyUserDirectMessageIdentity,
   sendUserDirectMessage,
+  sendUserDirectMessageWithReceipt,
   sendUserDirectMessageBestEffort,
   sendUserDirectMessageBestEffortWithReceipts,
 } from './user-direct-message';
@@ -281,6 +282,41 @@ describe('sendUserDirectMessage', () => {
     ).resolves.toBe(true);
     expect(mockDiscordPostMessage).toHaveBeenCalledWith({
       channelId: 'discord-dm-1',
+      text: 'hello',
+      textFormat: 'markdown',
+    });
+  });
+
+  it('sends a Telegram self-DM to the linked private chat and returns its receipt', async () => {
+    mockTelegramUserMappingsFindFirst.mockResolvedValue({
+      telegramChatId: '424242',
+    });
+    mockTelegramPostMessage.mockResolvedValue({
+      messageId: 'telegram-message-1',
+    });
+
+    await expect(
+      sendUserDirectMessageWithReceipt({
+        provider: 'telegram',
+        userId: 'user-1',
+        text: 'hello',
+        logContext: 'test',
+      }),
+    ).resolves.toEqual({
+      delivered: true,
+      receipt: {
+        provider: 'telegram',
+        workspaceId: '424242',
+        channelId: '424242',
+        messageId: 'telegram-message-1',
+      },
+    });
+    expect(mockTelegramUserMappingsFindFirst).toHaveBeenCalledWith({
+      where: undefined,
+      columns: { telegramChatId: true },
+    });
+    expect(mockTelegramPostMessage).toHaveBeenCalledWith({
+      channelId: '424242',
       text: 'hello',
       textFormat: 'markdown',
     });

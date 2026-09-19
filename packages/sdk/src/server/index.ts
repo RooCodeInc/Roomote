@@ -380,11 +380,13 @@ export {
   hasUserDirectMessageIdentity,
   hasAnyUserDirectMessageIdentity,
   sendUserDirectMessage,
+  sendUserDirectMessageWithReceipt,
   sendUserDirectMessageBestEffort,
   sendUserDirectMessageBestEffortWithReceipts,
   type UserDirectMessageDestination,
   type UserDirectMessageProvider,
   type UserDirectMessageReceipt,
+  type UserDirectMessageResult,
 } from './lib/user-direct-message';
 
 export {

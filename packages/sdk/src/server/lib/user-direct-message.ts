@@ -59,6 +59,11 @@ export type UserDirectMessageReceipt = {
   threadId?: string;
 };
 
+export type UserDirectMessageResult = {
+  delivered: boolean;
+  receipt: UserDirectMessageReceipt | null;
+};
+
 type UserDirectMessagePresentation = {
   sessionId: string;
   initialUserMessage?: { senderDisplayName: string | null; text: string };
@@ -732,64 +737,74 @@ async function sendDiscordUserDirectMessage(
   }
 }
 
-export async function sendUserDirectMessage({
-  provider,
-  userId,
-  text,
-  slackBlocks,
-  logContext,
-  idempotencyKey,
-}: {
+type SendUserDirectMessageInput = {
   provider: CommunicationProvider;
   userId: string;
   text: string;
   slackBlocks?: unknown[];
   logContext: string;
   idempotencyKey?: string;
-}): Promise<boolean> {
+};
+
+export async function sendUserDirectMessageWithReceipt({
+  provider,
+  userId,
+  text,
+  slackBlocks,
+  logContext,
+  idempotencyKey,
+}: SendUserDirectMessageInput): Promise<UserDirectMessageResult> {
   switch (provider) {
-    case 'slack':
-      return Boolean(
-        await sendSlackUserDirectMessage(
-          userId,
-          text,
-          logContext,
-          slackBlocks,
-          idempotencyKey,
-        ),
+    case 'slack': {
+      const receipt = await sendSlackUserDirectMessage(
+        userId,
+        text,
+        logContext,
+        slackBlocks,
+        idempotencyKey,
       );
-    case 'teams':
-      return Boolean(
-        await sendTeamsUserDirectMessage(userId, text, logContext),
+      return { delivered: Boolean(receipt), receipt };
+    }
+    case 'teams': {
+      const receipt = await sendTeamsUserDirectMessage(
+        userId,
+        text,
+        logContext,
       );
-    case 'telegram':
-      return Boolean(
-        await sendTelegramUserDirectMessage(
-          userId,
-          text,
-          logContext,
-          idempotencyKey,
-        ),
+      return { delivered: Boolean(receipt), receipt };
+    }
+    case 'telegram': {
+      const receipt = await sendTelegramUserDirectMessage(
+        userId,
+        text,
+        logContext,
+        idempotencyKey,
       );
-    case 'discord':
-      return Boolean(
-        await sendDiscordUserDirectMessage(
-          userId,
-          text,
-          logContext,
-          idempotencyKey,
-        ),
+      return { delivered: Boolean(receipt), receipt };
+    }
+    case 'discord': {
+      const receipt = await sendDiscordUserDirectMessage(
+        userId,
+        text,
+        logContext,
+        idempotencyKey,
       );
+      return { delivered: Boolean(receipt), receipt };
+    }
     case 'agentmail':
-      return (
-        await sendAgentMailUserDirectMessage(
-          userId,
-          text,
-          logContext,
-          idempotencyKey,
-        )
-      ).delivered;
+      return sendAgentMailUserDirectMessage(
+        userId,
+        text,
+        logContext,
+        idempotencyKey,
+      );
   }
+}
+
+export async function sendUserDirectMessage(
+  input: SendUserDirectMessageInput,
+): Promise<boolean> {
+  return (await sendUserDirectMessageWithReceipt(input)).delivered;
 }
 
 /**

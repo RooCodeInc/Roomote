@@ -4,7 +4,7 @@ import {
 } from '@roomote/types';
 import {
   hasUserDirectMessageIdentity,
-  sendUserDirectMessage,
+  sendUserDirectMessageWithReceipt,
 } from '@roomote/sdk/server';
 
 import { sendCommunicationChannelPost } from './communication-channel-posts';
@@ -116,17 +116,18 @@ export async function sendCommunicationMessage(params: {
       );
     }
 
-    const delivered = await sendUserDirectMessage({
+    const result = await sendUserDirectMessageWithReceipt({
       provider: destination.provider,
       userId: params.actingUserId,
       text: params.message,
       logContext: 'roomote-mcp-chat-message',
     });
-    return delivered
+    return result.delivered
       ? jsonResponse({
           delivered: true,
           provider: destination.provider,
           destination: params.destination,
+          receipt: result.receipt,
         })
       : jsonResponse(
           {
