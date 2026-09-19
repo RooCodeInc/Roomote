@@ -2241,7 +2241,7 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
-  it('keeps native channel delivery separate from unrelated integration catalogs', () => {
+  it('keeps native message delivery separate from unrelated integration catalogs', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
       availableIntegrations: [
@@ -2249,7 +2249,7 @@ describe('buildFastAgentSystemPrompt', () => {
           id: 'roomote',
           name: 'Roomote',
           description: 'Native Roomote capabilities',
-          tools: [{ name: 'post_to_channel' }],
+          tools: [{ name: 'send_chat_message' }],
         },
         {
           id: 'new-relic',
@@ -2271,19 +2271,28 @@ describe('buildFastAgentSystemPrompt', () => {
       'The built-in and on-demand integration catalogs and the HTTP integrations list are not the full tool inventory',
     );
     expect(prompt).toContain(
-      'use an exposed channel-posting tool for a requested channel post',
+      'call `list_chat_destinations` with the exact provider and kind',
     );
     expect(prompt).toContain(
-      "Slack's absence from an integration catalog or an empty HTTP integrations list does not make that exposed tool unavailable",
+      'follow `nextOffset` only when more candidates are genuinely needed',
+    );
+    expect(prompt).toContain(
+      'A `slack:me` or `telegram:me` destination always resolves from the authenticated member',
+    );
+    expect(prompt).toContain(
+      'Do not infer destination references or message another person without an explicit request',
+    );
+    expect(prompt).toContain(
+      "Slack or Telegram's absence from an integration catalog",
     );
     expect(prompt).toContain(
       'Preserve explicit requests to configure a built-in integration, remote MCP, or direct API',
     );
     expect(prompt).toContain(
-      "treat the posting tool's provider and channel permission result as authoritative",
+      "treat each communication tool's provider, linkage, and destination permission result as authoritative",
     );
     expect(prompt).toContain(
-      'When a delegated worker or subagent lacks a posting tool and prepares content that the user asked to deliver, it must return the completed content to the parent instead of posting it',
+      'When a delegated worker or subagent lacks `send_chat_message` and prepares content that the user asked to deliver, it must return the completed content to the parent instead of sending it',
     );
     expect(prompt).toContain(
       'The parent remains responsible for making exactly the requested delivery',

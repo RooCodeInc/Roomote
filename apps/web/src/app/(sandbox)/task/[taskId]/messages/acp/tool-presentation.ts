@@ -105,6 +105,7 @@ const COMMUNICATION_TOOL_NAMES = new Set([
   'send_chat_reply',
   'send_chat_reaction',
   'send_chat_reaction_emoji',
+  'send_chat_message',
   'post_to_channel',
   'ignore_event',
 ]);
@@ -123,6 +124,7 @@ const TOOL_ICON_OVERRIDES: Readonly<Partial<Record<string, ToolIconKey>>> = {
   request_environment_variables: 'terminal',
   report_platform_issue: 'alert',
   submit_automation_work_items: 'task',
+  list_chat_destinations: 'messages',
   list_chat_channels: 'messages',
   get_chat_channel_messages: 'messages',
   get_chat_message_context: 'messages',
@@ -450,6 +452,11 @@ function resolveReceiptLanguage(
     return {
       verb: byPhase('Reporting', 'Reported', 'Failed to Report'),
       object: 'result to voice',
+    };
+  if (toolName === 'send_chat_message')
+    return {
+      verb: byPhase('Sending', 'Sent', 'Failed to Send'),
+      object: 'chat message',
     };
   if (toolName === 'post_to_channel')
     return {

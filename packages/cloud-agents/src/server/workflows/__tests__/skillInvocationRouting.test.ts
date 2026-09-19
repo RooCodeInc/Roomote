@@ -45,7 +45,7 @@ describe('packaged skill invocation routing', () => {
       expect(skill).toContain('ambiguity');
       expect(skill).toContain('actual tool error');
       expect(skill).not.toMatch(
-        /mcp__sentry__|find_integration_tools|call_integration_tool|find_organizations|organizationSlug|`args`|submit_automation_work_items|post_to_channel/,
+        /mcp__sentry__|find_integration_tools|call_integration_tool|find_organizations|organizationSlug|`args`|submit_automation_work_items|send_chat_message/,
       );
       expect(skill).not.toMatch(
         /Roomote|Roo Vet|roomote-|Slack|React|\bNode\b|last 24 hours|production|preview/,

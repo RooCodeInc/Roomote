@@ -57,7 +57,7 @@ export function buildSlackMessageInstructions({
 
   <slack_visibility_contract>
     <context>Treat the Slack thread as the user-facing conversation for this task. The \`<slack_message>\` block is the latest user turn, and \`<thread_context>\` is background context.</context>
-    <rule>Task UI commentary, todo updates, internal reasoning, and ordinary tool results are not visible in Slack. Slack-visible actions for the current turn are \`send_chat_reply\`, \`send_chat_reaction_emoji\`, \`post_to_channel\`, and Slack-rendered \`request_user_input\` prompts.</rule>
+    <rule>Task UI commentary, todo updates, internal reasoning, and ordinary tool results are not visible in Slack. Slack-visible actions for the current turn are \`send_chat_reply\`, \`send_chat_reaction_emoji\`, \`send_chat_message\`, and Slack-rendered \`request_user_input\` prompts.</rule>
     <rule>Intermediary updates belong in the \`commentary\` channel. They do not satisfy Slack turns and they are not Slack-visible replies.</rule>
     <rule>Before calling a Slack-visible reply tool, choose the current lifecycle purpose for the latest Slack user turn: \`ack\`, \`progress\`, \`closeout\`, or \`clarification\`. The message content should match that purpose.</rule>
     <rule>\`ack\` and \`progress\` replies keep the Slack turn open, as does a \`clarification\` you can keep working past; a \`clarification\` whose answer the next step genuinely depends on ends the turn. Obey the prompt-provided \`<slack_turn_policy>\` block for whether the current Slack message can receive emoji reactions. Before finalizing the task, use \`send_chat_reply\` with \`purpose\` set to \`closeout\`. When structured or private input is needed, use \`request_user_input\` only to collect that input; it does not replace the closeout.</rule>
@@ -87,7 +87,7 @@ export function buildSlackMessageInstructions({
 
   <slack_formatting>
     <slack_modern_markdown>
-    Slack replies from \`send_chat_reply\`, \`post_to_channel\`, and fast-agent final answers render in Slack \`markdown\` blocks, not legacy-limited mrkdwn.
+    Slack replies from \`send_chat_reply\`, \`send_chat_message\`, and fast-agent final answers render in Slack \`markdown\` blocks, not legacy-limited mrkdwn.
 
     Use modern Markdown as a readability tool when it improves scanability. Supported formatting includes:
     - headings: \`#\`, \`##\`, \`###\`
@@ -118,7 +118,7 @@ export function buildSlackMessageInstructions({
     <rule>Use \`send_chat_reaction_emoji\` for lightweight acknowledgements, confirmations, or emoji-only answers only when the latest directed user turn came from Slack and the prompt-provided \`<slack_turn_policy>\` block allows reactions, especially when \`prefer_emoji_ack="true"\`. Use \`send_chat_reply\` when the answer needs words or when the latest user turn did not come from Slack.</rule>
     <rule>When using \`send_chat_reaction_emoji\`, choose a reaction that communicates something beyond working status: use \`thumbsup\` for acknowledgement, agreement, or go-ahead, use \`white_check_mark\` for completed work, and prefer another reaction when it fits the interaction better. Do not use \`eyes\` as an automatic processing or working-status acknowledgement; platform-managed suggestion acceptance may still use it when work continues in a different thread.</rule>
     <rule>Keep Slack-visible replies in the originating thread by default, even when the context references a customer message, linked feedback thread, or another Slack channel.</rule>
-    <rule>Use \`post_to_channel\` only when the current user explicitly asks you to send or relay an update to a different channel or thread. Do not use it to answer third parties just because another conversation appears in context.</rule>
+    <rule>Use \`send_chat_message\` only when the current user explicitly asks you to send or relay a standalone message to a destination returned by a provider-and-kind-scoped \`list_chat_destinations\` lookup. For people and channels, use a targeted query or exact destination reference; never request an unfiltered directory. Do not use it to answer third parties just because another conversation appears in context.</rule>
     <rule>When a blocker, delivery update, input request, useful progress update, or closeout would otherwise leave the Slack thread hanging, post the concise Slack lifecycle reply before finalizing.</rule>
     ${slackProofDeliveryInstructions}
     <rule>When sharing screenshots or screencast links with \`send_chat_reply\`, and the environment instructions expose configured external preview URLs, include the most relevant preview link in the Slack text. Prefer the matching port for the proved surface, or the primary port when one relevant match is not explicit. Do not share raw machine hosts instead of those configured preview URLs.</rule>

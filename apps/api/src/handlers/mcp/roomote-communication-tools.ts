@@ -1,13 +1,15 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
-  CHAT_CHANNEL_POST_TOOL_NAME,
-  CHAT_CHANNELS_TOOL,
+  CHAT_DESTINATIONS_TOOL,
+  CHAT_MESSAGE_SEND_TOOL,
   CHAT_REACTION_EMOJI_TOOL_NAME,
+  chatDestinationLookupFieldSchemas,
+  chatDestinationLookupInputSchema,
 } from '@roomote/types';
 import { z } from 'zod';
 
-import { listCommunicationChannels } from './communication-channel-discovery';
-import { sendCommunicationChannelPost } from './communication-channel-posts';
+import { listCommunicationDestinations } from './communication-channel-discovery';
+import { sendCommunicationMessage } from './communication-message-send';
 import { maybeAddCommunicationReaction } from './communication-thread-replies';
 import { toolError } from './in-process-api';
 import { toMcpToolResult } from './proxy-utils';
@@ -24,16 +26,11 @@ export function registerRoomoteCommunicationTools(
   actingUserId: string,
 ): void {
   server.registerTool(
-    CHAT_CHANNELS_TOOL.name,
+    CHAT_DESTINATIONS_TOOL.name,
     {
-      title: CHAT_CHANNELS_TOOL.title,
-      description: CHAT_CHANNELS_TOOL.description,
-      inputSchema: {
-        slackTeamId: z
-          .string()
-          .optional()
-          .describe('Optional Slack workspace ID to limit channel discovery.'),
-      },
+      title: CHAT_DESTINATIONS_TOOL.title,
+      description: CHAT_DESTINATIONS_TOOL.description,
+      inputSchema: chatDestinationLookupFieldSchemas,
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -41,24 +38,37 @@ export function registerRoomoteCommunicationTools(
         openWorldHint: false,
       },
     },
-    async ({ slackTeamId }) =>
-      toMcpToolResult(
-        await listCommunicationChannels({ actingUserId, slackTeamId }),
-      ),
+    async (params) => {
+      const parsed = chatDestinationLookupInputSchema.safeParse(params);
+      if (!parsed.success) {
+        return toolError({
+          code: 'invalid_destination_lookup',
+          error: parsed.error.issues.map(({ message }) => message).join(' '),
+        });
+      }
+      return toMcpToolResult(
+        await listCommunicationDestinations({
+          actingUserId,
+          ...parsed.data,
+        }),
+      );
+    },
   );
 
   server.registerTool(
-    CHAT_CHANNEL_POST_TOOL_NAME,
+    CHAT_MESSAGE_SEND_TOOL.name,
     {
-      title: 'Post To Channel',
-      description:
-        'Post a new standalone Markdown message to an accessible Slack channel. Use send_chat_reply for normal replies in the current conversation. Channel access is verified with the configured Slack installation.',
+      title: CHAT_MESSAGE_SEND_TOOL.title,
+      description: CHAT_MESSAGE_SEND_TOOL.description,
       inputSchema: {
-        provider: z.literal('slack'),
-        slackTeamId: z.string().min(1),
-        channel: z.string().min(1),
-        threadTs: z.string().min(1).optional(),
-        text: z.string().min(1),
+        destination: z
+          .string()
+          .min(1)
+          .describe(CHAT_MESSAGE_SEND_TOOL.inputDescriptions.destination),
+        message: z
+          .string()
+          .min(1)
+          .describe(CHAT_MESSAGE_SEND_TOOL.inputDescriptions.message),
       },
       annotations: {
         readOnlyHint: false,
@@ -67,24 +77,12 @@ export function registerRoomoteCommunicationTools(
         openWorldHint: false,
       },
     },
-    async ({ provider, slackTeamId, channel, threadTs, text }) =>
+    async ({ destination, message }) =>
       responseToToolResult(
-        await sendCommunicationChannelPost({
-          taskRun: {
-            id: 0,
-            taskId: `member:${actingUserId}`,
-            actingUserId,
-            payload: {
-              communicationProvider: provider,
-              communicationTeamId: slackTeamId,
-            },
-          },
-          parsedBody: {
-            channel,
-            ...(threadTs ? { threadTs } : {}),
-            text,
-            images: [],
-          },
+        await sendCommunicationMessage({
+          actingUserId,
+          destination,
+          message,
         }),
       ),
   );

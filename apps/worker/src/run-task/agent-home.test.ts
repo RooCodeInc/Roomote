@@ -108,18 +108,21 @@ describe('createIntegrationMcpInstructions', () => {
       'The built-in and on-demand integration catalogs and the HTTP integrations list are not the full tool inventory',
     );
     expect(instructions).toContain(
-      'use an exposed channel-posting tool for a requested channel post',
+      'call `list_chat_destinations` with the exact provider and kind',
     );
     expect(instructions).toContain(
-      "Slack's absence from an integration catalog or an empty HTTP integrations list does not make that exposed tool unavailable",
+      'Slack person/channel lookup requires a targeted query or exact destination reference',
     );
     expect(instructions).toContain(
-      'When a delegated worker or subagent lacks a posting tool and prepares content that the user asked to deliver, it must return the completed content to the parent instead of posting it',
+      "Slack or Telegram's absence from an integration catalog, or an empty HTTP integrations list, does not make these exposed tools unavailable",
+    );
+    expect(instructions).toContain(
+      'When a delegated worker or subagent lacks `send_chat_message` and prepares content that the user asked to deliver, it must return the completed content to the parent instead of sending it',
     );
     expect(instructions).toContain(
       'The parent remains responsible for making exactly the requested delivery',
     );
-    expect(instructions).toContain('Never duplicate a successful post');
+    expect(instructions).toContain('Never duplicate a successful send');
   });
   it.each(['gbrain', 'supermemory'])(
     'injects shared memory lifecycle guidance for %s',

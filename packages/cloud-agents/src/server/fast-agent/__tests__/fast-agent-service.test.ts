@@ -9522,7 +9522,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
-  it('exposes and targets Slack channel tools through the Fast parent', async () => {
+  it('exposes and targets Slack destinations through the Fast parent', async () => {
     const postReaction = vi.fn().mockResolvedValue(undefined);
     mocks.callIntegration.mockImplementation(
       async (_context, _integrations, request) =>
@@ -9538,8 +9538,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         tools: [
           { name: 'get_chat_message_context' },
           { name: 'get_chat_channel_messages' },
-          { name: 'list_chat_channels' },
-          { name: 'post_to_channel' },
+          { name: 'list_chat_destinations' },
+          { name: 'send_chat_message' },
           { name: 'send_chat_reaction_emoji' },
           { name: 'add_reaction_to_slack_message' },
         ],
@@ -9557,11 +9557,14 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
             name: ':eyes:',
           }),
         ).resolves.toMatchObject({ success: true });
-        await invokeMcpTool('roomote', 'list_chat_channels', {});
-        await invokeMcpTool('roomote', 'post_to_channel', {
-          channel: '#shipping',
-          threadTs: '199.9',
-          text: 'Release is ready.',
+        await invokeMcpTool('roomote', 'list_chat_destinations', {
+          provider: 'slack',
+          kind: 'channel',
+          query: 'shipping',
+        });
+        await invokeMcpTool('roomote', 'send_chat_message', {
+          destination: 'slack:team-1:channel:channel-2:thread:199.9',
+          message: 'Release is ready.',
         });
         await invokeTool(nativeToolNames.sendChatReply, {
           purpose: 'closeout',
@@ -9588,8 +9591,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect.arrayContaining([
         'get_chat_message_context',
         'get_chat_channel_messages',
-        'list_chat_channels',
-        'post_to_channel',
+        'list_chat_destinations',
+        'send_chat_message',
         'send_chat_reaction_emoji',
       ]),
     );
@@ -9615,8 +9618,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect.anything(),
       {
         integrationId: 'roomote',
-        toolName: 'list_chat_channels',
-        args: { slackTeamId: 'team-1' },
+        toolName: 'list_chat_destinations',
+        args: {
+          provider: 'slack',
+          kind: 'channel',
+          query: 'shipping',
+          workspaceId: 'team-1',
+        },
       },
     );
     expect(mocks.callIntegration).toHaveBeenCalledWith(
@@ -9624,14 +9632,53 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect.anything(),
       {
         integrationId: 'roomote',
-        toolName: 'post_to_channel',
+        toolName: 'send_chat_message',
         args: {
-          channel: '#shipping',
-          threadTs: '199.9',
-          text: 'Release is ready.',
-          provider: 'slack',
-          slackTeamId: 'team-1',
+          destination: 'slack:team-1:channel:channel-2:thread:199.9',
+          message: 'Release is ready.',
         },
+      },
+    );
+  });
+
+  it('keeps Slack self lookup provider-scoped without workspace injection', async () => {
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: 'Manage Roomote',
+        tools: [{ name: 'list_chat_destinations' }],
+      },
+    ]);
+    mocks.callIntegration.mockResolvedValue({ destinations: [] });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’ll check your linked Slack destination.',
+        });
+        await invokeMcpTool('roomote', 'list_chat_destinations', {
+          provider: 'slack',
+          kind: 'self',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Checked the linked destination.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.callIntegration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      {
+        integrationId: 'roomote',
+        toolName: 'list_chat_destinations',
+        args: { provider: 'slack', kind: 'self' },
       },
     );
   });
@@ -9678,7 +9725,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
-  it('keeps cross-surface posts while omitting origin-scoped channel tools', async () => {
+  it('keeps destination lookup and sending available across surfaces', async () => {
     mocks.listIntegrations.mockResolvedValue([
       {
         id: 'roomote',
@@ -9686,8 +9733,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         description: 'Manage Roomote',
         tools: [
           { name: 'get_chat_message_context' },
-          { name: 'list_chat_channels' },
-          { name: 'post_to_channel' },
+          { name: 'list_chat_destinations' },
+          { name: 'send_chat_message' },
           { name: 'send_chat_reaction_emoji' },
           { name: 'add_reaction_to_slack_message' },
         ],
@@ -9724,17 +9771,159 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       .tools.map(({ name }) => name);
     expect(roomoteTools).toEqual([
       'get_chat_message_context',
-      'post_to_channel',
+      'list_chat_destinations',
+      'send_chat_message',
     ]);
   });
 
-  it('exposes an explicit Slack post from a Telegram Fast conversation', async () => {
+  it('keeps destination lookup and sending in Telegram conversations', async () => {
     mocks.listIntegrations.mockResolvedValue([
       {
         id: 'roomote',
         name: 'Roomote',
         description: 'Manage Roomote',
-        tools: [{ name: 'post_to_channel' }],
+        tools: [
+          { name: 'list_chat_destinations' },
+          { name: 'send_chat_message' },
+          { name: 'send_chat_reaction_emoji' },
+        ],
+      },
+    ]);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Messaging destinations are available.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      conversation: {
+        surface: 'telegram',
+        workspaceId: 'chat-1',
+        conversationId: 'notification:chat-1:user:user-1',
+        replyTarget: { channelId: 'chat-1' },
+      },
+      adapter: callbacks({ postReaction: undefined }),
+    });
+
+    const roomoteTools = (
+      mocks.getNativeRuntime.mock.calls[0]?.[1] as Array<{
+        id: string;
+        tools: Array<{ name: string }>;
+      }>
+    )
+      .find(({ id }) => id === 'roomote')!
+      .tools.map(({ name }) => name);
+    expect(roomoteTools).toEqual([
+      'list_chat_destinations',
+      'send_chat_message',
+    ]);
+  });
+
+  it.each(['web', 'telegram'] as const)(
+    'lets a %s Fast session use the unified sender for an actor-scoped self DM',
+    async (surface) => {
+      let unauthorizedRecipientResult: unknown;
+      mocks.listIntegrations.mockResolvedValue([
+        {
+          id: 'roomote',
+          name: 'Roomote',
+          description: 'Manage Roomote',
+          tools: [
+            {
+              name: 'send_chat_message',
+              inputSchema: {
+                type: 'object',
+                properties: {
+                  destination: { type: 'string' },
+                  message: { type: 'string' },
+                },
+                required: ['destination', 'message'],
+                additionalProperties: false,
+              },
+            },
+          ],
+        },
+      ]);
+      mocks.callIntegration.mockResolvedValue({
+        delivered: true,
+        provider: 'telegram',
+      });
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+            message: 'I’ll send that.',
+          });
+          unauthorizedRecipientResult = await invokeMcpTool(
+            'roomote',
+            'send_chat_message',
+            {
+              recipientId: 'someone-else',
+              destination: 'telegram:me',
+              message: 'Exact message.',
+            },
+          );
+          await invokeMcpTool('roomote', 'send_chat_message', {
+            destination: 'telegram:me',
+            message: 'Exact message.',
+          });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Sent via Telegram.',
+          });
+          return '';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        conversation:
+          surface === 'web'
+            ? {
+                surface,
+                workspaceId: 'user-1',
+                conversationId: 'web-session-1',
+              }
+            : {
+                surface,
+                workspaceId: 'chat-1',
+                conversationId: 'notification:chat-1:user:user-1',
+                replyTarget: { channelId: 'chat-1' },
+              },
+        adapter: callbacks(),
+      });
+
+      expect(unauthorizedRecipientResult).toEqual({
+        success: false,
+        error:
+          'Unknown argument key "recipientId" for roomote tool send_chat_message. This tool accepts: destination, message.',
+      });
+      expect(mocks.callIntegration).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'user-1' }),
+        expect.anything(),
+        {
+          integrationId: 'roomote',
+          toolName: 'send_chat_message',
+          args: { destination: 'telegram:me', message: 'Exact message.' },
+        },
+      );
+    },
+  );
+
+  it('exposes an explicit Slack destination send from a Telegram Fast conversation', async () => {
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: 'Manage Roomote',
+        tools: [{ name: 'send_chat_message' }],
       },
     ]);
     mocks.callIntegration.mockResolvedValue({ ok: true });
@@ -9745,12 +9934,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           purpose: 'ack',
           message: 'I’ll share that.',
         });
-        await invokeMcpTool('roomote', 'post_to_channel', {
-          provider: 'slack',
-          slackTeamId: 'team-1',
-          channel: 'channel-1',
-          threadTs: '199.9',
-          text: 'Release is ready.',
+        await invokeMcpTool('roomote', 'send_chat_message', {
+          destination: 'slack:team-1:channel:channel-1:thread:199.9',
+          message: 'Release is ready.',
         });
         await invokeTool(nativeToolNames.sendChatReply, {
           purpose: 'closeout',
@@ -9776,13 +9962,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect.anything(),
       {
         integrationId: 'roomote',
-        toolName: 'post_to_channel',
+        toolName: 'send_chat_message',
         args: {
-          provider: 'slack',
-          slackTeamId: 'team-1',
-          channel: 'channel-1',
-          threadTs: '199.9',
-          text: 'Release is ready.',
+          destination: 'slack:team-1:channel:channel-1:thread:199.9',
+          message: 'Release is ready.',
         },
       },
     );

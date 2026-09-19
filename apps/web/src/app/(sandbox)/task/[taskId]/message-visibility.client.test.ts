@@ -199,6 +199,7 @@ describe('message visibility helpers', () => {
     // Outbound communication is the task's visible output, not plumbing.
     for (const toolName of [
       'send_chat_reply',
+      'send_chat_message',
       'post_to_channel',
       'send_chat_reaction_emoji',
     ]) {

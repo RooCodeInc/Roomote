@@ -398,7 +398,7 @@ async function resolveRuntimeTarget(
 /**
  * Communication payload fields to stamp onto an automation-launched scan
  * task so the surface-generic worker tools (send_chat_reply,
- * post_to_channel) target the destination conversation. Slack destinations
+ * send_chat_message) target the destination conversation. Slack destinations
  * carry their selected workspace while retaining Slack channel normalization
  * and membership checks.
  */
@@ -416,7 +416,11 @@ export function buildDestinationTaskPayloadFields(
     };
   }
   if (destination.provider === 'slack') {
-    return destination.teamId ? { teamId: destination.teamId } : {};
+    return {
+      communicationProvider: 'slack',
+      communicationChannelId: destination.channelId,
+      ...(destination.teamId ? { teamId: destination.teamId } : {}),
+    };
   }
 
   return {
@@ -435,11 +439,17 @@ export function buildDestinationTaskPayloadFields(
  */
 export function buildDestinationPromptContext(
   destination: ResolvedAutomationDestination,
-): { channelTag: string; postToolName: string; surfaceLabel: string } {
+): {
+  channelTag: string;
+  destinationRef: string;
+  postToolName: string;
+  surfaceLabel: string;
+} {
   if (destination.provider === 'slack') {
     return {
-      channelTag: 'slack_channel_id',
-      postToolName: 'post_to_channel',
+      channelTag: 'chat_destination',
+      destinationRef: 'slack:current',
+      postToolName: 'send_chat_message',
       surfaceLabel: 'Slack',
     };
   }
@@ -447,14 +457,16 @@ export function buildDestinationPromptContext(
   if (destination.provider === 'email') {
     return {
       channelTag: 'channel_id',
+      destinationRef: destination.channelId,
       postToolName: 'send_chat_reply',
       surfaceLabel: 'Email',
     };
   }
 
   return {
-    channelTag: 'channel_id',
-    postToolName: 'post_to_channel',
+    channelTag: 'chat_destination',
+    destinationRef: `${destination.provider}:current`,
+    postToolName: 'send_chat_message',
     surfaceLabel:
       destination.provider === 'teams'
         ? 'Teams'

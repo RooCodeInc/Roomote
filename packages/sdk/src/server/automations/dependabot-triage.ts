@@ -18,7 +18,6 @@ import {
 import { createScheduledTriageJob } from './scheduled-triage-runner';
 
 function buildDependabotTriagePrompt({
-  channelId,
   destination,
   repositoryFullNames,
   repositoryCoverage,
@@ -65,7 +64,7 @@ Treat repository-level gaps such as Dependabot alerts being disabled for a repos
   <run_mode>read_only</run_mode>
   <trigger>${manualTrigger ? 'manual' : 'scheduled'}</trigger>
   <alert_scope>current_open_dependabot_alerts</alert_scope>
-  <${promptContext.channelTag}>${channelId}</${promptContext.channelTag}>
+  <${promptContext.channelTag}>${promptContext.destinationRef}</${promptContext.channelTag}>
   <repository_scope>
 ${repositoryScope}
   </repository_scope>

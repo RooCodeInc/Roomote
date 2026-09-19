@@ -907,7 +907,7 @@ describe('roomote MCP tool descriptions', () => {
       registeredTools.find(({ name }) => name === 'send_chat_reaction_emoji'),
     ).toBe(undefined);
     expect(
-      registeredTools.find(({ name }) => name === 'post_to_channel'),
+      registeredTools.find(({ name }) => name === 'send_chat_message'),
     ).toBeUndefined();
   });
 
@@ -943,11 +943,11 @@ describe('roomote MCP tool descriptions', () => {
     expect(names).toContain('report_to_parent_session');
     expect(names).not.toContain('send_chat_reply');
     for (const name of [
-      'list_chat_channels',
+      'list_chat_destinations',
       'get_chat_channel_messages',
       'get_chat_message_context',
       'send_chat_reaction_emoji',
-      'post_to_channel',
+      'send_chat_message',
     ]) {
       expect(names).not.toContain(name);
     }
@@ -990,18 +990,36 @@ describe('roomote MCP tool descriptions', () => {
       expect.arrayContaining([
         'send_chat_reply',
         'send_chat_reaction_emoji',
-        'post_to_channel',
+        'send_chat_message',
       ]),
     );
+    for (const legacyName of [
+      'list_chat_channels',
+      'post_to_channel',
+      'send_direct_message_to_self',
+    ]) {
+      expect(names).not.toContain(legacyName);
+    }
     expect(names).not.toContain('add_reaction_to_slack_message');
   });
 
-  it('registers and forwards the provider-neutral channel listing tool', async () => {
+  it('registers and forwards the provider-neutral destination listing tool', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => ({ channelCount: 0, platforms: [] }),
+        json: async () => ({
+          provider: 'slack',
+          kind: 'channel',
+          totalCount: 0,
+          returnedCount: 0,
+          offset: 0,
+          limit: 20,
+          hasMore: false,
+          truncated: false,
+          destinations: [],
+          limitations: [],
+        }),
       }),
     );
 
@@ -1009,19 +1027,45 @@ describe('roomote MCP tool descriptions', () => {
       ROOMOTE_CLOUD_TOKEN: 'run-token',
       ROOMOTE_PLATFORM_API_URL: 'https://platform.example.com',
     });
-    const listTool = getRegisteredTool(registeredTools, 'list_chat_channels');
+    const listTool = getRegisteredTool(
+      registeredTools,
+      'list_chat_destinations',
+    );
 
     expect(listTool.config.description).toBe(
-      'List the communication channels Roomote is connected to or can currently discover, grouped by platform. Returns channel IDs and platform-specific workspace context so another chat tool can target the right channel. Some platforms do not support channel enumeration and report that limitation explicitly.',
+      'Find authorized destinations for a new standalone message. Provider and destination kind are required. Self lookup supports Slack or Telegram and resolves only the authenticated member without enumerating directories. Slack person and channel lookup requires either a targeted query or an exact destination reference. Results are bounded and paginated; pass a returned destination unchanged to send_chat_message.',
     );
+    expect(Object.keys(listTool.config.inputSchema)).toEqual([
+      'provider',
+      'kind',
+      'query',
+      'destination',
+      'workspaceId',
+      'offset',
+      'limit',
+    ]);
     expect(listTool.handler).toBeDefined();
-    await listTool.handler?.({});
+    await listTool.handler?.({
+      provider: 'slack',
+      kind: 'channel',
+      query: 'shipping',
+      workspaceId: 'T1',
+      offset: 20,
+      limit: 10,
+    });
 
     expect(fetch).toHaveBeenCalledWith(
-      'https://platform.example.com/api/mcp/communication/channels',
+      'https://platform.example.com/api/mcp/communication/destinations',
       expect.objectContaining({
         method: 'POST',
-        body: '{}',
+        body: JSON.stringify({
+          provider: 'slack',
+          kind: 'channel',
+          query: 'shipping',
+          workspaceId: 'T1',
+          offset: 20,
+          limit: 10,
+        }),
       }),
     );
   });
@@ -1133,28 +1177,26 @@ describe('roomote MCP tool descriptions', () => {
     );
   });
 
-  it('documents the provider-neutral channel post tool', async () => {
+  it('documents the provider-neutral chat message tool', async () => {
     const { registeredTools } = await importRoomoteMcpServer({
       ROOMOTE_TASK_ID: 'task_123',
       ROOMOTE_SLACK_CHANNEL: 'C123',
     });
-    const postTool = getRegisteredTool(registeredTools, 'post_to_channel');
-    const channelField = getInputSchemaField(postTool, 'channel');
-    const textField = getInputSchemaField(postTool, 'text');
+    const postTool = getRegisteredTool(registeredTools, 'send_chat_message');
+    const destinationField = getInputSchemaField(postTool, 'destination');
+    const messageField = getInputSchemaField(postTool, 'message');
 
-    expect(textField.description).toBe(
-      'Markdown text to post. Lead with the answer or takeaway.',
-    );
+    expect(messageField.description).toBe('Markdown message to send.');
     expect(postTool.config.description).toBe(
-      'Slack-visible: posts a new standalone message into a Slack channel the Roomote app can access. Use this only when the current user explicitly asks you to post a separate update message rather than replying in the ongoing exchange; prefer send_chat_reply for normal replies. Pass a channel ID (Slack also accepts a channel name or mention, DM ID, or linked Slack user ID/mention). Cross-channel posts and DMs are subject to provider-specific authorization and target support. The message text renders as Markdown. Lead with the answer or takeaway, use short paragraphs, and put each list item on its own line.',
+      'Send a new standalone Markdown message to an authorized destination. First use list_chat_destinations and pass its exact destination reference unchanged. Self destinations resolve only from the authenticated member; Slack people and channels retain workspace linkage and access checks. A trusted Slack channel reference may append :thread:<message timestamp>. Use send_chat_reply for the current conversation. Never infer or alter a destination reference. Worker tasks may also attach image paths or already-uploaded artifact IDs; attachment ownership is verified against the current task run.',
     );
     expect(postTool.config.description).not.toContain(
       '<slack_modern_markdown>',
     );
-    expect(channelField.description).toBe(
-      'Slack channel ID the Roomote app can access; Slack also accepts a linked user ID or mention for DMs',
+    expect(destinationField.description).toBe(
+      'Exact destination reference from list_chat_destinations, or a trusted Slack channel reference with an optional :thread:<message timestamp> suffix.',
     );
-    expect(textField.description).not.toContain(
+    expect(messageField.description).not.toContain(
       'Keep simple updates simple instead of forcing structure.',
     );
   });

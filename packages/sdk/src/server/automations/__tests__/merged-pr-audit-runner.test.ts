@@ -99,8 +99,9 @@ vi.mock('../destination', () => ({
       ) || runtime.defaultAutomationTarget?.provider === 'email',
   ),
   buildDestinationPromptContext: vi.fn(() => ({
-    channelTag: 'slack_channel',
-    postToolName: 'post_to_channel',
+    channelTag: 'chat_destination',
+    destinationRef: 'slack:current',
+    postToolName: 'send_chat_message',
     surfaceLabel: 'Slack',
   })),
   buildDestinationTaskPayloadFields: vi.fn(() => ({})),

@@ -17,6 +17,8 @@ import {
 } from '@roomote/sdk/server';
 import {
   CHAT_CHANNEL_MESSAGES_TOOL,
+  CHAT_DESTINATIONS_TOOL,
+  CHAT_MESSAGE_SEND_TOOL,
   CHAT_MESSAGE_CONTEXT_TOOL,
   environmentConfigSchema,
   MCP_INTEGRATIONS,
@@ -401,7 +403,7 @@ function createRoomoteMcpServer(
   registerMemberTools: boolean,
 ) {
   const server = new NullableOptionalsMcpServer(ROOMOTE_MCP_SERVER_INFO, {
-    instructions: `Use get_about_me for Roomote platform, integration, and getting-started context. Use ${CHAT_MESSAGE_CONTEXT_TOOL.name} for surrounding context from the task communication channel or a referenced Slack/Discord message. Use ${CHAT_CHANNEL_MESSAGES_TOOL.name} for readable history from the task communication channel or an explicitly linked channel.`,
+    instructions: `Use get_about_me for Roomote platform, integration, and getting-started context. Use ${CHAT_MESSAGE_CONTEXT_TOOL.name} for surrounding context from the task communication channel or a referenced Slack/Discord message. Use ${CHAT_CHANNEL_MESSAGES_TOOL.name} for readable history from the task communication channel or an explicitly linked channel. For a requested standalone message, call ${CHAT_DESTINATIONS_TOOL.name} with the exact provider and kind; person/channel lookup also requires a targeted query or exact destination. Pass the selected destination unchanged to ${CHAT_MESSAGE_SEND_TOOL.name}.`,
   });
 
   if (registerMemberTools) {

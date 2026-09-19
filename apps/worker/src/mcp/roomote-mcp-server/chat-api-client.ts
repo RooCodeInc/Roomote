@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
+import type { ChatDestinationLookupInput } from '@roomote/types';
 
 import { buildApiHeaders, fetchWithTimeout } from './api-client.js';
 import { ChatDeliveryError } from './chat-delivery-error.js';
 import type {
   CommunicationChannelMessagesResponse,
-  CommunicationChannelsResponse,
+  CommunicationDestinationsResponse,
+  CommunicationSendResponse,
   CommunicationMessageContextResponse,
   RoomoteConfig,
   ChannelPostResponse,
@@ -195,14 +197,31 @@ export async function getChatMessageContext(
   );
 }
 
-export async function listChatChannels(
+export async function listChatDestinations(
   config: RoomoteConfig,
-): Promise<CommunicationChannelsResponse> {
-  return postToCommunicationLookupEndpoint<CommunicationChannelsResponse>(
+  input: ChatDestinationLookupInput,
+): Promise<CommunicationDestinationsResponse> {
+  return postToCommunicationLookupEndpoint<CommunicationDestinationsResponse>(
     config,
-    'channels',
-    {},
-    'Failed to list chat channels',
+    'destinations',
+    input,
+    'Failed to list chat destinations',
+  );
+}
+
+export async function sendChatMessage(
+  config: RoomoteConfig,
+  input: {
+    destination: string;
+    message: string;
+    imageArtifactIds?: string[];
+  },
+): Promise<CommunicationSendResponse> {
+  return postToCommunicationLookupEndpoint<CommunicationSendResponse>(
+    config,
+    'send',
+    input,
+    'Failed to send chat message',
   );
 }
 
