@@ -109,6 +109,8 @@ const DEEP_LINK_ENABLE_DESCRIPTIONS: Record<string, string> = {
     'Roomote will be able to inspect monitoring, incidents, and telemetry.',
   braintrust:
     'Roomote will be able to inspect prompts, evaluations, and AI run history.',
+  buildkite:
+    'Roomote will be able to inspect Buildkite pipelines, builds, jobs, logs, tests, artifacts, and agents through a read-only connection.',
   grafana:
     'Roomote will be able to inspect dashboards, alert rules, live alert state, annotations, and data sources.',
   granola:

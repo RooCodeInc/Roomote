@@ -1,0 +1,32 @@
+---
+title: Buildkite
+description: Inspect Buildkite pipelines, builds, jobs, and tests from Roomote tasks.
+icon: 'https://api.iconify.design/simple-icons:buildkite.svg?color=currentColor'
+---
+
+Connect Buildkite when tasks need CI pipeline, build, job, log, artifact, test,
+cluster, agent, or queue context.
+
+## How setup works
+
+A deployment operator connects Buildkite once from **Settings > Integrations**
+using OAuth. The built-in integration uses Buildkite's hosted
+`/mcp/readonly` endpoint and requests its `read` scope. Buildkite's public OAuth
+metadata supports dynamic client registration and PKCE, so self-hosted Roomote
+deployments do not need a preconfigured Buildkite OAuth client.
+
+The organization picker shown during authorization is a convenience, not an
+access-control boundary. The connection can see organizations available to the
+authorizing account, subject to Buildkite's permissions.
+
+## Network restrictions
+
+If a Buildkite organization uses an API IP allowlist, add Buildkite's published
+MCP egress addresses to that allowlist. The hosted MCP server calls the
+Buildkite API from Buildkite infrastructure.
+
+## Verify the connection
+
+Start by listing pipelines or inspecting a recent failed build. This built-in
+connection is read-only; use a separately configured custom MCP server if a
+different endpoint or token-backed toolset is required.

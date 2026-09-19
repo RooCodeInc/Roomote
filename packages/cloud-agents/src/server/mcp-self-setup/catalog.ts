@@ -38,6 +38,13 @@ export const MCP_SETUP_INTEGRATION_METADATA: Record<
   string,
   SetupMcpIntegrationMetadata
 > = {
+  buildkite: {
+    capabilities: [
+      'Inspect Buildkite pipelines, builds, jobs, and logs',
+      'Review artifacts, annotations, tests, agents, and queues',
+      'Keep hosted MCP access read-only at the provider endpoint',
+    ],
+  },
   asana: {
     capabilities: [
       'Inspect Asana workspaces, projects, and tasks',
