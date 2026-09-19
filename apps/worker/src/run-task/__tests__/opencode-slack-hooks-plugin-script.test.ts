@@ -40,6 +40,8 @@ describe('OPENCODE_SLACK_HOOKS_PLUGIN_SCRIPT', () => {
     );
     delete process.env.ROOMOTE_COMMUNICATION_PROVIDER;
     delete process.env.ROOMOTE_SLACK_CHANNEL;
+    delete process.env.ROOMOTE_FAST_AGENT_CHILD;
+    delete process.env.ROOMOTE_FAST_AGENT_CHILD_CHAT_RELAY;
   });
 
   afterEach(() => {

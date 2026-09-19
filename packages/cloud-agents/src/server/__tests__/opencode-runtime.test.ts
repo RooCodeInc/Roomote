@@ -57,6 +57,46 @@ describe('buildOpenCodeCliEnv', () => {
     }
   });
 
+  it("does not pass the launching service's deployment secrets to the helper", () => {
+    const inherited = {
+      DATABASE_URL: 'postgres://postgres:password@postgres:5432/roomote',
+      ENCRYPTION_KEY: 'encryption-key',
+      JOB_AUTH_PRIVATE_KEY: 'job-private-key',
+      R_GITHUB_CLIENT_SECRET: 'github-client-secret',
+      ANTHROPIC_API_KEY: 'anthropic-key',
+    };
+    const previous = new Map(
+      Object.keys(inherited).map((key) => [key, process.env[key]]),
+    );
+    Object.assign(process.env, inherited);
+
+    try {
+      const env = buildOpenCodeCliEnv({
+        R_MODEL: 'anthropic/claude-sonnet-5',
+        ROOMOTE_FAST_TOOL_BRIDGE_TOKEN: 'bridge-token',
+      });
+
+      // The helper keeps what it needs to call the model and reach the tool
+      // bridge.
+      expect(env.DATABASE_URL).toBeUndefined();
+      expect(env.ENCRYPTION_KEY).toBeUndefined();
+      expect(env.JOB_AUTH_PRIVATE_KEY).toBeUndefined();
+      expect(env.R_GITHUB_CLIENT_SECRET).toBeUndefined();
+      expect(env.ANTHROPIC_API_KEY).toBe('anthropic-key');
+      expect(env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN).toBe('bridge-token');
+      // The launching service itself is untouched.
+      expect(process.env.JOB_AUTH_PRIVATE_KEY).toBe('job-private-key');
+    } finally {
+      for (const [key, value] of previous) {
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+    }
+  });
+
   it('builds a model-backed config without reasoning options by default', () => {
     const env = buildOpenCodeCliEnv({
       R_MODEL: 'openrouter/openai/gpt-5.4',
@@ -375,6 +415,55 @@ describe('buildOpenCodeCliEnv', () => {
           },
         },
       },
+    });
+  });
+
+  it('registers the Kimi for Coding provider without relying on the OpenCode catalog', () => {
+    // The runtime catalog renamed this provider id. Left to the catalog,
+    // OpenCode falls back to an OpenAI-compatible SDK with no base URL and
+    // fails with `"undefined/chat/completions" cannot be parsed as a URL`.
+    const env = buildOpenCodeCliEnv({
+      R_MODEL: 'kimi-for-coding/k3',
+      R_SMALL_MODEL: 'kimi-for-coding/kimi-for-coding',
+    });
+    const config = JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}') as {
+      model: string;
+      small_model: string;
+      provider: Record<
+        string,
+        { models: Record<string, unknown> } & Record<string, unknown>
+      >;
+    };
+
+    expect(config.model).toBe('kimi-for-coding/k3');
+    expect(config.small_model).toBe('kimi-for-coding/kimi-for-coding');
+    expect(config.provider['kimi-for-coding']).toMatchObject({
+      npm: '@ai-sdk/anthropic',
+      api: 'https://api.kimi.com/coding/v1',
+      env: ['KIMI_API_KEY'],
+    });
+    expect(
+      Object.keys(config.provider['kimi-for-coding']!.models).sort(),
+    ).toEqual([
+      'k3',
+      'k3-256k',
+      'kimi-for-coding',
+      'kimi-for-coding-highspeed',
+    ]);
+  });
+
+  it('adds the Kimi for Coding registration to operator-supplied config content', () => {
+    const env = buildOpenCodeCliEnv({
+      R_MODEL: 'kimi-for-coding/k3',
+      OPENCODE_CONFIG_CONTENT: JSON.stringify({ model: 'kimi-for-coding/k3' }),
+    });
+    const config = JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}') as {
+      provider?: Record<string, Record<string, unknown>>;
+    };
+
+    expect(config.provider?.['kimi-for-coding']).toMatchObject({
+      npm: '@ai-sdk/anthropic',
+      api: 'https://api.kimi.com/coding/v1',
     });
   });
 

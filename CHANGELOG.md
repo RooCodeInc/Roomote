@@ -2,6 +2,69 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.12.1 (2026-09-19)
+
+Roomote 1.12.1 restores model and messaging reliability, strengthens Fast Session evidence and credential handling, and improves automation delivery.
+
+### Highlights
+
+- Restore Kimi for Coding and resolve saved provider credentials for models selected on individual Sessions.
+- Keep Slack and Telegram messaging reliable with bounded provider handling, authenticated destinations, and traceable self-DM delivery.
+- Deliver complete automation outcomes and email actions while verifying delegated-task reports against concrete evidence.
+- Restore integration authentication for self-hosted Fast Sessions and limit helper processes to the environment values they need.
+
+### Patch changes
+
+- Self-hosted Fast Sessions running through BullMQ can mint the authentication tokens required by structured review and deployment integrations instead of starting with no available integration tools. Thanks to @pridemusvaire for contributing this fix.
+- Automation reports now wait for delegated work to finish instead of publishing an internal handoff, and email reports include the same relevant navigation and configuration actions as Slack whenever those actions are available.
+- Fast Sessions now verify delegated-task completion and blocker reports against concrete evidence, reuse sufficient proof already supplied, and make one bounded recovery attempt when the reported result is incomplete or inconsistent.
+- Picking a model for a single Session from a provider that none of the deployment's default models use no longer fails with a missing API key error. The provider credential saved in Settings is now resolved for the picked model.
+- Kimi for Coding works again in sessions and tasks. The public model catalog OpenCode reads at runtime renamed this provider, so every request failed before it was sent. Roomote now registers the provider itself instead of depending on that catalog entry. Saved `kimi-for-coding/k2p7` selections move to `kimi-for-coding/kimi-for-coding`, the id Kimi now documents for that model.
+- Keep Slack messages reliable under provider limits by safely truncating oversized content, bounding rate-limit retries, and preventing cached thread reads from overwriting newer edits or hiding deletions.
+- Standalone Telegram messages to your linked account now use a managed private topic when Threaded Mode is enabled and return provider delivery details, so accepted self-DMs are reliably received and traceable without inheriting an unrelated chat or topic.
+- The OpenCode helper process used for Fast Sessions and helper model calls now receives only the environment it uses: model-provider credentials (including any declared in `R_MODEL_ENV_KEYS`) and the variables passed to it explicitly.
+- Explicit messaging requests now use one provider-neutral destination lookup and send flow across Fast Sessions and tasks, with bounded Slack discovery, authenticated self destinations for Slack and Telegram, and the existing provider access checks.
+
+## 1.12.0 (2026-09-18)
+
+Roomote 1.12 expands self-service integrations and repository discovery, adds browser and email delivery options, and improves Session reliability across web and Slack.
+
+### Highlights
+
+- Connect built-in integrations and personal or shared remote MCP servers directly from Sessions, with integration keys available to every active member.
+- Find connected repositories live by name or description from Fast Sessions and task sandboxes, including deployments without configured environments.
+- Receive browser attention alerts and automation reports by email, with secure implicit verification when replying to Roomote-initiated email.
+- Delete Sessions with their direct Memory, cycle through artifacts, and recover more reliably from setup, worker, and initial page-loading failures.
+
+### Minor changes
+
+- Built-in automations can deliver reports to an account email address, automations use the configurable Default destination when one is available, and custom automations no longer stop at an arbitrary limit of 25.
+- Verify an unverified account email implicitly when its owner replies to a Roomote-initiated email: the reply must pass DMARC and quote the single-use reference token the outbound email carried, after which the reply is processed normally without a separate verification message or Settings visit.
+- Agents have a read-only `list_repositories` tool that searches connected repositories live, by name or description, with paging. In Fast Sessions it covers every active repository and returns each one's ID, default branch, provider, host, URL, and mapped environments, so a loosely named repository ("my fork of X") is resolved without asking for a URL even on deployments with more repositories than the prompt lists. In task sandboxes it covers the repositories the task is authorized to check out, with their checkout state, alongside the existing `REPOSITORIES.md` index and `clone_repository` tool; it appears in sandboxes once the worker image from this release is in use.
+- Integration keys are now available to active members without an Experimental settings opt-in. Existing owner and administrator permissions, secure credential substitution, approved origin and method limits, and network safeguards remain unchanged.
+- Home composer suggestions are now available to every user instead of requiring an Experimental setting.
+- Fast Sessions now expose the complete built-in integration catalog and connection status through read-only discovery, then use a separate canonical-ID `connect_integration` action to start the provider's supported OAuth, secure Settings, already-connected, or keyless path. Native, remote MCP, and API-key instructions now share one decision flow that respects explicit choices and never bypasses permission or authorization outcomes. OAuth callbacks remain bound to the requester and Session, then resume the conversation after success, cancellation, or failure. Notion additionally supports an operator-configured public-connection OAuth client while retaining its internal integration secret flow.
+- Add OpenRouter as a selectable backend for the optional Jev judgment model, reusing the deployment's existing OpenRouter connection while preserving strict response validation and existing fallbacks.
+- Any member can now add a remote MCP server, the way they add an integration key: shared with everyone in the deployment, or private to them. Private servers live under Personal Settings → Personal MCP servers, reach only their owner's Sessions and tasks, and stay invisible to everyone else, administrators included. Shared servers are managed by the member who added them and by administrators, and other members see them read-only. A server can be moved between private and shared without authorizing again. Asking Roomote in a Session to connect a service's MCP server now works for every member, shared by default and private on request. Local (stdio) servers remain administrator-only.
+- Delete a Session and its directly associated Memory from the Session menu, with clear safeguards for active work and private data.
+- Sessions can notify you in the browser when they need attention or are ready, with an opt-in permission prompt and attention tracking that avoids duplicate or stale alerts.
+- Announce the latest stable major or minor Roomote release after a successful update through a configurable built-in automation, matching the in-app authored summary and complete highlights with durable retry-safe delivery and a manual test action.
+
+### Patch changes
+
+- Cycle directly between artifacts in the artifact viewer without returning to the artifact list.
+- Use a neutral reaction when a pull request closes without merging instead of presenting the closure as a celebration.
+- Block custom integration requests from targeting internal network addresses while preserving explicitly approved public endpoints and methods.
+- Fast Sessions now see the deployment's active connected repositories even when no environments are configured, so a request that names a repository (or "my fork of X") launches an All repositories task instead of asking for a repository URL. The list is capped for large deployments, and the agent only asks when several repositories plausibly match.
+- Move Integrations into the top-level navigation and make each integration's connection status easier to scan in its details.
+- Improve mobile Session and task controls by preventing prompts from stealing focus, keeping the Session drawer above the keyboard, and placing Session overflow actions in the bottom-right action rail.
+- Make model selection clearer by refining coding-model routing controls, showing the selected default model in the Session composer, and restoring metadata for recommended Amazon Bedrock models.
+- Updated the bundled OpenCode runtime to 1.18.30. Native Amazon Bedrock models that return redacted reasoning (such as xAI Grok) now work in sessions and tasks instead of failing on every response, and Bedrock reasoning replay is more reliable. GPT-6 sessions keep identifying as Roomote under OpenCode's new GPT-6 system prompt.
+- Recover cleanly from worker bootstrap exits, repository setup failures, skipped setup capabilities, invalid custom schedules, and initial Session, task, or Personalization loading errors instead of leaving work stalled, hiding useful errors, or leaving pages stuck.
+- Make Roomote interfaces clearer with condensed Session metadata, independent nested disclosures, accessible task-log controls, a less cluttered list-focused Home experience, standardized product terminology, and the current deployment host in About.
+- Make Slack automation and release-announcement cards consistent and easier to read by preserving paragraph spacing, compacting unordered lists, and using the standard automation result layout.
+- Include attached screenshots in the first reply sent to a vision-capable model instead of making the model wait for a later turn to see them.
+
 ## 1.11.0 (2026-09-17)
 
 Roomote 1.11 adds private Sessions, smarter model routing and triage, cross-platform peer conversations, and safer integration and operator workflows.

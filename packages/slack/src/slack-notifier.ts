@@ -43,6 +43,7 @@ type SlackApiThreadMessage = {
   ts: string;
   thread_ts?: string;
   bot_id?: string;
+  app_id?: string;
   type: string;
   reply_count?: number;
   latest_reply?: string;
@@ -51,6 +52,10 @@ type SlackApiThreadMessage = {
   files?: SlackFile[];
   bot_profile?: {
     name?: string;
+  };
+  metadata?: {
+    event_type?: unknown;
+    event_payload?: unknown;
   };
 };
 
@@ -120,9 +125,37 @@ export type SlackTaskStreamStatus =
 
 const SLACK_USERS_LIST_LIMIT = 999;
 const MAX_SLACK_CONVERSATIONS_REPLIES_RATE_LIMIT_RETRIES = 3;
+const MAX_SLACK_CONVERSATIONS_REPLIES_RATE_LIMIT_WAIT_MS = 60_000;
+const DEFAULT_SLACK_CONVERSATIONS_REPLIES_BACKOFF_MS = 1_000;
+const SLACK_CONVERSATIONS_REPLIES_JITTER_MS = 250;
+const SLACK_CONVERSATIONS_REPLIES_CACHE_TTL_MS = 2_000;
+const MAX_SLACK_CONVERSATIONS_REPLIES_CACHE_ENTRIES = 32;
 const MAX_SLACK_UPDATE_RETRIES = 2;
 const SLACK_UPDATE_RETRY_DELAY_MS = 250;
 const MAX_SLACK_UPDATE_RATE_LIMIT_WAIT_MS = 5_000;
+/** Slack's top-level text fallback is limited to 40,000 characters. */
+export const SLACK_MESSAGE_TEXT_MAX_CHARS = 40_000;
+const SLACK_TEXT_TRUNCATION_MARKER = '[…truncated…]';
+const SLACK_TEXT_HEAD_CHARS = 20_000;
+
+function truncateSlackText(text: string): string {
+  if (text.length <= SLACK_MESSAGE_TEXT_MAX_CHARS) {
+    return text;
+  }
+
+  const characters = Array.from(text);
+  if (characters.length <= SLACK_MESSAGE_TEXT_MAX_CHARS) {
+    return text;
+  }
+
+  const tailChars =
+    SLACK_MESSAGE_TEXT_MAX_CHARS -
+    SLACK_TEXT_HEAD_CHARS -
+    Array.from(SLACK_TEXT_TRUNCATION_MARKER).length -
+    2;
+
+  return `${characters.slice(0, SLACK_TEXT_HEAD_CHARS).join('')}\n${SLACK_TEXT_TRUNCATION_MARKER}\n${characters.slice(-tailChars).join('')}`;
+}
 
 const SLACK_UPDATE_STALE_TARGET_ERRORS = new Set([
   'file_deleted',
@@ -226,12 +259,23 @@ function shouldExpandThreadRoot(params: {
 function normalizeOutboundMessage<T extends object & SlackMessage>(
   message: T,
 ): T {
-  if (!Array.isArray(message.blocks) || message.blocks.length === 0) {
-    return message;
+  const text =
+    typeof message.text === 'string'
+      ? truncateSlackText(message.text)
+      : message.text;
+
+  const normalizedMessage =
+    text === message.text ? message : { ...message, text };
+
+  if (
+    !Array.isArray(normalizedMessage.blocks) ||
+    normalizedMessage.blocks.length === 0
+  ) {
+    return normalizedMessage;
   }
 
   return {
-    ...message,
+    ...normalizedMessage,
     unfurl_links: false,
     unfurl_media: false,
   };
@@ -246,6 +290,15 @@ type SlackChannelInfoContext = {
 export class SlackNotifier {
   private readonly token: string;
   private readonly channelInfoCache: SlackChannelInfoCache | null;
+  private readonly threadResponseCache = new Map<
+    string,
+    { expiresAt: number; response: SlackApiThreadResponse }
+  >();
+  private threadResponseGeneration = 0;
+  private readonly threadResponseRequests = new Map<
+    string,
+    Promise<SlackApiThreadResponse | null>
+  >();
   private readonly botUserId: string | null;
   private readonly botName: string | null;
   private client?: WebClient;
@@ -1068,6 +1121,7 @@ export class SlackNotifier {
         );
       }
 
+      if (result.ok) this.invalidateThreadResponses();
       return result;
     } catch (error) {
       console.error(
@@ -1188,6 +1242,7 @@ export class SlackNotifier {
         const result: SlackResponse = await response.json();
 
         if (result.ok) {
+          this.invalidateThreadResponses();
           return true;
         }
 
@@ -1256,54 +1311,13 @@ export class SlackNotifier {
         latest: messageTs,
         inclusive: 'true',
       });
-      let retryCount = 0;
-      let result: {
-        ok: boolean;
-        error?: string;
-        messages?: Array<{ ts: string }>;
-      };
+      const result = await this.fetchThreadResponse(
+        query,
+        'hasMessageInThread',
+      );
 
-      while (true) {
-        const response = await slackFetch(
-          `${buildSlackApiUrl('conversations.replies')}?${query.toString()}`,
-          {
-            method: 'GET',
-            headers: {
-              Authorization: `Bearer ${this.token}`,
-              'Content-Type': 'application/x-www-form-urlencoded',
-            },
-          },
-        );
-
-        if (response.status === 429) {
-          if (
-            retryCount >= MAX_SLACK_CONVERSATIONS_REPLIES_RATE_LIMIT_RETRIES
-          ) {
-            console.error(
-              `[hasMessageInThread] Slack conversations.replies exhausted ${MAX_SLACK_CONVERSATIONS_REPLIES_RATE_LIMIT_RETRIES} rate-limit retries`,
-            );
-            return null;
-          }
-
-          retryCount += 1;
-          await new Promise((resolve) =>
-            setTimeout(
-              resolve,
-              getSlackRetryAfterMs(response.headers.get('Retry-After')),
-            ),
-          );
-          continue;
-        }
-
-        if (!response.ok) {
-          console.error(
-            `[hasMessageInThread] Slack API failed: ${response.status} ${response.statusText}`,
-          );
-          return null;
-        }
-
-        result = (await response.json()) as typeof result;
-        break;
+      if (!result) {
+        return null;
       }
 
       if (!result.ok) {
@@ -1361,6 +1375,7 @@ export class SlackNotifier {
         recipient_user_id: params.recipientUserId,
         markdown_text: params.markdownText,
       });
+      if (response.ok) this.invalidateThreadResponses();
       return response.ok && typeof response.ts === 'string'
         ? response.ts
         : null;
@@ -1383,6 +1398,7 @@ export class SlackNotifier {
         ts: params.ts,
         markdown_text: params.markdownText,
       });
+      if (response.ok) this.invalidateThreadResponses();
       return response.ok === true;
     } catch (error) {
       console.error(
@@ -1407,6 +1423,7 @@ export class SlackNotifier {
           ? { session_status: params.sessionStatus }
           : {}),
       });
+      if (response.ok) this.invalidateThreadResponses();
       return response.ok === true;
     } catch (error) {
       console.error(
@@ -1429,44 +1446,22 @@ export class SlackNotifier {
     throwOnUnavailable?: boolean;
   }): Promise<unknown[] | null> {
     try {
-      const response = await slackFetch(
-        `${buildSlackApiUrl('conversations.replies')}?channel=${encodeURIComponent(channel)}&ts=${encodeURIComponent(threadTs)}&oldest=${encodeURIComponent(messageTs)}&latest=${encodeURIComponent(messageTs)}&inclusive=true`,
-        {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${this.token}`,
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-        },
+      const result = await this.fetchThreadResponse(
+        new URLSearchParams({
+          channel,
+          ts: threadTs,
+          oldest: messageTs,
+          latest: messageTs,
+          inclusive: 'true',
+        }),
+        'fetchMessageBlocks',
       );
 
-      if (!response.ok) {
+      if (!result) {
         if (throwOnUnavailable)
-          throw new Error(
-            `Slack message lookup unavailable (${response.status})`,
-          );
-        console.error(
-          `[fetchMessageBlocks] Slack API failed: ${response.status} ${response.statusText}`,
-        );
+          throw new Error('Slack message lookup unavailable');
         return null;
       }
-
-      const result = (await response.json()) as {
-        ok: boolean;
-        error?: string;
-        messages?: Array<{
-          ts: string;
-          blocks?: Array<{
-            type: string;
-            text?: { type: string; text: string };
-            elements?: Array<{
-              type: string;
-              text?: string;
-              action_id?: string;
-            }>;
-          }>;
-        }>;
-      };
 
       if (!result.ok || !result.messages) {
         if (
@@ -1612,35 +1607,19 @@ export class SlackNotifier {
         return null;
       }
 
-      const repliesResponse = await slackFetch(
-        `${buildSlackApiUrl('conversations.replies')}?channel=${encodeURIComponent(channel)}&ts=${encodeURIComponent(threadTs)}&oldest=${encodeURIComponent(messageTs)}&latest=${encodeURIComponent(messageTs)}&inclusive=true&include_all_metadata=true`,
-        {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${this.token}`,
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-        },
+      const repliesResult = await this.fetchThreadResponse(
+        new URLSearchParams({
+          channel,
+          ts: threadTs,
+          oldest: messageTs,
+          latest: messageTs,
+          inclusive: 'true',
+          include_all_metadata: 'true',
+        }),
+        'getMessageMetadata',
       );
 
-      if (!repliesResponse.ok) {
-        console.error(
-          `[getMessageMetadata] Slack replies API failed: ${repliesResponse.status} ${repliesResponse.statusText}`,
-        );
-        return null;
-      }
-
-      const repliesResult = (await repliesResponse.json()) as {
-        ok: boolean;
-        error?: string;
-        messages?: Array<{
-          ts: string;
-          metadata?: {
-            event_type?: unknown;
-            event_payload?: unknown;
-          };
-        }>;
-      };
+      if (!repliesResult) return null;
 
       return parseMetadata(repliesResult);
     } catch (error) {
@@ -1795,38 +1774,18 @@ export class SlackNotifier {
         return messageFromHistory;
       }
 
-      const repliesResponse = await slackFetch(
-        `${buildSlackApiUrl('conversations.replies')}?channel=${encodeURIComponent(channel)}&ts=${encodeURIComponent(messageTs)}&oldest=${encodeURIComponent(messageTs)}&latest=${encodeURIComponent(messageTs)}&inclusive=true`,
-        {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${this.token}`,
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-        },
+      const repliesResult = await this.fetchThreadResponse(
+        new URLSearchParams({
+          channel,
+          ts: messageTs,
+          oldest: messageTs,
+          latest: messageTs,
+          inclusive: 'true',
+        }),
+        'getMessage',
       );
 
-      if (!repliesResponse.ok) {
-        console.error(
-          `[getMessage] Slack replies lookup failed: ${repliesResponse.status} ${repliesResponse.statusText}`,
-        );
-        return null;
-      }
-
-      const repliesResult = (await repliesResponse.json()) as {
-        ok: boolean;
-        error?: string;
-        messages?: Array<{
-          text?: string;
-          ts?: string;
-          thread_ts?: string;
-          user?: string;
-          bot_id?: string;
-          attachments?: unknown[];
-          blocks?: unknown[];
-          files?: SlackFile[];
-        }>;
-      };
+      if (!repliesResult) return null;
 
       if (!repliesResult.ok) {
         if (
@@ -1880,6 +1839,7 @@ export class SlackNotifier {
         return false;
       }
 
+      this.invalidateThreadResponses();
       return true;
     } catch (error) {
       console.error(
@@ -2309,32 +2269,17 @@ export class SlackNotifier {
         params.set('inclusive', 'true');
       }
 
-      const response = await slackFetch(
-        `${buildSlackApiUrl('conversations.replies')}?${params.toString()}`,
-        {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${this.token}`,
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-        },
+      const result = await this.fetchThreadResponse(
+        params,
+        'fetchThreadMessages',
       );
 
-      if (!response.ok) {
-        console.error(
-          `[fetchThreadMessages] Slack conversations.replies failed: ${response.status} ${response.statusText}`,
-        );
-
-        return [];
-      }
-
-      const result: SlackApiThreadResponse = await response.json();
+      if (!result) return [];
 
       if (!result.ok) {
         console.error(
           `[fetchThreadMessages] Slack conversations.replies error: ${result.error || 'Unknown error'}`,
         );
-
         return [];
       }
 
@@ -2347,6 +2292,151 @@ export class SlackNotifier {
       );
 
       return [];
+    }
+  }
+
+  private invalidateThreadResponses(): void {
+    this.threadResponseGeneration += 1;
+    this.threadResponseCache.clear();
+    this.threadResponseRequests.clear();
+  }
+
+  private async fetchThreadResponse(
+    query: URLSearchParams,
+    context:
+      | 'hasMessageInThread'
+      | 'fetchThreadMessages'
+      | 'fetchMessageBlocks'
+      | 'getMessageMetadata'
+      | 'getMessage',
+  ): Promise<SlackApiThreadResponse | null> {
+    // Full thread snapshots tolerate a short cache. Existence/identity checks
+    // must see current state, and block reads protect read-modify-write callers
+    // (including a second read under a lock) from overwriting newer content.
+    const cacheable = context === 'fetchThreadMessages';
+    const freshRead = context === 'fetchMessageBlocks';
+    const generation = this.threadResponseGeneration;
+    const cacheKey = query.toString();
+    const maxRateLimitRetries =
+      context === 'fetchMessageBlocks'
+        ? 1
+        : MAX_SLACK_CONVERSATIONS_REPLIES_RATE_LIMIT_RETRIES;
+    const requestKey = `${cacheKey}:retries=${maxRateLimitRetries}`;
+    const getCachedResponse = (): SlackApiThreadResponse | null => {
+      if (!cacheable) return null;
+      const cached = this.threadResponseCache.get(cacheKey);
+      if (!cached) return null;
+      if (cached.expiresAt > Date.now()) return cached.response;
+      this.threadResponseCache.delete(cacheKey);
+      return null;
+    };
+
+    const cached = getCachedResponse();
+    if (cached) return cached;
+
+    const pending = freshRead
+      ? undefined
+      : this.threadResponseRequests.get(requestKey);
+    if (pending) return pending;
+
+    const request = (async () => {
+      for (
+        let retryCount = 0;
+        retryCount <= maxRateLimitRetries;
+        retryCount += 1
+      ) {
+        try {
+          if (retryCount > 0) {
+            const cached = getCachedResponse();
+            if (cached) return cached;
+          }
+
+          const response = await slackFetch(
+            `${buildSlackApiUrl('conversations.replies')}?${query.toString()}`,
+            {
+              method: 'GET',
+              headers: {
+                Authorization: `Bearer ${this.token}`,
+                'Content-Type': 'application/x-www-form-urlencoded',
+              },
+            },
+          );
+
+          if (response.status === 429) {
+            if (retryCount >= maxRateLimitRetries) {
+              console.error(
+                `[${context}] Slack conversations.replies exhausted ${maxRateLimitRetries} rate-limit retries`,
+              );
+              return null;
+            }
+
+            const jitterMs = Math.floor(
+              Math.random() * SLACK_CONVERSATIONS_REPLIES_JITTER_MS,
+            );
+            const retryAfterHeader = response.headers.get('Retry-After');
+            const retryAfterSeconds = Number.parseFloat(retryAfterHeader ?? '');
+            const retryAfterMs =
+              Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0
+                ? getSlackRetryAfterMs(retryAfterHeader)
+                : DEFAULT_SLACK_CONVERSATIONS_REPLIES_BACKOFF_MS *
+                  2 ** retryCount;
+            await new Promise((resolve) =>
+              setTimeout(
+                resolve,
+                Math.min(
+                  retryAfterMs + jitterMs,
+                  MAX_SLACK_CONVERSATIONS_REPLIES_RATE_LIMIT_WAIT_MS,
+                ),
+              ),
+            );
+            continue;
+          }
+
+          if (!response.ok) {
+            console.error(
+              `[${context}] Slack conversations.replies failed: ${response.status} ${response.statusText}`,
+            );
+            return null;
+          }
+
+          const result = (await response.json()) as SlackApiThreadResponse;
+          if (
+            result.ok &&
+            cacheable &&
+            generation === this.threadResponseGeneration
+          ) {
+            this.threadResponseCache.set(cacheKey, {
+              expiresAt: Date.now() + SLACK_CONVERSATIONS_REPLIES_CACHE_TTL_MS,
+              response: result,
+            });
+          }
+          while (
+            this.threadResponseCache.size >
+            MAX_SLACK_CONVERSATIONS_REPLIES_CACHE_ENTRIES
+          ) {
+            const oldestKey = this.threadResponseCache.keys().next().value;
+            if (oldestKey === undefined) break;
+            this.threadResponseCache.delete(oldestKey);
+          }
+          return result;
+        } catch (error) {
+          console.error(
+            `[${context}] Failed to fetch Slack thread messages: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          return null;
+        }
+      }
+
+      return null;
+    })();
+
+    if (!freshRead) this.threadResponseRequests.set(requestKey, request);
+    try {
+      return await request;
+    } finally {
+      if (this.threadResponseRequests.get(requestKey) === request) {
+        this.threadResponseRequests.delete(requestKey);
+      }
     }
   }
 

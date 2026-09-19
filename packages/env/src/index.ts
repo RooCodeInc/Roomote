@@ -991,7 +991,8 @@ const SERVICE_AUTH_KEYPAIR_ENV_KEYS = {
   web: AUTH_KEYPAIR_ENV_KEYS,
   api: ['JOB_AUTH_PRIVATE_KEY', 'JOB_AUTH_PUBLIC_KEY'],
   controller: ['JOB_AUTH_PRIVATE_KEY', 'JOB_AUTH_PUBLIC_KEY'],
-  bullmq: [],
+  // Fast Agent on bullmq mints MCP/auth tokens, so it needs the job keypair.
+  bullmq: ['JOB_AUTH_PRIVATE_KEY', 'JOB_AUTH_PUBLIC_KEY'],
   'preview-proxy': ['JOB_AUTH_PUBLIC_KEY', 'PREVIEW_AUTH_PUBLIC_KEY'],
   'db-migrate': [],
 } as const satisfies Record<RoomoteService, readonly AuthKeypairEnvKey[]>;

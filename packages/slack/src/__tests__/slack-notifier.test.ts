@@ -560,6 +560,93 @@ describe('SlackNotifier', () => {
       expect(result).toBe(true);
     });
 
+    it('bounds oversized text fallbacks while preserving both ends', async () => {
+      getGlobalWithFetch().fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ ok: true }),
+      });
+      const text = `${'start '.repeat(8_000)}END`;
+
+      const result = await notifier.updateMessage({
+        channel: 'C123',
+        ts: '123.000',
+        message: { text },
+      });
+
+      const [, request] = getGlobalWithFetch().fetch.mock.calls[0] as [
+        string,
+        RequestInit,
+      ];
+      const body = JSON.parse(request.body as string) as { text: string };
+      expect(body.text).toHaveLength(40_000);
+      expect(body.text.startsWith('start start')).toBe(true);
+      expect(body.text.endsWith('END')).toBe(true);
+      expect(body.text).toContain('[…truncated…]');
+      expect(result).toBe(true);
+    });
+
+    it.each([20_001, 25_000, 40_000])(
+      'preserves %i emoji without unnecessary truncation',
+      async (count) => {
+        getGlobalWithFetch().fetch = vi
+          .fn()
+          .mockResolvedValue(Response.json({ ok: true }));
+        const text = '😀'.repeat(count);
+        await notifier.updateMessage({
+          channel: 'C123',
+          ts: '123.000',
+          message: { text },
+        });
+        const request = getGlobalWithFetch().fetch.mock
+          .calls[0]?.[1] as RequestInit;
+        expect(JSON.parse(request.body as string).text).toBe(text);
+      },
+    );
+
+    it('bounds oversized emoji by code points without overlapping retained content', async () => {
+      getGlobalWithFetch().fetch = vi
+        .fn()
+        .mockResolvedValue(Response.json({ ok: true }));
+      const text = '😀'.repeat(40_001);
+      await notifier.updateMessage({
+        channel: 'C123',
+        ts: '123.000',
+        message: { text },
+      });
+      const request = getGlobalWithFetch().fetch.mock
+        .calls[0]?.[1] as RequestInit;
+      const result = JSON.parse(request.body as string).text as string;
+      expect(Array.from(result)).toHaveLength(40_000);
+      expect(result).toContain('[…truncated…]');
+      expect(result).not.toMatch(
+        /(?:^|[^\uD800-\uDBFF])[\uDC00-\uDFFF]|[\uD800-\uDBFF](?:$|[^\uDC00-\uDFFF])/u,
+      );
+    });
+
+    it('does not split surrogate pairs at truncation boundaries', async () => {
+      getGlobalWithFetch().fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ ok: true }),
+      });
+      const text = `${'a'.repeat(20_000)}x${'😀'.repeat(20_000)}END`;
+
+      await notifier.updateMessage({
+        channel: 'C123',
+        ts: '123.000',
+        message: { text },
+      });
+
+      const [, request] = getGlobalWithFetch().fetch.mock.calls[0] as [
+        string,
+        RequestInit,
+      ];
+      const body = JSON.parse(request.body as string) as { text: string };
+      expect(body.text).not.toMatch(
+        /(?:^|[^\uD800-\uDBFF])[\uDC00-\uDFFF]|[\uD800-\uDBFF](?:$|[^\uDC00-\uDFFF])/u,
+      );
+      expect(body.text.endsWith('END')).toBe(true);
+    });
+
     it('classifies authorization failures without retrying or logging message content', async () => {
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       getGlobalWithFetch().fetch = vi.fn().mockResolvedValue({
@@ -1438,6 +1525,7 @@ describe('SlackNotifier', () => {
 
     it('retries transient conversations.replies rate limits before returning success', async () => {
       vi.useFakeTimers();
+      vi.spyOn(Math, 'random').mockReturnValue(0);
 
       try {
         getGlobalWithFetch().fetch = vi
@@ -1479,6 +1567,245 @@ describe('SlackNotifier', () => {
           'https://slack.com/api/conversations.replies?channel=C123&ts=111.000&oldest=111.000&latest=111.000&inclusive=true',
           expect.any(Object),
         );
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('coalesces concurrent identical conversations.replies checks', async () => {
+      let resolveFetch: ((value: Response) => void) | undefined;
+      getGlobalWithFetch().fetch = vi.fn().mockReturnValue(
+        new Promise<Response>((resolve) => {
+          resolveFetch = resolve;
+        }),
+      );
+
+      const first = notifier.hasMessageInThread({
+        channel: 'C123',
+        threadTs: '111.000',
+        messageTs: '111.000',
+      });
+      const second = notifier.hasMessageInThread({
+        channel: 'C123',
+        threadTs: '111.000',
+        messageTs: '111.000',
+      });
+
+      resolveFetch?.(
+        Response.json({
+          ok: true,
+          messages: [{ ts: '111.000' }],
+        }),
+      );
+
+      await expect(Promise.all([first, second])).resolves.toEqual([true, true]);
+      expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps block-read retries independent of concurrent existence checks', async () => {
+      vi.useFakeTimers();
+      vi.spyOn(Math, 'random').mockReturnValue(0);
+
+      try {
+        getGlobalWithFetch().fetch = vi
+          .fn()
+          .mockResolvedValueOnce({
+            ok: false,
+            status: 429,
+            statusText: 'Too Many Requests',
+            headers: { get: () => null },
+          })
+          .mockResolvedValueOnce(
+            Response.json({
+              ok: true,
+              messages: [{ ts: '111.000' }],
+            }),
+          );
+
+        getGlobalWithFetch().fetch.mockResolvedValueOnce(
+          Response.json({
+            ok: true,
+            messages: [
+              {
+                ts: '111.000',
+                blocks: [
+                  { type: 'section', text: { type: 'mrkdwn', text: 'fresh' } },
+                ],
+              },
+            ],
+          }),
+        );
+
+        const blocksPromise = notifier.getMessageBlocks({
+          channel: 'C123',
+          messageTs: '111.000',
+          threadTs: '111.000',
+        });
+
+        await Promise.resolve();
+
+        const existsPromise = notifier.hasMessageInThread({
+          channel: 'C123',
+          threadTs: '111.000',
+          messageTs: '111.000',
+        });
+
+        await expect(existsPromise).resolves.toBe(true);
+        await vi.advanceTimersByTimeAsync(1_000);
+        await expect(blocksPromise).resolves.toEqual([
+          { type: 'section', text: { type: 'mrkdwn', text: 'fresh' } },
+        ]);
+        expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(3);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  describe('fetchThreadMessages', () => {
+    it('expires thread snapshots and bounds the cache to 32 entries', async () => {
+      vi.useFakeTimers();
+      try {
+        getGlobalWithFetch().fetch = vi
+          .fn()
+          .mockImplementation(async () =>
+            Response.json({ ok: true, messages: [] }),
+          );
+        const input = { channel: 'C123', threadTs: '0.000' };
+        await notifier.fetchThreadMessages(input);
+        await notifier.fetchThreadMessages(input);
+        expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(1);
+        await vi.advanceTimersByTimeAsync(2001);
+        await notifier.fetchThreadMessages(input);
+        expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(2);
+        for (let i = 1; i <= 32; i++)
+          await notifier.fetchThreadMessages({
+            channel: 'C123',
+            threadTs: `${i}.000`,
+          });
+        await notifier.fetchThreadMessages(input);
+        expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(35);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('does not coalesce block reads that may protect separate edits', async () => {
+      const responses: Array<(response: Response) => void> = [];
+      getGlobalWithFetch().fetch = vi
+        .fn()
+        .mockImplementation(
+          () => new Promise<Response>((resolve) => responses.push(resolve)),
+        );
+      const input = {
+        channel: 'C123',
+        threadTs: '111.000',
+        messageTs: '111.000',
+      };
+      const first = notifier.getMessageBlocks(input);
+      const second = notifier.getMessageBlocks(input);
+      expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(2);
+      responses[0]!(
+        Response.json({ ok: true, messages: [{ ts: '111.000', blocks: [] }] }),
+      );
+      responses[1]!(
+        Response.json({ ok: true, messages: [{ ts: '111.000', blocks: [] }] }),
+      );
+      await Promise.all([first, second]);
+    });
+
+    it('does not let a pre-write request replace newer cached or in-flight data', async () => {
+      let releaseOld!: (response: Response) => void;
+      let releaseNew!: (response: Response) => void;
+      getGlobalWithFetch().fetch = vi
+        .fn()
+        .mockImplementationOnce(
+          () =>
+            new Promise<Response>((resolve) => {
+              releaseOld = resolve;
+            }),
+        )
+        .mockResolvedValueOnce(Response.json({ ok: true }))
+        .mockImplementationOnce(
+          () =>
+            new Promise<Response>((resolve) => {
+              releaseNew = resolve;
+            }),
+        );
+      const input = { channel: 'C123', threadTs: '111.000' };
+      const oldRead = notifier.fetchThreadMessages(input);
+      await notifier.updateMessage({
+        channel: 'C123',
+        ts: '111.000',
+        message: { text: 'new' },
+      });
+      const newRead = notifier.fetchThreadMessages(input);
+      releaseOld(
+        Response.json({
+          ok: true,
+          messages: [
+            { ts: '111.000', type: 'message', bot_id: 'B123', text: 'old' },
+          ],
+        }),
+      );
+      await oldRead;
+      const joined = notifier.fetchThreadMessages(input);
+      expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(3);
+      releaseNew(
+        Response.json({
+          ok: true,
+          messages: [
+            { ts: '111.000', type: 'message', bot_id: 'B123', text: 'new' },
+          ],
+        }),
+      );
+      const results = await Promise.all([
+        newRead,
+        joined,
+        notifier.fetchThreadMessages(input),
+      ]);
+      for (const result of results) expect(result[0]?.text).toBe('new');
+      expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(3);
+    });
+
+    it('retries rate limits with a bounded jittered wait', async () => {
+      vi.useFakeTimers();
+      vi.spyOn(Math, 'random').mockReturnValue(0);
+
+      try {
+        getGlobalWithFetch().fetch = vi
+          .fn()
+          .mockResolvedValueOnce({
+            ok: false,
+            status: 429,
+            statusText: 'Too Many Requests',
+            headers: { get: () => '120' },
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({
+              ok: true,
+              messages: [
+                {
+                  ts: '111.000',
+                  type: 'message',
+                  text: 'root message',
+                  bot_id: 'B123',
+                },
+              ],
+            }),
+          });
+
+        const resultPromise = notifier.fetchThreadMessages({
+          channel: 'C123',
+          threadTs: '111.000',
+        });
+
+        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(60_000);
+
+        await expect(resultPromise).resolves.toHaveLength(1);
+        expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(2);
       } finally {
         vi.useRealTimers();
       }

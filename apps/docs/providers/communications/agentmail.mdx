@@ -77,10 +77,13 @@ optional overrides of the settings UI:
 ## Email Roomote
 
 Send an email to the deployment inbox from an email address on your Roomote
-account. The address must be verified. Roomote replies in the same email
-thread, and follow-up emails in that thread continue the same conversation; a
-running delegated task receives them as follow-ups. Start a new request with a
-new email so it opens a new thread.
+account. Verified addresses can start work immediately. An unverified address
+can also reply to a Roomote-initiated email when the reply passes DMARC and
+quotes its single-use reference token; that reply verifies the address
+automatically. Roomote replies in the same email thread, and follow-up emails in
+that thread continue the same conversation; a running delegated task receives
+them as follow-ups. Start a new request with a new email so it opens a new
+thread.
 
 Roomote also requires AgentMail to report a passing DMARC result before it
 trusts the sender address. Sender domains therefore need a published DMARC

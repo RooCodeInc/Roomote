@@ -17,9 +17,8 @@ import {
   ACP_UI_TOOL_OUTPUT_MAX_CHARS,
   ALL_REPOSITORIES,
   BRAIN_MCP_ID,
-  CHAT_CHANNEL_POST_TOOL_NAME,
   CHAT_CHANNEL_MESSAGES_TOOL,
-  CHAT_CHANNELS_TOOL,
+  CHAT_DESTINATIONS_TOOL,
   CHAT_MESSAGE_CONTEXT_TOOL,
   CHAT_REACTION_EMOJI_TOOL_NAME,
   FAST_EXECUTION,
@@ -281,9 +280,6 @@ function selectFastRoomoteChannelTools(options: {
           ...integration,
           tools: integration.tools.filter(({ name }) => {
             if (name === LEGACY_SLACK_REACTION_TOOL) return false;
-            if (name === CHAT_CHANNELS_TOOL.name) {
-              return slackConversation;
-            }
             if (name === CHAT_REACTION_EMOJI_TOOL_NAME) {
               return slackConversation && options.currentMessageReactable;
             }
@@ -1417,6 +1413,32 @@ function findRecordedCloseout(
   }
   if (last.status !== 'unknown') return null;
   return text ? { kind: 'lost', purpose, text } : null;
+}
+
+function hasRecordedSuccessfulTaskLaunch(
+  events: FastAgentTurnAttemptSummary['events'],
+): boolean {
+  return events.some((event) => {
+    if (
+      event.kind !== 'action' ||
+      event.tool !== FAST_AGENT_NATIVE_TOOL_NAMES.launchTask ||
+      event.status !== 'completed' ||
+      !event.result
+    ) {
+      return false;
+    }
+    try {
+      const result: unknown = JSON.parse(event.result);
+      return (
+        typeof result === 'object' &&
+        result !== null &&
+        'success' in result &&
+        result.success === true
+      );
+    } catch {
+      return false;
+    }
+  });
 }
 
 function clipText(text: string, max: number): string {
@@ -3733,6 +3755,11 @@ export async function answerFastAgentQuestion({
     let substantiveWorkAcknowledged = resumedWithDeliveredAcknowledgement;
     let nativeToolInvoked = false;
     let retriedTaskStart = false;
+    let automationWorkDelegated = Boolean(
+      (platformEventKind === 'automation' || automationReport) &&
+      previousAttempt &&
+      hasRecordedSuccessfulTaskLaunch(previousAttempt.events),
+    );
     const mirrorPendingMessages = async (strict = false) => {
       const pending = turnVisibleMessages.slice(mirroredMessageCount);
       if (pending.length === 0) return;
@@ -3759,12 +3786,22 @@ export async function answerFastAgentQuestion({
       streamedEvent?: { eventId: string; turnSeq: number },
     ) => {
       startSurfaceActivity();
+      // A successful automation delegation makes this turn's closeout a
+      // handoff, not the report. Persist that distinction so replay cannot
+      // publish it before the delegated task settles.
+      const eligibleReply =
+        automationWorkDelegated &&
+        (platformEventKind === 'automation' || automationReport) &&
+        reply.purpose === 'closeout'
+          ? { ...reply, kickoff: true }
+          : reply;
       const replyWithImages = {
-        ...reply,
-        ...(!reply.imageArtifactIds?.length && defaultImageArtifactIds.length
+        ...eligibleReply,
+        ...(!eligibleReply.imageArtifactIds?.length &&
+        defaultImageArtifactIds.length
           ? { imageArtifactIds: defaultImageArtifactIds }
           : {}),
-        ...(!reply.charts?.length && defaultCharts.length
+        ...(!eligibleReply.charts?.length && defaultCharts.length
           ? { charts: defaultCharts }
           : {}),
       };
@@ -4245,27 +4282,26 @@ export async function answerFastAgentQuestion({
         const actorScopedIntegrationArguments =
           call.integrationId === ROOMOTE_MCP_ID &&
           conversation.surface === 'slack'
-            ? call.toolName === CHAT_CHANNELS_TOOL.name
+            ? call.toolName === CHAT_DESTINATIONS_TOOL.name &&
+              call.args.provider === 'slack' &&
+              call.args.kind !== 'self'
               ? {
                   ...chatScopedIntegrationArguments,
-                  slackTeamId: conversation.workspaceId,
+                  workspaceId:
+                    typeof call.args.workspaceId === 'string' &&
+                    call.args.workspaceId.trim()
+                      ? call.args.workspaceId
+                      : conversation.workspaceId,
                 }
-              : call.toolName === CHAT_CHANNEL_POST_TOOL_NAME
+              : call.toolName === CHAT_REACTION_EMOJI_TOOL_NAME
                 ? {
-                    ...chatScopedIntegrationArguments,
+                    name: call.args.name,
                     provider: 'slack',
                     slackTeamId: conversation.workspaceId,
+                    channel: conversation.replyTarget.channelId,
+                    messageId: currentMessageId ?? conversation.conversationId,
                   }
-                : call.toolName === CHAT_REACTION_EMOJI_TOOL_NAME
-                  ? {
-                      name: call.args.name,
-                      provider: 'slack',
-                      slackTeamId: conversation.workspaceId,
-                      channel: conversation.replyTarget.channelId,
-                      messageId:
-                        currentMessageId ?? conversation.conversationId,
-                    }
-                  : chatScopedIntegrationArguments
+                : chatScopedIntegrationArguments
             : chatScopedIntegrationArguments;
         const sendsChatReaction =
           call.integrationId === ROOMOTE_MCP_ID &&
@@ -4985,6 +5021,7 @@ export async function answerFastAgentQuestion({
               completedTaskActions.delete(signature);
             }
             if (result.success) {
+              automationWorkDelegated = true;
               currentTasks.set(result.taskId, { taskId: result.taskId });
               if (substantiveHumanInput) {
                 try {

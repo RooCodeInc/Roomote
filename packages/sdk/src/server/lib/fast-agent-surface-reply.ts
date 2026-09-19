@@ -97,6 +97,7 @@ import { addFastAgentTelegramTopicTitleSync } from './fast-agent-telegram-title-
 import {
   buildMarkdownReplyQuote,
   buildSlackReplyQuote,
+  createPendingFastAgentReplyQuote,
 } from './fast-agent-reply-quote';
 
 export type FastAgentSurfaceReplyDelivery = {
@@ -132,6 +133,8 @@ type FastAgentSurfaceReplyParams = {
    */
   activeTasks?: FastAgentActiveTask[];
   externalInput?: FastAgentReactionExternalInput;
+  /** The message was entered on the web and is being relayed to a side surface. */
+  webFollowUp?: boolean;
   /** Per-turn provider route for an explicit cross-surface notification reply. */
   deliveryConversation?: FastAgentConversation;
   /**
@@ -174,6 +177,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
   currentMessageId?: string;
   replyToMessageId?: string;
   externalInput?: FastAgentReactionExternalInput;
+  webFollowUp?: boolean;
   deliveryConversation?: FastAgentConversation;
 }): Promise<FastAgentSurfaceReplyDelivery | null> {
   // A turn Roomote framed for the agent (the post-save continuation) is
@@ -193,6 +197,22 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     return null;
   }
   const conversation = params.deliveryConversation ?? session.conversation;
+  // Slack and Discord already quote ordinary surface turns. Preserve that
+  // shipped behavior while extending explicit web follow-ups to every comms
+  // surface without making native Teams, Telegram, or email replies noisy.
+  const shouldQuoteReply =
+    !params.externalInput &&
+    (params.webFollowUp ||
+      conversation.surface === 'slack' ||
+      conversation.surface === 'discord');
+  const pendingReplyQuote = createPendingFastAgentReplyQuote(
+    shouldQuoteReply
+      ? {
+          senderDisplayName: params.senderDisplayName,
+          text: visibleQuestion,
+        }
+      : null,
+  );
   const createArtifact = buildFastAgentArtifactCreator(session.id);
   const withCanonical = (
     delivery: Omit<FastAgentSurfaceReplyDelivery, 'canonicalConversation'>,
@@ -238,12 +258,6 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     }
 
     const slack = new SlackNotifier(installation.botAccessToken);
-    let pendingQuote = params.externalInput
-      ? null
-      : buildSlackReplyQuote({
-          senderDisplayName: params.senderDisplayName,
-          text: visibleQuestion,
-        });
     // Streaming a reply outside a DM needs the Slack user it is addressed
     // to; a sender without a linked Slack account gets whole replies.
     const senderSubject = await findSlackConversationSubjectByUserId({
@@ -272,10 +286,8 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
                       artifactIds,
                       sessionId: session.id,
                     }),
-                  getQuote: () => pendingQuote,
-                  onDelivered: () => {
-                    pendingQuote = null;
-                  },
+                  getQuote: () => pendingReplyQuote.peek(buildSlackReplyQuote),
+                  onDelivered: pendingReplyQuote.markDelivered,
                 }),
             }
           : {}),
@@ -305,8 +317,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           videoArtifactIds = [],
           charts = [],
         }) => {
-          const quote = pendingQuote;
-          pendingQuote = null;
+          const quote = pendingReplyQuote.peek(buildSlackReplyQuote);
           const images = await resolveFastAgentSessionImages({
             artifactIds: imageArtifactIds,
             sessionId: session.id,
@@ -340,6 +351,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           if (!messageTs) {
             throw new Error('Slack did not return a Fast reply timestamp.');
           }
+          pendingReplyQuote.markDelivered();
           await recordFastAgentConversationMessageBestEffort({
             sessionId: session.id,
             conversation,
@@ -366,13 +378,6 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       return null;
     }
 
-    let pendingQuote = params.externalInput
-      ? null
-      : buildMarkdownReplyQuote({
-          senderDisplayName: params.senderDisplayName,
-          text: visibleQuestion,
-        });
-
     const activity = createFastAgentTypingActivity({
       sendTyping: () => provider.triggerTyping(conversation.replyTarget),
       intervalMs: 8_000,
@@ -386,8 +391,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
         conversation,
       }),
       postReply: async ({ message }) => {
-        const quote = pendingQuote;
-        pendingQuote = null;
+        const quote = pendingReplyQuote.peek(buildMarkdownReplyQuote);
         const footerText = buildFastSessionReplyFooterText({
           provider: 'discord',
           sessionId: session.id,
@@ -437,6 +441,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           conversation,
           messageId: posted.messageId,
         });
+        pendingReplyQuote.markDelivered();
         return { messageId: posted.messageId };
       },
     };
@@ -480,6 +485,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           serviceUrl,
         }),
         postReply: async ({ message }) => {
+          const quote = pendingReplyQuote.peek(buildMarkdownReplyQuote);
           const posted = await postTextThreadReplyWithFooter({
             provider,
             input: {
@@ -491,7 +497,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
                     replyToMessageId: conversation.replyTarget.threadId,
                   }
                 : {}),
-              text: message,
+              text: quote ? `${quote}\n\n${message}` : message,
               textFormat: 'markdown',
             },
             footerText: buildFastSessionReplyFooterText({
@@ -505,6 +511,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
             conversation,
             messageId: posted.messageId,
           });
+          pendingReplyQuote.markDelivered();
           return { messageId: posted.messageId };
         },
         replaceReply: createTeamsFastReplyReplacer({
@@ -617,6 +624,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     const postReply: FastAgentTurnAdapter['postReply'] = async ({
       message,
     }) => {
+      const quote = pendingReplyQuote.peek(buildMarkdownReplyQuote);
       const posted = await postTextThreadReplyWithFooter({
         provider,
         input: {
@@ -625,7 +633,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
             ? { threadId: conversation.replyTarget.threadId }
             : {}),
           ...(replyToMessageId ? { replyToMessageId } : {}),
-          text: message,
+          text: quote ? `${quote}\n\n${message}` : message,
           textFormat: 'markdown',
         },
         footerText: buildFastSessionReplyFooterText({
@@ -640,6 +648,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
         conversation,
         messageId: posted.lastTextMessageId ?? posted.messageId,
       });
+      pendingReplyQuote.markDelivered();
       return { messageId: posted.messageId };
     };
     return withCanonical({
@@ -694,18 +703,21 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
         // message instead of editing (email is one final reply per turn,
         // never a streamed draft).
         postReply: async ({ message }) => {
+          const quote = pendingReplyQuote.peek(buildMarkdownReplyQuote);
+          const bodyText = quote ? `${quote}\n\n${message}` : message;
           const posted = await provider.postMessage({
             channelId: conversation.replyTarget.channelId,
             threadId: conversation.conversationId,
-            text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'agentmail', sessionId: session.id, ...footerContext })}`,
+            text: `${bodyText}\n\n${buildFastSessionReplyFooterText({ provider: 'agentmail', sessionId: session.id, ...footerContext })}`,
             textFormat: 'markdown',
-            idempotencyKey: `agentmail:${conversation.conversationId}:fast-reply:${params.currentMessageId ?? 'web'}:${agentMailPostIndex++}:${createHash('sha256').update(message).digest('hex').slice(0, 12)}`,
+            idempotencyKey: `agentmail:${conversation.conversationId}:fast-reply:${params.currentMessageId ?? 'web'}:${agentMailPostIndex++}:${createHash('sha256').update(bodyText).digest('hex').slice(0, 12)}`,
           });
           await recordFastAgentConversationMessageBestEffort({
             sessionId: session.id,
             conversation,
             messageId: posted.lastTextMessageId ?? posted.messageId,
           });
+          pendingReplyQuote.markDelivered();
           return { messageId: posted.messageId };
         },
         replaceReply: async (handle) => handle,
@@ -759,6 +771,7 @@ function buildSurfaceHumanFollowUpEvent(
     ...(params.senderDisplayName
       ? { senderDisplayName: params.senderDisplayName }
       : {}),
+    ...(params.webFollowUp ? { webFollowUp: true } : {}),
     ...(params.agentContext ? { agentContext: params.agentContext } : {}),
     ...(params.activeTasks?.length ? { activeTasks: params.activeTasks } : {}),
     ...(params.deliveryConversation

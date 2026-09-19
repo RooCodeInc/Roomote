@@ -70,7 +70,6 @@ function buildSentrySubmissionCloseoutInstruction(promptContext: {
 }
 
 function buildSentryTriagePrompt({
-  channelId,
   destination,
   frequency,
   projectSlugs,
@@ -111,7 +110,7 @@ function buildSentryTriagePrompt({
   <run_mode>read_only</run_mode>
   <trigger>${manualTrigger ? 'manual' : 'scheduled'}</trigger>
   <scan_window>last ${windowDays} day${windowDays === 1 ? '' : 's'}</scan_window>
-  <${promptContext.channelTag}>${channelId}</${promptContext.channelTag}>
+  <${promptContext.channelTag}>${promptContext.destinationRef}</${promptContext.channelTag}>
   <project_scope>
 ${projectScope}
   </project_scope>

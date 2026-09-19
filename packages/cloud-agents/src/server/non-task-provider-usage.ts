@@ -800,7 +800,15 @@ async function resolveNonTaskModelRuntime(
   let resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv = {};
 
   try {
-    resolvedModelRuntimeEnv = await resolveEffectiveModelRuntimeEnv();
+    // Provider credentials resolve from the role models, so an explicit
+    // model rides in as the primary role: otherwise a provider no role model
+    // uses never gets its Settings-stored key and fails with
+    // ProviderAuthError before a request is made.
+    resolvedModelRuntimeEnv = await resolveEffectiveModelRuntimeEnv(
+      requestedModel
+        ? { runtimeEnv: { ...process.env, R_MODEL: requestedModel } }
+        : {},
+    );
   } catch (error) {
     if (!requestedModel) {
       throw error;

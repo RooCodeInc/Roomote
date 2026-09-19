@@ -20,6 +20,8 @@ export const SLACK_POSTING_TOOL_BASENAMES = [
   'send_chat_reply',
   'report_to_parent_session',
   'send_chat_reaction_emoji',
+  'send_chat_message',
+  // Retained for historical task transcripts and older worker releases.
   'post_to_channel',
   'reply_to_slack_thread',
 ] as const;

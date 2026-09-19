@@ -84,10 +84,12 @@ jq -e '
     "S3_SECRET_ACCESS_KEY", "OPENAI_API_KEY"
   ][] | . as $key | $root.services["preview-proxy"].environment[$key] == null] | all) and
   ([[
-    "JOB_AUTH_PRIVATE_KEY", "JOB_AUTH_PUBLIC_KEY", "PREVIEW_AUTH_PRIVATE_KEY",
+    "PREVIEW_AUTH_PRIVATE_KEY",
     "PREVIEW_AUTH_PUBLIC_KEY", "S3_SECRET_ACCESS_KEY",
     "R_GITHUB_CLIENT_SECRET", "R_SLACK_CLIENT_SECRET"
   ][] | . as $key | $root.services.bullmq.environment[$key] == null] | all) and
+  (.services.bullmq.environment.JOB_AUTH_PRIVATE_KEY != null) and
+  (.services.bullmq.environment.JOB_AUTH_PUBLIC_KEY != null) and
   ([[
     "MODAL_TOKEN_SECRET", "PREVIEW_AUTH_PRIVATE_KEY"
   ][] | . as $key | $root.services.api.environment[$key] == null] | all) and

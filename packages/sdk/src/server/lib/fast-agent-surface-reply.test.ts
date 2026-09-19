@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   telegramEditForumTopic: vi.fn(),
   telegramResolveForumTopicIcon: vi.fn(),
   telegramTyping: vi.fn(),
+  createAgentMailProvider: vi.fn(),
+  agentMailPostMessage: vi.fn(),
   createDiscordProvider: vi.fn(),
   discordTyping: vi.fn(),
   discordPostMessage: vi.fn(),
@@ -63,6 +65,11 @@ vi.mock('./teams-communication', () => ({
 vi.mock('./telegram-communication', () => ({
   createTelegramCommunicationProviderFromRuntimeCredentials:
     mocks.createTelegramProvider,
+}));
+
+vi.mock('./agentmail-communication', () => ({
+  createAgentMailCommunicationProviderFromRuntimeCredentials:
+    mocks.createAgentMailProvider,
 }));
 
 vi.mock('./discord-communication', () => ({
@@ -136,6 +143,7 @@ async function createConversation(input: {
     | 'slack'
     | 'teams'
     | 'telegram'
+    | 'agentmail'
     | 'discord'
     | 'linear'
     | 'github';
@@ -186,6 +194,15 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       resolveForumTopicIconCustomEmojiId: mocks.telegramResolveForumTopicIcon,
       sendChatAction: mocks.telegramTyping,
       sendRichMessageDraft: mocks.telegramTyping,
+    });
+    mocks.agentMailPostMessage.mockResolvedValue({
+      provider: 'agentmail',
+      channelId: 'roomote@agentmail.test',
+      messageId: 'agentmail-message-1',
+    });
+    mocks.createAgentMailProvider.mockResolvedValue({
+      provider: 'agentmail',
+      postMessage: mocks.agentMailPostMessage,
     });
     mocks.createDiscordProvider.mockResolvedValue({
       triggerTyping: mocks.discordTyping,
@@ -264,8 +281,9 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
     const delivery = await buildFastAgentSurfaceReplyDelivery({
       sessionId: conversation.id,
       userId: user.id,
-      senderDisplayName: null,
-      question: 'Explain this',
+      senderDisplayName: 'Dana',
+      question: 'Explain *this*',
+      webFollowUp: true,
       currentMessageId: '42',
     });
     const adapter = delivery!.adapter;
@@ -285,12 +303,66 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       await expect(
         stream.finish({ purpose: 'closeout', message: 'Final answer' }),
       ).resolves.toEqual({ messageId: 'telegram-message-2' });
-      expect(mocks.telegramPostMessage).toHaveBeenCalled();
+      expect(mocks.telegramPostMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: '> **Dana:** Explain \\*this\\*\n\nFinal answer',
+        }),
+      );
       await adapter.activity!.settle();
     } finally {
       await adapter.activity!.dispose();
       vi.useRealTimers();
     }
+  });
+
+  it('quotes only the first successful Telegram reply and retains the quote after a failed post', async () => {
+    const user = await userFactory.create();
+    const conversation = await createConversation({
+      userId: user.id,
+      surface: 'telegram',
+      replyTarget: { channelId: '-100123', threadId: '77' },
+    });
+    const delivery = await buildFastAgentSurfaceReplyDelivery({
+      sessionId: conversation.id,
+      userId: user.id,
+      senderDisplayName: 'Dana',
+      question: 'Check the web follow-up',
+      webFollowUp: true,
+      currentMessageId: 'web-message-1',
+    });
+    mocks.telegramPostMessage.mockRejectedValueOnce(new Error('post failed'));
+
+    await expect(
+      delivery!.adapter.postReply({
+        purpose: 'closeout',
+        message: 'First attempt',
+      }),
+    ).rejects.toThrow('post failed');
+    await delivery!.adapter.postReply({
+      purpose: 'closeout',
+      message: 'Retried answer',
+    });
+    await delivery!.adapter.postReply({
+      purpose: 'closeout',
+      message: 'Later answer',
+    });
+
+    expect(mocks.telegramPostMessage).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        text: '> **Dana:** Check the web follow-up\n\nFirst attempt',
+      }),
+    );
+    expect(mocks.telegramPostMessage).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        text: '> **Dana:** Check the web follow-up\n\nRetried answer',
+      }),
+    );
+    expect(mocks.telegramPostMessage).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({ text: 'Later answer' }),
+    );
   });
 
   it('does not offer Telegram draft streaming in groups', async () => {
@@ -780,6 +852,11 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
         expect.objectContaining({
           bodyBlocks: expect.arrayContaining([
             {
+              type: 'section',
+              block_id: 'quote',
+              text: { type: 'mrkdwn', text: '>*Matt:* Follow up' },
+            },
+            {
               type: 'markdown',
               text: ['First reply', fallback].filter(Boolean).join('\n\n'),
             },
@@ -879,6 +956,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
         userId: user.id,
         senderDisplayName: 'Matt',
         question: 'Follow up',
+        webFollowUp: true,
         ...(currentMessageId ? { currentMessageId } : {}),
       });
       const handle = await delivery!.adapter.postReply({
@@ -903,8 +981,8 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
           ...(currentMessageId ? { replyToMessageId: currentMessageId } : {}),
           text:
             surface === 'telegram'
-              ? 'Done'
-              : expect.stringContaining('[Open in Roomote]'),
+              ? '> **Matt:** Follow up\n\nDone'
+              : expect.stringContaining('> **Matt:** Follow up\n\nDone\n\n'),
           ...(surface === 'telegram'
             ? { footerText: expect.stringContaining('[Open in Roomote]') }
             : {}),
@@ -919,6 +997,118 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
           messageId:
             surface === 'teams' ? 'teams-message-1' : 'telegram-message-2',
           text: expect.stringContaining('Updated'),
+        }),
+      );
+    },
+  );
+
+  it('quotes web follow-ups in Discord replies with provider Markdown', async () => {
+    const user = await userFactory.create();
+    const conversation = await createConversation({
+      userId: user.id,
+      surface: 'discord',
+      replyTarget: { channelId: 'discord-channel', threadId: 'discord-thread' },
+    });
+    const delivery = await buildFastAgentSurfaceReplyDelivery({
+      sessionId: conversation.id,
+      userId: user.id,
+      senderDisplayName: 'Dana',
+      question: 'Continue from web',
+      webFollowUp: true,
+      currentMessageId: 'web-message-1',
+    });
+
+    await delivery!.adapter.postReply({
+      purpose: 'closeout',
+      message: 'Discord answer',
+    });
+
+    expect(mocks.discordPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining(
+          '> **Dana:** Continue from web\n\nDiscord answer\n\n',
+        ),
+      }),
+    );
+  });
+
+  it('quotes web follow-ups in AgentMail replies and leaves later replies unquoted', async () => {
+    const user = await userFactory.create();
+    const conversation = await createConversation({
+      userId: user.id,
+      surface: 'agentmail',
+      replyTarget: { channelId: 'roomote@agentmail.test' },
+    });
+    const delivery = await buildFastAgentSurfaceReplyDelivery({
+      sessionId: conversation.id,
+      userId: user.id,
+      senderDisplayName: 'Dana',
+      question: 'Continue from web',
+      webFollowUp: true,
+      currentMessageId: 'web-message-1',
+    });
+
+    await delivery!.adapter.postReply({
+      purpose: 'closeout',
+      message: 'Email answer',
+    });
+    await delivery!.adapter.postReply({
+      purpose: 'closeout',
+      message: 'Later email',
+    });
+
+    expect(mocks.agentMailPostMessage).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        threadId: conversation.conversationId,
+        text: expect.stringContaining(
+          '> **Dana:** Continue from web\n\nEmail answer\n\n',
+        ),
+      }),
+    );
+    expect(mocks.agentMailPostMessage).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        text: expect.stringMatching(/^Later email\n\n/),
+      }),
+    );
+  });
+
+  it.each([
+    ['teams', mocks.teamsPostMessage],
+    ['telegram', mocks.telegramPostMessage],
+    ['agentmail', mocks.agentMailPostMessage],
+  ] as const)(
+    'keeps native %s follow-ups unquoted',
+    async (surface, postMessage) => {
+      const user = await userFactory.create();
+      const conversation = await createConversation({
+        userId: user.id,
+        surface,
+        replyTarget: {
+          channelId:
+            surface === 'agentmail'
+              ? 'roomote@agentmail.test'
+              : `${surface}-channel`,
+          ...(surface === 'agentmail' ? {} : { threadId: `${surface}-thread` }),
+        },
+      });
+      const delivery = await buildFastAgentSurfaceReplyDelivery({
+        sessionId: conversation.id,
+        userId: user.id,
+        senderDisplayName: 'Native user',
+        question: 'Native follow-up',
+        currentMessageId: 'provider-message-1',
+      });
+
+      await delivery!.adapter.postReply({
+        purpose: 'closeout',
+        message: 'Native answer',
+      });
+
+      expect(postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: expect.not.stringContaining('Native user'),
         }),
       );
     },
@@ -966,7 +1156,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
     expect(mocks.telegramPostMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         replyToMessageId: '777',
-        text: expect.not.stringContaining('external_input'),
+        text: 'Thanks for confirming.',
       }),
     );
   });

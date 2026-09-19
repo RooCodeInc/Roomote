@@ -12,6 +12,7 @@ import {
   users,
 } from '@roomote/db/server';
 import { Env } from '@roomote/env';
+import { buildAutomationResultLinkButtonRows } from '@roomote/communication';
 import { SlackNotifier } from '@roomote/slack';
 import {
   platformIssueReportSchema,
@@ -31,6 +32,7 @@ import {
 import {
   appendManagerSlackFooter,
   buildAutomationSettingsMessage,
+  buildManagerSlackSettingsUrl,
   degradeSlackMrkdwnToMarkdown,
   PLATFORM_ISSUE_ALERTS_SETTINGS_HASH,
 } from './manager-slack';
@@ -120,13 +122,8 @@ function buildPlatformIssueSlackAlertMessage(params: {
       slackIcon: 'triangle-alert',
       additionalActions: [
         {
-          type: 'button',
-          action_id: 'platform_issue_review_and_send',
-          text: {
-            type: 'plain_text',
-            text: 'Send to Roomote',
-            emoji: false,
-          },
+          actionId: 'platform_issue_review_and_send',
+          text: 'Send to Roomote',
           url: buildPlatformIssueSubmissionUrl(params.reportId),
         },
       ],
@@ -244,6 +241,19 @@ export async function notifyPlatformIssueReport(params: {
             }),
           ),
           idempotencyKey: `platform-issue:${params.reportRowId}`,
+          buttons: buildAutomationResultLinkButtonRows({
+            configureUrl: buildManagerSlackSettingsUrl(
+              PLATFORM_ISSUE_ALERTS_SETTINGS_HASH,
+            ),
+            taskUrl: buildPlatformIssueSourceUrl(params.source, 'agentmail'),
+            additionalActions: [
+              {
+                actionId: 'platform_issue_review_and_send',
+                text: 'Send to Roomote',
+                url: buildPlatformIssueSubmissionUrl(params.reportRowId),
+              },
+            ],
+          }),
         },
       );
       await markPlatformIssueReportPosted(params.reportRowId);

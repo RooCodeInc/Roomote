@@ -818,15 +818,17 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       href: 'https://www.kimi.com/code/console',
       linkLabel: 'Open Kimi Code console',
     },
+    // Only Kimi's documented model ids work on this endpoint: `k2p7` was
+    // renamed upstream to `kimi-for-coding`, the rolling default coding model
+    // (no longer K2.7, so it is not offered under that recommended name).
     suggestedTaskModels: mapRecommendedTaskModels({
       'kimi-k3': 'kimi-for-coding/k3',
-      'kimi-k2-7-code': 'kimi-for-coding/k2p7',
     }),
     recommendedRoleModels: {
-      helper: 'kimi-for-coding/k2p7',
+      helper: 'kimi-for-coding/kimi-for-coding',
       vision: 'kimi-for-coding/k3',
       codeReview: 'kimi-for-coding/k3',
-      explore: 'kimi-for-coding/k2p7',
+      explore: 'kimi-for-coding/kimi-for-coding',
       planning: 'kimi-for-coding/k3',
     },
   },

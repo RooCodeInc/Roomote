@@ -352,9 +352,8 @@ describe('automation result blocks', () => {
       configureLabel: 'Configure alert',
       additionalActions: [
         {
-          type: 'button',
-          action_id: 'manage_models',
-          text: { type: 'plain_text', text: 'Manage models', emoji: false },
+          actionId: 'manage_models',
+          text: 'Manage models',
           url: 'https://app.example.com/settings/models',
         },
       ],

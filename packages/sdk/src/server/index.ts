@@ -380,11 +380,13 @@ export {
   hasUserDirectMessageIdentity,
   hasAnyUserDirectMessageIdentity,
   sendUserDirectMessage,
+  sendUserDirectMessageWithReceipt,
   sendUserDirectMessageBestEffort,
   sendUserDirectMessageBestEffortWithReceipts,
   type UserDirectMessageDestination,
   type UserDirectMessageProvider,
   type UserDirectMessageReceipt,
+  type UserDirectMessageResult,
 } from './lib/user-direct-message';
 
 export {
@@ -596,8 +598,15 @@ export {
 export {
   canManageCustomMcpServer,
   customMcpConnectionWhere,
+  customMcpServerStore,
+  deleteCustomMcpServer,
   findCustomMcpServerById,
+  moveCustomMcpServer,
   storeCustomMcpServerMetadata,
+  updateCustomMcpServer,
+  type CustomMcpServerScope,
+  type CustomMcpServerUpdate,
+  type CustomMcpServerWrite,
   type ResolvedCustomMcpServer,
 } from './lib/mcp/custom-servers';
 

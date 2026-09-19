@@ -12,6 +12,7 @@ import {
   type AutomationRuntime,
 } from '@roomote/db/server';
 import { redactSecrets } from '@roomote/communication/redact-secrets';
+import { buildAutomationResultLinkButtonRows } from '@roomote/communication';
 import {
   buildAutomationResultBlocks,
   SlackPostDeliveryError,
@@ -469,9 +470,8 @@ function buildMergeAnnouncerNotification(params: {
   const additionalActions = changesUrl
     ? [
         {
-          type: 'button',
-          action_id: 'merge_announcer_view_changes',
-          text: { type: 'plain_text', text: 'View changes', emoji: false },
+          actionId: 'merge_announcer_view_changes',
+          text: 'View changes',
           url: changesUrl,
         },
       ]
@@ -510,12 +510,10 @@ function buildMergeAnnouncerNotification(params: {
       additionalActions,
     }),
     markdownText: `${markdownNarrative}\n\n> ${summary}`,
-    buttons: [
-      [
-        ...(changesUrl ? [{ text: 'View changes', url: changesUrl }] : []),
-        { text: 'Configure', url: configureUrl },
-      ],
-    ],
+    buttons: buildAutomationResultLinkButtonRows({
+      configureUrl,
+      additionalActions,
+    }),
   };
 }
 
