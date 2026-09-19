@@ -152,7 +152,7 @@ export function ArtifactDetail({
         actions={
           <>
             {artifact && !isLoading ? (
-              <BasicTooltip content="Open standalone viewer">
+              <BasicTooltip content="Open artifact">
                 <Button
                   asChild
                   variant="ghost"
@@ -168,7 +168,7 @@ export function ArtifactDetail({
                     )}
                     target="_blank"
                     rel="noreferrer"
-                    aria-label="Open standalone viewer"
+                    aria-label="Open artifact"
                   >
                     <ExternalLink className="size-3.5" />
                   </Link>
@@ -179,7 +179,7 @@ export function ArtifactDetail({
                 variant="ghost"
                 size="icon"
                 className="size-5 shrink-0"
-                aria-label="Open standalone viewer"
+                aria-label="Open artifact"
                 disabled
               >
                 <ExternalLink className="size-3.5" />
