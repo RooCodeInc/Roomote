@@ -3202,7 +3202,13 @@ describe('resolveOpenCodeSmallModel', () => {
     });
 
     expect(result.object.answer).toBe('ok');
-    expect(mockResolveEffectiveModelRuntimeEnv).toHaveBeenCalled();
+    // The explicit model is resolved as the primary role so its provider's
+    // Settings-stored credential is included even when no role model uses it.
+    expect(mockResolveEffectiveModelRuntimeEnv).toHaveBeenCalledWith({
+      runtimeEnv: expect.objectContaining({
+        R_MODEL: 'openrouter/z-ai/glm-5.2',
+      }),
+    });
     expect(sessionPromptMock).toHaveBeenCalledWith(
       expect.objectContaining({
         model: {
