@@ -111,8 +111,8 @@ provider is connected (GitHub, GitLab, or Gitea) and the repos you care about
 have configured Roomote environments. When an issue is opened or reopened,
 Roomote starts a task immediately, investigates the issue, and posts a concrete
 plan or clarifying questions as a comment on that issue. It does not need a
-Manager Channel, does not post Slack digests, does not implement the fix, and
-does not open a pull request automatically. Azure DevOps work items and
+default destination, does not post Slack digests, does not implement the fix,
+and does not open a pull request automatically. Azure DevOps work items and
 Bitbucket issues are not covered yet.
 
 For **Resolve PR Conflicts**, pick a schedule, PR age cap, and label. The
@@ -124,8 +124,8 @@ skips PRs older than the age cap you set.
 
 For **Merge announcer**, connect a source-control provider and turn the toggle
 on. Choose Slack, Microsoft Teams, Telegram, or Discord, then select a channel
-or **DM me**. Choose **Default** to use the shared Manager Channel or normal
-primary-conversation fallback. Roomote reacts to provider-deduplicated push
+or **DM me**. Choose **Default** to use the deployment's default destination.
+Roomote reacts to provider-deduplicated push
 webhooks for each active repository's current default branch, uses the
 deployment helper model to write a brief commit summary, and includes the pusher
 and commit authors. Feature-branch pushes and branch deletions are ignored.
@@ -143,6 +143,12 @@ Other announcements link to the provider's compare view.
 searchable list. Filter the list to **All**, **Built-in**, or **Custom** when you
 need a narrower view. Each row shows its current configuration and actions;
 select **Configure** to edit an automation.
+
+The **Default destination** at the top of the page receives reports from
+automations that do not have an explicit destination. An admin can choose a
+Slack or Discord channel or direct message, or an Email recipient. A destination
+saved on an individual automation takes precedence, and existing custom
+automations keep the destination selected when they were created.
 
 Members can list, inspect, edit, enable or disable, delete, and run their own
 custom automations. Admins can perform these actions on all custom automations,
@@ -410,12 +416,12 @@ See how channel instructions and launch criteria work together in the
 
 ## Manager automations
 
-The manager section controls the shared Manager Channel plus recurring
-manager-facing updates and suggestions.
+The manager section controls the deployment's default destination plus
+recurring manager-facing updates and suggestions.
 
 | Automation                   | What it posts                                                    | Typical cadence                             |
 | ---------------------------- | ---------------------------------------------------------------- | ------------------------------------------- |
-| **Automation output**        | The shared Manager Channel destination                           | Configure once                              |
+| **Default destination**      | The fallback destination for automations without their own       | Configure once                              |
 | **Weekly Manager Stats**     | A weekly summary of Roomote activity                             | Weekly                                      |
 | **Inference Provider Usage Alerts** | Warnings when an inference-provider quota approaches exhaustion | Hourly                              |
 | **Triage Sentry Issues**     | Prioritized Sentry follow-up work                                | Daily or weekly                             |
@@ -443,14 +449,15 @@ than switching the report to another address or provider. Receiving these
 outbound reports does not require email verification, but replying still
 requires the account address to be verified and pass DMARC.
 
-Set **Automation output** first. This is the shared Slack or Discord Manager
-Channel for manager-facing posts, suggestions, summaries, and setup alerts.
-Make sure the Roomote app can access the channel before you save it.
+Set **Default destination** first. Choose a Slack or Discord channel or direct
+message, or an Email recipient, for manager-facing posts, suggestions,
+summaries, and setup alerts. Make sure Roomote can reach the destination before
+you save it.
 
 For Slack, the first account connection after app installation automatically
-sets up public `#roomote-managers` if no Slack or Discord Manager Channel is
-configured. Existing automation destinations are unchanged, and no automations
-are enabled by channel setup. See [Slack setup](/providers/communications/slack#automatic-manager-channel)
+sets up public `#roomote-managers` if no default destination is configured.
+Existing automation destinations are unchanged, and no automations
+are enabled by channel setup. See [Slack setup](/providers/communications/slack#automatic-default-destination)
 for required permissions and retry instructions.
 
 **Inference Provider Usage Alerts** is enabled at an hourly cadence with an 85% threshold
@@ -459,15 +466,15 @@ Roomote releases. Admins can disable it, choose a Slack, Discord, or Email desti
 and set the warning threshold from 5% through 95% in 5% increments. Roomote
 checks hourly, posts an alert card for each provider that crosses the threshold
 in a quota cycle, and sends a fresh critical alert if the quota later reaches
-100%. The automation-specific destination wins, followed by the shared Manager
-Channel and then the supported primary Teams, Telegram, or Discord conversation
-fallback. The check is deterministic, supports **Run now**, and never starts a
-Roomote task or session.
+100%. The automation-specific destination wins, followed by the default
+destination and then the supported primary Teams, Telegram, or Discord
+conversation fallback. The check is deterministic, supports **Run now**, and
+never starts a Roomote task or session.
 
 **Platform Issue Alerts** are enabled by default. Tasks and sessions use
 them for admin-fixable platform, configuration, and access defects. Their own
-Slack, Discord, or Email destination wins, followed by the shared Manager Channel. If
-neither channel is configured, Roomote sends the alert directly to active
+Slack, Discord, or Email destination wins, followed by the default destination.
+If neither destination is configured, Roomote sends the alert directly to active
 deployment admins using each admin's first linked provider in this order:
 Slack, Teams, Telegram, then Discord. Admins need a linked account and must be
 reachable by the bot for this fallback to work. When only some admins receive
@@ -483,14 +490,16 @@ does not replay historical announcements. Restarts, retries of the same
 version, and rollbacks do not post. Patch-only updates also stay silent while
 still becoming the baseline for the next comparison. An update posts when its
 installed version crosses a major or minor boundary, including a patch release
-such as `1.10.5` to `1.11.2`. When an update skips releases, the message selects
-up to three authored highlights across the intervening changelog entries and
-links to the full notes for the installed release. If that authoritative range
-has no authored highlights, Roomote silently completes the announcement instead
-of retrying it; missing or unreadable release data remains retryable. Leave its
-destination on **Default** to use the standard automation destination, or choose
-a Slack, Microsoft Teams, Telegram, or Discord channel or direct message, or
-an Email identity.
+such as `1.10.5` to `1.11.2`. Roomote announces the matching stable major or
+minor release, using its authored summary and complete highlight list, and
+links to that release's full notes. If the selected release has neither an
+authored summary nor highlights, Roomote silently completes the announcement
+instead of retrying it; missing or unreadable release data remains retryable.
+Leave its destination on **Default** to use the standard automation destination,
+or choose a Slack, Microsoft Teams, Telegram, or Discord channel or direct
+message, or an Email identity. **Run now** sends a sample from the latest stable
+major or minor release notes without changing the automatic announcement
+baseline.
 Delivery failures remain pending for retry without reposting a destination
 already recorded as successful.
 
@@ -502,7 +511,8 @@ an already submitted report do not create duplicates.
 
 Each automation card shows a **Reports to** line with the destination the next
 run will use and which setting produced it. Reports go to the automation's own
-explicit destination when one is set, otherwise to the shared Manager Channel.
+explicit destination when one is set, otherwise to the deployment's default
+destination.
 An unavailable explicit Email destination fails closed and never enters the
 fallback waterfall. If Slack is
 not connected, fallback selection runs only when no destination is saved or the
