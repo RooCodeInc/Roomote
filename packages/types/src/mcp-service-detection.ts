@@ -452,6 +452,24 @@ export function matchSlackMcpSetupServiceUrl(
   return undefined;
 }
 
+function stripTrailingUrlPunctuation(value: string): string {
+  let end = value.length;
+  while (end > 0) {
+    const character = value[end - 1];
+    if (
+      character === ',' ||
+      character === '.' ||
+      character === '!' ||
+      character === '?'
+    ) {
+      end -= 1;
+      continue;
+    }
+    break;
+  }
+  return value.slice(0, end);
+}
+
 export function findSlackMcpSetupServicesInText(
   text: string,
 ): SlackMcpSetupServiceDefinition[] {
@@ -459,7 +477,7 @@ export function findSlackMcpSetupServicesInText(
   const urlPattern = /(?:https?:\/\/|www\.)[^\s<>()|]+/giu;
 
   for (const match of text.matchAll(urlPattern)) {
-    const candidate = match[0].replace(/[,.!?]+$/u, '');
+    const candidate = stripTrailingUrlPunctuation(match[0]);
     const service = matchSlackMcpSetupServiceUrl(candidate);
     if (service) {
       services.set(service.id, service);
