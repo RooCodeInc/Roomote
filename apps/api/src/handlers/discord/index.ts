@@ -584,21 +584,30 @@ async function processDiscordGatewayEvent(
     if (command.name === 'goal') {
       // Handled after resolving the current conversation and linked user.
     } else if (command.name === 'skills') {
-      const registrationScope = channel.guildId
-        ? { guildId: channel.guildId }
-        : {};
-      const registration = await resolved.provider
-        .registerCommands({
+      const registrations = [
+        resolved.provider.registerCommands({
           applicationId: resolved.applicationId,
-          ...registrationScope,
-        })
-        .then(() => true)
-        .catch((error) => {
+        }),
+        ...(interaction?.guild_id
+          ? [
+              resolved.provider.registerCommands({
+                applicationId: resolved.applicationId,
+                guildId: interaction.guild_id,
+              }),
+            ]
+          : []),
+      ];
+      const registrationResults = await Promise.allSettled(registrations);
+      const registration = registrationResults.every(
+        (result) => result.status === 'fulfilled',
+      );
+      for (const result of registrationResults) {
+        if (result.status === 'rejected') {
           apiLogger.warn(
-            `[discord] Failed to remove the retired /skills command: ${error instanceof Error ? error.message : String(error)}`,
+            `[discord] Failed to remove the retired /skills command: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`,
           );
-          return false;
-        });
+        }
+      }
       await replyToDiscordEvent({
         provider: resolved.provider,
         applicationId: resolved.applicationId,

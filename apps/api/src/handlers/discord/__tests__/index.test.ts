@@ -2362,7 +2362,10 @@ describe('Discord Gateway event handler', () => {
       ignored: 'retired_command',
       registration: true,
     });
-    expect(mocks.registerCommands).toHaveBeenCalledWith({
+    expect(mocks.registerCommands).toHaveBeenNthCalledWith(1, {
+      applicationId: 'app-1',
+    });
+    expect(mocks.registerCommands).toHaveBeenNthCalledWith(2, {
       applicationId: 'app-1',
       guildId: 'guild-1',
     });
