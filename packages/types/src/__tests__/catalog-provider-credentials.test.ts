@@ -20,6 +20,11 @@ describe('mergeCatalogProviderCredentialConfig', () => {
     ['zai/glm-5.3', 'zai', 'ZAI_API_KEY'],
     ['zai-coding-plan/glm-5.3', 'zai-coding-plan', 'ZAI_CODING_PLAN_API_KEY'],
     ['opencode-go/kimi-k3', 'opencode-go', 'OPENCODE_GO_API_KEY'],
+    [
+      'azure-cognitive-services/gpt-5.6-sol',
+      'azure-cognitive-services',
+      'AZURE_COGNITIVE_SERVICES_API_KEY',
+    ],
   ])(
     'binds %s to the env var Roomote stores its key under',
     (modelId, providerId, envVarName) => {
@@ -32,6 +37,68 @@ describe('mergeCatalogProviderCredentialConfig', () => {
       });
     },
   );
+
+  it('keeps Azure AI Foundry off the Azure OpenAI key', () => {
+    // Both use the Azure SDK, which reads AZURE_API_KEY by default, so an
+    // unbound Foundry call would borrow the other provider's credential.
+    const merged = mergeCatalogProviderCredentialConfig(
+      {},
+      { AZURE_API_KEY: 'azure-openai-key' },
+      ['azure-cognitive-services/gpt-5.6-sol', 'azure/gpt-5.6-sol'],
+    );
+
+    expect(merged).toEqual({
+      'azure-cognitive-services': {
+        options: { apiKey: '{env:AZURE_COGNITIVE_SERVICES_API_KEY}' },
+      },
+    });
+  });
+
+  describe('a provider that accepts more than one key name (Google)', () => {
+    it('binds the alias Roomote stores the key under, which the SDK does not read', () => {
+      expect(
+        mergeCatalogProviderCredentialConfig(
+          {},
+          { GEMINI_API_KEY: 'gemini-key' },
+          ['google/gemini-3.8-flash'],
+        ),
+      ).toEqual({ google: { options: { apiKey: '{env:GEMINI_API_KEY}' } } });
+    });
+
+    it('prefers the SDK native name when both are set', () => {
+      expect(
+        mergeCatalogProviderCredentialConfig(
+          {},
+          {
+            GEMINI_API_KEY: 'gemini-key',
+            GOOGLE_GENERATIVE_AI_API_KEY: 'native-key',
+          },
+          ['google/gemini-3.8-flash'],
+        ),
+      ).toEqual({
+        google: { options: { apiKey: '{env:GOOGLE_GENERATIVE_AI_API_KEY}' } },
+      });
+    });
+
+    it('binds nothing when no key is visible, leaving the SDK default lookup alone', () => {
+      // Binding to an unset name would hand OpenCode an empty key and break
+      // a deployment the SDK's own lookup would have served.
+      const providerConfig = {};
+
+      expect(
+        mergeCatalogProviderCredentialConfig(providerConfig, {}, [
+          'google/gemini-3.8-flash',
+        ]),
+      ).toBe(providerConfig);
+      expect(
+        mergeCatalogProviderCredentialConfig(
+          providerConfig,
+          { GEMINI_API_KEY: '   ' },
+          ['google/gemini-3.8-flash'],
+        ),
+      ).toBe(providerConfig);
+    });
+  });
 
   it('keeps Z.AI and the Z.AI Coding Plan on their own credentials', () => {
     const merged = mergeCatalogProviderCredentialConfig({}, {}, [

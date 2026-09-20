@@ -441,6 +441,28 @@ describe('buildOpenCodeCliEnv', () => {
     });
   });
 
+  it('binds the Azure AI Foundry and Google keys the provider SDKs would not read', () => {
+    // Both SDKs read a different env var than the one Roomote stores the key
+    // under: the Azure SDK reads AZURE_API_KEY, Google's reads
+    // GOOGLE_GENERATIVE_AI_API_KEY.
+    const env = buildOpenCodeCliEnv({
+      R_MODEL: 'azure-cognitive-services/gpt-5.6-sol',
+      R_SMALL_MODEL: 'google/gemini-3.8-flash',
+      AZURE_COGNITIVE_SERVICES_RESOURCE_NAME: 'acme-foundry',
+      GEMINI_API_KEY: 'gemini-key',
+    });
+    const config = JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}') as {
+      provider: Record<string, { options?: Record<string, unknown> }>;
+    };
+
+    expect(config.provider['azure-cognitive-services']?.options).toEqual({
+      apiKey: '{env:AZURE_COGNITIVE_SERVICES_API_KEY}',
+    });
+    expect(config.provider.google?.options).toEqual({
+      apiKey: '{env:GEMINI_API_KEY}',
+    });
+  });
+
   it('binds those keys in operator-supplied config content too', () => {
     const env = buildOpenCodeCliEnv({
       R_MODEL: 'opencode-go/kimi-k3',
