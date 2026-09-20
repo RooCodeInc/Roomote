@@ -685,6 +685,29 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     }),
   },
   {
+    // Provider id and model slugs match models.dev / OpenCode's direct
+    // DeepSeek catalog.
+    id: 'deepseek',
+    label: 'DeepSeek',
+    envVarName: 'DEEPSEEK_API_KEY',
+    defaultRoomoteModel: 'deepseek/deepseek-v4-pro',
+    authKind: 'api-key',
+    credentialHelp: {
+      text: 'Paste an API key from the DeepSeek platform.',
+      href: 'https://platform.deepseek.com/api_keys',
+      linkLabel: 'Open DeepSeek API keys',
+    },
+    suggestedTaskModels: mapRecommendedTaskModels({
+      'deepseek-v4-1-flash': 'deepseek/deepseek-flash',
+      'deepseek-v4-pro-0813': 'deepseek/deepseek-v4-pro',
+    }),
+    recommendedRoleModels: {
+      helper: 'deepseek/deepseek-flash',
+      vision: 'deepseek/deepseek-flash',
+      explore: 'deepseek/deepseek-flash',
+    },
+  },
+  {
     id: 'openai',
     label: 'OpenAI',
     envVarName: 'OPENAI_API_KEY',

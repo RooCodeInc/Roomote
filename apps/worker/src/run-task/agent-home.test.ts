@@ -689,6 +689,27 @@ describe('generateOpenCodeConfig provider support', () => {
     });
   });
 
+  it('rebases DeepSeek onto its root-relative inference gateway route', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'deepseek/deepseek-v4-pro',
+        R_VISION_MODEL: 'deepseek/deepseek-flash',
+        R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
+        R_INFERENCE_GATEWAY_KEYS: 'DEEPSEEK_API_KEY',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, { options?: Record<string, unknown> }>;
+    };
+
+    expect(config.provider.deepseek?.options).toMatchObject({
+      baseURL: 'https://api.example.com/api/inference/deepseek',
+      apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
+    });
+    expect(result.configContent).not.toContain('DEEPSEEK_API_KEY');
+  });
+
   it('instructs API-proxy runs to call services through the base URL without touching inference', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),
