@@ -1,0 +1,53 @@
+---
+title: DeepSeek
+icon: 'https://unpkg.com/@lobehub/icons-static-svg@1.94.0/icons/deepseek.svg'
+description: Use DeepSeek's direct API for Roomote tasks and sessions.
+---
+
+DeepSeek exposes its current Flash and Pro models through an OpenAI-compatible
+API. Roomote connects to that API directly rather than routing requests through
+another inference provider.
+
+## Get an API key
+
+Create a key in the [DeepSeek platform](https://platform.deepseek.com/api_keys)
+and add balance to the account that will run Roomote tasks.
+
+## Configuration
+
+Add **DeepSeek** in **Settings > Models** and paste the key, or configure:
+
+```sh
+DEEPSEEK_API_KEY=...
+```
+
+Roomote recommends these direct model routes:
+
+- `deepseek/deepseek-v4-pro` for coding, code review, and planning
+- `deepseek/deepseek-flash` for helper, explore, and vision work
+
+The Flash model accepts text and image input. The Pro model accepts text input.
+Both models support tool calls and configurable reasoning.
+
+## Cost behavior
+
+DeepSeek charges the connected account for input, cached input, and output
+tokens. Roomote records usage and estimates cost from current model metadata;
+DeepSeek's [models and pricing](https://api-docs.deepseek.com/quick_start/pricing)
+page remains authoritative.
+
+## Verify setup
+
+1. save `DEEPSEEK_API_KEY`
+2. confirm DeepSeek V4.1 Flash and DeepSeek V4 Pro 0813 appear in **Settings > Models**
+3. confirm the desired models and role mapping are enabled
+4. run a small task and confirm the request appears in DeepSeek platform usage
+
+## Common issues
+
+- **Authentication or balance errors occur.** Confirm the key is active and the
+  account has enough balance.
+- **A model ID is rejected.** Use the exact `deepseek/...` ID shown in Roomote;
+  OpenRouter and other provider routes are separate connections.
+- **Image input fails on Pro.** Assign `deepseek/deepseek-flash` to the vision
+  role; the Pro model is text-only.
