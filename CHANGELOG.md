@@ -2,6 +2,18 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.12.4 (2026-09-20)
+
+Roomote 1.12.4 adds first-class DeepSeek connectivity with recommended Flash and Pro models for every agent role.
+
+### Highlights
+
+- Connect DeepSeek directly with an API key and use its recommended Flash and Pro models across sessions and tasks.
+
+### Patch changes
+
+- Connect DeepSeek directly with an API key and use the recommended DeepSeek V4.1 Flash and V4 Pro models across Roomote sessions and tasks.
+
 ## 1.12.3 (2026-09-20)
 
 Roomote 1.12.3 keeps Gitea pull request delivery reliable when repositories contain unassigned open changes.
