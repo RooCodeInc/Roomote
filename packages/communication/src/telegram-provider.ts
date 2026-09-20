@@ -539,7 +539,6 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
           command: 'goal',
           description: 'Keep working toward an objective',
         },
-        { command: 'skills', description: 'List callable skills' },
       ],
       scope: { type: 'all_group_chats' },
     });
@@ -552,7 +551,6 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
           command: 'goal',
           description: 'Keep working toward an objective',
         },
-        { command: 'skills', description: 'List callable skills' },
       ],
       scope: { type: 'all_private_chats' },
     });

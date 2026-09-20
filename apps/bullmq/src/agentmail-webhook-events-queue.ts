@@ -8,11 +8,6 @@ import {
   recoverPendingAgentMailWork,
   type AgentMailWebhookEventJob,
 } from '@roomote/sdk/server';
-import {
-  formatUserCallableSkillsPage,
-  listUserCallableFastAgentSkills,
-  parseSkillsCommandPage,
-} from '@roomote/cloud-agents/server';
 
 import { getRedis } from './redis';
 
@@ -35,19 +30,7 @@ async function processJob(job: Job<AgentMailQueueJob>) {
   }
 
   try {
-    await drainAgentMailInboundTurns(job.data.conversationId, {
-      commandHandler: async ({ bodyText, subject, userId }) => {
-        const page =
-          parseSkillsCommandPage(bodyText) ??
-          (subject ? parseSkillsCommandPage(subject) : null);
-        if (page === null) return null;
-        return formatUserCallableSkillsPage({
-          catalog: await listUserCallableFastAgentSkills(userId),
-          page,
-          command: '/skills',
-        });
-      },
-    });
+    await drainAgentMailInboundTurns(job.data.conversationId);
   } catch (error) {
     if (!(error instanceof AgentMailConversationBusyError) || !job.token) {
       throw error;

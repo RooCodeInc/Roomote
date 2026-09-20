@@ -69,7 +69,7 @@ const mocks = vi.hoisted(() => ({
   recordProviderMessage: vi.fn(),
   queueFastSurfaceReply: vi.fn(),
   admitHumanFollowUp: vi.fn(),
-  buildSkillsReply: vi.fn(),
+  registerCommands: vi.fn(),
 }));
 
 vi.mock('../../account-link-help.js', () => ({
@@ -193,10 +193,6 @@ vi.mock('../task-orchestration.js', () => ({
 
 vi.mock('../replies.js', () => ({ replyToDiscordEvent: mocks.reply }));
 
-vi.mock('../../shared/skills-command.js', () => ({
-  buildSkillsCommandReply: mocks.buildSkillsReply,
-}));
-
 vi.mock('../callback-actions.js', () => ({
   handleDiscordComponentInteraction: mocks.component,
   handleDiscordSuggestionReaction: mocks.suggestionReaction,
@@ -238,6 +234,7 @@ const provider = {
   createThreadFromMessage: mocks.createThreadFromMessage,
   createTaskThread: mocks.createTaskThread,
   postMessage: mocks.postMessage,
+  registerCommands: mocks.registerCommands,
 };
 
 function envelope(
@@ -335,7 +332,6 @@ describe('Discord Gateway event handler', () => {
     mocks.upsertInstallation.mockResolvedValue(undefined);
     mocks.upsertUserMapping.mockResolvedValue(undefined);
     mocks.findMappedUserId.mockResolvedValue('roomote-user-1');
-    mocks.buildSkillsReply.mockResolvedValue('skills page two');
     mocks.findInstallation.mockResolvedValue(null);
     mocks.findActiveRun.mockResolvedValue(undefined);
     mocks.findCompletedRun.mockResolvedValue(null);
@@ -371,6 +367,7 @@ describe('Discord Gateway event handler', () => {
     mocks.recordProviderMessage.mockResolvedValue(true);
     mocks.queueFastSurfaceReply.mockResolvedValue(true);
     mocks.reply.mockResolvedValue({ messageId: 'reply-1' });
+    mocks.registerCommands.mockResolvedValue(undefined);
     mocks.createDirectMessage.mockResolvedValue({ id: 'dm-private-1' });
     mocks.createThreadFromMessage.mockResolvedValue({
       channelId: 'message-1',
@@ -2338,19 +2335,22 @@ describe('Discord Gateway event handler', () => {
     );
   });
 
-  it('routes /skills to a linked-user inventory without starting agent work', async () => {
+  it('retires stale /skills commands and refreshes the registration scope', async () => {
+    mocks.getChannel.mockResolvedValue({
+      id: 'channel-1',
+      guildId: 'guild-1',
+      name: 'general',
+      type: 0,
+    });
     const interaction = {
-      id: 'interaction-skills',
+      id: 'interaction-retired-skills',
       application_id: 'app-1',
       type: 2,
       token: 'interaction-token',
-      channel_id: 'dm-1',
-      user: { id: 'discord-user-1', username: 'matt' },
-      data: {
-        name: 'skills',
-        type: 1,
-        options: [{ name: 'page', type: 4, value: 2 }],
-      },
+      channel_id: 'channel-1',
+      guild_id: 'guild-1',
+      member: { user: { id: 'discord-user-1', username: 'matt' } },
+      data: { name: 'skills', type: 1 },
     };
 
     const response = await postEvent(
@@ -2359,18 +2359,22 @@ describe('Discord Gateway event handler', () => {
 
     await expect(response.json()).resolves.toEqual({
       ok: true,
-      skillsListed: true,
+      ignored: 'retired_command',
+      registration: true,
     });
-    expect(mocks.buildSkillsReply).toHaveBeenCalledWith({
-      userId: 'roomote-user-1',
-      page: 2,
-      command: '/skills',
+    expect(mocks.registerCommands).toHaveBeenNthCalledWith(1, {
+      applicationId: 'app-1',
+    });
+    expect(mocks.registerCommands).toHaveBeenNthCalledWith(2, {
+      applicationId: 'app-1',
+      guildId: 'guild-1',
     });
     expect(mocks.reply).toHaveBeenCalledWith(
-      expect.objectContaining({ text: 'skills page two', ephemeral: true }),
+      expect.objectContaining({
+        ephemeral: true,
+        text: expect.stringContaining('commands have been refreshed'),
+      }),
     );
-    expect(mocks.answerFast).not.toHaveBeenCalled();
-    expect(mocks.queueMessage).not.toHaveBeenCalled();
   });
 
   it('uses /new to send a fresh request into the DM conversation even when it has an active task', async () => {

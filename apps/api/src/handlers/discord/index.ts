@@ -98,7 +98,6 @@ import {
   fetchDiscordThreadHistoryBestEffort,
 } from './thread-context.js';
 import { shouldRouteUnmentionedDiscordThreadReplyToAgent } from './unmentioned-thread-reply.js';
-import { buildSkillsCommandReply } from '../shared/skills-command.js';
 
 export const discordGatewayEventProcessingTimeout = {
   timeoutMs: 4 * 60 * 1000,
@@ -155,7 +154,6 @@ const DISCORD_HELP_MESSAGE = [
   '`/new request:<request>` — start a fresh task.',
   '`/goal objective:<objective>` — keep this session working toward an objective across multiple turns.',
   '`/link code:<code>` — link this Discord account in a DM with me.',
-  '`/skills page:<page>` — list skills you can invoke with `$name`.',
   '`/help` — show this message.',
   '',
   'Follow up by sending another message in the task thread.',
@@ -586,7 +584,41 @@ async function processDiscordGatewayEvent(
     if (command.name === 'goal') {
       // Handled after resolving the current conversation and linked user.
     } else if (command.name === 'skills') {
-      // Handled after resolving the linked user.
+      const registrations = [
+        resolved.provider.registerCommands({
+          applicationId: resolved.applicationId,
+        }),
+        ...(interaction?.guild_id
+          ? [
+              resolved.provider.registerCommands({
+                applicationId: resolved.applicationId,
+                guildId: interaction.guild_id,
+              }),
+            ]
+          : []),
+      ];
+      const registrationResults = await Promise.allSettled(registrations);
+      const registration = registrationResults.every(
+        (result) => result.status === 'fulfilled',
+      );
+      for (const result of registrationResults) {
+        if (result.status === 'rejected') {
+          apiLogger.warn(
+            `[discord] Failed to remove the retired /skills command: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`,
+          );
+        }
+      }
+      await replyToDiscordEvent({
+        provider: resolved.provider,
+        applicationId: resolved.applicationId,
+        channel,
+        interaction: interactionReplyContext(event),
+        text: registration
+          ? 'The `/skills` command is no longer available. Discord commands have been refreshed.'
+          : 'The `/skills` command is no longer available. Please refresh Discord commands in Roomote settings.',
+        ephemeral: true,
+      });
+      return { ok: true, ignored: 'retired_command', registration };
     } else {
       return { ok: true, ignored: 'unsupported_command' };
     }
@@ -851,22 +883,6 @@ async function processDiscordGatewayEvent(
       : {}),
     userId: senderUserId,
   });
-
-  if (command?.name === 'skills') {
-    await replyToDiscordEvent({
-      provider: resolved.provider,
-      applicationId: resolved.applicationId,
-      channel,
-      interaction: interactionReplyContext(event),
-      text: await buildSkillsCommandReply({
-        userId: senderUserId,
-        page: command.page ?? 1,
-        command: '/skills',
-      }),
-      ephemeral: true,
-    });
-    return { ok: true, skillsListed: true };
-  }
 
   // Fast mode is unconditional for ordinary linked-human messages, including
   // reaction summons: a configured emoji synthesizes a bot mention that enters
