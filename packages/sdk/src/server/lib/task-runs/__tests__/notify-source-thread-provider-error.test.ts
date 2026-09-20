@@ -7,6 +7,7 @@ const mockFindFirstRun = vi.fn();
 const mockFindFirstSlackInstallation = vi.fn();
 const mockRedisSet = vi.fn().mockResolvedValue('OK');
 const mockRedisDel = vi.fn().mockResolvedValue(1);
+const mockEnqueueParentEvent = vi.fn().mockResolvedValue({ queued: true });
 
 vi.mock('@roomote/db/server', async () => {
   const actual =
@@ -39,6 +40,11 @@ vi.mock('@roomote/redis', () => ({
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   getTaskUrl: vi.fn().mockReturnValue('https://example.com/task'),
+}));
+
+vi.mock('../../fast-agent-parent-event-queue', () => ({
+  enqueueFastAgentParentEvent: (...args: unknown[]) =>
+    mockEnqueueParentEvent(...args),
 }));
 
 const mockSlackPostMessage = vi.fn().mockResolvedValue('ts-1');
@@ -209,6 +215,7 @@ describe('maybeNotifySourceThreadOfTerminalProviderError', () => {
     vi.clearAllMocks();
     mockRedisSet.mockResolvedValue('OK');
     mockRedisDel.mockResolvedValue(1);
+    mockEnqueueParentEvent.mockResolvedValue({ queued: true });
     mockSlackPostMessage.mockResolvedValue('ts-1');
     mockFindFirstSlackInstallation.mockResolvedValue({
       botAccessToken: 'xoxb-token',
@@ -334,6 +341,84 @@ describe('maybeNotifySourceThreadOfTerminalProviderError', () => {
     await notify(makeEnvelope({ location: 'payload' }));
 
     expect(mockDiscordPostMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('durably queues a redacted provider error for the owning Session', async () => {
+    const fastAgentParent = {
+      sessionId: '11111111-1111-4111-8111-111111111111',
+      conversation: {
+        surface: 'slack' as const,
+        workspaceId: 'T123',
+        conversationId: '100.001',
+        replyTarget: { channelId: 'C123', threadId: '100.001' },
+      },
+    };
+    mockFindFirstRun.mockResolvedValue(
+      makeRun({ payload: payload({ fastAgentParent }) }),
+    );
+
+    await notify(
+      makeEnvelope({
+        ts: 42,
+        errorSummary:
+          'The provider rejected api_key=sk-secret while overloaded.',
+      }),
+    );
+
+    expect(mockEnqueueParentEvent).toHaveBeenCalledWith({
+      parent: fastAgentParent,
+      event: {
+        type: 'task_turn_provider_error',
+        taskId: 'task-1',
+        runId: 7,
+        messageTs: 42,
+        error: 'The provider rejected api_key=[redacted] while overloaded.',
+        taskUrl: 'https://example.com/task',
+      },
+    });
+    expect(mockRedisSet).not.toHaveBeenCalled();
+    expect(mockSlackPostMessage).not.toHaveBeenCalled();
+  });
+
+  it('re-admits the same durable event instead of taking a direct delivery claim', async () => {
+    const fastAgentParent = {
+      sessionId: '11111111-1111-4111-8111-111111111111',
+      conversation: {
+        surface: 'web' as const,
+        workspaceId: 'web',
+        conversationId: '11111111-1111-4111-8111-111111111111',
+      },
+    };
+    mockFindFirstRun.mockResolvedValue(
+      makeRun({ payload: payload({ fastAgentParent }) }),
+    );
+    const envelope = makeEnvelope({ ts: 43 });
+
+    await notify(envelope);
+    await notify(envelope);
+
+    expect(mockEnqueueParentEvent).toHaveBeenCalledTimes(2);
+    expect(mockEnqueueParentEvent.mock.calls[0]).toEqual(
+      mockEnqueueParentEvent.mock.calls[1],
+    );
+    expect(mockRedisSet).not.toHaveBeenCalled();
+  });
+
+  it('does not notify the Session for a transient provider retry notice', async () => {
+    await notify({
+      ...makeEnvelope({ location: 'none' }),
+      metadata: {
+        providerRetryNotice: {
+          kind: 'provider_error',
+          attemptNumber: 1,
+          maxAttempts: 3,
+          errorSummary: PROVIDER_ERROR,
+        },
+      },
+    });
+
+    expect(mockFindFirstRun).not.toHaveBeenCalled();
+    expect(mockEnqueueParentEvent).not.toHaveBeenCalled();
   });
 
   it('ignores ordinary assistant messages', async () => {

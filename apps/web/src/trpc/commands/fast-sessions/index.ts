@@ -296,6 +296,7 @@ async function runWebFastAgentTurn({
               currentMessageId: turnMessageId,
               userId,
               question,
+              webFollowUp: true,
               ...(images?.length ? { images } : {}),
               ...(senderDisplayName ? { senderDisplayName } : {}),
               ...(turnSource === 'platform_event'
@@ -783,6 +784,7 @@ export async function replyToFastSessionCommand(
       userId: auth.userId,
       senderDisplayName,
       question: input.text,
+      webFollowUp: true,
     }),
   ]);
   if (!delivery) {

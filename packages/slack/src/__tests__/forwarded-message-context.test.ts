@@ -8,6 +8,7 @@ import {
   formatSlackBlockLinkContext,
   formatSlackBlockTextContext,
   formatSlackForwardedMessageContext,
+  formatSlackMcpSetupRecommendationContext,
 } from '../forwarded-message-context';
 import type { SlackFile } from '../types';
 
@@ -200,6 +201,71 @@ describe('forwarded-message-context', () => {
         '- e: https://example.sentry.io/issues/7454501897/?referrer=slack&environment=production',
       ].join('\n'),
     );
+  });
+
+  it('adds a setup recommendation for pasted Buildkite organization URLs', () => {
+    expect(
+      formatSlackMcpSetupRecommendationContext(
+        'Can you inspect https://buildkite.com/acme/pipelines/api/builds/42?',
+      ),
+    ).toBe(
+      [
+        'Slack integration setup recommendations:',
+        '- Buildkite: if it is unavailable, offer to connect the built-in integration from /integrations.',
+      ].join('\n'),
+    );
+  });
+
+  it('adds a setup recommendation for pasted Cloudflare dashboard URLs', () => {
+    expect(
+      formatSlackMcpSetupRecommendationContext(
+        'Can you inspect https://dash.cloudflare.com/example/workers/services/view/api?',
+      ),
+    ).toBe(
+      [
+        'Slack integration setup recommendations:',
+        '- Cloudflare: if it is unavailable, offer to connect the built-in integration from /integrations.',
+      ].join('\n'),
+    );
+  });
+
+  it('adds the Buildkite recommendation to active Slack agent context', () => {
+    expect(
+      formatSlackAttachmentContext('Can you inspect this?', undefined, [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: '<https://buildkite.com/acme/pipelines/api|Pipeline>',
+          },
+        },
+      ]),
+    ).toContain('Slack integration setup recommendations:\n- Buildkite:');
+  });
+
+  it('detects Buildkite URLs exposed only through attachment title links', () => {
+    expect(
+      formatSlackAttachmentContext('Can you inspect this?', [
+        {
+          title: 'Build #42',
+          title_link: 'https://buildkite.com/acme/pipelines/api/builds/42',
+        },
+      ]),
+    ).toContain('Slack integration setup recommendations:\n- Buildkite:');
+  });
+
+  it('adds the Cloudflare recommendation to active Slack agent context', () => {
+    expect(
+      formatSlackAttachmentContext('Can you inspect this?', undefined, [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: '<https://dash.cloudflare.com/example/workers|Worker>',
+          },
+        },
+      ]),
+    ).toContain('Slack integration setup recommendations:\n- Cloudflare:');
   });
 
   it('extracts Sentry-style block and attachment context without action labels', () => {

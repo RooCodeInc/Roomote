@@ -96,6 +96,11 @@ describe('createSessionArtifact', () => {
     const viewUrl = new URL(artifact.viewUrl);
     expect(viewUrl.pathname).toBe(`/sessions/${session!.id}`);
     expect(viewUrl.search).toBe('?artifact=notes%2Fresult.md&v=1');
+    const standaloneViewUrl = new URL(artifact.standaloneViewUrl);
+    expect(standaloneViewUrl.pathname).toBe(
+      `/artifacts/session/${session!.id}`,
+    );
+    expect(standaloneViewUrl.search).toBe('?path=notes%2Fresult.md&v=1');
     const [row] = await db
       .select()
       .from(taskArtifacts)

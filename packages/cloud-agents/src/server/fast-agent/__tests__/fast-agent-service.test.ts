@@ -6,6 +6,9 @@ const mocks = vi.hoisted(() => ({
   getActiveTasks: vi.fn(),
   getSession: vi.fn(),
   getNativeRuntime: vi.fn(),
+  mountCodeModeIntegration: vi.fn(),
+  serverNameCollision: vi.fn(),
+  clearIntegrationToolCache: vi.fn(),
   setOpenCodeSession: vi.fn(),
   upsertMessage: vi.fn(),
   getEnvironments: vi.fn(),
@@ -19,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   appendMemory: vi.fn(),
   appendLearnedPreference: vi.fn(),
   isBrainEnabled: vi.fn(),
+  deploymentExperimentEnabled: vi.fn(),
   privateSessionsEnabled: vi.fn(),
   generateText: vi.fn(),
   generateHelperText: vi.fn(),
@@ -233,6 +237,7 @@ vi.mock('@roomote/db/server', () => ({
   appendLearnedUserPreference: mocks.appendLearnedPreference,
   getUserPersonalizationRuntimeContext: mocks.getPersonalization,
   isBrainEnabled: mocks.isBrainEnabled,
+  isDeploymentExperimentEnabled: mocks.deploymentExperimentEnabled,
   isPrivateSessionsExperimentEnabled: mocks.privateSessionsEnabled,
   db: {
     execute: mocks.executeDb,
@@ -320,6 +325,8 @@ vi.mock('../fast-agent-native-tool-bridge', () => ({
     task: true,
   },
   getFastAgentNativeToolRuntime: mocks.getNativeRuntime,
+  mountFastAgentIntegrationOnCodeModeServer: mocks.mountCodeModeIntegration,
+  hasFastAgentCodeModeServerNameCollision: mocks.serverNameCollision,
   bindFastAgentNativeToolExecutor: mocks.bindExecutor,
   createFastAgentSpillTurnBudget: () => ({ calls: 0, outputBytes: 0 }),
   bindFastAgentMcpToolExecutor: mocks.bindMcpExecutor,
@@ -329,6 +336,7 @@ vi.mock('../fast-agent-native-tool-bridge', () => ({
 vi.mock('../fast-agent-integration-broker', () => ({
   listFastAgentIntegrations: mocks.listIntegrations,
   callFastAgentIntegration: mocks.callIntegration,
+  clearFastAgentIntegrationToolCache: mocks.clearIntegrationToolCache,
 }));
 
 vi.mock('../fast-agent-context-telemetry', () => ({
@@ -519,6 +527,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.touchSessionActivity.mockResolvedValue(undefined);
     mocks.getSessionForTask.mockResolvedValue(null);
     mocks.privateSessionsEnabled.mockResolvedValue(true);
+    mocks.deploymentExperimentEnabled.mockResolvedValue(false);
     mocks.getPendingHumanFollowUp.mockResolvedValue([]);
     mocks.ensureOwnTaskFollowThroughWakeup.mockResolvedValue(undefined);
     mocks.ensureSessionGoalContinuationWakeup.mockResolvedValue(undefined);
@@ -1046,6 +1055,37 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(secondSystemPrompt).toContain('Updated guidance.');
     expect(secondSystemPrompt).not.toContain('First guidance.');
     expect(mocks.getDeploymentSettings).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the dispatcher in the prompt when integration ids collide under the code-mode experiment', async () => {
+    mocks.deploymentExperimentEnabled.mockImplementation(
+      async (id: string) => id === 'codeModeIntegrations',
+    );
+    mocks.serverNameCollision.mockReturnValue(true);
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'foo.bar',
+        name: 'Foo Dot Bar',
+        description: 'First',
+        tools: [{ name: 'search' }],
+      },
+      {
+        id: 'foo_bar',
+        name: 'Foo Underscore Bar',
+        description: 'Second',
+        tools: [{ name: 'read' }],
+      },
+    ]);
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    const systemPrompt = mocks.generateText.mock.calls[0]?.[0].system as
+      | string
+      | undefined;
+    expect(systemPrompt).toContain('### On-demand servers');
+    expect(systemPrompt).not.toContain(
+      'reached only through the `execute` tool',
+    );
   });
 
   it('includes saved routing rules in the Fast system prompt', async () => {
@@ -5504,7 +5544,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       artifactType: 'general',
       contentType: 'text/markdown',
       size: 8,
-      viewUrl: 'https://roomote.example/sessions/session-1',
+      viewUrl:
+        'https://roomote.example/sessions/session-1?artifact=notes%2Fdecision.md&v=1',
+      standaloneViewUrl:
+        'https://roomote.example/artifacts/session/session-1?path=notes%2Fdecision.md&v=1',
     });
     const adapter = callbacks({ createArtifact });
     mocks.generateText.mockImplementation(
@@ -5520,7 +5563,16 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         });
         expect(result).toMatchObject({
           success: true,
-          artifact: { id: 'artifact-1', contentType: 'text/markdown' },
+          artifact: {
+            id: 'artifact-1',
+            contentType: 'text/markdown',
+            viewUrl:
+              'https://roomote.example/sessions/session-1?artifact=notes%2Fdecision.md&v=1',
+            standaloneViewUrl:
+              'https://roomote.example/artifacts/session/session-1?path=notes%2Fdecision.md&v=1',
+          },
+          guidance:
+            'The artifact viewUrl opens in its Session; standaloneViewUrl opens the document, image, or file on its own page with a direct shareable link. Share whichever returned URL fits the context, unchanged, instead of constructing an artifact URL.',
         });
         await invokeTool(nativeToolNames.sendChatReply, {
           purpose: 'closeout',
@@ -6073,6 +6125,124 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.getNativeRuntime).toHaveBeenCalledTimes(2);
   });
 
+  it('mounts an integration connected mid-turn on the code-mode server', async () => {
+    mocks.deploymentExperimentEnabled.mockImplementation(
+      async (id: string) => id === 'codeModeIntegrations',
+    );
+    mocks.getNativeRuntime.mockImplementation(async () => {
+      mocks.mcpCapabilityAvailable = true;
+      return {
+        directory: '/tmp/fast-native-tools',
+        mcpCapability: 'mcp-capability-1',
+        codeModeIntegrationsActive: true,
+        env: {
+          ROOMOTE_FAST_TOOL_BRIDGE_URL: 'http://127.0.0.1:4321/tool',
+          ROOMOTE_FAST_TOOL_BRIDGE_TOKEN: 'test-token',
+        },
+      };
+    });
+    mocks.listIntegrations
+      .mockResolvedValueOnce([
+        {
+          id: 'github',
+          name: 'GitHub',
+          description: 'Repository access',
+          tools: [{ name: 'search_code' }],
+        },
+      ])
+      .mockResolvedValue([
+        {
+          id: 'github',
+          name: 'GitHub',
+          description: 'Repository access',
+          tools: [{ name: 'search_code' }],
+        },
+        {
+          id: 'notion',
+          name: 'Notion',
+          description: 'Docs access',
+          tools: [{ name: 'search_pages' }],
+        },
+      ]);
+    mocks.getUnifiedSession.mockResolvedValue({ id: 'session-1' });
+    mocks.connectIntegration.mockResolvedValue({ status: 'connected' });
+    mocks.mountCodeModeIntegration.mockResolvedValue(true);
+
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        options.onServerLeased?.('http://127.0.0.1:9999');
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’ll connect that.',
+        });
+        const result = await invokeTool(nativeToolNames.connectIntegration, {
+          integrationId: 'notion',
+        });
+        expect(result).toMatchObject({ success: true, status: 'connected' });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Connected.',
+        });
+        return '';
+      },
+    );
+
+    await expect(
+      answerFastAgentQuestion({ ...baseParams, adapter: callbacks() }),
+    ).resolves.toBe('Connected.');
+    // Only the newly connected server is mounted mid-turn; github was already
+    // in the turn-start mount set.
+    expect(mocks.mountCodeModeIntegration).toHaveBeenCalledTimes(1);
+    expect(mocks.mountCodeModeIntegration).toHaveBeenCalledWith({
+      serverUrl: 'http://127.0.0.1:9999',
+      directory: '/tmp/fast-native-tools',
+      mcpCapability: 'mcp-capability-1',
+      integrationId: 'notion',
+    });
+    // The tool cache is cleared so discovery stops serving the pre-connect
+    // empty tool list, and the connect result points at the execute runner.
+    expect(mocks.clearIntegrationToolCache).toHaveBeenCalled();
+    expect(mocks.listNativeIntegrations).toHaveBeenCalled();
+  });
+
+  it('does not mount mid-turn connections when the code-mode experiment is off', async () => {
+    mocks.getUnifiedSession.mockResolvedValue({ id: 'session-1' });
+    mocks.connectIntegration.mockResolvedValue({ status: 'connected' });
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'notion',
+        name: 'Notion',
+        description: 'Docs access',
+        tools: [{ name: 'search_pages' }],
+      },
+    ]);
+
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        options.onServerLeased?.('http://127.0.0.1:9999');
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’ll connect that.',
+        });
+        await invokeTool(nativeToolNames.connectIntegration, {
+          integrationId: 'notion',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Connected.',
+        });
+        return '';
+      },
+    );
+
+    await expect(
+      answerFastAgentQuestion({ ...baseParams, adapter: callbacks() }),
+    ).resolves.toBe('Connected.');
+    expect(mocks.mountCodeModeIntegration).not.toHaveBeenCalled();
+  });
+
   it('keeps Fast-native tools parent-only while MCP tools use the shared broker', async () => {
     const adapter = callbacks();
     mocks.listIntegrations.mockResolvedValue([
@@ -6219,6 +6389,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       ]),
       {
         addRemoteMcpEnabled: true,
+        codeModeIntegrationsEnabled: false,
         surface: 'slack',
         serviceCredentialToolsEnabled: true,
         serviceCredentialPrepareEnabled: true,
@@ -13322,6 +13493,86 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     ).rejects.toThrow('OpenCode unavailable');
     expect(activity.start).toHaveBeenCalledOnce();
     expect(activity.settle).toHaveBeenCalledOnce();
+  });
+
+  describe('platform event whose inference failure cannot succeed on retry', () => {
+    const closeout =
+      'Could not authenticate with the configured inference provider. An administrator needs to reconnect or replace its credentials.';
+    const rejectCredentials = () => {
+      mocks.classifyInferenceError.mockReturnValue({
+        message: 'The inference provider rejected these credentials.',
+        reason: 'invalid_credentials',
+        retryable: false,
+      });
+      mocks.generateText.mockRejectedValue(
+        new Error('APIError: Missing API key.'),
+      );
+    };
+
+    it('tells the user once and settles instead of asking to be re-delivered', async () => {
+      rejectCredentials();
+      const adapter = callbacks();
+
+      // Resolves rather than rethrows, so the event queue does not deliver
+      // the same event again for a failure that would repeat identically.
+      await expect(
+        answerFastAgentQuestion({
+          ...baseParams,
+          turnSource: 'platform_event',
+          adapter,
+        }),
+      ).resolves.toBe(closeout);
+      expect(mocks.generateText).toHaveBeenCalledOnce();
+      expect(adapter.postReply).toHaveBeenCalledWith({
+        purpose: 'closeout',
+        message: closeout,
+      });
+    });
+
+    it('does not repeat a closeout the conversation already ends with', async () => {
+      rejectCredentials();
+      mocks.getSession.mockResolvedValueOnce({
+        id: 'conversation-1',
+        compatibilityMessages: [{ role: 'assistant', content: closeout }],
+        openCodeSessionId: null,
+      });
+      const adapter = callbacks();
+
+      // Every platform event on a misconfigured deployment fails the same
+      // way; the next one still settles, without posting again.
+      await expect(
+        answerFastAgentQuestion({
+          ...baseParams,
+          turnSource: 'platform_event',
+          adapter,
+        }),
+      ).resolves.toBe(closeout);
+      expect(adapter.postReply).not.toHaveBeenCalled();
+    });
+
+    it('still rethrows a failure another attempt could recover', async () => {
+      vi.useFakeTimers();
+      try {
+        mocks.generateText.mockRejectedValue(
+          new Error('TypeError: fetch failed'),
+        );
+        const adapter = callbacks();
+
+        const result = answerFastAgentQuestion({
+          ...baseParams,
+          turnSource: 'platform_event',
+          adapter,
+        });
+        const settled = expect(result).rejects.toThrow('fetch failed');
+        await vi.runAllTimersAsync();
+        await settled;
+        expect(adapter.postReply).not.toHaveBeenCalledWith(
+          expect.objectContaining({ purpose: 'closeout' }),
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   describe('answerFastAgentQuestion streamed reply text', () => {

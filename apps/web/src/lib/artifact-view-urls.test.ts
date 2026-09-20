@@ -3,6 +3,7 @@ import {
   getSessionArtifactsViewUrl,
   getSessionArtifactViewUrl,
   getSessionTaskArtifactViewUrl,
+  getStandaloneArtifactViewUrl,
   hasSessionArtifactsSearchParams,
   parseSessionArtifactSearchParams,
 } from './artifact-view-urls';
@@ -13,6 +14,34 @@ describe('getArtifactViewUrl', () => {
       getArtifactViewUrl('https://roomote.example', 'task-1', 'notes/a.md', 2),
     ).toBe(
       'https://roomote.example/task/task-1/artifacts?path=notes%2Fa.md&v=2',
+    );
+  });
+});
+
+describe('getStandaloneArtifactViewUrl', () => {
+  it('encodes task ownership in the path', () => {
+    expect(
+      getStandaloneArtifactViewUrl(
+        'https://roomote.example',
+        { taskId: 'task/1' },
+        'notes/a b.md',
+        2,
+      ),
+    ).toBe(
+      'https://roomote.example/artifacts/task/task%2F1?path=notes%2Fa+b.md&v=2',
+    );
+  });
+
+  it('encodes Session ownership in the path', () => {
+    expect(
+      getStandaloneArtifactViewUrl(
+        'https://roomote.example',
+        { sessionId: 'session-1' },
+        'proof/image.png',
+        3,
+      ),
+    ).toBe(
+      'https://roomote.example/artifacts/session/session-1?path=proof%2Fimage.png&v=3',
     );
   });
 });

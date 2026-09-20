@@ -11,17 +11,22 @@ import { getTaskRunError } from '@/lib/task-run-errors';
 
 import { StartupFailureMessage, StartupSequence } from './StartupMessage';
 import { useStartupProgress } from './useStartupProgress';
+import { useRetryFailedTaskStart } from '@/hooks/task-runs';
 
 interface StartupProps {
   runId: number;
-  initialTaskRun?: TaskRunProgress;
+  taskId?: string;
+  initialTaskRun?: TaskRunProgress & Pick<TaskRun, 'sourceRunId'>;
+  canRetryFailedStart?: boolean;
   newTaskHref?: string;
   onStatusChange?: (status: RunStatusValue) => void;
 }
 
 export const Startup = ({
   runId,
+  taskId,
   initialTaskRun,
+  canRetryFailedStart,
   newTaskHref,
   onStatusChange,
 }: StartupProps) => {
@@ -39,7 +44,9 @@ export const Startup = ({
     <SSEProvider source={eventSource}>
       <StartupInner
         runId={runId}
+        taskId={taskId}
         initialTaskRun={initialTaskRun}
+        canRetryFailedStart={canRetryFailedStart}
         newTaskHref={newTaskHref}
         onStatusChange={onStatusChange}
       />
@@ -49,17 +56,22 @@ export const Startup = ({
 
 interface StartupInnerProps {
   runId: number;
-  initialTaskRun?: TaskRunProgress;
+  taskId?: string;
+  initialTaskRun?: TaskRunProgress & Pick<TaskRun, 'sourceRunId'>;
+  canRetryFailedStart?: boolean;
   newTaskHref?: string;
   onStatusChange?: (status: RunStatusValue) => void;
 }
 
 const StartupInner = ({
   runId,
+  taskId,
   initialTaskRun,
+  canRetryFailedStart,
   newTaskHref,
   onStatusChange,
 }: StartupInnerProps) => {
+  const retryFailedStart = useRetryFailedTaskStart();
   const {
     steps,
     error,
@@ -79,6 +91,13 @@ const StartupInner = ({
       logsConnected={logsConnected}
       logsError={logsError}
       newTaskHref={newTaskHref}
+      isRetry={initialTaskRun?.sourceRunId != null}
+      onRetry={
+        taskId && canRetryFailedStart
+          ? () => retryFailedStart.mutate({ taskId, runId })
+          : undefined
+      }
+      retryPending={retryFailedStart.isPending}
     />
   );
 };

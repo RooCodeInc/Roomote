@@ -52,6 +52,7 @@ import {
   mergeAmazonBedrockProviderConfig,
   mergeBedrockMantleOpenAiProviderConfig,
   mergeBedrockMantleProviderConfig,
+  mergeCatalogProviderCredentialConfig,
   mergeKimiForCodingProviderConfig,
   mergeOpenAiCompatibleProviderConfig,
   mergeOpenCodeModelReasoningOptions,
@@ -65,7 +66,6 @@ import {
   resolveOpenRouterVariantModelAlias,
   toBedrockMantleRuntimeModelId,
   OPENCODE_ARCHITECT_AGENT,
-  OPENCODE_GO_API_KEY_ENV_VAR_NAME,
   TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME,
   TASK_MODEL_COSTS_ENV_VAR_NAME,
   CREDENTIAL_EGRESS_METHODS,
@@ -106,11 +106,6 @@ const GOOGLE_APPLICATION_CREDENTIALS_FILE_NAME =
 export const OPENCODE_AUTH_FILE_NAME = 'auth.json';
 
 const OPENROUTER_PROVIDER_ID = 'openrouter';
-
-const AZURE_COGNITIVE_SERVICES_PROVIDER_ID = 'azure-cognitive-services';
-
-const AZURE_COGNITIVE_SERVICES_API_KEY_ENV_VAR_NAME =
-  'AZURE_COGNITIVE_SERVICES_API_KEY';
 
 /**
  * OpenRouter identifies the calling application through the `HTTP-Referer`
@@ -1209,73 +1204,6 @@ function rebaseProviderOntoGateway(
   };
 }
 
-/**
- * OpenCode discovers the Azure AI Foundry catalog and resource name from the
- * `AZURE_COGNITIVE_SERVICES_*` env vars, but its underlying Azure SDK reads
- * `AZURE_API_KEY` by default. Bind Roomote's provider-specific key explicitly
- * so direct mode does not borrow the Azure OpenAI key when both providers are
- * configured. Gateway mode replaces this value with the run token later.
- */
-function mergeAzureCognitiveServicesProviderConfig(
-  providerConfig: Record<string, unknown>,
-  modelIds: Array<string | undefined>,
-): Record<string, unknown> {
-  if (
-    !modelIds.some((modelId) =>
-      modelId?.trim().startsWith(`${AZURE_COGNITIVE_SERVICES_PROVIDER_ID}/`),
-    )
-  ) {
-    return providerConfig;
-  }
-
-  const existingProvider = asRecord(
-    providerConfig[AZURE_COGNITIVE_SERVICES_PROVIDER_ID],
-  );
-  const existingOptions = asRecord(existingProvider.options);
-
-  return {
-    ...providerConfig,
-    [AZURE_COGNITIVE_SERVICES_PROVIDER_ID]: {
-      ...existingProvider,
-      options: {
-        apiKey: `{env:${AZURE_COGNITIVE_SERVICES_API_KEY_ENV_VAR_NAME}}`,
-        ...existingOptions,
-      },
-    },
-  };
-}
-
-/**
- * OpenCode's catalog maps both Zen and Go to OPENCODE_API_KEY. Roomote keeps
- * their credentials separate, so bind Go to its dedicated env var directly.
- * Gateway mode replaces this value with the run token later.
- */
-function mergeOpenCodeGoProviderConfig(
-  providerConfig: Record<string, unknown>,
-  modelIds: Array<string | undefined>,
-): Record<string, unknown> {
-  const providerId = 'opencode-go';
-  if (
-    !modelIds.some((modelId) => modelId?.trim().startsWith(`${providerId}/`))
-  ) {
-    return providerConfig;
-  }
-
-  const existingProvider = asRecord(providerConfig[providerId]);
-  const existingOptions = asRecord(existingProvider.options);
-
-  return {
-    ...providerConfig,
-    [providerId]: {
-      ...existingProvider,
-      options: {
-        apiKey: `{env:${OPENCODE_GO_API_KEY_ENV_VAR_NAME}}`,
-        ...existingOptions,
-      },
-    },
-  };
-}
-
 function normalizeStringList(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value.filter((entry): entry is string => typeof entry === 'string');
@@ -1851,30 +1779,28 @@ function resolveModelBackedOpenCodeConfig(
       )
     : providerReasoningConfig;
   const providerConfig = mergeInferenceGatewayProviderConfig(
-    mergeOpenCodeGoProviderConfig(
-      mergeAzureCognitiveServicesProviderConfig(
-        mergeAmazonBedrockProviderConfig(
-          mergeBedrockMantleProviderConfig(
-            mergeBedrockMantleOpenAiProviderConfig(
-              mergeOpenAiCompatibleProviderConfig(
-                // Registered in full so it does not depend on OpenCode's
-                // runtime catalog; the gateway rebase below still replaces
-                // the base URL and credential in gateway mode.
-                mergeKimiForCodingProviderConfig(
-                  mergeOpenRouterVariantAliasModels(
-                    providerModelConfig,
-                    variantAliases,
-                  ),
-                  configuredModelIds,
+    // Binds the keys OpenCode would not find under its catalog's env var
+    // names. Gateway mode replaces the key and base URL just above.
+    mergeCatalogProviderCredentialConfig(
+      mergeAmazonBedrockProviderConfig(
+        mergeBedrockMantleProviderConfig(
+          mergeBedrockMantleOpenAiProviderConfig(
+            mergeOpenAiCompatibleProviderConfig(
+              // Registered in full so it does not depend on OpenCode's
+              // runtime catalog; the gateway rebase below still replaces
+              // the base URL and credential in gateway mode.
+              mergeKimiForCodingProviderConfig(
+                mergeOpenRouterVariantAliasModels(
+                  providerModelConfig,
+                  variantAliases,
                 ),
-                runtimeEnv,
-                openAiCompatibleModelIds,
-                visionModel ?? effectiveCodingModel,
-                modelContextWindows,
-                modelCosts,
+                configuredModelIds,
               ),
               runtimeEnv,
-              configuredModelIds,
+              openAiCompatibleModelIds,
+              visionModel ?? effectiveCodingModel,
+              modelContextWindows,
+              modelCosts,
             ),
             runtimeEnv,
             configuredModelIds,
@@ -1882,8 +1808,10 @@ function resolveModelBackedOpenCodeConfig(
           runtimeEnv,
           configuredModelIds,
         ),
+        runtimeEnv,
         configuredModelIds,
       ),
+      runtimeEnv,
       configuredModelIds,
     ),
     runtimeEnv,

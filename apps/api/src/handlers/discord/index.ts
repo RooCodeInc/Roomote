@@ -583,6 +583,42 @@ async function processDiscordGatewayEvent(
   if (command && command.name !== 'new') {
     if (command.name === 'goal') {
       // Handled after resolving the current conversation and linked user.
+    } else if (command.name === 'skills') {
+      const registrations = [
+        resolved.provider.registerCommands({
+          applicationId: resolved.applicationId,
+        }),
+        ...(interaction?.guild_id
+          ? [
+              resolved.provider.registerCommands({
+                applicationId: resolved.applicationId,
+                guildId: interaction.guild_id,
+              }),
+            ]
+          : []),
+      ];
+      const registrationResults = await Promise.allSettled(registrations);
+      const registration = registrationResults.every(
+        (result) => result.status === 'fulfilled',
+      );
+      for (const result of registrationResults) {
+        if (result.status === 'rejected') {
+          apiLogger.warn(
+            `[discord] Failed to remove the retired /skills command: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`,
+          );
+        }
+      }
+      await replyToDiscordEvent({
+        provider: resolved.provider,
+        applicationId: resolved.applicationId,
+        channel,
+        interaction: interactionReplyContext(event),
+        text: registration
+          ? 'The `/skills` command is no longer available. Discord commands have been refreshed.'
+          : 'The `/skills` command is no longer available. Please refresh Discord commands in Roomote settings.',
+        ephemeral: true,
+      });
+      return { ok: true, ignored: 'retired_command', registration };
     } else {
       return { ok: true, ignored: 'unsupported_command' };
     }

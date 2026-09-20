@@ -48,6 +48,7 @@ vi.mock('@/components/system', () => ({
   SquareDashedMousePointer: () => null,
   MessageSquareIcon: () => null,
   MessageSquareWarning: () => null,
+  RotateCcw: () => null,
 }));
 
 vi.mock('@/components/sandbox', () => ({
@@ -145,6 +146,32 @@ describe('StartupSequence', () => {
     );
     expect(
       screen.queryByRole('button', { name: 'Retry' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('keeps retrying and manual recovery on the same task', () => {
+    const onRetry = vi.fn();
+    const { rerender } = render(
+      <StartupSequence
+        steps={[{ status: RunStatus.Pending, completed: false }]}
+        isRetry
+      />,
+    );
+
+    expect(screen.getByText('Retrying environment')).toBeInTheDocument();
+
+    rerender(
+      <StartupSequence
+        steps={[{ status: RunStatus.Failed, completed: true }]}
+        error="Sandbox could not start"
+        newTaskHref="/?prompt=old"
+        onRetry={onRetry}
+      />,
+    );
+    screen.getByRole('button', { name: 'Retry' }).click();
+    expect(onRetry).toHaveBeenCalledOnce();
+    expect(
+      screen.queryByRole('link', { name: 'Try in a new task' }),
     ).not.toBeInTheDocument();
   });
 

@@ -41,6 +41,17 @@ or certificate is required, and enables keyless integrations directly. The
 same admin, ownership, and deployment availability rules apply as in Settings.
 Credentials are never collected in chat.
 
+Most catalog integrations connect once for the whole deployment, so connecting
+one makes it available to everyone; a few connect for one person instead. If
+you ask Roomote to connect a provider just for yourself, it goes by which kind
+that provider is. A per-person integration it simply connects for you. A
+deployment-wide one it does not connect quietly: it tells you the integration
+would be shared with everyone, and offers the routes that can stay private
+instead, the provider's own remote MCP server added under
+[Personal Settings](/personal-settings) or a personal
+[integration key](/integration-keys). It connects the shared integration only
+if you say that is fine.
+
 Roomote can list the full built-in catalog and current connection status without
 starting setup. A connection starts only after you ask to connect a provider.
 If you explicitly request a remote MCP server or direct API access instead,
@@ -67,7 +78,9 @@ from [Personal Settings](/personal-settings).
 | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- | ------------------------------------------ |
 | <IntegrationName href="/integrations/asana" icon="asana" name="Asana" />                                          | Project and task context from Asana               | Admin connection once                      |
 | <IntegrationName href="/integrations/better-stack" icon="betterstack" name="Better Stack" />                      | Monitoring and incident context                   | Admin connection once                      |
+| <IntegrationName href="/integrations/buildkite" icon="buildkite" name="Buildkite" />                           | Read-only CI pipeline and build context            | Admin connection once                      |
 | <IntegrationName href="/integrations/braintrust" icon="braintrust" name="Braintrust" />                           | Prompts, runs, and evaluation context             | Enable first, then teammates link accounts |
+| <IntegrationName href="/integrations/cloudflare" icon="cloudflare" name="Cloudflare" />                       | Cloud infrastructure and API operations           | Admin connection once                      |
 | <IntegrationName href="/integrations/elevenlabs" icon="elevenlabs" name="ElevenLabs" />                        | Voice narration for feature-demo videos           | Admin connection once                      |
 | <IntegrationName href="/integrations/exa" icon="exa" name="Exa" />                                              | Keyless web search; optional Agent research       | Admin enables; API key optional             |
 | <IntegrationName href="/integrations/grafana" icon="grafana" name="Grafana" />                                    | Dashboards, alerting, and monitoring context      | Admin connection once                      |

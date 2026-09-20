@@ -4,8 +4,7 @@ import { formatDistanceToNow } from 'date-fns';
 import { formatInferenceCost, getUserDisplayName } from '@/lib';
 import {
   getSessionArtifactsViewUrl,
-  getSessionArtifactViewUrl,
-  getSessionTaskArtifactViewUrl,
+  getStandaloneArtifactViewUrl,
 } from '@/lib/artifact-view-urls';
 import { formatAutomationLabel } from '@/lib/task-creator-filter';
 import {
@@ -83,20 +82,14 @@ export function SessionCard({
   const hasOutputMetadata =
     session.pullRequests.length > 0 || session.artifactCount > 0;
   const artifactHref = session.singleArtifact
-    ? session.singleArtifact.taskId
-      ? getSessionTaskArtifactViewUrl(
-          '',
-          session.id,
-          session.singleArtifact.taskId,
-          session.singleArtifact.path,
-          session.singleArtifact.version,
-        )
-      : getSessionArtifactViewUrl(
-          '',
-          session.id,
-          session.singleArtifact.path,
-          session.singleArtifact.version,
-        )
+    ? getStandaloneArtifactViewUrl(
+        '',
+        session.singleArtifact.taskId
+          ? { taskId: session.singleArtifact.taskId }
+          : { sessionId: session.id },
+        session.singleArtifact.path,
+        session.singleArtifact.version,
+      )
     : getSessionArtifactsViewUrl('', session.id);
 
   return (

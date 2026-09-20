@@ -5,6 +5,7 @@ import { createArtifact } from '../create';
 
 const {
   mockBuildSignedArtifactRawUrl,
+  mockBuildStandaloneArtifactViewUrl,
   mockAuthorizeTaskArtifactUpload,
   mockCreateTaskArtifactRecord,
   mockEnv,
@@ -16,6 +17,15 @@ const {
   mockBuildSignedArtifactRawUrl: vi.fn(
     () =>
       'https://public.example.com/api/artifacts/art-1/raw?sig=signed&ts=1234',
+  ),
+  mockBuildStandaloneArtifactViewUrl: vi.fn(
+    (
+      baseUrl: string,
+      owner: { taskId: string },
+      path: string,
+      version: number,
+    ) =>
+      `${baseUrl}/artifacts/task/${owner.taskId}?path=${encodeURIComponent(path)}&v=${version}`,
   ),
   mockAuthorizeTaskArtifactUpload: vi.fn(),
   mockCreateTaskArtifactRecord: vi.fn(),
@@ -37,6 +47,7 @@ vi.mock('@roomote/env', () => ({
 vi.mock('@roomote/sdk/server', () => ({
   authorizeTaskArtifactUpload: mockAuthorizeTaskArtifactUpload,
   buildSignedArtifactRawUrl: mockBuildSignedArtifactRawUrl,
+  buildStandaloneArtifactViewUrl: mockBuildStandaloneArtifactViewUrl,
   createTaskArtifactRecord: mockCreateTaskArtifactRecord,
   currentEpochSeconds: () => 1234,
 }));
@@ -149,6 +160,8 @@ describe('createArtifact', () => {
     expect(await response.json()).toMatchObject({
       viewUrl:
         'https://public.example.com/task/task-1/artifacts/tmp/capture.png?v=1',
+      standaloneViewUrl:
+        'https://public.example.com/artifacts/task/task-1?path=tmp%2Fcapture.png&v=1',
       rawUrl:
         'https://public.example.com/api/artifacts/art-1/raw?sig=signed&ts=1234',
     });
@@ -158,5 +171,11 @@ describe('createArtifact', () => {
       apiBaseUrl: 'https://public.example.com',
       signingKey: 'signing-key',
     });
+    expect(mockBuildStandaloneArtifactViewUrl).toHaveBeenCalledWith(
+      'https://public.example.com',
+      { taskId: 'task-1' },
+      'tmp/capture.png',
+      1,
+    );
   });
 });

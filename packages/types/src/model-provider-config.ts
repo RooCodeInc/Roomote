@@ -604,7 +604,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-terra': 'vercel/openai/gpt-5.6-terra',
       'gpt-5-6-luna': 'vercel/openai/gpt-5.6-luna',
       'gemini-3-8-flash': 'vercel/google/gemini-3.8-flash',
-      'deepseek-v4-1-flash': 'vercel/deepseek/deepseek-v4.1-flash-beta',
+      'deepseek-v4-1-flash': 'vercel/deepseek/deepseek-v4.1-flash',
       'deepseek-v4-pro-0813': 'vercel/deepseek/deepseek-v4-pro-0813',
       'glm-5-3-flash': 'vercel/zai/glm-5.3-flash',
       'glm-5-3': 'vercel/zai/glm-5.3',
@@ -612,7 +612,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'kimi-k2-7-code': 'vercel/moonshotai/kimi-k2.7-code',
       'qwen3-8-max': 'vercel/alibaba/qwen3.8-max',
       'minimax-m3': 'vercel/minimax/minimax-m3',
-      'grok-4-6': 'vercel/xai/grok-4.6',
+      'grok-4-6': 'vercel/spacexai/grok-4.6',
     }),
     // Vision is unset: the recommended coding model is multimodal, so image
     // work follows the coding model ("same as coding").
@@ -632,7 +632,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     authKind: 'api-key',
     // Requesty's models.dev slugs are provider-local rather than lab/model.
     suggestedTaskModels: mapRecommendedTaskModels({
-      'claude-fable-5-1': 'requesty/claude-fable-5-1',
+      'claude-fable-5-1': 'requesty/claude-fable-5.1',
       'claude-fable-5': 'requesty/claude-fable-5',
       'claude-haiku-4-5': 'requesty/claude-haiku-4-5',
       'claude-opus-5': 'requesty/claude-opus-5',
@@ -640,16 +640,16 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-sol': 'requesty/gpt-5.6-sol@eu',
       'gpt-5-6-terra': 'requesty/gpt-5.6-terra@eu',
       'gpt-5-6-luna': 'requesty/gpt-5.6-luna@eu',
-      'gemini-3-8-flash': 'requesty/vertex/gemini-3.8-flash',
+      'gemini-3-8-flash': 'requesty/gemini-3.8-flash',
       'glm-5-3-flash': 'requesty/glm-5.3-flash',
       'glm-5-3': 'requesty/glm-5.3',
       'kimi-k3': 'requesty/kimi-k3',
       'grok-4-6': 'requesty/grok-4.6',
     }),
     recommendedRoleModels: {
-      helper: 'requesty/vertex/gemini-3.8-flash',
+      helper: 'requesty/gemini-3.8-flash',
       codeReview: 'requesty/claude-sonnet-5',
-      explore: 'requesty/vertex/gemini-3.8-flash',
+      explore: 'requesty/gemini-3.8-flash',
       planning: 'requesty/claude-opus-5',
     },
     recommendedRoleReasoningEfforts: { codeReview: 'medium' },
@@ -892,7 +892,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     // Go serves a broader catalog; only models in Roomote's central curated
     // recommendation list are suggested here.
     suggestedTaskModels: mapRecommendedTaskModels({
-      'deepseek-v4-1-flash': 'opencode-go/deepseek-flash',
+      'deepseek-v4-1-flash': 'opencode-go/deepseek-v4.1-flash',
       'deepseek-v4-pro-0813': 'opencode-go/deepseek-v4-pro',
       'glm-5-3-flash': 'opencode-go/glm-5.3-flash',
       'glm-5-3': 'opencode-go/glm-5.3',
@@ -907,7 +907,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       helper: 'opencode-go/gpt-5.6-luna',
       vision: 'opencode-go/gpt-5.6-luna',
       codeReview: 'opencode-go/minimax-m3',
-      explore: 'opencode-go/deepseek-flash',
+      explore: 'opencode-go/deepseek-v4.1-flash',
       planning: 'opencode-go/qwen3.8-max',
     },
   },
@@ -1038,7 +1038,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'glm-5-3': 'zai-coding-plan/glm-5.3',
     }),
     recommendedRoleModels: {
-      vision: 'zai-coding-plan/glm-5v-turbo',
+      vision: 'zai-coding-plan/glm-5.3-flash',
     },
   },
   {

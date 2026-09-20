@@ -1,27 +1,11 @@
 import type { TaskRun } from '@roomote/db/server';
 
 const mocks = vi.hoisted(() => ({
-  findRun: vi.fn(),
-  canRetry: vi.fn(),
-  enqueueRelaunch: vi.fn(),
-  recordLifecycle: vi.fn(),
-}));
-
-vi.mock('@roomote/db/server', () => ({
-  db: { query: { taskRuns: { findFirst: mocks.findRun } } },
-  and: vi.fn((...values: unknown[]) => values),
-  eq: vi.fn((...values: unknown[]) => values),
-  recordTaskRunLifecycleEvent: mocks.recordLifecycle,
-  taskRuns: {
-    id: 'id',
-    taskId: 'task_id',
-    sourceRunId: 'source_run_id',
-  },
+  retryFailedTaskStart: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  canRetryFailedStart: mocks.canRetry,
-  enqueueTaskRelaunch: mocks.enqueueRelaunch,
+  retryFailedTaskStart: mocks.retryFailedTaskStart,
 }));
 
 import { retryFastAgentStartup } from './fast-agent-startup-retry';
@@ -50,54 +34,36 @@ function makeRun(overrides: Partial<TaskRun> = {}): TaskRun {
 describe('retryFastAgentStartup', () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    mocks.canRetry.mockResolvedValue(true);
-    mocks.enqueueRelaunch.mockResolvedValue({ id: 201 });
-    mocks.recordLifecycle.mockResolvedValue(undefined);
+    mocks.retryFailedTaskStart.mockResolvedValue({
+      success: true,
+      run: { id: 201 },
+      retryNumber: 1,
+      delayMs: 1_000,
+    });
   });
 
-  it('reuses an already-queued retry idempotently', async () => {
-    mocks.findRun.mockResolvedValueOnce({ id: 201 });
+  it('delegates parent-approved retries to canonical failed-start retry admission', async () => {
     await expect(retryFastAgentStartup(makeRun(), parent)).resolves.toEqual({
       success: true,
       runId: 201,
     });
-    expect(mocks.enqueueRelaunch).not.toHaveBeenCalled();
+    expect(mocks.retryFailedTaskStart).toHaveBeenCalledWith({
+      sourceRun: expect.objectContaining({ id: 200 }),
+      actingUserId: 'user-1',
+      trigger: 'fast_parent',
+    });
   });
 
-  it('queues an eligible first retry after the bounded backoff', async () => {
-    vi.useFakeTimers();
-    try {
-      mocks.findRun.mockResolvedValueOnce(undefined);
-      const result = retryFastAgentStartup(makeRun(), parent);
-      await vi.advanceTimersByTimeAsync(1_000);
-      await expect(result).resolves.toEqual({ success: true, runId: 201 });
-      expect(mocks.enqueueRelaunch).toHaveBeenCalledWith({
-        sourceRunId: 200,
-        actingUserId: 'user-1',
-      });
-    } finally {
-      vi.useRealTimers();
-    }
-  });
+  it('reports the canonical retry rejection', async () => {
+    mocks.retryFailedTaskStart.mockResolvedValue({
+      success: false,
+      reason: 'limit_reached',
+      error: 'The failed-start retry limit has been reached.',
+    });
 
-  it('reports the retry limit without launching again', async () => {
-    mocks.findRun
-      .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce({
-        sourceRunId: 100,
-        payload: { fastAgentParent: parent },
-      })
-      .mockResolvedValueOnce({
-        sourceRunId: null,
-        payload: { fastAgentParent: parent },
-      });
-
-    await expect(
-      retryFastAgentStartup(makeRun({ sourceRunId: 150 }), parent),
-    ).resolves.toEqual({
+    await expect(retryFastAgentStartup(makeRun(), parent)).resolves.toEqual({
       success: false,
       error: 'The failed-start retry limit has been reached.',
     });
-    expect(mocks.enqueueRelaunch).not.toHaveBeenCalled();
   });
 });

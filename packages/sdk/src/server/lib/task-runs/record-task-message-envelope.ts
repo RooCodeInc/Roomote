@@ -822,7 +822,9 @@ export async function recordTaskMessageEnvelope(
   // `finishRun` -- and the agent cannot report it either because its own turn is
   // already dead. Report it from the message itself so the originating chat
   // thread is told regardless of what the task does next.
-  void maybeNotifySourceThreadOfTerminalProviderError({
+  // Wait through durable Session admission before acknowledging the persisted
+  // envelope. Direct chat delivery remains best effort inside the helper.
+  await maybeNotifySourceThreadOfTerminalProviderError({
     runId,
     taskId,
     envelope,

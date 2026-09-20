@@ -2,6 +2,7 @@ import {
   TASK_TURN_PROVIDER_ERROR_TEXT,
   formatMarkdownLink,
 } from '@roomote/communication/chat-messages';
+import { redactSecrets } from '@roomote/communication/redact-secrets';
 import {
   type AcpPersistedEnvelope,
   asRecord,
@@ -10,6 +11,7 @@ import {
   getCommunicationProviderFromTaskPayload,
   getCommunicationServiceUrlFromTaskPayload,
   getCommunicationThreadIdFromTaskPayload,
+  getFastAgentParentFromPayload,
   getTerminalProviderErrorFromMessageData,
 } from '@roomote/types';
 import {
@@ -34,6 +36,7 @@ import {
   formatChannelProviderError,
 } from './channel-provider-error-text';
 import { resolveSlackTaskRunRouting } from './slack-task-run-routing';
+import { enqueueFastAgentParentEvent } from '../fast-agent-parent-event-queue';
 
 const TURN_PROVIDER_ERROR_CLAIM_KEY_PREFIX = 'turn-provider-error:';
 const TURN_PROVIDER_ERROR_CLAIM_TTL_SECONDS = 7 * 24 * 60 * 60;
@@ -258,8 +261,9 @@ async function notifySlack(run: NotifiedRun, error: string): Promise<boolean> {
 }
 
 /**
- * Report a turn-ending provider error into the conversation that started the
- * task, on whichever chat platform that was.
+ * Report a turn-ending provider error into the conversation that owns the
+ * task. Session-owned tasks enter the durable parent-event inbox; standalone
+ * chat tasks keep their direct provider delivery.
  *
  * A terminal provider error kills the model turn but deliberately leaves the
  * task session alive for follow-ups, so the run settles as `idle` rather than
@@ -277,14 +281,6 @@ async function notifySourceThreadOfTerminalProviderError(input: {
   ts: number;
   errorSummary: string;
 }): Promise<void> {
-  const error = formatChannelProviderError(input.errorSummary);
-
-  if (!error) {
-    // Unrecognized or unsafe-to-echo error text. The full detail stays in the
-    // task transcript rather than being pasted into a customer channel.
-    return;
-  }
-
   const run = await db.query.taskRuns.findFirst({
     where: eq(taskRuns.id, input.runId),
     with: { task: true },
@@ -294,13 +290,49 @@ async function notifySourceThreadOfTerminalProviderError(input: {
     return;
   }
 
+  const parent = getFastAgentParentFromPayload(run.payload);
+  if (parent) {
+    const error = redactSecrets(input.errorSummary).trim();
+    if (!error) return;
+
+    await enqueueFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'task_turn_provider_error',
+        taskId: run.taskId,
+        runId: run.id,
+        messageTs: input.ts,
+        error,
+        taskUrl: getTaskUrl({
+          taskId: run.taskId,
+          utm: {
+            campaign: 'fast-delegation-provider-error',
+            source: parent.conversation.surface,
+          },
+        }),
+      },
+    });
+    console.log(
+      `[turnProviderError] Queued provider error for Fast parent Session of run ${input.runId}`,
+    );
+    return;
+  }
+
+  const error = formatChannelProviderError(input.errorSummary);
+
+  if (!error) {
+    // Unrecognized or unsafe-to-echo error text. The full detail stays in the
+    // task transcript rather than being pasted into a customer channel.
+    return;
+  }
+
   const provider = run.task.slackThreadTs
     ? 'slack'
     : getCommunicationProviderFromTaskPayload(run.payload);
 
   if (!provider) {
-    // Task was not started from a chat surface (web, GitHub, Linear, ...), so
-    // there is no source thread to report into.
+    // Task was not started from a chat surface or Session, so there is no
+    // owning conversation to report into.
     return;
   }
 

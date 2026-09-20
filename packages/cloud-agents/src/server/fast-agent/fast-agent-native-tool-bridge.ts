@@ -108,6 +108,12 @@ type FastAgentNativeToolRuntime = {
   directory: string;
   env: Record<string, string>;
   mcpCapability: string;
+  /**
+   * True when the code-mode integrations experiment actually activated for
+   * this runtime (flag on and no server-name collision fallback). The service
+   * uses it to mount integrations connected mid-turn onto the leased server.
+   */
+  codeModeIntegrationsActive: boolean;
 };
 
 export type FastAgentMcpToolCall = {
@@ -1151,16 +1157,21 @@ async function handleMcpRequest(
     { name: `roomote-fast-${integration.id}`, version: '1.0.0' },
     { capabilities: { tools: {} }, instructions: integration.instructions },
   );
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: integration.tools.map((tool) => ({
-      name: tool.name,
-      ...(tool.description ? { description: tool.description } : {}),
-      inputSchema:
-        tool.inputSchema && typeof tool.inputSchema === 'object'
-          ? tool.inputSchema
-          : { type: 'object' as const },
-    })),
-  }));
+  server.setRequestHandler(ListToolsRequestSchema, async () => {
+    console.info(
+      `[Fast Agent] MCP bridge ListTools integration=${integration.id} toolCount=${integration.tools.length} tools=${integration.tools.map((tool) => tool.name).join(',')}`,
+    );
+    return {
+      tools: integration.tools.map((tool) => ({
+        name: tool.name,
+        ...(tool.description ? { description: tool.description } : {}),
+        inputSchema:
+          tool.inputSchema && typeof tool.inputSchema === 'object'
+            ? tool.inputSchema
+            : { type: 'object' as const },
+      })),
+    };
+  });
   server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
     const executor = capability.executor;
     const generation = capability.generation;
@@ -1609,6 +1620,41 @@ function pruneSessionRuntimes(): void {
   }
 }
 
+/**
+ * True when two authorized integrations would collide as sanitized OpenCode
+ * server names, so the code-mode integrations experiment cannot activate for
+ * this set. The service checks this before building the system prompt so a
+ * colliding conversation keeps the classic dispatcher described in its
+ * prompt, matching the runtime fallback in getFastAgentNativeToolRuntime.
+ */
+export function hasFastAgentCodeModeServerNameCollision(
+  integrations: FastAgentIntegration[],
+): boolean {
+  return findSanitizedMcpServerNameCollision(integrations) !== null;
+}
+
+/**
+ * OpenCode prefixes MCP tools with the sanitized server name
+ * (`[^a-zA-Z0-9_-]` becomes `_`). Two distinct integration ids that sanitize
+ * to the same server name would merge their tool namespaces under code mode,
+ * so the experiment refuses to activate for that conversation instead of
+ * exposing an ambiguous catalog.
+ */
+function findSanitizedMcpServerNameCollision(
+  integrations: FastAgentIntegration[],
+): { first: string; second: string; sanitized: string } | null {
+  const seen = new Map<string, string>();
+  for (const integration of integrations) {
+    const sanitized = integration.id.replace(/[^a-zA-Z0-9_-]/gu, '_');
+    const first = seen.get(sanitized);
+    if (first !== undefined && first !== integration.id) {
+      return { first, second: integration.id, sanitized };
+    }
+    seen.set(sanitized, integration.id);
+  }
+  return null;
+}
+
 export async function getFastAgentNativeToolRuntime(
   sessionId: string,
   integrations: FastAgentIntegration[],
@@ -1617,6 +1663,7 @@ export async function getFastAgentNativeToolRuntime(
     serviceCredentialToolsEnabled?: boolean;
     serviceCredentialPrepareEnabled?: boolean;
     addRemoteMcpEnabled?: boolean;
+    codeModeIntegrationsEnabled?: boolean;
   } = {},
 ): Promise<FastAgentNativeToolRuntime> {
   bridgePromise ??= startBridge();
@@ -1637,6 +1684,7 @@ export async function getFastAgentNativeToolRuntime(
           : {}),
       },
       mcpCapability: randomBytes(32).toString('hex'),
+      codeModeIntegrationsActive: false,
     };
     sessionRuntimes.set(sessionId, runtime);
   } else {
@@ -1657,9 +1705,32 @@ export async function getFastAgentNativeToolRuntime(
   // reachable through the capability (find_integration_tools and
   // call_integration_tool route to the same executor) without their schemas
   // being sent on every model request.
-  const nativeIntegrations = integrations.filter((integration) =>
+  let mountedIntegrations = integrations.filter((integration) =>
     isFastAgentNativeIntegration(integration.id),
   );
+  // The code-mode integrations experiment instead mounts every
+  // actor-authorized server and lets OpenCode's confined `execute` runner
+  // discover and call their tools individually. Calls flow through the same
+  // capability executor as call_integration_tool, so authorization,
+  // visibility, credential mediation, and refresh behavior are unchanged.
+  let codeModeIntegrationsActive = false;
+  if (options.codeModeIntegrationsEnabled === true) {
+    const collision = findSanitizedMcpServerNameCollision(integrations);
+    if (collision) {
+      console.warn(
+        `[Fast Agent] Code-mode integrations skipped: integration ids ${collision.first} and ${collision.second} collide as OpenCode MCP server names (${collision.sanitized}).`,
+      );
+    } else {
+      codeModeIntegrationsActive = true;
+      mountedIntegrations = integrations;
+    }
+  }
+  if (codeModeIntegrationsActive) {
+    runtime.env.OPENCODE_EXPERIMENTAL_CODE_MODE = '1';
+  } else {
+    delete runtime.env.OPENCODE_EXPERIMENTAL_CODE_MODE;
+  }
+  runtime.codeModeIntegrationsActive = codeModeIntegrationsActive;
   writeFileSync(
     join(runtime.directory, 'opencode.json'),
     JSON.stringify({
@@ -1670,7 +1741,7 @@ export async function getFastAgentNativeToolRuntime(
       agent: {
         build: {
           tools: buildFastAgentToolFilter(
-            nativeIntegrations.map((integration) => integration.id),
+            mountedIntegrations.map((integration) => integration.id),
             {
               surface: options.surface ?? 'web',
               serviceCredentialToolsEnabled:
@@ -1678,12 +1749,13 @@ export async function getFastAgentNativeToolRuntime(
               serviceCredentialPrepareEnabled:
                 options.serviceCredentialPrepareEnabled,
               addRemoteMcpEnabled: options.addRemoteMcpEnabled,
+              codeModeIntegrationsEnabled: codeModeIntegrationsActive,
             },
           ),
         },
       },
       mcp: Object.fromEntries(
-        nativeIntegrations.map((integration) => [
+        mountedIntegrations.map((integration) => [
           integration.id,
           {
             type: 'remote',
@@ -1698,6 +1770,62 @@ export async function getFastAgentNativeToolRuntime(
     'utf8',
   );
   return runtime;
+}
+
+/**
+ * Mount one integration on a running code-mode OpenCode server mid-turn.
+ * Used when connect_integration or add_remote_mcp succeeds after the turn's
+ * config was generated: without this the new server would be absent from
+ * tools.$codemode.search and uncalleable through execute until the next turn.
+ * The mounted endpoint is the same capability-scoped bridge URL the
+ * turn-start config uses, so authorization and credential mediation are
+ * unchanged. Returns false (caller keeps the successful connect result) when
+ * the server rejects the add; the next turn mounts it from config instead.
+ */
+export async function mountFastAgentIntegrationOnCodeModeServer(input: {
+  serverUrl: string;
+  directory: string;
+  mcpCapability: string;
+  integrationId: string;
+}): Promise<boolean> {
+  bridgePromise ??= startBridge();
+  const bridge = await bridgePromise;
+  // OpenCode instances are per-directory: without the workspace routing the
+  // server would land on the default instance and stay invisible to the
+  // session's code-mode catalog.
+  const response = await fetch(
+    `${input.serverUrl}/mcp?directory=${encodeURIComponent(input.directory)}`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: input.integrationId,
+        config: {
+          type: 'remote',
+          url: `${bridge.url}/mcp/${input.mcpCapability}/${encodeURIComponent(input.integrationId)}`,
+          enabled: true,
+          oauth: false,
+          headers: { Authorization: `Bearer ${input.mcpCapability}` },
+        },
+      }),
+      signal: AbortSignal.timeout(10_000),
+    },
+  );
+  if (!response.ok) return false;
+  // A 200 still carries a per-server status map; a failed connect there means
+  // the server never enters the code-mode catalog this turn.
+  const status = (await response.json().catch(() => null)) as Record<
+    string,
+    { status?: string; error?: string }
+  > | null;
+  const entry = status?.[input.integrationId];
+  if (entry && entry.status !== 'connected') {
+    console.warn(
+      `[Fast Agent] Code-mode mid-turn mount of ${input.integrationId} reports status=${entry.status ?? 'unknown'}${entry.error ? ` error=${entry.error}` : ''}.`,
+    );
+    return false;
+  }
+  return true;
 }
 
 export function bindFastAgentMcpToolExecutor(

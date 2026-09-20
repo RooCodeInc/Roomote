@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { format as formatDate } from 'date-fns';
@@ -15,12 +16,14 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
   DropdownMenuLabel,
+  ExternalLink,
   X,
 } from '@/components/system';
 
 import type { ArtifactWithContent } from '@/types';
 
 import { useTRPC } from '@/trpc/client';
+import { getStandaloneArtifactViewUrl } from '@/lib/artifact-view-urls';
 
 import { ArtifactViewerContent } from '@/components/tasks/ArtifactViewerContent';
 
@@ -148,6 +151,40 @@ export function ArtifactDetail({
         }
         actions={
           <>
+            {artifact && !isLoading ? (
+              <BasicTooltip content="Open artifact">
+                <Button
+                  asChild
+                  variant="ghost"
+                  size="icon"
+                  className="size-5 shrink-0 hover:scale-120 hover:text-accent-foreground"
+                >
+                  <Link
+                    href={getStandaloneArtifactViewUrl(
+                      '',
+                      { taskId },
+                      artifact.path,
+                      artifact.version,
+                    )}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label="Open artifact"
+                  >
+                    <ExternalLink className="size-3.5" />
+                  </Link>
+                </Button>
+              </BasicTooltip>
+            ) : (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-5 shrink-0"
+                aria-label="Open artifact"
+                disabled
+              >
+                <ExternalLink className="size-3.5" />
+              </Button>
+            )}
             <BasicTooltip content="View fullscreen">
               <Button
                 variant="ghost"

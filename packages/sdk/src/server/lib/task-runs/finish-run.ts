@@ -56,6 +56,7 @@ import {
   finalizeGithubPrReviewComment,
   getTaskUrl,
   releaseTaskRun,
+  retryFailedTaskStart,
   suggestSlackQuestionChannels,
 } from '@roomote/cloud-agents/server';
 import { captureTaskSettled } from '@roomote/telemetry/server';
@@ -382,6 +383,20 @@ export const finishRun = async ({
     }
   });
 
+  const fastAgentParent = getFastAgentParentFromPayload(run.payload);
+  const automaticallyRetried = await maybeRetryFailedStart({
+    run: { ...run, status, error: sanitizedError ?? run.error },
+    status,
+    hasFastAgentParent: Boolean(fastAgentParent),
+  });
+
+  await cleanupTerminalRunResources(run, status);
+
+  if (automaticallyRetried) {
+    void captureTaskSettled(run.id, RunStatus.Failed, errorCode);
+    return;
+  }
+
   if (status !== RunStatus.Idle) {
     try {
       await refreshFinishedAutomationSlackResult(run);
@@ -438,7 +453,6 @@ export const finishRun = async ({
       });
     }
   }
-  const fastAgentParent = getFastAgentParentFromPayload(run.payload);
   const parentSettleNotification = notifyFastAgentParentOnSettle(
     {
       ...run,
@@ -484,30 +498,6 @@ export const finishRun = async ({
     } catch (error) {
       console.warn(
         `[finishRun] Failed to refresh final title for run ${id}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
-  }
-
-  if (status !== RunStatus.Idle) {
-    try {
-      await cleanupSandboxOidcTargetsForTaskRun(id);
-    } catch (error) {
-      console.warn(
-        `[finishRun] Failed to clean sandbox OIDC targets for run ${id}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
-  }
-
-  if (status !== RunStatus.Idle) {
-    try {
-      await revokeTaskRunScopedGitLabTokens(run);
-    } catch (error) {
-      console.warn(
-        `[finishRun] Failed to revoke GitLab scoped tokens for run ${id}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
@@ -657,6 +647,53 @@ export const finishRun = async ({
     }
   }
 };
+
+async function maybeRetryFailedStart(input: {
+  run: TaskRun;
+  status: RunStatus;
+  hasFastAgentParent: boolean;
+}): Promise<boolean> {
+  if (input.status !== RunStatus.Failed || input.hasFastAgentParent) {
+    return false;
+  }
+
+  try {
+    const result = await retryFailedTaskStart({
+      sourceRun: input.run,
+      actingUserId: input.run.actingUserId,
+      trigger: 'automatic',
+    });
+    return result.success;
+  } catch (error) {
+    console.error(
+      `[finishRun] Failed to schedule automatic startup retry for run ${input.run.id}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return false;
+  }
+}
+
+async function cleanupTerminalRunResources(
+  run: TaskRun,
+  status: RunStatus,
+): Promise<void> {
+  if (status === RunStatus.Idle) return;
+
+  try {
+    await cleanupSandboxOidcTargetsForTaskRun(run.id);
+  } catch (error) {
+    console.warn(
+      `[finishRun] Failed to clean sandbox OIDC targets for run ${run.id}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  try {
+    await revokeTaskRunScopedGitLabTokens(run);
+  } catch (error) {
+    console.warn(
+      `[finishRun] Failed to revoke GitLab scoped tokens for run ${run.id}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
 
 /**
  * Keep every direct completion writer on the same Brain activation guard.

@@ -2,6 +2,8 @@ import {
   TaskModelSelectionError,
   applyTaskModelSelectionToRun,
   canRetryFailedStart,
+  countFailedStartRetries,
+  FAILED_START_AUTO_RETRY_MAX_RETRIES,
 } from '@roomote/cloud-agents/server';
 import {
   REASONING_EFFORT_VALUES,
@@ -12,6 +14,7 @@ import {
   getCommunicationChannelFromTaskPayload,
   getCommunicationProviderFromTaskPayload,
   getEnvironmentDefinitionIdFromPayload,
+  getFastAgentParentFromPayload,
   isBootingRunStatus,
   isExitedRunStatus,
   resolveSourceControlProviderFromPayload,
@@ -78,6 +81,20 @@ import {
 const SANDBOX_PROMPT_TOKEN_TIMEOUT_MS = 15 * 60 * 1000;
 const SANDBOX_PROMPT_TIMEOUT_MS = 30_000;
 const SANDBOX_RPC_HEALTHCHECK_TIMEOUT_MS = 5_000;
+
+export function shouldPollForAutomaticFailedStartRetry(input: {
+  sessionState: string;
+  canRetryFailedStart: boolean;
+  failedStartRetryCount: number;
+  hasFastAgentParent: boolean;
+}): boolean {
+  return (
+    input.sessionState === 'boot-failed' &&
+    input.canRetryFailedStart &&
+    !input.hasFastAgentParent &&
+    input.failedStartRetryCount < FAILED_START_AUTO_RETRY_MAX_RETRIES
+  );
+}
 const requestUserInputAnswersSchema = z.record(
   z.object({
     answers: z.array(z.string()),
@@ -968,6 +985,16 @@ export async function getSandboxSessionByTaskIdCommand(
     hasMessages,
     hasHarnessMessages,
   });
+  const shouldPollForAutomaticRetry =
+    taskRun.canRetryFailedStart === true &&
+    shouldPollForAutomaticFailedStartRetry({
+      sessionState,
+      canRetryFailedStart: true,
+      failedStartRetryCount: await countFailedStartRetries(taskRun.taskId),
+      hasFastAgentParent: Boolean(
+        getFastAgentParentFromPayload(taskRun.payload),
+      ),
+    });
   const resolvedPreviewRuntimeConfig =
     await resolveEffectivePreviewRuntimeConfig({
       runtimeEnv: process.env,
@@ -978,6 +1005,10 @@ export async function getSandboxSessionByTaskIdCommand(
   // Dynamically shorten the poll interval when a snapshot is in progress
   // so the client picks up snapshotCreatedAt as quickly as possible.
   const refetchInterval = (() => {
+    if (shouldPollForAutomaticRetry) {
+      return 2_000;
+    }
+
     // Keep polling quickly while waiting for the harness's first message so we
     // can switch from Startup/resume to live chat as soon as output appears.
     if (

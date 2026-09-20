@@ -416,6 +416,7 @@ describe('uploadArtifact', () => {
           version: 1,
           uploadUrl: 'https://s3.example.com/upload',
           viewUrl: 'https://test-api.example.com/view',
+          standaloneViewUrl: 'https://test-api.example.com/standalone',
           artifactType: 'plan',
           rawUrl: 'https://test-api.example.com/api/artifacts/art-1/raw',
         }),
@@ -439,6 +440,7 @@ describe('uploadArtifact', () => {
       artifactId: 'art-1',
       version: 1,
       viewUrl: 'https://test-api.example.com/view',
+      standaloneViewUrl: 'https://test-api.example.com/standalone',
       artifactType: 'plan',
       rawUrl: 'https://test-api.example.com/api/artifacts/art-1/raw',
     });
@@ -473,6 +475,7 @@ describe('uploadArtifact', () => {
     });
 
     expect(result.rawUrl).toBeUndefined();
+    expect(result.standaloneViewUrl).toBeUndefined();
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 });

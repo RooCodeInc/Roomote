@@ -275,6 +275,7 @@ describe('setup context on ordinary Fast session input', () => {
       event: expect.objectContaining({
         setupSession: true,
         setupContext: setupContext.setupContext,
+        webFollowUp: true,
       }),
     });
   });
@@ -285,6 +286,9 @@ describe('setup context on ordinary Fast session input', () => {
       text: 'Review this change.',
     });
     const turn = await runScheduled();
+    expect(mocks.buildReplyDelivery).toHaveBeenCalledWith(
+      expect.objectContaining({ webFollowUp: true }),
+    );
     expect(turn.setupSession).toBeUndefined();
     expect(turn.setupSnapshot).toBeUndefined();
     expect(turn.adapter.resolveUserInputPreset).toBeUndefined();
@@ -1316,6 +1320,7 @@ describe('Fast session PR review actions', () => {
       userId: 'user-1',
       senderDisplayName: 'User One',
       question: 'Continue this scheduled run.',
+      webFollowUp: true,
     });
     const scheduled = mocks.after.mock.calls[0]?.[0];
     expect(scheduled).toBeTypeOf('function');

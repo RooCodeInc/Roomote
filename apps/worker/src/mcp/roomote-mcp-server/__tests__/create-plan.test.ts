@@ -40,6 +40,7 @@ describe('handleCreatePlan', () => {
           version: 1,
           uploadUrl: 'https://s3.example.com/upload',
           viewUrl: 'https://test-api.example.com/view',
+          standaloneViewUrl: 'https://test-api.example.com/standalone',
           artifactType: 'plan',
           rawUrl: 'https://test-api.example.com/api/artifacts/art-1/raw',
         }),
@@ -63,6 +64,9 @@ describe('handleCreatePlan', () => {
     expect(parsed.artifactId).toBe('art-1');
     expect(parsed.version).toBe(1);
     expect(parsed.viewUrl).toBe('https://test-api.example.com/view');
+    expect(parsed.standaloneViewUrl).toBe(
+      'https://test-api.example.com/standalone',
+    );
     expect(parsed.rawUrl).toBeUndefined();
 
     expect(fetchMock.mock.calls[0]![0]).toBe(

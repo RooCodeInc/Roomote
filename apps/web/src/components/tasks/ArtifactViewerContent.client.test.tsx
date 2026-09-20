@@ -878,6 +878,49 @@ describe('ArtifactViewerContent', () => {
     );
   });
 
+  it.each([
+    [
+      { taskId: 'task-1' },
+      '/artifacts/task/task-1?path=reports%2Fdata.csv&v=1',
+    ],
+    [
+      { sessionId: 'session-1' },
+      '/artifacts/session/session-1?path=reports%2Fdata.csv&v=1',
+    ],
+  ])('copies the standalone artifact URL for owner %o', async (owner, path) => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    render(
+      <ArtifactViewerContent
+        owner={owner}
+        artifact={{
+          id: 'artifact-1',
+          taskId: 'taskId' in owner ? owner.taskId : null,
+          sessionId: 'sessionId' in owner ? owner.sessionId : null,
+          path: 'reports/data.csv',
+          version: 1,
+          artifactType: 'general',
+          contentType: 'text/csv',
+          size: 128,
+          createdAt: new Date('2026-05-22T00:00:00.000Z'),
+          downloadUrl: 'https://example.test/data.csv',
+          content: 'name,value\nalpha,1',
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy URL' }));
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith(
+        `${window.location.origin}${path}`,
+      );
+    });
+  });
+
   it('offers the Build action when a markdown plan has no fetched content', () => {
     render(
       <ArtifactViewerContent

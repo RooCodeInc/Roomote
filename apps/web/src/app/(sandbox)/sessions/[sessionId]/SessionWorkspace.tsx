@@ -1,6 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
+import Link from 'next/link';
 import {
   createContext,
   useCallback,
@@ -27,7 +28,10 @@ import {
   getUserDisplayName,
   humanizeFilename,
 } from '@/lib';
-import { type SessionArtifactSelection } from '@/lib/artifact-view-urls';
+import {
+  getStandaloneArtifactViewUrl,
+  type SessionArtifactSelection,
+} from '@/lib/artifact-view-urls';
 import { isMarkdownArtifact, isTabularArtifact } from '@/lib/artifact-types';
 import { getSessionPullRequests } from '@/lib/session-pull-requests';
 import { SessionInferenceCostBreakdown } from '@/components/sessions/SessionInferenceCostBreakdown';
@@ -60,6 +64,7 @@ import {
   Loader2Icon,
   LocalDateTime,
   Mail,
+  Maximize2,
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -416,6 +421,37 @@ function SessionArtifactViewer({
         backLabel={backLabel}
         onClose={onClose}
         closeLabel={closeLabel}
+        actions={
+          (selection.version ?? artifact?.version) ? (
+            <BasicTooltip content="Open artifact">
+              <Button asChild variant="ghost" size="icon" className="size-8">
+                <Link
+                  href={getStandaloneArtifactViewUrl(
+                    '',
+                    selection.owner,
+                    selection.path,
+                    selection.version ?? artifact!.version,
+                  )}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label="Open artifact"
+                >
+                  <Maximize2 />
+                </Link>
+              </Button>
+            </BasicTooltip>
+          ) : (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8"
+              aria-label="Open artifact"
+              disabled
+            >
+              <Maximize2 />
+            </Button>
+          )
+        }
       />
       <div className="min-h-0 flex-1 bg-background">
         <ArtifactViewerContent

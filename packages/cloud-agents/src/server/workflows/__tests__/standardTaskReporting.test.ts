@@ -94,5 +94,8 @@ describe('standardTask reporting consumer', () => {
       'acknowledge it immediately to the user',
     );
     expect(harnessInstructions).toContain('<user_input_elicitation>');
+    expect(harnessInstructions).toContain(
+      'The returned `viewUrl` opens the artifact in its task, while `standaloneViewUrl` opens the document, image, or file on its own page with a direct shareable link; share whichever returned URL fits the context, unchanged, rather than constructing an artifact URL.',
+    );
   });
 });

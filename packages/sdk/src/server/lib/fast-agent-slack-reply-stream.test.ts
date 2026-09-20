@@ -86,7 +86,7 @@ describe('createSlackFastReplyStream', () => {
       threadTs: '100.1',
       recipientTeamId: 'T1',
       recipientUserId: 'U1',
-      markdownText: 'Looking',
+      markdownText: '> Matt: hi\nLooking',
     });
     expect(slack.appendMessageStream).toHaveBeenCalledWith({
       channel: 'C1',
@@ -391,7 +391,7 @@ describe('createSlackFastReplyStream', () => {
     mocks.updateWithFooter.mockResolvedValue(false);
     slack.deleteMessage.mockResolvedValue(false);
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const { stream, onDelivered } = build(slack, null);
+    const { stream, onDelivered, getPendingQuote } = build(slack, '> Matt: hi');
 
     await stream.append('Looking');
     await expect(
@@ -400,7 +400,11 @@ describe('createSlackFastReplyStream', () => {
     expect(mocks.recordMessage).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: 'session-1', messageId: '200.1' }),
     );
+    expect(slack.startMessageStream).toHaveBeenCalledWith(
+      expect.objectContaining({ markdownText: '> Matt: hi\nLooking' }),
+    );
     expect(onDelivered).toHaveBeenCalledOnce();
+    expect(getPendingQuote()).toBeNull();
     expect(error).toHaveBeenCalledWith(
       expect.stringContaining('partial stream could not be removed'),
     );

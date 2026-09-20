@@ -1856,6 +1856,10 @@ describe('SessionWorkspace', () => {
     expect(
       screen.queryByRole('button', { name: 'Open Decision from Session' }),
     ).toBeNull();
+    expect(screen.getByRole('link', { name: 'Open artifact' })).toHaveAttribute(
+      'href',
+      '/artifacts/session/session-1?path=notes%2Fdecision.md&v=1',
+    );
     await waitFor(() =>
       expect(artifactQueryInputs).toContainEqual({
         sessionId: 'session-1',

@@ -75,6 +75,7 @@ import {
   getSessionForTask,
   inArray,
   isBrainEnabled,
+  isDeploymentExperimentEnabled,
   isPrivateSessionsExperimentEnabled,
   isNull,
   markSessionGoalForConversation,
@@ -196,6 +197,8 @@ import {
   bindFastAgentMcpToolExecutor,
   FAST_AGENT_NATIVE_TOOL_NAMES,
   getFastAgentNativeToolRuntime,
+  hasFastAgentCodeModeServerNameCollision,
+  mountFastAgentIntegrationOnCodeModeServer,
   type FastAgentMcpToolCall,
   type FastAgentNativeToolCall,
 } from './fast-agent-native-tool-bridge';
@@ -205,6 +208,7 @@ import {
 } from './fast-agent-tool-policy';
 import {
   callFastAgentIntegration,
+  clearFastAgentIntegrationToolCache,
   listFastAgentIntegrations,
   type FastAgentIntegration,
 } from './fast-agent-integration-broker';
@@ -950,6 +954,49 @@ class FastAgentInferenceError extends Error {
     this.name = 'FastAgentInferenceError';
     this.detail = describeInferenceErrorForUser(cause);
   }
+}
+
+/**
+ * Inference failures that will repeat identically however often the turn is
+ * re-delivered, because they describe the deployment's configuration or the
+ * content itself rather than the state of the provider. A generic provider
+ * rejection is deliberately not here: a later attempt from a rebuilt session
+ * can still succeed, so it is retried within a bounded budget instead.
+ */
+const TERMINAL_INFERENCE_FAILURE_REASONS: ReadonlySet<string> = new Set([
+  'invalid_credentials',
+  'insufficient_credits',
+  'model_unavailable',
+  'content_filter',
+]);
+
+function isTerminalInferenceFailure(
+  failure: FastAgentInferenceFailure,
+): boolean {
+  return (
+    !failure.retryable && TERMINAL_INFERENCE_FAILURE_REASONS.has(failure.reason)
+  );
+}
+
+/**
+ * The terminal inference failure inside an error chain, if there is one.
+ * Callers that re-deliver a failed turn use it to stop re-delivering one
+ * that cannot succeed.
+ */
+export function findTerminalFastAgentInferenceFailure(
+  error: unknown,
+): FastAgentInferenceFailure | null {
+  let current: unknown = error;
+  for (let depth = 0; depth < 6 && current; depth += 1) {
+    if (current instanceof FastAgentInferenceError) {
+      return isTerminalInferenceFailure(current.failure)
+        ? current.failure
+        : null;
+    }
+    if (typeof current !== 'object') return null;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return null;
 }
 
 const FAST_AGENT_INFERENCE_DETAIL_MAX_CHARS = 200;
@@ -1944,8 +1991,18 @@ export async function answerFastAgentQuestion({
   let currentPrivateOwnerUserId: string | null = null;
   let privateSessionsExperimentEnabled = false;
   let availableIntegrations: FastAgentIntegration[] = [];
+  /** Code-mode integrations experiment turn state: set once the turn's
+   * runtime and leased server are known, read by mid-turn connect handlers. */
+  let codeModeIntegrationsActiveForTurn = false;
+  let codeModeMcpCapabilityForTurn: string | null = null;
+  let codeModeDirectoryForTurn: string | null = null;
+  let codeModeMountedIntegrationIdsForTurn = new Set<string>();
+  let codeModeOpenCodeServerUrl: string | null = null;
   let durableOpenCodeSessionId: string | null = null;
   let lastVisibleMessage = '';
+  // The most recent assistant message already in the conversation, so a
+  // repeat of the same terminal failure does not post the same closeout again.
+  let priorAssistantMessage: string | undefined;
   /** Last model OpenCode resolved for this turn, for the failure closeout. */
   let lastResolvedInferenceModel: string | undefined;
   let currentInstructionVersion = 0;
@@ -3341,6 +3398,12 @@ export async function answerFastAgentQuestion({
     // The judgment model's environment pick is only useful before the Session
     // has chosen where its work runs, so it is requested for what looks like
     // the first human request and used only once persistence confirms it.
+    const priorAssistant = session.compatibilityMessages
+      .filter((message) => message.role === 'assistant')
+      .at(-1);
+    priorAssistantMessage = priorAssistant
+      ? extractModelMessageText(priorAssistant).join('\n')
+      : undefined;
     const routingHintRequest =
       substantiveHumanInput &&
       !setupSession &&
@@ -3421,6 +3484,9 @@ export async function answerFastAgentQuestion({
       currentSessionPrivacy === 'private'
         ? await isPrivateSessionsExperimentEnabled()
         : false;
+    const codeModeIntegrationsEnabled = await isDeploymentExperimentEnabled(
+      'codeModeIntegrations',
+    );
     availableIntegrations = selectFastRoomoteChannelTools({
       integrations: discoveredIntegrations,
       conversation,
@@ -3677,6 +3743,11 @@ export async function answerFastAgentQuestion({
       Env.RELEASE_VERSION,
       packageJson.version,
     );
+    // Colliding sanitized server names keep the classic dispatcher at
+    // runtime; prompt, config mounting, and the lease must all agree.
+    const codeModeIntegrationsEffective =
+      codeModeIntegrationsEnabled &&
+      !hasFastAgentCodeModeServerNameCollision(availableIntegrations);
     const system = buildFastAgentSystemPrompt({
       availableEnvironments,
       activeRepositories,
@@ -3705,6 +3776,7 @@ export async function answerFastAgentQuestion({
       setupSession,
       serviceCredentialToolsEnabled: currentUser.serviceCredentialToolsEnabled,
       addRemoteMcpEnabled: !platformEvent,
+      codeModeIntegrationsEnabled: codeModeIntegrationsEffective,
       personalizationContext,
       globalAgentInstructions: agentBehaviorSettings?.globalAgentInstructions,
       workspaceRoutingRules:
@@ -4079,6 +4151,98 @@ export async function answerFastAgentQuestion({
       call.toolName === 'integration_request' &&
       typeof call.args?.integrationId === 'string' &&
       call.args.integrationId.startsWith('session:');
+    /**
+     * Code-mode integrations experiment: a server connected mid-turn is not
+     * in the mounted set the leased OpenCode server booted with, so mount it
+     * live; otherwise tools.$codemode.search cannot see it until the next
+     * turn. Failures keep the successful connect result; the next turn mounts
+     * the server from the regenerated config instead.
+     */
+    const mountNewlyConnectedCodeModeIntegrations = async (
+      refreshedIntegrations: FastAgentIntegration[],
+    ): Promise<void> => {
+      if (
+        !codeModeIntegrationsActiveForTurn ||
+        !codeModeOpenCodeServerUrl ||
+        !codeModeMcpCapabilityForTurn ||
+        !codeModeDirectoryForTurn
+      ) {
+        console.warn(
+          `[Fast Agent] Skipping mid-turn code-mode mount: active=${codeModeIntegrationsActiveForTurn} serverUrl=${codeModeOpenCodeServerUrl ? 'set' : 'null'} capability=${codeModeMcpCapabilityForTurn ? 'set' : 'null'} directory=${codeModeDirectoryForTurn ? 'set' : 'null'}.`,
+        );
+        return;
+      }
+      const serverUrl = codeModeOpenCodeServerUrl;
+      const mcpCapability = codeModeMcpCapabilityForTurn;
+      const directory = codeModeDirectoryForTurn;
+      for (const integration of refreshedIntegrations) {
+        if (codeModeMountedIntegrationIdsForTurn.has(integration.id)) {
+          continue;
+        }
+        codeModeMountedIntegrationIdsForTurn.add(integration.id);
+        try {
+          const mounted = await mountFastAgentIntegrationOnCodeModeServer({
+            serverUrl,
+            directory,
+            mcpCapability,
+            integrationId: integration.id,
+          });
+          if (mounted) {
+            console.info(
+              `[Fast Agent] Mounted integration ${integration.id} on the code-mode server mid-turn (server=${serverUrl} directory=${directory}).`,
+            );
+          } else {
+            console.warn(
+              `[Fast Agent] Code-mode server rejected the mid-turn mount of integration ${integration.id}; it becomes callable next turn.`,
+            );
+          }
+        } catch (error) {
+          console.warn(
+            `[Fast Agent] Failed to mount integration ${integration.id} on the code-mode server mid-turn: ${formatErrorForLog(error)}`,
+          );
+        }
+      }
+    };
+    /**
+     * A successful connect must make the integration usable in this same
+     * turn: the per-user tool cache otherwise keeps serving the pre-connect
+     * (empty) tool list for up to five minutes, and the built-in catalog
+     * keeps reporting the integration as not connected. Clear and refresh
+     * both, then mount the new server on the code-mode server when the
+     * experiment is active.
+     */
+    const refreshIntegrationsAfterConnect = async (): Promise<void> => {
+      clearFastAgentIntegrationToolCache();
+      const refreshedIntegrations = await listFastAgentIntegrations(
+        { userId, apiBaseUrl },
+        adapter.resolveMcpServerConfigs,
+      );
+      availableIntegrations.splice(
+        0,
+        availableIntegrations.length,
+        ...refreshedIntegrations,
+      );
+      onDemandIntegrations.splice(
+        0,
+        onDemandIntegrations.length,
+        ...refreshedIntegrations.filter(
+          (integration) => !isFastAgentNativeIntegration(integration.id),
+        ),
+      );
+      const refreshedCatalog = await listNativeIntegrationsForFast({
+        userId,
+      }).catch(() => null);
+      if (refreshedCatalog) {
+        nativeIntegrationCatalog.splice(
+          0,
+          nativeIntegrationCatalog.length,
+          ...refreshedCatalog,
+        );
+      }
+      await mountNewlyConnectedCodeModeIntegrations(refreshedIntegrations);
+      // Next-turn durability is automatic: the refreshed integrations flow
+      // into the runtime config written at the next turn's setup.
+    };
     const executeMcpTool = async (
       call: FastAgentMcpToolCall,
       { acknowledgementExempt = false } = {},
@@ -4458,25 +4622,17 @@ export async function answerFastAgentQuestion({
               integrationId: args.integrationId,
             });
             if (result.status === 'connected') {
-              const refreshedIntegrations = await listFastAgentIntegrations(
-                { userId, apiBaseUrl },
-                adapter.resolveMcpServerConfigs,
-              );
-              availableIntegrations.splice(
-                0,
-                availableIntegrations.length,
-                ...refreshedIntegrations,
-              );
-              onDemandIntegrations.splice(
-                0,
-                onDemandIntegrations.length,
-                ...refreshedIntegrations.filter(
-                  (integration) =>
-                    !isFastAgentNativeIntegration(integration.id),
-                ),
-              );
+              await refreshIntegrationsAfterConnect();
             }
-            return { success: true, ...result };
+            return {
+              success: true,
+              ...result,
+              ...(codeModeIntegrationsActiveForTurn
+                ? {
+                    note: 'Connected. Its tools become available through the execute runner, discovered with tools.$codemode.search; call them as tools.<server>.<tool>(input), using bracket notation for either segment like tools["my-server"]["my-tool"](input) when a name is not a plain identifier; if probes still show them missing, they are usable from a follow-up turn.',
+                  }
+                : {}),
+            };
           }
           case FAST_AGENT_NATIVE_TOOL_NAMES.addRemoteMcp: {
             if (platformEvent) {
@@ -4503,25 +4659,17 @@ export async function answerFastAgentQuestion({
               ...args,
             });
             if (result.status === 'connected') {
-              const refreshedIntegrations = await listFastAgentIntegrations(
-                { userId, apiBaseUrl },
-                adapter.resolveMcpServerConfigs,
-              );
-              availableIntegrations.splice(
-                0,
-                availableIntegrations.length,
-                ...refreshedIntegrations,
-              );
-              onDemandIntegrations.splice(
-                0,
-                onDemandIntegrations.length,
-                ...refreshedIntegrations.filter(
-                  (integration) =>
-                    !isFastAgentNativeIntegration(integration.id),
-                ),
-              );
+              await refreshIntegrationsAfterConnect();
             }
-            return { success: true, ...result };
+            return {
+              success: true,
+              ...result,
+              ...(codeModeIntegrationsActiveForTurn
+                ? {
+                    note: 'Connected. Its tools become available through the execute runner, discovered with tools.$codemode.search; call them as tools.<server>.<tool>(input), using bracket notation for either segment like tools["my-server"]["my-tool"](input) when a name is not a plain identifier; if probes still show them missing, they are usable from a follow-up turn.',
+                  }
+                : {}),
+            };
           }
           case FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply: {
             const args = chatReplyArgsSchema.parse(call.args);
@@ -4703,7 +4851,8 @@ export async function answerFastAgentQuestion({
               return {
                 success: true,
                 artifact,
-                guidance: 'Link the artifact viewUrl when it is useful.',
+                guidance:
+                  'The artifact viewUrl opens in its Session; standaloneViewUrl opens the document, image, or file on its own page with a direct shareable link. Share whichever returned URL fits the context, unchanged, instead of constructing an artifact URL.',
               };
             } catch (error) {
               completedTaskActions.delete(`artifact:${signature}`);
@@ -5805,8 +5954,23 @@ export async function answerFastAgentQuestion({
             serviceCredentialPrepareEnabled:
               currentUser.serviceCredentialToolsEnabled && !platformEvent,
             addRemoteMcpEnabled: !platformEvent,
+            codeModeIntegrationsEnabled: codeModeIntegrationsEffective,
           },
         );
+        codeModeIntegrationsActiveForTurn =
+          nativeRuntime.codeModeIntegrationsActive;
+        codeModeMcpCapabilityForTurn = nativeRuntime.codeModeIntegrationsActive
+          ? nativeRuntime.mcpCapability
+          : null;
+        codeModeDirectoryForTurn = nativeRuntime.codeModeIntegrationsActive
+          ? nativeRuntime.directory
+          : null;
+        codeModeMountedIntegrationIdsForTurn = new Set(
+          nativeRuntime.codeModeIntegrationsActive
+            ? availableIntegrations.map((integration) => integration.id)
+            : [],
+        );
+        codeModeOpenCodeServerUrl = null;
         const unbindExecutors = new Set<() => void>();
         const boundSubagentSessionIDs = new Set<string>();
         const unbindAllExecutors = () => {
@@ -5981,6 +6145,10 @@ export async function answerFastAgentQuestion({
                     {
                       directory: nativeRuntime.directory,
                       env: nativeRuntime.env,
+                      codeModeIntegrations: codeModeIntegrationsEffective,
+                      onServerLeased: (url) => {
+                        codeModeOpenCodeServerUrl = url;
+                      },
                       permission: FAST_AGENT_SESSION_PERMISSIONS,
                       signal: promptSignal,
                       promptOnlySubagents: true,
@@ -6579,7 +6747,15 @@ export async function answerFastAgentQuestion({
       // the model can see the failure the user saw in Slack or Discord.
       fastAgentOpenCodeSessionManager.invalidate(canonicalConversationId);
     }
-    if (platformEvent) throw error;
+    // A platform event normally fails without a closeout so its queue can
+    // deliver it again. An inference failure that cannot succeed on a retry
+    // (rejected credentials, no credits, an unavailable model) would repeat
+    // forever, so it is settled here like a human turn: the user is told
+    // once, and the event is not re-delivered.
+    const terminalInferenceFailure =
+      error instanceof FastAgentInferenceError &&
+      isTerminalInferenceFailure(error.failure);
+    if (platformEvent && !terminalInferenceFailure) throw error;
 
     const message = storageFull
       ? formatFastAgentStorageFullMessage(storageDiagnostic?.kind ?? 'unknown')
@@ -6593,7 +6769,11 @@ export async function answerFastAgentQuestion({
     // The error closeout is recorded like any other closeout: its intent
     // before the post and its reply row right after, so a run that resumes
     // this turn sees it and does not post a second one.
-    if (!isInstructionClosed()) {
+    // Every platform event on a misconfigured deployment fails the same
+    // way; the conversation only needs to hear it once.
+    const repeatedPlatformFailure =
+      platformEvent && priorAssistantMessage === message;
+    if (!isInstructionClosed() && !repeatedPlatformFailure) {
       try {
         const reply = { purpose: 'closeout' as const, message };
         await postRecordedSystemCloseout(message, async () => {
