@@ -2,6 +2,18 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.12.3 (2026-09-20)
+
+Roomote 1.12.3 keeps Gitea pull request delivery reliable when repositories contain unassigned open changes.
+
+### Highlights
+
+- Create and update Gitea pull requests reliably even when another open pull request has no assignees.
+
+### Patch changes
+
+- Gitea pull request creation now succeeds when another open pull request has no assignees, while preserving requested assignments and existing assignees during updates.
+
 ## 1.12.2 (2026-09-20)
 
 Roomote 1.12.2 improves model compatibility, integration access, artifact sharing, and recovery across Sessions and tasks.
