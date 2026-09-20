@@ -78,3 +78,16 @@ export const integrationToolPolicyUpsertSchema = z.object({
 export type IntegrationToolPolicyUpsert = z.infer<
   typeof integrationToolPolicyUpsertSchema
 >;
+
+/**
+ * Unambiguous composite key for one (integration, tool) policy entry. A
+ * delimiter-joined string would let distinct pairs collide (for example
+ * `a`/`bc` and `ab`/`c`), which would apply one tool's configured mode to a
+ * different tool.
+ */
+export function integrationToolPolicyKey(
+  integrationId: string,
+  toolName: string,
+): string {
+  return JSON.stringify([integrationId, toolName]);
+}

@@ -11,9 +11,10 @@ import {
   listIntegrationToolPolicies,
   markIntegrationToolApprovalConsumed,
 } from '@roomote/db/server';
-import type {
-  IntegrationToolApprovalMetadata,
-  IntegrationToolPolicyMetadata,
+import {
+  integrationToolPolicyKey,
+  type IntegrationToolApprovalMetadata,
+  type IntegrationToolPolicyMetadata,
 } from '@roomote/types';
 
 import type { FastAgentIntegration } from './fast-agent-integration-broker';
@@ -65,14 +66,16 @@ export function buildIntegrationToolApprovalRules(
 ): PermissionRuleset {
   const modeByTool = new Map(
     policies.map((policy) => [
-      `${policy.integrationId}${policy.toolName}`,
+      integrationToolPolicyKey(policy.integrationId, policy.toolName),
       policy.mode,
     ]),
   );
   const rules: PermissionRuleset = [];
   for (const integration of integrations) {
     for (const tool of integration.tools) {
-      const mode = modeByTool.get(`${integration.id}${tool.name}`);
+      const mode = modeByTool.get(
+        integrationToolPolicyKey(integration.id, tool.name),
+      );
       if (mode === 'ask') {
         rules.push({
           permission: codeModeToolKey(integration.id, tool.name),

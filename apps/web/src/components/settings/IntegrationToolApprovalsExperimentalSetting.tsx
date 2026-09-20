@@ -19,6 +19,7 @@ import type {
   IntegrationToolPolicyMetadata,
   IntegrationToolPolicyMode,
 } from '@roomote/types';
+import { integrationToolPolicyKey } from '@roomote/types';
 import { useCodeModeIntegrationsExperiment } from '@/hooks/useCodeModeIntegrationsExperiment';
 import { useIntegrationToolApprovalsExperiment } from '@/hooks/useIntegrationToolApprovalsExperiment';
 import { useEffectiveMcpIntegrations } from '@/hooks/mcp-connections/useEffectiveMcpIntegrations';
@@ -32,10 +33,6 @@ const MODE_LABELS: Record<IntegrationToolPolicyMode, string> = {
   ask: 'Ask every time',
   reject: 'Always reject',
 };
-
-function policyKey(integrationId: string, toolName: string) {
-  return `${integrationId}${toolName}`;
-}
 
 function IntegrationToolPolicyList({
   integrationId,
@@ -77,7 +74,8 @@ function IntegrationToolPolicyList({
     <ul className="divide-y divide-border">
       {enabledTools.map((tool) => {
         const mode =
-          policies.get(policyKey(integrationId, tool.name)) ?? 'allow';
+          policies.get(integrationToolPolicyKey(integrationId, tool.name)) ??
+          'allow';
         return (
           <li
             key={tool.name}
@@ -141,7 +139,7 @@ export function IntegrationToolApprovalsExperimentalSetting() {
 
   const policies = new Map(
     (policiesQuery.data ?? []).map((policy: IntegrationToolPolicyMetadata) => [
-      policyKey(policy.integrationId, policy.toolName),
+      integrationToolPolicyKey(policy.integrationId, policy.toolName),
       policy.mode,
     ]),
   );

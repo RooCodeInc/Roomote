@@ -73,6 +73,38 @@ describe('buildIntegrationToolApprovalRules', () => {
     expect(buildIntegrationToolApprovalRules(integrations, [])).toEqual([]);
   });
 
+  it('never lets distinct integration/tool pairs share one policy entry', () => {
+    // Regression: a delimiter-less composite key makes `a`/`bc` and `ab`/`c`
+    // the same map entry, so one pair's mode would gate the other.
+    const collidingIntegrations = [
+      {
+        id: 'a',
+        name: 'A',
+        description: '',
+        tools: [{ name: 'bc', description: '', inputSchema: {} }],
+      } as unknown as FastAgentIntegration,
+      {
+        id: 'ab',
+        name: 'AB',
+        description: '',
+        tools: [{ name: 'c', description: '', inputSchema: {} }],
+      } as unknown as FastAgentIntegration,
+    ];
+    const rules = buildIntegrationToolApprovalRules(collidingIntegrations, [
+      {
+        policyId: 'p1',
+        integrationId: 'a',
+        toolName: 'bc',
+        mode: 'ask',
+        updatedAt: '',
+        createdAt: '',
+      },
+    ]);
+    expect(rules).toEqual([
+      { permission: 'a_bc', pattern: '*', action: 'ask' },
+    ]);
+  });
+
   it('never materializes rules for tools the actor is not authorized to mount', () => {
     const rules = buildIntegrationToolApprovalRules(integrations, [
       {
