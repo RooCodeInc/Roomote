@@ -209,6 +209,7 @@ import {
 import {
   createFastAgentToolApprovalBridge,
   resolveFastAgentToolApprovalRules,
+  shouldRebuildSessionForToolApprovalRules,
 } from './fast-agent-tool-approvals';
 import {
   callFastAgentIntegration,
@@ -360,7 +361,7 @@ const FAST_AGENT_HUMAN_STEER_MAX_FILE_BYTES = 24 * 1024 * 1024;
  * running under stale approvals (or stale ungated behavior after the
  * experiment is disabled).
  */
-const fastAgentToolApprovalRulesHashes = new Map<string, string>();
+const fastAgentToolApprovalRulesHashes = new Map<string, string | null>();
 
 function buildFastAgentNativeSteerMessageId(
   rowId: string,
@@ -5879,40 +5880,49 @@ export async function answerFastAgentQuestion({
     }
     diagnostics.markInferenceQueued();
     // OpenCode fixes a session's permission ruleset at creation. When the
-    // compiled tool-approval rules change (policy edit, experiment toggle),
-    // a warm or resumed session would keep running under the old rules, so
-    // rebuild it instead of silently applying stale approvals — or stale
-    // ungated behavior after the experiment turns off.
+    // compiled tool-approval rules change (policy edit, experiment toggle)
+    // — or when a persisted session's creation rules are unknowable after a
+    // process restart — a warm or resumed session would keep running under
+    // the old rules, so rebuild it instead of silently applying stale
+    // approvals or stale ungated behavior.
     const toolApprovalRulesHash = toolApprovalRules?.hash ?? null;
-    const previousToolApprovalRulesHash =
-      fastAgentToolApprovalRulesHashes.get(session.id) ?? null;
-    if (previousToolApprovalRulesHash !== toolApprovalRulesHash) {
-      // A persisted or warm session made under different rules must not run
-      // this turn. When nothing rebuildable exists yet there is nothing to
-      // invalidate; the fresh session is simply created with the new rules.
-      if (durableOpenCodeSessionId ?? session.openCodeSessionId) {
-        console.info(
-          `[Fast Agent] Tool approval rules changed for session ${session.id}; rebuilding the OpenCode session.`,
+    const hasLiveOpenCodeSession = Boolean(
+      durableOpenCodeSessionId ?? session.openCodeSessionId,
+    );
+    const rebuildForToolApprovalRules =
+      shouldRebuildSessionForToolApprovalRules({
+        hasLiveOpenCodeSession,
+        recordedHash: fastAgentToolApprovalRulesHashes.has(session.id)
+          ? (fastAgentToolApprovalRulesHashes.get(session.id) ?? null)
+          : undefined,
+        currentHash: toolApprovalRulesHash,
+      });
+    let toolApprovalRulesRebuildFailed = false;
+    if (rebuildForToolApprovalRules && hasLiveOpenCodeSession) {
+      console.info(
+        `[Fast Agent] Tool approval rules changed for session ${session.id}; rebuilding the OpenCode session.`,
+      );
+      try {
+        await setFastAgentOpenCodeSession({
+          sessionId: session.id,
+          openCodeSessionId: null,
+        });
+        durableOpenCodeSessionId = null;
+        session.openCodeSessionId = null;
+        fastAgentOpenCodeSessionManager.invalidate(session.id);
+      } catch (error) {
+        toolApprovalRulesRebuildFailed = true;
+        console.warn(
+          `[Fast Agent] Failed to rebuild the OpenCode session after a tool approval rules change: ${formatErrorForLog(error)}`,
         );
-        try {
-          await setFastAgentOpenCodeSession({
-            sessionId: session.id,
-            openCodeSessionId: null,
-          });
-          durableOpenCodeSessionId = null;
-          session.openCodeSessionId = null;
-          fastAgentOpenCodeSessionManager.invalidate(session.id);
-        } catch (error) {
-          console.warn(
-            `[Fast Agent] Failed to rebuild the OpenCode session after a tool approval rules change: ${formatErrorForLog(error)}`,
-          );
-        }
       }
-      if (toolApprovalRulesHash === null) {
-        fastAgentToolApprovalRulesHashes.delete(session.id);
-      } else {
-        fastAgentToolApprovalRulesHashes.set(session.id, toolApprovalRulesHash);
-      }
+    }
+    // Record the rules this turn runs (or recreates) the session with,
+    // including "no rules": an explicit null entry is what lets a later turn
+    // tell "known to be ungated" apart from "unknown after restart". Skip the
+    // record after a failed rebuild so the next turn retries it.
+    if (!toolApprovalRulesRebuildFailed) {
+      fastAgentToolApprovalRulesHashes.set(session.id, toolApprovalRulesHash);
     }
     const promptTextPromise = fastAgentOpenCodeSessionManager.run({
       conversationId: session.id,

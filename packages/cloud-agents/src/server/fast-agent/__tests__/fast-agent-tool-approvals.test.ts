@@ -26,6 +26,7 @@ import {
   extractApprovalCallArgs,
   hashIntegrationToolApprovalRules,
   resolveFastAgentToolApprovalRules,
+  shouldRebuildSessionForToolApprovalRules,
 } from '../fast-agent-tool-approvals';
 import type { FastAgentIntegration } from '../fast-agent-integration-broker';
 
@@ -127,6 +128,80 @@ describe('resolveFastAgentToolApprovalRules', () => {
     expect(isDeploymentExperimentEnabled).toHaveBeenCalledWith(
       'integrationToolApprovals',
     );
+  });
+});
+
+describe('shouldRebuildSessionForToolApprovalRules', () => {
+  const live = { hasLiveOpenCodeSession: true };
+
+  it('rebuilds when a live session has no recorded rules hash (post-restart persisted session)', () => {
+    // The unknown-rules case: a stale ask would pause forever with no
+    // approval bridge installed, and a stale deny would keep blocking.
+    expect(
+      shouldRebuildSessionForToolApprovalRules({
+        ...live,
+        recordedHash: undefined,
+        currentHash: null,
+      }),
+    ).toBe(true);
+    expect(
+      shouldRebuildSessionForToolApprovalRules({
+        ...live,
+        recordedHash: undefined,
+        currentHash: 'hash-a',
+      }),
+    ).toBe(true);
+  });
+
+  it('rebuilds when the recorded rules differ from the current rules', () => {
+    expect(
+      shouldRebuildSessionForToolApprovalRules({
+        ...live,
+        recordedHash: 'hash-a',
+        currentHash: 'hash-b',
+      }),
+    ).toBe(true);
+    expect(
+      shouldRebuildSessionForToolApprovalRules({
+        ...live,
+        recordedHash: 'hash-a',
+        currentHash: null,
+      }),
+    ).toBe(true);
+    expect(
+      shouldRebuildSessionForToolApprovalRules({
+        ...live,
+        recordedHash: null,
+        currentHash: 'hash-a',
+      }),
+    ).toBe(true);
+  });
+
+  it('keeps the live session when the recorded rules match, including a known-ungated record', () => {
+    expect(
+      shouldRebuildSessionForToolApprovalRules({
+        ...live,
+        recordedHash: 'hash-a',
+        currentHash: 'hash-a',
+      }),
+    ).toBe(false);
+    expect(
+      shouldRebuildSessionForToolApprovalRules({
+        ...live,
+        recordedHash: null,
+        currentHash: null,
+      }),
+    ).toBe(false);
+  });
+
+  it('never rebuilds when there is no live session to invalidate', () => {
+    expect(
+      shouldRebuildSessionForToolApprovalRules({
+        hasLiveOpenCodeSession: false,
+        recordedHash: undefined,
+        currentHash: 'hash-a',
+      }),
+    ).toBe(false);
   });
 });
 

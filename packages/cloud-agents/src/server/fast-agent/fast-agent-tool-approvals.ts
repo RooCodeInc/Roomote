@@ -92,6 +92,25 @@ export function buildIntegrationToolApprovalRules(
 }
 
 /**
+ * Whether the live OpenCode session must be rebuilt before this turn because
+ * its creation-time permission ruleset is stale or unknowable. The recorded
+ * hash is process-local, so after a restart a persisted session has no record
+ * (`recordedHash` undefined): it may still carry a stale ask (which would
+ * pause forever without an approval bridge installed) or a stale deny, so
+ * the only safe choice is to rebuild. An explicit null record means "known
+ * to be ungated" and does not rebuild on its own.
+ */
+export function shouldRebuildSessionForToolApprovalRules(input: {
+  hasLiveOpenCodeSession: boolean;
+  recordedHash: string | null | undefined;
+  currentHash: string | null;
+}): boolean {
+  if (!input.hasLiveOpenCodeSession) return false;
+  if (input.recordedHash === undefined) return true;
+  return input.recordedHash !== input.currentHash;
+}
+
+/**
  * Fingerprint of the compiled rules for warm-session staleness detection.
  * OpenCode fixes a session's permission ruleset at creation, so a policy or
  * experiment change must rebuild the OpenCode session rather than silently
