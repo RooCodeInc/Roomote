@@ -120,6 +120,19 @@ search, commits, pull requests, diffs, and comments, plus supported PR updates
 and replies. No additional MCP server is needed. See that guide for access
 requirements, pagination limits, and the code-search deprecation.
 
+## Code Mode Integrations experiment
+
+A deployment admin can enable **Code Mode Integrations** under **Settings >
+Experimental**. When enabled, sessions discover and call each connected
+integration through OpenCode's confined code-mode runner and tool search instead
+of the standard on-demand integration dispatcher. Existing authorization,
+visibility, and credential-mediation rules do not change.
+
+An integration connected during a session normally becomes available in the
+same turn; if the running server cannot mount it, the next turn picks it up. If
+two integration IDs would map to the same code-mode tool namespace, Roomote
+keeps that conversation on the standard dispatcher instead.
+
 ## The session view
 
 A session header shows the other people currently viewing that session. Your
