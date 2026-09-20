@@ -408,6 +408,7 @@ function collectManualSkillRecords(
 }
 
 export type FastAgentSettingsPromptCatalog = {
+  catalogRevision?: string;
   /** Marketplace sources configured per authorized environment. These are
    * never fetched for the prompt; the model enumerates them with a scoped
    * `list_skills` call when one looks relevant. */
@@ -619,7 +620,19 @@ export class RemoteFastAgentSettingsSkillSource implements FastAgentSettingsSkil
         ? [{ environmentId: environment.id, sources }]
         : [];
     });
-    return { marketplaceSources, skills, warnings };
+    const catalogRevision = createHash('sha256')
+      .update(
+        JSON.stringify(
+          authorizedEnvironments
+            .map((environment) => ({
+              id: environment.id,
+              skills: environment.config.skills ?? {},
+            }))
+            .sort((left, right) => left.id.localeCompare(right.id)),
+        ),
+      )
+      .digest('hex');
+    return { catalogRevision, marketplaceSources, skills, warnings };
   }
 
   async read(

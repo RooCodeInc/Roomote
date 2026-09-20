@@ -6,7 +6,31 @@ import {
   parseSkillsCommandPage,
   UserCallableSkillCatalogCache,
 } from '../fast-agent-skill-command';
+import type { UserCallableSkillCatalog } from '../fast-agent-skill-command';
 import type { FastAgentSkillListResult } from '../fast-agent-skill-store';
+
+function catalog(name: string): {
+  skills: FastAgentSkillListResult['skills'];
+  warnings: string[];
+} {
+  return {
+    skills: [
+      {
+        description: `${name} description`,
+        id: `packaged:${name}`,
+        invocation: name,
+        name,
+        source: 'packaged',
+      },
+    ],
+    warnings: [],
+  };
+}
+
+const pendingRemote = {
+  marketplaceSourceCount: 1,
+  repositoryEnvironmentCount: 1,
+};
 
 describe('Fast skill command', () => {
   it('merges scoped catalogs using canonical precedence', async () => {
@@ -119,92 +143,179 @@ describe('Fast skill command', () => {
     expect(parseSkillsCommandPage('show skills')).toBeNull();
   });
 
-  it('reuses a catalog across pagination and joins in-flight discovery', async () => {
-    let resolveList!: (result: FastAgentSkillListResult) => void;
-    const pending = new Promise<FastAgentSkillListResult>((resolve) => {
-      resolveList = resolve;
-    });
-    const list = vi.fn(() => pending);
+  it('returns a cold local snapshot without waiting and starts one refresh', async () => {
+    const refresh = vi.fn(
+      () => new Promise<UserCallableSkillCatalog>(() => {}),
+    );
     const cache = new UserCallableSkillCatalogCache();
-    const dependencies = {
-      cache,
-      environmentIds: [],
-      list,
-      log: vi.fn(),
-    };
 
-    const first = listUserCallableFastAgentSkills('user-1', dependencies);
-    const second = listUserCallableFastAgentSkills('user-1', dependencies);
-    resolveList({ skills: [], warnings: [] });
-    await Promise.all([first, second]);
-    await listUserCallableFastAgentSkills('user-1', dependencies);
+    const result = cache.get({
+      key: 'actor:user-1:revision:one',
+      local: catalog('local'),
+      page: 1,
+      pending: pendingRemote,
+      refresh,
+    });
 
-    expect(list).toHaveBeenCalledTimes(1);
-    expect(dependencies.log).toHaveBeenCalledWith(
-      expect.stringContaining('cache_status=joined'),
-    );
-    expect(dependencies.log).toHaveBeenCalledWith(
-      expect.stringContaining('cache_status=hit'),
-    );
+    expect(result.catalog).toMatchObject({
+      remoteDiscovery: { status: 'partial' },
+      skills: [expect.objectContaining({ name: 'local' })],
+    });
+    await Promise.resolve();
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 
-  it('expires cached catalogs', async () => {
+  it('pins pagination while a refreshed snapshot waits for page one', async () => {
+    let resolveRefresh!: (value: UserCallableSkillCatalog) => void;
+    const refresh = vi.fn(
+      () =>
+        new Promise<UserCallableSkillCatalog>((resolve) => {
+          resolveRefresh = resolve;
+        }),
+    );
+    const cache = new UserCallableSkillCatalogCache();
+    const input = {
+      key: 'actor:user-1:revision:one',
+      local: catalog('local'),
+      pending: pendingRemote,
+      refresh,
+    };
+    cache.get({ ...input, page: 1 });
+    cache.get({ ...input, page: 2 });
+    await Promise.resolve();
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    resolveRefresh(catalog('remote'));
+    await vi.waitFor(() =>
+      expect(cache.get({ ...input, page: 2 }).catalog).toMatchObject({
+        remoteDiscovery: { status: 'ready' },
+        skills: [expect.objectContaining({ name: 'local' })],
+      }),
+    );
+    const promoted = cache.get({ ...input, page: 1 }).catalog;
+    expect(promoted).toMatchObject({
+      skills: [expect.objectContaining({ name: 'remote' })],
+    });
+    expect(promoted.remoteDiscovery).toBeUndefined();
+  });
+
+  it('keeps complete local catalogs synchronous without a refresh', () => {
+    const refresh = vi.fn();
+    const result = new UserCallableSkillCatalogCache().get({
+      key: 'actor:user-1:revision:local',
+      local: catalog('local'),
+      page: 1,
+      pending: {
+        marketplaceSourceCount: 0,
+        repositoryEnvironmentCount: 0,
+      },
+      refresh,
+    });
+
+    expect(result.catalog.remoteDiscovery).toBeUndefined();
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it('retries failed background discovery after the retry window', async () => {
     let now = 1_000;
-    const cache = new UserCallableSkillCatalogCache(100, 100, () => now);
-    const list = vi.fn(async () => ({ skills: [], warnings: [] }));
-    const dependencies = {
-      cache,
-      environmentIds: [],
-      list,
-      log: vi.fn(),
+    const cache = new UserCallableSkillCatalogCache(100, () => now);
+    const refresh = vi
+      .fn<() => Promise<UserCallableSkillCatalog>>()
+      .mockRejectedValueOnce(new Error('discovery failed'))
+      .mockResolvedValueOnce(catalog('remote'));
+    const input = {
+      key: 'actor:user-1:revision:one',
+      local: catalog('local'),
+      page: 1,
+      pending: pendingRemote,
+      refresh,
     };
 
-    await listUserCallableFastAgentSkills('user-1', dependencies);
-    await listUserCallableFastAgentSkills('user-1', dependencies);
-    now += 101;
-    await listUserCallableFastAgentSkills('user-1', dependencies);
+    cache.get(input);
+    await vi.waitFor(() =>
+      expect(cache.get(input).catalog.remoteDiscovery?.status).toBe('failed'),
+    );
+    expect(refresh).toHaveBeenCalledTimes(1);
+    now += 30_001;
+    cache.get(input);
+    await Promise.resolve();
+    expect(refresh).toHaveBeenCalledTimes(2);
+  });
 
-    expect(list).toHaveBeenCalledTimes(2);
+  it('refreshes a complete snapshot after remote freshness expires', async () => {
+    let now = 1_000;
+    const cache = new UserCallableSkillCatalogCache(100, () => now);
+    const refresh = vi
+      .fn<() => Promise<UserCallableSkillCatalog>>()
+      .mockResolvedValueOnce(catalog('remote-one'))
+      .mockResolvedValueOnce(catalog('remote-two'));
+    const input = {
+      key: 'actor:user-1:revision:one',
+      local: catalog('local'),
+      page: 1,
+      pending: pendingRemote,
+      refresh,
+    };
+
+    cache.get(input);
+    await vi.waitFor(() =>
+      expect(cache.get(input).catalog.skills[0]?.name).toBe('remote-one'),
+    );
+    now += 5 * 60_000 + 1;
+    cache.get(input);
+    await Promise.resolve();
+    expect(refresh).toHaveBeenCalledTimes(2);
+    await vi.waitFor(() =>
+      expect(cache.get(input).catalog.skills[0]?.name).toBe('remote-two'),
+    );
   });
 
   it('isolates actors and environment scopes with bounded retention', async () => {
-    const cache = new UserCallableSkillCatalogCache(1_000, 2);
-    const list = vi.fn(async () => ({ skills: [], warnings: [] }));
-    const load = (userId: string, environmentIds: string[]) =>
-      listUserCallableFastAgentSkills(userId, {
-        cache,
-        environmentIds,
-        list,
-        log: vi.fn(),
+    const cache = new UserCallableSkillCatalogCache(2);
+    const refresh = vi.fn(
+      () => new Promise<UserCallableSkillCatalog>(() => {}),
+    );
+    const load = (key: string) =>
+      cache.get({
+        key,
+        local: catalog(key),
+        page: 1,
+        pending: pendingRemote,
+        refresh,
       });
 
-    await load('user-1', ['env-1']);
-    await load('user-1', ['env-2']);
-    await load('user-2', ['env-1']);
-    await load('user-1', ['env-1']);
+    load('actor:user-1:revision:env-1');
+    load('actor:user-1:revision:env-2');
+    load('actor:user-2:revision:env-1');
+    const reloaded = load('actor:user-1:revision:env-1');
 
-    expect(list).toHaveBeenCalledTimes(8);
+    await Promise.resolve();
+    expect(refresh).toHaveBeenCalledTimes(2);
+    expect(reloaded.status).toBe('miss');
   });
 
-  it('does not cache failed catalog discovery', async () => {
-    const cache = new UserCallableSkillCatalogCache();
-    const list = vi
-      .fn<() => Promise<FastAgentSkillListResult>>()
-      .mockRejectedValueOnce(new Error('discovery failed'))
-      .mockResolvedValueOnce({ skills: [], warnings: [] });
-    const dependencies = {
-      cache,
-      environmentIds: [],
-      list,
-      log: vi.fn(),
-    };
-
-    await expect(
-      listUserCallableFastAgentSkills('user-1', dependencies),
-    ).rejects.toThrow('discovery failed');
-    await expect(
-      listUserCallableFastAgentSkills('user-1', dependencies),
-    ).resolves.toEqual({ skills: [], warnings: [] });
-    expect(list).toHaveBeenCalledTimes(2);
+  it('formats partial and ready snapshots without claiming completeness', () => {
+    expect(
+      formatUserCallableSkillsPage({
+        catalog: withRemoteDiscoveryForTest(catalog('local'), 'partial'),
+        command: '/skills',
+      }),
+    ).toContain('1 so far');
+    expect(
+      formatUserCallableSkillsPage({
+        catalog: withRemoteDiscoveryForTest(catalog('local'), 'ready'),
+        command: '/skills',
+      }),
+    ).toContain('updated full list is ready');
   });
 });
+
+function withRemoteDiscoveryForTest(
+  value: UserCallableSkillCatalog,
+  status: 'partial' | 'ready',
+): UserCallableSkillCatalog {
+  return {
+    ...value,
+    remoteDiscovery: { ...pendingRemote, status },
+  };
+}

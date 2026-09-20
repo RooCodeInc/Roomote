@@ -2,4 +2,4 @@
 '@roomote/cloud-agents': patch
 ---
 
-Reuse recently discovered skill catalogs across paginated communication commands instead of repeating remote discovery for every page.
+Return locally available skills immediately, then refresh remote skill catalogs in the background and reuse stable snapshots across communication command pages.
