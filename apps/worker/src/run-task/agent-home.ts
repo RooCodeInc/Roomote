@@ -52,6 +52,7 @@ import {
   mergeAmazonBedrockProviderConfig,
   mergeBedrockMantleOpenAiProviderConfig,
   mergeBedrockMantleProviderConfig,
+  mergeCatalogProviderCredentialConfig,
   mergeKimiForCodingProviderConfig,
   mergeOpenAiCompatibleProviderConfig,
   mergeOpenCodeModelReasoningOptions,
@@ -65,7 +66,6 @@ import {
   resolveOpenRouterVariantModelAlias,
   toBedrockMantleRuntimeModelId,
   OPENCODE_ARCHITECT_AGENT,
-  OPENCODE_GO_API_KEY_ENV_VAR_NAME,
   TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME,
   TASK_MODEL_COSTS_ENV_VAR_NAME,
   CREDENTIAL_EGRESS_METHODS,
@@ -1245,37 +1245,6 @@ function mergeAzureCognitiveServicesProviderConfig(
   };
 }
 
-/**
- * OpenCode's catalog maps both Zen and Go to OPENCODE_API_KEY. Roomote keeps
- * their credentials separate, so bind Go to its dedicated env var directly.
- * Gateway mode replaces this value with the run token later.
- */
-function mergeOpenCodeGoProviderConfig(
-  providerConfig: Record<string, unknown>,
-  modelIds: Array<string | undefined>,
-): Record<string, unknown> {
-  const providerId = 'opencode-go';
-  if (
-    !modelIds.some((modelId) => modelId?.trim().startsWith(`${providerId}/`))
-  ) {
-    return providerConfig;
-  }
-
-  const existingProvider = asRecord(providerConfig[providerId]);
-  const existingOptions = asRecord(existingProvider.options);
-
-  return {
-    ...providerConfig,
-    [providerId]: {
-      ...existingProvider,
-      options: {
-        apiKey: `{env:${OPENCODE_GO_API_KEY_ENV_VAR_NAME}}`,
-        ...existingOptions,
-      },
-    },
-  };
-}
-
 function normalizeStringList(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value.filter((entry): entry is string => typeof entry === 'string');
@@ -1851,7 +1820,9 @@ function resolveModelBackedOpenCodeConfig(
       )
     : providerReasoningConfig;
   const providerConfig = mergeInferenceGatewayProviderConfig(
-    mergeOpenCodeGoProviderConfig(
+    // Binds the keys OpenCode would not find under its catalog's env var
+    // names. Gateway mode replaces the key and base URL just above.
+    mergeCatalogProviderCredentialConfig(
       mergeAzureCognitiveServicesProviderConfig(
         mergeAmazonBedrockProviderConfig(
           mergeBedrockMantleProviderConfig(
@@ -1884,6 +1855,7 @@ function resolveModelBackedOpenCodeConfig(
         ),
         configuredModelIds,
       ),
+      runtimeEnv,
       configuredModelIds,
     ),
     runtimeEnv,
