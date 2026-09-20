@@ -1871,6 +1871,7 @@ export function FastSessionTranscript({
               <div className="mt-3">
                 {pendingInputRequest.preset === 'setup_starter_tasks' ? (
                   <SetupStarterTasksCard
+                    key={pendingInputRequest.requestId}
                     sessionId={sessionId}
                     request={pendingInputRequest}
                   />
@@ -1882,6 +1883,7 @@ export function FastSessionTranscript({
                   />
                 ) : (
                   <SessionUserInputCard
+                    key={pendingInputRequest.requestId}
                     sessionId={sessionId}
                     request={pendingInputRequest}
                   />

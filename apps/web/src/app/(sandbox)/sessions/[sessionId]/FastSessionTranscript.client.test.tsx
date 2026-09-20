@@ -317,7 +317,21 @@ vi.mock('../../task/[taskId]/messages/acp/DelegatedTaskCard', () => ({
 
 vi.mock('./SessionUserInputCard', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./SessionUserInputCard')>()),
-  SessionUserInputCard: () => <div>Structured input request</div>,
+  SessionUserInputCard: ({ request }: { request: { requestId: string } }) => {
+    const [selected, setSelected] = useState(false);
+    return (
+      <div>
+        <div>Structured input request</div>
+        <div data-testid="structured-request-id">{request.requestId}</div>
+        <button type="button" onClick={() => setSelected(true)}>
+          Select answer
+        </button>
+        <div data-testid="structured-selection">
+          {selected ? 'selected' : 'empty'}
+        </div>
+      </div>
+    );
+  },
 }));
 
 vi.mock('./setup/SetupStarterTasksCard', () => ({
@@ -3336,6 +3350,65 @@ describe('FastSessionTranscript', () => {
 
     expect(screen.getByText('Structured input request')).toBeVisible();
     expect(screen.getByPlaceholderText('Message agent')).toBeInTheDocument();
+  });
+
+  it('resets generic structured input state when the transcript request changes', () => {
+    const request = (requestId: string, ts: number) => ({
+      id: requestId,
+      eventId: requestId,
+      turnId: `turn-${requestId}`,
+      turnSeq: 1,
+      ts,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+      role: 'assistant' as const,
+      contentBlocks: [{ type: 'text' as const, text: 'Choose one' }],
+      metadata: { visibleInTranscript: true },
+      payload: {
+        requestId,
+        status: 'pending' as const,
+        sessionId: 'session-1',
+        turnId: `turn-${requestId}`,
+        callId: `call-${requestId}`,
+        questions: [
+          {
+            id: 'choice',
+            header: 'Choice',
+            question: 'Choose one',
+            isOther: false,
+            isSecret: false,
+            options: [{ label: 'One', description: 'First choice' }],
+          },
+        ],
+      },
+      source: 'web' as const,
+      nativeSessionId: null,
+      nativeMessageId: null,
+      createdAt: new Date(ts),
+    });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[request('rui:request-1', 1)]}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Select answer' }));
+    expect(screen.getByTestId('structured-selection')).toHaveTextContent(
+      'selected',
+    );
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [request('rui:request-2', 2)],
+      });
+    });
+
+    expect(screen.getByTestId('structured-request-id')).toHaveTextContent(
+      'rui:request-2',
+    );
+    expect(screen.getByTestId('structured-selection')).toHaveTextContent(
+      'empty',
+    );
   });
 
   it('updates the header title from the session stream event', () => {
