@@ -69,6 +69,7 @@ const mocks = vi.hoisted(() => ({
   recordProviderMessage: vi.fn(),
   queueFastSurfaceReply: vi.fn(),
   admitHumanFollowUp: vi.fn(),
+  registerCommands: vi.fn(),
 }));
 
 vi.mock('../../account-link-help.js', () => ({
@@ -233,6 +234,7 @@ const provider = {
   createThreadFromMessage: mocks.createThreadFromMessage,
   createTaskThread: mocks.createTaskThread,
   postMessage: mocks.postMessage,
+  registerCommands: mocks.registerCommands,
 };
 
 function envelope(
@@ -365,6 +367,7 @@ describe('Discord Gateway event handler', () => {
     mocks.recordProviderMessage.mockResolvedValue(true);
     mocks.queueFastSurfaceReply.mockResolvedValue(true);
     mocks.reply.mockResolvedValue({ messageId: 'reply-1' });
+    mocks.registerCommands.mockResolvedValue(undefined);
     mocks.createDirectMessage.mockResolvedValue({ id: 'dm-private-1' });
     mocks.createThreadFromMessage.mockResolvedValue({
       channelId: 'message-1',
@@ -2328,6 +2331,45 @@ describe('Discord Gateway event handler', () => {
         text: expect.stringContaining(
           'keep this session working toward an objective across multiple turns',
         ),
+      }),
+    );
+  });
+
+  it('retires stale /skills commands and refreshes the registration scope', async () => {
+    mocks.getChannel.mockResolvedValue({
+      id: 'channel-1',
+      guildId: 'guild-1',
+      name: 'general',
+      type: 0,
+    });
+    const interaction = {
+      id: 'interaction-retired-skills',
+      application_id: 'app-1',
+      type: 2,
+      token: 'interaction-token',
+      channel_id: 'channel-1',
+      guild_id: 'guild-1',
+      member: { user: { id: 'discord-user-1', username: 'matt' } },
+      data: { name: 'skills', type: 1 },
+    };
+
+    const response = await postEvent(
+      envelope(interaction, 'INTERACTION_CREATE'),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      ignored: 'retired_command',
+      registration: true,
+    });
+    expect(mocks.registerCommands).toHaveBeenCalledWith({
+      applicationId: 'app-1',
+      guildId: 'guild-1',
+    });
+    expect(mocks.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ephemeral: true,
+        text: expect.stringContaining('commands have been refreshed'),
       }),
     );
   });
