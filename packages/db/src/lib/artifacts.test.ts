@@ -2,7 +2,93 @@ import { db } from '../db';
 import { sessionFactory } from '../fixtures/factories/session.factory';
 import { taskFactory } from '../fixtures/factories/task.factory';
 import { taskArtifacts } from '../schema';
-import { getSessionArtifactByPath, getTaskArtifactByPath } from './artifacts';
+import {
+  getSessionArtifactByPath,
+  getTaskArtifactByPath,
+  listLatestTaskArtifacts,
+} from './artifacts';
+
+describe('listLatestTaskArtifacts', () => {
+  it('returns only the latest uploaded version per path from a large history', async () => {
+    const task = await taskFactory.create();
+    const firstCreatedAt = new Date('2026-01-01T00:00:00.000Z');
+    const secondCreatedAt = new Date('2026-01-02T00:00:00.000Z');
+
+    await db.insert(taskArtifacts).values([
+      ...Array.from({ length: 250 }, (_, version) => ({
+        taskId: task.id,
+        path: 'reports/repeated.md',
+        version,
+        uploaded: true,
+        artifactType: 'general',
+        contentType: 'text/markdown',
+        size: version + 1,
+        createdAt:
+          version === 0
+            ? firstCreatedAt
+            : new Date(secondCreatedAt.getTime() + version * 1_000),
+      })),
+      {
+        taskId: task.id,
+        path: 'reports/other.md',
+        version: 0,
+        uploaded: true,
+        artifactType: 'general',
+        contentType: 'text/markdown',
+        size: 10,
+        createdAt: secondCreatedAt,
+      },
+      {
+        taskId: task.id,
+        path: 'reports/repeated.md',
+        version: 250,
+        uploaded: false,
+        artifactType: 'general',
+        contentType: 'text/markdown',
+        size: 251,
+      },
+    ]);
+
+    const artifacts = await listLatestTaskArtifacts({ taskId: task.id });
+
+    expect(artifacts).toHaveLength(2);
+    expect(artifacts.map(({ path, version }) => ({ path, version }))).toEqual([
+      { path: 'reports/repeated.md', version: 249 },
+      { path: 'reports/other.md', version: 0 },
+    ]);
+  });
+
+  it('applies the artifact type filter before selecting the latest version', async () => {
+    const task = await taskFactory.create();
+    await db.insert(taskArtifacts).values([
+      {
+        taskId: task.id,
+        path: 'report.md',
+        version: 0,
+        uploaded: true,
+        artifactType: 'general',
+        contentType: 'text/markdown',
+        size: 10,
+      },
+      {
+        taskId: task.id,
+        path: 'report.md',
+        version: 1,
+        uploaded: true,
+        artifactType: 'visual-proof',
+        contentType: 'text/markdown',
+        size: 20,
+      },
+    ]);
+
+    await expect(
+      listLatestTaskArtifacts({
+        taskId: task.id,
+        artifactType: 'general',
+      }),
+    ).resolves.toMatchObject([{ path: 'report.md', version: 0 }]);
+  });
+});
 
 describe.each(['task', 'session'] as const)(
   '%s artifact path lookup',
