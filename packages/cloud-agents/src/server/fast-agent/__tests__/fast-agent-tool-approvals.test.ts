@@ -25,8 +25,9 @@ import {
   createFastAgentToolApprovalBridge,
   extractApprovalCallArgs,
   hashIntegrationToolApprovalRules,
+  integrationToolApprovalRulesToConfig,
   resolveFastAgentToolApprovalRules,
-  shouldRebuildSessionForToolApprovalRules,
+  shouldDisposeInstanceForToolApprovalRules,
 } from '../fast-agent-tool-approvals';
 import type { FastAgentIntegration } from '../fast-agent-integration-broker';
 
@@ -163,75 +164,97 @@ describe('resolveFastAgentToolApprovalRules', () => {
   });
 });
 
-describe('shouldRebuildSessionForToolApprovalRules', () => {
-  const live = { hasLiveOpenCodeSession: true };
-
-  it('rebuilds when a live session has no recorded rules hash (post-restart persisted session)', () => {
-    // The unknown-rules case: a stale ask would pause forever with no
-    // approval bridge installed, and a stale deny would keep blocking.
+describe('integrationToolApprovalRulesToConfig', () => {
+  it('compiles rules into OpenCode config-permission shape', () => {
     expect(
-      shouldRebuildSessionForToolApprovalRules({
-        ...live,
+      integrationToolApprovalRulesToConfig([
+        { permission: 'mock-slack_post_message', pattern: '*', action: 'ask' },
+        {
+          permission: 'mock-slack_delete_channel',
+          pattern: '*',
+          action: 'deny',
+        },
+      ]),
+    ).toEqual({
+      'mock-slack_post_message': 'ask',
+      'mock-slack_delete_channel': 'deny',
+    });
+    expect(integrationToolApprovalRulesToConfig([])).toEqual({});
+  });
+});
+
+describe('shouldDisposeInstanceForToolApprovalRules', () => {
+  it('never disposes on an unknown record: after a restart the instance is fresh, not stale', () => {
+    // Restart/legacy-equivalence cases: there is no live instance to
+    // refresh, and disposing would be a false-positive cache break.
+    expect(
+      shouldDisposeInstanceForToolApprovalRules({
         recordedHash: undefined,
         currentHash: null,
       }),
-    ).toBe(true);
+    ).toBe(false);
     expect(
-      shouldRebuildSessionForToolApprovalRules({
-        ...live,
+      shouldDisposeInstanceForToolApprovalRules({
         recordedHash: undefined,
         currentHash: 'hash-a',
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
-  it('rebuilds when the recorded rules differ from the current rules', () => {
+  it('disposes when the cached instance booted with different rules', () => {
     expect(
-      shouldRebuildSessionForToolApprovalRules({
-        ...live,
+      shouldDisposeInstanceForToolApprovalRules({
         recordedHash: 'hash-a',
         currentHash: 'hash-b',
       }),
     ).toBe(true);
+    // Experiment turned off: the recorded gated instance must be refreshed
+    // back to the ungated config.
     expect(
-      shouldRebuildSessionForToolApprovalRules({
-        ...live,
+      shouldDisposeInstanceForToolApprovalRules({
         recordedHash: 'hash-a',
         currentHash: null,
       }),
     ).toBe(true);
     expect(
-      shouldRebuildSessionForToolApprovalRules({
-        ...live,
+      shouldDisposeInstanceForToolApprovalRules({
         recordedHash: null,
         currentHash: 'hash-a',
       }),
     ).toBe(true);
   });
 
-  it('keeps the live session when the recorded rules match, including a known-ungated record', () => {
+  it('preserves the cached instance on unchanged effective policies, including ordering-equivalent rules', () => {
     expect(
-      shouldRebuildSessionForToolApprovalRules({
-        ...live,
+      shouldDisposeInstanceForToolApprovalRules({
         recordedHash: 'hash-a',
         currentHash: 'hash-a',
       }),
     ).toBe(false);
     expect(
-      shouldRebuildSessionForToolApprovalRules({
-        ...live,
+      shouldDisposeInstanceForToolApprovalRules({
         recordedHash: null,
         currentHash: null,
       }),
     ).toBe(false);
   });
+});
 
-  it('never rebuilds when there is no live session to invalidate', () => {
+describe('ordering-equivalent policies share one hash', () => {
+  it('hashIntegrationToolApprovalRules is order-insensitive, so a reordered edit does not dispose the instance', () => {
+    const first = hashIntegrationToolApprovalRules([
+      { permission: 'b_tool', pattern: '*', action: 'deny' },
+      { permission: 'a_tool', pattern: '*', action: 'ask' },
+    ]);
+    const reordered = hashIntegrationToolApprovalRules([
+      { permission: 'a_tool', pattern: '*', action: 'ask' },
+      { permission: 'b_tool', pattern: '*', action: 'deny' },
+    ]);
+    expect(first).toBe(reordered);
     expect(
-      shouldRebuildSessionForToolApprovalRules({
-        hasLiveOpenCodeSession: false,
-        recordedHash: undefined,
-        currentHash: 'hash-a',
+      shouldDisposeInstanceForToolApprovalRules({
+        recordedHash: first,
+        currentHash: reordered,
       }),
     ).toBe(false);
   });

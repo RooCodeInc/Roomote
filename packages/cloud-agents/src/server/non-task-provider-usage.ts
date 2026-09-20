@@ -351,6 +351,8 @@ export type NonTaskOpenCodeNativeSessionOptions = {
     ask: NonTaskOpenCodePermissionAsk,
     helpers: NonTaskOpenCodePermissionAskHelpers,
   ) => void;
+  /** See the matching option on the prompt runner. */
+  disposeInstanceBeforeSession?: { completed: boolean };
   permission?: PermissionRuleset;
   promptOnlySubagents?: boolean;
   signal?: AbortSignal;
@@ -1198,6 +1200,15 @@ async function runNonTaskSdkPrompt(
       ask: NonTaskOpenCodePermissionAsk,
       helpers: NonTaskOpenCodePermissionAskHelpers,
     ) => void;
+    /**
+     * Dispose the directory's cached OpenCode instance before any session
+     * call, so its agent/tool state is rebuilt from the freshly written
+     * config. Sessions and transcripts persist on disk; only the in-memory
+     * instance cache is dropped. The shared object's `completed` flag is set
+     * on success (including "nothing cached to dispose") so the caller can
+     * retry the refresh on a later turn when the dispose genuinely failed.
+     */
+    disposeInstanceBeforeSession?: { completed: boolean };
     permission?: PermissionRuleset;
     preserveReasoning?: boolean;
     promptOnlySubagents?: boolean;
@@ -1271,6 +1282,27 @@ async function runNonTaskSdkPrompt(
       baseUrl: server.url,
       fetch: openCodeSdkFetch,
     });
+    if (options.disposeInstanceBeforeSession) {
+      try {
+        const disposeUrl = new URL(`${server.url}/instance/dispose`);
+        disposeUrl.searchParams.set('directory', sessionDirectory);
+        const disposeResponse = await fetch(disposeUrl, {
+          method: 'POST',
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (disposeResponse.ok) {
+          options.disposeInstanceBeforeSession.completed = true;
+        } else {
+          console.warn(
+            `[NonTaskProviderUsage] OpenCode instance dispose returned ${disposeResponse.status}.`,
+          );
+        }
+      } catch (error) {
+        console.warn(
+          `[NonTaskProviderUsage] OpenCode instance dispose failed: ${formatOpenCodeSdkError(error)}`,
+        );
+      }
+    }
     const permissionAskHelpers: NonTaskOpenCodePermissionAskHelpers = {
       // Native asks identify the paused call (messageID/callID) but carry no
       // arguments. Recover them from the asking session's own transcript so
@@ -2004,6 +2036,9 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
       onParentTaskPartUpdated: options.onParentTaskPartUpdated,
       onAssistantTextUpdated: options.onAssistantTextUpdated,
       onPermissionAsked: options.onPermissionAsked,
+      ...(options.disposeInstanceBeforeSession
+        ? { disposeInstanceBeforeSession: options.disposeInstanceBeforeSession }
+        : {}),
       permission: options.permission,
       preserveReasoning: true,
       promptOnlySubagents: options.promptOnlySubagents,

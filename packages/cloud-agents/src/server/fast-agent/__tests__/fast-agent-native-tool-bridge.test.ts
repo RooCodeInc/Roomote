@@ -461,6 +461,104 @@ describe('Fast native OpenCode tool bridge', () => {
     }
   });
 
+  it('falls back to the dispatcher path when distinct integration tools collide as one flattened OpenCode tool key', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const runtime = await getFastAgentNativeToolRuntime(
+        'code-mode-tool-key-collision',
+        [
+          {
+            id: 'a',
+            name: 'A',
+            description: 'First',
+            tools: [{ name: 'b_c' }],
+          },
+          {
+            id: 'a_b',
+            name: 'AB',
+            description: 'Second',
+            tools: [{ name: 'c' }],
+          },
+        ],
+        { codeModeIntegrationsEnabled: true },
+      );
+
+      // `a`/`b_c` and `a_b`/`c` both flatten to `a_b_c`: the catalog's tool
+      // identity is ambiguous, so code mode must not activate.
+      expect(runtime.env).not.toHaveProperty('OPENCODE_EXPERIMENTAL_CODE_MODE');
+      const config = JSON.parse(
+        await readFile(join(runtime.directory, 'opencode.json'), 'utf8'),
+      );
+      expect(Object.keys(config.mcp)).toEqual([]);
+      expect(config.agent.build.tools.execute).not.toBe(true);
+      expect(config.agent.build.tools.call_integration_tool).toBe(true);
+      expect(
+        warn.mock.calls.some(([message]) => String(message).includes('a_b_c')),
+      ).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('writes tool approval permission entries for the build agent and helper subagents', async () => {
+    const runtime = await getFastAgentNativeToolRuntime(
+      'code-mode-tool-approval-permission',
+      [
+        {
+          id: 'github',
+          name: 'GitHub',
+          description: 'GitHub',
+          tools: [{ name: 'create_issue' }, { name: 'search_issues' }],
+        },
+      ],
+      {
+        codeModeIntegrationsEnabled: true,
+        toolApprovalPermission: {
+          github_create_issue: 'ask',
+          github_search_issues: 'deny',
+        },
+      },
+    );
+
+    const config = JSON.parse(
+      await readFile(join(runtime.directory, 'opencode.json'), 'utf8'),
+    );
+    expect(config.agent.build.permission).toEqual({
+      github_create_issue: 'ask',
+      github_search_issues: 'deny',
+    });
+    expect(config.agent.advisor.permission).toEqual(
+      config.agent.build.permission,
+    );
+    expect(config.agent.judge.permission).toEqual(
+      config.agent.build.permission,
+    );
+    expect(runtime.env.OPENCODE_EXPERIMENTAL_CODE_MODE).toBe('1');
+  });
+
+  it('omits tool approval permission entries when approvals are inactive', async () => {
+    const runtime = await getFastAgentNativeToolRuntime(
+      'code-mode-tool-approval-inactive',
+      [
+        {
+          id: 'github',
+          name: 'GitHub',
+          description: 'GitHub',
+          tools: [{ name: 'create_issue' }],
+        },
+      ],
+      { codeModeIntegrationsEnabled: true },
+    );
+
+    const config = JSON.parse(
+      await readFile(join(runtime.directory, 'opencode.json'), 'utf8'),
+    );
+    expect(config.agent.build.permission).toBeUndefined();
+    expect(config.agent.advisor).toBeUndefined();
+    expect(config.agent.judge).toBeUndefined();
+    expect(runtime.env.OPENCODE_EXPERIMENTAL_CODE_MODE).toBe('1');
+  });
+
   it('posts the capability-scoped bridge config when mounting an integration mid-turn', async () => {
     const requests: { url: string; body: unknown }[] = [];
     const originalFetch = globalThis.fetch;

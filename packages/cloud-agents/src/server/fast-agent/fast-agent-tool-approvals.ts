@@ -95,21 +95,36 @@ export function buildIntegrationToolApprovalRules(
 }
 
 /**
- * Whether the live OpenCode session must be rebuilt before this turn because
- * its creation-time permission ruleset is stale or unknowable. The recorded
- * hash is process-local, so after a restart a persisted session has no record
- * (`recordedHash` undefined): it may still carry a stale ask (which would
- * pause forever without an approval bridge installed) or a stale deny, so
- * the only safe choice is to rebuild. An explicit null record means "known
- * to be ungated" and does not rebuild on its own.
+ * Compile the same rules into OpenCode's config-permission shape for the
+ * generated per-conversation `opencode.json` (`agent.<name>.permission`),
+ * which is how gated rules reach the parent build agent and the helper
+ * subagents without touching session-creation state.
  */
-export function shouldRebuildSessionForToolApprovalRules(input: {
-  hasLiveOpenCodeSession: boolean;
+export function integrationToolApprovalRulesToConfig(
+  rules: PermissionRuleset,
+): Record<string, 'ask' | 'deny'> {
+  return Object.fromEntries(
+    rules.map((rule) => [rule.permission, rule.action]),
+  ) as Record<string, 'ask' | 'deny'>;
+}
+
+/**
+ * Whether the live per-directory OpenCode instance must be disposed so its
+ * cached agent state is rebuilt from the freshly rewritten config. Approval
+ * rules ride in the generated per-conversation config, which every turn
+ * rewrites, and OpenCode's own servers are disposable child processes: after
+ * a Roomote restart there is no live instance at all, and the next turn's
+ * instance boots from the current config. A dispose is therefore only needed
+ * when the same process previously booted the instance with different rules
+ * (`recordedHash` set and unequal). An unknown record after a restart is
+ * fresh state, not stale state, and must not dispose — that would be a
+ * false-positive cache break.
+ */
+export function shouldDisposeInstanceForToolApprovalRules(input: {
   recordedHash: string | null | undefined;
   currentHash: string | null;
 }): boolean {
-  if (!input.hasLiveOpenCodeSession) return false;
-  if (input.recordedHash === undefined) return true;
+  if (input.recordedHash === undefined) return false;
   return input.recordedHash !== input.currentHash;
 }
 

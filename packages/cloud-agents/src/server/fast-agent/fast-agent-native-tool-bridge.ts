@@ -70,6 +70,10 @@ import {
   buildFastAgentToolFilter,
   isFastAgentNativeIntegration,
 } from './fast-agent-tool-policy';
+import {
+  ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME,
+  ROOMOTE_OPENCODE_JUDGE_AGENT_NAME,
+} from '../../opencode-prompt-subagents';
 
 export {
   FAST_AGENT_NATIVE_TOOL_FILTER,
@@ -1655,6 +1659,47 @@ function findSanitizedMcpServerNameCollision(
   return null;
 }
 
+/**
+ * OpenCode flattens every MCP tool to `<sanitized server>_<tool name>`, and
+ * both halves may themselves contain underscores, so two distinct
+ * integration/tool pairs can collapse into one native key (`a`/`b_c` and
+ * `a_b`/`c` both become `a_b_c`). The server-name guard above does not catch
+ * that: the flattened names collide even though the server names are
+ * distinct. Such a catalog makes per-tool identity ambiguous — for tool
+ * calls themselves, and for any approval policy keyed by the native name —
+ * so code mode refuses to activate for it, same as a server-name collision.
+ */
+function findCodeModeToolKeyCollision(
+  integrations: FastAgentIntegration[],
+): { first: string; second: string; key: string } | null {
+  const seen = new Map<string, string>();
+  for (const integration of integrations) {
+    const sanitized = integration.id.replace(/[^a-zA-Z0-9_-]/gu, '_');
+    for (const tool of integration.tools) {
+      const key = `${sanitized}_${tool.name}`;
+      const pair = `${integration.id}/${tool.name}`;
+      const first = seen.get(key);
+      if (first !== undefined && first !== pair) {
+        return { first, second: pair, key };
+      }
+      seen.set(key, pair);
+    }
+  }
+  return null;
+}
+
+/**
+ * True when two mounted integration tools would collide as one flattened
+ * OpenCode tool key, so the code-mode integrations experiment cannot
+ * activate for this set. Checked alongside the server-name guard everywhere
+ * code-mode activation is decided.
+ */
+export function hasFastAgentCodeModeToolKeyCollision(
+  integrations: FastAgentIntegration[],
+): boolean {
+  return findCodeModeToolKeyCollision(integrations) !== null;
+}
+
 export async function getFastAgentNativeToolRuntime(
   sessionId: string,
   integrations: FastAgentIntegration[],
@@ -1664,6 +1709,16 @@ export async function getFastAgentNativeToolRuntime(
     serviceCredentialPrepareEnabled?: boolean;
     addRemoteMcpEnabled?: boolean;
     codeModeIntegrationsEnabled?: boolean;
+    /**
+     * Experiment-gated (`integrationToolApprovals`) per-tool approval rules
+     * in OpenCode config-permission shape, applied to the parent build agent
+     * and the helper subagents in the generated per-conversation config.
+     * Rules live in config rather than the session ruleset so a policy
+     * change never strands stale state in a persisted session: this file is
+     * rewritten every turn, and a policy change disposes the directory's
+     * cached instance instead of rebuilding the session.
+     */
+    toolApprovalPermission?: Record<string, 'ask' | 'deny'>;
   } = {},
 ): Promise<FastAgentNativeToolRuntime> {
   bridgePromise ??= startBridge();
@@ -1716,9 +1771,16 @@ export async function getFastAgentNativeToolRuntime(
   let codeModeIntegrationsActive = false;
   if (options.codeModeIntegrationsEnabled === true) {
     const collision = findSanitizedMcpServerNameCollision(integrations);
+    const toolKeyCollision = collision
+      ? null
+      : findCodeModeToolKeyCollision(integrations);
     if (collision) {
       console.warn(
         `[Fast Agent] Code-mode integrations skipped: integration ids ${collision.first} and ${collision.second} collide as OpenCode MCP server names (${collision.sanitized}).`,
+      );
+    } else if (toolKeyCollision) {
+      console.warn(
+        `[Fast Agent] Code-mode integrations skipped: tools ${toolKeyCollision.first} and ${toolKeyCollision.second} collide as the OpenCode tool name (${toolKeyCollision.key}).`,
       );
     } else {
       codeModeIntegrationsActive = true;
@@ -1731,6 +1793,15 @@ export async function getFastAgentNativeToolRuntime(
     delete runtime.env.OPENCODE_EXPERIMENTAL_CODE_MODE;
   }
   runtime.codeModeIntegrationsActive = codeModeIntegrationsActive;
+  // Approval rules apply to the parent build agent and to the helper
+  // subagents. OpenCode merges this per-directory config over the shared
+  // server config, so a permission-only entry extends the existing advisor
+  // and judge definitions instead of replacing them.
+  const toolApprovalAgentEntries = options.toolApprovalPermission
+    ? {
+        permission: options.toolApprovalPermission,
+      }
+    : {};
   writeFileSync(
     join(runtime.directory, 'opencode.json'),
     JSON.stringify({
@@ -1752,7 +1823,14 @@ export async function getFastAgentNativeToolRuntime(
               codeModeIntegrationsEnabled: codeModeIntegrationsActive,
             },
           ),
+          ...toolApprovalAgentEntries,
         },
+        ...(options.toolApprovalPermission
+          ? {
+              [ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME]: toolApprovalAgentEntries,
+              [ROOMOTE_OPENCODE_JUDGE_AGENT_NAME]: toolApprovalAgentEntries,
+            }
+          : {}),
       },
       mcp: Object.fromEntries(
         mountedIntegrations.map((integration) => [
