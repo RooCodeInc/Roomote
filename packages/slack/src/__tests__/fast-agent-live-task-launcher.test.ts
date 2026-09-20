@@ -86,7 +86,16 @@ import { RunStatus } from '@roomote/types';
 
 import { createFastAgentSlackLiveTaskLauncher } from '../fast-agent-live-task-launcher';
 
-function createLauncher() {
+function createLauncher(
+  callbacks: {
+    onTaskCreated?: () => void;
+    onVisibleResponse?: (kind: 'task_card' | 'task_link_fallback') => void;
+    onVisibleResponseFailure?: (
+      kind: 'task_card' | 'task_link_fallback',
+      reason: string,
+    ) => void;
+  } = {},
+) {
   return createFastAgentSlackLiveTaskLauncher({
     slack: {
       postMessage: mocks.postMessage,
@@ -100,6 +109,7 @@ function createLauncher() {
     channelId: 'C123',
     threadTs: '100.001',
     messageId: '100.002',
+    ...callbacks,
   });
 }
 
@@ -135,7 +145,9 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
   };
 
   it('posts a starting placeholder card in the parent thread and records the task title', async () => {
-    const launchTask = createLauncher();
+    const onTaskCreated = vi.fn();
+    const onVisibleResponse = vi.fn();
+    const launchTask = createLauncher({ onTaskCreated, onVisibleResponse });
 
     await expect(
       launchTask({
@@ -197,6 +209,8 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
       rendersTaskLink: true,
       environmentId: 'env-1',
     });
+    expect(onTaskCreated).toHaveBeenCalledOnce();
+    expect(onVisibleResponse).toHaveBeenCalledWith('task_card');
   });
 
   it('normalizes Slack links but keeps raw mentions before launching the child task', async () => {
@@ -318,11 +332,16 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
   });
 
   it('posts a plain task link when Slack rejects the card', async () => {
+    const onVisibleResponse = vi.fn();
+    const onVisibleResponseFailure = vi.fn();
     mocks.postMessageDetailed.mockResolvedValue({
       slackErrorCode: 'invalid_blocks',
     });
 
-    await createLauncher()({
+    await createLauncher({
+      onVisibleResponse,
+      onVisibleResponseFailure,
+    })({
       prompt: 'Add a regression test',
       environmentId: null,
       parentSessionId: '11111111-1111-4111-8111-111111111111',
@@ -331,6 +350,11 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
 
     expect(mocks.postMessage).toHaveBeenCalledWith(taskLinkFallback);
     expect(mocks.setSlackLiveTaskStreamData).not.toHaveBeenCalled();
+    expect(onVisibleResponseFailure).toHaveBeenCalledWith(
+      'task_card',
+      'provider_rejected',
+    );
+    expect(onVisibleResponse).toHaveBeenCalledWith('task_link_fallback');
   });
 
   it('posts nothing when the thread root is gone', async () => {

@@ -26,6 +26,8 @@ type SlackLiveTaskCardNotifier = Pick<
   | 'updateMessage'
 >;
 
+type SlackLiveTaskVisibleResponseKind = 'task_card' | 'task_link_fallback';
+
 const STARTING_TASK_TITLE = 'Starting task…';
 
 function describeError(error: unknown): string {
@@ -50,14 +52,26 @@ export function createFastAgentSlackLiveTaskLauncher(
     'liveTaskStream' | 'afterKickoff' | 'onQueueFailure' | 'rendersTaskLink'
   > & {
     slack: SlackLiveTaskCardNotifier;
+    onTaskCreated?: () => void;
+    onVisibleResponse?: (kind: SlackLiveTaskVisibleResponseKind) => void;
+    onVisibleResponseFailure?: (
+      kind: SlackLiveTaskVisibleResponseKind,
+      reason: string,
+    ) => void;
   },
 ): LaunchFastAgentTask {
-  const { slack, ...launcherParams } = params;
+  const {
+    slack,
+    onTaskCreated,
+    onVisibleResponse,
+    onVisibleResponseFailure,
+    ...launcherParams
+  } = params;
 
   const postTaskLink = async (taskUrl: string): Promise<void> => {
     const label = 'Open in Roomote';
     try {
-      await slack.postMessage({
+      const messageTs = await slack.postMessage({
         channel: launcherParams.channelId,
         thread_ts: launcherParams.threadTs,
         text: `${label}: ${taskUrl}`,
@@ -65,7 +79,16 @@ export function createFastAgentSlackLiveTaskLauncher(
         unfurl_links: false,
         unfurl_media: false,
       });
+      if (messageTs) {
+        onVisibleResponse?.('task_link_fallback');
+      } else {
+        onVisibleResponseFailure?.(
+          'task_link_fallback',
+          'provider_did_not_accept',
+        );
+      }
     } catch (error) {
+      onVisibleResponseFailure?.('task_link_fallback', 'exception');
       console.error(
         `[Fast Agent] Failed to post the task link fallback: ${describeError(error)}`,
       );
@@ -76,6 +99,7 @@ export function createFastAgentSlackLiveTaskLauncher(
     taskRun: { id: number; taskId: string },
     context: { prompt: string; taskUrl: string },
   ): Promise<void> => {
+    onTaskCreated?.();
     const taskUpdateId = `roomote-task-${taskRun.taskId}`;
     let messageTs: string | undefined;
     let destinationUrl = context.taskUrl;
@@ -116,12 +140,21 @@ export function createFastAgentSlackLiveTaskLauncher(
         if (posted.skippedMissingThreadRoot) {
           return;
         }
+        onVisibleResponseFailure?.(
+          'task_card',
+          posted.transportError
+            ? 'transport_error'
+            : posted.slackErrorCode
+              ? 'provider_rejected'
+              : 'provider_did_not_accept',
+        );
         console.warn(
           `[Fast Agent] Slack rejected the task card for run ${taskRun.id} (${posted.slackErrorCode ?? (posted.transportError ? 'transport error' : 'unknown')}); posting the task link instead.`,
         );
         await postTaskLink(destinationUrl);
         return;
       }
+      onVisibleResponse?.('task_card');
 
       // The stored title is the prompt-derived fallback the worker renders
       // if no generated title exists yet.
@@ -136,6 +169,9 @@ export function createFastAgentSlackLiveTaskLauncher(
         taskUrl: destinationUrl,
       });
     } catch (error) {
+      if (!messageTs) {
+        onVisibleResponseFailure?.('task_card', 'exception');
+      }
       console.error(
         `[Fast Agent] Failed to post the Slack task card for run ${taskRun.id}: ${describeError(error)}`,
       );

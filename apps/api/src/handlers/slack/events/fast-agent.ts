@@ -42,6 +42,7 @@ import {
   postSlackThreadMarkdownMessage,
   guardReplyStreamBySourceMessage,
 } from '../helpers/thread-posting.js';
+import type { SlackFirstVisibleResponseTiming } from '../helpers/first-visible-response-timing.js';
 import { processSlackAttachments } from '../helpers/attachments.js';
 import {
   mentionsAnySlackUser,
@@ -71,6 +72,7 @@ export async function processFastAgentMessage(params: {
   originSessionId?: string;
   onAccepted?: (abort: () => Promise<void>) => void;
   onRejected?: () => void;
+  firstVisibleResponseTiming?: SlackFirstVisibleResponseTiming;
 }): Promise<void> {
   const {
     event,
@@ -174,6 +176,7 @@ export async function processFastAgentMessage(params: {
       }
     })();
     const conversation = session.conversation;
+    params.firstVisibleResponseTiming?.markSessionReady(session.created);
 
     const threadContext = await threadContextPromise;
 
@@ -469,6 +472,9 @@ export async function processFastAgentMessage(params: {
                       }),
                     onDelivered: () => {
                       didSendVisibleResponse = true;
+                      params.firstVisibleResponseTiming?.markFirstVisibleResponse(
+                        'streamed_reply',
+                      );
                     },
                   }),
                   {
@@ -519,6 +525,10 @@ export async function processFastAgentMessage(params: {
             })),
           });
           if (posted === 'failed') {
+            params.firstVisibleResponseTiming?.markVisibleResponseFailure(
+              kickoff ? 'kickoff_reply' : 'reply',
+              'provider_did_not_accept',
+            );
             throw new Error('Slack did not accept the Fast parent reply.');
           }
           if (posted === 'suppressed' && kickoff) {
@@ -536,6 +546,9 @@ export async function processFastAgentMessage(params: {
           if (typeof posted !== 'object') {
             return undefined;
           }
+          params.firstVisibleResponseTiming?.markFirstVisibleResponse(
+            kickoff ? 'kickoff_reply' : 'reply',
+          );
           await recordFastAgentConversationMessageBestEffort({
             sessionId: session.id,
             conversation,
@@ -588,6 +601,7 @@ export async function processFastAgentMessage(params: {
             messageId,
           });
           didSendVisibleResponse = true;
+          params.firstVisibleResponseTiming?.markFirstVisibleResponse('reply');
           return { messageId };
         },
         postReaction: async ({ name, messageId }) => {
@@ -600,6 +614,9 @@ export async function processFastAgentMessage(params: {
             throw new Error(`Slack rejected the ${name} reaction.`);
           }
           didSendVisibleResponse = true;
+          params.firstVisibleResponseTiming?.markFirstVisibleResponse(
+            'reaction',
+          );
         },
       },
     });
@@ -619,11 +636,19 @@ export async function processFastAgentMessage(params: {
         fastSessionFooter: { sessionId: session.id, ...footerContext },
       });
       if (typeof posted === 'object') {
+        params.firstVisibleResponseTiming?.markFirstVisibleResponse(
+          'fallback_reply',
+        );
         await recordFastAgentConversationMessageBestEffort({
           sessionId: session.id,
           conversation,
           messageId: posted.messageId,
         });
+      } else if (posted === 'failed') {
+        params.firstVisibleResponseTiming?.markVisibleResponseFailure(
+          'fallback_reply',
+          'provider_did_not_accept',
+        );
       }
     }
   } finally {

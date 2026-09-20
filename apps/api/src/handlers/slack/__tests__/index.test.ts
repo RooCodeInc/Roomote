@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   findInstallation: vi.fn(),
   redisEval: vi.fn(),
   redisValues: new Map<string, string>(),
+  logApiOperationalEvent: vi.fn(),
 }));
 
 vi.mock('@roomote/redis', () => ({
@@ -39,6 +40,7 @@ vi.mock('../../../logging.js', () => ({
     debug: vi.fn(),
     warn: vi.fn(),
   },
+  logApiOperationalEvent: mocks.logApiOperationalEvent,
 }));
 
 vi.mock('../constants.js', () => ({
@@ -170,6 +172,15 @@ describe('Slack event callback deduplication', () => {
     expect(duplicateResponse.status).toBe(200);
     await expect(duplicateResponse.json()).resolves.toEqual({ ok: true });
     expect(mocks.dispatchSlackEvent).toHaveBeenCalledTimes(2);
+    expect(mocks.logApiOperationalEvent).toHaveBeenCalledWith(
+      'info',
+      'slack_first_visible_response_timing',
+      expect.objectContaining({
+        eventType: 'webhook_response_ready',
+        outcome: 'duplicate',
+        reason: 'event_already_completed_transport_unobserved',
+      }),
+    );
   });
 
   it('keeps a redelivery retryable while the first attempt is processing', async () => {

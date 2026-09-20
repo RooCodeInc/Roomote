@@ -30,6 +30,7 @@ import {
 import type { SlackWebhookBody } from './types.js';
 import { verifySlackRequest } from './verifySlackRequest.js';
 import { resumePendingSlackAuthRequest } from './events/auth-resume.js';
+import { createSlackFirstVisibleResponseTiming } from './helpers/first-visible-response-timing.js';
 
 export const slack = new Hono();
 
@@ -102,6 +103,7 @@ slack.post('/auth/resume', async (c) => {
 });
 
 slack.post('/', async (c) => {
+  const receivedAt = Date.now();
   const headers = c.req.header();
   const rawBody = await c.req.text();
 
@@ -175,6 +177,14 @@ slack.post('/', async (c) => {
     const event = body.event;
     const teamId = body.team_id;
     const eventId = body.event_id;
+    const firstVisibleResponseTiming =
+      (event.type === 'app_mention' || event.type === 'message') && eventId
+        ? createSlackFirstVisibleResponseTiming({
+            eventId,
+            eventType: event.type,
+            receivedAt,
+          })
+        : undefined;
 
     if (!teamId) {
       console.error('❌ No team_id found in webhook payload');
@@ -200,10 +210,20 @@ slack.post('/', async (c) => {
 
       if (claimResult.status === 'completed') {
         apiLogger.debug(`🔄 Skipping duplicate Slack event: ${eventId}`);
+        firstVisibleResponseTiming?.markWebhookResponseReady({
+          status: 200,
+          outcome: 'duplicate',
+          reason: 'event_already_completed',
+        });
         return c.json({ ok: true });
       }
       if (claimResult.status === 'processing') {
         apiLogger.debug(`⏳ Slack event is still processing: ${eventId}`);
+        firstVisibleResponseTiming?.markWebhookResponseReady({
+          status: 503,
+          outcome: 'retryable_failure',
+          reason: 'event_still_processing',
+        });
         return c.json(
           { ok: false, error: 'slack_event_processing' },
           { status: 503 },
@@ -211,6 +231,7 @@ slack.post('/', async (c) => {
       }
       eventClaim = claimResult.claim;
     }
+    firstVisibleResponseTiming?.markEventReceived();
 
     const isAppAuthoredEvent = isAppAuthoredSlackEvent(event);
     const automatedAppMentionEvent = isRoutableAutomatedSlackAppMention(
@@ -242,6 +263,7 @@ slack.post('/', async (c) => {
         appName: slackInstallation.appName,
       }),
       teamId,
+      firstVisibleResponseTiming,
     });
     const eventLogDetails = getSlackWebhookEventLogDetails(event);
     const callbackLog = eventLogDetails.callbackId
@@ -277,6 +299,11 @@ slack.post('/', async (c) => {
       if (eventClaim) {
         await completeSlackEventClaim(eventClaim);
       }
+      firstVisibleResponseTiming?.markWebhookResponseReady({
+        status: 200,
+        outcome: 'accepted',
+        reason: 'dispatch_completed',
+      });
     } catch (error) {
       stopLeaseRenewal();
       console.error(
@@ -289,6 +316,11 @@ slack.post('/', async (c) => {
           );
         });
       }
+      firstVisibleResponseTiming?.markWebhookResponseReady({
+        status: 503,
+        outcome: 'failed',
+        reason: 'dispatch_failed',
+      });
       return c.json(
         { ok: false, error: 'slack_event_processing_failed' },
         { status: 503 },

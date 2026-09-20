@@ -82,6 +82,7 @@ import {
 import { postSlackThreadMarkdownMessage } from '../helpers/thread-posting.js';
 import { resolveFastAgentReplyTasks } from '../pr-review-retire.js';
 import { lookupSlackUserMapping } from '../helpers/user-mapping.js';
+import type { SlackFirstVisibleResponseTiming } from '../helpers/first-visible-response-timing.js';
 import {
   compareNumericMessageIds,
   resolveUnmentionedThreadReplyRouting,
@@ -1063,6 +1064,7 @@ export function startFastAgentResponse(params: {
   delegatedTaskInitiator?: TaskInitiator;
   originSessionId?: string;
   errorLogPrefix: string;
+  firstVisibleResponseTiming?: SlackFirstVisibleResponseTiming;
 }): Promise<FastAgentStartResult> {
   const { errorLogPrefix, delegatedTaskInitiator, ...fastAgentParams } = params;
   return startAcceptedFastAgentTurn({
@@ -1087,7 +1089,17 @@ export function startFastAgentResponse(params: {
           channelId: params.event.channel,
           threadTs: params.event.thread_ts || params.event.ts,
           messageId: params.event.ts,
+          onTaskCreated: () =>
+            params.firstVisibleResponseTiming?.markTaskCreated(),
+          onVisibleResponse: (kind) =>
+            params.firstVisibleResponseTiming?.markFirstVisibleResponse(kind),
+          onVisibleResponseFailure: (kind, reason) =>
+            params.firstVisibleResponseTiming?.markVisibleResponseFailure(
+              kind,
+              reason,
+            ),
         }),
+        firstVisibleResponseTiming: params.firstVisibleResponseTiming,
         onAccepted,
         onRejected,
       }),
@@ -1115,6 +1127,7 @@ async function handleSlackEntryEvent(params: {
   skipThreadFollowupHandling?: boolean;
   threadTaskId?: string;
   peerConversationsExperimentEnabled?: boolean;
+  firstVisibleResponseTiming?: SlackFirstVisibleResponseTiming;
 }): Promise<void> {
   const {
     event,
@@ -1263,6 +1276,7 @@ async function handleSlackEntryEvent(params: {
       peerConversationsExperimentEnabled: peerConversationsExperimentEnabled,
       ...(attentionReply ? { originSessionId: attentionReply.sessionId } : {}),
       errorLogPrefix: `❌ Background fast-agent response failed for thread ${threadId}:`,
+      firstVisibleResponseTiming: params.firstVisibleResponseTiming,
     });
 
     return;
@@ -1378,5 +1392,6 @@ export async function handleMessageOrAppMentionEvent(params: {
       unmentionedThreadReplyRouting.shouldRoute
         ? unmentionedThreadReplyRouting.peerConversationsExperimentEnabled
         : undefined,
+    firstVisibleResponseTiming: context.firstVisibleResponseTiming,
   });
 }
