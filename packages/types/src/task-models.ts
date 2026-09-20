@@ -21,6 +21,7 @@ export const ENABLED_DIRECT_TASK_MODEL_PROVIDER_IDS = [
   'requesty',
   'baseten',
   'togetherai',
+  'deepseek',
   'openai',
   'azure',
   'azure-cognitive-services',
