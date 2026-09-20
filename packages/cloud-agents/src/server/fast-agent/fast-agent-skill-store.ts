@@ -107,6 +107,11 @@ export type FastAgentSettingsSkillSource = {
   dispose?(): Promise<void>;
 };
 
+type FastAgentSkillSourceTiming = (
+  source: 'packaged' | 'instance' | 'settings' | 'repository',
+  durationMs: number,
+) => void;
+
 const FAST_AGENT_PACKAGED_SKILL_NAME_SET = new Set<string>(
   FAST_AGENT_PACKAGED_SKILL_NAMES,
 );
@@ -250,6 +255,7 @@ export class FastAgentSkillStore {
     private readonly repositorySkills?: FastAgentRepositorySkillSource,
     private readonly settingsSkills?: FastAgentSettingsSkillSource,
     private readonly instanceSkills?: FastAgentSettingsSkillSource,
+    private readonly onSourceTiming?: FastAgentSkillSourceTiming,
   ) {
     this.rootDirectory = rootDirectory
       ? Promise.resolve(resolve(rootDirectory))
@@ -257,17 +263,19 @@ export class FastAgentSkillStore {
   }
 
   async list(query: FastAgentSkillQuery = {}): Promise<FastAgentSkillCatalog> {
-    const packaged = await Promise.all(
-      FAST_AGENT_PACKAGED_SKILL_NAMES.map(async (name) => {
-        const document = await this.readPackaged(name);
-        return {
-          description: getFastAgentSkillDescription(document.content),
-          id: document.id,
-          invocation: name,
-          name,
-          source: 'packaged' as const,
-        };
-      }),
+    const packaged = await this.measureSource('packaged', () =>
+      Promise.all(
+        FAST_AGENT_PACKAGED_SKILL_NAMES.map(async (name) => {
+          const document = await this.readPackaged(name);
+          return {
+            description: getFastAgentSkillDescription(document.content),
+            id: document.id,
+            invocation: name,
+            name,
+            source: 'packaged' as const,
+          };
+        }),
+      ),
     );
     const scope = query.environmentId
       ? ({ environmentId: query.environmentId } as const)
@@ -278,7 +286,9 @@ export class FastAgentSkillStore {
     const packagedMatchIsAuthoritative =
       !!query.name && packagedNames.has(query.name);
     const instance = this.instanceSkills
-      ? await this.instanceSkills.list(query)
+      ? await this.measureSource('instance', () =>
+          this.instanceSkills!.list(query),
+        )
       : { skills: [], warnings: [] };
     const filteredInstance = instance.skills.filter(
       (skill) =>
@@ -292,8 +302,10 @@ export class FastAgentSkillStore {
       !packagedMatchIsAuthoritative &&
       !instanceMatchIsAuthoritative &&
       this.settingsSkills
-        ? await collectOptionalSource('legacy Settings', () =>
-            this.settingsSkills!.list(query),
+        ? await this.measureSource('settings', () =>
+            collectOptionalSource('legacy Settings', () =>
+              this.settingsSkills!.list(query),
+            ),
           )
         : { skills: [], warnings: [] };
     const repository =
@@ -302,8 +314,10 @@ export class FastAgentSkillStore {
       (query.sourceOffset ?? 0) === 0 &&
       scope &&
       this.repositorySkills
-        ? await collectOptionalSource('repository', () =>
-            this.repositorySkills!.list(scope),
+        ? await this.measureSource('repository', () =>
+            collectOptionalSource('repository', () =>
+              this.repositorySkills!.list(scope),
+            ),
           )
         : { skills: [], warnings: [] };
     const filteredPackaged = query.name
@@ -356,6 +370,19 @@ export class FastAgentSkillStore {
         ...repository.warnings,
       ],
     };
+  }
+
+  private async measureSource<T>(
+    source: Parameters<FastAgentSkillSourceTiming>[0],
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    if (!this.onSourceTiming) return operation();
+    const startedAt = performance.now();
+    try {
+      return await operation();
+    } finally {
+      this.onSourceTiming?.(source, performance.now() - startedAt);
+    }
   }
 
   async read(

@@ -9,7 +9,9 @@ export async function buildSkillsCommandReply(input: {
   command: string;
 }): Promise<string> {
   return formatUserCallableSkillsPage({
-    catalog: await listUserCallableFastAgentSkills(input.userId),
+    catalog: await listUserCallableFastAgentSkills(input.userId, {
+      page: input.page,
+    }),
     page: input.page,
     command: input.command,
   });

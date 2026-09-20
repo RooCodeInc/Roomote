@@ -42,7 +42,7 @@ async function processJob(job: Job<AgentMailQueueJob>) {
           (subject ? parseSkillsCommandPage(subject) : null);
         if (page === null) return null;
         return formatUserCallableSkillsPage({
-          catalog: await listUserCallableFastAgentSkills(userId),
+          catalog: await listUserCallableFastAgentSkills(userId, { page }),
           page,
           command: '/skills',
         });

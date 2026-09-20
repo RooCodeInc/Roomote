@@ -488,6 +488,7 @@ describe('RemoteFastAgentSettingsSkillSource', () => {
     const catalog = await source.listPromptCatalog();
 
     expect(loadMarketplaceSnapshot).not.toHaveBeenCalled();
+    expect(catalog.catalogRevision).toMatch(/^[0-9a-f]{64}$/u);
     expect(catalog.skills).toEqual([
       expect.objectContaining({
         description: 'Use when triaging a support escalation.',
@@ -503,6 +504,20 @@ describe('RemoteFastAgentSettingsSkillSource', () => {
         sources: ['anthropics/skills', 'dbt-labs/dbt-agent-skills'],
       },
     ]);
+    const changedSource = new RemoteFastAgentSettingsSkillSource({
+      allowedEnvironmentIds: ['environment-1'],
+      resolveEnvironments: vi.fn().mockResolvedValue([
+        {
+          id: 'environment-1',
+          config: environmentConfig({
+            skills: { 'anthropics/skills': ['frontend-design', 'pdfs'] },
+          }),
+        },
+      ]),
+    });
+    expect((await changedSource.listPromptCatalog()).catalogRevision).not.toBe(
+      catalog.catalogRevision,
+    );
     // The same ID resolves through `list`, so `load_skill` works on it.
     const listed = await source.list({});
     expect(listed.skills.map((skill) => skill.id)).toEqual([
