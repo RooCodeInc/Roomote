@@ -62,6 +62,8 @@ interface StartOpenCodeServerHarnessResult {
   subprocess: ResultPromise;
 }
 
+const OPENCODE_STARTUP_TIMEOUT_MS = 90_000;
+
 function parseTimeoutMs(value: string | undefined): number | undefined {
   const trimmed = value?.trim();
 
@@ -285,7 +287,7 @@ export async function startOpenCodeServerHarness({
       await Promise.race([
         waitForOpenCodeServer({
           baseUrl,
-          timeoutMs: 30_000,
+          timeoutMs: OPENCODE_STARTUP_TIMEOUT_MS,
           signal: readinessAbortController.signal,
         }),
         subprocess.then(
