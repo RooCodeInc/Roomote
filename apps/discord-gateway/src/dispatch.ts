@@ -166,9 +166,7 @@ async function deferInteraction(
     const commandName = interaction.data?.name?.toLowerCase();
     const ephemeral =
       interaction.type === 2 &&
-      (commandName === 'link' ||
-        commandName === 'help' ||
-        commandName === 'skills');
+      (commandName === 'link' || commandName === 'help');
     await rest.post(
       Routes.interactionCallback(interaction.id, interaction.token),
       {

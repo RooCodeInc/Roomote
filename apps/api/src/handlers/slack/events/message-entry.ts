@@ -8,7 +8,6 @@ import {
 import {
   FastAgentDurableRetryScheduledError,
   getFastAgentSessionOwner,
-  parseSkillsCommandPage,
 } from '@roomote/cloud-agents/server';
 import {
   acquireSlackFastRootBindingLock,
@@ -83,7 +82,6 @@ import {
 import { postSlackThreadMarkdownMessage } from '../helpers/thread-posting.js';
 import { resolveFastAgentReplyTasks } from '../pr-review-retire.js';
 import { lookupSlackUserMapping } from '../helpers/user-mapping.js';
-import { buildSkillsCommandReply } from '../../shared/skills-command.js';
 import {
   compareNumericMessageIds,
   resolveUnmentionedThreadReplyRouting,
@@ -121,20 +119,6 @@ export function isRemovedEvalCommandInvocation(text: string): boolean {
     .replace(/^\s*<@[^>]+>[\s,:;.-]*/u, '')
     .trimStart();
   return REMOVED_EVAL_COMMAND_PATTERN.test(mentionStrippedText);
-}
-
-export function getSlackSkillsCommandPage(text: string): number | null {
-  return parseSkillsCommandPage(text.replace(/^\s*<@[^>]+>[\s,:;.-]*/u, ''));
-}
-
-export function shouldHandleSlackSkillsCommand(
-  event: SlackEvent,
-  botUserId: string | null | undefined,
-): boolean {
-  return (
-    event.channel_type === 'im' ||
-    mentionsSlackBot(event, botUserId ?? undefined)
-  );
 }
 
 async function postRemovedEvalCommandMessage(params: {
@@ -1169,32 +1153,6 @@ async function handleSlackEntryEvent(params: {
     }
 
     await showConnectAccount(event, slackInstallation, slack);
-    return;
-  }
-
-  const skillsPage = getSlackSkillsCommandPage(
-    event.authoredText ?? event.text,
-  );
-  if (
-    skillsPage !== null &&
-    shouldHandleSlackSkillsCommand(event, slackInstallation.botUserId)
-  ) {
-    await postSlackThreadMarkdownMessage({
-      slack,
-      channel: event.channel,
-      threadTs: event.thread_ts || event.ts,
-      text: await buildSkillsCommandReply({
-        userId: userMapping.userId,
-        page: skillsPage,
-        command: 'skills',
-      }),
-      sourceMessageTs: event.ts,
-      conversationLog: {
-        userId: userMapping.userId,
-        slackTeamId: teamId,
-        source: 'slack_skills_command',
-      },
-    });
     return;
   }
 

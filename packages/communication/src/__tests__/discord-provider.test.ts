@@ -305,11 +305,6 @@ describe('DiscordCommunicationProvider', () => {
           }),
         ],
       },
-      {
-        name: 'skills',
-        type: 1,
-        options: [expect.objectContaining({ name: 'page', required: false })],
-      },
       { name: 'help', type: 1 },
     ]);
   });

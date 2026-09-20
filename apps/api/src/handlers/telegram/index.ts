@@ -21,7 +21,6 @@ import {
   getTelegramUpdateMessageReaction,
   getNewTelegramMessageReactions,
   getTelegramGoalCommand,
-  getTelegramSkillsCommand,
   getTelegramNewTaskCommand,
   isTelegramImplicitTopicCreatedMessage,
   isTelegramPrivateChat,
@@ -70,7 +69,6 @@ import {
   upsertTelegramUserMapping,
 } from './linked-user.js';
 import { captureTelegramPrimaryChatBestEffort } from './primary-chat.js';
-import { buildSkillsCommandReply } from '../shared/skills-command.js';
 import {
   ackTelegramMessageBestEffort,
   createTelegramForumTopicBestEffort,
@@ -84,7 +82,6 @@ const TELEGRAM_COMMAND_HELP = [
   '`/help` — show command help.',
   '`/new <request>` — start a fresh conversation instead of continuing the current one; when topics are available, it opens a new topic.',
   '`/goal <objective>` — keep this session working toward an objective.',
-  '`/skills [page]` — list skills you can invoke with `$name`.',
 ].join('\n');
 
 const TELEGRAM_WELCOME_MESSAGE = [
@@ -675,27 +672,9 @@ telegram.post('/', async (c) => {
   const goalCommand = getTelegramGoalCommand(update, {
     botUsername: botUsername ?? undefined,
   });
-  const skillsCommand = getTelegramSkillsCommand(update, {
-    botUsername: botUsername ?? undefined,
-  });
 
-  if (!queuedMessage && !newTaskCommand && !goalCommand && !skillsCommand) {
+  if (!queuedMessage && !newTaskCommand && !goalCommand) {
     return c.json({ ok: true, ignored: 'unsupported_update' });
-  }
-
-  if (skillsCommand) {
-    await postTelegramMessageBestEffort({
-      chatId: metadata.communicationChannelId,
-      threadId: metadata.communicationThreadId,
-      replyToMessageId: metadata.communicationMessageId,
-      text: await buildSkillsCommandReply({
-        userId: senderUserId,
-        page: skillsCommand.page,
-        command: '/skills',
-      }),
-      textFormat: 'markdown',
-    });
-    return c.json({ ok: true, skillsListed: true });
   }
 
   const repliedToReportRootId =

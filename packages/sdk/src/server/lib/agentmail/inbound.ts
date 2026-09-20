@@ -788,12 +788,6 @@ type TurnDeliveryOutcome =
   | { outcome: 'delivered' }
   | { outcome: 'parked'; retryAt: Date };
 
-type AgentMailInboundCommandHandler = (input: {
-  bodyText: string;
-  subject: string | null;
-  userId: string;
-}) => Promise<string | null>;
-
 class AgentMailDeliveryUnavailableError extends Error {
   constructor(conversationId: string) {
     super(
@@ -810,7 +804,6 @@ async function deliverTurn(
   ownerAttentionResolution?: Awaited<
     ReturnType<typeof findSessionAttentionNotificationReply>
   >,
-  commandHandler?: AgentMailInboundCommandHandler,
 ): Promise<TurnDeliveryOutcome> {
   // The reply route (in-reply-to, recipient) is read from the conversation
   // row when the reply is sent, so it is advanced here, for the turn about
@@ -825,29 +818,6 @@ async function deliverTurn(
   });
 
   if (!turn.bodyText && !conversation.subject?.trim()) {
-    return { outcome: 'delivered' };
-  }
-
-  const commandReply = await commandHandler?.({
-    bodyText: turn.bodyText,
-    subject: conversation.subject?.trim() || null,
-    userId: turn.senderUserId,
-  });
-  if (commandReply) {
-    const credentials = await resolveAgentMailRuntimeCredentials();
-    if (!credentials.apiKey) {
-      throw new AgentMailDeliveryUnavailableError(conversation.id);
-    }
-    const client = new AgentMailApiClient({ apiKey: credentials.apiKey });
-    await client.replyToMessage(
-      conversation.inboxId,
-      turn.providerMessageId,
-      {
-        text: commandReply,
-        html: `<div>${escapeAgentMailHtml(commandReply).replaceAll('\n', '<br>')}</div>`,
-      },
-      { idempotencyKey: `agentmail:command:${turn.providerMessageId}` },
-    );
     return { outcome: 'delivered' };
   }
 
@@ -988,7 +958,6 @@ async function deliverTurn(
  */
 export async function drainAgentMailInboundTurns(
   conversationId: string,
-  options: { commandHandler?: AgentMailInboundCommandHandler } = {},
 ): Promise<void> {
   if (!isEmailChannelEnabled()) {
     return;
@@ -1061,7 +1030,6 @@ export async function drainAgentMailInboundTurns(
           conversation,
           turnLock,
           attentionResolution,
-          options.commandHandler,
         );
       } catch (error) {
         if (error instanceof AgentMailDeliveryUnavailableError) {

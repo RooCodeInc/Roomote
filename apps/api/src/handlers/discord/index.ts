@@ -98,7 +98,6 @@ import {
   fetchDiscordThreadHistoryBestEffort,
 } from './thread-context.js';
 import { shouldRouteUnmentionedDiscordThreadReplyToAgent } from './unmentioned-thread-reply.js';
-import { buildSkillsCommandReply } from '../shared/skills-command.js';
 
 export const discordGatewayEventProcessingTimeout = {
   timeoutMs: 4 * 60 * 1000,
@@ -155,7 +154,6 @@ const DISCORD_HELP_MESSAGE = [
   '`/new request:<request>` — start a fresh task.',
   '`/goal objective:<objective>` — keep this session working toward an objective across multiple turns.',
   '`/link code:<code>` — link this Discord account in a DM with me.',
-  '`/skills page:<page>` — list skills you can invoke with `$name`.',
   '`/help` — show this message.',
   '',
   'Follow up by sending another message in the task thread.',
@@ -585,8 +583,6 @@ async function processDiscordGatewayEvent(
   if (command && command.name !== 'new') {
     if (command.name === 'goal') {
       // Handled after resolving the current conversation and linked user.
-    } else if (command.name === 'skills') {
-      // Handled after resolving the linked user.
     } else {
       return { ok: true, ignored: 'unsupported_command' };
     }
@@ -851,22 +847,6 @@ async function processDiscordGatewayEvent(
       : {}),
     userId: senderUserId,
   });
-
-  if (command?.name === 'skills') {
-    await replyToDiscordEvent({
-      provider: resolved.provider,
-      applicationId: resolved.applicationId,
-      channel,
-      interaction: interactionReplyContext(event),
-      text: await buildSkillsCommandReply({
-        userId: senderUserId,
-        page: command.page ?? 1,
-        command: '/skills',
-      }),
-      ephemeral: true,
-    });
-    return { ok: true, skillsListed: true };
-  }
 
   // Fast mode is unconditional for ordinary linked-human messages, including
   // reaction summons: a configured emoji synthesizes a bot mention that enters

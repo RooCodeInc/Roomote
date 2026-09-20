@@ -69,7 +69,6 @@ const mocks = vi.hoisted(() => ({
   recordProviderMessage: vi.fn(),
   queueFastSurfaceReply: vi.fn(),
   admitHumanFollowUp: vi.fn(),
-  buildSkillsReply: vi.fn(),
 }));
 
 vi.mock('../../account-link-help.js', () => ({
@@ -192,10 +191,6 @@ vi.mock('../task-orchestration.js', () => ({
 }));
 
 vi.mock('../replies.js', () => ({ replyToDiscordEvent: mocks.reply }));
-
-vi.mock('../../shared/skills-command.js', () => ({
-  buildSkillsCommandReply: mocks.buildSkillsReply,
-}));
 
 vi.mock('../callback-actions.js', () => ({
   handleDiscordComponentInteraction: mocks.component,
@@ -335,7 +330,6 @@ describe('Discord Gateway event handler', () => {
     mocks.upsertInstallation.mockResolvedValue(undefined);
     mocks.upsertUserMapping.mockResolvedValue(undefined);
     mocks.findMappedUserId.mockResolvedValue('roomote-user-1');
-    mocks.buildSkillsReply.mockResolvedValue('skills page two');
     mocks.findInstallation.mockResolvedValue(null);
     mocks.findActiveRun.mockResolvedValue(undefined);
     mocks.findCompletedRun.mockResolvedValue(null);
@@ -2336,41 +2330,6 @@ describe('Discord Gateway event handler', () => {
         ),
       }),
     );
-  });
-
-  it('routes /skills to a linked-user inventory without starting agent work', async () => {
-    const interaction = {
-      id: 'interaction-skills',
-      application_id: 'app-1',
-      type: 2,
-      token: 'interaction-token',
-      channel_id: 'dm-1',
-      user: { id: 'discord-user-1', username: 'matt' },
-      data: {
-        name: 'skills',
-        type: 1,
-        options: [{ name: 'page', type: 4, value: 2 }],
-      },
-    };
-
-    const response = await postEvent(
-      envelope(interaction, 'INTERACTION_CREATE'),
-    );
-
-    await expect(response.json()).resolves.toEqual({
-      ok: true,
-      skillsListed: true,
-    });
-    expect(mocks.buildSkillsReply).toHaveBeenCalledWith({
-      userId: 'roomote-user-1',
-      page: 2,
-      command: '/skills',
-    });
-    expect(mocks.reply).toHaveBeenCalledWith(
-      expect.objectContaining({ text: 'skills page two', ephemeral: true }),
-    );
-    expect(mocks.answerFast).not.toHaveBeenCalled();
-    expect(mocks.queueMessage).not.toHaveBeenCalled();
   });
 
   it('uses /new to send a fresh request into the DM conversation even when it has an active task', async () => {

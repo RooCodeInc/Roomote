@@ -55,7 +55,6 @@ const {
   enableAutoHandlePrReviewFeedbackMock,
   retirePrReviewActionMessagesBestEffortMock,
   retireTelegramRequestUserInputPromptBestEffortMock,
-  buildSkillsReplyMock,
 } = vi.hoisted(() => ({
   addReactionMock: vi.fn(),
   answerCallbackQueryMock: vi.fn(),
@@ -115,7 +114,6 @@ const {
   enableAutoHandlePrReviewFeedbackMock: vi.fn(),
   retirePrReviewActionMessagesBestEffortMock: vi.fn(),
   retireTelegramRequestUserInputPromptBestEffortMock: vi.fn(),
-  buildSkillsReplyMock: vi.fn(),
 }));
 
 vi.mock('@roomote/env', () => ({
@@ -367,10 +365,6 @@ vi.mock('../../tasks/task-stop.js', () => ({
   stopTaskRun: stopTaskRunMock,
 }));
 
-vi.mock('../../shared/skills-command.js', () => ({
-  buildSkillsCommandReply: buildSkillsReplyMock,
-}));
-
 vi.mock('@roomote/cloud-agents/server', () => ({
   AUDIO_TRANSCRIPTION_MAX_SIZE_BYTES: 20 * 1024 * 1024,
   buildFastAgentReactionExternalInputQuestion: vi.fn(
@@ -490,7 +484,6 @@ describe('Telegram webhook handler', () => {
     findFastMessageSessionMock.mockResolvedValue(null);
     findFastReplySessionMock.mockResolvedValue(null);
     getFastSessionMock.mockResolvedValue({ id: 'fast-session-default' });
-    buildSkillsReplyMock.mockResolvedValue('skills page two');
     isFastProviderMessageMock.mockResolvedValue(false);
 
     envMock.R_APP_URL = 'https://app.example.com';
@@ -2703,37 +2696,6 @@ describe('Telegram webhook handler', () => {
         textFormat: 'markdown',
       }),
     );
-  });
-
-  it('routes /skills for a linked sender without launching work', async () => {
-    mockTelegramLinkedSender('user-1');
-    const text = '/skills 2';
-    const response = await postTelegramUpdate(
-      createTelegramUpdate({
-        message: {
-          text,
-          entities: [{ type: 'bot_command', offset: 0, length: 7 }],
-        },
-      }),
-    );
-
-    await expect(response.json()).resolves.toEqual({
-      ok: true,
-      skillsListed: true,
-    });
-    expect(buildSkillsReplyMock).toHaveBeenCalledWith({
-      userId: 'user-1',
-      page: 2,
-      command: '/skills',
-    });
-    expect(postMessageMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channelId: '222',
-        text: 'skills page two',
-      }),
-    );
-    expect(queueCommunicationMessageOnceMock).not.toHaveBeenCalled();
-    expect(continueFastReplyMock).not.toHaveBeenCalled();
   });
 
   it('welcomes bare /start commands from an unlinked sender', async () => {

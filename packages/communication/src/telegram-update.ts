@@ -620,11 +620,6 @@ export type TelegramGoalCommand = {
   objective: string;
 };
 
-export type TelegramSkillsCommand = {
-  command: 'skills';
-  page: number;
-};
-
 /**
  * Detects an explicit `/new` command and returns the command name plus the task
  * description with the invocation stripped. Returns `null` for other updates.
@@ -656,19 +651,7 @@ export function getTelegramGoalCommand(
   return command ? { command: 'goal', objective: command.argument } : null;
 }
 
-export function getTelegramSkillsCommand(
-  update: TelegramUpdate,
-  options: TelegramBotMentionOptions = {},
-): TelegramSkillsCommand | null {
-  const command = getTelegramLeadingCommand(update, 'skills', options);
-  if (!command || !/^\d*$/u.test(command.argument)) return null;
-  const page = Number.parseInt(command.argument || '1', 10);
-  return Number.isSafeInteger(page) && page > 0
-    ? { command: 'skills', page }
-    : null;
-}
-
-function getTelegramLeadingCommand<T extends 'new' | 'goal' | 'skills'>(
+function getTelegramLeadingCommand<T extends 'new' | 'goal'>(
   update: TelegramUpdate,
   commandName: T,
   options: TelegramBotMentionOptions,
