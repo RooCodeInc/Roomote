@@ -834,8 +834,10 @@ describe('Home', () => {
     render(<Home initialPlaceholderIndex={0} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
-    await waitFor(() => expect(mockToastError).toHaveBeenCalled());
-    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Connection lost',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     await waitFor(() => expect(mockStartFastSession).toHaveBeenCalledTimes(2));
 
     expect(mockStartFastSession.mock.calls[0]?.[0].conversationId).toBe(
@@ -853,7 +855,9 @@ describe('Home', () => {
     render(<Home initialPlaceholderIndex={0} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
-    await waitFor(() => expect(mockToastError).toHaveBeenCalled());
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Connection lost',
+    );
     submittedPromptText = 'Corrected prompt';
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
     await waitFor(() => expect(mockStartFastSession).toHaveBeenCalledTimes(2));

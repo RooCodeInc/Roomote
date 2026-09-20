@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useRef } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 
@@ -22,13 +22,21 @@ type FastSessionSubmission = {
 
 export function useFastSessionLauncher(options?: {
   onSessionStarted?: () => void;
+  showErrorToast?: boolean;
 }) {
   const onSessionStarted = options?.onSessionStarted;
+  const showErrorToast = options?.showErrorToast ?? true;
   const router = useRouter();
   const mutation = useStartFastSession();
+  const [error, setError] = useState<Error | null>(null);
+  const inFlightRef = useRef(false);
   const retryRef = useRef<{
     conversationId: string;
     payloadKey: string;
+  } | null>(null);
+  const failedLaunchRef = useRef<{
+    payload: FastSessionSubmission;
+    launchOptions: { voice?: boolean };
   } | null>(null);
 
   const startFastSession = useCallback(
@@ -38,7 +46,9 @@ export function useFastSessionLauncher(options?: {
     ): Promise<void> => {
       // A second submit while the first is in flight would mint a second
       // Session and orphan one of them.
-      if (mutation.isPending) return;
+      if (inFlightRef.current || mutation.isPending) return;
+      inFlightRef.current = true;
+      setError(null);
 
       const payloadKey = JSON.stringify(payload);
       const conversationId =
@@ -65,6 +75,7 @@ export function useFastSessionLauncher(options?: {
           });
         }
         retryRef.current = null;
+        failedLaunchRef.current = null;
         onSessionStarted?.();
         router.push(
           launchOptions.voice
@@ -72,17 +83,29 @@ export function useFastSessionLauncher(options?: {
             : `/sessions/${sessionId}`,
         );
       } catch (error) {
-        toast.error(
-          error instanceof Error ? error.message : 'Failed to start session',
-        );
+        const startError =
+          error instanceof Error ? error : new Error('Failed to start session');
+        failedLaunchRef.current = { payload, launchOptions };
+        setError(startError);
+        if (showErrorToast) toast.error(startError.message);
+      } finally {
+        inFlightRef.current = false;
       }
     },
-    [mutation, onSessionStarted, router],
+    [mutation, onSessionStarted, router, showErrorToast],
   );
 
+  const retryFastSession = useCallback(async (): Promise<void> => {
+    const failedLaunch = failedLaunchRef.current;
+    if (!failedLaunch) return;
+    await startFastSession(failedLaunch.payload, failedLaunch.launchOptions);
+  }, [startFastSession]);
+
   return {
+    error,
     isPending: mutation.isPending,
     mutation,
+    retryFastSession,
     startFastSession,
   };
 }

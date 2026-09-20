@@ -18,7 +18,12 @@ import { usePrivateSessionsExperiment } from '@/hooks/usePrivateSessionsExperime
 
 import { type PromptInputMessage } from '@/components/ai-elements';
 import { SessionModelSwitcher, TaskPromptInput } from '@/components/tasks';
-import { BasicTooltip, Button, HatGlasses } from '@/components/system';
+import {
+  BasicTooltip,
+  Button,
+  HatGlasses,
+  RetryableLoadError,
+} from '@/components/system';
 
 const DEFAULT_PROMPT_PLACEHOLDER = 'What do you want to do?';
 
@@ -75,8 +80,15 @@ export function NewTaskForm({
   useEffect(() => setPromptText(initialPromptText), [initialPromptText]);
   useEffect(() => setSelectedModelOverrideId(modelParam), [modelParam]);
 
-  const { isPending: isFastSessionPending, startFastSession } =
-    useFastSessionLauncher({ onSessionStarted: onTaskStarted });
+  const {
+    error: fastSessionError,
+    isPending: isFastSessionPending,
+    retryFastSession,
+    startFastSession,
+  } = useFastSessionLauncher({
+    onSessionStarted: onTaskStarted,
+    showErrorToast: false,
+  });
   const launchTaskModels = useLaunchTaskModels();
   const defaultModelId = launchTaskModels.data?.defaultFastModelId;
   const defaultReasoningEffort =
@@ -227,6 +239,16 @@ export function NewTaskForm({
           ) : null
         }
       />
+      {fastSessionError ? (
+        <div role="alert">
+          <RetryableLoadError
+            className="mt-3 p-4 md:p-4 [&_[data-slot=empty-icon]]:mb-0"
+            message={fastSessionError.message}
+            isRetrying={isFastSessionPending}
+            onRetry={() => void retryFastSession()}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }
