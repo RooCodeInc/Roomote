@@ -400,9 +400,10 @@ function toRestrictedNonTaskConfigContent(
 }
 
 /**
- * Merges the Bedrock provider registrations for the env's role models into an
- * operator-supplied config content string. Malformed content is returned
- * unchanged — `toRestrictedNonTaskConfigContent` already fails it closed.
+ * Merges the Bedrock, Kimi, and Cloudflare provider registrations for the
+ * env's role models into an operator-supplied config content string.
+ * Malformed content is returned unchanged —
+ * `toRestrictedNonTaskConfigContent` already fails it closed.
  */
 function mergeBedrockRegistrationsIntoConfigContent(
   configContent: string,
@@ -416,7 +417,9 @@ function mergeBedrockRegistrationsIntoConfigContent(
       (modelId): modelId is string =>
         Boolean(modelId) && !isTaskModelIdDisabled(modelId!),
     )
-    .map(toBedrockMantleRuntimeModelId);
+    .map((modelId) =>
+      rewriteCloudflareOpenCodeModelId(toBedrockMantleRuntimeModelId(modelId)),
+    );
 
   if (roleModelIds.length === 0) {
     return configContent;
@@ -440,10 +443,14 @@ function mergeBedrockRegistrationsIntoConfigContent(
       !Array.isArray(config.provider)
         ? (config.provider as Record<string, unknown>)
         : {};
-    const provider = mergeAmazonBedrockProviderConfig(
-      mergeBedrockMantleProviderConfig(
-        mergeBedrockMantleOpenAiProviderConfig(
-          mergeKimiForCodingProviderConfig(existingProvider, roleModelIds),
+    const provider = mergeCloudflareOpenCodeProviderConfig(
+      mergeAmazonBedrockProviderConfig(
+        mergeBedrockMantleProviderConfig(
+          mergeBedrockMantleOpenAiProviderConfig(
+            mergeKimiForCodingProviderConfig(existingProvider, roleModelIds),
+            env,
+            roleModelIds,
+          ),
           env,
           roleModelIds,
         ),
@@ -594,9 +601,10 @@ export function buildOpenCodeCliEnv(
     }
   } else {
     // Operator-supplied config skips the model-backed builder, but the role
-    // models still need their Bedrock providers registered — otherwise a
-    // Bedrock helper model fails with ProviderModelNotFoundError whenever a
-    // deployment also sets OPENCODE_CONFIG_CONTENT.
+    // models still need their Bedrock, Kimi, and Cloudflare providers
+    // registered — otherwise a helper model fails with
+    // ProviderModelNotFoundError (or OpenCode's default Cloudflare catalog
+    // config) whenever a deployment also sets OPENCODE_CONFIG_CONTENT.
     env.OPENCODE_CONFIG_CONTENT = mergeBedrockRegistrationsIntoConfigContent(
       env.OPENCODE_CONFIG_CONTENT,
       env,

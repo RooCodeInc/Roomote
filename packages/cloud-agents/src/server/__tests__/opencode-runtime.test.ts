@@ -500,6 +500,60 @@ describe('buildOpenCodeCliEnv', () => {
     });
   });
 
+  it('adds the Cloudflare AI Gateway registration to operator-supplied config content', () => {
+    const env = buildOpenCodeCliEnv({
+      R_MODEL: 'cloudflare-ai-gateway/openai/gpt-5.6-terra',
+      CLOUDFLARE_AI_GATEWAY_API_TOKEN: 'token',
+      CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID: 'a1b2c3d4e5f6789012345678abcdef90',
+      CLOUDFLARE_AI_GATEWAY_ID: 'my_gateway',
+      OPENCODE_CONFIG_CONTENT: JSON.stringify({
+        model: 'cloudflare-ai-gateway/openai/gpt-5.6-terra',
+      }),
+    });
+    const config = JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}') as {
+      provider?: Record<string, Record<string, unknown>>;
+    };
+
+    expect(config.provider?.['cloudflare-ai-gateway']).toMatchObject({
+      npm: '@ai-sdk/openai-compatible',
+      options: {
+        baseURL:
+          'https://api.cloudflare.com/client/v4/accounts/a1b2c3d4e5f6789012345678abcdef90/ai/v1',
+        apiKey: '{env:CLOUDFLARE_AI_GATEWAY_API_TOKEN}',
+        headers: { 'cf-aig-gateway-id': 'my_gateway' },
+      },
+    });
+  });
+
+  it('adds the Cloudflare Workers AI registration to operator-supplied config content', () => {
+    const env = buildOpenCodeCliEnv({
+      R_MODEL: 'cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code',
+      CLOUDFLARE_WORKERS_AI_API_TOKEN: 'token',
+      CLOUDFLARE_WORKERS_AI_ACCOUNT_ID: 'a1b2c3d4e5f6789012345678abcdef90',
+      OPENCODE_CONFIG_CONTENT: JSON.stringify({
+        model: 'cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code',
+      }),
+    });
+    const config = JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}') as {
+      provider?: Record<
+        string,
+        { options?: Record<string, unknown> } & Record<string, unknown>
+      >;
+    };
+
+    expect(config.provider?.['cloudflare-workers-ai']).toMatchObject({
+      npm: '@ai-sdk/openai-compatible',
+      options: {
+        baseURL:
+          'https://api.cloudflare.com/client/v4/accounts/a1b2c3d4e5f6789012345678abcdef90/ai/v1',
+        apiKey: '{env:CLOUDFLARE_WORKERS_AI_API_TOKEN}',
+      },
+    });
+    expect(
+      config.provider?.['cloudflare-workers-ai']?.options?.headers,
+    ).toBeUndefined();
+  });
+
   it('registers bearer-token credentials on the native Bedrock provider', () => {
     const env = buildOpenCodeCliEnv({
       R_MODEL: 'amazon-bedrock/anthropic.claude-sonnet-5-v1:0',
