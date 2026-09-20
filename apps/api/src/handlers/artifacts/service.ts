@@ -4,9 +4,8 @@ import {
   tasks,
   eq,
   and,
-  asc,
-  desc,
   getTaskArtifactByPath,
+  listLatestTaskArtifacts,
 } from '@roomote/db/server';
 import {
   type TaskArtifactType,
@@ -61,30 +60,10 @@ export async function listArtifactsByTask(input: {
   artifactType?: TaskArtifactType;
   auth: ArtifactAuthContext;
 }) {
-  const whereConditions = [
-    eq(taskArtifacts.taskId, input.taskId),
-    eq(taskArtifacts.uploaded, true),
-  ];
-
-  if (input.artifactType !== undefined) {
-    whereConditions.push(eq(taskArtifacts.artifactType, input.artifactType));
-  }
-
-  const rows = await db
-    .select()
-    .from(taskArtifacts)
-    .where(and(...whereConditions))
-    .orderBy(asc(taskArtifacts.createdAt), desc(taskArtifacts.version));
-
-  const latestByPath = new Map<string, (typeof rows)[number]>();
-  for (const row of rows) {
-    const existing = latestByPath.get(row.path);
-    if (!existing || row.version > existing.version) {
-      latestByPath.set(row.path, row);
-    }
-  }
-
-  return [...latestByPath.values()];
+  return listLatestTaskArtifacts({
+    taskId: input.taskId,
+    artifactType: input.artifactType,
+  });
 }
 
 export async function verifyTaskAccessForArtifact(

@@ -1,4 +1,5 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { type TaskArtifactType } from '@roomote/types';
+import { and, asc, desc, eq, getTableColumns, sql } from 'drizzle-orm';
 
 import { db } from '../db';
 import { taskArtifacts, tasks } from '../schema';
@@ -8,6 +9,47 @@ function artifactVersionCondition(version: number | undefined) {
   return version !== undefined
     ? eq(taskArtifacts.version, version)
     : eq(taskArtifacts.uploaded, true);
+}
+
+export async function listLatestTaskArtifacts(input: {
+  taskId: string;
+  artifactType?: TaskArtifactType;
+}) {
+  const whereConditions = [
+    eq(taskArtifacts.taskId, input.taskId),
+    eq(taskArtifacts.uploaded, true),
+  ];
+
+  if (input.artifactType !== undefined) {
+    whereConditions.push(eq(taskArtifacts.artifactType, input.artifactType));
+  }
+
+  // Rank in SQL while retaining the existing first-upload ordering per path.
+  const rankedArtifacts = db
+    .select({
+      ...getTableColumns(taskArtifacts),
+      firstCreatedAt:
+        sql<Date>`min(${taskArtifacts.createdAt}) over (partition by ${taskArtifacts.path})`.as(
+          'first_created_at',
+        ),
+      versionRank:
+        sql<number>`row_number() over (partition by ${taskArtifacts.path} order by ${taskArtifacts.version} desc)`.as(
+          'version_rank',
+        ),
+    })
+    .from(taskArtifacts)
+    .where(and(...whereConditions))
+    .as('ranked_task_artifacts');
+
+  const rows = await db
+    .select()
+    .from(rankedArtifacts)
+    .where(eq(rankedArtifacts.versionRank, 1))
+    .orderBy(asc(rankedArtifacts.firstCreatedAt), asc(rankedArtifacts.path));
+
+  return rows.map(
+    ({ firstCreatedAt: _, versionRank: __, ...artifact }) => artifact,
+  );
 }
 
 export async function getTaskArtifactByPath(input: {
