@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   getNativeRuntime: vi.fn(),
   mountCodeModeIntegration: vi.fn(),
   serverNameCollision: vi.fn(),
+  toolKeyCollision: vi.fn(() => false),
   clearIntegrationToolCache: vi.fn(),
   setOpenCodeSession: vi.fn(),
   upsertMessage: vi.fn(),
@@ -327,6 +328,7 @@ vi.mock('../fast-agent-native-tool-bridge', () => ({
   getFastAgentNativeToolRuntime: mocks.getNativeRuntime,
   mountFastAgentIntegrationOnCodeModeServer: mocks.mountCodeModeIntegration,
   hasFastAgentCodeModeServerNameCollision: mocks.serverNameCollision,
+  hasFastAgentCodeModeToolKeyCollision: mocks.toolKeyCollision,
   bindFastAgentNativeToolExecutor: mocks.bindExecutor,
   createFastAgentSpillTurnBudget: () => ({ calls: 0, outputBytes: 0 }),
   bindFastAgentMcpToolExecutor: mocks.bindMcpExecutor,
@@ -1074,6 +1076,37 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         name: 'Foo Underscore Bar',
         description: 'Second',
         tools: [{ name: 'read' }],
+      },
+    ]);
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    const systemPrompt = mocks.generateText.mock.calls[0]?.[0].system as
+      | string
+      | undefined;
+    expect(systemPrompt).toContain('### On-demand servers');
+    expect(systemPrompt).not.toContain(
+      'reached only through the `execute` tool',
+    );
+  });
+
+  it('keeps the dispatcher in the prompt when distinct integration tools collide as one flattened tool key under the code-mode experiment', async () => {
+    mocks.deploymentExperimentEnabled.mockImplementation(
+      async (id: string) => id === 'codeModeIntegrations',
+    );
+    mocks.toolKeyCollision.mockReturnValue(true);
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'a',
+        name: 'A',
+        description: 'First',
+        tools: [{ name: 'b_c' }],
+      },
+      {
+        id: 'a_b',
+        name: 'AB',
+        description: 'Second',
+        tools: [{ name: 'c' }],
       },
     ]);
 
