@@ -9,6 +9,7 @@ import {
 import { FAST_AGENT_MEMORY_FACT_MAX_CHARS } from '@roomote/types';
 
 import { scrubForMemoryCheck } from '../memory-check-scrub';
+import { appendFastAgentMemorySavedEvent } from './fast-agent-session';
 import {
   generateTrackedNonTaskObject,
   NON_TASK_INFERENCE_SURFACES,
@@ -167,6 +168,7 @@ type FastAgentPostTurnMemoryResult =
  */
 export async function saveFastAgentPostTurnMemory(input: {
   conversationId: string;
+  turnId: string;
   userId: string;
   request: string;
   /** Messages the same person steered into the turn while it ran. */
@@ -252,6 +254,7 @@ export async function saveFastAgentPostTurnMemory(input: {
     });
 
     let saved = 0;
+    const savedFacts: string[] = [];
 
     for (const memory of object.memories) {
       const result = await appendFastAgentMemory(
@@ -264,11 +267,26 @@ export async function saveFastAgentPostTurnMemory(input: {
         if (saved > 0) break;
         return { status: 'skipped', reason: result.reason };
       }
+      savedFacts.push(memory);
       saved += 1;
     }
 
     if (saved === 0) {
       return { status: 'skipped', reason: 'nothing_distilled' };
+    }
+
+    try {
+      await appendFastAgentMemorySavedEvent({
+        sessionId: input.conversationId,
+        turnId: input.turnId,
+        memories: savedFacts.map((memory) => scrubForMemoryCheck(memory)),
+      });
+    } catch (error) {
+      // Memory persistence already succeeded; a transcript event is best
+      // effort and must not turn a successful save into a reported failure.
+      console.warn(
+        `[FastPostTurnMemory] Failed to publish save event. conversationId="${input.conversationId}" error="${error instanceof Error ? error.message : String(error)}"`,
+      );
     }
 
     console.info(

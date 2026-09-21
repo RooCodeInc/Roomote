@@ -102,6 +102,7 @@ import {
 import { IntegrationToolSessionControlsProvider } from '@/components/sessions/IntegrationToolSessionControls';
 import { openIntegrationKeyDialog } from '@/components/sessions/integration-key-dialog';
 import { useSessionTitlePropagation } from './use-session-title-propagation';
+import { MemorySavedMessage } from '@/components/ai-elements/MemorySavedMessage';
 
 import {
   AcpMessageItem,
@@ -948,6 +949,9 @@ export function FastSessionTranscript({
   );
   const renderCapabilityOfferMessage = useCallback(
     (message: AcpUiMessage) => {
+      if (message.updateType === ACP_ENVELOPE_EVENT_TYPES.MemorySaved) {
+        return <MemorySavedMessage message={message} />;
+      }
       const offer = capabilityOffersByMessageId.get(message.id);
       if (!offer) return undefined;
       const introMessage: AcpUiMessage = {

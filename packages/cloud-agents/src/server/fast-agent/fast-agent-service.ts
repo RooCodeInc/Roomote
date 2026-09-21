@@ -6931,8 +6931,11 @@ export async function answerFastAgentQuestion({
       !setupSession &&
       currentSessionPrivacy === 'shared'
     ) {
+      // Reply delivery has already settled before this detached best-effort
+      // pass starts; Jev and distillation never gate the visible response.
       void saveFastAgentPostTurnMemory({
         conversationId: session.id,
+        turnId,
         userId,
         // A platform event's own text is not something a person said.
         request: substantiveHumanInput ? question : '',

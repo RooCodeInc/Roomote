@@ -5,6 +5,8 @@ const {
   mockIsBrainEnabled,
   mockIsTaskRunSharedBrainEligible,
   mockSaveBrainDistilledSummary,
+  mockInsertTaskMemoryEvent,
+  mockInsertTaskMemoryValues,
   mockTurnRows,
 } = vi.hoisted(() => ({
   mockEvaluateDecisionModel: vi.fn(),
@@ -13,28 +15,37 @@ const {
   mockIsBrainEnabled: vi.fn(),
   mockIsTaskRunSharedBrainEligible: vi.fn(),
   mockSaveBrainDistilledSummary: vi.fn(),
+  mockInsertTaskMemoryEvent: vi.fn(),
+  mockInsertTaskMemoryValues: vi.fn(),
   mockTurnRows: vi.fn(),
 }));
 
-vi.mock('@roomote/db/server', () => ({
-  and: vi.fn(),
-  desc: vi.fn(),
-  eq: vi.fn(),
-  inArray: vi.fn(),
-  sql: vi.fn(),
-  taskMessages: {},
-  getBrainMemorySummary: mockGetBrainMemorySummary,
-  isBrainEnabled: mockIsBrainEnabled,
-  isTaskRunSharedBrainEligible: mockIsTaskRunSharedBrainEligible,
-  saveBrainDistilledSummary: mockSaveBrainDistilledSummary,
-  db: {
+vi.mock('@roomote/db/server', () => {
+  const insert = () => ({ values: mockInsertTaskMemoryValues });
+  const database = {
+    insert,
     select: () => ({
       from: () => ({
         where: () => ({ orderBy: () => ({ limit: mockTurnRows }) }),
       }),
     }),
-  },
-}));
+    transaction: async (callback: (tx: { insert: typeof insert }) => unknown) =>
+      callback({ insert }),
+  };
+  return {
+    and: vi.fn(),
+    desc: vi.fn(),
+    eq: vi.fn(),
+    inArray: vi.fn(),
+    sql: vi.fn(),
+    taskMessages: {},
+    getBrainMemorySummary: mockGetBrainMemorySummary,
+    isBrainEnabled: mockIsBrainEnabled,
+    isTaskRunSharedBrainEligible: mockIsTaskRunSharedBrainEligible,
+    saveBrainDistilledSummary: mockSaveBrainDistilledSummary,
+    db: database,
+  };
+});
 
 vi.mock('../typesafe-judgment', () => ({
   evaluateDecisionModel: mockEvaluateDecisionModel,
@@ -51,14 +62,16 @@ import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 
 import { distillTaskRunTurnMemory } from '../task-run-memory-distillation';
 
-const row = (eventType: string, text: string) => ({
+const row = (eventType: string, text: string, ts = 1) => ({
   eventType,
   contentBlocks: [{ type: 'text', text }],
   payload: null,
+  ts,
 });
-const assistant = (text: string) =>
-  row(ACP_ENVELOPE_EVENT_TYPES.AssistantMessage, text);
-const user = (text: string) => row(ACP_ENVELOPE_EVENT_TYPES.UserPrompt, text);
+const assistant = (text: string, ts?: number) =>
+  row(ACP_ENVELOPE_EVENT_TYPES.AssistantMessage, text, ts);
+const user = (text: string, ts?: number) =>
+  row(ACP_ENVELOPE_EVENT_TYPES.UserPrompt, text, ts);
 
 function answers(
   overrides: Partial<
@@ -105,6 +118,10 @@ describe('distillTaskRunTurnMemory', () => {
     mockIsTaskRunSharedBrainEligible.mockResolvedValue(true);
     mockGetBrainMemorySummary.mockResolvedValue(null);
     mockSaveBrainDistilledSummary.mockResolvedValue(true);
+    mockInsertTaskMemoryEvent.mockResolvedValue(undefined);
+    mockInsertTaskMemoryValues.mockImplementation(() => ({
+      onConflictDoNothing: mockInsertTaskMemoryEvent,
+    }));
     // Newest first, as the query returns them. Only the latest turn counts.
     mockTurnRows.mockResolvedValue([
       assistant('Retries are capped at 3 and skip 4xx responses.'),
@@ -135,10 +152,30 @@ describe('distillTaskRunTurnMemory', () => {
           request: 'Do not retry 4xx; the partner API bans replayed requests.',
           report:
             'Updating the retry policy.\n\nRetries are capped at 3 and skip 4xx responses.',
+          turnTs: 1,
           existing_memory: '',
         },
       }),
     );
+    expect(mockInsertTaskMemoryValues).toHaveBeenCalledWith({
+      runId: 102,
+      taskId: 'task-1',
+      userId: 'user-1',
+      ts: 1,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.MemorySaved,
+      role: 'system',
+      protocol: 'roomote_runtime',
+      contentBlocks: [{ type: 'text', text: 'Saved to memory' }],
+      metadata: {
+        visibleInTranscript: true,
+        memorySave: true,
+        automatic: true,
+      },
+      payload: {
+        memories: [expect.stringContaining('Webhook retries are capped')],
+      },
+      source: 'roomote',
+    });
     expect(summary).toContain('## Outcome\n\nWebhook retries are capped at 3');
     expect(summary?.endsWith(DISTILLED_NOTE)).toBe(true);
     expect(mockSaveBrainDistilledSummary).toHaveBeenCalledWith(
@@ -148,6 +185,43 @@ describe('distillTaskRunTurnMemory', () => {
       null,
       { requeue: true },
     );
+  });
+
+  it('uses the turn key across fallback retries and follow-up turns', async () => {
+    await distillTaskRunTurnMemory(run);
+    mockTurnRows.mockResolvedValue([
+      assistant('Follow-up found a second durable fact.', 2),
+      user('Also remember the follow-up decision.', 2),
+    ]);
+    mockGetBrainMemorySummary.mockResolvedValueOnce(
+      `## Outcome\n\nWebhook retries are capped.\n\n${DISTILLED_NOTE}`,
+    );
+    await distillTaskRunTurnMemory(run);
+
+    expect(mockInsertTaskMemoryValues).toHaveBeenCalledTimes(2);
+    expect(mockInsertTaskMemoryValues.mock.calls[0]?.[0]).toMatchObject({
+      taskId: 'task-1',
+      ts: 1,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.MemorySaved,
+    });
+    expect(mockInsertTaskMemoryValues.mock.calls[1]?.[0]).toMatchObject({
+      taskId: 'task-1',
+      ts: 2,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.MemorySaved,
+    });
+  });
+
+  it('rolls back the summary when event publication fails so retry can publish it', async () => {
+    mockInsertTaskMemoryEvent.mockRejectedValueOnce(new Error('database busy'));
+
+    await expect(distillTaskRunTurnMemory(run)).resolves.toBeNull();
+    expect(mockSaveBrainDistilledSummary).toHaveBeenCalledOnce();
+
+    mockInsertTaskMemoryEvent.mockResolvedValueOnce(undefined);
+    await expect(distillTaskRunTurnMemory(run)).resolves.toContain(
+      'Webhook retries are capped',
+    );
+    expect(mockInsertTaskMemoryEvent).toHaveBeenCalledTimes(2);
   });
 
   it('builds on its own earlier memory and saves against that exact text', async () => {

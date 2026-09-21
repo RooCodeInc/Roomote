@@ -11,8 +11,11 @@ import {
   sql,
   taskMessages,
 } from '@roomote/db/server';
+import type { DatabaseOrTransaction } from '@roomote/db/server';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
+  MEMORY_SAVED_EVENT_TEXT,
+  ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
   extractAcpMessageText,
   extractVisibleAcpPromptText,
   isSystemInjectedAcpPromptText,
@@ -125,12 +128,13 @@ function clip(text: string, maxChars: number): string {
  */
 async function loadLatestTurn(
   runId: number,
-): Promise<{ request: string; report: string } | null> {
+): Promise<{ request: string; report: string; turnTs: number } | null> {
   const rows = await db
     .select({
       eventType: taskMessages.eventType,
       contentBlocks: taskMessages.contentBlocks,
       payload: taskMessages.payload,
+      ts: taskMessages.ts,
     })
     .from(taskMessages)
     .where(
@@ -168,7 +172,12 @@ async function loadLatestTurn(
             : raw,
           ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
         )?.trim() ?? '';
-      break;
+      if (reportMessages.length === 0) return null;
+      return {
+        request: clip(request, REQUEST_MAX_CHARS),
+        report: reportMessages.join('\n\n'),
+        turnTs: row.ts,
+      };
     }
 
     if (reportMessages.length < REPORT_MESSAGE_LIMIT && remaining > 0) {
@@ -182,8 +191,86 @@ async function loadLatestTurn(
     ? {
         request: clip(request, REQUEST_MAX_CHARS),
         report: reportMessages.join('\n\n'),
+        turnTs: rows[0]?.ts ?? runId,
       }
     : null;
+}
+
+async function publishTaskMemorySavedEvent(input: {
+  database: DatabaseOrTransaction;
+  runId: number;
+  taskId: string;
+  userId?: string | null;
+  turnTs: number;
+  summary: string;
+}): Promise<void> {
+  const distilled = input.summary.endsWith(DISTILLED_SUMMARY_NOTE)
+    ? input.summary.slice(0, -DISTILLED_SUMMARY_NOTE.length).trim()
+    : input.summary;
+  const memories = [scrubForMemoryCheck(distilled)].filter(Boolean);
+
+  if (memories.length === 0) return;
+
+  await input.database
+    .insert(taskMessages)
+    .values({
+      runId: input.runId,
+      taskId: input.taskId,
+      userId: input.userId ?? null,
+      // The settled turn timestamp makes retries idempotent while allowing
+      // later follow-up turns in the same run to publish their own row.
+      ts: input.turnTs,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.MemorySaved,
+      role: 'system',
+      protocol: ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+      contentBlocks: [{ type: 'text', text: MEMORY_SAVED_EVENT_TEXT }],
+      metadata: {
+        visibleInTranscript: true,
+        memorySave: true,
+        automatic: true,
+      },
+      payload: { memories },
+      source: 'roomote',
+    })
+    .onConflictDoNothing({
+      target: [
+        taskMessages.taskId,
+        taskMessages.protocol,
+        taskMessages.ts,
+        taskMessages.eventType,
+      ],
+    });
+}
+
+async function saveSummaryAndPublishTaskMemoryEvent(input: {
+  runId: number;
+  taskId: string;
+  userId?: string | null;
+  turnTs: number;
+  summary: string;
+  existing: string | null;
+  requeue: boolean;
+}): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    const saved = await saveBrainDistilledSummary(
+      tx,
+      input.runId,
+      input.summary,
+      input.existing,
+      { requeue: input.requeue },
+    );
+    if (!saved) return false;
+
+    await publishTaskMemorySavedEvent({
+      database: tx,
+      runId: input.runId,
+      taskId: input.taskId,
+      userId: input.userId,
+      turnTs: input.turnTs,
+      summary: input.summary,
+    });
+    return true;
+  });
 }
 
 /**
@@ -284,7 +371,13 @@ export async function distillTaskRunTurnMemory(input: {
     const summary = `${renderTaskMemorySummary(object)}\n\n${DISTILLED_SUMMARY_NOTE}`;
 
     if (
-      !(await saveBrainDistilledSummary(db, input.runId, summary, existing, {
+      !(await saveSummaryAndPublishTaskMemoryEvent({
+        runId: input.runId,
+        taskId: input.taskId,
+        userId: input.userId,
+        turnTs: turn.turnTs,
+        summary,
+        existing,
         requeue: input.requeue,
       }))
     ) {

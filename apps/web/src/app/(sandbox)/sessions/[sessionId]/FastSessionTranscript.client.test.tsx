@@ -851,6 +851,72 @@ describe('FastSessionTranscript', () => {
     createdAt: new Date(ts),
   });
 
+  it('shows automatic memory saves and expands their distilled facts', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="fast-conversation"
+        initialMessages={[
+          {
+            ...textMessage({
+              id: 'memory-save',
+              role: 'assistant',
+              text: 'Saved to memory',
+              ts: 2,
+            }),
+            eventType: ACP_ENVELOPE_EVENT_TYPES.MemorySaved,
+            role: 'system' as const,
+            payload: {
+              memories: ['Staging deploys use the release branch.'],
+            },
+          },
+        ]}
+        canReply
+      />,
+    );
+
+    const summary = screen.getByText('Saved to memory');
+    expect(summary).toBeInTheDocument();
+    expect(summary.closest('details')).not.toHaveAttribute('open');
+    fireEvent.click(summary);
+    expect(summary.closest('details')).toHaveAttribute('open');
+    expect(
+      screen.getByText('Staging deploys use the release branch.'),
+    ).toBeInTheDocument();
+  });
+
+  it('renders a persisted memory-save row delivered by the transcript messages stream', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="fast-conversation"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+
+    const source = FakeEventSource.instances[0];
+    expect(source).toBeDefined();
+    act(() => {
+      source?.emit('messages', {
+        messages: [
+          {
+            ...textMessage({
+              id: 'memory-save-streamed',
+              role: 'assistant',
+              text: 'Saved to memory',
+              ts: 2,
+            }),
+            eventType: ACP_ENVELOPE_EVENT_TYPES.MemorySaved,
+            role: 'system' as const,
+            payload: { memories: ['The release branch deploys staging.'] },
+          },
+        ],
+        conversationResponding: false,
+      });
+    });
+
+    expect(screen.getByText('Saved to memory')).toBeInTheDocument();
+  });
+
   it('restores each Session draft and scroll position without focusing after a direct switch', () => {
     function SessionSwitchHarness() {
       const [sessionId, setSessionId] = useState('session-a');
