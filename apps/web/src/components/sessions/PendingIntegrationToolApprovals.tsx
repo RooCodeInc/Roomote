@@ -194,18 +194,16 @@ export function PendingIntegrationToolApprovals({
               >
                 Allow for this session
               </Button>
-              <div className="border-t pt-2 sm:ml-auto sm:border-t-0 sm:pt-0">
-                <Button
-                  className="w-full sm:w-auto"
-                  size="sm"
-                  type="button"
-                  variant="destructive"
-                  disabled={busyId === item.approvalId}
-                  onClick={() => void decide(item.approvalId, 'rejected')}
-                >
-                  Deny
-                </Button>
-              </div>
+              <Button
+                className="self-center text-muted-foreground hover:text-destructive sm:ml-auto sm:self-auto"
+                size="sm"
+                type="button"
+                variant="ghost"
+                disabled={busyId === item.approvalId}
+                onClick={() => void decide(item.approvalId, 'rejected')}
+              >
+                Deny
+              </Button>
             </div>
           </section>
         );

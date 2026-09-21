@@ -98,6 +98,32 @@ describe('PendingIntegrationToolApprovals', () => {
     ).toBeInTheDocument();
   });
 
+  it('disables every decision while the request is being submitted', async () => {
+    let resolveFetch: ((response: Response) => void) | undefined;
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveFetch = resolve;
+        }),
+    );
+    renderCard();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Allow once' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Allow once' })).toBeDisabled();
+      expect(
+        screen.getByRole('button', { name: 'Allow for this session' }),
+      ).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Deny' })).toBeDisabled();
+    });
+
+    resolveFetch?.(new Response('{}', { status: 200 }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Allow once' })).toBeEnabled();
+    });
+  });
+
   it('describes empty arguments without exposing implementation wording', () => {
     render(
       <QueryClientProvider client={new QueryClient()}>
