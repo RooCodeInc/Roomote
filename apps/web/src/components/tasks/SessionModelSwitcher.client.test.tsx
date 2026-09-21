@@ -46,16 +46,13 @@ vi.mock('@/components/tasks/ModelReasoningPicker', () => ({
   ),
   ModelReasoningPicker: ({
     trigger,
-    emptyModelLabel,
     defaultReasoningEffort,
   }: {
     trigger: ReactNode;
-    emptyModelLabel?: string;
     defaultReasoningEffort?: string | null;
   }) => (
     <div>
       {trigger}
-      <div data-testid="model-default-option">{emptyModelLabel}</div>
       <div data-testid="reasoning-default">
         {defaultReasoningEffort ?? 'Reasoning'}
       </div>
@@ -94,9 +91,6 @@ describe('SessionModelSwitcher', () => {
     expect(
       screen.getByRole('button', { name: 'Model for this session' }),
     ).toHaveTextContent('Claude Sonnet 5High');
-    expect(screen.getByTestId('model-default-option')).toHaveTextContent(
-      'Claude Sonnet 5 (Default)',
-    );
     expect(screen.getByTestId('reasoning-default')).toHaveTextContent('high');
   });
 
@@ -107,9 +101,6 @@ describe('SessionModelSwitcher', () => {
       screen.getByRole('button', { name: 'Model for this session' }),
     ).toHaveTextContent(/^Model$/);
     expect(screen.queryByText('Medium')).not.toBeInTheDocument();
-    expect(screen.getByTestId('model-default-option')).toHaveTextContent(
-      'Deployment default',
-    );
     expect(screen.getByTestId('reasoning-default')).toHaveTextContent(
       'Reasoning',
     );
@@ -141,9 +132,6 @@ describe('SessionModelSwitcher', () => {
     expect(
       screen.getByRole('button', { name: 'Model for this session' }),
     ).toHaveTextContent('GPT 5.6Low');
-    expect(screen.getByTestId('model-default-option')).toHaveTextContent(
-      'GPT 5.6 (Default)',
-    );
     expect(screen.getByTestId('reasoning-default')).toHaveTextContent('medium');
   });
 });

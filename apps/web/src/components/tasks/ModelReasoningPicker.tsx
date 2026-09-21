@@ -3,6 +3,7 @@
 import {
   useEffect,
   forwardRef,
+  useMemo,
   useRef,
   useState,
   type ComponentProps,
@@ -13,13 +14,14 @@ import {
 } from 'react';
 import {
   getReasoningEffortLabel,
+  groupModelsByDisplayProvider,
   REASONING_EFFORT_VALUES,
   type ReasoningEffort,
   type TaskModelMetadata,
 } from '@roomote/types';
 
 import {
-  ArrowRight,
+  ArrowDownIcon,
   BasicTooltip,
   buttonVariants,
   ChevronDown,
@@ -35,13 +37,20 @@ import {
 } from '@/components/system';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { cn } from '@/lib/utils';
-import { ArrowDown } from 'lucide-react';
 
 export type ModelReasoningPickerModel = {
   id: string;
   displayName: string;
   isDefault?: boolean;
   metadata?: TaskModelMetadata | null;
+  providerLabel?: string;
+};
+
+type ProviderGroupingOptions = {
+  chatgptConnected?: boolean;
+  openaiConnected?: boolean;
+  xaiSubscriptionConnected?: boolean;
+  xaiConnected?: boolean;
 };
 
 const ROW_HEIGHT_PX = 40;
@@ -58,7 +67,6 @@ function PickerContent({
   models,
   model,
   defaultModelId,
-  emptyModelLabel,
   onModelChange,
   reasoningEffort,
   defaultReasoningEffort,
@@ -67,12 +75,12 @@ function PickerContent({
   modelDisabled,
   reasoningDisabled,
   supportedReasoningEfforts,
+  providerGrouping,
   onClose,
 }: {
   models: ModelReasoningPickerModel[];
   model: string;
   defaultModelId?: string | null;
-  emptyModelLabel?: string;
   onModelChange: (model: string) => void;
   reasoningEffort: ReasoningEffort | null;
   defaultReasoningEffort?: ReasoningEffort | null;
@@ -81,6 +89,7 @@ function PickerContent({
   modelDisabled?: boolean;
   reasoningDisabled?: boolean;
   supportedReasoningEfforts?: readonly ReasoningEffort[];
+  providerGrouping?: ProviderGroupingOptions;
   onClose?: () => void;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
@@ -98,9 +107,24 @@ function PickerContent({
     efforts[Math.floor((efforts.length - 1) / 2)];
   const effortIndex = effectiveEffort ? efforts.indexOf(effectiveEffort) : 0;
 
-  const options = emptyModelLabel
-    ? [{ id: '', displayName: emptyModelLabel }, ...models]
-    : models;
+  const { leadingOptions, modelGroups, options } = useMemo(() => {
+    const leading = models.filter(({ id }) => !id.includes('/'));
+    const groups = groupModelsByDisplayProvider(
+      models.filter(({ id }) => id.includes('/')),
+      providerGrouping,
+    ).map((group) => ({
+      ...group,
+      label:
+        group.items.find(({ providerLabel }) => providerLabel)?.providerLabel ??
+        group.label,
+    }));
+
+    return {
+      leadingOptions: leading,
+      modelGroups: groups,
+      options: [...leading, ...groups.flatMap(({ items }) => items)],
+    };
+  }, [models, providerGrouping]);
 
   const updateScrollBoundaries = () => {
     const list = listRef.current;
@@ -118,7 +142,7 @@ function PickerContent({
     const observer = new ResizeObserver(updateScrollBoundaries);
     observer.observe(list);
     return () => observer.disconnect();
-  }, [models.length]);
+  }, [modelGroups.length, options.length]);
 
   // Reset the typeahead buffer after a short idle pause so a later keystroke
   // starts a fresh prefix instead of continuing a stale one.
@@ -189,10 +213,7 @@ function PickerContent({
   const selectModel = (nextModel: string) => {
     onModelChange(nextModel);
     if (disabled || reasoningDisabled) return;
-    // The synthetic default option reports an empty id; resolve it to the
-    // effective default model so its supported efforts constrain the change.
-    const nextModelId = nextModel || defaultModelId || '';
-    const nextModelOption = models.find(({ id }) => id === nextModelId);
+    const nextModelOption = models.find(({ id }) => id === nextModel);
     const nextEfforts =
       supportedReasoningEfforts ?? supportedEfforts(nextModelOption);
     if (nextEfforts.length === 0) {
@@ -254,6 +275,36 @@ function PickerContent({
     );
   };
 
+  const renderModelOption = (option: ModelReasoningPickerModel) => {
+    const selected = option.id === effectiveModelId;
+    return (
+      <button
+        key={option.id || '__default-model__'}
+        type="button"
+        role="option"
+        aria-selected={selected}
+        tabIndex={selected ? 0 : -1}
+        disabled={disabled || modelDisabled}
+        className={cn(
+          'flex h-10 w-full cursor-pointer items-center rounded-md px-3 text-left text-sm transition-colors motion-reduce:transition-none',
+          'hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          selected && '',
+        )}
+        onClick={() => selectModel(option.id)}
+      >
+        <span className="min-w-0 flex-1 truncate flex items-center gap-2">
+          <span className="size-4">
+            <ArrowDownIcon
+              className={`size-4 transition-opacity -rotate-90 ${selected ? 'opacity-100 animate-bounce' : 'opacity-0'}`}
+            />
+          </span>
+          {option.displayName}
+          {option.isDefault ? ' (Default)' : ''}
+        </span>
+      </button>
+    );
+  };
+
   return (
     <div
       className="grid grid-cols-[1fr_4rem] grid-rows-1 divide-x divide-border overflow-hidden border-t md:border-t-0 mt-4 md:mt-0"
@@ -270,35 +321,22 @@ function PickerContent({
             updateScrollBoundaries()
           }
         >
-          {options.map((option) => {
-            const selected = option.id === model;
-            return (
-              <button
-                key={option.id || '__default-model__'}
-                type="button"
-                role="option"
-                aria-selected={selected}
-                tabIndex={selected ? 0 : -1}
-                disabled={disabled || modelDisabled}
-                className={cn(
-                  'flex h-10 w-full cursor-pointer items-center rounded-md px-3 text-left text-sm transition-colors motion-reduce:transition-none',
-                  'hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                  selected && '',
-                )}
-                onClick={() => selectModel(option.id)}
+          {leadingOptions.map(renderModelOption)}
+          {modelGroups.map((group) => (
+            <div
+              key={group.providerId}
+              role="group"
+              aria-label={`${group.label} models`}
+            >
+              <div
+                aria-hidden="true"
+                className="flex items-center gap-2 pl-9 pr-3 py-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase"
               >
-                <span className="min-w-0 flex-1 truncate flex items-center gap-2">
-                  <span className="size-4">
-                    <ArrowDown
-                      className={`size-4 transition-opacity -rotate-90 ${selected ? 'opacity-100 animate-bounce' : 'opacity-0'}`}
-                    />
-                  </span>
-                  {option.displayName}
-                  {option.isDefault ? ' (Default)' : ''}
-                </span>
-              </button>
-            );
-          })}
+                {group.label}
+              </div>
+              {group.items.map(renderModelOption)}
+            </div>
+          ))}
         </div>
         <div
           aria-hidden="true"
@@ -331,7 +369,7 @@ function PickerContent({
             : 'No reasoning'}
         </span>
         <div className="relative min-h-0 flex-1 pb-4">
-          <div className="relative h-full">
+          <div className="relative h-full cursor-ns-resize">
             {efforts.map((effort, index) => {
               const position = index / Math.max(1, efforts.length - 1);
               const endpointOffset =

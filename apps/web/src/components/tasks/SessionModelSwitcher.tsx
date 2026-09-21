@@ -67,15 +67,16 @@ export function SessionModelSwitcher({
       models={data?.models ?? []}
       model={model}
       defaultModelId={effectiveDefaultModelId}
-      emptyModelLabel={
-        effectiveDefaultModelId
-          ? `${displayModelName(effectiveDefaultModelId)} (Default)`
-          : 'Deployment default'
-      }
       onModelChange={onModelChange}
       reasoningEffort={reasoningEffort}
       defaultReasoningEffort={effectiveDefaultEffort}
       onReasoningEffortChange={onReasoningEffortChange}
+      providerGrouping={{
+        chatgptConnected: data?.chatgptConnected,
+        openaiConnected: data?.openaiConnected,
+        xaiSubscriptionConnected: data?.xaiSubscriptionConnected,
+        xaiConnected: data?.xaiConnected,
+      }}
       disabled={disabled}
     />
   );

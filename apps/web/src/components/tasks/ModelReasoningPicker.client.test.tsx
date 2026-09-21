@@ -59,16 +59,18 @@ const models: ModelReasoningPickerModel[] = [
 ];
 
 function Harness({
+  initialModel = 'provider/alpha',
   initialEffort = 'low' as ReasoningEffort | null,
   defaultModelId,
-  withDefaultOption = false,
+  availableModels = models,
 }: {
+  initialModel?: string;
   initialEffort?: ReasoningEffort | null;
   defaultModelId?: string | null;
-  withDefaultOption?: boolean;
+  availableModels?: ModelReasoningPickerModel[];
 }) {
   const [open, setOpen] = useState(false);
-  const [model, setModel] = useState('provider/alpha');
+  const [model, setModel] = useState(initialModel);
   const [effort, setEffort] = useState<ReasoningEffort | null>(initialEffort);
 
   return (
@@ -83,13 +85,13 @@ function Harness({
             aria-label="Choose model"
             onClick={() => setOpen(true)}
           >
-            {models.find(({ id }) => id === model)?.displayName ?? 'Model'}
+            {availableModels.find(({ id }) => id === model)?.displayName ??
+              'Model'}
           </button>
         }
-        models={models}
+        models={availableModels}
         model={model}
         defaultModelId={defaultModelId}
-        emptyModelLabel={withDefaultOption ? 'Deployment default' : undefined}
         onModelChange={setModel}
         reasoningEffort={effort}
         defaultReasoningEffort="medium"
@@ -164,6 +166,26 @@ describe('ModelReasoningPicker', () => {
     );
   });
 
+  it('groups model options under non-selectable provider labels', () => {
+    render(
+      <Harness
+        availableModels={[
+          ...models,
+          { id: 'anthropic/claude', displayName: 'Claude' },
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Choose model' }));
+
+    expect(
+      screen.getByRole('group', { name: 'Anthropic models' }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('group', { name: 'Provider models' }),
+    ).toBeVisible();
+    expect(screen.getAllByRole('option')).toHaveLength(4);
+  });
+
   it('persists the effective supported effort when switching from a no-override state', () => {
     render(<Harness initialEffort={null} />);
     fireEvent.click(screen.getByRole('button', { name: 'Choose model' }));
@@ -219,17 +241,13 @@ describe('ModelReasoningPicker', () => {
     );
   });
 
-  it('constrains the synthetic default option to the default model efforts', () => {
-    render(<Harness defaultModelId="provider/beta" withDefaultOption />);
+  it('selects the real default model without adding a duplicate option', () => {
+    render(<Harness initialModel="" defaultModelId="provider/beta" />);
     fireEvent.click(screen.getByRole('button', { name: 'Choose model' }));
 
-    // Returning to the default option (empty id) resolves to provider/beta,
-    // whose only supported effort is medium, so the explicit low is clamped.
-    fireEvent.click(screen.getByRole('option', { name: 'Deployment default' }));
-    expect(screen.getByTestId('selection')).toHaveTextContent(':medium');
-    expect(
-      screen.getByRole('slider', { name: 'Reasoning level' }),
-    ).toHaveAttribute('aria-valuemax', '0');
+    const betaOptions = screen.getAllByRole('option', { name: 'Beta' });
+    expect(betaOptions).toHaveLength(1);
+    expect(betaOptions[0]).toHaveAttribute('aria-selected', 'true');
   });
 
   it('uses a dismissible mobile drawer without a close action', async () => {

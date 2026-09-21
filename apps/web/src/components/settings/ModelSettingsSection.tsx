@@ -262,7 +262,9 @@ function TaskModelRoleEditor({
         ? `Set by ${descriptor.modelEnvVar}, not changeable in the UI.`
         : `Set by ${descriptor.reasoningEnvVar}, not changeable in the UI.`;
   const sameAsCoding = descriptor.modelFallback === 'coding';
-  const models = optionGroups.flatMap((group) => group.items);
+  const models = optionGroups.flatMap((group) =>
+    group.items.map((item) => ({ ...item, providerLabel: group.label })),
+  );
   const pickerModels = sameAsCoding
     ? [
         {
