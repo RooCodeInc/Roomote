@@ -154,7 +154,7 @@ export const SideNavItem = forwardRef<HTMLButtonElement, SideNavItemProps>(
         disabled={disabled}
         className={itemClasses}
         onClick={handleClick}
-        aria-label={ariaLabel ?? (!isLeftSide ? resolvedLabel : undefined)}
+        aria-label={ariaLabel ?? (!expanded ? resolvedLabel : undefined)}
         {...props}
       >
         {children as ReactElement}
@@ -167,7 +167,7 @@ export const SideNavItem = forwardRef<HTMLButtonElement, SideNavItemProps>(
         disabled={disabled}
         className={itemClasses}
         onClick={handleClick}
-        aria-label={ariaLabel ?? (!isLeftSide ? resolvedLabel : undefined)}
+        aria-label={ariaLabel ?? (!expanded ? resolvedLabel : undefined)}
         {...props}
       >
         {useNativeLink ? (
@@ -197,7 +197,7 @@ export const SideNavItem = forwardRef<HTMLButtonElement, SideNavItemProps>(
         aria-disabled={isFocusableDisabled || undefined}
         className={itemClasses}
         onClick={handleClick}
-        aria-label={ariaLabel ?? (!isLeftSide ? resolvedLabel : undefined)}
+        aria-label={ariaLabel ?? (!expanded ? resolvedLabel : undefined)}
         {...props}
       >
         {content}
