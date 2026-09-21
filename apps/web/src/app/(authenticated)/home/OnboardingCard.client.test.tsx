@@ -220,9 +220,10 @@ it('keeps the validation dialog visible after the onboarding card is dismissed',
 
   const { rerender } = render(<OnboardingCard />);
 
-  // The launch card goes away (dismissed or rotated) before the server-side
-  // validation failure arrives.
-  dismissCard();
+  // Dismiss every card so the component hits the no-active-card branch.
+  while (screen.queryAllByRole('button', { name: 'Dismiss' }).length > 0) {
+    dismissCard();
+  }
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   expect(screen.queryByText(/Find something/)).not.toBeInTheDocument();
 
