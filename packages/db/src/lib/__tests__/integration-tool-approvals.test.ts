@@ -157,6 +157,42 @@ describe('integration tool policies', () => {
       updatedByUserId: admin,
     });
   });
+
+  it('stores the auto instruction and clears it for non-auto modes', async () => {
+    const admin = await user();
+    await upsertIntegrationToolPolicy({
+      integrationId: 'mockslack',
+      toolName: 'read_channel',
+      mode: 'auto',
+      instruction: 'Only read-only lookups',
+      updatedByUserId: admin,
+    });
+    let policies = await listIntegrationToolPolicies();
+    expect(policies.find((p) => p.toolName === 'read_channel')).toMatchObject({
+      mode: 'auto',
+      instruction: 'Only read-only lookups',
+    });
+    // Switching away from auto drops the instruction with the mode.
+    await upsertIntegrationToolPolicy({
+      integrationId: 'mockslack',
+      toolName: 'read_channel',
+      mode: 'ask',
+      updatedByUserId: admin,
+    });
+    policies = await listIntegrationToolPolicies();
+    expect(policies.find((p) => p.toolName === 'read_channel')).toMatchObject({
+      mode: 'ask',
+    });
+    expect(
+      policies.find((p) => p.toolName === 'read_channel')?.instruction,
+    ).toBeUndefined();
+    await upsertIntegrationToolPolicy({
+      integrationId: 'mockslack',
+      toolName: 'read_channel',
+      mode: 'allow',
+      updatedByUserId: admin,
+    });
+  });
 });
 
 describe('insertIntegrationToolApproval', () => {
@@ -208,6 +244,72 @@ describe('insertIntegrationToolApproval', () => {
     await expect(insertPending({ sessionId, userId: otherId })).rejects.toThrow(
       IntegrationToolApprovalUnavailableError,
     );
+  });
+});
+
+describe('insertIntegrationToolApproval shadow evaluation', () => {
+  it('records the advisory evaluation bound to the request fingerprint, alongside the still-pending human decision', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const argsFingerprint = fingerprint();
+    const approval = await insertIntegrationToolApproval(
+      { sessionId, userId },
+      {
+        integrationId: call.integrationId,
+        toolName: call.toolName,
+        nativeRequestId: nextNativeRequestId(),
+        argsFingerprint,
+        argsSummary: call.args,
+        shadowEvaluation: {
+          recommendation: 'would_approve',
+          reason: 'The judgment model would have approved this call.',
+          confidence: 0.9,
+          provider: 'typesafe',
+          model: 'jev-latest',
+          instruction: 'Only actions clearly requested by the user',
+          argsFingerprint,
+          evaluatedAt: new Date().toISOString(),
+        },
+      },
+    );
+    // The evaluation never authorizes: the row is still a pending human ask.
+    expect(approval.status).toBe('pending');
+    expect(approval.shadowEvaluation).toMatchObject({
+      recommendation: 'would_approve',
+      confidence: 0.9,
+      model: 'jev-latest',
+      argsFingerprint,
+    });
+    const row = await getIntegrationToolApproval(approval.approvalId);
+    expect(row?.shadowEvaluation?.recommendation).toBe('would_approve');
+  });
+
+  it('correlates the recorded recommendation with the eventual human decision on the same row', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const approval = await insertIntegrationToolApproval(
+      { sessionId, userId },
+      {
+        integrationId: call.integrationId,
+        toolName: call.toolName,
+        nativeRequestId: nextNativeRequestId(),
+        argsFingerprint: fingerprint(),
+        argsSummary: call.args,
+        shadowEvaluation: {
+          recommendation: 'would_ask',
+          reason: 'The judgment model would still have asked a human.',
+          instruction: 'x',
+          argsFingerprint: fingerprint(),
+          evaluatedAt: new Date().toISOString(),
+        },
+      },
+    );
+    const decided = await decideIntegrationToolApproval(
+      { sessionId, userId },
+      { approvalId: approval.approvalId, decision: 'approved' },
+    );
+    expect(decided.status).toBe('approved');
+    expect(decided.shadowEvaluation?.recommendation).toBe('would_ask');
   });
 });
 

@@ -4595,6 +4595,12 @@ export const integrationToolPolicies = pgTable(
     mode: text('mode')
       .notNull()
       .$type<import('@roomote/types').IntegrationToolPolicyMode>(),
+    /**
+     * Optional per-policy approval instruction for the `auto` shadow
+     * evaluation; NULL means the deployment default instruction. Additive and
+     * N-1 safe: previous releases never read or write it.
+     */
+    instruction: text('instruction'),
     updatedByUserId: text('updated_by_user_id').references(() => users.id, {
       onDelete: 'set null',
     }),
@@ -4649,6 +4655,18 @@ export const integrationToolApprovalRequests = pgTable(
       onDelete: 'set null',
     }),
     decidedAt: timestamp('decided_at'),
+    /**
+     * Advisory shadow evaluation recorded for `auto`-gated calls while the
+     * human decision was (and remains) mandatory. Bound to this exact request
+     * via `argsFingerprint`; the eventual human decision lives on this same
+     * row (`status`, `decidedByUserId`, `decidedAt`) for correlation. The
+     * recommendation never authorizes anything. Additive and N-1 safe:
+     * previous releases never read or write it.
+     */
+    shadowEvaluation:
+      jsonb('shadow_evaluation').$type<
+        import('@roomote/types').IntegrationToolApprovalShadowEvaluation
+      >(),
     /** Why a cancelled request was cancelled (for example experiment disabled). */
     cancelReason: text('cancel_reason'),
     /** The window for the requester to answer; unresolved rows fail closed. */

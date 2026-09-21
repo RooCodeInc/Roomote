@@ -145,8 +145,11 @@ async function resolveJudgmentBackendUncached(): Promise<
   return undefined;
 }
 
-/** Cached briefly because judgments sit on hot paths. */
-async function resolveJudgmentBackend(): Promise<JudgmentBackend | undefined> {
+/** Cached briefly because judgments sit on hot paths. Exported so audit
+ * records can name the exact backend that answered an evaluation. */
+export async function resolveJudgmentBackend(): Promise<
+  JudgmentBackend | undefined
+> {
   const now = Date.now();
 
   if (cachedBackend && cachedBackend.expiresAt > now) {

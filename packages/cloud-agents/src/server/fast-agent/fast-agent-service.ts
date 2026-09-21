@@ -6098,6 +6098,11 @@ export async function answerFastAgentQuestion({
                       sessionId: session.id,
                       userId,
                       integrations: availableIntegrations,
+                      policies: toolApprovalRules.policies,
+                      // Bounded excerpt of the requester's current intent for
+                      // the `auto` shadow evaluator (untrusted context only;
+                      // it never authorizes the call).
+                      userIntentExcerpt: promptForAttempt,
                       signal: promptSignal,
                       ...(conversation.surface === 'slack' ||
                       conversation.surface === 'discord'

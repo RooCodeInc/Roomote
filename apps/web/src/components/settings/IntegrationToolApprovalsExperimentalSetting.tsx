@@ -14,12 +14,16 @@ import {
   ShieldQuestion,
   Spinner,
   Switch,
+  Textarea,
 } from '@/components/system';
 import type {
   IntegrationToolPolicyMetadata,
   IntegrationToolPolicyMode,
 } from '@roomote/types';
-import { integrationToolPolicyKey } from '@roomote/types';
+import {
+  DEFAULT_INTEGRATION_TOOL_AUTO_APPROVAL_INSTRUCTION,
+  integrationToolPolicyKey,
+} from '@roomote/types';
 import { useCodeModeIntegrationsExperiment } from '@/hooks/useCodeModeIntegrationsExperiment';
 import { useIntegrationToolApprovalsExperiment } from '@/hooks/useIntegrationToolApprovalsExperiment';
 import { useEffectiveMcpIntegrations } from '@/hooks/mcp-connections/useEffectiveMcpIntegrations';
@@ -32,6 +36,7 @@ const MODE_LABELS: Record<IntegrationToolPolicyMode, string> = {
   allow: 'Always allow (default)',
   ask: 'Ask every time',
   reject: 'Always reject',
+  auto: 'Auto (shadow preview — still asks you)',
 };
 
 function IntegrationToolPolicyList({
@@ -39,12 +44,14 @@ function IntegrationToolPolicyList({
   integrationName,
   policies,
   onSetMode,
+  onSetInstruction,
   isUpdating,
 }: {
   integrationId: string;
   integrationName: string;
-  policies: Map<string, IntegrationToolPolicyMode>;
+  policies: Map<string, IntegrationToolPolicyMetadata>;
   onSetMode: (toolName: string, mode: IntegrationToolPolicyMode) => void;
+  onSetInstruction: (toolName: string, instruction: string) => void;
   isUpdating: boolean;
 }) {
   const tools = useMcpConnectionTools(integrationId);
@@ -73,43 +80,66 @@ function IntegrationToolPolicyList({
   return (
     <ul className="divide-y divide-border">
       {enabledTools.map((tool) => {
-        const mode =
-          policies.get(integrationToolPolicyKey(integrationId, tool.name)) ??
-          'allow';
+        const policy = policies.get(
+          integrationToolPolicyKey(integrationId, tool.name),
+        );
+        const mode = policy?.mode ?? 'allow';
         return (
-          <li
-            key={tool.name}
-            className="flex items-center justify-between gap-3 py-2"
-          >
-            <span className="min-w-0 truncate font-mono text-xs">
-              {tool.name}
-            </span>
-            <Select
-              value={mode}
-              disabled={isUpdating}
-              onValueChange={(value) =>
-                onSetMode(tool.name, value as IntegrationToolPolicyMode)
-              }
-            >
-              <SelectTrigger
-                className="w-44 shrink-0"
-                aria-label={`Approval mode for ${tool.name}`}
+          <li key={tool.name} className="py-2">
+            <div className="flex items-center justify-between gap-3">
+              <span className="min-w-0 truncate font-mono text-xs">
+                {tool.name}
+              </span>
+              <Select
+                value={mode}
+                disabled={isUpdating}
+                onValueChange={(value) =>
+                  onSetMode(tool.name, value as IntegrationToolPolicyMode)
+                }
               >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {(
-                  Object.entries(MODE_LABELS) as [
-                    IntegrationToolPolicyMode,
-                    string,
-                  ][]
-                ).map(([value, label]) => (
-                  <SelectItem key={value} value={value}>
-                    {label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+                <SelectTrigger
+                  className="w-64 shrink-0"
+                  aria-label={`Approval mode for ${tool.name}`}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {(
+                    Object.entries(MODE_LABELS) as [
+                      IntegrationToolPolicyMode,
+                      string,
+                    ][]
+                  ).map(([value, label]) => (
+                    <SelectItem key={value} value={value}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {mode === 'auto' ? (
+              <div className="mt-2 space-y-1">
+                <p className="text-xs text-muted-foreground">
+                  Shadow preview: the judgment model records what it would have
+                  recommended for each call, but you still approve every call
+                  yourself. Its redacted view of the arguments and a short
+                  excerpt of your request leave this deployment to the
+                  configured judgment provider.
+                </p>
+                <Textarea
+                  aria-label={`Approval instruction for ${tool.name}`}
+                  rows={2}
+                  disabled={isUpdating}
+                  defaultValue={
+                    policy?.instruction ??
+                    DEFAULT_INTEGRATION_TOOL_AUTO_APPROVAL_INSTRUCTION
+                  }
+                  onBlur={(event) =>
+                    onSetInstruction(tool.name, event.target.value)
+                  }
+                />
+              </div>
+            ) : null}
           </li>
         );
       })}
@@ -140,7 +170,7 @@ export function IntegrationToolApprovalsExperimentalSetting() {
   const policies = new Map(
     (policiesQuery.data ?? []).map((policy: IntegrationToolPolicyMetadata) => [
       integrationToolPolicyKey(policy.integrationId, policy.toolName),
-      policy.mode,
+      policy,
     ]),
   );
 
@@ -175,7 +205,10 @@ export function IntegrationToolApprovalsExperimentalSetting() {
           Gate individual integration tools behind a requester decision in
           Sessions. Applies on top of Code Mode Integrations: a tool set to Ask
           every time pauses each call until the Session owner allows it once or
-          rejects it, and Always reject blocks it outright. Tools left at the
+          rejects it, and Always reject blocks it outright. Auto is a shadow
+          preview: every call still waits for your decision, while the
+          configured judgment model records what it would have recommended so
+          you can evaluate it before trusting any automation. Tools left at the
           default run exactly as before. Policies apply to every Session on this
           deployment.
         </p>
@@ -239,6 +272,16 @@ export function IntegrationToolApprovalsExperimentalSetting() {
                               integrationId: integration.id,
                               toolName,
                               mode,
+                            })
+                          }
+                          onSetInstruction={(toolName, instruction) =>
+                            setPolicy.mutate({
+                              integrationId: integration.id,
+                              toolName,
+                              mode: 'auto',
+                              ...(instruction.trim()
+                                ? { instruction: instruction.trim() }
+                                : {}),
                             })
                           }
                         />

@@ -4,6 +4,7 @@ import { and, eq, gt, inArray, sql } from 'drizzle-orm';
 
 import type {
   IntegrationToolApprovalMetadata,
+  IntegrationToolApprovalShadowEvaluation,
   IntegrationToolPolicyMetadata,
   IntegrationToolPolicyMode,
 } from '@roomote/types';
@@ -103,6 +104,7 @@ function policyMetadata(
     integrationId: row.integrationId,
     toolName: row.toolName,
     mode: row.mode,
+    ...(row.instruction ? { instruction: row.instruction } : {}),
     updatedAt: row.updatedAt.toISOString(),
     createdAt: row.createdAt.toISOString(),
   };
@@ -117,6 +119,7 @@ function approvalMetadata(
     toolName: row.toolName,
     argsSummary: row.argsSummary,
     status: row.status,
+    ...(row.shadowEvaluation ? { shadowEvaluation: row.shadowEvaluation } : {}),
     expiresAt: row.expiresAt.toISOString(),
     createdAt: row.createdAt.toISOString(),
   };
@@ -150,6 +153,8 @@ export async function upsertIntegrationToolPolicy(input: {
   integrationId: string;
   toolName: string;
   mode: IntegrationToolPolicyMode;
+  /** Only meaningful for `auto`; stored as NULL for other modes. */
+  instruction?: string;
   updatedByUserId: string;
 }): Promise<void> {
   if (input.mode === 'allow') {
@@ -163,12 +168,17 @@ export async function upsertIntegrationToolPolicy(input: {
       );
     return;
   }
+  const instruction =
+    input.mode === 'auto' && input.instruction?.trim()
+      ? input.instruction.trim()
+      : null;
   await db
     .insert(integrationToolPolicies)
     .values({
       integrationId: input.integrationId,
       toolName: input.toolName,
       mode: input.mode,
+      instruction,
       updatedByUserId: input.updatedByUserId,
       updatedAt: sql`clock_timestamp()`,
     })
@@ -179,6 +189,7 @@ export async function upsertIntegrationToolPolicy(input: {
       ],
       set: {
         mode: input.mode,
+        instruction,
         updatedByUserId: input.updatedByUserId,
         updatedAt: sql`clock_timestamp()`,
       },
@@ -216,6 +227,13 @@ export async function insertIntegrationToolApproval(
     nativeRequestId: string;
     argsFingerprint: string;
     argsSummary: unknown;
+    /**
+     * Advisory shadow evaluation for `auto`-gated calls, bound to this
+     * request's `argsFingerprint`. Recorded alongside the pending row so the
+     * eventual human decision on the same row stays correlated with what the
+     * evaluator would have recommended. Never authorizes the call.
+     */
+    shadowEvaluation?: IntegrationToolApprovalShadowEvaluation;
   },
 ): Promise<IntegrationToolApprovalMetadata> {
   return db.transaction(async (tx) => {
@@ -245,6 +263,9 @@ export async function insertIntegrationToolApproval(
         nativeRequestId: input.nativeRequestId,
         argsFingerprint: input.argsFingerprint,
         argsSummary: redactIntegrationToolArgs(input.argsSummary),
+        ...(input.shadowEvaluation
+          ? { shadowEvaluation: input.shadowEvaluation }
+          : {}),
         expiresAt: sql`clock_timestamp() + ${INTEGRATION_TOOL_APPROVAL_WINDOW_MINUTES} * interval '1 minute'`,
       })
       .onConflictDoNothing({

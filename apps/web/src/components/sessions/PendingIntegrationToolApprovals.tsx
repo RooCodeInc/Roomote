@@ -81,6 +81,20 @@ export function PendingIntegrationToolApprovals({
               <p className="truncate text-xs text-muted-foreground">
                 {summarizeArgs(item.argsSummary)}
               </p>
+              {item.shadowEvaluation ? (
+                <p className="text-xs text-muted-foreground">
+                  Auto preview: the judgment model{' '}
+                  {item.shadowEvaluation.recommendation === 'would_approve'
+                    ? 'would have approved this call'
+                    : 'would have asked you'}
+                  {typeof item.shadowEvaluation.confidence === 'number'
+                    ? ` (confidence ${Math.round(
+                        item.shadowEvaluation.confidence * 100,
+                      )}%)`
+                    : ''}
+                  . Your decision is still required.
+                </p>
+              ) : null}
             </div>
             <div className="flex gap-2">
               <Button

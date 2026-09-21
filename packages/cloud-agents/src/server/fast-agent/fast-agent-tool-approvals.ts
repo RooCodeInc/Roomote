@@ -10,6 +10,7 @@ import {
   isDeploymentExperimentEnabled,
   listIntegrationToolPolicies,
   markIntegrationToolApprovalConsumed,
+  redactIntegrationToolArgs,
 } from '@roomote/db/server';
 import {
   integrationToolPolicyKey,
@@ -18,6 +19,10 @@ import {
 } from '@roomote/types';
 
 import type { FastAgentIntegration } from './fast-agent-integration-broker';
+import { evaluateIntegrationToolAutoShadow } from './fast-agent-tool-approval-shadow';
+
+/** Bounded excerpt of the requester's intent sent to the shadow evaluator. */
+const AUTO_SHADOW_INTENT_EXCERPT_MAX_CHARS = 2_000;
 
 /**
  * Experiment-gated (`integrationToolApprovals`) per-tool approvals for
@@ -76,7 +81,10 @@ export function buildIntegrationToolApprovalRules(
       const mode = modeByTool.get(
         integrationToolPolicyKey(integration.id, tool.name),
       );
-      if (mode === 'ask') {
+      // `auto` is a shadow/preview mode: it compiles to the exact same
+      // native `ask` rule as `ask`, because the human decision remains
+      // mandatory. The evaluator only records a recommendation.
+      if (mode === 'ask' || mode === 'auto') {
         rules.push({
           permission: codeModeToolKey(integration.id, tool.name),
           pattern: '*',
@@ -205,7 +213,14 @@ export function extractApprovalCallArgs(
 export async function resolveFastAgentToolApprovalRules(input: {
   codeModeIntegrationsEffective: boolean;
   integrations: FastAgentIntegration[];
-}): Promise<{ rules: PermissionRuleset; hash: string } | undefined> {
+}): Promise<
+  | {
+      rules: PermissionRuleset;
+      hash: string;
+      policies: IntegrationToolPolicyMetadata[];
+    }
+  | undefined
+> {
   if (!input.codeModeIntegrationsEffective) return undefined;
   const enabled = await isDeploymentExperimentEnabled(
     'integrationToolApprovals',
@@ -213,29 +228,51 @@ export async function resolveFastAgentToolApprovalRules(input: {
   if (!enabled) return undefined;
   const policies = await listIntegrationToolPolicies();
   const rules = buildIntegrationToolApprovalRules(input.integrations, policies);
-  return { rules, hash: hashIntegrationToolApprovalRules(rules) };
+  return { rules, hash: hashIntegrationToolApprovalRules(rules), policies };
 }
 
 export function createFastAgentToolApprovalBridge(input: {
   sessionId: string;
   userId: string;
   integrations: FastAgentIntegration[];
+  /**
+   * The policies in effect this turn, from the same load that compiled the
+   * native rules. Needed so `auto` (shadow/preview) calls can record the
+   * evaluator recommendation against the exact instruction that applied.
+   */
+  policies?: IntegrationToolPolicyMetadata[];
+  /**
+   * Bounded excerpt of the requester's current intent, given to the shadow
+   * evaluator as untrusted context. Absent intent records `would_ask`-leaning
+   * context rather than guessing.
+   */
+  userIntentExcerpt?: string;
   /** Optional chat-surface notification for non-web conversations. */
   notify?: (approval: IntegrationToolApprovalMetadata) => Promise<void>;
   signal?: AbortSignal;
 }) {
   const toolByKey = new Map<
     string,
-    { integrationId: string; toolName: string }
+    { integrationId: string; toolName: string; toolDescription?: string }
   >();
   for (const integration of input.integrations) {
     for (const tool of integration.tools) {
       toolByKey.set(codeModeToolKey(integration.id, tool.name), {
         integrationId: integration.id,
         toolName: tool.name,
+        ...(tool.description ? { toolDescription: tool.description } : {}),
       });
     }
   }
+  const policyByTool = new Map(
+    (input.policies ?? []).map((policy) => [
+      integrationToolPolicyKey(policy.integrationId, policy.toolName),
+      policy,
+    ]),
+  );
+  const intentExcerpt = input.userIntentExcerpt
+    ? input.userIntentExcerpt.slice(0, AUTO_SHADOW_INTENT_EXCERPT_MAX_CHARS)
+    : undefined;
   const handledRequestIds = new Set<string>();
   const notifiedApprovalIds = new Set<string>();
 
@@ -265,18 +302,43 @@ export function createFastAgentToolApprovalBridge(input: {
         })
         .catch(() => undefined);
       const args = extractApprovalCallArgs(recovered, tool);
+      const argsFingerprint = fingerprintIntegrationToolCall({
+        integrationId: tool.integrationId,
+        toolName: tool.toolName,
+        args: args ?? null,
+      });
+      // `auto` (shadow/preview): record what the judgment model would have
+      // recommended for this exact call. The evaluation is advisory only —
+      // the call still pauses on this same native ask and the human decision
+      // below remains the sole authorization. The evaluator is bounded to
+      // redacted arguments and never issues an allow, so a slow or failed
+      // evaluation can only delay the card by its own timeout, never skip it.
+      const policy = policyByTool.get(
+        integrationToolPolicyKey(tool.integrationId, tool.toolName),
+      );
+      const shadowEvaluation =
+        policy?.mode === 'auto'
+          ? await evaluateIntegrationToolAutoShadow({
+              integrationId: tool.integrationId,
+              toolName: tool.toolName,
+              ...(tool.toolDescription
+                ? { toolDescription: tool.toolDescription }
+                : {}),
+              args: redactIntegrationToolArgs(args ?? null),
+              ...(intentExcerpt ? { userIntentExcerpt: intentExcerpt } : {}),
+              policy,
+              argsFingerprint,
+            })
+          : undefined;
       const approval = await insertIntegrationToolApproval(
         { sessionId: input.sessionId, userId: input.userId },
         {
           integrationId: tool.integrationId,
           toolName: tool.toolName,
           nativeRequestId: ask.requestId,
-          argsFingerprint: fingerprintIntegrationToolCall({
-            integrationId: tool.integrationId,
-            toolName: tool.toolName,
-            args: args ?? null,
-          }),
+          argsFingerprint,
           argsSummary: args ?? null,
+          ...(shadowEvaluation ? { shadowEvaluation } : {}),
         },
       );
       if (input.notify && !notifiedApprovalIds.has(approval.approvalId)) {

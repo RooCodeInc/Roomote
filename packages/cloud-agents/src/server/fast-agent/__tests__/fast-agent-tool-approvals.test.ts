@@ -9,6 +9,11 @@ vi.mock('@roomote/db/server', () => ({
   isDeploymentExperimentEnabled: vi.fn(async () => true),
   listIntegrationToolPolicies: vi.fn(async () => []),
   markIntegrationToolApprovalConsumed: vi.fn(async () => true),
+  redactIntegrationToolArgs: vi.fn((value: unknown) => value),
+}));
+
+vi.mock('../fast-agent-tool-approval-shadow', () => ({
+  evaluateIntegrationToolAutoShadow: vi.fn(),
 }));
 
 import {
@@ -29,6 +34,7 @@ import {
   resolveFastAgentToolApprovalRules,
   shouldDisposeInstanceForToolApprovalRules,
 } from '../fast-agent-tool-approvals';
+import { evaluateIntegrationToolAutoShadow } from '../fast-agent-tool-approval-shadow';
 import type { FastAgentIntegration } from '../fast-agent-integration-broker';
 
 const integrations: FastAgentIntegration[] = [
@@ -67,6 +73,22 @@ describe('buildIntegrationToolApprovalRules', () => {
     expect(rules).toEqual([
       { permission: 'mock-slack_post_message', pattern: '*', action: 'ask' },
       { permission: 'mock-slack_delete_channel', pattern: '*', action: 'deny' },
+    ]);
+  });
+
+  it('maps auto to the same native ask rule as ask, because human approval stays mandatory in shadow mode', () => {
+    const rules = buildIntegrationToolApprovalRules(integrations, [
+      {
+        policyId: 'p1',
+        integrationId: 'mock-slack',
+        toolName: 'post_message',
+        mode: 'auto',
+        updatedAt: '',
+        createdAt: '',
+      },
+    ]);
+    expect(rules).toEqual([
+      { permission: 'mock-slack_post_message', pattern: '*', action: 'ask' },
     ]);
   });
 
@@ -324,6 +346,7 @@ describe('tool approval bridge', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(isDeploymentExperimentEnabled).mockResolvedValue(true);
+    vi.mocked(markIntegrationToolApprovalConsumed).mockResolvedValue(true);
     vi.mocked(insertIntegrationToolApproval).mockResolvedValue({
       approvalId: 'approval-1',
       integrationId: 'mock-slack',
@@ -436,6 +459,149 @@ describe('tool approval bridge', () => {
     instance.handleAsk(ask, helperMocks);
     await vi.waitFor(() => expect(helperMocks.reply).toHaveBeenCalledTimes(1));
     expect(insertIntegrationToolApproval).toHaveBeenCalledTimes(1);
+  });
+
+  describe('auto (shadow/preview) mode', () => {
+    const autoPolicies = [
+      {
+        policyId: 'p-auto',
+        integrationId: 'mock-slack',
+        toolName: 'post_message',
+        mode: 'auto' as const,
+        updatedAt: '',
+        createdAt: '',
+      },
+    ];
+
+    it('records the shadow recommendation but still pauses for the human decision even on would_approve', async () => {
+      vi.mocked(evaluateIntegrationToolAutoShadow).mockResolvedValue({
+        recommendation: 'would_approve',
+        reason: 'The judgment model would have approved this call.',
+        confidence: 0.9,
+        provider: 'typesafe',
+        model: 'jev-latest',
+        instruction: 'Only actions clearly requested by the user',
+        argsFingerprint: 'fingerprint',
+        evaluatedAt: new Date().toISOString(),
+      });
+      // The human has not decided: the row stays pending within the window.
+      vi.mocked(getIntegrationToolApproval).mockResolvedValue({
+        status: 'pending',
+      } as never);
+      const helperMocks = helpers();
+      const abort = new AbortController();
+      createFastAgentToolApprovalBridge({
+        sessionId: 'session-id',
+        userId: 'user-id',
+        integrations,
+        policies: autoPolicies,
+        userIntentExcerpt: 'please post hi',
+        signal: abort.signal,
+      }).handleAsk(ask, helperMocks);
+      await vi.waitFor(() =>
+        expect(insertIntegrationToolApproval).toHaveBeenCalledWith(
+          { sessionId: 'session-id', userId: 'user-id' },
+          expect.objectContaining({
+            shadowEvaluation: expect.objectContaining({
+              recommendation: 'would_approve',
+            }),
+          }),
+        ),
+      );
+      // Give the poll loop a chance to run; the native ask must stay open
+      // because the evaluator can never authorize the call itself.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(helperMocks.reply).not.toHaveBeenCalled();
+      abort.abort();
+    });
+
+    it('still relays the human approval exactly once after a would_approve shadow evaluation', async () => {
+      vi.mocked(evaluateIntegrationToolAutoShadow).mockResolvedValue({
+        recommendation: 'would_approve',
+        reason: 'ok',
+        instruction: 'x',
+        argsFingerprint: 'fingerprint',
+        evaluatedAt: new Date().toISOString(),
+      });
+      vi.mocked(getIntegrationToolApproval).mockResolvedValue({
+        status: 'approved',
+      } as never);
+      const helperMocks = helpers();
+      createFastAgentToolApprovalBridge({
+        sessionId: 'session-id',
+        userId: 'user-id',
+        integrations,
+        policies: autoPolicies,
+      }).handleAsk(ask, helperMocks);
+      await vi.waitFor(() =>
+        expect(helperMocks.reply).toHaveBeenCalledWith(
+          'req-1',
+          'once',
+          undefined,
+        ),
+      );
+      expect(markIntegrationToolApprovalConsumed).toHaveBeenCalledTimes(1);
+    });
+
+    it('records a fail-closed would_ask evaluation and still asks the human', async () => {
+      vi.mocked(evaluateIntegrationToolAutoShadow).mockResolvedValue({
+        recommendation: 'would_ask',
+        reason: 'Evaluation failed and fell back to the human decision.',
+        instruction: 'x',
+        argsFingerprint: 'fingerprint',
+        evaluatedAt: new Date().toISOString(),
+      });
+      vi.mocked(getIntegrationToolApproval).mockResolvedValue({
+        status: 'rejected',
+      } as never);
+      const helperMocks = helpers();
+      createFastAgentToolApprovalBridge({
+        sessionId: 'session-id',
+        userId: 'user-id',
+        integrations,
+        policies: autoPolicies,
+      }).handleAsk(ask, helperMocks);
+      await vi.waitFor(() =>
+        expect(helperMocks.reply).toHaveBeenCalledWith(
+          'req-1',
+          'reject',
+          'The requester rejected this tool call.',
+        ),
+      );
+      expect(insertIntegrationToolApproval).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          shadowEvaluation: expect.objectContaining({
+            recommendation: 'would_ask',
+          }),
+        }),
+      );
+    });
+
+    it('never evaluates policies that are not auto, leaving Allow/Ask/Reject behavior unchanged', async () => {
+      vi.mocked(getIntegrationToolApproval).mockResolvedValue({
+        status: 'approved',
+      } as never);
+      const helperMocks = helpers();
+      createFastAgentToolApprovalBridge({
+        sessionId: 'session-id',
+        userId: 'user-id',
+        integrations,
+        policies: [{ ...autoPolicies[0]!, mode: 'ask' }],
+      }).handleAsk(ask, helperMocks);
+      await vi.waitFor(() =>
+        expect(helperMocks.reply).toHaveBeenCalledWith(
+          'req-1',
+          'once',
+          undefined,
+        ),
+      );
+      expect(evaluateIntegrationToolAutoShadow).not.toHaveBeenCalled();
+      expect(insertIntegrationToolApproval).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.not.objectContaining({ shadowEvaluation: expect.anything() }),
+      );
+    });
   });
 
   it('notifies chat surfaces once per approval', async () => {
