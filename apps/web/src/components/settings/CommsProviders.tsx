@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
 import { useTRPC } from '@/trpc/client';
-import { Alert, Info, Skeleton } from '@/components/system';
+import { Alert, Button, Info, Skeleton, Spinner } from '@/components/system';
 import type { CommsStatus } from '@/trpc/commands/comms';
 
 import { CommsProviderSection } from './CommsProviderSection';
@@ -112,11 +112,23 @@ export function CommsProviders() {
     );
   }
 
-  if (status.isError) {
+  if (status.isError && !status.data) {
     return (
-      <p className="text-sm text-destructive">
-        Failed to load communications provider status.
-      </p>
+      <div className="space-y-3">
+        <p className="text-sm text-destructive">
+          Failed to load communications provider status.
+        </p>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => void status.refetch()}
+          disabled={status.isFetching}
+          aria-busy={status.isFetching}
+        >
+          {status.isFetching ? <Spinner /> : null}
+          {status.isFetching ? 'Retrying...' : 'Retry'}
+        </Button>
+      </div>
     );
   }
 
