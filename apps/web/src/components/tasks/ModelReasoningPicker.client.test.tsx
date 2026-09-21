@@ -131,9 +131,26 @@ describe('ModelReasoningPicker', () => {
     ).toHaveAttribute('data-disabled');
 
     fireEvent.click(screen.getByRole('option', { name: 'Alpha' }));
-    fireEvent.wheel(screen.getByRole('slider', { name: 'Reasoning level' }), {
+    const slider = screen.getByRole('slider', { name: 'Reasoning level' });
+    const pageWheelListener = vi.fn();
+    document.body.addEventListener('wheel', pageWheelListener);
+    const wheelToHigh = new WheelEvent('wheel', {
+      bubbles: true,
+      cancelable: true,
       deltaY: -40,
     });
+    fireEvent(slider, wheelToHigh);
+    const wheelAtHigh = new WheelEvent('wheel', {
+      bubbles: true,
+      cancelable: true,
+      deltaY: -40,
+    });
+    fireEvent(slider, wheelAtHigh);
+    document.body.removeEventListener('wheel', pageWheelListener);
+
+    expect(wheelToHigh.defaultPrevented).toBe(true);
+    expect(wheelAtHigh.defaultPrevented).toBe(true);
+    expect(pageWheelListener).not.toHaveBeenCalled();
     expect(screen.getByTestId('selection')).toHaveTextContent(
       'provider/alpha:high',
     );

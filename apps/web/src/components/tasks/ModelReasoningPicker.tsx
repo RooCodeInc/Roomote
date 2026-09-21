@@ -10,7 +10,6 @@ import {
   type KeyboardEvent,
   type ReactNode,
   type UIEvent,
-  type WheelEvent,
 } from 'react';
 import {
   getReasoningEffortLabel,
@@ -95,6 +94,7 @@ function PickerContent({
   onClose?: () => void;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
+  const reasoningPanelRef = useRef<HTMLDivElement>(null);
   const [canScrollUp, setCanScrollUp] = useState(false);
   const [canScrollDown, setCanScrollDown] = useState(false);
   const [typeaheadQuery, setTypeaheadQuery] = useState('');
@@ -260,22 +260,44 @@ function PickerContent({
     if (effort && effort !== effectiveEffort) onReasoningEffortChange(effort);
   };
 
-  const handleWheel = (event: WheelEvent<HTMLDivElement>) => {
-    if (
-      disabled ||
-      reasoningDisabled ||
-      efforts.length < 2 ||
-      event.deltaY === 0
-    )
-      return;
-    event.preventDefault();
-    setEffortIndex(
-      Math.max(
+  useEffect(() => {
+    const reasoningPanel = reasoningPanelRef.current;
+    if (!reasoningPanel) return;
+
+    const interceptWheel = (event: globalThis.WheelEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (
+        disabled ||
+        reasoningDisabled ||
+        efforts.length < 2 ||
+        event.deltaY === 0
+      ) {
+        return;
+      }
+
+      const nextIndex = Math.max(
         0,
         Math.min(efforts.length - 1, effortIndex + (event.deltaY < 0 ? 1 : -1)),
-      ),
-    );
-  };
+      );
+      const effort = efforts[nextIndex];
+      if (effort && effort !== effectiveEffort) {
+        onReasoningEffortChange(effort);
+      }
+    };
+
+    reasoningPanel.addEventListener('wheel', interceptWheel, {
+      passive: false,
+    });
+    return () => reasoningPanel.removeEventListener('wheel', interceptWheel);
+  }, [
+    disabled,
+    effectiveEffort,
+    effortIndex,
+    efforts,
+    onReasoningEffortChange,
+    reasoningDisabled,
+  ]);
 
   const renderModelOption = (option: ModelReasoningPickerModel) => {
     const selected = option.id === effectiveModelId;
@@ -359,8 +381,8 @@ function PickerContent({
       </div>
 
       <div
+        ref={reasoningPanelRef}
         className="flex min-w-0 flex-col items-center gap-0 overflow-hidden space-y-2 pt-1"
-        onWheel={handleWheel}
       >
         <span
           className="h-7 pt-2 text-center text-xs font-medium"
