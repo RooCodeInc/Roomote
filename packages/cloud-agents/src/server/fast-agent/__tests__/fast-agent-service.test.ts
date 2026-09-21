@@ -10764,10 +10764,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
             result,
           });
           expect(toolResults[1]).toEqual({
-            success: false,
-            error: 'The same integration call already ran in this turn.',
+            success: true,
+            result,
           });
-          expect(mocks.callIntegration).toHaveBeenCalledOnce();
+          expect(mocks.callIntegration).toHaveBeenCalledTimes(2);
           expect(mocks.listIntegrations).toHaveBeenCalledWith(
             { userId: 'user-1', apiBaseUrl: 'https://api.example.com' },
             resolveMcpServerConfigs,
