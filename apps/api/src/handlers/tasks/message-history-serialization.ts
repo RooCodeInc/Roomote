@@ -17,10 +17,10 @@ import type {
   MessageHistorySnapshot,
 } from './message-history-pagination';
 
-export const DEFAULT_MESSAGE_LIMIT = 100;
-export const MAX_MESSAGE_LIMIT = 1000;
-export const MAX_MESSAGE_PAGE_BYTES = 256_000;
-export const MAX_MESSAGE_SCAN_ROWS = 10_000;
+const DEFAULT_MESSAGE_LIMIT = 100;
+const MAX_MESSAGE_LIMIT = 1000;
+const MAX_MESSAGE_PAGE_BYTES = 256_000;
+const MAX_MESSAGE_SCAN_ROWS = 10_000;
 const MAX_MESSAGE_TEXT_CHARS = ACP_UI_TOOL_OUTPUT_MAX_CHARS;
 const MAX_MESSAGE_IMAGE_URI_CHARS = 64_000;
 
@@ -43,7 +43,7 @@ export function parseMessageLimit(value: string | undefined): number | null {
   return Math.min(Math.max(Math.trunc(parsed), 1), MAX_MESSAGE_LIMIT);
 }
 
-export function positionForMessageRow(
+function positionForMessageRow(
   row: Pick<MessageHistoryRow, 'id' | 'ts' | 'turnSeq' | 'createdAt'>,
 ): MessageHistoryPosition {
   return {
@@ -84,7 +84,7 @@ function truncateMessageContent(
   };
 }
 
-export function serializeMessage(
+function serializeMessage(
   row: MessageHistoryRow,
 ): RoomoteTranscriptMessage | null {
   const visibleInTranscript = resolveAcpTranscriptVisibility({
@@ -115,7 +115,7 @@ export function serializeMessage(
   });
 }
 
-export function minimalMessageForSize(
+function minimalMessageForSize(
   message: RoomoteTranscriptMessage,
 ): RoomoteTranscriptMessage {
   return {
@@ -127,7 +127,7 @@ export function minimalMessageForSize(
   };
 }
 
-export function messageBytes(message: RoomoteTranscriptMessage): number {
+function messageBytes(message: RoomoteTranscriptMessage): number {
   return Buffer.byteLength(JSON.stringify(message), 'utf8');
 }
 
@@ -147,7 +147,7 @@ export function coverageForMessages(
   };
 }
 
-export interface CollectedMessagePage {
+interface CollectedMessagePage {
   messages: RoomoteTranscriptMessage[];
   hasMore: boolean;
   truncated: boolean;

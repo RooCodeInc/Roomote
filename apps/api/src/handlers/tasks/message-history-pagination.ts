@@ -25,7 +25,7 @@ export type MessageHistoryCursor = {
   position: MessageHistoryPosition;
 };
 
-export const MESSAGE_HISTORY_CURSOR_MAX_LENGTH = 4096;
+const MESSAGE_HISTORY_CURSOR_MAX_LENGTH = 4096;
 
 const uuidSchema = z.string().uuid();
 
