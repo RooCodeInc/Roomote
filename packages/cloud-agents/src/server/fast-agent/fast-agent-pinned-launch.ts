@@ -146,7 +146,7 @@ async function findConversationTargetForLaunchKey(
   }
   const target = await findConversationTargetById(parentSessionId, userId);
   if (target?.ownerUserId && target.ownerUserId !== userId) {
-    throw new Error('This launch id already belongs to another Session.');
+    throw new Error('This launch id already belongs to another session.');
   }
   return target;
 }
@@ -208,7 +208,7 @@ async function resolveConversationTarget(
       input.userId,
     );
     if (!target) {
-      throw new Error('The Session for this launch could not be found.');
+      throw new Error('The session for this launch could not be found.');
     }
     return target;
   }
@@ -451,7 +451,7 @@ async function launchInSession(
     throw new Error('The task launch did not create a run.');
   }
   if (!session) {
-    throw new Error('The task launch did not attach to a Session.');
+    throw new Error('The task launch did not attach to a session.');
   }
 
   return {

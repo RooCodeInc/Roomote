@@ -5614,7 +5614,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
               'https://roomote.example/artifacts/session/session-1?path=notes%2Fdecision.md&v=1',
           },
           guidance:
-            'The artifact viewUrl opens in its Session; standaloneViewUrl opens the document, image, or file on its own page with a direct shareable link. Share whichever returned URL fits the context, unchanged, instead of constructing an artifact URL.',
+            'The artifact viewUrl opens in its session; standaloneViewUrl opens the document, image, or file on its own page with a direct shareable link. Share whichever returned URL fits the context, unchanged, instead of constructing an artifact URL.',
         });
         await invokeTool(nativeToolNames.sendChatReply, {
           purpose: 'closeout',

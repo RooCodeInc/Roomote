@@ -132,7 +132,7 @@ export async function handlePrReviewLaunch(
       id: body.fastConversationId,
     });
     if (!record) {
-      return c.json({ error: 'The requesting Session was not found.' }, 404);
+      return c.json({ error: 'The requesting session was not found.' }, 404);
     }
     // Chat and source-control conversations are shared surfaces where any
     // member can already trigger Session events; a web conversation is one
@@ -142,7 +142,7 @@ export async function handlePrReviewLaunch(
       record.userId !== auth.userId
     ) {
       return c.json(
-        { error: 'The requesting Session belongs to another user.' },
+        { error: 'The requesting session belongs to another user.' },
         403,
       );
     }

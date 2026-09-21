@@ -4678,7 +4678,7 @@ export async function answerFastAgentQuestion({
             if (!canonicalSession) {
               return {
                 success: false,
-                error: 'This Fast conversation is not attached to a Session.',
+                error: 'This Fast conversation is not attached to a session.',
               };
             }
             const result = await connectIntegrationForFast({
@@ -4715,7 +4715,7 @@ export async function answerFastAgentQuestion({
             if (!canonicalSession) {
               return {
                 success: false,
-                error: 'This Fast conversation is not attached to a Session.',
+                error: 'This Fast conversation is not attached to a session.',
               };
             }
             const result = await addRemoteCustomMcpForFast({
@@ -4880,7 +4880,7 @@ export async function answerFastAgentQuestion({
             if (!adapter.createArtifact) {
               return {
                 success: false,
-                error: 'Artifact creation is unavailable for this Session.',
+                error: 'Artifact creation is unavailable for this session.',
               };
             }
             const args = createArtifactArgsSchema.parse(call.args);
@@ -4917,7 +4917,7 @@ export async function answerFastAgentQuestion({
                 success: true,
                 artifact,
                 guidance:
-                  'The artifact viewUrl opens in its Session; standaloneViewUrl opens the document, image, or file on its own page with a direct shareable link. Share whichever returned URL fits the context, unchanged, instead of constructing an artifact URL.',
+                  'The artifact viewUrl opens in its session; standaloneViewUrl opens the document, image, or file on its own page with a direct shareable link. Share whichever returned URL fits the context, unchanged, instead of constructing an artifact URL.',
               };
             } catch (error) {
               completedTaskActions.delete(`artifact:${signature}`);
@@ -5513,7 +5513,7 @@ export async function answerFastAgentQuestion({
                 reason === 'human_turn_required'
                   ? 'New integration-key approvals require a human-authored turn. Ask the user to reply so you can continue.'
                   : reason === 'actor_owner_mismatch'
-                    ? 'Integration-key tools are unavailable because the task actor does not own this Session. Ask the Session owner to reply so you can continue.'
+                    ? 'Integration-key tools are unavailable because the task actor does not own this session. Ask the session owner to reply so you can continue.'
                     : 'Integration-key tools are unavailable because this turn has no acting user. Ask the user to reply so you can continue.';
               return {
                 success: false,
@@ -5670,7 +5670,7 @@ export async function answerFastAgentQuestion({
             if (!sessionGoal?.generation) {
               return {
                 success: false,
-                error: 'There is no active Session goal.',
+                error: 'There is no active session goal.',
               };
             }
             if (args.action === 'blocked' && !args.reason) {
@@ -5725,7 +5725,7 @@ export async function answerFastAgentQuestion({
                 success: false,
                 error:
                   result.reason === 'private_conversation'
-                    ? 'Private Sessions cannot write to shared memory.'
+                    ? 'Private sessions cannot write to shared memory.'
                     : "This conversation's memory is full. Start a new conversation to save further memories.",
               };
             }
@@ -5765,7 +5765,7 @@ export async function answerFastAgentQuestion({
               return {
                 success: false,
                 error:
-                  'Trusted capability cards are available only to administrators in web Sessions.',
+                  'Trusted capability cards are available only to administrators in web sessions.',
               };
             }
             const requestedArgs = fastAgentCapabilityOfferInputSchema.parse(
@@ -5856,7 +5856,7 @@ export async function answerFastAgentQuestion({
             if (conversation.surface !== 'web') {
               return {
                 success: false,
-                error: 'Structured input is available only in web Sessions.',
+                error: 'Structured input is available only in web sessions.',
               };
             }
             const args = requestUserInputArgsSchema.parse(call.args);
@@ -6377,7 +6377,7 @@ export async function answerFastAgentQuestion({
                               );
                               await adapter.postReply({
                                 purpose: 'progress',
-                                message: `Approval needed: ${approval.integrationId} wants to run ${approval.toolName}. Allow or reject it in the Session: ${sessionUrl}`,
+                                message: `Approval needed: ${approval.integrationId} wants to run ${approval.toolName}. Allow or reject it in the session: ${sessionUrl}`,
                               });
                             },
                           }

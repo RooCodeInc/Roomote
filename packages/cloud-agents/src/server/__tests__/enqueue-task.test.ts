@@ -1378,7 +1378,7 @@ describe('enqueueTask Session linkage', () => {
         surface: 'web',
         trigger: 'manual',
       }),
-    ).rejects.toThrow('another Session');
+    ).rejects.toThrow('another session');
   });
 });
 

@@ -120,7 +120,7 @@ function ServiceCredentialsForm({
       } catch {
         if (!controller.signal.aborted)
           setError(
-            "API key approval is unavailable. Sign in as this Session's owner and try again.",
+            "API key approval is unavailable. Sign in as this session's owner and try again.",
           );
       } finally {
         if (!controller.signal.aborted) setLoading(false);
@@ -221,7 +221,7 @@ function ServiceCredentialsForm({
                     toast.success('Integration saved.');
                   } else {
                     toast.warning(
-                      'Integration saved. The Session could not be notified. Ask the agent to check list_integration_keys and continue.',
+                      'Integration saved. The session could not be notified. Ask the agent to check list_integration_keys and continue.',
                     );
                   }
                   onCancel();

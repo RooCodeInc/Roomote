@@ -781,7 +781,7 @@ describe('personal MCP servers in Personal settings', () => {
     expect(screen.queryByLabelText('Local (stdio)')).toBeNull();
     expect(screen.queryByLabelText('Everyone in this deployment')).toBeNull();
     expect(
-      screen.getByText(/available only to your own Sessions and tasks/),
+      screen.getByText(/available only to your own sessions and tasks/),
     ).toBeInTheDocument();
 
     fireEvent.change(screen.getByPlaceholderText('e.g. internal-tools'), {

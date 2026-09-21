@@ -377,7 +377,7 @@ function ServerFormDialog({
           </DialogTitle>
           <DialogDescription>
             {visibility === 'owner'
-              ? 'A personal server is available only to your own Sessions and tasks. It is reached through an authenticated Roomote proxy, so credentials stay server-side.'
+              ? 'A personal server is available only to your own sessions and tasks. It is reached through an authenticated Roomote proxy, so credentials stay server-side.'
               : 'Custom servers are available to agents in every task. Remote servers are reached through an authenticated Roomote proxy, so credentials stay server-side. Local servers run inside the task sandbox with the same privileges as the agent.'}
           </DialogDescription>
         </DialogHeader>
