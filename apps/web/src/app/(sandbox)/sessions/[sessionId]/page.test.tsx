@@ -94,6 +94,15 @@ vi.mock('@/components/layout', () => ({
 vi.mock('./FastSessionTranscript', () => ({
   FastSessionTranscript: transcriptMock,
 }));
+vi.mock('./EditableSessionTitle', () => ({
+  EditableSessionTitle: ({
+    title,
+    className,
+  }: {
+    title: string;
+    className: string;
+  }) => <h1 className={className}>{title}</h1>,
+}));
 vi.mock('./SessionTaskTimeline', () => ({
   SessionTaskTimeline: sessionTaskTimelineMock,
 }));
