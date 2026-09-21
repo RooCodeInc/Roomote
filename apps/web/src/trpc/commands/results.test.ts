@@ -45,6 +45,7 @@ describe('Results commands', () => {
     experimentEnabled.value = true;
     const auth = { userId: user.id } as UserAuthSuccess;
     const sourceTask = await taskFactory.create({
+      title: 'Readable source task',
       repositoryName: 'RooCodeInc/Roomote',
       repositoryUrl: 'https://github.com/RooCodeInc/Roomote',
     });
@@ -87,10 +88,14 @@ describe('Results commands', () => {
         expect.objectContaining({
           id: suggestion!.id,
           repositoryUrl: 'https://github.com/RooCodeInc/Roomote',
+          sourceTaskId: sourceTask.id,
+          sourceTaskTitle: 'Readable source task',
         }),
         expect.objectContaining({
           id: report!.id,
           repositoryUrl: 'https://github.com/RooCodeInc/Roomote',
+          sourceTaskId: sourceTask.id,
+          sourceTaskTitle: 'Readable source task',
         }),
       ]);
 
@@ -99,8 +104,18 @@ describe('Results commands', () => {
         .set({ deletedAt: new Date() })
         .where(eq(tasks.id, sourceTask.id));
       await expect(listResultsCommand(auth)).resolves.toEqual([
-        expect.objectContaining({ id: suggestion!.id, repositoryUrl: null }),
-        expect.objectContaining({ id: report!.id, repositoryUrl: null }),
+        expect.objectContaining({
+          id: suggestion!.id,
+          repositoryUrl: null,
+          sourceTaskId: null,
+          sourceTaskTitle: null,
+        }),
+        expect.objectContaining({
+          id: report!.id,
+          repositoryUrl: null,
+          sourceTaskId: null,
+          sourceTaskTitle: null,
+        }),
       ]);
 
       await actOnResultCommand(auth, {
@@ -131,6 +146,83 @@ describe('Results commands', () => {
         .where(eq(automationResults.id, report!.id));
       await db.delete(tasks).where(eq(tasks.id, sourceTask.id));
       await db.delete(users).where(eq(users.id, user.id));
+    }
+  });
+
+  it('exposes source metadata only when the viewer can read the joined task', async () => {
+    experimentEnabled.value = true;
+    const [owner, viewer] = await Promise.all([
+      userFactory.create(),
+      userFactory.create(),
+    ]);
+    const [readableTask, privateTask] = await Promise.all([
+      taskFactory.create({ title: 'Readable source' }),
+      taskFactory.create({
+        title: 'Private source',
+        privacy: 'private',
+        privateOwnerUserId: owner.id,
+      }),
+    ]);
+    const insertedReports = await db
+      .insert(automationResults)
+      .values([
+        {
+          userId: owner.id,
+          resultVisibility: 'shared',
+          automationName: 'Readable source report',
+          content: 'Readable source body',
+          dedupeKey: `results-source:${owner.id}:readable`,
+          sourceTaskId: readableTask.id,
+        },
+        {
+          userId: owner.id,
+          resultVisibility: 'shared',
+          automationName: 'Private source report',
+          content: 'Private source body',
+          dedupeKey: `results-source:${owner.id}:private`,
+          sourceTaskId: privateTask.id,
+        },
+        {
+          userId: owner.id,
+          resultVisibility: 'shared',
+          automationName: 'Missing source report',
+          content: 'Missing source body',
+          dedupeKey: `results-source:${owner.id}:missing`,
+          sourceTaskId: null,
+        },
+      ])
+      .returning({ id: automationResults.id });
+
+    try {
+      const results = await listResultsCommand({
+        userId: viewer.id,
+        isAdmin: false,
+      } as UserAuthSuccess);
+      const byId = new Map(results.map((result) => [result.id, result]));
+
+      expect(byId.get(insertedReports[0]!.id)).toMatchObject({
+        sourceTaskId: readableTask.id,
+        sourceTaskTitle: 'Readable source',
+      });
+      expect(byId.get(insertedReports[1]!.id)).toMatchObject({
+        sourceTaskId: null,
+        sourceTaskTitle: null,
+      });
+      expect(byId.get(insertedReports[2]!.id)).toMatchObject({
+        sourceTaskId: null,
+        sourceTaskTitle: null,
+      });
+    } finally {
+      await db.delete(automationResults).where(
+        inArray(
+          automationResults.id,
+          insertedReports.map(({ id }) => id),
+        ),
+      );
+      await db
+        .delete(tasks)
+        .where(inArray(tasks.id, [readableTask.id, privateTask.id]));
+      await db.delete(users).where(inArray(users.id, [owner.id, viewer.id]));
     }
   });
 

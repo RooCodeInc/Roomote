@@ -2,6 +2,7 @@ import {
   and,
   automationResults,
   count,
+  customAutomationTaskAccess,
   db,
   desc,
   eq,
@@ -30,6 +31,8 @@ export type ResultInboxItem = {
   createdAt: Date;
   automationKey: BackgroundAutomationKey | null;
   repositoryUrl: string | null;
+  sourceTaskId: string | null;
+  sourceTaskTitle: string | null;
 };
 
 function githubRepositoryUrl(
@@ -69,7 +72,7 @@ const visibleSuggestion = () =>
   )!;
 
 export async function listResultsCommand(
-  _auth: UserAuthSuccess,
+  auth: UserAuthSuccess,
 ): Promise<ResultInboxItem[]> {
   await assertResultsEnabled();
   const [reports, suggestions] = await Promise.all([
@@ -83,6 +86,8 @@ export async function listResultsCommand(
         createdAt: automationResults.createdAt,
         sourceRepositoryName: tasks.repositoryName,
         sourceRepositoryUrl: tasks.repositoryUrl,
+        sourceTaskId: tasks.id,
+        sourceTaskTitle: tasks.title,
       })
       .from(automationResults)
       .leftJoin(
@@ -90,6 +95,7 @@ export async function listResultsCommand(
         and(
           eq(tasks.id, automationResults.sourceTaskId),
           isNull(tasks.deletedAt),
+          customAutomationTaskAccess(auth),
         ),
       )
       .where(
@@ -116,11 +122,17 @@ export async function listResultsCommand(
         targetRepositoryFullName: workItems.targetRepositoryFullName,
         sourceRepositoryName: tasks.repositoryName,
         sourceRepositoryUrl: tasks.repositoryUrl,
+        sourceTaskId: tasks.id,
+        sourceTaskTitle: tasks.title,
       })
       .from(workItems)
       .leftJoin(
         tasks,
-        and(eq(tasks.id, workItems.sourceTaskId), isNull(tasks.deletedAt)),
+        and(
+          eq(tasks.id, workItems.sourceTaskId),
+          isNull(tasks.deletedAt),
+          customAutomationTaskAccess(auth),
+        ),
       )
       .where(
         and(

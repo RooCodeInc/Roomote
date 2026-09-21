@@ -28,6 +28,8 @@ const results: ResultInboxItem[] = [
     priority: 'critical',
     createdAt: new Date('2026-09-11T10:00:00Z'),
     repositoryUrl: 'https://github.com/RooCodeInc/Roomote',
+    sourceTaskId: 'source-task-1',
+    sourceTaskTitle: 'Review the release',
   },
   {
     id: '22222222-2222-4222-8222-222222222222',
@@ -39,6 +41,8 @@ const results: ResultInboxItem[] = [
     priority: 'high',
     createdAt: new Date('2026-09-11T09:00:00Z'),
     repositoryUrl: null,
+    sourceTaskId: null,
+    sourceTaskTitle: null,
   },
 ];
 let currentResults = results;
@@ -232,6 +236,27 @@ describe('ResultsPage', () => {
     fireEvent.keyDown(pullRequest, { key: 'Enter' });
     fireEvent.click(url);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('links readable source tasks from the row and detail dialog without opening the row', async () => {
+    renderPage();
+
+    const sourceLink = await screen.findByRole('link', {
+      name: 'Open source task: Review the release',
+    });
+    expect(sourceLink).toHaveAttribute('href', '/task/source-task-1');
+    expect(
+      screen.getAllByRole('link', { name: /Open source task/ }),
+    ).toHaveLength(1);
+
+    fireEvent.keyDown(sourceLink, { key: 'Enter' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Important report'));
+    const dialog = screen.getByRole('dialog');
+    expect(
+      within(dialog).getByRole('link', { name: 'Open source task' }),
+    ).toHaveAttribute('href', '/task/source-task-1');
   });
 
   it('renders result Markdown as uniform text while preserving links', async () => {
