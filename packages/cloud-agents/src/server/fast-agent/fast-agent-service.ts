@@ -125,7 +125,6 @@ import {
 } from './ensure-environment';
 import {
   isCompatibleRecipeEnvironment,
-  isConfiguredEnvironmentId,
   isRecipeEnvironmentBlockedFromLaunch,
 } from './r-analysis-environment';
 import {
@@ -5142,32 +5141,17 @@ export async function answerFastAgentQuestion({
               };
             }
             if (args.mode === 'environment_verification') {
-              if (!platformEvent) {
-                return {
-                  success: false,
-                  error:
-                    'Environment verification cannot be started directly from a human turn. Use ensure_environment to preview and create the recipe environment; creation starts verification automatically.',
-                };
-              }
-              if (!currentUser.isAdmin) {
-                return {
-                  success: false,
-                  error:
-                    'Only deployment administrators can start environment verification.',
-                };
-              }
-              if (
-                !isConfiguredEnvironmentId(
-                  args.environmentId,
-                  availableEnvironments,
-                )
-              ) {
-                return {
-                  success: false,
-                  error:
-                    'A configured environmentId is required for environment verification.',
-                };
-              }
+              // Recipe verification is created server-side by ensure_environment
+              // create, bound to the exact candidate; ordinary environment
+              // verification retries go through Settings. No turn, human or
+              // platform, may launch verification directly: an unrelated
+              // delegated-task event would otherwise bypass the candidate
+              // binding for any environment.
+              return {
+                success: false,
+                error:
+                  'Environment verification cannot be started directly. Use ensure_environment to preview and create the recipe environment; creation starts verification automatically.',
+              };
             }
             if (args.mode === 'environment_setup') {
               if (!currentUser.isAdmin) {
@@ -5188,7 +5172,7 @@ export async function answerFastAgentQuestion({
             const launchTarget = availableEnvironments.find(
               (environment) => environment.id === args.environmentId,
             );
-            if (launchTarget && args.mode !== 'environment_verification') {
+            if (launchTarget) {
               if (isRecipeEnvironmentBlockedFromLaunch(launchTarget)) {
                 return {
                   success: false,
@@ -5289,24 +5273,12 @@ export async function answerFastAgentQuestion({
               }
             };
             throwIfTurnCancelled();
-            const selectedEnvironment = args.environmentId
-              ? availableEnvironments.find(
-                  (environment) => environment.id === args.environmentId,
-                )
-              : undefined;
-            const prompt =
-              args.mode === 'environment_verification' && args.environmentId
-                ? buildEnvironmentVerificationPrompt({
-                    environmentId: args.environmentId,
-                    environmentName:
-                      selectedEnvironment?.name ?? 'R/Bioconductor analysis',
-                  })
-                : args.includeAttachments
-                  ? appendAttachmentTextsToPromptText({
-                      text: args.prompt,
-                      attachmentTexts,
-                    })
-                  : args.prompt;
+            const prompt = args.includeAttachments
+              ? appendAttachmentTextsToPromptText({
+                  text: args.prompt,
+                  attachmentTexts,
+                })
+              : args.prompt;
             let result: Awaited<ReturnType<typeof adapter.launchTask>>;
             try {
               result = await adapter.launchTask({
@@ -5315,10 +5287,6 @@ export async function answerFastAgentQuestion({
                   ? { images }
                   : {}),
                 environmentId: args.environmentId ?? null,
-                ...(args.mode === 'environment_verification' &&
-                args.environmentId
-                  ? { verifiesEnvironmentId: args.environmentId }
-                  : {}),
                 ...(args.mode === 'environment_setup'
                   ? { preparesEnvironment: true }
                   : {}),

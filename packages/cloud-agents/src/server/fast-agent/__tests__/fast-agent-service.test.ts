@@ -11509,33 +11509,25 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(toolResult).toEqual({
       success: false,
       error:
-        'Environment verification cannot be started directly from a human turn. Use ensure_environment to preview and create the recipe environment; creation starts verification automatically.',
+        'Environment verification cannot be started directly. Use ensure_environment to preview and create the recipe environment; creation starts verification automatically.',
     });
     expect(launchTask).not.toHaveBeenCalled();
   });
 
-  it('allows a trusted admin child continuation to launch environment verification', async () => {
+  it('rejects environment verification from platform events too; recipe verification stays bound to ensure_environment create', async () => {
     const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
       success: true,
       taskId: 'verification-task',
     }));
     const adapter = callbacks({ launchTask });
+    let toolResult: unknown;
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
-        await expect(
-          invokeTool(nativeToolNames.launchTask, {
-            mode: 'environment_verification',
-            prompt: 'Verify the environment.',
-            environmentId: 'env-1',
-          }),
-        ).resolves.toEqual({
-          success: true,
-          taskId: 'verification-task',
-        });
-        await invokeTool(nativeToolNames.sendChatReply, {
-          purpose: 'closeout',
-          message: 'The verification task is running.',
+        toolResult = await invokeTool(nativeToolNames.launchTask, {
+          mode: 'environment_verification',
+          prompt: 'Verify the environment.',
+          environmentId: 'env-1',
         });
         return '';
       },
@@ -11548,13 +11540,12 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       adapter,
     });
 
-    expect(mocks.getUserIdentity).toHaveBeenCalledWith('user-1');
-    expect(launchTask).toHaveBeenCalledWith(
-      expect.objectContaining({
-        environmentId: 'env-1',
-        verifiesEnvironmentId: 'env-1',
-      }),
-    );
+    expect(toolResult).toEqual({
+      success: false,
+      error:
+        'Environment verification cannot be started directly. Use ensure_environment to preview and create the recipe environment; creation starts verification automatically.',
+    });
+    expect(launchTask).not.toHaveBeenCalled();
   });
 
   it('validates and forwards pull request review model overrides', async () => {

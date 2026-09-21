@@ -486,7 +486,7 @@ export default {
     model: z.string().min(1).nullable().optional().describe("Exact deployment-enabled model ID; omit or pass null to use the deployment default"),
     reasoningEffort: z.enum(${JSON.stringify(REASONING_EFFORT_VALUES)}).nullable().optional().describe("Optional reasoning effort override; use only with a selected model and omit or pass null to use the model's default"),
     includeAttachments: z.boolean().optional().describe("Set true to forward supported images and extracted file, audio, or video context from the active conversation turn; defaults to false"),
-    mode: z.enum(["standard", "environment_setup", "environment_verification"]).optional().describe("Use environment_setup for an admin-approved Blank slate environment-definition task. environment_verification is only for trusted platform-event continuations after setup; never use it directly in a human turn or for a recipe flow, because ensure_environment create starts recipe verification automatically"),
+    mode: z.enum(["standard", "environment_setup", "environment_verification"]).optional().describe("Use environment_setup for an admin-approved Blank slate environment-definition task. environment_verification is rejected on every turn; recipe verification is created automatically by ensure_environment create"),
   },
   execute: (args, context) => invoke("launch_task", args, context),
 }
