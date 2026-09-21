@@ -78,8 +78,8 @@ describe('evaluateTaskCompletionGate', () => {
       report: check.report,
       diff: check.diff,
     });
-    // One check per coding turn: the helper-model fallback stays available.
-    expect(call.highVolume).toBeUndefined();
+    // Hosted judgment model only: the helper fallback is ruled out.
+    expect(call.highVolume).toBe(true);
     expect(Object.keys(call.questions)).toEqual([
       'requestUnaddressed',
       'reportOverclaims',
@@ -121,12 +121,13 @@ describe('evaluateTaskCompletionGate', () => {
       check: {
         ...check,
         diff: `${check.diff}+const key = "ghp_${'a'.repeat(36)}";\n`,
+        diffStat: ` config/ghp_${'b'.repeat(36)}.json | 1 +`,
       },
     });
 
     expect(
       JSON.stringify(mockEvaluateDecisionModel.mock.calls[0]![0].state),
-    ).not.toContain('ghp_aaaa');
+    ).not.toMatch(/ghp_(aaaa|bbbb)/);
   });
 
   it('is skipped without a request, without a decision model, or on failure', async () => {

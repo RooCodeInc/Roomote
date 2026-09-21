@@ -871,16 +871,16 @@ describe('opencode-server bootstrap', () => {
       'Keep judge tool use minimal and targeted.',
     );
     expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
-      'When that step kept no images (a no-op, not-applicable, unnecessary, or blocked result), or the workflow required no proof step, do not spawn the judge.',
+      'do not run the judge pass until that step has returned a capture result, honest no-op, not-applicable, unnecessary, or blocked outcome',
     );
     expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
       'open the kept screenshot and keyframe images and verify them against the plan and shipped change',
     );
     expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
-      'the path `/tmp/capture-visual-proof/diff-at-start.patch`',
+      'the path `/tmp/capture-visual-proof/diff-at-start.patch` when it exists',
     );
     expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
-      'If judge-driven fixes change repository files, re-run the `capture-visual-proof` step once',
+      'If judge-driven fixes change repository files and this run requires a pre-delivery',
     );
     expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).not.toContain(
       'background visual proof',
@@ -889,6 +889,41 @@ describe('opencode-server bootstrap', () => {
     expect(runtimeEnv).not.toHaveProperty(
       'R_CODE_REVIEW_MODEL_REASONING_EFFORT',
     );
+  });
+
+  it('limits the judge to proof images when the platform checks completion at turn end', async () => {
+    const { prepareOpenCodeCommandEnv } =
+      await import('../opencode-server/bootstrap');
+
+    const homeDir = createTempHome();
+
+    await prepareOpenCodeCommandEnv({
+      runtimeEnv: {
+        ...createDirectHarnessRuntimeEnv(homeDir),
+        ROOMOTE_COMPLETION_GATE: 'true',
+      },
+      workspacePath: '/tmp/workspace',
+      logger: createLogger(),
+    });
+
+    const instructions = fs.readFileSync(
+      path.join(
+        homeDir,
+        '.config',
+        'opencode',
+        'roomote-opencode-judge-model-instructions.md',
+      ),
+      'utf8',
+    );
+
+    expect(instructions).toContain('configured for visual-proof checks only');
+    expect(instructions).toContain(
+      'When that step kept no images (a no-op, not-applicable, unnecessary, or blocked result), or the workflow required no proof step, do not spawn the judge.',
+    );
+    expect(instructions).toContain(
+      'Whether the work matches the request is checked by the platform automatically when your turn ends',
+    );
+    expect(instructions).not.toContain('delegate one focused compare pass');
   });
 
   it('configures a hidden judge subagent with the coding model when no vision model is configured', async () => {
@@ -961,7 +996,7 @@ describe('opencode-server bootstrap', () => {
       'falls back to the active coding model',
     );
     expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
-      'Whether the work matches the request is checked by the platform automatically when your turn ends',
+      'Start from the shipped diff, the plan, the validation state, and the latest pre-delivery visual-proof result',
     );
   });
 

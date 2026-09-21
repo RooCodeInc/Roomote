@@ -1742,7 +1742,8 @@ export class OpenCodeServerHarness
   private lastBlockedCloseoutAssistantText: string | null = null;
   private completionGateReminderCount = 0;
   // Identity of the last diff the completion check saw, so a turn that changed
-  // nothing (a question, a closeout reminder) is never re-checked.
+  // nothing and carried no new request (a closeout reminder, a hidden
+  // follow-up) is never re-checked.
   private completionGateLastDiffKey: string | null = null;
   // The report the agent gave before the check reopened its turn. The
   // follow-up turn only adds a short correction, so the two are joined.
@@ -2311,7 +2312,12 @@ export class OpenCodeServerHarness
     this.stopHookReminderCount = 0;
     this.lastBlockedCloseoutAssistantText = null;
     this.completionGateReminderCount = 0;
-    this.completionGateHeldReport = null;
+
+    if (command.data.visibleInTranscript !== false) {
+      // A new request can leave the diff untouched (the agent only claims to
+      // have acted on it), so an unchanged diff is checked again against it.
+      this.completionGateLastDiffKey = null;
+    }
 
     // A soft cancel can race with the very first session creation and abort
     // its dedicated controller before a session id exists. SendMessage is the

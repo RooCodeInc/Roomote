@@ -4,6 +4,7 @@ import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
 import {
+  TASK_COMPLETION_GATE_ENV_VAR,
   TASK_COMPLETION_GATE_LIMITS,
   TaskPayloadKind,
   taskCompletionCheckResponseSchema,
@@ -76,8 +77,9 @@ const runGit: GitRunner = (repoPath, args, options) =>
   });
 
 /**
- * PR reviews are themselves the review pass, and automations report through
- * their own result contract rather than a person's request.
+ * The platform turns the check on per run. PR reviews are themselves the
+ * review pass, and automations report through their own result contract
+ * rather than a person's request.
  */
 export function isCompletionGateEligible(
   env: Record<string, string> | undefined,
@@ -85,7 +87,8 @@ export function isCompletionGateEligible(
   const taskType = env?.ROOMOTE_TASK_TYPE?.trim();
 
   return Boolean(
-    env?.ROOMOTE_CLOUD_TOKEN &&
+    env?.[TASK_COMPLETION_GATE_ENV_VAR] === 'true' &&
+    env.ROOMOTE_CLOUD_TOKEN &&
     env.ROOMOTE_PLATFORM_API_URL &&
     env.ROOMOTE_TASK_RUN_ID &&
     env.ROOMOTE_AUTOMATION_TASK !== 'true' &&

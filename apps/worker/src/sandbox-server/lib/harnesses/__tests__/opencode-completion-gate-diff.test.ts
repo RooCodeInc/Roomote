@@ -186,14 +186,18 @@ describe('clipDiffByFile', () => {
 
 describe('isCompletionGateEligible', () => {
   const env = {
+    ROOMOTE_COMPLETION_GATE: 'true',
     ROOMOTE_CLOUD_TOKEN: 'token',
     ROOMOTE_PLATFORM_API_URL: 'http://api.test',
     ROOMOTE_TASK_RUN_ID: '42',
   };
 
-  it('requires platform credentials and excludes reviews and automations', () => {
+  it('requires the platform flag and credentials, and excludes reviews and automations', () => {
     expect(isCompletionGateEligible(env)).toBe(true);
     expect(isCompletionGateEligible(undefined)).toBe(false);
+    expect(
+      isCompletionGateEligible({ ...env, ROOMOTE_COMPLETION_GATE: 'false' }),
+    ).toBe(false);
     expect(isCompletionGateEligible({ ...env, ROOMOTE_CLOUD_TOKEN: '' })).toBe(
       false,
     );

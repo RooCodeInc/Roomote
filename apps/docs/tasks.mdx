@@ -171,12 +171,14 @@ video. Roomote skips visual proof when it would not add useful evidence. Judge
 the evidence against the stated result rather than requiring a recording for
 every change.
 
-When a task turn ends with code changes, Roomote automatically compares what
-you asked for, the agent's closing report, and the diff. If a requested change
+When a [judgment model](/models#judgment-model) is configured and a task turn
+ends with code changes, Roomote automatically compares what you asked for, the
+agent's closing report, and the diff. If a requested change
 is missing, the report describes a change the diff does not contain, or the diff
 adds leftovers such as debug logging or a disabled test, the agent gets one
 chance to fix it or explain before the task reports back. The check takes about
-a second and does not replace pull request review.
+a second and does not replace pull request review. Without a judgment model,
+the agent runs a slower review pass of its own before delivery instead.
 
 Visual proof should use genuine application, authentication, database, and
 backend state when practical. When an artifact instead uses disclosed simulated

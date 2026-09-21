@@ -32,6 +32,7 @@ vi.mock('../opencode-server/completion-gate', async (importOriginal) => ({
 }));
 
 const GATE_ENV = {
+  ROOMOTE_COMPLETION_GATE: 'true',
   ROOMOTE_CLOUD_TOKEN: 'run-token',
   ROOMOTE_PLATFORM_API_URL: 'http://api.test',
   ROOMOTE_TASK_RUN_ID: '42',
@@ -240,8 +241,8 @@ describe('OpenCode harness completion check', () => {
     }
   });
 
-  it('does not re-check a diff it has already seen', async () => {
-    const { client, harness, completed } = await startTask();
+  it('re-checks an unchanged diff only when a new visible request arrived', async () => {
+    const { client, harness, prompts, completed } = await startTask();
 
     try {
       await completeTurn(client, 'msg_1', 'Removed the guard.');
@@ -249,12 +250,25 @@ describe('OpenCode harness completion check', () => {
 
       harness.sendCommand({
         commandName: TaskCommandName.SendMessage,
-        data: { text: 'What did you change?', visibleInTranscript: true },
+        data: { text: 'Internal follow-up.', visibleInTranscript: false },
       });
-      await completeTurn(client, 'msg_2', 'Only the guard.');
+      await vi.waitFor(() => expect(prompts).toHaveLength(2));
+      await completeTurn(client, 'msg_2', 'Nothing further.');
 
       await vi.waitFor(() => expect(completed()).toHaveLength(2));
       expect(mockRequestTaskCompletionCheck).toHaveBeenCalledTimes(1);
+
+      // The agent may only claim to have acted on a new request, leaving the
+      // diff as it was; that turn still has to be checked.
+      harness.sendCommand({
+        commandName: TaskCommandName.SendMessage,
+        data: { text: 'Also remove the helper.', visibleInTranscript: true },
+      });
+      await vi.waitFor(() => expect(prompts).toHaveLength(3));
+      await completeTurn(client, 'msg_3', 'Removed the helper too.');
+
+      await vi.waitFor(() => expect(completed()).toHaveLength(3));
+      expect(mockRequestTaskCompletionCheck).toHaveBeenCalledTimes(2);
     } finally {
       harness.dispose();
     }
@@ -275,6 +289,18 @@ describe('OpenCode harness completion check', () => {
       ...GATE_ENV,
       ROOMOTE_TASK_TYPE: 'github_pr_review',
     });
+    const { ROOMOTE_COMPLETION_GATE: _gate, ...withoutJudgmentModel } =
+      GATE_ENV;
+    const noJudgmentModel = await startTask(withoutJudgmentModel);
+
+    try {
+      await completeTurn(noJudgmentModel.client, 'msg_1', 'Done.');
+      await vi.waitFor(() =>
+        expect(noJudgmentModel.completed()).toHaveLength(1),
+      );
+    } finally {
+      noJudgmentModel.harness.dispose();
+    }
 
     try {
       await completeTurn(review.client, 'msg_1', 'Reviewed.');

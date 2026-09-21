@@ -6,6 +6,7 @@ import {
   INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
   OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
   SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
+  TASK_COMPLETION_GATE_ENV_VAR,
   TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME,
   parseInferenceGatewayKeys,
   parseModelProviderEnvKeys,
@@ -50,6 +51,7 @@ import {
   resolvePublicGitAuthor,
   resolveRunCommitAuthor,
 } from '@roomote/cloud-agents/server';
+import { isTypeSafeJudgmentConfigured } from '@roomote/cloud-agents/server/typesafe-judgment';
 
 import { withBootstrapFailureSignal } from '../../../bootstrap-failure-signal';
 import { notifySourceRunOnSettle } from './notify-source-run-on-settle';
@@ -291,6 +293,15 @@ export async function fetchResolvedRuntimeEnvVars(
       options?.sourceControlProvider,
     ),
   );
+
+  // The turn-end completion check only runs where a hosted judgment model can
+  // answer it; everywhere else the sandbox keeps the judge pass. Only the
+  // flag crosses into the sandbox, never the judgment model key.
+  if (await isTypeSafeJudgmentConfigured()) {
+    resolvedEnvVars[TASK_COMPLETION_GATE_ENV_VAR] = 'true';
+  } else {
+    delete resolvedEnvVars[TASK_COMPLETION_GATE_ENV_VAR];
+  }
 
   if (options?.includeSandboxOpenRouterApiKey) {
     return resolvedEnvVars;

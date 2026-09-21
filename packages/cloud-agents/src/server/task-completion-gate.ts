@@ -23,11 +23,10 @@ import {
 const FLAG_MIN_PROBABILITY = 0.85;
 
 /**
- * The sandbox holds the turn open while this runs. A hosted judgment model
- * answers in well under a second; the ceiling is for the helper-model
- * fallback.
+ * The sandbox holds the turn open while this runs. The hosted judgment model
+ * answers in well under a second.
  */
-const COMPLETION_GATE_TIMEOUT_MS = 15_000;
+const COMPLETION_GATE_TIMEOUT_MS = 5_000;
 const REQUEST_MAX_CHARS = 6_000;
 const FOLLOW_UPS_MAX_CHARS = 4_000;
 /** The opening prompt plus the most recent follow-ups. */
@@ -150,9 +149,12 @@ async function loadTaskRequests(
  * changes with no visual proof, which re-read the repository for minutes to
  * answer the same questions.
  *
- * It runs once per turn that changed code, not per message, so deployments
- * without a hosted judgment model fall back to the helper model. Never
- * throws: any failure is `skipped`, and a skipped check never holds a turn.
+ * It needs the hosted judgment model. A live probe of the helper-model
+ * fallback across five small models found uncalibrated answers (several
+ * flagged nearly every clean turn) at 3-40 s per call, so `highVolume` is set
+ * to rule the fallback out, and deployments without a judgment model keep the
+ * judge pass instead. Never throws: any failure is `skipped`, and a skipped
+ * check never holds a turn.
  */
 export async function evaluateTaskCompletionGate(input: {
   taskId: string;
@@ -181,11 +183,12 @@ export async function evaluateTaskCompletionGate(input: {
         request: requests.request,
         follow_ups: requests.followUps,
         report: redactBrainText(input.check.report).trim(),
-        diff_stat: input.check.diffStat,
+        diff_stat: redactBrainText(input.check.diffStat),
         diff: redactBrainText(input.check.diff),
       },
       questions: questions as Record<string, TypeSafeNoulQuestion>,
       timeoutMs: COMPLETION_GATE_TIMEOUT_MS,
+      highVolume: true,
       userId: input.userId,
       taskId: input.taskId,
     });

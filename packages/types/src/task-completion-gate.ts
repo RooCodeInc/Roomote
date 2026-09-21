@@ -1,6 +1,14 @@
 import { z } from 'zod';
 
 /**
+ * Set to `true` in a run's environment when the deployment has a hosted
+ * judgment model, which is what makes the turn-end completion check fast and
+ * calibrated enough to run. The sandbox uses it to decide whether to run the
+ * check and which judge instructions the agent gets.
+ */
+export const TASK_COMPLETION_GATE_ENV_VAR = 'ROOMOTE_COMPLETION_GATE';
+
+/**
  * Caps on what the sandbox sends for a completion check. The diff cap keeps
  * the whole decision state inside the judgment model's input limit; the
  * worker clips per file so every changed file stays represented.
