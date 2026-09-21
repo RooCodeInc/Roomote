@@ -4593,9 +4593,12 @@ export const integrationToolPolicies = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     integrationId: text('integration_id').notNull(),
     toolName: text('tool_name').notNull(),
-    mode: text('mode')
-      .notNull()
-      .$type<import('@roomote/types').IntegrationToolPolicyMode>(),
+    /**
+     * Stored as `ask` or `reject`. The `auto` mode is an `ask` row with
+     * `auto` set, so a release that predates it still asks.
+     */
+    mode: text('mode').notNull().$type<'ask' | 'reject'>(),
+    auto: boolean('auto').notNull().default(false),
     updatedByUserId: text('updated_by_user_id').references(() => users.id, {
       onDelete: 'set null',
     }),
@@ -4628,9 +4631,12 @@ export const integrationToolUserPolicies = pgTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     integrationId: text('integration_id').notNull(),
     toolName: text('tool_name').notNull(),
-    mode: text('mode')
-      .notNull()
-      .$type<import('@roomote/types').IntegrationToolPolicyMode>(),
+    /**
+     * Stored as `ask` or `reject`. The `auto` mode is an `ask` row with
+     * `auto` set, so a release that predates it still asks.
+     */
+    mode: text('mode').notNull().$type<'ask' | 'reject'>(),
+    auto: boolean('auto').notNull().default(false),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
@@ -4693,6 +4699,14 @@ export const integrationToolApprovalRequests = pgTable(
     decidedAt: timestamp('decided_at'),
     /** Why a cancelled request was cancelled (for example experiment disabled). */
     cancelReason: text('cancel_reason'),
+    /**
+     * What the decision model made of this call, for a tool in `auto` mode.
+     * Recorded beside the requester's own decision; it decides nothing.
+     */
+    autoEvaluation:
+      jsonb('auto_evaluation').$type<
+        import('@roomote/types').IntegrationToolAutoEvaluation
+      >(),
     /** The window for the requester to answer; unresolved rows fail closed. */
     expiresAt: timestamp('expires_at').notNull(),
     createdAt: timestamp('created_at').notNull().defaultNow(),

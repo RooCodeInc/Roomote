@@ -17,6 +17,7 @@ import { z } from 'zod';
  */
 export const INTEGRATION_TOOL_POLICY_MODES = [
   'allow',
+  'auto',
   'ask',
   'reject',
 ] as const;
@@ -65,6 +66,21 @@ export interface IntegrationToolApprovalMetadata {
   /** When this approval stops accepting a decision and fails closed. */
   expiresAt: string;
   createdAt: string;
+}
+
+/**
+ * A decision model's view of one paused call to a tool in `auto` mode. While
+ * Auto is a preview it is only recorded next to the requester's own decision,
+ * so the two can be compared; it never approves or rejects anything. The
+ * model can only ever recommend running the call or asking, never rejecting.
+ */
+export interface IntegrationToolAutoEvaluation {
+  recommendation: 'approve' | 'ask';
+  /** Probability from 0 to 1 that each question's answer is yes. */
+  answers?: Record<string, number>;
+  /** Why there are no answers: nothing could evaluate the call. */
+  unavailable?: 'no_model' | 'error';
+  evaluatedAt: string;
 }
 
 /**
@@ -123,7 +139,18 @@ export type IntegrationToolSessionOverrideUpsert = z.infer<
 const INTEGRATION_TOOL_POLICY_MODE_STRICTNESS: Record<
   IntegrationToolPolicyMode,
   number
-> = { allow: 0, ask: 1, reject: 2 };
+> = { allow: 0, auto: 1, ask: 2, reject: 3 };
+
+/**
+ * `auto` is `ask` with a second opinion: every call still pauses for the
+ * Session owner, and a decision model's view of the call is recorded next to
+ * their answer. It gates exactly like `ask` everywhere a call is held.
+ */
+export function integrationToolModeAsks(
+  mode: IntegrationToolPolicyMode | undefined,
+): boolean {
+  return mode === 'ask' || mode === 'auto';
+}
 
 /** The stricter of a tool's deployment policy and the requester's own. */
 function resolveStricterIntegrationToolPolicyMode(
@@ -270,7 +297,7 @@ export function compileTaskIntegrationToolApprovals(input: {
     const action =
       mode === 'reject'
         ? 'deny'
-        : mode === 'ask' || policyMode === 'ask'
+        : integrationToolModeAsks(mode) || integrationToolModeAsks(policyMode)
           ? 'ask'
           : undefined;
     if (!action) continue;

@@ -3,7 +3,7 @@ import { compileTaskIntegrationToolApprovals } from '../integration-tool-approva
 const policy = (
   integrationId: string,
   toolName: string,
-  mode: 'ask' | 'reject',
+  mode: 'auto' | 'ask' | 'reject',
 ) => ({ integrationId, toolName, mode });
 
 describe('compileTaskIntegrationToolApprovals', () => {
@@ -59,6 +59,23 @@ describe('compileTaskIntegrationToolApprovals', () => {
       linear_save_issue: 'ask',
       linear_list_issues: 'ask',
       linear_delete_issue: 'deny',
+    });
+  });
+
+  it('holds an auto tool exactly like an ask tool', () => {
+    const { permission } = compileTaskIntegrationToolApprovals({
+      serverNames: ['linear'],
+      policies: [
+        policy('linear', 'save_issue', 'auto'),
+        policy('linear', 'list_issues', 'auto'),
+      ],
+      sessionOverrides: [
+        { integrationId: 'linear', toolName: 'list_issues', mode: 'allow' },
+      ],
+    });
+    expect(permission).toEqual({
+      linear_save_issue: 'ask',
+      linear_list_issues: 'ask',
     });
   });
 

@@ -1,4 +1,5 @@
 const mocks = vi.hoisted(() => ({
+  recordAuto: vi.fn(),
   experiment: vi.fn(async () => true),
   findRun: vi.fn(async () => ({ taskId: 'task-1' }) as unknown),
   sessionForTask: vi.fn(async () => null as unknown),
@@ -11,6 +12,11 @@ const mocks = vi.hoisted(() => ({
   getApproval: vi.fn(async () => undefined as unknown),
   expire: vi.fn(async () => undefined),
 }));
+
+vi.mock(
+  '@roomote/cloud-agents/server/integration-tool-auto-evaluation',
+  () => ({ recordIntegrationToolAutoEvaluationInBackground: mocks.recordAuto }),
+);
 
 vi.mock('@roomote/db/server', () => ({
   db: { query: { taskRuns: { findFirst: mocks.findRun } } },
@@ -34,6 +40,9 @@ import {
   requestTaskToolApproval,
   resolveTaskIntegrationToolApprovals,
 } from '../task-tool-approvals';
+
+/** Let the unawaited Auto lookup finish before asserting it did nothing. */
+const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
 
 const ownedSession = {
   id: 'session-1',
@@ -125,6 +134,101 @@ describe('requestTaskToolApproval', () => {
         }),
       }),
     );
+  });
+
+  it("still asks about an auto tool, and records the model's view beside the ask", async () => {
+    mocks.userPolicies.mockResolvedValue([
+      { integrationId: 'linear', toolName: 'save_issue', mode: 'auto' },
+    ]);
+    const resolveServers = async () => ({ linear: {} });
+    await expect(
+      requestTaskToolApproval({
+        ...ask,
+        actingUserId: 'user-1',
+        resolveServers,
+      }),
+    ).resolves.toEqual({ outcome: 'pending', approvalId: 'approval-1' });
+    await vi.waitFor(() => expect(mocks.recordAuto).toHaveBeenCalled());
+    expect(mocks.recordAuto).toHaveBeenCalledWith(
+      'approval-1',
+      expect.objectContaining({
+        integrationId: 'linear',
+        toolName: 'save_issue',
+        args: { title: 'Hi' },
+        taskId: 'task-1',
+      }),
+    );
+
+    // A stricter deployment Ask first wins, so nothing is evaluated.
+    mocks.recordAuto.mockClear();
+    mocks.deploymentPolicies.mockResolvedValue([
+      { integrationId: 'linear', toolName: 'save_issue', mode: 'ask' },
+    ]);
+    await requestTaskToolApproval({
+      ...ask,
+      actingUserId: 'user-1',
+      resolveServers,
+    });
+    await settle();
+    expect(mocks.recordAuto).not.toHaveBeenCalled();
+  });
+
+  it('reads a custom server under the layer its mounted configuration names', async () => {
+    const resolveServers = vi.fn(async () => ({
+      notes: { toolApprovalPolicyScope: 'deployment' as const },
+    }));
+    const autoAsk = {
+      ...ask,
+      integrationId: 'notes',
+      actingUserId: 'user-1',
+      resolveServers,
+    };
+    // A personal Auto says nothing about the shared server that is mounted
+    // under that name, for instance while their own is not signed in.
+    mocks.userPolicies.mockResolvedValue([
+      { integrationId: 'notes', toolName: 'save_issue', mode: 'auto' },
+    ]);
+    await requestTaskToolApproval(autoAsk);
+    await settle();
+    expect(mocks.recordAuto).not.toHaveBeenCalled();
+
+    // Mounted as their own, a deployment Ask first on the shared one no
+    // longer outranks their personal Auto.
+    resolveServers.mockResolvedValue({
+      notes: { toolApprovalPolicyScope: 'personal' as never },
+    });
+    mocks.deploymentPolicies.mockResolvedValue([
+      { integrationId: 'notes', toolName: 'save_issue', mode: 'ask' },
+    ]);
+    await requestTaskToolApproval(autoAsk);
+    await vi.waitFor(() => expect(mocks.recordAuto).toHaveBeenCalledTimes(1));
+
+    // No Auto policy anywhere: the configuration is never resolved.
+    resolveServers.mockClear();
+    mocks.userPolicies.mockResolvedValue([]);
+    await requestTaskToolApproval(autoAsk);
+    await settle();
+    expect(resolveServers).not.toHaveBeenCalled();
+  });
+
+  it('records the ask even when the Auto lookup fails', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    mocks.userPolicies.mockResolvedValue([
+      { integrationId: 'linear', toolName: 'save_issue', mode: 'auto' },
+    ]);
+    await expect(
+      requestTaskToolApproval({
+        ...ask,
+        actingUserId: 'user-1',
+        resolveServers: async () => {
+          throw new Error('token refresh failed');
+        },
+      }),
+    ).resolves.toEqual({ outcome: 'pending', approvalId: 'approval-1' });
+    await vi.waitFor(() => expect(warn).toHaveBeenCalled());
+    await settle();
+    expect(mocks.recordAuto).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 
   it('answers without a card once the owner allowed the tool for the session', async () => {
