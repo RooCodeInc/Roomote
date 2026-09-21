@@ -66,6 +66,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 }));
 
 import {
+  launchMissingEnvironmentSnapshot,
   refreshSnapshotsJob,
   SNAPSHOT_REFRESH_LAUNCH_SPACING_MS,
 } from '../refresh-snapshots';
@@ -210,5 +211,75 @@ describe('refreshSnapshotsJob launch pacing', () => {
     await refreshSnapshotsJob();
 
     expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
+});
+
+describe('launchMissingEnvironmentSnapshot', () => {
+  const target = { environmentId: 'env-1', provider: 'modal' as const };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockEnvironmentSnapshotsFindFirst.mockResolvedValue(undefined);
+    mockClaimPendingEnvironmentSnapshotForAttachment.mockImplementation(
+      async (_db: unknown, params: { environmentId: string }) =>
+        makeClaim(params.environmentId),
+    );
+  });
+
+  it('launches the build against the row it claimed', async () => {
+    mockEnqueueTask.mockResolvedValue({ id: 42 });
+    const paceBeforeLaunch = vi.fn().mockResolvedValue(undefined);
+
+    const result = await launchMissingEnvironmentSnapshot(target, {
+      paceBeforeLaunch,
+    });
+
+    expect(result).toEqual({ kind: 'enqueued', runId: 42 });
+    expect(paceBeforeLaunch).toHaveBeenCalledTimes(1);
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflow: 'env_snapshot',
+        task: expect.objectContaining({
+          computeProvider: 'modal',
+          payload: expect.objectContaining({
+            environmentId: 'env-1',
+            environmentSnapshotAttachment: makeClaim('env-1').attachmentSource,
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('skips without pacing when the claim is lost', async () => {
+    mockClaimPendingEnvironmentSnapshotForAttachment.mockResolvedValue(null);
+    const paceBeforeLaunch = vi.fn().mockResolvedValue(undefined);
+
+    const result = await launchMissingEnvironmentSnapshot(target, {
+      paceBeforeLaunch,
+    });
+
+    expect(result).toEqual({ kind: 'skipped' });
+    expect(paceBeforeLaunch).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
+
+  it('records the claimed row as failed when the launch throws', async () => {
+    mockEnqueueTask.mockRejectedValue(new Error('queue unavailable'));
+
+    await expect(
+      launchMissingEnvironmentSnapshot(target, {
+        paceBeforeLaunch: async () => {},
+      }),
+    ).rejects.toThrow('queue unavailable');
+
+    expect(mockUpdatePendingEnvironmentSnapshot).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        environmentId: 'env-1',
+        provider: 'modal',
+        snapshotStatus: 'failed',
+        attachmentSource: makeClaim('env-1').attachmentSource,
+      }),
+    );
   });
 });

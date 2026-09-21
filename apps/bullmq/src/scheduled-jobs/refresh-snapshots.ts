@@ -43,6 +43,12 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** The environment and provider a snapshot build is launched for. */
+interface SnapshotLaunchTarget {
+  environmentId: string;
+  provider: ComputeProvider;
+}
+
 interface SnapshotRefreshCandidateBase {
   environmentId: string;
   environmentName: string;
@@ -288,7 +294,7 @@ async function findSnapshotRefreshCandidates(
 }
 
 async function findActiveSnapshotRefreshJob(
-  candidate: SnapshotRefreshCandidate,
+  candidate: SnapshotLaunchTarget,
   dbOrTx: DatabaseOrTransaction = db,
 ): Promise<ActiveSnapshotRefreshJob | null> {
   const [activeRun] = await dbOrTx
@@ -314,7 +320,7 @@ async function findActiveSnapshotRefreshJob(
 }
 
 async function hasRecentPendingSnapshotClaim(
-  candidate: SnapshotRefreshCandidate,
+  candidate: SnapshotLaunchTarget,
   now: Date,
   dbOrTx: DatabaseOrTransaction = db,
 ): Promise<boolean> {
@@ -338,6 +344,106 @@ async function hasRecentPendingSnapshotClaim(
   }
 
   return false;
+}
+
+/**
+ * Builds a snapshot for an environment that has none on this provider.
+ *
+ * Shared by the daily refresh and the retired-snapshot rebuild so both reserve
+ * the build the same way: skip when a build is already running or reserved,
+ * claim the pending row, pace, then launch. A launch that fails after the
+ * claim records the failure on that row instead of leaving it pending.
+ */
+export async function launchMissingEnvironmentSnapshot(
+  target: SnapshotLaunchTarget,
+  options: {
+    paceBeforeLaunch: () => Promise<void>;
+    onQueueing?: () => void;
+  },
+): Promise<SnapshotRefreshLockResult> {
+  const activeRefreshJob = await findActiveSnapshotRefreshJob(target);
+
+  if (activeRefreshJob) {
+    return { kind: 'active_refresh', activeRefreshJob };
+  }
+
+  if (await hasRecentPendingSnapshotClaim(target, new Date())) {
+    return { kind: 'skipped' };
+  }
+
+  // Claim first, pace after: the pending claim is the reservation that keeps
+  // concurrent claimants (the admin snapshot command, a competing cycle) off
+  // this environment during the wait, so a lost claim is always a skip that
+  // never slept. The claim is stamped with the current time rather than job
+  // start — pacing stretches a job over minutes, and a claim carrying an old
+  // timestamp would look stale and be stolen mid-wait.
+  const claimedAt = new Date();
+  const pendingSnapshotClaim =
+    await claimPendingEnvironmentSnapshotForAttachment(db, {
+      environmentId: target.environmentId,
+      provider: target.provider,
+      updatedAt: claimedAt,
+      allowStalePendingBefore: new Date(
+        claimedAt.getTime() - PENDING_SNAPSHOT_RECOVERY_GRACE_MS,
+      ),
+      requireMissingSnapshot: true,
+    });
+
+  if (!pendingSnapshotClaim) {
+    return { kind: 'skipped' };
+  }
+
+  try {
+    await options.paceBeforeLaunch();
+    options.onQueueing?.();
+
+    const { id } = await enqueueTask({
+      task: {
+        type: TaskPayloadKind.SnapshotEnvironment,
+        computeProvider: target.provider,
+        payload: {
+          repo: '',
+          environmentId: target.environmentId,
+          environmentSnapshotAttachment: pendingSnapshotClaim.attachmentSource,
+        },
+      },
+      initiator: { kind: 'automation', key: 'snapshot_refresh' },
+      workflow: 'env_snapshot',
+      surface: 'system',
+      trigger: 'schedule',
+      visibility: 'hidden',
+    });
+
+    return { kind: 'enqueued', runId: id };
+  } catch (error) {
+    try {
+      if (!(await findActiveSnapshotRefreshJob(target))) {
+        await updatePendingEnvironmentSnapshot(db, {
+          environmentId: target.environmentId,
+          provider: target.provider,
+          snapshotId: null,
+          snapshotStatus: 'failed',
+          snapshotCreatedAt: null,
+          snapshotExpiresAt: null,
+          attachmentSource: pendingSnapshotClaim.attachmentSource,
+        });
+      }
+    } catch (statusError) {
+      logRefreshSnapshotsError(
+        'Failed to record snapshot backfill failure state',
+        {
+          environmentId: target.environmentId,
+          provider: target.provider,
+          error:
+            statusError instanceof Error
+              ? statusError.message
+              : String(statusError),
+        },
+      );
+    }
+
+    throw error;
+  }
 }
 
 /**
@@ -399,16 +505,27 @@ export const refreshSnapshotsJob = async () => {
         candidate.snapshotCreatedAt,
         startedAt,
       );
-      let pendingSnapshotClaim: Awaited<
-        ReturnType<typeof claimPendingEnvironmentSnapshotForAttachment>
-      > = null;
-
       try {
         if (candidate.source === 'missing_default_provider_snapshot') {
-          const activeRefreshJob =
-            await findActiveSnapshotRefreshJob(candidate);
+          const launch = await launchMissingEnvironmentSnapshot(candidate, {
+            paceBeforeLaunch: paceBeforeNextLaunch,
+            onQueueing: () =>
+              logRefreshSnapshots('Queueing snapshot refresh job', {
+                environmentId: candidate.environmentId,
+                environmentName: candidate.environmentName,
+                provider: candidate.provider,
+                source: candidate.source,
+                snapshotId: candidate.snapshotId,
+                snapshotCreatedAt:
+                  candidate.snapshotCreatedAt?.toISOString() ?? null,
+                snapshotExpiresAt:
+                  candidate.snapshotExpiresAt?.toISOString() ?? null,
+                snapshotUpdatedAt: candidate.updatedAt?.toISOString() ?? null,
+                snapshotAgeHours,
+              }),
+          });
 
-          if (activeRefreshJob) {
+          if (launch.kind === 'active_refresh') {
             skippedActiveRefreshCount++;
             logRefreshSnapshots(
               'Skipping snapshot refresh because one is already in flight',
@@ -424,78 +541,21 @@ export const refreshSnapshotsJob = async () => {
                   candidate.snapshotExpiresAt?.toISOString() ?? null,
                 snapshotUpdatedAt: candidate.updatedAt?.toISOString() ?? null,
                 snapshotAgeHours,
-                activeRunId: activeRefreshJob.id,
-                activeTaskRunStatus: activeRefreshJob.status,
+                activeRunId: launch.activeRefreshJob.id,
+                activeTaskRunStatus: launch.activeRefreshJob.status,
                 activeTaskRunCreatedAt:
-                  activeRefreshJob.createdAt.toISOString(),
+                  launch.activeRefreshJob.createdAt.toISOString(),
               },
             );
             continue;
           }
 
-          if (await hasRecentPendingSnapshotClaim(candidate, new Date())) {
+          if (launch.kind === 'skipped') {
             continue;
           }
-
-          // Claim first, pace after: the pending claim is the reservation
-          // that keeps concurrent claimants (the admin snapshot command, a
-          // competing cycle) off this environment during the wait, so a lost
-          // claim is always a skip that never slept. The claim is stamped
-          // with the current time rather than job start — pacing stretches
-          // this job over minutes, and a claim carrying an old timestamp
-          // would look stale and be stolen mid-wait.
-          const claimedAt = new Date();
-          pendingSnapshotClaim =
-            await claimPendingEnvironmentSnapshotForAttachment(db, {
-              environmentId: candidate.environmentId,
-              provider: candidate.provider,
-              updatedAt: claimedAt,
-              allowStalePendingBefore: new Date(
-                claimedAt.getTime() - PENDING_SNAPSHOT_RECOVERY_GRACE_MS,
-              ),
-              requireMissingSnapshot: true,
-            });
-
-          if (!pendingSnapshotClaim) {
-            continue;
-          }
-
-          await paceBeforeNextLaunch();
-
-          logRefreshSnapshots('Queueing snapshot refresh job', {
-            environmentId: candidate.environmentId,
-            environmentName: candidate.environmentName,
-            provider: candidate.provider,
-            source: candidate.source,
-            snapshotId: candidate.snapshotId,
-            snapshotCreatedAt:
-              candidate.snapshotCreatedAt?.toISOString() ?? null,
-            snapshotExpiresAt:
-              candidate.snapshotExpiresAt?.toISOString() ?? null,
-            snapshotUpdatedAt: candidate.updatedAt?.toISOString() ?? null,
-            snapshotAgeHours,
-          });
-
-          const { id } = await enqueueTask({
-            task: {
-              type: TaskPayloadKind.SnapshotEnvironment,
-              computeProvider: candidate.provider,
-              payload: {
-                repo: '',
-                environmentId: candidate.environmentId,
-                environmentSnapshotAttachment:
-                  pendingSnapshotClaim.attachmentSource,
-              },
-            },
-            initiator: { kind: 'automation', key: 'snapshot_refresh' },
-            workflow: 'env_snapshot',
-            surface: 'system',
-            trigger: 'schedule',
-            visibility: 'hidden',
-          });
 
           logRefreshSnapshots('Created snapshot refresh job', {
-            runId: id,
+            runId: launch.runId,
             environmentId: candidate.environmentId,
             environmentName: candidate.environmentName,
             provider: candidate.provider,
@@ -630,37 +690,6 @@ export const refreshSnapshotsJob = async () => {
         recordLaunch();
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-
-        if (pendingSnapshotClaim) {
-          try {
-            const activeRefreshJobAfterError =
-              await findActiveSnapshotRefreshJob(candidate);
-
-            if (!activeRefreshJobAfterError) {
-              await updatePendingEnvironmentSnapshot(db, {
-                environmentId: candidate.environmentId,
-                provider: candidate.provider,
-                snapshotId: null,
-                snapshotStatus: 'failed',
-                snapshotCreatedAt: null,
-                snapshotExpiresAt: null,
-                attachmentSource: pendingSnapshotClaim.attachmentSource,
-              });
-            }
-          } catch (statusError) {
-            logRefreshSnapshotsError(
-              'Failed to record snapshot backfill failure state',
-              {
-                environmentId: candidate.environmentId,
-                provider: candidate.provider,
-                error:
-                  statusError instanceof Error
-                    ? statusError.message
-                    : String(statusError),
-              },
-            );
-          }
-        }
 
         const errorDetails = {
           environmentId: candidate.environmentId,
