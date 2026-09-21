@@ -17,6 +17,18 @@ import { evaluateTypeSafeJudgmentsWithMetadata } from './typesafe-judgment';
 
 const LOOP_TTL_MS = 5 * 60_000;
 const MIN_CONFIDENCE = 0.65;
+const URL_PATTERN = /\bhttps?:\/\/[^\s"'<>]+/giu;
+const SECRET_ASSIGNMENT_PATTERN =
+  /(\b(?:api[\s_-]*key|access[\s_-]*token|auth(?:orization)?|bearer|token|secret|password|passwd|private[\s_-]*key|client[\s_-]*secret|session[\s_-]*id|verification[\s_-]*code)\b\s*[:=]\s*)(?:["'`]?)[^\s"'`<>,;)}\]]+/giu;
+const BEARER_PATTERN = /\b(?:bearer|basic|token)\s+[A-Za-z0-9._~+/=-]{8,}/giu;
+const COMMON_TOKEN_PATTERN =
+  /\b(?:sk|rk|pk|ghp|gho|ghu|ghs|ghr|github_pat|AIza|ya29|xox[baprs])[-_.][A-Za-z0-9._~-]{8,}\b/giu;
+const JWT_PATTERN =
+  /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/gu;
+const SENSITIVE_LINE_PATTERN =
+  /\b(?:api[\s_-]*key|access[\s_-]*token|auth(?:orization)?|bearer|password|passwd|private[\s_-]*key|client[\s_-]*secret|session[\s_-]*id|verification[\s_-]*code)\b/iu;
+const SENSITIVE_PATH_PATTERN =
+  /\/(token|secret|password|reset|invite|auth|code|key)\/[^/?#]+/giu;
 
 type PreparationLoop = {
   loopId: string;
@@ -134,11 +146,66 @@ function describeAction(action: ScreenshotPreparationAction): string {
   }
 }
 
+function redactSecretPatterns(value: string): string {
+  return value
+    .replace(SECRET_ASSIGNMENT_PATTERN, '$1[redacted]')
+    .replace(BEARER_PATTERN, '[redacted bearer credential]')
+    .replace(COMMON_TOKEN_PATTERN, '[redacted token]')
+    .replace(JWT_PATTERN, '[redacted JWT]');
+}
+
+function redactPageUrl(value: string): string {
+  const trimmed = value.trim();
+
+  try {
+    const parsed = new URL(trimmed);
+    const hadQuery = parsed.search.length > 0;
+    const hadFragment = parsed.hash.length > 0;
+
+    parsed.username = '';
+    parsed.password = '';
+    parsed.search = '';
+    parsed.hash = '';
+
+    const safeUrl = redactSecretPatterns(
+      parsed.toString().replace(SENSITIVE_PATH_PATTERN, '/$1/[redacted]'),
+    );
+
+    return `${safeUrl}${hadQuery ? ' [query redacted]' : ''}${hadFragment ? ' [fragment redacted]' : ''}`;
+  } catch {
+    return redactSecretPatterns(trimmed);
+  }
+}
+
+function redactVisibleText(value: string): string {
+  const withSafeUrls = value.replace(URL_PATTERN, (url) => redactPageUrl(url));
+  let redactNextValue = false;
+
+  return withSafeUrls
+    .split(/\r?\n/u)
+    .map((line) => {
+      if (SENSITIVE_LINE_PATTERN.test(line)) {
+        redactNextValue = true;
+        return '[redacted sensitive page text]';
+      }
+
+      if (redactNextValue && line.trim()) {
+        redactNextValue = false;
+        return '[redacted sensitive value]';
+      }
+
+      return redactSecretPatterns(line);
+    })
+    .join('\n');
+}
+
 function sanitizePageState(
   page: NonNullable<ScreenshotPreparationInput['page']>,
 ): NonNullable<ScreenshotPreparationInput['page']> {
   return {
     ...page,
+    url: redactPageUrl(page.url),
+    visibleText: redactVisibleText(page.visibleText),
     controls: page.controls.map((control) =>
       control.sensitive ? { ...control, value: '[redacted]' } : control,
     ),

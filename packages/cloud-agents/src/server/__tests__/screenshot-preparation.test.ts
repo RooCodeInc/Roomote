@@ -59,13 +59,14 @@ function nextInput(
     requiredStates: string[];
     rejectedActionId?: string;
   },
+  pageState = page,
 ) {
   return {
     operation: 'next' as const,
     optIn: true,
     ...(loopId ? { loopId } : {}),
     evidenceGoal: 'Show the saved settings state.',
-    page,
+    page: pageState,
     allowedActions,
     ...(correction ? { correction } : {}),
   };
@@ -97,6 +98,38 @@ describe('bounded screenshot preparation', () => {
       }),
     ).resolves.toMatchObject({ status: 'fallback', reason: 'not_opted_in' });
     expect(mockEvaluate).not.toHaveBeenCalled();
+  });
+
+  it('redacts secret-bearing URLs and visible text before sending state to Jev', async () => {
+    mockEvaluate.mockResolvedValueOnce({
+      answers: {
+        next_action: {
+          type: 'choice',
+          choice: 'fill_name',
+          probabilities: { fallback: 0.05, fill_name: 0.95 },
+          confidence: 0.95,
+        },
+      },
+    });
+
+    await prepareScreenshotStep({
+      runId: 'run-redaction',
+      enabled: true,
+      input: nextInput([fillAction], undefined, undefined, {
+        ...page,
+        url: 'https://preview.example/settings?tab=security&token=sk-live-secret#api-key',
+        visibleText:
+          'Settings\nAPI key: sk-live-secret\nhttps://example.test/callback?access_token=secret-value',
+      }),
+    });
+
+    const state = mockEvaluate.mock.calls[0]![0].state;
+    expect(state.page.url).toContain('[query redacted]');
+    expect(state.page.url).toContain('[fragment redacted]');
+    expect(state.page.url).not.toContain('sk-live-secret');
+    expect(state.page.visibleText).toContain('[redacted sensitive page text]');
+    expect(state.page.visibleText).not.toContain('sk-live-secret');
+    expect(state.page.visibleText).not.toContain('secret-value');
   });
 
   it('returns only an allowed action and carries timing and token metrics through acceptance', async () => {
