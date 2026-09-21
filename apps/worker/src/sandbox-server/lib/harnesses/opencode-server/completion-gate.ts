@@ -433,7 +433,17 @@ export async function requestTaskCompletionCheck(
 
 const FLAG_GUIDANCE: Record<TaskCompletionFlagId, string> = {
   requestUnaddressed:
-    'Part of what was asked does not appear in the diff, and your report does not say why.',
+    'Part of what was asked does not appear to be done, and your report does not say why.',
+  planIncomplete:
+    'Your checklist still has an item that is not completed, and your report does not account for it.',
+  validationContradicted:
+    'Your report claims a validation result that the commands you actually ran do not support: the last run failed, or no such command was run.',
+  validationMissing:
+    'Code changed but no test, type check, lint, or build was run, and your report does not say why.',
+  proofClaimDoubtful:
+    'The diff changes something a person sees in the interface, but your report waves off visual proof or never mentions it.',
+  evidentDefect:
+    'The changed lines appear to contain a plain defect: an inverted condition, a removed guard, error check, or await, a call left on an old signature, or a test weakened so it passes.',
   reportOverclaims:
     'Your report describes a code change that the diff does not contain.',
   leftoverArtifacts:

@@ -217,7 +217,7 @@ describe('OpenCode harness completion check', () => {
 
       await vi.waitFor(() => expect(prompts).toHaveLength(2));
       expect(prompts[1]).toContain(
-        'Part of what was asked does not appear in the diff',
+        'Part of what was asked does not appear to be done',
       );
       expect(completed()).toHaveLength(0);
 
@@ -416,6 +416,92 @@ describe('OpenCode harness completion check', () => {
       await vi.waitFor(() => expect(prompts).toHaveLength(2));
       expect(order).toEqual(['check', 'prompt']);
       expect(completed()).toHaveLength(1);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('sends the shell commands it observed as validation evidence', async () => {
+    const { client, harness, completed } = await startTask();
+    const emitBash = (
+      callId: string,
+      command: string,
+      state: Record<string, unknown>,
+      sessionID = 'ses_1',
+    ) =>
+      client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: `prt_${callId}`,
+            sessionID,
+            messageID: 'msg_1',
+            type: 'tool',
+            tool: 'bash',
+            callID: callId,
+            state: { input: { command }, ...state },
+          },
+        },
+      });
+
+    try {
+      await emitBash('call_1', 'pnpm vitest run src/guard.test.ts', {
+        status: 'completed',
+        output: 'Tests  1 failed | 11 passed (12)',
+        metadata: { exitCode: 1 },
+      });
+      await emitBash('call_2', 'pnpm check-types', {
+        status: 'completed',
+        output: 'Tasks: 27 successful, 27 total',
+        metadata: { exitCode: 0 },
+      });
+      await completeTurn(client, 'msg_1', 'Removed the guard. Tests pass.');
+
+      await vi.waitFor(() => expect(completed()).toHaveLength(1));
+      expect(mockRequestTaskCompletionCheck.mock.calls[0]![1].commands).toEqual(
+        [
+          {
+            command: 'pnpm vitest run src/guard.test.ts',
+            exitCode: 1,
+            outputTail: 'Tests  1 failed | 11 passed (12)',
+          },
+          {
+            command: 'pnpm check-types',
+            exitCode: 0,
+            outputTail: 'Tasks: 27 successful, 27 total',
+          },
+        ],
+      );
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('does not submit a held follow-up after the task was cancelled', async () => {
+    let releaseCheck: (() => void) | undefined;
+    mockRequestTaskCompletionCheck.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseCheck = () => resolve({ status: 'clear', flags: [] });
+        }),
+    );
+    const { client, harness, prompts } = await startTask();
+
+    try {
+      const firstTurn = completeTurn(client, 'msg_1', 'Removed the guard.');
+      await vi.waitFor(() => expect(releaseCheck).toBeDefined());
+
+      harness.sendCommand({
+        commandName: TaskCommandName.SendMessage,
+        data: { text: 'Also remove the helper.', visibleInTranscript: true },
+      });
+      harness.sendCommand({ commandName: TaskCommandName.CancelTask });
+      releaseCheck?.();
+      await firstTurn;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      // Reviving the task here would undo the cancel the user just asked for.
+      expect(prompts).toEqual(['Remove the guard.']);
     } finally {
       harness.dispose();
     }

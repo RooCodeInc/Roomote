@@ -31,13 +31,21 @@ const prompt = (text: string) => ({
   payload: null,
 });
 
-/** The gate scans oldest-first for the opening, then newest-first. */
-function mockTranscript(prompts: string[], scanLimit = 12): void {
+/**
+ * The gate scans prompts oldest-first for the opening, then newest-first, and
+ * then reads the latest plan.
+ */
+function mockTranscript(
+  prompts: string[],
+  options: { plan?: string; scanLimit?: number } = {},
+): void {
   const rows = prompts.map(prompt);
+  const scanLimit = options.scanLimit ?? 12;
   mockPromptRows
     .mockReset()
     .mockResolvedValueOnce(rows.slice(0, scanLimit))
-    .mockResolvedValueOnce([...rows].reverse().slice(0, scanLimit));
+    .mockResolvedValueOnce([...rows].reverse().slice(0, scanLimit))
+    .mockResolvedValueOnce(options.plan ? [prompt(options.plan)] : []);
 }
 
 const check = {
@@ -45,12 +53,26 @@ const check = {
   diffStat: ' src/guard.ts | 40 ----',
   diff: 'diff --git a/src/guard.ts b/src/guard.ts\n-export const guard = true;\n',
   diffTruncated: false,
+  commands: [
+    {
+      command: 'pnpm vitest run src/guard.test.ts',
+      exitCode: 0,
+      outputTail: 'Tests  12 passed (12)',
+    },
+  ],
 };
 
 function answers(
   overrides: Partial<
     Record<
-      'requestUnaddressed' | 'reportOverclaims' | 'leftoverArtifacts',
+      | 'requestUnaddressed'
+      | 'planIncomplete'
+      | 'reportOverclaims'
+      | 'validationContradicted'
+      | 'validationMissing'
+      | 'proofClaimDoubtful'
+      | 'evidentDefect'
+      | 'leftoverArtifacts',
       number
     >
   > = {},
@@ -59,6 +81,10 @@ function answers(
     Object.entries({
       requestUnaddressed: 0.04,
       reportOverclaims: 0.03,
+      validationContradicted: 0.03,
+      validationMissing: 0.02,
+      proofClaimDoubtful: 0.02,
+      evidentDefect: 0.02,
       leftoverArtifacts: 0.02,
       ...overrides,
     }).map(([id, noul]) => [id, { type: 'noul', noul }]),
@@ -89,11 +115,51 @@ describe('evaluateTaskCompletionGate', () => {
     });
     // Hosted judgment model only: the helper fallback is ruled out.
     expect(call.highVolume).toBe(true);
+    expect(call.state).toMatchObject({
+      plan: '',
+      diff_truncated: false,
+      commands: {
+        c1: {
+          command: 'pnpm vitest run src/guard.test.ts',
+          exit_code: 0,
+          output_tail: 'Tests  12 passed (12)',
+        },
+      },
+    });
+    // Everything the judge pass used to weigh, minus the checklist question
+    // when the task never made a checklist.
     expect(Object.keys(call.questions)).toEqual([
       'requestUnaddressed',
       'reportOverclaims',
+      'validationContradicted',
+      'validationMissing',
+      'proofClaimDoubtful',
+      'evidentDefect',
       'leftoverArtifacts',
     ]);
+  });
+
+  it("holds the report against the agent's own checklist when there is one", async () => {
+    mockTranscript(['Remove the duplicate-call guard.'], {
+      plan: '- [completed] Remove the guard\n- [pending] Update the docs',
+    });
+    mockEvaluateDecisionModel.mockResolvedValue(
+      answers({ planIncomplete: 0.9 }),
+    );
+
+    await expect(
+      evaluateTaskCompletionGate({ taskId: 'task-1', check }),
+    ).resolves.toEqual({
+      status: 'flagged',
+      flags: [{ id: 'planIncomplete', probability: 0.9 }],
+    });
+
+    const call = mockEvaluateDecisionModel.mock.calls[0]![0];
+
+    expect(call.state.plan).toBe(
+      '- [completed] Remove the guard\n- [pending] Update the docs',
+    );
+    expect(Object.keys(call.questions)).toContain('planIncomplete');
   });
 
   it('keeps the opening prompt and the newest follow-ups on a long task', async () => {
@@ -136,19 +202,19 @@ describe('evaluateTaskCompletionGate', () => {
     });
   });
 
-  it('does not ask whether a change is present when the diff was clipped', async () => {
-    mockEvaluateDecisionModel.mockResolvedValue({
-      leftoverArtifacts: { type: 'noul', noul: 0.1 },
-    });
-
+  it('keeps every question on a clipped diff and tells the model it is clipped', async () => {
     await evaluateTaskCompletionGate({
       taskId: 'task-1',
       check: { ...check, diffTruncated: true },
     });
 
-    expect(
-      Object.keys(mockEvaluateDecisionModel.mock.calls[0]![0].questions),
-    ).toEqual(['leftoverArtifacts']);
+    const call = mockEvaluateDecisionModel.mock.calls[0]![0];
+
+    expect(call.state.diff_truncated).toBe(true);
+    expect(Object.keys(call.questions)).toContain('requestUnaddressed');
+    expect(call.questions.requestUnaddressed.instructions).toContain(
+      'When `diff_truncated` is true',
+    );
   });
 
   it('redacts credentials before the diff leaves the deployment', async () => {
@@ -158,12 +224,19 @@ describe('evaluateTaskCompletionGate', () => {
         ...check,
         diff: `${check.diff}+const key = "ghp_${'a'.repeat(36)}";\n`,
         diffStat: ` config/ghp_${'b'.repeat(36)}.json | 1 +`,
+        commands: [
+          {
+            command: `curl -H "Authorization: Bearer ghp_${'c'.repeat(36)}" https://example.com`,
+            exitCode: 0,
+            outputTail: `token=ghp_${'d'.repeat(36)}`,
+          },
+        ],
       },
     });
 
     expect(
       JSON.stringify(mockEvaluateDecisionModel.mock.calls[0]![0].state),
-    ).not.toMatch(/ghp_(aaaa|bbbb)/);
+    ).not.toMatch(/ghp_(aaaa|bbbb|cccc|dddd)/);
   });
 
   it('is skipped without a request, without a decision model, or on failure', async () => {

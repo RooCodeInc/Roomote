@@ -19,6 +19,7 @@ import {
   PROVIDER_RETRY_NOTICE_PAYLOAD_KEY,
   TASK_COMPLETION_GATE_LIMITS,
   TERMINAL_PROVIDER_ERROR_PAYLOAD_KEY,
+  type TaskCompletionCommand,
   TaskEventName,
 } from '@roomote/types';
 import { redactSecrets } from '@roomote/communication/redact-secrets';
@@ -1757,6 +1758,12 @@ export class OpenCodeServerHarness
   private turnSettling: Promise<void> | null = null;
   private lastSettledTurnSource: 'session_status' | 'session_idle' | null =
     null;
+  // Bumped when the task is cancelled or closed, so a message held for a
+  // closing turn is dropped rather than restarting a task the user stopped.
+  private taskStopGeneration = 0;
+  // The parent agent's latest shell commands, as observed from OpenCode: the
+  // validation evidence the completion check holds the report against.
+  private completionGateCommands: TaskCompletionCommand[] = [];
   // The report the agent gave before the check reopened its turn. The
   // follow-up turn only adds a short correction, so the two are joined.
   private completionGateHeldReport: string | null = null;
@@ -2213,6 +2220,7 @@ export class OpenCodeServerHarness
     ) {
       // A completion check still in flight must not reopen a stopped turn.
       this.completionGateRequestGeneration += 1;
+      this.taskStopGeneration += 1;
     }
 
     switch (command.commandName) {
@@ -2289,6 +2297,7 @@ export class OpenCodeServerHarness
     this.completionGateLastCheckedKey = null;
     this.completionGateRequestGeneration += 1;
     this.completionGateHeldReport = null;
+    this.completionGateCommands = [];
     this.ignoreNextStopHookSessionIdle = false;
     this.ignoreNextQueuedDrainSessionIdle = false;
     this.currentWorkflowPhase = command.data.workflowPhase ?? null;
@@ -2334,7 +2343,18 @@ export class OpenCodeServerHarness
       // outstanding. Handle this message once that turn has completed, as a
       // message sent after it, so the check judges the turn it belongs to and
       // the message is never steered into a turn that is closing.
+      const stopGeneration = this.taskStopGeneration;
       await this.turnSettling;
+
+      if (this.disposed || this.taskStopGeneration !== stopGeneration) {
+        // Cancelled or closed while held. Without the hold this message would
+        // have been steered into the turn the cancel then aborted; submitting
+        // it now would restart the task instead.
+        this.logger.info(
+          'OpenCode dropping a message held for a closing turn because the task was stopped meanwhile',
+        );
+        return;
+      }
 
       if (this.lastSettledTurnSource === 'session_status' && !this.inFlight) {
         // This message is released in the gap between the status-sourced idle
@@ -4998,6 +5018,7 @@ export class OpenCodeServerHarness
       !this.persistedToolResultKeys.has(eventKey)
     ) {
       this.persistedToolResultKeys.add(eventKey);
+      this.recordCompletionGateCommand(context.sessionId, normalized);
       this.runtimeEvents.toolResult({
         sessionId: context.sessionId,
         messageId: context.messageId,
@@ -5434,6 +5455,46 @@ export class OpenCodeServerHarness
     }
   }
 
+  /** Keeps the parent agent's most recent shell commands for the check. */
+  private recordCompletionGateCommand(
+    sessionId: string,
+    normalized: ReturnType<typeof normalizeOpenCodeToolPart>,
+  ): void {
+    const { isExecute, command, exitCode } = normalized.resultPayload;
+
+    // Subagent sessions run their own commands; the report under check is the
+    // parent's, and so is the evidence.
+    if (
+      !isExecute ||
+      typeof command !== 'string' ||
+      !command ||
+      sessionId !== this.sessionId
+    ) {
+      return;
+    }
+
+    this.completionGateCommands.push({
+      command: command.slice(0, TASK_COMPLETION_GATE_LIMITS.commandMaxChars),
+      exitCode:
+        typeof exitCode === 'number' && Number.isInteger(exitCode)
+          ? exitCode
+          : // A failed tool with no exit code (timeout, spawn error) still failed.
+            normalized.status === 'failed'
+            ? 1
+            : null,
+      outputTail: normalized.output.slice(
+        -TASK_COMPLETION_GATE_LIMITS.commandOutputTailMaxChars,
+      ),
+    });
+
+    if (
+      this.completionGateCommands.length >
+      TASK_COMPLETION_GATE_LIMITS.commandsMax
+    ) {
+      this.completionGateCommands.shift();
+    }
+  }
+
   /**
    * The realtime completion check: when a turn ends with a diff it has not
    * seen, ask the platform whether the work matches the request and the
@@ -5481,6 +5542,7 @@ export class OpenCodeServerHarness
         diff: shipped.diff,
         diffStat: shipped.diffStat,
         diffTruncated: shipped.diffTruncated,
+        commands: [...this.completionGateCommands],
       });
 
       this.logger.info(

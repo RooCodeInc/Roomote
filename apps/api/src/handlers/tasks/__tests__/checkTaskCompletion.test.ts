@@ -66,7 +66,8 @@ describe('checkTaskCompletion', () => {
     expect(mocks.evaluateTaskCompletionGate).toHaveBeenCalledWith({
       taskId: 'task-1',
       userId: 'user-1',
-      check,
+      // An older worker sends no command evidence.
+      check: { ...check, commands: [] },
     });
   });
 
@@ -78,7 +79,7 @@ describe('checkTaskCompletion', () => {
 
   it('rejects an empty or oversized diff', async () => {
     expect((await post({ ...check, diff: '' })).status).toBe(400);
-    expect((await post({ ...check, diff: 'x'.repeat(60_001) })).status).toBe(
+    expect((await post({ ...check, diff: 'x'.repeat(48_001) })).status).toBe(
       400,
     );
   });
