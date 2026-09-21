@@ -1,10 +1,18 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { chmod, mkdir, readFile, rename, rm } from 'node:fs/promises';
+import {
+  chmod,
+  mkdir,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { fileURLToPath } from 'node:url';
 
 import {
   CreateBucketCommand,
@@ -42,8 +50,12 @@ const builds: Record<string, { goarch: string; sha256: string }> = {
     sha256: '3f9e2d92ca9fe43ebac8f069349a3fefb91500ed06b22697e9d9f3dba6e1db17',
   },
 };
-const build = builds[process.arch];
-assert.ok(build, 'MinIO sandbox bootstrap supports Linux x64 and arm64');
+const resolvedBuild = builds[process.arch];
+assert.ok(
+  resolvedBuild,
+  'MinIO sandbox bootstrap supports Linux x64 and arm64',
+);
+const build: { goarch: string; sha256: string } = resolvedBuild;
 const directory = join(homedir(), '.cache', 'roomote-minio');
 await mkdir(directory, { recursive: true, mode: 0o700 });
 const binary = join(directory, `minio.${release}`);
@@ -52,6 +64,87 @@ const checksum = async (path: string) =>
   createHash('sha256')
     .update(await readFile(path))
     .digest('hex');
+// The published roomote-minio image holds this exact binary (same pins, same
+// checksum), so a cold sandbox takes it from the registry instead of spending
+// most of a minute compiling it. The deployment catalog names the image; the
+// pinned SHA-256 above still decides whether the result is accepted.
+const publishedBinaryPath = 'usr/local/bin/minio';
+async function downloadPublishedBinary(destination: string): Promise<boolean> {
+  const catalog = JSON.parse(
+    await readFile(
+      join(
+        dirname(fileURLToPath(import.meta.url)),
+        '../../../deploy/deployment-catalog.json',
+      ),
+      'utf8',
+    ),
+  ) as { criticalImages: { minio: string } };
+  const image = catalog.criticalImages.minio.match(
+    /^ghcr\.io\/([^:@]+):[^@]+@(sha256:[0-9a-f]{64})$/,
+  );
+  assert.ok(image, 'Unexpected MinIO image reference in deployment catalog');
+  const repository = image[1] as string;
+  const indexDigest = image[2] as string;
+  const registry = `https://ghcr.io/v2/${repository}`;
+  const request = async (url: string, headers: Record<string, string> = {}) => {
+    const response = await fetch(url, {
+      headers,
+      signal: AbortSignal.timeout(60_000),
+    });
+    assert.ok(response.ok, `${new URL(url).pathname}: ${response.status}`);
+    return response;
+  };
+  const { token } = (await (
+    await request(`https://ghcr.io/token?scope=repository:${repository}:pull`)
+  ).json()) as { token: string };
+  const manifest = async <T>(digest: string) =>
+    (await (
+      await request(`${registry}/manifests/${digest}`, {
+        Authorization: `Bearer ${token}`,
+        Accept:
+          'application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json',
+      })
+    ).json()) as T;
+  const index = await manifest<{
+    manifests: {
+      digest: string;
+      platform?: { architecture: string; os: string };
+    }[];
+  }>(indexDigest);
+  const platform = index.manifests.find(
+    (entry) =>
+      entry.platform?.os === 'linux' &&
+      entry.platform.architecture === build.goarch,
+  );
+  assert.ok(platform, `No linux/${build.goarch} image in ${indexDigest}`);
+  const { layers } = await manifest<{
+    layers: { digest: string; size: number }[];
+  }>(platform.digest);
+  const workingDirectory = dirname(destination);
+  const archive = join(workingDirectory, 'layer.tar.gz');
+  // The binaries are the bulk of the image, so their layer is the largest.
+  for (const layer of [...layers].sort((a, b) => b.size - a.size)) {
+    const blob = await request(`${registry}/blobs/${layer.digest}`, {
+      Authorization: `Bearer ${token}`,
+    });
+    await writeFile(archive, Buffer.from(await blob.arrayBuffer()));
+    try {
+      execFileSync(
+        'tar',
+        ['-xzf', archive, '-C', workingDirectory, publishedBinaryPath],
+        { stdio: 'ignore', timeout: 60_000 },
+      );
+    } catch {
+      continue;
+    } finally {
+      await rm(archive, { force: true });
+    }
+    await rename(join(workingDirectory, publishedBinaryPath), destination);
+    return (await checksum(destination)) === build.sha256;
+  }
+  return false;
+}
+
 try {
   assert.equal(await checksum(binary), build.sha256);
 } catch {
@@ -59,70 +152,15 @@ try {
   const temporary = join(temporaryDirectory, 'minio');
   try {
     await mkdir(temporaryDirectory, { mode: 0o700 });
-    const goEnvironment = {
-      ...process.env,
-      CGO_ENABLED: '0',
-      GOARCH: build.goarch,
-      GOENV: 'off',
-      GONOSUMDB: '',
-      GOOS: 'linux',
-      GOPRIVATE: '',
-      GOPROXY: 'https://proxy.golang.org',
-      GOSUMDB: 'sum.golang.org',
-      GOTOOLCHAIN: 'local',
-    };
-    const go = execFileSync('mise', ['which', 'go'], {
-      encoding: 'utf8',
-    }).trim();
-    assert.equal(
-      execFileSync(go, ['version'], {
-        encoding: 'utf8',
-        env: goEnvironment,
-      }).trim(),
-      `go version go1.24.8 linux/${build.goarch}`,
-      'MinIO build requires the repository-pinned Go toolchain',
-    );
-    // Community MinIO is source-only; the Go checksum database authenticates
-    // the pinned upstream module before a reproducible, checksum-pinned build.
-    const source = JSON.parse(
-      execFileSync(
-        go,
-        ['mod', 'download', '-json', `github.com/minio/minio@${release}`],
-        {
-          encoding: 'utf8',
-          env: goEnvironment,
-          timeout: 120_000,
-        },
-      ),
-    ) as { Dir: string; GoModSum: string; Sum: string; Version: string };
-    assert.equal(source.Version, sourceVersion, 'Unexpected MinIO source');
-    assert.equal(source.Sum, sourceSum, 'MinIO source checksum mismatch');
-    assert.equal(
-      source.GoModSum,
-      sourceGoModSum,
-      'MinIO module checksum mismatch',
-    );
-    // Same flags as .docker/minio (the published roomote-minio image):
-    // -buildid= drops the toolchain-derived build ID and -s -w the debug
-    // info, as upstream's release builds did. The pinned checksums are for
-    // NATIVE builds only: MinIO's compiled code still differs when the Go
-    // compiler runs on a different host architecture than it targets, so a
-    // cross-compile (for example arm64 from an amd64 host) will not match
-    // and must never be used to refresh these pins. This script only ever
-    // builds natively, so that constraint holds here by construction.
-    execFileSync(
-      go,
-      ['build', '-trimpath', '-ldflags=-buildid= -s -w', '-o', temporary, '.'],
-      {
-        cwd: source.Dir,
-        stdio: 'inherit',
-        timeout: 540_000,
-        env: {
-          ...goEnvironment,
-          GOFLAGS: '-mod=readonly',
-        },
+    const downloaded = await downloadPublishedBinary(temporary).catch(
+      (error: unknown) => {
+        console.warn(
+          `Published MinIO binary unavailable, building from source: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return false;
       },
     );
+    if (!downloaded) await buildFromSource(temporary);
     assert.equal(
       await checksum(temporary),
       build.sha256,
@@ -133,6 +171,73 @@ try {
   } finally {
     await rm(temporaryDirectory, { force: true, recursive: true });
   }
+}
+
+async function buildFromSource(temporary: string): Promise<void> {
+  const goEnvironment = {
+    ...process.env,
+    CGO_ENABLED: '0',
+    GOARCH: build.goarch,
+    GOENV: 'off',
+    GONOSUMDB: '',
+    GOOS: 'linux',
+    GOPRIVATE: '',
+    GOPROXY: 'https://proxy.golang.org',
+    GOSUMDB: 'sum.golang.org',
+    GOTOOLCHAIN: 'local',
+  };
+  const go = execFileSync('mise', ['which', 'go'], {
+    encoding: 'utf8',
+  }).trim();
+  assert.equal(
+    execFileSync(go, ['version'], {
+      encoding: 'utf8',
+      env: goEnvironment,
+    }).trim(),
+    `go version go1.24.8 linux/${build.goarch}`,
+    'MinIO build requires the repository-pinned Go toolchain',
+  );
+  // Community MinIO is source-only; the Go checksum database authenticates
+  // the pinned upstream module before a reproducible, checksum-pinned build.
+  const source = JSON.parse(
+    execFileSync(
+      go,
+      ['mod', 'download', '-json', `github.com/minio/minio@${release}`],
+      {
+        encoding: 'utf8',
+        env: goEnvironment,
+        timeout: 120_000,
+      },
+    ),
+  ) as { Dir: string; GoModSum: string; Sum: string; Version: string };
+  assert.equal(source.Version, sourceVersion, 'Unexpected MinIO source');
+  assert.equal(source.Sum, sourceSum, 'MinIO source checksum mismatch');
+  assert.equal(
+    source.GoModSum,
+    sourceGoModSum,
+    'MinIO module checksum mismatch',
+  );
+  // Same flags as .docker/minio (the published roomote-minio image):
+  // -buildid= drops the toolchain-derived build ID and -s -w the debug
+  // info, as upstream's release builds did. The pinned checksums are for
+  // NATIVE builds only: MinIO's compiled code still differs when the Go
+  // compiler runs on a different host architecture than it targets, so a
+  // cross-compile (for example arm64 from an amd64 host) will not match
+  // and must never be used to refresh these pins. This script only ever
+  // builds natively, so that constraint holds here by construction.
+  execFileSync(
+    go,
+    ['build', '-trimpath', '-ldflags=-buildid= -s -w', '-o', temporary, '.'],
+    {
+      cwd: source.Dir,
+      stdio: 'inherit',
+      timeout: 540_000,
+      env: {
+        ...goEnvironment,
+        GOFLAGS: '-mod=readonly',
+      },
+    },
+  );
 }
 
 const processName = 'roomote-sandbox-minio';
