@@ -85,6 +85,7 @@ import {
 import { SetupStarterTasksCard } from './setup/SetupStarterTasksCard';
 import { SetupIntegrationsCard } from './setup/SetupIntegrationsCard';
 import { SESSION_HEADER_CONTENT_CLASS_NAME } from './session-header-layout';
+import { EditableSessionTitle } from './EditableSessionTitle';
 import { isRequestUserInputResponseRepresentedByCanonicalReceipt } from '@/lib/setup-receipt-transcript';
 import { CapabilityOfferCard } from './CapabilityOfferCard';
 import { PendingIntegrationKeys } from '@/components/sessions/PendingIntegrationKeys';
@@ -444,6 +445,8 @@ export function FastSessionTranscript({
   headerExtras,
   privateSession = false,
   headerActions,
+  canRenameTitle = false,
+  titleSessionId = sessionId,
   secretSessionId,
   sessionGoal,
   autoStartVoice = false,
@@ -462,6 +465,8 @@ export function FastSessionTranscript({
   headerExtras?: ReactNode;
   privateSession?: boolean;
   headerActions?: ReactNode;
+  canRenameTitle?: boolean;
+  titleSessionId?: string;
   secretSessionId?: string;
   sessionGoal?: SessionGoal | null;
   /**
@@ -1810,12 +1815,13 @@ export function FastSessionTranscript({
           }
         >
           <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <h1
-              className="ph-no-capture min-w-0 truncate cursor-default text-sm font-medium"
+            <EditableSessionTitle
+              sessionId={titleSessionId}
               title={title ?? fallbackTitle}
-            >
-              {title ?? fallbackTitle}
-            </h1>
+              canRename={canRenameTitle}
+              className="ph-no-capture min-w-0 truncate cursor-default text-sm font-medium"
+              onTitleChange={setTitle}
+            />
             {(privateSession || effectiveSessionModel || headerExtras) && (
               <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-2 text-xs text-muted-foreground">
                 {privateSession ? (
