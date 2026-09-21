@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import Link from 'next/link';
 
 const { replaceMock, searchParamsMock } = vi.hoisted(() => ({
   replaceMock: vi.fn(),
@@ -84,6 +85,26 @@ describe('SessionsFilters', () => {
     expect(replaceMock).toHaveBeenCalledWith(
       '/sessions?user=automation%3Asentry_triage',
     );
+  });
+
+  it('keeps primary navigation available while a filter menu is open', async () => {
+    render(
+      <>
+        <Link href="/automations">Automations</Link>
+        <SessionsFilters {...baseProps} />
+      </>,
+    );
+
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Session scope' }), {
+      key: 'ArrowDown',
+    });
+
+    expect(
+      await screen.findByRole('menuitemcheckbox', { name: 'All sessions' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: 'Automations' }),
+    ).toBeInTheDocument();
   });
 
   it('keeps a selected user filter in the primary controls', () => {

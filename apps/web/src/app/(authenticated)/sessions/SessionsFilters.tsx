@@ -70,7 +70,7 @@ function SessionFilterDropdown({
   const label = options.find((option) => option.value === value)?.label;
 
   return (
-    <DropdownMenu>
+    <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
         <Button
           variant="ghost"
