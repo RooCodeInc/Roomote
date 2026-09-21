@@ -23,10 +23,10 @@ import {
   TaskPromptInput,
 } from '@/components/tasks';
 import {
+  AlertCircle,
   BasicTooltip,
   Button,
   HatGlasses,
-  RetryableLoadError,
 } from '@/components/system';
 
 const DEFAULT_PROMPT_PLACEHOLDER = 'What do you want to do?';
@@ -269,13 +269,23 @@ export function NewTaskForm({
         }
       />
       {fastSessionError ? (
-        <div role="alert">
-          <RetryableLoadError
-            className="mt-3 p-4 md:p-4 [&_[data-slot=empty-icon]]:mb-0"
-            message={fastSessionError.message}
-            isRetrying={isFastSessionPending}
-            onRetry={() => void retryFastSession()}
+        <div role="alert" className="flex items-center gap-2 px-3 py-2 text-sm">
+          <AlertCircle
+            aria-hidden="true"
+            className="text-destructive size-4 shrink-0"
           />
+          <p className="text-muted-foreground min-w-0 flex-1">
+            Couldn’t start this session.
+          </p>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={isFastSessionPending}
+            onClick={() => void retryFastSession()}
+          >
+            Retry
+          </Button>
         </div>
       ) : null}
     </div>
