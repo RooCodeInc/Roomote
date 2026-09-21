@@ -181,7 +181,9 @@ export function PendingUserInputRequestCard({
   const showBackButton =
     request.questions.length > 1 && currentQuestionIndex > 0;
   const showOtherChip = Boolean(question?.isOther && options.length > 0);
-  const isFreeTextOnly = Boolean(question?.isOther && options.length === 0);
+  const isFreeTextOnly = Boolean(
+    question && options.length === 0 && (question.isOther || question.isSecret),
+  );
   const selectedOther = draft.selectedValue === OTHER_VALUE;
   const showOtherInput = isFreeTextOnly || (showOtherChip && selectedOther);
   const showInlineOtherInput = showOtherInput && !question?.isSecret;
