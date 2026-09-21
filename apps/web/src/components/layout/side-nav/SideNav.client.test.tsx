@@ -177,6 +177,7 @@ vi.mock('@/trpc/client', () => ({
       search: { queryOptions: queryOptionsMock },
     },
     results: {
+      pendingCount: { queryOptions: () => ({ queryKey: ['results'] }) },
       unreadCount: { queryOptions: () => ({ queryKey: ['results'] }) },
     },
   }),

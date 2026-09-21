@@ -58,6 +58,7 @@ import { readBullMqQueueHealth } from './health';
 import { startBullMqLivenessWatchdog } from './liveness-watchdog';
 import { startSessionWakeupQueue } from './session-wakeup-queue';
 import { startHomeComposerRecommendationsQueue } from './home-composer-recommendations-queue';
+import { startAutomationResultPreparationQueue } from './automation-result-preparation-queue';
 import { installBullMqGracefulShutdown } from './graceful-shutdown';
 
 // Deployments roll every service at once while migrations run only ahead
@@ -236,6 +237,11 @@ const {
   worker: homeComposerRecommendationsWorker,
   queueEvents: homeComposerRecommendationsQueueEvents,
 } = startHomeComposerRecommendationsQueue();
+const {
+  queue: automationResultPreparationQueue,
+  worker: automationResultPreparationWorker,
+  queueEvents: automationResultPreparationQueueEvents,
+} = await startAutomationResultPreparationQueue();
 
 const serverAdapter = new HonoAdapter(serveStatic);
 
@@ -279,6 +285,9 @@ createBullBoard({
     new BullMQAdapter(sessionWakeupQueue, { readOnlyMode: false }),
     new BullMQAdapter(agentMailWebhookEventsQueue, { readOnlyMode: false }),
     new BullMQAdapter(homeComposerRecommendationsQueue, {
+      readOnlyMode: false,
+    }),
+    new BullMQAdapter(automationResultPreparationQueue, {
       readOnlyMode: false,
     }),
   ],
@@ -497,6 +506,9 @@ installBullMqGracefulShutdown({
     await homeComposerRecommendationsWorker.close();
     await homeComposerRecommendationsQueueEvents.close();
     await homeComposerRecommendationsQueue.close();
+    await automationResultPreparationWorker.close();
+    await automationResultPreparationQueueEvents.close();
+    await automationResultPreparationQueue.close();
     await discordGatewaySupervisor.stop();
     await closeRedis();
   },

@@ -5003,6 +5003,12 @@ export const automationResults = pgTable(
     sourceTaskId: text('source_task_id').references(() => tasks.id, {
       onDelete: 'set null',
     }),
+    sourceRunId: integer('source_run_id').references(() => taskRuns.id, {
+      onDelete: 'set null',
+    }),
+    sourceSessionId: uuid('source_session_id').references(() => sessions.id, {
+      onDelete: 'set null',
+    }),
     userId: text('user_id').references(() => users.id, {
       onDelete: 'set null',
     }),
@@ -5011,6 +5017,24 @@ export const automationResults = pgTable(
       text('result_visibility').$type<AutomationResultVisibility>(),
     automationName: text('automation_name').notNull(),
     content: text('content').notNull(),
+    resultKind: text('result_kind')
+      .notNull()
+      .default('outcome')
+      .$type<import('@roomote/types').AutomationResultKind>(),
+    headline: text('headline'),
+    decisionContext: text('decision_context'),
+    selectedReferenceKeys: jsonb('selected_reference_keys')
+      .notNull()
+      .default(sql`'[]'::jsonb`)
+      .$type<string[]>(),
+    preparationStatus: text('preparation_status')
+      .notNull()
+      .default('pending')
+      .$type<import('@roomote/types').AutomationResultPreparationStatus>(),
+    preparationAttempts: integer('preparation_attempts').notNull().default(0),
+    preparationVersion: integer('preparation_version').notNull().default(1),
+    preparedAt: timestamp('prepared_at'),
+    preparationErrorCode: text('preparation_error_code'),
     priority: text('priority')
       .notNull()
       .default('normal')
@@ -5021,6 +5045,7 @@ export const automationResults = pgTable(
       'manual' | 'pull_request_merged'
     >(),
     ignoredAt: timestamp('ignored_at'),
+    supersededAt: timestamp('superseded_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
@@ -5029,6 +5054,20 @@ export const automationResults = pgTable(
     index('automation_results_inbox_idx').on(table.priority, table.createdAt),
     index('automation_results_user_id_idx').on(table.userId),
     index('automation_results_source_task_id_idx').on(table.sourceTaskId),
+    index('automation_results_source_run_id_idx').on(table.sourceRunId),
+    index('automation_results_source_session_id_idx').on(table.sourceSessionId),
+    index('automation_results_preparation_status_created_at_idx').on(
+      table.preparationStatus,
+      table.createdAt,
+    ),
+    check(
+      'automation_results_result_kind_check',
+      sql`${table.resultKind} in ('outcome', 'input_request')`,
+    ),
+    check(
+      'automation_results_preparation_status_check',
+      sql`${table.preparationStatus} in ('pending', 'ready', 'failed')`,
+    ),
   ],
 );
 
