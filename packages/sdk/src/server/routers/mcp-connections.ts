@@ -118,7 +118,7 @@ async function resolveMcpServerConfigs(options: {
   auth: Parameters<typeof resolveActorScopedUserContext>[0];
   requestOrigin: string | null;
   includeRoomoteMemberTools?: boolean;
-  includeCacheRevision?: boolean;
+  includeSessionMetadata?: boolean;
   quiet?: boolean;
 }): Promise<ResolvedMcpServerConfigs> {
   const logInfo: InfoLogger = options.quiet ? () => {} : console.info;
@@ -193,7 +193,7 @@ async function resolveMcpServerConfigs(options: {
   // A worker writes what it receives into an agent's MCP configuration, so
   // it gets the connection fields only. The cache revision and the approval
   // policy scope are control-plane metadata for Roomote's Session runtime.
-  if (!options.includeCacheRevision) {
+  if (!options.includeSessionMetadata) {
     for (const server of Object.values(servers)) {
       delete server.cacheRevision;
       delete server.toolApprovalPolicyScope;
@@ -216,7 +216,7 @@ export async function resolveUserMcpServerConfigs(options: {
     auth: { userId: options.userId },
     requestOrigin: getRequestOrigin({ url: options.apiBaseUrl }),
     includeRoomoteMemberTools: options.includeRoomoteMemberTools,
-    includeCacheRevision: true,
+    includeSessionMetadata: true,
     // This runs on every Fast turn; the per-connection info stream is worker
     // config-fetch debugging noise at that frequency.
     quiet: true,

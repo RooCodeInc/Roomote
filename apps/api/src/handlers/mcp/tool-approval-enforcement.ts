@@ -3,10 +3,7 @@ import {
   listIntegrationToolPolicies,
   listIntegrationToolUserPolicies,
 } from '@roomote/db/server';
-import {
-  resolveStricterIntegrationToolPolicyMode,
-  type IntegrationToolPolicyMode,
-} from '@roomote/types';
+import { resolveGoverningIntegrationToolPolicies } from '@roomote/types';
 
 export type ProxyToolApprovalBlock = 'reject' | 'needs_approval';
 
@@ -53,18 +50,13 @@ export async function resolveProxyToolApprovalBlocks(input: {
       ? listIntegrationToolUserPolicies(actingUserId)
       : Promise.resolve([]),
   ]);
-  const modes = new Map<string, IntegrationToolPolicyMode | undefined>();
-  for (const policy of [...deploymentPolicies, ...userPolicies]) {
-    if (policy.integrationId !== input.integrationId) continue;
-    modes.set(
-      policy.toolName,
-      resolveStricterIntegrationToolPolicyMode(
-        modes.get(policy.toolName),
-        policy.mode,
-      ),
-    );
-  }
-  for (const [toolName, mode] of modes) {
+  const governing = resolveGoverningIntegrationToolPolicies({
+    deploymentPolicies,
+    userPolicies,
+    scopeOf: () => input.policyScope,
+  });
+  for (const { integrationId, toolName, mode } of governing) {
+    if (integrationId !== input.integrationId) continue;
     if (mode === 'reject') {
       blocks.set(toolName, 'reject');
     } else if (mode === 'ask' && input.tokenType === 'run') {
