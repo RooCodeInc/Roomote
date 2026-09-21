@@ -12,6 +12,7 @@ import {
   ChevronRight,
   CircleCheck,
   Hand,
+  MoreHorizontal,
   Select,
   SelectContent,
   SelectItem,
@@ -88,15 +89,16 @@ type GroupableTool = { name: string; readOnly?: boolean | null };
 /**
  * Split tools the way the MCP server describes them: read-only tools apart
  * from ones that can write. A server that annotates none of its tools gets a
- * single group, since calling every tool "write" there would be a guess. An
+ * single untitled group, since calling every tool "write" there would be a
+ * guess and a lone "Tools" heading classifies nothing. An
  * unannotated tool on an annotating server counts as able to write, which is
  * the MCP default for a missing `readOnlyHint`.
  */
 export function groupIntegrationToolsByAccess<T extends GroupableTool>(
   tools: T[],
-): { id: string; title: string; tools: T[] }[] {
+): { id: string; title: string | null; tools: T[] }[] {
   if (!tools.some((tool) => typeof tool.readOnly === 'boolean')) {
-    return tools.length > 0 ? [{ id: 'all', title: 'Tools', tools }] : [];
+    return tools.length > 0 ? [{ id: 'all', title: null, tools }] : [];
   }
   return [
     {
@@ -113,9 +115,10 @@ export function groupIntegrationToolsByAccess<T extends GroupableTool>(
 }
 
 /**
- * One collapsible tool group. With approvals active its header carries a
- * mode select that applies to every tool in the group; it shows the shared
- * mode, or "Mixed" when the group's tools differ.
+ * One tool group. A titled group collapses; an untitled one (unclassified
+ * tools) is just the list. With approvals active the header carries a mode
+ * select that applies to every tool in the group; it shows the shared mode,
+ * or "Custom" when the group's tools differ.
  */
 export function IntegrationToolApprovalGroup({
   title,
@@ -125,7 +128,8 @@ export function IntegrationToolApprovalGroup({
   onChangeAll,
   children,
 }: {
-  title: string;
+  /** Null for unclassified tools: no heading and nothing to collapse. */
+  title: string | null;
   count: number;
   /** The group's per-tool modes, or undefined while approvals are inactive. */
   modes?: IntegrationToolPolicyMode[];
@@ -140,6 +144,48 @@ export function IntegrationToolApprovalGroup({
       : undefined;
   const Chevron = open ? ChevronDown : ChevronRight;
 
+  const bulkSelect =
+    modes && onChangeAll ? (
+      <Select
+        value={sharedMode ?? ''}
+        disabled={disabled}
+        onValueChange={(next) => onChangeAll(next as IntegrationToolPolicyMode)}
+      >
+        <SelectTrigger
+          className="w-44 shrink-0"
+          aria-label={`Approval mode for all ${title?.toLowerCase() ?? 'tools'}`}
+        >
+          <SelectValue
+            placeholder={
+              <span className="flex items-center gap-2">
+                <MoreHorizontal aria-hidden="true" className="size-4" />
+                Custom
+              </span>
+            }
+          />
+        </SelectTrigger>
+        <SelectContent>
+          {APPROVAL_MODES.map(({ mode, label, icon: Icon }) => (
+            <SelectItem key={mode} value={mode}>
+              <Icon aria-hidden="true" className="size-4" />
+              {label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    ) : null;
+
+  if (title === null) {
+    return (
+      <section aria-label="Tools">
+        {bulkSelect ? (
+          <div className="flex items-center justify-end py-2">{bulkSelect}</div>
+        ) : null}
+        <div className="divide-y divide-border">{children}</div>
+      </section>
+    );
+  }
+
   return (
     <section aria-label={title}>
       <div className="flex items-center gap-2 py-2">
@@ -153,30 +199,7 @@ export function IntegrationToolApprovalGroup({
           <span className="truncate">{title}</span>
           <Badge variant="secondary">{count}</Badge>
         </button>
-        {modes && onChangeAll ? (
-          <Select
-            value={sharedMode ?? ''}
-            disabled={disabled}
-            onValueChange={(next) =>
-              onChangeAll(next as IntegrationToolPolicyMode)
-            }
-          >
-            <SelectTrigger
-              className="w-44 shrink-0"
-              aria-label={`Approval mode for all ${title.toLowerCase()}`}
-            >
-              <SelectValue placeholder="Mixed" />
-            </SelectTrigger>
-            <SelectContent>
-              {APPROVAL_MODES.map(({ mode, label, icon: Icon }) => (
-                <SelectItem key={mode} value={mode}>
-                  <Icon aria-hidden="true" className="size-4" />
-                  {label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        ) : null}
+        {bulkSelect}
       </div>
       {open ? <div className="divide-y divide-border">{children}</div> : null}
     </section>

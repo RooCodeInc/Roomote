@@ -150,13 +150,22 @@ describe('McpToolManagementDialog tool approvals', () => {
     ]);
   });
 
-  it('keeps one group when the server annotates no tools', () => {
+  it('shows unclassified tools as a plain list with one Custom bulk select', () => {
     state.approvalsEnabled = true;
+    state.policies = [
+      { integrationId: 'exa', toolName: 'web_fetch_exa', mode: 'reject' },
+    ];
     renderDialog();
-    expect(screen.getByRole('region', { name: 'Tools' })).toBeInTheDocument();
+    // No heading to collapse when the server classifies nothing.
+    expect(
+      screen.queryByRole('button', { expanded: true }),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole('region', { name: 'Read-only tools' }),
     ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('combobox', { name: 'Approval mode for all tools' }),
+    ).toHaveTextContent('Custom');
   });
 
   it('groups annotated tools by access and sets a whole group at once', async () => {

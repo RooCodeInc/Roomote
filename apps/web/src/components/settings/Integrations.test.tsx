@@ -237,7 +237,7 @@ vi.mock('./IntegrationToolApprovalControls', () => ({
   ),
   IntegrationToolApprovalModeControl: () => null,
   groupIntegrationToolsByAccess: <T,>(tools: T[]) =>
-    tools.length > 0 ? [{ id: 'all', title: 'Tools', tools }] : [],
+    tools.length > 0 ? [{ id: 'all', title: null, tools }] : [],
 }));
 
 vi.mock('@/hooks/useIntegrationToolApprovalsExperiment', () => ({
