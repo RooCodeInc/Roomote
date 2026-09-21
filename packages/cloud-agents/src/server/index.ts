@@ -37,6 +37,7 @@ export * from './workflows/githubPrReviewComment';
 export * from './linked-task-relay';
 export * from './llm-task-title';
 export { distillTaskRunTurnMemory } from './task-run-memory-distillation';
+export { evaluateTaskCompletionGate } from './task-completion-gate';
 export * from './user-personalization';
 export * from './mcp-self-setup';
 export * from './mcp-tool-client';

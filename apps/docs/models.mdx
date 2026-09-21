@@ -344,6 +344,10 @@ When a judgment model is on, Roomote asks it first for:
 - choosing the forum tag when Roomote opens a thread in a Discord forum channel
 - whether a settled session or task turn holds something worth saving to
   [Memory](/memory) that the agent did not record itself
+- checking a finished coding turn against the evidence: the request, the
+  agent's checklist, the diff, and the commands it ran. This check has no
+  helper-model fallback; without a judgment model the agent runs its own slower
+  review pass instead. See [Tasks](/tasks)
 
 Roomote acts on the judgment model only when it is confident. When it is
 unsure, unavailable, or returns an error, Roomote keeps the behavior it has
