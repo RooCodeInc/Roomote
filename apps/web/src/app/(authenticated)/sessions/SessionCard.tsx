@@ -20,6 +20,7 @@ import { SessionInferenceCostBreakdown } from '@/components/sessions/SessionInfe
 import { PrivateSessionIcon } from '@/components/sessions/PrivateSessionIcon';
 import { getSessionSurfaceLabel } from '@/components/sessions/session-surfaces';
 import { TaskAutomationIcon } from '@/components/tasks/TaskAutomationIcon';
+import { SessionActions } from '../../(sandbox)/sessions/[sessionId]/SessionDeleteAction';
 
 type SessionCardData = {
   id: string;
@@ -57,6 +58,7 @@ type SessionCardData = {
     repositoryName: string | null;
     inferenceCostMicroUsd: number;
   }>;
+  canManage?: boolean;
 };
 
 export function SessionCard({
@@ -193,6 +195,11 @@ export function SessionCard({
           </div>
         ) : null}
       </div>
+      {session.canManage ? (
+        <div className="pointer-events-auto relative z-20 shrink-0 self-center">
+          <SessionActions sessionId={session.id} listRow />
+        </div>
+      ) : null}
     </div>
   );
 }

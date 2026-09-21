@@ -1,5 +1,11 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 
+vi.mock('../../(sandbox)/sessions/[sessionId]/SessionDeleteAction', () => ({
+  SessionActions: () => (
+    <button type="button" aria-label="More session actions" />
+  ),
+}));
+
 import { SessionCard } from './SessionCard';
 
 describe('SessionCard', () => {
@@ -42,6 +48,7 @@ describe('SessionCard', () => {
               inferenceCostMicroUsd: 6_000,
             },
           ],
+          canManage: true,
         }}
       />,
     );
@@ -70,6 +77,9 @@ describe('SessionCard', () => {
     );
     expect(screen.queryByText('Roomote')).not.toBeInTheDocument();
     expect(screen.queryByText('1 execution')).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'More session actions' }),
+    ).toBeInTheDocument();
   });
 
   it('shows a contextual matching transcript snippet', () => {

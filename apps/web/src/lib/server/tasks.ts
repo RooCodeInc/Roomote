@@ -424,7 +424,10 @@ export const getTasks = async ({
   const hasTaskTypeFilter = effectiveFilters.some(
     (filter) => filter.type === 'taskType',
   );
-  const conditions: TaskFilterCondition[] = [isNull(tasks.deletedAt)];
+  const conditions: TaskFilterCondition[] = [
+    isNull(tasks.archivedAt),
+    isNull(tasks.deletedAt),
+  ];
   const access = customAutomationTaskAccess({ userId, isAdmin });
   if (access) conditions.push(access);
 

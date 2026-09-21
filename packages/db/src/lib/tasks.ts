@@ -10,12 +10,17 @@ import { generateTaskId } from './task-id';
 
 /**
  * Predicate for task rows a user is allowed to read. A task is visible only
- * when it is marked `visibility = 'visible'` AND has not been soft-deleted
- * (`deletedAt IS NULL`). Soft-deleted rows are retained for satellites and
- * artifact cleanup, so this predicate must exclude them from API reads.
+ * when it is marked `visibility = 'visible'`, has not been archived with its
+ * Session, and has not been soft-deleted. Soft-deleted rows are retained for
+ * satellites and artifact cleanup, so this predicate must exclude them from
+ * API reads.
  */
 export function isVisibleTask(): SQL {
-  return and(eq(tasks.visibility, 'visible'), isNull(tasks.deletedAt)) as SQL;
+  return and(
+    eq(tasks.visibility, 'visible'),
+    isNull(tasks.archivedAt),
+    isNull(tasks.deletedAt),
+  ) as SQL;
 }
 
 const UNIQUE_VIOLATION_CODE = '23505';
