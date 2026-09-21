@@ -85,20 +85,6 @@ export async function loadFastAgentPromptSkillCatalog(
         >(undefined),
   ]);
 
-  return mergeFastAgentPromptSkillCatalog(
-    instance,
-    settings,
-    repository,
-    sources,
-  );
-}
-
-async function mergeFastAgentPromptSkillCatalog(
-  instance: PromiseSettledResult<FastAgentSkillListResult>,
-  settings: PromiseSettledResult<FastAgentSettingsPromptCatalog>,
-  repository: PromiseSettledResult<FastAgentSkillListResult> | undefined,
-  sources: PromptSkillCatalogSources,
-): Promise<FastAgentPromptSkillCatalog> {
   try {
     // A partial failure degrades to a warning so the surviving source still
     // reaches the prompt. When nothing loaded, throw instead of rendering an
