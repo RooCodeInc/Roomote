@@ -10657,6 +10657,130 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     },
   );
 
+  it('allows a failed read to be retried while keeping the failed mutation protected', async () => {
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'service',
+        name: 'Service',
+        description: 'Read and write service',
+        tools: [
+          {
+            name: 'read_state',
+            annotations: { readOnlyHint: true },
+          },
+          {
+            name: 'write_state',
+            annotations: { readOnlyHint: false },
+          },
+        ],
+      },
+    ]);
+    const results: unknown[] = [];
+    mocks.callIntegration
+      .mockRejectedValueOnce(new Error('temporary read failure'))
+      .mockResolvedValueOnce({ value: 'fresh' })
+      .mockResolvedValueOnce({ value: 'refreshed' })
+      .mockRejectedValueOnce(new Error('temporary write failure'));
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'Checking the service.',
+        });
+        results.push(
+          await invokeMcpTool('service', 'read_state', { key: 'status' }),
+        );
+        results.push(
+          await invokeMcpTool('service', 'read_state', { key: 'status' }),
+        );
+        results.push(
+          await invokeMcpTool('service', 'read_state', { key: 'status' }),
+        );
+        results.push(
+          await invokeMcpTool('service', 'write_state', { value: 'new' }),
+        );
+        results.push(
+          await invokeMcpTool('service', 'write_state', { value: 'new' }),
+        );
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Checked.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(results[0]).toMatchObject({
+      success: false,
+      error: 'temporary read failure',
+    });
+    expect(results[1]).toEqual({ success: true, result: { value: 'fresh' } });
+    expect(results[2]).toMatchObject({
+      success: true,
+      result: { value: 'refreshed' },
+    });
+    expect(results[3]).toMatchObject({
+      success: false,
+      error: 'temporary write failure',
+    });
+    expect(results[4]).toEqual({
+      success: false,
+      error: 'The same integration call already ran in this turn.',
+    });
+    expect(mocks.callIntegration).toHaveBeenCalledTimes(4);
+  });
+
+  it('deduplicates concurrent identical read calls while allowing a later refresh', async () => {
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'service',
+        name: 'Service',
+        description: 'Read service',
+        tools: [{ name: 'read_state', annotations: { readOnlyHint: true } }],
+      },
+    ]);
+    mocks.callIntegration.mockResolvedValue({ value: 'current' });
+    const results: unknown[] = [];
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'Checking the service.',
+        });
+        results.push(
+          ...(await Promise.all([
+            invokeMcpTool('service', 'read_state', { key: 'status' }),
+            invokeMcpTool('service', 'read_state', { key: 'status' }),
+          ])),
+        );
+        results.push(
+          await invokeMcpTool('service', 'read_state', { key: 'status' }),
+        );
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Checked.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(results).toEqual([
+      { success: true, result: { value: 'current' } },
+      {
+        success: false,
+        error: 'The same integration call already ran in this turn.',
+      },
+      { success: true, result: { value: 'current' } },
+    ]);
+    expect(mocks.callIntegration).toHaveBeenCalledTimes(2);
+  });
+
   it('upserts parent OpenCode task parts as one canonical subagent lifecycle', async () => {
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {

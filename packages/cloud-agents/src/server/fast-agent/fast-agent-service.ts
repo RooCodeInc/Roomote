@@ -780,6 +780,19 @@ function buildIntegrationCallSignature({
   ]);
 }
 
+function isReadOnlyIntegrationTool(
+  integrations: FastAgentIntegration[],
+  integrationId: string,
+  toolName: string,
+): boolean {
+  return (
+    integrations
+      .find((integration) => integration.id === integrationId)
+      ?.tools.find((tool) => tool.name === toolName)?.annotations
+      ?.readOnlyHint === true
+  );
+}
+
 function resolveFastAgentChatLookupProvider(
   args: Record<string, unknown>,
   conversation: FastAgentConversation,
@@ -4320,6 +4333,9 @@ export async function answerFastAgentQuestion({
       let canonicalToolEvent:
         | Awaited<ReturnType<typeof beginCanonicalToolEvent>>
         | undefined;
+      let integrationCallSignature: string | undefined;
+      let readOnlyIntegrationTool = false;
+      let reservedIntegrationCall = false;
       try {
         const closedError = requireOpen();
         if (closedError) return closedError;
@@ -4432,6 +4448,12 @@ export async function answerFastAgentQuestion({
           toolName: call.toolName,
           args: actorScopedIntegrationArguments,
         });
+        integrationCallSignature = signature;
+        readOnlyIntegrationTool = isReadOnlyIntegrationTool(
+          availableIntegrations,
+          call.integrationId,
+          call.toolName,
+        );
         if (integrationCallSignatures.has(signature)) {
           return {
             success: false,
@@ -4439,6 +4461,7 @@ export async function answerFastAgentQuestion({
           };
         }
         integrationCallSignatures.add(signature);
+        reservedIntegrationCall = true;
         throwIfTurnCancelled();
         canonicalToolEvent = await beginCanonicalToolEvent({
           title: call.toolName,
@@ -4497,6 +4520,13 @@ export async function answerFastAgentQuestion({
         }
         return failure;
       } finally {
+        if (
+          reservedIntegrationCall &&
+          readOnlyIntegrationTool &&
+          integrationCallSignature
+        ) {
+          integrationCallSignatures.delete(integrationCallSignature);
+        }
         activeToolExecutions -= 1;
         schedulePendingHumanSteerDrain();
       }

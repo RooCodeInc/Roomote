@@ -7,6 +7,7 @@
  */
 
 import { parseMcpToolResult } from '@roomote/types';
+import type { ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 
 export class McpToolCallError extends Error {
   readonly upstreamText!: string | null;
@@ -56,6 +57,7 @@ export type McpToolDefinition = {
   name: string;
   description?: string;
   inputSchema?: unknown;
+  annotations?: ToolAnnotations;
 };
 
 /** List the tools exposed by a streamable-http MCP server. */
@@ -77,6 +79,9 @@ export async function listMcpTools(options: {
         : {}),
       ...(definition.inputSchema
         ? { inputSchema: definition.inputSchema }
+        : {}),
+      ...(definition.annotations
+        ? { annotations: definition.annotations }
         : {}),
     }));
   } finally {
