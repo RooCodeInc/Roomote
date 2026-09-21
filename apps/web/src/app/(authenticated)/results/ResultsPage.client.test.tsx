@@ -367,6 +367,29 @@ describe('ResultsPage', () => {
     ).toBeNull();
   });
 
+  it('falls back to the loaded list item when the detail fetch rejects', async () => {
+    mocks.get.mockImplementation((input: { id: string }) =>
+      input.id === results[1]!.id
+        ? Promise.reject(new Error('Detail failed'))
+        : Promise.resolve(results[0]),
+    );
+    renderPage();
+    await screen.findByText('Full report');
+    fireEvent.click(
+      screen.getByRole('option', { name: /Simplify the worker/ }),
+    );
+
+    expect(
+      await screen.findByRole('heading', { name: 'Simplify the worker' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getAllByText('Extract the repeated boundary.').length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getByRole('button', { name: 'Start investigation' }),
+    ).toBeInTheDocument();
+  });
+
   it('navigates rows with arrows and activates the current main action with Enter', async () => {
     renderPage();
     await screen.findByText('Full report');

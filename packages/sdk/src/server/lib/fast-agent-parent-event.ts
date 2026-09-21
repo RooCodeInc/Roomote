@@ -2875,6 +2875,10 @@ export async function deliverFastAgentParentEventWithLock(
                   : {}),
                 ...(sourceSession ? { sourceSessionId: sourceSession.id } : {}),
                 content: reply.message,
+                resultKind:
+                  reply.purpose === 'clarification'
+                    ? 'input_request'
+                    : 'outcome',
                 dedupeKey: `fast:${buildFastAutomationSuggestionEventId(reportEvent)}`,
                 visibility: await resolveCustomAutomationResultVisibility(
                   automationId,

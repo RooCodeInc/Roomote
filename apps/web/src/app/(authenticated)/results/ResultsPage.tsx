@@ -224,10 +224,19 @@ export function ResultsPage() {
 
   useEffect(() => {
     const next = detailQuery.data;
-    if (!next || resultKey(next) !== selectedKey) return;
-    setDisplayedResult(next);
-    setShowDetailSkeleton(false);
-  }, [detailQuery.data, selectedKey]);
+    if (next && resultKey(next) === selectedKey) {
+      setDisplayedResult(next);
+      setShowDetailSkeleton(false);
+      return;
+    }
+    // A rejected detail fetch falls back to the already-loaded list item so
+    // the pane never stays on a skeleton or goes blank; recovery retries the
+    // list query, which re-populates the detail cache.
+    if (detailQuery.isError && selectedSummary) {
+      setDisplayedResult(selectedSummary);
+      setShowDetailSkeleton(false);
+    }
+  }, [detailQuery.data, detailQuery.isError, selectedKey, selectedSummary]);
 
   const selectResult = (result: ResultInboxItem) => {
     const key = resultKey(result);
@@ -435,7 +444,7 @@ export function ResultsPage() {
                   className="flex h-full min-h-0 flex-col"
                 >
                   <div className="min-h-0 flex-1 overflow-y-auto">
-                    <div className="mx-auto max-w-3xl px-5 pt-6 md:px-8 md:pt-8">
+                    <div className="mx-auto max-w-3xl px-5 pb-5 pt-6 md:px-8 md:pb-5 md:pt-8">
                       <Button
                         variant="ghost"
                         size="sm"
@@ -484,7 +493,7 @@ export function ResultsPage() {
                       </div>
                     </div>
                     <div aria-hidden="true" className="border-t" />
-                    <div className="mx-auto max-w-3xl px-5 pb-6 pt-6 md:px-8 md:pb-8">
+                    <div className="mx-auto max-w-3xl px-5 pb-6 pt-3 md:px-8 md:pb-8">
                       {showSuggestionComposer &&
                       actionableResult?.kind === 'suggestion' ? (
                         <div className="rounded-xl border bg-card p-4">
@@ -510,7 +519,7 @@ export function ResultsPage() {
                         </div>
                       ) : null}
 
-                      <div className="mt-7 max-w-none pl-10">
+                      <div className="mt-3 max-w-none pl-10">
                         <MessageResponse className="break-words text-sm **:data-[streamdown='heading-1']:text-xl! **:data-[streamdown='heading-2']:text-base! **:data-[streamdown='heading-3']:text-base!">
                           {displayedResult.content}
                         </MessageResponse>
