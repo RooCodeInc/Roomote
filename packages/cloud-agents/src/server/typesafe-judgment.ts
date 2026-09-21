@@ -491,14 +491,26 @@ export function resetDecisionModelCache(): void {
  * Jev backend is approved for high-volume decisions; helper fallback remains
  * ordinary-decision-only regardless of which helper model is configured.
  */
-export async function resolveDecisionModel(): Promise<DecisionModelResolution> {
+export async function resolveDecisionModel(
+  options: {
+    highVolume?: boolean;
+  } = {},
+): Promise<DecisionModelResolution | null> {
   const now = Date.now();
 
   if (cachedDecisionModel && cachedDecisionModel.expiresAt > now) {
-    return cachedDecisionModel.value;
+    return options.highVolume &&
+      !cachedDecisionModel.value.supportsHighVolumeDecisions
+      ? null
+      : cachedDecisionModel.value;
   }
 
   const backend = await resolveJudgmentBackend();
+
+  if (!backend && options.highVolume) {
+    return null;
+  }
+
   const value: DecisionModelResolution = backend
     ? { kind: 'judgment', supportsHighVolumeDecisions: true }
     : await (async () => {
@@ -598,7 +610,13 @@ export async function evaluateDecisionModel<
   userId?: string | null;
   taskId?: string | null;
 }): Promise<TypeSafeAnswers<TQuestions> | null> {
-  const decisionModel = await resolveDecisionModel();
+  const decisionModel = await resolveDecisionModel({
+    highVolume: params.highVolume === true,
+  });
+
+  if (!decisionModel) {
+    return null;
+  }
 
   if (
     params.highVolume === true &&

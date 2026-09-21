@@ -160,23 +160,18 @@ describe('evaluateTypeSafeJudgments', () => {
     );
   });
 
-  it('keeps the helper fallback ineligible for high-volume decisions', async () => {
+  it('short-circuits high-volume decisions before resolving the helper', async () => {
     mockKeys({});
-    mockResolveNonTaskHelperModel.mockResolvedValue({
-      model: 'bedrock-mantle-openai/gpt-5.6-luna',
-      catalogModelId: 'bedrock-mantle/openai.gpt-5.6-luna',
-    });
 
-    await expect(resolveDecisionModel()).resolves.toEqual({
-      kind: 'helper',
-      model: 'bedrock-mantle-openai/gpt-5.6-luna',
-      catalogModelId: 'bedrock-mantle/openai.gpt-5.6-luna',
-      supportsHighVolumeDecisions: false,
-    });
+    await expect(
+      resolveDecisionModel({ highVolume: true }),
+    ).resolves.toBeNull();
+    expect(mockResolveNonTaskHelperModel).not.toHaveBeenCalled();
 
     await expect(
       evaluateDecisionModel({ state: 'hi', questions, highVolume: true }),
     ).resolves.toBeNull();
+    expect(mockResolveNonTaskHelperModel).not.toHaveBeenCalled();
     expect(mockGenerateTrackedNonTaskObject).not.toHaveBeenCalled();
   });
 
@@ -513,6 +508,5 @@ describe('evaluateTypeSafeJudgments', () => {
         candidates: [{ id: 'a', text: 'A' }],
       }),
     ).resolves.toBeNull();
-    expect(mockResolveNonTaskHelperModel).toHaveBeenCalledOnce();
   });
 });
