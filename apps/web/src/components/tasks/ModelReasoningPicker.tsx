@@ -21,7 +21,6 @@ import {
 import {
   BasicTooltip,
   buttonVariants,
-  Check,
   ChevronDown,
   Drawer,
   DrawerContent,
@@ -43,8 +42,12 @@ export type ModelReasoningPickerModel = {
   metadata?: TaskModelMetadata | null;
 };
 
-const ROW_HEIGHT_PX = 32;
+const ROW_HEIGHT_PX = 40;
 const LIST_HEIGHT_PX = ROW_HEIGHT_PX * 6.5;
+const LABEL_HEIGHT_PX = 28;
+const SLIDER_TOP_INSET_PX = 8;
+const SLIDER_BOTTOM_INSET_PX = 16;
+const TYPEAHEAD_IDLE_RESET_MS = 1000;
 
 function supportedEfforts(model: ModelReasoningPickerModel | undefined) {
   if (model?.metadata?.supportsReasoning === false) return [];
@@ -64,6 +67,7 @@ function PickerContent({
   modelDisabled,
   reasoningDisabled,
   supportedReasoningEfforts,
+  onClose,
 }: {
   models: ModelReasoningPickerModel[];
   model: string;
@@ -77,10 +81,12 @@ function PickerContent({
   modelDisabled?: boolean;
   reasoningDisabled?: boolean;
   supportedReasoningEfforts?: readonly ReasoningEffort[];
+  onClose?: () => void;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
   const [canScrollUp, setCanScrollUp] = useState(false);
   const [canScrollDown, setCanScrollDown] = useState(false);
+  const [typeaheadQuery, setTypeaheadQuery] = useState('');
   const effectiveModelId = model || defaultModelId || '';
   const selectedModel = models.find(({ id }) => id === effectiveModelId);
   const efforts = supportedReasoningEfforts ?? supportedEfforts(selectedModel);
@@ -91,6 +97,10 @@ function PickerContent({
       : efforts.find((effort) => effort === defaultReasoningEffort)) ??
     efforts[Math.floor((efforts.length - 1) / 2)];
   const effortIndex = effectiveEffort ? efforts.indexOf(effectiveEffort) : 0;
+
+  const options = emptyModelLabel
+    ? [{ id: '', displayName: emptyModelLabel }, ...models]
+    : models;
 
   const updateScrollBoundaries = () => {
     const list = listRef.current;
@@ -110,14 +120,83 @@ function PickerContent({
     return () => observer.disconnect();
   }, [models.length]);
 
+  // Reset the typeahead buffer after a short idle pause so a later keystroke
+  // starts a fresh prefix instead of continuing a stale one.
+  useEffect(() => {
+    if (!typeaheadQuery) return;
+    const timer = setTimeout(
+      () => setTypeaheadQuery(''),
+      TYPEAHEAD_IDLE_RESET_MS,
+    );
+    return () => clearTimeout(timer);
+  }, [typeaheadQuery]);
+
+  const scrollToModelMatch = (query: string) => {
+    const list = listRef.current;
+    if (!list || !query) return;
+    const matchIndex = options.findIndex(({ displayName }) =>
+      displayName.toLowerCase().startsWith(query),
+    );
+    if (matchIndex < 0) return;
+    const optionButtons =
+      list.querySelectorAll<HTMLButtonElement>('[role="option"]');
+    const match = optionButtons[matchIndex];
+    if (!match) return;
+    match.focus({ preventScroll: true });
+    const targetScroll =
+      match.offsetTop - (list.clientHeight - match.offsetHeight) / 2;
+    list.scrollTop = Math.max(0, targetScroll);
+    updateScrollBoundaries();
+  };
+
+  // The picker surface has no text field; while it is open, printable
+  // keystrokes are captured at the document level and treated as a
+  // typeahead prefix that scrolls the model list to the first match.
+  // Esc keeps its Radix meaning (close without changing the selection),
+  // and Enter closes keeping the current selection, like clicking outside.
+  useEffect(() => {
+    const handleTypeaheadKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.key === 'Escape') {
+        setTypeaheadQuery('');
+        return;
+      }
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        setTypeaheadQuery('');
+        onClose?.();
+        return;
+      }
+      if (event.key === 'Backspace') {
+        event.preventDefault();
+        const next = typeaheadQuery.slice(0, -1);
+        setTypeaheadQuery(next);
+        if (next) scrollToModelMatch(next);
+        return;
+      }
+      if (event.key.length !== 1 || event.key === ' ') return;
+      event.preventDefault();
+      const nextQuery = typeaheadQuery + event.key.toLowerCase();
+      setTypeaheadQuery(nextQuery);
+      scrollToModelMatch(nextQuery);
+    };
+
+    document.addEventListener('keydown', handleTypeaheadKeyDown);
+    return () =>
+      document.removeEventListener('keydown', handleTypeaheadKeyDown);
+  });
+
   const selectModel = (nextModel: string) => {
     onModelChange(nextModel);
-    if (reasoningEffort === null) return;
+    if (disabled || reasoningDisabled) return;
     const nextModelOption = models.find(({ id }) => id === nextModel);
-    const nextEfforts = supportedEfforts(nextModelOption);
-    if (nextEfforts.includes(reasoningEffort)) return;
+    const nextEfforts =
+      supportedReasoningEfforts ?? supportedEfforts(nextModelOption);
     if (nextEfforts.length === 0) {
-      onReasoningEffortChange(null);
+      if (reasoningEffort !== null) onReasoningEffortChange(null);
+      return;
+    }
+    if (reasoningEffort !== null && nextEfforts.includes(reasoningEffort)) {
       return;
     }
     onReasoningEffortChange(
@@ -172,21 +251,17 @@ function PickerContent({
     );
   };
 
-  const options = emptyModelLabel
-    ? [{ id: '', displayName: emptyModelLabel }, ...models]
-    : models;
-
   return (
     <div
-      className="grid grid-cols-[minmax(0,1fr)_6.5rem] gap-3 p-3"
-      style={{ height: LIST_HEIGHT_PX + 24 }}
+      className="grid grid-cols-[minmax(0,1fr)_5.5rem] grid-rows-1 divide-x divide-border overflow-hidden md:grid-cols-[18rem_5.5rem]"
+      style={{ height: LIST_HEIGHT_PX }}
     >
       <div className="relative min-w-0">
         <div
           ref={listRef}
           role="listbox"
           aria-label="Models"
-          className="scroll-thin h-full overflow-y-auto pr-1"
+          className="scroll-thin h-full overflow-y-auto"
           onKeyDown={moveModelFocus}
           onScroll={(_event: UIEvent<HTMLDivElement>) =>
             updateScrollBoundaries()
@@ -203,7 +278,7 @@ function PickerContent({
                 tabIndex={selected ? 0 : -1}
                 disabled={disabled || modelDisabled}
                 className={cn(
-                  'flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm transition-colors motion-reduce:transition-none',
+                  'flex h-10 w-full items-center rounded-md px-3 text-left text-lg transition-colors motion-reduce:transition-none',
                   'hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                   selected && 'bg-accent-bright-foreground text-foreground',
                 )}
@@ -213,12 +288,6 @@ function PickerContent({
                   {option.displayName}
                   {option.isDefault ? ' (Default)' : ''}
                 </span>
-                <Check
-                  className={cn(
-                    'size-4 shrink-0',
-                    selected ? 'opacity-100' : 'opacity-0',
-                  )}
-                />
               </button>
             );
           })}
@@ -236,25 +305,32 @@ function PickerContent({
       </div>
 
       <div
-        className="flex min-w-0 flex-col items-center gap-2"
+        className="flex min-w-0 flex-col items-center gap-0 overflow-hidden px-1"
         onWheel={handleWheel}
       >
         <span
-          className="h-5 text-center text-sm font-medium"
+          className="h-7 pt-2 text-center text-sm font-medium"
           aria-live="polite"
         >
           {effectiveEffort
             ? getReasoningEffortLabel(effectiveEffort)
             : 'No reasoning'}
         </span>
-        <div className="relative min-h-0 flex-1 py-2">
+        <div className="relative min-h-0 flex-1">
           {efforts.map((effort, index) => (
             <span
               key={effort}
               aria-hidden="true"
               className="pointer-events-none absolute left-1/2 z-10 h-0.5 w-4 -translate-x-1/2 rounded-full bg-background/70"
               style={{
-                bottom: `${8 + (index / Math.max(1, efforts.length - 1)) * (100 - 16)}%`,
+                bottom: `${
+                  SLIDER_BOTTOM_INSET_PX +
+                  (index / Math.max(1, efforts.length - 1)) *
+                    (LIST_HEIGHT_PX -
+                      LABEL_HEIGHT_PX -
+                      SLIDER_TOP_INSET_PX -
+                      SLIDER_BOTTOM_INSET_PX)
+                }px`,
               }}
             />
           ))}
@@ -271,7 +347,7 @@ function PickerContent({
                 ? getReasoningEffortLabel(effectiveEffort)
                 : 'No reasoning'
             }
-            className="h-full min-h-0 py-1 data-[disabled]:opacity-70 [&_[data-slot=slider-track]]:w-8 [&_[data-slot=slider-track]]:border [&_[data-slot=slider-track]]:border-input [&_[data-slot=slider-track]]:bg-input [&_[data-slot=slider-range]]:bg-accent-foreground [&_[data-slot=slider-thumb]]:size-7 [&_[data-slot=slider-thumb]]:border-2 [&_[data-slot=slider-thumb]]:border-accent-foreground [&_[data-slot=slider-thumb]]:transition-transform motion-reduce:[&_[data-slot=slider-thumb]]:transition-none"
+            className="h-full min-h-0 pt-2 pb-4 data-[disabled]:opacity-70 [&_[data-slot=slider-track]]:w-8 [&_[data-slot=slider-track]]:border [&_[data-slot=slider-track]]:border-input [&_[data-slot=slider-track]]:bg-input [&_[data-slot=slider-range]]:bg-accent-foreground [&_[data-slot=slider-thumb]]:size-7 [&_[data-slot=slider-thumb]]:border-2 [&_[data-slot=slider-thumb]]:border-accent-foreground [&_[data-slot=slider-thumb]]:transition-transform motion-reduce:[&_[data-slot=slider-thumb]]:transition-none"
             onValueChange={([index]) => setEffortIndex(index ?? 0)}
           />
         </div>
@@ -305,7 +381,10 @@ export function ModelReasoningPicker({
           <DrawerDescription className="sr-only">
             Changes apply immediately. Swipe down or tap outside to dismiss.
           </DrawerDescription>
-          <PickerContent {...contentProps} />
+          <PickerContent
+            {...contentProps}
+            onClose={() => onOpenChange(false)}
+          />
         </DrawerContent>
       </Drawer>
     );
@@ -320,9 +399,13 @@ export function ModelReasoningPicker({
         side="top"
         align="start"
         sideOffset={6}
-        className="w-[30rem] overflow-hidden p-0"
+        className="relative w-[23.5rem] overflow-visible p-0"
       >
-        <PickerContent {...contentProps} />
+        <PickerContent {...contentProps} onClose={() => onOpenChange(false)} />
+        <span
+          aria-hidden="true"
+          className="absolute -bottom-1 left-5 size-2 rotate-45 border-b border-r border-border bg-popover"
+        />
       </PopoverContent>
     </Popover>
   );

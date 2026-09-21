@@ -69,7 +69,7 @@ export function SessionModelSwitcher({
       defaultModelId={effectiveDefaultModelId}
       emptyModelLabel={
         effectiveDefaultModelId
-          ? `Default (${displayModelName(effectiveDefaultModelId)})`
+          ? `${displayModelName(effectiveDefaultModelId)} (Default)`
           : 'Deployment default'
       }
       onModelChange={onModelChange}

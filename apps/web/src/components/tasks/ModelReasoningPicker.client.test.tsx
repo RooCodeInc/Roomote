@@ -52,10 +52,14 @@ const models: ModelReasoningPickerModel[] = [
   },
 ];
 
-function Harness() {
+function Harness({
+  initialEffort = 'low' as ReasoningEffort | null,
+}: {
+  initialEffort?: ReasoningEffort | null;
+}) {
   const [open, setOpen] = useState(false);
   const [model, setModel] = useState('provider/alpha');
-  const [effort, setEffort] = useState<ReasoningEffort | null>('low');
+  const [effort, setEffort] = useState<ReasoningEffort | null>(initialEffort);
 
   return (
     <>
@@ -135,6 +139,61 @@ describe('ModelReasoningPicker', () => {
     ).toHaveAttribute('data-disabled');
     expect(screen.getByTestId('selection')).toHaveTextContent(
       'provider/plain:default',
+    );
+  });
+
+  it('persists the effective supported effort when switching from a no-override state', () => {
+    render(<Harness initialEffort={null} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Choose model' }));
+
+    // No-override (null) plus a restricted model: the picker emits the
+    // effective allowed effort instead of leaving the launch unspecified.
+    fireEvent.click(screen.getByRole('option', { name: 'Beta' }));
+    expect(screen.getByTestId('selection')).toHaveTextContent(
+      'provider/beta:medium',
+    );
+
+    // A model without reasoning support keeps the no-override state.
+    fireEvent.click(screen.getByRole('option', { name: 'Plain' }));
+    expect(screen.getByTestId('selection')).toHaveTextContent(
+      'provider/plain:default',
+    );
+  });
+
+  it('scrolls the model list to typed prefixes and closes on Enter', async () => {
+    render(<Harness />);
+    fireEvent.click(screen.getByRole('button', { name: 'Choose model' }));
+
+    fireEvent.keyDown(document.body, { key: 'b' });
+    expect(screen.getByRole('option', { name: 'Beta' })).toHaveFocus();
+
+    // Backspace empties the buffer; the next keystroke starts a fresh prefix.
+    fireEvent.keyDown(document.body, { key: 'Backspace' });
+    fireEvent.keyDown(document.body, { key: 'a' });
+    expect(screen.getByRole('option', { name: 'Alpha' })).toHaveFocus();
+
+    // Enter closes the picker without changing the selection.
+    fireEvent.keyDown(document.body, { key: 'Enter' });
+    await waitFor(() => {
+      const trigger = document.querySelector('[data-slot="popover-trigger"]');
+      expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    });
+    expect(screen.getByTestId('selection')).toHaveTextContent(
+      'provider/alpha:low',
+    );
+  });
+
+  it('keeps Enter from activating a typeahead-focused option', () => {
+    render(<Harness />);
+    fireEvent.click(screen.getByRole('button', { name: 'Choose model' }));
+
+    fireEvent.keyDown(document.body, { key: 'b' });
+    expect(screen.getByRole('option', { name: 'Beta' })).toHaveFocus();
+    fireEvent.keyDown(document.body, { key: 'Enter' });
+
+    // The focused option was not selected; the current selection stands.
+    expect(screen.getByTestId('selection')).toHaveTextContent(
+      'provider/alpha:low',
     );
   });
 

@@ -95,7 +95,7 @@ describe('SessionModelSwitcher', () => {
       screen.getByRole('button', { name: 'Model for this session' }),
     ).toHaveTextContent('Claude Sonnet 5High');
     expect(screen.getByTestId('model-default-option')).toHaveTextContent(
-      'Default (Claude Sonnet 5)',
+      'Claude Sonnet 5 (Default)',
     );
     expect(screen.getByTestId('reasoning-default')).toHaveTextContent('high');
   });
@@ -142,7 +142,7 @@ describe('SessionModelSwitcher', () => {
       screen.getByRole('button', { name: 'Model for this session' }),
     ).toHaveTextContent('GPT 5.6Low');
     expect(screen.getByTestId('model-default-option')).toHaveTextContent(
-      'Default (GPT 5.6)',
+      'GPT 5.6 (Default)',
     );
     expect(screen.getByTestId('reasoning-default')).toHaveTextContent('medium');
   });

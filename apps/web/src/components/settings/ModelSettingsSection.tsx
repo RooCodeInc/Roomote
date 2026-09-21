@@ -318,7 +318,6 @@ function TaskModelRoleEditor({
             DEFAULT_MODEL_ROLE_REASONING_EFFORTS[config.role]
           }
           onReasoningEffortChange={onReasoningChange}
-          supportedReasoningEfforts={supportsReasoning ? undefined : []}
           modelDisabled={managedByEnv}
           reasoningDisabled={reasoningManagedByEnv}
         />
@@ -1024,12 +1023,16 @@ export function ModelSettingsSection({
   );
 
   const codingModelOptions = useMemo<EditableRuntimeModelOption[]>(() => {
+    const metadataById = new Map(
+      models.map((model) => [model.id, model.metadata ?? null]),
+    );
     const enabledOptions = models
       .filter((model) => enabledModelSet.has(model.id))
       .map((model) => ({
         id: model.id,
         displayName: model.displayName,
         family: model.family,
+        metadata: model.metadata ?? null,
       }));
     const codingStatus = settingsData?.runtimeModels.codingModel;
 
@@ -1045,6 +1048,7 @@ export function ModelSettingsSection({
         {
           id: codingStatus.effectiveModelId,
           displayName: codingStatus.effectiveModelId,
+          metadata: metadataById.get(codingStatus.effectiveModelId) ?? null,
         },
       ];
     }
@@ -1052,12 +1056,16 @@ export function ModelSettingsSection({
     return enabledOptions;
   }, [enabledModelSet, models, settingsData]);
   const helperModelOptions = useMemo<EditableRuntimeModelOption[]>(() => {
+    const metadataById = new Map(
+      models.map((model) => [model.id, model.metadata ?? null]),
+    );
     const options: EditableRuntimeModelOption[] = (
       settingsData?.helperModelOptions ?? []
     ).map((option) => ({
       id: option.id,
       displayName: option.displayName,
       family: option.family,
+      metadata: metadataById.get(option.id) ?? null,
     }));
     const appendEffectiveModel = (
       effectiveModelId: string | null | undefined,
@@ -1085,7 +1093,7 @@ export function ModelSettingsSection({
     }
 
     return options;
-  }, [settingsData]);
+  }, [models, settingsData]);
   const groupOptions = useMemo(
     () => ({
       chatgptConnected,
@@ -1309,18 +1317,22 @@ export function ModelSettingsSection({
   };
 
   const updateRoleModel = (role: TaskModelRole, modelId: string | null) => {
+    // Derive from the authoritative draft ref: the picker can emit a model
+    // change and a reasoning change in the same event, and rebuilding from
+    // the render-scoped roleDrafts would clobber the earlier update.
+    const currentRoles = draftStateRef.current.roles;
     const resolvedModelId =
-      role === 'coding' ? modelId : (modelId ?? roleDrafts.coding.modelId);
+      role === 'coding' ? modelId : (modelId ?? currentRoles.coding.modelId);
 
     applyDraftUpdates(
       {
         roles: {
-          ...roleDrafts,
+          ...currentRoles,
           [role]: {
-            ...roleDrafts[role],
+            ...currentRoles[role],
             modelId,
             reasoningEffort: modelSupportsReasoning(resolvedModelId)
-              ? roleDrafts[role].reasoningEffort
+              ? currentRoles[role].reasoningEffort
               : null,
           },
         },
@@ -1333,12 +1345,14 @@ export function ModelSettingsSection({
     role: TaskModelRole,
     reasoningEffort: ReasoningEffort | null,
   ) => {
+    const currentRoles = draftStateRef.current.roles;
+
     applyDraftUpdates(
       {
         roles: {
-          ...roleDrafts,
+          ...currentRoles,
           [role]: {
-            ...roleDrafts[role],
+            ...currentRoles[role],
             reasoningEffort,
           },
         },
