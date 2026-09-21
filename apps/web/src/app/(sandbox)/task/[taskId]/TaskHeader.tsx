@@ -8,6 +8,7 @@ import {
   PullRequestBadge,
   WorkspaceBadge,
 } from '@/components/sandbox';
+import { PrivateSessionIcon } from '@/components/sessions/PrivateSessionIcon';
 import { TaskRobotIcon } from '@/components/tasks/TaskRobotIcon';
 import { cn } from '@/lib/utils';
 
@@ -72,6 +73,7 @@ export function TaskHeaderContent({
 
 export function TaskHeaderMetadata({
   model,
+  privacy,
   environmentId,
   repo,
   pullRequests = [],
@@ -80,6 +82,7 @@ export function TaskHeaderMetadata({
   className,
 }: {
   model?: string | null;
+  privacy?: 'shared' | 'private';
   environmentId?: string;
   repo?: string;
   pullRequests?: Array<{
@@ -97,7 +100,8 @@ export function TaskHeaderMetadata({
     repo !== NO_REPOSITORIES &&
     Boolean(environmentId || repo);
 
-  if (!model && !hasWorkspace && !hasPullRequest) return null;
+  if (!model && privacy !== 'private' && !hasWorkspace && !hasPullRequest)
+    return null;
 
   return (
     <div
@@ -106,13 +110,18 @@ export function TaskHeaderMetadata({
         className,
       )}
     >
-      {model ? (
-        <ModelBadge
-          model={model}
-          displayName={getTaskModelDisplayName(model)}
-          showIcon={false}
-          iconClassName="text-muted-foreground"
-        />
+      {model || privacy === 'private' ? (
+        <span className="inline-flex items-center gap-1.5">
+          {model ? (
+            <ModelBadge
+              model={model}
+              displayName={getTaskModelDisplayName(model)}
+              showIcon={false}
+              iconClassName="text-muted-foreground"
+            />
+          ) : null}
+          {privacy === 'private' ? <PrivateSessionIcon /> : null}
+        </span>
       ) : null}
       {hasWorkspace ? (
         <WorkspaceBadge

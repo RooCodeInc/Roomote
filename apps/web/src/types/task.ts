@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { TaskArtifactType } from '@roomote/types';
 import {
+  SESSION_PRIVACY_VALUES,
   TASK_INITIATOR_KINDS,
   TASK_STATES,
   TASK_SURFACES,
@@ -31,6 +32,7 @@ export const taskSchema = z.object({
   attributionKind: z.string().nullable().optional(),
   title: z.string(),
   model: z.string().nullable().optional(),
+  privacy: z.enum(SESSION_PRIVACY_VALUES).optional(),
   modelProvider: z.string().nullable().optional(),
   modelDisplayName: z.string().nullable().optional(),
   mode: z.string().nullable(),
