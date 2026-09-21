@@ -352,6 +352,33 @@ describe('UsersSettings', () => {
     });
   });
 
+  it('explains invalid invite use counts instead of silently changing them', async () => {
+    renderUsersSettings();
+
+    const usesInput = await screen.findByLabelText('Uses');
+    const createButton = screen.getByRole('button', { name: 'Create invite' });
+
+    for (const value of ['', '0', '1001', '1.5']) {
+      fireEvent.change(usesInput, { target: { value } });
+
+      expect(createButton).toBeDisabled();
+      expect(usesInput).toHaveAttribute('aria-invalid', 'true');
+      expect(
+        screen.getByText('Enter a whole number from 1 to 1,000.'),
+      ).toBeInTheDocument();
+    }
+
+    expect(mockCreateInvite).not.toHaveBeenCalled();
+
+    fireEvent.change(usesInput, { target: { value: '12' } });
+
+    expect(createButton).toBeEnabled();
+    expect(usesInput).toHaveAttribute('aria-invalid', 'false');
+    expect(
+      screen.queryByText('Enter a whole number from 1 to 1,000.'),
+    ).not.toBeInTheDocument();
+  });
+
   it('submits the invite creation form', async () => {
     renderUsersSettings();
 
