@@ -505,6 +505,42 @@ describe('MCP session routes', () => {
     expect(body.messages[1]?.text).toBe('Same timestamp, later sequence');
     expect(body.messages[2]?.text).toBe('Older message');
 
+    const firstPageResponse = await createApp(owner.id).request(
+      `/sessions/${session.id}/messages?limit=2`,
+    );
+    const firstPage = (await firstPageResponse.json()) as {
+      messages: Array<{ id: string; text: string | null }>;
+      hasMore: boolean;
+      nextCursor: string | null;
+    };
+    expect(firstPageResponse.status).toBe(200);
+    expect(firstPage.messages).toHaveLength(2);
+    expect(firstPage.hasMore).toBe(true);
+    expect(firstPage.nextCursor).toEqual(expect.any(String));
+
+    const secondPageResponse = await createApp(owner.id).request(
+      `/sessions/${session.id}/messages?limit=2&cursor=${encodeURIComponent(firstPage.nextCursor!)}`,
+    );
+    const secondPage = (await secondPageResponse.json()) as {
+      messages: Array<{ id: string; text: string | null }>;
+      hasMore: boolean;
+      nextCursor: string | null;
+      coverage: { complete: boolean };
+    };
+    expect(secondPageResponse.status).toBe(200);
+    expect(secondPage.messages).toHaveLength(1);
+    expect(secondPage.messages[0]?.text).toBe('Older message');
+    expect(secondPage.hasMore).toBe(false);
+    expect(secondPage.nextCursor).toBeNull();
+    expect(secondPage.coverage.complete).toBe(true);
+    expect(
+      new Set(
+        [...firstPage.messages, ...secondPage.messages].map(
+          (message) => message.id,
+        ),
+      ).size,
+    ).toBe(3);
+
     const updatesResponse = await createApp(owner.id).request(
       `/sessions/${session.id}/updates`,
     );

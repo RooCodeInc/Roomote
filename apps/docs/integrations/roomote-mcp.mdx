@@ -36,6 +36,15 @@ results, hidden reasoning, and transcript metadata are excluded. Reusing the
 cursor after no new activity returns an empty narrative delta rather than the
 same messages again; full transcript reads remain available for debugging.
 
+`get_messages` reads task or Session history in bounded pages, newest first.
+Pass `limit` for the page size, then reuse `nextCursor` while `hasMore` is true.
+The response reports `coverage.complete`, the covered oldest and newest event
+timestamps, and `truncated`; stop when coverage is complete instead of asking
+for an oversized transcript. A cursor keeps the read anchored to one history
+snapshot, while `hasNewer` indicates that new events arrived after paging
+began. Access checks still apply to every page and cursors cannot be reused for
+another task or Session.
+
 When relaying between Codex and Roomote, summarize substantive messages with
 the labels `Codex → Roomote` and `Roomote → Codex`. Relay questions or input
 needs promptly, skip narration for unchanged polls, and make the final answer

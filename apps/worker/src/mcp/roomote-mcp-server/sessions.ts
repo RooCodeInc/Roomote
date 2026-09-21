@@ -47,12 +47,17 @@ export async function handleGetSessionSummary(
 }
 
 export async function handleGetSessionMessages(
-  params: { sessionId: string; limit?: number },
+  params: { sessionId: string; limit?: number; cursor?: string },
   config: RoomoteConfig,
 ): Promise<ToolResult> {
   try {
     return jsonResult(
-      await getSessionMessages(config, params.sessionId, params.limit),
+      await getSessionMessages(
+        config,
+        params.sessionId,
+        params.limit,
+        params.cursor,
+      ),
     );
   } catch (error) {
     return catchError(error);

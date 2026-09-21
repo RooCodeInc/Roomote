@@ -60,7 +60,7 @@ describe('session API', () => {
       limit: 10,
     });
     await getSessionSummary(config, 'session-1');
-    await getSessionMessages(config, 'session-1', 25);
+    await getSessionMessages(config, 'session-1', 25, 'session-history-cursor');
     await sendMessageToSession(config, 'session-1', 'Continue');
 
     expect(fetch).toHaveBeenNthCalledWith(
@@ -83,7 +83,7 @@ describe('session API', () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       4,
-      'https://test-api.example.com/api/mcp/sessions/session-1/messages?limit=25',
+      'https://test-api.example.com/api/mcp/sessions/session-1/messages?limit=25&cursor=session-history-cursor',
       expect.any(Object),
     );
     expect(fetch).toHaveBeenNthCalledWith(
@@ -496,6 +496,7 @@ describe('getTaskMessages', () => {
     const result = await getTaskMessages(config, 'task-1', {
       limit: 5,
       order: 'desc',
+      cursor: 'history-cursor',
     });
 
     expect(result.returned).toBe(1);
@@ -503,6 +504,7 @@ describe('getTaskMessages', () => {
     expect(fetchCall?.[0]).toContain('/api/mcp/tasks/task-1/messages');
     expect(fetchCall?.[0]).toContain('limit=5');
     expect(fetchCall?.[0]).toContain('order=desc');
+    expect(fetchCall?.[0]).toContain('cursor=history-cursor');
   });
 
   it('should throw on non-ok response', async () => {

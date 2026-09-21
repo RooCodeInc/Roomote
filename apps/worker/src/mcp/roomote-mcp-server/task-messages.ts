@@ -1,5 +1,5 @@
 import { getTaskMessages } from './tasks-api-client.js';
-import { textResult, catchError } from './tool-result.js';
+import { catchError } from './tool-result.js';
 import type { RoomoteConfig, ToolResult } from './types.js';
 
 const MESSAGE_TEXT_LIMIT = 500;
@@ -40,21 +40,17 @@ function getMessageRole(message: {
 }
 
 export async function handleGetTaskMessages(
-  params: { taskId: string; limit?: number },
+  params: { taskId: string; limit?: number; cursor?: string },
   config: RoomoteConfig,
 ): Promise<ToolResult> {
   try {
     const result = await getTaskMessages(config, params.taskId, {
       limit: params.limit,
       order: 'desc',
+      cursor: params.cursor,
     });
 
     const messages = result.messages;
-
-    if (messages.length === 0) {
-      return textResult('No messages found for this task.');
-    }
-
     const lines = messages.map((m) => {
       const role = getMessageRole(m);
       const label = m.eventType;
@@ -67,11 +63,39 @@ export async function handleGetTaskMessages(
       return `${prefix}\n${text}`;
     });
 
-    const header = params.limit
-      ? `Latest ${messages.length} message(s) for task ${params.taskId}:`
-      : `${messages.length} message(s) for task ${params.taskId}:`;
+    const header = params.cursor
+      ? `History page with ${messages.length} message(s) for task ${params.taskId}:`
+      : params.limit
+        ? `Latest ${messages.length} message(s) for task ${params.taskId}:`
+        : `${messages.length} message(s) for task ${params.taskId}:`;
+    const footer = result.hasMore
+      ? [
+          `History page truncated: ${result.truncated}.`,
+          `More history is available; call get_messages with cursor: ${result.nextCursor}`,
+        ]
+      : [
+          `History coverage complete: true${result.truncated ? ' (page content was truncated).' : '.'}`,
+        ];
+    if (result.hasNewer) {
+      footer.push(
+        'Newer messages arrived after this history snapshot; restart without a cursor to include them.',
+      );
+    }
 
-    return textResult([header, '', ...lines].join('\n\n'));
+    return {
+      structuredContent: { ...result },
+      content: [
+        {
+          type: 'text',
+          text: [
+            messages.length === 0 ? 'No messages found for this task.' : header,
+            ...(messages.length > 0 ? ['', ...lines] : []),
+            '',
+            ...footer,
+          ].join('\n\n'),
+        },
+      ],
+    };
   } catch (error) {
     return catchError(error);
   }

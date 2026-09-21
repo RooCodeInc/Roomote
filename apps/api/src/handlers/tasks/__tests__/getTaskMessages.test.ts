@@ -14,15 +14,22 @@ const {
   ascMock,
   descMock,
   eqMock,
+  inArrayMock,
   mockGetImageUrisFromContentBlocks,
   mockGetFastSessionMessagesForUser,
   mockGetTextFromContentBlocks,
   mockLogHandlerError,
   mockResolveAcpTranscriptVisibility,
   mockSelect,
+  snapshotSelectFromMock,
+  snapshotSelectLimitMock,
+  snapshotSelectOrderByMock,
+  snapshotSelectWhereMock,
   selectFromMock,
   selectOrderByMock,
+  selectLimitMock,
   selectWhereMock,
+  sqlMock,
   taskSelectFromMock,
   taskSelectLimitMock,
   taskSelectWhereMock,
@@ -32,6 +39,7 @@ const {
   ascMock: vi.fn((value) => ({ type: 'asc', value })),
   descMock: vi.fn((value) => ({ type: 'desc', value })),
   eqMock: vi.fn((...args) => ({ type: 'eq', args })),
+  inArrayMock: vi.fn((...args) => ({ type: 'inArray', args })),
   mockGetImageUrisFromContentBlocks: vi.fn(() => [
     'https://example.com/image.png',
   ]),
@@ -40,9 +48,15 @@ const {
   mockLogHandlerError: vi.fn(),
   mockResolveAcpTranscriptVisibility: vi.fn(() => true),
   mockSelect: vi.fn(),
+  snapshotSelectFromMock: vi.fn(),
+  snapshotSelectLimitMock: vi.fn(),
+  snapshotSelectOrderByMock: vi.fn(),
+  snapshotSelectWhereMock: vi.fn(),
   selectFromMock: vi.fn(),
   selectOrderByMock: vi.fn(),
+  selectLimitMock: vi.fn(),
   selectWhereMock: vi.fn(),
+  sqlMock: vi.fn(() => ({ type: 'sql' })),
   taskSelectFromMock: vi.fn(),
   taskSelectLimitMock: vi.fn(),
   taskSelectWhereMock: vi.fn(),
@@ -80,6 +94,8 @@ vi.mock('@roomote/db/server', () => ({
   },
   desc: descMock,
   eq: eqMock,
+  inArray: inArrayMock,
+  sql: sqlMock,
   taskMessages: {
     id: 'taskMessages.id',
     taskId: 'taskMessages.taskId',
@@ -139,9 +155,10 @@ describe('getTaskMessages', () => {
     });
     selectWhereMock.mockReturnValue({
       orderBy: selectOrderByMock,
-      limit: taskSelectLimitMock,
+      limit: selectLimitMock,
     });
-    selectOrderByMock.mockResolvedValue([
+    selectOrderByMock.mockReturnValue({ limit: selectLimitMock });
+    selectLimitMock.mockResolvedValue([
       {
         id: 'message-1',
         taskId: 'task-1',
@@ -155,11 +172,29 @@ describe('getTaskMessages', () => {
       },
     ]);
 
+    snapshotSelectFromMock.mockReturnValue({ where: snapshotSelectWhereMock });
+    snapshotSelectWhereMock.mockReturnValue({
+      orderBy: snapshotSelectOrderByMock,
+      limit: snapshotSelectLimitMock,
+    });
+    snapshotSelectOrderByMock.mockReturnValue({
+      limit: snapshotSelectLimitMock,
+    });
+    snapshotSelectLimitMock.mockResolvedValue([
+      {
+        id: 'message-1',
+        createdAt: new Date('2026-04-21T12:00:00Z'),
+      },
+    ]);
+
     mockSelect
       .mockReturnValueOnce({
         from: taskSelectFromMock,
       })
       .mockReturnValueOnce({
+        from: snapshotSelectFromMock,
+      })
+      .mockReturnValue({
         from: selectFromMock,
       });
   });
@@ -196,7 +231,7 @@ describe('getTaskMessages', () => {
   });
 
   it('returns linked subagent identity through the existing transcript serialization', async () => {
-    selectOrderByMock.mockResolvedValueOnce([
+    selectLimitMock.mockResolvedValueOnce([
       {
         id: 'message-child-1',
         taskId: 'task-1',
@@ -252,9 +287,12 @@ describe('getTaskMessages', () => {
     );
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
+    await expect(response.json()).resolves.toMatchObject({
       messages: [],
       returned: 0,
+      hasMore: false,
+      nextCursor: null,
+      coverage: { complete: true },
     });
   });
 
@@ -271,13 +309,22 @@ describe('getTaskMessages', () => {
 
   it('falls back to a Fast session when no task matches', async () => {
     taskSelectLimitMock.mockResolvedValueOnce([]);
-    mockGetFastSessionMessagesForUser.mockResolvedValueOnce([
-      {
-        id: 'fast-message-1',
-        taskId: '00000000-0000-4000-8000-000000000001',
-        text: 'Fast response',
-      },
-    ]);
+    mockGetFastSessionMessagesForUser.mockResolvedValueOnce({
+      messages: [
+        {
+          id: 'fast-message-1',
+          taskId: '00000000-0000-4000-8000-000000000001',
+          text: 'Fast response',
+        },
+      ],
+      returned: 1,
+      order: 'asc',
+      hasMore: false,
+      nextCursor: null,
+      truncated: false,
+      hasNewer: false,
+      coverage: { complete: true, newestTs: 1, oldestTs: 1 },
+    });
 
     const response = await createApp(authContext).request(
       'http://localhost/tasks/00000000-0000-4000-8000-000000000001/messages',
@@ -296,14 +343,28 @@ describe('getTaskMessages', () => {
     expect(mockGetFastSessionMessagesForUser).toHaveBeenCalledWith({
       sessionId: '00000000-0000-4000-8000-000000000001',
       userId: 'user-1',
-      limit: undefined,
+      limit: 100,
       order: 'asc',
+      cursor: undefined,
+      target: {
+        kind: 'task',
+        id: '00000000-0000-4000-8000-000000000001',
+      },
     });
   });
 
   it('forwards explicit descending order to Fast session fallback', async () => {
     taskSelectLimitMock.mockResolvedValueOnce([]);
-    mockGetFastSessionMessagesForUser.mockResolvedValueOnce([]);
+    mockGetFastSessionMessagesForUser.mockResolvedValueOnce({
+      messages: [],
+      returned: 0,
+      order: 'desc',
+      hasMore: false,
+      nextCursor: null,
+      truncated: false,
+      hasNewer: false,
+      coverage: { complete: true, newestTs: null, oldestTs: null },
+    });
 
     const response = await createApp(authContext).request(
       'http://localhost/tasks/00000000-0000-4000-8000-000000000001/messages?order=desc',
@@ -313,8 +374,13 @@ describe('getTaskMessages', () => {
     expect(mockGetFastSessionMessagesForUser).toHaveBeenCalledWith({
       sessionId: '00000000-0000-4000-8000-000000000001',
       userId: 'user-1',
-      limit: undefined,
+      limit: 100,
       order: 'desc',
+      cursor: undefined,
+      target: {
+        kind: 'task',
+        id: '00000000-0000-4000-8000-000000000001',
+      },
     });
   });
 });

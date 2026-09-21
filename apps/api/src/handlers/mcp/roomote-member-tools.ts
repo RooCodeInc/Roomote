@@ -157,6 +157,7 @@ export function registerRoomoteMemberTools(
             if (params.action === 'get_messages') {
               query.set('order', 'desc');
               if (params.limit) query.set('limit', String(params.limit));
+              if (params.cursor) query.set('cursor', params.cursor);
             } else if (params.action === 'get_updates') {
               if (params.limit) query.set('limit', String(params.limit));
               if (params.cursor) query.set('cursor', params.cursor);
@@ -179,6 +180,7 @@ export function registerRoomoteMemberTools(
           if (params.action === 'get_messages') {
             query.set('order', 'desc');
             if (params.limit) query.set('limit', String(params.limit));
+            if (params.cursor) query.set('cursor', params.cursor);
           } else if (params.action === 'get_updates') {
             if (params.limit) query.set('limit', String(params.limit));
             if (params.cursor) query.set('cursor', params.cursor);

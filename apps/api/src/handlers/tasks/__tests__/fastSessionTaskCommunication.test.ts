@@ -206,6 +206,265 @@ describe('Fast session communication through task routes', () => {
     });
   });
 
+  it('walks stable backward pages across replayed and equal-timestamp events', async () => {
+    const owner = await userFactory.create();
+    const task = await taskFactory.create({ initiatorUserId: owner.id });
+    const run = await runFactory.create({
+      taskId: task.id,
+      actingUserId: owner.id,
+    });
+    const createdAt = new Date('2026-04-21T12:00:00.000Z');
+    await db.insert(taskMessages).values([
+      {
+        runId: run.id,
+        taskId: task.id,
+        ts: 20,
+        eventType: 'roomote_runtime.assistant_text',
+        protocol: 'roomote_runtime',
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: 'latest' }],
+        metadata: {},
+        payload: {},
+        createdAt,
+      },
+      {
+        runId: run.id,
+        taskId: task.id,
+        ts: 10,
+        eventType: 'roomote_runtime.user_prompt',
+        protocol: 'roomote_runtime',
+        role: 'user',
+        contentBlocks: [{ type: 'text', text: 'replayed prompt' }],
+        metadata: {},
+        payload: {},
+        createdAt,
+      },
+      {
+        runId: run.id,
+        taskId: task.id,
+        ts: 10,
+        eventType: 'roomote_runtime.plan',
+        protocol: 'roomote_runtime',
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: 'replayed plan' }],
+        metadata: {},
+        payload: {},
+        createdAt,
+      },
+      {
+        runId: run.id,
+        taskId: task.id,
+        ts: 1,
+        eventType: 'roomote_runtime.system_notice',
+        protocol: 'roomote_runtime',
+        role: 'system',
+        contentBlocks: [{ type: 'text', text: 'older resumed run' }],
+        metadata: {},
+        payload: {},
+        createdAt,
+      },
+    ]);
+
+    const firstResponse = await createApp(userAuth(owner.id)).request(
+      `/tasks/${task.id}/messages?limit=2&order=desc`,
+    );
+    const first = (await firstResponse.json()) as {
+      messages: Array<{ id: string; text: string | null }>;
+      hasMore: boolean;
+      nextCursor: string | null;
+      coverage: { complete: boolean };
+    };
+    expect(firstResponse.status).toBe(200);
+    expect(first.messages.map((message) => message.text)).toContain('latest');
+    expect(first.messages).toHaveLength(2);
+    expect(first.hasMore).toBe(true);
+    expect(first.coverage.complete).toBe(false);
+    expect(first.nextCursor).toEqual(expect.any(String));
+
+    const secondResponse = await createApp(userAuth(owner.id)).request(
+      `/tasks/${task.id}/messages?limit=2&order=desc&cursor=${encodeURIComponent(first.nextCursor!)}`,
+    );
+    const second = (await secondResponse.json()) as {
+      messages: Array<{ id: string; text: string | null }>;
+      hasMore: boolean;
+      nextCursor: string | null;
+      coverage: { complete: boolean };
+    };
+    expect(secondResponse.status).toBe(200);
+    expect(second.messages.map((message) => message.text)).toContain(
+      'older resumed run',
+    );
+    expect(second.messages).toHaveLength(2);
+    expect(second.hasMore).toBe(false);
+    expect(second.nextCursor).toBeNull();
+    expect(second.coverage.complete).toBe(true);
+    expect(
+      new Set(
+        [...first.messages, ...second.messages].map((message) => message.id),
+      ).size,
+    ).toBe(4);
+    expect(
+      new Set(
+        [...first.messages, ...second.messages].map((message) => message.text),
+      ),
+    ).toEqual(
+      new Set([
+        'latest',
+        'replayed prompt',
+        'replayed plan',
+        'older resumed run',
+      ]),
+    );
+  });
+
+  it('freezes a paging snapshot and reports concurrent arrivals', async () => {
+    const owner = await userFactory.create();
+    const task = await taskFactory.create({ initiatorUserId: owner.id });
+    const run = await runFactory.create({
+      taskId: task.id,
+      actingUserId: owner.id,
+    });
+    await db.insert(taskMessages).values([
+      {
+        runId: run.id,
+        taskId: task.id,
+        ts: 3,
+        eventType: 'roomote_runtime.assistant_text',
+        protocol: 'roomote_runtime',
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: 'newest before page one' }],
+        metadata: {},
+        payload: {},
+        createdAt: new Date('2026-04-21T12:00:03.000Z'),
+      },
+      {
+        runId: run.id,
+        taskId: task.id,
+        ts: 2,
+        eventType: 'roomote_runtime.user_prompt',
+        protocol: 'roomote_runtime',
+        role: 'user',
+        contentBlocks: [{ type: 'text', text: 'older before page one' }],
+        metadata: {},
+        payload: {},
+        createdAt: new Date('2026-04-21T12:00:02.000Z'),
+      },
+    ]);
+
+    const first = (await (
+      await createApp(userAuth(owner.id)).request(
+        `/tasks/${task.id}/messages?limit=1&order=desc`,
+      )
+    ).json()) as { nextCursor: string };
+
+    await db.insert(taskMessages).values({
+      runId: run.id,
+      taskId: task.id,
+      ts: 4,
+      eventType: 'roomote_runtime.tool_result',
+      protocol: 'roomote_runtime',
+      role: 'tool',
+      contentBlocks: [{ type: 'text', text: 'arrived after page one' }],
+      metadata: {},
+      payload: {},
+      createdAt: new Date('2026-04-21T12:00:04.000Z'),
+    });
+
+    const secondResponse = await createApp(userAuth(owner.id)).request(
+      `/tasks/${task.id}/messages?limit=1&order=desc&cursor=${encodeURIComponent(first.nextCursor)}`,
+    );
+    await expect(secondResponse.json()).resolves.toMatchObject({
+      messages: [{ text: 'older before page one' }],
+      hasMore: false,
+      hasNewer: true,
+      coverage: { complete: true },
+    });
+  });
+
+  it('caps oversized transcript pages and supplies a continuation cursor', async () => {
+    const owner = await userFactory.create();
+    const task = await taskFactory.create({ initiatorUserId: owner.id });
+    const run = await runFactory.create({
+      taskId: task.id,
+      actingUserId: owner.id,
+    });
+    const text = 'x'.repeat(20_000);
+    await db.insert(taskMessages).values(
+      Array.from({ length: 30 }, (_, index) => ({
+        runId: run.id,
+        taskId: task.id,
+        ts: index + 1,
+        eventType: `roomote_runtime.replay_${index}` as const,
+        protocol: 'roomote_runtime' as const,
+        role: 'assistant' as const,
+        contentBlocks: [{ type: 'text' as const, text }],
+        metadata: {},
+        payload: {},
+        createdAt: new Date(
+          `2026-04-21T12:00:${String(index).padStart(2, '0')}.000Z`,
+        ),
+      })),
+    );
+
+    const response = await createApp(userAuth(owner.id)).request(
+      `/tasks/${task.id}/messages?limit=100&order=desc`,
+    );
+    const body = (await response.json()) as {
+      messages: Array<{ text: string | null }>;
+      returned: number;
+      hasMore: boolean;
+      truncated: boolean;
+      nextCursor: string | null;
+    };
+    expect(response.status).toBe(200);
+    expect(body.returned).toBeLessThan(30);
+    expect(body.hasMore).toBe(true);
+    expect(body.truncated).toBe(true);
+    expect(body.nextCursor).toEqual(expect.any(String));
+    expect(Buffer.byteLength(JSON.stringify(body), 'utf8')).toBeLessThan(
+      300_000,
+    );
+    expect(
+      body.messages.every((message) => (message.text?.length ?? 0) <= 20_003),
+    ).toBe(true);
+  });
+
+  it('rejects oversized or cross-task cursors after task authorization', async () => {
+    const owner = await userFactory.create();
+    const firstTask = await taskFactory.create({ initiatorUserId: owner.id });
+    const secondTask = await taskFactory.create({ initiatorUserId: owner.id });
+    const run = await runFactory.create({
+      taskId: firstTask.id,
+      actingUserId: owner.id,
+    });
+    await db.insert(taskMessages).values({
+      runId: run.id,
+      taskId: firstTask.id,
+      ts: 1,
+      eventType: 'roomote_runtime.assistant_text',
+      protocol: 'roomote_runtime',
+      role: 'assistant',
+      contentBlocks: [{ type: 'text', text: 'cursor source' }],
+      metadata: {},
+      payload: {},
+    });
+    const first = (await (
+      await createApp(userAuth(owner.id)).request(
+        `/tasks/${firstTask.id}/messages?limit=1&order=desc`,
+      )
+    ).json()) as { nextCursor: string };
+
+    const crossTask = await createApp(userAuth(owner.id)).request(
+      `/tasks/${secondTask.id}/messages?cursor=${encodeURIComponent(first.nextCursor)}`,
+    );
+    expect(crossTask.status).toBe(400);
+
+    const oversized = await createApp(userAuth(owner.id)).request(
+      `/tasks/${firstTask.id}/messages?cursor=${'a'.repeat(4097)}`,
+    );
+    expect(oversized.status).toBe(400);
+  });
+
   it('shares Fast sessions with bystanders but rejects absent or invalid IDs', async () => {
     const owner = await userFactory.create();
     const bystander = await userFactory.create();

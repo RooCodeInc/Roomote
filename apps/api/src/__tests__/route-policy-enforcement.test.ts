@@ -645,7 +645,13 @@ describe('route policy enforcement', () => {
             state: { changed: boolean };
           }
         | undefined;
-      expect(Buffer.byteLength(JSON.stringify(legacy))).toBe(202_099);
+      expect(Buffer.byteLength(JSON.stringify(legacy))).toBeLessThan(256_000);
+      expect(legacy.result?.structuredContent).toMatchObject({
+        returned: 3,
+        hasMore: false,
+        truncated: true,
+        coverage: { complete: true },
+      });
       expect(Buffer.byteLength(JSON.stringify(first))).toBe(2_138);
       expect(firstUpdate?.narrative).toEqual([
         expect.objectContaining({
