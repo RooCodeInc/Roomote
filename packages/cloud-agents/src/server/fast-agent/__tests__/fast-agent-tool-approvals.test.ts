@@ -641,9 +641,13 @@ describe('resolveFastAgentToolApprovalSession', () => {
       id: 'unified-session',
       ownerUserId: 'owner-1',
     } as never);
-    expect(await resolveFastAgentToolApprovalSession('conversation')).toEqual({
+    // A participant sent the turn; the owner is still the one who decides.
+    expect(
+      await resolveFastAgentToolApprovalSession('conversation', 'participant'),
+    ).toEqual({
       sessionId: 'unified-session',
       ownerUserId: 'owner-1',
+      deciderUserId: 'owner-1',
     });
     expect(getSessionForFastConversation).toHaveBeenCalledWith(
       expect.anything(),
@@ -653,9 +657,12 @@ describe('resolveFastAgentToolApprovalSession', () => {
 
   it('falls back to the conversation id so an unbound ask fails closed', async () => {
     vi.mocked(getSessionForFastConversation).mockResolvedValueOnce(null);
-    expect(await resolveFastAgentToolApprovalSession('conversation')).toEqual({
+    expect(
+      await resolveFastAgentToolApprovalSession('conversation', 'acting-user'),
+    ).toEqual({
       sessionId: 'conversation',
       ownerUserId: undefined,
+      deciderUserId: 'acting-user',
     });
   });
 });

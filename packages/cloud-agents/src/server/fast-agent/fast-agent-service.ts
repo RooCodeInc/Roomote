@@ -3845,7 +3845,8 @@ export async function answerFastAgentQuestion({
     const {
       sessionId: toolApprovalSessionId,
       ownerUserId: toolApprovalOwnerUserId,
-    } = await resolveFastAgentToolApprovalSession(session.id);
+      deciderUserId: toolApprovalDeciderUserId,
+    } = await resolveFastAgentToolApprovalSession(session.id, userId);
     const toolApprovalRules = await resolveFastAgentToolApprovalRules({
       integrations: availableIntegrations,
       sessionId: toolApprovalSessionId,
@@ -6407,7 +6408,8 @@ export async function answerFastAgentQuestion({
                 const toolApprovalBridge = toolApprovalRules
                   ? createFastAgentToolApprovalBridge({
                       sessionId: toolApprovalSessionId,
-                      userId,
+                      // The Session owner decides, even on a participant's turn.
+                      userId: toolApprovalDeciderUserId,
                       integrations: availableIntegrations,
                       signal: promptSignal,
                       ...(conversation.surface === 'slack' ||

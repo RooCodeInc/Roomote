@@ -321,17 +321,27 @@ export async function resolveFastAgentToolApprovalRules(input: {
  * bound Session there is nowhere for the requester to decide, so the
  * conversation id is returned and the ownership check fails the ask closed.
  *
- * Only the Session owner can decide an approval, so the owner is also whose
- * personal policies apply: a participant's own `ask` policy in someone
- * else's shared Session would pause a call nobody can approve.
+ * Only the Session owner can decide an approval, so approvals are recorded
+ * for the owner even when a participant sent the turn, and the owner is
+ * whose personal policies apply: otherwise a participant's turn in a shared
+ * Session would pause a call nobody can approve. Without a bound owner the
+ * acting user stands in as the decider, and the ownership check fails the
+ * ask closed.
  */
 export async function resolveFastAgentToolApprovalSession(
   fastConversationId: string,
-): Promise<{ sessionId: string; ownerUserId: string | undefined }> {
+  actingUserId: string,
+): Promise<{
+  sessionId: string;
+  ownerUserId: string | undefined;
+  deciderUserId: string;
+}> {
   const session = await getSessionForFastConversation(db, fastConversationId);
+  const ownerUserId = session?.ownerUserId ?? undefined;
   return {
     sessionId: session?.id ?? fastConversationId,
-    ownerUserId: session?.ownerUserId ?? undefined,
+    ownerUserId,
+    deciderUserId: ownerUserId ?? actingUserId,
   };
 }
 
