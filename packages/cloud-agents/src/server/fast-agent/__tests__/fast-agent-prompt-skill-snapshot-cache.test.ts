@@ -175,6 +175,26 @@ describe('FastAgentPromptSkillSnapshotCache', () => {
     expect(load).toHaveBeenCalledTimes(2);
   });
 
+  it('bounds the retry bookkeeping like the snapshots', async () => {
+    const cache = new FastAgentPromptSkillSnapshotCache<Snapshot>({
+      cleanup,
+      maxEntries: 2,
+      now: () => now,
+      retryMs: 5_000,
+    });
+    const load = vi.fn(async (): Promise<Snapshot> => {
+      throw new Error('fetch failed');
+    });
+
+    for (const key of ['a', 'b', 'c']) {
+      await expect(cache.get(key, load)).rejects.toThrow('fetch failed');
+    }
+    // `a` was evicted to make room, so it is fetched again; `c` still waits.
+    await expect(cache.get('a', load)).rejects.toThrow('fetch failed');
+    await expect(cache.get('c', load)).rejects.toThrow('unavailable');
+    expect(load).toHaveBeenCalledTimes(4);
+  });
+
   it('keeps only what retain returns', async () => {
     const cache = new FastAgentPromptSkillSnapshotCache<
       Snapshot & { secret?: string }

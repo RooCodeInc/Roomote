@@ -4,7 +4,7 @@
  * `git fetch`, so without this each turn waits on one fetch per repository
  * and marketplace source before inference can start.
  *
- * A snapshot younger than `freshMs` is returned as is. An older one is still
+ * A snapshot younger than `freshMs` (30 minutes) is returned as is. An older one is still
  * returned, while a single background load replaces it. With nothing cached,
  * the caller waits at most `coldWaitMs` and then gets a rejection, which the
  * skill sources already report as "could not be inspected": the turn proceeds
@@ -18,7 +18,8 @@
  *
  * A load that fails is not repeated for `retryMs`. Without that, a source
  * that fails quickly would be fetched again on every turn, which is the work
- * this cache exists to remove.
+ * this cache exists to remove. That bookkeeping is dropped once it elapses
+ * and is bounded like the snapshots themselves.
  */
 type CacheEntry<TSnapshot> = {
   loadedAt: number;
@@ -40,11 +41,24 @@ type FastAgentPromptSkillSnapshotCacheOptions<TSnapshot> = {
   staleMs?: number;
 };
 
-const DEFAULT_FRESH_MS = 5 * 60_000;
-const DEFAULT_STALE_MS = 60 * 60_000;
+// Skills in a repository change rarely, and neither window ever holds a turn:
+// past `freshMs` a turn still gets the cached listing and only triggers a
+// background refresh. A long stale window keeps a deployment that was idle
+// overnight from paying the cold path on its next turn.
+const DEFAULT_FRESH_MS = 30 * 60_000;
+const DEFAULT_STALE_MS = 24 * 60 * 60_000;
 const DEFAULT_COLD_WAIT_MS = 1_500;
 const DEFAULT_RETRY_MS = 60_000;
 const DEFAULT_MAX_ENTRIES = 128;
+
+/** Maps iterate in insertion order, so the first key is the oldest. */
+function evictOldest(map: Map<string, unknown>, maxEntries: number): void {
+  while (map.size > maxEntries) {
+    const oldest = map.keys().next().value;
+    if (oldest === undefined) return;
+    map.delete(oldest);
+  }
+}
 
 export class FastAgentPromptSkillSnapshotCache<TSnapshot> {
   private readonly cleanup: (snapshot: TSnapshot) => Promise<void>;
@@ -74,7 +88,9 @@ export class FastAgentPromptSkillSnapshotCache<TSnapshot> {
     const entry = this.entries.get(key);
     const age = entry ? this.now() - entry.loadedAt : undefined;
 
-    const backingOff = (this.retryAt.get(key) ?? 0) > this.now();
+    const retryAt = this.retryAt.get(key);
+    const backingOff = retryAt !== undefined && retryAt > this.now();
+    if (retryAt !== undefined && !backingOff) this.retryAt.delete(key);
 
     if (entry && age !== undefined && age < this.staleMs) {
       if (age >= this.freshMs && !backingOff) {
@@ -123,14 +139,12 @@ export class FastAgentPromptSkillSnapshotCache<TSnapshot> {
         this.retryAt.delete(key);
         this.entries.delete(key);
         this.entries.set(key, { loadedAt: this.now(), snapshot });
-        while (this.entries.size > this.maxEntries) {
-          const oldest = this.entries.keys().next().value;
-          if (oldest === undefined) break;
-          this.entries.delete(oldest);
-        }
+        evictOldest(this.entries, this.maxEntries);
         return snapshot;
       } catch (error) {
+        this.retryAt.delete(key);
         this.retryAt.set(key, this.now() + this.retryMs);
+        evictOldest(this.retryAt, this.maxEntries);
         throw error;
       } finally {
         this.inflight.delete(key);
