@@ -648,7 +648,10 @@ export async function createEnvironment(
  */
 export async function updateEnvironment(
   config: RoomoteConfig,
-  params: { environmentId: string; config: unknown },
+  params: {
+    environmentId: string;
+    config: unknown;
+  },
 ): Promise<UpdateEnvironmentResponse> {
   return apiFetch(
     config,
@@ -656,11 +659,34 @@ export async function updateEnvironment(
     {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        config: params.config,
-      }),
+      body: JSON.stringify({ config: params.config }),
     },
     'Failed to update environment',
+  );
+}
+
+/**
+ * Finalize a worker-resolved environment recipe through the trusted
+ * finalization endpoint. The bound verification task submits the resolution;
+ * the API preserves the verification binding and idempotently accepts or
+ * rejects.
+ */
+export async function finalizeEnvironmentRecipeResolution(
+  config: RoomoteConfig,
+  params: {
+    environmentId: string;
+    recipe: unknown;
+  },
+): Promise<{ success: boolean; environmentId: string }> {
+  return apiFetch(
+    config,
+    `/api/mcp/environments/${encodeURIComponent(params.environmentId)}/recipe_resolution`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recipe: params.recipe }),
+    },
+    'Failed to finalize the environment recipe',
   );
 }
 

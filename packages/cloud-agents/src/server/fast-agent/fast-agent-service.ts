@@ -33,6 +33,7 @@ import {
   REASONING_EFFORT_VALUES,
   activeRunStatuses,
   buildInferenceProviderRecoveryPrompt,
+  buildEnvironmentVerificationPrompt,
   buildDataVisualizationBlocks,
   dataVisualizationInputsSchema,
   fastAgentHumanFollowUpEventSchema,
@@ -54,6 +55,7 @@ import {
   parseSlackChannelPermalink,
   parseSlackMessagePermalink,
   platformIssueReportSchema,
+  type EnvironmentRecipe,
   type IntegrationToolCandidate,
   type DataVisualizationInput,
   CALL_INTEGRATION_TOOL_TOOL,
@@ -73,6 +75,7 @@ import {
   getDeploymentTaskModelOptions,
   getSessionForFastConversation,
   getSessionForTask,
+  getActiveRecipeVerificationTaskId,
   inArray,
   isBrainEnabled,
   isDeploymentExperimentEnabled,
@@ -82,6 +85,7 @@ import {
   releaseSessionGoalContinuation,
   sql,
   touchSessionActivity,
+  withEnvironmentVerificationRetryLock,
 } from '@roomote/db/server';
 import {
   buildFastSessionUrl,
@@ -113,6 +117,16 @@ import {
   listActiveRepositories,
   type RoutableEnvironment,
 } from '../available-environments';
+import { requireRecipeControlAdapter } from '../environment-recipes';
+import {
+  createEnvironmentRecipeCandidate,
+  launchEnvironmentRecipeVerification,
+  previewEnsureEnvironment,
+} from './ensure-environment';
+import {
+  isCompatibleRecipeEnvironment,
+  isRecipeEnvironmentBlockedFromLaunch,
+} from './r-analysis-environment';
 import {
   FAST_AGENT_MODEL_ROLE,
   FAST_RESPONDING_LEASE_MS,
@@ -120,6 +134,10 @@ import {
 } from './fast-agent-constants';
 import { buildFastAgentUserContentBlocks } from './fast-agent-content-blocks';
 import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
+import {
+  inspectRAnalysisScript,
+  parseRAttachmentText,
+} from './r-analysis-preflight';
 import {
   enqueueUserPersonalizationUpdate,
   resolveFastAgentPersonalizationContext,
@@ -472,6 +490,19 @@ const launchTaskArgsSchema = z.object({
   model: z.string().trim().min(1).nullable().optional(),
   reasoningEffort: z.enum(REASONING_EFFORT_VALUES).nullable().optional(),
   includeAttachments: z.boolean().optional().default(false),
+  mode: z
+    .enum(['standard', 'environment_setup', 'environment_verification'])
+    .optional()
+    .default('standard'),
+});
+
+const ensureEnvironmentArgsSchema = z.object({
+  action: z.enum(['preview', 'create']),
+  type: z.enum(['r-bioconductor']),
+  packages: z.array(z.string().min(1)).min(1),
+  name: z.string().trim().min(1).max(100),
+  purpose: z.string().trim().min(1).max(500),
+  proposalFingerprint: z.string().optional(),
 });
 
 const reviewPullRequestArgsSchema = z.object({
@@ -1833,6 +1864,42 @@ const connectIntegrationArgsSchema = z
   .object({ integrationId: nativeIntegrationIdSchema })
   .strict();
 
+function resolveRAnalysisPreflight(input: {
+  attachmentTexts: string[];
+  availableEnvironments: RoutableEnvironment[];
+}): {
+  rAnalysisPreflight?: {
+    filename: string;
+    packages: string[];
+    unresolvedPackageExpressions: string[];
+    compatibleEnvironmentId?: string;
+  };
+} {
+  const attachment = input.attachmentTexts
+    .map(parseRAttachmentText)
+    .find((value) => value !== null);
+  if (!attachment) return {};
+
+  const preflight = inspectRAnalysisScript(attachment.source);
+  const compatible = input.availableEnvironments.find((environment) =>
+    isCompatibleRecipeEnvironment(
+      {
+        isVerified: environment.isVerified ?? false,
+        config: environment.config,
+      },
+      { packages: preflight.packages },
+    ),
+  );
+
+  return {
+    rAnalysisPreflight: {
+      filename: attachment.filename,
+      ...preflight,
+      ...(compatible ? { compatibleEnvironmentId: compatible.id } : {}),
+    },
+  };
+}
+
 export async function answerFastAgentQuestion({
   question,
   images = [],
@@ -1908,7 +1975,7 @@ export async function answerFastAgentQuestion({
   /** The settling delegated task ran for a custom automation; its closeout is
    * the run's report and may carry launchable suggestions. */
   automationReport?: boolean;
-  /** Trusted owner actor for a task-settled continuation, resolved server-side. */
+  /** Trusted owner actor for a delegated-task continuation, resolved server-side. */
   serviceCredentialPlatformActorUserId?: string;
   serviceCredentialPlatformDenialReason?:
     | 'no_acting_user'
@@ -3786,6 +3853,8 @@ export async function answerFastAgentQuestion({
         agentBehaviorSettings?.workspaceRoutingSettings?.rules,
       privacy: currentSessionPrivacy,
       codingModelRoutingRules: taskModelOptions.codingModelRoutingRules,
+      userIsAdmin: currentUser.isAdmin,
+      ...resolveRAnalysisPreflight({ attachmentTexts, availableEnvironments }),
     });
     diagnostics.recordPromptContext({
       systemPromptChars: system.length,
@@ -4880,6 +4949,135 @@ export async function answerFastAgentQuestion({
             });
           }
 
+          case FAST_AGENT_NATIVE_TOOL_NAMES.ensureEnvironment: {
+            const args = ensureEnvironmentArgsSchema.parse(call.args);
+            const recipeAdapter = requireRecipeControlAdapter(args.type);
+            const request = { packages: args.packages };
+
+            if (args.action === 'preview') {
+              const preview = previewEnsureEnvironment({
+                adapter: recipeAdapter,
+                request,
+                name: args.name,
+                purpose: args.purpose,
+                environments: availableEnvironments,
+              });
+              if (preview.status === 'name_unavailable') {
+                return {
+                  success: false,
+                  error: `The name "${preview.name}" is unavailable because it belongs to an incompatible environment. Keep the same requested package set, choose another meaningful qualifier instead of appending a hash, and preview again. Do not launch or verify the incompatible environment.`,
+                };
+              }
+              return { success: true, ...preview };
+            }
+
+            if (!currentUser.isAdmin) {
+              return {
+                success: false,
+                error:
+                  'Environment creation requires a deployment administrator. Describe the exact proposal so an administrator can approve it; read-only preview and reuse checks do not require admin.',
+              };
+            }
+
+            if (!args.proposalFingerprint) {
+              return {
+                success: false,
+                error:
+                  'create requires the exact proposalFingerprint returned by a matching preview call.',
+              };
+            }
+
+            try {
+              await adapter.assertTaskLaunch?.();
+            } catch (error) {
+              return toolFailure(error);
+            }
+
+            const candidate = await createEnvironmentRecipeCandidate({
+              adapter: recipeAdapter,
+              request,
+              name: args.name,
+              purpose: args.purpose,
+              proposalFingerprint: args.proposalFingerprint,
+              createdByUserId: userId,
+            });
+
+            if (!candidate.success) {
+              return candidate;
+            }
+
+            const recipe: EnvironmentRecipe = {
+              type: recipeAdapter.type,
+              schema_version: recipeAdapter.schemaVersion,
+              request: recipeAdapter.normalizeRequest(request),
+              request_fingerprint: recipeAdapter.computeRequestFingerprint(
+                recipeAdapter.normalizeRequest(request),
+              ),
+            };
+
+            const prompt = buildEnvironmentVerificationPrompt({
+              environmentId: candidate.environmentId,
+              environmentName: candidate.name,
+              recipeVerificationInstructions:
+                recipeAdapter.buildVerificationInstructions(recipe),
+            });
+
+            let launchResult:
+              | (Awaited<ReturnType<typeof adapter.launchTask>> & {
+                  alreadyActive?: boolean;
+                })
+              | null = null;
+            try {
+              launchResult = await launchEnvironmentRecipeVerification({
+                environmentId: candidate.environmentId,
+                withLock: withEnvironmentVerificationRetryLock,
+                findActiveTaskId: getActiveRecipeVerificationTaskId,
+                launch: () =>
+                  adapter.launchTask({
+                    prompt,
+                    environmentId: candidate.environmentId,
+                    verifiesEnvironmentId: candidate.environmentId,
+                    model: null,
+                    reasoningEffort: null,
+                    parentSessionId: session.id,
+                    launchIdempotencyKey: `fast:ensure-environment:${candidate.environmentId}:${randomUUID()}`,
+                    postKickoff: async () => {},
+                  }),
+              });
+            } catch (error) {
+              // The candidate stays visible without a verification binding;
+              // an identical create call reuses it and retries enqueueing.
+              return {
+                success: false,
+                error: `The environment candidate "${candidate.name}" was created but the verification task could not be queued (${error instanceof Error ? error.message : String(error)}). A repeated identical create will resume it.`,
+              };
+            }
+
+            if (!launchResult.success) {
+              return {
+                success: false,
+                error: `The environment candidate "${candidate.name}" was created but the verification task could not be queued (${launchResult.error}). A repeated identical create will resume it.`,
+              };
+            }
+
+            currentTasks.set(launchResult.taskId, {
+              taskId: launchResult.taskId,
+            });
+
+            return {
+              success: true,
+              environmentId: candidate.environmentId,
+              name: candidate.name,
+              created: candidate.created,
+              verificationTaskId: launchResult.taskId,
+              message: candidate.created
+                ? `Environment "${candidate.name}" created and its verification task started. When it reports success, launch the analysis without asking the user to restart.`
+                : launchResult.alreadyActive
+                  ? `Environment "${candidate.name}" already has a verification task in progress.`
+                  : `Environment "${candidate.name}" was reused and its verification task resubmitted.`,
+            };
+          }
+
           case FAST_AGENT_NATIVE_TOOL_NAMES.showWidget: {
             const args = showWidgetArgsSchema.parse(call.args);
             const result = await prepareShowWidget(args);
@@ -4942,6 +5140,47 @@ export async function answerFastAgentQuestion({
                 error: 'The selected environment was not found.',
               };
             }
+            if (args.mode === 'environment_verification') {
+              // Recipe verification is created server-side by ensure_environment
+              // create, bound to the exact candidate; ordinary environment
+              // verification retries go through Settings. No turn, human or
+              // platform, may launch verification directly: an unrelated
+              // delegated-task event would otherwise bypass the candidate
+              // binding for any environment.
+              return {
+                success: false,
+                error:
+                  'Environment verification cannot be started directly. Use ensure_environment to preview and create the recipe environment; creation starts verification automatically.',
+              };
+            }
+            if (args.mode === 'environment_setup') {
+              if (!currentUser.isAdmin) {
+                return {
+                  success: false,
+                  error:
+                    'Only deployment administrators can start environment setup.',
+                };
+              }
+              if (args.environmentId !== NO_REPOSITORIES) {
+                return {
+                  success: false,
+                  error:
+                    'Repository-free environment setup must use the Blank slate target.',
+                };
+              }
+            }
+            const launchTarget = availableEnvironments.find(
+              (environment) => environment.id === args.environmentId,
+            );
+            if (launchTarget) {
+              if (isRecipeEnvironmentBlockedFromLaunch(launchTarget)) {
+                return {
+                  success: false,
+                  error:
+                    'This recipe environment is not verified yet and cannot run normal work. Use ensure_environment or wait for its verification to succeed.',
+                };
+              }
+            }
             if (
               selectedModel &&
               !taskModelOptions.models.some(
@@ -4978,6 +5217,7 @@ export async function answerFastAgentQuestion({
               selectedModel,
               selectedReasoningEffort,
               args.includeAttachments,
+              args.mode,
             ])}`;
             if (completedTaskActions.has(signature)) {
               return {
@@ -5047,6 +5287,9 @@ export async function answerFastAgentQuestion({
                   ? { images }
                   : {}),
                 environmentId: args.environmentId ?? null,
+                ...(args.mode === 'environment_setup'
+                  ? { preparesEnvironment: true }
+                  : {}),
                 model: selectedModel,
                 reasoningEffort: selectedReasoningEffort,
                 parentSessionId: session.id,

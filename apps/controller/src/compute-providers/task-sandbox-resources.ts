@@ -14,8 +14,14 @@ export async function taskNeedsNestedDocker(
   taskRun: TaskRun,
   environmentConfig: EnvironmentConfig | undefined,
 ): Promise<boolean> {
+  if (taskRun.payload.preparesEnvironment) {
+    return true;
+  }
   if (environmentConfig) {
-    return Boolean(environmentConfig.docker_projects?.length);
+    return Boolean(
+      environmentConfig.docker_projects?.length ||
+      environmentConfig.environment_recipe,
+    );
   }
 
   const task = await db.query.tasks.findFirst({

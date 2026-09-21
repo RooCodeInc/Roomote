@@ -49,6 +49,12 @@ If the resulting environment needs changes, edit it from
 **Settings > Environments** and update the repositories, guidance, services, or
 YAML definition there.
 
+When an agent proposes creating or changing an environment, it first shows the
+concrete setup, expected maximum build time, and effect on running and future
+tasks. Creation or update waits for explicit approval of that exact proposal;
+administrator access alone is not consent, and a materially changed proposal
+must be approved again.
+
 ## Start from a brand-new repository
 
 You do not need an existing codebase to set up an environment. From
@@ -77,6 +83,12 @@ Add enough context for Roomote to start productively:
 
 Environment changes apply to new tasks. Running tasks keep the workspace they
 already started with.
+
+For supported R/Bioconductor analyses, Roomote can also create a repository-free
+environment from an uploaded R script. The saved recipe pins the runtime image
+and package lock, is verified in a fresh workspace, and can be reused by later
+compatible scripts. Packages installed ad hoc during one task are not added to
+that recipe automatically.
 
 ## Edit an environment
 
@@ -242,6 +254,25 @@ Roomote works best when the environment lets it prove what changed. Include
 the commands and services needed to run tests, start the app, and open
 previews. For UI work, [configure Live Previews](/live-previews#prerequisites)
 so teammates can inspect the result without pulling the branch locally.
+
+## Environment lifecycle
+
+Environment cards and detail pages derive their lifecycle from verification
+state:
+
+- **Configured** exists but is not verified for its current runtime
+  configuration.
+- **Configuring** is a recipe environment whose packages are still being
+  resolved by its verification task.
+- **Verifying** is a resolved environment with an active verification task.
+- **Ready** passed a verification task for its current configuration.
+- **Failed** is a resolution or verification error shown on the environment.
+
+Recipe environments are created on demand through the Fast session's
+`ensure_environment` tool after one user confirmation; creation is
+administrator-only, while previewing and reusing an existing environment is
+open to members. An unresolved or unverified recipe environment is never
+routable for normal work.
 
 ## How to tell an environment is healthy
 

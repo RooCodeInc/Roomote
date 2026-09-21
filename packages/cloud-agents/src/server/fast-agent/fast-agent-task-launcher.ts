@@ -9,6 +9,7 @@ import {
   type TaskSurface,
   type TaskTrigger,
 } from '@roomote/types';
+import { beginEnvironmentVerification } from '@roomote/db/server';
 
 import {
   enqueueTask,
@@ -61,6 +62,8 @@ export function createFastAgentTaskLauncher(
     prompt,
     images,
     environmentId,
+    verifiesEnvironmentId,
+    preparesEnvironment,
     branch,
     launchIdempotencyKey,
     model,
@@ -96,6 +99,8 @@ export function createFastAgentTaskLauncher(
         ...(branch ? { branch } : {}),
         ...(launchIdempotencyKey ? { launchIdempotencyKey } : {}),
         ...(images?.length ? { images } : {}),
+        ...(verifiesEnvironmentId ? { verifiesEnvironmentId } : {}),
+        ...(preparesEnvironment ? { preparesEnvironment: true } : {}),
       },
     };
     let taskUrl: string | undefined;
@@ -115,6 +120,16 @@ export function createFastAgentTaskLauncher(
         ...(params.prLinkage ? { prLinkage: params.prLinkage } : {}),
       },
       {
+        ...(verifiesEnvironmentId
+          ? {
+              afterCreateInTransaction: async (tx, taskRun) => {
+                await beginEnvironmentVerification(tx, {
+                  environmentId: verifiesEnvironmentId,
+                  verificationTaskId: taskRun.taskId,
+                });
+              },
+            }
+          : {}),
         beforeEnqueue: async (taskRun) => {
           const resolvedTaskUrl = getTaskUrl({
             taskId: taskRun.taskId,

@@ -40,6 +40,9 @@ const mockDbTransaction = vi.fn();
 const mockCaptureTaskSettled = vi.fn();
 const mockResolveDefaultComputeProvider = vi.fn().mockResolvedValue('modal');
 const mockUpdatePendingEnvironmentSnapshot = vi.fn().mockResolvedValue(true);
+const mockMarkEnvironmentVerificationFailedIfCurrent = vi
+  .fn()
+  .mockResolvedValue({ marked: true });
 const mockGetCustomAutomationById = vi.fn();
 const mockRefreshAutomationRootFooter = vi.fn().mockResolvedValue(true);
 const mockResolveAutomationResultSubtitle = vi.fn();
@@ -182,6 +185,8 @@ vi.mock('@roomote/db/server', async () => {
       mockResolveDiscordRuntimeCredentials(...args),
     updatePendingEnvironmentSnapshot: (...args: unknown[]) =>
       mockUpdatePendingEnvironmentSnapshot(...args),
+    markEnvironmentVerificationFailedIfCurrent: (...args: unknown[]) =>
+      mockMarkEnvironmentVerificationFailedIfCurrent(...args),
   };
 });
 
@@ -467,6 +472,9 @@ describe('finishRun', () => {
     mockDbExecute.mockResolvedValue([]);
     mockResolveDefaultComputeProvider.mockResolvedValue('modal');
     mockUpdatePendingEnvironmentSnapshot.mockResolvedValue(true);
+    mockMarkEnvironmentVerificationFailedIfCurrent.mockResolvedValue({
+      marked: true,
+    });
     mockNotifyFastAgentParentOnSettle.mockResolvedValue('admitted');
     mockNotifyWebTaskInitiatorOnSettle.mockResolvedValue('delivered');
     mockRetryFailedTaskStart.mockResolvedValue({
@@ -1093,6 +1101,53 @@ describe('finishRun', () => {
       expect(mockDbUpdateSet).toHaveBeenCalledWith(
         expect.objectContaining({ status: RunStatus.Failed }),
       );
+    });
+  });
+
+  describe('environment verification failure state', () => {
+    it('marks a bound environment failed when worker setup fails', async () => {
+      mockFindFirstRun.mockResolvedValue(
+        makeRun({
+          taskId: 'verification-task',
+          payload: {
+            repo: '',
+            environmentId: 'environment-1',
+            verifiesEnvironmentId: 'environment-1',
+          },
+        }),
+      );
+
+      await finishRun({
+        id: 1,
+        status: RunStatus.Failed,
+        error: 'recipe restore failed',
+      });
+
+      expect(
+        mockMarkEnvironmentVerificationFailedIfCurrent,
+      ).toHaveBeenCalledWith(expect.anything(), {
+        environmentId: 'environment-1',
+        verificationTaskId: 'verification-task',
+        error: 'The verification task failed before reporting a result.',
+      });
+    });
+
+    it('does not mark the environment for a completed verification run', async () => {
+      mockFindFirstRun.mockResolvedValue(
+        makeRun({
+          payload: {
+            repo: '',
+            environmentId: 'environment-1',
+            verifiesEnvironmentId: 'environment-1',
+          },
+        }),
+      );
+
+      await finishRun({ id: 1, status: RunStatus.Completed });
+
+      expect(
+        mockMarkEnvironmentVerificationFailedIfCurrent,
+      ).not.toHaveBeenCalled();
     });
   });
 

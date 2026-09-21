@@ -456,6 +456,24 @@ export default {
 }
 `,
 
+    [FAST_AGENT_NATIVE_TOOL_NAMES.ensureEnvironment]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "On-demand environment provisioning for recipe environments (for example R + Bioconductor). Use preview to check for a compatible verified environment, inspect an existing candidate, or obtain a creation proposal; never create or update environments with manage_environments for recipe flows. After the user confirms the proposal once, use create with the exact proposal fingerprint. Choose the environment name from the user's purpose and detected technical characteristics before previewing (for example 'R + Bioconductor — Differential Expression', 'Bioconductor — Airway RNA-seq', or 'R Environment — Genomics Visualization'); use 'R + Bioconductor Environment' only when the request has no more specific purpose. If preview returns name_unavailable, choose another meaningful qualifier rather than appending a hash.",
+  args: {
+    action: z.enum(["preview", "create"]),
+    type: z.enum(["r-bioconductor"]).describe("Environment recipe type"),
+    packages: z.array(z.string().min(1)).min(1).describe("Direct package names requested by the analysis"),
+    name: z.string().min(1).max(100).describe("Meaningful human-readable environment name chosen from the user's purpose"),
+    purpose: z.string().min(1).max(500).describe("Short description of the intent behind this environment"),
+    proposalFingerprint: z.string().optional().describe("Frozen proposal fingerprint returned by preview; required for create"),
+  },
+  execute: (args, context) => invoke("ensure_environment", args, context),
+}
+`,
+
     [FAST_AGENT_NATIVE_TOOL_NAMES.launchTask]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
@@ -468,6 +486,7 @@ export default {
     model: z.string().min(1).nullable().optional().describe("Exact deployment-enabled model ID; omit or pass null to use the deployment default"),
     reasoningEffort: z.enum(${JSON.stringify(REASONING_EFFORT_VALUES)}).nullable().optional().describe("Optional reasoning effort override; use only with a selected model and omit or pass null to use the model's default"),
     includeAttachments: z.boolean().optional().describe("Set true to forward supported images and extracted file, audio, or video context from the active conversation turn; defaults to false"),
+    mode: z.enum(["standard", "environment_setup", "environment_verification"]).optional().describe("Use environment_setup for an admin-approved Blank slate environment-definition task. environment_verification is rejected on every turn; recipe verification is created automatically by ensure_environment create"),
   },
   execute: (args, context) => invoke("launch_task", args, context),
 }

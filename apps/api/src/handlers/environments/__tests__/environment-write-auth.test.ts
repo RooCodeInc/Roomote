@@ -87,6 +87,11 @@ function deploymentRunToken(): RunTokenContext {
   };
 }
 
+const attributionConfig = {
+  name: 'Attribution Test',
+  repositories: [{ repository: 'acme/app' }],
+};
+
 /**
  * Requests with an invalid JSON body: reaching the 400 body validation
  * proves the user-context gate passed, without mocking the full write path.
@@ -268,11 +273,12 @@ describe('createEnvironment attribution', () => {
     ]);
   });
 
-  it('attributes the write to the live acting user over the mint-time claim', async () => {
-    // First lookup: live-actor resolution. Second lookup: the post-create
-    // attachEnvironmentIdToTaskRun payload sync, which can no-op.
+  it('allows the conversational write and attributes it to the live acting user', async () => {
+    // First lookup: live-actor resolution. Second lookup: verification-task
+    // attribution. Third lookup: the post-create payload sync, which can no-op.
     mockTaskRunFindFirst
       .mockResolvedValueOnce({ actingUserId: 'user-live' })
+      .mockResolvedValueOnce({ taskId: 'task-1' })
       .mockResolvedValueOnce(null);
 
     const app = createApp({
@@ -287,10 +293,7 @@ describe('createEnvironment attribution', () => {
       new Request('http://localhost/environments', {
         method: 'POST',
         body: JSON.stringify({
-          config: {
-            name: 'Attribution Test',
-            repositories: [{ repository: 'acme/app' }],
-          },
+          config: attributionConfig,
         }),
         headers: { 'content-type': 'application/json' },
       }),
