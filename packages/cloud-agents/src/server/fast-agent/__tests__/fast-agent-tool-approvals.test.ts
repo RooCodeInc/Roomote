@@ -42,7 +42,7 @@ import {
   integrationToolApprovalRulesToConfig,
   mergeIntegrationToolPolicies,
   resolveFastAgentToolApprovalRules,
-  resolveFastAgentToolApprovalSessionId,
+  resolveFastAgentToolApprovalSession,
   shouldDisposeInstanceForToolApprovalRules,
 } from '../fast-agent-tool-approvals';
 import type { FastAgentIntegration } from '../fast-agent-integration-broker';
@@ -400,9 +400,11 @@ describe('resolveFastAgentToolApprovalRules', () => {
     const resolved = await resolveFastAgentToolApprovalRules({
       integrations,
       sessionId: 'session-id',
-      userId: 'user-id',
+      ownerUserId: 'owner-id',
     });
-    expect(listIntegrationToolUserPolicies).toHaveBeenCalledWith('user-id');
+    // The owner is the only one who can decide, so theirs are the personal
+    // policies that apply, whoever sent the turn.
+    expect(listIntegrationToolUserPolicies).toHaveBeenCalledWith('owner-id');
     expect(
       Object.fromEntries(
         resolved!.rules.map((rule) => [rule.permission, rule.action]),
@@ -414,7 +416,7 @@ describe('resolveFastAgentToolApprovalRules', () => {
     });
   });
 
-  it('reads no personal policies without a requester', async () => {
+  it('reads no personal policies without a Session owner', async () => {
     await resolveFastAgentToolApprovalRules({ integrations });
     expect(listIntegrationToolUserPolicies).not.toHaveBeenCalled();
     expect(mergeIntegrationToolPolicies([], [])).toEqual([]);
@@ -633,14 +635,16 @@ describe('extractApprovalCallArgs', () => {
   });
 });
 
-describe('resolveFastAgentToolApprovalSessionId', () => {
+describe('resolveFastAgentToolApprovalSession', () => {
   it('records approvals under the unified Session bound to the Fast conversation', async () => {
     vi.mocked(getSessionForFastConversation).mockResolvedValueOnce({
       id: 'unified-session',
+      ownerUserId: 'owner-1',
     } as never);
-    expect(await resolveFastAgentToolApprovalSessionId('conversation')).toBe(
-      'unified-session',
-    );
+    expect(await resolveFastAgentToolApprovalSession('conversation')).toEqual({
+      sessionId: 'unified-session',
+      ownerUserId: 'owner-1',
+    });
     expect(getSessionForFastConversation).toHaveBeenCalledWith(
       expect.anything(),
       'conversation',
@@ -649,9 +653,10 @@ describe('resolveFastAgentToolApprovalSessionId', () => {
 
   it('falls back to the conversation id so an unbound ask fails closed', async () => {
     vi.mocked(getSessionForFastConversation).mockResolvedValueOnce(null);
-    expect(await resolveFastAgentToolApprovalSessionId('conversation')).toBe(
-      'conversation',
-    );
+    expect(await resolveFastAgentToolApprovalSession('conversation')).toEqual({
+      sessionId: 'conversation',
+      ownerUserId: undefined,
+    });
   });
 });
 

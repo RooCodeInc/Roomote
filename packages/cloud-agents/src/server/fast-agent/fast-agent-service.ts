@@ -226,7 +226,7 @@ import {
 } from './fast-agent-tool-policy';
 import {
   createFastAgentToolApprovalBridge,
-  resolveFastAgentToolApprovalSessionId,
+  resolveFastAgentToolApprovalSession,
   integrationToolApprovalRulesToConfig,
   resolveFastAgentToolApprovalRules,
   shouldDisposeInstanceForToolApprovalRules,
@@ -3842,13 +3842,14 @@ export async function answerFastAgentQuestion({
     // Undefined while the experiment is off, which keeps ungated behavior.
     // Approvals and session overrides are keyed on the unified Session, not
     // the Fast conversation; resolve it once for the rules and the bridge.
-    const toolApprovalSessionId = await resolveFastAgentToolApprovalSessionId(
-      session.id,
-    );
+    const {
+      sessionId: toolApprovalSessionId,
+      ownerUserId: toolApprovalOwnerUserId,
+    } = await resolveFastAgentToolApprovalSession(session.id);
     const toolApprovalRules = await resolveFastAgentToolApprovalRules({
       integrations: availableIntegrations,
       sessionId: toolApprovalSessionId,
-      userId,
+      ownerUserId: toolApprovalOwnerUserId,
     });
     const system = buildFastAgentSystemPrompt({
       availableEnvironments,

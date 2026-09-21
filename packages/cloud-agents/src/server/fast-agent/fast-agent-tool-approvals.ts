@@ -89,9 +89,9 @@ function listMountedIntegrationTools(
 }
 
 /**
- * Layer the requester's personal policies on the deployment ones. The
- * stricter mode wins per tool, so a personal policy can gate or block the
- * requester's own calls but never loosen what an admin configured.
+ * Layer the Session owner's personal policies on the deployment ones. The
+ * stricter mode wins per tool, so a personal policy can gate or block calls
+ * in the owner's Sessions but never loosen what an admin configured.
  */
 export function mergeIntegrationToolPolicies(
   deploymentPolicies: IntegrationToolPolicyMetadata[],
@@ -290,8 +290,8 @@ export async function resolveFastAgentToolApprovalRules(input: {
   integrations: FastAgentIntegration[];
   /** The Session whose requester-owned overrides layer on the policies. */
   sessionId?: string;
-  /** The requester whose personal policies tighten the deployment ones. */
-  userId?: string;
+  /** The Session owner, whose personal policies tighten the deployment ones. */
+  ownerUserId?: string;
 }): Promise<{ rules: PermissionRuleset; hash: string } | undefined> {
   const enabled = await isDeploymentExperimentEnabled(
     'integrationToolApprovals',
@@ -299,8 +299,8 @@ export async function resolveFastAgentToolApprovalRules(input: {
   if (!enabled) return undefined;
   const [policies, userPolicies, sessionOverrides] = await Promise.all([
     listIntegrationToolPolicies(),
-    input.userId
-      ? listIntegrationToolUserPolicies(input.userId)
+    input.ownerUserId
+      ? listIntegrationToolUserPolicies(input.ownerUserId)
       : Promise.resolve([]),
     input.sessionId
       ? listIntegrationToolSessionOverrides(input.sessionId)
@@ -315,17 +315,24 @@ export async function resolveFastAgentToolApprovalRules(input: {
 }
 
 /**
- * The id approvals are recorded and decided under. Approval rows, their
+ * The Session approvals are recorded and decided under. Approval rows, their
  * ownership check, and the requester's decision route are all keyed on the
  * unified Session, not the Fast conversation that runs the turn. Without a
  * bound Session there is nowhere for the requester to decide, so the
  * conversation id is returned and the ownership check fails the ask closed.
+ *
+ * Only the Session owner can decide an approval, so the owner is also whose
+ * personal policies apply: a participant's own `ask` policy in someone
+ * else's shared Session would pause a call nobody can approve.
  */
-export async function resolveFastAgentToolApprovalSessionId(
+export async function resolveFastAgentToolApprovalSession(
   fastConversationId: string,
-): Promise<string> {
+): Promise<{ sessionId: string; ownerUserId: string | undefined }> {
   const session = await getSessionForFastConversation(db, fastConversationId);
-  return session?.id ?? fastConversationId;
+  return {
+    sessionId: session?.id ?? fastConversationId,
+    ownerUserId: session?.ownerUserId ?? undefined,
+  };
 }
 
 export function createFastAgentToolApprovalBridge(input: {
