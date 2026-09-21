@@ -19,9 +19,11 @@ function environmentConfig(overrides: Record<string, unknown>) {
 
 function marketplaceSnapshot({
   name = 'marketplace-review',
+  revision = 'abc123',
   source = 'example/skills',
 }: {
   name?: string;
+  revision?: string;
   source?: string;
 } = {}): SettingsSkillMarketplaceSnapshot {
   const content = [
@@ -52,7 +54,7 @@ function marketplaceSnapshot({
         sourceName: source,
       },
     ],
-    revision: 'abc123',
+    revision,
     source,
   };
 }
@@ -242,12 +244,64 @@ describe('RemoteFastAgentSettingsSkillSource', () => {
       }),
     ]);
     expect(catalog.skills[0]?.id).toMatch(
-      /^settings:marketplace:[a-f0-9]{64}$/u,
+      /^settings:marketplace:[A-Za-z0-9_-]+$/u,
     );
     await expect(source.read(catalog.skills[0]!.id)).resolves.toMatchObject({
       content: expect.stringContaining('# Marketplace review'),
       settingsSource: 'example/skills',
     });
+  });
+
+  it('loads a prompt-listed marketplace skill from its captured revision', async () => {
+    const resolveEnvironments = vi.fn().mockResolvedValue([
+      {
+        id: 'environment-1',
+        config: environmentConfig({
+          skills: { 'example/skills': 'all' },
+        }),
+      },
+    ]);
+    const promptSource = new RemoteFastAgentSettingsSkillSource({
+      allowedEnvironmentIds: ['environment-1'],
+      loadMarketplaceSnapshot: vi.fn().mockImplementation((source: string) =>
+        Promise.resolve(
+          marketplaceSnapshot({
+            revision: 'abcdef',
+            source,
+          }),
+        ),
+      ),
+      resolveEnvironments,
+    });
+    const promptCatalog = await promptSource.listPromptCatalog();
+    const promptSkill = promptCatalog.skills[0]!;
+
+    const loadMarketplaceSnapshot = vi
+      .fn()
+      .mockImplementation((source: string, revision?: string) =>
+        Promise.resolve(
+          marketplaceSnapshot({
+            revision: revision ?? 'fedcba',
+            source,
+          }),
+        ),
+      );
+    const executorSource = new RemoteFastAgentSettingsSkillSource({
+      allowedEnvironmentIds: ['environment-1'],
+      loadMarketplaceSnapshot,
+      resolveEnvironments,
+    });
+
+    await expect(executorSource.read(promptSkill.id)).resolves.toMatchObject({
+      id: promptSkill.id,
+      name: 'marketplace-review',
+      settingsSource: 'example/skills',
+      source: 'settings',
+    });
+    expect(loadMarketplaceSnapshot).toHaveBeenCalledWith(
+      'example/skills',
+      'abcdef',
+    );
   });
 
   it('filters exact-name sources before applying the marketplace source cap', async () => {

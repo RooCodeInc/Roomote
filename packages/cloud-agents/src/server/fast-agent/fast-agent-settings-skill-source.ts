@@ -80,6 +80,7 @@ type FastAgentSettingsSkillSourceOptions = {
   allowedEnvironmentIds: string[];
   loadMarketplaceSnapshot?: (
     source: string,
+    revision?: string,
   ) => Promise<SettingsSkillMarketplaceSnapshot>;
   resolveEnvironments?: (
     query: FastAgentSkillQuery,
@@ -129,8 +130,53 @@ function parseFrontmatterScalar(content: string, key: string): string {
   return value;
 }
 
-function settingsSkillId(kind: 'manual' | 'marketplace', identity: string) {
-  return `settings:${kind}:${createHash('sha256').update(identity).digest('hex')}`;
+function settingsSkillId(identity: string): string {
+  return `settings:manual:${createHash('sha256').update(identity).digest('hex')}`;
+}
+
+function marketplaceSkillId(
+  source: string,
+  revision: string,
+  name: string,
+): string {
+  const payload = Buffer.from(
+    JSON.stringify([source, revision, name]),
+    'utf8',
+  ).toString('base64url');
+  return `settings:marketplace:${payload}`;
+}
+
+type MarketplaceSkillReference = {
+  name: string;
+  revision: string;
+  source: string;
+};
+
+function parseMarketplaceSkillId(
+  id: string,
+): MarketplaceSkillReference | undefined {
+  const payload = /^settings:marketplace:([A-Za-z0-9_-]+)$/u.exec(id)?.[1];
+  if (!payload) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(
+      Buffer.from(payload, 'base64url').toString('utf8'),
+    );
+    if (
+      !Array.isArray(parsed) ||
+      parsed.length !== 3 ||
+      typeof parsed[0] !== 'string' ||
+      typeof parsed[1] !== 'string' ||
+      typeof parsed[2] !== 'string' ||
+      !SETTINGS_SKILL_SOURCE_PATTERN.test(parsed[0]) ||
+      !/^[0-9a-f]{6,64}$/iu.test(parsed[1]) ||
+      !SETTINGS_SKILL_NAME_PATTERN.test(parsed[2])
+    ) {
+      return undefined;
+    }
+    return { name: parsed[2], revision: parsed[1], source: parsed[0] };
+  } catch {
+    return undefined;
+  }
 }
 
 async function runGit(
@@ -168,6 +214,7 @@ async function readGitResource(
 export async function loadFastAgentSettingsMarketplaceSnapshot(
   source: string,
   executeGit = runGit,
+  revisionRef = 'HEAD',
 ): Promise<SettingsSkillMarketplaceSnapshot> {
   const sourceSegments = source.split('/');
   if (
@@ -191,7 +238,7 @@ export async function loadFastAgentSettingsMarketplaceSnapshot(
       '--filter=blob:none',
       '--no-tags',
       `https://github.com/${source}.git`,
-      'HEAD',
+      revisionRef,
     ]);
     const revision = (
       await executeGit(['-C', repositoryDirectory, 'rev-parse', 'FETCH_HEAD'])
@@ -382,7 +429,7 @@ function collectManualSkillRecords(
         );
         continue;
       }
-      const id = settingsSkillId('manual', `${manualSkill.name}\0${content}`);
+      const id = settingsSkillId(`${manualSkill.name}\0${content}`);
       const record = byId.get(id) ?? {
         content,
         description: manualSkill.description,
@@ -420,6 +467,7 @@ export class RemoteFastAgentSettingsSkillSource implements FastAgentSettingsSkil
   private readonly allowedEnvironmentIds: Set<string>;
   private readonly loadMarketplaceSnapshot: (
     source: string,
+    revision?: string,
   ) => Promise<SettingsSkillMarketplaceSnapshot>;
   private readonly marketplaceSnapshots = new Map<
     string,
@@ -434,7 +482,8 @@ export class RemoteFastAgentSettingsSkillSource implements FastAgentSettingsSkil
     this.allowedEnvironmentIds = new Set(options.allowedEnvironmentIds);
     this.loadMarketplaceSnapshot =
       options.loadMarketplaceSnapshot ??
-      loadFastAgentSettingsMarketplaceSnapshot;
+      ((source, revision) =>
+        loadFastAgentSettingsMarketplaceSnapshot(source, runGit, revision));
     this.resolveEnvironments =
       options.resolveEnvironments ??
       ((query) =>
@@ -442,6 +491,22 @@ export class RemoteFastAgentSettingsSkillSource implements FastAgentSettingsSkil
           [...this.allowedEnvironmentIds],
           query,
         ));
+  }
+
+  private async getMarketplaceSnapshot(
+    source: string,
+    revision?: string,
+  ): Promise<SettingsSkillMarketplaceSnapshot> {
+    const key = revision ? `${source}\0${revision}` : source;
+    let snapshotPromise = this.marketplaceSnapshots.get(key);
+    if (!snapshotPromise) {
+      snapshotPromise =
+        revision === undefined
+          ? this.loadMarketplaceSnapshot(source)
+          : this.loadMarketplaceSnapshot(source, revision);
+      this.marketplaceSnapshots.set(key, snapshotPromise);
+    }
+    return snapshotPromise;
   }
 
   async list(query: FastAgentSkillQuery): Promise<FastAgentSkillListResult> {
@@ -518,15 +583,10 @@ export class RemoteFastAgentSettingsSkillSource implements FastAgentSettingsSkil
     }
     const marketplaceResults = await Promise.all(
       selectedSources.map(async ([source, selectionsByEnvironment]) => {
-        let snapshotPromise = this.marketplaceSnapshots.get(source);
-        if (!snapshotPromise) {
-          snapshotPromise = this.loadMarketplaceSnapshot(source);
-          this.marketplaceSnapshots.set(source, snapshotPromise);
-        }
         try {
           return {
             selectionsByEnvironment,
-            snapshot: await snapshotPromise,
+            snapshot: await this.getMarketplaceSnapshot(source),
             source,
           };
         } catch {
@@ -548,9 +608,10 @@ export class RemoteFastAgentSettingsSkillSource implements FastAgentSettingsSkil
           )
           .map(([environmentId]) => environmentId);
         if (environmentIds.length === 0) continue;
-        const id = settingsSkillId(
-          'marketplace',
-          `${source}\0${snapshot.revision}\0${marketplaceRecord.name}`,
+        const id = marketplaceSkillId(
+          source,
+          snapshot.revision,
+          marketplaceRecord.name,
         );
         const record: SettingsSkillRecord = {
           ...marketplaceRecord,
@@ -612,6 +673,47 @@ export class RemoteFastAgentSettingsSkillSource implements FastAgentSettingsSkil
     };
   }
 
+  private async loadMarketplaceSkillReference(
+    id: string,
+    reference: MarketplaceSkillReference,
+  ): Promise<void> {
+    const environmentsList = await this.resolveEnvironments({});
+    const selectionsByEnvironment = new Map<string, 'all' | Set<string>>();
+    for (const environment of environmentsList) {
+      if (!this.allowedEnvironmentIds.has(environment.id)) continue;
+      const selection = environment.config.skills?.[reference.source];
+      if (selection === undefined) continue;
+      selectionsByEnvironment.set(
+        environment.id,
+        selection === 'all' ? 'all' : new Set(selection),
+      );
+    }
+    const environmentIds = [...selectionsByEnvironment.entries()]
+      .filter(
+        ([, selection]) => selection === 'all' || selection.has(reference.name),
+      )
+      .map(([environmentId]) => environmentId)
+      .sort();
+    if (environmentIds.length === 0) return;
+
+    const snapshot = await this.getMarketplaceSnapshot(
+      reference.source,
+      reference.revision,
+    );
+    if (snapshot.revision !== reference.revision) return;
+    const marketplaceRecord = snapshot.records.find(
+      (record) => record.name === reference.name,
+    );
+    if (!marketplaceRecord) return;
+    this.records.set(id, {
+      ...marketplaceRecord,
+      environmentIds,
+      id,
+      invocation: marketplaceRecord.name,
+      snapshot,
+    });
+  }
+
   async read(
     id: string,
     resource = 'SKILL.md',
@@ -620,7 +722,12 @@ export class RemoteFastAgentSettingsSkillSource implements FastAgentSettingsSkil
     // executor's `list`, so a fresh per-turn source must be able to resolve
     // either an inline or marketplace record directly.
     if (!this.records.has(id) && id.startsWith('settings:')) {
-      await this.list({});
+      const marketplaceReference = parseMarketplaceSkillId(id);
+      if (marketplaceReference) {
+        await this.loadMarketplaceSkillReference(id, marketplaceReference);
+      } else {
+        await this.list({});
+      }
     }
     const record = this.records.get(id);
     const selectedResource = record?.resources.get(resource);

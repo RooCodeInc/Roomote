@@ -355,7 +355,8 @@ export class FastAgentSkillStore {
           ? left.id.localeCompare(right.id)
           : left.name.localeCompare(right.name),
       ),
-      ...(settings.nextSourceOffset === undefined
+      ...(settings.nextSourceOffset === undefined ||
+      settingsMatchIsAuthoritative
         ? {}
         : { nextSourceOffset: settings.nextSourceOffset }),
       warnings: [

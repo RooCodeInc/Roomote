@@ -250,6 +250,9 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(skillListSource).toContain(
       'an exact name to search all four sources without guessing an environment or repository',
     );
+    expect(skillListSource).toContain(
+      'following nextSourceOffset with sourceOffset unless a higher-precedence match has already been returned',
+    );
     expect(skillListSource).toContain('complete bounded inventory');
     expect(skillListSource).toContain(
       'packaged > instance > legacy Settings > repository',

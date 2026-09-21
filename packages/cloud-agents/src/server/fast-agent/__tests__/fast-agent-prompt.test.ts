@@ -533,7 +533,9 @@ describe('buildFastAgentSystemPrompt', () => {
             source: 'repository',
           },
         ],
-        warnings: [],
+        warnings: [
+          'Repository skill discovery omitted 2 repositories after reaching the limit of 8.',
+        ],
       },
     });
 
@@ -554,6 +556,9 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain(
       '- 2 more skills are not listed here; call `list_skills` for the full inventory.',
+    );
+    expect(prompt).toContain(
+      '- Inventory warning (untrusted diagnostic): Repository skill discovery omitted 2 repositories after reaching the limit of 8.',
     );
     expect(prompt).toContain(
       '- Dashboard [id: env-1] also installs marketplace skill sources anthropics/skills; additional skills may be omitted from this bounded inventory. Call `list_skills` without a scope for the complete bounded authorized inventory',
@@ -759,9 +764,9 @@ describe('buildFastAgentSystemPrompt', () => {
       'An unscoped exact `name` lookup searches packaged, instance, authorized legacy Settings, and authorized repository skills',
     );
     expect(prompt).toContain(
-      'whenever a result includes `nextSourceOffset`, call `list_skills` again',
+      'when a result includes `nextSourceOffset` and no authoritative packaged, instance, or Settings match has already been returned',
     );
-    expect(prompt).toContain('collect every page');
+    expect(prompt).toContain('stop once a higher-precedence match is returned');
     expect(prompt).toContain('exact returned skill ID');
     expect(prompt).toContain('Not every skill applies in Fast');
     expect(prompt).toContain('some require starting a coding task');

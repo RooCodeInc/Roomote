@@ -466,7 +466,7 @@ describe('FastAgentSkillStore', () => {
     });
   });
 
-  it('uses an unscoped exact-name lookup for packaged and settings skills only', async () => {
+  it('stops exact-name pagination when a Settings match is authoritative', async () => {
     const repositorySkills = { list: vi.fn(), read: vi.fn() };
     const settingsSkills = {
       list: vi.fn().mockResolvedValue({
@@ -498,7 +498,7 @@ describe('FastAgentSkillStore', () => {
     expect(catalog.skills).toEqual([
       expect.objectContaining({ id: 'settings:manual:thermonuclear' }),
     ]);
-    expect(catalog.nextSourceOffset).toBe(8);
+    expect(catalog.nextSourceOffset).toBeUndefined();
   });
 
   it('checks repositories after paginated Settings lookup is exhausted', async () => {
