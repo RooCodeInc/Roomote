@@ -376,7 +376,7 @@ describe('useCustomMcpServers', () => {
     expect(
       screen.getByRole('button', { name: 'Show less' }),
     ).toBeInTheDocument();
-    expect(screen.getByRole('checkbox', { name: 'resolve' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Resolve' })).toBeChecked();
     state.tools = [];
   });
 
@@ -425,7 +425,7 @@ describe('useCustomMcpServers', () => {
     it('never loads or shows approval policies for non-admins or with the experiment off', async () => {
       state.isAdmin = false;
       await openToolsDialog();
-      await screen.findByText('search');
+      await screen.findByText('Search');
       expect(
         screen.queryByRole('radiogroup', { name: 'Approval mode for search' }),
       ).not.toBeInTheDocument();
@@ -436,7 +436,7 @@ describe('useCustomMcpServers', () => {
       approvals.experimentEnabled = false;
       approvals.listEnabled.length = 0;
       await openToolsDialog();
-      await screen.findByText('search');
+      await screen.findByText('Search');
       expect(
         screen.queryByRole('radiogroup', { name: 'Approval mode for search' }),
       ).not.toBeInTheDocument();

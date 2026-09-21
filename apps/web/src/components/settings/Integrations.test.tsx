@@ -233,14 +233,22 @@ vi.mock('@/hooks/linear', () => ({
 vi.mock('./IntegrationToolApprovalControls', () => ({
   IntegrationToolApprovalList: <T extends { name: string }>({
     tools,
-    children,
+    isToolEnabled,
+    onToggleTool,
   }: {
     tools: T[];
-    children: (tool: T) => ReactNode;
+    isToolEnabled: (toolName: string) => boolean;
+    onToggleTool: (toolName: string, enabled: boolean) => void;
   }) => (
     <div>
       {tools.map((tool) => (
-        <div key={tool.name}>{children(tool)}</div>
+        <input
+          key={tool.name}
+          type="checkbox"
+          aria-label={tool.name}
+          checked={isToolEnabled(tool.name)}
+          onChange={(event) => onToggleTool(tool.name, event.target.checked)}
+        />
       ))}
     </div>
   ),
@@ -1556,7 +1564,7 @@ describe('Integrations settings', () => {
     ).not.toBeNull();
   });
 
-  it('opens the manage tools dialog with prettified tool labels', () => {
+  it('opens the manage tools dialog with a toggle per tool', () => {
     state.deploymentEnablements = [{ mcpId: 'sentry', enabled: true }];
     state.userConnections = [
       { id: 'conn-sentry', mcpId: 'sentry', authStatus: 'authenticated' },
@@ -1582,16 +1590,8 @@ describe('Integrations settings', () => {
       screen.getByRole('heading', { name: 'Manage tools for Sentry' }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Disable get_sentry_resource' }),
-    ).toBeInTheDocument();
-    expect(screen.getByText('Get Sentry Resource')).toHaveAttribute(
-      'for',
-      expect.stringMatching(/^mcp-tool-sentry-/),
-    );
-    expect(screen.queryByText('get_sentry_resource')).not.toBeInTheDocument();
-    expect(
-      screen.queryByText('Inspect a Sentry resource'),
-    ).not.toBeInTheDocument();
+      screen.getByRole('checkbox', { name: 'get_sentry_resource' }),
+    ).toBeChecked();
     expect(
       screen.getByRole('button', { name: 'Save changes' }),
     ).toBeInTheDocument();
@@ -2632,7 +2632,7 @@ describe('Integrations settings', () => {
       screen.getByRole('button', { name: 'Manage Sentry tools' }),
     );
     fireEvent.click(
-      screen.getByRole('button', { name: 'Disable get_sentry_resource' }),
+      screen.getByRole('checkbox', { name: 'get_sentry_resource' }),
     );
 
     rerender(<Integrations />);
@@ -2641,11 +2641,11 @@ describe('Integrations settings', () => {
       screen.getByRole('heading', { name: 'Manage tools for Sentry' }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Enable get_sentry_resource' }),
-    ).toBeInTheDocument();
+      screen.getByRole('checkbox', { name: 'get_sentry_resource' }),
+    ).not.toBeChecked();
     expect(
-      screen.getByRole('button', { name: 'Enable search_events' }),
-    ).toBeInTheDocument();
+      screen.getByRole('checkbox', { name: 'search_events' }),
+    ).not.toBeChecked();
   });
 
   it('lets an admin store a voice key from the Voice card', async () => {
