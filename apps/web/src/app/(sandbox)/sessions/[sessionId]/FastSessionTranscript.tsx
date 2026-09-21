@@ -50,6 +50,7 @@ import {
   type SlackMentionScope,
 } from '@/components/ai-elements/slack-mention-context';
 import { WorkspaceHeader } from '@/components/layout';
+import { Alert, AlertDescription, AlertTitle } from '@/components/system';
 import { PrivateSessionIcon } from '@/components/sessions/PrivateSessionIcon';
 import { useLiveVoice } from '@/hooks/useLiveVoice';
 import { useSessionVoiceCallLease } from '@/hooks/useSessionVoiceCallLease';
@@ -61,6 +62,9 @@ import {
   type SessionPromptSubmission,
 } from './SessionPromptInput';
 import { preparePromptAttachments } from '@/lib/prompt-attachments';
+import { describeValidationError } from '@/lib/validation-error';
+import { isComposerValidationError } from '@/lib/validation-error';
+import { ComposerErrorDialog } from '@/components/tasks/ComposerErrorDialog';
 import {
   useOpenSessionTaskPanel,
   useOpenSessionTasksPanel,
@@ -567,6 +571,7 @@ export function FastSessionTranscript({
       ),
   );
   const [replyError, setReplyError] = useState<string | null>(null);
+  const [validationError, setValidationError] = useState<unknown>(null);
   const [title, setTitle] = useState<string | null>(initialTitle);
   useSessionTitlePropagation(title, initialTitle);
   const [goal, setGoal] = useState<SessionGoal | null>(sessionGoal ?? null);
@@ -1307,10 +1312,13 @@ export function FastSessionTranscript({
       let optimisticId: string | null = null;
       let clientMessageId: string | undefined;
       try {
-        const prepared = await preparePromptAttachments({
-          text: message.text.trim(),
-          attachments: message.files,
-        });
+        const prepared = await preparePromptAttachments(
+          {
+            text: message.text.trim(),
+            attachments: message.files,
+          },
+          { enforceAttachmentTextLimit: true },
+        );
         const images = prepared.images ?? [];
         if (!prepared.text && images.length === 0) {
           return false;
@@ -1382,9 +1390,13 @@ export function FastSessionTranscript({
             ),
           );
         }
-        setReplyError(
-          error instanceof Error ? error.message : 'Failed to send message',
-        );
+        if (isComposerValidationError(error)) {
+          setValidationError(error);
+        } else {
+          setReplyError(
+            describeValidationError(error, 'Failed to send message'),
+          );
+        }
         if (optimisticId) {
           dispatchPendingResponse({
             type: 'rollbackOptimistic',
@@ -1984,8 +1996,21 @@ export function FastSessionTranscript({
               }}
             />
             {replyError ? (
-              <p className="px-4 pb-2 text-xs text-destructive">{replyError}</p>
+              <Alert
+                variant="destructive"
+                className="mx-4 mb-2 [&>svg]:size-4"
+                role="alert"
+              >
+                <AlertTitle>Message not sent</AlertTitle>
+                <AlertDescription>
+                  <p className="whitespace-pre-line">{replyError}</p>
+                </AlertDescription>
+              </Alert>
             ) : null}
+            <ComposerErrorDialog
+              error={validationError}
+              onClose={() => setValidationError(null)}
+            />
           </div>
         ) : null}
       </SlackMentionProvider>

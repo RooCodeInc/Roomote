@@ -195,6 +195,43 @@ describe('PromptInput', () => {
     expect(screen.getByTestId('attachment-count')).toHaveTextContent('1');
   });
 
+  it('keeps prompt text and attachments when a rejected submit fails', async () => {
+    const onSubmit = vi
+      .fn()
+      .mockRejectedValue(
+        new Error(
+          'Extracted text from "notes.txt" would exceed the 200,000 character limit for attachments (total 200,001 characters). Remove or shorten the attachment and try again.',
+        ),
+      );
+    const { container } = render(
+      <PromptInput accept=".md" onSubmit={onSubmit}>
+        <AttachmentCount />
+        <PromptInputBody>
+          <PromptInputTextarea aria-label="Prompt" />
+        </PromptInputBody>
+        <button type="submit">Send</button>
+      </PromptInput>,
+    );
+
+    const input = container.querySelector('input[type="file"]');
+    fireEvent.change(input!, {
+      target: {
+        files: [new File(['# Notes'], 'notes.md', { type: 'text/markdown' })],
+      },
+    });
+
+    const textarea = screen.getByLabelText('Prompt');
+    fireEvent.change(textarea, { target: { value: 'Summarize the notes' } });
+    fireEvent.click(screen.getByText('Send'));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(screen.getByTestId('attachment-count')).toHaveTextContent('1'),
+    );
+    expect(screen.getByTestId('attachment-count')).toHaveTextContent('1');
+    expect(textarea).toHaveValue('Summarize the notes');
+  });
+
   it('accepts text attachments through a text wildcard filter', () => {
     const { container } = render(
       <PromptInput accept="text/*,.pdf" onSubmit={() => {}}>

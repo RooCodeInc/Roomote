@@ -1,3 +1,5 @@
+export const ROOMOTE_ATTACHMENT_TEXT_MAX_CHARS = 200_000;
+
 const TEXT_ATTACHMENT_EXTENSIONS = [
   'txt',
   'md',
