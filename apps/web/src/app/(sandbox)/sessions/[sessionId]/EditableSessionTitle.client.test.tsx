@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 const { renameMutationMock, useTRPCMock } = vi.hoisted(() => ({
@@ -113,6 +119,39 @@ describe('EditableSessionTitle', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Edit session title' }));
     fireEvent.change(screen.getByRole('textbox'), { target: { value: '   ' } });
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+  });
+
+  it('serializes saves while a rename is pending', async () => {
+    let resolveRename!: (value: undefined) => void;
+    renameMutationMock.mockImplementationOnce(
+      () =>
+        new Promise<undefined>((resolve) => {
+          resolveRename = resolve;
+        }),
+    );
+    renderTitle();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit session title' }));
+    fireEvent.change(screen.getByRole('textbox'), {
+      target: { value: 'First rename' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    const heading = screen.getByRole('button', { name: 'Edit session title' });
+    expect(heading).toHaveAttribute('aria-disabled', 'true');
+    await waitFor(() => expect(renameMutationMock).toHaveBeenCalledTimes(1));
+    fireEvent.click(heading);
+    fireEvent.keyDown(heading, { key: 'Enter' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(renameMutationMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => resolveRename(undefined));
+    await waitFor(() =>
+      expect(heading).toHaveAttribute('aria-disabled', 'false'),
+    );
+
+    fireEvent.click(heading);
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 
   it('renders a non-interactive heading when renaming is not allowed', () => {

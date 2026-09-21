@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
@@ -60,6 +60,7 @@ function EditableSessionTitleControl({
   const [displayTitle, setDisplayTitle] = useState(title);
   const [titleDraft, setTitleDraft] = useState(title);
   const [isRenameDialogOpen, setIsRenameDialogOpen] = useState(false);
+  const renamePendingRef = useRef(false);
 
   useEffect(() => {
     setDisplayTitle(title);
@@ -72,6 +73,7 @@ function EditableSessionTitleControl({
   }, [displayTitle, isRenameDialogOpen]);
 
   const handleOpenRenameDialog = () => {
+    if (renamePendingRef.current) return;
     setTitleDraft(displayTitle);
     setIsRenameDialogOpen(true);
   };
@@ -92,6 +94,7 @@ function EditableSessionTitleControl({
     setIsRenameDialogOpen(false);
     if (nextTitle === currentTitle) return;
 
+    renamePendingRef.current = true;
     setDisplayTitle(nextTitle);
     onTitleChange?.(nextTitle);
 
@@ -104,6 +107,7 @@ function EditableSessionTitleControl({
         error instanceof Error ? error.message : 'Failed to rename session.',
       );
     } finally {
+      renamePendingRef.current = false;
       void queryClient.invalidateQueries({
         queryKey: trpc.sessions.byId.queryKey({ sessionId }),
       });
@@ -124,6 +128,7 @@ function EditableSessionTitleControl({
         onClick={handleOpenRenameDialog}
         onKeyDown={handleTitleKeyDown}
         aria-label="Edit session title"
+        aria-disabled={renameSession.isPending}
         title={displayTitle}
         className={`${className} cursor-pointer rounded-sm hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-1 focus-visible:outline-border`}
       >
