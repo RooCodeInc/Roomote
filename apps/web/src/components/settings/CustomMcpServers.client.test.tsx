@@ -36,7 +36,13 @@ const {
   listInputs,
   toastSuccessMock,
   toastErrorMock,
+  approvals,
 } = vi.hoisted(() => ({
+  approvals: {
+    experimentEnabled: false,
+    listEnabled: [] as boolean[],
+    setMode: vi.fn(),
+  },
   state: {
     availability: { enabled: true },
     isAdmin: true,
@@ -62,6 +68,23 @@ const {
 
 vi.mock('sonner', () => ({
   toast: { success: toastSuccessMock, error: toastErrorMock },
+}));
+
+vi.mock('@/hooks/useIntegrationToolApprovalsExperiment', () => ({
+  useIntegrationToolApprovalsExperiment: () => ({
+    enabled: approvals.experimentEnabled,
+  }),
+}));
+
+vi.mock('@/hooks/useIntegrationToolPolicies', () => ({
+  useIntegrationToolPolicies: (options: { enabled?: boolean }) => {
+    approvals.listEnabled.push(options.enabled ?? true);
+    return {
+      modes: new Map([[JSON.stringify(['internal-tools', 'search']), 'ask']]),
+      isUpdating: false,
+      setMode: approvals.setMode,
+    };
+  },
 }));
 
 vi.mock('@/hooks/useUser', () => ({
@@ -319,6 +342,69 @@ describe('useCustomMcpServers', () => {
         name: 'Manage tools for internal-tools',
       }),
     ).toBeInTheDocument();
+  });
+
+  describe('tool approval modes', () => {
+    beforeEach(() => {
+      state.isAdmin = true;
+      state.servers = [buildServer()];
+      state.tools = [{ name: 'search', description: null, enabled: true }];
+      approvals.experimentEnabled = true;
+      approvals.listEnabled.length = 0;
+      approvals.setMode.mockClear();
+      Element.prototype.scrollIntoView = vi.fn();
+    });
+
+    afterEach(() => {
+      approvals.experimentEnabled = false;
+      state.tools = [];
+    });
+
+    async function openToolsDialog() {
+      renderHarness();
+      fireEvent.click(
+        await screen.findByRole('button', {
+          name: 'Manage internal-tools tools',
+        }),
+      );
+    }
+
+    it('lets an admin set a shared custom server tool to ask first, keyed by the server name', async () => {
+      await openToolsDialog();
+
+      const select = await screen.findByRole('combobox', {
+        name: 'Approval mode for search',
+      });
+      expect(select).toHaveTextContent('Ask first');
+      fireEvent.click(select);
+      fireEvent.click(await screen.findByRole('option', { name: 'Reject' }));
+      expect(approvals.setMode).toHaveBeenCalledWith(
+        'internal-tools',
+        'search',
+        'reject',
+      );
+    });
+
+    it('never loads or shows approval policies for non-admins or with the experiment off', async () => {
+      state.isAdmin = false;
+      await openToolsDialog();
+      await screen.findByText('search');
+      expect(
+        screen.queryByRole('combobox', { name: 'Approval mode for search' }),
+      ).not.toBeInTheDocument();
+      expect(approvals.listEnabled).not.toContain(true);
+
+      cleanup();
+      state.isAdmin = true;
+      approvals.experimentEnabled = false;
+      approvals.listEnabled.length = 0;
+      await openToolsDialog();
+      await screen.findByText('search');
+      expect(
+        screen.queryByRole('combobox', { name: 'Approval mode for search' }),
+      ).not.toBeInTheDocument();
+      expect(approvals.listEnabled).not.toContain(true);
+    });
   });
 
   it('offers Connect and a status for unauthenticated oauth servers', async () => {

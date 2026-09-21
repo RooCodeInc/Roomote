@@ -2,20 +2,28 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@roomote/db/server', () => ({
   cancelOpenIntegrationToolApprovals: vi.fn(async () => 0),
+  db: {},
+  getSessionForFastConversation: vi.fn(),
   expireIntegrationToolApproval: vi.fn(async () => undefined),
   fingerprintIntegrationToolCall: vi.fn(() => 'fingerprint'),
   getIntegrationToolApproval: vi.fn(),
+  insertAutoApprovedIntegrationToolApproval: vi.fn(async () => undefined),
   insertIntegrationToolApproval: vi.fn(),
   isDeploymentExperimentEnabled: vi.fn(async () => true),
   listIntegrationToolPolicies: vi.fn(async () => []),
+  listIntegrationToolSessionOverrides: vi.fn(async () => []),
   markIntegrationToolApprovalConsumed: vi.fn(async () => true),
 }));
 
 import {
   expireIntegrationToolApproval,
   getIntegrationToolApproval,
+  getSessionForFastConversation,
+  insertAutoApprovedIntegrationToolApproval,
   insertIntegrationToolApproval,
   isDeploymentExperimentEnabled,
+  listIntegrationToolPolicies,
+  listIntegrationToolSessionOverrides,
   markIntegrationToolApprovalConsumed,
 } from '@roomote/db/server';
 
@@ -27,6 +35,7 @@ import {
   hashIntegrationToolApprovalRules,
   integrationToolApprovalRulesToConfig,
   resolveFastAgentToolApprovalRules,
+  resolveFastAgentToolApprovalSessionId,
   shouldDisposeInstanceForToolApprovalRules,
 } from '../fast-agent-tool-approvals';
 import type { FastAgentIntegration } from '../fast-agent-integration-broker';
@@ -106,10 +115,10 @@ describe('buildIntegrationToolApprovalRules', () => {
     ]);
   });
 
-  it('fails closed on ambiguous flattened tool keys while unaffected tools keep their policies', () => {
-    // `a`/`b_c` and `a_b`/`c` both flatten to `a_b_c`: approval enforcement
-    // cannot resolve identity, so the ambiguous key must be denied outright
-    // and must never execute under either tool's policy.
+  it('applies the most restrictive mode to an ambiguous flattened key while unaffected tools keep their policies', () => {
+    // `a`/`b_c` and `a_b`/`c` both flatten to `a_b_c`: the shared key gets
+    // the most restrictive mode among the colliding tools, so it can never
+    // execute ungated, and unaffected tools are untouched.
     const ambiguous = [
       {
         id: 'a',
@@ -145,15 +154,12 @@ describe('buildIntegrationToolApprovalRules', () => {
         createdAt: '',
       },
     ]);
-    // The ambiguous key is denied exactly once, last (last-match-wins), so
-    // the `ask` policy on `a`/`b_c` cannot gate it and nothing executes it.
-    expect(rules[rules.length - 1]).toEqual({
+    expect(rules).toContainEqual({
       permission: 'a_b_c',
       pattern: '*',
-      action: 'deny',
+      action: 'ask',
     });
     expect(rules.filter((rule) => rule.permission === 'a_b_c')).toHaveLength(1);
-    // Unaffected tools keep their configured modes.
     expect(rules).toContainEqual({
       permission: 'a_unrelated',
       pattern: '*',
@@ -206,6 +212,122 @@ describe('buildIntegrationToolApprovalRules', () => {
   });
 });
 
+describe('buildIntegrationToolApprovalRules with mounted server names', () => {
+  const mounted = (id: string, toolName: string) =>
+    ({
+      id,
+      name: id,
+      description: '',
+      tools: [{ name: toolName, description: '', inputSchema: {} }],
+    }) as unknown as FastAgentIntegration;
+  const ask = (integrationId: string, toolName: string) => ({
+    policyId: `${integrationId}/${toolName}`,
+    integrationId,
+    toolName,
+    mode: 'ask' as const,
+    updatedAt: '',
+    createdAt: '',
+  });
+
+  it('keys a rule on the unique mount name when sanitized ids collide', () => {
+    // `foo.bar` and `foo_bar` both sanitize to `foo_bar`; the second mounts
+    // under a suffixed name, and its policy must follow it there.
+    const rules = buildIntegrationToolApprovalRules(
+      [mounted('foo.bar', 'read'), mounted('foo_bar', 'read')],
+      [ask('foo_bar', 'read')],
+    );
+    expect(rules).toEqual([
+      { permission: 'foo_bar__roomote_2_read', pattern: '*', action: 'ask' },
+    ]);
+  });
+
+  it('applies the most restrictive mode when two tools flatten to one native key', () => {
+    // `a`/`b_c` and `a_b`/`c` both flatten to `a_b_c`. The native rule cannot
+    // tell them apart, so a gated tool must never run ungated through the
+    // other one's default allow.
+    const integrations = [mounted('a', 'b_c'), mounted('a_b', 'c')];
+    expect(
+      buildIntegrationToolApprovalRules(integrations, [ask('a_b', 'c')]),
+    ).toEqual([{ permission: 'a_b_c', pattern: '*', action: 'ask' }]);
+    expect(
+      buildIntegrationToolApprovalRules(integrations, [
+        ask('a', 'b_c'),
+        { ...ask('a_b', 'c'), mode: 'reject' as const },
+      ]),
+    ).toEqual([{ permission: 'a_b_c', pattern: '*', action: 'deny' }]);
+  });
+});
+
+describe('buildIntegrationToolApprovalRules with session overrides', () => {
+  const policy = (toolName: string, mode: 'ask' | 'reject') => ({
+    policyId: toolName,
+    integrationId: 'mock-slack',
+    toolName,
+    mode,
+    updatedAt: '',
+    createdAt: '',
+  });
+  const override = (toolName: string, mode: 'allow' | 'ask') => ({
+    integrationId: 'mock-slack',
+    toolName,
+    mode,
+  });
+
+  it('gates a default-allow tool the requester asked to be asked about', () => {
+    expect(
+      buildIntegrationToolApprovalRules(
+        integrations,
+        [],
+        [override('read_channel', 'ask')],
+      ),
+    ).toEqual([
+      {
+        permission: codeModeToolKey('mock-slack', 'read_channel'),
+        pattern: '*',
+        action: 'ask',
+      },
+    ]);
+  });
+
+  it('keeps the native ask under a session allow so the rules never change', () => {
+    const policies = [policy('post_message', 'ask')];
+    const withOverride = buildIntegrationToolApprovalRules(
+      integrations,
+      policies,
+      [override('post_message', 'allow')],
+    );
+    expect(withOverride).toEqual(
+      buildIntegrationToolApprovalRules(integrations, policies),
+    );
+  });
+
+  it('never lets a session override loosen a deployment reject', () => {
+    expect(
+      buildIntegrationToolApprovalRules(
+        integrations,
+        [policy('delete_channel', 'reject')],
+        [override('delete_channel', 'allow')],
+      ),
+    ).toEqual([
+      {
+        permission: codeModeToolKey('mock-slack', 'delete_channel'),
+        pattern: '*',
+        action: 'deny',
+      },
+    ]);
+  });
+
+  it('ignores overrides for tools the actor is not authorized to mount', () => {
+    expect(
+      buildIntegrationToolApprovalRules(
+        integrations,
+        [],
+        [override('tool_the_actor_cannot_see', 'ask')],
+      ),
+    ).toEqual([]);
+  });
+});
+
 describe('hashIntegrationToolApprovalRules', () => {
   it('is stable across rule order and changes with the rules', () => {
     const first = hashIntegrationToolApprovalRules([
@@ -229,6 +351,27 @@ describe('resolveFastAgentToolApprovalRules', () => {
     vi.clearAllMocks();
   });
 
+  it('layers the Session overrides on the deployment policies', async () => {
+    vi.mocked(listIntegrationToolPolicies).mockResolvedValueOnce([]);
+    vi.mocked(listIntegrationToolSessionOverrides).mockResolvedValueOnce([
+      { integrationId: 'mock-slack', toolName: 'read_channel', mode: 'ask' },
+    ]);
+    const resolved = await resolveFastAgentToolApprovalRules({
+      integrations,
+      sessionId: 'session-id',
+    });
+    expect(listIntegrationToolSessionOverrides).toHaveBeenCalledWith(
+      'session-id',
+    );
+    expect(resolved?.rules).toEqual([
+      {
+        permission: codeModeToolKey('mock-slack', 'read_channel'),
+        pattern: '*',
+        action: 'ask',
+      },
+    ]);
+  });
+
   it('is inactive without the experiment', async () => {
     vi.mocked(isDeploymentExperimentEnabled).mockResolvedValueOnce(false);
     expect(
@@ -239,7 +382,12 @@ describe('resolveFastAgentToolApprovalRules', () => {
     );
   });
 
-  it('fails closed rather than deactivating approvals on an ambiguous catalog', async () => {
+  it('applies the most restrictive mode to a colliding flattened key so it never runs ungated', async () => {
+    // `a`/`b_c` and `a_b`/`c` both flatten to `a_b_c`. With an `ask` policy
+    // on one of them, the shared key asks (never silently executes); with a
+    // `reject` policy, it denies. The bridge resolves which tool actually
+    // runs from the paused call's child record and fails closed when it
+    // cannot (covered below).
     const ambiguous = [
       {
         id: 'a',
@@ -254,10 +402,37 @@ describe('resolveFastAgentToolApprovalRules', () => {
         tools: [{ name: 'c', description: '', inputSchema: {} }],
       } as unknown as FastAgentIntegration,
     ];
+    vi.mocked(listIntegrationToolPolicies).mockResolvedValueOnce([
+      {
+        policyId: 'p1',
+        integrationId: 'a',
+        toolName: 'b_c',
+        mode: 'ask',
+        updatedAt: '',
+        createdAt: '',
+      },
+    ]);
     const resolved = await resolveFastAgentToolApprovalRules({
       integrations: ambiguous,
     });
     expect(resolved?.rules).toEqual([
+      { permission: 'a_b_c', pattern: '*', action: 'ask' },
+    ]);
+
+    vi.mocked(listIntegrationToolPolicies).mockResolvedValueOnce([
+      {
+        policyId: 'p2',
+        integrationId: 'a_b',
+        toolName: 'c',
+        mode: 'reject',
+        updatedAt: '',
+        createdAt: '',
+      },
+    ]);
+    const rejected = await resolveFastAgentToolApprovalRules({
+      integrations: ambiguous,
+    });
+    expect(rejected?.rules).toEqual([
       { permission: 'a_b_c', pattern: '*', action: 'deny' },
     ]);
   });
@@ -392,6 +567,44 @@ describe('extractApprovalCallArgs', () => {
     ).toEqual(code);
     expect(extractApprovalCallArgs(undefined, tool)).toBeUndefined();
   });
+
+  it('shows the paused call, not an earlier call to the same tool in one script', () => {
+    expect(
+      extractApprovalCallArgs(
+        {
+          input: { code: 'two calls' },
+          toolCalls: [
+            { tool: 'mock-slack.post_message', input: { channel: 'first' } },
+            { tool: 'mock-slack.read_channel', input: { channel: 'other' } },
+            { tool: 'mock-slack.post_message', input: { channel: 'second' } },
+          ],
+        },
+        tool,
+      ),
+    ).toEqual({ channel: 'second' });
+  });
+});
+
+describe('resolveFastAgentToolApprovalSessionId', () => {
+  it('records approvals under the unified Session bound to the Fast conversation', async () => {
+    vi.mocked(getSessionForFastConversation).mockResolvedValueOnce({
+      id: 'unified-session',
+    } as never);
+    expect(await resolveFastAgentToolApprovalSessionId('conversation')).toBe(
+      'unified-session',
+    );
+    expect(getSessionForFastConversation).toHaveBeenCalledWith(
+      expect.anything(),
+      'conversation',
+    );
+  });
+
+  it('falls back to the conversation id so an unbound ask fails closed', async () => {
+    vi.mocked(getSessionForFastConversation).mockResolvedValueOnce(null);
+    expect(await resolveFastAgentToolApprovalSessionId('conversation')).toBe(
+      'conversation',
+    );
+  });
 });
 
 describe('tool approval bridge', () => {
@@ -423,6 +636,7 @@ describe('tool approval bridge', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(isDeploymentExperimentEnabled).mockResolvedValue(true);
+    vi.mocked(listIntegrationToolSessionOverrides).mockResolvedValue([]);
     vi.mocked(insertIntegrationToolApproval).mockResolvedValue({
       approvalId: 'approval-1',
       integrationId: 'mock-slack',
@@ -432,6 +646,71 @@ describe('tool approval bridge', () => {
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
       createdAt: new Date().toISOString(),
     });
+  });
+
+  it('relays an ask once without a card when the requester allowed the tool for the session', async () => {
+    vi.mocked(listIntegrationToolSessionOverrides).mockResolvedValue([
+      { integrationId: 'mock-slack', toolName: 'post_message', mode: 'allow' },
+    ]);
+    const helperMocks = helpers();
+    bridge().handleAsk(ask, helperMocks);
+    await vi.waitFor(() => expect(helperMocks.reply).toHaveBeenCalled());
+
+    expect(listIntegrationToolSessionOverrides).toHaveBeenCalledWith(
+      'session-id',
+    );
+    expect(insertAutoApprovedIntegrationToolApproval).toHaveBeenCalledWith(
+      { sessionId: 'session-id', userId: 'user-id' },
+      expect.objectContaining({
+        integrationId: 'mock-slack',
+        toolName: 'post_message',
+        nativeRequestId: 'req-1',
+        argsSummary: { channel: 'C1', text: 'hi' },
+      }),
+    );
+    expect(helperMocks.reply).toHaveBeenCalledTimes(1);
+    expect(helperMocks.reply).toHaveBeenCalledWith('req-1', 'once');
+    expect(insertIntegrationToolApproval).not.toHaveBeenCalled();
+  });
+
+  it('still asks when the session override is for a different tool or mode', async () => {
+    vi.mocked(listIntegrationToolSessionOverrides).mockResolvedValue([
+      { integrationId: 'mock-slack', toolName: 'read_channel', mode: 'allow' },
+      { integrationId: 'mock-slack', toolName: 'post_message', mode: 'ask' },
+    ]);
+    vi.mocked(getIntegrationToolApproval).mockResolvedValue({
+      status: 'rejected',
+    } as never);
+    const helperMocks = helpers();
+    bridge().handleAsk(ask, helperMocks);
+    await vi.waitFor(() => expect(helperMocks.reply).toHaveBeenCalled());
+
+    expect(insertIntegrationToolApproval).toHaveBeenCalled();
+    expect(insertAutoApprovedIntegrationToolApproval).not.toHaveBeenCalled();
+    expect(helperMocks.reply).toHaveBeenCalledWith(
+      'req-1',
+      'reject',
+      expect.any(String),
+    );
+  });
+
+  it('rejects instead of running unrecorded when the auto-approval audit write fails', async () => {
+    vi.mocked(listIntegrationToolSessionOverrides).mockResolvedValue([
+      { integrationId: 'mock-slack', toolName: 'post_message', mode: 'allow' },
+    ]);
+    vi.mocked(insertAutoApprovedIntegrationToolApproval).mockRejectedValueOnce(
+      new Error('write failed'),
+    );
+    const helperMocks = helpers();
+    bridge().handleAsk(ask, helperMocks);
+    await vi.waitFor(() => expect(helperMocks.reply).toHaveBeenCalled());
+
+    expect(helperMocks.reply).toHaveBeenCalledTimes(1);
+    expect(helperMocks.reply).toHaveBeenCalledWith(
+      'req-1',
+      'reject',
+      expect.any(String),
+    );
   });
 
   it('fails closed without a card for tools outside the mounted catalog', async () => {

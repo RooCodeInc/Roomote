@@ -25,13 +25,14 @@ export function IntegrationToolApprovalsExperimentalSetting() {
         />
         <p className="text-sm text-muted-foreground">
           Gate individual integration tools behind a requester decision in
-          Sessions. Applies on top of Code Mode Integrations: while enabled,
-          each integration&apos;s Manage tools dialog in Settings → Integrations
-          offers Always allow (default), Ask every time, and Always reject per
-          tool. Ask pauses each call until the Session owner allows it once or
-          rejects it; Always reject blocks it outright. Tools left at the
-          default run exactly as before. Policies are deployment-wide and apply
-          from the next session turn.
+          Sessions. While enabled, each integration&apos;s Manage tools dialog
+          in Settings → Integrations offers Always allow (default), Ask first,
+          and Reject per tool. Ask first pauses each call until the Session
+          owner allows it once, stops the asks for the rest of that Session, or
+          rejects it; Reject blocks it outright. Session owners can also ask to
+          be asked about any tool from its call in the transcript. Tools left at
+          the default run exactly as before. Policies are deployment-wide and
+          apply from the next session turn.
         </p>
       </div>
     </Section>

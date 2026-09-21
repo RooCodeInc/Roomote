@@ -24,8 +24,10 @@ function summarizeArgs(argsSummary: unknown): string {
  * The experiment-gated (`integrationToolApprovals`) card asking the Session
  * requester to allow one gated integration tool call or reject it. Allowing
  * resumes that exact paused call once through OpenCode's native permission
- * reply; it never creates a standing rule. The card disappears once the call
- * is decided or the approval expires unanswered.
+ * reply. "Don't ask again this session" also records a requester-owned
+ * override so later calls to that tool in this Session run without a card;
+ * it never changes the deployment policy or any other Session. The card
+ * disappears once the call is decided or the approval expires unanswered.
  */
 export function PendingIntegrationToolApprovals({
   sessionId,
@@ -40,7 +42,7 @@ export function PendingIntegrationToolApprovals({
 
   const decide = async (
     approvalId: string,
-    decision: 'approved' | 'rejected',
+    decision: 'approved' | 'approved_for_session' | 'rejected',
   ) => {
     setBusyId(approvalId);
     try {
@@ -82,7 +84,7 @@ export function PendingIntegrationToolApprovals({
                 {summarizeArgs(item.argsSummary)}
               </p>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button
                 size="sm"
                 type="button"
@@ -90,6 +92,17 @@ export function PendingIntegrationToolApprovals({
                 onClick={() => void decide(item.approvalId, 'approved')}
               >
                 Allow once
+              </Button>
+              <Button
+                size="sm"
+                type="button"
+                variant="outline"
+                disabled={busyId === item.approvalId}
+                onClick={() =>
+                  void decide(item.approvalId, 'approved_for_session')
+                }
+              >
+                Don&apos;t ask again this session
               </Button>
               <Button
                 size="sm"

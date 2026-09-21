@@ -4671,6 +4671,43 @@ export const integrationToolApprovalRequests = pgTable(
 );
 
 /**
+ * integration_tool_session_overrides
+ *
+ * Experiment-gated (`integration_tool_approvals_experiment_enabled`)
+ * requester-owned, session-scoped overrides of a tool's approval mode. `allow`
+ * records "don't ask again this session" for a tool the deployment gates with
+ * `ask`; `ask` gates a default-allow tool for this session only. A deployment
+ * `reject` policy is never loosened by a row here, and rows cascade with
+ * their session. Additive; N-1 code never reads or writes it.
+ */
+export const integrationToolSessionOverrides = pgTable(
+  'integration_tool_session_overrides',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    integrationId: text('integration_id').notNull(),
+    toolName: text('tool_name').notNull(),
+    mode: text('mode')
+      .notNull()
+      .$type<import('@roomote/types').IntegrationToolSessionOverrideMode>(),
+    setByUserId: text('set_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('integration_tool_session_overrides_tool_idx').on(
+      table.sessionId,
+      table.integrationId,
+      table.toolName,
+    ),
+  ],
+);
+
+/**
  * Credential egress control plane (additive, N-1 safe: previous releases never
  * read these tables). One row per attached run that a trusted controller
  * registered with the credential-substituting egress gateway. The

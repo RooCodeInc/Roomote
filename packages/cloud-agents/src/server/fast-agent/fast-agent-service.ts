@@ -225,6 +225,7 @@ import {
 } from './fast-agent-tool-policy';
 import {
   createFastAgentToolApprovalBridge,
+  resolveFastAgentToolApprovalSessionId,
   integrationToolApprovalRulesToConfig,
   resolveFastAgentToolApprovalRules,
   shouldDisposeInstanceForToolApprovalRules,
@@ -3828,14 +3829,18 @@ export async function answerFastAgentQuestion({
       Env.RELEASE_VERSION,
       packageJson.version,
     );
-    // Experiment-gated (`integrationToolApprovals`) per-tool approval rules,
-    // layered on code mode (always on): native ask rules pause gated tools
+    // Experiment-gated (`integrationToolApprovals`) per-tool approval rules
+    // for code-mode integration calls: native ask rules pause gated tools
     // behind a requester decision and deny rules hide rejected tools.
-    // Undefined when the experiment is inactive, which keeps today's
-    // ungated behavior, or when the tool catalog's flattened native keys
-    // are ambiguous for this conversation.
+    // Undefined while the experiment is off, which keeps ungated behavior.
+    // Approvals and session overrides are keyed on the unified Session, not
+    // the Fast conversation; resolve it once for the rules and the bridge.
+    const toolApprovalSessionId = await resolveFastAgentToolApprovalSessionId(
+      session.id,
+    );
     const toolApprovalRules = await resolveFastAgentToolApprovalRules({
       integrations: availableIntegrations,
+      sessionId: toolApprovalSessionId,
     });
     const system = buildFastAgentSystemPrompt({
       availableEnvironments,
@@ -6391,7 +6396,7 @@ export async function answerFastAgentQuestion({
                 // model's acknowledgement gate or close the turn.
                 const toolApprovalBridge = toolApprovalRules
                   ? createFastAgentToolApprovalBridge({
-                      sessionId: session.id,
+                      sessionId: toolApprovalSessionId,
                       userId,
                       integrations: availableIntegrations,
                       signal: promptSignal,

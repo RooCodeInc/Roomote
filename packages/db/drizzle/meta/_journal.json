@@ -778,6 +778,13 @@
       "when": 1790001349600,
       "tag": "0110_flowery_starhawk",
       "breakpoints": true
+    },
+    {
+      "idx": 111,
+      "version": "7",
+      "when": 1790006040696,
+      "tag": "0111_black_power_man",
+      "breakpoints": true
     }
   ]
 }

@@ -3,18 +3,24 @@ import { createHash } from 'node:crypto';
 import type { PermissionRuleset } from '@opencode-ai/sdk/v2/client';
 import {
   cancelOpenIntegrationToolApprovals,
+  db,
   expireIntegrationToolApproval,
   fingerprintIntegrationToolCall,
   getIntegrationToolApproval,
+  getSessionForFastConversation,
+  insertAutoApprovedIntegrationToolApproval,
   insertIntegrationToolApproval,
   isDeploymentExperimentEnabled,
   listIntegrationToolPolicies,
+  listIntegrationToolSessionOverrides,
   markIntegrationToolApprovalConsumed,
 } from '@roomote/db/server';
 import {
   integrationToolPolicyKey,
+  resolveEffectiveIntegrationToolMode,
   type IntegrationToolApprovalMetadata,
   type IntegrationToolPolicyMetadata,
+  type IntegrationToolSessionOverrideMetadata,
 } from '@roomote/types';
 
 import type { FastAgentIntegration } from './fast-agent-integration-broker';
@@ -45,51 +51,38 @@ const INTEGRATION_TOOL_APPROVAL_POLL_MS = 1_500;
 const INTEGRATION_TOOL_APPROVAL_CANCEL_EXPERIMENT_DISABLED =
   'experiment_disabled';
 
-/** OpenCode flattens every MCP tool to `<server name>_<tool name>`. */
+/**
+ * OpenCode flattens every MCP tool to `<server name>_<tool name>`. The server
+ * name is the integration's code-mode mount name, which is the sanitized
+ * integration id made unique across the mounted set.
+ */
 export function codeModeToolKey(serverName: string, toolName: string) {
   return `${serverName}_${toolName}`;
 }
 
-/**
- * The collision-safe server names for this turn's mounted integrations,
- * shared with the config writer so approval rules, mounting, and the ask
- * bridge all name tools identically.
- */
-function integrationToolServerNames(
+type MountedIntegrationTool = {
+  integrationId: string;
+  toolName: string;
+  serverName: string;
+  key: string;
+};
+
+/** Every mounted tool with the native key and server name it runs under. */
+function listMountedIntegrationTools(
   integrations: FastAgentIntegration[],
-): Map<string, string> {
-  return buildFastAgentCodeModeServerNames(
+): MountedIntegrationTool[] {
+  const serverNames = buildFastAgentCodeModeServerNames(
     integrations.map((integration) => integration.id),
   );
-}
-
-/**
- * Server names are made unique per integration, but the flattened tool key
- * (`<server name>_<tool name>`) can still collide across distinct
- * integration/tool pairs because both halves may contain underscores
- * (`a`/`b_c` and `a_b`/`c` both become `a_b_c`). Returns every flattened
- * key claimed by more than one pair. Approval enforcement cannot resolve
- * identity for those keys, so they are failed closed (denied outright)
- * instead of being allowed to execute under another tool's policy.
- */
-function findCollidingIntegrationToolKeys(
-  integrations: FastAgentIntegration[],
-): string[] {
-  const serverNames = integrationToolServerNames(integrations);
-  const pairsByKey = new Map<string, Set<string>>();
-  for (const integration of integrations) {
+  return integrations.flatMap((integration) => {
     const serverName = serverNames.get(integration.id)!;
-    for (const tool of integration.tools) {
-      const key = codeModeToolKey(serverName, tool.name);
-      const pairs = pairsByKey.get(key) ?? new Set<string>();
-      pairs.add(`${integration.id}/${tool.name}`);
-      pairsByKey.set(key, pairs);
-    }
-  }
-  return [...pairsByKey.entries()]
-    .filter(([, pairs]) => pairs.size > 1)
-    .map(([key]) => key)
-    .sort();
+    return integration.tools.map((tool) => ({
+      integrationId: integration.id,
+      toolName: tool.name,
+      serverName,
+      key: codeModeToolKey(serverName, tool.name),
+    }));
+  });
 }
 
 /**
@@ -102,37 +95,50 @@ function findCollidingIntegrationToolKeys(
 export function buildIntegrationToolApprovalRules(
   integrations: FastAgentIntegration[],
   policies: IntegrationToolPolicyMetadata[],
+  sessionOverrides: IntegrationToolSessionOverrideMetadata[] = [],
 ): PermissionRuleset {
-  const serverNames = integrationToolServerNames(integrations);
-  const collidingKeys = new Set(findCollidingIntegrationToolKeys(integrations));
   const modeByTool = new Map(
     policies.map((policy) => [
       integrationToolPolicyKey(policy.integrationId, policy.toolName),
       policy.mode,
     ]),
   );
-  const rules: PermissionRuleset = [];
-  for (const integration of integrations) {
-    const serverName = serverNames.get(integration.id)!;
-    for (const tool of integration.tools) {
-      const key = codeModeToolKey(serverName, tool.name);
-      if (collidingKeys.has(key)) continue;
-      const mode = modeByTool.get(
-        integrationToolPolicyKey(integration.id, tool.name),
-      );
-      if (mode === 'ask') {
-        rules.push({ permission: key, pattern: '*', action: 'ask' });
-      } else if (mode === 'reject') {
-        rules.push({ permission: key, pattern: '*', action: 'deny' });
-      }
+  const overrideByTool = new Map(
+    sessionOverrides.map((override) => [
+      integrationToolPolicyKey(override.integrationId, override.toolName),
+      override.mode,
+    ]),
+  );
+  // Server names are unique, but both halves of a flattened key may contain
+  // underscores, so two distinct tools can still share one native key (`a` /
+  // `b_c` and `a_b` / `c`). A native rule cannot tell them apart, so the most
+  // restrictive mode among them wins: a collision can only ever add an ask or
+  // a block, never let a gated tool run ungated.
+  const actionByKey = new Map<string, 'ask' | 'deny'>();
+  for (const tool of listMountedIntegrationTools(integrations)) {
+    const key = integrationToolPolicyKey(tool.integrationId, tool.toolName);
+    const policyMode = modeByTool.get(key);
+    const mode = resolveEffectiveIntegrationToolMode({
+      policyMode,
+      sessionOverrideMode: overrideByTool.get(key),
+    });
+    // A session `allow` over a deployment `ask` deliberately keeps the
+    // native ask rule: the bridge answers those asks itself, so "don't ask
+    // again this session" works mid-turn, never changes the compiled rules
+    // (no instance dispose), and never relies on OpenCode's leaky native
+    // `always`.
+    if (mode === 'reject') {
+      actionByKey.set(tool.key, 'deny');
+    } else if (
+      (mode === 'ask' || (mode === 'allow' && policyMode === 'ask')) &&
+      actionByKey.get(tool.key) !== 'deny'
+    ) {
+      actionByKey.set(tool.key, 'ask');
     }
   }
-  // Fail closed on ambiguous keys: OpenCode evaluates last-match-wins, so
-  // these denies beat any configured rule for the same key. An ambiguous
-  // call can never execute ungated, and no tool inherits another's policy.
-  for (const key of collidingKeys) {
-    rules.push({ permission: key, pattern: '*', action: 'deny' });
-  }
+  const rules: PermissionRuleset = [...actionByKey].map(
+    ([permission, action]) => ({ permission, pattern: '*', action }),
+  );
   return rules;
 }
 
@@ -231,9 +237,13 @@ export function extractApprovalCallArgs(
 ): unknown {
   if (!recovered) return undefined;
   const dottedChildName = `${tool.serverName}.${tool.toolName}`;
-  const child = recovered.toolCalls?.find(
-    (entry) => entry.tool === dottedChildName,
-  );
+  // One script can call the same tool more than once. Child calls are
+  // recorded as they run, so the paused call is the most recent match, not
+  // the first; showing the first would put an earlier call's arguments on
+  // this ask's card and audit row.
+  const child = [...(recovered.toolCalls ?? [])]
+    .reverse()
+    .find((entry) => entry.tool === dottedChildName);
   return child ? child.input : recovered.input;
 }
 
@@ -249,20 +259,39 @@ export function extractApprovalCallArgs(
  */
 export async function resolveFastAgentToolApprovalRules(input: {
   integrations: FastAgentIntegration[];
+  /** The Session whose requester-owned overrides layer on the policies. */
+  sessionId?: string;
 }): Promise<{ rules: PermissionRuleset; hash: string } | undefined> {
   const enabled = await isDeploymentExperimentEnabled(
     'integrationToolApprovals',
   );
   if (!enabled) return undefined;
-  const collidingKeys = findCollidingIntegrationToolKeys(input.integrations);
-  if (collidingKeys.length > 0) {
-    console.warn(
-      `[Fast Agent] Tool approvals: denying ambiguous OpenCode tool names (${collidingKeys.join(', ')}) because distinct integration tools flatten to them.`,
-    );
-  }
-  const policies = await listIntegrationToolPolicies();
-  const rules = buildIntegrationToolApprovalRules(input.integrations, policies);
+  const [policies, sessionOverrides] = await Promise.all([
+    listIntegrationToolPolicies(),
+    input.sessionId
+      ? listIntegrationToolSessionOverrides(input.sessionId)
+      : Promise.resolve([]),
+  ]);
+  const rules = buildIntegrationToolApprovalRules(
+    input.integrations,
+    policies,
+    sessionOverrides,
+  );
   return { rules, hash: hashIntegrationToolApprovalRules(rules) };
+}
+
+/**
+ * The id approvals are recorded and decided under. Approval rows, their
+ * ownership check, and the requester's decision route are all keyed on the
+ * unified Session, not the Fast conversation that runs the turn. Without a
+ * bound Session there is nowhere for the requester to decide, so the
+ * conversation id is returned and the ownership check fails the ask closed.
+ */
+export async function resolveFastAgentToolApprovalSessionId(
+  fastConversationId: string,
+): Promise<string> {
+  const session = await getSessionForFastConversation(db, fastConversationId);
+  return session?.id ?? fastConversationId;
 }
 
 export function createFastAgentToolApprovalBridge(input: {
@@ -273,26 +302,12 @@ export function createFastAgentToolApprovalBridge(input: {
   notify?: (approval: IntegrationToolApprovalMetadata) => Promise<void>;
   signal?: AbortSignal;
 }) {
-  const serverNames = integrationToolServerNames(input.integrations);
-  type ToolIdentity = {
-    integrationId: string;
-    serverName: string;
-    toolName: string;
-  };
+  type ToolIdentity = MountedIntegrationTool;
   const toolsByKey = new Map<string, ToolIdentity[]>();
   const toolByDottedName = new Map<string, ToolIdentity>();
-  for (const integration of input.integrations) {
-    const serverName = serverNames.get(integration.id)!;
-    for (const tool of integration.tools) {
-      const identity: ToolIdentity = {
-        integrationId: integration.id,
-        serverName,
-        toolName: tool.name,
-      };
-      const key = codeModeToolKey(serverName, tool.name);
-      toolsByKey.set(key, [...(toolsByKey.get(key) ?? []), identity]);
-      toolByDottedName.set(`${serverName}.${tool.name}`, identity);
-    }
+  for (const tool of listMountedIntegrationTools(input.integrations)) {
+    toolsByKey.set(tool.key, [...(toolsByKey.get(tool.key) ?? []), tool]);
+    toolByDottedName.set(`${tool.serverName}.${tool.toolName}`, tool);
   }
   const handledRequestIds = new Set<string>();
   const notifiedApprovalIds = new Set<string>();
@@ -378,17 +393,61 @@ export function createFastAgentToolApprovalBridge(input: {
         return;
       }
       const { tool, args } = resolution;
+      const argsFingerprint = fingerprintIntegrationToolCall({
+        integrationId: tool.integrationId,
+        toolName: tool.toolName,
+        args: args ?? null,
+      });
+      // Never auto-approve or record anything while the experiment is off:
+      // a session-scoped allow must not execute the next ask after a mid-turn
+      // disable, exactly like the requester-decision path below.
+      if (!(await isDeploymentExperimentEnabled('integrationToolApprovals'))) {
+        await cancelOpenIntegrationToolApprovals(
+          INTEGRATION_TOOL_APPROVAL_CANCEL_EXPERIMENT_DISABLED,
+        );
+        await helpers
+          .reply(
+            ask.requestId,
+            'reject',
+            'Tool approvals were disabled; the call was not run.',
+          )
+          .catch(() => undefined);
+        return;
+      }
+      // "Don't ask again this session": read fresh on every ask so the
+      // requester's choice applies to the very next call, even mid-turn. The
+      // audit row is written before the relay; if it cannot be written the
+      // outer handler rejects the ask instead of running it unrecorded.
+      const sessionOverrides = await listIntegrationToolSessionOverrides(
+        input.sessionId,
+      );
+      const allowedForSession = sessionOverrides.some(
+        (override) =>
+          override.mode === 'allow' &&
+          override.integrationId === tool.integrationId &&
+          override.toolName === tool.toolName,
+      );
+      if (allowedForSession) {
+        await insertAutoApprovedIntegrationToolApproval(
+          { sessionId: input.sessionId, userId: input.userId },
+          {
+            integrationId: tool.integrationId,
+            toolName: tool.toolName,
+            nativeRequestId: ask.requestId,
+            argsFingerprint,
+            argsSummary: args ?? null,
+          },
+        );
+        await helpers.reply(ask.requestId, 'once');
+        return;
+      }
       const approval = await insertIntegrationToolApproval(
         { sessionId: input.sessionId, userId: input.userId },
         {
           integrationId: tool.integrationId,
           toolName: tool.toolName,
           nativeRequestId: ask.requestId,
-          argsFingerprint: fingerprintIntegrationToolCall({
-            integrationId: tool.integrationId,
-            toolName: tool.toolName,
-            args: args ?? null,
-          }),
+          argsFingerprint,
           argsSummary: args ?? null,
         },
       );

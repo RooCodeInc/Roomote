@@ -115,12 +115,10 @@ describe('McpToolManagementDialog tool approvals', () => {
     expect(searchSelect).toHaveTextContent('Always allow (default)');
     expect(
       screen.getByLabelText('Approval mode for web_fetch_exa'),
-    ).toHaveTextContent('Always reject');
+    ).toHaveTextContent('Reject');
 
     fireEvent.click(searchSelect);
-    fireEvent.click(
-      await screen.findByRole('option', { name: 'Ask every time' }),
-    );
+    fireEvent.click(await screen.findByRole('option', { name: 'Ask first' }));
     expect(state.setModeCalls).toEqual([
       { integrationId: 'exa', toolName: 'web_search_exa', mode: 'ask' },
     ]);
