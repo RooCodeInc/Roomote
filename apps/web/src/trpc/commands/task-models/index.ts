@@ -252,9 +252,22 @@ export async function getTaskModelSettingsCommand(
   // Models selected for a runtime role (or as the default coding model) stay
   // listed and active even when a release drops them from the recommended
   // list, so their selectors keep rendering and saves keep validating.
+  // Env-only overrides are not persisted selections, but the runtime resolves
+  // them independently of the saved config; include their effective ids so
+  // the catalog (and metadata lookups such as supported reasoning efforts)
+  // covers them as well.
+  const envEffectiveModelIds = TASK_MODEL_ROLES.flatMap((role) => {
+    const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+    const envModel = isConfiguredEnvValue(process.env[descriptor.modelEnvVar])
+      ? process.env[descriptor.modelEnvVar]!.trim()
+      : null;
+
+    return envModel ? [envModel] : [];
+  });
   const selectedModelIds = new Set(
     [
       settings.defaultModelId,
+      ...envEffectiveModelIds,
       ...TASK_MODEL_ROLES.map(
         (role) =>
           persistedRuntimeModelConfig[

@@ -189,7 +189,10 @@ function PickerContent({
   const selectModel = (nextModel: string) => {
     onModelChange(nextModel);
     if (disabled || reasoningDisabled) return;
-    const nextModelOption = models.find(({ id }) => id === nextModel);
+    // The synthetic default option reports an empty id; resolve it to the
+    // effective default model so its supported efforts constrain the change.
+    const nextModelId = nextModel || defaultModelId || '';
+    const nextModelOption = models.find(({ id }) => id === nextModelId);
     const nextEfforts =
       supportedReasoningEfforts ?? supportedEfforts(nextModelOption);
     if (nextEfforts.length === 0) {

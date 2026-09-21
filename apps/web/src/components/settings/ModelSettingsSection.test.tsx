@@ -762,6 +762,27 @@ describe('ModelSettingsSection', () => {
     expect(slider).toHaveAttribute('aria-valuemax', '1');
   });
 
+  it('limits the same-as-coding sentinel for env-managed coding models', () => {
+    // The coding model comes from an env-only override; the settings catalog
+    // still lists it (with metadata), so the sentinel stays constrained.
+    const data = buildSettingsData({
+      codingManagedByEnv: true,
+      codingEffectiveModelId: 'openrouter/openai/gpt-5.4',
+    });
+    (data.models[0]!.metadata as TaskModelMetadata).supportedReasoningEfforts =
+      ['low', 'high'];
+    settingsData.current = data;
+
+    renderModelSettingsSection();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Orchestration model and reasoning' }),
+    );
+
+    const slider = screen.getByRole('slider', { name: 'Reasoning level' });
+    expect(slider).toHaveAttribute('aria-valuemax', '1');
+  });
+
   it('clears orchestration reasoning when switching to a non-reasoning model', async () => {
     const data = buildSettingsData({
       orchestrationEffectiveModelId: 'openrouter/openai/gpt-5.4',

@@ -54,8 +54,12 @@ const models: ModelReasoningPickerModel[] = [
 
 function Harness({
   initialEffort = 'low' as ReasoningEffort | null,
+  defaultModelId,
+  withDefaultOption = false,
 }: {
   initialEffort?: ReasoningEffort | null;
+  defaultModelId?: string | null;
+  withDefaultOption?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [model, setModel] = useState('provider/alpha');
@@ -78,6 +82,8 @@ function Harness({
         }
         models={models}
         model={model}
+        defaultModelId={defaultModelId}
+        emptyModelLabel={withDefaultOption ? 'Deployment default' : undefined}
         onModelChange={setModel}
         reasoningEffort={effort}
         defaultReasoningEffort="medium"
@@ -195,6 +201,19 @@ describe('ModelReasoningPicker', () => {
     expect(screen.getByTestId('selection')).toHaveTextContent(
       'provider/alpha:low',
     );
+  });
+
+  it('constrains the synthetic default option to the default model efforts', () => {
+    render(<Harness defaultModelId="provider/beta" withDefaultOption />);
+    fireEvent.click(screen.getByRole('button', { name: 'Choose model' }));
+
+    // Returning to the default option (empty id) resolves to provider/beta,
+    // whose only supported effort is medium, so the explicit low is clamped.
+    fireEvent.click(screen.getByRole('option', { name: 'Deployment default' }));
+    expect(screen.getByTestId('selection')).toHaveTextContent(':medium');
+    expect(
+      screen.getByRole('slider', { name: 'Reasoning level' }),
+    ).toHaveAttribute('aria-valuemax', '0');
   });
 
   it('uses a dismissible mobile drawer without a close action', async () => {
