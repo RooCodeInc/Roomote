@@ -28,7 +28,7 @@ workflows.
   running and make agent work useful for their team.
 - Prefer practical workflow guidance: what to do, what happens next, how to
   verify it worked, and what to check when setup fails.
--   Keep repository setup, communications providers, inference providers, sandbox
+- Keep repository setup, communications providers, inference providers, sandbox
   providers, environments, and source-control flows prominent.
 - Be direct about prerequisites, tradeoffs, permissions, callback URLs,
   credentials, Docker or Compose issues, tunnels, sandbox limits, and restart or
