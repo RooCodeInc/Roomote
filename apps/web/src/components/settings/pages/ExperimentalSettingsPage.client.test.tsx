@@ -38,15 +38,6 @@ vi.mock('@/components/settings/PrivateSessionsExperimentalSetting', () => ({
 }));
 
 vi.mock(
-  '@/components/settings/CodeModeIntegrationsExperimentalSetting',
-  () => ({
-    CodeModeIntegrationsExperimentalSetting: () => (
-      <div>Code mode integrations setting</div>
-    ),
-  }),
-);
-
-vi.mock(
   '@/components/settings/BrowserNotificationsExperimentalSetting',
   () => ({
     BrowserNotificationsExperimentalSetting: () => (
@@ -87,7 +78,7 @@ describe('ExperimentalSettingsPage', () => {
     );
     expect(screen.getByText('Private Sessions setting')).toBeInTheDocument();
     expect(
-      screen.getByText('Code mode integrations setting'),
+      screen.getByText('Browser notifications setting'),
     ).toBeInTheDocument();
   });
 

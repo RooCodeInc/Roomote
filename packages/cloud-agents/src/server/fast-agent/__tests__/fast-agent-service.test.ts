@@ -9,7 +9,6 @@ const mocks = vi.hoisted(() => ({
   getSession: vi.fn(),
   getNativeRuntime: vi.fn(),
   mountCodeModeIntegration: vi.fn(),
-  serverNameCollision: vi.fn(),
   clearIntegrationToolCache: vi.fn(),
   setOpenCodeSession: vi.fn(),
   upsertMessage: vi.fn(),
@@ -340,7 +339,6 @@ vi.mock('../fast-agent-native-tool-bridge', () => ({
   },
   getFastAgentNativeToolRuntime: mocks.getNativeRuntime,
   mountFastAgentIntegrationOnCodeModeServer: mocks.mountCodeModeIntegration,
-  hasFastAgentCodeModeServerNameCollision: mocks.serverNameCollision,
   bindFastAgentNativeToolExecutor: mocks.bindExecutor,
   createFastAgentSpillTurnBudget: () => ({ calls: 0, outputBytes: 0 }),
   bindFastAgentMcpToolExecutor: mocks.bindMcpExecutor,
@@ -1079,11 +1077,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.getDeploymentSettings).toHaveBeenCalledTimes(2);
   });
 
-  it('keeps the dispatcher in the prompt when integration ids collide under the code-mode experiment', async () => {
-    mocks.deploymentExperimentEnabled.mockImplementation(
-      async (id: string) => id === 'codeModeIntegrations',
-    );
-    mocks.serverNameCollision.mockReturnValue(true);
+  it('keeps code mode enabled when integration ids collide', async () => {
     mocks.listIntegrations.mockResolvedValue([
       {
         id: 'foo.bar',
@@ -1104,9 +1098,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     const systemPrompt = mocks.generateText.mock.calls[0]?.[0].system as
       | string
       | undefined;
-    expect(systemPrompt).toContain('### On-demand servers');
-    expect(systemPrompt).not.toContain(
-      'reached only through the `execute` tool',
+    expect(systemPrompt).toContain('reached only through the `execute` tool');
+    expect(systemPrompt).toContain('### Foo Dot Bar [server: foo_bar]');
+    expect(systemPrompt).toContain(
+      '### Foo Underscore Bar [server: foo_bar__roomote_2]',
     );
   });
 
@@ -6147,10 +6142,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.getNativeRuntime).toHaveBeenCalledTimes(2);
   });
 
-  it('mounts an integration connected mid-turn on the code-mode server', async () => {
-    mocks.deploymentExperimentEnabled.mockImplementation(
-      async (id: string) => id === 'codeModeIntegrations',
-    );
+  it('mounts a colliding integration mid-turn under its unique code-mode name', async () => {
     mocks.getNativeRuntime.mockImplementation(async () => {
       mocks.mcpCapabilityAvailable = true;
       return {
@@ -6166,28 +6158,32 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.listIntegrations
       .mockResolvedValueOnce([
         {
-          id: 'github',
-          name: 'GitHub',
-          description: 'Repository access',
-          tools: [{ name: 'search_code' }],
+          id: 'foo_bar',
+          name: 'Foo Underscore Bar',
+          description: 'First integration',
+          tools: [{ name: 'read' }],
         },
       ])
       .mockResolvedValue([
         {
-          id: 'github',
-          name: 'GitHub',
-          description: 'Repository access',
-          tools: [{ name: 'search_code' }],
+          id: 'foo_bar',
+          name: 'Foo Underscore Bar',
+          description: 'First integration',
+          tools: [{ name: 'read' }],
         },
         {
-          id: 'notion',
-          name: 'Notion',
-          description: 'Docs access',
-          tools: [{ name: 'search_pages' }],
+          id: 'foo.bar',
+          name: 'Foo Dot Bar',
+          description: 'Second integration',
+          tools: [{ name: 'write' }],
         },
       ]);
     mocks.getUnifiedSession.mockResolvedValue({ id: 'session-1' });
-    mocks.connectIntegration.mockResolvedValue({ status: 'connected' });
+    mocks.addRemoteMcp.mockResolvedValue({
+      status: 'connected',
+      integrationId: 'foo.bar',
+      name: 'Foo Dot Bar',
+    });
     mocks.mountCodeModeIntegration.mockResolvedValue(true);
 
     mocks.generateText.mockImplementation(
@@ -6198,8 +6194,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           purpose: 'ack',
           message: 'I’ll connect that.',
         });
-        const result = await invokeTool(nativeToolNames.connectIntegration, {
-          integrationId: 'notion',
+        const result = await invokeTool(nativeToolNames.addRemoteMcp, {
+          name: 'Foo Dot Bar',
+          url: 'https://example.test/mcp',
         });
         expect(result).toMatchObject({ success: true, status: 'connected' });
         await invokeTool(nativeToolNames.sendChatReply, {
@@ -6213,14 +6210,15 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     await expect(
       answerFastAgentQuestion({ ...baseParams, adapter: callbacks() }),
     ).resolves.toBe('Connected.');
-    // Only the newly connected server is mounted mid-turn; github was already
+    // Only the newly connected server is mounted mid-turn; foo_bar was already
     // in the turn-start mount set.
     expect(mocks.mountCodeModeIntegration).toHaveBeenCalledTimes(1);
     expect(mocks.mountCodeModeIntegration).toHaveBeenCalledWith({
       serverUrl: 'http://127.0.0.1:9999',
       directory: '/tmp/fast-native-tools',
       mcpCapability: 'mcp-capability-1',
-      integrationId: 'notion',
+      integrationId: 'foo.bar',
+      serverName: 'foo_bar__roomote_2',
     });
     // The tool cache is cleared so discovery stops serving the pre-connect
     // empty tool list, and the connect result points at the execute runner.
@@ -6228,7 +6226,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.listNativeIntegrations).toHaveBeenCalled();
   });
 
-  it('does not mount mid-turn connections when the code-mode experiment is off', async () => {
+  it('does not remount an integration that was already mounted at turn start', async () => {
     mocks.getUnifiedSession.mockResolvedValue({ id: 'session-1' });
     mocks.connectIntegration.mockResolvedValue({ status: 'connected' });
     mocks.listIntegrations.mockResolvedValue([
@@ -6411,7 +6409,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       ]),
       {
         addRemoteMcpEnabled: true,
-        codeModeIntegrationsEnabled: false,
         surface: 'slack',
         serviceCredentialToolsEnabled: true,
         serviceCredentialPrepareEnabled: true,

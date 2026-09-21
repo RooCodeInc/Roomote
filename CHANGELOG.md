@@ -33,14 +33,14 @@ Roomote 1.12.2 improves model compatibility, integration access, artifact sharin
 ### Highlights
 
 - Provider credentials and recommended model ids now resolve correctly across Sessions and helper calls for Z.AI, Azure AI Foundry, Google Gemini, and other supported providers.
-- Buildkite and Cloudflare are available as built-in integrations, and administrators can optionally enable the experimental Code Mode Integrations workflow for Sessions.
+- Buildkite and Cloudflare are available as built-in integrations, and Sessions use the Code Mode Integrations workflow by default.
 - Authorized users can open artifacts directly and share standalone links from artifact creation results without first opening the parent task or Session.
 - Failed sandbox starts and undeliverable Session events recover with bounded retries and clear in-place failure handling instead of remaining stuck indefinitely.
 
 ### Patch changes
 
 - Provider credentials and recommended model ids now resolve correctly for Sessions and helper calls across Z.AI, Azure AI Foundry, Google Gemini, and other supported providers.
-- Buildkite and Cloudflare are available as built-in integrations, and administrators can optionally enable the experimental Code Mode Integrations workflow for Sessions.
+- Buildkite and Cloudflare are available as built-in integrations, and Sessions use the Code Mode Integrations workflow by default.
 - Authorized users can open artifacts directly and share standalone links from artifact creation results without first opening the parent task or Session.
 - Failed sandbox starts and undeliverable Session events recover with bounded retries and clear in-place failure handling instead of remaining stuck indefinitely.
 - Quote web-entered follow-ups in the first Fast session reply on every communication provider.

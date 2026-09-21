@@ -25,7 +25,7 @@ import {
 } from './fast-agent-conversation';
 import type { FastAgentPromptSkillCatalog } from './fast-agent-prompt-skill-catalog';
 import type { FastAgentActiveTask } from './fast-agent-session';
-import { isFastAgentNativeIntegration } from './fast-agent-tool-policy';
+import { buildFastAgentCodeModeServerNames } from './fast-agent-tool-policy';
 import { NATIVE_ROOMOTE_TOOL_SELECTION_INSTRUCTIONS } from '../../http-integrations';
 import { buildPrivateSessionGuidance } from '../../private-session-guidance';
 import { buildRoomoteStyleGuidanceSection } from '../../style-guidance';
@@ -173,42 +173,21 @@ function formatCodingModelRoutingRulesForPrompt(
 
 function formatIntegrationsForPrompt(
   integrations: FastAgentIntegration[],
-  options: { codeModeIntegrationsEnabled?: boolean } = {},
 ): string {
   if (integrations.length === 0) {
     return '- No deployment MCP servers are available in this conversation.';
   }
 
-  if (options.codeModeIntegrationsEnabled === true) {
-    return [
-      'Every server below is mounted individually and reached only through the `execute` tool, a confined script runner. No server tool is exposed as a direct tool call. Discover exact call signatures with `await tools.$codemode.search({ query: "<intent + key nouns>" })` (repeat with its returned `next.offset` for more, or pass `namespace` to browse one server), then call them in one script, for example `const result = await tools.gbrain.query({ query: "deployments" })`. Filter, aggregate, and combine inside the script and return only the fields you need instead of calling one tool per message. Run independent calls together with `await Promise.all(...)`. Tool names elsewhere in these instructions (for example `roomote_manage_tasks` or `gbrain_query`) name these same server tools: invoke them through `execute` as `tools.<server>.<tool>` — strip the server prefix for the tool segment, so `gbrain_query` is `tools.gbrain.query(...)`. When a server or tool name is not a plain identifier (hyphens, spaces, dots, and similar), use bracket notation for that segment: `tools["smoke-one"].read_item(...)`, `tools.exa["web-search"](...)`. `call_integration_tool` is unavailable in this conversation; `find_integration_tools` remains read-only discovery for the built-in integration catalog and connection statuses below.',
-      ...integrations.map(
-        (integration) =>
-          `### ${integration.name} [server: ${integration.id}]\n${integration.description}${integration.instructions ? `\n\n${integration.instructions}` : ''}\nTools: ${integration.tools.map((tool) => tool.name).join(', ')}`,
-      ),
-    ].join('\n\n');
-  }
-
-  const native = integrations.filter((integration) =>
-    isFastAgentNativeIntegration(integration.id),
+  const serverNames = buildFastAgentCodeModeServerNames(
+    integrations.map((integration) => integration.id),
   );
-  const onDemand = integrations.filter(
-    (integration) => !isFastAgentNativeIntegration(integration.id),
-  );
-  const sections = native.map(
-    (integration) =>
-      `### ${integration.name} [tool prefix: ${integration.id}_]\n${integration.description}${integration.instructions ? `\n\n${integration.instructions}` : ''}`,
-  );
-  if (onDemand.length > 0) {
-    sections.push(
-      `### On-demand servers\nThe servers below are not mounted as individual tools. Call \`find_integration_tools\` with the server id (and a tool name or keywords) to get a tool's input schema, then \`call_integration_tool\` with that server id, tool name, and arguments. Tool names are listed so you can pick the right server without searching.`,
-      ...onDemand.map(
-        (integration) =>
-          `#### ${integration.name} [id: ${integration.id}]\n${integration.description}${integration.instructions ? `\n\n${integration.instructions}` : ''}\nTools: ${integration.tools.map((tool) => tool.name).join(', ')}`,
-      ),
-    );
-  }
-  return sections.join('\n\n');
+  return [
+    'Every server below is mounted individually and reached only through the `execute` tool, a confined script runner. No server tool is exposed as a direct tool call. Discover exact call signatures with `await tools.$codemode.search({ query: "<intent + key nouns>" })` (repeat with its returned `next.offset` for more, or pass `namespace` to browse one server), then call them in one script, for example `const result = await tools.gbrain.query({ query: "deployments" })`. Filter, aggregate, and combine inside the script and return only the fields you need instead of calling one tool per message. Run independent calls together with `await Promise.all(...)`. Tool names elsewhere in these instructions (for example `roomote_manage_tasks` or `gbrain_query`) name these same server tools: invoke them through `execute` as `tools.<server>.<tool>` — strip the server prefix for the tool segment, so `gbrain_query` is `tools.gbrain.query(...)`. When a server or tool name is not a plain identifier (hyphens, spaces, dots, and similar), use bracket notation for that segment: `tools["smoke-one"].read_item(...)`, `tools.exa["web-search"](...)`. `find_integration_tools` remains read-only discovery for the built-in integration catalog and connection statuses below.',
+    ...integrations.map(
+      (integration) =>
+        `### ${integration.name} [server: ${serverNames.get(integration.id)}]\n${integration.description}${integration.instructions ? `\n\n${integration.instructions}` : ''}\nTools: ${integration.tools.map((tool) => tool.name).join(', ')}`,
+    ),
+  ].join('\n\n');
 }
 
 function formatNativeIntegrationCatalogForPrompt(
@@ -336,7 +315,6 @@ export function buildFastAgentSystemPrompt({
   setupSession = false,
   serviceCredentialToolsEnabled = false,
   addRemoteMcpEnabled = false,
-  codeModeIntegrationsEnabled = false,
   personalizationContext,
   globalAgentInstructions,
   workspaceRoutingRules = [],
@@ -381,10 +359,6 @@ export function buildFastAgentSystemPrompt({
   setupSession?: boolean;
   serviceCredentialToolsEnabled?: boolean;
   addRemoteMcpEnabled?: boolean;
-  /** Code-mode integrations experiment: every authorized MCP server is
-   * mounted individually and reached through OpenCode's code-mode `execute`
-   * tool instead of the on-demand find/call dispatcher. */
-  codeModeIntegrationsEnabled?: boolean;
   personalizationContext?: {
     displayName: string | null;
     instructions: string;
@@ -461,12 +435,10 @@ export function buildFastAgentSystemPrompt({
   const releaseIdentifier = releaseVersion
     ? `${buildRoomoteReleaseIdentifier(releaseVersion, { commitSha, appEnv })}\n\n`
     : '';
-  const deploymentMcpCallGuidance = codeModeIntegrationsEnabled
-    ? 'Every server exposes its tools individually through the `execute` code-mode runner; discover signatures with `tools.$codemode.search` and call them inside one script as `tools.<server>.<tool>(input)`, using bracket notation for either segment when a name is not a plain identifier (hyphens, spaces, dots, and similar): `tools["my-server"]["my-tool"](input)`.'
-    : 'Servers listed with a tool prefix expose each tool individually with its native JSON schema. On-demand servers are reached through `find_integration_tools` (fetch the schema by server id and tool name, or search by keywords) followed by `call_integration_tool`; the same acknowledgement, duplicate, and authorization rules apply to both paths.';
-  const bitbucketToolDiscoveryGuidance = codeModeIntegrationsEnabled
-    ? 'discover the available Bitbucket tool signature with `tools.$codemode.search`, then call it through `execute`'
-    : 'discover the available Bitbucket tool schema with `find_integration_tools`, then use `call_integration_tool`';
+  const deploymentMcpCallGuidance =
+    'Every server exposes its tools individually through the `execute` code-mode runner; discover signatures with `tools.$codemode.search` and call them inside one script as `tools.<server>.<tool>(input)`, using bracket notation for either segment when a name is not a plain identifier (hyphens, spaces, dots, and similar): `tools["my-server"]["my-tool"](input)`.';
+  const bitbucketToolDiscoveryGuidance =
+    'discover the available Bitbucket tool signature with `tools.$codemode.search`, then call it through `execute`';
   const recurringAutomationGuidance = `## Recurring Work and Automations
 - When a user explicitly asks for recurring work, recognize a real cadence expression such as "every Monday", "daily", "weekly", "whenever X happens", "from now on", or "on a schedule". Do not treat preference words such as "always use tabs" as a cadence.
 - Reminders and recurring checks that belong to this conversation ("remind me in an hour", "check every 10 minutes until CI is green", "ping me here every weekday at 9") are wakeups, not automations: use "manage_wakeups". Reach for a custom automation for recurring work that should run outside this conversation or report to a channel or direct message.
@@ -573,7 +545,7 @@ ${sessionGoal.blockedReason ? `- Blocked reason: ${sessionGoal.blockedReason}\n`
 }
 
 ## Deployment MCP Servers
-${formatIntegrationsForPrompt(availableIntegrations, { codeModeIntegrationsEnabled })}
+${formatIntegrationsForPrompt(availableIntegrations)}
 
 ## Built-in Integration Catalog
 ${formatNativeIntegrationCatalogForPrompt(nativeIntegrationCatalog)}

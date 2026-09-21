@@ -210,9 +210,9 @@ describe('buildFastAgentSystemPrompt', () => {
       'For focused Bitbucket Cloud reads and supported writes',
     );
     expect(prompt).toContain(
-      'discover the available Bitbucket tool schema with `find_integration_tools`',
+      'discover the available Bitbucket tool signature with `tools.$codemode.search`',
     );
-    expect(prompt).toContain('then use `call_integration_tool`');
+    expect(prompt).toContain('then call it through `execute`');
     expect(prompt).toContain(
       'Apply the same scope-based exploration rule as other providers',
     );
@@ -815,7 +815,7 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'Tool arguments, results, and reasoning are retained natively',
     );
-    expect(prompt).toContain('native JSON schema');
+    expect(prompt).toContain('code-mode runner');
     for (const name of ['prepare_integration_key', 'list_integration_keys']) {
       expect(prompt).not.toContain(name);
     }
@@ -1192,7 +1192,7 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
-  it('lists on-demand servers by name with their tool names instead of mounting them', () => {
+  it('lists every connected server as code-mode mounted', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
       availableIntegrations: [
@@ -1211,19 +1211,15 @@ describe('buildFastAgentSystemPrompt', () => {
       ],
     });
 
-    expect(prompt).toContain('Roomote [tool prefix: roomote_]');
-    expect(prompt).toContain('### On-demand servers');
-    expect(prompt).toContain('#### GitHub [id: github]');
+    expect(prompt).toContain('Roomote [server: roomote]');
+    expect(prompt).toContain('### GitHub [server: github]');
     expect(prompt).toContain('Tools: search_code, list_issues');
     expect(prompt).not.toContain('GitHub [tool prefix: github_]');
-    expect(prompt).toContain('`find_integration_tools`');
-    expect(prompt).toContain('`call_integration_tool`');
   });
 
-  it('describes every server as code-mode mounted when the experiment is on', () => {
+  it('describes every server as code-mode mounted', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
-      codeModeIntegrationsEnabled: true,
       availableIntegrations: [
         {
           id: 'roomote',
@@ -1245,9 +1241,7 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('### GitHub [server: github]');
     expect(prompt).toContain('### Roomote [server: roomote]');
     expect(prompt).toContain('Tools: search_code, list_issues');
-    expect(prompt).toContain(
-      '`call_integration_tool` is unavailable in this conversation',
-    );
+    expect(prompt).not.toContain('call_integration_tool');
     expect(prompt).toContain('`find_integration_tools` remains read-only');
     // Hyphenated and otherwise non-identifier server names must get bracket
     // notation; `tools.smoke-one.read_item(...)` would be invalid JavaScript.
@@ -1259,24 +1253,6 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('tools["my-server"]["my-tool"](input)');
     expect(prompt).not.toContain('### On-demand servers');
     expect(prompt).not.toContain('GitHub [tool prefix: github_]');
-  });
-
-  it('keeps the dispatcher description when the experiment is off', () => {
-    const prompt = buildFastAgentSystemPrompt({
-      availableEnvironments: [],
-      codeModeIntegrationsEnabled: false,
-      availableIntegrations: [
-        {
-          id: 'github',
-          name: 'GitHub',
-          description: 'Repository access',
-          tools: [{ name: 'search_code' }],
-        },
-      ],
-    });
-
-    expect(prompt).toContain('### On-demand servers');
-    expect(prompt).not.toContain('reached only through the `execute` tool');
   });
 
   it('prefers discovered provider APIs without bypassing task and structured review delegation', () => {
@@ -1315,9 +1291,9 @@ describe('buildFastAgentSystemPrompt', () => {
       ],
     });
 
-    expect(prompt).toContain('Brain [tool prefix: gbrain_]');
+    expect(prompt).toContain('Brain [server: gbrain]');
     expect(prompt.indexOf('## Turn Startup (Highest Priority)')).toBeLessThan(
-      prompt.indexOf('Brain [tool prefix: gbrain_]'),
+      prompt.indexOf('Brain [server: gbrain]'),
     );
     expect(prompt).toContain('before any other context or work tool call');
     expect(prompt).toContain('remain visible in the session');
@@ -2429,9 +2405,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'The parent remains responsible for making exactly the requested delivery',
     );
-    expect(prompt).toContain('Roomote [tool prefix: roomote_]');
-    expect(prompt).toContain('New Relic [id: new-relic]');
-    expect(prompt).toContain('Linear [id: linear]');
+    expect(prompt).toContain('Roomote [server: roomote]');
+    expect(prompt).toContain('New Relic [server: new-relic]');
+    expect(prompt).toContain('Linear [server: linear]');
   });
 
   it('does not bypass an applicable or indeterminate remote MCP with an integration key', () => {
