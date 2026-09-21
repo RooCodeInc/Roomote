@@ -15,6 +15,7 @@ const state = vi.hoisted(() => ({
     mode: string;
   }[],
   annotated: false,
+  searchDescription: null as string | null,
   policiesQueryEnabled: undefined as boolean | undefined,
 }));
 
@@ -56,7 +57,7 @@ vi.mock('@/hooks/mcp-connections', () => ({
       tools: [
         {
           name: 'web_search_exa',
-          description: null,
+          description: state.searchDescription,
           enabled: true,
           readOnly: state.annotated ? true : null,
         },
@@ -101,6 +102,25 @@ describe('McpToolManagementDialog tool approvals', () => {
     state.annotated = false;
     // Radix Select scrolls the highlighted option into view; jsdom lacks it.
     Element.prototype.scrollIntoView = vi.fn();
+  });
+
+  it('shows each tool as a staged checkbox with a readable name and its description', () => {
+    state.searchDescription = 'Search the web with Exa.';
+    try {
+      renderDialog();
+      const checkbox = screen.getByRole('checkbox', {
+        name: 'Web Search Exa',
+      });
+      expect(checkbox).toBeChecked();
+      expect(screen.getByText('Web Search Exa')).toHaveAttribute(
+        'title',
+        'web_search_exa',
+      );
+      expect(screen.getByText('Search the web with Exa.')).toBeInTheDocument();
+      expect(screen.queryByRole('switch')).not.toBeInTheDocument();
+    } finally {
+      state.searchDescription = null;
+    }
   });
 
   it('hides per-tool approval modes while the experiment is off', () => {

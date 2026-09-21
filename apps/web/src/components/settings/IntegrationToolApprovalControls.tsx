@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils';
 import {
   Badge,
   Ban,
+  Checkbox,
   ChevronDown,
   ChevronRight,
   CircleCheck,
@@ -227,18 +228,22 @@ function IntegrationToolApprovalGroup({
  * adds the per-tool mode control, the group-level control, and the save hint,
  * or nothing but the grouping when approvals are not active for the viewer.
  */
-export function IntegrationToolApprovalList<T extends GroupableTool>({
+export function IntegrationToolApprovalList<T extends ManageableTool>({
   integrationId,
+  integrationName,
   scope,
   canManage,
   open,
   tools,
   saveNote,
-  rowClassName,
-  children,
+  isToolEnabled,
+  onToggleTool,
+  toggleDisabled,
 }: {
   /** The id policies are keyed on: the mount name agents see. */
   integrationId: string | null;
+  /** Dropped from tool names that repeat it ("resend_list_domains"). */
+  integrationName: string | null;
   /** `personal` policies apply to the viewer's own sessions only. */
   scope: 'deployment' | 'personal';
   /** Deployment policies are admin-managed; never load them otherwise. */
@@ -247,8 +252,10 @@ export function IntegrationToolApprovalList<T extends GroupableTool>({
   tools: T[];
   /** How the dialog's own enable/disable changes are saved. */
   saveNote: string;
-  rowClassName: string;
-  children: (tool: T) => ReactNode;
+  isToolEnabled: (toolName: string) => boolean;
+  /** Staged by the dialog until its Save, hence a checkbox, not a switch. */
+  onToggleTool: (toolName: string, enabled: boolean) => void;
+  toggleDisabled?: boolean;
 }) {
   const experiment = useIntegrationToolApprovalsExperiment();
   const active = experiment.enabled && canManage && integrationId != null;
@@ -290,23 +297,100 @@ export function IntegrationToolApprovalList<T extends GroupableTool>({
               }
             : {})}
         >
-          {group.tools.map((tool) => (
-            <div key={tool.name} className={rowClassName}>
-              {children(tool)}
-              {active ? (
-                <IntegrationToolApprovalModeControl
-                  toolName={tool.name}
-                  value={modeFor(tool.name)}
-                  disabled={policies.isUpdating}
-                  onChange={(mode) =>
-                    policies.setMode(integrationId, tool.name, mode)
+          {group.tools.map((tool) => {
+            const checkboxId = `integration-tool-${integrationId ?? 'unknown'}-${tool.name}`;
+            return (
+              <div key={tool.name} className="flex items-start gap-3 py-2.5">
+                <Checkbox
+                  id={checkboxId}
+                  checked={isToolEnabled(tool.name)}
+                  disabled={toggleDisabled}
+                  onCheckedChange={(checked) =>
+                    onToggleTool(tool.name, checked === true)
                   }
+                  className="mt-0.5"
                 />
-              ) : null}
-            </div>
-          ))}
+                <div className="min-w-0 flex-1 text-sm">
+                  <label
+                    htmlFor={checkboxId}
+                    title={tool.name}
+                    className="cursor-pointer"
+                  >
+                    {prettifyToolName(tool.name, integrationName)}
+                  </label>
+                  {tool.description ? (
+                    <ToolDescription text={tool.description} />
+                  ) : null}
+                </div>
+                {active ? (
+                  <IntegrationToolApprovalModeControl
+                    toolName={tool.name}
+                    value={modeFor(tool.name)}
+                    disabled={policies.isUpdating}
+                    onChange={(mode) =>
+                      policies.setMode(integrationId, tool.name, mode)
+                    }
+                  />
+                ) : null}
+              </div>
+            );
+          })}
         </IntegrationToolApprovalGroup>
       ))}
     </>
+  );
+}
+
+type ManageableTool = GroupableTool & { description?: string | null };
+
+function splitToolNameParts(name: string): string[] {
+  return name.split(/[-_\s]+/).filter((part) => part.length > 0);
+}
+
+/** "resend_list_api_keys" under Resend reads as "List Api Keys". */
+function prettifyToolName(
+  name: string,
+  integrationName: string | null,
+): string {
+  const nameParts = splitToolNameParts(name);
+  const integrationParts = integrationName
+    ? splitToolNameParts(integrationName)
+    : [];
+  const hasIntegrationPrefix =
+    integrationParts.length > 0 &&
+    integrationParts.every(
+      (part, index) => nameParts[index]?.toLowerCase() === part.toLowerCase(),
+    );
+  const displayParts = hasIntegrationPrefix
+    ? nameParts.slice(integrationParts.length)
+    : nameParts;
+
+  return (displayParts.length > 0 ? displayParts : nameParts)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(' ');
+}
+
+/**
+ * MCP tool descriptions are written for the model and can run to several
+ * paragraphs, so long ones clamp to two lines behind a toggle.
+ */
+function ToolDescription({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const isLong = text.length > 140;
+
+  return (
+    <div className="text-xs text-muted-foreground">
+      <p className={isLong && !expanded ? 'line-clamp-2' : undefined}>{text}</p>
+      {isLong ? (
+        <button
+          type="button"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((current) => !current)}
+          className="mt-0.5 cursor-pointer font-medium text-foreground/80 hover:text-foreground"
+        >
+          {expanded ? 'Show less' : 'Show more'}
+        </button>
+      ) : null}
+    </div>
   );
 }

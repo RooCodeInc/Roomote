@@ -16,9 +16,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  Label,
   Spinner,
-  Switch,
   ToggleLeft,
   ToggleRight,
 } from '@/components/system';
@@ -39,36 +37,6 @@ type McpToolManagementDialogProps = {
   /** Admin-only approval policy state is never loaded for non-admin viewers. */
   isAdmin?: boolean;
 };
-
-function splitToolNameParts(name: string): string[] {
-  return name.split(/[-_\s]+/).filter((part) => part.length > 0);
-}
-
-function titleCaseToolNamePart(part: string): string {
-  return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
-}
-
-function prettifyToolName(
-  name: string,
-  integrationName: string | null,
-): string {
-  const nameParts = splitToolNameParts(name);
-  const integrationParts = integrationName
-    ? splitToolNameParts(integrationName)
-    : [];
-  const hasIntegrationPrefix =
-    integrationParts.length > 0 &&
-    integrationParts.every(
-      (part, index) => nameParts[index]?.toLowerCase() === part.toLowerCase(),
-    );
-  const displayParts = hasIntegrationPrefix
-    ? nameParts.slice(integrationParts.length)
-    : nameParts;
-
-  return (displayParts.length > 0 ? displayParts : nameParts)
-    .map(titleCaseToolNamePart)
-    .join(' ');
-}
 
 function McpToolLoadErrorMessage({
   integrationName,
@@ -277,42 +245,18 @@ export function McpToolManagementDialog({
             <div className="space-y-3 py-3">
               <IntegrationToolApprovalList
                 integrationId={mcpId}
+                integrationName={integrationName}
                 scope="deployment"
                 canManage={isAdmin !== false}
                 open={open}
                 tools={loadedTools}
                 saveNote="Tool enable/disable still needs Save changes."
-                rowClassName="flex min-w-0 items-center gap-4 py-2"
-              >
-                {(tool) => {
-                  const enabled = !normalizedDisabledToolNames.includes(
-                    tool.name,
-                  );
-                  const switchId = `mcp-tool-${mcpId ?? 'unknown'}-${tool.name}`;
-
-                  return (
-                    <div className="min-w-0 flex-1 space-y-1.5">
-                      <div className="flex min-w-0 items-center gap-4">
-                        <Switch
-                          id={switchId}
-                          checked={enabled}
-                          aria-label={`${enabled ? 'Disable' : 'Enable'} ${tool.name}`}
-                          disabled={setDisabledTools.isPending}
-                          onCheckedChange={(nextEnabled) =>
-                            handleToggle(tool.name, nextEnabled)
-                          }
-                        />
-                        <Label
-                          htmlFor={switchId}
-                          className="min-w-0 truncate text-sm text-foreground"
-                        >
-                          {prettifyToolName(tool.name, integrationName)}
-                        </Label>
-                      </div>
-                    </div>
-                  );
-                }}
-              </IntegrationToolApprovalList>
+                isToolEnabled={(toolName) =>
+                  !normalizedDisabledToolNames.includes(toolName)
+                }
+                onToggleTool={handleToggle}
+                toggleDisabled={setDisabledTools.isPending}
+              />
             </div>
           ) : null}
         </div>
