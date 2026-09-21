@@ -29,6 +29,7 @@ const COMPLETION_CHECK_TIMEOUT_MS = 8_000;
 const MAX_REPOSITORIES = 20;
 const MAX_UNTRACKED_FILES = 50;
 const MAX_UNTRACKED_FILE_BYTES = 200_000;
+// Beyond these a file is fingerprinted by its raw bytes, not normalized text.
 const MAX_FINGERPRINT_FILES = 300;
 const MAX_FINGERPRINT_FILE_BYTES = 2_000_000;
 const CLIPPED_PATCH_MARKER = '\n[... rest of this patch clipped ...]\n';
@@ -368,15 +369,6 @@ const FORMATTING_ONLY_CHARACTERS = /[\s'"`;,]/g;
  * moments with the same fingerprint hold the same code, however it got there:
  * an editor tool, `sed -i`, a heredoc script, or a git operation.
  */
-function statIdentity(filePath: string): string {
-  try {
-    const stats = statSync(filePath);
-    return `stat:${stats.size}:${stats.mtimeMs}`;
-  } catch {
-    return 'deleted';
-  }
-}
-
 async function fingerprintChangedFiles(
   repoPath: string,
   files: string[],
@@ -385,22 +377,17 @@ async function fingerprintChangedFiles(
   const paths = [...new Set(files)].sort();
 
   for (const [index, file] of paths.entries()) {
-    const filePath = join(repoPath, file);
-    // Every changed path is part of the identity. Past the caps a file is
-    // represented by its size and modification time instead of its content:
-    // cheaper, and it errs toward calling a run stale rather than current.
-    const content =
-      index < MAX_FINGERPRINT_FILES
-        ? await readFile(filePath).then(
-            (buffer) =>
-              buffer.byteLength <= MAX_FINGERPRINT_FILE_BYTES
-                ? buffer
-                    .toString('utf8')
-                    .replace(FORMATTING_ONLY_CHARACTERS, '')
-                : statIdentity(filePath),
-            () => 'deleted',
-          )
-        : statIdentity(filePath);
+    // Every changed file is read, so an edit anywhere changes the result.
+    // Past the caps the bytes are hashed as they are: normalizing them is the
+    // expensive part, and skipping it only errs toward calling a run stale.
+    const content = await readFile(join(repoPath, file)).then(
+      (buffer) =>
+        index < MAX_FINGERPRINT_FILES &&
+        buffer.byteLength <= MAX_FINGERPRINT_FILE_BYTES
+          ? buffer.toString('utf8').replace(FORMATTING_ONLY_CHARACTERS, '')
+          : createHash('sha256').update(buffer).digest('hex'),
+      () => 'deleted',
+    );
     hash.update(`${file}\0${content}\0`);
   }
 
