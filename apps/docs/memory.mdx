@@ -259,8 +259,9 @@ checks for a stated preference, decision, or correction, an explicit request
 to remember, or a finding that took real investigation. In a task it checks
 the turn's report for a decision, finding, dead end, or open item a later task
 could reuse, and the person's message for a correction or convention that
-should guide future work. Credential-shaped strings are scrubbed from the
-turn before either model sees it. Only a confident yes leads to a save; the
+should guide future work. Credential-shaped strings, email addresses, phone
+numbers, and card and ID numbers are scrubbed from the turn before either
+model sees it. Only a confident yes leads to a save; the
 helper model then writes the memory, which goes through the same redaction
 and filing. A task memory written this way says so, grows turn by turn, and is
 replaced if the agent records its own. Turns that look sensitive, try to plant

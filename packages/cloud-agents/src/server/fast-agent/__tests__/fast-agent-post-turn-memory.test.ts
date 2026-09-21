@@ -163,7 +163,7 @@ describe('saveFastAgentPostTurnMemory', () => {
     );
   });
 
-  it('scrubs credentials before anything reaches the decision or helper model', async () => {
+  it('scrubs credentials and personal data before anything reaches the decision or helper model', async () => {
     const token = `ghp_${'a'.repeat(36)}`;
     const key = `sk-${'b'.repeat(40)}`;
     mockGetFastAgentConversationMemory.mockResolvedValueOnce(
@@ -175,7 +175,7 @@ describe('saveFastAgentPostTurnMemory', () => {
 
     await saveFastAgentPostTurnMemory({
       ...turn,
-      request: `Always deploy from release. The CI token is ${token}.`,
+      request: `Always deploy from release. The CI token is ${token}. Ask dana@example.com or 415-555-0132.`,
       steeredRequests: [`Also the fallback token is ${token}`],
       reply: `Noted, I will use ${key} for the deploy bot.`,
     });
@@ -188,6 +188,8 @@ describe('saveFastAgentPostTurnMemory', () => {
     expect(sent).toContain('Always deploy from release.');
     expect(sent).not.toContain(token);
     expect(sent).not.toContain(key);
+    expect(sent).not.toContain('dana@example.com');
+    expect(sent).not.toContain('555-0132');
   });
 
   it('never pays for distillation on an unremarkable turn', async () => {

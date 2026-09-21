@@ -172,7 +172,7 @@ describe('distillTaskRunTurnMemory', () => {
     );
   });
 
-  it('scrubs credentials before anything reaches the decision or helper model', async () => {
+  it('scrubs credentials and personal data before anything reaches the decision or helper model', async () => {
     const token = `ghp_${'a'.repeat(36)}`;
     const key = `sk-${'b'.repeat(40)}`;
     mockGetBrainMemorySummary.mockResolvedValue(
@@ -180,7 +180,9 @@ describe('distillTaskRunTurnMemory', () => {
     );
     mockTurnRows.mockResolvedValue([
       assistant(`Retries skip 4xx. I used ${token} to test against staging.`),
-      user(`Do not retry 4xx. Use ${token} for the staging check.`),
+      user(
+        `Do not retry 4xx. Use ${token} for the staging check, and cc dana@example.com.`,
+      ),
     ]);
 
     await distillTaskRunTurnMemory(run);
@@ -193,6 +195,7 @@ describe('distillTaskRunTurnMemory', () => {
     expect(sent).toContain('Retries skip 4xx.');
     expect(sent).not.toContain(token);
     expect(sent).not.toContain(key);
+    expect(sent).not.toContain('dana@example.com');
   });
 
   it('stands down for a memory the agent recorded', async () => {
