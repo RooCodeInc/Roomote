@@ -438,6 +438,24 @@ export function createFastAgentToolApprovalBridge(input: {
             argsSummary: args ?? null,
           },
         );
+        // Recheck immediately before relaying: a disable landing while the
+        // override was read or the audit row was written must not let this
+        // call execute under a disabled experiment.
+        if (
+          !(await isDeploymentExperimentEnabled('integrationToolApprovals'))
+        ) {
+          await cancelOpenIntegrationToolApprovals(
+            INTEGRATION_TOOL_APPROVAL_CANCEL_EXPERIMENT_DISABLED,
+          );
+          await helpers
+            .reply(
+              ask.requestId,
+              'reject',
+              'Tool approvals were disabled; the call was not run.',
+            )
+            .catch(() => undefined);
+          return;
+        }
         await helpers.reply(ask.requestId, 'once');
         return;
       }

@@ -16,6 +16,7 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 import {
+  cancelOpenIntegrationToolApprovals,
   expireIntegrationToolApproval,
   getIntegrationToolApproval,
   getSessionForFastConversation,
@@ -670,6 +671,29 @@ describe('tool approval bridge', () => {
     );
     expect(helperMocks.reply).toHaveBeenCalledTimes(1);
     expect(helperMocks.reply).toHaveBeenCalledWith('req-1', 'once');
+    expect(insertIntegrationToolApproval).not.toHaveBeenCalled();
+  });
+
+  it('rejects instead of auto-allowing when the experiment is disabled before the session-allow relay', async () => {
+    vi.mocked(listIntegrationToolSessionOverrides).mockResolvedValue([
+      { integrationId: 'mock-slack', toolName: 'post_message', mode: 'allow' },
+    ]);
+    vi.mocked(isDeploymentExperimentEnabled)
+      .mockResolvedValueOnce(true) // pre-insert experiment check
+      .mockResolvedValue(false); // recheck immediately before relay
+    const helperMocks = helpers();
+    bridge().handleAsk(ask, helperMocks);
+    await vi.waitFor(() =>
+      expect(helperMocks.reply).toHaveBeenCalledWith(
+        'req-1',
+        'reject',
+        'Tool approvals were disabled; the call was not run.',
+      ),
+    );
+    expect(cancelOpenIntegrationToolApprovals).toHaveBeenCalledWith(
+      'experiment_disabled',
+    );
+    expect(helperMocks.reply).not.toHaveBeenCalledWith('req-1', 'once');
     expect(insertIntegrationToolApproval).not.toHaveBeenCalled();
   });
 
