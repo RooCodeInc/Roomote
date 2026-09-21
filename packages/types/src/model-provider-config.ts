@@ -612,7 +612,6 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'kimi-k2-7-code': 'vercel/moonshotai/kimi-k2.7-code',
       'qwen3-8-max': 'vercel/alibaba/qwen3.8-max',
       'minimax-m3': 'vercel/minimax/minimax-m3',
-      'grok-4-6': 'vercel/spacexai/grok-4.6',
     }),
     // Vision is unset: the recommended coding model is multimodal, so image
     // work follows the coding model ("same as coding").
@@ -644,7 +643,6 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'glm-5-3-flash': 'requesty/glm-5.3-flash',
       'glm-5-3': 'requesty/glm-5.3',
       'kimi-k3': 'requesty/kimi-k3',
-      'grok-4-6': 'requesty/grok-4.6',
     }),
     recommendedRoleModels: {
       helper: 'requesty/gemini-3.8-flash',
@@ -887,7 +885,6 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'kimi-k3': 'opencode/kimi-k3',
       'kimi-k2-7-code': 'opencode/kimi-k2.7-code',
       'minimax-m3': 'opencode/minimax-m3',
-      'grok-4-6': 'opencode/grok-4.6',
     }),
     // The default coding model (big-pickle) is OpenCode's own routed model,
     // so vision gets an explicit multimodal recommendation instead of the
@@ -920,7 +917,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'glm-5-3-flash': 'opencode-go/glm-5.3-flash',
       'glm-5-3': 'opencode-go/glm-5.3',
       'gpt-5-6-luna': 'opencode-go/gpt-5.6-luna',
-      'grok-4-6': 'opencode-go/grok-4.6',
+      'grok-4-7': 'opencode-go/grok-4.7',
       'kimi-k2-7-code': 'opencode-go/kimi-k2.7-code',
       'kimi-k3': 'opencode-go/kimi-k3',
       'minimax-m3': 'opencode-go/minimax-m3',
@@ -996,7 +993,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     id: 'xai',
     label: 'xAI',
     envVarName: 'XAI_API_KEY',
-    defaultRoomoteModel: 'xai/grok-4.6',
+    defaultRoomoteModel: 'xai/grok-4.7',
     authKind: 'api-key',
     credentialHelp: {
       text: 'Paste an xAI API key from the console.',
@@ -1004,7 +1001,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       linkLabel: 'xAI console',
     },
     suggestedTaskModels: mapRecommendedTaskModels({
-      'grok-4-6': 'xai/grok-4.6',
+      'grok-4-7': 'xai/grok-4.7',
     }),
   },
   {
@@ -1187,10 +1184,10 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     id: XAI_SUBSCRIPTION_PROVIDER_ID,
     label: 'xAI (Grok subscription)',
     envVarName: undefined,
-    defaultRoomoteModel: 'xai/grok-4.6',
+    defaultRoomoteModel: 'xai/grok-4.7',
     authKind: 'oauth',
     suggestedTaskModels: mapRecommendedTaskModels({
-      'grok-4-6': 'xai/grok-4.6',
+      'grok-4-7': 'xai/grok-4.7',
     }),
   },
 ] as const satisfies readonly SetupModelProviderDescriptor[];

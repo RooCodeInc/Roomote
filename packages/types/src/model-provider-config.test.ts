@@ -996,8 +996,8 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       [
         { id: 'openai/gpt-5.6-terra', displayName: 'GPT 5.6 Terra' },
         {
-          id: 'openrouter/x-ai/grok-4.6',
-          displayName: 'Grok 4.6',
+          id: 'openrouter/x-ai/grok-4.7',
+          displayName: 'Grok 4.7',
         },
         {
           id: 'openrouter/anthropic/claude-sonnet-5',
@@ -1014,7 +1014,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(groups[0]).toMatchObject({
       label: 'OpenRouter',
       items: [
-        { id: 'openrouter/x-ai/grok-4.6' },
+        { id: 'openrouter/x-ai/grok-4.7' },
         { id: 'openrouter/anthropic/claude-sonnet-5' },
       ],
     });
@@ -1055,7 +1055,6 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       'requesty/glm-5.3-flash',
       'requesty/glm-5.3',
       'requesty/kimi-k3',
-      'requesty/grok-4.6',
     ]);
   });
 
@@ -1145,19 +1144,19 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(getSetupProviderTaskModelPrefix('anthropic')).toBe('anthropic');
   });
 
-  it('recommends only Grok 4.6 for xAI API and Grok subscription', () => {
+  it('recommends only Grok 4.7 for xAI API and Grok subscription', () => {
     for (const providerId of ['xai', 'xai-subscription'] as const) {
       const provider = SETUP_MODEL_PROVIDER_CATALOG.find(
         (entry) => entry.id === providerId,
       );
 
-      expect(provider?.defaultRoomoteModel).toBe('xai/grok-4.6');
+      expect(provider?.defaultRoomoteModel).toBe('xai/grok-4.7');
       expect(provider?.suggestedTaskModels.map((model) => model.id)).toEqual([
-        'xai/grok-4.6',
+        'xai/grok-4.7',
       ]);
       expect(
         provider?.suggestedTaskModels.map((model) => model.displayName),
-      ).toEqual(['Grok 4.6']);
+      ).toEqual(['Grok 4.7']);
     }
   });
 
@@ -1354,7 +1353,7 @@ describe('buildRecommendedDeploymentModelConfig', () => {
       buildRecommendedDeploymentModelConfig(getSetupModelProvider('xai')),
     ).toEqual({
       ...createEmptyDeploymentModelConfig(),
-      roomoteModel: 'xai/grok-4.6',
+      roomoteModel: 'xai/grok-4.7',
     });
   });
 
