@@ -416,6 +416,36 @@ describe('resolveFastAgentToolApprovalRules', () => {
     });
   });
 
+  it('governs a custom server by its own policy layer only, since names can coincide', () => {
+    const policy = (toolName: string) => ({
+      policyId: toolName,
+      integrationId: 'tools',
+      toolName,
+      mode: 'reject' as const,
+      updatedAt: '',
+      createdAt: '',
+    });
+    const merged = (scope?: 'deployment' | 'personal') =>
+      mergeIntegrationToolPolicies(
+        [policy('shared_only')],
+        [policy('personal_only')],
+        [
+          {
+            id: 'tools',
+            toolApprovalPolicyScope: scope,
+            tools: [],
+          } as unknown as FastAgentIntegration,
+        ],
+      )
+        .map((entry) => entry.toolName)
+        .sort();
+
+    expect(merged('deployment')).toEqual(['shared_only']);
+    expect(merged('personal')).toEqual(['personal_only']);
+    // Built-in integrations take both layers.
+    expect(merged()).toEqual(['personal_only', 'shared_only']);
+  });
+
   it('reads no personal policies without a Session owner', async () => {
     await resolveFastAgentToolApprovalRules({ integrations });
     expect(listIntegrationToolUserPolicies).not.toHaveBeenCalled();

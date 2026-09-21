@@ -471,7 +471,21 @@ describe('createCustomMcpProxy', () => {
       expect(mockResolveApprovalBlocks).toHaveBeenCalledWith(
         expect.objectContaining({
           integrationId: 'internal-tools',
+          policyScope: 'deployment',
           tokenType: 'run',
+        }),
+      );
+    });
+
+    it("resolves a personal server under its owner's policies only", async () => {
+      mockFindCustomServer.mockResolvedValue(
+        buildServerRow({ url: upstreamUrl(), ownerUserId: 'user-1' }),
+      );
+      await postMcp(createApp(createAuthToken()), initializeRequest);
+      expect(mockResolveApprovalBlocks).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          integrationId: 'internal-tools',
+          policyScope: 'personal',
         }),
       );
     });

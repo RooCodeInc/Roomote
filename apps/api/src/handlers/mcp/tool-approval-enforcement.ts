@@ -23,10 +23,16 @@ export type ProxyToolApprovalBlock = 'reject' | 'needs_approval';
  *   pass: their native ask was already decided by the Session owner.
  *
  * The stricter of the deployment policy and the acting user's personal
- * policy applies. Returns no blocks while the experiment is off.
+ * policy applies, within the layers that govern the integration. Returns no blocks while the experiment is off.
  */
 export async function resolveProxyToolApprovalBlocks(input: {
   integrationId: string;
+  /**
+   * A custom server is governed by one layer only, matching where its
+   * policies are edited: `deployment` for a shared server, `personal` for its
+   * owner's. Their names can coincide. Unset (built-ins) takes both.
+   */
+  policyScope?: 'deployment' | 'personal';
   tokenType: 'run' | 'auth';
   /** Looked up only while the experiment is on. */
   resolveActingUserId: () => Promise<string | null>;
@@ -35,9 +41,14 @@ export async function resolveProxyToolApprovalBlocks(input: {
   if (!(await isDeploymentExperimentEnabled('integrationToolApprovals'))) {
     return blocks;
   }
-  const actingUserId = await input.resolveActingUserId();
+  const actingUserId =
+    input.policyScope === 'deployment'
+      ? null
+      : await input.resolveActingUserId();
   const [deploymentPolicies, userPolicies] = await Promise.all([
-    listIntegrationToolPolicies(),
+    input.policyScope === 'personal'
+      ? Promise.resolve([])
+      : listIntegrationToolPolicies(),
     actingUserId
       ? listIntegrationToolUserPolicies(actingUserId)
       : Promise.resolve([]),

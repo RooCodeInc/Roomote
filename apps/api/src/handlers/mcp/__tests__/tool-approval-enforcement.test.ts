@@ -69,6 +69,25 @@ describe('resolveProxyToolApprovalBlocks', () => {
     });
   });
 
+  it('governs a custom server by its own layer only, since names can coincide', async () => {
+    mockDeployment.mockResolvedValue([
+      policy('tools', 'shared_only', 'reject'),
+    ]);
+    mockUser.mockResolvedValue([policy('tools', 'personal_only', 'reject')]);
+    const resolve = (policyScope?: 'deployment' | 'personal') =>
+      resolveProxyToolApprovalBlocks({
+        integrationId: 'tools',
+        policyScope,
+        tokenType: 'run',
+        resolveActingUserId: async () => 'user-1',
+      }).then((blocks) => [...blocks.keys()].sort());
+
+    expect(await resolve('deployment')).toEqual(['shared_only']);
+    expect(await resolve('personal')).toEqual(['personal_only']);
+    // Built-in integrations take both layers.
+    expect(await resolve()).toEqual(['personal_only', 'shared_only']);
+  });
+
   it('reads no personal policies for a run without a human actor', async () => {
     await resolveProxyToolApprovalBlocks({
       integrationId: 'linear',

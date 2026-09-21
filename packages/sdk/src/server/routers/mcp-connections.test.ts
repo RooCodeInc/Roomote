@@ -1342,9 +1342,11 @@ describe('custom MCP server delivery', () => {
         }),
       ).toEqual({
         ...expected,
+        // Session-only metadata the worker delivery above never carries.
         'http-integrations': {
           ...expected['http-integrations'],
           cacheRevision: '0:',
+          toolApprovalPolicyScope: 'deployment',
         },
       });
     },

@@ -92,24 +92,45 @@ function listMountedIntegrationTools(
  * Layer the Session owner's personal policies on the deployment ones. The
  * stricter mode wins per tool, so a personal policy can gate or block calls
  * in the owner's Sessions but never loosen what an admin configured.
+ *
+ * A custom server is governed by one layer only, matching where its policies
+ * are edited: a shared server takes the deployment's, a personal server its
+ * owner's. Their names can coincide, so a policy written for one must never
+ * reach the other. Built-in integrations take both layers.
  */
 export function mergeIntegrationToolPolicies(
   deploymentPolicies: IntegrationToolPolicyMetadata[],
   userPolicies: IntegrationToolPolicyMetadata[],
+  integrations: FastAgentIntegration[] = [],
 ): IntegrationToolPolicyMetadata[] {
-  const merged = new Map(
-    deploymentPolicies.map((policy) => [
-      integrationToolPolicyKey(policy.integrationId, policy.toolName),
-      policy,
+  const scopeById = new Map(
+    integrations.map((integration) => [
+      integration.id,
+      integration.toolApprovalPolicyScope,
     ]),
   );
-  for (const policy of userPolicies) {
-    const key = integrationToolPolicyKey(policy.integrationId, policy.toolName);
-    const mode = resolveStricterIntegrationToolPolicyMode(
-      merged.get(key)?.mode,
-      policy.mode,
-    );
-    if (mode === policy.mode) merged.set(key, policy);
+  const governs = (
+    layer: 'deployment' | 'personal',
+    policy: IntegrationToolPolicyMetadata,
+  ) => (scopeById.get(policy.integrationId) ?? layer) === layer;
+
+  const merged = new Map<string, IntegrationToolPolicyMetadata>();
+  for (const [layer, policies] of [
+    ['deployment', deploymentPolicies],
+    ['personal', userPolicies],
+  ] as const) {
+    for (const policy of policies) {
+      if (!governs(layer, policy)) continue;
+      const key = integrationToolPolicyKey(
+        policy.integrationId,
+        policy.toolName,
+      );
+      const mode = resolveStricterIntegrationToolPolicyMode(
+        merged.get(key)?.mode,
+        policy.mode,
+      );
+      if (mode === policy.mode) merged.set(key, policy);
+    }
   }
   return [...merged.values()];
 }
@@ -308,7 +329,7 @@ export async function resolveFastAgentToolApprovalRules(input: {
   ]);
   const rules = buildIntegrationToolApprovalRules(
     input.integrations,
-    mergeIntegrationToolPolicies(policies, userPolicies),
+    mergeIntegrationToolPolicies(policies, userPolicies, input.integrations),
     sessionOverrides,
   );
   return { rules, hash: hashIntegrationToolApprovalRules(rules) };

@@ -178,6 +178,8 @@ export type FastAgentMcpServerConfig = {
   disabledTools?: string[];
   /** Opaque, non-secret revision used to invalidate process-local tool catalogs. */
   cacheRevision?: string;
+  /** Which approval policies govern a custom server; unset for built-ins. */
+  toolApprovalPolicyScope?: 'deployment' | 'personal';
 };
 
 /** Structured input request issued with the Fast-native request_user_input tool. */

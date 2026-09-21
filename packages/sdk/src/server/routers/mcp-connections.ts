@@ -84,6 +84,13 @@ type ResolvedMcpServerConfig = {
   headers: Record<string, string>;
   disabledTools?: string[];
   cacheRevision?: string;
+  /**
+   * Which per-tool approval policies govern a custom server: a shared server
+   * takes the deployment's, a personal one its owner's. A name can exist in
+   * both scopes, so the name alone cannot tell them apart. Unset for
+   * built-in integrations, where both layers apply.
+   */
+  toolApprovalPolicyScope?: 'deployment' | 'personal';
 };
 
 type ResolvedMcpServerConfigs = Record<string, ResolvedMcpServerConfig>;
@@ -183,9 +190,13 @@ async function resolveMcpServerConfigs(options: {
     url: `${options.requestOrigin ?? ''}${HTTP_INTEGRATIONS_MCP_PATH}`,
     headers: {},
   };
+  // A worker writes what it receives into an agent's MCP configuration, so
+  // it gets the connection fields only. The cache revision and the approval
+  // policy scope are control-plane metadata for Roomote's Session runtime.
   if (!options.includeCacheRevision) {
     for (const server of Object.values(servers)) {
       delete server.cacheRevision;
+      delete server.toolApprovalPolicyScope;
     }
   }
 
@@ -433,6 +444,8 @@ async function buildScopedCustomMcpServerConfigs(
       url: requestOrigin ? `${requestOrigin}${proxyPath}` : proxyPath,
       headers: { 'X-MCP-Client': PRODUCT_NAME },
       cacheRevision: `${row.updatedAt?.getTime() ?? 0}:${connectionUpdatedAt?.getTime() ?? ''}`,
+      toolApprovalPolicyScope:
+        scope.visibility === 'owner' ? 'personal' : 'deployment',
     };
   }
 

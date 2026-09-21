@@ -58,6 +58,8 @@ export type FastAgentIntegration = {
   name: string;
   description: string;
   dataPolicy?: 'shared' | 'private';
+  /** Which approval policies govern a custom server; unset for built-ins. */
+  toolApprovalPolicyScope?: 'deployment' | 'personal';
   instructions?: string;
   tools: McpToolDefinition[];
   endpoint?: {
@@ -546,6 +548,9 @@ export async function listFastAgentIntegrations(
       config,
     }),
     disabledTools: normalizeDisabledToolNames(config.disabledTools ?? []),
+    ...(config.toolApprovalPolicyScope
+      ? { toolApprovalPolicyScope: config.toolApprovalPolicyScope }
+      : {}),
   }));
 
   if (githubInstallation && !configuredServers.github) {
@@ -652,6 +657,9 @@ export async function listFastAgentIntegrations(
         name: result.value.name,
         description: result.value.description,
         dataPolicy: result.value.dataPolicy,
+        ...(result.value.toolApprovalPolicyScope
+          ? { toolApprovalPolicyScope: result.value.toolApprovalPolicyScope }
+          : {}),
         instructions: isMemory
           ? createMemoryMcpInstructions(result.value.id, {
               primary: primaryMemory,

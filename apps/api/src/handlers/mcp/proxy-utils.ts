@@ -356,6 +356,8 @@ interface ResolvedCredentials {
    * proxy enforce those policies; see `tool-approval-enforcement.ts`.
    */
   toolApprovalIntegrationId?: string;
+  /** The one policy layer governing a custom server; unset takes both. */
+  toolApprovalPolicyScope?: 'deployment' | 'personal';
   /**
    * Per-request upstream URL. Required when the proxy was constructed without
    * a static `upstream` (custom servers resolve theirs from the database).
@@ -1018,6 +1020,7 @@ export function createMcpProxy(config: McpProxyConfig) {
       try {
         toolApprovalBlocks = await resolveProxyToolApprovalBlocks({
           integrationId: credentials.toolApprovalIntegrationId,
+          policyScope: credentials.toolApprovalPolicyScope,
           tokenType: auth.tokenType,
           resolveActingUserId: () => resolveTaskOrSessionUserIdOrNull(auth),
         });
