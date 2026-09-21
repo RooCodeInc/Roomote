@@ -207,6 +207,7 @@ export async function prepareOpenCodeCommandEnv(options: {
   runtimeEnv: Record<string, string>;
   workspacePath: string;
   mcpServers?: Record<string, unknown>;
+  toolApprovalPermission?: Record<string, 'ask' | 'deny'>;
   model?: string;
   reasoningEffortOverride?: ReasoningEffort;
   developerInstructionsContent?: string;
@@ -238,6 +239,7 @@ export async function prepareOpenCodeCommandEnv(options: {
     runtimeEnv: commandEnv,
     developerInstructionsContent: options.developerInstructionsContent,
     mcpServers: normalizeOpenCodeMcpServers(parsedMcpServers, commandEnv),
+    toolApprovalPermission: options.toolApprovalPermission,
     model: options.model,
     reasoningEffortOverride: options.reasoningEffortOverride,
   });

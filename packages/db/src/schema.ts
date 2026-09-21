@@ -4667,6 +4667,14 @@ export const integrationToolApprovalRequests = pgTable(
     requesterUserId: text('requester_user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    /**
+     * The task whose agent asked, or null for the Session's own agent. A
+     * task's approved row is claimed by the integration proxy for that task's
+     * exact call rather than relayed by a bridge.
+     */
+    taskId: text('task_id').references(() => tasks.id, {
+      onDelete: 'cascade',
+    }),
     integrationId: text('integration_id').notNull(),
     toolName: text('tool_name').notNull(),
     /** The OpenCode permission request this decision replies to. */
@@ -4693,6 +4701,11 @@ export const integrationToolApprovalRequests = pgTable(
     index('integration_tool_approvals_session_requester_idx').on(
       table.sessionId,
       table.requesterUserId,
+      table.status,
+    ),
+    index('integration_tool_approvals_task_call_idx').on(
+      table.taskId,
+      table.argsFingerprint,
       table.status,
     ),
     // One open ask per native permission request; the runtime never reuses

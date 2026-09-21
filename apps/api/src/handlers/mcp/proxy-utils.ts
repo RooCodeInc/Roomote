@@ -20,6 +20,7 @@ import type { Variables } from '../../types';
 import { fetchWithLongLivedStreamDispatcher } from '../long-lived-fetch';
 import { createLoggedProxyResponseBody } from '../proxy-response-stream';
 import {
+  claimProxyTaskToolCall,
   describeProxyToolApprovalBlock,
   resolveProxyToolApprovalBlocks,
   type ProxyToolApprovalBlock,
@@ -209,6 +210,18 @@ export async function resolveTaskOrSessionUserIdOrNull(
 
   const [ownerUserId] = await getTaskHumanOwnerUserIds(db, taskRun.taskId);
   return ownerUserId ?? null;
+}
+
+/** The task a run token was minted for; null for any other caller. */
+async function resolveRunTokenTaskId(
+  auth: McpAuthContext,
+): Promise<string | null> {
+  if (auth.tokenType !== 'run' || !auth.runId) return null;
+  const taskRun = await db.query.taskRuns.findFirst({
+    columns: { taskId: true },
+    where: eq(taskRuns.id, auth.runId),
+  });
+  return taskRun?.taskId ?? null;
 }
 
 /**
@@ -1013,8 +1026,9 @@ export function createMcpProxy(config: McpProxyConfig) {
       );
     }
 
-    // Approval-blocked tools are hidden and refused exactly like disabled
-    // ones; only the refusal message differs.
+    // A rejected tool is hidden and refused exactly like a disabled one; only
+    // the refusal message differs. A tool that needs approval stays listed,
+    // and each call to it must claim the Session owner's approval below.
     let toolApprovalBlocks = new Map<string, ProxyToolApprovalBlock>();
     if (credentials.toolApprovalIntegrationId) {
       try {
@@ -1023,6 +1037,7 @@ export function createMcpProxy(config: McpProxyConfig) {
           policyScope: credentials.toolApprovalPolicyScope,
           tokenType: auth.tokenType,
           resolveActingUserId: () => resolveTaskOrSessionUserIdOrNull(auth),
+          resolveTaskId: () => resolveRunTokenTaskId(auth),
         });
       } catch (error) {
         // Fail closed: an unreadable policy must not let a gated tool run.
@@ -1040,12 +1055,15 @@ export function createMcpProxy(config: McpProxyConfig) {
           `Failed to resolve ${name} tool approval policies`,
         );
       }
-      if (toolApprovalBlocks.size > 0) {
+      const rejectedToolNames = [...toolApprovalBlocks]
+        .filter(([, block]) => block === 'reject')
+        .map(([toolName]) => toolName);
+      if (rejectedToolNames.length > 0) {
         credentials = {
           ...credentials,
           disabledToolNames: [
             ...(credentials.disabledToolNames ?? []),
-            ...toolApprovalBlocks.keys(),
+            ...rejectedToolNames,
           ],
         };
       }
@@ -1078,7 +1096,9 @@ export function createMcpProxy(config: McpProxyConfig) {
         disabledToolNames: credentials.disabledToolNames,
       });
       const hasToolRestrictions = Boolean(
-        effectiveAllowedToolNames || credentials.disabledToolNames?.length,
+        effectiveAllowedToolNames ||
+        credentials.disabledToolNames?.length ||
+        toolApprovalBlocks.size,
       );
 
       if (
@@ -1131,6 +1151,42 @@ export function createMcpProxy(config: McpProxyConfig) {
             approvalBlock
               ? describeProxyToolApprovalBlock(toolName, approvalBlock)
               : `${name} MCP tool "${toolName}" is not allowed on this endpoint`,
+            getJsonRpcRequestId(parsedBody),
+          );
+        }
+      }
+
+      const gatedToolName =
+        method === 'POST' ? getToolCallName(parsedBody) : null;
+      if (
+        gatedToolName &&
+        credentials.toolApprovalIntegrationId &&
+        toolApprovalBlocks.get(gatedToolName) === 'needs_approval'
+      ) {
+        let approved = false;
+        try {
+          approved = await claimProxyTaskToolCall({
+            taskId: await resolveRunTokenTaskId(auth),
+            integrationId: credentials.toolApprovalIntegrationId,
+            toolName: gatedToolName,
+            args: (parsedBody as { params?: { arguments?: unknown } }).params
+              ?.arguments,
+          });
+        } catch (error) {
+          // Fail closed: an unreadable approval is not an approval.
+          console.error(
+            formatSingleLineLog(`${logPrefix} Failed to claim tool approval`, {
+              requestId,
+              toolName: gatedToolName,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          );
+        }
+        if (!approved) {
+          return jsonRpcErrorResponse(
+            403,
+            -32000,
+            describeProxyToolApprovalBlock(gatedToolName, 'needs_approval'),
             getJsonRpcRequestId(parsedBody),
           );
         }

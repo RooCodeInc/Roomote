@@ -272,6 +272,29 @@ describe('opencode-server bootstrap', () => {
     expect(commandEnv.OPENCODE_DISABLE_PROJECT_CONFIG).toBe('1');
   });
 
+  it('adds per-tool approval rules on top of the allow-all permissions', async () => {
+    const { prepareOpenCodeCommandEnv } =
+      await import('../opencode-server/bootstrap');
+
+    const homeDir = createTempHome();
+    const { commandEnv } = await prepareOpenCodeCommandEnv({
+      runtimeEnv: createDirectHarnessRuntimeEnv(homeDir),
+      workspacePath: '/tmp/workspace',
+      toolApprovalPermission: {
+        linear_save_issue: 'ask',
+        linear_delete_issue: 'deny',
+      },
+      logger: createLogger(),
+    });
+
+    const { permission } = JSON.parse(commandEnv.OPENCODE_CONFIG_CONTENT!);
+    expect(permission).toMatchObject({
+      bash: 'allow',
+      linear_save_issue: 'ask',
+      linear_delete_issue: 'deny',
+    });
+  });
+
   it('moves literal remote MCP header values into env vars before preparing the runtime overlay', async () => {
     const { prepareOpenCodeCommandEnv } =
       await import('../opencode-server/bootstrap');

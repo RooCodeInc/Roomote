@@ -1,3 +1,11 @@
+const { mockToolApprovalRequest } = vi.hoisted(() => ({
+  mockToolApprovalRequest: vi.fn(),
+}));
+
+vi.mock('@roomote/sdk/client', () => ({
+  sdk: { toolApprovals: { request: mockToolApprovalRequest, status: vi.fn() } },
+}));
+
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -52,6 +60,7 @@ class FakeOpenCodeServerClient {
   abort = vi.fn(async () => true);
   questions = vi.fn(async () => []);
   replyQuestion = vi.fn(async () => true);
+  replyPermission = vi.fn(async (_options: unknown) => true);
   rejectQuestion = vi.fn(async () => true);
   get sessionCreateTimeoutMsValue(): number {
     return 90_000;
@@ -112,6 +121,10 @@ function createHarness(
     providerErrorBaseDelayMs?: number;
     providerErrorMaxDelayMs?: number;
     mcpServerNames?: string[];
+    toolApprovalTools?: Record<
+      string,
+      { integrationId: string; toolName: string }
+    >;
     model?: string;
     initialSessionId?: string;
   } = {},
@@ -135,6 +148,7 @@ function createHarness(
     providerErrorBaseDelayMs: options.providerErrorBaseDelayMs,
     providerErrorMaxDelayMs: options.providerErrorMaxDelayMs,
     mcpServerNames: options.mcpServerNames,
+    toolApprovalTools: options.toolApprovalTools,
     beforeQueuedPrompt: options.beforeQueuedPrompt,
   });
 
@@ -1730,6 +1744,55 @@ describe('OpenCodeServerHarness', () => {
     } finally {
       harness.dispose();
       fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("relays a gated tool's native ask from any session in the workspace", async () => {
+    mockToolApprovalRequest.mockResolvedValue({ outcome: 'approved' });
+    const { client, harness } = createHarness(undefined, {
+      toolApprovalTools: {
+        linear_save_issue: { integrationId: 'linear', toolName: 'save_issue' },
+      },
+    });
+
+    try {
+      await connectHarness(harness, client);
+      client.message.mockResolvedValue({
+        info: { id: 'msg_tool', role: 'assistant' },
+        parts: [
+          {
+            type: 'tool',
+            callID: 'call_1',
+            state: { status: 'running', input: { title: 'Hi' } },
+          },
+        ],
+      } as unknown as OpenCodeSessionMessage);
+
+      // A subagent's session, which the harness has not linked: the ask still
+      // has to be answered or that session stays paused forever.
+      await client.emit({
+        type: 'permission.asked',
+        properties: {
+          id: 'per_1',
+          sessionID: 'ses_subagent',
+          permission: 'linear_save_issue',
+          tool: { messageID: 'msg_tool', callID: 'call_1' },
+        },
+      });
+
+      await vi.waitFor(() =>
+        expect(client.replyPermission).toHaveBeenCalledWith(
+          expect.objectContaining({ requestId: 'per_1', reply: 'once' }),
+        ),
+      );
+      expect(mockToolApprovalRequest).toHaveBeenCalledWith({
+        integrationId: 'linear',
+        toolName: 'save_issue',
+        nativeRequestId: 'per_1',
+        args: { title: 'Hi' },
+      });
+    } finally {
+      harness.dispose();
     }
   });
 

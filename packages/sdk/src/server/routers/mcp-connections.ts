@@ -21,6 +21,7 @@ import {
 } from '@roomote/db/server';
 import { decrypt } from '@roomote/db/encryption';
 import { getValidAccessToken, hasValidOAuthTokens } from '../lib/mcp/data';
+import { resolveTaskIntegrationToolApprovals } from '../lib/task-tool-approvals';
 import {
   customMcpConnectionWhere,
   customMcpServerStore,
@@ -309,6 +310,32 @@ export const mcpConnectionsRouter = router({
       requestOrigin: getRequestOrigin(ctx.req),
     }),
   })),
+
+  /**
+   * The native approval rules for what a task run mounts, compiled here
+   * because the policy scopes are control-plane metadata a worker never sees.
+   * Absent while the `integrationToolApprovals` experiment is off.
+   */
+  getTaskToolApprovals: authenticatedProcedure.query(async ({ ctx }) => {
+    if (!isRunToken(ctx.auth)) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'This endpoint is only available to run tokens',
+      });
+    }
+    const toolApprovals = await resolveTaskIntegrationToolApprovals({
+      runId: ctx.auth.runId,
+      actingUserId: (await resolveActorScopedUserContext(ctx.auth)).userId,
+      resolveServers: () =>
+        resolveMcpServerConfigs({
+          auth: ctx.auth,
+          requestOrigin: getRequestOrigin(ctx.req),
+          includeSessionMetadata: true,
+          quiet: true,
+        }),
+    });
+    return { toolApprovals: toolApprovals ?? null };
+  }),
 
   /**
    * Deployment-scoped custom stdio MCP servers, with decrypted env values.

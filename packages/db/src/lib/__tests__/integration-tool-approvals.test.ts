@@ -4,11 +4,13 @@ import {
   integrationToolApprovalRequests,
   sessionFactory,
   sessions,
+  taskFactory,
   userFactory,
 } from '../../server';
 import {
   cancelOpenIntegrationToolApprovals,
   claimAutoApprovedIntegrationToolApproval,
+  claimTaskIntegrationToolCall,
   decideIntegrationToolApproval,
   expireIntegrationToolApproval,
   fingerprintIntegrationToolCall,
@@ -546,6 +548,109 @@ describe('auto-approved reservations', () => {
     const row = await getIntegrationToolApproval(reservation.approvalId);
     expect(row?.status).toBe('cancelled');
     expect(row?.cancelReason).toBe('experiment_disabled');
+  });
+});
+
+describe("claiming a task's approved call", () => {
+  async function approvedTaskCall(args: unknown = call.args) {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const task = await taskFactory.create();
+    const approval = await insertIntegrationToolApproval(
+      { sessionId, userId },
+      {
+        taskId: task.id,
+        integrationId: call.integrationId,
+        toolName: call.toolName,
+        nativeRequestId: nextNativeRequestId(),
+        argsFingerprint: fingerprint(args),
+        argsSummary: args,
+      },
+    );
+    expect(approval.taskId).toBe(task.id);
+    return { userId, sessionId, taskId: task.id, approval };
+  }
+
+  it('runs the exact approved call once, and nothing else', async () => {
+    const { userId, sessionId, taskId, approval } = await approvedTaskCall();
+    const claim = (input: { taskId?: string; args?: unknown } = {}) =>
+      claimTaskIntegrationToolCall({
+        taskId: input.taskId ?? taskId,
+        argsFingerprint: fingerprint(input.args ?? call.args),
+      });
+
+    // Asked but not yet answered.
+    await expect(claim()).resolves.toBe(false);
+    await decideIntegrationToolApproval(
+      { sessionId, userId },
+      { approvalId: approval.approvalId, decision: 'approved' },
+    );
+    // Other arguments and other tasks never ride on this approval.
+    await expect(claim({ args: { channel: 'C999' } })).resolves.toBe(false);
+    const otherTask = await taskFactory.create();
+    await expect(claim({ taskId: otherTask.id })).resolves.toBe(false);
+
+    await expect(claim()).resolves.toBe(true);
+    expect(
+      (await getIntegrationToolApproval(approval.approvalId))?.status,
+    ).toBe('consumed');
+    await expect(claim()).resolves.toBe(false);
+  });
+
+  it("never claims a Session agent's own approval, a rejection, or a stale decision", async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const sessionApproval = await insertPending({ sessionId, userId });
+    await decideIntegrationToolApproval(
+      { sessionId, userId },
+      { approvalId: sessionApproval.approvalId, decision: 'approved' },
+    );
+
+    const rejected = await approvedTaskCall();
+    await decideIntegrationToolApproval(
+      { sessionId: rejected.sessionId, userId: rejected.userId },
+      { approvalId: rejected.approval.approvalId, decision: 'rejected' },
+    );
+    await expect(
+      claimTaskIntegrationToolCall({
+        taskId: rejected.taskId,
+        argsFingerprint: fingerprint(),
+      }),
+    ).resolves.toBe(false);
+
+    const stale = await approvedTaskCall();
+    await decideIntegrationToolApproval(
+      { sessionId: stale.sessionId, userId: stale.userId },
+      { approvalId: stale.approval.approvalId, decision: 'approved' },
+    );
+    await db
+      .update(integrationToolApprovalRequests)
+      .set({ decidedAt: new Date(Date.now() - 60 * 60_000) })
+      .where(eq(integrationToolApprovalRequests.id, stale.approval.approvalId));
+    await expect(
+      claimTaskIntegrationToolCall({
+        taskId: stale.taskId,
+        argsFingerprint: fingerprint(),
+      }),
+    ).resolves.toBe(false);
+    expect(
+      (await getIntegrationToolApproval(sessionApproval.approvalId))?.status,
+    ).toBe('approved');
+  });
+
+  it('claims nothing while the experiment is off', async () => {
+    const { userId, sessionId, taskId, approval } = await approvedTaskCall();
+    await decideIntegrationToolApproval(
+      { sessionId, userId },
+      { approvalId: approval.approvalId, decision: 'approved' },
+    );
+    await setDeploymentExperimentEnabled('integrationToolApprovals', false);
+    await expect(
+      claimTaskIntegrationToolCall({
+        taskId,
+        argsFingerprint: fingerprint(),
+      }),
+    ).resolves.toBe(false);
   });
 });
 

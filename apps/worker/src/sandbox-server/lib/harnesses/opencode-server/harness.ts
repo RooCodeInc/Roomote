@@ -31,6 +31,7 @@ import type {
   AcpTurnCompletedEvent,
   ProviderRetryNotice,
   TaskEvent,
+  TaskIntegrationToolApprovals,
 } from '@roomote/types';
 
 import type {
@@ -61,6 +62,7 @@ import {
 import { RuntimePromptQueue } from '../runtime-prompt-queue';
 
 import { OpenCodeRuntimeEventEmitter } from './runtime-event-emitter';
+import { createTaskToolApprovalRelay } from './tool-approvals';
 import {
   OpenCodeServerClient,
   createOpenCodePromptParts,
@@ -140,6 +142,8 @@ interface OpenCodeServerHarnessOptions {
   providerErrorBaseDelayMs?: number;
   providerErrorMaxDelayMs?: number;
   mcpServerNames?: string[];
+  /** Which integration tool each gated native permission key stands for. */
+  toolApprovalTools?: TaskIntegrationToolApprovals['tools'];
   /**
    * Observer-only breadcrumb for rare harness failures that need a durable
    * post-mortem outside the sandbox (e.g. infinite OpenCode session create).
@@ -1660,6 +1664,10 @@ export class OpenCodeServerHarness
     HarnessPendingUserInputRequest
   >();
   private readonly nativeQuestionRequestIds = new Map<string, string>();
+  private readonly toolApprovalRelay?: ReturnType<
+    typeof createTaskToolApprovalRelay
+  >;
+  private pendingToolApprovals = 0;
   // Request ids that have already been answered or abandoned. A late answer
   // (e.g. a web POST opened before a steer abandoned the question) for one
   // of these must be rejected rather than fabricated into the replayed turn.
@@ -1818,6 +1826,18 @@ export class OpenCodeServerHarness
     ].sort((left, right) => right.length - left.length);
     this.beforeQueuedPrompt = options.beforeQueuedPrompt;
     this.onDiagnostic = options.onDiagnostic;
+    if (options.toolApprovalTools) {
+      this.toolApprovalRelay = createTaskToolApprovalRelay({
+        tools: options.toolApprovalTools,
+        client: this.client,
+        logger: this.logger,
+        signal: this.eventAbortController.signal,
+        onPendingCountChange: (pending) => {
+          this.pendingToolApprovals = pending;
+          this.stallWatchdogs.noteActivity();
+        },
+      });
+    }
     this.runtimeEvents = new OpenCodeRuntimeEventEmitter({
       taskEvent: (event) => this.emit('taskEvent', event),
       runtimeOutput: (event) => this.emit('runtimeOutput', event),
@@ -1839,6 +1859,7 @@ export class OpenCodeServerHarness
       getSessionId: () => this.sessionId,
       hasDeferringActivity: () =>
         this.pendingUserInputRequests.size > 0 ||
+        this.pendingToolApprovals > 0 ||
         this.activeExecuteToolProgress.size > 0 ||
         this.activeSubagentWatchdogs.size > 0 ||
         this.nativeSteerSubmissionsInFlight > 0,
@@ -3933,6 +3954,14 @@ export class OpenCodeServerHarness
     }
 
     const payload = unwrapped.payload;
+
+    // A subagent's gated call pauses its own session, so an ask is relayed
+    // whichever session in this workspace raised it.
+    if (payload.type === 'permission.asked') {
+      this.handlePermissionAsked(payload);
+      return;
+    }
+
     const sessionId = eventSessionId(payload);
 
     if (sessionId && this.sessionId && sessionId !== this.sessionId) {
@@ -4998,6 +5027,26 @@ export class OpenCodeServerHarness
 
     this.pendingUserInputRequests.set(request.requestId, pendingRequest);
     this.runtimeEvents.requestUserInput(pendingRequest);
+  }
+
+  private handlePermissionAsked(payload: OpenCodeEventPayload): void {
+    const properties = asRecord(payload.properties);
+    const requestId = asString(properties?.id);
+    const sessionId = asString(properties?.sessionID);
+    const permission = asString(properties?.permission);
+    const tool = asRecord(properties?.tool);
+
+    if (!this.toolApprovalRelay || !requestId || !sessionId || !permission) {
+      return;
+    }
+
+    this.toolApprovalRelay.handleAsk({
+      requestId,
+      sessionId,
+      permission,
+      messageId: asString(tool?.messageID),
+      callId: asString(tool?.callID),
+    });
   }
 
   private handleQuestionAsked(payload: OpenCodeEventPayload): void {

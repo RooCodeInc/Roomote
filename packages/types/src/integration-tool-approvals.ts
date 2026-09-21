@@ -60,6 +60,8 @@ export interface IntegrationToolApprovalMetadata {
   toolName: string;
   argsSummary: unknown;
   status: IntegrationToolApprovalStatus;
+  /** The task whose agent asked; null when the Session's own agent did. */
+  taskId: string | null;
   /** When this approval stops accepting a decision and fails closed. */
   expiresAt: string;
   createdAt: string;
@@ -207,4 +209,85 @@ export function integrationToolPolicyKey(
   toolName: string,
 ): string {
   return JSON.stringify([integrationId, toolName]);
+}
+
+/**
+ * What a task's worker needs to make its agent ask: the native permission
+ * rules for its OpenCode configuration, and which integration tool each
+ * gated native key stands for, so an ask can be recorded against the real
+ * tool. Advisory inside the sandbox; the integration proxy is the boundary.
+ */
+export interface TaskIntegrationToolApprovals {
+  permission: Record<string, 'ask' | 'deny'>;
+  tools: Record<string, { integrationId: string; toolName: string }>;
+}
+
+/** OpenCode names an MCP tool `<server>_<tool>`, each half sanitized. */
+function openCodeMcpToolKey(serverName: string, toolName: string): string {
+  const sanitize = (value: string) => value.replace(/[^a-zA-Z0-9_-]/g, '_');
+  return `${sanitize(serverName)}_${sanitize(toolName)}`;
+}
+
+/**
+ * Compile the governing policies and the Session's overrides into a task's
+ * native rules. Only `ask` and `deny` are emitted; allow is the absence of a
+ * rule. A session `allow` over an `ask` policy keeps the native ask, which is
+ * then answered without a card, exactly as in a Session. Two tools that
+ * flatten to one native key cannot be told apart by a native rule, so that
+ * key is denied rather than asked about under the wrong tool's name.
+ */
+export function compileTaskIntegrationToolApprovals(input: {
+  serverNames: string[];
+  policies: IntegrationToolPolicyEntry[];
+  sessionOverrides: IntegrationToolSessionOverrideMetadata[];
+}): TaskIntegrationToolApprovals {
+  const mounted = new Set(input.serverNames);
+  const policyModes = new Map(
+    input.policies.map((policy) => [
+      integrationToolPolicyKey(policy.integrationId, policy.toolName),
+      policy.mode,
+    ]),
+  );
+  const overrideModes = new Map(
+    input.sessionOverrides.map((override) => [
+      integrationToolPolicyKey(override.integrationId, override.toolName),
+      override.mode,
+    ]),
+  );
+  const result: TaskIntegrationToolApprovals = { permission: {}, tools: {} };
+  const ambiguous = new Set<string>();
+  for (const { integrationId, toolName } of [
+    ...input.policies,
+    ...input.sessionOverrides,
+  ]) {
+    if (!mounted.has(integrationId)) continue;
+    const policyKey = integrationToolPolicyKey(integrationId, toolName);
+    const policyMode = policyModes.get(policyKey);
+    const mode = resolveEffectiveIntegrationToolMode({
+      policyMode,
+      sessionOverrideMode: overrideModes.get(policyKey),
+    });
+    const action =
+      mode === 'reject'
+        ? 'deny'
+        : mode === 'ask' || policyMode === 'ask'
+          ? 'ask'
+          : undefined;
+    if (!action) continue;
+    const key = openCodeMcpToolKey(integrationId, toolName);
+    const known = result.tools[key];
+    if (
+      known &&
+      (known.integrationId !== integrationId || known.toolName !== toolName)
+    ) {
+      ambiguous.add(key);
+    }
+    result.tools[key] = { integrationId, toolName };
+    if (result.permission[key] !== 'deny') result.permission[key] = action;
+  }
+  for (const key of ambiguous) {
+    result.permission[key] = 'deny';
+    delete result.tools[key];
+  }
+  return result;
 }

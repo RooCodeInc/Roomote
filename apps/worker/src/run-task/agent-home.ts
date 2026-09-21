@@ -658,6 +658,7 @@ interface GenerateOpenCodeConfigOptions {
   runtimeEnv: Record<string, string>;
   developerInstructionsContent?: string;
   mcpServers?: OpenCodeConfigMcpServer[];
+  toolApprovalPermission?: Record<string, 'ask' | 'deny'>;
   model?: string;
   reasoningEffortOverride?: ReasoningEffort;
 }
@@ -1961,6 +1962,7 @@ export function generateOpenCodeConfig({
   runtimeEnv,
   developerInstructionsContent,
   mcpServers,
+  toolApprovalPermission,
   model,
   reasoningEffortOverride,
 }: GenerateOpenCodeConfigOptions): GenerateOpenCodeConfigResult {
@@ -2124,6 +2126,9 @@ export function generateOpenCodeConfig({
     permission: {
       ...operatorPermission,
       ...OPENCODE_ALLOW_ALL_PERMISSION,
+      // Per-tool approval rules for integration tools. Advisory here, since
+      // the agent can read this file; the integration proxy enforces them.
+      ...toolApprovalPermission,
     },
     provider: operatorProvider,
     skills: {
