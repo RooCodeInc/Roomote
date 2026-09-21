@@ -163,7 +163,7 @@ describe('SourceControlConfiguration', () => {
     vi.clearAllMocks();
   });
 
-  it('defaults GitHub setup to the manifest CTA', () => {
+  it('defaults GitHub setup to the manifest CTA with the organization field visible', () => {
     render(
       <SourceControlConfiguration
         sourceControlSetup={buildSourceControlSetup()}
@@ -178,12 +178,7 @@ describe('SourceControlConfiguration', () => {
     expect(
       screen.queryByRole('button', { name: 'Enter values manually' }),
     ).not.toBeInTheDocument();
-    expect(
-      screen.queryByLabelText('GitHub organization'),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Show advanced config' }),
-    ).toBeInTheDocument();
+    expect(screen.queryByLabelText('GitHub organization')).toBeInTheDocument();
     expect(screen.queryByText('GitHub App ID')).not.toBeInTheDocument();
   });
 
@@ -213,9 +208,6 @@ describe('SourceControlConfiguration', () => {
       />,
     );
 
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Show advanced config' }),
-    );
     fireEvent.change(screen.getByLabelText('GitHub organization'), {
       target: { value: ' example-org ' },
     });
