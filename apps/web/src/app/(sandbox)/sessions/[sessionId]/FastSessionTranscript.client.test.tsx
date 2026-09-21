@@ -2312,7 +2312,7 @@ describe('FastSessionTranscript', () => {
     expect(screen.queryByText('Working')).not.toBeInTheDocument();
   });
 
-  it('renders a validation error array as a human-readable composer alert', async () => {
+  it('shows a validation error dialog and preserves composer state instead of raw JSON', async () => {
     const rawValidationError = JSON.stringify([
       {
         code: 'custom',
@@ -2341,12 +2341,53 @@ describe('FastSessionTranscript', () => {
     fireEvent.change(input, { target: { value: 'Retry this' } });
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
 
-    const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('Message not sent');
-    expect(alert).toHaveTextContent(
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveTextContent('Attachment too large');
+    expect(dialog).toHaveTextContent(
       'attachmentTexts: Extracted attachment text exceeds the 200,000 character limit',
     );
+    expect(dialog).toHaveTextContent(
+      'Try a different file, or provide a URL and Roomote will download it.',
+    );
     expect(screen.queryByText(rawValidationError)).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Got it' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+    );
+    expect(input).toHaveValue('Retry this');
+  });
+
+  it('keeps the inline alert for non-validation send failures', async () => {
+    replyMutate.mockRejectedValue(new Error('turn is busy'));
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          textMessage({
+            id: 'user-1',
+            role: 'user',
+            text: 'First question',
+            ts: 1,
+          }),
+          textMessage({
+            id: 'assistant-1',
+            role: 'assistant',
+            text: 'First answer',
+            ts: 2,
+          }),
+        ]}
+        canReply
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, { target: { value: 'Retry this' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('turn is busy');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   it('keeps Working for an earlier pending response when a later send fails', async () => {

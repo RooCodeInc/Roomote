@@ -64,3 +64,35 @@ export function describeValidationError(error: unknown, fallback: string) {
 
   return fallback;
 }
+
+function isAttachmentTextLimitMessage(message: string): boolean {
+  return message.includes('attachment') && message.includes('character limit');
+}
+
+/**
+ * Composer validation errors — attachment text limit failures and zod issue
+ * arrays from the server — get the shared dialog; anything else keeps its
+ * existing inline or toast surface.
+ */
+export function isComposerValidationError(error: unknown): boolean {
+  if (!(error instanceof Error) || !error.message) {
+    return false;
+  }
+
+  if (isAttachmentTextLimitMessage(error.message)) {
+    return true;
+  }
+
+  try {
+    return isValidationIssueArray(JSON.parse(error.message));
+  } catch {
+    return false;
+  }
+}
+
+export function isAttachmentTextLimitError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    isAttachmentTextLimitMessage(describeValidationErrorMessage(error.message))
+  );
+}

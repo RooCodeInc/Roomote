@@ -585,25 +585,39 @@ describe('Home', () => {
     );
   });
 
-  it('blocks submission and warns when extraction exceeds the attachment text limit', async () => {
+  it('shows the attachment limit dialog and preserves composer state when extraction exceeds the limit', async () => {
+    submittedPromptText = 'Summarize this plan';
     mockPreparePromptAttachments.mockRejectedValueOnce(
       new Error(
-        'Extracted text from "notes-1.txt" would exceed the 200,000 character limit for attachments (total 200,001 characters). Remove or shorten the attachment and try again.',
+        'Extracted text from "notes.txt" would exceed the 200,000 character limit for attachments (total 200,001 characters). Remove or shorten the attachment and try again.',
       ),
     );
     render(<Home initialPlaceholderIndex={0} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
-    await waitFor(() => {
-      expect(mockToastError).toHaveBeenCalledWith(
-        expect.stringContaining(
-          'Extracted text from "notes-1.txt" would exceed the 200,000 character limit',
-        ),
-      );
-    });
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveTextContent('Attachment too large');
+    expect(dialog).toHaveTextContent(
+      'Extracted text from "notes.txt" would exceed the 200,000 character limit for attachments (total 200,001 characters). Remove or shorten the attachment and try again.',
+    );
+    expect(dialog).toHaveTextContent(
+      'Try a different file, or provide a URL and Roomote will download it.',
+    );
+
+    expect(mockToastError).not.toHaveBeenCalled();
     expect(mockStartFastSession).not.toHaveBeenCalled();
     expect(mockPush).not.toHaveBeenCalled();
+    // The modal dialog aria-hides the composer; check the raw value.
+    expect(document.querySelector('textarea')?.value).toBe(
+      'Summarize this plan',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Got it' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole('textbox')).toHaveValue('Summarize this plan');
   });
 
   it('cycles prompt placeholders every 10 seconds from a random starting point', async () => {

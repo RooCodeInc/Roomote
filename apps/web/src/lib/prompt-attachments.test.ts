@@ -128,41 +128,44 @@ describe('preparePromptAttachments', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(
-      preparePromptAttachments({
-        text: 'Analyze',
-        attachments: [
-          {
-            url: 'data:text/plain;base64,aaa',
-            filename: 'notes-1.txt',
-            mediaType: 'text/plain',
-          },
-          {
-            url: 'data:text/plain;base64,bbb',
-            filename: 'notes-2.txt',
-            mediaType: 'text/plain',
-          },
-          {
-            url: 'data:text/plain;base64,ccc',
-            filename: 'notes-3.txt',
-            mediaType: 'text/plain',
-          },
-          {
-            url: 'data:text/plain;base64,ddd',
-            filename: 'notes-4.txt',
-            mediaType: 'text/plain',
-          },
-        ],
-      }),
+      preparePromptAttachments(
+        {
+          text: 'Analyze',
+          attachments: [
+            {
+              url: 'data:text/plain;base64,aaa',
+              filename: 'notes-1.txt',
+              mediaType: 'text/plain',
+            },
+            {
+              url: 'data:text/plain;base64,bbb',
+              filename: 'notes-2.txt',
+              mediaType: 'text/plain',
+            },
+            {
+              url: 'data:text/plain;base64,ccc',
+              filename: 'notes-3.txt',
+              mediaType: 'text/plain',
+            },
+            {
+              url: 'data:text/plain;base64,ddd',
+              filename: 'notes-4.txt',
+              mediaType: 'text/plain',
+            },
+          ],
+        },
+        { enforceAttachmentTextLimit: true },
+      ),
     ).rejects.toThrow(
       `Extracted text from "notes-4.txt" would exceed the 200,000 character limit for attachments (total ${total.toLocaleString('en-US')} characters). Remove or shorten the attachment and try again.`,
     );
   });
 
-  it('blocks submit when a single attachment alone exceeds the aggregate limit', async () => {
-    const text = makeAttachmentText(1, 200_001);
+  it('leaves over-limit attachment text untouched for flows without the limit enforcement', async () => {
+    const texts = [makeAttachmentText(1, 200_001)];
     const fetchMock = vi
       .fn<typeof fetch>()
-      .mockImplementation(async () => makeExtractResponse([text]));
+      .mockImplementation(async () => makeExtractResponse(texts));
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(
@@ -176,6 +179,33 @@ describe('preparePromptAttachments', () => {
           },
         ],
       }),
+    ).resolves.toEqual({
+      text: `Analyze\n\n${texts[0]}`,
+      attachmentTexts: texts,
+    });
+  });
+
+  it('blocks submit when a single attachment alone exceeds the aggregate limit', async () => {
+    const text = makeAttachmentText(1, 200_001);
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async () => makeExtractResponse([text]));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      preparePromptAttachments(
+        {
+          text: 'Analyze',
+          attachments: [
+            {
+              url: 'data:text/plain;base64,aaa',
+              filename: 'notes-1.txt',
+              mediaType: 'text/plain',
+            },
+          ],
+        },
+        { enforceAttachmentTextLimit: true },
+      ),
     ).rejects.toThrow('Extracted text from "notes-1.txt" would exceed');
   });
 });

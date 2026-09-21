@@ -2,7 +2,6 @@
 
 import { useState, useCallback, useEffect, useRef, type Ref } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { toast } from 'sonner';
 
 import {
   type ReasoningEffort,
@@ -18,9 +17,12 @@ import { useVoiceEnabled } from '@/hooks/useVoiceEnabled';
 import { usePrivateSessionsExperiment } from '@/hooks/usePrivateSessionsExperiment';
 
 import { type PromptInputMessage } from '@/components/ai-elements';
-import { SessionModelSwitcher, TaskPromptInput } from '@/components/tasks';
+import {
+  ComposerErrorDialog,
+  SessionModelSwitcher,
+  TaskPromptInput,
+} from '@/components/tasks';
 import { BasicTooltip, Button, HatGlasses } from '@/components/system';
-import { describeValidationError } from '@/lib/validation-error';
 
 const DEFAULT_PROMPT_PLACEHOLDER = 'What do you want to do?';
 
@@ -79,6 +81,7 @@ export function NewTaskForm({
 
   const { isPending: isFastSessionPending, startFastSession } =
     useFastSessionLauncher({ onSessionStarted: onTaskStarted });
+  const [submitError, setSubmitError] = useState<unknown>(null);
   const launchTaskModels = useLaunchTaskModels();
   const defaultModelId = launchTaskModels.data?.defaultFastModelId;
   const defaultReasoningEffort =
@@ -133,14 +136,17 @@ export function NewTaskForm({
 
       let preparedPrompt;
       try {
-        preparedPrompt = await preparePromptAttachments({
-          text,
-          attachments: message.files,
-        });
-      } catch (error) {
-        toast.error(
-          describeValidationError(error, 'Failed to process file attachments.'),
+        preparedPrompt = await preparePromptAttachments(
+          {
+            text,
+            attachments: message.files,
+          },
+          { enforceAttachmentTextLimit: true },
         );
+      } catch (error) {
+        // Keep the composer exactly as the user left it and explain the
+        // failure in the shared dialog.
+        setSubmitError(error);
         return;
       }
 
@@ -184,6 +190,10 @@ export function NewTaskForm({
         animate ? 'animate-[enter-down_1s_1_100ms_backwards]' : undefined
       }
     >
+      <ComposerErrorDialog
+        error={submitError}
+        onClose={() => setSubmitError(null)}
+      />
       <TaskPromptInput
         promptKey={initialPromptText}
         isBusy={isBusy}

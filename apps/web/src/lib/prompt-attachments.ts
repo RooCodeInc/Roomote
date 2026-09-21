@@ -107,10 +107,20 @@ async function extractAttachmentTexts(files: File[]): Promise<string[]> {
   );
 }
 
-export async function preparePromptAttachments(input: {
-  text: string;
-  attachments?: PromptAttachmentPart[];
-}): Promise<{
+export async function preparePromptAttachments(
+  input: {
+    text: string;
+    attachments?: PromptAttachmentPart[];
+  },
+  options?: {
+    /**
+     * Enforce the Fast Session aggregate attachment-text limit client-side.
+     * The standard task and wake composers accept unbounded prompts, so the
+     * check stays opt-in to avoid narrowing those flows.
+     */
+    enforceAttachmentTextLimit?: boolean;
+  },
+): Promise<{
   text: string;
   images?: string[];
   attachmentTexts?: string[];
@@ -129,7 +139,9 @@ export async function preparePromptAttachments(input: {
     extractAttachmentTexts(nonImageFiles),
   ]);
 
-  assertAttachmentTextsWithinLimit(attachmentTexts);
+  if (options?.enforceAttachmentTextLimit) {
+    assertAttachmentTextsWithinLimit(attachmentTexts);
+  }
 
   return {
     text: appendAttachmentTextsToPromptText({
