@@ -1762,8 +1762,13 @@ export class OpenCodeServerHarness
   // closing turn is dropped rather than restarting a task the user stopped.
   private taskStopGeneration = 0;
   // The parent agent's latest shell commands, as observed from OpenCode: the
-  // validation evidence the completion check holds the report against.
-  private completionGateCommands: TaskCompletionCommand[] = [];
+  // validation evidence the completion check holds the report against. Each
+  // carries the request generation it ran under, because a test run from an
+  // earlier turn says nothing about code changed since.
+  private completionGateCommands: Array<
+    TaskCompletionCommand & { generation: number }
+  > = [];
+  private completionGateLastDiffKey: string | null = null;
   // The report the agent gave before the check reopened its turn. The
   // follow-up turn only adds a short correction, so the two are joined.
   private completionGateHeldReport: string | null = null;
@@ -2298,6 +2303,7 @@ export class OpenCodeServerHarness
     this.completionGateRequestGeneration += 1;
     this.completionGateHeldReport = null;
     this.completionGateCommands = [];
+    this.completionGateLastDiffKey = null;
     this.ignoreNextStopHookSessionIdle = false;
     this.ignoreNextQueuedDrainSessionIdle = false;
     this.currentWorkflowPhase = command.data.workflowPhase ?? null;
@@ -5474,6 +5480,7 @@ export class OpenCodeServerHarness
     }
 
     this.completionGateCommands.push({
+      generation: this.completionGateRequestGeneration,
       command: command.slice(0, TASK_COMPLETION_GATE_LIMITS.commandMaxChars),
       exitCode:
         typeof exitCode === 'number' && Number.isInteger(exitCode)
@@ -5536,13 +5543,21 @@ export class OpenCodeServerHarness
       }
 
       this.completionGateLastCheckedKey = checkedKey;
+      // Evidence from earlier turns still stands only while the code it
+      // validated is unchanged. Once this turn changed the diff, a claim that
+      // tests pass has to rest on commands run this turn.
+      const changedThisTurn = shipped.key !== this.completionGateLastDiffKey;
+      this.completionGateLastDiffKey = shipped.key;
+      const commands = this.completionGateCommands
+        .filter((entry) => !changedThisTurn || entry.generation === generation)
+        .map(({ generation: _generation, ...command }) => command);
       const startedAt = Date.now();
       const verdict = await requestTaskCompletionCheck(this.commandEnv, {
         report: report.slice(-TASK_COMPLETION_GATE_LIMITS.reportMaxChars),
         diff: shipped.diff,
         diffStat: shipped.diffStat,
         diffTruncated: shipped.diffTruncated,
-        commands: [...this.completionGateCommands],
+        commands,
       });
 
       this.logger.info(

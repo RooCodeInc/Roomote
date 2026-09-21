@@ -477,6 +477,66 @@ describe('OpenCode harness completion check', () => {
     }
   });
 
+  it('does not let an earlier turn vouch for code changed since', async () => {
+    const { client, harness, prompts, completed } = await startTask();
+    const runTests = (callId: string) =>
+      client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: `prt_${callId}`,
+            sessionID: 'ses_1',
+            messageID: 'msg_1',
+            type: 'tool',
+            tool: 'bash',
+            callID: callId,
+            state: {
+              status: 'completed',
+              input: { command: 'pnpm vitest run' },
+              output: 'Tests  12 passed (12)',
+              metadata: { exitCode: 0 },
+            },
+          },
+        },
+      });
+    const followUp = async (text: string, promptCount: number) => {
+      harness.sendCommand({
+        commandName: TaskCommandName.SendMessage,
+        data: { text, visibleInTranscript: true },
+      });
+      await vi.waitFor(() => expect(prompts).toHaveLength(promptCount));
+    };
+    const sentCommands = (call: number) =>
+      mockRequestTaskCompletionCheck.mock.calls[call]![1].commands;
+
+    try {
+      await runTests('call_1');
+      await completeTurn(client, 'msg_1', 'Removed the guard. Tests pass.');
+      await vi.waitFor(() => expect(completed()).toHaveLength(1));
+      expect(sentCommands(0)).toHaveLength(1);
+
+      // Nothing changed since the tests ran, so that run still stands.
+      await followUp('Is it pushed?', 2);
+      await completeTurn(client, 'msg_2', 'Yes, pushed. Tests pass.');
+      await vi.waitFor(() => expect(completed()).toHaveLength(2));
+      expect(sentCommands(1)).toHaveLength(1);
+
+      // More code changed and nothing was run: "tests pass" has no support.
+      mockCollectShippedDiff.mockResolvedValue({
+        key: 'diff-2',
+        diff: 'diff --git a/a.ts b/a.ts\n+more\n',
+        diffStat: ' a.ts | 2 +',
+        diffTruncated: false,
+      });
+      await followUp('Also remove the helper.', 3);
+      await completeTurn(client, 'msg_3', 'Removed the helper. Tests pass.');
+      await vi.waitFor(() => expect(completed()).toHaveLength(3));
+      expect(sentCommands(2)).toEqual([]);
+    } finally {
+      harness.dispose();
+    }
+  });
+
   it('does not submit a held follow-up after the task was cancelled', async () => {
     let releaseCheck: (() => void) | undefined;
     mockRequestTaskCompletionCheck.mockImplementationOnce(
