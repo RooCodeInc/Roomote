@@ -250,6 +250,25 @@ describe('launchMissingEnvironmentSnapshot', () => {
     );
   });
 
+  it('asks the claim for no live row only when the caller requires it', async () => {
+    mockEnqueueTask.mockResolvedValue({ id: 42 });
+
+    await launchMissingEnvironmentSnapshot(target, {
+      paceBeforeLaunch: async () => {},
+    });
+    await launchMissingEnvironmentSnapshot(target, {
+      paceBeforeLaunch: async () => {},
+      requireNoSnapshotRow: true,
+    });
+
+    const claimParams =
+      mockClaimPendingEnvironmentSnapshotForAttachment.mock.calls.map(
+        ([, params]) => params as { requireNoSnapshotRow?: boolean },
+      );
+    expect(claimParams[0]?.requireNoSnapshotRow).toBeUndefined();
+    expect(claimParams[1]?.requireNoSnapshotRow).toBe(true);
+  });
+
   it('skips without pacing when the claim is lost', async () => {
     mockClaimPendingEnvironmentSnapshotForAttachment.mockResolvedValue(null);
     const paceBeforeLaunch = vi.fn().mockResolvedValue(undefined);

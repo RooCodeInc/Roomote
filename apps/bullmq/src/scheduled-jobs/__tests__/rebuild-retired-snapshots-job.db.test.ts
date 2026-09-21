@@ -124,8 +124,11 @@ describe('retired snapshot rebuild job', () => {
     expect(launchedEnvironmentIds()).toEqual(
       expect.arrayContaining([first, second]),
     );
-    for (const [target] of mockLaunchMissingEnvironmentSnapshot.mock.calls) {
+    for (const [target, options] of mockLaunchMissingEnvironmentSnapshot.mock
+      .calls) {
       expect(target).toMatchObject({ provider });
+      // A build that failed elsewhere since the query must not be repeated.
+      expect(options).toMatchObject({ requireNoSnapshotRow: true });
     }
     expect(result.rebuilt).toBeGreaterThanOrEqual(2);
     expect(result.errors).toBe(0);

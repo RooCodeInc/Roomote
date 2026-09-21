@@ -359,6 +359,12 @@ export async function launchMissingEnvironmentSnapshot(
   options: {
     paceBeforeLaunch: () => Promise<void>;
     onQueueing?: () => void;
+    /**
+     * Launch only when the environment has no live snapshot row. Without it a
+     * live `failed` row is claimed over, which is what the daily refresh wants
+     * and what a once-per-retirement rebuild must not do.
+     */
+    requireNoSnapshotRow?: boolean;
   },
 ): Promise<SnapshotRefreshLockResult> {
   const activeRefreshJob = await findActiveSnapshotRefreshJob(target);
@@ -387,6 +393,7 @@ export async function launchMissingEnvironmentSnapshot(
         claimedAt.getTime() - PENDING_SNAPSHOT_RECOVERY_GRACE_MS,
       ),
       requireMissingSnapshot: true,
+      requireNoSnapshotRow: options.requireNoSnapshotRow,
     });
 
   if (!pendingSnapshotClaim) {

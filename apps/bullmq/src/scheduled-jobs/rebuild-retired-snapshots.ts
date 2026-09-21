@@ -156,6 +156,10 @@ export async function rebuildRetiredSnapshots(now: Date): Promise<{
       const launch = await launchMissingEnvironmentSnapshot(
         { environmentId: candidate.environmentId, provider },
         {
+          // The candidate query saw no live row, but a build started elsewhere
+          // may have claimed and failed since. The claim re-checks under the
+          // snapshot lock so that attempt is not repeated here.
+          requireNoSnapshotRow: true,
           paceBeforeLaunch: async () => {
             if (lastLaunchAtMs === null) return;
             const elapsedMs = Date.now() - lastLaunchAtMs;
