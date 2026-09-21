@@ -458,7 +458,7 @@ describe('roomote MCP tool descriptions', () => {
     const tool = getRegisteredTool(registeredTools, 'manage_tasks');
 
     expect(tool.config.description).toContain(
-      'Use action "get_messages" with sessionId for Session history, or taskId for a specific task transcript',
+      'Use action "get_messages" with sessionId for session history, or taskId for a specific task transcript',
     );
     expect(tool.config.description).toContain(
       'Use action "get_updates" with sessionId or taskId and its returned cursor',

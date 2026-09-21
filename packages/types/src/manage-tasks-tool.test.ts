@@ -51,7 +51,7 @@ describe('Roomote MCP management contract', () => {
       'when taskId is omitted',
     );
     expect(roomoteManagementFieldSchemas.sessionId.description).toContain(
-      'responses return the canonical Session ID',
+      'responses return the canonical session ID',
     );
   });
 

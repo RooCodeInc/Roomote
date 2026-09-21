@@ -106,7 +106,7 @@ export const roomoteManagementFieldSchemas = {
     .uuid()
     .optional()
     .describe(
-      'Roomote Session UUID from a /sessions/:id URL for get_summary, get_messages, get_updates, or send_message when taskId is omitted; responses return the canonical Session ID',
+      'Roomote session UUID from a /sessions/:id URL for get_summary, get_messages, get_updates, or send_message when taskId is omitted; responses return the canonical session ID',
     ),
   status: z
     .enum([...SESSION_STATUSES, 'completed', 'all'])
