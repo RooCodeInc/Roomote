@@ -157,6 +157,32 @@ describe('on-demand integration tools', () => {
     });
   });
 
+  it('guides recovery when every targeted integration listing fails', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const unavailable = vi.fn(async () => {
+      throw new Error('local dependency fault');
+    });
+    const result = parse(
+      await findOnDemandIntegrationTools(
+        catalog,
+        { integrationId: 'linear' },
+        unavailable,
+      ),
+    );
+
+    expect(result).toMatchObject({
+      success: true,
+      tools: [],
+      availableToolCount: 0,
+      emptyReason: 'integration_unavailable',
+      unavailableIntegrations: ['linear'],
+      guidance: expect.stringContaining('linear'),
+    });
+    expect(result.guidance).toContain('exact integrationId');
+    expect(result.guidance).toContain('connection and permissions');
+    expect(result.guidance).not.toContain('disconnected');
+  });
+
   it('explains an empty filtered result without logging query content', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const result = parse(

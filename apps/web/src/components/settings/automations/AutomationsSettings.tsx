@@ -2913,7 +2913,6 @@ export function AutomationsSettings({
       isSaving: isAutomationSaving(automationId),
       blockedReason,
     });
-  const slackAutomationsDisabled = !managerChannelConfigured;
   const sentryTriageBlockedReason = !sentryConnected
     ? 'Connect Sentry first'
     : null;
@@ -4689,7 +4688,6 @@ export function AutomationsSettings({
               isOpen={openAutomationIds.has('suggester')}
               onOpenChange={(open) => setAutomationOpen('suggester', open)}
               iconEnabled={iconEnabled.suggester}
-              disabled={slackAutomationsDisabled}
               debugSection={renderDebugRunsSection('suggester')}
               runAction={
                 <BasicTooltip
@@ -4827,7 +4825,6 @@ export function AutomationsSettings({
               isOpen={openAutomationIds.has('announcer')}
               onOpenChange={(open) => setAutomationOpen('announcer', open)}
               iconEnabled={iconEnabled.announcer}
-              disabled={slackAutomationsDisabled}
               debugSection={renderDebugRunsSection('announcer')}
               runAction={
                 <BasicTooltip

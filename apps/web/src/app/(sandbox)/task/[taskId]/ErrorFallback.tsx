@@ -149,13 +149,22 @@ export function ConnectionStatusBanner({ session }: { session: TaskSession }) {
     <div className="bg-destructive/10 border-card border-b">
       <div className="mx-auto flex w-full max-w-4xl items-center gap-3 px-4 py-3">
         <AlertCircle className="text-destructive size-4 shrink-0" />
-        <span className="text-destructive text-sm">
+        <span className="text-destructive min-w-0 flex-1 text-sm">
           {getErrorMessage({
             hasConnectedOnce,
             connectionError,
             connectionFailureCategory: effectiveFailureCategory,
           })}
         </span>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => reconnect()}
+        >
+          <RefreshCw />
+          Reconnect
+        </Button>
       </div>
     </div>
   );

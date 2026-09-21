@@ -25,7 +25,7 @@ import {
 } from './fast-agent-conversation';
 import type { FastAgentPromptSkillCatalog } from './fast-agent-prompt-skill-catalog';
 import type { FastAgentActiveTask } from './fast-agent-session';
-import { isFastAgentNativeIntegration } from './fast-agent-tool-policy';
+import { buildFastAgentCodeModeServerNames } from './fast-agent-tool-policy';
 import { NATIVE_ROOMOTE_TOOL_SELECTION_INSTRUCTIONS } from '../../http-integrations';
 import { buildPrivateSessionGuidance } from '../../private-session-guidance';
 import { buildRoomoteStyleGuidanceSection } from '../../style-guidance';
@@ -173,42 +173,21 @@ function formatCodingModelRoutingRulesForPrompt(
 
 function formatIntegrationsForPrompt(
   integrations: FastAgentIntegration[],
-  options: { codeModeIntegrationsEnabled?: boolean } = {},
 ): string {
   if (integrations.length === 0) {
     return '- No deployment MCP servers are available in this conversation.';
   }
 
-  if (options.codeModeIntegrationsEnabled === true) {
-    return [
-      'Every server below is mounted individually and reached only through the `execute` tool, a confined script runner. No server tool is exposed as a direct tool call. Discover exact call signatures with `await tools.$codemode.search({ query: "<intent + key nouns>" })` (repeat with its returned `next.offset` for more, or pass `namespace` to browse one server), then call them in one script, for example `const result = await tools.gbrain.query({ query: "deployments" })`. Filter, aggregate, and combine inside the script and return only the fields you need instead of calling one tool per message. Run independent calls together with `await Promise.all(...)`. Tool names elsewhere in these instructions (for example `roomote_manage_tasks` or `gbrain_query`) name these same server tools: invoke them through `execute` as `tools.<server>.<tool>` — strip the server prefix for the tool segment, so `gbrain_query` is `tools.gbrain.query(...)`. When a server or tool name is not a plain identifier (hyphens, spaces, dots, and similar), use bracket notation for that segment: `tools["smoke-one"].read_item(...)`, `tools.exa["web-search"](...)`. `call_integration_tool` is unavailable in this conversation; `find_integration_tools` remains read-only discovery for the built-in integration catalog and connection statuses below.',
-      ...integrations.map(
-        (integration) =>
-          `### ${integration.name} [server: ${integration.id}]\n${integration.description}${integration.instructions ? `\n\n${integration.instructions}` : ''}\nTools: ${integration.tools.map((tool) => tool.name).join(', ')}`,
-      ),
-    ].join('\n\n');
-  }
-
-  const native = integrations.filter((integration) =>
-    isFastAgentNativeIntegration(integration.id),
+  const serverNames = buildFastAgentCodeModeServerNames(
+    integrations.map((integration) => integration.id),
   );
-  const onDemand = integrations.filter(
-    (integration) => !isFastAgentNativeIntegration(integration.id),
-  );
-  const sections = native.map(
-    (integration) =>
-      `### ${integration.name} [tool prefix: ${integration.id}_]\n${integration.description}${integration.instructions ? `\n\n${integration.instructions}` : ''}`,
-  );
-  if (onDemand.length > 0) {
-    sections.push(
-      `### On-demand servers\nThe servers below are not mounted as individual tools. Call \`find_integration_tools\` with the server id (and a tool name or keywords) to get a tool's input schema, then \`call_integration_tool\` with that server id, tool name, and arguments. Tool names are listed so you can pick the right server without searching.`,
-      ...onDemand.map(
-        (integration) =>
-          `#### ${integration.name} [id: ${integration.id}]\n${integration.description}${integration.instructions ? `\n\n${integration.instructions}` : ''}\nTools: ${integration.tools.map((tool) => tool.name).join(', ')}`,
-      ),
-    );
-  }
-  return sections.join('\n\n');
+  return [
+    'Every server below is mounted individually and reached only through the `execute` tool, a confined script runner. No server tool is exposed as a direct tool call. Discover exact call signatures with `await tools.$codemode.search({ query: "<intent + key nouns>" })` (repeat with its returned `next.offset` for more, or pass `namespace` to browse one server), then call them in one script, for example `const result = await tools.gbrain.query({ query: "deployments" })`. Filter, aggregate, and combine inside the script and return only the fields you need instead of calling one tool per message. Run independent calls together with `await Promise.all(...)`. Tool names elsewhere in these instructions (for example `roomote_manage_tasks` or `gbrain_query`) name these same server tools: invoke them through `execute` as `tools.<server>.<tool>` — strip the server prefix for the tool segment, so `gbrain_query` is `tools.gbrain.query(...)`. When a server or tool name is not a plain identifier (hyphens, spaces, dots, and similar), use bracket notation for that segment: `tools["smoke-one"].read_item(...)`, `tools.exa["web-search"](...)`. `find_integration_tools` remains read-only discovery for the built-in integration catalog and connection statuses below.',
+    ...integrations.map(
+      (integration) =>
+        `### ${integration.name} [server: ${serverNames.get(integration.id)}]\n${integration.description}${integration.instructions ? `\n\n${integration.instructions}` : ''}\nTools: ${integration.tools.map((tool) => tool.name).join(', ')}`,
+    ),
+  ].join('\n\n');
 }
 
 function formatNativeIntegrationCatalogForPrompt(
@@ -336,12 +315,13 @@ export function buildFastAgentSystemPrompt({
   setupSession = false,
   serviceCredentialToolsEnabled = false,
   addRemoteMcpEnabled = false,
-  codeModeIntegrationsEnabled = false,
   personalizationContext,
   globalAgentInstructions,
   workspaceRoutingRules = [],
   privacy = 'shared',
   codingModelRoutingRules = [],
+  rAnalysisPreflight,
+  userIsAdmin = false,
 }: {
   availableEnvironments: RoutableEnvironment[];
   /** Active connected repositories, mapped to an environment or not. `null`
@@ -379,10 +359,6 @@ export function buildFastAgentSystemPrompt({
   setupSession?: boolean;
   serviceCredentialToolsEnabled?: boolean;
   addRemoteMcpEnabled?: boolean;
-  /** Code-mode integrations experiment: every authorized MCP server is
-   * mounted individually and reached through OpenCode's code-mode `execute`
-   * tool instead of the on-demand find/call dispatcher. */
-  codeModeIntegrationsEnabled?: boolean;
   personalizationContext?: {
     displayName: string | null;
     instructions: string;
@@ -393,6 +369,13 @@ export function buildFastAgentSystemPrompt({
   /** Privacy of the Session this turn belongs to. */
   privacy?: 'shared' | 'private';
   codingModelRoutingRules?: CodingModelRoutingRule[];
+  rAnalysisPreflight?: {
+    filename: string;
+    packages: string[];
+    unresolvedPackageExpressions: string[];
+    compatibleEnvironmentId?: string;
+  };
+  userIsAdmin?: boolean;
   /** @deprecated GitHub availability is derived from availableIntegrations. */
   hasGitHubTools?: boolean;
 }): string {
@@ -452,12 +435,10 @@ export function buildFastAgentSystemPrompt({
   const releaseIdentifier = releaseVersion
     ? `${buildRoomoteReleaseIdentifier(releaseVersion, { commitSha, appEnv })}\n\n`
     : '';
-  const deploymentMcpCallGuidance = codeModeIntegrationsEnabled
-    ? 'Every server exposes its tools individually through the `execute` code-mode runner; discover signatures with `tools.$codemode.search` and call them inside one script as `tools.<server>.<tool>(input)`, using bracket notation for either segment when a name is not a plain identifier (hyphens, spaces, dots, and similar): `tools["my-server"]["my-tool"](input)`.'
-    : 'Servers listed with a tool prefix expose each tool individually with its native JSON schema. On-demand servers are reached through `find_integration_tools` (fetch the schema by server id and tool name, or search by keywords) followed by `call_integration_tool`; the same acknowledgement, duplicate, and authorization rules apply to both paths.';
-  const bitbucketToolDiscoveryGuidance = codeModeIntegrationsEnabled
-    ? 'discover the available Bitbucket tool signature with `tools.$codemode.search`, then call it through `execute`'
-    : 'discover the available Bitbucket tool schema with `find_integration_tools`, then use `call_integration_tool`';
+  const deploymentMcpCallGuidance =
+    'Every server exposes its tools individually through the `execute` code-mode runner; discover signatures with `tools.$codemode.search` and call them inside one script as `tools.<server>.<tool>(input)`, using bracket notation for either segment when a name is not a plain identifier (hyphens, spaces, dots, and similar): `tools["my-server"]["my-tool"](input)`.';
+  const bitbucketToolDiscoveryGuidance =
+    'discover the available Bitbucket tool signature with `tools.$codemode.search`, then call it through `execute`';
   const recurringAutomationGuidance = `## Recurring Work and Automations
 - When a user explicitly asks for recurring work, recognize a real cadence expression such as "every Monday", "daily", "weekly", "whenever X happens", "from now on", or "on a schedule". Do not treat preference words such as "always use tabs" as a cadence.
 - Reminders and recurring checks that belong to this conversation ("remind me in an hour", "check every 10 minutes until CI is green", "ping me here every weekday at 9") are wakeups, not automations: use "manage_wakeups". Reach for a custom automation for recurring work that should run outside this conversation or report to a channel or direct message.
@@ -564,7 +545,7 @@ ${sessionGoal.blockedReason ? `- Blocked reason: ${sessionGoal.blockedReason}\n`
 }
 
 ## Deployment MCP Servers
-${formatIntegrationsForPrompt(availableIntegrations, { codeModeIntegrationsEnabled })}
+${formatIntegrationsForPrompt(availableIntegrations)}
 
 ## Built-in Integration Catalog
 ${formatNativeIntegrationCatalogForPrompt(nativeIntegrationCatalog)}
@@ -598,6 +579,16 @@ You are guiding this deployment's first administrator through a conversational, 
 - In the setup session, always refer to Roomote in the first person: use "I", "me", and "my" in user-visible messages. Do not alternate with "Roomote", "the agent", or third-person phrasing such as "Roomote can inspect your repositories" or "the workspace lets Roomote run code." Product names such as GitHub and Roomote may still be used when naming a connected service or the product itself.
 - In every user-visible setup reply, use ordinary language centered on the user's action and outcome. Say "Your repositories are ready" rather than "repositories synced"; say "Choose what you'd like me to work on first" rather than "choose the first work from the setup options"; and say "I need a workspace where I can run the work you selected" rather than "configure the sandbox provider." Explain what a sandbox means once only if that context helps the user understand why I need it, without referring to the interface.
 - Describe launched work in the user's terms. Do not expose repository-selection heuristics or narrate setup machinery.
+`
+    : ''
+}
+${
+  rAnalysisPreflight
+    ? `## Trusted R Analysis Preflight
+The current human turn includes the R script ${JSON.stringify(rAnalysisPreflight.filename)}. Server-side inspection found direct packages: ${rAnalysisPreflight.packages.join(', ') || 'none'}.
+${rAnalysisPreflight.unresolvedPackageExpressions.length > 0 ? `Ask only for these unresolved package expressions before continuing: ${rAnalysisPreflight.unresolvedPackageExpressions.join(', ')}.` : ''}
+${rAnalysisPreflight.compatibleEnvironmentId ? `A verified compatible environment already exists: ${rAnalysisPreflight.compatibleEnvironmentId}. Launch the analysis there with includeAttachments=true.` : userIsAdmin ? `No verified compatible environment exists. Choose a meaningful name from the user's purpose and the recipe type (for example "R + Bioconductor — Airway RNA-seq" or "R Environment — Genomics Visualization"; fall back to "R + Bioconductor Environment" only when the request has no more specific purpose), call ensure_environment preview, describe the proposal's setup-time bound and persistence impact, obtain exactly one confirmation, then call create with the exact proposalFingerprint. Resolution and verification then proceed without another confirmation; after verification succeeds, launch the original analysis with the R script retained in conversation context without asking the user to restart.` : `No verified compatible environment exists. Environment creation requires a deployment administrator. Explain that clearly, include the inferred package list, and do not launch a task with incidental installs.`}
+This block is trusted state. Environment provisioning and verification are enforced server-side through ensure_environment; never use manage_environments for recipe environments, and never claim readiness from setup-task evidence.
 `
     : ''
 }
@@ -645,6 +636,7 @@ ${surface === 'slack' ? '- Charts supplied to "send_chat_reply" render as Slack 
 - Before calling \`launch_task\`, a deployment MCP tool, or canceling a task on a human-authored turn, communicate first. The runtime rejects those actions until a visible text reply has been delivered. Platform events are exempt.
 - Before "launch_task", acknowledge with \`send_chat_reply\` so the response can stream before task startup. Do not restate that acknowledgement after launch. The task card or a separate task link keeps the started work associated with this conversation; later useful progress and the final result still belong here.
 - Set "includeAttachments" on "launch_task" to true only when supported attachments from the active conversation turn are relevant to the coding task. This forwards supported images and bounded text extracted from supported documents, audio, or video without exposing provider URLs. Omit it otherwise; attachments are not forwarded by default.
+- For trusted recipe environments, the verification task reports its own result and the Fast session resumes for the analysis launch. When a recipe environment needs a specific child task, inspect it with \`manage_tasks\` \`get_summary\` using the linked environment ID; do not treat setup-sandbox evidence as verification, and never call manage_environments in that flow.
   - A human turn may begin with a Roomote-injected \`<integration_saved>\` block: the human just saved an integration key through the Session form, and only the text after the block is shown to them. Follow the block, never quote it back, and never mention tool names to the human.
 ${buildIntegrationConnectionGuidance({ addRemoteMcpEnabled, platformEvent: Boolean(platformEvent), serviceCredentialToolsEnabled })}
 ${

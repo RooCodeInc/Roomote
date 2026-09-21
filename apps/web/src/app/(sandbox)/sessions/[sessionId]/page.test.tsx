@@ -94,8 +94,24 @@ vi.mock('@/components/layout', () => ({
 vi.mock('./FastSessionTranscript', () => ({
   FastSessionTranscript: transcriptMock,
 }));
+vi.mock('./EditableSessionTitle', () => ({
+  EditableSessionTitle: ({
+    title,
+    className,
+  }: {
+    title: string;
+    className: string;
+  }) => <h1 className={className}>{title}</h1>,
+}));
 vi.mock('./SessionTaskTimeline', () => ({
   SessionTaskTimeline: sessionTaskTimelineMock,
+}));
+vi.mock('./LiveSessionTitle', () => ({
+  LiveSessionTitle: ({ initialTitle }: { initialTitle: string }) => (
+    <h1 className="min-w-0 max-w-full flex-[0_1_auto] cursor-default break-words text-sm font-medium @[600px]:truncate">
+      {initialTitle}
+    </h1>
+  ),
 }));
 vi.mock('./SessionWorkspace', () => ({
   SessionWorkspace: sessionWorkspaceMock,

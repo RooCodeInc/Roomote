@@ -150,6 +150,8 @@ describe('refreshFastAgentSessionTitle', () => {
     expect(updated?.llmTitleCheckpoint).toBe(1);
     expect(session?.title).toBe('Rotate the API keys');
     expect(refreshedTitle).toEqual({
+      status: 'updated',
+      checkpoint: 1,
       title: 'Rotate the API keys',
       iconEmoji: '🪪',
       titleChanged: true,
@@ -226,7 +228,11 @@ describe('refreshFastAgentSessionTitle', () => {
       userId: user.id,
     });
 
-    expect(refreshedTitle).toBeNull();
+    expect(refreshedTitle).toEqual({
+      status: 'noop',
+      checkpoint: 0,
+      reason: 'checkpoint_reached',
+    });
     expect(generateLlmTaskTitleWithIcon).not.toHaveBeenCalled();
   });
 
@@ -266,7 +272,11 @@ describe('refreshFastAgentSessionTitle', () => {
       userId: user.id,
     });
 
-    expect(refreshedTitle).toBeNull();
+    expect(refreshedTitle).toEqual({
+      status: 'noop',
+      checkpoint: 1,
+      reason: 'checkpoint_reached',
+    });
     expect(generateLlmTaskTitleWithIcon).not.toHaveBeenCalled();
   });
 
@@ -298,6 +308,8 @@ describe('refreshFastAgentSessionTitle', () => {
     });
 
     expect(refreshedTitle).toEqual({
+      status: 'updated',
+      checkpoint: 4,
       title: 'Existing title',
       iconEmoji: '💬',
       titleChanged: false,
@@ -334,6 +346,73 @@ describe('refreshFastAgentSessionTitle', () => {
       where: eq(fastAgentConversations.id, conversation.id),
     });
     expect(updated?.title).toBe('My name');
+  });
+
+  it('returns a retryable failure without advancing the checkpoint', async () => {
+    const error = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    const user = await userFactory.create();
+    const conversation = await createConversation(user.id, 'title-retryable');
+    await insertMessage({
+      conversationId: conversation.id,
+      eventId: 'turn-1:user',
+      role: 'user',
+      text: 'Investigate the outage',
+      ts: 1,
+      eventType: 'roomote_runtime.user_prompt',
+    });
+    generateLlmTaskTitleWithIcon.mockRejectedValue(new Error('fetch failed'));
+
+    await expect(
+      refreshFastAgentSessionTitle({
+        sessionId: conversation.id,
+        userId: user.id,
+      }),
+    ).resolves.toMatchObject({
+      status: 'failed',
+      checkpoint: 1,
+      retryable: true,
+      reason: 'endpoint_unreachable',
+    });
+    const updated = await db.query.fastAgentConversations.findFirst({
+      where: eq(fastAgentConversations.id, conversation.id),
+    });
+    expect(updated?.llmTitleCheckpoint).toBe(0);
+    error.mockRestore();
+  });
+
+  it('classifies credential failures for bounded retry handling', async () => {
+    const error = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    const user = await userFactory.create();
+    const conversation = await createConversation(user.id, 'title-auth');
+    await insertMessage({
+      conversationId: conversation.id,
+      eventId: 'turn-1:user',
+      role: 'user',
+      text: 'Investigate authentication',
+      ts: 1,
+      eventType: 'roomote_runtime.user_prompt',
+    });
+    generateLlmTaskTitleWithIcon.mockRejectedValue({
+      name: 'ProviderAuthError',
+      data: { message: 'Invalid API key', statusCode: 401 },
+    });
+
+    await expect(
+      refreshFastAgentSessionTitle({
+        sessionId: conversation.id,
+        userId: user.id,
+      }),
+    ).resolves.toMatchObject({
+      status: 'failed',
+      checkpoint: 1,
+      retryable: false,
+      reason: 'invalid_credentials',
+    });
+    error.mockRestore();
   });
 
   it('never overwrites a manually renamed unified Fast Session', async () => {

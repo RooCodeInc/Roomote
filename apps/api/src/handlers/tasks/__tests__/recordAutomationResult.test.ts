@@ -6,6 +6,11 @@ import type { McpAuth } from '../../mcp/middleware';
 const mocks = vi.hoisted(() => ({
   findRun: vi.fn(),
   recordResult: vi.fn(),
+  enqueuePreparation: vi.fn(),
+}));
+
+vi.mock('@roomote/sdk/server/automation-result-preparation', () => ({
+  enqueueAutomationResultPreparation: mocks.enqueuePreparation,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -62,7 +67,10 @@ describe('recordAutomationResult', () => {
       content: 'Result body',
       dedupeKey: 'result-1',
       visibility: 'private',
+      sourceRunId: 42,
+      resultKind: undefined,
     });
+    expect(mocks.enqueuePreparation).toHaveBeenCalledWith('result-1');
   });
 
   it('rejects a run token bound to another task', async () => {

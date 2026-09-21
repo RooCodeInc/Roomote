@@ -7,6 +7,10 @@ import { toast } from 'sonner';
 import type { ReasoningEffort } from '@roomote/types';
 import { stagePendingFastSessionLaunch } from '@/lib/pending-fast-session-launch';
 import { sessionPathWithVoiceAutostart } from '@/lib/voice-autostart';
+import {
+  describeValidationError,
+  isComposerValidationError,
+} from '@/lib/validation-error';
 
 import { useStartFastSession } from './useStartFastSession';
 
@@ -28,7 +32,9 @@ export function useFastSessionLauncher(options?: {
   const showErrorToast = options?.showErrorToast ?? true;
   const router = useRouter();
   const mutation = useStartFastSession();
-  const [error, setError] = useState<Error | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const clearError = useCallback(() => setError(null), []);
+  const [retryableError, setRetryableError] = useState<Error | null>(null);
   const inFlightRef = useRef(false);
   const retryRef = useRef<{
     conversationId: string;
@@ -49,6 +55,7 @@ export function useFastSessionLauncher(options?: {
       if (inFlightRef.current || mutation.isPending) return;
       inFlightRef.current = true;
       setError(null);
+      setRetryableError(null);
 
       const payloadKey = JSON.stringify(payload);
       const conversationId =
@@ -83,10 +90,24 @@ export function useFastSessionLauncher(options?: {
             : `/sessions/${sessionId}`,
         );
       } catch (error) {
+        // Validation failures keep the composer untouched and explain
+        // themselves in the shared dialog; retrying them unchanged cannot
+        // succeed, so they never become a retryable launch.
+        if (isComposerValidationError(error)) {
+          failedLaunchRef.current = null;
+          setError(error);
+          return;
+        }
+        // Anything else may be transient: keep the exact submission so Retry
+        // replays it with the same conversation identity.
         const startError =
-          error instanceof Error ? error : new Error('Failed to start session');
+          error instanceof Error
+            ? new Error(
+                describeValidationError(error, 'Failed to start session'),
+              )
+            : new Error('Failed to start session');
         failedLaunchRef.current = { payload, launchOptions };
-        setError(startError);
+        setRetryableError(startError);
         if (showErrorToast) toast.error(startError.message);
       } finally {
         inFlightRef.current = false;
@@ -102,10 +123,20 @@ export function useFastSessionLauncher(options?: {
   }, [startFastSession]);
 
   return {
-    error,
     isPending: mutation.isPending,
     mutation,
-    retryFastSession,
     startFastSession,
+    /**
+     * The last server-side validation failure. Render ComposerErrorDialog
+     * with it so the failure is visible; clearError dismisses it.
+     */
+    error,
+    clearError,
+    /**
+     * The last non-validation start failure. Render it with a Retry action;
+     * retryFastSession replays the original submission unchanged.
+     */
+    retryableError,
+    retryFastSession,
   };
 }

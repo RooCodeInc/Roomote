@@ -68,6 +68,50 @@ function getEnvironmentSnapshot(
   return environment.snapshots[provider];
 }
 
+/**
+ * Secondary configuration details for a recipe environment: the resolved
+ * runtime and lockfile state alongside the direct package request. The
+ * human-readable name and description carry the intent.
+ */
+function EnvironmentRecipeDetails({ env }: { env: EnvironmentWithMeta }) {
+  const recipe = env.config?.environment_recipe;
+  if (!recipe) {
+    return null;
+  }
+
+  const resolution = recipe.resolution;
+
+  return (
+    <div className="space-y-1.5 pb-2">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground">
+        <span className="font-medium capitalize">{recipe.type}</span>
+        {resolution ? (
+          <>
+            <span>
+              R {resolution.r_version} · Bioconductor{' '}
+              {resolution.bioconductor_version}
+            </span>
+            <span className="ph-no-capture">{resolution.image}</span>
+            <span>Lockfile resolved and clean-restored</span>
+          </>
+        ) : (
+          <span>Resolving packages from official repositories…</span>
+        )}
+      </div>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {recipe.request.packages.map((name) => (
+          <Badge key={name} variant="outline" className="text-xs">
+            {name}
+          </Badge>
+        ))}
+      </div>
+      {env.description ? (
+        <p className="text-xs text-muted-foreground">{env.description}</p>
+      ) : null}
+    </div>
+  );
+}
+
 export function Environments() {
   const [environmentToDuplicate, setEnvironmentToDuplicate] =
     useState<EnvironmentWithMeta>();
@@ -204,7 +248,8 @@ export function Environments() {
                                 <Pencil className="size-4" />
                               </Link>
                             </Button>
-                            {verificationState !== 'in_progress' ? (
+                            {verificationState !== 'verifying' &&
+                            verificationState !== 'configuring' ? (
                               <Button
                                 variant="ghost"
                                 size="icon"
@@ -295,6 +340,7 @@ export function Environments() {
                     </div>
 
                     <CollapsibleContent className="space-y-2 pt-1 border-l-2 mb-2 pl-3">
+                      <EnvironmentRecipeDetails env={env} />
                       <div className="space-y-2 pb-2">
                         <div className="space-y-0">
                           {visibleSnapshotProviders.map((provider) => {

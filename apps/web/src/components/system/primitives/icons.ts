@@ -7,6 +7,7 @@ export {
   AlertCircleIcon,
   AlertTriangle,
   AppWindow,
+  Archive,
   ArrowDownIcon,
   ArrowLeft,
   ArrowLeftFromLine,

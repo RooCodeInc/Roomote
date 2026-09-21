@@ -6,7 +6,7 @@ import {
 } from '@roomote/types';
 
 import {
-  evaluateTypeSafeJudgments,
+  evaluateDecisionModel,
   type TypeSafeNoulQuestion,
 } from '../typesafe-judgment';
 
@@ -47,8 +47,8 @@ function toolText(tool: IntegrationToolCandidate): string {
 
 /**
  * Rank the scoped catalog by relevance to a free-text query through the
- * optional judgment model. Returns `undefined` when it is not configured,
- * fails, or finds no tool relevant enough, so the lexical result stands.
+ * decision model. Returns `undefined` when it is unavailable, gated, fails, or
+ * finds no tool relevant enough, so the lexical result stands.
  */
 async function rankWithJudgmentModel(
   candidates: IntegrationToolCandidate[],
@@ -90,7 +90,7 @@ async function rankWithJudgmentModel(
       const batch = judged.slice(start, start + TOOLS_PER_REQUEST);
       const keys = batch.map((_, index) => `t${start + index}`);
       batches.push(
-        evaluateTypeSafeJudgments({
+        evaluateDecisionModel({
           state: {
             query,
             tools: Object.fromEntries(
@@ -100,6 +100,7 @@ async function rankWithJudgmentModel(
           questions: Object.fromEntries(
             keys.map((key) => [key, toolRelevanceQuestion(key)]),
           ),
+          highVolume: true,
         }).then((answers) => answers && keys.map((key) => answers[key]!.noul)),
       );
     }

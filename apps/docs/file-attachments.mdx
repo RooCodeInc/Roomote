@@ -47,10 +47,16 @@ transport limits vary by surface.
 | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | Pure text       | `.txt`, `.md`, `.markdown`                                                                                                                    |
 | Structured text | `.json`, `.yaml`, `.yml`, `.xml`, `.log`, `.conf`, `.config`, `.ini`, `.env`, `.sh`, `.bash`, `.zsh`, `.toml`, `.properties`                  |
-| Code            | `.html`, `.htm`, `.css`, `.js`, `.jsx`, `.ts`, `.tsx`, `.py`, `.rb`, `.go`, `.rs`, `.java`, `.c`, `.h`, `.cpp`, `.cc`, `.cxx`, `.hpp`, `.sql` |
+| Code            | `.html`, `.htm`, `.css`, `.js`, `.jsx`, `.ts`, `.tsx`, `.py`, `.r`, `.ipynb`, `.rb`, `.go`, `.rs`, `.java`, `.c`, `.h`, `.cpp`, `.cc`, `.cxx`, `.hpp`, `.sql` |
 | Spreadsheets    | `.csv`, `.tsv`, `.xlsx`, `.xls`                                                                                                               |
 | Documents       | `.pdf`, `.docx`                                                                                                                               |
 | Presentations   | `.pptx`                                                                                                                                       |
+
+An attached `.r` script can also drive an environment recipe: Roomote detects
+the direct packages it uses and proposes an `r-bioconductor` environment, then
+resolves those packages from the official CRAN and Bioconductor repositories.
+See the [environment lifecycle](/environments#environment-lifecycle).
+
 | Images          | `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`                                                                                              |
 
 ## How Roomote uses them
@@ -73,6 +79,22 @@ That means you can ask things like:
 - "Read this config and explain why the service is failing."
 - "Check this customer PDF and draft the fix plan."
 - "Look at this screenshot and tell me what UI state it shows."
+
+## Open and share artifacts
+
+Artifact creation results can include two links:
+
+- `viewUrl` opens the artifact in its owning task or Session, where you can
+  continue to use the surrounding workspace context.
+- `standaloneViewUrl` opens the document, image, or file on its own page. Use it
+  when someone needs a direct link to the artifact without navigating through
+  the parent task or Session.
+
+Both links remain inside Roomote's authenticated access boundary. The recipient
+must be signed in to the deployment and already have permission to view the
+owning task or Session; a link does not make the artifact public or grant new
+access. The standalone page also supports available artifact versions and a
+link back to the owning task or Session when that context is useful.
 
 ## Videos from Roomote
 

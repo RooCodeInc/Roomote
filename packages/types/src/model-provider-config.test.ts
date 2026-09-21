@@ -320,6 +320,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       'requesty',
       'baseten',
       'togetherai',
+      'deepseek',
       'openai',
       'azure',
       'azure-cognitive-services',
@@ -728,6 +729,10 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         modelId: 'vercel/deepseek/deepseek-v4.1-flash',
       },
       {
+        providerId: 'deepseek',
+        modelId: 'deepseek/deepseek-flash',
+      },
+      {
         providerId: 'opencode-go',
         modelId: 'opencode-go/deepseek-v4.1-flash',
       },
@@ -761,6 +766,10 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       {
         providerId: 'togetherai',
         modelId: 'togetherai/deepseek-ai/DeepSeek-V4-Pro',
+      },
+      {
+        providerId: 'deepseek',
+        modelId: 'deepseek/deepseek-v4-pro',
       },
       {
         providerId: 'opencode',
@@ -1081,6 +1090,20 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       envVarName: 'TOGETHER_API_KEY',
       defaultRoomoteModel: 'togetherai/deepseek-ai/DeepSeek-V4-Pro',
       authKind: 'api-key',
+    });
+  });
+
+  it('maps DeepSeek to its direct API models and credential', () => {
+    expect(getSetupModelProvider('deepseek')).toMatchObject({
+      label: 'DeepSeek',
+      envVarName: 'DEEPSEEK_API_KEY',
+      defaultRoomoteModel: 'deepseek/deepseek-v4-pro',
+      authKind: 'api-key',
+      recommendedRoleModels: {
+        helper: 'deepseek/deepseek-flash',
+        vision: 'deepseek/deepseek-flash',
+        explore: 'deepseek/deepseek-flash',
+      },
     });
   });
 
@@ -1515,6 +1538,14 @@ describe('getModelProviderEnvKeyCandidates', () => {
     ).toEqual(['TOGETHER_API_KEY']);
   });
 
+  it('derives the DeepSeek provider key from the shared setup catalog metadata', () => {
+    expect(
+      getModelProviderEnvKeyCandidates({
+        providerId: 'deepseek',
+      }),
+    ).toEqual(['DEEPSEEK_API_KEY']);
+  });
+
   it('includes configured custom provider env keys after the known defaults', () => {
     expect(
       getModelProviderEnvKeyCandidates({
@@ -1562,6 +1593,7 @@ describe('getModelProviderEnvKeyCandidates', () => {
     expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain('REQUESTY_API_KEY');
     expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain('BASETEN_API_KEY');
     expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain('TOGETHER_API_KEY');
+    expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain('DEEPSEEK_API_KEY');
     expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain(
       'GOOGLE_GENERATIVE_AI_API_KEY',
     );

@@ -17,6 +17,7 @@ describe('metadata descriptions', () => {
     'opencode_code_mode',
     'composerSuggestions',
     'integration_keys_enabled',
+    'code_mode_integrations_experiment_enabled',
   ])('classifies removed experiment metadata %s as legacy', (key) => {
     expect(getBooleanMetadataDescriptorByKey(key)).toEqual({
       kind: 'legacy',
@@ -48,7 +49,6 @@ describe('metadata descriptions', () => {
       slackPeerConversations: false,
       privateSessions: false,
       browserNotifications: false,
-      codeModeIntegrations: false,
     });
   });
 });

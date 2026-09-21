@@ -89,6 +89,7 @@ describe('SideNavItem', () => {
     const label = within(link).getByText('History');
 
     expect(link).toHaveAttribute('href', '/tasks');
+    expect(link).toHaveAttribute('aria-label', 'History');
     expect(label.parentElement).toHaveClass(
       'hidden',
       'overflow-hidden',
@@ -212,6 +213,22 @@ describe('SideNavItem', () => {
 
     expect(onClick).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId('tooltip-content')).not.toBeInTheDocument();
+  });
+
+  it('labels collapsed action items when their visible text is hidden', () => {
+    render(
+      <SideNavItem
+        icon={TestIcon}
+        label="Search"
+        tooltip="Search (⌘K)"
+        description="Search and navigate"
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Search' })).toHaveAttribute(
+      'aria-label',
+      'Search',
+    );
   });
 
   it('anchors highlight dot on the icon in expanded mode', () => {

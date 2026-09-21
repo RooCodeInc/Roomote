@@ -832,6 +832,10 @@ async function hydrateSessionRows(
     const sessionArtifacts = artifactsBySession.get(row.id) ?? [];
     return {
       ...row,
+      canManage:
+        row.privacy === 'private'
+          ? row.privateOwnerUserId === auth.userId
+          : auth.isAdmin || row.ownerUserId === auth.userId,
       tasks: tasksWithUsage,
       pullRequests: getSessionPullRequests([
         {
@@ -1341,6 +1345,20 @@ export async function updateSessionMetadata(
         .update(fastAgentConversations)
         .set({ title: changes.title, titleEditedByUserAt: updatedAt })
         .where(eq(fastAgentConversations.id, session.fastConversationId));
+    }
+    if (session && changes.archivedAt !== undefined) {
+      await tx
+        .update(tasks)
+        .set({ archivedAt: changes.archivedAt, updatedAt })
+        .where(
+          inArray(
+            tasks.id,
+            tx
+              .select({ taskId: sessionTasks.taskId })
+              .from(sessionTasks)
+              .where(eq(sessionTasks.sessionId, session.id)),
+          ),
+        );
     }
     return session;
   });

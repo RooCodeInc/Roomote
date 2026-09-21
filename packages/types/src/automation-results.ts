@@ -10,6 +10,17 @@ export type AutomationResultPriority =
 /** Immutable Results-page eligibility captured when automation output is stored. */
 export type AutomationResultVisibility = 'shared' | 'private';
 
+export const AUTOMATION_RESULT_KINDS = ['outcome', 'input_request'] as const;
+export type AutomationResultKind = (typeof AUTOMATION_RESULT_KINDS)[number];
+
+export const AUTOMATION_RESULT_PREPARATION_STATUSES = [
+  'pending',
+  'ready',
+  'failed',
+] as const;
+export type AutomationResultPreparationStatus =
+  (typeof AUTOMATION_RESULT_PREPARATION_STATUSES)[number];
+
 export const AUTOMATION_RESULT_PRIORITY_LABELS: Record<
   AutomationResultPriority,
   string

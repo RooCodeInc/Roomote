@@ -3,11 +3,12 @@ import { tmpdir } from 'node:os';
 const mocks = vi.hoisted(() => ({
   appendVisibleMessages: vi.fn(),
   publishReplyStream: vi.fn(),
+  previewEnsureEnvironment: vi.fn(),
+  createEnvironmentRecipeCandidate: vi.fn(),
   getActiveTasks: vi.fn(),
   getSession: vi.fn(),
   getNativeRuntime: vi.fn(),
   mountCodeModeIntegration: vi.fn(),
-  serverNameCollision: vi.fn(),
   clearIntegrationToolCache: vi.fn(),
   setOpenCodeSession: vi.fn(),
   upsertMessage: vi.fn(),
@@ -83,6 +84,8 @@ const mocks = vi.hoisted(() => ({
   updateParentEventWhere: vi.fn(),
   nativeSteer: vi.fn(),
   executeDb: vi.fn(),
+  getActiveRecipeVerificationTaskId: vi.fn(),
+  withEnvironmentVerificationRetryLock: vi.fn(),
   evaluateJudgments: vi.fn(),
   nativeExecutor: undefined as
     | ((call: {
@@ -111,6 +114,7 @@ const nativeToolNames = vi.hoisted(
       connectIntegration: 'connect_integration',
       cancelTask: 'cancel_task',
       createArtifact: 'create_artifact',
+      ensureEnvironment: 'ensure_environment',
       reportPlatformIssue: 'report_platform_issue',
       findIntegrationTools: 'find_integration_tools',
       ignoreEvent: 'ignore_event',
@@ -200,6 +204,12 @@ vi.mock('../../available-environments', () => ({
   getAvailableEnvironments: mocks.getEnvironments,
 }));
 
+vi.mock('../ensure-environment', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../ensure-environment')>()),
+  previewEnsureEnvironment: mocks.previewEnsureEnvironment,
+  createEnvironmentRecipeCandidate: mocks.createEnvironmentRecipeCandidate,
+}));
+
 vi.mock('../../session-wakeups', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../session-wakeups')>()),
   ensureOwnTaskFollowThroughWakeup: mocks.ensureOwnTaskFollowThroughWakeup,
@@ -252,6 +262,9 @@ vi.mock('@roomote/db/server', () => ({
   getSessionForFastConversation: mocks.getUnifiedSession,
   getSessionForTask: mocks.getSessionForTask,
   touchSessionActivity: mocks.touchSessionActivity,
+  getActiveRecipeVerificationTaskId: mocks.getActiveRecipeVerificationTaskId,
+  withEnvironmentVerificationRetryLock:
+    mocks.withEnvironmentVerificationRetryLock,
   getSessionGoalForConversation: mocks.getSessionGoal,
   claimSessionGoalContinuation: mocks.claimSessionGoalContinuation,
   releaseSessionGoalContinuation: mocks.releaseSessionGoalContinuation,
@@ -326,7 +339,6 @@ vi.mock('../fast-agent-native-tool-bridge', () => ({
   },
   getFastAgentNativeToolRuntime: mocks.getNativeRuntime,
   mountFastAgentIntegrationOnCodeModeServer: mocks.mountCodeModeIntegration,
-  hasFastAgentCodeModeServerNameCollision: mocks.serverNameCollision,
   bindFastAgentNativeToolExecutor: mocks.bindExecutor,
   createFastAgentSpillTurnBudget: () => ({ calls: 0, outputBytes: 0 }),
   bindFastAgentMcpToolExecutor: mocks.bindMcpExecutor,
@@ -366,8 +378,8 @@ vi.mock('../../user-personalization', async (importOriginal) => {
   };
 });
 
-vi.mock('../fast-agent-title', () => ({
-  refreshFastAgentSessionTitle: mocks.refreshTitle,
+vi.mock('../session-title-refresh-job', () => ({
+  refreshFastAgentSessionTitleWithRetry: mocks.refreshTitle,
 }));
 
 vi.mock('../fast-agent-surface-reply-stream', async (importOriginal) => {
@@ -515,7 +527,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.listNativeIntegrations.mockResolvedValue([]);
-    mocks.refreshTitle.mockResolvedValue(null);
+    mocks.refreshTitle.mockResolvedValue({
+      status: 'noop',
+      checkpoint: 1,
+      reason: 'checkpoint_reached',
+    });
     mocks.resolveImageDelivery.mockResolvedValue({
       delivery: 'direct',
       model: 'openrouter/openai/gpt-5.4',
@@ -525,6 +541,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.mcpCapabilityAvailable = false;
     mocks.getUnifiedSession.mockResolvedValue(null);
     mocks.touchSessionActivity.mockResolvedValue(undefined);
+    mocks.getActiveRecipeVerificationTaskId.mockResolvedValue(null);
+    mocks.withEnvironmentVerificationRetryLock.mockImplementation(
+      async (_environmentId, mutation) => mutation({}),
+    );
     mocks.getSessionForTask.mockResolvedValue(null);
     mocks.privateSessionsEnabled.mockResolvedValue(true);
     mocks.deploymentExperimentEnabled.mockResolvedValue(false);
@@ -1057,11 +1077,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.getDeploymentSettings).toHaveBeenCalledTimes(2);
   });
 
-  it('keeps the dispatcher in the prompt when integration ids collide under the code-mode experiment', async () => {
-    mocks.deploymentExperimentEnabled.mockImplementation(
-      async (id: string) => id === 'codeModeIntegrations',
-    );
-    mocks.serverNameCollision.mockReturnValue(true);
+  it('keeps code mode enabled when integration ids collide', async () => {
     mocks.listIntegrations.mockResolvedValue([
       {
         id: 'foo.bar',
@@ -1082,9 +1098,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     const systemPrompt = mocks.generateText.mock.calls[0]?.[0].system as
       | string
       | undefined;
-    expect(systemPrompt).toContain('### On-demand servers');
-    expect(systemPrompt).not.toContain(
-      'reached only through the `execute` tool',
+    expect(systemPrompt).toContain('reached only through the `execute` tool');
+    expect(systemPrompt).toContain('### Foo Dot Bar [server: foo_bar]');
+    expect(systemPrompt).toContain(
+      '### Foo Underscore Bar [server: foo_bar__roomote_2]',
     );
   });
 
@@ -6125,10 +6142,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.getNativeRuntime).toHaveBeenCalledTimes(2);
   });
 
-  it('mounts an integration connected mid-turn on the code-mode server', async () => {
-    mocks.deploymentExperimentEnabled.mockImplementation(
-      async (id: string) => id === 'codeModeIntegrations',
-    );
+  it('mounts a colliding integration mid-turn under its unique code-mode name', async () => {
     mocks.getNativeRuntime.mockImplementation(async () => {
       mocks.mcpCapabilityAvailable = true;
       return {
@@ -6144,28 +6158,32 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.listIntegrations
       .mockResolvedValueOnce([
         {
-          id: 'github',
-          name: 'GitHub',
-          description: 'Repository access',
-          tools: [{ name: 'search_code' }],
+          id: 'foo_bar',
+          name: 'Foo Underscore Bar',
+          description: 'First integration',
+          tools: [{ name: 'read' }],
         },
       ])
       .mockResolvedValue([
         {
-          id: 'github',
-          name: 'GitHub',
-          description: 'Repository access',
-          tools: [{ name: 'search_code' }],
+          id: 'foo_bar',
+          name: 'Foo Underscore Bar',
+          description: 'First integration',
+          tools: [{ name: 'read' }],
         },
         {
-          id: 'notion',
-          name: 'Notion',
-          description: 'Docs access',
-          tools: [{ name: 'search_pages' }],
+          id: 'foo.bar',
+          name: 'Foo Dot Bar',
+          description: 'Second integration',
+          tools: [{ name: 'write' }],
         },
       ]);
     mocks.getUnifiedSession.mockResolvedValue({ id: 'session-1' });
-    mocks.connectIntegration.mockResolvedValue({ status: 'connected' });
+    mocks.addRemoteMcp.mockResolvedValue({
+      status: 'connected',
+      integrationId: 'foo.bar',
+      name: 'Foo Dot Bar',
+    });
     mocks.mountCodeModeIntegration.mockResolvedValue(true);
 
     mocks.generateText.mockImplementation(
@@ -6176,8 +6194,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           purpose: 'ack',
           message: 'I’ll connect that.',
         });
-        const result = await invokeTool(nativeToolNames.connectIntegration, {
-          integrationId: 'notion',
+        const result = await invokeTool(nativeToolNames.addRemoteMcp, {
+          name: 'Foo Dot Bar',
+          url: 'https://example.test/mcp',
         });
         expect(result).toMatchObject({ success: true, status: 'connected' });
         await invokeTool(nativeToolNames.sendChatReply, {
@@ -6191,14 +6210,15 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     await expect(
       answerFastAgentQuestion({ ...baseParams, adapter: callbacks() }),
     ).resolves.toBe('Connected.');
-    // Only the newly connected server is mounted mid-turn; github was already
+    // Only the newly connected server is mounted mid-turn; foo_bar was already
     // in the turn-start mount set.
     expect(mocks.mountCodeModeIntegration).toHaveBeenCalledTimes(1);
     expect(mocks.mountCodeModeIntegration).toHaveBeenCalledWith({
       serverUrl: 'http://127.0.0.1:9999',
       directory: '/tmp/fast-native-tools',
       mcpCapability: 'mcp-capability-1',
-      integrationId: 'notion',
+      integrationId: 'foo.bar',
+      serverName: 'foo_bar__roomote_2',
     });
     // The tool cache is cleared so discovery stops serving the pre-connect
     // empty tool list, and the connect result points at the execute runner.
@@ -6206,7 +6226,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.listNativeIntegrations).toHaveBeenCalled();
   });
 
-  it('does not mount mid-turn connections when the code-mode experiment is off', async () => {
+  it('does not remount an integration that was already mounted at turn start', async () => {
     mocks.getUnifiedSession.mockResolvedValue({ id: 'session-1' });
     mocks.connectIntegration.mockResolvedValue({ status: 'connected' });
     mocks.listIntegrations.mockResolvedValue([
@@ -6389,7 +6409,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       ]),
       {
         addRemoteMcpEnabled: true,
-        codeModeIntegrationsEnabled: false,
         surface: 'slack',
         serviceCredentialToolsEnabled: true,
         serviceCredentialPrepareEnabled: true,
@@ -11458,6 +11477,74 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
+  it('rejects direct environment verification from a human turn', async () => {
+    const launchTask = vi.fn<LaunchFastAgentTask>();
+    const adapter = callbacks({ launchTask });
+    let toolResult: unknown;
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’m checking the environment state.',
+        });
+        toolResult = await invokeTool(nativeToolNames.launchTask, {
+          mode: 'environment_verification',
+          prompt: 'Verify the environment.',
+          environmentId: 'env-1',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'The environment must go through the provisioning flow.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+
+    expect(toolResult).toEqual({
+      success: false,
+      error:
+        'Environment verification cannot be started directly. Use ensure_environment to preview and create the recipe environment; creation starts verification automatically.',
+    });
+    expect(launchTask).not.toHaveBeenCalled();
+  });
+
+  it('rejects environment verification from platform events too; recipe verification stays bound to ensure_environment create', async () => {
+    const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
+      success: true,
+      taskId: 'verification-task',
+    }));
+    const adapter = callbacks({ launchTask });
+    let toolResult: unknown;
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        toolResult = await invokeTool(nativeToolNames.launchTask, {
+          mode: 'environment_verification',
+          prompt: 'Verify the environment.',
+          environmentId: 'env-1',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      turnSource: 'platform_event',
+      serviceCredentialPlatformActorUserId: 'user-1',
+      adapter,
+    });
+
+    expect(toolResult).toEqual({
+      success: false,
+      error:
+        'Environment verification cannot be started directly. Use ensure_environment to preview and create the recipe environment; creation starts verification automatically.',
+    });
+    expect(launchTask).not.toHaveBeenCalled();
+  });
+
   it('validates and forwards pull request review model overrides', async () => {
     const adapter = callbacks();
     mocks.generateText.mockImplementation(
@@ -11504,6 +11591,88 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         reasoningEffort: 'xhigh',
       }),
     );
+  });
+
+  it('honors a surface launch gate before provisioning a recipe environment', async () => {
+    const assertTaskLaunch = vi.fn(async () => {
+      throw new Error('Connect source control before starting work.');
+    });
+    const launchTask = vi.fn<LaunchFastAgentTask>();
+    const adapter = callbacks({ assertTaskLaunch, launchTask });
+    mocks.previewEnsureEnvironment.mockReturnValue({
+      status: 'proposal',
+      proposalFingerprint: 'f'.repeat(64),
+      setupTimeBoundMinutes: 90,
+      persistenceImpact: 'Creates one durable environment.',
+      impactSummary: 'Resolves 1 R package.',
+    });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’m checking whether the workspace is ready.',
+        });
+        await expect(
+          invokeTool(nativeToolNames.ensureEnvironment, {
+            action: 'create',
+            type: 'r-bioconductor',
+            packages: ['DESeq2'],
+            name: 'R + Bioconductor — Airway RNA-seq',
+            purpose: 'Airway RNA-seq',
+            proposalFingerprint: 'f'.repeat(64),
+          }),
+        ).resolves.toEqual({
+          success: false,
+          error: 'Connect source control before starting work.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+
+    expect(assertTaskLaunch).toHaveBeenCalledOnce();
+    expect(mocks.createEnvironmentRecipeCandidate).not.toHaveBeenCalled();
+    expect(launchTask).not.toHaveBeenCalled();
+  });
+
+  it('directs an incompatible environment name back through preview', async () => {
+    const adapter = callbacks();
+    let toolResult: unknown;
+    mocks.previewEnsureEnvironment.mockReturnValue({
+      status: 'name_unavailable',
+      name: 'R + Tidymodels — Conversion Analysis',
+    });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’m checking the environment proposal.',
+        });
+        toolResult = await invokeTool(nativeToolNames.ensureEnvironment, {
+          action: 'preview',
+          type: 'r-bioconductor',
+          packages: ['DALEX', 'themis', 'tidymodels', 'xgboost'],
+          name: 'R + Tidymodels — Conversion Analysis',
+          purpose: 'Conversion analysis',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'A different environment name is required.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+
+    expect(toolResult).toEqual({
+      success: false,
+      error:
+        'The name "R + Tidymodels — Conversion Analysis" is unavailable because it belongs to an incompatible environment. Keep the same requested package set, choose another meaningful qualifier instead of appending a hash, and preview again. Do not launch or verify the incompatible environment.',
+    });
   });
 
   it('honors a surface launch gate before creating a task', async () => {

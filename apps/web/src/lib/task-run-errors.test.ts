@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { getTaskRunErrorDisplayMessage } from './task-run-errors';
+import {
+  getTaskRunErrorDisplayMessage,
+  isSnapshotUnavailableError,
+} from './task-run-errors';
 
 describe('getTaskRunErrorDisplayMessage', () => {
   it('rewrites missing remote branch workspace preparation failures', () => {
@@ -164,5 +167,22 @@ worker crashed: missing dependency libfoo`;
 
     expect(display).toContain('exited during boot');
     expect(display).toContain('missing dependency libfoo');
+  });
+});
+
+describe('isSnapshotUnavailableError', () => {
+  it('recognizes the cleanup error persisted for an unresumable run', () => {
+    expect(
+      isSnapshotUnavailableError({
+        error:
+          'Sandbox instance-123 was terminated before its snapshot completed; the run cannot be resumed',
+      }),
+    ).toBe(true);
+  });
+
+  it('does not classify unrelated execution failures as snapshot cleanup', () => {
+    expect(isSnapshotUnavailableError({ error: 'Model provider failed' })).toBe(
+      false,
+    );
   });
 });

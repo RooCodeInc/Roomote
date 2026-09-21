@@ -34,11 +34,39 @@ import {
   type GeneratedTaskTitle,
   type TaskTitleMessage,
 } from '../llm-task-title';
+import { classifyNonTaskInferenceError } from '../non-task-provider-usage';
 
 /** Mirrors the task-title checkpoints: regenerate as the conversation grows,
  * then stop once it has settled. */
 const TITLE_CHECKPOINTS = [1, 4, 20] as const;
 const TITLE_TRANSCRIPT_MESSAGE_LIMIT = 60;
+
+export type SessionTitleRefreshResult =
+  | {
+      status: 'updated';
+      checkpoint: number;
+      title: string;
+      titleChanged: boolean;
+      iconEmoji?: GeneratedTaskTitle['iconEmoji'];
+    }
+  | {
+      status: 'noop';
+      checkpoint: number | null;
+      reason:
+        | 'missing'
+        | 'manual_rename'
+        | 'checkpoint_reached'
+        | 'no_messages'
+        | 'fallback_title'
+        | 'lost_race';
+    }
+  | {
+      status: 'failed';
+      checkpoint: number | null;
+      message: string;
+      reason: string;
+      retryable: boolean;
+    };
 
 const TITLE_EVENT_TYPES = [
   ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
@@ -67,7 +95,8 @@ export async function refreshTaskSessionTitle({
   taskId: string;
   userId?: string;
   mode: 'checkpoint' | 'final';
-}): Promise<void> {
+}): Promise<SessionTitleRefreshResult> {
+  let targetCheckpoint: number | null = null;
   try {
     const [session] = await db
       .select({
@@ -80,8 +109,11 @@ export async function refreshTaskSessionTitle({
       .innerJoin(sessions, eq(sessions.id, sessionTasks.sessionId))
       .where(eq(sessionTasks.taskId, taskId))
       .limit(1);
-    if (!session || session.fastConversationId || session.titleEditedByUserAt) {
-      return;
+    if (!session || session.fastConversationId) {
+      return { status: 'noop', checkpoint: null, reason: 'missing' };
+    }
+    if (session.titleEditedByUserAt) {
+      return { status: 'noop', checkpoint: null, reason: 'manual_rename' };
     }
 
     const rows = await db
@@ -135,19 +167,28 @@ export async function refreshTaskSessionTitle({
       mode === 'final'
         ? LLM_TITLE_LOCKED_CHECKPOINT
         : checkpointForUserMessageCount(userMessageCount);
+    targetCheckpoint = checkpoint;
     if (
       checkpoint === 0 ||
       checkpoint <= session.llmTitleCheckpoint ||
-      messages.length === 0 ||
       (mode === 'final' && session.llmTitleCheckpoint >= 20)
     ) {
-      return;
+      return {
+        status: 'noop',
+        checkpoint,
+        reason: 'checkpoint_reached',
+      };
+    }
+    if (messages.length === 0) {
+      return { status: 'noop', checkpoint, reason: 'no_messages' };
     }
 
     const title = await generateLlmTaskTitle({ userId, taskId, messages });
-    if (isFallbackTaskTitle(title)) return;
+    if (isFallbackTaskTitle(title)) {
+      return { status: 'noop', checkpoint, reason: 'fallback_title' };
+    }
 
-    await db
+    const [updated] = await db
       .update(sessions)
       .set({
         title,
@@ -161,11 +202,26 @@ export async function refreshTaskSessionTitle({
           isNull(sessions.titleEditedByUserAt),
           lt(sessions.llmTitleCheckpoint, checkpoint),
         ),
-      );
+      )
+      .returning({ id: sessions.id });
+    return updated
+      ? {
+          status: 'updated',
+          checkpoint,
+          title,
+          titleChanged: true,
+        }
+      : { status: 'noop', checkpoint, reason: 'lost_race' };
   } catch (error) {
+    const failure = classifyNonTaskInferenceError(error);
     console.error(
       `[Session] Failed to refresh task-backed title task=${taskId}: ${formatErrorForLog(error)}`,
     );
+    return {
+      status: 'failed',
+      checkpoint: targetCheckpoint,
+      ...failure,
+    };
   }
 }
 
@@ -179,7 +235,8 @@ export async function refreshFastAgentSessionTitle({
 }: {
   sessionId: string;
   userId: string;
-}): Promise<(GeneratedTaskTitle & { titleChanged: boolean }) | null> {
+}): Promise<SessionTitleRefreshResult> {
+  let targetCheckpoint: number | null = null;
   try {
     const conversation = await db.query.fastAgentConversations.findFirst({
       where: eq(fastAgentConversations.id, sessionId),
@@ -191,10 +248,10 @@ export async function refreshFastAgentSessionTitle({
       },
     });
     if (!conversation) {
-      return null;
+      return { status: 'noop', checkpoint: null, reason: 'missing' };
     }
     if (conversation.titleEditedByUserAt) {
-      return null;
+      return { status: 'noop', checkpoint: null, reason: 'manual_rename' };
     }
 
     const rows = await db
@@ -243,11 +300,16 @@ export async function refreshFastAgentSessionTitle({
     }
 
     const checkpoint = checkpointForUserMessageCount(userMessageCount);
-    if (
-      checkpoint <= conversation.llmTitleCheckpoint ||
-      messages.length === 0
-    ) {
-      return null;
+    targetCheckpoint = checkpoint;
+    if (checkpoint <= conversation.llmTitleCheckpoint) {
+      return {
+        status: 'noop',
+        checkpoint,
+        reason: 'checkpoint_reached',
+      };
+    }
+    if (messages.length === 0) {
+      return { status: 'noop', checkpoint, reason: 'no_messages' };
     }
 
     const generated = await generateLlmTaskTitleWithIcon({
@@ -257,7 +319,7 @@ export async function refreshFastAgentSessionTitle({
     });
     const { title } = generated;
     if (isFallbackTaskTitle(title)) {
-      return null;
+      return { status: 'noop', checkpoint, reason: 'fallback_title' };
     }
 
     const persistedTitle = await db.transaction(async (tx) => {
@@ -315,14 +377,21 @@ export async function refreshFastAgentSessionTitle({
     });
     return persistedTitle
       ? {
+          status: 'updated',
+          checkpoint,
           ...persistedTitle,
           iconEmoji: generated.iconEmoji,
         }
-      : null;
+      : { status: 'noop', checkpoint, reason: 'lost_race' };
   } catch (error) {
+    const failure = classifyNonTaskInferenceError(error);
     console.error(
       `[Fast Agent] Failed to refresh session title session=${sessionId}: ${formatErrorForLog(error)}`,
     );
-    return null;
+    return {
+      status: 'failed',
+      checkpoint: targetCheckpoint,
+      ...failure,
+    };
   }
 }

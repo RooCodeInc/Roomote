@@ -288,6 +288,21 @@ describe('inference gateway', () => {
     }
   });
 
+  it('proxies DeepSeek root-relative inference paths with bearer auth', async () => {
+    const fetchMock = stubUpstreamFetch();
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/deepseek/chat/completions',
+    );
+
+    expect(response.status).toBe(200);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.deepseek.com/chat/completions');
+    expect(new Headers(init.headers).get('authorization')).toBe(
+      'Bearer provider-secret-key',
+    );
+  });
+
   it('routes Roomote models through OpenRouter with only the managed key', async () => {
     const fetchMock = stubUpstreamFetch();
     const response = await appRequest(

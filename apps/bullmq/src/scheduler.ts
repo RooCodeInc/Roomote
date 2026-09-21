@@ -19,6 +19,10 @@ import {
   type AutomationJobResult,
   type AutomationRunOpts,
 } from '@roomote/sdk/server';
+import {
+  processSessionTitleRefreshJob,
+  type SessionTitleRefreshJob,
+} from '@roomote/cloud-agents/server';
 
 import { getRedis } from './redis';
 import {
@@ -317,6 +321,8 @@ const runJobs = async (job: ScheduledJob): Promise<void> => {
       }
       return;
     }
+    case ScheduledJobName.SessionTitleRefresh:
+      return processSessionTitleRefreshJob(job.data as SessionTitleRefreshJob);
     case ScheduledJobName.CustomAutomations:
       await customAutomationsJob();
       return;

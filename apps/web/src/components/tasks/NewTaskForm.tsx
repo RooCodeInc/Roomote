@@ -17,7 +17,11 @@ import { useVoiceEnabled } from '@/hooks/useVoiceEnabled';
 import { usePrivateSessionsExperiment } from '@/hooks/usePrivateSessionsExperiment';
 
 import { type PromptInputMessage } from '@/components/ai-elements';
-import { SessionModelSwitcher, TaskPromptInput } from '@/components/tasks';
+import {
+  ComposerErrorDialog,
+  SessionModelSwitcher,
+  TaskPromptInput,
+} from '@/components/tasks';
 import {
   BasicTooltip,
   Button,
@@ -81,14 +85,18 @@ export function NewTaskForm({
   useEffect(() => setSelectedModelOverrideId(modelParam), [modelParam]);
 
   const {
-    error: fastSessionError,
     isPending: isFastSessionPending,
-    retryFastSession,
     startFastSession,
+    error: launcherError,
+    clearError: clearLauncherError,
+    retryableError: fastSessionError,
+    retryFastSession,
   } = useFastSessionLauncher({
     onSessionStarted: onTaskStarted,
+    // The inline Retry below already surfaces start failures here.
     showErrorToast: false,
   });
+  const [submitError, setSubmitError] = useState<unknown>(null);
   const launchTaskModels = useLaunchTaskModels();
   const defaultModelId = launchTaskModels.data?.defaultFastModelId;
   const defaultReasoningEffort =
@@ -141,10 +149,21 @@ export function NewTaskForm({
     async (message: PromptInputMessage) => {
       const text = message.text.trim();
 
-      const preparedPrompt = await preparePromptAttachments({
-        text,
-        attachments: message.files,
-      });
+      let preparedPrompt;
+      try {
+        preparedPrompt = await preparePromptAttachments(
+          {
+            text,
+            attachments: message.files,
+          },
+          { enforceAttachmentTextLimit: true },
+        );
+      } catch (error) {
+        // Keep the composer exactly as the user left it and explain the
+        // failure in the shared dialog.
+        setSubmitError(error);
+        return;
+      }
 
       const submission: SubmissionSnapshot = {
         description:
@@ -186,6 +205,13 @@ export function NewTaskForm({
         animate ? 'animate-[enter-down_1s_1_100ms_backwards]' : undefined
       }
     >
+      <ComposerErrorDialog
+        error={submitError ?? launcherError}
+        onClose={() => {
+          setSubmitError(null);
+          clearLauncherError();
+        }}
+      />
       <TaskPromptInput
         promptKey={initialPromptText}
         isBusy={isBusy}

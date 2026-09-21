@@ -38,7 +38,10 @@ describe('useFastSessionLauncher', () => {
       result.current.startFastSession({ text: 'Original prompt' }),
     );
 
-    expect(result.current.error?.message).toBe('Temporary start failure');
+    expect(result.current.retryableError?.message).toBe(
+      'Temporary start failure',
+    );
+    expect(result.current.error).toBeNull();
     const firstConversationId =
       mutateAsyncMock.mock.calls[0]?.[0].conversationId;
 
@@ -48,8 +51,40 @@ describe('useFastSessionLauncher', () => {
       text: 'Original prompt',
       conversationId: firstConversationId,
     });
-    expect(result.current.error).toBeNull();
+    expect(result.current.retryableError).toBeNull();
     expect(pushMock).toHaveBeenCalledWith('/sessions/session-1');
+  });
+
+  it('routes validation failures to the dialog error without a retryable launch', async () => {
+    mutateAsyncMock.mockRejectedValueOnce(
+      new Error(
+        JSON.stringify([
+          {
+            code: 'custom',
+            message:
+              'Extracted attachment text exceeds the 200,000 character limit',
+            path: ['attachmentTexts'],
+          },
+        ]),
+      ),
+    );
+    const { result } = renderHook(() => useFastSessionLauncher());
+
+    await act(() =>
+      result.current.startFastSession({
+        text: 'Summarize this plan',
+        attachmentTexts: ['too long'],
+      }),
+    );
+
+    expect(result.current.error).toBeInstanceOf(Error);
+    expect(result.current.retryableError).toBeNull();
+
+    await act(() => result.current.retryFastSession());
+    expect(mutateAsyncMock).toHaveBeenCalledOnce();
+
+    act(() => result.current.clearError());
+    expect(result.current.error).toBeNull();
   });
 
   it('does not start a duplicate while the first submission is pending', async () => {

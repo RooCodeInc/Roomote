@@ -4,7 +4,7 @@ import { appendAttachmentTextsToPromptText } from '@roomote/cloud-agents';
 import {
   DeploymentReadOnlyError,
   launchPinnedFastSessionTask,
-  refreshFastAgentSessionTitle,
+  refreshFastAgentSessionTitleWithRetry,
 } from '@roomote/cloud-agents/server';
 import { formatErrorForLog } from '@roomote/types';
 import { db, environments, eq } from '@roomote/db/server';
@@ -164,7 +164,7 @@ export async function startPinnedFastSessionLaunch(
     // No Fast turn runs for a pinned launch, so nothing else titles the
     // Session; derive one from the recorded request once the response is out.
     after(() =>
-      refreshFastAgentSessionTitle({
+      refreshFastAgentSessionTitleWithRetry({
         sessionId: launch.fastConversationId,
         userId: auth.userId,
       }).catch((error: unknown) => {

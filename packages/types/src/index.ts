@@ -37,6 +37,7 @@ export * from './brain';
 export * from './memory-mcp';
 export * from './custom-mcp-servers';
 export * from './environment-config';
+export * from './environment-recipe';
 export * from './reserved-mcp-env-vars';
 export * from './environment-definition-tasks';
 export * from './eval-harness-selection';
