@@ -79,16 +79,33 @@ function Harness({
   defaultModelId,
   emptyModelLabel,
   availableModels = models,
+  onModelSelectionChange,
 }: {
   initialModel?: string;
   initialEffort?: ReasoningEffort | null;
   defaultModelId?: string | null;
   emptyModelLabel?: string;
   availableModels?: ModelReasoningPickerModel[];
+  onModelSelectionChange?: (selection: {
+    model: string;
+    reasoningEffort: ReasoningEffort | null;
+  }) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [model, setModel] = useState(initialModel);
   const [effort, setEffort] = useState<ReasoningEffort | null>(initialEffort);
+  // Callers receiving the combined selection apply both values themselves
+  // (as SessionPromptInput does), so mirror that contract here.
+  const handleSelection = (selection: {
+    model: string;
+    reasoningEffort: ReasoningEffort | null;
+  }) => {
+    onModelSelectionChange?.(selection);
+    if (onModelSelectionChange) {
+      setModel(selection.model);
+      setEffort(selection.reasoningEffort);
+    }
+  };
 
   return (
     <>
@@ -114,6 +131,9 @@ function Harness({
         reasoningEffort={effort}
         defaultReasoningEffort="medium"
         onReasoningEffortChange={setEffort}
+        onModelSelectionChange={
+          onModelSelectionChange ? handleSelection : undefined
+        }
       />
     </>
   );
@@ -493,6 +513,25 @@ describe('ModelReasoningPicker', () => {
     expect(
       screen.getByRole('slider', { name: 'Reasoning level' }),
     ).toHaveAttribute('aria-valuemax', '0');
+  });
+
+  it('emits model and effort together through the combined callback', () => {
+    const combined = vi.fn();
+    render(<Harness onModelSelectionChange={combined} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Choose model' }));
+
+    // Beta only supports medium, so the switch also normalizes the effort;
+    // the combined callback carries both atomically and the separate
+    // effort callback is not called.
+    fireEvent.click(screen.getByRole('option', { name: 'Beta' }));
+    expect(combined).toHaveBeenCalledWith({
+      model: 'provider/beta',
+      reasoningEffort: 'medium',
+    });
+    expect(combined).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('selection')).toHaveTextContent(
+      'provider/beta:medium',
+    );
   });
 
   it('uses a dismissible mobile drawer without a close action', async () => {

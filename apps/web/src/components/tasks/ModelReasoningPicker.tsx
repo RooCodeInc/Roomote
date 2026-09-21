@@ -144,6 +144,7 @@ function PickerContent({
   reasoningDisabled,
   supportedReasoningEfforts,
   providerGrouping,
+  onModelSelectionChange,
   onClose,
 }: {
   models: ModelReasoningPickerModel[];
@@ -154,6 +155,15 @@ function PickerContent({
   reasoningEffort: ReasoningEffort | null;
   defaultReasoningEffort?: ReasoningEffort | null;
   onReasoningEffortChange: (effort: ReasoningEffort | null) => void;
+  /**
+   * Receives the model and reasoning effort together whenever a selection
+   * changes either value, so callers tracking the combined state never see
+   * a stale intermediate model or effort.
+   */
+  onModelSelectionChange?: (selection: {
+    model: string;
+    reasoningEffort: ReasoningEffort | null;
+  }) => void;
   disabled?: boolean;
   modelDisabled?: boolean;
   reasoningDisabled?: boolean;
@@ -304,9 +314,31 @@ function PickerContent({
       document.removeEventListener('keydown', handleTypeaheadKeyDown);
   });
 
-  const selectModel = (nextModel: string) => {
+  const applyModelSelection = (
+    nextModel: string,
+    nextReasoningEffort: ReasoningEffort | null,
+  ) => {
+    // An atomic combined callback lets callers that track the whole
+    // selection (such as the session voice-turn ref) apply the model and
+    // effort together instead of observing a stale intermediate state.
+    if (onModelSelectionChange) {
+      onModelSelectionChange({
+        model: nextModel,
+        reasoningEffort: nextReasoningEffort,
+      });
+      return;
+    }
     onModelChange(nextModel);
-    if (disabled || reasoningDisabled) return;
+    if (nextReasoningEffort !== reasoningEffort) {
+      onReasoningEffortChange(nextReasoningEffort);
+    }
+  };
+
+  const selectModel = (nextModel: string) => {
+    if (disabled || reasoningDisabled) {
+      applyModelSelection(nextModel, reasoningEffort);
+      return;
+    }
     const effectiveNextModelId = nextModel || defaultModelId || '';
     const nextModelOption = models.find(
       ({ id }) => id === effectiveNextModelId,
@@ -314,19 +346,22 @@ function PickerContent({
     const nextEfforts =
       supportedReasoningEfforts ?? supportedEfforts(nextModelOption);
     if (nextEfforts.length === 0) {
-      if (reasoningEffort !== null) onReasoningEffortChange(null);
+      applyModelSelection(nextModel, null);
       return;
     }
     if (reasoningEffort !== null) {
-      if (nextEfforts.includes(reasoningEffort)) return;
-      const closestEffort = closestSupportedEffort(
-        reasoningEffort,
-        nextEfforts,
+      if (nextEfforts.includes(reasoningEffort)) {
+        applyModelSelection(nextModel, reasoningEffort);
+        return;
+      }
+      applyModelSelection(
+        nextModel,
+        closestSupportedEffort(reasoningEffort, nextEfforts) ?? reasoningEffort,
       );
-      if (closestEffort) onReasoningEffortChange(closestEffort);
       return;
     }
-    onReasoningEffortChange(
+    applyModelSelection(
+      nextModel,
       (defaultReasoningEffort && nextEfforts.includes(defaultReasoningEffort)
         ? defaultReasoningEffort
         : nextEfforts[Math.floor((nextEfforts.length - 1) / 2)])!,

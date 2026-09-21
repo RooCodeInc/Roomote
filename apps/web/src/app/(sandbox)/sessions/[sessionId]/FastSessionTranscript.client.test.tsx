@@ -253,12 +253,17 @@ vi.mock('@/components/tasks/SessionModelSwitcher', () => ({
     onModelChange,
     reasoningEffort,
     onReasoningEffortChange,
+    onModelSelectionChange,
     disabled,
   }: {
     model: string;
     onModelChange: (model: string) => void;
     reasoningEffort: string | null;
     onReasoningEffortChange: (effort: 'high') => void;
+    onModelSelectionChange?: (selection: {
+      model: string;
+      reasoningEffort: string | null;
+    }) => void;
     disabled?: boolean;
   }) => (
     <div>
@@ -284,6 +289,18 @@ vi.mock('@/components/tasks/SessionModelSwitcher', () => ({
         onClick={() => onReasoningEffortChange('high')}
       >
         Use high reasoning
+      </button>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() =>
+          onModelSelectionChange?.({
+            model: 'openrouter/anthropic/claude-fable-5',
+            reasoningEffort: 'medium',
+          })
+        }
+      >
+        Use combined selection
       </button>
     </div>
   ),
@@ -3198,6 +3215,37 @@ describe('FastSessionTranscript', () => {
       expect(updateModelSelectionMutate).toHaveBeenCalledWith({
         sessionId: 'session-1',
         model: null,
+      });
+    });
+  });
+
+  it('applies a combined model and effort selection atomically', async () => {
+    updateModelSelectionMutate.mockResolvedValue({ success: true });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        sessionModel="openrouter/openai/gpt-5.6-terra"
+        canReply
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use combined selection' }),
+    );
+
+    // Both values update together so the voice-turn selection ref never
+    // observes a stale intermediate model or effort.
+    expect(screen.getByTestId('session-model')).toHaveTextContent(
+      'openrouter/anthropic/claude-fable-5',
+    );
+    expect(screen.getByTestId('session-reasoning')).toHaveTextContent('medium');
+    await waitFor(() => {
+      expect(updateModelSelectionMutate).toHaveBeenCalledWith({
+        sessionId: 'session-1',
+        model: 'openrouter/anthropic/claude-fable-5',
+        reasoningEffort: 'medium',
       });
     });
   });

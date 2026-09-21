@@ -18,6 +18,7 @@ export function SessionModelSwitcher({
   onModelChange,
   reasoningEffort,
   onReasoningEffortChange,
+  onModelSelectionChange,
   defaultModelId,
   defaultReasoningEffort,
   disabled,
@@ -27,6 +28,11 @@ export function SessionModelSwitcher({
   onModelChange: (model: string) => void;
   reasoningEffort: ReasoningEffort | null;
   onReasoningEffortChange: (effort: ReasoningEffort | null) => void;
+  /** Receives the combined model + effort selection atomically. */
+  onModelSelectionChange?: (selection: {
+    model: string;
+    reasoningEffort: ReasoningEffort | null;
+  }) => void;
   /** The deployment's effective Fast (orchestration) model. */
   defaultModelId?: string | null;
   defaultReasoningEffort?: ReasoningEffort | null;
@@ -76,6 +82,7 @@ export function SessionModelSwitcher({
       reasoningEffort={reasoningEffort}
       defaultReasoningEffort={effectiveDefaultEffort}
       onReasoningEffortChange={onReasoningEffortChange}
+      onModelSelectionChange={onModelSelectionChange}
       providerGrouping={{
         chatgptConnected: data?.chatgptConnected,
         openaiConnected: data?.openaiConnected,
