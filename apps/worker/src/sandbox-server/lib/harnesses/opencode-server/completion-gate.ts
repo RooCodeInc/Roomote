@@ -394,7 +394,13 @@ const SHELL_SOURCE_MUTATION_PATTERNS = [
   /\b(sed|gsed)\s+(-[a-zA-Z]*\s+)*-[a-zA-Z]*i/,
   /\bperl\s+(-[a-zA-Z]*\s+)*-[a-zA-Z]*i/,
   // Git operations that rewrite tracked content.
-  /\bgit\s+(checkout|restore|apply|am|merge|rebase|cherry-pick|revert|reset|pull)\b/,
+  /\bgit\s+(apply|am|merge|rebase|cherry-pick|revert|pull)\b/,
+  // Only the forms that rewrite files: `git checkout -b branch` switches
+  // branches, and `git reset HEAD -- path` (the workflow's own unstage step)
+  // and `git restore --staged` touch the index alone.
+  /\bgit\s+checkout\s+(\S+\s+)?(--\s|\.(\s|$))/,
+  /\bgit\s+restore\s+(?!.*--staged)(?!.*-S\b)/,
+  /\bgit\s+reset\s+.*--(hard|merge|keep)\b/,
   /\bgit\s+stash\s+(pop|apply)\b/,
   /\bpatch\s+(-|<)/,
   // Output written to a file outside scratch space. `2>&1`, `>/dev/null`,
