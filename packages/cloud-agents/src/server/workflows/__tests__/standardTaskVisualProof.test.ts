@@ -26,7 +26,7 @@ describe('Standard Task visual-proof step', () => {
     });
 
     expect(harnessInstructions).toContain(
-      'For repository-changing work that routes into `implement-changes` while Autonomous mode is active and stays on the parent delivery path, after implementation and before the delegated delivery skill, if repository files changed the active `implement-changes` workflow must load `capture-visual-proof` for one bounded proof step and capture any applicable screenshots or screencasts itself with `agent-browser`. Carry the proof result, or an explicit no-op or blocker result, into the judge pass and the later delivery step instead of bypassing proof. If the run later transitions into `fix-pr`, let that child skill own any required proof step before PR metadata refresh instead of inheriting this parent-owned delivery sequence.',
+      'For repository-changing work that routes into `implement-changes` while Autonomous mode is active and stays on the parent delivery path, after implementation and before the delegated delivery skill, if repository files changed the active `implement-changes` workflow must load `capture-visual-proof` for one bounded proof step and capture any applicable screenshots or screencasts itself with `agent-browser`. Carry the proof result, or an explicit no-op or blocker result, into the later delivery step (and into the judge pass when the proof kept images) instead of bypassing proof. If the run later transitions into `fix-pr`, let that child skill own any required proof step before PR metadata refresh instead of inheriting this parent-owned delivery sequence.',
     );
     expect(harnessInstructions).toContain(
       'For repository-changing `implement-changes` runs that stay on the parent delivery path, after implementation and before the policy-selected delivery skill, if repository files changed the active workflow must load `capture-visual-proof` as one bounded proof step. Browser capture belongs inside that step and follows its `agent-browser` rules.',
@@ -99,26 +99,29 @@ describe('Standard Task visual-proof step', () => {
     expect(skillContent).not.toContain('Slack screenshot posting');
   });
 
-  it('requires implement-changes to run the judge after the proof step with images and the diff snapshot', () => {
+  it('limits the implement-changes judge pass to proof that kept images', () => {
     const skillContent = readImplementChangesSkill();
 
     expect(skillContent).toContain(
-      'run one focused Task-tool judge pass after the initial self-review and only after any required pre-delivery `capture-visual-proof` step for this shipped change has completed',
+      'the pre-delivery `capture-visual-proof` step for this shipped change kept screenshots or keyframes, run one focused Task-tool judge pass after the initial self-review',
     );
     expect(skillContent).toContain(
-      'the path `/tmp/capture-visual-proof/diff-at-start.patch` when it exists, and the local paths of every kept screenshot and keyframe so the judge can open them',
+      'When the proof step kept no images (a no-op, not-applicable, unnecessary, or blocked result), do not run the judge',
+    );
+    expect(skillContent).toContain(
+      'the path `/tmp/capture-visual-proof/diff-at-start.patch`, and the local paths of every kept screenshot and keyframe so the judge can open them',
     );
     expect(skillContent).toContain(
       'to report undisclosed source drift between the proof snapshot and the shipped diff',
     );
     expect(skillContent).toContain(
-      'Treat the judge verdict as review input and fix actionable plan-mismatch, proof, or drift gaps it finds',
+      'Treat the judge verdict as review input and fix actionable proof or drift gaps it finds',
     );
     expect(skillContent).toContain(
       'When those judge-driven fixes change repository files, re-run the `capture-visual-proof` step once for the updated shipped change',
     );
     expect(skillContent).toContain(
-      'then run one more focused judge pass against the refreshed diff, validation state, and refreshed proof result before delivery',
+      'then run one more focused judge pass against the refreshed diff and refreshed proof result before delivery',
     );
     expect(skillContent).not.toContain('background visual proof');
   });
