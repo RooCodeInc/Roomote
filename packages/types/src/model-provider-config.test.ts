@@ -1055,6 +1055,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       'requesty/glm-5.3-flash',
       'requesty/glm-5.3',
       'requesty/kimi-k3',
+      'requesty/xai/grok-4.7',
     ]);
   });
 
@@ -1158,6 +1159,26 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         provider?.suggestedTaskModels.map((model) => model.displayName),
       ).toEqual(['Grok 4.7']);
     }
+  });
+
+  it('uses the verified Grok 4.7 route for every supported provider', () => {
+    const grok47ByProvider = userSelectableProviders.flatMap((provider) => {
+      const model = provider.suggestedTaskModels.find(
+        (suggestion) => suggestion.displayName === 'Grok 4.7',
+      );
+
+      return model ? [{ providerId: provider.id, modelId: model.id }] : [];
+    });
+
+    expect(grok47ByProvider).toEqual([
+      { providerId: 'openrouter', modelId: 'openrouter/x-ai/grok-4.7' },
+      { providerId: 'vercel', modelId: 'vercel/spacexai/grok-4.7' },
+      { providerId: 'requesty', modelId: 'requesty/xai/grok-4.7' },
+      { providerId: 'opencode', modelId: 'opencode/grok-4.7' },
+      { providerId: 'opencode-go', modelId: 'opencode-go/grok-4.7' },
+      { providerId: 'xai', modelId: 'xai/grok-4.7' },
+      { providerId: 'xai-subscription', modelId: 'xai/grok-4.7' },
+    ]);
   });
 
   it('marks xAI Grok subscription connected as its own OAuth provider without an API key', () => {

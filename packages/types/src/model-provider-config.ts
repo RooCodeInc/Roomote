@@ -612,6 +612,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'kimi-k2-7-code': 'vercel/moonshotai/kimi-k2.7-code',
       'qwen3-8-max': 'vercel/alibaba/qwen3.8-max',
       'minimax-m3': 'vercel/minimax/minimax-m3',
+      'grok-4-7': 'vercel/spacexai/grok-4.7',
     }),
     // Vision is unset: the recommended coding model is multimodal, so image
     // work follows the coding model ("same as coding").
@@ -643,6 +644,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'glm-5-3-flash': 'requesty/glm-5.3-flash',
       'glm-5-3': 'requesty/glm-5.3',
       'kimi-k3': 'requesty/kimi-k3',
+      'grok-4-7': 'requesty/xai/grok-4.7',
     }),
     recommendedRoleModels: {
       helper: 'requesty/gemini-3.8-flash',
@@ -885,6 +887,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'kimi-k3': 'opencode/kimi-k3',
       'kimi-k2-7-code': 'opencode/kimi-k2.7-code',
       'minimax-m3': 'opencode/minimax-m3',
+      'grok-4-7': 'opencode/grok-4.7',
     }),
     // The default coding model (big-pickle) is OpenCode's own routed model,
     // so vision gets an explicit multimodal recommendation instead of the
