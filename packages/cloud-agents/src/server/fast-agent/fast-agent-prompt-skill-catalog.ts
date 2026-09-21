@@ -1,7 +1,11 @@
 import { RemoteFastAgentInstanceSkillSource } from './fast-agent-instance-skill-source';
-import { RemoteFastAgentRepositorySkillSource } from './fast-agent-repository-skill-source';
 import {
-  RemoteFastAgentSettingsSkillSource,
+  createFastAgentPromptRepositorySkillSource,
+  type RemoteFastAgentRepositorySkillSource,
+} from './fast-agent-repository-skill-source';
+import {
+  createFastAgentPromptSettingsSkillSource,
+  type RemoteFastAgentSettingsSkillSource,
   type FastAgentSettingsPromptCatalog,
 } from './fast-agent-settings-skill-source';
 import {
@@ -50,12 +54,14 @@ export function createFastAgentPromptSkillCatalogSources({
 }): PromptSkillCatalogSources {
   return {
     instanceSkills: new RemoteFastAgentInstanceSkillSource(userId),
-    settingsSkills: new RemoteFastAgentSettingsSkillSource({
+    // Both list Git-backed skills, and this runs on every turn, so they read
+    // cached snapshots instead of fetching (see the snapshot cache).
+    settingsSkills: createFastAgentPromptSettingsSkillSource(
       allowedEnvironmentIds,
-    }),
-    repositorySkills: new RemoteFastAgentRepositorySkillSource({
+    ),
+    repositorySkills: createFastAgentPromptRepositorySkillSource(
       allowedEnvironmentIds,
-    }),
+    ),
   };
 }
 
