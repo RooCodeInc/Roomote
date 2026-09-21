@@ -838,6 +838,47 @@ describe('Home', () => {
     }
   });
 
+  it('opens the dialog for a server-side validation failure and preserves composer state', async () => {
+    submittedPromptText = 'Summarize this plan';
+    mockStartFastSession.mockRejectedValueOnce(
+      new Error(
+        JSON.stringify([
+          {
+            code: 'custom',
+            message:
+              'Extracted attachment text exceeds the 200,000 character limit',
+            path: ['attachmentTexts'],
+          },
+        ]),
+      ),
+    );
+    render(<Home initialPlaceholderIndex={0} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveTextContent('Attachment too large');
+    expect(dialog).toHaveTextContent(
+      'attachmentTexts: Extracted attachment text exceeds the 200,000 character limit',
+    );
+    expect(dialog).toHaveTextContent(
+      'Try a different file, or provide a URL and Roomote will download it.',
+    );
+
+    expect(mockToastError).not.toHaveBeenCalled();
+    expect(mockPush).not.toHaveBeenCalled();
+    // The modal dialog aria-hides the composer; check the raw value.
+    expect(document.querySelector('textarea')?.value).toBe(
+      'Summarize this plan',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Got it' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole('textbox')).toHaveValue('Summarize this plan');
+  });
+
   it('starts a Fast session without an environment', async () => {
     currentEnvironments = [];
 

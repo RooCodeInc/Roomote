@@ -79,8 +79,12 @@ export function NewTaskForm({
   useEffect(() => setPromptText(initialPromptText), [initialPromptText]);
   useEffect(() => setSelectedModelOverrideId(modelParam), [modelParam]);
 
-  const { isPending: isFastSessionPending, startFastSession } =
-    useFastSessionLauncher({ onSessionStarted: onTaskStarted });
+  const {
+    isPending: isFastSessionPending,
+    startFastSession,
+    error: launcherError,
+    clearError: clearLauncherError,
+  } = useFastSessionLauncher({ onSessionStarted: onTaskStarted });
   const [submitError, setSubmitError] = useState<unknown>(null);
   const launchTaskModels = useLaunchTaskModels();
   const defaultModelId = launchTaskModels.data?.defaultFastModelId;
@@ -191,8 +195,11 @@ export function NewTaskForm({
       }
     >
       <ComposerErrorDialog
-        error={submitError}
-        onClose={() => setSubmitError(null)}
+        error={submitError ?? launcherError}
+        onClose={() => {
+          setSubmitError(null);
+          clearLauncherError();
+        }}
       />
       <TaskPromptInput
         promptKey={initialPromptText}

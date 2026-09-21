@@ -52,6 +52,8 @@ vi.mock('@/hooks/task-runs', () => ({
   useFastSessionLauncher: () => ({
     isPending: false,
     startFastSession: mockStartDelegationSession,
+    error: null,
+    clearError: vi.fn(),
   }),
 }));
 

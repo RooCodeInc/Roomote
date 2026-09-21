@@ -23,6 +23,7 @@ import { useAuthenticateSlackAccount } from '@/hooks/slack';
 import { useAuthenticateLinearAccount } from '@/hooks/linear';
 import { useEnvironments } from '@/hooks/environments';
 import { useFastSessionLauncher } from '@/hooks/task-runs';
+import { ComposerErrorDialog } from '@/components/tasks/ComposerErrorDialog';
 import {
   useAuthenticateAdoAccount,
   useAuthenticateBitbucketAccount,
@@ -485,6 +486,10 @@ export function OnboardingCard() {
 
   return (
     <>
+      <ComposerErrorDialog
+        error={delegationSession.error}
+        onClose={delegationSession.clearError}
+      />
       <div className="relative overflow-clip">
         <AnimatePresence initial={false} mode="popLayout">
           <motion.div

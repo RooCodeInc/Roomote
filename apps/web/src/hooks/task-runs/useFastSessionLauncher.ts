@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 
 import type { ReasoningEffort } from '@roomote/types';
-import { ComposerErrorDialog } from '@/components/tasks/ComposerErrorDialog';
 import { stagePendingFastSessionLaunch } from '@/lib/pending-fast-session-launch';
 import { sessionPathWithVoiceAutostart } from '@/lib/voice-autostart';
 import {
@@ -95,6 +94,11 @@ export function useFastSessionLauncher(options?: {
     isPending: mutation.isPending,
     mutation,
     startFastSession,
-    errorDialog: <ComposerErrorDialog error={error} onClose={clearError} />,
+    /**
+     * The last server-side validation failure. Render ComposerErrorDialog
+     * with it so the failure is visible; clearError dismisses it.
+     */
+    error,
+    clearError,
   };
 }
