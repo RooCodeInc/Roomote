@@ -33,6 +33,7 @@ x-roomote-base-env: &roomote-base-env
   # answers the same typed decisions request as Jev at /v1/decisions.
   R_JUDGMENT_UPSTREAM_URL: ${R_JUDGMENT_UPSTREAM_URL:-}
   R_JUDGMENT_UPSTREAM_API_KEY: ${R_JUDGMENT_UPSTREAM_API_KEY:-}
+  R_JUDGMENT_SHADOW: ${R_JUDGMENT_SHADOW:-}
   R_GBRAIN_URL: ${R_GBRAIN_URL:-http://gbrain:8931}
   R_GBRAIN_ADMIN_TOKEN_FILE: /gbrain-data/admin-bootstrap-token
   # Written by the Brain on first boot when no token was supplied, so a stack

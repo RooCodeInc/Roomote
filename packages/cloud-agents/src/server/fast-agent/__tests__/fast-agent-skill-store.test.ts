@@ -16,6 +16,7 @@ import {
   FastAgentSkillStore,
   getDefaultSkillRootCandidates,
   resolveDefaultSkillRoot,
+  type FastAgentSkillQuery,
 } from '../fast-agent-skill-store';
 
 describe('FastAgentSkillStore', () => {
@@ -259,24 +260,85 @@ describe('FastAgentSkillStore', () => {
 
     repositorySkills.list.mockClear();
     const packagedOnlyCatalog = await store.list();
-    expect(repositorySkills.list).not.toHaveBeenCalled();
+    expect(repositorySkills.list).toHaveBeenCalledWith(undefined);
     expect(packagedOnlyCatalog.counts).toEqual({
       instance: 0,
       packaged: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
-      repository: 0,
+      repository: 1,
       settings: 0,
-      total: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
+      total: FAST_AGENT_PACKAGED_SKILL_NAMES.length + 1,
     });
-    expect(packagedOnlyCatalog.skills).not.toEqual(
+    expect(packagedOnlyCatalog.skills).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ source: 'repository' }),
+        expect.objectContaining({
+          name: 'changeset-release-pr',
+          source: 'repository',
+        }),
       ]),
     );
     expect(packagedOnlyCatalog.warnings).toEqual([]);
   });
 
+  it('includes authorized repository skills in unscoped inventories with scope metadata', async () => {
+    const repositorySkills = {
+      list: vi.fn().mockResolvedValue({
+        skills: [
+          {
+            description: 'Use TypeSafe for programmable judgments.',
+            environmentIds: ['environment-1', 'environment-2'],
+            id: 'repository:repo-1:.agents/skills:typesafe-ai',
+            invocation: 'typesafe-ai',
+            name: 'typesafe-ai',
+            repository: 'RooCodeInc/Roomote',
+            source: 'repository' as const,
+          },
+        ],
+        warnings: [],
+      }),
+      read: vi.fn(),
+    };
+    const store = new FastAgentSkillStore(undefined, repositorySkills);
+
+    const broadCatalog = await store.list();
+
+    expect(repositorySkills.list).toHaveBeenCalledWith(undefined);
+    expect(broadCatalog.skills).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          environmentIds: ['environment-1', 'environment-2'],
+          id: 'repository:repo-1:.agents/skills:typesafe-ai',
+          name: 'typesafe-ai',
+          repository: 'RooCodeInc/Roomote',
+          source: 'repository',
+        }),
+      ]),
+    );
+    expect(broadCatalog.counts).toEqual({
+      instance: 0,
+      packaged: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
+      repository: 1,
+      settings: 0,
+      total: FAST_AGENT_PACKAGED_SKILL_NAMES.length + 1,
+    });
+
+    repositorySkills.list.mockClear();
+    const exactCatalog = await store.list({ name: 'typesafe-ai' });
+
+    expect(repositorySkills.list).toHaveBeenCalledWith(undefined);
+    expect(exactCatalog.skills).toEqual([
+      expect.objectContaining({
+        environmentIds: ['environment-1', 'environment-2'],
+        name: 'typesafe-ai',
+        repository: 'RooCodeInc/Roomote',
+      }),
+    ]);
+  });
+
   it('includes authorized settings skills in an unscoped catalog with deterministic precedence', async () => {
-    const repositorySkills = { list: vi.fn(), read: vi.fn() };
+    const repositorySkills = {
+      list: vi.fn().mockResolvedValue({ skills: [], warnings: [] }),
+      read: vi.fn(),
+    };
     const settingsSkills = {
       list: vi.fn().mockResolvedValue({
         skills: [
@@ -315,7 +377,7 @@ describe('FastAgentSkillStore', () => {
     const catalog = await store.list();
 
     expect(settingsSkills.list).toHaveBeenCalledWith({});
-    expect(repositorySkills.list).not.toHaveBeenCalled();
+    expect(repositorySkills.list).toHaveBeenCalledWith(undefined);
     expect(
       catalog.skills.filter((skill) => skill.name === 'thermonuclear'),
     ).toEqual([
@@ -404,21 +466,53 @@ describe('FastAgentSkillStore', () => {
     });
   });
 
-  it('uses an unscoped exact-name lookup for packaged and settings skills only', async () => {
-    const repositorySkills = { list: vi.fn(), read: vi.fn() };
-    const settingsSkills = {
+  it('keeps Settings precedence across same-name continuation pages', async () => {
+    const repositorySkills = {
       list: vi.fn().mockResolvedValue({
-        nextSourceOffset: 8,
         skills: [
           {
-            description: 'Thermonuclear playbook.',
-            id: 'settings:manual:thermonuclear',
+            description: 'Repository fallback.',
+            id: 'repository:repo-1:.agents/skills:thermonuclear',
             name: 'thermonuclear',
-            source: 'settings' as const,
+            repository: 'RooCodeInc/Roomote',
+            source: 'repository' as const,
           },
         ],
         warnings: [],
       }),
+      read: vi.fn(),
+    };
+    const settingsSkills = {
+      list: vi
+        .fn()
+        .mockImplementation(({ sourceOffset }: FastAgentSkillQuery) =>
+          Promise.resolve(
+            sourceOffset === undefined
+              ? {
+                  nextSourceOffset: 8,
+                  skills: [
+                    {
+                      description: 'First environment variant.',
+                      id: 'settings:manual:thermonuclear-one',
+                      name: 'thermonuclear',
+                      source: 'settings' as const,
+                    },
+                  ],
+                  warnings: [],
+                }
+              : {
+                  skills: [
+                    {
+                      description: 'Second environment variant.',
+                      id: 'settings:manual:thermonuclear-two',
+                      name: 'thermonuclear',
+                      source: 'settings' as const,
+                    },
+                  ],
+                  warnings: [],
+                },
+          ),
+        ),
       read: vi.fn(),
     };
     const store = new FastAgentSkillStore(
@@ -427,16 +521,84 @@ describe('FastAgentSkillStore', () => {
       settingsSkills,
     );
 
-    const catalog = await store.list({ name: 'thermonuclear' });
+    const firstPage = await store.list({ name: 'thermonuclear' });
+    const secondPage = await store.list({
+      name: 'thermonuclear',
+      sourceOffset: 8,
+    });
 
-    expect(settingsSkills.list).toHaveBeenCalledWith({
+    expect(settingsSkills.list).toHaveBeenNthCalledWith(1, {
       name: 'thermonuclear',
     });
+    expect(settingsSkills.list).toHaveBeenNthCalledWith(2, {
+      name: 'thermonuclear',
+      sourceOffset: 8,
+    });
     expect(repositorySkills.list).not.toHaveBeenCalled();
-    expect(catalog.skills).toEqual([
-      expect.objectContaining({ id: 'settings:manual:thermonuclear' }),
+    expect(firstPage.skills).toEqual([
+      expect.objectContaining({ id: 'settings:manual:thermonuclear-one' }),
     ]);
-    expect(catalog.nextSourceOffset).toBe(8);
+    expect(firstPage.nextSourceOffset).toBe(8);
+    expect(secondPage.skills).toEqual([
+      expect.objectContaining({ id: 'settings:manual:thermonuclear-two' }),
+    ]);
+    expect(secondPage.nextSourceOffset).toBeUndefined();
+  });
+
+  it('checks repositories after paginated Settings lookup is exhausted', async () => {
+    const repositorySkills = {
+      list: vi.fn().mockResolvedValue({
+        skills: [
+          {
+            description: 'Repository TypeSafe guidance.',
+            environmentIds: ['environment-1'],
+            id: 'repository:repo-1:.agents/skills:typesafe-ai',
+            name: 'typesafe-ai',
+            repository: 'RooCodeInc/Roomote',
+            source: 'repository' as const,
+          },
+        ],
+        warnings: [],
+      }),
+      read: vi.fn(),
+    };
+    const settingsSkills = {
+      list: vi
+        .fn()
+        .mockImplementation(({ sourceOffset }: FastAgentSkillQuery) =>
+          Promise.resolve(
+            sourceOffset === undefined
+              ? {
+                  nextSourceOffset: 8,
+                  skills: [],
+                  warnings: [],
+                }
+              : { skills: [], warnings: [] },
+          ),
+        ),
+      read: vi.fn(),
+    };
+    const store = new FastAgentSkillStore(
+      undefined,
+      repositorySkills,
+      settingsSkills,
+    );
+
+    const firstPage = await store.list({ name: 'typesafe-ai' });
+    expect(firstPage.nextSourceOffset).toBe(8);
+    expect(repositorySkills.list).not.toHaveBeenCalled();
+
+    const finalPage = await store.list({
+      name: 'typesafe-ai',
+      sourceOffset: 8,
+    });
+    expect(repositorySkills.list).toHaveBeenCalledWith(undefined);
+    expect(finalPage.skills).toEqual([
+      expect.objectContaining({
+        name: 'typesafe-ai',
+        repository: 'RooCodeInc/Roomote',
+      }),
+    ]);
   });
 
   it('rejects traversal, non-Markdown files, symlinks, and unknown skills', async () => {

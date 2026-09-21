@@ -356,10 +356,19 @@ When a judgment model is on, Roomote asks it first for:
 
 Roomote acts on the judgment model only when it is confident. When it is
 unsure, unavailable, or returns an error, Roomote keeps the behavior it has
-without a judgment model, usually a helper model call. The text a decision
-needs is sent to the selected judgment model, so choosing Jev sends it to
-TypeSafe or the gateway you picked; keys stay on the control plane and are
-never sent to task sandboxes.
+without a judgment model, usually through the deployment's helper model. The
+helper model is resolved from the **Helper model** role and does not require a
+separate decision-model connection. The text a decision needs is sent to the
+selected judgment model, so choosing Jev sends it to TypeSafe or the gateway
+you picked; keys stay on the control plane and are never sent to task
+sandboxes.
+
+Some decisions evaluate many candidates in parallel, such as skill relevance
+and integration-tool ranking. Roomote only runs those high-volume workloads
+through a configured judgment model (Jev or the Roomote judgment model). A
+helper model never opts into these batches, so deployments without a judgment
+model keep the existing conservative behavior and do not incur new
+high-volume language-model calls.
 
 ## Reasoning settings
 

@@ -253,12 +253,17 @@ vi.mock('@/components/tasks/SessionModelSwitcher', () => ({
     onModelChange,
     reasoningEffort,
     onReasoningEffortChange,
+    onModelSelectionChange,
     disabled,
   }: {
     model: string;
     onModelChange: (model: string) => void;
     reasoningEffort: string | null;
     onReasoningEffortChange: (effort: 'high') => void;
+    onModelSelectionChange?: (selection: {
+      model: string;
+      reasoningEffort: string | null;
+    }) => void;
     disabled?: boolean;
   }) => (
     <div>
@@ -274,9 +279,28 @@ vi.mock('@/components/tasks/SessionModelSwitcher', () => ({
       <button
         type="button"
         disabled={disabled}
+        onClick={() => onModelChange('')}
+      >
+        Use default model
+      </button>
+      <button
+        type="button"
+        disabled={disabled}
         onClick={() => onReasoningEffortChange('high')}
       >
         Use high reasoning
+      </button>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() =>
+          onModelSelectionChange?.({
+            model: 'openrouter/anthropic/claude-fable-5',
+            reasoningEffort: 'medium',
+          })
+        }
+      >
+        Use combined selection
       </button>
     </div>
   ),
@@ -322,7 +346,21 @@ vi.mock('../../task/[taskId]/messages/acp/DelegatedTaskCard', () => ({
 
 vi.mock('./SessionUserInputCard', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./SessionUserInputCard')>()),
-  SessionUserInputCard: () => <div>Structured input request</div>,
+  SessionUserInputCard: ({ request }: { request: { requestId: string } }) => {
+    const [selected, setSelected] = useState(false);
+    return (
+      <div>
+        <div>Structured input request</div>
+        <div data-testid="structured-request-id">{request.requestId}</div>
+        <button type="button" onClick={() => setSelected(true)}>
+          Select answer
+        </button>
+        <div data-testid="structured-selection">
+          {selected ? 'selected' : 'empty'}
+        </div>
+      </div>
+    );
+  },
 }));
 
 vi.mock('./setup/SetupStarterTasksCard', () => ({
@@ -3247,6 +3285,63 @@ describe('FastSessionTranscript', () => {
     });
   });
 
+  it('persists clearing the session model override', async () => {
+    updateModelSelectionMutate.mockResolvedValue({ success: true });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        sessionModel="openrouter/z-ai/glm-5.2"
+        canReply
+      />,
+    );
+
+    expect(screen.getByTestId('session-model')).toHaveTextContent(
+      'openrouter/z-ai/glm-5.2',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Use default model' }));
+
+    expect(screen.getByTestId('session-model')).toBeEmptyDOMElement();
+    await waitFor(() => {
+      expect(updateModelSelectionMutate).toHaveBeenCalledWith({
+        sessionId: 'session-1',
+        model: null,
+      });
+    });
+  });
+
+  it('applies a combined model and effort selection atomically', async () => {
+    updateModelSelectionMutate.mockResolvedValue({ success: true });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        sessionModel="openrouter/openai/gpt-5.6-terra"
+        canReply
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use combined selection' }),
+    );
+
+    // Both values update together so the voice-turn selection ref never
+    // observes a stale intermediate model or effort.
+    expect(screen.getByTestId('session-model')).toHaveTextContent(
+      'openrouter/anthropic/claude-fable-5',
+    );
+    expect(screen.getByTestId('session-reasoning')).toHaveTextContent('medium');
+    await waitFor(() => {
+      expect(updateModelSelectionMutate).toHaveBeenCalledWith({
+        sessionId: 'session-1',
+        model: 'openrouter/anthropic/claude-fable-5',
+        reasoningEffort: 'medium',
+      });
+    });
+  });
+
   it('does not submit with Enter while a model selection is still saving', async () => {
     let resolveModelUpdate: ((value: { success: true }) => void) | undefined;
     updateModelSelectionMutate.mockReturnValue(
@@ -3419,6 +3514,65 @@ describe('FastSessionTranscript', () => {
 
     expect(screen.getByText('Structured input request')).toBeVisible();
     expect(screen.getByPlaceholderText('Message agent')).toBeInTheDocument();
+  });
+
+  it('resets generic structured input state when the transcript request changes', () => {
+    const request = (requestId: string, ts: number) => ({
+      id: requestId,
+      eventId: requestId,
+      turnId: `turn-${requestId}`,
+      turnSeq: 1,
+      ts,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+      role: 'assistant' as const,
+      contentBlocks: [{ type: 'text' as const, text: 'Choose one' }],
+      metadata: { visibleInTranscript: true },
+      payload: {
+        requestId,
+        status: 'pending' as const,
+        sessionId: 'session-1',
+        turnId: `turn-${requestId}`,
+        callId: `call-${requestId}`,
+        questions: [
+          {
+            id: 'choice',
+            header: 'Choice',
+            question: 'Choose one',
+            isOther: false,
+            isSecret: false,
+            options: [{ label: 'One', description: 'First choice' }],
+          },
+        ],
+      },
+      source: 'web' as const,
+      nativeSessionId: null,
+      nativeMessageId: null,
+      createdAt: new Date(ts),
+    });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[request('rui:request-1', 1)]}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Select answer' }));
+    expect(screen.getByTestId('structured-selection')).toHaveTextContent(
+      'selected',
+    );
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [request('rui:request-2', 2)],
+      });
+    });
+
+    expect(screen.getByTestId('structured-request-id')).toHaveTextContent(
+      'rui:request-2',
+    );
+    expect(screen.getByTestId('structured-selection')).toHaveTextContent(
+      'empty',
+    );
   });
 
   it('updates the header title and refreshes session lists from the session stream event', async () => {

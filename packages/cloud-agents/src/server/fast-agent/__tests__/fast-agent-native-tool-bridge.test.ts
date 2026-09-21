@@ -139,6 +139,9 @@ describe('Fast native OpenCode tool bridge', () => {
 
     expect(installedToolFiles.sort()).toEqual(
       Object.values(FAST_AGENT_NATIVE_TOOL_NAMES)
+        .filter(
+          (name) => name !== FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool,
+        )
         .map((name) => `${name}.js`)
         .sort(),
     );
@@ -242,14 +245,15 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(bridgeSource).toContain('metadata: payload.metadata ?? {}');
     expect(spillReadSource).toContain('never pass filesystem paths');
     expect(skillListSource).toContain(
-      'authorized legacy settings-defined skills, plus optionally repository-defined skills',
+      'authorized legacy settings-defined skills, and authorized repository-defined skills',
     );
     expect(skillListSource).toContain(
-      'an exact name to find packaged, instance, and legacy Settings skills',
+      'an exact name to search all four sources without guessing an environment or repository',
     );
     expect(skillListSource).toContain(
-      'complete packaged, instance, and authorized legacy Settings inventory',
+      'following nextSourceOffset with sourceOffset to collect remaining same-precedence Settings variants',
     );
+    expect(skillListSource).toContain('complete bounded inventory');
     expect(skillListSource).toContain(
       'packaged > instance > legacy Settings > repository',
     );
@@ -263,7 +267,9 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(skillListSource).toContain('name: z.string()');
     expect(skillListSource).toContain('sourceOffset: z.number()');
     expect(skillListSource).toContain('nextSourceOffset');
-    expect(skillListSource).toContain('Omit scope and name');
+    expect(skillListSource).toContain(
+      'Omit scope and name for the complete bounded inventory',
+    );
     expect(skillListSource).toContain('environmentId wins when both are given');
     expect(skillListSource).toContain('omit or pass null');
     // OpenCode wraps `args` in z.object itself; a bare union there produces
@@ -342,7 +348,7 @@ describe('Fast native OpenCode tool bridge', () => {
     }
   });
 
-  it('mounts only native integrations and hides execute when the code-mode experiment is off', async () => {
+  it('mounts every authorized integration and enables code mode', async () => {
     const runtime = await getFastAgentNativeToolRuntime(
       'code-mode-integrations-off',
       [
@@ -359,21 +365,20 @@ describe('Fast native OpenCode tool bridge', () => {
           tools: [{ name: 'search_code' }],
         },
       ],
-      { codeModeIntegrationsEnabled: false },
     );
 
-    expect(runtime.env).not.toHaveProperty('OPENCODE_EXPERIMENTAL_CODE_MODE');
+    expect(runtime.env.OPENCODE_EXPERIMENTAL_CODE_MODE).toBe('1');
     const config = JSON.parse(
       await readFile(join(runtime.directory, 'opencode.json'), 'utf8'),
     );
-    expect(Object.keys(config.mcp)).toEqual(['roomote']);
-    expect(config.agent.build.tools.execute).not.toBe(true);
-    expect(config.agent.build.tools.call_integration_tool).toBe(true);
+    expect(Object.keys(config.mcp).sort()).toEqual(['github', 'roomote']);
+    expect(config.agent.build.tools.execute).toBe(true);
+    expect(config.agent.build.tools.call_integration_tool).not.toBe(true);
     expect(config.agent.build.tools['roomote_*']).toBe(true);
-    expect(config.agent.build.tools['github_*']).not.toBe(true);
+    expect(config.agent.build.tools['github_*']).toBe(true);
   });
 
-  it('mounts every authorized integration and enables code mode when the experiment is on', async () => {
+  it('mounts every authorized integration and enables code mode', async () => {
     const runtime = await getFastAgentNativeToolRuntime(
       'code-mode-integrations-on',
       [
@@ -396,7 +401,6 @@ describe('Fast native OpenCode tool bridge', () => {
           tools: [{ name: 'search' }],
         },
       ],
-      { codeModeIntegrationsEnabled: true },
     );
 
     expect(runtime.env.OPENCODE_EXPERIMENTAL_CODE_MODE).toBe('1');
@@ -416,49 +420,42 @@ describe('Fast native OpenCode tool bridge', () => {
       );
     }
     expect(config.agent.build.tools.execute).toBe(true);
-    expect(config.agent.build.tools.call_integration_tool).toBe(false);
+    expect(config.agent.build.tools.call_integration_tool).not.toBe(true);
     expect(config.agent.build.tools.find_integration_tools).toBe(true);
     expect(config.agent.build.tools['github_*']).toBe(true);
     expect(config.agent.build.tools['*']).toBe(false);
   });
 
-  it('falls back to the dispatcher path when integration ids collide as MCP server names', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    try {
-      const runtime = await getFastAgentNativeToolRuntime(
-        'code-mode-integrations-collision',
-        [
-          {
-            id: 'foo.bar',
-            name: 'Foo Dot Bar',
-            description: 'First',
-            tools: [{ name: 'search' }],
-          },
-          {
-            id: 'foo_bar',
-            name: 'Foo Underscore Bar',
-            description: 'Second',
-            tools: [{ name: 'read' }],
-          },
-        ],
-        { codeModeIntegrationsEnabled: true },
-      );
+  it('keeps colliding integration ids addressable with unique code-mode names', async () => {
+    const runtime = await getFastAgentNativeToolRuntime(
+      'code-mode-integrations-collision',
+      [
+        {
+          id: 'foo.bar',
+          name: 'Foo Dot Bar',
+          description: 'First',
+          tools: [{ name: 'search' }],
+        },
+        {
+          id: 'foo_bar',
+          name: 'Foo Underscore Bar',
+          description: 'Second',
+          tools: [{ name: 'read' }],
+        },
+      ],
+    );
 
-      expect(runtime.env).not.toHaveProperty('OPENCODE_EXPERIMENTAL_CODE_MODE');
-      const config = JSON.parse(
-        await readFile(join(runtime.directory, 'opencode.json'), 'utf8'),
-      );
-      expect(Object.keys(config.mcp)).toEqual([]);
-      expect(config.agent.build.tools.execute).not.toBe(true);
-      expect(config.agent.build.tools.call_integration_tool).toBe(true);
-      expect(
-        warn.mock.calls.some(([message]) =>
-          String(message).includes('foo.bar'),
-        ),
-      ).toBe(true);
-    } finally {
-      warn.mockRestore();
-    }
+    expect(runtime.env.OPENCODE_EXPERIMENTAL_CODE_MODE).toBe('1');
+    const config = JSON.parse(
+      await readFile(join(runtime.directory, 'opencode.json'), 'utf8'),
+    );
+    expect(Object.keys(config.mcp).sort()).toEqual([
+      'foo_bar',
+      'foo_bar__roomote_2',
+    ]);
+    expect(config.agent.build.tools.execute).toBe(true);
+    expect(config.agent.build.tools['foo_bar_*']).toBe(true);
+    expect(config.agent.build.tools['foo_bar__roomote_2_*']).toBe(true);
   });
 
   it('posts the capability-scoped bridge config when mounting an integration mid-turn', async () => {
@@ -950,13 +947,19 @@ describe('Fast native OpenCode tool bridge', () => {
         result: {
           counts: {
             packaged: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
-            repository: 0,
+            repository: 1,
             settings: 0,
             instance: 0,
-            total: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
+            total: FAST_AGENT_PACKAGED_SKILL_NAMES.length + 1,
           },
           skills: expect.arrayContaining([
             expect.objectContaining({ id: 'packaged:security-review' }),
+            expect.objectContaining({
+              id: repositorySkillId,
+              environmentIds: ['environment-1'],
+              repository: 'RooCodeInc/Roomote',
+              source: 'repository',
+            }),
           ]),
         },
       });
@@ -1292,7 +1295,6 @@ describe('Fast native OpenCode tool bridge', () => {
     const runtime = await getFastAgentNativeToolRuntime(
       'mid-turn-capability-refresh',
       integrations,
-      { codeModeIntegrationsEnabled: true },
     );
     expect(runtime.codeModeIntegrationsActive).toBe(true);
     const executor = vi.fn(async () => ({ found: true }));
@@ -1394,22 +1396,24 @@ describe('Fast native OpenCode tool bridge', () => {
       mcp: Record<string, unknown>;
     };
 
-    expect(Object.keys(config.mcp).sort()).toEqual(['gbrain', 'roomote']);
+    expect(Object.keys(config.mcp).sort()).toEqual([
+      'gbrain',
+      'github',
+      'roomote',
+    ]);
     expect(config.agent.build.tools).toMatchObject({
       'roomote_*': true,
       'gbrain_*': true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools]: true,
-      [FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential]: true,
     });
-    expect(config.agent.build.tools).not.toHaveProperty('github_*');
+    expect(config.agent.build.tools).toHaveProperty('github_*', true);
     const toolsDirectory = join(runtime.env.OPENCODE_CONFIG_DIR!, 'tools');
     const toolFiles = await readdir(toolsDirectory);
     expect(toolFiles).toEqual(
       expect.arrayContaining([
         'find_integration_tools.js',
-        'call_integration_tool.js',
         'list_integration_keys.js',
         'prepare_integration_key.js',
       ]),

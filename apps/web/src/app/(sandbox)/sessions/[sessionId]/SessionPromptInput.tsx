@@ -416,6 +416,34 @@ export function SessionPromptInput({
     });
   };
 
+  const handleModelSelectionChange = (selection: {
+    model: string;
+    reasoningEffort: ReasoningEffort | null;
+  }) => {
+    // The picker emits model and effort together (a model switch can
+    // normalize the effort); applying both atomically keeps the voice-turn
+    // selection ref from observing a stale intermediate model.
+    const previousModel = model;
+    const previousReasoningEffort = reasoningEffort;
+    setModel(selection.model);
+    setReasoningEffort(selection.reasoningEffort);
+    onModelSelectionChange?.(selection);
+    void updateModelSelection(
+      {
+        model: selection.model || null,
+        reasoningEffort: selection.reasoningEffort,
+      },
+      () => {
+        setModel(previousModel);
+        setReasoningEffort(previousReasoningEffort);
+        onModelSelectionChange?.({
+          model: previousModel || null,
+          reasoningEffort: previousReasoningEffort,
+        });
+      },
+    );
+  };
+
   const controlsDisabled = isBusy || isUpdatingModelSelection;
 
   return (
@@ -493,6 +521,7 @@ export function SessionPromptInput({
                 onModelChange={handleModelChange}
                 reasoningEffort={reasoningEffort}
                 onReasoningEffortChange={handleReasoningEffortChange}
+                onModelSelectionChange={handleModelSelectionChange}
                 defaultModelId={defaultModelId}
                 defaultReasoningEffort={defaultReasoningEffort}
                 disabled={controlsDisabled}

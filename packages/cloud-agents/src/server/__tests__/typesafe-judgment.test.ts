@@ -1,14 +1,21 @@
-const { mockResolveModelProviderEnvValue, mockGetJudgmentSelection, mockEnv } =
-  vi.hoisted(() => ({
-    mockResolveModelProviderEnvValue: vi.fn(),
-    mockGetJudgmentSelection: vi.fn(),
-    mockEnv: {
-      R_JUDGMENT_MODEL: undefined as string | undefined,
-      R_JUDGMENT_UPSTREAM_URL: undefined as string | undefined,
-      R_JUDGMENT_UPSTREAM_API_KEY: undefined as string | undefined,
-      R_JUDGMENT_SHADOW: undefined as string | undefined,
-    },
-  }));
+const {
+  mockResolveModelProviderEnvValue,
+  mockGetJudgmentSelection,
+  mockGenerateTrackedNonTaskObject,
+  mockResolveNonTaskHelperModel,
+  mockEnv,
+} = vi.hoisted(() => ({
+  mockResolveModelProviderEnvValue: vi.fn(),
+  mockGetJudgmentSelection: vi.fn(),
+  mockGenerateTrackedNonTaskObject: vi.fn(),
+  mockResolveNonTaskHelperModel: vi.fn(),
+  mockEnv: {
+    R_JUDGMENT_MODEL: undefined as string | undefined,
+    R_JUDGMENT_UPSTREAM_URL: undefined as string | undefined,
+    R_JUDGMENT_UPSTREAM_API_KEY: undefined as string | undefined,
+    R_JUDGMENT_SHADOW: undefined as string | undefined,
+  },
+}));
 
 vi.mock('@roomote/env', () => ({ Env: mockEnv }));
 
@@ -17,8 +24,19 @@ vi.mock('@roomote/db/server', () => ({
   resolveModelProviderEnvValue: mockResolveModelProviderEnvValue,
 }));
 
+vi.mock('../non-task-provider-usage', () => ({
+  generateTrackedNonTaskObject: mockGenerateTrackedNonTaskObject,
+  NON_TASK_INFERENCE_SURFACES: {
+    decisionModelFallback: 'decision_model_fallback',
+  },
+  resolveNonTaskHelperModel: mockResolveNonTaskHelperModel,
+}));
+
 import {
   evaluateTypeSafeJudgments,
+  evaluateDecisionModel,
+  resetDecisionModelCache,
+  resolveDecisionModel,
   resetJudgmentBackendCache,
   scoreTypeSafeRelevance,
 } from '../typesafe-judgment';
@@ -73,11 +91,16 @@ describe('evaluateTypeSafeJudgments', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetJudgmentBackendCache();
+    resetDecisionModelCache();
     mockEnv.R_JUDGMENT_MODEL = undefined;
     mockEnv.R_JUDGMENT_UPSTREAM_URL = undefined;
     mockEnv.R_JUDGMENT_UPSTREAM_API_KEY = undefined;
     mockEnv.R_JUDGMENT_SHADOW = undefined;
     mockGetJudgmentSelection.mockResolvedValue(null);
+    mockResolveNonTaskHelperModel.mockResolvedValue({
+      model: 'openrouter/helper',
+      catalogModelId: 'openrouter/helper',
+    });
     mockKeys({ R_TYPESAFE_API_KEY: 'ts-key' });
   });
 
@@ -244,7 +267,29 @@ describe('evaluateTypeSafeJudgments', () => {
       ).resolves.toEqual(directAnswers);
 
       await vi.waitFor(() => expect(warn).toHaveBeenCalledTimes(1));
-      expect(warn.mock.calls[0]?.[0]).toContain('ECONNREFUSED');
+      expect(warn.mock.calls[0]?.[0]).toContain('request_failed');
+    });
+
+    it('logs an upstream error as a status, never the response body', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ answers: directAnswers })),
+        )
+        .mockResolvedValueOnce(
+          new Response('could not parse state: secret', { status: 400 }),
+        );
+      vi.stubGlobal('fetch', fetchMock);
+
+      await expect(
+        evaluateTypeSafeJudgments({ state: { text: 'secret' }, questions }),
+      ).resolves.toEqual(directAnswers);
+
+      await vi.waitFor(() => expect(warn).toHaveBeenCalledTimes(1));
+      const line = warn.mock.calls[0]?.[0] as string;
+      expect(line).toContain('http_400');
+      expect(line).not.toContain('secret');
     });
 
     it('does not shadow the upstream against itself', async () => {
@@ -300,6 +345,57 @@ describe('evaluateTypeSafeJudgments', () => {
       model: 'jev-latest',
       questions,
     });
+  });
+
+  it('resolves the hosted judgment model before the helper fallback', async () => {
+    await expect(resolveDecisionModel()).resolves.toEqual({
+      kind: 'judgment',
+      supportsHighVolumeDecisions: true,
+    });
+    expect(mockResolveNonTaskHelperModel).not.toHaveBeenCalled();
+  });
+
+  it('uses the resolved helper model for ordinary decision fallback', async () => {
+    mockKeys({});
+    mockGetJudgmentSelection.mockResolvedValue('off');
+    mockGenerateTrackedNonTaskObject.mockResolvedValue({
+      object: { answers: directAnswers },
+    });
+
+    await expect(
+      evaluateDecisionModel({ state: 'hi', questions }),
+    ).resolves.toEqual(directAnswers);
+    expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: 'openrouter/helper',
+        modelRole: 'small',
+        surface: 'decision_model_fallback',
+      }),
+    );
+  });
+
+  it('short-circuits high-volume decisions before resolving the helper', async () => {
+    mockKeys({});
+
+    await expect(
+      resolveDecisionModel({ highVolume: true }),
+    ).resolves.toBeNull();
+    expect(mockResolveNonTaskHelperModel).not.toHaveBeenCalled();
+
+    await expect(
+      evaluateDecisionModel({ state: 'hi', questions, highVolume: true }),
+    ).resolves.toBeNull();
+    expect(mockResolveNonTaskHelperModel).not.toHaveBeenCalled();
+    expect(mockGenerateTrackedNonTaskObject).not.toHaveBeenCalled();
+  });
+
+  it('does not cascade a hosted judgment failure into a helper call', async () => {
+    mockFetchResponse({ error: 'overloaded' }, { status: 529 });
+
+    await expect(
+      evaluateDecisionModel({ state: 'hi', questions }),
+    ).rejects.toThrow('HTTP 529');
+    expect(mockGenerateTrackedNonTaskObject).not.toHaveBeenCalled();
   });
 
   it('stays off when an admin turned the judgment model off in Settings', async () => {

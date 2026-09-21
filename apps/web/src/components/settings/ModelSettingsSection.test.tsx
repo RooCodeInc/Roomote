@@ -455,33 +455,14 @@ describe('ModelSettingsSection', () => {
 
     const { container } = renderModelSettingsSection();
 
-    const triggers = Array.from(
+    const pickerTriggers = Array.from(
       container.querySelectorAll<HTMLButtonElement>(
-        '[data-slot="select-trigger"]',
+        '[data-slot="model-reasoning-picker-trigger"]',
       ),
     );
-    // 7 model selects + 7 reasoning selects + the judgment model select + the
-    // add-model provider select.
-    expect(triggers).toHaveLength(16);
-    expect(triggers[0]).toBeDisabled();
-    expect(triggers[2]).toBeDisabled();
-    expect(triggers[4]).toBeDisabled();
-    expect(triggers[6]).toBeDisabled();
-    expect(triggers[8]).toBeDisabled();
-    expect(triggers[10]).toBeDisabled();
-    expect(triggers[12]).toBeDisabled();
-    // Reasoning selects stay enabled unless the reasoning env override is set.
-    expect(triggers[1]).not.toBeDisabled();
-    expect(triggers[3]).not.toBeDisabled();
-    expect(triggers[5]).not.toBeDisabled();
-    expect(triggers[7]).not.toBeDisabled();
-    expect(triggers[9]).not.toBeDisabled();
-    expect(triggers[11]).not.toBeDisabled();
-    expect(triggers[13]).not.toBeDisabled();
-    // The judgment model and add-model provider selects stay enabled
-    // regardless of env-managed runtime models.
-    expect(triggers[14]).not.toBeDisabled();
-    expect(triggers[15]).not.toBeDisabled();
+    expect(pickerTriggers).toHaveLength(7);
+    // The combined picker stays available because reasoning is not env-managed.
+    for (const trigger of pickerTriggers) expect(trigger).not.toBeDisabled();
 
     expect(screen.queryByText('Make default')).toBeNull();
     expect(screen.queryByText('Env-managed')).toBeNull();
@@ -504,15 +485,13 @@ describe('ModelSettingsSection', () => {
 
     const triggers = Array.from(
       container.querySelectorAll<HTMLButtonElement>(
-        '[data-slot="select-trigger"]',
+        '[data-slot="model-reasoning-picker-trigger"]',
       ),
     );
 
-    expect(triggers).toHaveLength(16);
+    expect(triggers).toHaveLength(7);
     expect(triggers[0]).not.toBeDisabled();
-    expect(triggers[1]).toBeDisabled();
-    expect(triggers[12]).not.toBeDisabled();
-    expect(triggers[13]).toBeDisabled();
+    expect(triggers[6]).not.toBeDisabled();
     expect(screen.queryByText('Reasoning env-managed')).toBeNull();
     expect(
       screen.getByLabelText(
@@ -585,8 +564,10 @@ describe('ModelSettingsSection', () => {
 
     const { container } = renderModelSettingsSection();
 
-    const triggers = container.querySelectorAll('[data-slot="select-trigger"]');
-    expect(triggers).toHaveLength(16);
+    const triggers = container.querySelectorAll(
+      '[data-slot="model-reasoning-picker-trigger"]',
+    );
+    expect(triggers).toHaveLength(7);
     for (const trigger of Array.from(triggers)) {
       expect(trigger).not.toBeDisabled();
     }
@@ -621,9 +602,7 @@ describe('ModelSettingsSection', () => {
 
     const modelMappingSection = screen.getByTestId('section-Model mapping');
     expect(within(modelMappingSection).getAllByText('High')).toHaveLength(2);
-    expect(
-      within(modelMappingSection).getByText('Extra high'),
-    ).toBeInTheDocument();
+    expect(within(modelMappingSection).getByText('X-High')).toBeInTheDocument();
     // Orchestration, helper, vision, and explore fall back to Low.
     expect(within(modelMappingSection).getAllByText('Low')).toHaveLength(4);
   });
@@ -649,6 +628,16 @@ describe('ModelSettingsSection', () => {
         name: 'Add a model routing rule',
       }),
     );
+    const routingModelTrigger = screen.getByRole('button', {
+      name: 'Routing rule 1 model and reasoning',
+    });
+    expect(routingModelTrigger).toHaveAttribute(
+      'data-slot',
+      'model-reasoning-picker-trigger',
+    );
+    fireEvent.click(routingModelTrigger);
+    fireEvent.click(screen.getByRole('option', { name: 'GLM 5.2' }));
+    fireEvent.keyDown(document, { key: 'Escape' });
     const condition = screen.getByLabelText('Routing rule 1 condition');
     fireEvent.change(condition, {
       target: { value: 'Routine tasks where speed matters' },
@@ -661,7 +650,7 @@ describe('ModelSettingsSection', () => {
       expect.objectContaining({
         codingModelRoutingRules: [
           {
-            modelId: 'openrouter/openai/gpt-5.4',
+            modelId: 'openrouter/z-ai/glm-5.2',
             reasoningEffort: 'medium',
             condition: 'Routine tasks where speed matters',
           },
@@ -755,12 +744,52 @@ describe('ModelSettingsSection', () => {
     data.models[0]!.metadata.supportsReasoning = false;
     settingsData.current = data;
 
-    const { container } = renderModelSettingsSection();
+    renderModelSettingsSection();
 
-    const triggers = container.querySelectorAll('[data-slot="select-trigger"]');
-    // 7 model selects + the judgment model select + the add-model provider
-    // select; no reasoning selectors.
-    expect(triggers).toHaveLength(9);
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Coding model and reasoning' }),
+    );
+    expect(screen.getByText('N/A')).toBeInTheDocument();
+  });
+
+  it('limits the same-as-coding picker to the effective coding model efforts', () => {
+    const data = buildSettingsData();
+    // The coding default model publishes a restricted effort list; secondary
+    // roles resolve to it via the "Same as coding model" sentinel.
+    (data.models[0]!.metadata as TaskModelMetadata).supportedReasoningEfforts =
+      ['low', 'high'];
+    settingsData.current = data;
+
+    renderModelSettingsSection();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Orchestration model and reasoning' }),
+    );
+
+    // Two supported efforts (low, high) rather than the unrestricted scale.
+    const slider = screen.getByRole('slider', { name: 'Reasoning level' });
+    expect(slider).toHaveAttribute('aria-valuemax', '1');
+  });
+
+  it('limits the same-as-coding sentinel for env-managed coding models', () => {
+    // The coding model comes from an env-only override; the settings catalog
+    // still lists it (with metadata), so the sentinel stays constrained.
+    const data = buildSettingsData({
+      codingManagedByEnv: true,
+      codingEffectiveModelId: 'openrouter/openai/gpt-5.4',
+    });
+    (data.models[0]!.metadata as TaskModelMetadata).supportedReasoningEfforts =
+      ['low', 'high'];
+    settingsData.current = data;
+
+    renderModelSettingsSection();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Orchestration model and reasoning' }),
+    );
+
+    const slider = screen.getByRole('slider', { name: 'Reasoning level' });
+    expect(slider).toHaveAttribute('aria-valuemax', '1');
   });
 
   it('clears orchestration reasoning when switching to a non-reasoning model', async () => {
@@ -773,12 +802,12 @@ describe('ModelSettingsSection', () => {
     data.models[1]!.metadata.supportsReasoning = false;
     settingsData.current = data;
 
-    const { container } = renderModelSettingsSection();
-    const triggers = container.querySelectorAll<HTMLButtonElement>(
-      '[data-slot="select-trigger"]',
+    renderModelSettingsSection();
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Orchestration model and reasoning',
+      }),
     );
-
-    fireEvent.click(triggers[2]!);
     fireEvent.click(await screen.findByRole('option', { name: 'GLM 5.2' }));
 
     await waitFor(() => {
@@ -791,10 +820,10 @@ describe('ModelSettingsSection', () => {
       }),
     );
     expect(
-      screen.queryByRole('combobox', {
-        name: 'Orchestration model reasoning level',
+      screen.getByRole('button', {
+        name: 'Orchestration model and reasoning',
       }),
-    ).toBeNull();
+    ).toHaveTextContent('GLM 5.2');
   });
 
   it('stops retrying a rejected save and allows a deliberate retry', async () => {
@@ -807,11 +836,11 @@ describe('ModelSettingsSection', () => {
       .mockRejectedValueOnce(new Error('Network unavailable'))
       // Bound a regression to one extra attempt instead of an infinite loop.
       .mockImplementationOnce(() => new Promise(() => {}));
-    const { container } = renderModelSettingsSection();
+    renderModelSettingsSection();
     const orchestrationTrigger = () =>
-      container.querySelectorAll<HTMLButtonElement>(
-        '[data-slot="select-trigger"]',
-      )[2]!;
+      screen.getByRole('button', {
+        name: 'Orchestration model and reasoning',
+      });
     const originalSelection = orchestrationTrigger().textContent;
 
     fireEvent.click(orchestrationTrigger());
@@ -825,7 +854,6 @@ describe('ModelSettingsSection', () => {
     expect(orchestrationTrigger().textContent).toBe(originalSelection);
 
     updateMutateAsyncMock.mockReset().mockResolvedValue({ success: true });
-    fireEvent.click(orchestrationTrigger());
     fireEvent.click(await screen.findByRole('option', { name: 'GLM 5.2' }));
     await waitFor(() => expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1));
     expect(orchestrationTrigger()).toHaveTextContent('GLM 5.2');
@@ -1842,7 +1870,7 @@ describe('ModelSettingsSection', () => {
 
     expect(screen.getByText('Advisor model')).toBeInTheDocument();
     expect(
-      screen.getByRole('combobox', { name: 'Advisor model reasoning level' }),
+      screen.getByRole('button', { name: 'Advisor model and reasoning' }),
     ).toBeInTheDocument();
   });
 
@@ -1853,8 +1881,8 @@ describe('ModelSettingsSection', () => {
 
     expect(screen.getByText('Orchestration model')).toBeInTheDocument();
     expect(
-      screen.getByRole('combobox', {
-        name: 'Orchestration model reasoning level',
+      screen.getByRole('button', {
+        name: 'Orchestration model and reasoning',
       }),
     ).toBeInTheDocument();
   });
@@ -1866,7 +1894,7 @@ describe('ModelSettingsSection', () => {
 
     expect(screen.getByText('Explore model')).toBeInTheDocument();
     expect(
-      screen.getByRole('combobox', { name: 'Explore model reasoning level' }),
+      screen.getByRole('button', { name: 'Explore model and reasoning' }),
     ).toBeInTheDocument();
   });
 });

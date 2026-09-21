@@ -50,7 +50,10 @@ import {
 } from '@/components/system';
 import type { LucideIcon } from '@/components/system';
 import { Section } from '@/components/settings';
-import { ReasoningEffortSelect } from '@/components/tasks/ReasoningEffortSelect';
+import {
+  ModelReasoningPicker,
+  ModelReasoningPickerTrigger,
+} from '@/components/tasks/ModelReasoningPicker';
 import { JudgmentModelRow } from './JudgmentModelRow';
 import {
   CodingModelRoutingRulesEditor,
@@ -62,10 +65,7 @@ import {
   type CodingModelRoutingRulesDraft,
 } from './CodingModelRoutingRulesEditor';
 import { formatMetadataSummary } from './model-metadata';
-import {
-  TaskModelSelect,
-  type EditableRuntimeModelOption,
-} from './TaskModelSelect';
+import { type EditableRuntimeModelOption } from './TaskModelSelect';
 import {
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
   DEFAULT_MODEL_ROLE_REASONING_EFFORTS,
@@ -226,6 +226,7 @@ function TaskModelRoleEditor({
   reasoningManagedByEnv,
   selectValue,
   optionGroups,
+  codingModelMetadata,
   supportsReasoning,
   reasoningEffort,
   onModelChange,
@@ -237,12 +238,15 @@ function TaskModelRoleEditor({
   reasoningManagedByEnv: boolean;
   selectValue: string;
   optionGroups: DisplayModelProviderGroup<EditableRuntimeModelOption>[];
+  /** Metadata of the effective coding model, constraining the sentinel. */
+  codingModelMetadata?: TaskModelMetadata | null;
   supportsReasoning: boolean;
   reasoningEffort: ReasoningEffort | null;
   onModelChange: (value: string) => void;
   onReasoningChange: (value: ReasoningEffort | null) => void;
   children?: ReactNode;
 }) {
+  const [pickerOpen, setPickerOpen] = useState(false);
   const Icon = config.icon;
   const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[config.role];
   const lockLabel =
@@ -257,6 +261,25 @@ function TaskModelRoleEditor({
       : managedByEnv
         ? `Set by ${descriptor.modelEnvVar}, not changeable in the UI.`
         : `Set by ${descriptor.reasoningEnvVar}, not changeable in the UI.`;
+  const sameAsCoding = descriptor.modelFallback === 'coding';
+  const models = optionGroups.flatMap((group) =>
+    group.items.map((item) => ({ ...item, providerLabel: group.label })),
+  );
+  const pickerModels = sameAsCoding
+    ? [
+        {
+          id: SAME_AS_CODING_MODEL_VALUE,
+          displayName: 'Same as coding model',
+          // "Same as coding" resolves to the effective coding model, so its
+          // supported reasoning efforts constrain the picker as well.
+          metadata: codingModelMetadata ?? null,
+        },
+        ...models,
+      ]
+    : models;
+  const selectedModel = pickerModels.find(({ id }) => id === selectValue);
+  const selectedReasoningEffort =
+    reasoningEffort ?? DEFAULT_MODEL_ROLE_REASONING_EFFORTS[config.role];
 
   return (
     <div className="flex items-start gap-3 py-3 first:pt-0 last:pb-0">
@@ -278,29 +301,34 @@ function TaskModelRoleEditor({
           </div>
           <p className="text-xs text-muted-foreground">{config.description}</p>
         </div>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <TaskModelSelect
-            value={selectValue}
-            disabled={managedByEnv || optionGroups.length === 0}
-            placeholder={config.placeholder}
-            optionGroups={optionGroups}
-            sameAsCodingModelValue={
-              descriptor.modelFallback === 'coding'
-                ? SAME_AS_CODING_MODEL_VALUE
-                : undefined
-            }
-            onValueChange={onModelChange}
-          />
-          {supportsReasoning && (
-            <ReasoningEffortSelect
-              value={reasoningEffort}
-              defaultEffort={DEFAULT_MODEL_ROLE_REASONING_EFFORTS[config.role]}
-              onChange={onReasoningChange}
-              disabled={reasoningManagedByEnv}
-              ariaLabel={config.reasoningAriaLabel}
+        <ModelReasoningPicker
+          open={pickerOpen}
+          onOpenChange={setPickerOpen}
+          trigger={
+            <ModelReasoningPickerTrigger
+              label={selectedModel?.displayName ?? config.placeholder}
+              reasoningEffort={
+                supportsReasoning ? selectedReasoningEffort : null
+              }
+              disabled={
+                (managedByEnv && reasoningManagedByEnv) ||
+                optionGroups.length === 0
+              }
+              appearance="select"
+              ariaLabel={`${config.label} and reasoning`}
             />
-          )}
-        </div>
+          }
+          models={pickerModels}
+          model={selectValue}
+          onModelChange={onModelChange}
+          reasoningEffort={reasoningEffort}
+          defaultReasoningEffort={
+            DEFAULT_MODEL_ROLE_REASONING_EFFORTS[config.role]
+          }
+          onReasoningEffortChange={onReasoningChange}
+          modelDisabled={managedByEnv}
+          reasoningDisabled={reasoningManagedByEnv}
+        />
         {children}
       </div>
     </div>
@@ -1003,12 +1031,16 @@ export function ModelSettingsSection({
   );
 
   const codingModelOptions = useMemo<EditableRuntimeModelOption[]>(() => {
+    const metadataById = new Map(
+      models.map((model) => [model.id, model.metadata ?? null]),
+    );
     const enabledOptions = models
       .filter((model) => enabledModelSet.has(model.id))
       .map((model) => ({
         id: model.id,
         displayName: model.displayName,
         family: model.family,
+        metadata: model.metadata ?? null,
       }));
     const codingStatus = settingsData?.runtimeModels.codingModel;
 
@@ -1024,6 +1056,7 @@ export function ModelSettingsSection({
         {
           id: codingStatus.effectiveModelId,
           displayName: codingStatus.effectiveModelId,
+          metadata: metadataById.get(codingStatus.effectiveModelId) ?? null,
         },
       ];
     }
@@ -1031,12 +1064,16 @@ export function ModelSettingsSection({
     return enabledOptions;
   }, [enabledModelSet, models, settingsData]);
   const helperModelOptions = useMemo<EditableRuntimeModelOption[]>(() => {
+    const metadataById = new Map(
+      models.map((model) => [model.id, model.metadata ?? null]),
+    );
     const options: EditableRuntimeModelOption[] = (
       settingsData?.helperModelOptions ?? []
     ).map((option) => ({
       id: option.id,
       displayName: option.displayName,
       family: option.family,
+      metadata: metadataById.get(option.id) ?? null,
     }));
     const appendEffectiveModel = (
       effectiveModelId: string | null | undefined,
@@ -1064,7 +1101,7 @@ export function ModelSettingsSection({
     }
 
     return options;
-  }, [settingsData]);
+  }, [models, settingsData]);
   const groupOptions = useMemo(
     () => ({
       chatgptConnected,
@@ -1114,6 +1151,11 @@ export function ModelSettingsSection({
     },
     {} as Record<TaskModelRole, string>,
   );
+  // "Same as coding model" resolves to the effective coding model, including
+  // env-managed overrides; its metadata constrains the sentinel's efforts.
+  const effectiveCodingModelMetadata =
+    models.find((model) => model.id === roleSelectValues.coding)?.metadata ??
+    null;
 
   // Reasoning selectors are hidden when the resolved model for a role is
   // known not to support configurable reasoning. Unknown support (missing
@@ -1288,18 +1330,22 @@ export function ModelSettingsSection({
   };
 
   const updateRoleModel = (role: TaskModelRole, modelId: string | null) => {
+    // Derive from the authoritative draft ref: the picker can emit a model
+    // change and a reasoning change in the same event, and rebuilding from
+    // the render-scoped roleDrafts would clobber the earlier update.
+    const currentRoles = draftStateRef.current.roles;
     const resolvedModelId =
-      role === 'coding' ? modelId : (modelId ?? roleDrafts.coding.modelId);
+      role === 'coding' ? modelId : (modelId ?? currentRoles.coding.modelId);
 
     applyDraftUpdates(
       {
         roles: {
-          ...roleDrafts,
+          ...currentRoles,
           [role]: {
-            ...roleDrafts[role],
+            ...currentRoles[role],
             modelId,
             reasoningEffort: modelSupportsReasoning(resolvedModelId)
-              ? roleDrafts[role].reasoningEffort
+              ? currentRoles[role].reasoningEffort
               : null,
           },
         },
@@ -1312,12 +1358,14 @@ export function ModelSettingsSection({
     role: TaskModelRole,
     reasoningEffort: ReasoningEffort | null,
   ) => {
+    const currentRoles = draftStateRef.current.roles;
+
     applyDraftUpdates(
       {
         roles: {
-          ...roleDrafts,
+          ...currentRoles,
           [role]: {
-            ...roleDrafts[role],
+            ...currentRoles[role],
             reasoningEffort,
           },
         },
@@ -1783,6 +1831,7 @@ export function ModelSettingsSection({
                 reasoningManagedByEnv={status.reasoningManagedByEnv}
                 selectValue={roleSelectValues[config.role]}
                 optionGroups={roleOptionGroups[config.role]}
+                codingModelMetadata={effectiveCodingModelMetadata}
                 supportsReasoning={roleSupportsReasoning[config.role]}
                 reasoningEffort={roleDrafts[config.role].reasoningEffort}
                 onModelChange={(value) =>

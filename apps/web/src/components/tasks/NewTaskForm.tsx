@@ -22,7 +22,12 @@ import {
   SessionModelSwitcher,
   TaskPromptInput,
 } from '@/components/tasks';
-import { BasicTooltip, Button, HatGlasses } from '@/components/system';
+import {
+  BasicTooltip,
+  Button,
+  HatGlasses,
+  RetryableLoadError,
+} from '@/components/system';
 
 const DEFAULT_PROMPT_PLACEHOLDER = 'What do you want to do?';
 
@@ -42,6 +47,7 @@ type NewTaskFormProps = {
   autoFocus?: boolean;
   textareaMaxHeight?: number;
   promptContainerRef?: Ref<HTMLDivElement>;
+  modelSelectorSize?: 'compact' | 'base';
 };
 
 export function NewTaskForm({
@@ -54,6 +60,7 @@ export function NewTaskForm({
   autoFocus = true,
   textareaMaxHeight,
   promptContainerRef,
+  modelSelectorSize = 'compact',
 }: NewTaskFormProps) {
   const { managedAccess = DEFAULT_MANAGED_DEPLOYMENT_ACCESS } =
     useAuthorizedUser();
@@ -84,7 +91,13 @@ export function NewTaskForm({
     startFastSession,
     error: launcherError,
     clearError: clearLauncherError,
-  } = useFastSessionLauncher({ onSessionStarted: onTaskStarted });
+    retryableError: fastSessionError,
+    retryFastSession,
+  } = useFastSessionLauncher({
+    onSessionStarted: onTaskStarted,
+    // The inline Retry below already surfaces start failures here.
+    showErrorToast: false,
+  });
   const [submitError, setSubmitError] = useState<unknown>(null);
   const launchTaskModels = useLaunchTaskModels();
   const defaultModelId = launchTaskModels.data?.defaultFastModelId;
@@ -230,6 +243,7 @@ export function NewTaskForm({
             onReasoningEffortChange={setSelectedReasoningEffort}
             defaultModelId={defaultModelId}
             defaultReasoningEffort={defaultReasoningEffort}
+            size={modelSelectorSize}
           />
         }
         submitLeadingAction={
@@ -254,6 +268,16 @@ export function NewTaskForm({
           ) : null
         }
       />
+      {fastSessionError ? (
+        <div role="alert">
+          <RetryableLoadError
+            className="mt-3 p-4 md:p-4 [&_[data-slot=empty-icon]]:mb-0"
+            message={fastSessionError.message}
+            isRetrying={isFastSessionPending}
+            onRetry={() => void retryFastSession()}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

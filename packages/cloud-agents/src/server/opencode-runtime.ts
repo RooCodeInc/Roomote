@@ -261,10 +261,8 @@ const PROMPT_ONLY_SUBAGENTS = {
   },
 } as const;
 
-function buildPromptOnlySubagents(options: {
-  codeModeIntegrationsEnabled?: boolean;
-}) {
-  const tools = buildFastAgentSubagentToolFilter(options);
+function buildPromptOnlySubagents() {
+  const tools = buildFastAgentSubagentToolFilter();
   if (tools === FAST_AGENT_SUBAGENT_TOOL_FILTER) return PROMPT_ONLY_SUBAGENTS;
   return {
     [ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME]: {
@@ -282,7 +280,6 @@ type NonTaskOpenCodeRuntimeOptions = {
   preserveReasoning?: boolean;
   promptOnlySubagents?: boolean;
   reasoningOverride?: { model: string; effort: ReasoningEffort };
-  codeModeIntegrations?: boolean;
 };
 
 let openCodeIdentityPluginUrl: string | undefined;
@@ -311,9 +308,7 @@ function buildRestrictedNonTaskConfig(
 
   return {
     subagent_depth: 2,
-    agent: buildPromptOnlySubagents({
-      codeModeIntegrationsEnabled: options.codeModeIntegrations === true,
-    }),
+    agent: buildPromptOnlySubagents(),
     plugin: [getOpenCodeIdentityPluginUrl()],
     permission: { ...NON_TASK_TOOL_PERMISSION_DENIALS, task: 'allow' },
   };
@@ -1037,7 +1032,6 @@ class OpenCodeSdkServerPool {
     preserveReasoning?: boolean;
     promptOnlySubagents?: boolean;
     reasoningOverride?: { model: string; effort: ReasoningEffort };
-    codeModeIntegrations?: boolean;
     startTimeoutMs: number;
     useConfiguredServer?: boolean;
   }): Promise<OpenCodeSdkServerLease> {
@@ -1059,7 +1053,6 @@ class OpenCodeSdkServerPool {
       preserveReasoning: params.preserveReasoning,
       promptOnlySubagents: params.promptOnlySubagents,
       reasoningOverride: params.reasoningOverride,
-      codeModeIntegrations: params.codeModeIntegrations,
     });
     const cached = this.cache.get(cacheKey);
 
@@ -1077,7 +1070,6 @@ class OpenCodeSdkServerPool {
           preserveReasoning: params.preserveReasoning,
           promptOnlySubagents: params.promptOnlySubagents,
           reasoningOverride: params.reasoningOverride,
-          codeModeIntegrations: params.codeModeIntegrations,
         },
       )
         .then((server) => this.cacheStartedServer(cacheKey, server))
@@ -1219,12 +1211,6 @@ export function leaseOpenCodeSdkServer(params: {
   promptOnlySubagents?: boolean;
   /** Override reasoning only for the model selected by this request. */
   reasoningOverride?: { model: string; effort: ReasoningEffort };
-  /**
-   * Code-mode integrations experiment: helper subagents drop the generic
-   * integration dispatcher. Keyed into the pool so experiment and
-   * non-experiment conversations never share a server.
-   */
-  codeModeIntegrations?: boolean;
   startTimeoutMs: number;
   /**
    * Whether an operator-supplied OpenCode server may serve the request.
