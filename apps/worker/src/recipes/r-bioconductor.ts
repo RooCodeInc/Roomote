@@ -65,15 +65,18 @@ function buildResolveScript(packages: string[]): string {
     "writeLines(lines, '/roomote-recipe/direct-packages.tsv')",
     "if (!nzchar(system.file(package='renv', lib.loc=target))) install.packages('renv', lib=target)",
     `renv::settings$bioconductor.version(${JSON.stringify(R_BIOCONDUCTOR_RECIPE_BIOCONDUCTOR_VERSION)}, project='/roomote-recipe')`,
-    "renv::snapshot(project='/roomote-recipe', type='all', library=target, lockfile='/roomote-recipe/renv.lock', prompt=FALSE)",
+    "renv::snapshot(project='/roomote-recipe', library=.libPaths(), packages=unique(c('BiocManager', 'BiocVersion', 'renv', pkgs)), lockfile='/roomote-recipe/renv.lock', prompt=FALSE)",
   ].join(';');
 }
 
 /**
  * Put the mounted recipe library first while retaining R's base/site
- * libraries for runtime and bootstrap tooling. Direct packages are installed,
- * snapshotted, and probed explicitly from `target`, so a package preinstalled
- * in the image cannot masquerade as part of the recipe resolution.
+ * libraries for runtime and bootstrap tooling. Direct packages are installed
+ * and probed explicitly from `target`, so a package preinstalled in the image
+ * cannot masquerade as part of the recipe resolution. Snapshotting resolves
+ * their dependency closure across all visible libraries because BiocManager
+ * can legitimately reuse dependencies bundled in the pinned image; the clean
+ * restore step then proves that the resulting lock is self-contained.
  */
 function recipeLibrarySetup(): string[] {
   return [

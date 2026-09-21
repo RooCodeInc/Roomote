@@ -87,7 +87,11 @@ describe('worker recipe registry', () => {
     expect(scripts[1]).toContain(
       'settings$bioconductor.version("3.21", project=\'/roomote-recipe\')',
     );
-    expect(scripts[1]).toContain("type='all', library=target");
+    expect(scripts[1]).toContain('library=.libPaths()');
+    expect(scripts[1]).toContain(
+      "packages=unique(c('BiocManager', 'BiocVersion', 'renv', pkgs))",
+    );
+    expect(scripts[1]).not.toContain("type='all'");
   });
 
   it('labels CRAN provenance before Bioconductor and fails unsupported sources', () => {

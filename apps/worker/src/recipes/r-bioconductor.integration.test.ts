@@ -10,7 +10,7 @@ import type { EnvironmentRecipe } from '@roomote/types';
 import { rBioconductorWorkerAdapter } from './r-bioconductor';
 
 it(
-  'resolves and cleanly restores a real Bioconductor package',
+  'resolves and cleanly restores a Bioconductor package closure that reuses image libraries',
   async () => {
     const recipePath = await mkdtemp(
       join(tmpdir(), 'roomote-r-bioconductor-recipe-'),
@@ -18,7 +18,7 @@ it(
     const recipe: EnvironmentRecipe = {
       type: 'r-bioconductor',
       schema_version: 1,
-      request: { packages: ['BiocGenerics'] },
+      request: { packages: ['DESeq2', 'airway'] },
       request_fingerprint: 'a'.repeat(64),
     };
 
@@ -45,9 +45,12 @@ it(
       expect(lock.Bioconductor?.Version).toBe('3.21');
       expect(Object.keys(lock.Packages ?? {})).toEqual(
         expect.arrayContaining([
-          'BiocGenerics',
+          'airway',
           'BiocManager',
           'BiocVersion',
+          'cli',
+          'DESeq2',
+          'Matrix',
           'generics',
           'renv',
         ]),
@@ -56,5 +59,5 @@ it(
       await rm(recipePath, { recursive: true, force: true });
     }
   },
-  15 * 60 * 1_000,
+  20 * 60 * 1_000,
 );
