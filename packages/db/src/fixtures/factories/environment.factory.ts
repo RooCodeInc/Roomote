@@ -23,7 +23,8 @@ export const environmentFactory = Factory.define<
     return inserted;
   });
 
-  const envName = params.name || faker.lorem.words(2);
+  const envName =
+    params.name ?? `${faker.lorem.words(2)}-${faker.string.uuid()}`;
 
   return {
     userId: params.userId,
