@@ -78,8 +78,9 @@ describe('SessionCard', () => {
     expect(screen.queryByText('Roomote')).not.toBeInTheDocument();
     expect(screen.queryByText('1 execution')).not.toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'More session actions' }),
-    ).toBeInTheDocument();
+      screen.getByRole('button', { name: 'More session actions' })
+        .parentElement,
+    ).toHaveClass('self-start');
   });
 
   it('shows a contextual matching transcript snippet', () => {

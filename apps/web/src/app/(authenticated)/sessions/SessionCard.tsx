@@ -196,7 +196,7 @@ export function SessionCard({
         ) : null}
       </div>
       {session.canManage ? (
-        <div className="pointer-events-auto relative z-20 shrink-0 self-center">
+        <div className="pointer-events-auto relative z-20 shrink-0 self-start">
           <SessionActions sessionId={session.id} listRow />
         </div>
       ) : null}
