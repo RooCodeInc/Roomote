@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { formatDistanceToNow } from 'date-fns';
+import { format, formatDistanceToNow, isSameDay, isSameYear } from 'date-fns';
 
 import { formatInferenceCost, getUserDisplayName } from '@/lib';
 import {
@@ -61,6 +61,12 @@ type SessionCardData = {
   canManage?: boolean;
 };
 
+export function formatSessionMobileTimestamp(date: Date, now = new Date()) {
+  if (isSameDay(date, now)) return format(date, 'hh:mm b');
+  if (isSameYear(date, now)) return format(date, 'LLL d');
+  return format(date, 'LLL d Y', { useAdditionalWeekYearTokens: true });
+}
+
 export function SessionCard({
   session,
   viewerUserId,
@@ -83,6 +89,7 @@ export function SessionCard({
   const surfaceLabel = getSessionSurfaceLabel(session.sourceSurface);
   const hasOutputMetadata =
     session.pullRequests.length > 0 || session.artifactCount > 0;
+  const activityDate = new Date(session.activityAt * 1000);
   const artifactHref = session.singleArtifact
     ? getStandaloneArtifactViewUrl(
         '',
@@ -159,10 +166,11 @@ export function SessionCard({
               <SessionStatusBadge status={status} className="capitalize" />
             )}
           </div>
-          <span className="shrink-0 text-xs text-muted-foreground">
-            {formatDistanceToNow(new Date(session.activityAt * 1000), {
-              addSuffix: true,
-            })}
+          <span className="shrink-0 text-xs text-muted-foreground md:hidden">
+            {formatSessionMobileTimestamp(activityDate)}
+          </span>
+          <span className="hidden shrink-0 text-xs text-muted-foreground md:inline">
+            {formatDistanceToNow(activityDate, { addSuffix: true })}
           </span>
         </div>
         <p className="mt-1 line-clamp-2 wrap-anywhere text-base font-medium group-hover:underline">
@@ -196,7 +204,7 @@ export function SessionCard({
         ) : null}
       </div>
       {session.canManage ? (
-        <div className="pointer-events-auto relative z-20 shrink-0 self-start">
+        <div className="pointer-events-auto relative -top-2 z-20 shrink-0 self-start">
           <SessionActions sessionId={session.id} listRow />
         </div>
       ) : null}

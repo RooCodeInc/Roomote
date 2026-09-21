@@ -6,7 +6,19 @@ vi.mock('../../(sandbox)/sessions/[sessionId]/SessionDeleteAction', () => ({
   ),
 }));
 
-import { SessionCard } from './SessionCard';
+import { formatSessionMobileTimestamp, SessionCard } from './SessionCard';
+
+describe('formatSessionMobileTimestamp', () => {
+  const now = new Date(2026, 8, 21, 15, 30);
+
+  it.each([
+    [new Date(2026, 8, 21, 9, 5), '09:05 AM'],
+    [new Date(2026, 8, 20, 23, 59), 'Sep 20'],
+    [new Date(2025, 6, 4, 12, 0), 'Jul 4 2025'],
+  ])('formats %s for compact mobile display', (date, expected) => {
+    expect(formatSessionMobileTimestamp(date, now)).toBe(expected);
+  });
+});
 
 describe('SessionCard', () => {
   it('links to the transcript without repository or execution metadata', async () => {
@@ -80,7 +92,7 @@ describe('SessionCard', () => {
     expect(
       screen.getByRole('button', { name: 'More session actions' })
         .parentElement,
-    ).toHaveClass('self-start');
+    ).toHaveClass('self-start', '-top-2');
   });
 
   it('shows a contextual matching transcript snippet', () => {

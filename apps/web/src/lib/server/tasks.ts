@@ -22,6 +22,7 @@ import {
   desc,
   asc,
   inArray,
+  isVisibleTask,
   like,
   lt,
   isNull,
@@ -584,8 +585,7 @@ export const searchTasks = async ({
   includeIds?: string[];
 }): Promise<SearchTaskResult[]> => {
   const visibleConditions = [
-    isNull(tasks.deletedAt),
-    eq(tasks.visibility, 'visible'),
+    isVisibleTask(),
     customAutomationTaskAccess({ userId }),
   ];
 
