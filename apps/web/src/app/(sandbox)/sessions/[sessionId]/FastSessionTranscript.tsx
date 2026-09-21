@@ -95,6 +95,7 @@ import { CapabilityOfferCard } from './CapabilityOfferCard';
 import { PendingIntegrationKeys } from '@/components/sessions/PendingIntegrationKeys';
 import { openIntegrationKeyDialog } from '@/components/sessions/integration-key-dialog';
 import { useSessionTitlePropagation } from './use-session-title-propagation';
+import { Brain } from '@/components/system';
 
 import {
   AcpMessageItem,
@@ -126,6 +127,39 @@ type TranscriptOwner = {
 };
 
 const ROOMOTE_KICKOFF_LINK = /\r?\n\r?\n\[Open in Roomote\]\([^\r\n]+\)\s*$/;
+
+function renderMemorySavedMessage(message: AcpUiMessage) {
+  if (message.updateType !== ACP_ENVELOPE_EVENT_TYPES.MemorySaved) {
+    return undefined;
+  }
+
+  const payload = message.data as Record<string, unknown>;
+  const rawMemories = payload.memories;
+  const memories = Array.isArray(rawMemories)
+    ? rawMemories.filter(
+        (memory): memory is string => typeof memory === 'string',
+      )
+    : [];
+
+  return (
+    <details className="group my-2 text-xs text-muted-foreground">
+      <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-md px-1 py-1 hover:bg-muted/60 [&::-webkit-details-marker]:hidden">
+        <Brain className="size-3.5" />
+        <span>Saved to memory</span>
+        {memories.length > 0 ? (
+          <span className="text-muted-foreground/70">{memories.length}</span>
+        ) : null}
+      </summary>
+      {memories.length > 0 ? (
+        <ul className="mt-1 space-y-1 border-l border-border pl-5 text-muted-foreground">
+          {memories.map((memory) => (
+            <li key={memory}>{memory}</li>
+          ))}
+        </ul>
+      ) : null}
+    </details>
+  );
+}
 
 function getTranscriptMessageText(message: TranscriptMessage) {
   const text = getTextFromContentBlocks(message.contentBlocks) ?? undefined;
@@ -941,6 +975,8 @@ export function FastSessionTranscript({
   );
   const renderCapabilityOfferMessage = useCallback(
     (message: AcpUiMessage) => {
+      const memorySaved = renderMemorySavedMessage(message);
+      if (memorySaved !== undefined) return memorySaved;
       const offer = capabilityOffersByMessageId.get(message.id);
       if (!offer) return undefined;
       const introMessage: AcpUiMessage = {

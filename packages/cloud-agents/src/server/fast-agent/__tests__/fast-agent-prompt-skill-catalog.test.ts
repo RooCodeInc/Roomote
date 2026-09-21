@@ -127,6 +127,38 @@ describe('loadFastAgentPromptSkillCatalog', () => {
     );
   });
 
+  it('reuses a scoped catalog during the short per-turn cache window', async () => {
+    const instanceSkills = {
+      list: vi.fn().mockResolvedValue({ skills: [], warnings: [] }),
+    };
+    const settingsSkills = {
+      listPromptCatalog: vi.fn().mockResolvedValue({
+        marketplaceSources: [],
+        skills: [],
+        warnings: [],
+      }),
+      dispose: vi.fn().mockResolvedValue(undefined),
+    };
+    const repositorySkills = {
+      list: vi.fn().mockResolvedValue({ skills: [], warnings: [] }),
+      dispose: vi.fn().mockResolvedValue(undefined),
+    };
+    const sources = { instanceSkills, settingsSkills, repositorySkills };
+
+    await loadFastAgentPromptSkillCatalog(sources, {
+      repositoryCacheKey: 'cache-test-user:env-1',
+    });
+    await loadFastAgentPromptSkillCatalog(sources, {
+      repositoryCacheKey: 'cache-test-user:env-1',
+    });
+
+    expect(instanceSkills.list).toHaveBeenCalledTimes(2);
+    expect(settingsSkills.listPromptCatalog).toHaveBeenCalledTimes(2);
+    expect(repositorySkills.list).toHaveBeenCalledOnce();
+    expect(settingsSkills.dispose).toHaveBeenCalledTimes(2);
+    expect(repositorySkills.dispose).toHaveBeenCalledTimes(2);
+  });
+
   it('drops custom skills that collide with a packaged skill name', async () => {
     const catalog = await loadFastAgentPromptSkillCatalog({
       instanceSkills: {

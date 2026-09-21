@@ -13,12 +13,13 @@ import {
   taskRuns,
   tasks,
 } from '@roomote/db/server';
-import type {
-  FastAgentConversationOwner,
-  ReasoningEffort,
-  RunStatus,
-  TaskSurface,
-  TaskTrigger,
+import {
+  ACP_ENVELOPE_EVENT_TYPES,
+  type FastAgentConversationOwner,
+  type ReasoningEffort,
+  type RunStatus,
+  type TaskSurface,
+  type TaskTrigger,
 } from '@roomote/types';
 import { captureUserStartedSessionCreated } from '../session-telemetry';
 import type { FastAgentConversation } from './fast-agent-conversation';
@@ -225,6 +226,33 @@ export async function upsertFastAgentMessage({
   }
 
   throw lastError;
+}
+
+export async function appendFastAgentMemorySavedEvent({
+  sessionId,
+  turnId,
+  memories,
+}: {
+  sessionId: string;
+  turnId: string;
+  memories: string[];
+}): Promise<void> {
+  await upsertFastAgentMessage({
+    sessionId,
+    insertOnly: true,
+    message: {
+      eventId: `${turnId}:memory-saved`,
+      turnId,
+      turnSeq: 2_000_000_001,
+      ts: Date.now(),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.MemorySaved,
+      role: 'system',
+      contentBlocks: [{ type: 'text', text: 'Saved to memory' }],
+      metadata: { visibleInTranscript: true, memorySave: true },
+      payload: { memories },
+      source: 'roomote',
+    },
+  });
 }
 
 export async function setFastAgentOpenCodeSession({

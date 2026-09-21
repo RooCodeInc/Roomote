@@ -36,6 +36,7 @@ export const ACP_ENVELOPE_EVENT_TYPES = {
   TaskCancelled: 'roomote_runtime.task_cancelled',
   /** Voice call lifecycle marker persisted in a Fast Session transcript. */
   VoiceCall: 'roomote_runtime.voice_call',
+  MemorySaved: 'roomote_runtime.memory_saved',
 } as const;
 
 export type AcpEnvelopeEventType =

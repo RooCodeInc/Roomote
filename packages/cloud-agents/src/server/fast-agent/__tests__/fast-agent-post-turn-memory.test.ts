@@ -1,11 +1,13 @@
 const {
   mockAppendFastAgentMemory,
+  mockAppendFastAgentMemorySavedEvent,
   mockEvaluateDecisionModel,
   mockGenerateTrackedNonTaskObject,
   mockGetFastAgentConversationMemory,
   mockIsBrainEnabled,
 } = vi.hoisted(() => ({
   mockAppendFastAgentMemory: vi.fn(),
+  mockAppendFastAgentMemorySavedEvent: vi.fn(),
   mockEvaluateDecisionModel: vi.fn(),
   mockGenerateTrackedNonTaskObject: vi.fn(),
   mockGetFastAgentConversationMemory: vi.fn(),
@@ -28,6 +30,10 @@ vi.mock('../../non-task-provider-usage', () => ({
   NON_TASK_INFERENCE_SURFACES: {
     fastAgentMemoryDistillation: 'fast_agent_memory_distillation',
   },
+}));
+
+vi.mock('../fast-agent-session', () => ({
+  appendFastAgentMemorySavedEvent: mockAppendFastAgentMemorySavedEvent,
 }));
 
 import { saveFastAgentPostTurnMemory } from '../fast-agent-post-turn-memory';
@@ -61,6 +67,7 @@ function answers(
 
 const turn = {
   conversationId: 'conversation-1',
+  turnId: 'turn-1',
   userId: 'user-1',
   request: 'From now on we deploy staging from the release branch, not main.',
   reply: 'Understood. I will deploy staging from the release branch.',
@@ -82,6 +89,7 @@ describe('saveFastAgentPostTurnMemory', () => {
       },
     });
     mockAppendFastAgentMemory.mockResolvedValue({ saved: true });
+    mockAppendFastAgentMemorySavedEvent.mockResolvedValue(undefined);
   });
 
   it('distills and saves a turn the decision model is confident about', async () => {
@@ -108,6 +116,11 @@ describe('saveFastAgentPostTurnMemory', () => {
       'conversation-1',
       'Staging deploys come from the release branch, not main.',
     );
+    expect(mockAppendFastAgentMemorySavedEvent).toHaveBeenCalledWith({
+      sessionId: 'conversation-1',
+      turnId: 'turn-1',
+      memories: ['Staging deploys come from the release branch, not main.'],
+    });
   });
 
   it('saves on an explicit remember request or an established finding alone', async () => {
