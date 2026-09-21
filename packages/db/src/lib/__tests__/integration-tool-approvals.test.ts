@@ -9,6 +9,7 @@ import {
 import {
   cancelOpenIntegrationToolApprovals,
   claimAutoApprovedIntegrationToolApproval,
+  claimIntegrationToolApprovalForRelay,
   decideIntegrationToolApproval,
   expireIntegrationToolApproval,
   fingerprintIntegrationToolCall,
@@ -25,7 +26,10 @@ import {
   setIntegrationToolSessionOverride,
   upsertIntegrationToolPolicy,
 } from '../integration-tool-approvals';
-import { setDeploymentExperimentEnabled } from '../deployment-experiments';
+import {
+  isDeploymentExperimentEnabledWithShareLock,
+  setDeploymentExperimentEnabled,
+} from '../deployment-experiments';
 
 const userIds: string[] = [];
 const sessionIds: string[] = [];
@@ -74,7 +78,14 @@ async function insertPending(
   });
 }
 
+// Claims only succeed while the experiment is on; each test starts from the
+// enabled state and the disable cases turn it off themselves.
+beforeEach(async () => {
+  await setDeploymentExperimentEnabled('integrationToolApprovals', true);
+});
+
 afterAll(async () => {
+  await setDeploymentExperimentEnabled('integrationToolApprovals', false);
   await db.delete(integrationToolApprovalRequests);
   for (const sessionId of sessionIds) {
     await db.delete(sessions).where(eq(sessions.id, sessionId));
@@ -318,11 +329,195 @@ describe('expireIntegrationToolApproval', () => {
   });
 });
 
+describe('claimIntegrationToolApprovalForRelay', () => {
+  it('relays inside the claim transaction and never relays after a committed disable', async () => {
+    const userId = await user();
+    const context = { sessionId: await ownedSession(userId), userId };
+    const pending = await insertPending(context);
+    await decideIntegrationToolApproval(context, {
+      approvalId: pending.approvalId,
+      decision: 'approved',
+    });
+    let relays = 0;
+    await expect(
+      claimIntegrationToolApprovalForRelay(
+        { approvalId: pending.approvalId, requesterUserId: userId },
+        'consumed',
+        async () => {
+          relays += 1;
+        },
+      ),
+    ).resolves.toBe(true);
+    expect(relays).toBe(1);
+    expect((await getIntegrationToolApproval(pending.approvalId))?.status).toBe(
+      'consumed',
+    );
+
+    // A committed disable wins before the relay ever runs, even with no
+    // sweep row cancellation involved.
+    const second = await insertPending(context);
+    await decideIntegrationToolApproval(context, {
+      approvalId: second.approvalId,
+      decision: 'approved',
+    });
+    await setDeploymentExperimentEnabled('integrationToolApprovals', false);
+    await expect(
+      claimIntegrationToolApprovalForRelay(
+        { approvalId: second.approvalId, requesterUserId: userId },
+        'consumed',
+        async () => {
+          relays += 1;
+        },
+      ),
+    ).resolves.toBe(false);
+    expect(relays).toBe(1);
+    await setDeploymentExperimentEnabled('integrationToolApprovals', true);
+  });
+
+  it('does not relay when the claim is already lost', async () => {
+    const userId = await user();
+    const context = { sessionId: await ownedSession(userId), userId };
+    const pending = await insertPending(context);
+    await decideIntegrationToolApproval(context, {
+      approvalId: pending.approvalId,
+      decision: 'approved',
+    });
+    await cancelOpenIntegrationToolApprovals('experiment_disabled');
+    let relays = 0;
+    await expect(
+      claimIntegrationToolApprovalForRelay(
+        { approvalId: pending.approvalId, requesterUserId: userId },
+        'consumed',
+        async () => {
+          relays += 1;
+        },
+      ),
+    ).resolves.toBe(false);
+    expect(relays).toBe(0);
+  });
+});
+
+describe('claims serialize against the experiment toggle', () => {
+  async function approvedManualRow(context: {
+    sessionId: string;
+    userId: string;
+  }) {
+    const pending = await insertPending(context);
+    await decideIntegrationToolApproval(context, {
+      approvalId: pending.approvalId,
+      decision: 'approved',
+    });
+    return pending.approvalId;
+  }
+
+  async function reservedAutoRow(context: {
+    sessionId: string;
+    userId: string;
+  }) {
+    const reservation = await insertAutoApprovedIntegrationToolApproval(
+      context,
+      {
+        integrationId: call.integrationId,
+        toolName: call.toolName,
+        nativeRequestId: nextNativeRequestId(),
+        argsFingerprint: fingerprint(),
+        argsSummary: call.args,
+      },
+    );
+    return reservation.approvalId;
+  }
+
+  it('never claims once the disable has committed, even before its sweep runs', async () => {
+    // The toggle commits `enabled=false` first and sweeps second. A claim
+    // landing in between used to win and relay under a disabled experiment.
+    const userId = await user();
+    const context = { sessionId: await ownedSession(userId), userId };
+    const manual = await approvedManualRow(context);
+    const auto = await reservedAutoRow(context);
+
+    await setDeploymentExperimentEnabled('integrationToolApprovals', false);
+
+    await expect(
+      markIntegrationToolApprovalConsumed({
+        approvalId: manual,
+        requesterUserId: userId,
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      claimAutoApprovedIntegrationToolApproval({
+        approvalId: auto,
+        requesterUserId: userId,
+      }),
+    ).resolves.toBe(false);
+
+    // The late sweep still finds both rows open and records the truth.
+    await cancelOpenIntegrationToolApprovals('experiment_disabled');
+    expect((await getIntegrationToolApproval(manual))?.status).toBe(
+      'cancelled',
+    );
+    expect((await getIntegrationToolApproval(auto))?.status).toBe('cancelled');
+  });
+
+  it('never claims a reservation inserted after the disable sweep already ran', async () => {
+    // The sweep only cancels rows that exist; a reservation written after it
+    // can only be stopped by the claim itself reading the experiment.
+    const userId = await user();
+    const context = { sessionId: await ownedSession(userId), userId };
+    await setDeploymentExperimentEnabled('integrationToolApprovals', false);
+    await cancelOpenIntegrationToolApprovals('experiment_disabled');
+
+    const auto = await reservedAutoRow(context);
+    await expect(
+      claimAutoApprovedIntegrationToolApproval({
+        approvalId: auto,
+        requesterUserId: userId,
+      }),
+    ).resolves.toBe(false);
+    expect((await getIntegrationToolApproval(auto))?.status).toBe('approved');
+  });
+
+  it('makes a concurrent disable wait for an in-flight claim instead of interleaving', async () => {
+    const userId = await user();
+    const context = { sessionId: await ownedSession(userId), userId };
+    const auto = await reservedAutoRow(context);
+
+    // Hold the same share lock the claim takes, then start a disable: it
+    // must block on the settings row until the lock holder commits.
+    let disableSettled = false;
+    let disable: Promise<unknown> = Promise.resolve();
+    await db.transaction(async (tx) => {
+      expect(
+        await isDeploymentExperimentEnabledWithShareLock(
+          'integrationToolApprovals',
+          tx,
+        ),
+      ).toBe(true);
+      disable = setDeploymentExperimentEnabled(
+        'integrationToolApprovals',
+        false,
+      ).then(() => {
+        disableSettled = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(disableSettled).toBe(false);
+    });
+    await disable;
+    expect(disableSettled).toBe(true);
+
+    // With the disable committed, the reservation can no longer be claimed.
+    await expect(
+      claimAutoApprovedIntegrationToolApproval({
+        approvalId: auto,
+        requesterUserId: userId,
+      }),
+    ).resolves.toBe(false);
+  });
+});
+
 describe('auto-approved reservations', () => {
   it('inserts an unrelayed approved decision and claims it exactly once', async () => {
     const userId = await user();
     const sessionId = await ownedSession(userId);
-    await setDeploymentExperimentEnabled('integrationToolApprovals', true);
     const reservation = await insertAutoApprovedIntegrationToolApproval(
       { sessionId, userId },
       {
@@ -357,7 +552,6 @@ describe('auto-approved reservations', () => {
   it('fails the claim when the disable sweep cancels the reservation first', async () => {
     const userId = await user();
     const sessionId = await ownedSession(userId);
-    await setDeploymentExperimentEnabled('integrationToolApprovals', true);
     const reservation = await insertAutoApprovedIntegrationToolApproval(
       { sessionId, userId },
       {
@@ -379,36 +573,6 @@ describe('auto-approved reservations', () => {
     const row = await getIntegrationToolApproval(reservation.approvalId);
     expect(row?.status).toBe('cancelled');
     expect(row?.cancelReason).toBe('experiment_disabled');
-  });
-
-  it('fails the claim in the window between the metadata disable and the sweep', async () => {
-    // The toggle commits `enabled=false` before the sweep runs; the claim
-    // re-reads the flag inside the same UPDATE, so this reservation cannot
-    // be claimed even though no sweep has cancelled it.
-    const userId = await user();
-    const sessionId = await ownedSession(userId);
-    await setDeploymentExperimentEnabled('integrationToolApprovals', true);
-    const reservation = await insertAutoApprovedIntegrationToolApproval(
-      { sessionId, userId },
-      {
-        integrationId: call.integrationId,
-        toolName: call.toolName,
-        nativeRequestId: nextNativeRequestId(),
-        argsFingerprint: fingerprint(),
-        argsSummary: call.args,
-      },
-    );
-    await setDeploymentExperimentEnabled('integrationToolApprovals', false);
-    await expect(
-      claimAutoApprovedIntegrationToolApproval({
-        approvalId: reservation.approvalId,
-        requesterUserId: userId,
-      }),
-    ).resolves.toBe(false);
-    const row = await getIntegrationToolApproval(reservation.approvalId);
-    expect(row?.status).toBe('approved');
-    expect(row?.status).not.toBe('auto_approved');
-    await setDeploymentExperimentEnabled('integrationToolApprovals', true);
   });
 });
 
@@ -551,7 +715,6 @@ describe('integration tool session overrides', () => {
   it('writes auto-approved asks as terminal audit rows no decision can claim', async () => {
     const userId = await user();
     const context = { sessionId: await ownedSession(userId), userId };
-    await setDeploymentExperimentEnabled('integrationToolApprovals', true);
     const reservation = await insertAutoApprovedIntegrationToolApproval(
       context,
       {

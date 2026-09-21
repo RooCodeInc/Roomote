@@ -10,9 +10,8 @@ import type {
   IntegrationToolSessionOverrideMode,
 } from '@roomote/types';
 
-import { DEPLOYMENT_EXPERIMENT_METADATA_KEYS } from '@roomote/feature-flags';
-
 import { db, type DatabaseOrTransaction } from '../db';
+import { isDeploymentExperimentEnabledWithShareLock } from './deployment-experiments';
 import {
   integrationToolApprovalRequests,
   integrationToolPolicies,
@@ -355,6 +354,99 @@ export async function decideIntegrationToolApproval(
 }
 
 /**
+ * Claim an unrelayed `approved` row for relay, serialized against the
+ * experiment toggle. Disabling commits `enabled=false` first and sweeps open
+ * rows second, so a bare conditional update could still claim a row in
+ * between and relay under a disabled experiment. Reading the setting with a
+ * share lock in the same transaction closes that: either the disable already
+ * committed and the claim fails, or the claim holds the lock and the disable
+ * waits until the claim has committed — so the call was genuinely authorized
+ * before the experiment went off. It also covers a row inserted after the
+ * sweep already ran, which the sweep alone can never cancel.
+ */
+async function claimApprovedIntegrationToolApproval(
+  input: { approvalId: string; requesterUserId: string },
+  claimedStatus: 'consumed' | 'auto_approved',
+): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    if (
+      !(await isDeploymentExperimentEnabledWithShareLock(
+        'integrationToolApprovals',
+        tx,
+      ))
+    ) {
+      return false;
+    }
+    const [row] = await tx
+      .update(integrationToolApprovalRequests)
+      .set({ status: claimedStatus })
+      .where(
+        and(
+          eq(integrationToolApprovalRequests.id, input.approvalId),
+          eq(
+            integrationToolApprovalRequests.requesterUserId,
+            input.requesterUserId,
+          ),
+          eq(integrationToolApprovalRequests.status, 'approved'),
+        ),
+      )
+      .returning({ id: integrationToolApprovalRequests.id });
+    return Boolean(row);
+  });
+}
+
+/**
+ * Claim an unrelayed `approved` row and relay it, serialized against the
+ * experiment toggle for the whole claim-and-relay. Disabling commits
+ * `enabled=false` first and sweeps open rows second, so a bare conditional
+ * update could still claim a row in between and relay under a disabled
+ * experiment — and a claim that commits before the relay could still let a
+ * disable slip in before the native reply. Reading the setting with a share
+ * lock and holding that lock until the relay completes closes both: either
+ * the disable already committed and the claim fails without relaying, or
+ * the claim holds the lock and the disable waits until the call was
+ * genuinely relayed before the experiment went off. It also covers a row
+ * inserted after the sweep already ran, which the sweep alone can never
+ * cancel.
+ */
+export async function claimIntegrationToolApprovalForRelay(
+  input: { approvalId: string; requesterUserId: string },
+  claimedStatus: 'consumed' | 'auto_approved',
+  relay: () => Promise<void>,
+): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    if (
+      !(await isDeploymentExperimentEnabledWithShareLock(
+        'integrationToolApprovals',
+        tx,
+      ))
+    ) {
+      return false;
+    }
+    const [row] = await tx
+      .update(integrationToolApprovalRequests)
+      .set({ status: claimedStatus })
+      .where(
+        and(
+          eq(integrationToolApprovalRequests.id, input.approvalId),
+          eq(
+            integrationToolApprovalRequests.requesterUserId,
+            input.requesterUserId,
+          ),
+          eq(integrationToolApprovalRequests.status, 'approved'),
+        ),
+      )
+      .returning({ id: integrationToolApprovalRequests.id });
+    if (!row) return false;
+    // The share lock stays held across the native reply, so the toggle's
+    // metadata write waits for it. The relay is a bounded localhost call to
+    // the session's own OpenCode server.
+    await relay();
+    return true;
+  });
+}
+
+/**
  * Record that the approved decision was relayed to the native runtime and the
  * call resumed exactly once. Only an approved, unclaimed row transitions, so
  * a second relay attempt or a late relay after cancellation matches zero
@@ -364,21 +456,7 @@ export async function markIntegrationToolApprovalConsumed(input: {
   approvalId: string;
   requesterUserId: string;
 }): Promise<boolean> {
-  const [row] = await db
-    .update(integrationToolApprovalRequests)
-    .set({ status: 'consumed' })
-    .where(
-      and(
-        eq(integrationToolApprovalRequests.id, input.approvalId),
-        eq(
-          integrationToolApprovalRequests.requesterUserId,
-          input.requesterUserId,
-        ),
-        eq(integrationToolApprovalRequests.status, 'approved'),
-      ),
-    )
-    .returning({ id: integrationToolApprovalRequests.id });
-  return Boolean(row);
+  return claimApprovedIntegrationToolApproval(input, 'consumed');
 }
 
 /** Lazily fail an unanswered window closed; safe to call on any pending row. */
@@ -566,38 +644,18 @@ export async function insertAutoApprovedIntegrationToolApproval(
 }
 
 /**
- * Atomically claim an unrelayed auto-approval for relay: the single UPDATE
- * both requires an unclaimed `approved` row and re-reads the experiment
- * flag, so a disable committed anywhere before the claim — even in the
- * window between the metadata write and the cancellation sweep — makes it
- * match zero rows and the caller rejects the native ask instead of
- * executing. A claim that commits first legitimately precedes the disable,
- * and no auto_approved record ever exists for a call that did not run.
+ * Atomically claim an unrelayed auto-approval for relay: only an `approved`,
+ * unclaimed row transitions to terminal `auto_approved`. The experiment
+ * disable sweep cancels `approved` rows, so a sweep that lands first makes
+ * this return false and the caller rejects the native ask instead of
+ * executing — no auto_approved record ever exists for a call that did not
+ * run, and no disable can slip between the claim and the relay decision.
  */
 export async function claimAutoApprovedIntegrationToolApproval(input: {
   approvalId: string;
   requesterUserId: string;
 }): Promise<boolean> {
-  const [row] = await db
-    .update(integrationToolApprovalRequests)
-    .set({ status: 'auto_approved' })
-    .where(
-      and(
-        eq(integrationToolApprovalRequests.id, input.approvalId),
-        eq(
-          integrationToolApprovalRequests.requesterUserId,
-          input.requesterUserId,
-        ),
-        eq(integrationToolApprovalRequests.status, 'approved'),
-        sql`coalesce((
-          select (settings.metadata ->> ${DEPLOYMENT_EXPERIMENT_METADATA_KEYS.integrationToolApprovals})::boolean
-          from deployment_settings settings
-          where settings.id = 'default'
-        ), false)`,
-      ),
-    )
-    .returning({ id: integrationToolApprovalRequests.id });
-  return Boolean(row);
+  return claimApprovedIntegrationToolApproval(input, 'auto_approved');
 }
 
 export {
