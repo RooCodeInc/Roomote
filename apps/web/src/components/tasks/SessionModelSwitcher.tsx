@@ -67,6 +67,11 @@ export function SessionModelSwitcher({
       models={data?.models ?? []}
       model={model}
       defaultModelId={effectiveDefaultModelId}
+      emptyModelLabel={
+        effectiveDefaultModelId
+          ? `Default (${displayModelName(effectiveDefaultModelId)})`
+          : 'Deployment default'
+      }
       onModelChange={onModelChange}
       reasoningEffort={reasoningEffort}
       defaultReasoningEffort={effectiveDefaultEffort}

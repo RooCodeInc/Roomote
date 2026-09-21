@@ -47,15 +47,18 @@ vi.mock('@/components/tasks/ModelReasoningPicker', () => ({
   ModelReasoningPicker: ({
     trigger,
     defaultReasoningEffort,
+    emptyModelLabel,
   }: {
     trigger: ReactNode;
     defaultReasoningEffort?: string | null;
+    emptyModelLabel?: string;
   }) => (
     <div>
       {trigger}
       <div data-testid="reasoning-default">
         {defaultReasoningEffort ?? 'Reasoning'}
       </div>
+      <div data-testid="empty-model-label">{emptyModelLabel}</div>
     </div>
   ),
 }));
@@ -92,6 +95,9 @@ describe('SessionModelSwitcher', () => {
       screen.getByRole('button', { name: 'Model for this session' }),
     ).toHaveTextContent('Claude Sonnet 5High');
     expect(screen.getByTestId('reasoning-default')).toHaveTextContent('high');
+    expect(screen.getByTestId('empty-model-label')).toHaveTextContent(
+      'Default (Claude Sonnet 5)',
+    );
   });
 
   it('does not invent a model or reasoning level while defaults are unresolved', () => {
@@ -103,6 +109,9 @@ describe('SessionModelSwitcher', () => {
     expect(screen.queryByText('Medium')).not.toBeInTheDocument();
     expect(screen.getByTestId('reasoning-default')).toHaveTextContent(
       'Reasoning',
+    );
+    expect(screen.getByTestId('empty-model-label')).toHaveTextContent(
+      'Deployment default',
     );
   });
 

@@ -134,6 +134,7 @@ function PickerContent({
   models,
   model,
   defaultModelId,
+  emptyModelLabel,
   onModelChange,
   reasoningEffort,
   defaultReasoningEffort,
@@ -148,6 +149,7 @@ function PickerContent({
   models: ModelReasoningPickerModel[];
   model: string;
   defaultModelId?: string | null;
+  emptyModelLabel?: string;
   onModelChange: (model: string) => void;
   reasoningEffort: ReasoningEffort | null;
   defaultReasoningEffort?: ReasoningEffort | null;
@@ -197,9 +199,12 @@ function PickerContent({
   }, [effortIndex]);
 
   const { leadingOptions, modelGroups, options } = useMemo(() => {
-    const leading = models.filter(({ id }) => !id.includes('/'));
+    const selectableModels = emptyModelLabel
+      ? [{ id: '', displayName: emptyModelLabel }, ...models]
+      : models;
+    const leading = selectableModels.filter(({ id }) => !id.includes('/'));
     const groups = groupModelsByDisplayProvider(
-      models.filter(({ id }) => id.includes('/')),
+      selectableModels.filter(({ id }) => id.includes('/')),
       providerGrouping,
     ).map((group) => ({
       ...group,
@@ -213,7 +218,7 @@ function PickerContent({
       modelGroups: groups,
       options: [...leading, ...groups.flatMap(({ items }) => items)],
     };
-  }, [models, providerGrouping]);
+  }, [emptyModelLabel, models, providerGrouping]);
 
   const updateScrollBoundaries = () => {
     const list = listRef.current;
@@ -302,7 +307,10 @@ function PickerContent({
   const selectModel = (nextModel: string) => {
     onModelChange(nextModel);
     if (disabled || reasoningDisabled) return;
-    const nextModelOption = models.find(({ id }) => id === nextModel);
+    const effectiveNextModelId = nextModel || defaultModelId || '';
+    const nextModelOption = models.find(
+      ({ id }) => id === effectiveNextModelId,
+    );
     const nextEfforts =
       supportedReasoningEfforts ?? supportedEfforts(nextModelOption);
     if (nextEfforts.length === 0) {
@@ -413,7 +421,7 @@ function PickerContent({
   ]);
 
   const renderModelOption = (option: ModelReasoningPickerModel) => {
-    const selected = option.id === effectiveModelId;
+    const selected = option.id === model;
     return (
       <button
         key={option.id || '__default-model__'}

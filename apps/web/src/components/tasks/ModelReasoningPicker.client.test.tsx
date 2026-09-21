@@ -77,11 +77,13 @@ function Harness({
   initialModel = 'provider/alpha',
   initialEffort = 'low' as ReasoningEffort | null,
   defaultModelId,
+  emptyModelLabel,
   availableModels = models,
 }: {
   initialModel?: string;
   initialEffort?: ReasoningEffort | null;
   defaultModelId?: string | null;
+  emptyModelLabel?: string;
   availableModels?: ModelReasoningPickerModel[];
 }) {
   const [open, setOpen] = useState(false);
@@ -107,6 +109,7 @@ function Harness({
         models={availableModels}
         model={model}
         defaultModelId={defaultModelId}
+        emptyModelLabel={emptyModelLabel}
         onModelChange={setModel}
         reasoningEffort={effort}
         defaultReasoningEffort="medium"
@@ -466,13 +469,30 @@ describe('ModelReasoningPicker', () => {
     );
   });
 
-  it('selects the real default model without adding a duplicate option', () => {
-    render(<Harness initialModel="" defaultModelId="provider/beta" />);
+  it('clears the model override and uses default-model efforts', () => {
+    render(
+      <Harness
+        initialModel="provider/alpha"
+        initialEffort="high"
+        defaultModelId="provider/beta"
+        emptyModelLabel="Default (Beta)"
+      />,
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Choose model' }));
 
-    const betaOptions = screen.getAllByRole('option', { name: 'Beta' });
-    expect(betaOptions).toHaveLength(1);
-    expect(betaOptions[0]).toHaveAttribute('aria-selected', 'true');
+    fireEvent.click(screen.getByRole('option', { name: 'Default (Beta)' }));
+
+    expect(screen.getByTestId('selection')).toHaveTextContent(':medium');
+    expect(
+      screen.getByRole('option', { name: 'Default (Beta)' }),
+    ).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('option', { name: 'Beta' })).toHaveAttribute(
+      'aria-selected',
+      'false',
+    );
+    expect(
+      screen.getByRole('slider', { name: 'Reasoning level' }),
+    ).toHaveAttribute('aria-valuemax', '0');
   });
 
   it('uses a dismissible mobile drawer without a close action', async () => {
