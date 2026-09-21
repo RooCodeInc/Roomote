@@ -395,10 +395,12 @@ const SHELL_SOURCE_MUTATION_PATTERNS = [
   /\bperl\s+(-[a-zA-Z]*\s+)*-[a-zA-Z]*i/,
   // Git operations that rewrite tracked content.
   /\bgit\s+(apply|am|merge|rebase|cherry-pick|revert|pull)\b/,
-  // Only the forms that rewrite files: `git checkout -b branch` switches
-  // branches, and `git reset HEAD -- path` (the workflow's own unstage step)
-  // and `git restore --staged` touch the index alone.
-  /\bgit\s+checkout\s+(\S+\s+)?(--\s|\.(\s|$))/,
+  // Only the forms that rewrite files. Creating a branch (`checkout -b`,
+  // `switch -c`) keeps the working tree, while moving to an existing branch
+  // or restoring paths replaces it. `git reset HEAD -- path` (the workflow's
+  // own unstage step) and `git restore --staged` touch the index alone.
+  /\bgit\s+checkout(?!.*\s(-[bB]|--orphan)\b)\s+\S/,
+  /\bgit\s+switch(?!.*\s(-[cC]|--create|--force-create|--orphan)\b)\s+\S/,
   /\bgit\s+restore\s+(?!.*--staged)(?!.*-S\b)/,
   /\bgit\s+reset\s+.*--(hard|merge|keep)\b/,
   /\bgit\s+stash\s+(pop|apply)\b/,
