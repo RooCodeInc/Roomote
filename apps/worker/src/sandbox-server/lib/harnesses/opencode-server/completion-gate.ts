@@ -1,7 +1,8 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, statSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { createReadStream, existsSync, readdirSync, statSync } from 'node:fs';
+import { readFile, stat } from 'node:fs/promises';
+import { pipeline } from 'node:stream/promises';
 import { basename, join, relative } from 'node:path';
 
 import {
@@ -377,15 +378,27 @@ async function fingerprintChangedFiles(
   const paths = [...new Set(files)].sort();
 
   for (const [index, file] of paths.entries()) {
+    const filePath = join(repoPath, file);
     // Every changed file is read, so an edit anywhere changes the result.
-    // Past the caps the bytes are hashed as they are: normalizing them is the
-    // expensive part, and skipping it only errs toward calling a run stale.
-    const content = await readFile(join(repoPath, file)).then(
-      (buffer) =>
-        index < MAX_FINGERPRINT_FILES &&
-        buffer.byteLength <= MAX_FINGERPRINT_FILE_BYTES
-          ? buffer.toString('utf8').replace(FORMATTING_ONLY_CHARACTERS, '')
-          : createHash('sha256').update(buffer).digest('hex'),
+    // Past the caps the bytes are streamed into a hash as they are:
+    // normalizing is the expensive part, large files are never held in
+    // memory, and skipping it only errs toward calling a run stale.
+    const content = await stat(filePath).then(
+      async (stats) => {
+        if (
+          index < MAX_FINGERPRINT_FILES &&
+          stats.size <= MAX_FINGERPRINT_FILE_BYTES
+        ) {
+          return (await readFile(filePath, 'utf8')).replace(
+            FORMATTING_ONLY_CHARACTERS,
+            '',
+          );
+        }
+
+        const bytes = createHash('sha256');
+        await pipeline(createReadStream(filePath), bytes);
+        return bytes.digest('hex');
+      },
       () => 'deleted',
     );
     hash.update(`${file}\0${content}\0`);
