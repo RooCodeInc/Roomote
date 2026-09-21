@@ -190,6 +190,11 @@ vi.mock('@/trpc/client', () => ({
     },
   }),
   useTRPC: () => ({
+    sessions: {
+      list: {
+        queryKey: () => ['sessions.list'],
+      },
+    },
     slack: {
       resolveUsers: {
         queryOptions: (input: unknown) => ({
@@ -3338,7 +3343,7 @@ describe('FastSessionTranscript', () => {
     expect(screen.getByPlaceholderText('Message agent')).toBeInTheDocument();
   });
 
-  it('updates the header title from the session stream event', () => {
+  it('updates the header title and refreshes session lists from the session stream event', async () => {
     document.title = 'Roomote';
     render(
       <FastSessionTranscript
@@ -3369,6 +3374,11 @@ describe('FastSessionTranscript', () => {
     );
     expect(document.title).toBe(
       'Rotate the API keys across every production environment with... | Roomote',
+    );
+    await waitFor(() =>
+      expect(invalidateQueries).toHaveBeenCalledWith({
+        queryKey: ['sessions.list'],
+      }),
     );
   });
 

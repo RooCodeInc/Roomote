@@ -32,11 +32,11 @@ import {
   type SessionInfo,
 } from './SessionWorkspace';
 import { SessionReadTracker } from './SessionReadTracker';
-import { EditableSessionTitle } from './EditableSessionTitle';
 import {
   SESSION_HEADER_CONTENT_CLASS_NAME,
   SESSION_HEADER_TITLE_CLASS_NAME,
 } from './session-header-layout';
+import { LiveSessionTitle } from './LiveSessionTitle';
 
 const getSessionPageData = cache(async (sessionId: string) => {
   const authorizedUser = await authorize();
@@ -216,9 +216,9 @@ export default async function SessionDetailPage({
                 }
               >
                 <div className="flex min-w-0 flex-1 flex-col gap-1">
-                  <EditableSessionTitle
+                  <LiveSessionTitle
                     sessionId={unifiedSession.id}
-                    title={unifiedSession.title}
+                    initialTitle={unifiedSession.title}
                     canRename={sessionInfo.canDelete}
                     className={SESSION_HEADER_TITLE_CLASS_NAME}
                   />

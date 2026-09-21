@@ -90,6 +90,7 @@ import { isRequestUserInputResponseRepresentedByCanonicalReceipt } from '@/lib/s
 import { CapabilityOfferCard } from './CapabilityOfferCard';
 import { PendingIntegrationKeys } from '@/components/sessions/PendingIntegrationKeys';
 import { openIntegrationKeyDialog } from '@/components/sessions/integration-key-dialog';
+import { useSessionTitlePropagation } from './use-session-title-propagation';
 
 import {
   AcpMessageItem,
@@ -567,6 +568,7 @@ export function FastSessionTranscript({
   );
   const [replyError, setReplyError] = useState<string | null>(null);
   const [title, setTitle] = useState<string | null>(initialTitle);
+  useSessionTitlePropagation(title, initialTitle);
   const [goal, setGoal] = useState<SessionGoal | null>(sessionGoal ?? null);
   const [conversationResponding, setConversationResponding] = useState<
     boolean | null
