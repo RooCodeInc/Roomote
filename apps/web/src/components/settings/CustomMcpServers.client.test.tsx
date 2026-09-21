@@ -346,6 +346,35 @@ describe('useCustomMcpServers', () => {
     ).toBeInTheDocument();
   });
 
+  it('truncates a prompt-length tool description behind a toggle that leaves the checkbox alone', async () => {
+    const long = `Resolves a package name. ${'Details. '.repeat(40)}`.trim();
+    state.servers = [buildServer()];
+    state.tools = [
+      { name: 'resolve', description: long, enabled: true },
+      { name: 'ping', description: 'Short.', enabled: true },
+    ];
+    renderHarness();
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Manage internal-tools tools',
+      }),
+    );
+
+    const toggle = await screen.findByRole('button', { name: 'Show more' });
+    expect(
+      screen.getAllByRole('button', { name: /Show (more|less)/ }),
+    ).toHaveLength(1);
+    expect(screen.getByText(long)).toHaveClass('line-clamp-2');
+
+    fireEvent.click(toggle);
+    expect(screen.getByText(long)).not.toHaveClass('line-clamp-2');
+    expect(
+      screen.getByRole('button', { name: 'Show less' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'resolve' })).toBeChecked();
+    state.tools = [];
+  });
+
   describe('tool approval modes', () => {
     beforeEach(() => {
       state.isAdmin = true;

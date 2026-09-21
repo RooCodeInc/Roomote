@@ -753,6 +753,32 @@ function ServerFormDialog({
   );
 }
 
+/**
+ * Some servers ship prompt-length tool descriptions. Two lines are enough to
+ * recognize a tool; the rest is one click away instead of burying the list.
+ * The toggle lives outside the row's label so it never flips the checkbox.
+ */
+function ToolDescription({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const isLong = text.length > 140;
+
+  return (
+    <div className="text-xs text-muted-foreground">
+      <p className={isLong && !expanded ? 'line-clamp-2' : undefined}>{text}</p>
+      {isLong ? (
+        <button
+          type="button"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((current) => !current)}
+          className="mt-0.5 cursor-pointer font-medium text-foreground/80 hover:text-foreground"
+        >
+          {expanded ? 'Show less' : 'Show more'}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 function CustomToolManagementDialog({
   server,
   scope,
@@ -885,35 +911,37 @@ function CustomToolManagementDialog({
                   {group.tools.map((tool) => (
                     <div
                       key={tool.name}
-                      className="flex items-center gap-3 py-2"
+                      className="flex items-start gap-3 py-2.5"
                     >
-                      <label className="flex min-w-0 flex-1 items-start gap-3 text-sm cursor-pointer">
-                        <Checkbox
-                          checked={!disabledNames.has(tool.name)}
-                          onCheckedChange={(checked) => {
-                            setDisabledNames((current) => {
-                              const next = new Set(current);
+                      <Checkbox
+                        id={`custom-mcp-tool-${tool.name}`}
+                        checked={!disabledNames.has(tool.name)}
+                        onCheckedChange={(checked) => {
+                          setDisabledNames((current) => {
+                            const next = new Set(current);
 
-                              if (checked === true) {
-                                next.delete(tool.name);
-                              } else {
-                                next.add(tool.name);
-                              }
+                            if (checked === true) {
+                              next.delete(tool.name);
+                            } else {
+                              next.add(tool.name);
+                            }
 
-                              return next;
-                            });
-                          }}
-                          className="mt-0.5"
-                        />
-                        <span>
-                          <span className="font-mono">{tool.name}</span>
-                          {tool.description && (
-                            <span className="block text-xs text-muted-foreground">
-                              {tool.description}
-                            </span>
-                          )}
-                        </span>
-                      </label>
+                            return next;
+                          });
+                        }}
+                        className="mt-0.5"
+                      />
+                      <div className="min-w-0 flex-1 text-sm">
+                        <label
+                          htmlFor={`custom-mcp-tool-${tool.name}`}
+                          className="cursor-pointer font-mono"
+                        >
+                          {tool.name}
+                        </label>
+                        {tool.description ? (
+                          <ToolDescription text={tool.description} />
+                        ) : null}
+                      </div>
                       {toolApprovalsActive && server ? (
                         <IntegrationToolApprovalModeControl
                           toolName={tool.name}

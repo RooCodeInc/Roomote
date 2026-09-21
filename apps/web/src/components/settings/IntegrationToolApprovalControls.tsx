@@ -179,7 +179,15 @@ export function IntegrationToolApprovalGroup({
     return (
       <section aria-label="Tools">
         {bulkSelect ? (
-          <div className="flex items-center justify-end py-2">{bulkSelect}</div>
+          <div className="flex items-center justify-between gap-3 border-b border-border pb-2">
+            <span className="text-sm font-medium">
+              All tools{' '}
+              <Badge variant="secondary" className="ml-1">
+                {count}
+              </Badge>
+            </span>
+            {bulkSelect}
+          </div>
         ) : null}
         <div className="divide-y divide-border">{children}</div>
       </section>
