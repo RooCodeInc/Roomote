@@ -13,13 +13,22 @@ import { useTRPC } from '@/trpc/client';
 
 /**
  * Deployment-wide per-tool approval policies (`integrationToolApprovals`
- * experiment). Reads and writes are admin-only server-side; changes save
- * immediately and take effect from the next session turn.
+ * experiment). The list endpoint is admin-only server side, so callers gate
+ * this query behind admin-only, open surfaces — for example the integration
+ * tool management dialog only enables it while open for an admin with the
+ * experiment on. Changes save immediately and take effect from the next
+ * session turn.
  */
-export function useIntegrationToolPolicies() {
+export function useIntegrationToolPolicies(
+  options: { enabled?: boolean } = {},
+) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
-  const listQuery = useQuery(trpc.integrationToolPolicies.list.queryOptions());
+  const listQuery = useQuery(
+    trpc.integrationToolPolicies.list.queryOptions(undefined, {
+      enabled: options.enabled ?? true,
+    }),
+  );
 
   const modes = new Map(
     (listQuery.data ?? []).map((policy: IntegrationToolPolicyMetadata) => [

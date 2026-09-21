@@ -9,6 +9,7 @@ const state = vi.hoisted(() => ({
     toolName: string;
     mode: string;
   }[],
+  policiesQueryEnabled: undefined as boolean | undefined,
 }));
 
 vi.mock('@/hooks/useIntegrationToolApprovalsExperiment', () => ({
@@ -21,19 +22,22 @@ vi.mock('@/hooks/useIntegrationToolApprovalsExperiment', () => ({
 }));
 
 vi.mock('@/hooks/useIntegrationToolPolicies', () => ({
-  useIntegrationToolPolicies: () => ({
-    isLoading: false,
-    isUpdating: false,
-    modes: new Map(
-      state.policies.map((policy) => [
-        JSON.stringify([policy.integrationId, policy.toolName]),
-        policy.mode,
-      ]),
-    ),
-    setMode: (integrationId: string, toolName: string, mode: string) => {
-      state.setModeCalls.push({ integrationId, toolName, mode });
-    },
-  }),
+  useIntegrationToolPolicies: (options?: { enabled?: boolean }) => {
+    state.policiesQueryEnabled = options?.enabled;
+    return {
+      isLoading: false,
+      isUpdating: false,
+      modes: new Map(
+        state.policies.map((policy) => [
+          JSON.stringify([policy.integrationId, policy.toolName]),
+          policy.mode,
+        ]),
+      ),
+      setMode: (integrationId: string, toolName: string, mode: string) => {
+        state.setModeCalls.push({ integrationId, toolName, mode });
+      },
+    };
+  },
 }));
 
 vi.mock('@/hooks/mcp-connections', () => ({
@@ -57,13 +61,14 @@ vi.mock('@/hooks/mcp-connections', () => ({
 
 import { McpToolManagementDialog } from './McpToolManagementDialog';
 
-function renderDialog() {
+function renderDialog(props?: { open?: boolean; isAdmin?: boolean }) {
   return render(
     <McpToolManagementDialog
       mcpId="exa"
       integrationName="Exa"
-      open={true}
+      open={props?.open ?? true}
       onOpenChange={() => undefined}
+      {...(props?.isAdmin === undefined ? {} : { isAdmin: props.isAdmin })}
     />,
   );
 }
@@ -82,6 +87,19 @@ describe('McpToolManagementDialog tool approvals', () => {
     expect(
       screen.queryByLabelText('Approval mode for web_search_exa'),
     ).not.toBeInTheDocument();
+  });
+
+  it('does not fire the admin-only policy query while the dialog is closed or for non-admin viewers', () => {
+    state.approvalsEnabled = true;
+    state.policiesQueryEnabled = undefined;
+    renderDialog({ open: false, isAdmin: true });
+    expect(state.policiesQueryEnabled).toBe(false);
+    state.policiesQueryEnabled = undefined;
+    renderDialog({ open: true, isAdmin: false });
+    expect(state.policiesQueryEnabled).toBe(false);
+    state.policiesQueryEnabled = undefined;
+    renderDialog({ open: true, isAdmin: true });
+    expect(state.policiesQueryEnabled).toBe(true);
   });
 
   it('shows per-tool approval modes with persisted values and saves changes immediately', async () => {

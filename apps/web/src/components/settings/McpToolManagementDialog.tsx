@@ -43,6 +43,8 @@ type McpToolManagementDialogProps = {
   integrationName: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Admin-only approval policy state is never loaded for non-admin viewers. */
+  isAdmin?: boolean;
 };
 
 function splitToolNameParts(name: string): string[] {
@@ -118,11 +120,18 @@ export function McpToolManagementDialog({
   integrationName,
   open,
   onOpenChange,
+  isAdmin,
 }: McpToolManagementDialogProps) {
   const toolsQuery = useMcpConnectionTools(open ? mcpId : null);
   const setDisabledTools = useSetDisabledMcpTools();
   const toolApprovalsExperiment = useIntegrationToolApprovalsExperiment();
-  const toolPolicies = useIntegrationToolPolicies();
+  // The approval policy list is an admin-only endpoint; never fire it for
+  // non-admin viewers or while the dialog is closed.
+  const toolApprovalsActive =
+    toolApprovalsExperiment.enabled && isAdmin !== false;
+  const toolPolicies = useIntegrationToolPolicies({
+    enabled: open && toolApprovalsActive,
+  });
   const [disabledToolNames, setDisabledToolNames] = useState<string[]>([]);
   const lastSyncedToolStateKey = useRef<string | null>(null);
 
@@ -287,7 +296,7 @@ export function McpToolManagementDialog({
 
           {hasLoadedTools ? (
             <div className="space-y-3 py-3">
-              {toolApprovalsExperiment.enabled && mcpId ? (
+              {toolApprovalsActive && mcpId ? (
                 <p className="text-xs text-muted-foreground">
                   Approval changes save immediately and apply from the next
                   session turn. Tool enable/disable still needs Save changes.
@@ -329,7 +338,7 @@ export function McpToolManagementDialog({
                         </Label>
                       </div>
                     </div>
-                    {toolApprovalsExperiment.enabled && mcpId ? (
+                    {toolApprovalsActive && mcpId ? (
                       <Select
                         value={approvalMode}
                         disabled={toolPolicies.isUpdating}
