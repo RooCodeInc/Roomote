@@ -2712,6 +2712,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       finishGeneration?.('Steered answer');
       await expect(resultPromise).resolves.toBe('Steered answer');
       expect(mocks.invalidateSession).not.toHaveBeenCalled();
+      // The accepted steer is judged for memory along with the opening message.
+      expect(mocks.savePostTurnMemory).toHaveBeenCalledWith(
+        expect.objectContaining({
+          request: baseParams.question,
+          steeredRequests: ['Use the corrected requirement.'],
+        }),
+      );
     } finally {
       vi.useRealTimers();
     }

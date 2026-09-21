@@ -107,6 +107,24 @@ function clip(text: string, maxChars: number): string {
     : trimmed;
 }
 
+/**
+ * What the person said this turn: the message that started it, then anything
+ * they steered in while it ran. A mid-turn correction is often the part most
+ * worth remembering, so steered text is budgeted first and a long opening
+ * message is what gets cut.
+ */
+function buildTurnRequest(request: string, steeredRequests: string[]): string {
+  const steered = clip(
+    steeredRequests
+      .map((text) => text.trim())
+      .filter(Boolean)
+      .join('\n\n'),
+    Math.floor(REQUEST_MAX_CHARS / 2),
+  );
+  const opening = clip(request, REQUEST_MAX_CHARS - steered.length);
+  return [opening, steered].filter(Boolean).join('\n\n');
+}
+
 /** Keep the most recent saved facts when the list outgrows the budget. */
 function clipTail(text: string, maxChars: number): string {
   const trimmed = text.trim();
@@ -149,6 +167,8 @@ export async function saveFastAgentPostTurnMemory(input: {
   conversationId: string;
   userId: string;
   request: string;
+  /** Messages the same person steered into the turn while it ran. */
+  steeredRequests?: string[];
   reply: string;
   senderDisplayName?: string;
   /** The agent already called `save_memory` during this turn. */
@@ -158,7 +178,7 @@ export async function saveFastAgentPostTurnMemory(input: {
     return { status: 'skipped', reason: 'agent_saved_memory' };
   }
 
-  const request = clip(input.request, REQUEST_MAX_CHARS);
+  const request = buildTurnRequest(input.request, input.steeredRequests ?? []);
   const reply = clip(input.reply, REPLY_MAX_CHARS);
 
   if (!request) {

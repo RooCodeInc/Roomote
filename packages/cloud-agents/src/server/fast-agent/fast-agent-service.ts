@@ -2070,6 +2070,8 @@ export async function answerFastAgentQuestion({
   let lastVisibleMessage = '';
   /** The agent called `save_memory` itself, so the post-turn pass stands down. */
   let agentSavedMemoryThisTurn = false;
+  /** Human messages steered into this turn after it started, in order. */
+  const steeredHumanRequests: string[] = [];
   // The most recent assistant message already in the conversation, so a
   // repeat of the same terminal failure does not post the same closeout again.
   let priorAssistantMessage: string | undefined;
@@ -2838,7 +2840,10 @@ export async function answerFastAgentQuestion({
       console.info(
         `[Fast Agent] Native steer accepted. conversationId="${canonicalConversationId}" followUpCount=${batch.length}`,
       );
-      for (const { row } of batch) injectedHumanFollowUpIds.add(row.id);
+      for (const { row, followUp } of batch) {
+        injectedHumanFollowUpIds.add(row.id);
+        steeredHumanRequests.push(followUp.question);
+      }
       // Only a surface that explicitly marked the turn quiet-eligible may
       // leave it unanswered; unmarked follow-ups and older rows require one.
       if (
@@ -6832,14 +6837,16 @@ export async function answerFastAgentQuestion({
     }
     await settleDurableTurn();
     if (
-      substantiveHumanInput &&
+      (substantiveHumanInput || steeredHumanRequests.length > 0) &&
       !setupSession &&
       currentSessionPrivacy === 'shared'
     ) {
       void saveFastAgentPostTurnMemory({
         conversationId: session.id,
         userId,
-        request: question,
+        // A platform event's own text is not something a person said.
+        request: substantiveHumanInput ? question : '',
+        steeredRequests: steeredHumanRequests,
         reply: lastVisibleMessage,
         senderDisplayName,
         agentSavedMemory: agentSavedMemoryThisTurn,

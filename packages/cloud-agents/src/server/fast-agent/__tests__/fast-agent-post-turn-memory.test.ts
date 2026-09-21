@@ -126,6 +126,43 @@ describe('saveFastAgentPostTurnMemory', () => {
     });
   });
 
+  it('judges messages steered in mid-turn, and keeps them when the opening message is long', async () => {
+    mockEvaluateDecisionModel.mockResolvedValueOnce(
+      answers({ statedDurable: 0.9 }),
+    );
+
+    await saveFastAgentPostTurnMemory({
+      ...turn,
+      request: 'x'.repeat(20_000),
+      steeredRequests: ['No, never squash on the mobile repo.', '  '],
+    });
+
+    const { request } = mockEvaluateDecisionModel.mock.calls[0]![0].state;
+    expect(request.length).toBeLessThanOrEqual(6_002);
+    expect(request.endsWith('No, never squash on the mobile repo.')).toBe(true);
+    expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: expect.stringContaining('never squash on the mobile repo'),
+      }),
+    );
+  });
+
+  it('judges a steered message on a turn no person started', async () => {
+    await saveFastAgentPostTurnMemory({
+      ...turn,
+      request: '',
+      steeredRequests: ['Remember that Dana owns billing.'],
+    });
+
+    expect(mockEvaluateDecisionModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        state: expect.objectContaining({
+          request: 'Remember that Dana owns billing.',
+        }),
+      }),
+    );
+  });
+
   it('never pays for distillation on an unremarkable turn', async () => {
     mockEvaluateDecisionModel.mockResolvedValueOnce(
       answers({ statedDurable: 0.6 }),
