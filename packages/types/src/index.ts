@@ -35,6 +35,7 @@ export * from './deploy-marker';
 export * from './deployment-access-policy';
 export * from './brain';
 export * from './memory-mcp';
+export * from './memory-events';
 export * from './custom-mcp-servers';
 export * from './environment-config';
 export * from './environment-recipe';

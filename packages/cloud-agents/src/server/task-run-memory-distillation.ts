@@ -13,6 +13,8 @@ import {
 } from '@roomote/db/server';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
+  MEMORY_SAVED_EVENT_TEXT,
+  ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
   extractAcpMessageText,
   extractVisibleAcpPromptText,
   isSystemInjectedAcpPromptText,
@@ -186,6 +188,50 @@ async function loadLatestTurn(
     : null;
 }
 
+async function publishTaskMemorySavedEvent(input: {
+  runId: number;
+  taskId: string;
+  userId?: string | null;
+  summary: string;
+}): Promise<void> {
+  const distilled = input.summary.endsWith(DISTILLED_SUMMARY_NOTE)
+    ? input.summary.slice(0, -DISTILLED_SUMMARY_NOTE.length).trim()
+    : input.summary;
+  const memories = [scrubForMemoryCheck(distilled)].filter(Boolean);
+
+  if (memories.length === 0) return;
+
+  await db
+    .insert(taskMessages)
+    .values({
+      runId: input.runId,
+      taskId: input.taskId,
+      userId: input.userId ?? null,
+      // The run id makes retries idempotent even when the completion timestamp
+      // is unavailable to this background projection.
+      ts: input.runId,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.MemorySaved,
+      role: 'system',
+      protocol: ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+      contentBlocks: [{ type: 'text', text: MEMORY_SAVED_EVENT_TEXT }],
+      metadata: {
+        visibleInTranscript: true,
+        memorySave: true,
+        automatic: true,
+      },
+      payload: { memories },
+      source: 'roomote',
+    })
+    .onConflictDoNothing({
+      target: [
+        taskMessages.taskId,
+        taskMessages.protocol,
+        taskMessages.ts,
+        taskMessages.eventType,
+      ],
+    });
+}
+
 /**
  * After a task turn settles, ask the decision model whether the turn holds
  * anything a later task could reuse, and only then pay for a helper-model
@@ -289,6 +335,21 @@ export async function distillTaskRunTurnMemory(input: {
       }))
     ) {
       return null;
+    }
+
+    try {
+      await publishTaskMemorySavedEvent({
+        runId: input.runId,
+        taskId: input.taskId,
+        userId: input.userId,
+        summary,
+      });
+    } catch (error) {
+      // The Brain summary is already persisted; a transcript event can be
+      // retried by the durable drainer without turning the save into failure.
+      console.warn(
+        `[TaskRunMemoryDistillation] Failed to publish save event. runId=${input.runId} error="${error instanceof Error ? error.message : String(error)}"`,
+      );
     }
 
     console.info(

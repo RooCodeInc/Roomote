@@ -15,6 +15,7 @@ import {
 } from '@roomote/db/server';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
+  MEMORY_SAVED_EVENT_TEXT,
   type FastAgentConversationOwner,
   type ReasoningEffort,
   type RunStatus,
@@ -247,7 +248,7 @@ export async function appendFastAgentMemorySavedEvent({
       ts: Date.now(),
       eventType: ACP_ENVELOPE_EVENT_TYPES.MemorySaved,
       role: 'system',
-      contentBlocks: [{ type: 'text', text: 'Saved to memory' }],
+      contentBlocks: [{ type: 'text', text: MEMORY_SAVED_EVENT_TEXT }],
       metadata: { visibleInTranscript: true, memorySave: true },
       payload: { memories },
       source: 'roomote',

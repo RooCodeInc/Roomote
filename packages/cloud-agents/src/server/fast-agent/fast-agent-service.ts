@@ -3518,12 +3518,6 @@ export async function answerFastAgentQuestion({
           ),
           userId,
         }),
-        {
-          repositoryCacheKey: `${userId}:${availableEnvironments
-            .map((environment) => environment.id)
-            .sort()
-            .join(',')}`,
-        },
       )
         .then((catalog) => {
           for (const warning of catalog.warnings) {

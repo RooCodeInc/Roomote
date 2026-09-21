@@ -27,7 +27,6 @@ export type FastAgentPromptSkillCatalog = {
 };
 
 export const FAST_AGENT_PROMPT_SKILL_LIMIT = 64;
-const PROMPT_SKILL_CATALOG_CACHE_TTL_MS = 30_000;
 
 type PromptSkillCatalogSources = {
   instanceSkills: Pick<RemoteFastAgentInstanceSkillSource, 'list'>;
@@ -75,63 +74,23 @@ async function settlePromptSkillSource<T>(
 
 export async function loadFastAgentPromptSkillCatalog(
   sources: PromptSkillCatalogSources,
-  options: { repositoryCacheKey?: string } = {},
 ): Promise<FastAgentPromptSkillCatalog> {
-  const repository = sources.repositorySkills
-    ? loadRepositorySkillSource(
-        sources.repositorySkills,
-        options.repositoryCacheKey,
-      )
-    : Promise.resolve<
-        PromiseSettledResult<FastAgentSkillListResult> | undefined
-      >(undefined);
-  const [instance, settings, repositoryResult] = await Promise.all([
+  const [instance, settings, repository] = await Promise.all([
     settlePromptSkillSource(() => sources.instanceSkills.list()),
     settlePromptSkillSource(() => sources.settingsSkills.listPromptCatalog()),
-    repository,
+    sources.repositorySkills
+      ? settlePromptSkillSource(() => sources.repositorySkills!.list())
+      : Promise.resolve<
+          PromiseSettledResult<FastAgentSkillListResult> | undefined
+        >(undefined),
   ]);
 
   return mergeFastAgentPromptSkillCatalog(
     instance,
     settings,
-    repositoryResult,
+    repository,
     sources,
   );
-}
-
-const repositorySkillSourceCache = new Map<
-  string,
-  {
-    expiresAt: number;
-    promise: Promise<PromiseSettledResult<FastAgentSkillListResult>>;
-  }
->();
-
-async function loadRepositorySkillSource(
-  source: NonNullable<PromptSkillCatalogSources['repositorySkills']>,
-  cacheKey?: string,
-): Promise<PromiseSettledResult<FastAgentSkillListResult>> {
-  const now = Date.now();
-  for (const [key, entry] of repositorySkillSourceCache) {
-    if (entry.expiresAt <= now) repositorySkillSourceCache.delete(key);
-  }
-  if (!cacheKey) return settlePromptSkillSource(() => source.list());
-  const cached = repositorySkillSourceCache.get(cacheKey);
-  if (cached) return cached.promise;
-
-  const promise = settlePromptSkillSource(() => source.list());
-  repositorySkillSourceCache.set(cacheKey, {
-    expiresAt: Date.now() + PROMPT_SKILL_CATALOG_CACHE_TTL_MS,
-    promise,
-  });
-  promise.then((result) => {
-    if (result.status === 'rejected') {
-      const current = repositorySkillSourceCache.get(cacheKey);
-      if (current?.promise === promise)
-        repositorySkillSourceCache.delete(cacheKey);
-    }
-  });
-  return promise;
 }
 
 async function mergeFastAgentPromptSkillCatalog(
