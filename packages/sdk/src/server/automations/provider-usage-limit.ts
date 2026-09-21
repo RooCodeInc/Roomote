@@ -25,6 +25,7 @@ import {
 
 import { getCommunicationProviderAdapter } from '../lib/communication-providers';
 import { resolveBackgroundAutomationResultVisibility } from '../lib/automation-result-visibility';
+import { enqueueAutomationResultPreparation } from '../lib/automation-result-preparation';
 import {
   buildAutomationIconUrl,
   buildManagerSlackSettingsUrl,
@@ -84,7 +85,11 @@ const defaultDependencies: ProviderUsageLimitDependencies = {
   getCommunicationAdapter: getCommunicationProviderAdapter,
   recordOutcome: (executor, params) =>
     recordAutomationRunOutcome(executor, params),
-  recordResult: (params) => recordBackgroundAutomationResult(params),
+  recordResult: async (params) => {
+    const result = await recordBackgroundAutomationResult(params);
+    if (result) await enqueueAutomationResultPreparation(result.id);
+    return result;
+  },
   now: () => new Date(),
 };
 

@@ -217,7 +217,11 @@ export async function getTaskSummary(
 export async function recordAutomationResult(
   config: RoomoteConfig,
   taskId: string,
-  params: { content: string; dedupeKey: string },
+  params: {
+    content: string;
+    dedupeKey: string;
+    resultKind?: 'outcome' | 'input_request';
+  },
 ): Promise<{ recorded: boolean }> {
   return apiFetch(
     config,

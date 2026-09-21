@@ -98,6 +98,7 @@ import {
   buildCustomAutomationSlackMessage,
 } from './manager-slack';
 import { resolveCustomAutomationResultVisibility } from './automation-result-visibility';
+import { enqueueAutomationResultPreparation } from './automation-result-preparation';
 import {
   appendFastAutomationSuggestionInstruction,
   postFastAutomationSuggestionsToDiscord,
@@ -2854,24 +2855,36 @@ export async function deliverFastAgentParentEventWithLock(
             if (reply.kickoff) {
               return;
             }
+            const posted = await baseAdapter.postReply(reply);
             if (
               reply.purpose === 'closeout' ||
               reply.purpose === 'clarification'
             ) {
-              await recordCustomAutomationResult({
+              const sourceSession = await getSessionForFastConversation(
+                db,
+                params.parent.sessionId,
+              );
+              const result = await recordCustomAutomationResult({
                 automationId,
                 userId: parentTurn.userId,
                 ...(reportEvent.type === 'task_settled'
-                  ? { sourceTaskId: reportEvent.taskId }
+                  ? {
+                      sourceTaskId: reportEvent.taskId,
+                      sourceRunId: reportEvent.runId,
+                    }
                   : {}),
+                ...(sourceSession ? { sourceSessionId: sourceSession.id } : {}),
                 content: reply.message,
                 dedupeKey: `fast:${buildFastAutomationSuggestionEventId(reportEvent)}`,
                 visibility: await resolveCustomAutomationResultVisibility(
                   automationId,
                 ).catch(() => 'private' as const),
               }).catch(() => undefined);
+              if (result) {
+                await enqueueAutomationResultPreparation(result.id);
+              }
             }
-            return baseAdapter.postReply(reply);
+            return posted;
           },
         },
       };
