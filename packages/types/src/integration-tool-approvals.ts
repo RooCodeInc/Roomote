@@ -124,7 +124,7 @@ const INTEGRATION_TOOL_POLICY_MODE_STRICTNESS: Record<
 > = { allow: 0, ask: 1, reject: 2 };
 
 /** The stricter of a tool's deployment policy and the requester's own. */
-export function resolveStricterIntegrationToolPolicyMode(
+function resolveStricterIntegrationToolPolicyMode(
   deploymentMode: IntegrationToolPolicyMode | undefined,
   userMode: IntegrationToolPolicyMode | undefined,
 ): IntegrationToolPolicyMode | undefined {
@@ -134,6 +134,52 @@ export function resolveStricterIntegrationToolPolicyMode(
     INTEGRATION_TOOL_POLICY_MODE_STRICTNESS[deploymentMode]
     ? userMode
     : deploymentMode;
+}
+
+/** Which policy layers govern an integration; unset means both. */
+export type IntegrationToolPolicyScope = 'deployment' | 'personal';
+
+type IntegrationToolPolicyEntry = Pick<
+  IntegrationToolPolicyMetadata,
+  'integrationId' | 'toolName' | 'mode'
+>;
+
+/**
+ * The one rule for combining policy layers, shared by every enforcement
+ * point (the Session runtime and the integration proxy): per tool, the
+ * stricter mode among the layers that govern its integration.
+ *
+ * A custom server is governed by one layer only, matching where its policies
+ * are edited: a shared server takes the deployment's, a personal server its
+ * owner's. Their names can coincide, so a policy written for one must never
+ * reach the other. Built-in integrations (no scope) take both layers.
+ */
+export function resolveGoverningIntegrationToolPolicies<
+  T extends IntegrationToolPolicyEntry,
+>(input: {
+  deploymentPolicies: T[];
+  userPolicies: T[];
+  scopeOf: (integrationId: string) => IntegrationToolPolicyScope | undefined;
+}): T[] {
+  const governing = new Map<string, T>();
+  for (const [layer, policies] of [
+    ['deployment', input.deploymentPolicies],
+    ['personal', input.userPolicies],
+  ] as const) {
+    for (const policy of policies) {
+      if ((input.scopeOf(policy.integrationId) ?? layer) !== layer) continue;
+      const key = integrationToolPolicyKey(
+        policy.integrationId,
+        policy.toolName,
+      );
+      const mode = resolveStricterIntegrationToolPolicyMode(
+        governing.get(key)?.mode,
+        policy.mode,
+      );
+      if (mode === policy.mode) governing.set(key, policy);
+    }
+  }
+  return [...governing.values()];
 }
 
 /**

@@ -29,10 +29,12 @@ export function IntegrationToolApprovalsExperimentalSetting() {
           in Settings → Integrations offers Always allow (default), Ask first,
           and Reject per tool. Ask first pauses each call until the Session
           owner allows it once, stops the asks for the rest of that Session, or
-          rejects it; Reject blocks it outright. Session owners can also ask to
-          be asked about any tool from its call in the transcript. Tools left at
-          the default run exactly as before. Policies are deployment-wide and
-          apply from the next session turn.
+          rejects it; Reject blocks it outright, in Sessions and tasks alike.
+          Tasks cannot request approval yet, so an Ask first tool is unavailable
+          to them. Session owners can also ask to be asked about any tool from
+          its call in the transcript. Tools left at the default run exactly as
+          before. Policies are deployment-wide and apply from the next session
+          turn.
         </p>
       </div>
     </Section>

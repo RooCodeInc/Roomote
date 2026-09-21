@@ -40,7 +40,6 @@ import {
   extractApprovalCallArgs,
   hashIntegrationToolApprovalRules,
   integrationToolApprovalRulesToConfig,
-  mergeIntegrationToolPolicies,
   resolveFastAgentToolApprovalRules,
   resolveFastAgentToolApprovalSession,
   shouldDisposeInstanceForToolApprovalRules,
@@ -416,10 +415,37 @@ describe('resolveFastAgentToolApprovalRules', () => {
     });
   });
 
+  it('governs a custom server by its own policy layer only, since names can coincide', async () => {
+    const policy = (toolName: string) => ({
+      policyId: toolName,
+      integrationId: 'mock-slack',
+      toolName,
+      mode: 'reject' as const,
+      updatedAt: '',
+      createdAt: '',
+    });
+    vi.mocked(listIntegrationToolPolicies).mockResolvedValueOnce([
+      policy('read_channel'),
+    ]);
+    vi.mocked(listIntegrationToolUserPolicies).mockResolvedValueOnce([
+      policy('post_message'),
+    ]);
+    const resolved = await resolveFastAgentToolApprovalRules({
+      integrations: [
+        { ...integrations[0]!, toolApprovalPolicyScope: 'personal' },
+      ],
+      ownerUserId: 'owner-id',
+    });
+    // A shared server of the same name has the deployment policy; this
+    // personal one must only see its owner's.
+    expect(resolved?.rules.map((rule) => rule.permission)).toEqual([
+      codeModeToolKey('mock-slack', 'post_message'),
+    ]);
+  });
+
   it('reads no personal policies without a Session owner', async () => {
     await resolveFastAgentToolApprovalRules({ integrations });
     expect(listIntegrationToolUserPolicies).not.toHaveBeenCalled();
-    expect(mergeIntegrationToolPolicies([], [])).toEqual([]);
   });
 
   it('is inactive without the experiment', async () => {

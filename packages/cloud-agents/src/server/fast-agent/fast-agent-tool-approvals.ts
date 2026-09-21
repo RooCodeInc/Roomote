@@ -20,7 +20,7 @@ import {
 import {
   integrationToolPolicyKey,
   resolveEffectiveIntegrationToolMode,
-  resolveStricterIntegrationToolPolicyMode,
+  resolveGoverningIntegrationToolPolicies,
   type IntegrationToolApprovalMetadata,
   type IntegrationToolPolicyMetadata,
   type IntegrationToolSessionOverrideMetadata,
@@ -86,32 +86,6 @@ function listMountedIntegrationTools(
       key: codeModeToolKey(serverName, tool.name),
     }));
   });
-}
-
-/**
- * Layer the Session owner's personal policies on the deployment ones. The
- * stricter mode wins per tool, so a personal policy can gate or block calls
- * in the owner's Sessions but never loosen what an admin configured.
- */
-export function mergeIntegrationToolPolicies(
-  deploymentPolicies: IntegrationToolPolicyMetadata[],
-  userPolicies: IntegrationToolPolicyMetadata[],
-): IntegrationToolPolicyMetadata[] {
-  const merged = new Map(
-    deploymentPolicies.map((policy) => [
-      integrationToolPolicyKey(policy.integrationId, policy.toolName),
-      policy,
-    ]),
-  );
-  for (const policy of userPolicies) {
-    const key = integrationToolPolicyKey(policy.integrationId, policy.toolName);
-    const mode = resolveStricterIntegrationToolPolicyMode(
-      merged.get(key)?.mode,
-      policy.mode,
-    );
-    if (mode === policy.mode) merged.set(key, policy);
-  }
-  return [...merged.values()];
 }
 
 /**
@@ -308,7 +282,16 @@ export async function resolveFastAgentToolApprovalRules(input: {
   ]);
   const rules = buildIntegrationToolApprovalRules(
     input.integrations,
-    mergeIntegrationToolPolicies(policies, userPolicies),
+    // The Session owner's personal policies layer on the deployment ones;
+    // see `resolveGoverningIntegrationToolPolicies` for the rule.
+    resolveGoverningIntegrationToolPolicies({
+      deploymentPolicies: policies,
+      userPolicies,
+      scopeOf: (integrationId) =>
+        input.integrations.find(
+          (integration) => integration.id === integrationId,
+        )?.toolApprovalPolicyScope,
+    }),
     sessionOverrides,
   );
   return { rules, hash: hashIntegrationToolApprovalRules(rules) };

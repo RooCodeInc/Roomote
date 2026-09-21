@@ -12,6 +12,7 @@ const {
   mockFindCustomServer,
   mockFindConnection,
   mockGetValidAccessToken,
+  mockResolveApprovalBlocks,
 } = vi.hoisted(() => ({
   mockEnv: {
     R_CUSTOM_MCP_ALLOWED_PRIVATE_CIDRS: undefined as string | undefined,
@@ -21,6 +22,7 @@ const {
   mockFindCustomServer: vi.fn(),
   mockFindConnection: vi.fn(),
   mockGetValidAccessToken: vi.fn(),
+  mockResolveApprovalBlocks: vi.fn(async () => new Map<string, string>()),
 }));
 
 vi.mock('@roomote/env', () => ({
@@ -28,6 +30,11 @@ vi.mock('@roomote/env', () => ({
   isCustomMcpDisabled: (value: boolean | undefined) => value === true,
   areCuratedIntegrationsDisabled: (value: boolean | undefined) =>
     value === true,
+}));
+
+vi.mock('../tool-approval-enforcement', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../tool-approval-enforcement')>()),
+  resolveProxyToolApprovalBlocks: mockResolveApprovalBlocks,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -449,6 +456,97 @@ describe('createCustomMcpProxy', () => {
     };
 
     expect(body.result.tools.map((tool) => tool.name)).toEqual(['safe_tool']);
+  });
+
+  describe('tool approval policies', () => {
+    afterEach(() => {
+      mockResolveApprovalBlocks.mockImplementation(async () => new Map());
+    });
+
+    it('resolves policies under the server name for the calling token', async () => {
+      mockFindCustomServer.mockResolvedValue(
+        buildServerRow({ url: upstreamUrl() }),
+      );
+      await postMcp(createApp(), initializeRequest);
+      expect(mockResolveApprovalBlocks).toHaveBeenCalledWith(
+        expect.objectContaining({
+          integrationId: 'internal-tools',
+          policyScope: 'deployment',
+          tokenType: 'run',
+        }),
+      );
+    });
+
+    it("resolves a personal server under its owner's policies only", async () => {
+      mockFindCustomServer.mockResolvedValue(
+        buildServerRow({ url: upstreamUrl(), ownerUserId: 'user-1' }),
+      );
+      await postMcp(createApp(createAuthToken()), initializeRequest);
+      expect(mockResolveApprovalBlocks).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          integrationId: 'internal-tools',
+          policyScope: 'personal',
+        }),
+      );
+    });
+
+    it('refuses a blocked tool call with the policy reason and never contacts the upstream', async () => {
+      mockFindCustomServer.mockResolvedValue(
+        buildServerRow({ url: upstreamUrl() }),
+      );
+      mockResolveApprovalBlocks.mockResolvedValue(
+        new Map([['dangerous_tool', 'needs_approval']]),
+      );
+
+      const response = await postMcp(createApp(), {
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'dangerous_tool', arguments: {} },
+      });
+
+      expect(response.status).toBe(403);
+      const body = (await response.json()) as { error: { message: string } };
+      expect(body.error.message).toContain('needs approval');
+      expect(lastUpstreamHeaders).toBeNull();
+    });
+
+    it('hides blocked tools from tools/list', async () => {
+      mockFindCustomServer.mockResolvedValue(
+        buildServerRow({ url: upstreamUrl() }),
+      );
+      mockResolveApprovalBlocks.mockResolvedValue(
+        new Map([['dangerous_tool', 'reject']]),
+      );
+
+      const response = await postMcp(createApp(), {
+        jsonrpc: '2.0',
+        id: 3,
+        method: 'tools/list',
+        params: {},
+      });
+      const body = (await response.json()) as {
+        result: { tools: { name: string }[] };
+      };
+      expect(body.result.tools.map((tool) => tool.name)).toEqual(['safe_tool']);
+    });
+
+    it('fails closed when the policies cannot be read', async () => {
+      mockFindCustomServer.mockResolvedValue(
+        buildServerRow({ url: upstreamUrl() }),
+      );
+      mockResolveApprovalBlocks.mockRejectedValue(new Error('db down'));
+
+      const response = await postMcp(createApp(), {
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'safe_tool', arguments: {} },
+      });
+
+      expect(response.status).toBe(500);
+      expect(lastUpstreamHeaders).toBeNull();
+    });
   });
 
   it('refuses upstream redirects instead of following them', async () => {

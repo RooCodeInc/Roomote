@@ -84,6 +84,13 @@ type ResolvedMcpServerConfig = {
   headers: Record<string, string>;
   disabledTools?: string[];
   cacheRevision?: string;
+  /**
+   * Which per-tool approval policies govern a custom server: a shared server
+   * takes the deployment's, a personal one its owner's. A name can exist in
+   * both scopes, so the name alone cannot tell them apart. Unset for
+   * built-in integrations, where both layers apply.
+   */
+  toolApprovalPolicyScope?: 'deployment' | 'personal';
 };
 
 type ResolvedMcpServerConfigs = Record<string, ResolvedMcpServerConfig>;
@@ -111,7 +118,7 @@ async function resolveMcpServerConfigs(options: {
   auth: Parameters<typeof resolveActorScopedUserContext>[0];
   requestOrigin: string | null;
   includeRoomoteMemberTools?: boolean;
-  includeCacheRevision?: boolean;
+  includeSessionMetadata?: boolean;
   quiet?: boolean;
 }): Promise<ResolvedMcpServerConfigs> {
   const logInfo: InfoLogger = options.quiet ? () => {} : console.info;
@@ -183,9 +190,13 @@ async function resolveMcpServerConfigs(options: {
     url: `${options.requestOrigin ?? ''}${HTTP_INTEGRATIONS_MCP_PATH}`,
     headers: {},
   };
-  if (!options.includeCacheRevision) {
+  // A worker writes what it receives into an agent's MCP configuration, so
+  // it gets the connection fields only. The cache revision and the approval
+  // policy scope are control-plane metadata for Roomote's Session runtime.
+  if (!options.includeSessionMetadata) {
     for (const server of Object.values(servers)) {
       delete server.cacheRevision;
+      delete server.toolApprovalPolicyScope;
     }
   }
 
@@ -205,7 +216,7 @@ export async function resolveUserMcpServerConfigs(options: {
     auth: { userId: options.userId },
     requestOrigin: getRequestOrigin({ url: options.apiBaseUrl }),
     includeRoomoteMemberTools: options.includeRoomoteMemberTools,
-    includeCacheRevision: true,
+    includeSessionMetadata: true,
     // This runs on every Fast turn; the per-connection info stream is worker
     // config-fetch debugging noise at that frequency.
     quiet: true,
@@ -394,6 +405,10 @@ async function buildScopedCustomMcpServerConfigs(
 ): Promise<ResolvedMcpServerConfigs> {
   const servers: ResolvedMcpServerConfigs = {};
   const rows = await customMcpServerStore(scope).list({ enabledOnly: true });
+  // Every entry built here belongs to this one scope, whichever branch
+  // builds it.
+  const toolApprovalPolicyScope =
+    scope.visibility === 'owner' ? 'personal' : 'deployment';
 
   for (const row of rows) {
     // stdio servers ride the worker merge path via getCustomStdioMcpServers.
@@ -407,6 +422,7 @@ async function buildScopedCustomMcpServerConfigs(
         url: `${requestOrigin ?? ''}/api/mcp/development-fixtures`,
         headers: {},
         cacheRevision: `${row.updatedAt?.getTime() ?? 0}`,
+        toolApprovalPolicyScope,
       };
       continue;
     }
@@ -433,6 +449,7 @@ async function buildScopedCustomMcpServerConfigs(
       url: requestOrigin ? `${requestOrigin}${proxyPath}` : proxyPath,
       headers: { 'X-MCP-Client': PRODUCT_NAME },
       cacheRevision: `${row.updatedAt?.getTime() ?? 0}:${connectionUpdatedAt?.getTime() ?? ''}`,
+      toolApprovalPolicyScope,
     };
   }
 
