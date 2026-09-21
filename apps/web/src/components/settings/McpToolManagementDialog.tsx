@@ -17,11 +17,6 @@ import {
   DialogHeader,
   DialogTitle,
   Label,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
   Spinner,
   Switch,
   ToggleLeft,
@@ -33,9 +28,13 @@ import {
 } from '@/hooks/mcp-connections';
 import { useIntegrationToolApprovalsExperiment } from '@/hooks/useIntegrationToolApprovalsExperiment';
 import { useIntegrationToolPolicies } from '@/hooks/useIntegrationToolPolicies';
+
+import {
+  INTEGRATION_TOOL_APPROVAL_SAVE_HINT,
+  IntegrationToolApprovalModeSelect,
+} from './IntegrationToolApprovalModeSelect';
 import { MCP_TOOL_CATALOG_REQUIRES_PERSONAL_CONNECTION } from '@/lib/mcp-tool-errors';
 import { SETTINGS_PATHS } from '@/lib/settings';
-import type { IntegrationToolPolicyMode } from '@roomote/types';
 import { integrationToolPolicyKey } from '@roomote/types';
 
 type McpToolManagementDialogProps = {
@@ -54,12 +53,6 @@ function splitToolNameParts(name: string): string[] {
 function titleCaseToolNamePart(part: string): string {
   return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
 }
-
-const APPROVAL_MODE_LABELS: Record<IntegrationToolPolicyMode, string> = {
-  allow: 'Always allow (default)',
-  ask: 'Ask every time',
-  reject: 'Always reject',
-};
 
 function prettifyToolName(
   name: string,
@@ -298,8 +291,8 @@ export function McpToolManagementDialog({
             <div className="space-y-3 py-3">
               {toolApprovalsActive && mcpId ? (
                 <p className="text-xs text-muted-foreground">
-                  Approval changes save immediately and apply from the next
-                  session turn. Tool enable/disable still needs Save changes.
+                  {INTEGRATION_TOOL_APPROVAL_SAVE_HINT} Tool enable/disable
+                  still needs Save changes.
                 </p>
               ) : null}
               {loadedTools.map((tool, index) => {
@@ -339,36 +332,14 @@ export function McpToolManagementDialog({
                       </div>
                     </div>
                     {toolApprovalsActive && mcpId ? (
-                      <Select
+                      <IntegrationToolApprovalModeSelect
+                        toolName={tool.name}
                         value={approvalMode}
                         disabled={toolPolicies.isUpdating}
-                        onValueChange={(value) =>
-                          toolPolicies.setMode(
-                            mcpId,
-                            tool.name,
-                            value as IntegrationToolPolicyMode,
-                          )
+                        onChange={(mode) =>
+                          toolPolicies.setMode(mcpId, tool.name, mode)
                         }
-                      >
-                        <SelectTrigger
-                          className="w-56 shrink-0"
-                          aria-label={`Approval mode for ${tool.name}`}
-                        >
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {(
-                            Object.entries(APPROVAL_MODE_LABELS) as [
-                              IntegrationToolPolicyMode,
-                              string,
-                            ][]
-                          ).map(([value, label]) => (
-                            <SelectItem key={value} value={value}>
-                              {label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      />
                     ) : null}
                   </div>
                 );
