@@ -390,75 +390,6 @@ export class NonTaskOpenCodeSessionNotFoundError extends Error {
   }
 }
 
-/**
- * Upper bound on one native permission reply. The approval claim holds the
- * deployment settings share lock across the relay, so an unresponsive
- * OpenCode server must never leave that lock (and with it an admin's
- * ability to disable the experiment) open indefinitely. On timeout the
- * claim transaction rolls back, the reservation stays `approved` for the
- * next sweep or turn, and the ask fails closed instead of stalling.
- */
-export const PERMISSION_REPLY_TIMEOUT_MS = 10_000;
-
-type PermissionReplyClient = {
-  permission: {
-    reply: (
-      parameters: {
-        requestID: string;
-        directory: string;
-        reply: 'once' | 'reject';
-        message?: string;
-      },
-      options?: { signal?: AbortSignal },
-    ) => Promise<{ error?: unknown }>;
-    list: (
-      parameters: { directory: string },
-      options?: { signal?: AbortSignal },
-    ) => Promise<{ data?: Array<{ id?: unknown }> }>;
-  };
-};
-
-/**
- * Reply to one native permission request, bounded by PERMISSION_REPLY_TIMEOUT_MS.
- * A timeout can fire after OpenCode accepted the reply but before the
- * response arrived, so on timeout the request's pending state is verified
- * with a second bounded read: a request that is no longer pending was
- * accepted (the reply landed and the response was lost), and the caller
- * must still record the relay instead of rolling the claim back over an
- * executing call. A request that is still pending genuinely did not
- * receive the reply, and the error propagates so the claim rolls back.
- */
-export async function replyToPermissionAsk(
-  client: PermissionReplyClient,
-  sessionDirectory: string,
-  requestId: string,
-  response: 'once' | 'reject',
-  message?: string,
-  timeoutMs: number = PERMISSION_REPLY_TIMEOUT_MS,
-): Promise<{ error?: unknown }> {
-  try {
-    return await client.permission.reply(
-      {
-        requestID: requestId,
-        directory: sessionDirectory,
-        reply: response,
-        ...(message ? { message } : {}),
-      },
-      { signal: AbortSignal.timeout(timeoutMs) },
-    );
-  } catch (error) {
-    const pending = await client.permission.list(
-      { directory: sessionDirectory },
-      { signal: AbortSignal.timeout(timeoutMs) },
-    );
-    const stillPending = (pending.data ?? []).some(
-      (request) => request.id === requestId,
-    );
-    if (!stillPending) return {};
-    throw error;
-  }
-}
-
 export class NonTaskOpenCodeSessionValidationError extends Error {
   constructor(error: unknown) {
     super(
@@ -1364,6 +1295,12 @@ async function runNonTaskSdkPrompt(
       }
     }
     const permissionAskHelpers: NonTaskOpenCodePermissionAskHelpers = {
+      // Native asks identify the paused call (messageID/callID) but carry no
+      // arguments. Recover them from the asking session's own transcript so
+      // the approval surface can show a redacted view of exactly what is
+      // about to run. Under code mode the paused part is the outer `execute`
+      // call; its metadata carries the child tool calls with their
+      // structured inputs, so consumers can still show the real arguments.
       fetchCallArgs: async ({ sessionId: askSessionId, callId }) => {
         if (!callId) return undefined;
         const result = await client.session.messages({
@@ -1391,13 +1328,12 @@ async function runNonTaskSdkPrompt(
         return undefined;
       },
       reply: async (requestId, response, message) => {
-        const result = await replyToPermissionAsk(
-          client,
-          sessionDirectory,
-          requestId,
-          response,
-          message,
-        );
+        const result = await client.permission.reply({
+          requestID: requestId,
+          directory: sessionDirectory,
+          reply: response,
+          ...(message ? { message } : {}),
+        });
         if (result.error) {
           console.warn(
             `[NonTaskProviderUsage] OpenCode permission reply failed: ${formatOpenCodeSdkError(result.error)}`,

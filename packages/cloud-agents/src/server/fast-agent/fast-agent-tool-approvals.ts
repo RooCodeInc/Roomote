@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import type { PermissionRuleset } from '@opencode-ai/sdk/v2/client';
 import {
   cancelOpenIntegrationToolApprovals,
-  claimIntegrationToolApprovalForRelay,
+  claimAutoApprovedIntegrationToolApproval,
   db,
   expireIntegrationToolApproval,
   fingerprintIntegrationToolCall,
@@ -14,6 +14,7 @@ import {
   isDeploymentExperimentEnabled,
   listIntegrationToolPolicies,
   listIntegrationToolSessionOverrides,
+  markIntegrationToolApprovalConsumed,
 } from '@roomote/db/server';
 import {
   integrationToolPolicyKey,
@@ -446,14 +447,10 @@ export function createFastAgentToolApprovalBridge(input: {
             argsSummary: args ?? null,
           },
         );
-        const claimed = await claimIntegrationToolApprovalForRelay(
-          {
-            approvalId: reservation.approvalId,
-            requesterUserId: input.userId,
-          },
-          'auto_approved',
-          () => helpers.reply(ask.requestId, 'once'),
-        );
+        const claimed = await claimAutoApprovedIntegrationToolApproval({
+          approvalId: reservation.approvalId,
+          requesterUserId: input.userId,
+        });
         if (!claimed) {
           await helpers
             .reply(
@@ -464,6 +461,7 @@ export function createFastAgentToolApprovalBridge(input: {
             .catch(() => undefined);
           return;
         }
+        await helpers.reply(ask.requestId, 'once');
         return;
       }
       const approval = await insertIntegrationToolApproval(
@@ -542,29 +540,22 @@ export function createFastAgentToolApprovalBridge(input: {
               .catch(() => undefined);
             return;
           }
-          // Consume and relay under one serialized claim: only the first
-          // relay of an approved, unclaimed decision reaches OpenCode, and
-          // the experiment share lock stays held until the native reply
-          // completes, so a disable can never slip between the claim and
-          // the relay. A cancelled or double-claimed row fails closed
-          // instead of executing twice.
-          const consumed = await claimIntegrationToolApprovalForRelay(
-            {
-              approvalId: approval.approvalId,
-              requesterUserId: input.userId,
-            },
-            'consumed',
-            () => helpers.reply(ask.requestId, 'once'),
-          );
-          if (!consumed) {
-            await helpers
-              .reply(
-                ask.requestId,
-                'reject',
-                'The approval for this tool call is no longer valid.',
-              )
-              .catch(() => undefined);
-          }
+          // Consume before relaying: only the first relay of an approved,
+          // unclaimed decision reaches OpenCode; a cancelled or
+          // double-claimed row fails closed instead of executing twice.
+          const consumed = await markIntegrationToolApprovalConsumed({
+            approvalId: approval.approvalId,
+            requesterUserId: input.userId,
+          });
+          await helpers
+            .reply(
+              ask.requestId,
+              consumed ? 'once' : 'reject',
+              consumed
+                ? undefined
+                : 'The approval for this tool call is no longer valid.',
+            )
+            .catch(() => undefined);
           return;
         }
         if (Date.now() >= deadline) {

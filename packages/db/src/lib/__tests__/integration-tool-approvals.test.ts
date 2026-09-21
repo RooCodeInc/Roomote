@@ -9,7 +9,6 @@ import {
 import {
   cancelOpenIntegrationToolApprovals,
   claimAutoApprovedIntegrationToolApproval,
-  claimIntegrationToolApprovalForRelay,
   decideIntegrationToolApproval,
   expireIntegrationToolApproval,
   fingerprintIntegrationToolCall,
@@ -326,74 +325,6 @@ describe('expireIntegrationToolApproval', () => {
     expect(
       await listPendingIntegrationToolApprovals({ sessionId, userId }),
     ).toHaveLength(0);
-  });
-});
-
-describe('claimIntegrationToolApprovalForRelay', () => {
-  it('relays inside the claim transaction and never relays after a committed disable', async () => {
-    const userId = await user();
-    const context = { sessionId: await ownedSession(userId), userId };
-    const pending = await insertPending(context);
-    await decideIntegrationToolApproval(context, {
-      approvalId: pending.approvalId,
-      decision: 'approved',
-    });
-    let relays = 0;
-    await expect(
-      claimIntegrationToolApprovalForRelay(
-        { approvalId: pending.approvalId, requesterUserId: userId },
-        'consumed',
-        async () => {
-          relays += 1;
-        },
-      ),
-    ).resolves.toBe(true);
-    expect(relays).toBe(1);
-    expect((await getIntegrationToolApproval(pending.approvalId))?.status).toBe(
-      'consumed',
-    );
-
-    // A committed disable wins before the relay ever runs, even with no
-    // sweep row cancellation involved.
-    const second = await insertPending(context);
-    await decideIntegrationToolApproval(context, {
-      approvalId: second.approvalId,
-      decision: 'approved',
-    });
-    await setDeploymentExperimentEnabled('integrationToolApprovals', false);
-    await expect(
-      claimIntegrationToolApprovalForRelay(
-        { approvalId: second.approvalId, requesterUserId: userId },
-        'consumed',
-        async () => {
-          relays += 1;
-        },
-      ),
-    ).resolves.toBe(false);
-    expect(relays).toBe(1);
-    await setDeploymentExperimentEnabled('integrationToolApprovals', true);
-  });
-
-  it('does not relay when the claim is already lost', async () => {
-    const userId = await user();
-    const context = { sessionId: await ownedSession(userId), userId };
-    const pending = await insertPending(context);
-    await decideIntegrationToolApproval(context, {
-      approvalId: pending.approvalId,
-      decision: 'approved',
-    });
-    await cancelOpenIntegrationToolApprovals('experiment_disabled');
-    let relays = 0;
-    await expect(
-      claimIntegrationToolApprovalForRelay(
-        { approvalId: pending.approvalId, requesterUserId: userId },
-        'consumed',
-        async () => {
-          relays += 1;
-        },
-      ),
-    ).resolves.toBe(false);
-    expect(relays).toBe(0);
   });
 });
 

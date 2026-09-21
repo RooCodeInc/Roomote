@@ -7,12 +7,7 @@ vi.mock('@roomote/db/server', () => ({
   expireIntegrationToolApproval: vi.fn(async () => undefined),
   fingerprintIntegrationToolCall: vi.fn(() => 'fingerprint'),
   getIntegrationToolApproval: vi.fn(),
-  claimIntegrationToolApprovalForRelay: vi.fn(
-    async (_input: unknown, _status: unknown, relay: () => Promise<void>) => {
-      await relay();
-      return true;
-    },
-  ),
+  claimAutoApprovedIntegrationToolApproval: vi.fn(async () => true),
   insertAutoApprovedIntegrationToolApproval: vi.fn(async () => ({
     approvalId: 'auto-approval-1',
   })),
@@ -20,10 +15,11 @@ vi.mock('@roomote/db/server', () => ({
   isDeploymentExperimentEnabled: vi.fn(async () => true),
   listIntegrationToolPolicies: vi.fn(async () => []),
   listIntegrationToolSessionOverrides: vi.fn(async () => []),
+  markIntegrationToolApprovalConsumed: vi.fn(async () => true),
 }));
 
 import {
-  claimIntegrationToolApprovalForRelay,
+  claimAutoApprovedIntegrationToolApproval,
   expireIntegrationToolApproval,
   getIntegrationToolApproval,
   getSessionForFastConversation,
@@ -32,6 +28,7 @@ import {
   isDeploymentExperimentEnabled,
   listIntegrationToolPolicies,
   listIntegrationToolSessionOverrides,
+  markIntegrationToolApprovalConsumed,
 } from '@roomote/db/server';
 
 import {
@@ -642,12 +639,6 @@ describe('tool approval bridge', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(claimIntegrationToolApprovalForRelay).mockImplementation(
-      async (_input: unknown, _status: unknown, relay: () => Promise<void>) => {
-        await relay();
-        return true;
-      },
-    );
     vi.mocked(isDeploymentExperimentEnabled).mockResolvedValue(true);
     vi.mocked(listIntegrationToolSessionOverrides).mockResolvedValue([]);
     vi.mocked(insertIntegrationToolApproval).mockResolvedValue({
@@ -693,7 +684,9 @@ describe('tool approval bridge', () => {
     vi.mocked(listIntegrationToolSessionOverrides).mockResolvedValue([
       { integrationId: 'mock-slack', toolName: 'post_message', mode: 'allow' },
     ]);
-    vi.mocked(claimIntegrationToolApprovalForRelay).mockResolvedValue(false);
+    vi.mocked(claimAutoApprovedIntegrationToolApproval).mockResolvedValue(
+      false,
+    );
     const helperMocks = helpers();
     bridge().handleAsk(ask, helperMocks);
     await vi.waitFor(() =>
@@ -703,11 +696,10 @@ describe('tool approval bridge', () => {
         'Tool approvals were disabled; the call was not run.',
       ),
     );
-    expect(claimIntegrationToolApprovalForRelay).toHaveBeenCalledWith(
-      { approvalId: 'auto-approval-1', requesterUserId: 'user-id' },
-      'auto_approved',
-      expect.any(Function),
-    );
+    expect(claimAutoApprovedIntegrationToolApproval).toHaveBeenCalledWith({
+      approvalId: 'auto-approval-1',
+      requesterUserId: 'user-id',
+    });
     expect(helperMocks.reply).not.toHaveBeenCalledWith('req-1', 'once');
     expect(insertIntegrationToolApproval).not.toHaveBeenCalled();
   });
@@ -781,7 +773,7 @@ describe('tool approval bridge', () => {
         'Tool approvals were disabled; the call was not run.',
       ),
     );
-    expect(claimIntegrationToolApprovalForRelay).not.toHaveBeenCalled();
+    expect(markIntegrationToolApprovalConsumed).not.toHaveBeenCalled();
   });
 
   it('records the ask with the paused call arguments and relays an approved decision once', async () => {
@@ -791,7 +783,11 @@ describe('tool approval bridge', () => {
     const helperMocks = helpers();
     bridge().handleAsk(ask, helperMocks);
     await vi.waitFor(() =>
-      expect(helperMocks.reply).toHaveBeenCalledWith('req-1', 'once'),
+      expect(helperMocks.reply).toHaveBeenCalledWith(
+        'req-1',
+        'once',
+        undefined,
+      ),
     );
     expect(insertIntegrationToolApproval).toHaveBeenCalledWith(
       { sessionId: 'session-id', userId: 'user-id' },
@@ -802,11 +798,10 @@ describe('tool approval bridge', () => {
         argsSummary: { channel: 'C1', text: 'hi' },
       }),
     );
-    expect(claimIntegrationToolApprovalForRelay).toHaveBeenCalledWith(
-      { approvalId: 'approval-1', requesterUserId: 'user-id' },
-      'consumed',
-      expect.any(Function),
-    );
+    expect(markIntegrationToolApprovalConsumed).toHaveBeenCalledWith({
+      approvalId: 'approval-1',
+      requesterUserId: 'user-id',
+    });
   });
 
   it('rejects the native ask when the requester rejects', async () => {
@@ -822,14 +817,14 @@ describe('tool approval bridge', () => {
         'The requester rejected this tool call.',
       ),
     );
-    expect(claimIntegrationToolApprovalForRelay).not.toHaveBeenCalled();
+    expect(markIntegrationToolApprovalConsumed).not.toHaveBeenCalled();
   });
 
   it('fails the native ask closed when the approved row was already claimed', async () => {
     vi.mocked(getIntegrationToolApproval).mockResolvedValue({
       status: 'approved',
     } as never);
-    vi.mocked(claimIntegrationToolApprovalForRelay).mockResolvedValue(false);
+    vi.mocked(markIntegrationToolApprovalConsumed).mockResolvedValue(false);
     const helperMocks = helpers();
     bridge().handleAsk(ask, helperMocks);
     await vi.waitFor(() =>
@@ -896,12 +891,7 @@ describe('tool approval bridge', () => {
     vi.mocked(getIntegrationToolApproval).mockResolvedValue({
       status: 'approved',
     } as never);
-    vi.mocked(claimIntegrationToolApprovalForRelay).mockImplementation(
-      async (_input: unknown, _status: unknown, relay: () => Promise<void>) => {
-        await relay();
-        return true;
-      },
-    );
+    vi.mocked(markIntegrationToolApprovalConsumed).mockResolvedValue(true);
     const helperMocks = {
       fetchCallArgs: vi.fn(async () => ({
         input: { code: 'return await tools.a_b.c({ x: 1 })' },
@@ -915,7 +905,11 @@ describe('tool approval bridge', () => {
       integrations: colliding,
     }).handleAsk({ ...ask, permission: 'a_b_c' }, helperMocks as never);
     await vi.waitFor(() =>
-      expect(helperMocks.reply).toHaveBeenCalledWith('req-1', 'once'),
+      expect(helperMocks.reply).toHaveBeenCalledWith(
+        'req-1',
+        'once',
+        undefined,
+      ),
     );
     // The card and audit record the tool that actually executes (a_b/c with
     // its own arguments), never the first colliding pair.

@@ -396,57 +396,6 @@ async function claimApprovedIntegrationToolApproval(
 }
 
 /**
- * Claim an unrelayed `approved` row and relay it, serialized against the
- * experiment toggle for the whole claim-and-relay. Disabling commits
- * `enabled=false` first and sweeps open rows second, so a bare conditional
- * update could still claim a row in between and relay under a disabled
- * experiment — and a claim that commits before the relay could still let a
- * disable slip in before the native reply. Reading the setting with a share
- * lock and holding that lock until the relay completes closes both: either
- * the disable already committed and the claim fails without relaying, or
- * the claim holds the lock and the disable waits until the call was
- * genuinely relayed before the experiment went off. It also covers a row
- * inserted after the sweep already ran, which the sweep alone can never
- * cancel.
- */
-export async function claimIntegrationToolApprovalForRelay(
-  input: { approvalId: string; requesterUserId: string },
-  claimedStatus: 'consumed' | 'auto_approved',
-  relay: () => Promise<void>,
-): Promise<boolean> {
-  return db.transaction(async (tx) => {
-    if (
-      !(await isDeploymentExperimentEnabledWithShareLock(
-        'integrationToolApprovals',
-        tx,
-      ))
-    ) {
-      return false;
-    }
-    const [row] = await tx
-      .update(integrationToolApprovalRequests)
-      .set({ status: claimedStatus })
-      .where(
-        and(
-          eq(integrationToolApprovalRequests.id, input.approvalId),
-          eq(
-            integrationToolApprovalRequests.requesterUserId,
-            input.requesterUserId,
-          ),
-          eq(integrationToolApprovalRequests.status, 'approved'),
-        ),
-      )
-      .returning({ id: integrationToolApprovalRequests.id });
-    if (!row) return false;
-    // The share lock stays held across the native reply, so the toggle's
-    // metadata write waits for it. The relay is a bounded localhost call to
-    // the session's own OpenCode server.
-    await relay();
-    return true;
-  });
-}
-
-/**
  * Record that the approved decision was relayed to the native runtime and the
  * call resumed exactly once. Only an approved, unclaimed row transitions, so
  * a second relay attempt or a late relay after cancellation matches zero
