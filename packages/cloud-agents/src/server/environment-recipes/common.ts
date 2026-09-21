@@ -19,6 +19,7 @@ export interface EnvironmentRecipeControlAdapter {
   /** Normalize (trim, dedupe, sort) an incoming packages request. */
   normalizeRequest(request: { packages: string[] }): { packages: string[] };
   computeRequestFingerprint(request: { packages: string[] }): string;
+  /** Recompute over the canonical resolution without its embedded fingerprint. */
   computeResolutionFingerprint(
     resolution: NonNullable<EnvironmentRecipe['resolution']>,
   ): string;

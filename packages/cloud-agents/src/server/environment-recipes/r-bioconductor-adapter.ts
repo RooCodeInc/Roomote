@@ -47,7 +47,9 @@ function computeRRequestFingerprint(request: { packages: string[] }): string {
 function computeRResolutionFingerprint(
   resolution: NonNullable<EnvironmentRecipe['resolution']>,
 ): string {
-  return stableRecipeJsonSha256(resolution);
+  const { resolution_fingerprint: _fingerprint, ...canonicalResolution } =
+    resolution;
+  return stableRecipeJsonSha256(canonicalResolution);
 }
 
 function isCompatibleREnvironment(

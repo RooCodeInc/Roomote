@@ -91,6 +91,12 @@ describe('rBioconductorControlAdapter', () => {
     expect(
       rBioconductorControlAdapter.computeResolutionFingerprint({
         ...resolution,
+        resolution_fingerprint: fingerprint,
+      }),
+    ).toBe(fingerprint);
+    expect(
+      rBioconductorControlAdapter.computeResolutionFingerprint({
+        ...resolution,
         renv_lock: {
           Bioconductor: { Version: '3.21' },
           R: { Version: '4.5.2' },
