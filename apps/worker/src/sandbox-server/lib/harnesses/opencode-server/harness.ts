@@ -307,6 +307,15 @@ interface OpenCodeChildSessionRelationship {
 
 const OPEN_CODE_EXECUTE_TOOLS = new Set(['bash', 'shell']);
 const OPEN_CODE_READ_TOOLS = new Set(['read']);
+const OPEN_CODE_EDIT_TOOLS = new Set([
+  'edit',
+  'write',
+  'patch',
+  'multiedit',
+  'apply_patch',
+]);
+// Edits to prose do not invalidate a test run.
+const NON_SOURCE_EDIT_PATTERN = /\.(md|mdx|txt)$/i;
 const OPEN_CODE_SEARCH_TOOLS = new Set(['grep', 'glob', 'find', 'list', 'ls']);
 const MAX_OPENCODE_STOP_HOOK_REMINDERS = 3;
 // The completion check is a fast, fallible read of the diff. It gets one
@@ -5461,12 +5470,40 @@ export class OpenCodeServerHarness
     }
   }
 
-  /** Keeps the parent agent's most recent shell commands for the check. */
+  /**
+   * Keeps the parent agent's most recent shell commands for the check, and
+   * marks them stale once a later source edit lands: a test run says nothing
+   * about code changed after it.
+   */
   private recordCompletionGateCommand(
     sessionId: string,
     normalized: ReturnType<typeof normalizeOpenCodeToolPart>,
   ): void {
     const { isExecute, command, exitCode } = normalized.resultPayload;
+
+    if (
+      sessionId === this.sessionId &&
+      normalized.status === 'completed' &&
+      OPEN_CODE_EDIT_TOOLS.has(normalized.toolName.trim().toLowerCase())
+    ) {
+      const rawInput = asRecord(
+        (normalized.resultPayload as Record<string, unknown>).rawInput,
+      );
+      const filePath = asString(rawInput?.filePath);
+      const editsSource = filePath
+        ? !NON_SOURCE_EDIT_PATTERN.test(filePath) &&
+          !path.relative(this.workspacePath, filePath).startsWith('..')
+        : // A patch names its files inside the patch text; assume source.
+          true;
+
+      if (editsSource) {
+        for (const entry of this.completionGateCommands) {
+          entry.ranBeforeLaterEdit = true;
+        }
+      }
+
+      return;
+    }
 
     // Subagent sessions run their own commands; the report under check is the
     // parent's, and so is the evidence.
@@ -5481,6 +5518,7 @@ export class OpenCodeServerHarness
 
     this.completionGateCommands.push({
       generation: this.completionGateRequestGeneration,
+      ranBeforeLaterEdit: false,
       command: command.slice(0, TASK_COMPLETION_GATE_LIMITS.commandMaxChars),
       exitCode:
         typeof exitCode === 'number' && Number.isInteger(exitCode)

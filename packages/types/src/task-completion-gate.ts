@@ -34,6 +34,11 @@ export const taskCompletionCommandSchema = z.object({
   outputTail: z
     .string()
     .max(TASK_COMPLETION_GATE_LIMITS.commandOutputTailMaxChars),
+  /**
+   * True when the agent edited source files after this command ran, so its
+   * result describes code that is no longer what ships.
+   */
+  ranBeforeLaterEdit: z.boolean().default(false),
 });
 
 export type TaskCompletionCommand = z.infer<typeof taskCompletionCommandSchema>;

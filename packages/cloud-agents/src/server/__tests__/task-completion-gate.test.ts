@@ -58,6 +58,7 @@ const check = {
       command: 'pnpm vitest run src/guard.test.ts',
       exitCode: 0,
       outputTail: 'Tests  12 passed (12)',
+      ranBeforeLaterEdit: false,
     },
   ],
 };
@@ -122,6 +123,7 @@ describe('evaluateTaskCompletionGate', () => {
         c1: {
           command: 'pnpm vitest run src/guard.test.ts',
           exit_code: 0,
+          ran_before_later_edit: false,
           output_tail: 'Tests  12 passed (12)',
         },
       },
@@ -229,6 +231,7 @@ describe('evaluateTaskCompletionGate', () => {
             command: `curl -H "Authorization: Bearer ghp_${'c'.repeat(36)}" https://example.com`,
             exitCode: 0,
             outputTail: `token=ghp_${'d'.repeat(36)}`,
+            ranBeforeLaterEdit: false,
           },
         ],
       },

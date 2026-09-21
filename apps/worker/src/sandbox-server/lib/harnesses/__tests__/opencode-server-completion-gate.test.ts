@@ -464,14 +464,91 @@ describe('OpenCode harness completion check', () => {
             command: 'pnpm vitest run src/guard.test.ts',
             exitCode: 1,
             outputTail: 'Tests  1 failed | 11 passed (12)',
+            ranBeforeLaterEdit: false,
           },
           {
             command: 'pnpm check-types',
             exitCode: 0,
             outputTail: 'Tasks: 27 successful, 27 total',
+            ranBeforeLaterEdit: false,
           },
         ],
       );
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('marks a test run stale once source is edited after it in the same turn', async () => {
+    const { client, harness, completed } = await startTask();
+    const emitTool = (
+      callId: string,
+      tool: string,
+      input: Record<string, unknown>,
+      output = '',
+    ) =>
+      client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: `prt_${callId}`,
+            sessionID: 'ses_1',
+            messageID: 'msg_1',
+            type: 'tool',
+            tool,
+            callID: callId,
+            state: {
+              status: 'completed',
+              input,
+              output,
+              metadata: { exitCode: 0 },
+            },
+          },
+        },
+      });
+
+    try {
+      await emitTool(
+        'call_1',
+        'bash',
+        { command: 'pnpm vitest run' },
+        'Tests  12 passed (12)',
+      );
+      // Prose and files outside the workspace leave the run standing.
+      await emitTool('call_2', 'edit', {
+        filePath: '/tmp/workspace/README.md',
+      });
+      await emitTool('call_3', 'write', { filePath: '/tmp/pr-body.md' });
+      await emitTool(
+        'call_4',
+        'bash',
+        { command: 'pnpm check-types' },
+        'Tasks: 27 successful',
+      );
+      await emitTool('call_5', 'edit', {
+        filePath: '/tmp/workspace/src/guard.ts',
+      });
+      await emitTool(
+        'call_6',
+        'bash',
+        { command: 'git status --short' },
+        ' M src/guard.ts',
+      );
+      await completeTurn(client, 'msg_1', 'Removed the guard. Tests pass.');
+
+      await vi.waitFor(() => expect(completed()).toHaveLength(1));
+      expect(
+        mockRequestTaskCompletionCheck.mock.calls[0]![1].commands.map(
+          (entry: { command: string; ranBeforeLaterEdit: boolean }) => [
+            entry.command,
+            entry.ranBeforeLaterEdit,
+          ],
+        ),
+      ).toEqual([
+        ['pnpm vitest run', true],
+        ['pnpm check-types', true],
+        ['git status --short', false],
+      ]);
     } finally {
       harness.dispose();
     }
