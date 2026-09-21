@@ -394,7 +394,7 @@ const SHELL_SOURCE_MUTATION_PATTERNS = [
   /\b(sed|gsed)\s+(-[a-zA-Z]*\s+)*-[a-zA-Z]*i/,
   /\bperl\s+(-[a-zA-Z]*\s+)*-[a-zA-Z]*i/,
   // Git operations that rewrite tracked content.
-  /\bgit\s+(apply|am|merge|rebase|cherry-pick|revert|pull)\b/,
+  /\bgit\s+(-\S+\s+(?!-)\S+\s+|--?\S+\s+)*(apply|am|merge|rebase|cherry-pick|revert|pull)\b/,
   // `git reset HEAD -- path` (the workflow's own unstage step) and
   // `git restore --staged` touch the index alone.
   /\bgit\s+restore\s+(?!.*--staged)(?!.*-S\b)/,
@@ -421,6 +421,14 @@ export function isLikelySourceMutatingCommand(command: string): boolean {
   );
 }
 
+const GIT_GLOBAL_OPTIONS_WITH_VALUE = new Set([
+  '-C',
+  '-c',
+  '--git-dir',
+  '--work-tree',
+  '--namespace',
+]);
+
 const BRANCH_CREATE_FLAGS = new Set([
   '-b',
   '-B',
@@ -440,13 +448,25 @@ const BRANCH_CREATE_FLAGS = new Set([
 function replacesWorkingTreeByBranch(segment: string): boolean {
   const tokens = segment.trim().split(/\s+/);
   const gitIndex = tokens.indexOf('git');
-  const verb = tokens[gitIndex + 1];
 
-  if (gitIndex === -1 || (verb !== 'checkout' && verb !== 'switch')) {
+  if (gitIndex === -1) {
     return false;
   }
 
-  const args = tokens.slice(gitIndex + 2);
+  // Skip global options (`git -C repo --no-pager checkout ...`) to the verb.
+  let verbIndex = gitIndex + 1;
+
+  while (tokens[verbIndex]?.startsWith('-')) {
+    verbIndex += GIT_GLOBAL_OPTIONS_WITH_VALUE.has(tokens[verbIndex]!) ? 2 : 1;
+  }
+
+  const verb = tokens[verbIndex];
+
+  if (verb !== 'checkout' && verb !== 'switch') {
+    return false;
+  }
+
+  const args = tokens.slice(verbIndex + 1);
   const positional = args.filter((arg) => !arg.startsWith('-'));
   const createsBranch = args.some((arg) => BRANCH_CREATE_FLAGS.has(arg));
 
