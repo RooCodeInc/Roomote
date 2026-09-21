@@ -523,6 +523,19 @@ async function invokeMcpTool(
   return mocks.mcpExecutor({ integrationId, toolName, args });
 }
 
+// An expectation that fails inside the model mock rejects the mocked call,
+// which the turn handles as an inference failure, so the test would still
+// pass. Rethrow it here so it fails the test that made it.
+afterEach(() => {
+  const swallowed = mocks.generateText.mock.settledResults.find(
+    (result) =>
+      result.type === 'rejected' &&
+      result.value instanceof Error &&
+      result.value.name === 'AssertionError',
+  );
+  if (swallowed) throw swallowed.value;
+});
+
 describe('answerFastAgentQuestion native OpenCode tools', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -6002,17 +6015,20 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
   it('refuses a memory save when no Brain is configured', async () => {
     mocks.isBrainEnabled.mockResolvedValue(false);
+    // Asserted after the turn: a failed expectation inside the model mock
+    // would be swallowed as an inference failure.
+    let saveResult: unknown;
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         options.onModelResolved?.('openrouter/openai/gpt-5.4');
         await options.onSessionReady('opencode-session-1');
-        options.onPromptStarted?.();
-        const result = await invokeTool(nativeToolNames.saveMemory, {
-          memory: 'Prefers deploys on Fridays',
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'On it.',
         });
-        expect(result).toMatchObject({
-          success: false,
-          error: 'This deployment has no Brain configured.',
+        options.onPromptStarted?.();
+        saveResult = await invokeTool(nativeToolNames.saveMemory, {
+          memory: 'Prefers deploys on Fridays',
         });
         await invokeTool(nativeToolNames.sendChatReply, {
           purpose: 'closeout',
@@ -6024,6 +6040,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
     await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
 
+    expect(saveResult).toMatchObject({
+      success: false,
+      error: 'This deployment has no Brain configured.',
+    });
     expect(mocks.appendMemory).not.toHaveBeenCalled();
   });
 
@@ -6033,17 +6053,18 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       saved: false,
       reason: 'memory_full',
     });
+    let saveResult: unknown;
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         options.onModelResolved?.('openrouter/openai/gpt-5.4');
         await options.onSessionReady('opencode-session-1');
-        options.onPromptStarted?.();
-        const result = await invokeTool(nativeToolNames.saveMemory, {
-          memory: 'One fact too many',
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'On it.',
         });
-        expect(result).toMatchObject({
-          success: false,
-          error: expect.stringContaining('memory is full'),
+        options.onPromptStarted?.();
+        saveResult = await invokeTool(nativeToolNames.saveMemory, {
+          memory: 'One fact too many',
         });
         await invokeTool(nativeToolNames.sendChatReply, {
           purpose: 'closeout',
@@ -6054,6 +6075,16 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
 
     await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(saveResult).toMatchObject({
+      success: false,
+      error: expect.stringContaining('memory is full'),
+    });
+    expect(mocks.appendMemory).toHaveBeenCalledWith(
+      expect.anything(),
+      'conversation-1',
+      'One fact too many',
+    );
   });
 
   it('validates a durable session before resuming with the new turn', async () => {
