@@ -8,6 +8,7 @@ import {
   clipDiffByFile,
   collectShippedDiff,
   isCompletionGateEligible,
+  isLikelySourceMutatingCommand,
 } from '../opencode-server/completion-gate';
 
 const tempDirs: string[] = [];
@@ -225,6 +226,42 @@ describe('isCompletionGateEligible', () => {
         ROOMOTE_TASK_TYPE: 'github_pr_review',
       }),
     ).toBe(false);
+  });
+});
+
+describe('isLikelySourceMutatingCommand', () => {
+  it.each([
+    "sed -i 's/guard/check/' src/guard.ts",
+    "sed -i '' -e 's/a/b/' src/guard.ts",
+    "perl -pi -e 's/a/b/' src/guard.ts",
+    'git checkout -- src/guard.ts',
+    'git restore src/guard.ts',
+    'git stash pop',
+    'git merge origin/main',
+    'git apply /tmp/fix.patch',
+    'patch -p1 < /tmp/fix.patch',
+    'echo "export const guard = false;" > src/guard.ts',
+    'cat /tmp/new.ts >> src/guard.ts',
+    'node gen.js | tee src/generated.ts',
+  ])('treats %s as an edit', (command) => {
+    expect(isLikelySourceMutatingCommand(command)).toBe(true);
+  });
+
+  it.each([
+    'pnpm vitest run src/guard.test.ts',
+    'pnpm vitest run 2>&1 | tail -20',
+    'pnpm check-types > /tmp/types.log 2>&1',
+    'pnpm lint >/dev/null',
+    'pnpm format',
+    'git status --short',
+    'git diff --stat',
+    'git add -A && git commit -m "Remove the guard"',
+    'git push origin HEAD',
+    'gh pr edit 12 --body-file /tmp/pr-body.md',
+    "grep -rn 'guard' src | head",
+    'node -e "console.log(1 > 0)"',
+  ])('leaves a validation run standing after %s', (command) => {
+    expect(isLikelySourceMutatingCommand(command)).toBe(false);
   });
 });
 

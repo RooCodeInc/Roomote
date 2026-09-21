@@ -116,6 +116,7 @@ import {
   buildCompletionGateReminder,
   collectShippedDiff,
   isCompletionGateEligible,
+  isLikelySourceMutatingCommand,
   requestTaskCompletionCheck,
 } from './completion-gate';
 
@@ -5514,6 +5515,17 @@ export class OpenCodeServerHarness
       sessionId !== this.sessionId
     ) {
       return;
+    }
+
+    if (
+      normalized.status === 'completed' &&
+      isLikelySourceMutatingCommand(command)
+    ) {
+      // `sed -i`, `git checkout -- file`, a redirect into a source file: the
+      // shell edited code just as an editor tool would have.
+      for (const entry of this.completionGateCommands) {
+        entry.ranBeforeLaterEdit = true;
+      }
     }
 
     this.completionGateCommands.push({

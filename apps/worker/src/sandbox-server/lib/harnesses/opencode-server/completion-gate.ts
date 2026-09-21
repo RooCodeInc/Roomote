@@ -389,6 +389,33 @@ export async function collectShippedDiff(
   };
 }
 
+const SHELL_SOURCE_MUTATION_PATTERNS = [
+  // In-place editors.
+  /\b(sed|gsed)\s+(-[a-zA-Z]*\s+)*-[a-zA-Z]*i/,
+  /\bperl\s+(-[a-zA-Z]*\s+)*-[a-zA-Z]*i/,
+  // Git operations that rewrite tracked content.
+  /\bgit\s+(checkout|restore|apply|am|merge|rebase|cherry-pick|revert|reset|pull)\b/,
+  /\bgit\s+stash\s+(pop|apply)\b/,
+  /\bpatch\s+(-|<)/,
+  // Output written to a file outside scratch space. `2>&1`, `>/dev/null`,
+  // and `> /tmp/...` are not edits, and the target has to look like a path
+  // so a comparison inside a quoted script (`1 > 0`) is not mistaken for one.
+  /(^|[^0-9&>])>>?\s*(?!&|\s|\/dev\/|\/tmp\/|\/private\/tmp\/|\$\{?TMPDIR)(?=[^\s&|;]*[./][a-zA-Z])[^\s&|;]/,
+  /\btee\s+(-a\s+)?(?!\/dev\/|\/tmp\/|\/private\/tmp\/)[^\s-]/,
+];
+
+/**
+ * Whether a shell command plainly rewrites source, which makes any earlier
+ * validation run stale the same way an editor tool does. Deliberately narrow:
+ * formatters, hooks, and installs also touch files, and treating those as
+ * edits would flag every honest "tests pass" that was followed by a format.
+ */
+export function isLikelySourceMutatingCommand(command: string): boolean {
+  return SHELL_SOURCE_MUTATION_PATTERNS.some((pattern) =>
+    pattern.test(command),
+  );
+}
+
 /** Never throws: a check that cannot be made is a check that was skipped. */
 export async function requestTaskCompletionCheck(
   env: Record<string, string>,

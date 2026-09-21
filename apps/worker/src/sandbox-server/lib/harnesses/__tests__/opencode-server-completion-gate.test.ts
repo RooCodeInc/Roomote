@@ -534,6 +534,10 @@ describe('OpenCode harness completion check', () => {
         { command: 'git status --short' },
         ' M src/guard.ts',
       );
+      // A shell rewrite counts the same as an editor tool.
+      await emitTool('call_7', 'bash', {
+        command: "sed -i 's/guard/check/' src/guard.ts",
+      });
       await completeTurn(client, 'msg_1', 'Removed the guard. Tests pass.');
 
       await vi.waitFor(() => expect(completed()).toHaveLength(1));
@@ -547,7 +551,8 @@ describe('OpenCode harness completion check', () => {
       ).toEqual([
         ['pnpm vitest run', true],
         ['pnpm check-types', true],
-        ['git status --short', false],
+        ['git status --short', true],
+        ["sed -i 's/guard/check/' src/guard.ts", false],
       ]);
     } finally {
       harness.dispose();
