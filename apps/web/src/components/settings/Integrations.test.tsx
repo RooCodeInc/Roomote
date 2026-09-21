@@ -228,6 +228,24 @@ vi.mock('@/hooks/linear', () => ({
   }),
 }));
 
+vi.mock('@/hooks/useIntegrationToolApprovalsExperiment', () => ({
+  useIntegrationToolApprovalsExperiment: () => ({
+    enabled: false,
+    isLoading: false,
+    isUpdating: false,
+    setEnabled: vi.fn(),
+  }),
+}));
+
+vi.mock('@/hooks/useIntegrationToolPolicies', () => ({
+  useIntegrationToolPolicies: () => ({
+    isLoading: false,
+    isUpdating: false,
+    modes: new Map(),
+    setMode: vi.fn(),
+  }),
+}));
+
 vi.mock('@/hooks/mcp-connections', () => ({
   useCuratedIntegrationsAvailability: () => ({
     data: { enabled: state.integrationsEnabled },

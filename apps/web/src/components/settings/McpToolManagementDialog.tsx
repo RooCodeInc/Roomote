@@ -17,6 +17,11 @@ import {
   DialogHeader,
   DialogTitle,
   Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
   Spinner,
   Switch,
   ToggleLeft,
@@ -26,8 +31,12 @@ import {
   useMcpConnectionTools,
   useSetDisabledMcpTools,
 } from '@/hooks/mcp-connections';
+import { useIntegrationToolApprovalsExperiment } from '@/hooks/useIntegrationToolApprovalsExperiment';
+import { useIntegrationToolPolicies } from '@/hooks/useIntegrationToolPolicies';
 import { MCP_TOOL_CATALOG_REQUIRES_PERSONAL_CONNECTION } from '@/lib/mcp-tool-errors';
 import { SETTINGS_PATHS } from '@/lib/settings';
+import type { IntegrationToolPolicyMode } from '@roomote/types';
+import { integrationToolPolicyKey } from '@roomote/types';
 
 type McpToolManagementDialogProps = {
   mcpId: string | null;
@@ -43,6 +52,12 @@ function splitToolNameParts(name: string): string[] {
 function titleCaseToolNamePart(part: string): string {
   return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
 }
+
+const APPROVAL_MODE_LABELS: Record<IntegrationToolPolicyMode, string> = {
+  allow: 'Always allow (default)',
+  ask: 'Ask every time',
+  reject: 'Always reject',
+};
 
 function prettifyToolName(
   name: string,
@@ -106,6 +121,8 @@ export function McpToolManagementDialog({
 }: McpToolManagementDialogProps) {
   const toolsQuery = useMcpConnectionTools(open ? mcpId : null);
   const setDisabledTools = useSetDisabledMcpTools();
+  const toolApprovalsExperiment = useIntegrationToolApprovalsExperiment();
+  const toolPolicies = useIntegrationToolPolicies();
   const [disabledToolNames, setDisabledToolNames] = useState<string[]>([]);
   const lastSyncedToolStateKey = useRef<string | null>(null);
 
@@ -270,11 +287,23 @@ export function McpToolManagementDialog({
 
           {hasLoadedTools ? (
             <div className="space-y-3 py-3">
+              {toolApprovalsExperiment.enabled && mcpId ? (
+                <p className="text-xs text-muted-foreground">
+                  Approval changes save immediately and apply from the next
+                  session turn. Tool enable/disable still needs Save changes.
+                </p>
+              ) : null}
               {loadedTools.map((tool, index) => {
                 const enabled = !normalizedDisabledToolNames.includes(
                   tool.name,
                 );
                 const switchId = `mcp-tool-${mcpId ?? 'unknown'}-${index}`;
+                const approvalMode =
+                  (mcpId
+                    ? toolPolicies.modes.get(
+                        integrationToolPolicyKey(mcpId, tool.name),
+                      )
+                    : undefined) ?? 'allow';
 
                 return (
                   <div
@@ -300,6 +329,38 @@ export function McpToolManagementDialog({
                         </Label>
                       </div>
                     </div>
+                    {toolApprovalsExperiment.enabled && mcpId ? (
+                      <Select
+                        value={approvalMode}
+                        disabled={toolPolicies.isUpdating}
+                        onValueChange={(value) =>
+                          toolPolicies.setMode(
+                            mcpId,
+                            tool.name,
+                            value as IntegrationToolPolicyMode,
+                          )
+                        }
+                      >
+                        <SelectTrigger
+                          className="w-56 shrink-0"
+                          aria-label={`Approval mode for ${tool.name}`}
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(
+                            Object.entries(APPROVAL_MODE_LABELS) as [
+                              IntegrationToolPolicyMode,
+                              string,
+                            ][]
+                          ).map(([value, label]) => (
+                            <SelectItem key={value} value={value}>
+                              {label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : null}
                   </div>
                 );
               })}
