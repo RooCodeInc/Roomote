@@ -31,8 +31,10 @@ import { useIntegrationToolPolicies } from '@/hooks/useIntegrationToolPolicies';
 
 import {
   INTEGRATION_TOOL_APPROVAL_SAVE_HINT,
-  IntegrationToolApprovalModeSelect,
-} from './IntegrationToolApprovalModeSelect';
+  IntegrationToolApprovalGroup,
+  IntegrationToolApprovalModeControl,
+  groupIntegrationToolsByAccess,
+} from './IntegrationToolApprovalControls';
 import { MCP_TOOL_CATALOG_REQUIRES_PERSONAL_CONNECTION } from '@/lib/mcp-tool-errors';
 import { SETTINGS_PATHS } from '@/lib/settings';
 import { integrationToolPolicyKey } from '@roomote/types';
@@ -125,6 +127,10 @@ export function McpToolManagementDialog({
   const toolPolicies = useIntegrationToolPolicies({
     enabled: open && toolApprovalsActive,
   });
+  const approvalModeFor = (toolName: string) =>
+    (mcpId
+      ? toolPolicies.modes.get(integrationToolPolicyKey(mcpId, toolName))
+      : undefined) ?? 'allow';
   const [disabledToolNames, setDisabledToolNames] = useState<string[]>([]);
   const lastSyncedToolStateKey = useRef<string | null>(null);
 
@@ -295,55 +301,72 @@ export function McpToolManagementDialog({
                   still needs Save changes.
                 </p>
               ) : null}
-              {loadedTools.map((tool, index) => {
-                const enabled = !normalizedDisabledToolNames.includes(
-                  tool.name,
-                );
-                const switchId = `mcp-tool-${mcpId ?? 'unknown'}-${index}`;
-                const approvalMode =
-                  (mcpId
-                    ? toolPolicies.modes.get(
-                        integrationToolPolicyKey(mcpId, tool.name),
-                      )
-                    : undefined) ?? 'allow';
+              {groupIntegrationToolsByAccess(loadedTools).map((group) => (
+                <IntegrationToolApprovalGroup
+                  key={group.id}
+                  title={group.title}
+                  count={group.tools.length}
+                  disabled={toolPolicies.isUpdating}
+                  {...(toolApprovalsActive && mcpId
+                    ? {
+                        modes: group.tools.map((tool) =>
+                          approvalModeFor(tool.name),
+                        ),
+                        onChangeAll: (mode) =>
+                          toolPolicies.setModes(
+                            mcpId,
+                            group.tools.map((tool) => tool.name),
+                            mode,
+                          ),
+                      }
+                    : {})}
+                >
+                  {group.tools.map((tool) => {
+                    const enabled = !normalizedDisabledToolNames.includes(
+                      tool.name,
+                    );
+                    const switchId = `mcp-tool-${mcpId ?? 'unknown'}-${tool.name}`;
+                    const approvalMode = approvalModeFor(tool.name);
 
-                return (
-                  <div
-                    key={tool.name}
-                    className="flex min-w-0 items-start gap-4"
-                  >
-                    <div className="min-w-0 flex-1 space-y-1.5">
-                      <div className="flex min-w-0 items-center gap-4">
-                        <Switch
-                          id={switchId}
-                          checked={enabled}
-                          aria-label={`${enabled ? 'Disable' : 'Enable'} ${tool.name}`}
-                          disabled={setDisabledTools.isPending}
-                          onCheckedChange={(nextEnabled) =>
-                            handleToggle(tool.name, nextEnabled)
-                          }
-                        />
-                        <Label
-                          htmlFor={switchId}
-                          className="min-w-0 truncate text-sm text-foreground"
-                        >
-                          {prettifyToolName(tool.name, integrationName)}
-                        </Label>
+                    return (
+                      <div
+                        key={tool.name}
+                        className="flex min-w-0 items-center gap-4 py-2"
+                      >
+                        <div className="min-w-0 flex-1 space-y-1.5">
+                          <div className="flex min-w-0 items-center gap-4">
+                            <Switch
+                              id={switchId}
+                              checked={enabled}
+                              aria-label={`${enabled ? 'Disable' : 'Enable'} ${tool.name}`}
+                              disabled={setDisabledTools.isPending}
+                              onCheckedChange={(nextEnabled) =>
+                                handleToggle(tool.name, nextEnabled)
+                              }
+                            />
+                            <Label
+                              htmlFor={switchId}
+                              className="min-w-0 truncate text-sm text-foreground"
+                            >
+                              {prettifyToolName(tool.name, integrationName)}
+                            </Label>
+                          </div>
+                        </div>
+                        {toolApprovalsActive && mcpId ? (
+                          <IntegrationToolApprovalModeControl
+                            toolName={tool.name}
+                            value={approvalMode}
+                            disabled={toolPolicies.isUpdating}
+                            onChange={(mode) =>
+                              toolPolicies.setMode(mcpId, tool.name, mode)
+                            }
+                          />
+                        ) : null}
                       </div>
-                    </div>
-                    {toolApprovalsActive && mcpId ? (
-                      <IntegrationToolApprovalModeSelect
-                        toolName={tool.name}
-                        value={approvalMode}
-                        disabled={toolPolicies.isUpdating}
-                        onChange={(mode) =>
-                          toolPolicies.setMode(mcpId, tool.name, mode)
-                        }
-                      />
-                    ) : null}
-                  </div>
-                );
-              })}
+                    );
+                  })}
+                </IntegrationToolApprovalGroup>
+              ))}
             </div>
           ) : null}
         </div>

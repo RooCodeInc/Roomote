@@ -228,6 +228,18 @@ vi.mock('@/hooks/linear', () => ({
   }),
 }));
 
+// The approval controls are covered by the tool dialog tests; here they only
+// need to stay out of the hand-rolled `@/components/system` mock's way.
+vi.mock('./IntegrationToolApprovalControls', () => ({
+  INTEGRATION_TOOL_APPROVAL_SAVE_HINT: '',
+  IntegrationToolApprovalGroup: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
+  IntegrationToolApprovalModeControl: () => null,
+  groupIntegrationToolsByAccess: <T,>(tools: T[]) =>
+    tools.length > 0 ? [{ id: 'all', title: 'Tools', tools }] : [],
+}));
+
 vi.mock('@/hooks/useIntegrationToolApprovalsExperiment', () => ({
   useIntegrationToolApprovalsExperiment: () => ({
     enabled: false,

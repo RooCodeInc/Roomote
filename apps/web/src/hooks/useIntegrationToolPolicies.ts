@@ -51,14 +51,42 @@ export function useIntegrationToolPolicies(
     }),
   );
 
+  // A group-level change is one approval mode for many tools. The endpoint
+  // is per tool, so the writes run in order and the list is refetched once at
+  // the end; a failure stops the run and the refetch shows what was saved.
+  const setModes = useMutation({
+    mutationFn: async (input: {
+      integrationId: string;
+      toolNames: string[];
+      mode: IntegrationToolPolicyMode;
+    }) => {
+      for (const toolName of input.toolNames) {
+        await setPolicy.mutateAsync({
+          integrationId: input.integrationId,
+          toolName,
+          mode: input.mode,
+        });
+      }
+    },
+    onSettled: () =>
+      queryClient.invalidateQueries({
+        queryKey: trpc.integrationToolPolicies.list.queryKey(),
+      }),
+  });
+
   return {
     isLoading: listQuery.isLoading,
     modes,
-    isUpdating: setPolicy.isPending,
+    isUpdating: setPolicy.isPending || setModes.isPending,
     setMode: (
       integrationId: string,
       toolName: string,
       mode: IntegrationToolPolicyMode,
     ) => setPolicy.mutate({ integrationId, toolName, mode }),
+    setModes: (
+      integrationId: string,
+      toolNames: string[],
+      mode: IntegrationToolPolicyMode,
+    ) => setModes.mutate({ integrationId, toolNames, mode }),
   };
 }

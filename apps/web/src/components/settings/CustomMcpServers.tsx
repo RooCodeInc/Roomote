@@ -43,8 +43,10 @@ import { useIntegrationToolPolicies } from '@/hooks/useIntegrationToolPolicies';
 import type { IntegrationItem } from './integration-card';
 import {
   INTEGRATION_TOOL_APPROVAL_SAVE_HINT,
-  IntegrationToolApprovalModeSelect,
-} from './IntegrationToolApprovalModeSelect';
+  IntegrationToolApprovalGroup,
+  IntegrationToolApprovalModeControl,
+  groupIntegrationToolsByAccess,
+} from './IntegrationToolApprovalControls';
 import { useTRPC } from '@/trpc/client';
 
 type Transport = 'remote' | 'stdio';
@@ -788,6 +790,10 @@ function CustomToolManagementDialog({
   );
 
   const [disabledNames, setDisabledNames] = useState<Set<string>>(new Set());
+  const approvalModeFor = (toolName: string) =>
+    (server
+      ? toolPolicies.modes.get(integrationToolPolicyKey(server.name, toolName))
+      : undefined) ?? 'allow';
 
   const loadedKey = useMemo(
     () =>
@@ -855,51 +861,74 @@ function CustomToolManagementDialog({
                 needs Save.
               </p>
             ) : null}
-            {toolsQuery.data?.tools.map((tool) => (
-              <div key={tool.name} className="flex items-start gap-3">
-                <label className="flex min-w-0 flex-1 items-start gap-3 text-sm cursor-pointer">
-                  <Checkbox
-                    checked={!disabledNames.has(tool.name)}
-                    onCheckedChange={(checked) => {
-                      setDisabledNames((current) => {
-                        const next = new Set(current);
+            {groupIntegrationToolsByAccess(toolsQuery.data?.tools ?? []).map(
+              (group) => (
+                <IntegrationToolApprovalGroup
+                  key={group.id}
+                  title={group.title}
+                  count={group.tools.length}
+                  disabled={toolPolicies.isUpdating}
+                  {...(toolApprovalsActive && server
+                    ? {
+                        modes: group.tools.map((tool) =>
+                          approvalModeFor(tool.name),
+                        ),
+                        onChangeAll: (mode) =>
+                          toolPolicies.setModes(
+                            server.name,
+                            group.tools.map((tool) => tool.name),
+                            mode,
+                          ),
+                      }
+                    : {})}
+                >
+                  {group.tools.map((tool) => (
+                    <div
+                      key={tool.name}
+                      className="flex items-center gap-3 py-2"
+                    >
+                      <label className="flex min-w-0 flex-1 items-start gap-3 text-sm cursor-pointer">
+                        <Checkbox
+                          checked={!disabledNames.has(tool.name)}
+                          onCheckedChange={(checked) => {
+                            setDisabledNames((current) => {
+                              const next = new Set(current);
 
-                        if (checked === true) {
-                          next.delete(tool.name);
-                        } else {
-                          next.add(tool.name);
-                        }
+                              if (checked === true) {
+                                next.delete(tool.name);
+                              } else {
+                                next.add(tool.name);
+                              }
 
-                        return next;
-                      });
-                    }}
-                    className="mt-0.5"
-                  />
-                  <span>
-                    <span className="font-mono">{tool.name}</span>
-                    {tool.description && (
-                      <span className="block text-xs text-muted-foreground">
-                        {tool.description}
-                      </span>
-                    )}
-                  </span>
-                </label>
-                {toolApprovalsActive && server ? (
-                  <IntegrationToolApprovalModeSelect
-                    toolName={tool.name}
-                    value={
-                      toolPolicies.modes.get(
-                        integrationToolPolicyKey(server.name, tool.name),
-                      ) ?? 'allow'
-                    }
-                    disabled={toolPolicies.isUpdating}
-                    onChange={(mode) =>
-                      toolPolicies.setMode(server.name, tool.name, mode)
-                    }
-                  />
-                ) : null}
-              </div>
-            ))}
+                              return next;
+                            });
+                          }}
+                          className="mt-0.5"
+                        />
+                        <span>
+                          <span className="font-mono">{tool.name}</span>
+                          {tool.description && (
+                            <span className="block text-xs text-muted-foreground">
+                              {tool.description}
+                            </span>
+                          )}
+                        </span>
+                      </label>
+                      {toolApprovalsActive && server ? (
+                        <IntegrationToolApprovalModeControl
+                          toolName={tool.name}
+                          value={approvalModeFor(tool.name)}
+                          disabled={toolPolicies.isUpdating}
+                          onChange={(mode) =>
+                            toolPolicies.setMode(server.name, tool.name, mode)
+                          }
+                        />
+                      ) : null}
+                    </div>
+                  ))}
+                </IntegrationToolApprovalGroup>
+              ),
+            )}
           </div>
         )}
 

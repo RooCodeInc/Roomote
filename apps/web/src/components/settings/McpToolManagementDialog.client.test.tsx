@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({
@@ -9,6 +9,12 @@ const state = vi.hoisted(() => ({
     toolName: string;
     mode: string;
   }[],
+  setModesCalls: [] as {
+    integrationId: string;
+    toolNames: string[];
+    mode: string;
+  }[],
+  annotated: false,
   policiesQueryEnabled: undefined as boolean | undefined,
 }));
 
@@ -36,6 +42,9 @@ vi.mock('@/hooks/useIntegrationToolPolicies', () => ({
       setMode: (integrationId: string, toolName: string, mode: string) => {
         state.setModeCalls.push({ integrationId, toolName, mode });
       },
+      setModes: (integrationId: string, toolNames: string[], mode: string) => {
+        state.setModesCalls.push({ integrationId, toolNames, mode });
+      },
     };
   },
 }));
@@ -45,8 +54,18 @@ vi.mock('@/hooks/mcp-connections', () => ({
     data: {
       mcpId: 'exa',
       tools: [
-        { name: 'web_search_exa', description: null, enabled: true },
-        { name: 'web_fetch_exa', description: null, enabled: true },
+        {
+          name: 'web_search_exa',
+          description: null,
+          enabled: true,
+          readOnly: state.annotated ? true : null,
+        },
+        {
+          name: 'web_fetch_exa',
+          description: null,
+          enabled: true,
+          readOnly: state.annotated ? false : null,
+        },
       ],
     },
     isPending: false,
@@ -78,6 +97,8 @@ describe('McpToolManagementDialog tool approvals', () => {
     state.approvalsEnabled = false;
     state.policies = [];
     state.setModeCalls = [];
+    state.setModesCalls = [];
+    state.annotated = false;
     // Radix Select scrolls the highlighted option into view; jsdom lacks it.
     Element.prototype.scrollIntoView = vi.fn();
   });
@@ -102,25 +123,68 @@ describe('McpToolManagementDialog tool approvals', () => {
     expect(state.policiesQueryEnabled).toBe(true);
   });
 
-  it('shows per-tool approval modes with persisted values and saves changes immediately', async () => {
+  it('shows per-tool approval modes with persisted values and saves changes in one click', () => {
     state.approvalsEnabled = true;
     state.policies = [
       { integrationId: 'exa', toolName: 'web_fetch_exa', mode: 'reject' },
     ];
     renderDialog();
 
-    const searchSelect = screen.getByLabelText(
-      'Approval mode for web_search_exa',
+    const search = within(
+      screen.getByRole('radiogroup', {
+        name: 'Approval mode for web_search_exa',
+      }),
     );
-    expect(searchSelect).toHaveTextContent('Always allow (default)');
+    expect(search.getByRole('radio', { name: 'Always allow' })).toBeChecked();
     expect(
-      screen.getByLabelText('Approval mode for web_fetch_exa'),
-    ).toHaveTextContent('Reject');
+      within(
+        screen.getByRole('radiogroup', {
+          name: 'Approval mode for web_fetch_exa',
+        }),
+      ).getByRole('radio', { name: 'Reject' }),
+    ).toBeChecked();
 
-    fireEvent.click(searchSelect);
-    fireEvent.click(await screen.findByRole('option', { name: 'Ask first' }));
+    fireEvent.click(search.getByRole('radio', { name: 'Ask first' }));
     expect(state.setModeCalls).toEqual([
       { integrationId: 'exa', toolName: 'web_search_exa', mode: 'ask' },
+    ]);
+  });
+
+  it('keeps one group when the server annotates no tools', () => {
+    state.approvalsEnabled = true;
+    renderDialog();
+    expect(screen.getByRole('region', { name: 'Tools' })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('region', { name: 'Read-only tools' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('groups annotated tools by access and sets a whole group at once', async () => {
+    state.approvalsEnabled = true;
+    state.annotated = true;
+    state.policies = [
+      { integrationId: 'exa', toolName: 'web_fetch_exa', mode: 'ask' },
+    ];
+    renderDialog();
+
+    const readOnly = within(
+      screen.getByRole('region', { name: 'Read-only tools' }),
+    );
+    expect(
+      readOnly.getByRole('radiogroup', {
+        name: 'Approval mode for web_search_exa',
+      }),
+    ).toBeInTheDocument();
+    const write = screen.getByRole('region', { name: 'Write/delete tools' });
+    const groupSelect = within(write).getByRole('combobox', {
+      name: 'Approval mode for all write/delete tools',
+    });
+    expect(groupSelect).toHaveTextContent('Ask first');
+
+    fireEvent.click(groupSelect);
+    fireEvent.click(await screen.findByRole('option', { name: 'Reject' }));
+    expect(state.setModesCalls).toEqual([
+      { integrationId: 'exa', toolNames: ['web_fetch_exa'], mode: 'reject' },
     ]);
   });
 });

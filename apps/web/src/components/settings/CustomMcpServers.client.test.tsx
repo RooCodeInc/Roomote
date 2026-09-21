@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
@@ -83,6 +84,7 @@ vi.mock('@/hooks/useIntegrationToolPolicies', () => ({
       modes: new Map([[JSON.stringify(['internal-tools', 'search']), 'ask']]),
       isUpdating: false,
       setMode: approvals.setMode,
+      setModes: vi.fn(),
     };
   },
 }));
@@ -372,12 +374,13 @@ describe('useCustomMcpServers', () => {
     it('lets an admin set a shared custom server tool to ask first, keyed by the server name', async () => {
       await openToolsDialog();
 
-      const select = await screen.findByRole('combobox', {
-        name: 'Approval mode for search',
-      });
-      expect(select).toHaveTextContent('Ask first');
-      fireEvent.click(select);
-      fireEvent.click(await screen.findByRole('option', { name: 'Reject' }));
+      const control = within(
+        await screen.findByRole('radiogroup', {
+          name: 'Approval mode for search',
+        }),
+      );
+      expect(control.getByRole('radio', { name: 'Ask first' })).toBeChecked();
+      fireEvent.click(control.getByRole('radio', { name: 'Reject' }));
       expect(approvals.setMode).toHaveBeenCalledWith(
         'internal-tools',
         'search',
@@ -390,7 +393,7 @@ describe('useCustomMcpServers', () => {
       await openToolsDialog();
       await screen.findByText('search');
       expect(
-        screen.queryByRole('combobox', { name: 'Approval mode for search' }),
+        screen.queryByRole('radiogroup', { name: 'Approval mode for search' }),
       ).not.toBeInTheDocument();
       expect(approvals.listEnabled).not.toContain(true);
 
@@ -401,7 +404,7 @@ describe('useCustomMcpServers', () => {
       await openToolsDialog();
       await screen.findByText('search');
       expect(
-        screen.queryByRole('combobox', { name: 'Approval mode for search' }),
+        screen.queryByRole('radiogroup', { name: 'Approval mode for search' }),
       ).not.toBeInTheDocument();
       expect(approvals.listEnabled).not.toContain(true);
     });
