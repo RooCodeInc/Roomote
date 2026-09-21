@@ -244,6 +244,7 @@ async function collectOptionalSource(
 export class FastAgentSkillStore {
   private readonly resources = new Map<string, Promise<string[]>>();
   private readonly rootDirectory: Promise<string>;
+  private readonly authoritativeSettingsQueries = new Set<string>();
 
   constructor(
     rootDirectory?: string,
@@ -296,7 +297,10 @@ export class FastAgentSkillStore {
             this.settingsSkills!.list(query),
           )
         : { skills: [], warnings: [] };
-    const settingsMatchIsAuthoritative =
+    const settingsQueryKey = query.name
+      ? `${query.name}\0${query.environmentId ?? ''}\0${query.repositoryId ?? ''}`
+      : undefined;
+    const settingsMatchInPage =
       !!query.name &&
       settings.skills.some(
         (skill) =>
@@ -304,6 +308,13 @@ export class FastAgentSkillStore {
           !packagedNames.has(skill.name) &&
           !instanceNames.has(skill.name),
       );
+    if (settingsMatchInPage && settingsQueryKey) {
+      this.authoritativeSettingsQueries.add(settingsQueryKey);
+    }
+    const settingsMatchIsAuthoritative =
+      settingsMatchInPage ||
+      (settingsQueryKey !== undefined &&
+        this.authoritativeSettingsQueries.has(settingsQueryKey));
     const repository =
       !packagedMatchIsAuthoritative &&
       !instanceMatchIsAuthoritative &&
@@ -355,8 +366,7 @@ export class FastAgentSkillStore {
           ? left.id.localeCompare(right.id)
           : left.name.localeCompare(right.name),
       ),
-      ...(settings.nextSourceOffset === undefined ||
-      settingsMatchIsAuthoritative
+      ...(settings.nextSourceOffset === undefined
         ? {}
         : { nextSourceOffset: settings.nextSourceOffset }),
       warnings: [

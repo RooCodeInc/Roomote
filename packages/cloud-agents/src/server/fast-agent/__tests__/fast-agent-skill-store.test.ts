@@ -466,21 +466,53 @@ describe('FastAgentSkillStore', () => {
     });
   });
 
-  it('stops exact-name pagination when a Settings match is authoritative', async () => {
-    const repositorySkills = { list: vi.fn(), read: vi.fn() };
-    const settingsSkills = {
+  it('keeps Settings precedence across same-name continuation pages', async () => {
+    const repositorySkills = {
       list: vi.fn().mockResolvedValue({
-        nextSourceOffset: 8,
         skills: [
           {
-            description: 'Thermonuclear playbook.',
-            id: 'settings:manual:thermonuclear',
+            description: 'Repository fallback.',
+            id: 'repository:repo-1:.agents/skills:thermonuclear',
             name: 'thermonuclear',
-            source: 'settings' as const,
+            repository: 'RooCodeInc/Roomote',
+            source: 'repository' as const,
           },
         ],
         warnings: [],
       }),
+      read: vi.fn(),
+    };
+    const settingsSkills = {
+      list: vi
+        .fn()
+        .mockImplementation(({ sourceOffset }: FastAgentSkillQuery) =>
+          Promise.resolve(
+            sourceOffset === undefined
+              ? {
+                  nextSourceOffset: 8,
+                  skills: [
+                    {
+                      description: 'First environment variant.',
+                      id: 'settings:manual:thermonuclear-one',
+                      name: 'thermonuclear',
+                      source: 'settings' as const,
+                    },
+                  ],
+                  warnings: [],
+                }
+              : {
+                  skills: [
+                    {
+                      description: 'Second environment variant.',
+                      id: 'settings:manual:thermonuclear-two',
+                      name: 'thermonuclear',
+                      source: 'settings' as const,
+                    },
+                  ],
+                  warnings: [],
+                },
+          ),
+        ),
       read: vi.fn(),
     };
     const store = new FastAgentSkillStore(
@@ -489,16 +521,28 @@ describe('FastAgentSkillStore', () => {
       settingsSkills,
     );
 
-    const catalog = await store.list({ name: 'thermonuclear' });
+    const firstPage = await store.list({ name: 'thermonuclear' });
+    const secondPage = await store.list({
+      name: 'thermonuclear',
+      sourceOffset: 8,
+    });
 
-    expect(settingsSkills.list).toHaveBeenCalledWith({
+    expect(settingsSkills.list).toHaveBeenNthCalledWith(1, {
       name: 'thermonuclear',
     });
+    expect(settingsSkills.list).toHaveBeenNthCalledWith(2, {
+      name: 'thermonuclear',
+      sourceOffset: 8,
+    });
     expect(repositorySkills.list).not.toHaveBeenCalled();
-    expect(catalog.skills).toEqual([
-      expect.objectContaining({ id: 'settings:manual:thermonuclear' }),
+    expect(firstPage.skills).toEqual([
+      expect.objectContaining({ id: 'settings:manual:thermonuclear-one' }),
     ]);
-    expect(catalog.nextSourceOffset).toBeUndefined();
+    expect(firstPage.nextSourceOffset).toBe(8);
+    expect(secondPage.skills).toEqual([
+      expect.objectContaining({ id: 'settings:manual:thermonuclear-two' }),
+    ]);
+    expect(secondPage.nextSourceOffset).toBeUndefined();
   });
 
   it('checks repositories after paginated Settings lookup is exhausted', async () => {

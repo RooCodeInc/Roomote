@@ -101,6 +101,23 @@ function repositorySkillId(
   return `repository:${repositoryId}:${root}:${name}`;
 }
 
+type RepositorySkillReference = {
+  name: string;
+  repositoryId: string;
+  root: string;
+};
+
+function parseRepositorySkillId(
+  id: string,
+): RepositorySkillReference | undefined {
+  const match =
+    /^repository:([^:]+):((?:\.agents|\.claude)\/skills):([A-Za-z0-9._-]+)$/u.exec(
+      id,
+    );
+  if (!match?.[1] || !match[2] || !match[3]) return undefined;
+  return { name: match[3], repositoryId: match[1], root: match[2] };
+}
+
 function normalizeInvocationSegment(value: string, fallback: string): string {
   const normalized = value
     .trim()
@@ -578,9 +595,13 @@ export class RemoteFastAgentRepositorySkillSource implements FastAgentRepository
     let record = this.records.get(id);
     // Prompt discovery and the executor use separate source instances. A
     // repository skill shown in the prompt must therefore be able to rebuild
-    // its bounded catalog before the first explicit `list_skills` call.
+    // its repository-scoped catalog before the first explicit `list_skills`
+    // call, even when the unscoped repository cap would choose a different set.
     if (!record) {
-      await this.list();
+      const reference = parseRepositorySkillId(id);
+      await this.list(
+        reference ? { repositoryId: reference.repositoryId } : undefined,
+      );
       record = this.records.get(id);
     }
     const selectedResource = record?.resources.get(resource);
