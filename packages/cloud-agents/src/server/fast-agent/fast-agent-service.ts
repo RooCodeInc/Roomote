@@ -214,7 +214,6 @@ import {
   bindFastAgentMcpToolExecutor,
   FAST_AGENT_NATIVE_TOOL_NAMES,
   getFastAgentNativeToolRuntime,
-  hasFastAgentCodeModeServerNameCollision,
   mountFastAgentIntegrationOnCodeModeServer,
   type FastAgentMcpToolCall,
   type FastAgentNativeToolCall,
@@ -3809,10 +3808,6 @@ export async function answerFastAgentQuestion({
       Env.RELEASE_VERSION,
       packageJson.version,
     );
-    // Colliding sanitized server names keep the classic dispatcher at
-    // runtime; prompt, config mounting, and the lease must all agree.
-    const codeModeIntegrationsEffective =
-      !hasFastAgentCodeModeServerNameCollision(availableIntegrations);
     const system = buildFastAgentSystemPrompt({
       availableEnvironments,
       activeRepositories,
@@ -3841,7 +3836,6 @@ export async function answerFastAgentQuestion({
       setupSession,
       serviceCredentialToolsEnabled: currentUser.serviceCredentialToolsEnabled,
       addRemoteMcpEnabled: !platformEvent,
-      codeModeIntegrationsActive: codeModeIntegrationsEffective,
       personalizationContext,
       globalAgentInstructions: agentBehaviorSettings?.globalAgentInstructions,
       workspaceRoutingRules:

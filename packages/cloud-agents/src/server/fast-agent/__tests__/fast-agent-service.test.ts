@@ -9,7 +9,6 @@ const mocks = vi.hoisted(() => ({
   getSession: vi.fn(),
   getNativeRuntime: vi.fn(),
   mountCodeModeIntegration: vi.fn(),
-  serverNameCollision: vi.fn(),
   clearIntegrationToolCache: vi.fn(),
   setOpenCodeSession: vi.fn(),
   upsertMessage: vi.fn(),
@@ -340,7 +339,6 @@ vi.mock('../fast-agent-native-tool-bridge', () => ({
   },
   getFastAgentNativeToolRuntime: mocks.getNativeRuntime,
   mountFastAgentIntegrationOnCodeModeServer: mocks.mountCodeModeIntegration,
-  hasFastAgentCodeModeServerNameCollision: mocks.serverNameCollision,
   bindFastAgentNativeToolExecutor: mocks.bindExecutor,
   createFastAgentSpillTurnBudget: () => ({ calls: 0, outputBytes: 0 }),
   bindFastAgentMcpToolExecutor: mocks.bindMcpExecutor,
@@ -1079,8 +1077,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.getDeploymentSettings).toHaveBeenCalledTimes(2);
   });
 
-  it('keeps the dispatcher in the prompt when integration ids collide', async () => {
-    mocks.serverNameCollision.mockReturnValue(true);
+  it('keeps code mode enabled when integration ids collide', async () => {
     mocks.listIntegrations.mockResolvedValue([
       {
         id: 'foo.bar',
@@ -1101,9 +1098,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     const systemPrompt = mocks.generateText.mock.calls[0]?.[0].system as
       | string
       | undefined;
-    expect(systemPrompt).toContain('### On-demand servers');
-    expect(systemPrompt).not.toContain(
-      'reached only through the `execute` tool',
+    expect(systemPrompt).toContain('reached only through the `execute` tool');
+    expect(systemPrompt).toContain('### Foo Dot Bar [server: foo_bar]');
+    expect(systemPrompt).toContain(
+      '### Foo Underscore Bar [server: foo_bar__roomote_2]',
     );
   });
 

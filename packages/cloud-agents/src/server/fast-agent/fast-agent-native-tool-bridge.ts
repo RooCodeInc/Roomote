@@ -21,8 +21,6 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import {
   ALL_REPOSITORIES,
-  CALL_INTEGRATION_TOOL_ARG_DESCRIPTIONS,
-  CALL_INTEGRATION_TOOL_TOOL,
   FIND_INTEGRATION_TOOLS_ARG_DESCRIPTIONS,
   FIND_INTEGRATION_TOOLS_TOOL,
   INTEGRATION_TOOL_LOOKUP_MAX_LIMIT,
@@ -67,6 +65,7 @@ import {
 } from '../show-widget';
 import { shouldOverrideFastProjectConfigForTaskSandbox } from './fast-agent-runtime-context';
 import {
+  buildFastAgentCodeModeServerNames,
   buildFastAgentToolFilter,
   isFastAgentNativeIntegration,
 } from './fast-agent-tool-policy';
@@ -357,9 +356,10 @@ export const invoke = async (name, args, context) => {
 }
 `;
 
-const FAST_AGENT_NATIVE_TOOL_SOURCES: Record<FastAgentNativeToolName, string> =
-  {
-    [FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply]: String.raw`
+const FAST_AGENT_NATIVE_TOOL_SOURCES: Partial<
+  Record<FastAgentNativeToolName, string>
+> = {
+  [FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -412,7 +412,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -426,7 +426,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.createArtifact]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.createArtifact]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -442,7 +442,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.reportPlatformIssue]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.reportPlatformIssue]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -456,7 +456,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.ensureEnvironment]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.ensureEnvironment]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -474,7 +474,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.launchTask]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.launchTask]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -492,7 +492,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.reviewPullRequest]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.reviewPullRequest]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -509,7 +509,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.sendTaskMessage]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.sendTaskMessage]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -524,7 +524,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.showWidget]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.showWidget]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -543,7 +543,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.cancelTask]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.cancelTask]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -554,7 +554,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.stopTask]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.stopTask]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -568,7 +568,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -587,7 +587,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.manageGoal]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.manageGoal]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -601,7 +601,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.retryTaskStart]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.retryTaskStart]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -612,7 +612,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.saveMemory]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.saveMemory]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -625,7 +625,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.updatePersonalization]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.updatePersonalization]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -639,7 +639,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -655,26 +655,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool]: String.raw`
-import { z } from "zod"
-import { invoke } from "../roomote-fast-tool-bridge.js"
-
-export default {
-  description: ${JSON.stringify(CALL_INTEGRATION_TOOL_TOOL.description)},
-  args: {
-    integrationId: z.string().min(1).describe(${JSON.stringify(CALL_INTEGRATION_TOOL_ARG_DESCRIPTIONS.integrationId)}),
-    toolName: z.string().min(1).describe(${JSON.stringify(CALL_INTEGRATION_TOOL_ARG_DESCRIPTIONS.toolName)}),
-    // OpenCode renames $defs without rewriting refs. Keep JSON value types
-    // concrete but non-recursive; nested values are validated server-side.
-    // Required (not optional) so no provider ever sees a null alternative
-    // that gpt-5.x models prefer over filling in an object.
-    args: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null(), z.array(z.unknown()), z.record(z.string(), z.unknown())])).describe(${JSON.stringify(CALL_INTEGRATION_TOOL_ARG_DESCRIPTIONS.args)}),
-  },
-  execute: (args, context) => invoke(${JSON.stringify(CALL_INTEGRATION_TOOL_TOOL.name)}, args, context),
-}
-`,
-
-    [FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -685,7 +666,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.addRemoteMcp]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.addRemoteMcp]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -700,7 +681,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.connectIntegration]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.connectIntegration]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -713,7 +694,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.inspectImages]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.inspectImages]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -727,7 +708,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.listRepositories]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.listRepositories]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -742,7 +723,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.listSkills]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.listSkills]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -758,7 +739,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -772,7 +753,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.spillRead]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.spillRead]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -787,7 +768,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.spillGrep]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.spillGrep]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -803,7 +784,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -828,7 +809,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials]: String.raw`
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
@@ -838,7 +819,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -863,7 +844,7 @@ export default {
   execute: (args, context) => invoke("request_user_input", args, context),
 }
 `,
-    [FAST_AGENT_NATIVE_TOOL_NAMES.offerCapability]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.offerCapability]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -878,7 +859,7 @@ export default {
   execute: (args, context) => invoke("offer_capability", args, context),
 }
 `,
-  };
+};
 
 const activeExecutors = new Map<string, ActiveExecutor>();
 const mcpCapabilities = new Map<string, FastAgentMcpCapability>();
@@ -1639,41 +1620,6 @@ function pruneSessionRuntimes(): void {
   }
 }
 
-/**
- * True when two authorized integrations would collide as sanitized OpenCode
- * server names, so the code-mode integrations experiment cannot activate for
- * this set. The service checks this before building the system prompt so a
- * colliding conversation keeps the classic dispatcher described in its
- * prompt, matching the runtime fallback in getFastAgentNativeToolRuntime.
- */
-export function hasFastAgentCodeModeServerNameCollision(
-  integrations: FastAgentIntegration[],
-): boolean {
-  return findSanitizedMcpServerNameCollision(integrations) !== null;
-}
-
-/**
- * OpenCode prefixes MCP tools with the sanitized server name
- * (`[^a-zA-Z0-9_-]` becomes `_`). Two distinct integration ids that sanitize
- * to the same server name would merge their tool namespaces under code mode,
- * so the code-mode path refuses to activate for that conversation instead of
- * exposing an ambiguous catalog.
- */
-function findSanitizedMcpServerNameCollision(
-  integrations: FastAgentIntegration[],
-): { first: string; second: string; sanitized: string } | null {
-  const seen = new Map<string, string>();
-  for (const integration of integrations) {
-    const sanitized = integration.id.replace(/[^a-zA-Z0-9_-]/gu, '_');
-    const first = seen.get(sanitized);
-    if (first !== undefined && first !== integration.id) {
-      return { first, second: integration.id, sanitized };
-    }
-    seen.set(sanitized, integration.id);
-  }
-  return null;
-}
-
 export async function getFastAgentNativeToolRuntime(
   sessionId: string,
   integrations: FastAgentIntegration[],
@@ -1719,33 +1665,15 @@ export async function getFastAgentNativeToolRuntime(
     revoked: false,
   });
   pruneSessionRuntimes();
-  // Only native servers are registered with OpenCode. On-demand servers stay
-  // reachable through the capability (find_integration_tools and
-  // call_integration_tool route to the same executor) without their schemas
-  // being sent on every model request.
-  let mountedIntegrations = integrations.filter((integration) =>
-    isFastAgentNativeIntegration(integration.id),
-  );
   // Mount every actor-authorized server and let OpenCode's confined `execute`
-  // runner discover and call tools individually. Calls flow through the same
-  // capability executor as call_integration_tool, so authorization,
-  // visibility, credential mediation, and refresh behavior are unchanged.
-  let codeModeIntegrationsActive = true;
-  const collision = findSanitizedMcpServerNameCollision(integrations);
-  if (collision) {
-    console.warn(
-      `[Fast Agent] Code-mode integrations skipped: integration ids ${collision.first} and ${collision.second} collide as OpenCode MCP server names (${collision.sanitized}).`,
-    );
-    codeModeIntegrationsActive = false;
-  } else {
-    mountedIntegrations = integrations;
-  }
-  if (codeModeIntegrationsActive) {
-    runtime.env.OPENCODE_EXPERIMENTAL_CODE_MODE = '1';
-  } else {
-    delete runtime.env.OPENCODE_EXPERIMENTAL_CODE_MODE;
-  }
-  runtime.codeModeIntegrationsActive = codeModeIntegrationsActive;
+  // runner discover and call tools individually. Server names are made unique
+  // after OpenCode sanitization so every integration remains addressable.
+  const mountedIntegrations = integrations;
+  const serverNames = buildFastAgentCodeModeServerNames(
+    mountedIntegrations.map((integration) => integration.id),
+  );
+  runtime.env.OPENCODE_EXPERIMENTAL_CODE_MODE = '1';
+  runtime.codeModeIntegrationsActive = true;
   writeFileSync(
     join(runtime.directory, 'opencode.json'),
     JSON.stringify({
@@ -1756,7 +1684,9 @@ export async function getFastAgentNativeToolRuntime(
       agent: {
         build: {
           tools: buildFastAgentToolFilter(
-            mountedIntegrations.map((integration) => integration.id),
+            mountedIntegrations.map(
+              (integration) => serverNames.get(integration.id)!,
+            ),
             {
               surface: options.surface ?? 'web',
               serviceCredentialToolsEnabled:
@@ -1764,14 +1694,13 @@ export async function getFastAgentNativeToolRuntime(
               serviceCredentialPrepareEnabled:
                 options.serviceCredentialPrepareEnabled,
               addRemoteMcpEnabled: options.addRemoteMcpEnabled,
-              codeModeIntegrationsActive,
             },
           ),
         },
       },
       mcp: Object.fromEntries(
         mountedIntegrations.map((integration) => [
-          integration.id,
+          serverNames.get(integration.id)!,
           {
             type: 'remote',
             url: `${bridge.url}/mcp/${runtime.mcpCapability}/${encodeURIComponent(integration.id)}`,
