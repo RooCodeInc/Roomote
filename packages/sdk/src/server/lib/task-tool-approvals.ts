@@ -15,6 +15,8 @@ import {
   taskRuns,
 } from '@roomote/db/server';
 import { recordIntegrationToolAutoEvaluationInBackground } from '@roomote/cloud-agents/server/integration-tool-auto-evaluation';
+import { customMcpServerStore } from './mcp/custom-servers';
+
 import {
   compileTaskIntegrationToolApprovals,
   resolveGoverningIntegrationToolPolicies,
@@ -156,25 +158,54 @@ export async function requestTaskToolApproval(input: {
 }
 
 /**
- * Whether the tool's governing mode is `auto`. Only decides whether the
- * model's view gets recorded, so a custom server name that exists in both
- * scopes is read under both layers here rather than resolving its scope.
+ * Which policy layer governs a custom server of this name for the acting
+ * member, mirroring how their servers are mounted: their own enabled personal
+ * server wins the name, then a shared one. Anything else is a built-in
+ * integration, which both layers govern.
  */
+async function resolveCustomServerPolicyScope(
+  name: string,
+  actingUserId: string | undefined,
+): Promise<IntegrationToolPolicyScope | undefined> {
+  const named = (rows: { name: string }[]) =>
+    rows.some((row) => row.name === name);
+  if (
+    actingUserId &&
+    named(
+      await customMcpServerStore({
+        visibility: 'owner',
+        ownerUserId: actingUserId,
+      }).list({ enabledOnly: true }),
+    )
+  ) {
+    return 'personal';
+  }
+  return named(
+    await customMcpServerStore({ visibility: 'deployment' }).list({
+      enabledOnly: true,
+    }),
+  )
+    ? 'deployment'
+    : undefined;
+}
+
+/** Whether the mode governing this tool for the task is `auto`. */
 async function isAutoTool(input: {
   integrationId: string;
   toolName: string;
   actingUserId?: string;
 }): Promise<boolean> {
-  const [deploymentPolicies, userPolicies] = await Promise.all([
+  const [deploymentPolicies, userPolicies, scope] = await Promise.all([
     listIntegrationToolPolicies(),
     input.actingUserId
       ? listIntegrationToolUserPolicies(input.actingUserId)
       : Promise.resolve([]),
+    resolveCustomServerPolicyScope(input.integrationId, input.actingUserId),
   ]);
   return resolveGoverningIntegrationToolPolicies({
     deploymentPolicies,
     userPolicies,
-    scopeOf: () => undefined,
+    scopeOf: () => scope,
   }).some(
     (policy) =>
       policy.mode === 'auto' &&
