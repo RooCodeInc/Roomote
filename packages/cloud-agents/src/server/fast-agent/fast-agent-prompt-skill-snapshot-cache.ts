@@ -13,7 +13,12 @@
  * cached listing only ever affects which names the prompt shows.
  *
  * The prompt reads a snapshot's records, never its checkout, so the cache
- * removes the checkout as soon as the load resolves.
+ * removes the checkout as soon as the load resolves, and keeps only what
+ * `retain` returns: a listing, without whatever the load needed to reach Git.
+ *
+ * A load that fails is not repeated for `retryMs`. Without that, a source
+ * that fails quickly would be fetched again on every turn, which is the work
+ * this cache exists to remove.
  */
 type CacheEntry<TSnapshot> = {
   loadedAt: number;
@@ -27,6 +32,10 @@ type FastAgentPromptSkillSnapshotCacheOptions<TSnapshot> = {
   freshMs?: number;
   maxEntries?: number;
   now?: () => number;
+  /** The part of a loaded snapshot worth keeping for up to `staleMs`. */
+  retain?: (snapshot: TSnapshot) => TSnapshot;
+  /** How long a key is left alone after its load fails. */
+  retryMs?: number;
   /** How long a snapshot may be served while a replacement loads. */
   staleMs?: number;
 };
@@ -34,6 +43,7 @@ type FastAgentPromptSkillSnapshotCacheOptions<TSnapshot> = {
 const DEFAULT_FRESH_MS = 5 * 60_000;
 const DEFAULT_STALE_MS = 60 * 60_000;
 const DEFAULT_COLD_WAIT_MS = 1_500;
+const DEFAULT_RETRY_MS = 60_000;
 const DEFAULT_MAX_ENTRIES = 128;
 
 export class FastAgentPromptSkillSnapshotCache<TSnapshot> {
@@ -44,6 +54,9 @@ export class FastAgentPromptSkillSnapshotCache<TSnapshot> {
   private readonly inflight = new Map<string, Promise<TSnapshot>>();
   private readonly maxEntries: number;
   private readonly now: () => number;
+  private readonly retain: (snapshot: TSnapshot) => TSnapshot;
+  private readonly retryAt = new Map<string, number>();
+  private readonly retryMs: number;
   private readonly staleMs: number;
 
   constructor(options: FastAgentPromptSkillSnapshotCacheOptions<TSnapshot>) {
@@ -52,6 +65,8 @@ export class FastAgentPromptSkillSnapshotCache<TSnapshot> {
     this.freshMs = options.freshMs ?? DEFAULT_FRESH_MS;
     this.maxEntries = options.maxEntries ?? DEFAULT_MAX_ENTRIES;
     this.now = options.now ?? Date.now;
+    this.retain = options.retain ?? ((snapshot) => snapshot);
+    this.retryMs = options.retryMs ?? DEFAULT_RETRY_MS;
     this.staleMs = options.staleMs ?? DEFAULT_STALE_MS;
   }
 
@@ -59,13 +74,19 @@ export class FastAgentPromptSkillSnapshotCache<TSnapshot> {
     const entry = this.entries.get(key);
     const age = entry ? this.now() - entry.loadedAt : undefined;
 
+    const backingOff = (this.retryAt.get(key) ?? 0) > this.now();
+
     if (entry && age !== undefined && age < this.staleMs) {
-      if (age >= this.freshMs) {
+      if (age >= this.freshMs && !backingOff) {
         // Refresh behind the caller; a failed refresh keeps serving the entry
         // until it ages out.
         void this.load(key, load).catch(() => undefined);
       }
       return entry.snapshot;
+    }
+
+    if (backingOff) {
+      throw new Error('Skill snapshot is unavailable.');
     }
 
     const loading = this.load(key, load);
@@ -96,8 +117,10 @@ export class FastAgentPromptSkillSnapshotCache<TSnapshot> {
 
     const loading = (async () => {
       try {
-        const snapshot = await load();
-        await this.cleanup(snapshot).catch(() => undefined);
+        const loaded = await load();
+        await this.cleanup(loaded).catch(() => undefined);
+        const snapshot = this.retain(loaded);
+        this.retryAt.delete(key);
         this.entries.delete(key);
         this.entries.set(key, { loadedAt: this.now(), snapshot });
         while (this.entries.size > this.maxEntries) {
@@ -106,6 +129,9 @@ export class FastAgentPromptSkillSnapshotCache<TSnapshot> {
           this.entries.delete(oldest);
         }
         return snapshot;
+      } catch (error) {
+        this.retryAt.set(key, this.now() + this.retryMs);
+        throw error;
       } finally {
         this.inflight.delete(key);
       }

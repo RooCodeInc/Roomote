@@ -22,6 +22,7 @@ describe('FastAgentPromptSkillSnapshotCache', () => {
       coldWaitMs: 1_000,
       freshMs: 10_000,
       now: () => now,
+      retryMs: 5_000,
       staleMs: 60_000,
     });
   }
@@ -134,16 +135,71 @@ describe('FastAgentPromptSkillSnapshotCache', () => {
     ).resolves.toMatchObject({ revision: 'rb' });
   });
 
-  it('propagates a failed cold load and retries on the next turn', async () => {
+  it('leaves a failed cold load alone until the retry delay passes', async () => {
     const cache = createCache();
+    const load = vi.fn(async (): Promise<Snapshot> => {
+      throw new Error('fetch failed');
+    });
 
-    await expect(
-      cache.get('repo', async () => {
-        throw new Error('fetch failed');
-      }),
-    ).rejects.toThrow('fetch failed');
+    await expect(cache.get('repo', load)).rejects.toThrow('fetch failed');
+    now = 4_000;
+    await expect(cache.get('repo', load)).rejects.toThrow('unavailable');
+    expect(load).toHaveBeenCalledTimes(1);
+
+    now = 5_000;
     await expect(
       cache.get('repo', async () => ({ directory: '/a', revision: 'r1' })),
     ).resolves.toMatchObject({ revision: 'r1' });
+  });
+
+  it('does not refresh a stale snapshot again right after a refresh failed', async () => {
+    const cache = createCache();
+    await cache.get('repo', async () => ({ directory: '/a', revision: 'r1' }));
+    now = 20_000;
+    const load = vi.fn(async (): Promise<Snapshot> => {
+      throw new Error('fetch failed');
+    });
+
+    for (const at of [20_000, 21_000, 24_000]) {
+      now = at;
+      await expect(cache.get('repo', load)).resolves.toMatchObject({
+        revision: 'r1',
+      });
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    expect(load).toHaveBeenCalledTimes(1);
+
+    now = 25_000;
+    await cache.get('repo', load);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps only what retain returns', async () => {
+    const cache = new FastAgentPromptSkillSnapshotCache<
+      Snapshot & { secret?: string }
+    >({
+      cleanup,
+      now: () => now,
+      retain: ({ directory, revision }) => ({ directory, revision }),
+    });
+    const load = async () => ({
+      directory: '/a',
+      revision: 'r1',
+      secret: 'token',
+    });
+
+    await expect(cache.get('repo', load)).resolves.toEqual({
+      directory: '/a',
+      revision: 'r1',
+    });
+    await expect(cache.get('repo', load)).resolves.toEqual({
+      directory: '/a',
+      revision: 'r1',
+    });
+    // The checkout is removed using the loaded snapshot, before it is trimmed.
+    expect(cleanup).toHaveBeenCalledWith(
+      expect.objectContaining({ secret: 'token' }),
+    );
   });
 });
