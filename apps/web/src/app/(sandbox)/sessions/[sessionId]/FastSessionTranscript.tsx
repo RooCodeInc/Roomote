@@ -50,6 +50,7 @@ import {
   type SlackMentionScope,
 } from '@/components/ai-elements/slack-mention-context';
 import { WorkspaceHeader } from '@/components/layout';
+import { Alert, AlertDescription, AlertTitle } from '@/components/system';
 import { PrivateSessionIcon } from '@/components/sessions/PrivateSessionIcon';
 import { useLiveVoice } from '@/hooks/useLiveVoice';
 import { useSessionVoiceCallLease } from '@/hooks/useSessionVoiceCallLease';
@@ -61,6 +62,7 @@ import {
   type SessionPromptSubmission,
 } from './SessionPromptInput';
 import { preparePromptAttachments } from '@/lib/prompt-attachments';
+import { describeValidationError } from '@/lib/validation-error';
 import {
   useOpenSessionTaskPanel,
   useOpenSessionTasksPanel,
@@ -1382,9 +1384,7 @@ export function FastSessionTranscript({
             ),
           );
         }
-        setReplyError(
-          error instanceof Error ? error.message : 'Failed to send message',
-        );
+        setReplyError(describeValidationError(error, 'Failed to send message'));
         if (optimisticId) {
           dispatchPendingResponse({
             type: 'rollbackOptimistic',
@@ -1984,7 +1984,16 @@ export function FastSessionTranscript({
               }}
             />
             {replyError ? (
-              <p className="px-4 pb-2 text-xs text-destructive">{replyError}</p>
+              <Alert
+                variant="destructive"
+                className="mx-4 mb-2 [&>svg]:size-4"
+                role="alert"
+              >
+                <AlertTitle>Message not sent</AlertTitle>
+                <AlertDescription>
+                  <p className="whitespace-pre-line">{replyError}</p>
+                </AlertDescription>
+              </Alert>
             ) : null}
           </div>
         ) : null}

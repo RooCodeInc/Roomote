@@ -2312,6 +2312,43 @@ describe('FastSessionTranscript', () => {
     expect(screen.queryByText('Working')).not.toBeInTheDocument();
   });
 
+  it('renders a validation error array as a human-readable composer alert', async () => {
+    const rawValidationError = JSON.stringify([
+      {
+        code: 'custom',
+        message:
+          'Extracted attachment text exceeds the 200,000 character limit',
+        path: ['attachmentTexts'],
+      },
+    ]);
+    replyMutate.mockRejectedValue(new Error(rawValidationError));
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          textMessage({
+            id: 'user-1',
+            role: 'user',
+            text: 'First question',
+            ts: 1,
+          }),
+        ]}
+        canReply
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, { target: { value: 'Retry this' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Message not sent');
+    expect(alert).toHaveTextContent(
+      'attachmentTexts: Extracted attachment text exceeds the 200,000 character limit',
+    );
+    expect(screen.queryByText(rawValidationError)).not.toBeInTheDocument();
+  });
+
   it('keeps Working for an earlier pending response when a later send fails', async () => {
     replyMutate.mockRejectedValue(new Error('turn is busy'));
     render(

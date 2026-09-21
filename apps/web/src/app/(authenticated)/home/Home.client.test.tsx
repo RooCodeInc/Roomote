@@ -585,6 +585,27 @@ describe('Home', () => {
     );
   });
 
+  it('blocks submission and warns when extraction exceeds the attachment text limit', async () => {
+    mockPreparePromptAttachments.mockRejectedValueOnce(
+      new Error(
+        'Extracted text from "notes-1.txt" would exceed the 200,000 character limit for attachments (total 200,001 characters). Remove or shorten the attachment and try again.',
+      ),
+    );
+    render(<Home initialPlaceholderIndex={0} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'Extracted text from "notes-1.txt" would exceed the 200,000 character limit',
+        ),
+      );
+    });
+    expect(mockStartFastSession).not.toHaveBeenCalled();
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
   it('cycles prompt placeholders every 10 seconds from a random starting point', async () => {
     vi.useFakeTimers();
 

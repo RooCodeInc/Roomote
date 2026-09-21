@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import type { ReasoningEffort } from '@roomote/types';
 import { stagePendingFastSessionLaunch } from '@/lib/pending-fast-session-launch';
 import { sessionPathWithVoiceAutostart } from '@/lib/voice-autostart';
+import { describeValidationError } from '@/lib/validation-error';
 
 import { useStartFastSession } from './useStartFastSession';
 
@@ -72,9 +73,7 @@ export function useFastSessionLauncher(options?: {
             : `/sessions/${sessionId}`,
         );
       } catch (error) {
-        toast.error(
-          error instanceof Error ? error.message : 'Failed to start session',
-        );
+        toast.error(describeValidationError(error, 'Failed to start session'));
       }
     },
     [mutation, onSessionStarted, router],

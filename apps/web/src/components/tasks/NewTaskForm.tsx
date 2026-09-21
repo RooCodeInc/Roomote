@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef, type Ref } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { toast } from 'sonner';
 
 import {
   type ReasoningEffort,
@@ -19,6 +20,7 @@ import { usePrivateSessionsExperiment } from '@/hooks/usePrivateSessionsExperime
 import { type PromptInputMessage } from '@/components/ai-elements';
 import { SessionModelSwitcher, TaskPromptInput } from '@/components/tasks';
 import { BasicTooltip, Button, HatGlasses } from '@/components/system';
+import { describeValidationError } from '@/lib/validation-error';
 
 const DEFAULT_PROMPT_PLACEHOLDER = 'What do you want to do?';
 
@@ -129,10 +131,18 @@ export function NewTaskForm({
     async (message: PromptInputMessage) => {
       const text = message.text.trim();
 
-      const preparedPrompt = await preparePromptAttachments({
-        text,
-        attachments: message.files,
-      });
+      let preparedPrompt;
+      try {
+        preparedPrompt = await preparePromptAttachments({
+          text,
+          attachments: message.files,
+        });
+      } catch (error) {
+        toast.error(
+          describeValidationError(error, 'Failed to process file attachments.'),
+        );
+        return;
+      }
 
       const submission: SubmissionSnapshot = {
         description:
