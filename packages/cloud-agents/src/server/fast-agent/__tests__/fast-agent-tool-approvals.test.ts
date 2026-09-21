@@ -744,6 +744,35 @@ describe('tool approval bridge', () => {
     );
   });
 
+  it('rejects the ask when an approved once cannot be delivered, instead of leaving the session paused', async () => {
+    vi.mocked(getIntegrationToolApproval).mockResolvedValue({
+      status: 'approved',
+    } as never);
+    const helperMocks = helpers();
+    helperMocks.reply.mockRejectedValueOnce(new Error('unresponsive'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      bridge().handleAsk(ask, helperMocks);
+      await vi.waitFor(() =>
+        expect(helperMocks.reply).toHaveBeenCalledTimes(2),
+      );
+    } finally {
+      warn.mockRestore();
+    }
+    expect(helperMocks.reply).toHaveBeenNthCalledWith(
+      1,
+      'req-1',
+      'once',
+      undefined,
+    );
+    expect(helperMocks.reply).toHaveBeenNthCalledWith(
+      2,
+      'req-1',
+      'reject',
+      expect.any(String),
+    );
+  });
+
   it('fails closed without a card for tools outside the mounted catalog', async () => {
     const helperMocks = helpers();
     bridge().handleAsk({ ...ask, permission: 'unknown_tool' }, helperMocks);

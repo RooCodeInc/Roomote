@@ -547,13 +547,18 @@ export function createFastAgentToolApprovalBridge(input: {
             approvalId: approval.approvalId,
             requesterUserId: input.userId,
           });
+          if (consumed) {
+            // An undeliverable `once` is not swallowed: it reaches the
+            // failure handler below, which rejects the ask so the session is
+            // never left paused on a call that cannot be resumed.
+            await helpers.reply(ask.requestId, 'once', undefined);
+            return;
+          }
           await helpers
             .reply(
               ask.requestId,
-              consumed ? 'once' : 'reject',
-              consumed
-                ? undefined
-                : 'The approval for this tool call is no longer valid.',
+              'reject',
+              'The approval for this tool call is no longer valid.',
             )
             .catch(() => undefined);
           return;
