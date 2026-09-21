@@ -872,6 +872,7 @@ export const tasks = pgTable(
     repositoryUrl: text('repository_url'),
     repositoryName: text('repository_name'),
     defaultBranch: text('default_branch'),
+    archivedAt: timestamp('archived_at'),
     // Soft delete; queries filter isNull(deletedAt).
     deletedAt: timestamp('deleted_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),

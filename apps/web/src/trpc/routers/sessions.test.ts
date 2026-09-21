@@ -5,6 +5,7 @@ import {
   sessions,
   sessionTasks,
   taskFactory,
+  tasks,
   userFactory,
 } from '@roomote/db/server';
 import type { UserAuthSuccess } from '@/types';
@@ -31,7 +32,10 @@ describe('private Session procedures', () => {
       title: 'Private Session',
       archivedAt: new Date(),
     });
-    const task = await taskFactory.create({ initiatorUserId: owner.id });
+    const task = await taskFactory.create({
+      initiatorUserId: owner.id,
+      archivedAt: session.archivedAt,
+    });
     await db.insert(sessionTasks).values({
       sessionId: session.id,
       taskId: task.id,
@@ -71,5 +75,8 @@ describe('private Session procedures', () => {
     await expect(
       db.query.sessions.findFirst({ where: eq(sessions.id, session.id) }),
     ).resolves.toMatchObject({ title: 'Owner rename', archivedAt: null });
+    await expect(
+      db.query.tasks.findFirst({ where: eq(tasks.id, task.id) }),
+    ).resolves.toMatchObject({ archivedAt: null });
   });
 });
