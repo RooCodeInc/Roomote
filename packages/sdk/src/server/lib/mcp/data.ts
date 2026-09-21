@@ -493,12 +493,10 @@ export async function getValidAccessToken(
 
         console.error(`[getValidAccessToken] Token refresh failed:`, message);
 
-        // Custom servers: a definitive rejection means the grant is dead.
-        // Surface the reconnect state instead of silently retrying with a
-        // stale token forever (there is no other feedback channel for a
-        // broken deployment-scoped connection). Transient failures (5xx,
-        // network) still fall through with the stale token below.
-        if (customTarget && isDefinitiveOAuthRejection(error)) {
+        // A definitive rejection means the grant is dead. Surface the
+        // reconnect state instead of silently retrying with a stale token.
+        // Transient failures (5xx, network) still fall through below.
+        if (isDefinitiveOAuthRejection(error)) {
           await db
             .update(mcpConnections)
             .set({ authStatus: 'error', updatedAt: new Date() })

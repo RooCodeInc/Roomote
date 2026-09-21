@@ -248,4 +248,69 @@ describe('getClientInformation', () => {
     const tokenBody = new URLSearchParams(String(tokenRequest?.[1]?.body));
     expect(tokenBody.get('resource')).toBe('https://mcp.monday.com/mcp');
   });
+
+  it('marks curated connections for reconnect after a definitive refresh rejection', async () => {
+    findFirstMock.mockResolvedValue({
+      id: 'conn-1',
+      mcpId: 'linear',
+      accessToken: 'expired-access-token',
+      refreshToken: 'revoked-refresh-token',
+      tokenExpiresAt: new Date(0),
+      authConfig: {
+        type: 'oauth_client',
+        client_id: 'linear-client',
+        client_secret: 'enc:linear-secret',
+        registered_redirect_uri:
+          'https://customer.example/api/mcp-oauth/callback',
+        token_endpoint_auth_method: 'client_secret_post',
+      },
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          Response.json(
+            { error: 'invalid_grant', error_description: 'Grant revoked' },
+            { status: 400 },
+          ),
+        ),
+    );
+
+    await expect(
+      getValidAccessToken('conn-1', 'https://mcp.linear.app/mcp'),
+    ).resolves.toBeUndefined();
+
+    expect(setMock).toHaveBeenCalledWith(
+      expect.objectContaining({ authStatus: 'error' }),
+    );
+  });
+
+  it('keeps the stale curated token after a transient refresh failure', async () => {
+    findFirstMock.mockResolvedValue({
+      id: 'conn-1',
+      mcpId: 'linear',
+      accessToken: 'expired-access-token',
+      refreshToken: 'refresh-token',
+      tokenExpiresAt: new Date(0),
+      authConfig: {
+        type: 'oauth_client',
+        client_id: 'linear-client',
+        client_secret: 'enc:linear-secret',
+        registered_redirect_uri:
+          'https://customer.example/api/mcp-oauth/callback',
+        token_endpoint_auth_method: 'client_secret_post',
+      },
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response('Unavailable', { status: 503 })),
+    );
+
+    await expect(
+      getValidAccessToken('conn-1', 'https://mcp.linear.app/mcp'),
+    ).resolves.toBe('expired-access-token');
+
+    expect(setMock).not.toHaveBeenCalled();
+  });
 });
