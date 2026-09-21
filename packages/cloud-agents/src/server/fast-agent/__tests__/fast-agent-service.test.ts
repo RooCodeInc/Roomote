@@ -368,8 +368,8 @@ vi.mock('../../user-personalization', async (importOriginal) => {
   };
 });
 
-vi.mock('../fast-agent-title', () => ({
-  refreshFastAgentSessionTitle: mocks.refreshTitle,
+vi.mock('../session-title-refresh-job', () => ({
+  refreshFastAgentSessionTitleWithRetry: mocks.refreshTitle,
 }));
 
 vi.mock('../fast-agent-surface-reply-stream', async (importOriginal) => {
@@ -517,7 +517,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.listNativeIntegrations.mockResolvedValue([]);
-    mocks.refreshTitle.mockResolvedValue(null);
+    mocks.refreshTitle.mockResolvedValue({
+      status: 'noop',
+      checkpoint: 1,
+      reason: 'checkpoint_reached',
+    });
     mocks.resolveImageDelivery.mockResolvedValue({
       delivery: 'direct',
       model: 'openrouter/openai/gpt-5.4',
@@ -5605,7 +5609,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
               'https://roomote.example/artifacts/session/session-1?path=notes%2Fdecision.md&v=1',
           },
           guidance:
-            'The artifact viewUrl opens in its Session; standaloneViewUrl opens only the artifact. Share whichever returned URL fits the context, unchanged, instead of constructing an artifact URL.',
+            'The artifact viewUrl opens in its Session; standaloneViewUrl opens the document, image, or file on its own page with a direct shareable link. Share whichever returned URL fits the context, unchanged, instead of constructing an artifact URL.',
         });
         await invokeTool(nativeToolNames.sendChatReply, {
           purpose: 'closeout',
@@ -13526,6 +13530,86 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     ).rejects.toThrow('OpenCode unavailable');
     expect(activity.start).toHaveBeenCalledOnce();
     expect(activity.settle).toHaveBeenCalledOnce();
+  });
+
+  describe('platform event whose inference failure cannot succeed on retry', () => {
+    const closeout =
+      'Could not authenticate with the configured inference provider. An administrator needs to reconnect or replace its credentials.';
+    const rejectCredentials = () => {
+      mocks.classifyInferenceError.mockReturnValue({
+        message: 'The inference provider rejected these credentials.',
+        reason: 'invalid_credentials',
+        retryable: false,
+      });
+      mocks.generateText.mockRejectedValue(
+        new Error('APIError: Missing API key.'),
+      );
+    };
+
+    it('tells the user once and settles instead of asking to be re-delivered', async () => {
+      rejectCredentials();
+      const adapter = callbacks();
+
+      // Resolves rather than rethrows, so the event queue does not deliver
+      // the same event again for a failure that would repeat identically.
+      await expect(
+        answerFastAgentQuestion({
+          ...baseParams,
+          turnSource: 'platform_event',
+          adapter,
+        }),
+      ).resolves.toBe(closeout);
+      expect(mocks.generateText).toHaveBeenCalledOnce();
+      expect(adapter.postReply).toHaveBeenCalledWith({
+        purpose: 'closeout',
+        message: closeout,
+      });
+    });
+
+    it('does not repeat a closeout the conversation already ends with', async () => {
+      rejectCredentials();
+      mocks.getSession.mockResolvedValueOnce({
+        id: 'conversation-1',
+        compatibilityMessages: [{ role: 'assistant', content: closeout }],
+        openCodeSessionId: null,
+      });
+      const adapter = callbacks();
+
+      // Every platform event on a misconfigured deployment fails the same
+      // way; the next one still settles, without posting again.
+      await expect(
+        answerFastAgentQuestion({
+          ...baseParams,
+          turnSource: 'platform_event',
+          adapter,
+        }),
+      ).resolves.toBe(closeout);
+      expect(adapter.postReply).not.toHaveBeenCalled();
+    });
+
+    it('still rethrows a failure another attempt could recover', async () => {
+      vi.useFakeTimers();
+      try {
+        mocks.generateText.mockRejectedValue(
+          new Error('TypeError: fetch failed'),
+        );
+        const adapter = callbacks();
+
+        const result = answerFastAgentQuestion({
+          ...baseParams,
+          turnSource: 'platform_event',
+          adapter,
+        });
+        const settled = expect(result).rejects.toThrow('fetch failed');
+        await vi.runAllTimersAsync();
+        await settled;
+        expect(adapter.postReply).not.toHaveBeenCalledWith(
+          expect.objectContaining({ purpose: 'closeout' }),
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   describe('answerFastAgentQuestion streamed reply text', () => {

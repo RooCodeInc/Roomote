@@ -86,11 +86,12 @@ describe('Results commands', () => {
       expect(results).toEqual([
         expect.objectContaining({
           id: suggestion!.id,
-          repositoryUrl: 'https://github.com/RooCodeInc/Roomote',
+          headline: 'Patch the alert',
+          actions: [expect.objectContaining({ action: 'start_investigation' })],
         }),
         expect.objectContaining({
           id: report!.id,
-          repositoryUrl: 'https://github.com/RooCodeInc/Roomote',
+          actions: [expect.objectContaining({ action: 'respond_in_task' })],
         }),
       ]);
 
@@ -99,8 +100,8 @@ describe('Results commands', () => {
         .set({ deletedAt: new Date() })
         .where(eq(tasks.id, sourceTask.id));
       await expect(listResultsCommand(auth)).resolves.toEqual([
-        expect.objectContaining({ id: suggestion!.id, repositoryUrl: null }),
-        expect.objectContaining({ id: report!.id, repositoryUrl: null }),
+        expect.objectContaining({ id: suggestion!.id }),
+        expect.objectContaining({ id: report!.id, actions: [] }),
       ]);
 
       await actOnResultCommand(auth, {

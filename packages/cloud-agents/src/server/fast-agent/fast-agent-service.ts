@@ -132,7 +132,7 @@ import {
   upsertFastAgentMessage,
   type FastAgentActiveTask,
 } from './fast-agent-session';
-import { refreshFastAgentSessionTitle } from './fast-agent-title';
+import { refreshFastAgentSessionTitleWithRetry } from './session-title-refresh-job';
 import {
   classifyNonTaskInferenceError,
   FAST_AGENT_SESSION_PERMISSIONS,
@@ -973,6 +973,49 @@ class FastAgentInferenceError extends Error {
     this.name = 'FastAgentInferenceError';
     this.detail = describeInferenceErrorForUser(cause);
   }
+}
+
+/**
+ * Inference failures that will repeat identically however often the turn is
+ * re-delivered, because they describe the deployment's configuration or the
+ * content itself rather than the state of the provider. A generic provider
+ * rejection is deliberately not here: a later attempt from a rebuilt session
+ * can still succeed, so it is retried within a bounded budget instead.
+ */
+const TERMINAL_INFERENCE_FAILURE_REASONS: ReadonlySet<string> = new Set([
+  'invalid_credentials',
+  'insufficient_credits',
+  'model_unavailable',
+  'content_filter',
+]);
+
+function isTerminalInferenceFailure(
+  failure: FastAgentInferenceFailure,
+): boolean {
+  return (
+    !failure.retryable && TERMINAL_INFERENCE_FAILURE_REASONS.has(failure.reason)
+  );
+}
+
+/**
+ * The terminal inference failure inside an error chain, if there is one.
+ * Callers that re-deliver a failed turn use it to stop re-delivering one
+ * that cannot succeed.
+ */
+export function findTerminalFastAgentInferenceFailure(
+  error: unknown,
+): FastAgentInferenceFailure | null {
+  let current: unknown = error;
+  for (let depth = 0; depth < 6 && current; depth += 1) {
+    if (current instanceof FastAgentInferenceError) {
+      return isTerminalInferenceFailure(current.failure)
+        ? current.failure
+        : null;
+    }
+    if (typeof current !== 'object') return null;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return null;
 }
 
 const FAST_AGENT_INFERENCE_DETAIL_MAX_CHARS = 200;
@@ -1976,6 +2019,9 @@ export async function answerFastAgentQuestion({
   let codeModeOpenCodeServerUrl: string | null = null;
   let durableOpenCodeSessionId: string | null = null;
   let lastVisibleMessage = '';
+  // The most recent assistant message already in the conversation, so a
+  // repeat of the same terminal failure does not post the same closeout again.
+  let priorAssistantMessage: string | undefined;
   /** Last model OpenCode resolved for this turn, for the failure closeout. */
   let lastResolvedInferenceModel: string | undefined;
   let currentInstructionVersion = 0;
@@ -3371,6 +3417,12 @@ export async function answerFastAgentQuestion({
     // The judgment model's environment pick is only useful before the Session
     // has chosen where its work runs, so it is requested for what looks like
     // the first human request and used only once persistence confirms it.
+    const priorAssistant = session.compatibilityMessages
+      .filter((message) => message.role === 'assistant')
+      .at(-1);
+    priorAssistantMessage = priorAssistant
+      ? extractModelMessageText(priorAssistant).join('\n')
+      : undefined;
     const routingHintRequest =
       substantiveHumanInput &&
       !setupSession &&
@@ -3646,13 +3698,16 @@ export async function answerFastAgentQuestion({
       substantiveHumanInput ||
       (platformEvent && platformEventKind === 'automation')
     ) {
-      void refreshFastAgentSessionTitle({ sessionId: session.id, userId }).then(
-        (generated) =>
-          adapter.activity?.updateTitle?.(generated?.title ?? null, {
-            iconEmoji: generated?.iconEmoji ?? null,
-            titleChanged: generated?.titleChanged,
-          }),
-      );
+      void refreshFastAgentSessionTitleWithRetry({
+        sessionId: session.id,
+        userId,
+      }).then((result) => {
+        const generated = result.status === 'updated' ? result : null;
+        return adapter.activity?.updateTitle?.(generated?.title ?? null, {
+          iconEmoji: generated?.iconEmoji ?? null,
+          titleChanged: generated?.titleChanged,
+        });
+      });
     }
     const sessionActiveTasks = await getActiveFastAgentTasks(session.id);
     const sessionGoal = await getSessionGoalForConversation(session.id);
@@ -4829,7 +4884,7 @@ export async function answerFastAgentQuestion({
                 success: true,
                 artifact,
                 guidance:
-                  'The artifact viewUrl opens in its Session; standaloneViewUrl opens only the artifact. Share whichever returned URL fits the context, unchanged, instead of constructing an artifact URL.',
+                  'The artifact viewUrl opens in its Session; standaloneViewUrl opens the document, image, or file on its own page with a direct shareable link. Share whichever returned URL fits the context, unchanged, instead of constructing an artifact URL.',
               };
             } catch (error) {
               completedTaskActions.delete(`artifact:${signature}`);
@@ -6825,7 +6880,15 @@ export async function answerFastAgentQuestion({
       // the model can see the failure the user saw in Slack or Discord.
       fastAgentOpenCodeSessionManager.invalidate(canonicalConversationId);
     }
-    if (platformEvent) throw error;
+    // A platform event normally fails without a closeout so its queue can
+    // deliver it again. An inference failure that cannot succeed on a retry
+    // (rejected credentials, no credits, an unavailable model) would repeat
+    // forever, so it is settled here like a human turn: the user is told
+    // once, and the event is not re-delivered.
+    const terminalInferenceFailure =
+      error instanceof FastAgentInferenceError &&
+      isTerminalInferenceFailure(error.failure);
+    if (platformEvent && !terminalInferenceFailure) throw error;
 
     const message = storageFull
       ? formatFastAgentStorageFullMessage(storageDiagnostic?.kind ?? 'unknown')
@@ -6839,7 +6902,11 @@ export async function answerFastAgentQuestion({
     // The error closeout is recorded like any other closeout: its intent
     // before the post and its reply row right after, so a run that resumes
     // this turn sees it and does not post a second one.
-    if (!isInstructionClosed()) {
+    // Every platform event on a misconfigured deployment fails the same
+    // way; the conversation only needs to hear it once.
+    const repeatedPlatformFailure =
+      platformEvent && priorAssistantMessage === message;
+    if (!isInstructionClosed() && !repeatedPlatformFailure) {
       try {
         const reply = { purpose: 'closeout' as const, message };
         await postRecordedSystemCloseout(message, async () => {

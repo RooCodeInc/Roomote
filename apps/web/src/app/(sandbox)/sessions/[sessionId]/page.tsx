@@ -36,6 +36,7 @@ import {
   SESSION_HEADER_CONTENT_CLASS_NAME,
   SESSION_HEADER_TITLE_CLASS_NAME,
 } from './session-header-layout';
+import { LiveSessionTitle } from './LiveSessionTitle';
 
 const getSessionPageData = cache(async (sessionId: string) => {
   const authorizedUser = await authorize();
@@ -176,6 +177,8 @@ export default async function SessionDetailPage({
                   autoStartVoice={autoStartVoice}
                   privateSession={unifiedSession.privacy === 'private'}
                   sessionGoal={unifiedSession.goal}
+                  canRenameTitle={sessionInfo.canDelete}
+                  titleSessionId={unifiedSession.id}
                   {...(unifiedSession.ownerUserId
                     ? {
                         owner: {
@@ -213,9 +216,12 @@ export default async function SessionDetailPage({
                 }
               >
                 <div className="flex min-w-0 flex-1 flex-col gap-1">
-                  <h1 className={SESSION_HEADER_TITLE_CLASS_NAME}>
-                    {unifiedSession.title}
-                  </h1>
+                  <LiveSessionTitle
+                    sessionId={unifiedSession.id}
+                    initialTitle={unifiedSession.title}
+                    canRename={sessionInfo.canDelete}
+                    className={SESSION_HEADER_TITLE_CLASS_NAME}
+                  />
                   <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-2 text-xs text-muted-foreground">
                     {unifiedSession.privacy === 'private' ? (
                       <PrivateSessionIcon className="text-accent-foreground" />

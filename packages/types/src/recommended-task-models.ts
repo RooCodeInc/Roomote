@@ -117,7 +117,7 @@ export const OPENROUTER_RECOMMENDED_TASK_MODEL_SLUGS = {
   'glm-5-3': 'openrouter/z-ai/glm-5.3',
   'kimi-k3': 'openrouter/moonshotai/kimi-k3',
   'kimi-k2-7-code': 'openrouter/moonshotai/kimi-k2.7-code',
-  'qwen3-8-max': 'openrouter/qwen/qwen3.8-max',
+  'qwen3-8-max': 'openrouter/qwen/qwen3.8-max-0902',
   'minimax-m3': 'openrouter/minimax/minimax-m3',
   'grok-4-6': 'openrouter/x-ai/grok-4.6',
 } as const satisfies RecommendedTaskModelSlugMap;

@@ -43,6 +43,7 @@ type SettledRun = TaskRun & { task: { title: string | null } };
 function makeSettledRun(overrides: Partial<SettledRun> = {}): SettledRun {
   return {
     id: 200,
+    kind: 'fresh',
     taskId: 'child-task',
     sourceRunId: 100,
     payload: { notifySourceRunOnSettle: true },
@@ -173,6 +174,28 @@ describe('notifySourceRunOnSettle', () => {
 
     expect(mockClaimReturning).not.toHaveBeenCalled();
     expect(mockWithSandboxServerRpcClient).not.toHaveBeenCalled();
+  });
+
+  it('preserves the launching run through same-task failed-start relaunches', async () => {
+    mockFindFirstRun
+      .mockResolvedValueOnce({
+        id: 150,
+        taskId: 'child-task',
+        kind: 'fresh',
+        sourceRunId: 100,
+        status: RunStatus.Failed,
+        sandboxServerUrl: null,
+      })
+      .mockResolvedValueOnce(activeParent);
+
+    await notifySourceRunOnSettle(
+      makeSettledRun({ sourceRunId: 150 }),
+      RunStatus.Completed,
+    );
+
+    expect(mockWithSandboxServerRpcClient).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: 100 }),
+    );
   });
 
   it('skips exited or sandbox-less launching runs without claiming', async () => {

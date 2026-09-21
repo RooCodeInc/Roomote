@@ -23,6 +23,43 @@ type SettledStatus =
   | RunStatus.Canceled
   | RunStatus.Idle;
 
+type SourceRunTarget = Pick<
+  TaskRun,
+  'id' | 'taskId' | 'kind' | 'sourceRunId' | 'status' | 'sandboxServerUrl'
+>;
+
+async function resolveLaunchingSourceRun(
+  run: TaskRun,
+): Promise<SourceRunTarget | null> {
+  let current: Pick<TaskRun, 'taskId' | 'kind' | 'sourceRunId'> = run;
+  const visited = new Set<number>();
+
+  while (current.sourceRunId && !visited.has(current.sourceRunId)) {
+    visited.add(current.sourceRunId);
+    const sourceRun = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, current.sourceRunId),
+      columns: {
+        id: true,
+        taskId: true,
+        kind: true,
+        sourceRunId: true,
+        status: true,
+        sandboxServerUrl: true,
+      },
+    });
+
+    if (!sourceRun) return null;
+    if (sourceRun.taskId !== run.taskId) return sourceRun;
+
+    // Same-task fresh links are failed-start relaunches. Resume links have a
+    // different meaning and must never notify their own task as a parent.
+    if (current.kind !== 'fresh') return null;
+    current = sourceRun;
+  }
+
+  return null;
+}
+
 function getSettleStatusLabel(status: SettledStatus): string {
   switch (status) {
     case RunStatus.Completed:
@@ -93,21 +130,10 @@ export async function notifySourceRunOnSettle(
       return;
     }
 
-    const sourceRun = await db.query.taskRuns.findFirst({
-      where: eq(taskRuns.id, run.sourceRunId),
-      columns: {
-        id: true,
-        taskId: true,
-        status: true,
-        sandboxServerUrl: true,
-      },
-    });
+    const sourceRun = await resolveLaunchingSourceRun(run);
 
-    // sourceRunId is also used by same-task resume chains; only cross-task
-    // spawns get a notification.
     if (
       !sourceRun ||
-      sourceRun.taskId === run.taskId ||
       isExitedRunStatus(sourceRun.status) ||
       !sourceRun.sandboxServerUrl
     ) {

@@ -21,6 +21,7 @@ export const ENABLED_DIRECT_TASK_MODEL_PROVIDER_IDS = [
   'requesty',
   'baseten',
   'togetherai',
+  'deepseek',
   'openai',
   'azure',
   'azure-cognitive-services',
@@ -259,6 +260,15 @@ const TASK_MODEL_ID_ALIASES: Readonly<Record<string, string>> = {
   'opencode/deepseek-v4-flash-0731': 'opencode/deepseek-v4-flash',
   // Kimi renamed this model to its documented id; the old one is rejected.
   'kimi-for-coding/k2p7': 'kimi-for-coding/kimi-for-coding',
+  // Earlier recommendations used ids the OpenCode model catalog does not list.
+  'vercel/xai/grok-4.6': 'vercel/spacexai/grok-4.6',
+  'vercel/deepseek/deepseek-v4.1-flash-beta':
+    'vercel/deepseek/deepseek-v4.1-flash',
+  'requesty/claude-fable-5-1': 'requesty/claude-fable-5.1',
+  'requesty/vertex/gemini-3.8-flash': 'requesty/gemini-3.8-flash',
+  'opencode-go/deepseek-flash': 'opencode-go/deepseek-v4.1-flash',
+  'openrouter/qwen/qwen3.8-max': 'openrouter/qwen/qwen3.8-max-0902',
+  'zai-coding-plan/glm-5v-turbo': 'zai-coding-plan/glm-5.3-flash',
 };
 
 /** Rewrites model IDs that Roomote persisted before a provider slug changed. */

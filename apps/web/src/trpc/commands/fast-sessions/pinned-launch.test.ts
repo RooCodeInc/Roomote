@@ -15,7 +15,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
     code = 'deployment_read_only';
   },
   launchPinnedFastSessionTask: mocks.launchPinned,
-  refreshFastAgentSessionTitle: mocks.refreshTitle,
+  refreshFastAgentSessionTitleWithRetry: mocks.refreshTitle,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -66,7 +66,11 @@ describe('startPinnedFastSessionLaunch', () => {
     mocks.getRepositories.mockResolvedValue([]);
     mocks.resolveEnvironmentProvider.mockResolvedValue('gitlab');
     mocks.resolveSelectedProvider.mockReturnValue(undefined);
-    mocks.refreshTitle.mockResolvedValue(null);
+    mocks.refreshTitle.mockResolvedValue({
+      status: 'noop',
+      checkpoint: 1,
+      reason: 'checkpoint_reached',
+    });
     mocks.after.mockImplementation((callback: () => unknown) => {
       void callback();
     });

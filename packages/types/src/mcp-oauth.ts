@@ -653,6 +653,30 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
       'Sentry advertises only a few tools directly (find_organizations, find_projects, search_issues, search_events, get_sentry_resource). Reach everything else (issue details, event stack traces, breadcrumbs, tag values, issue events, releases, traces, replays, attachments, monitors, alert rules, docs) by calling search_sentry_tools with a short query, then execute_sentry_tool with the returned tool name and arguments. Which tools exist depends on the access the admin granted when connecting. Treat Sentry as read-only unless the request explicitly asks to change Sentry state: do not resolve, assign, ignore, or otherwise update issues, and do not create or modify projects, teams, DSNs, or monitors on your own initiative.',
   },
   {
+    id: 'buildkite',
+    name: 'Buildkite',
+    url: 'https://mcp.buildkite.com/mcp/readonly',
+    description: `Inspect Buildkite pipelines, builds, jobs, tests, and agents from ${PRODUCT_NAME} tasks`,
+    icon: 'buildkite',
+    connectionScope: 'deployment',
+    oauthResource: 'https://mcp.buildkite.com/mcp/readonly',
+    oauthScopes: ['read'],
+    oauthScopeMode: 'read-only',
+    instructions:
+      "Use Buildkite to inspect organizations, pipelines, builds, jobs, logs, artifacts, annotations, tests, clusters, agents, and queues. This connection uses Buildkite's provider-enforced read-only MCP endpoint; do not assume mutation tools are available.",
+  },
+  {
+    id: 'cloudflare',
+    name: 'Cloudflare',
+    url: 'https://mcp.cloudflare.com/mcp',
+    description: `Inspect and operate Cloudflare resources from ${PRODUCT_NAME} tasks`,
+    icon: 'cloudflare',
+    connectionScope: 'deployment',
+    oauthResource: 'https://mcp.cloudflare.com/mcp',
+    instructions:
+      "Use Cloudflare to search and inspect the deployment's Cloudflare resources. The execute tool can call both read and write Cloudflare APIs; make changes only when the user explicitly requests the specific mutation, and preserve the permissions granted during OAuth consent.",
+  },
+  {
     id: 'pylon',
     name: 'Pylon',
     url: 'https://mcp.usepylon.com',

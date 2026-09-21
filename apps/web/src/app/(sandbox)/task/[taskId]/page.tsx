@@ -293,7 +293,9 @@ export default function SandboxPage() {
           <div className="mx-auto flex w-full max-w-4xl flex-col gap-2">
             <Startup
               runId={taskRun.id}
+              taskId={taskId}
               initialTaskRun={taskRun}
+              canRetryFailedStart={taskRun.canRetryFailedStart}
               newTaskHref={newTaskHref}
               onStatusChange={handleBootStatusChange}
             />
@@ -311,7 +313,9 @@ export default function SandboxPage() {
           <div className="mx-auto flex w-full max-w-4xl flex-col gap-2">
             <Startup
               runId={taskRun.id}
+              taskId={taskId}
               initialTaskRun={taskRun}
+              canRetryFailedStart={taskRun.canRetryFailedStart}
               newTaskHref={newTaskHref}
               onStatusChange={handleBootStatusChange}
             />

@@ -73,6 +73,7 @@ import {
   getSessionTimeline,
   archiveSessionCommand,
   deleteSessionCommand,
+  stopSessionTasksCommand,
   listSessionPins,
   markSessionReadCommand,
   sessionIdInputSchema,
@@ -445,6 +446,10 @@ import {
   actOnResultCommand,
   clearResultsCommand,
   getUnreadResultCountCommand,
+  getPendingResultCountCommand,
+  getResultCommand,
+  clearResultCommand,
+  acceptSuggestionResultCommand,
   listResultsCommand,
 } from '../commands/results';
 import {
@@ -3143,8 +3148,19 @@ export const appRouter = createRouter({
     list: protectedProcedure.query(({ ctx: { auth } }) =>
       listResultsCommand(auth),
     ),
+    get: protectedProcedure
+      .input(
+        z.object({
+          id: z.string().uuid(),
+          kind: z.enum(['report', 'suggestion']),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) => getResultCommand(auth, input)),
     unreadCount: protectedProcedure.query(({ ctx: { auth } }) =>
       getUnreadResultCountCommand(auth),
+    ),
+    pendingCount: protectedProcedure.query(({ ctx: { auth } }) =>
+      getPendingResultCountCommand(auth),
     ),
     act: protectedProcedure
       .input(
@@ -3158,6 +3174,19 @@ export const appRouter = createRouter({
     clear: protectedProcedure.mutation(({ ctx: { auth } }) =>
       clearResultsCommand(auth),
     ),
+    clearOne: protectedProcedure
+      .input(
+        z.object({
+          id: z.string().uuid(),
+          kind: z.enum(['report', 'suggestion']),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) => clearResultCommand(auth, input)),
+    acceptSuggestion: protectedProcedure
+      .input(z.object({ id: z.string().uuid() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        acceptSuggestionResultCommand(auth, input),
+      ),
   }),
 
   backgroundAgents: automationsRouter,
@@ -3347,6 +3376,11 @@ export const appRouter = createRouter({
       .input(sessionIdInputSchema)
       .mutation(({ ctx: { auth }, input }) =>
         archiveSessionCommand(auth, input.sessionId),
+      ),
+    stopTasks: protectedProcedure
+      .input(sessionIdInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        stopSessionTasksCommand(auth, input.sessionId),
       ),
     delete: protectedProcedure
       .input(sessionIdInputSchema)

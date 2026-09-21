@@ -74,6 +74,22 @@ That means you can ask things like:
 - "Check this customer PDF and draft the fix plan."
 - "Look at this screenshot and tell me what UI state it shows."
 
+## Open and share artifacts
+
+Artifact creation results can include two links:
+
+- `viewUrl` opens the artifact in its owning task or Session, where you can
+  continue to use the surrounding workspace context.
+- `standaloneViewUrl` opens the document, image, or file on its own page. Use it
+  when someone needs a direct link to the artifact without navigating through
+  the parent task or Session.
+
+Both links remain inside Roomote's authenticated access boundary. The recipient
+must be signed in to the deployment and already have permission to view the
+owning task or Session; a link does not make the artifact public or grant new
+access. The standalone page also supports available artifact versions and a
+link back to the owning task or Session when that context is useful.
+
 ## Videos from Roomote
 
 For new screencasts, Roomote prefers final MP4 (H.264) artifacts optimized for
@@ -91,9 +107,9 @@ for recording ownership and size limits.
 
 WebM recordings are converted to MP4 for Slack delivery without replacing the
 original artifact. If conversion or upload fails, or native delivery is not
-available on the current surface, Roomote shares only the artifact viewer link,
-without an error or unavailability explanation. Roomote only describes a video
-as attached when native delivery succeeds.
+available on the current surface, Roomote shares a direct link to open the file
+on its own page, without an error or unavailability explanation. Roomote only
+describes a video as attached when native delivery succeeds.
 
 ## Best practices
 

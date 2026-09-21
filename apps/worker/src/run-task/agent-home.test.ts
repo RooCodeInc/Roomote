@@ -689,6 +689,27 @@ describe('generateOpenCodeConfig provider support', () => {
     });
   });
 
+  it('rebases DeepSeek onto its root-relative inference gateway route', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'deepseek/deepseek-v4-pro',
+        R_VISION_MODEL: 'deepseek/deepseek-flash',
+        R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
+        R_INFERENCE_GATEWAY_KEYS: 'DEEPSEEK_API_KEY',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, { options?: Record<string, unknown> }>;
+    };
+
+    expect(config.provider.deepseek?.options).toMatchObject({
+      baseURL: 'https://api.example.com/api/inference/deepseek',
+      apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
+    });
+    expect(result.configContent).not.toContain('DEEPSEEK_API_KEY');
+  });
+
   it('instructs API-proxy runs to call services through the base URL without touching inference', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),
@@ -913,6 +934,46 @@ describe('generateOpenCodeConfig provider support', () => {
         baseURL: 'https://api.example.com/api/inference/kimi-for-coding/v1',
         apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
       },
+    });
+  });
+
+  it('binds the Z.AI Coding Plan key and region when there is no gateway', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'zai-coding-plan/glm-5.3',
+        ZAI_CODING_PLAN_REGION: 'china',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, { options?: Record<string, unknown> }>;
+    };
+
+    expect(config.provider['zai-coding-plan']?.options).toEqual({
+      apiKey: '{env:ZAI_CODING_PLAN_API_KEY}',
+      baseURL: 'https://open.bigmodel.cn/api/coding/paas/v4',
+    });
+  });
+
+  it('lets the gateway replace the Z.AI Coding Plan key and base URL', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'zai-coding-plan/glm-5.3',
+        ZAI_CODING_PLAN_REGION: 'china',
+        R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
+        R_INFERENCE_GATEWAY_KEYS: 'ZAI_CODING_PLAN_API_KEY',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, { options?: Record<string, unknown> }>;
+    };
+
+    // The gateway picks the region upstream; the sandbox only sees the
+    // gateway route and the run token.
+    expect(config.provider['zai-coding-plan']?.options).toEqual({
+      apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
+      baseURL: 'https://api.example.com/api/inference/zai-coding-plan',
     });
   });
 

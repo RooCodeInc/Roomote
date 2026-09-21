@@ -54,6 +54,7 @@ export * from './live-previews';
 export * from './logging';
 export * from './llm-usage';
 export * from './bedrock-opencode-provider';
+export * from './catalog-provider-credentials';
 export * from './kimi-for-coding-opencode-provider';
 export * from './inference-gateway';
 export * from './judgment-model';

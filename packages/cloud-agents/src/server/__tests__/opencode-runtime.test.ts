@@ -418,6 +418,65 @@ describe('buildOpenCodeCliEnv', () => {
     });
   });
 
+  it('binds the Z.AI Coding Plan key OpenCode would not find on its own', () => {
+    // OpenCode's catalog reads this provider's key from a different env var
+    // than the one Roomote stores it under, so without the binding helper
+    // calls are sent with no key and the provider answers 401.
+    const env = buildOpenCodeCliEnv({
+      R_MODEL: 'zai-coding-plan/glm-5.3',
+      R_SMALL_MODEL: 'zai/glm-5.3-flash',
+      ZAI_CODING_PLAN_REGION: 'china',
+    });
+    const config = JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}') as {
+      provider: Record<string, { options?: Record<string, unknown> }>;
+    };
+
+    expect(config.provider['zai-coding-plan']?.options).toEqual({
+      apiKey: '{env:ZAI_CODING_PLAN_API_KEY}',
+      baseURL: 'https://open.bigmodel.cn/api/coding/paas/v4',
+    });
+    // Its own credential and its own region setting.
+    expect(config.provider.zai?.options).toEqual({
+      apiKey: '{env:ZAI_API_KEY}',
+    });
+  });
+
+  it('binds the Azure AI Foundry and Google keys the provider SDKs would not read', () => {
+    // Both SDKs read a different env var than the one Roomote stores the key
+    // under: the Azure SDK reads AZURE_API_KEY, Google's reads
+    // GOOGLE_GENERATIVE_AI_API_KEY.
+    const env = buildOpenCodeCliEnv({
+      R_MODEL: 'azure-cognitive-services/gpt-5.6-sol',
+      R_SMALL_MODEL: 'google/gemini-3.8-flash',
+      AZURE_COGNITIVE_SERVICES_RESOURCE_NAME: 'acme-foundry',
+      GEMINI_API_KEY: 'gemini-key',
+    });
+    const config = JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}') as {
+      provider: Record<string, { options?: Record<string, unknown> }>;
+    };
+
+    expect(config.provider['azure-cognitive-services']?.options).toEqual({
+      apiKey: '{env:AZURE_COGNITIVE_SERVICES_API_KEY}',
+    });
+    expect(config.provider.google?.options).toEqual({
+      apiKey: '{env:GEMINI_API_KEY}',
+    });
+  });
+
+  it('binds those keys in operator-supplied config content too', () => {
+    const env = buildOpenCodeCliEnv({
+      R_MODEL: 'opencode-go/kimi-k3',
+      OPENCODE_CONFIG_CONTENT: JSON.stringify({ model: 'opencode-go/kimi-k3' }),
+    });
+    const config = JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}') as {
+      provider?: Record<string, { options?: Record<string, unknown> }>;
+    };
+
+    expect(config.provider?.['opencode-go']?.options).toEqual({
+      apiKey: '{env:OPENCODE_GO_API_KEY}',
+    });
+  });
+
   it('registers the Kimi for Coding provider without relying on the OpenCode catalog', () => {
     // The runtime catalog renamed this provider id. Left to the catalog,
     // OpenCode falls back to an OpenAI-compatible SDK with no base URL and

@@ -87,7 +87,7 @@ import {
   useSandboxLayout,
 } from '../../use-sandbox-layout';
 import { NestedTaskSidePanel } from './NestedTaskSidePanel';
-import { SessionDeleteAction } from './SessionDeleteAction';
+import { SessionActions } from './SessionDeleteAction';
 import {
   OpenSessionArtifactViewerContext,
   OpenSessionTaskPanelContext,
@@ -423,7 +423,7 @@ function SessionArtifactViewer({
         closeLabel={closeLabel}
         actions={
           (selection.version ?? artifact?.version) ? (
-            <BasicTooltip content="Open standalone viewer">
+            <BasicTooltip content="Open artifact">
               <Button asChild variant="ghost" size="icon" className="size-8">
                 <Link
                   href={getStandaloneArtifactViewUrl(
@@ -434,7 +434,7 @@ function SessionArtifactViewer({
                   )}
                   target="_blank"
                   rel="noreferrer"
-                  aria-label="Open standalone viewer"
+                  aria-label="Open artifact"
                 >
                   <Maximize2 />
                 </Link>
@@ -445,7 +445,7 @@ function SessionArtifactViewer({
               variant="ghost"
               size="icon"
               className="size-8"
-              aria-label="Open standalone viewer"
+              aria-label="Open artifact"
               disabled
             >
               <Maximize2 />
@@ -1135,7 +1135,7 @@ export function SessionWorkspace({
                 onShowMain={showMain}
                 footer={
                   session.canDelete ? (
-                    <SessionDeleteAction sessionId={session.id} />
+                    <SessionActions sessionId={session.id} />
                   ) : null
                 }
               >

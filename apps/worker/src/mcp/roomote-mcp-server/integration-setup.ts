@@ -53,6 +53,22 @@ Sentry uses the workspace MCP integration:
 
 Once connected, tasks can inspect Sentry issue and project context, and scheduled Sentry triage automation uses the same read-only MCP connection.
 
+# Buildkite
+
+Buildkite uses OAuth:
+1. A deployment operator enables Buildkite from Settings > Integrations.
+2. That operator connects Buildkite once for the deployment via OAuth.
+
+Once connected, I can inspect pipelines, builds, jobs, logs, artifacts, tests, clusters, agents, and queues through Buildkite's read-only hosted MCP endpoint. Organizations that restrict API access by IP must allowlist Buildkite's published MCP egress addresses. Organization selection during OAuth is a convenience, not an access-control boundary.
+
+# Cloudflare
+
+Cloudflare uses OAuth:
+1. A deployment operator enables Cloudflare from Settings > Integrations.
+2. That operator connects Cloudflare once for the deployment via OAuth.
+
+Once connected, I can search and inspect Cloudflare resources. The execute tool can also call write APIs, so I only make changes when the user explicitly requests the specific mutation and the OAuth connection permits it.
+
 # Pylon
 
 Pylon uses OAuth:

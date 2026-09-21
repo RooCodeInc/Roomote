@@ -14,6 +14,7 @@ import {
   mergeAmazonBedrockProviderConfig,
   mergeBedrockMantleOpenAiProviderConfig,
   mergeBedrockMantleProviderConfig,
+  mergeCatalogProviderCredentialConfig,
   mergeKimiForCodingProviderConfig,
   mergeOpenAiCompatibleProviderConfig,
   mergeOpenCodeModelReasoningOptions,
@@ -174,9 +175,15 @@ function buildModelBackedOpenCodeConfigContent(
           // Kimi for Coding is registered in full rather than left to
           // OpenCode's runtime catalog, which has renamed the provider id.
           mergeKimiForCodingProviderConfig(
-            mergeOpenRouterVariantAliasModels(
-              providerModelConfig,
-              variantAliases,
+            // Providers whose key OpenCode would not find under the env var
+            // its catalog names (Z.AI, Z.AI Coding Plan, OpenCode Go).
+            mergeCatalogProviderCredentialConfig(
+              mergeOpenRouterVariantAliasModels(
+                providerModelConfig,
+                variantAliases,
+              ),
+              env,
+              configuredModelIds,
             ),
             configuredModelIds,
           ),
@@ -454,7 +461,14 @@ function mergeBedrockRegistrationsIntoConfigContent(
     const provider = mergeAmazonBedrockProviderConfig(
       mergeBedrockMantleProviderConfig(
         mergeBedrockMantleOpenAiProviderConfig(
-          mergeKimiForCodingProviderConfig(existingProvider, roleModelIds),
+          mergeKimiForCodingProviderConfig(
+            mergeCatalogProviderCredentialConfig(
+              existingProvider,
+              env,
+              roleModelIds,
+            ),
+            roleModelIds,
+          ),
           env,
           roleModelIds,
         ),

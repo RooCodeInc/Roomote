@@ -187,6 +187,7 @@ vi.mock('@roomote/db/server', () => ({
   exists: existsFn,
   gt: gtFn,
   lte: vi.fn(),
+  ne: vi.fn(),
   asc: ascFn,
   desc: descFn,
   createComputeProviderMutationEventRecorder:
@@ -210,19 +211,21 @@ import { resolveComputeProviderEnvValues } from '@roomote/db/server';
  * Mock the sequential DB select queries in sleepCheckJob.
  * Order matters: the first resolved value maps to the dueJobs query,
  * the second to the staleWorkerJobs query, the third to the booting jobs
- * that never emitted a heartbeat, and the fourth to the provider
- * hard-timeout backstop query.
+ * that never emitted a heartbeat, the fourth to the provider hard-timeout
+ * backstop query, and the fifth to never-started runs that have no instance.
  */
 function mockJobQueries({
   dueJobs = [],
   staleJobs = [],
   bootingJobs = [],
   hardLimitJobs = [],
+  neverStartedWithoutInstance = [],
 }: {
   dueJobs?: unknown[];
   staleJobs?: unknown[];
   bootingJobs?: unknown[];
   hardLimitJobs?: unknown[];
+  neverStartedWithoutInstance?: unknown[];
 }) {
   const normalizedDueJobs = dueJobs.map((job) =>
     job && typeof job === 'object' && !('sleepAt' in job) && !Array.isArray(job)
@@ -239,7 +242,8 @@ function mockJobQueries({
     .mockResolvedValueOnce(normalizedDueJobs)
     .mockResolvedValueOnce(staleJobs)
     .mockResolvedValueOnce(bootingJobs)
-    .mockResolvedValueOnce(normalizedHardLimitJobs);
+    .mockResolvedValueOnce(normalizedHardLimitJobs)
+    .mockResolvedValueOnce(neverStartedWithoutInstance);
 }
 
 describe('sleepTaskRunNow', () => {
@@ -451,11 +455,14 @@ describe('sleepCheckJob', () => {
 
     await sleepCheckJob();
 
-    expect(selectLimitFn).toHaveBeenCalledTimes(4);
+    // Due, stale worker, booting, hard limit, and never-started runs that
+    // have no instance.
+    expect(selectLimitFn).toHaveBeenCalledTimes(5);
     expect(selectLimitFn).toHaveBeenNthCalledWith(1, 500);
     expect(selectLimitFn).toHaveBeenNthCalledWith(2, 500);
     expect(selectLimitFn).toHaveBeenNthCalledWith(3, 500);
     expect(selectLimitFn).toHaveBeenNthCalledWith(4, 500);
+    expect(selectLimitFn).toHaveBeenNthCalledWith(5, 500);
   });
 
   it('orders bounded due and stale scans by the oldest actionable timestamp', async () => {
@@ -511,9 +518,24 @@ describe('sleepCheckJob', () => {
       RunStatus.Spawning,
       RunStatus.Connecting,
     ]);
+    // Its never-started arm re-asserts the same statuses, because that
+    // eligibility is shared with the claim that follows selection.
     expect(inArrayFn).toHaveBeenNthCalledWith(7, 'status', [
+      RunStatus.Processing,
+      RunStatus.Preparing,
+      RunStatus.Spawning,
+      RunStatus.Connecting,
+    ]);
+    expect(inArrayFn).toHaveBeenNthCalledWith(9, 'status', [
       RunStatus.Running,
       RunStatus.Idle,
+    ]);
+    // Never-started runs with no instance are booting runs too.
+    expect(inArrayFn).toHaveBeenNthCalledWith(11, 'status', [
+      RunStatus.Processing,
+      RunStatus.Preparing,
+      RunStatus.Spawning,
+      RunStatus.Connecting,
     ]);
   });
 
@@ -1554,6 +1576,172 @@ describe('sleepCheckJob', () => {
       }),
     );
     expect(mockFinishRun).not.toHaveBeenCalled();
+  });
+
+  describe('runs whose worker never started', () => {
+    // `startedAt` is written by the worker's first call, so a worker that
+    // never boots leaves it null. These runs used to be invisible to every
+    // recovery path and stayed in a booting status indefinitely.
+    const neverStartedJob = (overrides: Record<string, unknown> = {}) => ({
+      id: 141,
+      machineId: 'sb-never-started',
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Preparing,
+      taskPhase: null,
+      vendor: 'modal',
+      startedAt: null,
+      workerHeartbeatAt: null,
+      snapshotId: null,
+      sleepRequestedAt: null,
+      snapshotRequestedAt: null,
+      sleepAt: null,
+      ...overrides,
+    });
+
+    it('destroys the instance and fails the run instead of preserving it', async () => {
+      mockJobQueries({ bootingJobs: [neverStartedJob()] });
+      mockGetInstanceStatus.mockResolvedValue({
+        status: 'running',
+        timeoutRemainingMs: 30 * 60 * 1_000,
+      });
+      returningFn.mockResolvedValueOnce([{ id: 141 }]);
+
+      await sleepCheckJob();
+
+      // A resumable run is normally snapshotted, but this worker did no work,
+      // so there is nothing worth keeping.
+      expect(mockCreateSnapshot).not.toHaveBeenCalled();
+      expect(mockDestroyInstance).toHaveBeenCalledWith(
+        expect.objectContaining({ instanceId: 'sb-never-started' }),
+      );
+      expect(mockFinishRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 141,
+          error: 'Worker never started on instance sb-never-started',
+        }),
+      );
+    });
+
+    it('fails the run when its instance is already gone', async () => {
+      mockJobQueries({ bootingJobs: [neverStartedJob()] });
+      mockGetInstanceStatus.mockResolvedValue({
+        status: 'stopped',
+        timeoutRemainingMs: 0,
+      });
+      returningFn.mockResolvedValueOnce([{ id: 141 }]);
+
+      await sleepCheckJob();
+
+      expect(mockDestroyInstance).not.toHaveBeenCalled();
+      expect(mockFinishRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 141,
+          error:
+            'Worker never started and instance sb-never-started is stopped',
+        }),
+      );
+    });
+
+    it('still preserves a run whose worker started but missed its first heartbeat', async () => {
+      mockJobQueries({
+        bootingJobs: [
+          neverStartedJob({
+            id: 142,
+            startedAt: new Date(Date.now() - 5 * 60 * 1_000),
+          }),
+        ],
+      });
+      mockGetInstanceStatus.mockResolvedValue({
+        status: 'running',
+        timeoutRemainingMs: 30 * 60 * 1_000,
+      });
+      returningFn.mockResolvedValueOnce([{ id: 142 }]);
+      mockCreateSnapshot.mockResolvedValue(true);
+
+      await sleepCheckJob();
+
+      expect(mockCreateSnapshot).toHaveBeenCalledWith(
+        expect.objectContaining({ runId: 142 }),
+      );
+      expect(mockFinishRun).not.toHaveBeenCalled();
+    });
+
+    it('settles a run whose instance no longer exists only under its claim', async () => {
+      // The likeliest outcome for a run that has been stuck for a long time:
+      // the provider has no record of the sandbox at all.
+      const azureJob = () =>
+        neverStartedJob({ vendor: 'azure', machineId: 'sb-never-started' });
+      const { AzureDataPlaneError } =
+        await import('@roomote/compute-providers');
+      const notFound = new AzureDataPlaneError(
+        'Requested document not found.',
+        404,
+      );
+
+      mockJobQueries({ bootingJobs: [azureJob()] });
+      mockGetInstanceStatus.mockRejectedValue(notFound);
+      returningFn.mockResolvedValueOnce([{ id: 141 }]);
+      await sleepCheckJob();
+      expect(mockFinishRun).toHaveBeenCalledTimes(1);
+      expect(mockFinishRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 141,
+          error: expect.stringContaining('no longer exists'),
+        }),
+      );
+
+      // An overlapping sweep that lost the claim never reaches the provider.
+      mockFinishRun.mockClear();
+      mockGetInstanceStatus.mockClear();
+      mockJobQueries({ bootingJobs: [azureJob()] });
+      mockGetInstanceStatus.mockRejectedValue(notFound);
+      returningFn.mockResolvedValue([]);
+      await sleepCheckJob();
+      expect(mockGetInstanceStatus).not.toHaveBeenCalled();
+      expect(mockFinishRun).not.toHaveBeenCalled();
+    });
+
+    it('leaves a run alone when an overlapping sweep already claimed it', async () => {
+      // Sleep checks run concurrently; settling has side effects (the
+      // lifecycle event, the task-settled notice) that must happen once.
+      mockJobQueries({
+        bootingJobs: [neverStartedJob()],
+        neverStartedWithoutInstance: [
+          neverStartedJob({ id: 143, machineId: null }),
+        ],
+      });
+      mockGetInstanceStatus.mockResolvedValue({
+        status: 'running',
+        timeoutRemainingMs: 30 * 60 * 1_000,
+      });
+      returningFn.mockResolvedValue([]);
+
+      await sleepCheckJob();
+
+      expect(mockDestroyInstance).not.toHaveBeenCalled();
+      expect(mockFinishRun).not.toHaveBeenCalled();
+    });
+
+    it('fails a never-started run that was never assigned an instance', async () => {
+      mockJobQueries({
+        neverStartedWithoutInstance: [
+          neverStartedJob({ id: 143, machineId: null }),
+        ],
+      });
+      returningFn.mockResolvedValueOnce([{ id: 143 }]);
+
+      await sleepCheckJob();
+
+      // Nothing to inspect or destroy: no provider call is made for it.
+      expect(mockGetInstanceStatus).not.toHaveBeenCalled();
+      expect(mockDestroyInstance).not.toHaveBeenCalled();
+      expect(mockFinishRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 143,
+          error: 'Worker never started and no sandbox instance was assigned',
+        }),
+      );
+    });
   });
 
   it('snapshots stale resumable jobs whose worker heartbeat stopped updating', async () => {

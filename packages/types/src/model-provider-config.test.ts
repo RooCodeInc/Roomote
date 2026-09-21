@@ -116,6 +116,28 @@ describe('normalizeDeploymentModelConfig', () => {
     });
   });
 
+  it('migrates persisted recommended models to the ids the model catalog lists', () => {
+    expect(
+      normalizeDeploymentModelConfig({
+        roomoteModel: 'vercel/xai/grok-4.6',
+        roomoteOrchestrationModel: 'requesty/claude-fable-5-1',
+        roomoteSmallModel: 'requesty/vertex/gemini-3.8-flash',
+        roomoteVisionModel: 'zai-coding-plan/glm-5v-turbo',
+        roomoteCodeReviewModel: 'vercel/deepseek/deepseek-v4.1-flash-beta',
+        roomoteExploreModel: 'opencode-go/deepseek-flash',
+        roomotePlanningModel: 'openrouter/qwen/qwen3.8-max',
+      }),
+    ).toMatchObject({
+      roomoteModel: 'vercel/spacexai/grok-4.6',
+      roomoteOrchestrationModel: 'requesty/claude-fable-5.1',
+      roomoteSmallModel: 'requesty/gemini-3.8-flash',
+      roomoteVisionModel: 'zai-coding-plan/glm-5.3-flash',
+      roomoteCodeReviewModel: 'vercel/deepseek/deepseek-v4.1-flash',
+      roomoteExploreModel: 'opencode-go/deepseek-v4.1-flash',
+      roomotePlanningModel: 'openrouter/qwen/qwen3.8-max-0902',
+    });
+  });
+
   it('coerces missing fields to null without dropping model keys', () => {
     expect(
       normalizeDeploymentModelConfig({ roomoteModel: 'openai/gpt-5.4' }),
@@ -298,6 +320,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       'requesty',
       'baseten',
       'togetherai',
+      'deepseek',
       'openai',
       'azure',
       'azure-cognitive-services',
@@ -451,7 +474,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         providerId: 'vercel',
         modelId: 'vercel/anthropic/claude-fable-5.1',
       },
-      { providerId: 'requesty', modelId: 'requesty/claude-fable-5-1' },
+      { providerId: 'requesty', modelId: 'requesty/claude-fable-5.1' },
       { providerId: 'anthropic', modelId: 'anthropic/claude-fable-5-1' },
       { providerId: 'opencode', modelId: 'opencode/claude-fable-5-1' },
       {
@@ -498,7 +521,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     });
 
     expect(providersByModel).toEqual([
-      { providerId: 'openrouter', modelId: 'openrouter/qwen/qwen3.8-max' },
+      { providerId: 'openrouter', modelId: 'openrouter/qwen/qwen3.8-max-0902' },
       { providerId: 'vercel', modelId: 'vercel/alibaba/qwen3.8-max' },
       { providerId: 'opencode-go', modelId: 'opencode-go/qwen3.8-max' },
     ]);
@@ -514,7 +537,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       roomoteSmallModel: 'opencode-go/gpt-5.6-luna',
       roomoteVisionModel: 'opencode-go/gpt-5.6-luna',
       roomoteCodeReviewModel: 'opencode-go/minimax-m3',
-      roomoteExploreModel: 'opencode-go/deepseek-flash',
+      roomoteExploreModel: 'opencode-go/deepseek-v4.1-flash',
       roomotePlanningModel: 'opencode-go/qwen3.8-max',
     });
   });
@@ -678,7 +701,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       { providerId: 'vercel', modelId: 'vercel/google/gemini-3.8-flash' },
       {
         providerId: 'requesty',
-        modelId: 'requesty/vertex/gemini-3.8-flash',
+        modelId: 'requesty/gemini-3.8-flash',
       },
       { providerId: 'opencode', modelId: 'opencode/gemini-3.8-flash' },
       { providerId: 'google', modelId: 'google/gemini-3.8-flash' },
@@ -703,11 +726,15 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       },
       {
         providerId: 'vercel',
-        modelId: 'vercel/deepseek/deepseek-v4.1-flash-beta',
+        modelId: 'vercel/deepseek/deepseek-v4.1-flash',
+      },
+      {
+        providerId: 'deepseek',
+        modelId: 'deepseek/deepseek-flash',
       },
       {
         providerId: 'opencode-go',
-        modelId: 'opencode-go/deepseek-flash',
+        modelId: 'opencode-go/deepseek-v4.1-flash',
       },
     ]);
   });
@@ -739,6 +766,10 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       {
         providerId: 'togetherai',
         modelId: 'togetherai/deepseek-ai/DeepSeek-V4-Pro',
+      },
+      {
+        providerId: 'deepseek',
+        modelId: 'deepseek/deepseek-v4-pro',
       },
       {
         providerId: 'opencode',
@@ -1003,16 +1034,16 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       envVarName: 'REQUESTY_API_KEY',
       defaultRoomoteModel: 'requesty/claude-sonnet-5',
       recommendedRoleModels: {
-        helper: 'requesty/vertex/gemini-3.8-flash',
+        helper: 'requesty/gemini-3.8-flash',
         codeReview: 'requesty/claude-sonnet-5',
-        explore: 'requesty/vertex/gemini-3.8-flash',
+        explore: 'requesty/gemini-3.8-flash',
         planning: 'requesty/claude-opus-5',
       },
     });
     expect(
       requestyProvider?.suggestedTaskModels.map((model) => model.id),
     ).toEqual([
-      'requesty/claude-fable-5-1',
+      'requesty/claude-fable-5.1',
       'requesty/claude-fable-5',
       'requesty/claude-haiku-4-5',
       'requesty/claude-opus-5',
@@ -1020,7 +1051,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       'requesty/gpt-5.6-sol@eu',
       'requesty/gpt-5.6-terra@eu',
       'requesty/gpt-5.6-luna@eu',
-      'requesty/vertex/gemini-3.8-flash',
+      'requesty/gemini-3.8-flash',
       'requesty/glm-5.3-flash',
       'requesty/glm-5.3',
       'requesty/kimi-k3',
@@ -1059,6 +1090,20 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       envVarName: 'TOGETHER_API_KEY',
       defaultRoomoteModel: 'togetherai/deepseek-ai/DeepSeek-V4-Pro',
       authKind: 'api-key',
+    });
+  });
+
+  it('maps DeepSeek to its direct API models and credential', () => {
+    expect(getSetupModelProvider('deepseek')).toMatchObject({
+      label: 'DeepSeek',
+      envVarName: 'DEEPSEEK_API_KEY',
+      defaultRoomoteModel: 'deepseek/deepseek-v4-pro',
+      authKind: 'api-key',
+      recommendedRoleModels: {
+        helper: 'deepseek/deepseek-flash',
+        vision: 'deepseek/deepseek-flash',
+        explore: 'deepseek/deepseek-flash',
+      },
     });
   });
 
@@ -1493,6 +1538,14 @@ describe('getModelProviderEnvKeyCandidates', () => {
     ).toEqual(['TOGETHER_API_KEY']);
   });
 
+  it('derives the DeepSeek provider key from the shared setup catalog metadata', () => {
+    expect(
+      getModelProviderEnvKeyCandidates({
+        providerId: 'deepseek',
+      }),
+    ).toEqual(['DEEPSEEK_API_KEY']);
+  });
+
   it('includes configured custom provider env keys after the known defaults', () => {
     expect(
       getModelProviderEnvKeyCandidates({
@@ -1540,6 +1593,7 @@ describe('getModelProviderEnvKeyCandidates', () => {
     expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain('REQUESTY_API_KEY');
     expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain('BASETEN_API_KEY');
     expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain('TOGETHER_API_KEY');
+    expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain('DEEPSEEK_API_KEY');
     expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain(
       'GOOGLE_GENERATIVE_AI_API_KEY',
     );

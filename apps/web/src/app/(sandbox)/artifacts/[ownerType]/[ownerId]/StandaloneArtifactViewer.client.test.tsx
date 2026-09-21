@@ -77,9 +77,7 @@ describe('StandaloneArtifactViewer', () => {
     );
     expect(screen.getByRole('heading', { name: 'Result' })).toBeVisible();
     expect(screen.getByText('Version 2')).toBeVisible();
-    expect(
-      screen.getByRole('link', { name: 'Open source task' }),
-    ).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'View in task' })).toHaveAttribute(
       'href',
       '/task/task-1/artifacts?path=reports%2Fresult.md&v=2',
     );

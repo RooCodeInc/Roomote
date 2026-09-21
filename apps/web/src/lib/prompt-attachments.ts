@@ -2,6 +2,7 @@
 
 import {
   ROOMOTE_FILE_ATTACHMENT_ACCEPT,
+  ROOMOTE_ATTACHMENT_TEXT_MAX_CHARS,
   appendAttachmentTextsToPromptText,
   isRoomoteImageAttachment,
 } from '@roomote/cloud-agents';
@@ -40,6 +41,30 @@ async function resolveAttachmentFiles(
   );
 }
 
+const ATTACHMENT_TEXT_HEADER_PATTERN = /^File attachment: (.+)$/;
+
+function getAttachmentTextFilename(text: string): string {
+  const headerLine = text.split('\n', 1)[0] ?? '';
+  const match = ATTACHMENT_TEXT_HEADER_PATTERN.exec(headerLine);
+  return match?.[1]?.trim() || 'attachment';
+}
+
+function formatCharCount(value: number): string {
+  return value.toLocaleString('en-US');
+}
+
+function assertAttachmentTextsWithinLimit(texts: string[]): void {
+  let totalChars = 0;
+  for (const text of texts) {
+    totalChars += text.length;
+    if (totalChars > ROOMOTE_ATTACHMENT_TEXT_MAX_CHARS) {
+      throw new Error(
+        `Extracted text from "${getAttachmentTextFilename(text)}" would exceed the ${formatCharCount(ROOMOTE_ATTACHMENT_TEXT_MAX_CHARS)} character limit for attachments (total ${formatCharCount(totalChars)} characters). Remove or shorten the attachment and try again.`,
+      );
+    }
+  }
+}
+
 async function extractAttachmentTexts(files: File[]): Promise<string[]> {
   if (files.length === 0) {
     return [];
@@ -73,13 +98,29 @@ async function extractAttachmentTexts(files: File[]): Promise<string[]> {
     }
   }
 
-  return Array.isArray(body.attachmentTexts) ? body.attachmentTexts : [];
+  if (!Array.isArray(body.attachmentTexts)) {
+    return [];
+  }
+
+  return body.attachmentTexts.filter(
+    (text) => typeof text === 'string' && text.length > 0,
+  );
 }
 
-export async function preparePromptAttachments(input: {
-  text: string;
-  attachments?: PromptAttachmentPart[];
-}): Promise<{
+export async function preparePromptAttachments(
+  input: {
+    text: string;
+    attachments?: PromptAttachmentPart[];
+  },
+  options?: {
+    /**
+     * Enforce the Fast Session aggregate attachment-text limit client-side.
+     * The standard task and wake composers accept unbounded prompts, so the
+     * check stays opt-in to avoid narrowing those flows.
+     */
+    enforceAttachmentTextLimit?: boolean;
+  },
+): Promise<{
   text: string;
   images?: string[];
   attachmentTexts?: string[];
@@ -97,6 +138,10 @@ export async function preparePromptAttachments(input: {
     imageFiles.length > 0 ? processImageFiles(imageFiles) : Promise.resolve([]),
     extractAttachmentTexts(nonImageFiles),
   ]);
+
+  if (options?.enforceAttachmentTextLimit) {
+    assertAttachmentTextsWithinLimit(attachmentTexts);
+  }
 
   return {
     text: appendAttachmentTextsToPromptText({

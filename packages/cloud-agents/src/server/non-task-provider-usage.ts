@@ -117,6 +117,7 @@ export const NON_TASK_INFERENCE_SURFACES = {
   chatVideoDescription: 'chat_video_description',
   composerSuggestionGeneration: 'composer_suggestion_generation',
   customAutomationScheduleResolution: 'custom_automation_schedule_resolution',
+  automationResultPreparation: 'automation_result_preparation',
   ciFailureTriageRulesResolution: 'ci_failure_triage_rules_resolution',
   fastAgentImageInspection: 'fast_agent_image_inspection',
   fastAgentQuestionAnswering: 'fast_agent',

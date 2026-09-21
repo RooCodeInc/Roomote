@@ -79,12 +79,12 @@ export function StandaloneArtifactViewer({
         </div>
         {sourceUrl ? (
           <BasicTooltip
-            content={`Open source ${'taskId' in owner ? 'task' : 'session'}`}
+            content={`View in ${'taskId' in owner ? 'task' : 'session'}`}
           >
             <Button asChild variant="ghost" size="icon">
               <Link
                 href={sourceUrl}
-                aria-label={`Open source ${'taskId' in owner ? 'task' : 'session'}`}
+                aria-label={`View in ${'taskId' in owner ? 'task' : 'session'}`}
               >
                 <ArrowUpRightIcon />
               </Link>

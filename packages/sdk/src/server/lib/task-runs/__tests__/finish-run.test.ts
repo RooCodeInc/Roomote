@@ -43,6 +43,11 @@ const mockUpdatePendingEnvironmentSnapshot = vi.fn().mockResolvedValue(true);
 const mockGetCustomAutomationById = vi.fn();
 const mockRefreshAutomationRootFooter = vi.fn().mockResolvedValue(true);
 const mockResolveAutomationResultSubtitle = vi.fn();
+const mockRetryFailedTaskStart = vi.fn();
+const mockRefreshTaskTitleOnCompletion = vi.fn().mockResolvedValue(undefined);
+const mockRefreshTaskSessionTitleOnCompletion = vi
+  .fn()
+  .mockResolvedValue(undefined);
 
 /**
  * Rows resolved by db.select() chains that join tasks with task_runs (the
@@ -199,6 +204,8 @@ vi.mock('@roomote/cloud-agents/server', () => ({
     mockBuildTerminalReviewStatus(...args),
   finalizeGithubPrReviewComment: (...args: unknown[]) =>
     mockFinalizeGithubPrReviewComment(...args),
+  retryFailedTaskStart: (...args: unknown[]) =>
+    mockRetryFailedTaskStart(...args),
   REVIEW_SUMMARY_MARKER: '<!-- roomote-review-summary',
   REVIEW_STATUS_START_MARKER: '<!-- roomote-review-status:start -->',
   REVIEW_STATUS_END_MARKER: '<!-- roomote-review-status:end -->',
@@ -364,6 +371,13 @@ vi.mock('../../automation-result-metadata', () => ({
     mockResolveAutomationResultSubtitle(...args),
 }));
 
+vi.mock('../record-task-message-envelope', () => ({
+  refreshTaskTitleOnCompletion: (...args: unknown[]) =>
+    mockRefreshTaskTitleOnCompletion(...args),
+  refreshTaskSessionTitleOnCompletion: (...args: unknown[]) =>
+    mockRefreshTaskSessionTitleOnCompletion(...args),
+}));
+
 import { finishRun } from '../finish-run';
 import { createTaskRunGitHubToken } from '@roomote/github';
 import { enqueueTask } from '@roomote/cloud-agents/server';
@@ -455,6 +469,11 @@ describe('finishRun', () => {
     mockUpdatePendingEnvironmentSnapshot.mockResolvedValue(true);
     mockNotifyFastAgentParentOnSettle.mockResolvedValue('admitted');
     mockNotifyWebTaskInitiatorOnSettle.mockResolvedValue('delivered');
+    mockRetryFailedTaskStart.mockResolvedValue({
+      success: false,
+      reason: 'ineligible',
+      error: 'not eligible',
+    });
     syncRunRows = [];
     mockDbTransaction.mockImplementation(
       async (callback: (tx: unknown) => unknown) =>
@@ -513,6 +532,17 @@ describe('finishRun', () => {
     });
 
     expect(mockCleanupSandboxOidcTargetsForTaskRun).toHaveBeenCalledWith(1);
+  });
+
+  it('runs the final title repair when a task is canceled', async () => {
+    mockFindFirstRun.mockResolvedValue(makeRun());
+
+    await finishRun({ id: 1, status: RunStatus.Canceled });
+
+    expect(mockRefreshTaskSessionTitleOnCompletion).toHaveBeenCalledWith({
+      taskId: 'task-1',
+    });
+    expect(mockRefreshTaskTitleOnCompletion).not.toHaveBeenCalled();
   });
 
   it('refreshes finalized metadata on a custom automation Slack result', async () => {
@@ -603,6 +633,45 @@ describe('finishRun', () => {
     expect(mockCaptureTaskSettled).not.toHaveBeenCalled();
     expect(mockTerminateCredentialEgress).not.toHaveBeenCalled();
     expect(mockNotifyWebTaskInitiatorOnSettle).not.toHaveBeenCalled();
+  });
+
+  it('suppresses terminal notifications while an automatic startup retry is queued', async () => {
+    const run = makeRun({ status: RunStatus.Connecting });
+    mockFindFirstRun.mockResolvedValue(run);
+    mockRetryFailedTaskStart.mockResolvedValue({
+      success: true,
+      run: makeRun({ id: 2, sourceRunId: run.id }),
+      retryNumber: 1,
+      delayMs: 1_000,
+    });
+
+    await finishRun({ id: 1, status: RunStatus.Failed, error: 'boot failed' });
+
+    expect(mockRetryFailedTaskStart).toHaveBeenCalledWith({
+      sourceRun: expect.objectContaining({ id: 1, status: RunStatus.Failed }),
+      actingUserId: 'user-1',
+      trigger: 'automatic',
+    });
+    expect(mockNotifySourceRunOnSettle).not.toHaveBeenCalled();
+    expect(mockNotifyWebTaskInitiatorOnSettle).not.toHaveBeenCalled();
+    expect(mockNotifyFastAgentParentOnSettle).not.toHaveBeenCalled();
+    expect(mockSettleLiveTaskMessageOnExit).not.toHaveBeenCalled();
+    expect(mockCleanupSandboxOidcTargetsForTaskRun).toHaveBeenCalledWith(1);
+    expect(mockCaptureTaskSettled).toHaveBeenCalledWith(
+      1,
+      RunStatus.Failed,
+      undefined,
+    );
+  });
+
+  it('does not attempt automatic retry after cancellation', async () => {
+    mockFindFirstRun.mockResolvedValue(
+      makeRun({ cancelRequestedAt: new Date(), status: RunStatus.Connecting }),
+    );
+
+    await finishRun({ id: 1, status: RunStatus.Failed, error: 'stopped' });
+
+    expect(mockRetryFailedTaskStart).not.toHaveBeenCalled();
   });
 
   it('continues terminal side effects when retry queue admission fails', async () => {

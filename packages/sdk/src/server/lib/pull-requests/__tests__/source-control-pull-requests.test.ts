@@ -2804,6 +2804,78 @@ Done.`,
     base: { ref: 'develop' },
   };
 
+  it.each([
+    { requestedAssignees: [], expectedAssignees: undefined },
+    {
+      requestedAssignees: ['bot-user'],
+      expectedAssignees: ['bot-user'],
+    },
+  ])(
+    'creates a Gitea pull request when an unrelated open pull request has null assignees: $requestedAssignees',
+    async ({ requestedAssignees, expectedAssignees }) => {
+      mockRepositoriesFindFirst.mockResolvedValue({
+        installationId: null,
+        externalRepoId: '7',
+        fullName: 'acme/tools',
+        htmlUrl: 'https://git.example.com/acme/tools',
+      });
+      const fetchImpl = vi
+        .fn()
+        .mockResolvedValueOnce(
+          jsonResponse([
+            {
+              number: 2,
+              title: 'Unrelated pull request',
+              html_url: 'https://git.example.com/acme/tools/pulls/2',
+              draft: false,
+              head: { ref: 'feature/unrelated' },
+              base: { ref: 'develop' },
+              assignees: null,
+            },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            number: 3,
+            title: 'WIP: [Feature] X',
+            html_url: 'https://git.example.com/acme/tools/pulls/3',
+            draft: false,
+            assignees: expectedAssignees?.map((login) => ({ login })) ?? null,
+          }),
+        );
+
+      const result = await createOrUpdateSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({
+          repo: 'acme/tools',
+          sourceControlProvider: 'gitea',
+        }),
+        input: {
+          ...baseInput,
+          repositoryFullName: 'acme/tools',
+          sourceControlProvider: 'gitea' as const,
+          targetBranch: 'develop',
+          assignees: requestedAssignees,
+        },
+        fetchImpl,
+      });
+
+      expect(fetchImpl.mock.calls[1]?.[1]).toMatchObject({ method: 'POST' });
+      const createBody = JSON.parse(
+        (fetchImpl.mock.calls[1]?.[1] as { body: string }).body,
+      );
+      if (expectedAssignees) {
+        expect(createBody).toMatchObject({ assignees: expectedAssignees });
+      } else {
+        expect(createBody).not.toHaveProperty('assignees');
+      }
+      expect(result).toMatchObject({
+        action: 'created',
+        number: 3,
+        targetBranch: 'develop',
+      });
+    },
+  );
+
   it('walks Gitea pages until it finds the pull request for the source branch', async () => {
     mockRepositoriesFindFirst.mockResolvedValue({
       installationId: null,
