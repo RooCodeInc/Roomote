@@ -20,6 +20,11 @@ const {
   mockGetTaskHumanOwnerUserIds: vi.fn(),
 }));
 
+vi.mock('../tool-approval-enforcement', () => ({
+  describeProxyToolApprovalBlock: () => '',
+  resolveProxyToolApprovalBlocks: async () => new Map(),
+}));
+
 vi.mock('@roomote/db/server', () => ({
   db: {
     query: {

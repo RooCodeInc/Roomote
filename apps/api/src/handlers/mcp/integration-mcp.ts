@@ -192,6 +192,7 @@ export function createIntegrationMcpProxy(
       return {
         ...credentials,
         ...resolvedToolPolicy,
+        toolApprovalIntegrationId: integration.id,
       };
     },
   });
