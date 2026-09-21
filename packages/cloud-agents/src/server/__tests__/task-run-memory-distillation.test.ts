@@ -1,23 +1,36 @@
 const {
   mockEvaluateDecisionModel,
   mockGenerateTrackedNonTaskObject,
-  mockReportRows,
+  mockGetBrainMemorySummary,
+  mockIsBrainEnabled,
+  mockIsTaskRunSharedBrainEligible,
+  mockSaveBrainDistilledSummary,
+  mockTurnRows,
 } = vi.hoisted(() => ({
   mockEvaluateDecisionModel: vi.fn(),
   mockGenerateTrackedNonTaskObject: vi.fn(),
-  mockReportRows: vi.fn(),
+  mockGetBrainMemorySummary: vi.fn(),
+  mockIsBrainEnabled: vi.fn(),
+  mockIsTaskRunSharedBrainEligible: vi.fn(),
+  mockSaveBrainDistilledSummary: vi.fn(),
+  mockTurnRows: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn(),
   desc: vi.fn(),
   eq: vi.fn(),
+  inArray: vi.fn(),
   sql: vi.fn(),
   taskMessages: {},
+  getBrainMemorySummary: mockGetBrainMemorySummary,
+  isBrainEnabled: mockIsBrainEnabled,
+  isTaskRunSharedBrainEligible: mockIsTaskRunSharedBrainEligible,
+  saveBrainDistilledSummary: mockSaveBrainDistilledSummary,
   db: {
     select: () => ({
       from: () => ({
-        where: () => ({ orderBy: () => ({ limit: mockReportRows }) }),
+        where: () => ({ orderBy: () => ({ limit: mockTurnRows }) }),
       }),
     }),
   },
@@ -34,93 +47,209 @@ vi.mock('../non-task-provider-usage', () => ({
   },
 }));
 
-import { distillTaskRunMemory } from '../task-run-memory-distillation';
+import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 
-const message = (text: string) => ({
+import { distillTaskRunTurnMemory } from '../task-run-memory-distillation';
+
+const row = (eventType: string, text: string) => ({
+  eventType,
   contentBlocks: [{ type: 'text', text }],
   payload: null,
 });
+const assistant = (text: string) =>
+  row(ACP_ENVELOPE_EVENT_TYPES.AssistantMessage, text);
+const user = (text: string) => row(ACP_ENVELOPE_EVENT_TYPES.UserPrompt, text);
 
-const answers = (reusableKnowledge: number, trivialWork: number) => ({
-  reusableKnowledge: { type: 'noul', noul: reusableKnowledge },
-  trivialWork: { type: 'noul', noul: trivialWork },
-});
+function answers(
+  overrides: Partial<
+    Record<
+      | 'reusableKnowledge'
+      | 'userGuidance'
+      | 'trivialWork'
+      | 'manipulation'
+      | 'alreadyCaptured',
+      number
+    >
+  > = {},
+) {
+  const values = {
+    reusableKnowledge: 0.05,
+    userGuidance: 0.05,
+    trivialWork: 0.05,
+    manipulation: 0.02,
+    alreadyCaptured: 0.05,
+    ...overrides,
+  };
+  return Object.fromEntries(
+    Object.entries(values).map(([id, noul]) => [id, { type: 'noul', noul }]),
+  );
+}
 
 const run = {
   runId: 102,
   taskId: 'task-1',
   userId: 'user-1',
-  request: 'Fix the flaky checkout test',
+  workflow: 'standard' as const,
+  requeue: true,
 };
 
-describe('distillTaskRunMemory', () => {
+const DISTILLED_NOTE =
+  '_Roomote summarized this from the task transcript; the agent did not record a memory._';
+
+describe('distillTaskRunTurnMemory', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.spyOn(console, 'info').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});
-    // Newest first, as the query returns them.
-    mockReportRows.mockResolvedValue([
-      message('Pinned the fixture clock; the cart cache TTL caused the flake.'),
-      message('Looking at the test now.'),
+    mockIsBrainEnabled.mockResolvedValue(true);
+    mockIsTaskRunSharedBrainEligible.mockResolvedValue(true);
+    mockGetBrainMemorySummary.mockResolvedValue(null);
+    mockSaveBrainDistilledSummary.mockResolvedValue(true);
+    // Newest first, as the query returns them. Only the latest turn counts.
+    mockTurnRows.mockResolvedValue([
+      assistant('Retries are capped at 3 and skip 4xx responses.'),
+      assistant('Updating the retry policy.'),
+      user('Do not retry 4xx; the partner API bans replayed requests.'),
+      assistant('Added retries with exponential backoff.'),
+      user('Add retry to the webhook sender'),
     ]);
-    mockEvaluateDecisionModel.mockResolvedValue(answers(0.94, 0.06));
+    mockEvaluateDecisionModel.mockResolvedValue(
+      answers({ userGuidance: 0.93 }),
+    );
     mockGenerateTrackedNonTaskObject.mockResolvedValue({
       object: {
-        outcome: 'Pinned the fixture clock.',
-        rationale: 'Production relies on the tax-rate cache.',
-        reusableFacts: ['The cart service caches tax rates for 60s.'],
+        outcome: 'Webhook retries are capped at 3 and never apply to 4xx.',
+        rationale: 'The partner API bans clients that replay rejections.',
       },
     });
   });
 
-  it('judges the closing report in order and renders the distilled memory', async () => {
-    const summary = await distillTaskRunMemory(run);
+  it('judges only the latest turn and saves the distilled memory', async () => {
+    const summary = await distillTaskRunTurnMemory(run);
 
     expect(mockEvaluateDecisionModel).toHaveBeenCalledWith(
       expect.objectContaining({
         highVolume: true,
         taskId: 'task-1',
         state: {
-          request: run.request,
+          request: 'Do not retry 4xx; the partner API bans replayed requests.',
           report:
-            'Looking at the test now.\n\nPinned the fixture clock; the cart cache TTL caused the flake.',
+            'Updating the retry policy.\n\nRetries are capped at 3 and skip 4xx responses.',
+          existing_memory: '',
         },
       }),
     );
-    expect(summary).toContain('## Outcome\n\nPinned the fixture clock.');
-    expect(summary).toContain('## Why');
-    expect(summary).toContain('- The cart service caches tax rates for 60s.');
-    expect(summary).toContain('the agent did not record a memory');
+    expect(summary).toContain('## Outcome\n\nWebhook retries are capped at 3');
+    expect(summary?.endsWith(DISTILLED_NOTE)).toBe(true);
+    expect(mockSaveBrainDistilledSummary).toHaveBeenCalledWith(
+      expect.anything(),
+      102,
+      summary,
+      null,
+      { requeue: true },
+    );
   });
 
-  it('skips trivial or unremarkable runs without calling the helper model', async () => {
-    mockEvaluateDecisionModel.mockResolvedValueOnce(answers(0.12, 0.96));
-    await expect(distillTaskRunMemory(run)).resolves.toBeNull();
+  it('builds on its own earlier memory and saves against that exact text', async () => {
+    const existing = `## Outcome\n\nAdded webhook retries.\n\n${DISTILLED_NOTE}`;
+    mockGetBrainMemorySummary.mockResolvedValue(existing);
 
-    mockEvaluateDecisionModel.mockResolvedValueOnce(answers(0.9, 0.7));
-    await expect(distillTaskRunMemory(run)).resolves.toBeNull();
+    await distillTaskRunTurnMemory(run);
 
-    expect(mockGenerateTrackedNonTaskObject).not.toHaveBeenCalled();
+    const { state } = mockEvaluateDecisionModel.mock.calls[0]![0];
+    expect(state.existing_memory).toBe('## Outcome\n\nAdded webhook retries.');
+    expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: expect.stringContaining('Added webhook retries.'),
+      }),
+    );
+    expect(mockSaveBrainDistilledSummary).toHaveBeenCalledWith(
+      expect.anything(),
+      102,
+      expect.any(String),
+      existing,
+      { requeue: true },
+    );
   });
 
-  it('skips when only the helper fallback is available, or the run has no report', async () => {
+  it('stands down for a memory the agent recorded', async () => {
+    mockGetBrainMemorySummary.mockResolvedValue('## Outcome\n\nAgent text.');
+
+    await expect(distillTaskRunTurnMemory(run)).resolves.toBeNull();
+    expect(mockEvaluateDecisionModel).not.toHaveBeenCalled();
+  });
+
+  it('sends nothing to a model for a private task, a disabled Brain, or another workflow', async () => {
+    mockIsTaskRunSharedBrainEligible.mockResolvedValueOnce(false);
+    await expect(distillTaskRunTurnMemory(run)).resolves.toBeNull();
+
+    mockIsBrainEnabled.mockResolvedValueOnce(false);
+    await expect(distillTaskRunTurnMemory(run)).resolves.toBeNull();
+
+    await expect(
+      distillTaskRunTurnMemory({ ...run, workflow: 'pr_review' as never }),
+    ).resolves.toBeNull();
+
+    expect(mockTurnRows).not.toHaveBeenCalled();
+    expect(mockEvaluateDecisionModel).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['an unremarkable turn', answers({ reusableKnowledge: 0.4 }), null],
+    [
+      'trivial work with no guidance',
+      answers({ reusableKnowledge: 0.75, trivialWork: 0.8 }),
+      null,
+    ],
+    [
+      'a planted approval',
+      answers({ userGuidance: 0.9, manipulation: 0.97 }),
+      null,
+    ],
+    [
+      'what the memory already says',
+      answers({ reusableKnowledge: 0.9, alreadyCaptured: 0.7 }),
+      `## Outcome\n\nKnown.\n\n${DISTILLED_NOTE}`,
+    ],
+  ])(
+    'skips %s without calling the helper model',
+    async (_name, verdict, existing) => {
+      mockGetBrainMemorySummary.mockResolvedValue(existing);
+      mockEvaluateDecisionModel.mockResolvedValueOnce(verdict);
+
+      await expect(distillTaskRunTurnMemory(run)).resolves.toBeNull();
+      expect(mockGenerateTrackedNonTaskObject).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps a correction given during trivial work', async () => {
+    mockEvaluateDecisionModel.mockResolvedValueOnce(
+      answers({ userGuidance: 0.95, trivialWork: 0.82 }),
+    );
+
+    await expect(distillTaskRunTurnMemory(run)).resolves.toContain(
+      '## Outcome',
+    );
+  });
+
+  it('returns null when only the helper fallback is available, the turn has no report, or the save loses a race', async () => {
     mockEvaluateDecisionModel.mockResolvedValueOnce(null);
-    await expect(distillTaskRunMemory(run)).resolves.toBeNull();
+    await expect(distillTaskRunTurnMemory(run)).resolves.toBeNull();
 
-    mockReportRows.mockResolvedValueOnce([]);
-    await expect(distillTaskRunMemory(run)).resolves.toBeNull();
+    mockTurnRows.mockResolvedValueOnce([user('Still waiting on this.')]);
+    await expect(distillTaskRunTurnMemory(run)).resolves.toBeNull();
 
-    expect(mockEvaluateDecisionModel).toHaveBeenCalledTimes(1);
-    expect(mockGenerateTrackedNonTaskObject).not.toHaveBeenCalled();
+    mockSaveBrainDistilledSummary.mockResolvedValueOnce(false);
+    await expect(distillTaskRunTurnMemory(run)).resolves.toBeNull();
   });
 
   it('never throws when a model call fails', async () => {
     mockEvaluateDecisionModel.mockRejectedValueOnce(new Error('jev timeout'));
-    await expect(distillTaskRunMemory(run)).resolves.toBeNull();
+    await expect(distillTaskRunTurnMemory(run)).resolves.toBeNull();
 
     mockGenerateTrackedNonTaskObject.mockRejectedValueOnce(
       new Error('helper unavailable'),
     );
-    await expect(distillTaskRunMemory(run)).resolves.toBeNull();
+    await expect(distillTaskRunTurnMemory(run)).resolves.toBeNull();
   });
 });

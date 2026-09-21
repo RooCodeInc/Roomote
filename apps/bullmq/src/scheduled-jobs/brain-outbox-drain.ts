@@ -1,4 +1,4 @@
-import { distillTaskRunMemory } from '@roomote/cloud-agents/server';
+import { distillTaskRunTurnMemory } from '@roomote/cloud-agents/server';
 import { redactBrainText } from '@roomote/communication/redact-brain-text';
 import {
   db,
@@ -9,7 +9,6 @@ import {
   upsertBrainSyncState,
   environments,
   fastAgentConversations,
-  fillBrainDistilledSummary,
   markBrainMemoryEvent,
   markFastAgentMemoryEvent,
   settleBrainMemoryEvent,
@@ -819,42 +818,36 @@ export function requestHomeComposerPrecomputeAfterMemorySettlement(
 const DISTILLATION_MAX_RUN_AGE_MS = 24 * 60 * 60 * 1_000;
 
 /**
- * The agent writes its own memory when it can. When it recorded none, the
- * decision model judges whether the run's closing report is worth one and the
- * helper model writes it; otherwise the page keeps the completion line.
+ * Each settled turn is normally distilled when it settles. This is the
+ * durable fallback for a turn whose in-process pass was lost: the same check,
+ * which stands down for an agent-authored memory and for anything the run's
+ * memory already says. Returns the text to publish.
  */
-async function distillMissingTaskMemory(input: {
-  eventId: string;
+async function distillUnrecordedTaskMemory(input: {
   runId: number;
   taskId: string;
   userId: string | null;
   workflow: TaskWorkflow;
   completedAt: Date | null;
-  request: string | null;
+  agentSummary: string | null;
 }): Promise<string | null> {
   if (
-    input.workflow !== 'standard' ||
     !input.completedAt ||
     Date.now() - input.completedAt.getTime() > DISTILLATION_MAX_RUN_AGE_MS
   ) {
-    return null;
+    return input.agentSummary;
   }
 
-  const summary = await distillTaskRunMemory({
-    runId: input.runId,
-    taskId: input.taskId,
-    userId: input.userId,
-    request: input.request,
-  });
-
-  if (!summary) {
-    return null;
-  }
-
-  // Stored so later re-puts keep it. An agent summary that landed meanwhile
-  // wins: the revision fence re-ingests the row with the agent's text.
-  await fillBrainDistilledSummary(db, input.eventId, summary);
-  return summary;
+  // Not requeued: this pass holds the row and publishes the text itself.
+  return (
+    (await distillTaskRunTurnMemory({
+      runId: input.runId,
+      taskId: input.taskId,
+      userId: input.userId,
+      workflow: input.workflow,
+      requeue: false,
+    })) ?? input.agentSummary
+  );
 }
 
 /** Returns false when no pending events remained to claim. */
@@ -964,17 +957,14 @@ export async function drainOneBatch(connection: {
           run.payload as Record<string, unknown>,
           task.workflow,
         );
-        const agentSummary =
-          event.agentSummary ??
-          (await distillMissingTaskMemory({
-            eventId: event.id,
-            runId: run.id,
-            taskId: run.taskId,
-            userId: task.initiatorUser?.id ?? null,
-            workflow: task.workflow,
-            completedAt: run.completedAt,
-            request,
-          }));
+        const agentSummary = await distillUnrecordedTaskMemory({
+          runId: run.id,
+          taskId: run.taskId,
+          userId: task.initiatorUser?.id ?? null,
+          workflow: task.workflow,
+          completedAt: run.completedAt,
+          agentSummary: event.agentSummary,
+        });
 
         const page = buildMemoryPage({
           environmentName,

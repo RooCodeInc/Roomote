@@ -36,7 +36,7 @@ export * from './untrusted-content';
 export * from './workflows/githubPrReviewComment';
 export * from './linked-task-relay';
 export * from './llm-task-title';
-export { distillTaskRunMemory } from './task-run-memory-distillation';
+export { distillTaskRunTurnMemory } from './task-run-memory-distillation';
 export * from './user-personalization';
 export * from './mcp-self-setup';
 export * from './mcp-tool-client';

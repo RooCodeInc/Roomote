@@ -28,7 +28,8 @@ import {
   releaseBrainMemoryEvents,
   settleBrainMemoryEvent,
   maybeEnqueueBrainMemoryEvent,
-  fillBrainDistilledSummary,
+  getBrainMemorySummary,
+  saveBrainDistilledSummary,
   saveBrainAgentSummary,
   requeueBrainMemoryEventsForTasks,
   requeueFailedBrainMemoryEvents,
@@ -644,44 +645,90 @@ describe('maybeEnqueueBrainMemoryEvent', () => {
   });
 });
 
-describe('fillBrainDistilledSummary', () => {
-  it('fills an empty summary without handing the claimed row back', async () => {
+describe('saveBrainDistilledSummary', () => {
+  const summaryFor = async (runId: number) => {
+    const [event] = await db
+      .select()
+      .from(brainMemoryEvents)
+      .where(eq(brainMemoryEvents.runId, runId));
+    return event;
+  };
+
+  it('creates the row for a run that is still in flight, then builds on its own text', async () => {
+    const run = await makeCompletedRun();
+
+    expect(
+      await saveBrainDistilledSummary(db, run.id, 'turn one', null, {
+        requeue: true,
+      }),
+    ).toBe(true);
+    expect(await getBrainMemorySummary(db, run.id)).toBe('turn one');
+
+    expect(
+      await saveBrainDistilledSummary(
+        db,
+        run.id,
+        'turns one and two',
+        'turn one',
+        {
+          requeue: true,
+        },
+      ),
+    ).toBe(true);
+    expect(await summaryFor(run.id)).toMatchObject({
+      agentSummary: 'turns one and two',
+      status: 'pending',
+    });
+  });
+
+  it('never replaces a memory the agent recorded meanwhile', async () => {
+    const run = await makeCompletedRun();
+    await saveBrainAgentSummary(db, run.id, 'agent narrative');
+
+    expect(
+      await saveBrainDistilledSummary(db, run.id, 'distilled', null, {
+        requeue: true,
+      }),
+    ).toBe(false);
+    expect(
+      await saveBrainDistilledSummary(db, run.id, 'distilled', 'stale text', {
+        requeue: true,
+      }),
+    ).toBe(false);
+    expect(await getBrainMemorySummary(db, run.id)).toBe('agent narrative');
+  });
+
+  it('leaves a row the drainer holds claimed when it is not requeued', async () => {
     const run = await makeCompletedRun();
     await maybeEnqueueBrainMemoryEvent(db, run.id);
     const [claimed] = await claimPendingBrainMemoryEvents(db, 10);
 
     expect(
-      await fillBrainDistilledSummary(db, claimed!.id, 'distilled narrative'),
+      await saveBrainDistilledSummary(db, run.id, 'distilled', null, {
+        requeue: false,
+      }),
     ).toBe(true);
-
-    const [event] = await db
-      .select()
-      .from(brainMemoryEvents)
-      .where(eq(brainMemoryEvents.runId, run.id));
-    expect(event).toMatchObject({
-      agentSummary: 'distilled narrative',
+    expect(await summaryFor(run.id)).toMatchObject({
+      agentSummary: 'distilled',
       status: 'processing',
       revision: claimed!.revision,
     });
   });
 
-  it('never replaces a memory the agent recorded', async () => {
-    const run = await makeCompletedRun();
-    await saveBrainAgentSummary(db, run.id, 'agent narrative');
-    const [event] = await db
-      .select()
-      .from(brainMemoryEvents)
-      .where(eq(brainMemoryEvents.runId, run.id));
+  it('refuses a private task', async () => {
+    const owner = await userFactory.create();
+    const run = await makeCompletedRun(undefined, {
+      initiatorUserId: owner.id,
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+    });
 
     expect(
-      await fillBrainDistilledSummary(db, event!.id, 'distilled narrative'),
+      await saveBrainDistilledSummary(db, run.id, 'distilled', null, {
+        requeue: true,
+      }),
     ).toBe(false);
-
-    const [after] = await db
-      .select()
-      .from(brainMemoryEvents)
-      .where(eq(brainMemoryEvents.runId, run.id));
-    expect(after?.agentSummary).toBe('agent narrative');
+    expect(await getBrainMemorySummary(db, run.id)).toBeNull();
   });
 });
 
