@@ -127,12 +127,13 @@ function clip(text: string, maxChars: number): string {
  */
 async function loadLatestTurn(
   runId: number,
-): Promise<{ request: string; report: string } | null> {
+): Promise<{ request: string; report: string; turnTs: number } | null> {
   const rows = await db
     .select({
       eventType: taskMessages.eventType,
       contentBlocks: taskMessages.contentBlocks,
       payload: taskMessages.payload,
+      ts: taskMessages.ts,
     })
     .from(taskMessages)
     .where(
@@ -170,7 +171,12 @@ async function loadLatestTurn(
             : raw,
           ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
         )?.trim() ?? '';
-      break;
+      if (reportMessages.length === 0) return null;
+      return {
+        request: clip(request, REQUEST_MAX_CHARS),
+        report: reportMessages.join('\n\n'),
+        turnTs: row.ts,
+      };
     }
 
     if (reportMessages.length < REPORT_MESSAGE_LIMIT && remaining > 0) {
@@ -184,6 +190,7 @@ async function loadLatestTurn(
     ? {
         request: clip(request, REQUEST_MAX_CHARS),
         report: reportMessages.join('\n\n'),
+        turnTs: rows[0]?.ts ?? runId,
       }
     : null;
 }
@@ -192,6 +199,7 @@ async function publishTaskMemorySavedEvent(input: {
   runId: number;
   taskId: string;
   userId?: string | null;
+  turnTs: number;
   summary: string;
 }): Promise<void> {
   const distilled = input.summary.endsWith(DISTILLED_SUMMARY_NOTE)
@@ -207,9 +215,9 @@ async function publishTaskMemorySavedEvent(input: {
       runId: input.runId,
       taskId: input.taskId,
       userId: input.userId ?? null,
-      // The run id makes retries idempotent even when the completion timestamp
-      // is unavailable to this background projection.
-      ts: input.runId,
+      // The settled turn timestamp makes retries idempotent while allowing
+      // later follow-up turns in the same run to publish their own row.
+      ts: input.turnTs,
       eventType: ACP_ENVELOPE_EVENT_TYPES.MemorySaved,
       role: 'system',
       protocol: ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
@@ -342,6 +350,7 @@ export async function distillTaskRunTurnMemory(input: {
         runId: input.runId,
         taskId: input.taskId,
         userId: input.userId,
+        turnTs: turn.turnTs,
         summary,
       });
     } catch (error) {

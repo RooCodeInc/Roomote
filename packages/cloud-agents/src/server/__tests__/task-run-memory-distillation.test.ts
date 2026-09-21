@@ -56,14 +56,16 @@ import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 
 import { distillTaskRunTurnMemory } from '../task-run-memory-distillation';
 
-const row = (eventType: string, text: string) => ({
+const row = (eventType: string, text: string, ts = 1) => ({
   eventType,
   contentBlocks: [{ type: 'text', text }],
   payload: null,
+  ts,
 });
-const assistant = (text: string) =>
-  row(ACP_ENVELOPE_EVENT_TYPES.AssistantMessage, text);
-const user = (text: string) => row(ACP_ENVELOPE_EVENT_TYPES.UserPrompt, text);
+const assistant = (text: string, ts?: number) =>
+  row(ACP_ENVELOPE_EVENT_TYPES.AssistantMessage, text, ts);
+const user = (text: string, ts?: number) =>
+  row(ACP_ENVELOPE_EVENT_TYPES.UserPrompt, text, ts);
 
 function answers(
   overrides: Partial<
@@ -144,6 +146,7 @@ describe('distillTaskRunTurnMemory', () => {
           request: 'Do not retry 4xx; the partner API bans replayed requests.',
           report:
             'Updating the retry policy.\n\nRetries are capped at 3 and skip 4xx responses.',
+          turnTs: 1,
           existing_memory: '',
         },
       }),
@@ -152,7 +155,7 @@ describe('distillTaskRunTurnMemory', () => {
       runId: 102,
       taskId: 'task-1',
       userId: 'user-1',
-      ts: 102,
+      ts: 1,
       eventType: ACP_ENVELOPE_EVENT_TYPES.MemorySaved,
       role: 'system',
       protocol: 'roomote_runtime',
@@ -178,8 +181,12 @@ describe('distillTaskRunTurnMemory', () => {
     );
   });
 
-  it('uses a deterministic task event key across fallback retries', async () => {
+  it('uses the turn key across fallback retries and follow-up turns', async () => {
     await distillTaskRunTurnMemory(run);
+    mockTurnRows.mockResolvedValue([
+      assistant('Follow-up found a second durable fact.', 2),
+      user('Also remember the follow-up decision.', 2),
+    ]);
     mockGetBrainMemorySummary.mockResolvedValueOnce(
       `## Outcome\n\nWebhook retries are capped.\n\n${DISTILLED_NOTE}`,
     );
@@ -188,12 +195,12 @@ describe('distillTaskRunTurnMemory', () => {
     expect(mockInsertTaskMemoryValues).toHaveBeenCalledTimes(2);
     expect(mockInsertTaskMemoryValues.mock.calls[0]?.[0]).toMatchObject({
       taskId: 'task-1',
-      ts: 102,
+      ts: 1,
       eventType: ACP_ENVELOPE_EVENT_TYPES.MemorySaved,
     });
     expect(mockInsertTaskMemoryValues.mock.calls[1]?.[0]).toMatchObject({
       taskId: 'task-1',
-      ts: 102,
+      ts: 2,
       eventType: ACP_ENVELOPE_EVENT_TYPES.MemorySaved,
     });
   });
