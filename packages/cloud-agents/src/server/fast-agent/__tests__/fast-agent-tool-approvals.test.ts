@@ -106,6 +106,91 @@ describe('buildIntegrationToolApprovalRules', () => {
     ]);
   });
 
+  it('fails closed on ambiguous flattened tool keys while unaffected tools keep their policies', () => {
+    // `a`/`b_c` and `a_b`/`c` both flatten to `a_b_c`: approval enforcement
+    // cannot resolve identity, so the ambiguous key must be denied outright
+    // and must never execute under either tool's policy.
+    const ambiguous = [
+      {
+        id: 'a',
+        name: 'A',
+        description: '',
+        tools: [
+          { name: 'b_c', description: '', inputSchema: {} },
+          { name: 'unrelated', description: '', inputSchema: {} },
+        ],
+      } as unknown as FastAgentIntegration,
+      {
+        id: 'a_b',
+        name: 'AB',
+        description: '',
+        tools: [{ name: 'c', description: '', inputSchema: {} }],
+      } as unknown as FastAgentIntegration,
+    ];
+    const rules = buildIntegrationToolApprovalRules(ambiguous, [
+      {
+        policyId: 'p1',
+        integrationId: 'a',
+        toolName: 'b_c',
+        mode: 'ask',
+        updatedAt: '',
+        createdAt: '',
+      },
+      {
+        policyId: 'p2',
+        integrationId: 'a',
+        toolName: 'unrelated',
+        mode: 'ask',
+        updatedAt: '',
+        createdAt: '',
+      },
+    ]);
+    // The ambiguous key is denied exactly once, last (last-match-wins), so
+    // the `ask` policy on `a`/`b_c` cannot gate it and nothing executes it.
+    expect(rules[rules.length - 1]).toEqual({
+      permission: 'a_b_c',
+      pattern: '*',
+      action: 'deny',
+    });
+    expect(rules.filter((rule) => rule.permission === 'a_b_c')).toHaveLength(1);
+    // Unaffected tools keep their configured modes.
+    expect(rules).toContainEqual({
+      permission: 'a_unrelated',
+      pattern: '*',
+      action: 'ask',
+    });
+  });
+
+  it('denies an ambiguous key even when one colliding tool is configured Always reject and the other is default', () => {
+    const ambiguous = [
+      {
+        id: 'a',
+        name: 'A',
+        description: '',
+        tools: [{ name: 'b_c', description: '', inputSchema: {} }],
+      } as unknown as FastAgentIntegration,
+      {
+        id: 'a_b',
+        name: 'AB',
+        description: '',
+        tools: [{ name: 'c', description: '', inputSchema: {} }],
+      } as unknown as FastAgentIntegration,
+    ];
+    const rules = buildIntegrationToolApprovalRules(ambiguous, [
+      {
+        policyId: 'p1',
+        integrationId: 'a_b',
+        toolName: 'c',
+        mode: 'reject',
+        updatedAt: '',
+        createdAt: '',
+      },
+    ]);
+    expect(rules).toEqual([
+      { permission: 'a_b_c', pattern: '*', action: 'deny' },
+    ]);
+  });
+
   it('never materializes rules for tools the actor is not authorized to mount', () => {
     const rules = buildIntegrationToolApprovalRules(integrations, [
       {
@@ -144,23 +229,37 @@ describe('resolveFastAgentToolApprovalRules', () => {
     vi.clearAllMocks();
   });
 
-  it('is inactive without code mode or without the experiment', async () => {
-    expect(
-      await resolveFastAgentToolApprovalRules({
-        codeModeIntegrationsEffective: false,
-        integrations,
-      }),
-    ).toBeUndefined();
+  it('is inactive without the experiment', async () => {
     vi.mocked(isDeploymentExperimentEnabled).mockResolvedValueOnce(false);
     expect(
-      await resolveFastAgentToolApprovalRules({
-        codeModeIntegrationsEffective: true,
-        integrations,
-      }),
+      await resolveFastAgentToolApprovalRules({ integrations }),
     ).toBeUndefined();
     expect(isDeploymentExperimentEnabled).toHaveBeenCalledWith(
       'integrationToolApprovals',
     );
+  });
+
+  it('fails closed rather than deactivating approvals on an ambiguous catalog', async () => {
+    const ambiguous = [
+      {
+        id: 'a',
+        name: 'A',
+        description: '',
+        tools: [{ name: 'b_c', description: '', inputSchema: {} }],
+      } as unknown as FastAgentIntegration,
+      {
+        id: 'a_b',
+        name: 'AB',
+        description: '',
+        tools: [{ name: 'c', description: '', inputSchema: {} }],
+      } as unknown as FastAgentIntegration,
+    ];
+    const resolved = await resolveFastAgentToolApprovalRules({
+      integrations: ambiguous,
+    });
+    expect(resolved?.rules).toEqual([
+      { permission: 'a_b_c', pattern: '*', action: 'deny' },
+    ]);
   });
 });
 
@@ -261,7 +360,7 @@ describe('ordering-equivalent policies share one hash', () => {
 });
 
 describe('extractApprovalCallArgs', () => {
-  const tool = { integrationId: 'mock-slack', toolName: 'post_message' };
+  const tool = { serverName: 'mock-slack', toolName: 'post_message' };
 
   it('returns a plain call input directly', () => {
     expect(extractApprovalCallArgs({ input: { channel: 'C1' } }, tool)).toEqual(
@@ -335,10 +434,36 @@ describe('tool approval bridge', () => {
     });
   });
 
-  it('ignores asks for tools outside the mounted catalog', () => {
+  it('fails closed without a card for tools outside the mounted catalog', async () => {
     const helperMocks = helpers();
     bridge().handleAsk({ ...ask, permission: 'unknown_tool' }, helperMocks);
+    await vi.waitFor(() =>
+      expect(helperMocks.reply).toHaveBeenCalledWith(
+        'req-1',
+        'reject',
+        'The approval identity of this tool call is ambiguous; the call was not run.',
+      ),
+    );
     expect(insertIntegrationToolApproval).not.toHaveBeenCalled();
+  });
+
+  it('rejects an approved decision without executing when the experiment is disabled before the relay', async () => {
+    vi.mocked(getIntegrationToolApproval).mockResolvedValue({
+      status: 'approved',
+    } as never);
+    vi.mocked(isDeploymentExperimentEnabled)
+      .mockResolvedValueOnce(true) // top-of-loop check
+      .mockResolvedValue(false); // approved-branch re-check and beyond
+    const helperMocks = helpers();
+    bridge().handleAsk(ask, helperMocks);
+    await vi.waitFor(() =>
+      expect(helperMocks.reply).toHaveBeenCalledWith(
+        'req-1',
+        'reject',
+        'Tool approvals were disabled; the call was not run.',
+      ),
+    );
+    expect(markIntegrationToolApprovalConsumed).not.toHaveBeenCalled();
   });
 
   it('records the ask with the paused call arguments and relays an approved decision once', async () => {
@@ -436,6 +561,90 @@ describe('tool approval bridge', () => {
     instance.handleAsk(ask, helperMocks);
     await vi.waitFor(() => expect(helperMocks.reply).toHaveBeenCalledTimes(1));
     expect(insertIntegrationToolApproval).toHaveBeenCalledTimes(1);
+  });
+
+  it('resolves a colliding flattened key from the paused call child record instead of the first pair', async () => {
+    const colliding = [
+      {
+        id: 'a',
+        name: 'A',
+        description: '',
+        tools: [{ name: 'b_c', description: '', inputSchema: {} }],
+      } as unknown as FastAgentIntegration,
+      {
+        id: 'a_b',
+        name: 'AB',
+        description: '',
+        tools: [{ name: 'c', description: '', inputSchema: {} }],
+      } as unknown as FastAgentIntegration,
+    ];
+    vi.mocked(getIntegrationToolApproval).mockResolvedValue({
+      status: 'approved',
+    } as never);
+    vi.mocked(markIntegrationToolApprovalConsumed).mockResolvedValue(true);
+    const helperMocks = {
+      fetchCallArgs: vi.fn(async () => ({
+        input: { code: 'return await tools.a_b.c({ x: 1 })' },
+        toolCalls: [{ tool: 'a_b.c', input: { x: 1 } }],
+      })),
+      reply: vi.fn(async () => undefined),
+    };
+    createFastAgentToolApprovalBridge({
+      sessionId: 'session-id',
+      userId: 'user-id',
+      integrations: colliding,
+    }).handleAsk({ ...ask, permission: 'a_b_c' }, helperMocks as never);
+    await vi.waitFor(() =>
+      expect(helperMocks.reply).toHaveBeenCalledWith(
+        'req-1',
+        'once',
+        undefined,
+      ),
+    );
+    // The card and audit record the tool that actually executes (a_b/c with
+    // its own arguments), never the first colliding pair.
+    expect(insertIntegrationToolApproval).toHaveBeenCalledWith(
+      { sessionId: 'session-id', userId: 'user-id' },
+      expect.objectContaining({
+        integrationId: 'a_b',
+        toolName: 'c',
+        argsSummary: { x: 1 },
+      }),
+    );
+  });
+
+  it('fails closed without a card when a colliding flattened key cannot be resolved from the child record', async () => {
+    const colliding = [
+      {
+        id: 'a',
+        name: 'A',
+        description: '',
+        tools: [{ name: 'b_c', description: '', inputSchema: {} }],
+      } as unknown as FastAgentIntegration,
+      {
+        id: 'a_b',
+        name: 'AB',
+        description: '',
+        tools: [{ name: 'c', description: '', inputSchema: {} }],
+      } as unknown as FastAgentIntegration,
+    ];
+    const helperMocks = {
+      fetchCallArgs: vi.fn(async () => undefined),
+      reply: vi.fn(async () => undefined),
+    };
+    createFastAgentToolApprovalBridge({
+      sessionId: 'session-id',
+      userId: 'user-id',
+      integrations: colliding,
+    }).handleAsk({ ...ask, permission: 'a_b_c' }, helperMocks as never);
+    await vi.waitFor(() =>
+      expect(helperMocks.reply).toHaveBeenCalledWith(
+        'req-1',
+        'reject',
+        'The approval identity of this tool call is ambiguous; the call was not run.',
+      ),
+    );
+    expect(insertIntegrationToolApproval).not.toHaveBeenCalled();
   });
 
   it('notifies chat surfaces once per approval', async () => {

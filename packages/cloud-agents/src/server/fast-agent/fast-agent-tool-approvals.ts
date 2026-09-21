@@ -18,6 +18,7 @@ import {
 } from '@roomote/types';
 
 import type { FastAgentIntegration } from './fast-agent-integration-broker';
+import { buildFastAgentCodeModeServerNames } from './fast-agent-tool-policy';
 
 /**
  * Experiment-gated (`integrationToolApprovals`) per-tool approvals for
@@ -44,13 +45,51 @@ const INTEGRATION_TOOL_APPROVAL_POLL_MS = 1_500;
 const INTEGRATION_TOOL_APPROVAL_CANCEL_EXPERIMENT_DISABLED =
   'experiment_disabled';
 
-/** OpenCode prefixes MCP tools with the sanitized server name. */
-function sanitizeCodeModeIntegrationPrefix(integrationId: string) {
-  return integrationId.replace(/[^a-zA-Z0-9_-]/gu, '_');
+/** OpenCode flattens every MCP tool to `<server name>_<tool name>`. */
+export function codeModeToolKey(serverName: string, toolName: string) {
+  return `${serverName}_${toolName}`;
 }
 
-export function codeModeToolKey(integrationId: string, toolName: string) {
-  return `${sanitizeCodeModeIntegrationPrefix(integrationId)}_${toolName}`;
+/**
+ * The collision-safe server names for this turn's mounted integrations,
+ * shared with the config writer so approval rules, mounting, and the ask
+ * bridge all name tools identically.
+ */
+function integrationToolServerNames(
+  integrations: FastAgentIntegration[],
+): Map<string, string> {
+  return buildFastAgentCodeModeServerNames(
+    integrations.map((integration) => integration.id),
+  );
+}
+
+/**
+ * Server names are made unique per integration, but the flattened tool key
+ * (`<server name>_<tool name>`) can still collide across distinct
+ * integration/tool pairs because both halves may contain underscores
+ * (`a`/`b_c` and `a_b`/`c` both become `a_b_c`). Returns every flattened
+ * key claimed by more than one pair. Approval enforcement cannot resolve
+ * identity for those keys, so they are failed closed (denied outright)
+ * instead of being allowed to execute under another tool's policy.
+ */
+function findCollidingIntegrationToolKeys(
+  integrations: FastAgentIntegration[],
+): string[] {
+  const serverNames = integrationToolServerNames(integrations);
+  const pairsByKey = new Map<string, Set<string>>();
+  for (const integration of integrations) {
+    const serverName = serverNames.get(integration.id)!;
+    for (const tool of integration.tools) {
+      const key = codeModeToolKey(serverName, tool.name);
+      const pairs = pairsByKey.get(key) ?? new Set<string>();
+      pairs.add(`${integration.id}/${tool.name}`);
+      pairsByKey.set(key, pairs);
+    }
+  }
+  return [...pairsByKey.entries()]
+    .filter(([, pairs]) => pairs.size > 1)
+    .map(([key]) => key)
+    .sort();
 }
 
 /**
@@ -64,6 +103,8 @@ export function buildIntegrationToolApprovalRules(
   integrations: FastAgentIntegration[],
   policies: IntegrationToolPolicyMetadata[],
 ): PermissionRuleset {
+  const serverNames = integrationToolServerNames(integrations);
+  const collidingKeys = new Set(findCollidingIntegrationToolKeys(integrations));
   const modeByTool = new Map(
     policies.map((policy) => [
       integrationToolPolicyKey(policy.integrationId, policy.toolName),
@@ -72,24 +113,25 @@ export function buildIntegrationToolApprovalRules(
   );
   const rules: PermissionRuleset = [];
   for (const integration of integrations) {
+    const serverName = serverNames.get(integration.id)!;
     for (const tool of integration.tools) {
+      const key = codeModeToolKey(serverName, tool.name);
+      if (collidingKeys.has(key)) continue;
       const mode = modeByTool.get(
         integrationToolPolicyKey(integration.id, tool.name),
       );
       if (mode === 'ask') {
-        rules.push({
-          permission: codeModeToolKey(integration.id, tool.name),
-          pattern: '*',
-          action: 'ask',
-        });
+        rules.push({ permission: key, pattern: '*', action: 'ask' });
       } else if (mode === 'reject') {
-        rules.push({
-          permission: codeModeToolKey(integration.id, tool.name),
-          pattern: '*',
-          action: 'deny',
-        });
+        rules.push({ permission: key, pattern: '*', action: 'deny' });
       }
     }
+  }
+  // Fail closed on ambiguous keys: OpenCode evaluates last-match-wins, so
+  // these denies beat any configured rule for the same key. An ambiguous
+  // call can never execute ungated, and no tool inherits another's policy.
+  for (const key of collidingKeys) {
+    rules.push({ permission: key, pattern: '*', action: 'deny' });
   }
   return rules;
 }
@@ -185,10 +227,10 @@ export function extractApprovalCallArgs(
         toolCalls?: Array<{ tool?: unknown; input?: unknown }>;
       }
     | undefined,
-  tool: { integrationId: string; toolName: string },
+  tool: { serverName: string; toolName: string },
 ): unknown {
   if (!recovered) return undefined;
-  const dottedChildName = `${sanitizeCodeModeIntegrationPrefix(tool.integrationId)}.${tool.toolName}`;
+  const dottedChildName = `${tool.serverName}.${tool.toolName}`;
   const child = recovered.toolCalls?.find(
     (entry) => entry.tool === dottedChildName,
   );
@@ -196,21 +238,28 @@ export function extractApprovalCallArgs(
 }
 
 /**
- * Load and compile the approval rules for one turn. Returns undefined when
- * the experiment is off or code mode is inactive so callers can skip every
- * approval concern. Policies are read fresh each turn; the caller compares
- * the returned hash against the hash the live OpenCode session was created
- * with and rebuilds on drift.
+ * Load and compile the approval rules for one turn. Returns undefined only
+ * when the experiment is off, which keeps today's ungated behavior. When
+ * distinct integration tools flatten to the same native key, those keys are
+ * denied outright (fail closed) so an ambiguous call can never execute
+ * under another tool's policy; unaffected tools keep their configured
+ * modes. Policies are read fresh each turn; the caller compares the
+ * returned hash against the hash the live instance booted with and
+ * refreshes on drift.
  */
 export async function resolveFastAgentToolApprovalRules(input: {
-  codeModeIntegrationsEffective: boolean;
   integrations: FastAgentIntegration[];
 }): Promise<{ rules: PermissionRuleset; hash: string } | undefined> {
-  if (!input.codeModeIntegrationsEffective) return undefined;
   const enabled = await isDeploymentExperimentEnabled(
     'integrationToolApprovals',
   );
   if (!enabled) return undefined;
+  const collidingKeys = findCollidingIntegrationToolKeys(input.integrations);
+  if (collidingKeys.length > 0) {
+    console.warn(
+      `[Fast Agent] Tool approvals: denying ambiguous OpenCode tool names (${collidingKeys.join(', ')}) because distinct integration tools flatten to them.`,
+    );
+  }
   const policies = await listIntegrationToolPolicies();
   const rules = buildIntegrationToolApprovalRules(input.integrations, policies);
   return { rules, hash: hashIntegrationToolApprovalRules(rules) };
@@ -224,22 +273,72 @@ export function createFastAgentToolApprovalBridge(input: {
   notify?: (approval: IntegrationToolApprovalMetadata) => Promise<void>;
   signal?: AbortSignal;
 }) {
-  const toolByKey = new Map<
-    string,
-    { integrationId: string; toolName: string }
-  >();
+  const serverNames = integrationToolServerNames(input.integrations);
+  type ToolIdentity = {
+    integrationId: string;
+    serverName: string;
+    toolName: string;
+  };
+  const toolsByKey = new Map<string, ToolIdentity[]>();
+  const toolByDottedName = new Map<string, ToolIdentity>();
   for (const integration of input.integrations) {
+    const serverName = serverNames.get(integration.id)!;
     for (const tool of integration.tools) {
-      toolByKey.set(codeModeToolKey(integration.id, tool.name), {
+      const identity: ToolIdentity = {
         integrationId: integration.id,
+        serverName,
         toolName: tool.name,
-      });
+      };
+      const key = codeModeToolKey(serverName, tool.name);
+      toolsByKey.set(key, [...(toolsByKey.get(key) ?? []), identity]);
+      toolByDottedName.set(`${serverName}.${tool.name}`, identity);
     }
   }
   const handledRequestIds = new Set<string>();
   const notifiedApprovalIds = new Set<string>();
 
-  const resolveTool = (permission: string) => toolByKey.get(permission);
+  // A code-mode child call's dotted name (`server.tool`) is unambiguous even
+  // when its flattened permission key (`server_tool`) is not, so it is the
+  // identity source for colliding keys. Flattening replaces the first dot.
+  const flattenDottedChildName = (dotted: string) => {
+    const boundary = dotted.indexOf('.');
+    return boundary === -1
+      ? dotted
+      : `${dotted.slice(0, boundary)}_${dotted.slice(boundary + 1)}`;
+  };
+
+  /**
+   * Resolve which mounted tool an ask is really for. A unique flattened key
+   * resolves directly. A colliding key resolves only through the paused
+   * call's own child-tool record; without it the identity is unknowable and
+   * the ask must fail closed rather than display or audit the wrong tool.
+   */
+  const resolveToolForAsk = (
+    permission: string,
+    recovered:
+      | {
+          input?: unknown;
+          toolCalls?: Array<{ tool?: unknown; input?: unknown }>;
+        }
+      | undefined,
+  ): { tool: ToolIdentity; args: unknown } | null => {
+    const candidates = toolsByKey.get(permission) ?? [];
+    if (candidates.length === 1) {
+      const tool = candidates[0]!;
+      return { tool, args: extractApprovalCallArgs(recovered, tool) };
+    }
+    const matchingChildren = (recovered?.toolCalls ?? []).filter(
+      (entry) =>
+        typeof entry.tool === 'string' &&
+        flattenDottedChildName(entry.tool) === permission,
+    );
+    if (matchingChildren.length === 1) {
+      const child = matchingChildren[0]!;
+      const tool = toolByDottedName.get(child.tool as string);
+      if (tool) return { tool, args: child.input };
+    }
+    return null;
+  };
 
   /**
    * Handle one native `permission.asked` event: record the requester-facing
@@ -252,8 +351,6 @@ export function createFastAgentToolApprovalBridge(input: {
     ask: FastAgentToolApprovalAsk,
     helpers: FastAgentToolApprovalHelpers,
   ): void => {
-    const tool = resolveTool(ask.permission);
-    if (!tool) return;
     if (handledRequestIds.has(ask.requestId)) return;
     handledRequestIds.add(ask.requestId);
     void (async () => {
@@ -264,7 +361,23 @@ export function createFastAgentToolApprovalBridge(input: {
           ...(ask.callId ? { callId: ask.callId } : {}),
         })
         .catch(() => undefined);
-      const args = extractApprovalCallArgs(recovered, tool);
+      const resolution = resolveToolForAsk(ask.permission, recovered);
+      if (!resolution) {
+        // Never show the requester a card for a different tool than the one
+        // that would execute, and never let an ambiguous call through.
+        console.warn(
+          `[Fast Agent] Tool approval ask ${ask.requestId} for ${ask.permission} has an ambiguous tool identity; failing closed.`,
+        );
+        await helpers
+          .reply(
+            ask.requestId,
+            'reject',
+            'The approval identity of this tool call is ambiguous; the call was not run.',
+          )
+          .catch(() => undefined);
+        return;
+      }
+      const { tool, args } = resolution;
       const approval = await insertIntegrationToolApproval(
         { sessionId: input.sessionId, userId: input.userId },
         {
@@ -326,6 +439,25 @@ export function createFastAgentToolApprovalBridge(input: {
           return;
         }
         if (row.status === 'approved') {
+          // The experiment may have been disabled since this iteration's
+          // top-level check; never relay an execution under a disabled
+          // experiment. The cancellation sweep also marks the row cancelled,
+          // which makes the consume below fail closed as well.
+          if (
+            !(await isDeploymentExperimentEnabled('integrationToolApprovals'))
+          ) {
+            await cancelOpenIntegrationToolApprovals(
+              INTEGRATION_TOOL_APPROVAL_CANCEL_EXPERIMENT_DISABLED,
+            );
+            await helpers
+              .reply(
+                ask.requestId,
+                'reject',
+                'Tool approvals were disabled; the call was not run.',
+              )
+              .catch(() => undefined);
+            return;
+          }
           // Consume before relaying: only the first relay of an approved,
           // unclaimed decision reaches OpenCode; a cancelled or
           // double-claimed row fails closed instead of executing twice.

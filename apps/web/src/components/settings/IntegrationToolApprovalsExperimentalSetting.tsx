@@ -1,7 +1,6 @@
 'use client';
 
 import { ShieldQuestion, Switch } from '@/components/system';
-import { useCodeModeIntegrationsExperiment } from '@/hooks/useCodeModeIntegrationsExperiment';
 import { useIntegrationToolApprovalsExperiment } from '@/hooks/useIntegrationToolApprovalsExperiment';
 
 import { Section } from './Section';
@@ -14,7 +13,6 @@ import { Section } from './Section';
 export function IntegrationToolApprovalsExperimentalSetting() {
   const { enabled, isLoading, isUpdating, setEnabled } =
     useIntegrationToolApprovalsExperiment();
-  const codeModeIntegrations = useCodeModeIntegrationsExperiment();
 
   return (
     <Section icon={ShieldQuestion} title="Integration tool approvals">
@@ -36,12 +34,6 @@ export function IntegrationToolApprovalsExperimentalSetting() {
           from the next session turn.
         </p>
       </div>
-      {enabled && !codeModeIntegrations.enabled ? (
-        <p className="mt-3 text-sm text-muted-foreground">
-          Code Mode Integrations is off, so these policies currently have no
-          effect. Enable both experiments to gate integration tools.
-        </p>
-      ) : null}
     </Section>
   );
 }

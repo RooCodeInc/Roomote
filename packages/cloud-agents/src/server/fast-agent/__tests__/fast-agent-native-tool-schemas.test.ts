@@ -8,7 +8,6 @@ import { createServer } from 'node:http';
 import { once } from 'node:events';
 
 import {
-  CALL_INTEGRATION_TOOL_TOOL,
   FAST_AGENT_NATIVE_TOOL_NAMES,
   serviceCredentialPrepareSchema,
   serviceCredentialPrepareToolSchema,
@@ -504,7 +503,11 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
   it('covers every enabled native tool', () => {
     const generated = tools.map((tool) => tool.name).sort();
     expect(generated).toEqual(
-      Object.values(FAST_AGENT_NATIVE_TOOL_NAMES).sort(),
+      Object.values(FAST_AGENT_NATIVE_TOOL_NAMES)
+        .filter(
+          (name) => name !== FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool,
+        )
+        .sort(),
     );
     for (const tool of tools) {
       expect(typeof tool.description, tool.name).toBe('string');
@@ -756,27 +759,6 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     ).toBe(false);
   });
 
-  it('exposes integration call args as an object with arbitrary JSON values', () => {
-    const callTool = tools.find(
-      (tool) => tool.name === FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool,
-    );
-    const schema = toOpenCodeJsonSchema(zod, callTool?.args ?? {}) as {
-      properties?: Record<string, unknown>;
-    };
-    const argsSchema = schema.properties?.args as
-      | { type?: string; additionalProperties?: { anyOf?: unknown[] } }
-      | undefined;
-
-    expect(argsSchema?.type).toBe('object');
-    expect(argsSchema?.additionalProperties?.anyOf).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ type: 'string' }),
-        expect.objectContaining({ type: 'object' }),
-        expect.objectContaining({ type: 'array' }),
-      ]),
-    );
-  });
-
   it('detects dangling refs after OpenCode normalizes recursive Zod schemas', () => {
     const args = {
       args: zod.z.record(zod.z.string(), zod.z.json()).optional(),
@@ -789,78 +771,6 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     expect(() => validator.compile(toOpenCodeJsonSchema(zod, args))).toThrow(
       /can't resolve reference #\/\$defs\//,
     );
-  });
-
-  it('preserves nested JSON through serialized native schema validation and server parsing', () => {
-    const callTool = tools.find(
-      (tool) => tool.name === FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool,
-    )!;
-    const validate = validator.compile(
-      toOpenCodeJsonSchema(zod, callTool.args),
-    );
-    const nativeSchema = zod.z.object(callTool.args as Record<string, never>);
-    const serverSchema = z.object(CALL_INTEGRATION_TOOL_TOOL.inputSchema);
-    const base = { integrationId: 'example', toolName: 'nested_tool' };
-    for (const args of [
-      {},
-      {
-        text: 'value',
-        number: 1.5,
-        enabled: true,
-        nullable: null,
-        list: [
-          null,
-          false,
-          42,
-          'text',
-          [],
-          {},
-          { nested: [{ 'arbitrary/key': { values: [1, null] } }] },
-        ],
-        object: { nested: { list: [[{ value: 'preserved' }]] } },
-      },
-    ]) {
-      const input = JSON.parse(JSON.stringify({ ...base, args }));
-      expect(validate(input), JSON.stringify(validate.errors)).toBe(true);
-      expect(nativeSchema.parse(input)).toEqual(input);
-      expect(serverSchema.parse(input)).toEqual(input);
-    }
-    for (const args of [null, 'text', [], 42, false]) {
-      expect(validate({ ...base, args })).toBe(false);
-    }
-    // Omitting args is rejected too: the field is required so the provider
-    // schema never carries a null alternative.
-    expect(validate(base)).toBe(false);
-    expect(serverSchema.safeParse(base).success).toBe(false);
-  });
-
-  it('preserves required Sentry organization scope through generated tool execution and server parsing', async () => {
-    const callTool = tools.find(
-      (tool) => tool.name === FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool,
-    )!;
-    const request = {
-      integrationId: 'sentry',
-      toolName: 'search_issues',
-      args: {
-        organizationSlug: 'example-org',
-        query: 'lastSeen:-24h',
-        projectSlugOrId: 'example-project',
-      },
-    };
-    const parsed = zod.z
-      .object(callTool.args as Record<string, never>)
-      .parse(request);
-    const execute = callTool.execute as (
-      args: unknown,
-      context: unknown,
-    ) => Promise<{ name: string; args: unknown }>;
-    const forwarded = await execute(parsed, {});
-    expect(forwarded.name).toBe(
-      FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool,
-    );
-    expect(
-      z.object(CALL_INTEGRATION_TOOL_TOOL.inputSchema).parse(forwarded.args),
-    ).toEqual(request);
   });
 
   it('forwards explicit internal wakeup visibility', async () => {
@@ -899,55 +809,6 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     });
   });
 
-  // Synthetic arguments verify the generic bridge, not live upstream schemas.
-  it.each([
-    { toolName: 'sources', args: {} },
-    { toolName: 'sources', args: { name: 'example', page: 2, per_page: 10 } },
-    { toolName: 'source', args: { id: 42 } },
-    {
-      toolName: 'query',
-      args: {
-        source_id: 42,
-        table: 'observed_logs_7',
-        host: 'cluster.example.test',
-        query: 'SELECT count() FROM observed_logs_7',
-      },
-    },
-    {
-      toolName: 'query',
-      args: { source_id: 42, table: 'observed_logs_7', query: 'SELECT 1' },
-    },
-  ])(
-    'preserves Better Stack $toolName arguments without defaults through generated execution',
-    async ({ toolName, args }) => {
-      const callTool = tools.find(
-        (tool) =>
-          tool.name === FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool,
-      )!;
-      const request = JSON.parse(
-        JSON.stringify({ integrationId: 'betterstack', toolName, args }),
-      );
-      const validate = validator.compile(
-        toOpenCodeJsonSchema(zod, callTool.args),
-      );
-      expect(validate(request), JSON.stringify(validate.errors)).toBe(true);
-      const parsed = zod.z
-        .object(callTool.args as Record<string, never>)
-        .parse(request);
-      expect(parsed).toEqual(request);
-      const execute = callTool.execute as (
-        args: unknown,
-        context: unknown,
-      ) => Promise<{ name: string; args: unknown }>;
-      const forwarded = await execute(parsed, {});
-      expect(forwarded.name).toBe(
-        FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool,
-      );
-      expect(
-        z.object(CALL_INTEGRATION_TOOL_TOOL.inputSchema).parse(forwarded.args),
-      ).toEqual(request);
-    },
-  );
   it('preserves discovery prose preferences through the native bridge', async () => {
     const inputTool = tools.find(
       (tool) => tool.name === FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput,
