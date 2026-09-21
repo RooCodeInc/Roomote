@@ -11,6 +11,7 @@ import { LLM_TITLE_LOCKED_CHECKPOINT } from '@roomote/cloud-agents/server';
 
 import {
   recordTaskMessageEnvelope,
+  refreshTaskSessionTitleOnCompletion,
   refreshTaskTitleOnCompletion,
 } from '../record-task-message-envelope';
 
@@ -31,7 +32,7 @@ vi.mock('@roomote/cloud-agents/server', async (importOriginal) => {
   return {
     ...actual,
     generateLlmTaskTitle: mockGenerateLlmTaskTitle,
-    refreshTaskSessionTitle: mockRefreshTaskSessionTitle,
+    refreshTaskSessionTitleWithRetry: mockRefreshTaskSessionTitle,
   };
 });
 
@@ -127,6 +128,20 @@ describe('task title refresh', () => {
       userId: undefined,
       mode: 'final',
     });
+  });
+
+  it('can repair only the Session title when a task is canceled', async () => {
+    await refreshTaskSessionTitleOnCompletion({
+      taskId: 'task-title-canceled',
+      userId: 'user-1',
+    });
+
+    expect(mockRefreshTaskSessionTitle).toHaveBeenCalledWith({
+      taskId: 'task-title-canceled',
+      userId: 'user-1',
+      mode: 'final',
+    });
+    expect(mockGenerateLlmTaskTitle).not.toHaveBeenCalled();
   });
 
   it('never rewrites a locked deterministic title', async () => {

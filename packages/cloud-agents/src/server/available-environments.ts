@@ -16,6 +16,7 @@ import {
   LIST_REPOSITORIES_DEFAULT_LIMIT,
   LIST_REPOSITORIES_MAX_LIMIT,
 } from '@roomote/types';
+import type { EnvironmentConfig } from '@roomote/types';
 
 /** An environment the Fast Session can delegate a task to. */
 export interface RoutableEnvironment {
@@ -24,6 +25,9 @@ export interface RoutableEnvironment {
   description?: string;
   repositories?: Array<{ id: string; name: string }>;
   repositoryNames: string[];
+  isVerified?: boolean;
+  verificationError?: string | null;
+  config?: EnvironmentConfig;
 }
 
 /** Active repository names the Fast Session can show, independent of environments. */
@@ -92,6 +96,9 @@ export async function getAvailableEnvironments(): Promise<
       id: environments.id,
       name: environments.name,
       description: environments.description,
+      isVerified: environments.isVerified,
+      verificationError: environments.verificationError,
+      config: environments.config,
     })
     .from(environments)
     .where(and(eq(environments.isEval, false), isNull(environments.userId)));
@@ -116,11 +123,14 @@ export async function getAvailableEnvironments(): Promise<
       id: env.id,
       name: env.name,
       description: env.description ?? undefined,
+      verificationError: env.verificationError,
       repositories: mappings.map((mapping) => ({
         id: mapping.repoId,
         name: mapping.repoName,
       })),
       repositoryNames: mappings.map((m) => m.repoName),
+      isVerified: env.isVerified,
+      config: env.config,
     });
   }
 

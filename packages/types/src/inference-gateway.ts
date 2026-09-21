@@ -209,6 +209,13 @@ const ANTHROPIC_COMPATIBLE_INFERENCE_PATHS: readonly string[] = [
   '/v1/models',
 ];
 
+/** Paths relative to DeepSeek's documented root API base (not `/v1`). */
+const DEEPSEEK_INFERENCE_PATHS: readonly string[] = [
+  '/chat/completions',
+  '/responses',
+  '/models',
+];
+
 /** Paths relative to the models.dev v4 base (not OpenAI `/v1/...`). */
 const ZAI_INFERENCE_PATHS: readonly string[] = [
   '/chat/completions',
@@ -351,6 +358,15 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
       authHeader: { name: 'authorization', scheme: 'bearer' },
       allowedPaths: OPENAI_COMPATIBLE_INFERENCE_PATHS,
       openCodeBaseUrlSuffix: '/v1',
+    },
+    {
+      id: 'deepseek',
+      name: 'DeepSeek',
+      envVarNames: ['DEEPSEEK_API_KEY'],
+      upstreamBaseUrl: 'https://api.deepseek.com',
+      authHeader: { name: 'authorization', scheme: 'bearer' },
+      allowedPaths: DEEPSEEK_INFERENCE_PATHS,
+      openCodeBaseUrlSuffix: '',
     },
     {
       id: 'moonshotai',

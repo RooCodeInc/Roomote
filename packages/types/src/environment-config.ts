@@ -2,6 +2,7 @@ import YAML from 'yaml';
 import { z } from 'zod';
 
 import { PRODUCT_NAME } from './constants';
+import { environmentRecipeSchema } from './environment-recipe';
 import { gitBranchNameSchema } from './git-ref';
 import { collectReservedEnvReferences } from './reserved-mcp-env-vars';
 import { SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME } from './sandbox-preview-inference';
@@ -722,6 +723,8 @@ export const environmentConfigSchema = z
      * their repositories have been prepared.
      */
     docker_projects: z.array(dockerProjectSchema).optional(),
+    /** On-demand recipe environment, resolved through a trusted worker. */
+    environment_recipe: environmentRecipeSchema.optional(),
     /**
      * Optional sandbox OIDC targets for this environment.
      * Tokens are minted by Roomote, written into the sandbox filesystem, and

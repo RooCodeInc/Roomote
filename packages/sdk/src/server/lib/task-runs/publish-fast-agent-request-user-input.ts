@@ -7,6 +7,8 @@ import {
   db,
   eq,
   getCustomAutomationById,
+  getSessionForFastConversation,
+  recordCustomAutomationResult,
   slackInstallations,
   taskRuns,
 } from '@roomote/db/server';
@@ -25,6 +27,8 @@ import {
 
 import { buildSlackClientMessageId } from '../fast-agent-parent-event';
 import { buildCustomAutomationSlackMessage } from '../manager-slack';
+import { resolveCustomAutomationResultVisibility } from '../automation-result-visibility';
+import { enqueueAutomationResultPreparation } from '../automation-result-preparation';
 
 const PUBLISH_LOCK_TTL_SECONDS = 10;
 const PUBLISH_LOCK_ATTEMPTS = 20;
@@ -244,6 +248,41 @@ export async function publishFastAgentRequestUserInput(input: {
       ...pendingRequest,
       promptMessageTs: messageTs,
     });
+
+    try {
+      const customAutomationId = getCustomAutomationId(run.payload);
+      const automation = customAutomationId
+        ? await getCustomAutomationById(customAutomationId)
+        : null;
+      const sourceSession = await getSessionForFastConversation(
+        db,
+        parent.sessionId,
+      );
+      if (customAutomationId && automation?.createdByUserId) {
+        const content = [
+          `${automation.name} needs input to continue.`,
+          ...input.questions.map((question) => question.question),
+        ].join('\n\n');
+        const result = await recordCustomAutomationResult({
+          automationId: customAutomationId,
+          userId: automation.createdByUserId,
+          sourceTaskId: input.taskId,
+          sourceRunId: input.runId,
+          ...(sourceSession ? { sourceSessionId: sourceSession.id } : {}),
+          resultKind: 'input_request',
+          content,
+          dedupeKey: `fast-input:${input.runId}:${input.requestId}`,
+          visibility: await resolveCustomAutomationResultVisibility(
+            customAutomationId,
+          ).catch(() => 'private' as const),
+        });
+        if (result) await enqueueAutomationResultPreparation(result.id);
+      }
+    } catch (error) {
+      console.error(
+        `[publishFastAgentRequestUserInput] Failed to record Results input request: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
 
     return { published: true, messageTs };
   } finally {

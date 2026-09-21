@@ -98,6 +98,30 @@ describe('inference gateway URL builders', () => {
     ).toBe('opencode-go');
   });
 
+  it('registers DeepSeek with its root-relative OpenAI-compatible paths', () => {
+    const provider = getInferenceGatewayProvider('deepseek');
+
+    expect(provider).toMatchObject({
+      envVarNames: ['DEEPSEEK_API_KEY'],
+      upstreamBaseUrl: 'https://api.deepseek.com',
+      authHeader: { name: 'authorization', scheme: 'bearer' },
+      openCodeBaseUrlSuffix: '',
+    });
+    expect(provider?.allowedPaths).toEqual(
+      expect.arrayContaining(['/chat/completions', '/responses', '/models']),
+    );
+    expect(provider?.allowedPaths).not.toContain('/v1/chat/completions');
+    expect(
+      buildInferenceGatewayOpenCodeBaseUrl(
+        'https://api.example.com/api/inference',
+        provider!,
+      ),
+    ).toBe('https://api.example.com/api/inference/deepseek');
+    expect(
+      getInferenceGatewayProviderByEnvVarName('DEEPSEEK_API_KEY')?.id,
+    ).toBe('deepseek');
+  });
+
   it('registers native Amazon Bedrock with its regional runtime endpoint', () => {
     const provider = getInferenceGatewayProvider('amazon-bedrock');
 

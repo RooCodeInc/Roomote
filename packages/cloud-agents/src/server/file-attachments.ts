@@ -4,10 +4,12 @@ import JSZip from 'jszip';
 import mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
 
-import { isRoomoteTextExtractableAttachment } from '../file-attachments';
+import {
+  isRoomoteTextExtractableAttachment,
+  ROOMOTE_ATTACHMENT_TEXT_MAX_CHARS,
+} from '../file-attachments';
 
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
-const MAX_ATTACHMENT_TEXT_CHARS_TOTAL = 200_000;
 const TRUNCATED_MARKER = '[truncated]';
 const OMITTED_ATTACHMENT_MARKER = '[omitted: attachment budget exhausted]';
 
@@ -280,7 +282,7 @@ export async function extractPromptTextAttachments(
 ): Promise<ExtractPromptTextAttachmentsResult> {
   const attachmentTexts: string[] = [];
   const warnings: string[] = [];
-  let remainingChars = MAX_ATTACHMENT_TEXT_CHARS_TOTAL;
+  let remainingChars = ROOMOTE_ATTACHMENT_TEXT_MAX_CHARS;
 
   const extractionResults = await Promise.all(
     inputs.map(async (input) => {

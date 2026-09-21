@@ -45,6 +45,7 @@ import {
   getDuplicateEnvironmentRepositoryConfigError,
   getEnvironmentRepositoryInstallationError,
   getMissingEnvironmentRepositoryError,
+  getUnresolvedEnvironmentRecipeError,
   isExitedRunStatus,
   normalizeRepositorySelection,
   resolveEvalHarnessSelection,
@@ -476,6 +477,14 @@ export async function createEnvironmentCommand(
     };
   }
 
+  const unresolvedRecipeError = getUnresolvedEnvironmentRecipeError(
+    parseResult.data,
+  );
+
+  if (unresolvedRecipeError) {
+    return { success: false, error: unresolvedRecipeError };
+  }
+
   const duplicateRepositoryError = getDuplicateEnvironmentRepositoryConfigError(
     parseResult.data.repositories ?? [],
   );
@@ -646,6 +655,14 @@ export async function updateEnvironmentCommand(
     }
 
     nextConfig = parseResult.data;
+  }
+
+  if (nextConfig) {
+    const unresolvedRecipeError =
+      getUnresolvedEnvironmentRecipeError(nextConfig);
+    if (unresolvedRecipeError) {
+      return { success: false, error: unresolvedRecipeError };
+    }
   }
 
   if (input.name && input.name !== env.name) {

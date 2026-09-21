@@ -98,6 +98,7 @@ import {
   buildCustomAutomationSlackMessage,
 } from './manager-slack';
 import { resolveCustomAutomationResultVisibility } from './automation-result-visibility';
+import { enqueueAutomationResultPreparation } from './automation-result-preparation';
 import {
   appendFastAutomationSuggestionInstruction,
   postFastAutomationSuggestionsToDiscord,
@@ -227,6 +228,8 @@ export type FastAgentParentEvent =
       type: 'child_message';
       taskId: string;
       runId: number;
+      /** Trusted latest actor copied from task_runs when the report is queued. */
+      actingUserId?: string;
       messageId: string;
       admittedAtMs?: number;
       purpose: 'ack' | 'progress' | 'closeout' | 'clarification';
@@ -2640,9 +2643,12 @@ function buildFastAutomationFailureReport(
     : `${subject} failed${detail}\n${event.taskUrl}`;
 }
 
-async function resolveTaskSettledCredentialActor(
+async function resolveDelegatedTaskActor(
   parent: FastAgentParent,
-  event: Extract<FastAgentParentEvent, { type: 'task_settled' }>,
+  event: Extract<
+    FastAgentParentEvent,
+    { type: 'child_message' | 'task_settled' }
+  >,
 ): Promise<{
   userId?: string;
   denialReason?: 'no_acting_user' | 'actor_owner_mismatch';
@@ -2823,9 +2829,10 @@ export async function deliverFastAgentParentEventWithLock(
 
     const humanFollowUp =
       params.event.type === 'human_follow_up' ? params.event : null;
-    const taskSettledCredentialActor =
+    const delegatedTaskActor =
+      params.event.type === 'child_message' ||
       params.event.type === 'task_settled'
-        ? await resolveTaskSettledCredentialActor(params.parent, params.event)
+        ? await resolveDelegatedTaskActor(params.parent, params.event)
         : undefined;
     let parentTurn = await createFastAgentParentTurn({
       parent: params.parent,
@@ -2854,24 +2861,40 @@ export async function deliverFastAgentParentEventWithLock(
             if (reply.kickoff) {
               return;
             }
+            const posted = await baseAdapter.postReply(reply);
             if (
               reply.purpose === 'closeout' ||
               reply.purpose === 'clarification'
             ) {
-              await recordCustomAutomationResult({
+              const sourceSession = await getSessionForFastConversation(
+                db,
+                params.parent.sessionId,
+              );
+              const result = await recordCustomAutomationResult({
                 automationId,
                 userId: parentTurn.userId,
                 ...(reportEvent.type === 'task_settled'
-                  ? { sourceTaskId: reportEvent.taskId }
+                  ? {
+                      sourceTaskId: reportEvent.taskId,
+                      sourceRunId: reportEvent.runId,
+                    }
                   : {}),
+                ...(sourceSession ? { sourceSessionId: sourceSession.id } : {}),
                 content: reply.message,
+                resultKind:
+                  reply.purpose === 'clarification'
+                    ? 'input_request'
+                    : 'outcome',
                 dedupeKey: `fast:${buildFastAutomationSuggestionEventId(reportEvent)}`,
                 visibility: await resolveCustomAutomationResultVisibility(
                   automationId,
                 ).catch(() => 'private' as const),
               }).catch(() => undefined);
+              if (result) {
+                await enqueueAutomationResultPreparation(result.id);
+              }
             }
-            return baseAdapter.postReply(reply);
+            return posted;
           },
         },
       };
@@ -3006,16 +3029,15 @@ export async function deliverFastAgentParentEventWithLock(
       automationReport:
         params.event.type === 'task_settled' &&
         Boolean(params.event.customAutomationId),
-      ...(taskSettledCredentialActor?.userId
+      ...(delegatedTaskActor?.userId
         ? {
-            serviceCredentialPlatformActorUserId:
-              taskSettledCredentialActor.userId,
+            serviceCredentialPlatformActorUserId: delegatedTaskActor.userId,
           }
         : {}),
-      ...(taskSettledCredentialActor?.denialReason
+      ...(delegatedTaskActor?.denialReason
         ? {
             serviceCredentialPlatformDenialReason:
-              taskSettledCredentialActor.denialReason,
+              delegatedTaskActor.denialReason,
           }
         : {}),
       ...(params.event.type === 'child_message' &&

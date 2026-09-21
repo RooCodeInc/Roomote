@@ -23,6 +23,7 @@ import { useAuthenticateSlackAccount } from '@/hooks/slack';
 import { useAuthenticateLinearAccount } from '@/hooks/linear';
 import { useEnvironments } from '@/hooks/environments';
 import { useFastSessionLauncher } from '@/hooks/task-runs';
+import { ComposerErrorDialog } from '@/components/tasks/ComposerErrorDialog';
 import {
   useAuthenticateAdoAccount,
   useAuthenticateBitbucketAccount,
@@ -481,10 +482,23 @@ export function OnboardingCard() {
   ];
 
   const activeCard = cards.find((card) => card.visible && !dismissed[card.id]);
-  if (!activeCard) return null;
+  if (!activeCard) {
+    // Keep a pending launch validation failure visible even after every
+    // onboarding card is dismissed.
+    return (
+      <ComposerErrorDialog
+        error={delegationSession.error}
+        onClose={delegationSession.clearError}
+      />
+    );
+  }
 
   return (
     <>
+      <ComposerErrorDialog
+        error={delegationSession.error}
+        onClose={delegationSession.clearError}
+      />
       <div className="relative overflow-clip">
         <AnimatePresence initial={false} mode="popLayout">
           <motion.div

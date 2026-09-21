@@ -138,7 +138,7 @@ describe('buildOpenCodeCliEnv', () => {
     });
   });
 
-  it('keeps call_integration_tool for helper subagents by default and drops it under the code-mode experiment', () => {
+  it('drops call_integration_tool for helper subagents', () => {
     const readSubagentTools = (
       options: Parameters<typeof buildOpenCodeCliEnv>[1],
     ) => {
@@ -149,12 +149,6 @@ describe('buildOpenCodeCliEnv', () => {
 
     expect(
       readSubagentTools({ promptOnlySubagents: true }).call_integration_tool,
-    ).toBe(true);
-    expect(
-      readSubagentTools({
-        promptOnlySubagents: true,
-        codeModeIntegrations: true,
-      }).call_integration_tool,
     ).toBe(false);
   });
 

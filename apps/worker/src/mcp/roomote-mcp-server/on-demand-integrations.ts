@@ -5,6 +5,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import {
   formatErrorForLog,
   formatSingleLineLog,
+  getIntegrationToolLookupUnavailableGuidance,
   INTEGRATION_TOOL_LOOKUP_NO_EXPOSED_TOOLS_GUIDANCE,
   INTEGRATION_TOOL_LOOKUP_NO_MATCH_GUIDANCE,
   INTEGRATION_TOOL_LOOKUP_PARTIALLY_UNAVAILABLE_GUIDANCE,
@@ -205,7 +206,12 @@ export async function findOnDemandIntegrationTools(
                 guidance:
                   INTEGRATION_TOOL_LOOKUP_PARTIALLY_UNAVAILABLE_GUIDANCE,
               }
-            : {}),
+            : emptyReason === 'integration_unavailable'
+              ? {
+                  guidance:
+                    getIntegrationToolLookupUnavailableGuidance(unavailable),
+                }
+              : {}),
     ...(unavailable.length > 0 ? { unavailableIntegrations: unavailable } : {}),
   });
 }

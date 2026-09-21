@@ -50,6 +50,7 @@ import {
   type SlackMentionScope,
 } from '@/components/ai-elements/slack-mention-context';
 import { WorkspaceHeader } from '@/components/layout';
+import { Alert, AlertDescription, AlertTitle } from '@/components/system';
 import { PrivateSessionIcon } from '@/components/sessions/PrivateSessionIcon';
 import { useLiveVoice } from '@/hooks/useLiveVoice';
 import { useSessionVoiceCallLease } from '@/hooks/useSessionVoiceCallLease';
@@ -61,6 +62,9 @@ import {
   type SessionPromptSubmission,
 } from './SessionPromptInput';
 import { preparePromptAttachments } from '@/lib/prompt-attachments';
+import { describeValidationError } from '@/lib/validation-error';
+import { isComposerValidationError } from '@/lib/validation-error';
+import { ComposerErrorDialog } from '@/components/tasks/ComposerErrorDialog';
 import {
   useOpenSessionTaskPanel,
   useOpenSessionTasksPanel,
@@ -85,10 +89,12 @@ import {
 import { SetupStarterTasksCard } from './setup/SetupStarterTasksCard';
 import { SetupIntegrationsCard } from './setup/SetupIntegrationsCard';
 import { SESSION_HEADER_CONTENT_CLASS_NAME } from './session-header-layout';
+import { EditableSessionTitle } from './EditableSessionTitle';
 import { isRequestUserInputResponseRepresentedByCanonicalReceipt } from '@/lib/setup-receipt-transcript';
 import { CapabilityOfferCard } from './CapabilityOfferCard';
 import { PendingIntegrationKeys } from '@/components/sessions/PendingIntegrationKeys';
 import { openIntegrationKeyDialog } from '@/components/sessions/integration-key-dialog';
+import { useSessionTitlePropagation } from './use-session-title-propagation';
 
 import {
   AcpMessageItem,
@@ -444,6 +450,8 @@ export function FastSessionTranscript({
   headerExtras,
   privateSession = false,
   headerActions,
+  canRenameTitle = false,
+  titleSessionId = sessionId,
   secretSessionId,
   sessionGoal,
   autoStartVoice = false,
@@ -462,6 +470,8 @@ export function FastSessionTranscript({
   headerExtras?: ReactNode;
   privateSession?: boolean;
   headerActions?: ReactNode;
+  canRenameTitle?: boolean;
+  titleSessionId?: string;
   secretSessionId?: string;
   sessionGoal?: SessionGoal | null;
   /**
@@ -561,7 +571,9 @@ export function FastSessionTranscript({
       ),
   );
   const [replyError, setReplyError] = useState<string | null>(null);
+  const [validationError, setValidationError] = useState<unknown>(null);
   const [title, setTitle] = useState<string | null>(initialTitle);
+  useSessionTitlePropagation(title, initialTitle);
   const [goal, setGoal] = useState<SessionGoal | null>(sessionGoal ?? null);
   const [conversationResponding, setConversationResponding] = useState<
     boolean | null
@@ -1300,10 +1312,13 @@ export function FastSessionTranscript({
       let optimisticId: string | null = null;
       let clientMessageId: string | undefined;
       try {
-        const prepared = await preparePromptAttachments({
-          text: message.text.trim(),
-          attachments: message.files,
-        });
+        const prepared = await preparePromptAttachments(
+          {
+            text: message.text.trim(),
+            attachments: message.files,
+          },
+          { enforceAttachmentTextLimit: true },
+        );
         const images = prepared.images ?? [];
         if (!prepared.text && images.length === 0) {
           return false;
@@ -1375,9 +1390,13 @@ export function FastSessionTranscript({
             ),
           );
         }
-        setReplyError(
-          error instanceof Error ? error.message : 'Failed to send message',
-        );
+        if (isComposerValidationError(error)) {
+          setValidationError(error);
+        } else {
+          setReplyError(
+            describeValidationError(error, 'Failed to send message'),
+          );
+        }
         if (optimisticId) {
           dispatchPendingResponse({
             type: 'rollbackOptimistic',
@@ -1810,12 +1829,13 @@ export function FastSessionTranscript({
           }
         >
           <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <h1
-              className="ph-no-capture min-w-0 truncate cursor-default text-sm font-medium"
+            <EditableSessionTitle
+              sessionId={titleSessionId}
               title={title ?? fallbackTitle}
-            >
-              {title ?? fallbackTitle}
-            </h1>
+              canRename={canRenameTitle}
+              className="ph-no-capture min-w-0 truncate cursor-default text-sm font-medium"
+              onTitleChange={setTitle}
+            />
             {(privateSession || effectiveSessionModel || headerExtras) && (
               <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-2 text-xs text-muted-foreground">
                 {privateSession ? (
@@ -1978,8 +1998,21 @@ export function FastSessionTranscript({
               }}
             />
             {replyError ? (
-              <p className="px-4 pb-2 text-xs text-destructive">{replyError}</p>
+              <Alert
+                variant="destructive"
+                className="mx-4 mb-2 [&>svg]:size-4"
+                role="alert"
+              >
+                <AlertTitle>Message not sent</AlertTitle>
+                <AlertDescription>
+                  <p className="whitespace-pre-line">{replyError}</p>
+                </AlertDescription>
+              </Alert>
             ) : null}
+            <ComposerErrorDialog
+              error={validationError}
+              onClose={() => setValidationError(null)}
+            />
           </div>
         ) : null}
       </SlackMentionProvider>

@@ -6,6 +6,7 @@ import {
   resolveWorkspaceSourceControlHost,
   resolveWorkspaceSourceControlProvider,
   workspaceAllowsPrivateAttribution,
+  workspaceRequiresSourceControlCredentials,
   workspaceUsesOnlySourceControlProvider,
 } from '../source-control-provider';
 
@@ -19,6 +20,24 @@ let mockRows: Array<{
   sourceControlProvider: 'github' | 'gitlab' | 'gitea' | 'ado' | 'bitbucket';
 }> = [];
 let mockEnvironmentRepositories: string[] = [];
+const mockFindEnvironment = vi.fn<
+  () => Promise<
+    | {
+        config: {
+          name: string;
+          repositories: Array<{ repository: string }>;
+        };
+      }
+    | undefined
+  >
+>(async () => ({
+  config: {
+    name: 'Test environment',
+    repositories: mockEnvironmentRepositories.map((repository) => ({
+      repository,
+    })),
+  },
+}));
 
 const query = {
   innerJoin: vi.fn(() => query),
@@ -42,14 +61,7 @@ const dbOrTx = {
   })),
   query: {
     environments: {
-      findFirst: vi.fn(async () => ({
-        config: {
-          name: 'Test environment',
-          repositories: mockEnvironmentRepositories.map((repository) => ({
-            repository,
-          })),
-        },
-      })),
+      findFirst: mockFindEnvironment,
     },
   },
 } as unknown as DatabaseOrTransaction;
@@ -479,6 +491,52 @@ describe('resolveWorkspaceSourceControlProvider', () => {
       expect.stringContaining('Omitting ambiguous repository group/project'),
     );
     warn.mockRestore();
+  });
+});
+
+describe('workspaceRequiresSourceControlCredentials', () => {
+  beforeEach(() => {
+    mockEnvironmentRepositories = [];
+    mockFindEnvironment.mockReset();
+    mockFindEnvironment.mockImplementation(async () => ({
+      config: {
+        name: 'Test environment',
+        repositories: mockEnvironmentRepositories.map((repository) => ({
+          repository,
+        })),
+      },
+    }));
+  });
+
+  it('does not require credentials for an environment without repositories', async () => {
+    await expect(
+      workspaceRequiresSourceControlCredentials(dbOrTx, {
+        type: 'environment',
+        environmentId: 'env-1',
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it('requires credentials for an environment with repositories', async () => {
+    mockEnvironmentRepositories = ['acme/api'];
+
+    await expect(
+      workspaceRequiresSourceControlCredentials(dbOrTx, {
+        type: 'environment',
+        environmentId: 'env-1',
+      }),
+    ).resolves.toBe(true);
+  });
+
+  it('fails closed when the environment does not exist', async () => {
+    mockFindEnvironment.mockResolvedValueOnce(undefined);
+
+    await expect(
+      workspaceRequiresSourceControlCredentials(dbOrTx, {
+        type: 'environment',
+        environmentId: 'missing-env',
+      }),
+    ).resolves.toBe(true);
   });
 });
 

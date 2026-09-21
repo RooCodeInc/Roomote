@@ -2,6 +2,53 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.12.4 (2026-09-20)
+
+Roomote 1.12.4 adds first-class DeepSeek connectivity with recommended Flash and Pro models for every agent role.
+
+### Highlights
+
+- Connect DeepSeek directly with an API key and use its recommended Flash and Pro models across sessions and tasks.
+
+### Patch changes
+
+- Connect DeepSeek directly with an API key and use the recommended DeepSeek V4.1 Flash and V4 Pro models across Roomote sessions and tasks.
+
+## 1.12.3 (2026-09-20)
+
+Roomote 1.12.3 keeps Gitea pull request delivery reliable when repositories contain unassigned open changes.
+
+### Highlights
+
+- Create and update Gitea pull requests reliably even when another open pull request has no assignees.
+
+### Patch changes
+
+- Gitea pull request creation now succeeds when another open pull request has no assignees, while preserving requested assignments and existing assignees during updates.
+
+## 1.12.2 (2026-09-20)
+
+Roomote 1.12.2 improves model compatibility, integration access, artifact sharing, and recovery across Sessions and tasks.
+
+### Highlights
+
+- Provider credentials and recommended model ids now resolve correctly across Sessions and helper calls for Z.AI, Azure AI Foundry, Google Gemini, and other supported providers.
+- Buildkite and Cloudflare are available as built-in integrations, and Sessions use the Code Mode Integrations workflow by default.
+- Authorized users can open artifacts directly and share standalone links from artifact creation results without first opening the parent task or Session.
+- Failed sandbox starts and undeliverable Session events recover with bounded retries and clear in-place failure handling instead of remaining stuck indefinitely.
+
+### Patch changes
+
+- Provider credentials and recommended model ids now resolve correctly for Sessions and helper calls across Z.AI, Azure AI Foundry, Google Gemini, and other supported providers.
+- Buildkite and Cloudflare are available as built-in integrations, and Sessions use the Code Mode Integrations workflow by default.
+- Authorized users can open artifacts directly and share standalone links from artifact creation results without first opening the parent task or Session.
+- Failed sandbox starts and undeliverable Session events recover with bounded retries and clear in-place failure handling instead of remaining stuck indefinitely.
+- Quote web-entered follow-ups in the first Fast session reply on every communication provider.
+- Session events that cannot be delivered no longer retry indefinitely. An event whose model call fails for a configuration reason (rejected credentials, no credits, an unavailable model) is settled at once and the Session is told once; other failures retry with backoff and are abandoned after a bounded number of attempts. `/health/bullmq` no longer reports the worker unhealthy for events it attempted and could not deliver.
+- Tell Roomote what to do when someone asks to connect a built-in integration privately. Most built-ins connect once for the whole deployment, so a request to keep a connection to oneself cannot be answered by connecting one silently. Roomote now says that the integration connects for everyone, offers the routes that can be private instead, and connects the built-in only when the person accepts the shared connection.
+- Seven recommended models used ids the model catalog does not list, so selecting them failed with a model-not-found error: Grok 4.6 and DeepSeek V4.1 Flash on Vercel AI Gateway, Claude Fable 5.1 and Gemini 3.8 Flash on Requesty, DeepSeek V4.1 Flash on OpenCode Go, Qwen3.8 Max on OpenRouter, and the vision default for the Z.AI Coding Plan (now GLM-5.3 Flash, the plan's image-capable model). Saved selections of the old ids are migrated automatically.
+- A task run whose worker never started is now failed instead of staying in a booting status indefinitely. Its sandbox is destroyed, the Session gets the normal task-settled notice, and `/health/controller` stops reporting it as stuck after dequeue.
+
 ## 1.12.1 (2026-09-19)
 
 Roomote 1.12.1 restores model and messaging reliability, strengthens Fast Session evidence and credential handling, and improves automation delivery.
