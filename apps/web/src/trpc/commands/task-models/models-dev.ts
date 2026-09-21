@@ -340,8 +340,6 @@ export function mergeMetadata(
   patch: Partial<TaskModelMetadata>,
 ): TaskModelMetadata {
   const supportsReasoning = patch.supportsReasoning ?? base?.supportsReasoning;
-  const supportsHighVolumeDecisions =
-    patch.supportsHighVolumeDecisions ?? base?.supportsHighVolumeDecisions;
 
   return {
     contextWindow: patch.contextWindow ?? base?.contextWindow ?? null,
@@ -352,9 +350,6 @@ export function mergeMetadata(
       patch.outputPricePerToken ?? base?.outputPricePerToken ?? null,
     lastRefreshedAt: base?.lastRefreshedAt ?? null,
     ...(supportsReasoning != null ? { supportsReasoning } : {}),
-    ...(supportsHighVolumeDecisions != null
-      ? { supportsHighVolumeDecisions }
-      : {}),
   };
 }
 

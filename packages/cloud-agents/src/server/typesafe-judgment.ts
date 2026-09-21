@@ -1,6 +1,5 @@
 import { Env } from '@roomote/env';
 import {
-  getDeploymentTaskModelOption,
   getDeploymentJudgmentModelSelection,
   resolveModelProviderEnvValue,
 } from '@roomote/db/server';
@@ -107,7 +106,7 @@ export type DecisionModelResolution =
       model: string;
       catalogModelId: string;
       reasoningEffort?: ReasoningEffort;
-      supportsHighVolumeDecisions: boolean;
+      supportsHighVolumeDecisions: false;
     };
 
 /**
@@ -488,9 +487,9 @@ export function resetDecisionModelCache(): void {
 
 /**
  * Resolve the decision model in precedence order: a configured hosted
- * judgment backend first, then the deployment helper model. Helper metadata is
- * read for the model that actually won role resolution, not for a requested
- * model that may have been replaced by the helper/coding fallback.
+ * judgment backend first, then the deployment helper model. Only the hosted
+ * Jev backend is approved for high-volume decisions; helper fallback remains
+ * ordinary-decision-only regardless of which helper model is configured.
  */
 export async function resolveDecisionModel(): Promise<DecisionModelResolution> {
   const now = Date.now();
@@ -504,8 +503,6 @@ export async function resolveDecisionModel(): Promise<DecisionModelResolution> {
     ? { kind: 'judgment', supportsHighVolumeDecisions: true }
     : await (async () => {
         const helper = await resolveNonTaskHelperModel();
-        const model = await getDeploymentTaskModelOption(helper.catalogModelId);
-
         return {
           kind: 'helper' as const,
           model: helper.model,
@@ -513,8 +510,7 @@ export async function resolveDecisionModel(): Promise<DecisionModelResolution> {
           ...(helper.reasoningEffort
             ? { reasoningEffort: helper.reasoningEffort }
             : {}),
-          supportsHighVolumeDecisions:
-            model?.metadata?.supportsHighVolumeDecisions === true,
+          supportsHighVolumeDecisions: false as const,
         };
       })();
 
@@ -659,10 +655,6 @@ export async function scoreTypeSafeRelevance(params: {
   context?: Record<string, unknown>;
   timeoutMs?: number;
 }): Promise<Map<string, number> | null> {
-  if (!(await isTypeSafeJudgmentConfigured())) {
-    return null;
-  }
-
   const batches: Array<ReadonlyArray<{ id: string; text: string }>> = [];
 
   for (
@@ -705,7 +697,7 @@ export async function scoreTypeSafeRelevance(params: {
       });
 
       if (!answers) {
-        throw new Error('Judgment model became unconfigured while ranking');
+        return null;
       }
 
       return batch.map(
@@ -715,5 +707,9 @@ export async function scoreTypeSafeRelevance(params: {
     }),
   );
 
-  return new Map(results.flat());
+  if (results.some((result) => result === null)) {
+    return null;
+  }
+
+  return new Map(results.flatMap((result) => result ?? []));
 }

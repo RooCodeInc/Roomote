@@ -106,11 +106,6 @@ export const taskModelMetadataSchema = z.object({
    * list. Absent or null when the catalogs do not say either way.
    */
   supportsReasoning: z.boolean().nullable().optional(),
-  /**
-   * Whether the model is approved for high-volume typed decision batches.
-   * Absent or null is intentionally treated as unsupported.
-   */
-  supportsHighVolumeDecisions: z.boolean().nullable().optional(),
 });
 
 export type TaskModelMetadata = z.infer<typeof taskModelMetadataSchema>;

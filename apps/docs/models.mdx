@@ -352,12 +352,10 @@ selected provider; keys stay on the control plane and are never sent to task
 sandboxes.
 
 Some decisions evaluate many candidates in parallel, such as skill relevance
-and integration-tool ranking. Roomote does not automatically send those new
-high-volume workloads to an ordinary language model. In **Settings > Models >
-Available Models**, turn on **High-volume decisions** only for a model that the
-deployment has verified is suitable for that workload. The setting is off by
-default and is preserved when catalog metadata is refreshed. A configured Jev
-judgment model is already suitable for these batches.
+and integration-tool ranking. Roomote only runs those high-volume workloads
+through an explicitly configured Jev judgment backend. A helper model never
+opts into these batches, so deployments without Jev keep the existing
+conservative behavior and do not incur new high-volume language-model calls.
 
 ## Reasoning settings
 

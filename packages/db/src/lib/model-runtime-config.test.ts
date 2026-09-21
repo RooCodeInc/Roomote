@@ -72,7 +72,6 @@ vi.mock('../schema', () => ({
 
 import {
   DevLoginInferencePlaceholderError,
-  getDeploymentTaskModelOption,
   invalidateBrainEnabledCache,
   isBrainEnabled,
   isBrainProviderConfigured,
@@ -1237,46 +1236,6 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
       );
       expect(env).not.toHaveProperty('LITELLM_API_KEY');
       expect(env).not.toHaveProperty('LITELLM_BASE_URL');
-    });
-  });
-});
-
-describe('getDeploymentTaskModelOption', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockDecryptSecrets.mockImplementation(async (value) => value);
-    mockEnvironmentVariablesFindMany.mockResolvedValue([]);
-  });
-
-  it('looks up metadata from the full deployment catalog', async () => {
-    mockDeploymentSettingsFindFirst.mockResolvedValue({
-      runtimeModelConfig: null,
-      taskModelSettings: {
-        models: [
-          {
-            id: 'openrouter/helper',
-            displayName: 'Helper',
-            family: 'Helper',
-            metadata: {
-              contextWindow: null,
-              inputTypes: null,
-              inputPricePerToken: null,
-              outputPricePerToken: null,
-              lastRefreshedAt: null,
-              supportsHighVolumeDecisions: true,
-            },
-          },
-        ],
-        allowedModelIds: [],
-        defaultModelId: 'openrouter/helper',
-      },
-    });
-
-    await expect(
-      getDeploymentTaskModelOption('openrouter/helper'),
-    ).resolves.toMatchObject({
-      id: 'openrouter/helper',
-      metadata: { supportsHighVolumeDecisions: true },
     });
   });
 });
