@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, statSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { basename, join, relative } from 'node:path';
 
 import {
@@ -28,6 +29,8 @@ const COMPLETION_CHECK_TIMEOUT_MS = 8_000;
 const MAX_REPOSITORIES = 20;
 const MAX_UNTRACKED_FILES = 50;
 const MAX_UNTRACKED_FILE_BYTES = 200_000;
+const MAX_FINGERPRINT_FILES = 300;
+const MAX_FINGERPRINT_FILE_BYTES = 2_000_000;
 const CLIPPED_PATCH_MARKER = '\n[... rest of this patch clipped ...]\n';
 
 /** Generated files whose patches say nothing about whether the work is done. */
@@ -244,17 +247,26 @@ function isLikelyText(filePath: string): boolean {
 async function collectRepositoryDiff(
   repoPath: string,
   git: GitRunner,
-): Promise<{ diff: string; diffStat: string } | null> {
+): Promise<{ diff: string; diffStat: string; fingerprint: string } | null> {
   const base = await resolveTaskBase(repoPath, git);
 
   if (!base) {
     return null;
   }
 
-  const [tracked, stat, untrackedList] = await Promise.all([
+  const [tracked, stat, untrackedList, changedList] = await Promise.all([
     git(repoPath, ['diff', '--no-color', base, '--', '.', ...NOISE_PATHSPECS]),
     git(repoPath, ['diff', '--no-color', '--stat=120', base]),
     git(repoPath, ['ls-files', '--others', '--exclude-standard', '-z']),
+    git(repoPath, [
+      'diff',
+      '--name-only',
+      '-z',
+      base,
+      '--',
+      '.',
+      ...NOISE_PATHSPECS,
+    ]),
   ]);
 
   if (tracked === null) {
@@ -280,6 +292,10 @@ async function collectRepositoryDiff(
   );
 
   return {
+    fingerprint: await fingerprintChangedFiles(repoPath, [
+      ...(changedList ?? '').split('\0').filter(Boolean),
+      ...untracked,
+    ]),
     diff: [tracked, ...untrackedPatches.filter(Boolean)].join(''),
     diffStat: [
       (stat ?? '').trimEnd(),
@@ -333,13 +349,54 @@ export function clipDiffByFile(
   };
 }
 
+/**
+ * What formatters and pre-commit hooks rewrite: whitespace, quote style,
+ * trailing commas, semicolons, and wrapping parentheses.
+ */
+const FORMATTING_ONLY_CHARACTERS = /[\s'"`;,()]/g;
+
+/**
+ * The code this task has changed, reduced to what a formatter cannot alter:
+ * every changed file's current content with formatting-only characters
+ * removed. It is read from the files rather than the patch text, because a
+ * reformat moves hunks and line counts even where no code changed. Two
+ * moments with the same fingerprint hold the same code, however it got there:
+ * an editor tool, `sed -i`, a heredoc script, or a git operation.
+ */
+async function fingerprintChangedFiles(
+  repoPath: string,
+  files: string[],
+): Promise<string> {
+  const hash = createHash('sha256');
+
+  for (const file of [...new Set(files)]
+    .sort()
+    .slice(0, MAX_FINGERPRINT_FILES)) {
+    const content = await readFile(join(repoPath, file)).then(
+      (buffer) =>
+        buffer.byteLength <= MAX_FINGERPRINT_FILE_BYTES
+          ? buffer.toString('utf8').replace(FORMATTING_ONLY_CHARACTERS, '')
+          : `size:${buffer.byteLength}`,
+      () => 'deleted',
+    );
+    hash.update(`${file}\0${content}\0`);
+  }
+
+  return hash.digest('hex');
+}
+
 interface ShippedDiff {
   /** Hash of the unclipped diff: the identity of the work being checked. */
   key: string;
+  /** Format-insensitive identity of the changed code; see above. */
+  fingerprint: string;
   diff: string;
   diffStat: string;
   diffTruncated: boolean;
 }
+
+/** The fingerprint of a workspace this task has not changed. */
+export const UNCHANGED_WORKSPACE_FINGERPRINT = 'unchanged';
 
 /** What this task changed across the workspace, or `null` when nothing did. */
 export async function collectShippedDiff(
@@ -360,6 +417,7 @@ export async function collectShippedDiff(
 
         return repositories.length > 1 && label
           ? {
+              fingerprint: `${label}:${result.fingerprint}`,
               diff: `# repository: ${label}\n${result.diff}`,
               diffStat: `# repository: ${label}\n${result.diffStat}`,
             }
@@ -380,6 +438,9 @@ export async function collectShippedDiff(
 
   return {
     key: createHash('sha256').update(fullDiff).digest('hex'),
+    fingerprint: createHash('sha256')
+      .update(sections.map((section) => section.fingerprint).join('\n'))
+      .digest('hex'),
     diff: clipped.diff,
     diffTruncated: clipped.truncated,
     diffStat: sections
@@ -387,90 +448,6 @@ export async function collectShippedDiff(
       .join('\n')
       .slice(0, TASK_COMPLETION_GATE_LIMITS.diffStatMaxChars),
   };
-}
-
-const SHELL_SOURCE_MUTATION_PATTERNS = [
-  // In-place editors.
-  /\b(sed|gsed)\s+(-[a-zA-Z]*\s+)*-[a-zA-Z]*i/,
-  /\bperl\s+(-[a-zA-Z]*\s+)*-[a-zA-Z]*i/,
-  // Git operations that rewrite tracked content.
-  /\bgit\s+(-\S+\s+(?!-)\S+\s+|--?\S+\s+)*(apply|am|merge|rebase|cherry-pick|revert|pull)\b/,
-  // `git reset HEAD -- path` (the workflow's own unstage step) and
-  // `git restore --staged` touch the index alone.
-  /\bgit\s+restore\s+(?!.*--staged)(?!.*-S\b)/,
-  /\bgit\s+reset\s+.*--(hard|merge|keep)\b/,
-  /\bgit\s+stash\s+(pop|apply)\b/,
-  /\bpatch\s+(-|<)/,
-  // Output written to a file outside scratch space. `2>&1`, `>/dev/null`,
-  // and `> /tmp/...` are not edits, and the target has to look like a path
-  // so a comparison inside a quoted script (`1 > 0`) is not mistaken for one.
-  /(^|[^0-9&>])>>?\s*(?!&|\s|\/dev\/|\/tmp\/|\/private\/tmp\/|\$\{?TMPDIR)(?=[^\s&|;]*[./][a-zA-Z])[^\s&|;]/,
-  /\btee\s+(-a\s+)?(?!\/dev\/|\/tmp\/|\/private\/tmp\/)[^\s-]/,
-];
-
-/**
- * Whether a shell command plainly rewrites source, which makes any earlier
- * validation run stale the same way an editor tool does. Deliberately narrow:
- * formatters, hooks, and installs also touch files, and treating those as
- * edits would flag every honest "tests pass" that was followed by a format.
- */
-export function isLikelySourceMutatingCommand(command: string): boolean {
-  return (
-    SHELL_SOURCE_MUTATION_PATTERNS.some((pattern) => pattern.test(command)) ||
-    command.split(/&&|\|\||[;|\n]/).some(replacesWorkingTreeByBranch)
-  );
-}
-
-const GIT_GLOBAL_OPTIONS_WITH_VALUE = new Set([
-  '-C',
-  '-c',
-  '--git-dir',
-  '--work-tree',
-  '--namespace',
-]);
-
-const BRANCH_CREATE_FLAGS = new Set([
-  '-b',
-  '-B',
-  '-c',
-  '-C',
-  '--create',
-  '--force-create',
-  '--orphan',
-]);
-
-/**
- * `git checkout` and `git switch` keep the working tree only when they create
- * a branch at the current commit: a create flag and nothing but the new name.
- * A start point (`-b fix origin/main`), an existing branch, or paths all
- * replace files.
- */
-function replacesWorkingTreeByBranch(segment: string): boolean {
-  const tokens = segment.trim().split(/\s+/);
-  const gitIndex = tokens.indexOf('git');
-
-  if (gitIndex === -1) {
-    return false;
-  }
-
-  // Skip global options (`git -C repo --no-pager checkout ...`) to the verb.
-  let verbIndex = gitIndex + 1;
-
-  while (tokens[verbIndex]?.startsWith('-')) {
-    verbIndex += GIT_GLOBAL_OPTIONS_WITH_VALUE.has(tokens[verbIndex]!) ? 2 : 1;
-  }
-
-  const verb = tokens[verbIndex];
-
-  if (verb !== 'checkout' && verb !== 'switch') {
-    return false;
-  }
-
-  const args = tokens.slice(verbIndex + 1);
-  const positional = args.filter((arg) => !arg.startsWith('-'));
-  const createsBranch = args.some((arg) => BRANCH_CREATE_FLAGS.has(arg));
-
-  return !(createsBranch && positional.length === 1);
 }
 
 /** Never throws: a check that cannot be made is a check that was skipped. */

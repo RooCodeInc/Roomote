@@ -176,6 +176,7 @@ describe('OpenCode harness completion check', () => {
   beforeEach(() => {
     mockCollectShippedDiff.mockReset().mockResolvedValue({
       key: 'diff-1',
+      fingerprint: 'code-1',
       diff: 'diff --git a/a.ts b/a.ts\n+change\n',
       diffStat: ' a.ts | 1 +',
       diffTruncated: false,
@@ -224,6 +225,7 @@ describe('OpenCode harness completion check', () => {
       // The fix changes the diff, but the single reminder is spent.
       mockCollectShippedDiff.mockResolvedValue({
         key: 'diff-2',
+        fingerprint: 'code-2',
         diff: 'diff --git a/a.ts b/a.ts\n+fixed\n',
         diffStat: ' a.ts | 1 +',
         diffTruncated: false,
@@ -479,15 +481,23 @@ describe('OpenCode harness completion check', () => {
     }
   });
 
-  it('marks a test run stale once source is edited after it in the same turn', async () => {
+  it('marks a run stale when the code changed after it, however it was changed', async () => {
     const { client, harness, completed } = await startTask();
-    const emitTool = (
+    const diffAt = (code: string) => ({
+      key: `diff-${code}`,
+      fingerprint: code,
+      diff: 'diff --git a/a.ts b/a.ts\n+change\n',
+      diffStat: ' a.ts | 1 +',
+      diffTruncated: false,
+    });
+    const runCommand = async (
       callId: string,
-      tool: string,
-      input: Record<string, unknown>,
-      output = '',
-    ) =>
-      client.emit({
+      command: string,
+      code: string,
+    ) => {
+      // What the workspace holds once this command has finished.
+      mockCollectShippedDiff.mockResolvedValueOnce(diffAt(code));
+      await client.emit({
         type: 'message.part.updated',
         properties: {
           part: {
@@ -495,64 +505,46 @@ describe('OpenCode harness completion check', () => {
             sessionID: 'ses_1',
             messageID: 'msg_1',
             type: 'tool',
-            tool,
+            tool: 'bash',
             callID: callId,
             state: {
               status: 'completed',
-              input,
-              output,
+              input: { command },
+              output: 'ok',
               metadata: { exitCode: 0 },
             },
           },
         },
       });
+    };
 
     try {
-      await emitTool(
-        'call_1',
-        'bash',
-        { command: 'pnpm vitest run' },
-        'Tests  12 passed (12)',
+      await runCommand('call_1', 'pnpm vitest run', 'code-1');
+      // No pattern would recognize this as an edit; the fingerprint does.
+      await runCommand(
+        'call_2',
+        "python3 - <<'EOF'\nopen('src/guard.ts','w').write(new_source)\nEOF",
+        'code-2',
       );
-      // Prose and files outside the workspace leave the run standing.
-      await emitTool('call_2', 'edit', {
-        filePath: '/tmp/workspace/README.md',
-      });
-      await emitTool('call_3', 'write', { filePath: '/tmp/pr-body.md' });
-      await emitTool(
-        'call_4',
-        'bash',
-        { command: 'pnpm check-types' },
-        'Tasks: 27 successful',
-      );
-      await emitTool('call_5', 'edit', {
-        filePath: '/tmp/workspace/src/guard.ts',
-      });
-      await emitTool(
-        'call_6',
-        'bash',
-        { command: 'git status --short' },
-        ' M src/guard.ts',
-      );
-      // A shell rewrite counts the same as an editor tool.
-      await emitTool('call_7', 'bash', {
-        command: "sed -i 's/guard/check/' src/guard.ts",
-      });
+      await runCommand('call_3', 'pnpm check-types', 'code-2');
+      // A formatter rewrites files without changing the fingerprint.
+      await runCommand('call_4', 'pnpm format', 'code-2');
+      mockCollectShippedDiff.mockResolvedValue(diffAt('code-2'));
       await completeTurn(client, 'msg_1', 'Removed the guard. Tests pass.');
 
       await vi.waitFor(() => expect(completed()).toHaveLength(1));
       expect(
         mockRequestTaskCompletionCheck.mock.calls[0]![1].commands.map(
           (entry: { command: string; ranBeforeLaterEdit: boolean }) => [
-            entry.command,
+            entry.command.split('\n')[0],
             entry.ranBeforeLaterEdit,
           ],
         ),
       ).toEqual([
         ['pnpm vitest run', true],
-        ['pnpm check-types', true],
-        ['git status --short', true],
-        ["sed -i 's/guard/check/' src/guard.ts", false],
+        ["python3 - <<'EOF'", false],
+        ['pnpm check-types', false],
+        ['pnpm format', false],
       ]);
     } finally {
       harness.dispose();
@@ -595,17 +587,22 @@ describe('OpenCode harness completion check', () => {
       await runTests('call_1');
       await completeTurn(client, 'msg_1', 'Removed the guard. Tests pass.');
       await vi.waitFor(() => expect(completed()).toHaveLength(1));
-      expect(sentCommands(0)).toHaveLength(1);
+      expect(sentCommands(0)).toEqual([
+        expect.objectContaining({ ranBeforeLaterEdit: false }),
+      ]);
 
       // Nothing changed since the tests ran, so that run still stands.
       await followUp('Is it pushed?', 2);
       await completeTurn(client, 'msg_2', 'Yes, pushed. Tests pass.');
       await vi.waitFor(() => expect(completed()).toHaveLength(2));
-      expect(sentCommands(1)).toHaveLength(1);
+      expect(sentCommands(1)).toEqual([
+        expect.objectContaining({ ranBeforeLaterEdit: false }),
+      ]);
 
       // More code changed and nothing was run: "tests pass" has no support.
       mockCollectShippedDiff.mockResolvedValue({
         key: 'diff-2',
+        fingerprint: 'code-2',
         diff: 'diff --git a/a.ts b/a.ts\n+more\n',
         diffStat: ' a.ts | 2 +',
         diffTruncated: false,
@@ -613,7 +610,12 @@ describe('OpenCode harness completion check', () => {
       await followUp('Also remove the helper.', 3);
       await completeTurn(client, 'msg_3', 'Removed the helper. Tests pass.');
       await vi.waitFor(() => expect(completed()).toHaveLength(3));
-      expect(sentCommands(2)).toEqual([]);
+      expect(sentCommands(2)).toEqual([
+        expect.objectContaining({
+          command: 'pnpm vitest run',
+          ranBeforeLaterEdit: true,
+        }),
+      ]);
     } finally {
       harness.dispose();
     }

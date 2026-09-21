@@ -8,7 +8,6 @@ import {
   clipDiffByFile,
   collectShippedDiff,
   isCompletionGateEligible,
-  isLikelySourceMutatingCommand,
 } from '../opencode-server/completion-gate';
 
 const tempDirs: string[] = [];
@@ -167,6 +166,38 @@ describe('collectShippedDiff', () => {
     expect(shipped?.diff).toContain('# repository: acme/web');
   });
 
+  it('keeps its fingerprint through a reformat and changes it on a real edit', async () => {
+    const repo = createCheckout();
+    write(repo, 'src/app.ts', "export const app = { value: 'two' };\n");
+    const before = await collectShippedDiff(repo);
+
+    // What a formatter or pre-commit hook does.
+    write(repo, 'src/app.ts', 'export const app = {\n  value: "two",\n}\n');
+    const reformatted = await collectShippedDiff(repo);
+
+    // What an editor tool, `sed -i`, or a heredoc script does.
+    write(repo, 'src/app.ts', 'export const app = {\n  value: "three",\n}\n');
+    const edited = await collectShippedDiff(repo);
+
+    expect(reformatted?.key).not.toBe(before?.key);
+    expect(reformatted?.fingerprint).toBe(before?.fingerprint);
+    expect(edited?.fingerprint).not.toBe(before?.fingerprint);
+  });
+
+  it('keeps its fingerprint when the work is committed', async () => {
+    const repo = createCheckout();
+    git(repo, 'checkout', '-q', '-b', 'task');
+    write(repo, 'src/app.ts', 'export const app = 2;\n');
+    write(repo, 'src/new.ts', 'export const added = true;\n');
+    const uncommitted = await collectShippedDiff(repo);
+
+    commit(repo, 'work');
+    const committed = await collectShippedDiff(repo);
+
+    // Tests run before `git commit` still vouch for the committed code.
+    expect(committed?.fingerprint).toBe(uncommitted?.fingerprint);
+  });
+
   it('changes its key when the diff changes', async () => {
     const repo = createCheckout();
     write(repo, 'src/app.ts', 'export const app = 2;\n');
@@ -226,63 +257,6 @@ describe('isCompletionGateEligible', () => {
         ROOMOTE_TASK_TYPE: 'github_pr_review',
       }),
     ).toBe(false);
-  });
-});
-
-describe('isLikelySourceMutatingCommand', () => {
-  it.each([
-    "sed -i 's/guard/check/' src/guard.ts",
-    "sed -i '' -e 's/a/b/' src/guard.ts",
-    "perl -pi -e 's/a/b/' src/guard.ts",
-    'git checkout -- src/guard.ts',
-    'git checkout origin/main -- src/guard.ts',
-    'git checkout .',
-    'git checkout feature/existing-pr',
-    'git switch main',
-    'git -C packages/api checkout feature/existing-pr',
-    'git --no-pager -c core.hooksPath=/dev/null switch main',
-    'git -C packages/api merge origin/main',
-    'git checkout -B fix/remove-guard origin/main',
-    'git checkout -b fix/remove-guard origin/main',
-    'git switch -C fix/remove-guard origin/main',
-    'gh pr checkout 12 && git checkout feature/existing-pr',
-    'git reset --hard origin/main',
-    'git restore src/guard.ts',
-    'git stash pop',
-    'git merge origin/main',
-    'git apply /tmp/fix.patch',
-    'patch -p1 < /tmp/fix.patch',
-    'echo "export const guard = false;" > src/guard.ts',
-    'cat /tmp/new.ts >> src/guard.ts',
-    'node gen.js | tee src/generated.ts',
-  ])('treats %s as an edit', (command) => {
-    expect(isLikelySourceMutatingCommand(command)).toBe(true);
-  });
-
-  it.each([
-    'pnpm vitest run src/guard.test.ts',
-    'pnpm vitest run 2>&1 | tail -20',
-    'pnpm check-types > /tmp/types.log 2>&1',
-    'pnpm lint >/dev/null',
-    'pnpm format',
-    'git status --short',
-    'git diff --stat',
-    'git checkout -b fix/remove-guard',
-    'git switch -c fix/remove-guard',
-    'git checkout -B fix/remove-guard',
-    'git -C packages/api checkout -b fix/remove-guard',
-    'git -C packages/api status --short',
-    'git add -A && git checkout -b fix/remove-guard && git commit -m wip',
-    'git reset HEAD -- src/unexpected.ts',
-    'git reset',
-    'git restore --staged src/unexpected.ts',
-    'git add -A && git commit -m "Remove the guard"',
-    'git push origin HEAD',
-    'gh pr edit 12 --body-file /tmp/pr-body.md',
-    "grep -rn 'guard' src | head",
-    'node -e "console.log(1 > 0)"',
-  ])('leaves a validation run standing after %s', (command) => {
-    expect(isLikelySourceMutatingCommand(command)).toBe(false);
   });
 });
 

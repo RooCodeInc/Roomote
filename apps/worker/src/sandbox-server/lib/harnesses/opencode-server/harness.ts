@@ -116,8 +116,8 @@ import {
   buildCompletionGateReminder,
   collectShippedDiff,
   isCompletionGateEligible,
-  isLikelySourceMutatingCommand,
   requestTaskCompletionCheck,
+  UNCHANGED_WORKSPACE_FINGERPRINT,
 } from './completion-gate';
 
 interface OpenCodeServerHarnessOptions {
@@ -308,15 +308,6 @@ interface OpenCodeChildSessionRelationship {
 
 const OPEN_CODE_EXECUTE_TOOLS = new Set(['bash', 'shell']);
 const OPEN_CODE_READ_TOOLS = new Set(['read']);
-const OPEN_CODE_EDIT_TOOLS = new Set([
-  'edit',
-  'write',
-  'patch',
-  'multiedit',
-  'apply_patch',
-]);
-// Edits to prose do not invalidate a test run.
-const NON_SOURCE_EDIT_PATTERN = /\.(md|mdx|txt)$/i;
 const OPEN_CODE_SEARCH_TOOLS = new Set(['grep', 'glob', 'find', 'list', 'ls']);
 const MAX_OPENCODE_STOP_HOOK_REMINDERS = 3;
 // The completion check is a fast, fallible read of the diff. It gets one
@@ -1773,12 +1764,17 @@ export class OpenCodeServerHarness
   private taskStopGeneration = 0;
   // The parent agent's latest shell commands, as observed from OpenCode: the
   // validation evidence the completion check holds the report against. Each
-  // carries the request generation it ran under, because a test run from an
-  // earlier turn says nothing about code changed since.
+  // carries a fingerprint of the workspace diff taken right after it ran. A
+  // run counts only while that still matches the code being shipped, however
+  // the code was changed since (editor tool, `sed -i`, heredoc script, git),
+  // in this turn or a later one. Nothing here guesses from the command text.
   private completionGateCommands: Array<
-    TaskCompletionCommand & { generation: number }
+    Omit<TaskCompletionCommand, 'ranBeforeLaterEdit'> & {
+      fingerprintAfter: Promise<string | null>;
+    }
   > = [];
-  private completionGateLastDiffKey: string | null = null;
+  // Serializes the snapshots so each reads the workspace in command order.
+  private completionGateSnapshots: Promise<unknown> = Promise.resolve();
   // The report the agent gave before the check reopened its turn. The
   // follow-up turn only adds a short correction, so the two are joined.
   private completionGateHeldReport: string | null = null;
@@ -2313,7 +2309,6 @@ export class OpenCodeServerHarness
     this.completionGateRequestGeneration += 1;
     this.completionGateHeldReport = null;
     this.completionGateCommands = [];
-    this.completionGateLastDiffKey = null;
     this.ignoreNextStopHookSessionIdle = false;
     this.ignoreNextQueuedDrainSessionIdle = false;
     this.currentWorkflowPhase = command.data.workflowPhase ?? null;
@@ -5472,39 +5467,14 @@ export class OpenCodeServerHarness
   }
 
   /**
-   * Keeps the parent agent's most recent shell commands for the check, and
-   * marks them stale once a later source edit lands: a test run says nothing
-   * about code changed after it.
+   * Keeps the parent agent's most recent shell commands for the check, each
+   * with a snapshot of what the workspace held once it finished.
    */
   private recordCompletionGateCommand(
     sessionId: string,
     normalized: ReturnType<typeof normalizeOpenCodeToolPart>,
   ): void {
     const { isExecute, command, exitCode } = normalized.resultPayload;
-
-    if (
-      sessionId === this.sessionId &&
-      normalized.status === 'completed' &&
-      OPEN_CODE_EDIT_TOOLS.has(normalized.toolName.trim().toLowerCase())
-    ) {
-      const rawInput = asRecord(
-        (normalized.resultPayload as Record<string, unknown>).rawInput,
-      );
-      const filePath = asString(rawInput?.filePath);
-      const editsSource = filePath
-        ? !NON_SOURCE_EDIT_PATTERN.test(filePath) &&
-          !path.relative(this.workspacePath, filePath).startsWith('..')
-        : // A patch names its files inside the patch text; assume source.
-          true;
-
-      if (editsSource) {
-        for (const entry of this.completionGateCommands) {
-          entry.ranBeforeLaterEdit = true;
-        }
-      }
-
-      return;
-    }
 
     // Subagent sessions run their own commands; the report under check is the
     // parent's, and so is the evidence.
@@ -5517,20 +5487,23 @@ export class OpenCodeServerHarness
       return;
     }
 
-    if (
-      normalized.status === 'completed' &&
-      isLikelySourceMutatingCommand(command)
-    ) {
-      // `sed -i`, `git checkout -- file`, a redirect into a source file: the
-      // shell edited code just as an editor tool would have.
-      for (const entry of this.completionGateCommands) {
-        entry.ranBeforeLaterEdit = true;
-      }
+    if (!isCompletionGateEligible(this.commandEnv)) {
+      return;
     }
 
+    // Taken off the event path: the model needs seconds to issue its next
+    // tool call, git needs a fraction of one. A failed snapshot is `null`,
+    // which never matches, so the run is left out rather than trusted.
+    const fingerprintAfter = this.completionGateSnapshots.then(() =>
+      collectShippedDiff(this.workspacePath).then(
+        (shipped) => shipped?.fingerprint ?? UNCHANGED_WORKSPACE_FINGERPRINT,
+        () => null,
+      ),
+    );
+    this.completionGateSnapshots = fingerprintAfter;
+
     this.completionGateCommands.push({
-      generation: this.completionGateRequestGeneration,
-      ranBeforeLaterEdit: false,
+      fingerprintAfter,
       command: command.slice(0, TASK_COMPLETION_GATE_LIMITS.commandMaxChars),
       exitCode:
         typeof exitCode === 'number' && Number.isInteger(exitCode)
@@ -5593,14 +5566,17 @@ export class OpenCodeServerHarness
       }
 
       this.completionGateLastCheckedKey = checkedKey;
-      // Evidence from earlier turns still stands only while the code it
-      // validated is unchanged. Once this turn changed the diff, a claim that
-      // tests pass has to rest on commands run this turn.
-      const changedThisTurn = shipped.key !== this.completionGateLastDiffKey;
-      this.completionGateLastDiffKey = shipped.key;
-      const commands = this.completionGateCommands
-        .filter((entry) => !changedThisTurn || entry.generation === generation)
-        .map(({ generation: _generation, ...command }) => command);
+      // A run vouches for the code only if the code is still what it was when
+      // the run finished. Reformatting alone does not change the fingerprint.
+      const commands = await Promise.all(
+        this.completionGateCommands.map(
+          async ({ fingerprintAfter, ...command }) => ({
+            ...command,
+            ranBeforeLaterEdit:
+              (await fingerprintAfter) !== shipped.fingerprint,
+          }),
+        ),
+      );
       const startedAt = Date.now();
       const verdict = await requestTaskCompletionCheck(this.commandEnv, {
         report: report.slice(-TASK_COMPLETION_GATE_LIMITS.reportMaxChars),
