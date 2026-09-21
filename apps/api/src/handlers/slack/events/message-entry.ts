@@ -219,15 +219,12 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
     fastSessionOwner?.kind === 'user' &&
     (await isDeploymentExperimentEnabled('slackPeerConversations'));
 
-  if (
+  const requiresExplicitMentionForPeerMessage =
     !peerConversationsExperimentEnabled &&
     mentionsSlackUserOtherThanBotWithoutMentioningBot(
       event,
       slackInstallation.botUserId,
-    )
-  ) {
-    return { shouldRoute: false };
-  }
+    );
 
   let roomoteThreadMatch: Awaited<
     ReturnType<typeof findRoomoteOwnedSlackThread>
@@ -265,6 +262,10 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
 
   if (!eligibilityReason) {
     return { shouldRoute: false };
+  }
+
+  if (requiresExplicitMentionForPeerMessage) {
+    return { shouldRoute: false, shouldRecordConversationMessage: true };
   }
 
   const threadMessages = await slack

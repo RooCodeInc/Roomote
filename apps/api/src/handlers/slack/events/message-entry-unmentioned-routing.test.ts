@@ -351,10 +351,32 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
           text: '<@U333> what do you think?',
         }),
       ),
-    ).resolves.toEqual({ shouldRoute: false });
+    ).resolves.toEqual({
+      shouldRoute: false,
+      shouldRecordConversationMessage: true,
+    });
     expect(peerConversationsExperimentEnabledMock).toHaveBeenCalledWith(
       'slackPeerConversations',
     );
+    expect(fetchThreadMessagesMock).not.toHaveBeenCalled();
+  });
+
+  it('does not mark an unrelated peer message recordable', async () => {
+    getFastAgentSessionOwnerMock.mockResolvedValue(null);
+    findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
+    findActiveSlackTaskRunMock.mockResolvedValue(null);
+    findCompletedSlackTaskRunWithSnapshotMock.mockResolvedValue(null);
+
+    await expect(
+      routeDecision(
+        threadReplyEvent({
+          user: 'U111',
+          ts: '102.000',
+          text: '<@U333> what do you think?',
+        }),
+      ),
+    ).resolves.toEqual({ shouldRoute: false });
+    expect(fetchThreadMessagesMock).not.toHaveBeenCalled();
   });
 
   it('keeps routing after the sender mentions themself in a fast-agent thread', async () => {
