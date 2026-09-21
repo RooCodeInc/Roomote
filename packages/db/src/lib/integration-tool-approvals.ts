@@ -4,6 +4,7 @@ import { and, eq, gt, inArray, sql } from 'drizzle-orm';
 
 import type {
   IntegrationToolApprovalMetadata,
+  IntegrationToolAutoEvaluation,
   IntegrationToolPolicyMetadata,
   IntegrationToolPolicyMode,
   IntegrationToolSessionOverrideMetadata,
@@ -103,14 +104,20 @@ type IntegrationToolApprovalRow =
 function policyMetadata(
   row: Pick<
     IntegrationToolPolicyRow,
-    'id' | 'integrationId' | 'toolName' | 'mode' | 'updatedAt' | 'createdAt'
+    | 'id'
+    | 'integrationId'
+    | 'toolName'
+    | 'mode'
+    | 'auto'
+    | 'updatedAt'
+    | 'createdAt'
   >,
 ): IntegrationToolPolicyMetadata {
   return {
     policyId: row.id,
     integrationId: row.integrationId,
     toolName: row.toolName,
-    mode: row.mode,
+    mode: row.mode === 'ask' && row.auto ? 'auto' : row.mode,
     updatedAt: row.updatedAt.toISOString(),
     createdAt: row.createdAt.toISOString(),
   };
@@ -198,8 +205,11 @@ async function upsertPolicy(
       );
     return;
   }
+  // `auto` is stored as `ask` with a flag, so a release that predates it
+  // still asks about the tool instead of reading an unknown mode as allow.
   const changes = {
-    mode: input.mode,
+    mode: input.mode === 'auto' ? ('ask' as const) : input.mode,
+    auto: input.mode === 'auto',
     ...store.ownValues,
     updatedAt: sql`clock_timestamp()`,
   };
@@ -471,6 +481,17 @@ export async function markIntegrationToolApprovalConsumed(input: {
   requesterUserId: string;
 }): Promise<boolean> {
   return claimApprovedIntegrationToolApproval(input, 'consumed');
+}
+
+/** Record the decision model's view of a call to a tool in `auto` mode. */
+export async function recordIntegrationToolAutoEvaluation(
+  approvalId: string,
+  autoEvaluation: IntegrationToolAutoEvaluation,
+): Promise<void> {
+  await db
+    .update(integrationToolApprovalRequests)
+    .set({ autoEvaluation })
+    .where(eq(integrationToolApprovalRequests.id, approvalId));
 }
 
 /** Lazily fail an unanswered window closed; safe to call on any pending row. */

@@ -29,7 +29,9 @@ export function IntegrationToolApprovalsExperimentalSetting() {
           tools dialog in Settings → Integrations offers Always allow (default),
           Ask first, and Reject per tool. Ask first pauses each call until the
           Session owner allows it once, stops the asks for the rest of that
-          Session, or rejects it; Reject blocks it outright. A task asks the
+          Session, or rejects it; Reject blocks it outright. Auto is a preview
+          that asks like Ask first and records what a decision model would have
+          decided, so its judgment can be compared with yours. A task asks the
           owner of its Session the same way, and a task nobody can answer for,
           such as one an automation started, cannot run an Ask first tool.
           Session owners can also ask to be asked about any tool from its call

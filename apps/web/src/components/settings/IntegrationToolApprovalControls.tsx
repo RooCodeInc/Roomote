@@ -25,15 +25,26 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  Sparkles,
   type LucideIcon,
 } from '@/components/system';
 
 const APPROVAL_MODES: {
   mode: IntegrationToolPolicyMode;
   label: string;
+  hint?: string;
   icon: LucideIcon;
 }[] = [
   { mode: 'allow', label: 'Always allow', icon: CircleCheck },
+  // A preview: it asks exactly like Ask first, and records what a decision
+  // model made of each call so its judgment can be checked before it is
+  // trusted to skip the ask.
+  {
+    mode: 'auto',
+    label: 'Auto (preview)',
+    hint: 'Auto (preview): asks first, and records what Roomote would decide',
+    icon: Sparkles,
+  },
   { mode: 'ask', label: 'Ask first', icon: Hand },
   { mode: 'reject', label: 'Reject', icon: Ban },
 ];
@@ -64,7 +75,7 @@ function IntegrationToolApprovalModeControl({
       aria-label={`Approval mode for ${toolName}`}
       className="flex shrink-0 items-center gap-0.5 rounded-md bg-muted/50 p-0.5"
     >
-      {APPROVAL_MODES.map(({ mode, label, icon: Icon }) => {
+      {APPROVAL_MODES.map(({ mode, label, hint, icon: Icon }) => {
         const checked = mode === value;
         return (
           <button
@@ -73,7 +84,7 @@ function IntegrationToolApprovalModeControl({
             role="radio"
             aria-checked={checked}
             aria-label={label}
-            title={label}
+            title={hint ?? label}
             disabled={disabled}
             onClick={() => {
               if (!checked) onChange(mode);

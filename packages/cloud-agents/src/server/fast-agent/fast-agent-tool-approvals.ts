@@ -18,6 +18,7 @@ import {
   markIntegrationToolApprovalConsumed,
 } from '@roomote/db/server';
 import {
+  integrationToolModeAsks,
   integrationToolPolicyKey,
   resolveEffectiveIntegrationToolMode,
   resolveGoverningIntegrationToolPolicies,
@@ -26,6 +27,7 @@ import {
   type IntegrationToolSessionOverrideMetadata,
 } from '@roomote/types';
 
+import { recordIntegrationToolAutoEvaluationInBackground } from '../integration-tool-auto-evaluation';
 import type { FastAgentIntegration } from './fast-agent-integration-broker';
 import { buildFastAgentCodeModeServerNames } from './fast-agent-tool-policy';
 
@@ -68,6 +70,7 @@ type MountedIntegrationTool = {
   toolName: string;
   serverName: string;
   key: string;
+  description?: string;
 };
 
 /** Every mounted tool with the native key and server name it runs under. */
@@ -84,6 +87,7 @@ function listMountedIntegrationTools(
       toolName: tool.name,
       serverName,
       key: codeModeToolKey(serverName, tool.name),
+      description: tool.description,
     }));
   });
 }
@@ -133,7 +137,8 @@ export function buildIntegrationToolApprovalRules(
     if (mode === 'reject') {
       actionByKey.set(tool.key, 'deny');
     } else if (
-      (mode === 'ask' || (mode === 'allow' && policyMode === 'ask')) &&
+      (integrationToolModeAsks(mode) ||
+        (mode === 'allow' && integrationToolModeAsks(policyMode))) &&
       actionByKey.get(tool.key) !== 'deny'
     ) {
       actionByKey.set(tool.key, 'ask');
@@ -266,7 +271,15 @@ export async function resolveFastAgentToolApprovalRules(input: {
   sessionId?: string;
   /** The Session owner, whose personal policies tighten the deployment ones. */
   ownerUserId?: string;
-}): Promise<{ rules: PermissionRuleset; hash: string } | undefined> {
+}): Promise<
+  | {
+      rules: PermissionRuleset;
+      hash: string;
+      /** Policy keys of the tools in `auto` mode; see the bridge. */
+      autoToolKeys: Set<string>;
+    }
+  | undefined
+> {
   const enabled = await isDeploymentExperimentEnabled(
     'integrationToolApprovals',
   );
@@ -280,21 +293,31 @@ export async function resolveFastAgentToolApprovalRules(input: {
       ? listIntegrationToolSessionOverrides(input.sessionId)
       : Promise.resolve([]),
   ]);
+  // The Session owner's personal policies layer on the deployment ones; see
+  // `resolveGoverningIntegrationToolPolicies` for the rule.
+  const governing = resolveGoverningIntegrationToolPolicies({
+    deploymentPolicies: policies,
+    userPolicies,
+    scopeOf: (integrationId) =>
+      input.integrations.find((integration) => integration.id === integrationId)
+        ?.toolApprovalPolicyScope,
+  });
   const rules = buildIntegrationToolApprovalRules(
     input.integrations,
-    // The Session owner's personal policies layer on the deployment ones;
-    // see `resolveGoverningIntegrationToolPolicies` for the rule.
-    resolveGoverningIntegrationToolPolicies({
-      deploymentPolicies: policies,
-      userPolicies,
-      scopeOf: (integrationId) =>
-        input.integrations.find(
-          (integration) => integration.id === integrationId,
-        )?.toolApprovalPolicyScope,
-    }),
+    governing,
     sessionOverrides,
   );
-  return { rules, hash: hashIntegrationToolApprovalRules(rules) };
+  return {
+    rules,
+    hash: hashIntegrationToolApprovalRules(rules),
+    autoToolKeys: new Set(
+      governing
+        .filter((policy) => policy.mode === 'auto')
+        .map((policy) =>
+          integrationToolPolicyKey(policy.integrationId, policy.toolName),
+        ),
+    ),
+  };
 }
 
 /**
@@ -332,6 +355,13 @@ export function createFastAgentToolApprovalBridge(input: {
   sessionId: string;
   userId: string;
   integrations: FastAgentIntegration[];
+  /**
+   * Tools in `auto` mode. Auto is a preview: their asks go to the requester
+   * like any other, and the decision model's view is recorded beside the
+   * answer. `userRequest` is what that model checks the call against.
+   */
+  autoToolKeys?: Set<string>;
+  userRequest?: string;
   /** Optional chat-surface notification for non-web conversations. */
   notify?: (approval: IntegrationToolApprovalMetadata) => Promise<void>;
   signal?: AbortSignal;
@@ -507,6 +537,20 @@ export function createFastAgentToolApprovalBridge(input: {
           argsSummary: args ?? null,
         },
       );
+      if (
+        input.autoToolKeys?.has(
+          integrationToolPolicyKey(tool.integrationId, tool.toolName),
+        )
+      ) {
+        recordIntegrationToolAutoEvaluationInBackground(approval.approvalId, {
+          integrationId: tool.integrationId,
+          toolName: tool.toolName,
+          toolDescription: tool.description,
+          args,
+          userRequest: input.userRequest,
+          userId: input.userId,
+        });
+      }
       if (input.notify && !notifiedApprovalIds.has(approval.approvalId)) {
         notifiedApprovalIds.add(approval.approvalId);
         await input.notify(approval);

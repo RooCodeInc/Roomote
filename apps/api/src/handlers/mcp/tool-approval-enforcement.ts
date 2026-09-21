@@ -9,8 +9,10 @@ import {
   listIntegrationToolUserPolicies,
 } from '@roomote/db/server';
 import {
+  integrationToolModeAsks,
   resolveEffectiveIntegrationToolMode,
   resolveGoverningIntegrationToolPolicies,
+  type IntegrationToolPolicyMode,
 } from '@roomote/types';
 
 export type ProxyToolApprovalBlock = 'reject' | 'needs_approval';
@@ -70,7 +72,7 @@ export async function resolveProxyToolApprovalBlocks(input: {
     userPolicies,
     scopeOf: () => input.policyScope,
   });
-  const policyModes = new Map<string, 'allow' | 'ask' | 'reject'>();
+  const policyModes = new Map<string, IntegrationToolPolicyMode>();
   for (const { integrationId, toolName, mode } of governing) {
     if (integrationId === input.integrationId) policyModes.set(toolName, mode);
   }
@@ -97,7 +99,7 @@ export async function resolveProxyToolApprovalBlocks(input: {
     });
     if (mode === 'reject') {
       blocks.set(toolName, 'reject');
-    } else if (mode === 'ask' && input.tokenType === 'run') {
+    } else if (integrationToolModeAsks(mode) && input.tokenType === 'run') {
       blocks.set(toolName, 'needs_approval');
     }
   }

@@ -1,6 +1,7 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 
+import { resolveActorScopedUserContext } from '../lib/auth/resolve-actor-scoped-user';
 import {
   getTaskToolApprovalStatus,
   requestTaskToolApproval,
@@ -32,8 +33,12 @@ export const toolApprovalsRouter = router({
         })
         .strict(),
     )
-    .mutation(({ ctx, input }) =>
-      requestTaskToolApproval({ runId: ctx.runId, ...input }),
+    .mutation(async ({ ctx, input }) =>
+      requestTaskToolApproval({
+        runId: ctx.runId,
+        actingUserId: (await resolveActorScopedUserContext(ctx.auth)).userId,
+        ...input,
+      }),
     ),
 
   /** Poll one of this task's approvals while the Session owner decides. */

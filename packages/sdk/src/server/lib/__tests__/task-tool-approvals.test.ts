@@ -1,4 +1,5 @@
 const mocks = vi.hoisted(() => ({
+  recordAuto: vi.fn(),
   experiment: vi.fn(async () => true),
   findRun: vi.fn(async () => ({ taskId: 'task-1' }) as unknown),
   sessionForTask: vi.fn(async () => null as unknown),
@@ -11,6 +12,11 @@ const mocks = vi.hoisted(() => ({
   getApproval: vi.fn(async () => undefined as unknown),
   expire: vi.fn(async () => undefined),
 }));
+
+vi.mock(
+  '@roomote/cloud-agents/server/integration-tool-auto-evaluation',
+  () => ({ recordIntegrationToolAutoEvaluationInBackground: mocks.recordAuto }),
+);
 
 vi.mock('@roomote/db/server', () => ({
   db: { query: { taskRuns: { findFirst: mocks.findRun } } },
@@ -125,6 +131,32 @@ describe('requestTaskToolApproval', () => {
         }),
       }),
     );
+  });
+
+  it("still asks about an auto tool, and records the model's view beside the ask", async () => {
+    mocks.userPolicies.mockResolvedValue([
+      { integrationId: 'linear', toolName: 'save_issue', mode: 'auto' },
+    ]);
+    await expect(
+      requestTaskToolApproval({ ...ask, actingUserId: 'user-1' }),
+    ).resolves.toEqual({ outcome: 'pending', approvalId: 'approval-1' });
+    expect(mocks.recordAuto).toHaveBeenCalledWith(
+      'approval-1',
+      expect.objectContaining({
+        integrationId: 'linear',
+        toolName: 'save_issue',
+        args: { title: 'Hi' },
+        taskId: 'task-1',
+      }),
+    );
+
+    // A stricter deployment Ask first wins, so nothing is evaluated.
+    mocks.recordAuto.mockClear();
+    mocks.deploymentPolicies.mockResolvedValue([
+      { integrationId: 'linear', toolName: 'save_issue', mode: 'ask' },
+    ]);
+    await requestTaskToolApproval({ ...ask, actingUserId: 'user-1' });
+    expect(mocks.recordAuto).not.toHaveBeenCalled();
   });
 
   it('answers without a card once the owner allowed the tool for the session', async () => {

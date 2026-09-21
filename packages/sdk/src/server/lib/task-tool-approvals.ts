@@ -14,6 +14,7 @@ import {
   listIntegrationToolUserPolicies,
   taskRuns,
 } from '@roomote/db/server';
+import { recordIntegrationToolAutoEvaluationInBackground } from '@roomote/cloud-agents/server/integration-tool-auto-evaluation';
 import {
   compileTaskIntegrationToolApprovals,
   resolveGoverningIntegrationToolPolicies,
@@ -97,6 +98,8 @@ export async function requestTaskToolApproval(input: {
   toolName: string;
   nativeRequestId: string;
   args?: unknown;
+  /** Whose personal policies apply; see `resolveTaskIntegrationToolApprovals`. */
+  actingUserId?: string;
 }): Promise<TaskToolApprovalRequestResult> {
   if (!(await isDeploymentExperimentEnabled('integrationToolApprovals'))) {
     return { outcome: 'not_required' };
@@ -138,7 +141,46 @@ export async function requestTaskToolApproval(input: {
     return claimed ? { outcome: 'approved' } : { outcome: 'not_required' };
   }
   const approval = await insertIntegrationToolApproval(context, call);
+  if (await isAutoTool(input)) {
+    // Auto is a preview: the owner is still asked, and the decision model's
+    // view of the call is recorded beside their answer.
+    recordIntegrationToolAutoEvaluationInBackground(approval.approvalId, {
+      integrationId: input.integrationId,
+      toolName: input.toolName,
+      args: input.args,
+      userId: session.ownerUserId,
+      taskId: session.taskId,
+    });
+  }
   return { outcome: 'pending', approvalId: approval.approvalId };
+}
+
+/**
+ * Whether the tool's governing mode is `auto`. Only decides whether the
+ * model's view gets recorded, so a custom server name that exists in both
+ * scopes is read under both layers here rather than resolving its scope.
+ */
+async function isAutoTool(input: {
+  integrationId: string;
+  toolName: string;
+  actingUserId?: string;
+}): Promise<boolean> {
+  const [deploymentPolicies, userPolicies] = await Promise.all([
+    listIntegrationToolPolicies(),
+    input.actingUserId
+      ? listIntegrationToolUserPolicies(input.actingUserId)
+      : Promise.resolve([]),
+  ]);
+  return resolveGoverningIntegrationToolPolicies({
+    deploymentPolicies,
+    userPolicies,
+    scopeOf: () => undefined,
+  }).some(
+    (policy) =>
+      policy.mode === 'auto' &&
+      policy.integrationId === input.integrationId &&
+      policy.toolName === input.toolName,
+  );
 }
 
 /** The worker's poll while the Session owner decides. */

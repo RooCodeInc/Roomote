@@ -2,6 +2,7 @@ import {
   db,
   eq,
   integrationToolApprovalRequests,
+  integrationToolPolicies,
   sessionFactory,
   sessions,
   taskFactory,
@@ -23,6 +24,7 @@ import {
   listIntegrationToolSessionOverridesForRequester,
   listPendingIntegrationToolApprovals,
   markIntegrationToolApprovalConsumed,
+  recordIntegrationToolAutoEvaluation,
   redactIntegrationToolArgs,
   setIntegrationToolSessionOverride,
   upsertIntegrationToolPolicy,
@@ -548,6 +550,68 @@ describe('auto-approved reservations', () => {
     const row = await getIntegrationToolApproval(reservation.approvalId);
     expect(row?.status).toBe('cancelled');
     expect(row?.cancelReason).toBe('experiment_disabled');
+  });
+});
+
+describe('auto mode', () => {
+  it('stores auto as an ask row a previous release still asks about', async () => {
+    const userId = await user();
+    const integrationId = `auto-${Date.now()}`;
+    await upsertIntegrationToolPolicy({
+      integrationId,
+      toolName: 'save',
+      mode: 'auto',
+      updatedByUserId: userId,
+    });
+    await upsertIntegrationToolUserPolicy({
+      userId,
+      integrationId,
+      toolName: 'save',
+      mode: 'auto',
+    });
+    const [row] = await db
+      .select()
+      .from(integrationToolPolicies)
+      .where(eq(integrationToolPolicies.integrationId, integrationId));
+    expect(row).toMatchObject({ mode: 'ask', auto: true });
+    const modeOf = (policies: { integrationId: string; mode: string }[]) =>
+      policies.find((policy) => policy.integrationId === integrationId)?.mode;
+    expect(modeOf(await listIntegrationToolPolicies())).toBe('auto');
+    expect(modeOf(await listIntegrationToolUserPolicies(userId))).toBe('auto');
+
+    // Moving to plain Ask first clears the flag on the same row.
+    await upsertIntegrationToolPolicy({
+      integrationId,
+      toolName: 'save',
+      mode: 'ask',
+      updatedByUserId: userId,
+    });
+    expect(modeOf(await listIntegrationToolPolicies())).toBe('ask');
+    await upsertIntegrationToolPolicy({
+      integrationId,
+      toolName: 'save',
+      mode: 'allow',
+      updatedByUserId: userId,
+    });
+  });
+
+  it("records the model's view beside the requester's decision", async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const approval = await insertPending({ sessionId, userId });
+    const evaluation = {
+      recommendation: 'approve' as const,
+      answers: { matchesRequest: 0.95 },
+      evaluatedAt: new Date().toISOString(),
+    };
+    await recordIntegrationToolAutoEvaluation(approval.approvalId, evaluation);
+    await decideIntegrationToolApproval(
+      { sessionId, userId },
+      { approvalId: approval.approvalId, decision: 'rejected' },
+    );
+    expect(await getIntegrationToolApproval(approval.approvalId)).toMatchObject(
+      { status: 'rejected', autoEvaluation: evaluation },
+    );
   });
 });
 
