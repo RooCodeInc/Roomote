@@ -26,6 +26,7 @@ import {
   resolveSandboxModelRuntimeEnv,
   resolveWorkspaceSourceControlProvider,
   resolveWorkspaceSourceControlHost,
+  workspaceRequiresSourceControlCredentials,
   workspaceAllowsPrivateAttribution,
   workspaceUsesOnlySourceControlProvider,
   stringifyDecryptedEnvVarValue,
@@ -514,8 +515,10 @@ export async function resolveTaskRunSourceControlProviders(
 
   // A Blank slate is stamped at launch only when the deployment has active
   // repositories to check out on demand; without a stamp it needs no
-  // source-control credentials, so never fall back to a provider default.
-  if (workspace.type === 'no_repositories') {
+  // source-control credentials. Persisted environments with no configured
+  // repositories have the same requirement even though their workspace type
+  // remains `environment`, so never fall back to a provider default for either.
+  if (!(await workspaceRequiresSourceControlCredentials(dbOrTx, workspace))) {
     return [];
   }
 

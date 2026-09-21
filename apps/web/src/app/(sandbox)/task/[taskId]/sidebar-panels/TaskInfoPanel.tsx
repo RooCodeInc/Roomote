@@ -10,6 +10,7 @@ import {
   type CodingHarness,
   type LinkedWorkItem,
   type SourceControlProvider,
+  RunStatus,
   HARNESS_LABELS,
   PRODUCT_NAME,
   getModelProviderLabel,
@@ -20,7 +21,10 @@ import {
   resolveSourceControlProviderFromPayload,
 } from '@roomote/types';
 
-import { getTaskRunDisplayError } from '@/lib/task-run-errors';
+import {
+  getTaskRunDisplayError,
+  isSnapshotUnavailableError,
+} from '@/lib/task-run-errors';
 import { formatInferenceCost } from '@/lib/formatters';
 import { getUserDisplayName } from '@/lib/user-display-name';
 import { cn } from '@/lib/utils';
@@ -253,7 +257,13 @@ export function TaskInfoPanel({
     regenerateSummary,
   } = useTaskSummary(task.id, { enabled: active });
 
-  const taskRunError = getTaskRunDisplayError(taskRun);
+  const showSnapshotUnavailableNote =
+    (taskRun.status === RunStatus.Completed ||
+      taskRun.status === RunStatus.Idle) &&
+    isSnapshotUnavailableError(taskRun);
+  const taskRunError = showSnapshotUnavailableNote
+    ? undefined
+    : getTaskRunDisplayError(taskRun);
   const startedFrom = getStartedFrom(task, taskRun);
   const linkedWorkItems = taskRun.payload?.linkedWorkItems ?? [];
   const effectiveHarness = taskRun.harness ?? harness;
@@ -511,6 +521,16 @@ export function TaskInfoPanel({
           </span>
         </SandboxInfoRow>
       </SandboxInfoTable>
+
+      {showSnapshotUnavailableNote && (
+        <div className="text-sm text-muted-foreground">
+          <h3 className="mb-1 font-medium">Snapshot unavailable</h3>
+          <p>
+            This run completed, but its sandbox snapshot was unavailable, so it
+            cannot be resumed.
+          </p>
+        </div>
+      )}
 
       {taskRunError && (
         <div>

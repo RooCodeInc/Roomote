@@ -47,10 +47,16 @@ transport limits vary by surface.
 | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | Pure text       | `.txt`, `.md`, `.markdown`                                                                                                                    |
 | Structured text | `.json`, `.yaml`, `.yml`, `.xml`, `.log`, `.conf`, `.config`, `.ini`, `.env`, `.sh`, `.bash`, `.zsh`, `.toml`, `.properties`                  |
-| Code            | `.html`, `.htm`, `.css`, `.js`, `.jsx`, `.ts`, `.tsx`, `.py`, `.rb`, `.go`, `.rs`, `.java`, `.c`, `.h`, `.cpp`, `.cc`, `.cxx`, `.hpp`, `.sql` |
+| Code            | `.html`, `.htm`, `.css`, `.js`, `.jsx`, `.ts`, `.tsx`, `.py`, `.r`, `.ipynb`, `.rb`, `.go`, `.rs`, `.java`, `.c`, `.h`, `.cpp`, `.cc`, `.cxx`, `.hpp`, `.sql` |
 | Spreadsheets    | `.csv`, `.tsv`, `.xlsx`, `.xls`                                                                                                               |
 | Documents       | `.pdf`, `.docx`                                                                                                                               |
 | Presentations   | `.pptx`                                                                                                                                       |
+
+An attached `.r` script can also drive an environment recipe: Roomote detects
+the direct packages it uses and proposes an `r-bioconductor` environment, then
+resolves those packages from the official CRAN and Bioconductor repositories.
+See the [environment lifecycle](/environments#environment-lifecycle).
+
 | Images          | `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`                                                                                              |
 
 ## How Roomote uses them

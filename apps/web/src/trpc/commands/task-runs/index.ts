@@ -10,6 +10,7 @@ import {
   desc,
   eq,
   inArray,
+  markEnvironmentVerificationFailedIfCurrent,
   markTaskStartParallelCountEndedAt,
   taskRuns,
 } from '@roomote/db/server';
@@ -48,6 +49,26 @@ export async function cancelTaskRunCommand(
     }
 
     if (!isExitedRunStatus(job.status)) {
+      const markFailedEnvironmentVerification = async () => {
+        // A canceled verification attempt that never reported a result marks
+        // its environment failed; a bound recipe candidate stays resumable by
+        // retrying the identical request.
+        const verifiesEnvironmentId =
+          job.payload &&
+          typeof job.payload === 'object' &&
+          !Array.isArray(job.payload)
+            ? (job.payload as Record<string, unknown>).verifiesEnvironmentId
+            : null;
+        if (typeof verifiesEnvironmentId === 'string') {
+          await markEnvironmentVerificationFailedIfCurrent(db, {
+            environmentId: verifiesEnvironmentId,
+            verificationTaskId: job.taskId,
+            error:
+              'The verification task was canceled before reporting a result.',
+          });
+        }
+      };
+
       if (input.runId !== undefined) {
         const terminate = input.terminate !== false;
         const result = await stopTaskRun({
@@ -64,6 +85,7 @@ export async function cancelTaskRunCommand(
         if (terminate && result.mode === 'direct_cancel') {
           void settleLiveTaskMessageOnExit(job, RunStatus.Canceled);
         }
+        await markFailedEnvironmentVerification();
         return { success: true };
       }
 
@@ -98,6 +120,7 @@ export async function cancelTaskRunCommand(
         // A run canceled before any worker claimed it has nobody else to
         // settle its live task message.
         void settleLiveTaskMessageOnExit(job, RunStatus.Canceled);
+        await markFailedEnvironmentVerification();
       }
     }
 

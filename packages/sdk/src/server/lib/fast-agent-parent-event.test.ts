@@ -1202,6 +1202,27 @@ describe('deliverFastAgentParentEvent', () => {
     });
   });
 
+  it('authorizes a child continuation for the active Session owner recorded on the run', async () => {
+    await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'child_message',
+        taskId: 'task-1',
+        runId: 42,
+        actingUserId: 'u1',
+        messageId: '44444444-4444-4444-8444-444444444444',
+        purpose: 'closeout',
+        message: 'The environment was created and is ready for verification.',
+      },
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        serviceCredentialPlatformActorUserId: 'u1',
+      }),
+    );
+  });
+
   it('carries child-selected images and charts into the Fast parent turn by default', async () => {
     mocks.answerQuestion.mockResolvedValueOnce('Shared the proof.');
 

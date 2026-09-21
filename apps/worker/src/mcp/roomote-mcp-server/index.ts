@@ -66,6 +66,7 @@ import { handleSendMessage } from './send-message.js';
 import { handleListTaskModels } from './list-models.js';
 import {
   handleCreateEnvironment,
+  handlePreviewEnvironment,
   handleRecordVerification,
   handleUpdateEnvironment,
 } from './create-environment.js';
@@ -1116,10 +1117,10 @@ roomoteMcpServer.registerTool(
   'manage_environments',
   {
     title: 'Manage Environments',
-    description: `Create or update ${PRODUCT_NAME} environments, or record an environment verification result.`,
+    description: `Preview, create, or update ${PRODUCT_NAME} environments, or record an environment verification result. Before create/update, tell the user what will change and ask whether to proceed. Only perform the write after an affirmative response; admin authorization remains separate.`,
     inputSchema: {
       action: z
-        .enum(['create', 'update', 'record_verification'])
+        .enum(['preview', 'create', 'update', 'record_verification'])
         .describe('The environment action to perform'),
       definition: z
         .string()
@@ -1190,6 +1191,19 @@ roomoteMcpServer.registerTool(
         },
         config,
       );
+    }
+
+    if (params.action === 'preview') {
+      if (params.definition === undefined) {
+        return errorResult('definition is required for action "preview"');
+      }
+      return handlePreviewEnvironment({
+        definition: params.definition,
+        format: params.format,
+        name: params.name,
+        description: params.description,
+        environmentId: params.environmentId,
+      });
     }
 
     if (params.definition === undefined) {
