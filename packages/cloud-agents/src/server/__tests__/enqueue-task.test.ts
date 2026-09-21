@@ -1986,6 +1986,79 @@ describe('enqueueTaskRelaunch failed start', () => {
     expect(runsForTask).toHaveLength(2);
   });
 
+  async function createFailedStartRun(userId: string) {
+    const failedRun = await launchFresh({
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+
+    await db
+      .update(taskRuns)
+      .set({
+        status: RunStatus.Failed,
+        error: 'Workspace has exceeded its spend limit',
+        completedAt: new Date(),
+      })
+      .where(eq(taskRuns.id, failedRun.id));
+
+    return failedRun;
+  }
+
+  it('returns the retry that is still in flight when the same run is retried again', async () => {
+    const userId = await createUser();
+    const failedRun = await createFailedStartRun(userId);
+
+    const firstRetry = await enqueueTaskRelaunch(
+      { sourceRunId: failedRun.id, actingUserId: userId },
+      { enqueue: false },
+    );
+    const secondRetry = await enqueueTaskRelaunch(
+      { sourceRunId: failedRun.id, actingUserId: userId },
+      { enqueue: false },
+    );
+
+    expect(secondRetry.id).toBe(firstRetry.id);
+
+    const runsForTask = await db.query.taskRuns.findMany({
+      where: eq(taskRuns.taskId, failedRun.taskId),
+    });
+    expect(runsForTask).toHaveLength(2);
+  });
+
+  it.each([RunStatus.Canceled, RunStatus.Failed])(
+    'creates a new run when the earlier retry ended as %s',
+    async (endedStatus) => {
+      const userId = await createUser();
+      const failedRun = await createFailedStartRun(userId);
+
+      const endedRetry = await enqueueTaskRelaunch(
+        { sourceRunId: failedRun.id, actingUserId: userId },
+        { enqueue: false },
+      );
+
+      await db
+        .update(taskRuns)
+        .set({ status: endedStatus, completedAt: new Date() })
+        .where(eq(taskRuns.id, endedRetry.id));
+
+      const nextRetry = await enqueueTaskRelaunch(
+        { sourceRunId: failedRun.id, actingUserId: userId },
+        { enqueue: false },
+      );
+
+      expect(nextRetry.id).not.toBe(endedRetry.id);
+      expect(nextRetry.sourceRunId).toBe(failedRun.id);
+      expect(nextRetry.status).toBe(RunStatus.Pending);
+
+      const runsForTask = await db.query.taskRuns.findMany({
+        where: eq(taskRuns.taskId, failedRun.taskId),
+      });
+      expect(runsForTask).toHaveLength(3);
+    },
+  );
+
   it('rejects relaunch when the source run is not failed', async () => {
     const userId = await createUser();
 
