@@ -482,7 +482,16 @@ export function OnboardingCard() {
   ];
 
   const activeCard = cards.find((card) => card.visible && !dismissed[card.id]);
-  if (!activeCard) return null;
+  if (!activeCard) {
+    // Keep a pending launch validation failure visible even after every
+    // onboarding card is dismissed.
+    return (
+      <ComposerErrorDialog
+        error={delegationSession.error}
+        onClose={delegationSession.clearError}
+      />
+    );
+  }
 
   return (
     <>

@@ -12,6 +12,7 @@ let hasEnabledAutomations = true;
 let environments: unknown[] = [{}];
 let environmentsPending = false;
 let environmentsSuccess = true;
+const launcherErrorState: { error: unknown } = { error: null };
 
 const {
   mockPush,
@@ -52,8 +53,10 @@ vi.mock('@/hooks/task-runs', () => ({
   useFastSessionLauncher: () => ({
     isPending: false,
     startFastSession: mockStartDelegationSession,
-    error: null,
-    clearError: vi.fn(),
+    error: launcherErrorState.error,
+    clearError: () => {
+      launcherErrorState.error = null;
+    },
   }),
 }));
 
@@ -191,6 +194,7 @@ beforeEach(() => {
   environmentsPending = false;
   environmentsSuccess = true;
   localStorage.clear();
+  launcherErrorState.error = null;
   vi.clearAllMocks();
 });
 
@@ -208,6 +212,45 @@ it('prioritizes delegation discovery and starts its interview directly', () => {
   expect(mockStartDelegationSession).toHaveBeenCalledWith({
     text: '$explore-delegation Find something to take off my plate.',
   });
+});
+
+it('keeps the validation dialog visible after the onboarding card is dismissed', () => {
+  environments = [];
+  hasEnabledAutomations = false;
+
+  const { rerender } = render(<OnboardingCard />);
+
+  // The launch card goes away (dismissed or rotated) before the server-side
+  // validation failure arrives.
+  dismissCard();
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(screen.queryByText(/Find something/)).not.toBeInTheDocument();
+
+  launcherErrorState.error = new Error(
+    JSON.stringify([
+      {
+        code: 'custom',
+        message:
+          'Extracted attachment text exceeds the 200,000 character limit',
+        path: ['attachmentTexts'],
+      },
+    ]),
+  );
+  rerender(<OnboardingCard />);
+
+  const dialog = screen.getByRole('dialog');
+  expect(dialog).toHaveTextContent('Attachment too large');
+  expect(dialog).toHaveTextContent(
+    'attachmentTexts: Extracted attachment text exceeds the 200,000 character limit',
+  );
+  expect(dialog).toHaveTextContent(
+    'Try a different file, or provide a URL and Roomote will download it.',
+  );
+
+  fireEvent.click(screen.getByRole('button', { name: 'Got it' }));
+  // Re-render the card; the dialog only renders again if clearError failed.
+  rerender(<OnboardingCard />);
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });
 
 it('prioritizes environment setup and persists its dismissal', () => {
