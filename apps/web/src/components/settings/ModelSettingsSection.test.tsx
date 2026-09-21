@@ -844,6 +844,34 @@ describe('ModelSettingsSection', () => {
     expect(availableSection).toHaveTextContent('just now');
   });
 
+  it('persists the high-volume decision capability per model', async () => {
+    settingsData.current = buildSettingsData();
+
+    renderModelSettingsSection();
+
+    const capability = screen.getByRole('switch', {
+      name: 'Allow high-volume decisions with GPT 5.4',
+    });
+    expect(capability).not.toBeChecked();
+
+    fireEvent.click(capability);
+
+    await waitFor(() => {
+      expect(updateMutateAsyncMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          models: expect.arrayContaining([
+            expect.objectContaining({
+              id: 'openrouter/openai/gpt-5.4',
+              metadata: expect.objectContaining({
+                supportsHighVolumeDecisions: true,
+              }),
+            }),
+          ]),
+        }),
+      );
+    });
+  });
+
   it('labels model metadata and exposes tooltip details to keyboard users', async () => {
     settingsData.current = buildSettingsData();
 

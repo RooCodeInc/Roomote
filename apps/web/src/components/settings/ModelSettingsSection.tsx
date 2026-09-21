@@ -624,8 +624,27 @@ function metadataEqual(
     left.inputPricePerToken === right.inputPricePerToken &&
     left.outputPricePerToken === right.outputPricePerToken &&
     left.lastRefreshedAt === right.lastRefreshedAt &&
-    (left.supportsReasoning ?? null) === (right.supportsReasoning ?? null)
+    (left.supportsReasoning ?? null) === (right.supportsReasoning ?? null) &&
+    (left.supportsHighVolumeDecisions ?? null) ===
+      (right.supportsHighVolumeDecisions ?? null)
   );
+}
+
+function setHighVolumeDecisionCapability(
+  metadata: TaskModelMetadata | null | undefined,
+  supportsHighVolumeDecisions: boolean,
+): TaskModelMetadata {
+  return {
+    contextWindow: metadata?.contextWindow ?? null,
+    inputTypes: metadata?.inputTypes ?? null,
+    inputPricePerToken: metadata?.inputPricePerToken ?? null,
+    outputPricePerToken: metadata?.outputPricePerToken ?? null,
+    lastRefreshedAt: metadata?.lastRefreshedAt ?? null,
+    ...(metadata?.supportsReasoning !== undefined
+      ? { supportsReasoning: metadata.supportsReasoning }
+      : {}),
+    supportsHighVolumeDecisions,
+  };
 }
 
 function formatDetailedContextWindow(
@@ -1321,6 +1340,28 @@ export function ModelSettingsSection({
             reasoningEffort,
           },
         },
+      },
+      400,
+    );
+  };
+
+  const updateHighVolumeDecisionCapability = (
+    modelId: string,
+    supportsHighVolumeDecisions: boolean,
+  ) => {
+    applyDraftUpdates(
+      {
+        models: models.map((model) =>
+          model.id === modelId
+            ? {
+                ...model,
+                metadata: setHighVolumeDecisionCapability(
+                  model.metadata,
+                  supportsHighVolumeDecisions,
+                ),
+              }
+            : model,
+        ),
       },
       400,
     );
@@ -2144,6 +2185,25 @@ export function ModelSettingsSection({
                           <p className="text-xs text-muted-foreground">
                             {model.id}
                           </p>
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <Switch
+                              aria-label={`Allow high-volume decisions with ${model.displayName}`}
+                              checked={
+                                metadata?.supportsHighVolumeDecisions === true
+                              }
+                              onCheckedChange={(value) =>
+                                updateHighVolumeDecisionCapability(
+                                  model.id,
+                                  value,
+                                )
+                              }
+                            />
+                            <BasicTooltip content="Allow this model to handle high-volume typed decision batches. Leave off for ordinary language models unless the deployment has verified the cost and behavior.">
+                              <span className="cursor-help">
+                                High-volume decisions
+                              </span>
+                            </BasicTooltip>
+                          </div>
                         </div>
                       </div>
 

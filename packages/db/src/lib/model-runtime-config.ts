@@ -18,6 +18,7 @@ import {
   isSettingsOnlyProviderEnvVar,
   normalizeDeploymentModelConfig,
   normalizeOptionalReasoningEffort,
+  normalizeTaskModelId,
   normalizeTaskModelSettings,
   parseModelProviderEnvKeys,
   ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
@@ -130,6 +131,28 @@ async function loadPersistedRuntimeModelConfig(
       deployment?.taskModelSettings,
     ).codingModelRoutingRules,
   };
+}
+
+/**
+ * Look up a deployment model's persisted metadata without requiring it to be
+ * enabled for new tasks. Control-plane decision fallbacks may use a model that
+ * an operator has kept configured for a role but disabled in the task picker.
+ */
+export async function getDeploymentTaskModelOption(
+  modelId: string,
+  options: { executor?: DatabaseOrTransaction } = {},
+): Promise<TaskModelOption | undefined> {
+  const normalizedModelId = normalizeTaskModelId(modelId);
+
+  if (!normalizedModelId) {
+    return undefined;
+  }
+
+  const { catalogModels } = await loadPersistedRuntimeModelConfig(
+    options.executor ?? db,
+  );
+
+  return catalogModels.find((model) => model.id === normalizedModelId);
 }
 
 export async function getDeploymentTaskModelOptions(

@@ -273,6 +273,31 @@ describe('task model settings', () => {
     ]);
   });
 
+  it('preserves the explicit high-volume decision capability flag', () => {
+    const settings = normalizeTaskModelSettings({
+      models: [
+        buildTaskModelOption({
+          id: 'openrouter/openai/gpt-5.6',
+          displayName: 'GPT 5.6',
+          metadata: {
+            contextWindow: null,
+            inputTypes: null,
+            inputPricePerToken: null,
+            outputPricePerToken: null,
+            lastRefreshedAt: null,
+            supportsHighVolumeDecisions: true,
+          },
+        }),
+      ],
+      allowedModelIds: ['openrouter/openai/gpt-5.6'],
+      defaultModelId: 'openrouter/openai/gpt-5.6',
+    });
+
+    expect(settings.models?.[0]?.metadata?.supportsHighVolumeDecisions).toBe(
+      true,
+    );
+  });
+
   it('removes disabled direct-provider models from persisted settings', () => {
     const settings = normalizeTaskModelSettings({
       models: [

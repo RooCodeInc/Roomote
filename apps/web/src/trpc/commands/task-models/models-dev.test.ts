@@ -4,6 +4,7 @@ import {
   fetchModelsDevCatalog,
   listXaiChatModelsFromCatalog,
   lookupModelMetadataFromCatalog,
+  mergeMetadata,
   resolveModelsDevSlug,
   suggestModelsFromCatalog,
   type ModelsDevCatalog,
@@ -472,6 +473,27 @@ describe('lookupModelMetadataFromCatalog', () => {
       outputPricePerToken: 4 / 1_000_000,
     });
     expect(result.displayName).toBe('Kimi K2.7 Code');
+  });
+});
+
+describe('mergeMetadata', () => {
+  it('preserves the manually configured high-volume decision capability', () => {
+    expect(
+      mergeMetadata(
+        {
+          contextWindow: null,
+          inputTypes: null,
+          inputPricePerToken: null,
+          outputPricePerToken: null,
+          lastRefreshedAt: null,
+          supportsHighVolumeDecisions: true,
+        },
+        { contextWindow: 128_000 },
+      ),
+    ).toMatchObject({
+      contextWindow: 128_000,
+      supportsHighVolumeDecisions: true,
+    });
   });
 });
 

@@ -43,12 +43,12 @@ function describeSkill(skill: FastAgentSkillSummary): string {
 }
 
 /**
- * Per-turn skill hint from the optional judgment model. It travels with the
+ * Per-turn skill hint from the decision model. It travels with the
  * turn's user message, never the system prompt, so the cached system prompt
  * (including its alphabetical skill list) stays identical across turns.
- * Returns `undefined` when the model is not configured, fails, or finds
- * nothing it is confident about; the model then picks skills on its own
- * exactly as before.
+ * Returns `undefined` when the model is unavailable, gated, fails, or finds
+ * nothing it is confident about; the model then picks skills on its own exactly
+ * as before.
  */
 export async function buildFastAgentSkillRelevanceContext({
   catalog,

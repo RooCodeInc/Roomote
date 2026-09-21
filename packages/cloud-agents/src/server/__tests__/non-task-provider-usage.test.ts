@@ -58,6 +58,7 @@ vi.mock('@roomote/db/server', () => ({
 
 import {
   createOpenCodeSdkFetch,
+  resolveNonTaskHelperModel,
   resolveOpenCodeSmallModel,
 } from '../non-task-provider-usage';
 
@@ -199,6 +200,18 @@ describe('resolveOpenCodeSmallModel', () => {
     expect(resolveOpenCodeSmallModel()).toBe(
       'openrouter/anthropic/claude-sonnet-4',
     );
+  });
+
+  it('resolves the configured helper model before the coding fallback', async () => {
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/anthropic/claude-sonnet-4',
+      R_SMALL_MODEL: 'openrouter/openai/gpt-5.6-luna',
+    });
+
+    await expect(resolveNonTaskHelperModel()).resolves.toEqual({
+      model: 'openrouter/openai/gpt-5.6-luna',
+      catalogModelId: 'openrouter/openai/gpt-5.6-luna',
+    });
   });
 
   it('reuses a managed OpenCode SDK server for matching structured object calls', async () => {

@@ -115,6 +115,7 @@ export const NON_TASK_INFERENCE_SURFACES = {
   brainSynthesis: 'brain_synthesis',
   chatAudioTranscription: 'chat_audio_transcription',
   chatVideoDescription: 'chat_video_description',
+  decisionModelFallback: 'decision_model_fallback',
   composerSuggestionGeneration: 'composer_suggestion_generation',
   customAutomationScheduleResolution: 'custom_automation_schedule_resolution',
   automationResultPreparation: 'automation_result_preparation',
@@ -787,6 +788,7 @@ async function resolveNonTaskModelRuntime(
   modelRole: 'primary' | 'small' | 'orchestration' = 'small',
 ): Promise<{
   model: string;
+  catalogModelId: string;
   resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv;
 }> {
   const requestedModel = model?.trim();
@@ -864,6 +866,7 @@ async function resolveNonTaskModelRuntime(
     // server's config registered (Bedrock Mantle GPT ids run under
     // `bedrock-mantle-openai`), mirroring the task worker's rewrite.
     model: toBedrockMantleRuntimeModelId(resolvedModel),
+    catalogModelId: resolvedModel,
     // An explicit model rides into the server lease env as the primary role
     // model so the config builder registers its provider — the deployment's
     // role models may not include it, and an unregistered Bedrock (or
@@ -871,6 +874,27 @@ async function resolveNonTaskModelRuntime(
     // request is made. The lease cache keys on env, so distinct explicit
     // models get their own servers instead of colliding.
     resolvedModelRuntimeEnv: selectedRuntimeEnv,
+  };
+}
+
+/**
+ * Resolve the deployment helper model once through the same role path used by
+ * ordinary non-task calls. `catalogModelId` stays in the task-model namespace
+ * so callers can look up metadata even when OpenCode rewrites its runtime id.
+ */
+export async function resolveNonTaskHelperModel(): Promise<{
+  model: string;
+  catalogModelId: string;
+  reasoningEffort?: ReasoningEffort;
+}> {
+  const runtime = await resolveNonTaskModelRuntime(undefined, 'small');
+  const reasoningEffort =
+    runtime.resolvedModelRuntimeEnv.R_SMALL_MODEL_REASONING_EFFORT;
+
+  return {
+    model: runtime.model,
+    catalogModelId: runtime.catalogModelId,
+    ...(isReasoningEffort(reasoningEffort) ? { reasoningEffort } : {}),
   };
 }
 

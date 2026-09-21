@@ -1,19 +1,40 @@
-const { mockResolveModelProviderEnvValue, mockGetJudgmentSelection, mockEnv } =
-  vi.hoisted(() => ({
-    mockResolveModelProviderEnvValue: vi.fn(),
-    mockGetJudgmentSelection: vi.fn(),
-    mockEnv: { R_JUDGMENT_MODEL: undefined as string | undefined },
-  }));
+const {
+  mockResolveModelProviderEnvValue,
+  mockGetJudgmentSelection,
+  mockGetDeploymentTaskModelOption,
+  mockGenerateTrackedNonTaskObject,
+  mockResolveNonTaskHelperModel,
+  mockEnv,
+} = vi.hoisted(() => ({
+  mockResolveModelProviderEnvValue: vi.fn(),
+  mockGetJudgmentSelection: vi.fn(),
+  mockGetDeploymentTaskModelOption: vi.fn(),
+  mockGenerateTrackedNonTaskObject: vi.fn(),
+  mockResolveNonTaskHelperModel: vi.fn(),
+  mockEnv: { R_JUDGMENT_MODEL: undefined as string | undefined },
+}));
 
 vi.mock('@roomote/env', () => ({ Env: mockEnv }));
 
 vi.mock('@roomote/db/server', () => ({
   getDeploymentJudgmentModelSelection: mockGetJudgmentSelection,
+  getDeploymentTaskModelOption: mockGetDeploymentTaskModelOption,
   resolveModelProviderEnvValue: mockResolveModelProviderEnvValue,
+}));
+
+vi.mock('../non-task-provider-usage', () => ({
+  generateTrackedNonTaskObject: mockGenerateTrackedNonTaskObject,
+  NON_TASK_INFERENCE_SURFACES: {
+    decisionModelFallback: 'decision_model_fallback',
+  },
+  resolveNonTaskHelperModel: mockResolveNonTaskHelperModel,
 }));
 
 import {
   evaluateTypeSafeJudgments,
+  evaluateDecisionModel,
+  resetDecisionModelCache,
+  resolveDecisionModel,
   resetJudgmentBackendCache,
   scoreTypeSafeRelevance,
 } from '../typesafe-judgment';
@@ -68,8 +89,14 @@ describe('evaluateTypeSafeJudgments', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetJudgmentBackendCache();
+    resetDecisionModelCache();
     mockEnv.R_JUDGMENT_MODEL = undefined;
     mockGetJudgmentSelection.mockResolvedValue(null);
+    mockGetDeploymentTaskModelOption.mockResolvedValue(undefined);
+    mockResolveNonTaskHelperModel.mockResolvedValue({
+      model: 'openrouter/helper',
+      catalogModelId: 'openrouter/helper',
+    });
     mockKeys({ R_TYPESAFE_API_KEY: 'ts-key' });
   });
 
@@ -108,6 +135,96 @@ describe('evaluateTypeSafeJudgments', () => {
       model: 'jev-latest',
       questions,
     });
+  });
+
+  it('resolves the hosted judgment model before the helper fallback', async () => {
+    await expect(resolveDecisionModel()).resolves.toEqual({
+      kind: 'judgment',
+      supportsHighVolumeDecisions: true,
+    });
+    expect(mockResolveNonTaskHelperModel).not.toHaveBeenCalled();
+  });
+
+  it('uses the resolved helper model for ordinary decision fallback', async () => {
+    mockKeys({});
+    mockGetJudgmentSelection.mockResolvedValue('off');
+    mockGenerateTrackedNonTaskObject.mockResolvedValue({
+      object: { answers: directAnswers },
+    });
+
+    await expect(
+      evaluateDecisionModel({ state: 'hi', questions }),
+    ).resolves.toEqual(directAnswers);
+    expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: 'openrouter/helper',
+        modelRole: 'small',
+        surface: 'decision_model_fallback',
+      }),
+    );
+  });
+
+  it('gates high-volume helper decisions when the resolved model is not capable', async () => {
+    mockKeys({});
+    mockGetDeploymentTaskModelOption.mockResolvedValue({
+      id: 'openrouter/helper',
+      displayName: 'Helper',
+      family: 'Helper',
+      metadata: { supportsHighVolumeDecisions: false },
+    });
+
+    await expect(
+      evaluateDecisionModel({ state: 'hi', questions, highVolume: true }),
+    ).resolves.toBeNull();
+    expect(mockGenerateTrackedNonTaskObject).not.toHaveBeenCalled();
+  });
+
+  it('propagates high-volume capability from the actual helper fallback model', async () => {
+    mockKeys({});
+    mockResolveNonTaskHelperModel.mockResolvedValue({
+      model: 'bedrock-mantle-openai/gpt-5.6-luna',
+      catalogModelId: 'bedrock-mantle/openai.gpt-5.6-luna',
+    });
+    mockGetDeploymentTaskModelOption.mockResolvedValue({
+      id: 'bedrock-mantle/openai.gpt-5.6-luna',
+      displayName: 'Luna',
+      family: 'GPT',
+      metadata: { supportsHighVolumeDecisions: true },
+    });
+
+    await expect(resolveDecisionModel()).resolves.toEqual({
+      kind: 'helper',
+      model: 'bedrock-mantle-openai/gpt-5.6-luna',
+      catalogModelId: 'bedrock-mantle/openai.gpt-5.6-luna',
+      supportsHighVolumeDecisions: true,
+    });
+  });
+
+  it('uses a capable helper model for opted-in high-volume decisions', async () => {
+    mockKeys({});
+    mockGetDeploymentTaskModelOption.mockResolvedValue({
+      id: 'openrouter/helper',
+      displayName: 'Helper',
+      family: 'Helper',
+      metadata: { supportsHighVolumeDecisions: true },
+    });
+    mockGenerateTrackedNonTaskObject.mockResolvedValue({
+      object: { answers: directAnswers },
+    });
+
+    await expect(
+      evaluateDecisionModel({ state: 'hi', questions, highVolume: true }),
+    ).resolves.toEqual(directAnswers);
+    expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledOnce();
+  });
+
+  it('does not cascade a hosted judgment failure into a helper call', async () => {
+    mockFetchResponse({ error: 'overloaded' }, { status: 529 });
+
+    await expect(
+      evaluateDecisionModel({ state: 'hi', questions }),
+    ).rejects.toThrow('HTTP 529');
+    expect(mockGenerateTrackedNonTaskObject).not.toHaveBeenCalled();
   });
 
   it('stays off when an admin turned the judgment model off in Settings', async () => {
