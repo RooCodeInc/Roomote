@@ -12,6 +12,12 @@ import {
   type UIEvent,
 } from 'react';
 import {
+  AnimatePresence,
+  motion,
+  useReducedMotion,
+  type Variants,
+} from 'motion/react';
+import {
   getReasoningEffortLabel,
   groupModelsByDisplayProvider,
   REASONING_EFFORT_VALUES,
@@ -55,13 +61,51 @@ type ProviderGroupingOptions = {
 
 const ROW_HEIGHT_PX = 40;
 const LIST_HEIGHT_PX = ROW_HEIGHT_PX * 6.5;
+const MODEL_OPTION_SCROLL_OFFSET_PX = ROW_HEIGHT_PX / 2;
 const SLIDER_THUMB_RADIUS_PX = 14;
 const TYPEAHEAD_IDLE_RESET_MS = 1000;
 const SELECTION_FLASH_HOLD_MS = 150;
+const REASONING_LABEL_OFFSET_PX = 12;
+const REASONING_LABEL_DURATION_SECONDS = 0.2;
+const REASONING_LABEL_ENTER_DELAY_SECONDS = 0.05;
+const REASONING_LABEL_EASING = [0.22, 1, 0.36, 1] as const;
+
+type ReasoningLabelTransition = {
+  direction: 1 | -1;
+  reducedMotion: boolean;
+};
+
+const reasoningLabelVariants: Variants = {
+  enter: ({ direction, reducedMotion }: ReasoningLabelTransition) => ({
+    opacity: reducedMotion ? 1 : 0,
+    y: reducedMotion ? 0 : direction * REASONING_LABEL_OFFSET_PX,
+  }),
+  center: ({ reducedMotion }: ReasoningLabelTransition) => ({
+    opacity: 1,
+    y: 0,
+    transition: {
+      duration: reducedMotion ? 0 : REASONING_LABEL_DURATION_SECONDS,
+      delay: reducedMotion ? 0 : REASONING_LABEL_ENTER_DELAY_SECONDS,
+      ease: REASONING_LABEL_EASING,
+    },
+  }),
+  exit: ({ direction, reducedMotion }: ReasoningLabelTransition) => ({
+    opacity: reducedMotion ? 1 : 0,
+    y: reducedMotion ? 0 : direction * -REASONING_LABEL_OFFSET_PX,
+    transition: {
+      duration: reducedMotion ? 0 : REASONING_LABEL_DURATION_SECONDS,
+      ease: REASONING_LABEL_EASING,
+    },
+  }),
+};
 
 function supportedEfforts(model: ModelReasoningPickerModel | undefined) {
   if (model?.metadata?.supportsReasoning === false) return [];
   return model?.metadata?.supportedReasoningEfforts ?? REASONING_EFFORT_VALUES;
+}
+
+function getPickerReasoningEffortLabel(effort: ReasoningEffort): string {
+  return effort === 'xhigh' ? 'X-High' : getReasoningEffortLabel(effort);
 }
 
 function PickerContent({
@@ -95,6 +139,7 @@ function PickerContent({
 }) {
   const listRef = useRef<HTMLDivElement>(null);
   const reasoningPanelRef = useRef<HTMLDivElement>(null);
+  const previousEffortIndexRef = useRef(0);
   const [canScrollUp, setCanScrollUp] = useState(false);
   const [canScrollDown, setCanScrollDown] = useState(false);
   const [typeaheadQuery, setTypeaheadQuery] = useState('');
@@ -108,6 +153,20 @@ function PickerContent({
       : efforts.find((effort) => effort === defaultReasoningEffort)) ??
     efforts[Math.floor((efforts.length - 1) / 2)];
   const effortIndex = effectiveEffort ? efforts.indexOf(effectiveEffort) : 0;
+  const reducedMotion = useReducedMotion() ?? false;
+  const effortTransitionDirection: 1 | -1 =
+    effortIndex < previousEffortIndexRef.current ? -1 : 1;
+  const effortLabel = effectiveEffort
+    ? getPickerReasoningEffortLabel(effectiveEffort)
+    : 'No reasoning';
+  const labelTransition: ReasoningLabelTransition = {
+    direction: effortTransitionDirection,
+    reducedMotion,
+  };
+
+  useEffect(() => {
+    previousEffortIndexRef.current = effortIndex;
+  }, [effortIndex]);
 
   const { leadingOptions, modelGroups, options } = useMemo(() => {
     const leading = models.filter(({ id }) => !id.includes('/'));
@@ -232,6 +291,26 @@ function PickerContent({
     );
   };
 
+  const scrollModelOptionIntoView = (option: HTMLButtonElement) => {
+    const list = listRef.current;
+    if (!list) return;
+
+    const listRect = list.getBoundingClientRect();
+    const optionRect = option.getBoundingClientRect();
+    const scrollDelta =
+      optionRect.top < listRect.top
+        ? optionRect.top - listRect.top - MODEL_OPTION_SCROLL_OFFSET_PX
+        : optionRect.bottom > listRect.bottom
+          ? optionRect.bottom - listRect.bottom + MODEL_OPTION_SCROLL_OFFSET_PX
+          : 0;
+
+    if (scrollDelta === 0) return;
+    list.scrollTo({
+      top: list.scrollTop + scrollDelta,
+      behavior: reducedMotion ? 'auto' : 'smooth',
+    });
+  };
+
   const moveModelFocus = (event: KeyboardEvent<HTMLDivElement>) => {
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
     const options = Array.from(
@@ -314,7 +393,10 @@ function PickerContent({
           'hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
           selected && '',
         )}
-        onClick={() => selectModel(option.id)}
+        onClick={(event) => {
+          scrollModelOptionIntoView(event.currentTarget);
+          selectModel(option.id);
+        }}
       >
         <span className="min-w-0 flex-1 truncate flex items-center gap-2">
           <span className="size-4">
@@ -385,12 +467,27 @@ function PickerContent({
         className="flex min-w-0 flex-col items-center gap-0 overflow-hidden space-y-2 pt-1"
       >
         <span
-          className="h-7 pt-2 text-center text-xs font-medium"
-          aria-live="polite"
+          data-testid="reasoning-level-label"
+          data-transition-direction={
+            effortTransitionDirection > 0 ? 'up' : 'down'
+          }
+          className="relative h-7 w-full  text-center text-xs font-medium"
         >
-          {effectiveEffort
-            ? getReasoningEffortLabel(effectiveEffort)
-            : 'No reasoning'}
+          <AnimatePresence initial={false} custom={labelTransition}>
+            <motion.span
+              key={effectiveEffort ?? 'no-reasoning'}
+              aria-hidden="true"
+              className="absolute inset-x-0 top-3"
+              custom={labelTransition}
+              variants={reasoningLabelVariants}
+              initial="enter"
+              animate="center"
+              exit="exit"
+            >
+              {effortLabel}
+            </motion.span>
+          </AnimatePresence>
+          <span className="sr-only" role="status" aria-label={effortLabel} />
         </span>
         <div className="relative min-h-0 flex-1 pb-4">
           <div className="relative h-full cursor-ns-resize">
@@ -419,10 +516,10 @@ function PickerContent({
               aria-label="Reasoning level"
               aria-valuetext={
                 effectiveEffort
-                  ? getReasoningEffortLabel(effectiveEffort)
+                  ? getPickerReasoningEffortLabel(effectiveEffort)
                   : 'No reasoning'
               }
-              className="h-full min-h-0 data-[disabled]:opacity-70 [&_[data-slot=slider-track]]:w-4 [&_[data-slot=slider-track]]:border [&_[data-slot=slider-track]]:border-input [&_[data-slot=slider-track]]:bg-input [&_[data-slot=slider-range]]:bg-accent-foreground [&_[data-slot=slider-thumb]]:size-7 [&_[data-slot=slider-thumb]]:border-2 [&_[data-slot=slider-thumb]]:border-accent-foreground [&_[data-slot=slider-thumb]]:transition-transform motion-reduce:[&_[data-slot=slider-thumb]]:transition-none"
+              className="h-full min-h-0 data-[disabled]:opacity-70 [&>span:not([data-slot])]:transition-[bottom] [&>span:not([data-slot])]:duration-300 [&>span:not([data-slot])]:ease-out motion-reduce:[&>span:not([data-slot])]:transition-none [&_[data-slot=slider-track]]:w-4 [&_[data-slot=slider-track]]:border [&_[data-slot=slider-track]]:border-input [&_[data-slot=slider-track]]:bg-input [&_[data-slot=slider-range]]:bg-accent-foreground [&_[data-slot=slider-thumb]]:size-7 [&_[data-slot=slider-thumb]]:border-2 [&_[data-slot=slider-thumb]]:border-accent-foreground"
               onValueChange={([index]) => setEffortIndex(index ?? 0)}
             />
           </div>
@@ -474,7 +571,7 @@ export function ModelReasoningPicker({
       <PopoverContent
         side="top"
         align="start"
-        sideOffset={6}
+        sideOffset={10}
         className="relative w-[22rem] overflow-visible p-0 border rounded-2xl"
       >
         <PickerContent {...contentProps} onClose={() => onOpenChange(false)} />
@@ -566,7 +663,7 @@ export const ModelReasoningPickerTrigger = forwardRef<
             selectionFlash && 'text-accent-foreground duration-0',
           )}
         >
-          {getReasoningEffortLabel(reasoningEffort)}
+          {getPickerReasoningEffortLabel(reasoningEffort)}
         </span>
       ) : null}
       {appearance === 'select' ? (

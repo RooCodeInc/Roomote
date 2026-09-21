@@ -179,7 +179,7 @@ describe('ModelReasoningPicker', () => {
     rerender(
       <ModelReasoningPickerTrigger
         label="Beta"
-        reasoningEffort="high"
+        reasoningEffort="xhigh"
         ariaLabel="Model selection"
       />,
     );
@@ -190,9 +190,26 @@ describe('ModelReasoningPicker', () => {
       () => expect(trigger).toHaveAttribute('data-selection-flash', 'false'),
       { timeout: 500 },
     );
+    expect(trigger).toHaveTextContent('X-High');
+    expect(trigger).not.toHaveTextContent('Extra high');
   });
 
-  it('supports list keyboard navigation and no-reasoning models', () => {
+  it('moves the reasoning label in the direction of the slider change', () => {
+    render(<Harness />);
+    fireEvent.click(screen.getByRole('button', { name: 'Choose model' }));
+
+    const slider = screen.getByRole('slider', { name: 'Reasoning level' });
+    const label = screen.getByTestId('reasoning-level-label');
+    fireEvent.wheel(slider, { deltaY: -40 });
+    expect(slider).toHaveAttribute('aria-valuetext', 'High');
+    expect(label).toHaveAttribute('data-transition-direction', 'up');
+
+    fireEvent.wheel(slider, { deltaY: 40 });
+    expect(slider).toHaveAttribute('aria-valuetext', 'Low');
+    expect(label).toHaveAttribute('data-transition-direction', 'down');
+  });
+
+  it('supports list keyboard navigation and no-reasoning models', async () => {
     render(<Harness />);
     fireEvent.click(screen.getByRole('button', { name: 'Choose model' }));
 
@@ -202,13 +219,39 @@ describe('ModelReasoningPicker', () => {
     expect(screen.getByRole('option', { name: 'Plain' })).toHaveFocus();
     fireEvent.click(screen.getByRole('option', { name: 'Plain' }));
 
-    expect(screen.getByText('No reasoning')).toBeVisible();
+    await waitFor(() => expect(screen.getByText('No reasoning')).toBeVisible());
     expect(
       screen.getByRole('slider', { name: 'Reasoning level' }),
     ).toHaveAttribute('data-disabled');
     expect(screen.getByTestId('selection')).toHaveTextContent(
       'provider/plain:default',
     );
+  });
+
+  it('scrolls a partially clipped clicked model further into view', () => {
+    render(<Harness />);
+    fireEvent.click(screen.getByRole('button', { name: 'Choose model' }));
+
+    const list = screen.getByRole('listbox', { name: 'Models' });
+    const beta = screen.getByRole('option', { name: 'Beta' });
+    const scrollTo = vi.fn();
+    Object.defineProperties(list, {
+      scrollTop: { configurable: true, value: 100, writable: true },
+      scrollTo: { configurable: true, value: scrollTo },
+    });
+    vi.spyOn(list, 'getBoundingClientRect').mockReturnValue(
+      DOMRect.fromRect({ y: 0, height: 100 }),
+    );
+    vi.spyOn(beta, 'getBoundingClientRect').mockReturnValue(
+      DOMRect.fromRect({ y: 80, height: 40 }),
+    );
+
+    fireEvent.click(beta);
+
+    expect(scrollTo).toHaveBeenCalledWith({
+      top: 140,
+      behavior: 'smooth',
+    });
   });
 
   it('groups model options under non-selectable provider labels', () => {
