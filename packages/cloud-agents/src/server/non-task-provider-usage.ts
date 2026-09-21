@@ -354,6 +354,58 @@ export type NonTaskOpenCodeNativeSessionOptions = {
   validateSession?: boolean;
 };
 
+/** Upper bound on one attempt to deliver a native permission reply. */
+export const PERMISSION_REPLY_TIMEOUT_MS = 10_000;
+
+type PermissionReplyClient = {
+  permission: {
+    reply: (
+      parameters: {
+        requestID: string;
+        directory: string;
+        reply: 'once' | 'reject';
+        message?: string;
+      },
+      options?: { signal?: AbortSignal },
+    ) => Promise<{ error?: unknown }>;
+  };
+};
+
+/**
+ * Deliver one native permission reply without ever waiting on OpenCode
+ * indefinitely. The approval decision is already committed when this runs
+ * and no lock is held across it, so bounding it only bounds how long the
+ * paused call waits on an unresponsive server. A reply is keyed by the
+ * request id and a repeat for an already-answered request changes nothing,
+ * so one retry is safe and covers a reply that was dropped in transit. A
+ * second failure surfaces as an error for the caller to log; the decision
+ * record stays as committed.
+ */
+export async function replyToPermissionAsk(
+  client: PermissionReplyClient,
+  sessionDirectory: string,
+  requestId: string,
+  response: 'once' | 'reject',
+  message?: string,
+  timeoutMs: number = PERMISSION_REPLY_TIMEOUT_MS,
+): Promise<{ error?: unknown }> {
+  const attempt = () =>
+    client.permission.reply(
+      {
+        requestID: requestId,
+        directory: sessionDirectory,
+        reply: response,
+        ...(message ? { message } : {}),
+      },
+      { signal: AbortSignal.timeout(timeoutMs) },
+    );
+  try {
+    return await attempt();
+  } catch {
+    return attempt();
+  }
+}
+
 /** One native OpenCode `permission.asked` event, normalized for consumers. */
 export interface NonTaskOpenCodePermissionAsk {
   requestId: string;
@@ -1328,12 +1380,13 @@ async function runNonTaskSdkPrompt(
         return undefined;
       },
       reply: async (requestId, response, message) => {
-        const result = await client.permission.reply({
-          requestID: requestId,
-          directory: sessionDirectory,
-          reply: response,
-          ...(message ? { message } : {}),
-        });
+        const result = await replyToPermissionAsk(
+          client,
+          sessionDirectory,
+          requestId,
+          response,
+          message,
+        );
         if (result.error) {
           console.warn(
             `[NonTaskProviderUsage] OpenCode permission reply failed: ${formatOpenCodeSdkError(result.error)}`,
