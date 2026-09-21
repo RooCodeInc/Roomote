@@ -41,6 +41,7 @@ const mocks = vi.hoisted(() => ({
   getUserIdentity: vi.fn(),
   getPersonalization: vi.fn(),
   refreshTitle: vi.fn(),
+  savePostTurnMemory: vi.fn(),
   bindExecutor: vi.fn(),
   bindMcpExecutor: vi.fn(),
   captureInferenceContext: vi.fn(),
@@ -377,6 +378,10 @@ vi.mock('../../user-personalization', async (importOriginal) => {
     resolveFastAgentPersonalizationContext: mocks.getPersonalization,
   };
 });
+
+vi.mock('../fast-agent-post-turn-memory', () => ({
+  saveFastAgentPostTurnMemory: mocks.savePostTurnMemory,
+}));
 
 vi.mock('../session-title-refresh-job', () => ({
   refreshFastAgentSessionTitleWithRetry: mocks.refreshTitle,
@@ -2707,6 +2712,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       finishGeneration?.('Steered answer');
       await expect(resultPromise).resolves.toBe('Steered answer');
       expect(mocks.invalidateSession).not.toHaveBeenCalled();
+      // The accepted steer is judged for memory along with the opening message.
+      expect(mocks.savePostTurnMemory).toHaveBeenCalledWith(
+        expect.objectContaining({
+          request: baseParams.question,
+          steeredRequests: ['Use the corrected requirement.'],
+        }),
+      );
     } finally {
       vi.useRealTimers();
     }
@@ -5998,6 +6010,94 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       'conversation-1',
       'Prefers deploys on Fridays',
     );
+  });
+
+  it('hands each settled human turn to the post-turn memory pass', async () => {
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'It routes inbound webhooks.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.savePostTurnMemory).toHaveBeenCalledTimes(1);
+    expect(mocks.savePostTurnMemory).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationId: 'conversation-1',
+        userId: 'user-1',
+        request: baseParams.question,
+        reply: 'It routes inbound webhooks.',
+        agentSavedMemory: false,
+      }),
+    );
+  });
+
+  it('tells the post-turn memory pass when the agent already saved', async () => {
+    mocks.isBrainEnabled.mockResolvedValue(true);
+    mocks.appendMemory.mockResolvedValue({ saved: true });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        options.onModelResolved?.('openrouter/openai/gpt-5.4');
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'On it.',
+        });
+        options.onPromptStarted?.();
+        await invokeTool(nativeToolNames.saveMemory, {
+          memory: 'Prefers deploys on Fridays',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Remembered.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.savePostTurnMemory).toHaveBeenCalledWith(
+      expect.objectContaining({ agentSavedMemory: true }),
+    );
+  });
+
+  it('keeps private Sessions and platform events out of the post-turn memory pass', async () => {
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Done.',
+        });
+        return '';
+      },
+    );
+
+    mocks.getSession.mockResolvedValueOnce({
+      id: 'conversation-1',
+      compatibilityMessages: [],
+      openCodeSessionId: null,
+      privacy: 'private',
+      privateOwnerUserId: 'user-1',
+    });
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter: callbacks(),
+      turnSource: 'platform_event',
+    });
+
+    expect(mocks.savePostTurnMemory).not.toHaveBeenCalled();
   });
 
   it('refuses a memory save when no Brain is configured', async () => {

@@ -149,6 +149,7 @@ import {
   upsertFastAgentMessage,
   type FastAgentActiveTask,
 } from './fast-agent-session';
+import { saveFastAgentPostTurnMemory } from './fast-agent-post-turn-memory';
 import { refreshFastAgentSessionTitleWithRetry } from './session-title-refresh-job';
 import {
   classifyNonTaskInferenceError,
@@ -2067,6 +2068,10 @@ export async function answerFastAgentQuestion({
   let codeModeOpenCodeServerUrl: string | null = null;
   let durableOpenCodeSessionId: string | null = null;
   let lastVisibleMessage = '';
+  /** The agent called `save_memory` itself, so the post-turn pass stands down. */
+  let agentSavedMemoryThisTurn = false;
+  /** Human messages steered into this turn after it started, in order. */
+  const steeredHumanRequests: string[] = [];
   // The most recent assistant message already in the conversation, so a
   // repeat of the same terminal failure does not post the same closeout again.
   let priorAssistantMessage: string | undefined;
@@ -2835,7 +2840,10 @@ export async function answerFastAgentQuestion({
       console.info(
         `[Fast Agent] Native steer accepted. conversationId="${canonicalConversationId}" followUpCount=${batch.length}`,
       );
-      for (const { row } of batch) injectedHumanFollowUpIds.add(row.id);
+      for (const { row, followUp } of batch) {
+        injectedHumanFollowUpIds.add(row.id);
+        steeredHumanRequests.push(followUp.question);
+      }
       // Only a surface that explicitly marked the turn quiet-eligible may
       // leave it unanswered; unmarked follow-ups and older rows require one.
       if (
@@ -5733,6 +5741,7 @@ export async function answerFastAgentQuestion({
                     : "This conversation's memory is full. Start a new conversation to save further memories.",
               };
             }
+            agentSavedMemoryThisTurn = true;
             return {
               success: true,
               saved: true,
@@ -6827,6 +6836,22 @@ export async function answerFastAgentQuestion({
       }
     }
     await settleDurableTurn();
+    if (
+      (substantiveHumanInput || steeredHumanRequests.length > 0) &&
+      !setupSession &&
+      currentSessionPrivacy === 'shared'
+    ) {
+      void saveFastAgentPostTurnMemory({
+        conversationId: session.id,
+        userId,
+        // A platform event's own text is not something a person said.
+        request: substantiveHumanInput ? question : '',
+        steeredRequests: steeredHumanRequests,
+        reply: lastVisibleMessage,
+        senderDisplayName,
+        agentSavedMemory: agentSavedMemoryThisTurn,
+      });
+    }
     const settledGoal = await getSessionGoalForConversation(session.id);
     if (settledGoal?.status === 'active') {
       const activeGoalTasks = await getActiveFastAgentTasks(session.id);

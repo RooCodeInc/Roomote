@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 /**
  * Brain (deployment-hosted gbrain) shared contract.
  *
@@ -485,3 +487,47 @@ export const TASK_MEMORY_LIMITS = {
   listEntryMaxChars: 1_000,
   listMaxEntries: 20,
 } as const;
+
+const taskMemoryList = z
+  .array(z.string().trim().min(1).max(TASK_MEMORY_LIMITS.listEntryMaxChars))
+  .max(TASK_MEMORY_LIMITS.listMaxEntries);
+
+/**
+ * Field caps keep one task's memory proportionate: a memory is a distillation
+ * for future agents, not a transcript. The numbers live in TASK_MEMORY_LIMITS
+ * so the worker tool schema advertises the same caps the server enforces.
+ */
+export const taskMemorySchema = z.object({
+  outcome: z.string().trim().min(1).max(TASK_MEMORY_LIMITS.outcomeMaxChars),
+  decisions: taskMemoryList.optional(),
+  rationale: z
+    .string()
+    .trim()
+    .max(TASK_MEMORY_LIMITS.rationaleMaxChars)
+    .optional(),
+  reusableFacts: taskMemoryList.optional(),
+  unresolvedQuestions: taskMemoryList.optional(),
+});
+
+/** The markdown a task memory contributes to its Brain page. */
+export function renderTaskMemorySummary(
+  input: z.infer<typeof taskMemorySchema>,
+): string {
+  const section = (title: string, lines: string[]) =>
+    lines.length > 0
+      ? [`## ${title}`, '', ...lines.map((l) => `- ${l}`), '']
+      : [];
+
+  return [
+    '## Outcome',
+    '',
+    input.outcome,
+    '',
+    ...(input.rationale ? ['## Why', '', input.rationale, ''] : []),
+    ...section('Decisions', input.decisions ?? []),
+    ...section('Reusable facts', input.reusableFacts ?? []),
+    ...section('Open questions', input.unresolvedQuestions ?? []),
+  ]
+    .join('\n')
+    .trim();
+}
