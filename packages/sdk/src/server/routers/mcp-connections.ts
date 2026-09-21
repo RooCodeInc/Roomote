@@ -405,6 +405,10 @@ async function buildScopedCustomMcpServerConfigs(
 ): Promise<ResolvedMcpServerConfigs> {
   const servers: ResolvedMcpServerConfigs = {};
   const rows = await customMcpServerStore(scope).list({ enabledOnly: true });
+  // Every entry built here belongs to this one scope, whichever branch
+  // builds it.
+  const toolApprovalPolicyScope =
+    scope.visibility === 'owner' ? 'personal' : 'deployment';
 
   for (const row of rows) {
     // stdio servers ride the worker merge path via getCustomStdioMcpServers.
@@ -418,6 +422,7 @@ async function buildScopedCustomMcpServerConfigs(
         url: `${requestOrigin ?? ''}/api/mcp/development-fixtures`,
         headers: {},
         cacheRevision: `${row.updatedAt?.getTime() ?? 0}`,
+        toolApprovalPolicyScope,
       };
       continue;
     }
@@ -444,8 +449,7 @@ async function buildScopedCustomMcpServerConfigs(
       url: requestOrigin ? `${requestOrigin}${proxyPath}` : proxyPath,
       headers: { 'X-MCP-Client': PRODUCT_NAME },
       cacheRevision: `${row.updatedAt?.getTime() ?? 0}:${connectionUpdatedAt?.getTime() ?? ''}`,
-      toolApprovalPolicyScope:
-        scope.visibility === 'owner' ? 'personal' : 'deployment',
+      toolApprovalPolicyScope,
     };
   }
 
