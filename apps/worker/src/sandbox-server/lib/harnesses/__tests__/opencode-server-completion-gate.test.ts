@@ -307,6 +307,89 @@ describe('OpenCode harness completion check', () => {
     }
   });
 
+  it('judges a turn against its own request when a follow-up lands mid-check', async () => {
+    let releaseCheck: (() => void) | undefined;
+    mockRequestTaskCompletionCheck.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseCheck = () =>
+            resolve({
+              status: 'flagged',
+              flags: [{ id: 'reportOverclaims', probability: 0.9 }],
+            });
+        }),
+    );
+    const { client, harness, prompts, completed } = await startTask();
+
+    try {
+      const firstTurn = completeTurn(client, 'msg_1', 'Removed the guard.');
+      await vi.waitFor(() => expect(releaseCheck).toBeDefined());
+
+      // A steerable follow-up must wait for the closing turn rather than be
+      // injected into it or spend that turn's reminder.
+      harness.sendCommand({
+        commandName: TaskCommandName.SendMessage,
+        data: {
+          text: 'Also remove the helper.',
+          visibleInTranscript: true,
+          autoSteerWhenQueued: true,
+        },
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(prompts).toHaveLength(1);
+
+      releaseCheck?.();
+      await firstTurn;
+
+      // The flagged first turn is reopened, then the follow-up is delivered.
+      await vi.waitFor(() => expect(prompts).toHaveLength(3));
+      expect(prompts[1]).toContain('Your report describes a code change');
+      expect(prompts[2]).toBe('Also remove the helper.');
+      expect(completed()).toHaveLength(0);
+
+      // The follow-up's own turn still gets a check and a reminder of its own.
+      mockRequestTaskCompletionCheck.mockResolvedValueOnce({
+        status: 'flagged',
+        flags: [{ id: 'requestUnaddressed', probability: 0.92 }],
+      });
+      await completeTurn(client, 'msg_2', 'Removed the helper too.');
+
+      await vi.waitFor(() => expect(prompts).toHaveLength(4));
+      expect(prompts[3]).toContain('Part of what was asked');
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('drops a verdict that arrives after the task was cancelled', async () => {
+    let releaseCheck: (() => void) | undefined;
+    mockRequestTaskCompletionCheck.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseCheck = () =>
+            resolve({
+              status: 'flagged',
+              flags: [{ id: 'leftoverArtifacts', probability: 0.95 }],
+            });
+        }),
+    );
+    const { client, harness, prompts } = await startTask();
+
+    try {
+      const firstTurn = completeTurn(client, 'msg_1', 'Removed the guard.');
+      await vi.waitFor(() => expect(releaseCheck).toBeDefined());
+
+      harness.sendCommand({ commandName: TaskCommandName.CancelTask });
+      releaseCheck?.();
+      await firstTurn;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      expect(prompts).toHaveLength(1);
+    } finally {
+      harness.dispose();
+    }
+  });
+
   it('skips the check when nothing changed or the task is ineligible', async () => {
     mockCollectShippedDiff.mockResolvedValue(null);
     const unchanged = await startTask();

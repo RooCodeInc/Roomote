@@ -24,7 +24,7 @@ const GIT_MAX_BUFFER_BYTES = 32 * 1024 * 1024;
  * The turn is held open while the API answers. The ceiling sits above the
  * server's own decision-model timeout so the server's `skipped` wins the race.
  */
-const COMPLETION_CHECK_TIMEOUT_MS = 20_000;
+const COMPLETION_CHECK_TIMEOUT_MS = 8_000;
 const MAX_REPOSITORIES = 20;
 const MAX_UNTRACKED_FILES = 50;
 const MAX_UNTRACKED_FILE_BYTES = 200_000;

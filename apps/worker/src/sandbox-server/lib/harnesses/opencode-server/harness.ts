@@ -1749,6 +1749,12 @@ export class OpenCodeServerHarness
   // a request that arrives while a check is awaiting git or the API is not
   // overwritten when that older check records what it saw.
   private completionGateRequestGeneration = 0;
+  // True while the check awaits git or the API with the finished turn still
+  // held open, and the promise that settles once that turn has completed.
+  private completionGateChecking = false;
+  private turnSettling: Promise<void> | null = null;
+  private lastSettledTurnSource: 'session_status' | 'session_idle' | null =
+    null;
   // The report the agent gave before the check reopened its turn. The
   // follow-up turn only adds a short correction, so the two are joined.
   private completionGateHeldReport: string | null = null;
@@ -2199,6 +2205,14 @@ export class OpenCodeServerHarness
   }
 
   private async handleCommand(command: TaskCommand): Promise<void> {
+    if (
+      command.commandName === TaskCommandName.CancelTask ||
+      command.commandName === TaskCommandName.CloseTask
+    ) {
+      // A completion check still in flight must not reopen a stopped turn.
+      this.completionGateRequestGeneration += 1;
+    }
+
     switch (command.commandName) {
       case TaskCommandName.StartNewTask:
         await this.handleStartNewTask(command);
@@ -2313,6 +2327,22 @@ export class OpenCodeServerHarness
   }
 
   private async handleSendMessage(command: SendMessageCommand): Promise<void> {
+    if (this.completionGateChecking && this.turnSettling) {
+      // The previous turn has already ended; only its completion check is
+      // outstanding. Handle this message once that turn has completed, as a
+      // message sent after it, so the check judges the turn it belongs to and
+      // the message is never steered into a turn that is closing.
+      await this.turnSettling;
+
+      if (this.lastSettledTurnSource === 'session_status' && !this.inFlight) {
+        // This message is released in the gap between the status-sourced idle
+        // that completed the turn and its paired session.idle. Submitting now
+        // re-arms inFlight, so that paired idle would complete this new turn
+        // at once. Swallow it, as the queued-drain path does.
+        this.ignoreNextQueuedDrainSessionIdle = true;
+      }
+    }
+
     const text = command.data.text ?? '';
     this.stopHookReminderCount = 0;
     this.lastBlockedCloseoutAssistantText = null;
@@ -5225,6 +5255,27 @@ export class OpenCodeServerHarness
   private async finishCurrentTurn(
     source: 'session_status' | 'session_idle' = 'session_idle',
   ): Promise<void> {
+    let settle: () => void = () => {};
+    const settling = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    this.turnSettling = settling;
+
+    try {
+      await this.completeCurrentTurn(source);
+    } finally {
+      this.lastSettledTurnSource = source;
+      settle();
+
+      if (this.turnSettling === settling) {
+        this.turnSettling = null;
+      }
+    }
+  }
+
+  private async completeCurrentTurn(
+    source: 'session_status' | 'session_idle',
+  ): Promise<void> {
     if (!this.inFlight && !this.prompts.hasQueuedMessages()) {
       return;
     }
@@ -5398,9 +5449,11 @@ export class OpenCodeServerHarness
       return false;
     }
 
+    this.completionGateChecking = true;
+
     try {
-      // Read before the first await: a request arriving mid-check belongs to
-      // the next turn's identity, not this one's.
+      // Read before the first await: anything that moves it mid-check (a new
+      // task, a cancel) makes this verdict stale.
       const generation = this.completionGateRequestGeneration;
       const shipped = await collectShippedDiff(this.workspacePath);
       const checkedKey = `${generation}:${shipped?.key}`;
@@ -5435,7 +5488,8 @@ export class OpenCodeServerHarness
       if (
         verdict.status !== 'flagged' ||
         this.disposed ||
-        this.sessionId !== sessionId
+        this.sessionId !== sessionId ||
+        this.completionGateRequestGeneration !== generation
       ) {
         return false;
       }
@@ -5461,6 +5515,8 @@ export class OpenCodeServerHarness
         }`,
       );
       return false;
+    } finally {
+      this.completionGateChecking = false;
     }
   }
 
