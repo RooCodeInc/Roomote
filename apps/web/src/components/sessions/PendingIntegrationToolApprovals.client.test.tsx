@@ -42,8 +42,8 @@ describe('PendingIntegrationToolApprovals', () => {
 
   it.each([
     ['Allow once', 'approved'],
-    ["Don't ask again this session", 'approved_for_session'],
-    ['Reject', 'rejected'],
+    ['Allow for this session', 'approved_for_session'],
+    ['Deny', 'rejected'],
   ])('submits "%s" as the %s decision', async (label, decision) => {
     renderCard();
     fireEvent.click(screen.getByRole('button', { name: label }));
@@ -58,5 +58,85 @@ describe('PendingIntegrationToolApprovals', () => {
       approvalId: pending[0]!.approvalId,
       decision,
     });
+  });
+
+  it('keeps technical request details collapsed until requested', () => {
+    renderCard();
+
+    expect(
+      screen.getByText('Let Mock Slack use this tool?'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('post_message')).not.toBeInTheDocument();
+    expect(screen.queryByText('mock-slack')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }));
+
+    expect(screen.getByText('post_message')).toBeInTheDocument();
+    expect(screen.getByText('mock-slack')).toBeInTheDocument();
+    expect(screen.getByText(/"channel": "C1"/)).toBeInTheDocument();
+  });
+
+  it('uses request context when a read tool clearly targets a repository', () => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <PendingIntegrationToolApprovals
+          sessionId="session-1"
+          pending={[
+            {
+              ...pending[0]!,
+              integrationId: 'deepwiki',
+              toolName: 'read_wiki_structure',
+              argsSummary: { repoName: 'RooCodeInc/Roomote' },
+            },
+          ]}
+        />
+      </QueryClientProvider>,
+    );
+
+    expect(
+      screen.getByText('Let Deepwiki inspect this repository?'),
+    ).toBeInTheDocument();
+  });
+
+  it('disables every decision while the request is being submitted', async () => {
+    let resolveFetch: ((response: Response) => void) | undefined;
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveFetch = resolve;
+        }),
+    );
+    renderCard();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Allow once' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Allow once' })).toBeDisabled();
+      expect(
+        screen.getByRole('button', { name: 'Allow for this session' }),
+      ).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Deny' })).toBeDisabled();
+    });
+
+    resolveFetch?.(new Response('{}', { status: 200 }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Allow once' })).toBeEnabled();
+    });
+  });
+
+  it('describes empty arguments without exposing implementation wording', () => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <PendingIntegrationToolApprovals
+          sessionId="session-1"
+          pending={[{ ...pending[0]!, argsSummary: {} }]}
+        />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }));
+
+    expect(screen.getByText('No additional details.')).toBeInTheDocument();
+    expect(screen.queryByText('No arguments')).not.toBeInTheDocument();
   });
 });
