@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import { useState } from 'react';
 import type { ReasoningEffort } from '@roomote/types';
 
@@ -96,6 +102,16 @@ function Harness({
 describe('ModelReasoningPicker', () => {
   beforeEach(() => {
     mobileState.current = false;
+  });
+
+  afterEach(async () => {
+    // Radix focus-scope schedules focus-out dispatch timers during popover
+    // and drawer interactions. Flush them inside this test's environment;
+    // firing after jsdom teardown throws a cross-realm dispatchEvent error
+    // that Vitest reports as an unhandled error and fails the whole run.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+    });
   });
 
   it('applies model and wheel changes immediately while staying open', async () => {
