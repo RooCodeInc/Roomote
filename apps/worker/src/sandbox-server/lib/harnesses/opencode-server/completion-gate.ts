@@ -395,12 +395,8 @@ const SHELL_SOURCE_MUTATION_PATTERNS = [
   /\bperl\s+(-[a-zA-Z]*\s+)*-[a-zA-Z]*i/,
   // Git operations that rewrite tracked content.
   /\bgit\s+(apply|am|merge|rebase|cherry-pick|revert|pull)\b/,
-  // Only the forms that rewrite files. Creating a branch (`checkout -b`,
-  // `switch -c`) keeps the working tree, while moving to an existing branch
-  // or restoring paths replaces it. `git reset HEAD -- path` (the workflow's
-  // own unstage step) and `git restore --staged` touch the index alone.
-  /\bgit\s+checkout(?!.*\s(-[bB]|--orphan)\b)\s+\S/,
-  /\bgit\s+switch(?!.*\s(-[cC]|--create|--force-create|--orphan)\b)\s+\S/,
+  // `git reset HEAD -- path` (the workflow's own unstage step) and
+  // `git restore --staged` touch the index alone.
   /\bgit\s+restore\s+(?!.*--staged)(?!.*-S\b)/,
   /\bgit\s+reset\s+.*--(hard|merge|keep)\b/,
   /\bgit\s+stash\s+(pop|apply)\b/,
@@ -419,9 +415,42 @@ const SHELL_SOURCE_MUTATION_PATTERNS = [
  * edits would flag every honest "tests pass" that was followed by a format.
  */
 export function isLikelySourceMutatingCommand(command: string): boolean {
-  return SHELL_SOURCE_MUTATION_PATTERNS.some((pattern) =>
-    pattern.test(command),
+  return (
+    SHELL_SOURCE_MUTATION_PATTERNS.some((pattern) => pattern.test(command)) ||
+    command.split(/&&|\|\||[;|\n]/).some(replacesWorkingTreeByBranch)
   );
+}
+
+const BRANCH_CREATE_FLAGS = new Set([
+  '-b',
+  '-B',
+  '-c',
+  '-C',
+  '--create',
+  '--force-create',
+  '--orphan',
+]);
+
+/**
+ * `git checkout` and `git switch` keep the working tree only when they create
+ * a branch at the current commit: a create flag and nothing but the new name.
+ * A start point (`-b fix origin/main`), an existing branch, or paths all
+ * replace files.
+ */
+function replacesWorkingTreeByBranch(segment: string): boolean {
+  const tokens = segment.trim().split(/\s+/);
+  const gitIndex = tokens.indexOf('git');
+  const verb = tokens[gitIndex + 1];
+
+  if (gitIndex === -1 || (verb !== 'checkout' && verb !== 'switch')) {
+    return false;
+  }
+
+  const args = tokens.slice(gitIndex + 2);
+  const positional = args.filter((arg) => !arg.startsWith('-'));
+  const createsBranch = args.some((arg) => BRANCH_CREATE_FLAGS.has(arg));
+
+  return !(createsBranch && positional.length === 1);
 }
 
 /** Never throws: a check that cannot be made is a check that was skipped. */
