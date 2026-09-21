@@ -307,6 +307,30 @@ describe('evaluateTypeSafeJudgments', () => {
     );
   });
 
+  it('tells the helper model what a noul is, so it does not answer with its own confidence', async () => {
+    mockKeys({});
+    mockGetJudgmentSelection.mockResolvedValue('off');
+    mockGenerateTrackedNonTaskObject.mockResolvedValue({
+      object: { answers: directAnswers },
+    });
+
+    await evaluateDecisionModel({ state: 'hi', questions });
+
+    const call = mockGenerateTrackedNonTaskObject.mock.calls.at(-1)![0] as {
+      prompt: string;
+    };
+
+    expect(call.prompt).toContain(
+      '`noul` is the probability from 0 to 1 that the answer is yes',
+    );
+    expect(call.prompt).toContain(
+      'It is not confidence in your own answer: a confident no is near 0 and a confident yes is near 1.',
+    );
+    expect(call.prompt).toContain(
+      '`score` is the zero-based index of the criteria entry that fits best',
+    );
+  });
+
   it('short-circuits high-volume decisions before resolving the helper', async () => {
     mockKeys({});
 
