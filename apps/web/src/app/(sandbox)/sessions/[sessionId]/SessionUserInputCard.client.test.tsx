@@ -127,6 +127,97 @@ describe('SessionUserInputCard', () => {
     );
   });
 
+  it('preserves answers for the same request and resets them for a new request', () => {
+    const firstRequest = {
+      ...multiRequest,
+      requestId: 'rui:first',
+      questions: [
+        {
+          id: 'choice',
+          header: 'Choice',
+          question: 'Choose one',
+          isOther: false,
+          isSecret: false,
+          multiple: false,
+          options: [
+            { label: 'Deep', description: 'Deep mode' },
+            { label: 'Fast', description: 'Fast mode' },
+          ],
+        },
+      ],
+    };
+    const secondRequest = { ...firstRequest, requestId: 'rui:second' };
+    const { rerender } = render(
+      <SessionUserInputCard sessionId="s" request={firstRequest} />,
+    );
+
+    fireEvent.click(screen.getByRole('radio', { name: /Deep/ }));
+    expect(screen.getByRole('radio', { name: /Deep/ })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+
+    rerender(<SessionUserInputCard sessionId="s" request={firstRequest} />);
+    expect(screen.getByRole('radio', { name: /Deep/ })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+
+    rerender(
+      <SessionUserInputCard
+        key={secondRequest.requestId}
+        sessionId="s"
+        request={secondRequest}
+      />,
+    );
+    expect(screen.getByRole('radio', { name: /Deep/ })).toHaveAttribute(
+      'aria-checked',
+      'false',
+    );
+    fireEvent.click(screen.getByRole('radio', { name: /Fast/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
+    expect(mockMutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: 'rui:second',
+        answers: { choice: { answers: ['Fast'] } },
+      }),
+    );
+  });
+
+  it('resets free-text answers when the request identity changes', () => {
+    const firstRequest = {
+      requestId: 'rui:text-first',
+      questions: [
+        {
+          id: 'details',
+          header: 'Details',
+          question: 'Add details',
+          isOther: false,
+          isSecret: false,
+        },
+      ],
+    };
+    const secondRequest = { ...firstRequest, requestId: 'rui:text-second' };
+    const { rerender } = render(
+      <SessionUserInputCard sessionId="s" request={firstRequest} />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Add details'), {
+      target: { value: 'draft answer' },
+    });
+    rerender(<SessionUserInputCard sessionId="s" request={firstRequest} />);
+    expect(screen.getByLabelText('Add details')).toHaveValue('draft answer');
+
+    rerender(
+      <SessionUserInputCard
+        key={secondRequest.requestId}
+        sessionId="s"
+        request={secondRequest}
+      />,
+    );
+    expect(screen.getByLabelText('Add details')).toHaveValue('');
+  });
+
   it('uses accessible radio semantics for single-choice options', () => {
     render(
       <SessionUserInputCard
