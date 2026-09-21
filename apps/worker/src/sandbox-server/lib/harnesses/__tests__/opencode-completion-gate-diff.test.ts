@@ -184,6 +184,21 @@ describe('collectShippedDiff', () => {
     expect(edited?.fingerprint).not.toBe(before?.fingerprint);
   });
 
+  it('notices an edit to a file too large to fingerprint by content', async () => {
+    const repo = createCheckout();
+    const large = `export const data = '${'x'.repeat(2_100_000)}';\n`;
+    git(repo, 'checkout', '-q', '-b', 'task');
+    write(repo, 'src/large.ts', large);
+    commit(repo, 'add data');
+    const before = await collectShippedDiff(repo);
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    write(repo, 'src/large.ts', large.replace('xxx', 'xyx'));
+    const after = await collectShippedDiff(repo);
+
+    expect(after?.fingerprint).not.toBe(before?.fingerprint);
+  });
+
   it('keeps its fingerprint when the work is committed', async () => {
     const repo = createCheckout();
     git(repo, 'checkout', '-q', '-b', 'task');

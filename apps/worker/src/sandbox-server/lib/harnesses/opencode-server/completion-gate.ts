@@ -273,12 +273,13 @@ async function collectRepositoryDiff(
     return null;
   }
 
-  const untracked = (untrackedList ?? '')
+  const untrackedAll = (untrackedList ?? '')
     .split('\0')
-    .filter(
-      (file) =>
-        file && !isNoiseFile(file) && isLikelyText(join(repoPath, file)),
-    )
+    .filter((file) => file && !isNoiseFile(file));
+  // The patch shown to the model leaves out large and binary files; the
+  // fingerprint below still covers them.
+  const untracked = untrackedAll
+    .filter((file) => isLikelyText(join(repoPath, file)))
     .slice(0, MAX_UNTRACKED_FILES);
   const untrackedPatches = await Promise.all(
     untracked.map((file) =>
@@ -294,7 +295,7 @@ async function collectRepositoryDiff(
   return {
     fingerprint: await fingerprintChangedFiles(repoPath, [
       ...(changedList ?? '').split('\0').filter(Boolean),
-      ...untracked,
+      ...untrackedAll,
     ]),
     diff: [tracked, ...untrackedPatches.filter(Boolean)].join(''),
     diffStat: [
@@ -352,6 +353,14 @@ export function clipDiffByFile(
 /**
  * What formatters and pre-commit hooks rewrite: whitespace, quote style,
  * trailing commas, semicolons, and wrapping parentheses.
+ *
+ * A deliberate trade. Each of these can carry meaning in principle (a
+ * parenthesis that changes precedence most of all), so an edit made only of
+ * them goes unseen and an earlier test run keeps vouching for it. Keeping
+ * them would instead mark runs stale whenever a formatter wraps a return or
+ * an arrow parameter in code the agent just wrote, which happens on most
+ * tasks and would flag honest reports. A missed stale run leaves the agent's
+ * claim trusted, which is how every run is treated without this check.
  */
 const FORMATTING_ONLY_CHARACTERS = /[\s'"`;,()]/g;
 
@@ -363,22 +372,39 @@ const FORMATTING_ONLY_CHARACTERS = /[\s'"`;,()]/g;
  * moments with the same fingerprint hold the same code, however it got there:
  * an editor tool, `sed -i`, a heredoc script, or a git operation.
  */
+function statIdentity(filePath: string): string {
+  try {
+    const stats = statSync(filePath);
+    return `stat:${stats.size}:${stats.mtimeMs}`;
+  } catch {
+    return 'deleted';
+  }
+}
+
 async function fingerprintChangedFiles(
   repoPath: string,
   files: string[],
 ): Promise<string> {
   const hash = createHash('sha256');
+  const paths = [...new Set(files)].sort();
 
-  for (const file of [...new Set(files)]
-    .sort()
-    .slice(0, MAX_FINGERPRINT_FILES)) {
-    const content = await readFile(join(repoPath, file)).then(
-      (buffer) =>
-        buffer.byteLength <= MAX_FINGERPRINT_FILE_BYTES
-          ? buffer.toString('utf8').replace(FORMATTING_ONLY_CHARACTERS, '')
-          : `size:${buffer.byteLength}`,
-      () => 'deleted',
-    );
+  for (const [index, file] of paths.entries()) {
+    const filePath = join(repoPath, file);
+    // Every changed path is part of the identity. Past the caps a file is
+    // represented by its size and modification time instead of its content:
+    // cheaper, and it errs toward calling a run stale rather than current.
+    const content =
+      index < MAX_FINGERPRINT_FILES
+        ? await readFile(filePath).then(
+            (buffer) =>
+              buffer.byteLength <= MAX_FINGERPRINT_FILE_BYTES
+                ? buffer
+                    .toString('utf8')
+                    .replace(FORMATTING_ONLY_CHARACTERS, '')
+                : statIdentity(filePath),
+            () => 'deleted',
+          )
+        : statIdentity(filePath);
     hash.update(`${file}\0${content}\0`);
   }
 
