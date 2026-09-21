@@ -764,9 +764,11 @@ describe('buildFastAgentSystemPrompt', () => {
       'An unscoped exact `name` lookup searches packaged, instance, authorized legacy Settings, and authorized repository skills',
     );
     expect(prompt).toContain(
-      'when a result includes `nextSourceOffset` and no authoritative packaged, instance, or Settings match has already been returned',
+      'whenever a result includes `nextSourceOffset`, call `list_skills` again',
     );
-    expect(prompt).toContain('stop once a higher-precedence match is returned');
+    expect(prompt).toContain(
+      'to collect remaining same-precedence Settings variants',
+    );
     expect(prompt).toContain('exact returned skill ID');
     expect(prompt).toContain('Not every skill applies in Fast');
     expect(prompt).toContain('some require starting a coding task');
