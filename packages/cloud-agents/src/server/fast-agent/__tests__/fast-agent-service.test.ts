@@ -6142,7 +6142,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.getNativeRuntime).toHaveBeenCalledTimes(2);
   });
 
-  it('mounts an integration connected mid-turn on the code-mode server', async () => {
+  it('mounts a colliding integration mid-turn under its unique code-mode name', async () => {
     mocks.getNativeRuntime.mockImplementation(async () => {
       mocks.mcpCapabilityAvailable = true;
       return {
@@ -6158,28 +6158,32 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.listIntegrations
       .mockResolvedValueOnce([
         {
-          id: 'github',
-          name: 'GitHub',
-          description: 'Repository access',
-          tools: [{ name: 'search_code' }],
+          id: 'foo_bar',
+          name: 'Foo Underscore Bar',
+          description: 'First integration',
+          tools: [{ name: 'read' }],
         },
       ])
       .mockResolvedValue([
         {
-          id: 'github',
-          name: 'GitHub',
-          description: 'Repository access',
-          tools: [{ name: 'search_code' }],
+          id: 'foo_bar',
+          name: 'Foo Underscore Bar',
+          description: 'First integration',
+          tools: [{ name: 'read' }],
         },
         {
-          id: 'notion',
-          name: 'Notion',
-          description: 'Docs access',
-          tools: [{ name: 'search_pages' }],
+          id: 'foo.bar',
+          name: 'Foo Dot Bar',
+          description: 'Second integration',
+          tools: [{ name: 'write' }],
         },
       ]);
     mocks.getUnifiedSession.mockResolvedValue({ id: 'session-1' });
-    mocks.connectIntegration.mockResolvedValue({ status: 'connected' });
+    mocks.addRemoteMcp.mockResolvedValue({
+      status: 'connected',
+      integrationId: 'foo.bar',
+      name: 'Foo Dot Bar',
+    });
     mocks.mountCodeModeIntegration.mockResolvedValue(true);
 
     mocks.generateText.mockImplementation(
@@ -6190,8 +6194,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           purpose: 'ack',
           message: 'I’ll connect that.',
         });
-        const result = await invokeTool(nativeToolNames.connectIntegration, {
-          integrationId: 'notion',
+        const result = await invokeTool(nativeToolNames.addRemoteMcp, {
+          name: 'Foo Dot Bar',
+          url: 'https://example.test/mcp',
         });
         expect(result).toMatchObject({ success: true, status: 'connected' });
         await invokeTool(nativeToolNames.sendChatReply, {
@@ -6205,14 +6210,15 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     await expect(
       answerFastAgentQuestion({ ...baseParams, adapter: callbacks() }),
     ).resolves.toBe('Connected.');
-    // Only the newly connected server is mounted mid-turn; github was already
+    // Only the newly connected server is mounted mid-turn; foo_bar was already
     // in the turn-start mount set.
     expect(mocks.mountCodeModeIntegration).toHaveBeenCalledTimes(1);
     expect(mocks.mountCodeModeIntegration).toHaveBeenCalledWith({
       serverUrl: 'http://127.0.0.1:9999',
       directory: '/tmp/fast-native-tools',
       mcpCapability: 'mcp-capability-1',
-      integrationId: 'notion',
+      integrationId: 'foo.bar',
+      serverName: 'foo_bar__roomote_2',
     });
     // The tool cache is cleared so discovery stops serving the pre-connect
     // empty tool list, and the connect result points at the execute runner.

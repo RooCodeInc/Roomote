@@ -1730,9 +1730,11 @@ export async function mountFastAgentIntegrationOnCodeModeServer(input: {
   directory: string;
   mcpCapability: string;
   integrationId: string;
+  serverName?: string;
 }): Promise<boolean> {
   bridgePromise ??= startBridge();
   const bridge = await bridgePromise;
+  const serverName = input.serverName ?? input.integrationId;
   // OpenCode instances are per-directory: without the workspace routing the
   // server would land on the default instance and stay invisible to the
   // session's code-mode catalog.
@@ -1742,7 +1744,7 @@ export async function mountFastAgentIntegrationOnCodeModeServer(input: {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        name: input.integrationId,
+        name: serverName,
         config: {
           type: 'remote',
           url: `${bridge.url}/mcp/${input.mcpCapability}/${encodeURIComponent(input.integrationId)}`,
@@ -1761,7 +1763,7 @@ export async function mountFastAgentIntegrationOnCodeModeServer(input: {
     string,
     { status?: string; error?: string }
   > | null;
-  const entry = status?.[input.integrationId];
+  const entry = status?.[serverName];
   if (entry && entry.status !== 'connected') {
     console.warn(
       `[Fast Agent] Code-mode mid-turn mount of ${input.integrationId} reports status=${entry.status ?? 'unknown'}${entry.error ? ` error=${entry.error}` : ''}.`,
