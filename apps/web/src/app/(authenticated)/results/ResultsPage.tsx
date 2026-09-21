@@ -435,7 +435,7 @@ export function ResultsPage() {
                   className="flex h-full min-h-0 flex-col"
                 >
                   <div className="min-h-0 flex-1 overflow-y-auto">
-                    <div className="mx-auto max-w-3xl px-5 py-6 md:px-8 md:py-8">
+                    <div className="mx-auto max-w-3xl px-5 pt-6 md:px-8 md:pt-8">
                       <Button
                         variant="ghost"
                         size="sm"
@@ -482,10 +482,12 @@ export function ResultsPage() {
                           </p>
                         </div>
                       </div>
-
+                    </div>
+                    <div aria-hidden="true" className="border-t" />
+                    <div className="mx-auto max-w-3xl px-5 pb-6 pt-6 md:px-8 md:pb-8">
                       {showSuggestionComposer &&
                       actionableResult?.kind === 'suggestion' ? (
-                        <div className="mt-6 rounded-xl border bg-card p-4">
+                        <div className="rounded-xl border bg-card p-4">
                           <NewTaskForm
                             key={actionableResult.id}
                             animate={false}
