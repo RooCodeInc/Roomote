@@ -1749,8 +1749,10 @@ export class OpenCodeServerHarness
   // a request that arrives while a check is awaiting git or the API is not
   // overwritten when that older check records what it saw.
   private completionGateRequestGeneration = 0;
-  // True while the check awaits git or the API with the finished turn still
-  // held open, and the promise that settles once that turn has completed.
+  // True from the moment a finished turn starts closing (finalizing its last
+  // message, then the check itself) until it has completed, and the promise
+  // that settles at that point. Messages arriving in between are held so the
+  // check reads the transcript of the turn it is judging.
   private completionGateChecking = false;
   private turnSettling: Promise<void> | null = null;
   private lastSettledTurnSource: 'session_status' | 'session_idle' | null =
@@ -5264,6 +5266,7 @@ export class OpenCodeServerHarness
     try {
       await this.completeCurrentTurn(source);
     } finally {
+      this.completionGateChecking = false;
       this.lastSettledTurnSource = source;
       settle();
 
@@ -5286,6 +5289,11 @@ export class OpenCodeServerHarness
       this.inFlight = false;
       return;
     }
+
+    // Set before the first await of the closing path, not just around the
+    // check: a follow-up steered in while the last message is finalized would
+    // already be in the transcript the check reads.
+    this.completionGateChecking = isCompletionGateEligible(this.commandEnv);
 
     if (await this.recoverInterruptedToolTurn(source)) {
       return;
@@ -5449,8 +5457,6 @@ export class OpenCodeServerHarness
       return false;
     }
 
-    this.completionGateChecking = true;
-
     try {
       // Read before the first await: anything that moves it mid-check (a new
       // task, a cancel) makes this verdict stale.
@@ -5515,8 +5521,6 @@ export class OpenCodeServerHarness
         }`,
       );
       return false;
-    } finally {
-      this.completionGateChecking = false;
     }
   }
 

@@ -361,6 +361,66 @@ describe('OpenCode harness completion check', () => {
     }
   });
 
+  it('holds a follow-up steered in before the check has even started', async () => {
+    const { client, harness, prompts, completed } = await startTask();
+    let releaseFinalMessage: (() => void) | undefined;
+    const order: string[] = [];
+
+    mockRequestTaskCompletionCheck.mockImplementationOnce(async () => {
+      order.push('check');
+      return { status: 'clear', flags: [] };
+    });
+    client.promptAsync.mockImplementation(async (options: unknown) => {
+      const parts = (
+        options as { request?: { parts?: Array<{ text?: string }> } }
+      ).request?.parts;
+      prompts.push(parts?.[0]?.text ?? '');
+      order.push('prompt');
+    });
+    // The turn is closing, but still reading its last message from OpenCode.
+    let delayed = false;
+    client.messages.mockImplementation(() => {
+      const messages = [finalMessage('msg_1', 'Removed the guard.')];
+
+      if (delayed) {
+        return Promise.resolve(messages);
+      }
+
+      delayed = true;
+      return new Promise((resolve) => {
+        releaseFinalMessage = () => resolve(messages);
+      });
+    });
+
+    try {
+      const closing = client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+      await vi.waitFor(() => expect(releaseFinalMessage).toBeDefined());
+
+      harness.sendCommand({
+        commandName: TaskCommandName.SendMessage,
+        data: {
+          text: 'Also remove the helper.',
+          visibleInTranscript: true,
+          autoSteerWhenQueued: true,
+        },
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(prompts).toHaveLength(1);
+
+      releaseFinalMessage?.();
+      await closing;
+
+      await vi.waitFor(() => expect(prompts).toHaveLength(2));
+      expect(order).toEqual(['check', 'prompt']);
+      expect(completed()).toHaveLength(1);
+    } finally {
+      harness.dispose();
+    }
+  });
+
   it('drops a verdict that arrives after the task was cancelled', async () => {
     let releaseCheck: (() => void) | undefined;
     mockRequestTaskCompletionCheck.mockImplementationOnce(
