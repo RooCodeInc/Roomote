@@ -253,12 +253,17 @@ vi.mock('@/components/tasks/SessionModelSwitcher', () => ({
     onModelChange,
     reasoningEffort,
     onReasoningEffortChange,
+    onModelSelectionChange,
     disabled,
   }: {
     model: string;
     onModelChange: (model: string) => void;
     reasoningEffort: string | null;
     onReasoningEffortChange: (effort: 'high') => void;
+    onModelSelectionChange?: (selection: {
+      model: string;
+      reasoningEffort: string | null;
+    }) => void;
     disabled?: boolean;
   }) => (
     <div>
@@ -274,9 +279,28 @@ vi.mock('@/components/tasks/SessionModelSwitcher', () => ({
       <button
         type="button"
         disabled={disabled}
+        onClick={() => onModelChange('')}
+      >
+        Use default model
+      </button>
+      <button
+        type="button"
+        disabled={disabled}
         onClick={() => onReasoningEffortChange('high')}
       >
         Use high reasoning
+      </button>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() =>
+          onModelSelectionChange?.({
+            model: 'openrouter/anthropic/claude-fable-5',
+            reasoningEffort: 'medium',
+          })
+        }
+      >
+        Use combined selection
       </button>
     </div>
   ),
@@ -3257,6 +3281,63 @@ describe('FastSessionTranscript', () => {
         text: 'Use these settings',
         model: 'openrouter/z-ai/glm-5.2',
         reasoningEffort: 'high',
+      });
+    });
+  });
+
+  it('persists clearing the session model override', async () => {
+    updateModelSelectionMutate.mockResolvedValue({ success: true });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        sessionModel="openrouter/z-ai/glm-5.2"
+        canReply
+      />,
+    );
+
+    expect(screen.getByTestId('session-model')).toHaveTextContent(
+      'openrouter/z-ai/glm-5.2',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Use default model' }));
+
+    expect(screen.getByTestId('session-model')).toBeEmptyDOMElement();
+    await waitFor(() => {
+      expect(updateModelSelectionMutate).toHaveBeenCalledWith({
+        sessionId: 'session-1',
+        model: null,
+      });
+    });
+  });
+
+  it('applies a combined model and effort selection atomically', async () => {
+    updateModelSelectionMutate.mockResolvedValue({ success: true });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        sessionModel="openrouter/openai/gpt-5.6-terra"
+        canReply
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use combined selection' }),
+    );
+
+    // Both values update together so the voice-turn selection ref never
+    // observes a stale intermediate model or effort.
+    expect(screen.getByTestId('session-model')).toHaveTextContent(
+      'openrouter/anthropic/claude-fable-5',
+    );
+    expect(screen.getByTestId('session-reasoning')).toHaveTextContent('medium');
+    await waitFor(() => {
+      expect(updateModelSelectionMutate).toHaveBeenCalledWith({
+        sessionId: 'session-1',
+        model: 'openrouter/anthropic/claude-fable-5',
+        reasoningEffort: 'medium',
       });
     });
   });
