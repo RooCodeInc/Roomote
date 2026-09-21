@@ -150,15 +150,6 @@ export async function shouldRouteUnmentionedDiscordThreadReplyToAgent(params: {
     return false;
   }
 
-  // The owner opt-in admits visible human discussion in this exact Fast
-  // thread. Provider and linked-sender checks above still fail closed.
-  if (
-    params.peerConversationsExperimentEnabled &&
-    params.isOpenConversationThread
-  ) {
-    return true;
-  }
-
   const threadMessages = await params.fetchThreadMessages();
 
   // A real thread always contains at least one message, so a missing or empty
@@ -190,6 +181,9 @@ export async function shouldRouteUnmentionedDiscordThreadReplyToAgent(params: {
     isThreadRootAuthor,
     isAutomationReportThread: params.isAutomationReportThread,
     isOpenConversationThread: params.isOpenConversationThread,
+    allowPeerConversationMessages:
+      params.peerConversationsExperimentEnabled === true &&
+      params.isOpenConversationThread === true,
     threadMessages: toSharedHistoryMessages(threadMessages, botUserId),
     compareMessageIds: compareBigIntMessageIds,
   });

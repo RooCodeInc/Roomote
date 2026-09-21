@@ -141,6 +141,58 @@ describe('shouldRouteUnmentionedTeamsThreadReplyToAgent', () => {
     await expect(routeDecision(threadReplyActivity())).resolves.toBe(true);
   });
 
+  it('routes a clear follow-up to Roomote through the judgment gate', async () => {
+    evaluateTypeSafeJudgmentsMock.mockResolvedValue({
+      addressee: {
+        type: 'choice',
+        choice: 'roomote',
+        confidence: 0.94,
+        probabilities: { roomote: 0.94, participant: 0.03, unclear: 0.03 },
+      },
+    });
+    fetchThreadMessagesMock.mockResolvedValue([
+      humanGraphMessage({
+        id: THREAD_ROOT_ID,
+        userId: 'aad-user-1',
+        text: '@Roomote please fix the bug',
+        mentions: [botMention()],
+      }),
+      botGraphMessage('1700000000100'),
+    ]);
+
+    await expect(
+      routeDecision(threadReplyActivity({ text: 'Can you also add a test?' })),
+    ).resolves.toBe(true);
+    expect(evaluateTypeSafeJudgmentsMock).toHaveBeenCalledOnce();
+  });
+
+  it('suppresses a human-to-human reply when the judgment model says participant', async () => {
+    evaluateTypeSafeJudgmentsMock.mockResolvedValue({
+      addressee: {
+        type: 'choice',
+        choice: 'participant',
+        confidence: 0.93,
+        probabilities: { roomote: 0.02, participant: 0.93, unclear: 0.05 },
+      },
+    });
+    fetchThreadMessagesMock.mockResolvedValue([
+      humanGraphMessage({
+        id: THREAD_ROOT_ID,
+        userId: 'aad-user-1',
+        text: '@Roomote please fix the bug',
+        mentions: [botMention()],
+      }),
+      botGraphMessage('1700000000100'),
+    ]);
+
+    await expect(
+      routeDecision(
+        threadReplyActivity({ text: 'Dan, can you send the logs?' }),
+      ),
+    ).resolves.toBe(false);
+    expect(evaluateTypeSafeJudgmentsMock).toHaveBeenCalledOnce();
+  });
+
   it('recognizes an announcer report root when no regular task run owns the thread', async () => {
     findLatestTeamsThreadTaskRunMock.mockResolvedValue(undefined);
     findTaskBackedTeamsAutomationReportRunMock.mockResolvedValue({
@@ -432,6 +484,7 @@ describe('shouldRouteUnmentionedTeamsThreadReplyToAgent', () => {
       ),
     ).resolves.toBe(false);
     expect(fetchThreadMessagesMock).not.toHaveBeenCalled();
+    expect(evaluateTypeSafeJudgmentsMock).not.toHaveBeenCalled();
   });
 
   it('ignores replies that mention another user', async () => {

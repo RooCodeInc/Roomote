@@ -402,9 +402,15 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
         }),
       ),
     ).resolves.toBe(false);
+    expect(evaluateTypeSafeJudgmentsMock).not.toHaveBeenCalled();
   });
 
   it('routes peer discussion in an opted-in open Fast conversation', async () => {
+    fetchThreadMessagesMock.mockResolvedValue([
+      humanHistory(THREAD_ROOT_ID, USER_1, 'Can you summarize this?'),
+      botHistory('200', 'Hi there.'),
+    ]);
+
     await expect(
       routeDecision(
         threadReplyMessage({
@@ -417,17 +423,46 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
         },
       ),
     ).resolves.toBe(true);
-    expect(fetchThreadMessagesMock).not.toHaveBeenCalled();
+    expect(fetchThreadMessagesMock).toHaveBeenCalledOnce();
   });
 
   it('keeps subsequent ambient turns in the opted-in Fast conversation', async () => {
+    fetchThreadMessagesMock.mockResolvedValue([
+      humanHistory(THREAD_ROOT_ID, USER_1, 'Can you summarize this?'),
+      botHistory('200', 'Hi there.'),
+    ]);
+
     await expect(
       routeDecision(threadReplyMessage({ content: 'I agree' }), {
         isOpenConversationThread: true,
         peerConversationsExperimentEnabled: true,
       }),
     ).resolves.toBe(true);
-    expect(fetchThreadMessagesMock).not.toHaveBeenCalled();
+    expect(fetchThreadMessagesMock).toHaveBeenCalledOnce();
+  });
+
+  it('gates an opted-in peer message with the configured judgment model', async () => {
+    fetchThreadMessagesMock.mockResolvedValue([
+      humanHistory(THREAD_ROOT_ID, USER_1, 'Can you summarize this?'),
+      botHistory('200', 'Hi there.'),
+    ]);
+    evaluateTypeSafeJudgmentsMock.mockResolvedValue({
+      addressee: {
+        type: 'choice',
+        choice: 'participant',
+        confidence: 0.92,
+        probabilities: { roomote: 0.03, participant: 0.92, unclear: 0.05 },
+      },
+    });
+
+    await expect(
+      routeDecision(threadReplyMessage({ content: 'I agree' }), {
+        isOpenConversationThread: true,
+        peerConversationsExperimentEnabled: true,
+      }),
+    ).resolves.toBe(false);
+    expect(fetchThreadMessagesMock).toHaveBeenCalledOnce();
+    expect(evaluateTypeSafeJudgmentsMock).toHaveBeenCalledOnce();
   });
 
   it('does not route a forwarded snapshot that mentions someone else', async () => {

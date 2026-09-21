@@ -274,6 +274,7 @@ describe('resolveUnmentionedThreadReplyRouting', () => {
     input: {
       senderUserId?: string;
       isThreadTaskOwner?: boolean;
+      isOpenConversationThread?: boolean;
       threadMessages?: UnmentionedThreadHistoryMessage[];
       eventText?: string;
     } = {},
@@ -284,6 +285,7 @@ describe('resolveUnmentionedThreadReplyRouting', () => {
       senderUserId: input.senderUserId ?? 'U1',
       isThreadTaskOwner: input.isThreadTaskOwner ?? true,
       isThreadRootAuthor: false,
+      isOpenConversationThread: input.isOpenConversationThread ?? false,
       threadMessages: input.threadMessages ?? interjectedThread,
       compareMessageIds: compareNumericMessageIds,
     });
@@ -393,19 +395,116 @@ describe('resolveUnmentionedThreadReplyRouting', () => {
     warn.mockRestore();
   });
 
-  it('does not consult the judgment model for a reply with no text', async () => {
+  it('keeps legacy routing when the optional judgment backend is unavailable', async () => {
     await expect(resolve({ eventText: '   ' })).resolves.toEqual({
       shouldRoute: false,
       interjectionDetected: true,
     });
-    expect(mockEvaluateTypeSafeJudgments).not.toHaveBeenCalled();
+    expect(mockEvaluateTypeSafeJudgments).toHaveBeenCalledOnce();
   });
 
-  it('does not consult the judgment model when the heuristic already routes', async () => {
+  it('consults the judgment model once when the heuristic admits a reply', async () => {
     await expect(
       resolve({ threadMessages: [human('100', 'U1'), bot('200')] }),
     ).resolves.toEqual({ shouldRoute: true, interjectionDetected: false });
-    expect(mockEvaluateTypeSafeJudgments).not.toHaveBeenCalled();
+    expect(mockEvaluateTypeSafeJudgments).toHaveBeenCalledOnce();
+  });
+
+  it('routes a clear unmentioned follow-up to Roomote', async () => {
+    mockEvaluateTypeSafeJudgments.mockResolvedValue(
+      addresseeAnswer('roomote', 0.9),
+    );
+
+    await expect(
+      resolve({ eventText: 'Can you also add a regression test?' }),
+    ).resolves.toEqual({
+      shouldRoute: true,
+      interjectionDetected: false,
+      routedByJudgmentModel: true,
+    });
+  });
+
+  it.each([
+    [
+      'a human-to-human question',
+      'Dan, can you send me the logs?',
+      'participant',
+    ],
+    ['an ambiguous thanks', 'Sounds good, thanks', 'unclear'],
+    ['a peer-conversation apology', 'Sorry for the ping', 'participant'],
+  ] as const)(
+    'suppresses %s even when the heuristic would admit it',
+    async (_label, eventText, choice) => {
+      mockEvaluateTypeSafeJudgments.mockResolvedValue(
+        addresseeAnswer(choice, 0.9),
+      );
+
+      await expect(
+        resolve({
+          eventText,
+          threadMessages: [human('100', 'U1'), bot('200')],
+        }),
+      ).resolves.toEqual({ shouldRoute: false, interjectionDetected: false });
+    },
+  );
+
+  it('suppresses a changing-speaker continuation addressed to another participant', async () => {
+    mockEvaluateTypeSafeJudgments.mockResolvedValue(
+      addresseeAnswer('participant', 0.95),
+    );
+
+    await expect(
+      resolve({
+        senderUserId: 'U3',
+        isOpenConversationThread: true,
+        threadMessages: [
+          human('100', 'U1', { mentionsBot: true, text: 'please investigate' }),
+          bot('200', 'I found the issue.'),
+          human('300', 'U2', { text: 'I agree with that.' }),
+        ],
+      }),
+    ).resolves.toEqual({
+      shouldRoute: false,
+      interjectionDetected: false,
+    });
+  });
+
+  it('fails closed when a configured judgment model is unavailable', async () => {
+    mockEvaluateTypeSafeJudgments.mockRejectedValue(new Error('timeout'));
+
+    await expect(
+      resolve({
+        eventText: 'Sounds good',
+        threadMessages: [human('100', 'U1'), bot('200')],
+      }),
+    ).resolves.toEqual({
+      shouldRoute: false,
+      interjectionDetected: false,
+    });
+  });
+
+  it('fails closed when a configured judgment answer is malformed', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockEvaluateTypeSafeJudgments.mockResolvedValue({
+      addressee: {
+        type: 'choice',
+        choice: 'roomote',
+        confidence: 0.95,
+        probabilities: { roomote: Number.NaN },
+      },
+    });
+
+    await expect(
+      resolve({
+        eventText: 'Can you check this?',
+        threadMessages: [human('100', 'U1'), bot('200')],
+      }),
+    ).resolves.toEqual({
+      shouldRoute: false,
+      interjectionDetected: false,
+    });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('invalid'));
+    warn.mockRestore();
   });
 
   it('never consults the judgment model for an ineligible sender', async () => {

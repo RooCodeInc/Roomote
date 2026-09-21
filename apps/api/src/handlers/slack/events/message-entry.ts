@@ -142,7 +142,7 @@ async function postRemovedEvalCommandMessage(params: {
 }
 
 type UnmentionedSlackThreadReplyRoutingDecision =
-  | { shouldRoute: false }
+  | { shouldRoute: false; shouldRecordConversationMessage?: true }
   | {
       shouldRoute: true;
       peerConversationsExperimentEnabled?: true;
@@ -208,8 +208,8 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
     return { shouldRoute: false };
   }
 
-  // Opted-in Fast owners receive the discussion and peer-mention reminder as
-  // context. Otherwise the existing peer-mention cutoff remains unchanged.
+  // Opted-in Fast owners may participate in an open conversation, but the
+  // shared addressee gate still needs recent history before starting Fast.
   const fastSessionOwner = await getBoundSlackFastAgentSessionOwner({
     teamId,
     channelId: event.channel,
@@ -218,11 +218,9 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
   const peerConversationsExperimentEnabled =
     fastSessionOwner?.kind === 'user' &&
     (await isDeploymentExperimentEnabled('slackPeerConversations'));
-  if (peerConversationsExperimentEnabled) {
-    return { shouldRoute: true, peerConversationsExperimentEnabled: true };
-  }
 
   if (
+    !peerConversationsExperimentEnabled &&
     mentionsSlackUserOtherThanBotWithoutMentioningBot(
       event,
       slackInstallation.botUserId,
@@ -283,7 +281,7 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
   // empty result means the history is unreliable. Require an explicit mention
   // instead of routing blind.
   if (!threadMessages || threadMessages.length === 0) {
-    return { shouldRoute: false };
+    return { shouldRoute: false, shouldRecordConversationMessage: true };
   }
 
   const botUserId = slackInstallation.botUserId ?? undefined;
@@ -329,6 +327,7 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
       roomoteThreadMatch?.isAutomationReportThread,
     ),
     isOpenConversationThread: isFastAgentThread,
+    allowPeerConversationMessages: peerConversationsExperimentEnabled,
     threadMessages: sharedHistory,
     compareMessageIds: compareNumericMessageIds,
   });
@@ -340,11 +339,14 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
         slack,
       });
     }
-    return { shouldRoute: false };
+    return { shouldRoute: false, shouldRecordConversationMessage: true };
   }
 
   return {
     shouldRoute: true,
+    ...(peerConversationsExperimentEnabled
+      ? { peerConversationsExperimentEnabled: true as const }
+      : {}),
     threadMessages,
     ...(roomoteThreadMatch?.trackedAliasTaskId
       ? { taskId: roomoteThreadMatch.trackedAliasTaskId }
@@ -378,7 +380,7 @@ async function maybeRecordTrackedAutomationThreadReply(params: {
   slack: SlackNotifier;
   slackInstallation: SlackInstallation;
   teamId: string;
-}): Promise<void> {
+}): Promise<boolean> {
   const { event, slack, slackInstallation, teamId } = params;
 
   if (
@@ -387,7 +389,7 @@ async function maybeRecordTrackedAutomationThreadReply(params: {
     !event.thread_ts ||
     !event.user
   ) {
-    return;
+    return false;
   }
 
   if (
@@ -395,14 +397,14 @@ async function maybeRecordTrackedAutomationThreadReply(params: {
     event.subtype !== 'file_share' &&
     event.subtype !== 'bot_message'
   ) {
-    return;
+    return false;
   }
 
   if (
     event.subtype === 'bot_message' ||
     isRoomoteAuthoredSlackEvent(event, slackInstallation)
   ) {
-    return;
+    return false;
   }
 
   const trackedThread = await findTrackedBackgroundAutomationSlackThread({
@@ -412,7 +414,7 @@ async function maybeRecordTrackedAutomationThreadReply(params: {
   });
 
   if (!trackedThread) {
-    return;
+    return false;
   }
 
   const { activeMapping: userMapping } = await lookupSlackUserMapping({
@@ -425,6 +427,36 @@ async function maybeRecordTrackedAutomationThreadReply(params: {
     slack,
     userMapping: userMapping ?? null,
     teamId,
+    shouldRecordThreadReply: true,
+  });
+  return true;
+}
+
+export async function recordSuppressedUnmentionedSlackThreadReply(params: {
+  event: SlackEvent;
+  slack: SlackNotifier;
+  teamId: string;
+}): Promise<void> {
+  if (!params.event.user) {
+    return;
+  }
+
+  const { activeMapping: userMapping } = await lookupSlackUserMapping({
+    slackUserId: params.event.user,
+    teamId: params.teamId,
+  });
+
+  // Preserve the linked-user conversation log without turning a suppressed
+  // drive-by reply into an account-linking or task-entry flow.
+  if (!userMapping) {
+    return;
+  }
+
+  await recordInboundSlackConversationMessage({
+    event: params.event,
+    slack: params.slack,
+    userMapping,
+    teamId: params.teamId,
     shouldRecordThreadReply: true,
   });
 }
@@ -1330,12 +1362,24 @@ export async function handleMessageOrAppMentionEvent(params: {
     !unmentionedThreadReplyRouting.shouldRoute &&
     !automatedAppMentionEvent
   ) {
-    await maybeRecordTrackedAutomationThreadReply({
-      event,
-      slack: context.slack,
-      slackInstallation: context.slackInstallation,
-      teamId: context.teamId,
-    });
+    const recordedTrackedAutomationReply =
+      await maybeRecordTrackedAutomationThreadReply({
+        event,
+        slack: context.slack,
+        slackInstallation: context.slackInstallation,
+        teamId: context.teamId,
+      });
+
+    if (
+      !recordedTrackedAutomationReply &&
+      unmentionedThreadReplyRouting.shouldRecordConversationMessage
+    ) {
+      await recordSuppressedUnmentionedSlackThreadReply({
+        event,
+        slack: context.slack,
+        teamId: context.teamId,
+      });
+    }
 
     if (isBotMentionedMessageEvent) {
       return;
