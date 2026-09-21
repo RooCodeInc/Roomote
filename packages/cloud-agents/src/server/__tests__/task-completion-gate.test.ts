@@ -190,6 +190,19 @@ describe('evaluateTaskCompletionGate', () => {
     });
   });
 
+  it('flags a contradicted validation claim at its own lower threshold', async () => {
+    mockEvaluateDecisionModel.mockResolvedValue(
+      answers({ validationContradicted: 0.7, evidentDefect: 0.7 }),
+    );
+
+    await expect(
+      evaluateTaskCompletionGate({ taskId: 'task-1', check }),
+    ).resolves.toEqual({
+      status: 'flagged',
+      flags: [{ id: 'validationContradicted', probability: 0.7 }],
+    });
+  });
+
   it('leaves out a validation run that predates the last source edit', async () => {
     await evaluateTaskCompletionGate({
       taskId: 'task-1',

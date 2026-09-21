@@ -25,6 +25,18 @@ import {
 const FLAG_MIN_PROBABILITY = 0.8;
 
 /**
+ * "Claims tests pass, none were run" scores 0.79-0.82, so at the shared
+ * threshold it flips from run to run. Nothing that should stay quiet scored
+ * above 0.47 on this question across the synthetic cases and 45 real merged
+ * pull requests, which leaves room to catch it reliably.
+ */
+const FLAG_MIN_PROBABILITY_OVERRIDES: Partial<
+  Record<TaskCompletionFlagId, number>
+> = {
+  validationContradicted: 0.65,
+};
+
+/**
  * The sandbox holds the turn open while this runs. The hosted judgment model
  * answers in well under a second.
  */
@@ -309,7 +321,11 @@ export async function evaluateTaskCompletionGate(input: {
         id: id as TaskCompletionFlagId,
         probability: answer.noul,
       }))
-      .filter((flag) => flag.probability >= FLAG_MIN_PROBABILITY);
+      .filter(
+        (flag) =>
+          flag.probability >=
+          (FLAG_MIN_PROBABILITY_OVERRIDES[flag.id] ?? FLAG_MIN_PROBABILITY),
+      );
 
     console.info(
       `[TaskCompletionGate] Evaluated. taskId=${input.taskId} truncated=${input.check.diffTruncated} ${Object.entries(
