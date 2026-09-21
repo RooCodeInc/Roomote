@@ -15,6 +15,7 @@ import { isDeploymentExperimentEnabledWithShareLock } from './deployment-experim
 import {
   integrationToolApprovalRequests,
   integrationToolPolicies,
+  integrationToolUserPolicies,
   integrationToolSessionOverrides,
   sessions,
   users,
@@ -100,7 +101,10 @@ type IntegrationToolApprovalRow =
   typeof integrationToolApprovalRequests.$inferSelect;
 
 function policyMetadata(
-  row: IntegrationToolPolicyRow,
+  row: Pick<
+    IntegrationToolPolicyRow,
+    'id' | 'integrationId' | 'toolName' | 'mode' | 'updatedAt' | 'createdAt'
+  >,
 ): IntegrationToolPolicyMetadata {
   return {
     policyId: row.id,
@@ -186,6 +190,63 @@ export async function upsertIntegrationToolPolicy(input: {
         updatedByUserId: input.updatedByUserId,
         updatedAt: sql`clock_timestamp()`,
       },
+    });
+}
+
+/** One user's personal policies; `allow` is stored as no row. */
+export async function listIntegrationToolUserPolicies(
+  userId: string,
+): Promise<IntegrationToolPolicyMetadata[]> {
+  const rows = await db
+    .select()
+    .from(integrationToolUserPolicies)
+    .where(eq(integrationToolUserPolicies.userId, userId))
+    .orderBy(
+      integrationToolUserPolicies.integrationId,
+      integrationToolUserPolicies.toolName,
+    );
+  return rows.map(policyMetadata);
+}
+
+/**
+ * Configure one tool's approval mode for the user's own Sessions. It layers
+ * on the deployment policy and never loosens it; see
+ * `resolveStricterIntegrationToolPolicyMode`.
+ */
+export async function upsertIntegrationToolUserPolicy(input: {
+  userId: string;
+  integrationId: string;
+  toolName: string;
+  mode: IntegrationToolPolicyMode;
+}): Promise<void> {
+  if (input.mode === 'allow') {
+    await db
+      .delete(integrationToolUserPolicies)
+      .where(
+        and(
+          eq(integrationToolUserPolicies.userId, input.userId),
+          eq(integrationToolUserPolicies.integrationId, input.integrationId),
+          eq(integrationToolUserPolicies.toolName, input.toolName),
+        ),
+      );
+    return;
+  }
+  await db
+    .insert(integrationToolUserPolicies)
+    .values({
+      userId: input.userId,
+      integrationId: input.integrationId,
+      toolName: input.toolName,
+      mode: input.mode,
+      updatedAt: sql`clock_timestamp()`,
+    })
+    .onConflictDoUpdate({
+      target: [
+        integrationToolUserPolicies.userId,
+        integrationToolUserPolicies.integrationId,
+        integrationToolUserPolicies.toolName,
+      ],
+      set: { mode: input.mode, updatedAt: sql`clock_timestamp()` },
     });
 }
 

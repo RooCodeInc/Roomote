@@ -14,11 +14,13 @@ import {
   isDeploymentExperimentEnabled,
   listIntegrationToolPolicies,
   listIntegrationToolSessionOverrides,
+  listIntegrationToolUserPolicies,
   markIntegrationToolApprovalConsumed,
 } from '@roomote/db/server';
 import {
   integrationToolPolicyKey,
   resolveEffectiveIntegrationToolMode,
+  resolveStricterIntegrationToolPolicyMode,
   type IntegrationToolApprovalMetadata,
   type IntegrationToolPolicyMetadata,
   type IntegrationToolSessionOverrideMetadata,
@@ -84,6 +86,32 @@ function listMountedIntegrationTools(
       key: codeModeToolKey(serverName, tool.name),
     }));
   });
+}
+
+/**
+ * Layer the requester's personal policies on the deployment ones. The
+ * stricter mode wins per tool, so a personal policy can gate or block the
+ * requester's own calls but never loosen what an admin configured.
+ */
+export function mergeIntegrationToolPolicies(
+  deploymentPolicies: IntegrationToolPolicyMetadata[],
+  userPolicies: IntegrationToolPolicyMetadata[],
+): IntegrationToolPolicyMetadata[] {
+  const merged = new Map(
+    deploymentPolicies.map((policy) => [
+      integrationToolPolicyKey(policy.integrationId, policy.toolName),
+      policy,
+    ]),
+  );
+  for (const policy of userPolicies) {
+    const key = integrationToolPolicyKey(policy.integrationId, policy.toolName);
+    const mode = resolveStricterIntegrationToolPolicyMode(
+      merged.get(key)?.mode,
+      policy.mode,
+    );
+    if (mode === policy.mode) merged.set(key, policy);
+  }
+  return [...merged.values()];
 }
 
 /**
@@ -262,20 +290,25 @@ export async function resolveFastAgentToolApprovalRules(input: {
   integrations: FastAgentIntegration[];
   /** The Session whose requester-owned overrides layer on the policies. */
   sessionId?: string;
+  /** The requester whose personal policies tighten the deployment ones. */
+  userId?: string;
 }): Promise<{ rules: PermissionRuleset; hash: string } | undefined> {
   const enabled = await isDeploymentExperimentEnabled(
     'integrationToolApprovals',
   );
   if (!enabled) return undefined;
-  const [policies, sessionOverrides] = await Promise.all([
+  const [policies, userPolicies, sessionOverrides] = await Promise.all([
     listIntegrationToolPolicies(),
+    input.userId
+      ? listIntegrationToolUserPolicies(input.userId)
+      : Promise.resolve([]),
     input.sessionId
       ? listIntegrationToolSessionOverrides(input.sessionId)
       : Promise.resolve([]),
   ]);
   const rules = buildIntegrationToolApprovalRules(
     input.integrations,
-    policies,
+    mergeIntegrationToolPolicies(policies, userPolicies),
     sessionOverrides,
   );
   return { rules, hash: hashIntegrationToolApprovalRules(rules) };

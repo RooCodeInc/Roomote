@@ -4611,6 +4611,39 @@ export const integrationToolPolicies = pgTable(
 );
 
 /**
+ * integration_tool_user_policies
+ *
+ * Experiment-gated (`integration_tool_approvals_experiment_enabled`) personal
+ * per-tool approval modes. Same modes as `integration_tool_policies`, scoped
+ * to one user's own Sessions, and only ever tightening: the stricter of the
+ * deployment and personal mode applies. `allow` is stored as no row. Rows
+ * cascade with their user. Additive; N-1 code never reads or writes it.
+ */
+export const integrationToolUserPolicies = pgTable(
+  'integration_tool_user_policies',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    integrationId: text('integration_id').notNull(),
+    toolName: text('tool_name').notNull(),
+    mode: text('mode')
+      .notNull()
+      .$type<import('@roomote/types').IntegrationToolPolicyMode>(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('integration_tool_user_policies_tool_idx').on(
+      table.userId,
+      table.integrationId,
+      table.toolName,
+    ),
+  ],
+);
+
+/**
  * integration_tool_approval_requests
  *
  * Experiment-gated (`integration_tool_approvals_experiment_enabled`) pending

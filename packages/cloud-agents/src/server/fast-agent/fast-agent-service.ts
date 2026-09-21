@@ -3848,6 +3848,7 @@ export async function answerFastAgentQuestion({
     const toolApprovalRules = await resolveFastAgentToolApprovalRules({
       integrations: availableIntegrations,
       sessionId: toolApprovalSessionId,
+      userId,
     });
     const system = buildFastAgentSystemPrompt({
       availableEnvironments,

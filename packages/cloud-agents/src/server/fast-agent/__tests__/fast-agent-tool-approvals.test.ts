@@ -15,6 +15,7 @@ vi.mock('@roomote/db/server', () => ({
   isDeploymentExperimentEnabled: vi.fn(async () => true),
   listIntegrationToolPolicies: vi.fn(async () => []),
   listIntegrationToolSessionOverrides: vi.fn(async () => []),
+  listIntegrationToolUserPolicies: vi.fn(async () => []),
   markIntegrationToolApprovalConsumed: vi.fn(async () => true),
 }));
 
@@ -28,6 +29,7 @@ import {
   isDeploymentExperimentEnabled,
   listIntegrationToolPolicies,
   listIntegrationToolSessionOverrides,
+  listIntegrationToolUserPolicies,
   markIntegrationToolApprovalConsumed,
 } from '@roomote/db/server';
 
@@ -38,6 +40,7 @@ import {
   extractApprovalCallArgs,
   hashIntegrationToolApprovalRules,
   integrationToolApprovalRulesToConfig,
+  mergeIntegrationToolPolicies,
   resolveFastAgentToolApprovalRules,
   resolveFastAgentToolApprovalSessionId,
   shouldDisposeInstanceForToolApprovalRules,
@@ -374,6 +377,47 @@ describe('resolveFastAgentToolApprovalRules', () => {
         action: 'ask',
       },
     ]);
+  });
+
+  it("tightens with the requester's personal policies and never loosens a deployment one", async () => {
+    const policy = (toolName: string, mode: 'allow' | 'ask' | 'reject') => ({
+      policyId: `${toolName}-${mode}`,
+      integrationId: 'mock-slack',
+      toolName,
+      mode,
+      updatedAt: '',
+      createdAt: '',
+    });
+    vi.mocked(listIntegrationToolPolicies).mockResolvedValueOnce([
+      policy('delete_channel', 'reject'),
+      policy('post_message', 'ask'),
+    ]);
+    vi.mocked(listIntegrationToolUserPolicies).mockResolvedValueOnce([
+      policy('delete_channel', 'ask'),
+      policy('post_message', 'reject'),
+      policy('read_channel', 'ask'),
+    ]);
+    const resolved = await resolveFastAgentToolApprovalRules({
+      integrations,
+      sessionId: 'session-id',
+      userId: 'user-id',
+    });
+    expect(listIntegrationToolUserPolicies).toHaveBeenCalledWith('user-id');
+    expect(
+      Object.fromEntries(
+        resolved!.rules.map((rule) => [rule.permission, rule.action]),
+      ),
+    ).toEqual({
+      [codeModeToolKey('mock-slack', 'delete_channel')]: 'deny',
+      [codeModeToolKey('mock-slack', 'post_message')]: 'deny',
+      [codeModeToolKey('mock-slack', 'read_channel')]: 'ask',
+    });
+  });
+
+  it('reads no personal policies without a requester', async () => {
+    await resolveFastAgentToolApprovalRules({ integrations });
+    expect(listIntegrationToolUserPolicies).not.toHaveBeenCalled();
+    expect(mergeIntegrationToolPolicies([], [])).toEqual([]);
   });
 
   it('is inactive without the experiment', async () => {

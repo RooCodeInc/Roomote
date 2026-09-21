@@ -24,6 +24,8 @@ import {
   redactIntegrationToolArgs,
   setIntegrationToolSessionOverride,
   upsertIntegrationToolPolicy,
+  upsertIntegrationToolUserPolicy,
+  listIntegrationToolUserPolicies,
 } from '../integration-tool-approvals';
 import {
   isDeploymentExperimentEnabledWithShareLock,
@@ -172,6 +174,46 @@ describe('integration tool policies', () => {
       mode: 'allow',
       updatedByUserId: admin,
     });
+  });
+});
+
+describe('personal integration tool policies', () => {
+  it("keeps each user's modes separate and deletes on reset to allow", async () => {
+    const first = await user();
+    const second = await user();
+    await upsertIntegrationToolUserPolicy({
+      userId: first,
+      integrationId: 'my-server',
+      toolName: 'delete_page',
+      mode: 'ask',
+    });
+    await upsertIntegrationToolUserPolicy({
+      userId: first,
+      integrationId: 'my-server',
+      toolName: 'delete_page',
+      mode: 'reject',
+    });
+    await upsertIntegrationToolUserPolicy({
+      userId: second,
+      integrationId: 'my-server',
+      toolName: 'delete_page',
+      mode: 'ask',
+    });
+    expect(
+      (await listIntegrationToolUserPolicies(first)).map((p) => p.mode),
+    ).toEqual(['reject']);
+    expect(
+      (await listIntegrationToolUserPolicies(second)).map((p) => p.mode),
+    ).toEqual(['ask']);
+
+    await upsertIntegrationToolUserPolicy({
+      userId: first,
+      integrationId: 'my-server',
+      toolName: 'delete_page',
+      mode: 'allow',
+    });
+    expect(await listIntegrationToolUserPolicies(first)).toEqual([]);
+    expect(await listIntegrationToolUserPolicies(second)).toHaveLength(1);
   });
 });
 

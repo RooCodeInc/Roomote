@@ -226,7 +226,9 @@ import {
 } from '../commands/deployment-experiments';
 import {
   listIntegrationToolPoliciesCommand,
+  listPersonalIntegrationToolPoliciesCommand,
   setIntegrationToolPolicyCommand,
+  setPersonalIntegrationToolPolicyCommand,
 } from '../commands/integration-tool-policies';
 import {
   type EnvironmentConfigVersionDetail,
@@ -3618,6 +3620,14 @@ export const appRouter = createRouter({
       .input(integrationToolPolicyUpsertSchema)
       .mutation(({ ctx: { auth }, input }) =>
         setIntegrationToolPolicyCommand(auth, input),
+      ),
+    listPersonal: protectedProcedure.query(({ ctx: { auth } }) =>
+      listPersonalIntegrationToolPoliciesCommand(auth),
+    ),
+    setPersonal: protectedProcedure
+      .input(integrationToolPolicyUpsertSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        setPersonalIntegrationToolPolicyCommand(auth, input),
       ),
   }),
 

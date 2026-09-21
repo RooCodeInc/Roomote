@@ -795,13 +795,15 @@ function CustomToolManagementDialog({
   const trpc = useTRPC();
   const { isAdmin } = useAuthorizedUser();
   const toolApprovalsExperiment = useIntegrationToolApprovalsExperiment();
-  // Approval policies are deployment-wide and admin-managed, and a shared
-  // custom server mounts under its name, so only admins on the shared list
-  // get the control; the admin-only list query never fires otherwise.
+  // A custom server mounts under its name. Shared servers take the
+  // deployment-wide, admin-managed policies (the admin-only list query never
+  // fires otherwise); a personal server takes its owner's personal policies,
+  // which apply to their own Sessions only.
   const toolApprovalsActive =
-    toolApprovalsExperiment.enabled && isAdmin && scope === 'deployment';
+    toolApprovalsExperiment.enabled && (scope === 'owner' || isAdmin);
   const toolPolicies = useIntegrationToolPolicies({
     enabled: open && toolApprovalsActive,
+    scope: scope === 'owner' ? 'personal' : 'deployment',
   });
 
   const toolsQuery = useQuery(
@@ -883,8 +885,11 @@ function CustomToolManagementDialog({
           <div className="space-y-2 max-h-96 overflow-y-auto">
             {toolApprovalsActive && server ? (
               <p className="text-xs text-muted-foreground">
-                {INTEGRATION_TOOL_APPROVAL_SAVE_HINT} Tool enable/disable still
-                needs Save.
+                {INTEGRATION_TOOL_APPROVAL_SAVE_HINT}
+                {scope === 'owner'
+                  ? ' These apply to your own sessions only.'
+                  : ''}{' '}
+                Tool enable/disable still needs Save.
               </p>
             ) : null}
             {groupIntegrationToolsByAccess(toolsQuery.data?.tools ?? []).map(
