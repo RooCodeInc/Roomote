@@ -253,6 +253,19 @@ the session's own memory entry, which the platform redacts and files just
 like a task memory. Saved facts become searchable after the next ingestion
 pass, so they surface in later sessions rather than instantly.
 
+With a [judgment model](/models#judgment-model) on, Roomote also catches what
+the agent did not save itself. After every settled session turn it checks for
+a stated preference, decision, or correction, an explicit request to remember,
+or a finding that took real investigation. When a task finishes without a
+recorded memory, it checks whether the closing report holds a decision,
+finding, dead end, or open item a later task could reuse. Only a confident yes
+leads to a save; the helper model then writes the memory, which goes through
+the same redaction and filing, and a task memory written this way says so.
+Session turns that look sensitive, try to plant approvals or bypass rules, or
+repeat what was already saved are skipped, trivial tasks keep the plain
+completion line, and [private sessions](/private-sessions) and private tasks
+are never checked.
+
 Additional memory integrations, such as Supermemory, can also provide shared
 context to tasks and sessions. Roomote chooses one connected memory
 store for the initial recall so multiple stores do not repeat the same preflight.

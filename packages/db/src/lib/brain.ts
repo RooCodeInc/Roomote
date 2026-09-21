@@ -579,6 +579,31 @@ export async function saveBrainAgentSummary(
 }
 
 /**
+ * Park a summary Roomote distilled for a run whose agent recorded none. It
+ * only fills an empty summary, so an agent-authored memory always wins, and
+ * it leaves `revision` alone: the drainer calls this for the row it holds and
+ * writes the same text in the same pass, so there is no newer content to
+ * re-ingest. Returns whether the summary was stored.
+ */
+export async function fillBrainDistilledSummary(
+  database: DatabaseOrTransaction,
+  eventId: string,
+  summary: string,
+): Promise<boolean> {
+  const updated = await database
+    .update(brainMemoryEvents)
+    .set({ agentSummary: summary, updatedAt: sql`now()` })
+    .where(
+      and(
+        eq(brainMemoryEvents.id, eventId),
+        isNull(brainMemoryEvents.agentSummary),
+      ),
+    )
+    .returning({ id: brainMemoryEvents.id });
+  return updated.length > 0;
+}
+
+/**
  * Re-ingest every completed run of a task after something the task produced
  * reached an outcome the memory should carry (a linked pull request merged or
  * was closed unmerged). The page content is rebuilt from live rows by the

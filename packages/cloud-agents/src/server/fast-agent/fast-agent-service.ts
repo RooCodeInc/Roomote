@@ -149,6 +149,7 @@ import {
   upsertFastAgentMessage,
   type FastAgentActiveTask,
 } from './fast-agent-session';
+import { saveFastAgentPostTurnMemory } from './fast-agent-post-turn-memory';
 import { refreshFastAgentSessionTitleWithRetry } from './session-title-refresh-job';
 import {
   classifyNonTaskInferenceError,
@@ -2067,6 +2068,8 @@ export async function answerFastAgentQuestion({
   let codeModeOpenCodeServerUrl: string | null = null;
   let durableOpenCodeSessionId: string | null = null;
   let lastVisibleMessage = '';
+  /** The agent called `save_memory` itself, so the post-turn pass stands down. */
+  let agentSavedMemoryThisTurn = false;
   // The most recent assistant message already in the conversation, so a
   // repeat of the same terminal failure does not post the same closeout again.
   let priorAssistantMessage: string | undefined;
@@ -5733,6 +5736,7 @@ export async function answerFastAgentQuestion({
                     : "This conversation's memory is full. Start a new conversation to save further memories.",
               };
             }
+            agentSavedMemoryThisTurn = true;
             return {
               success: true,
               saved: true,
@@ -6827,6 +6831,20 @@ export async function answerFastAgentQuestion({
       }
     }
     await settleDurableTurn();
+    if (
+      substantiveHumanInput &&
+      !setupSession &&
+      currentSessionPrivacy === 'shared'
+    ) {
+      void saveFastAgentPostTurnMemory({
+        conversationId: session.id,
+        userId,
+        request: question,
+        reply: lastVisibleMessage,
+        senderDisplayName,
+        agentSavedMemory: agentSavedMemoryThisTurn,
+      });
+    }
     const settledGoal = await getSessionGoalForConversation(session.id);
     if (settledGoal?.status === 'active') {
       const activeGoalTasks = await getActiveFastAgentTasks(session.id);

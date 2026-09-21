@@ -342,6 +342,8 @@ When a judgment model is on, Roomote asks it first for:
 - dropping inbound [email](/providers/communications/agentmail) that is
   clearly an automatic reply, such as an out-of-office or bounce notice
 - choosing the forum tag when Roomote opens a thread in a Discord forum channel
+- whether a settled session turn, or a finished task whose agent recorded no
+  memory, holds something worth saving to [Memory](/memory)
 
 Roomote acts on the judgment model only when it is confident. When it is
 unsure, unavailable, or returns an error, Roomote keeps the behavior it has
@@ -351,8 +353,9 @@ separate decision-model connection. The text a decision needs is sent to the
 selected provider; keys stay on the control plane and are never sent to task
 sandboxes.
 
-Some decisions evaluate many candidates in parallel, such as skill relevance
-and integration-tool ranking. Roomote only runs those high-volume workloads
+Some decisions run in bulk: many candidates in parallel, such as skill
+relevance and integration-tool ranking, or a check after every session turn
+and finished task, such as the Memory check. Roomote only runs those high-volume workloads
 through an explicitly configured Jev judgment backend. A helper model never
 opts into these batches, so deployments without Jev keep the existing
 conservative behavior and do not incur new high-volume language-model calls.

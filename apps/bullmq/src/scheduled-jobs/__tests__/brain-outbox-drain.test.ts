@@ -23,6 +23,8 @@ const {
   mockRunBrainCollectors,
   mockRequestHomeComposerPrecompute,
   mockTaskRun,
+  mockDistillTaskRunMemory,
+  mockFillDistilledSummary,
 } = vi.hoisted(() => ({
   mockResolveConnection: vi.fn(),
   mockIsBrainEmbeddingAvailable: vi.fn(),
@@ -46,6 +48,12 @@ const {
   mockRunBrainCollectors: vi.fn(),
   mockRequestHomeComposerPrecompute: vi.fn(),
   mockTaskRun: vi.fn(),
+  mockDistillTaskRunMemory: vi.fn(),
+  mockFillDistilledSummary: vi.fn(),
+}));
+
+vi.mock('@roomote/cloud-agents/server', () => ({
+  distillTaskRunMemory: mockDistillTaskRunMemory,
 }));
 
 vi.mock('@roomote/sdk/server', async (importOriginal) => ({
@@ -83,6 +91,7 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
       })),
     },
     backfillBrainMemoryEvents: mockBackfillEvents,
+    fillBrainDistilledSummary: mockFillDistilledSummary,
     claimPendingBrainMemoryEvents: mockClaimEvents,
     claimPendingFastAgentMemoryEvents: mockClaimFastEvents,
     claimPendingBrainPageRetirements: mockClaimRetirements,
@@ -113,6 +122,8 @@ beforeEach(() => {
   mockClaimRetirements.mockResolvedValue([]);
   mockConversationRows.mockResolvedValue([]);
   mockTaskRun.mockResolvedValue(null);
+  mockDistillTaskRunMemory.mockResolvedValue(null);
+  mockFillDistilledSummary.mockResolvedValue(true);
   mockMarkBrainEvent.mockResolvedValue(undefined);
   mockSettleBrainEvent.mockResolvedValue('settled');
   mockRequestHomeComposerPrecompute.mockResolvedValue(undefined);
@@ -158,6 +169,10 @@ describe('task memory drain classification', () => {
     mockGetSyncState.mockResolvedValue({ backfillCompletedAt: new Date() });
     mockPullRequestFacts.mockResolvedValue([]);
     mockTaskPullRequests.mockReturnValue([]);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('settles snapshot maintenance as skipped without publishing it', async () => {
@@ -211,6 +226,113 @@ describe('task memory drain classification', () => {
       1,
       'done',
     );
+  });
+
+  const putPageBody = (fetchMock: ReturnType<typeof vi.fn>) =>
+    String((fetchMock.mock.calls[0]?.[1] as RequestInit | undefined)?.body);
+
+  it('distills a memory for a fresh run whose agent recorded none', async () => {
+    vi.useFakeTimers({ now: new Date('2026-09-18T05:00:00Z') });
+    mockClaimEvents
+      .mockResolvedValueOnce([
+        {
+          id: 'standard-event',
+          revision: 1,
+          attempts: 1,
+          runId: 102,
+          agentSummary: null,
+        },
+      ])
+      .mockResolvedValue([]);
+    mockTaskRun.mockResolvedValue(
+      completedTaskRun('standard', 'standard-task'),
+    );
+    mockDistillTaskRunMemory.mockResolvedValue(
+      '## Outcome\n\nPinned the fixture clock instead of disabling the cache.',
+    );
+    const fetchMock = vi.fn(async () => Response.json({ result: {} }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await brainOutboxDrainJob();
+
+    expect(mockDistillTaskRunMemory).toHaveBeenCalledWith({
+      runId: 102,
+      taskId: 'standard-task',
+      userId: null,
+      request: 'Ship the useful task memory.',
+    });
+    expect(mockFillDistilledSummary).toHaveBeenCalledWith(
+      expect.anything(),
+      'standard-event',
+      expect.stringContaining('Pinned the fixture clock'),
+    );
+    expect(putPageBody(fetchMock)).toContain('Pinned the fixture clock');
+    expect(putPageBody(fetchMock)).not.toContain('Task completed at');
+  });
+
+  it('keeps the completion line when nothing is worth distilling', async () => {
+    vi.useFakeTimers({ now: new Date('2026-09-18T05:00:00Z') });
+    mockClaimEvents
+      .mockResolvedValueOnce([
+        {
+          id: 'standard-event',
+          revision: 1,
+          attempts: 1,
+          runId: 102,
+          agentSummary: null,
+        },
+      ])
+      .mockResolvedValue([]);
+    mockTaskRun.mockResolvedValue(
+      completedTaskRun('standard', 'standard-task'),
+    );
+    const fetchMock = vi.fn(async () => Response.json({ result: {} }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await brainOutboxDrainJob();
+
+    expect(mockDistillTaskRunMemory).toHaveBeenCalledTimes(1);
+    expect(mockFillDistilledSummary).not.toHaveBeenCalled();
+    expect(putPageBody(fetchMock)).toContain('Task completed at');
+  });
+
+  it('never distills over an agent memory, an old run, or a non-standard workflow', async () => {
+    vi.useFakeTimers({ now: new Date('2026-09-18T05:00:00Z') });
+    const fetchMock = vi.fn(async () => Response.json({ result: {} }));
+    vi.stubGlobal('fetch', fetchMock);
+    const event = {
+      id: 'standard-event',
+      revision: 1,
+      attempts: 1,
+      runId: 102,
+      agentSummary: null,
+    };
+
+    mockClaimEvents
+      .mockResolvedValueOnce([
+        { ...event, agentSummary: '## Outcome\n\nDone.' },
+      ])
+      .mockResolvedValue([]);
+    mockTaskRun.mockResolvedValue(
+      completedTaskRun('standard', 'standard-task'),
+    );
+    await brainOutboxDrainJob();
+
+    // A backfilled or re-put run from before the freshness window.
+    vi.setSystemTime(new Date('2026-09-20T05:00:00Z'));
+    mockClaimEvents.mockResolvedValueOnce([event]).mockResolvedValue([]);
+    await brainOutboxDrainJob();
+
+    vi.setSystemTime(new Date('2026-09-18T05:00:00Z'));
+    const reviewRun = completedTaskRun('standard', 'standard-task');
+    mockTaskRun.mockResolvedValue({
+      ...reviewRun,
+      task: { ...reviewRun.task, workflow: 'review' },
+    });
+    mockClaimEvents.mockResolvedValueOnce([event]).mockResolvedValue([]);
+    await brainOutboxDrainJob();
+
+    expect(mockDistillTaskRunMemory).not.toHaveBeenCalled();
   });
 });
 
