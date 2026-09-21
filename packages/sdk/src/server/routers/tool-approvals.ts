@@ -8,6 +8,7 @@ import {
 } from '../lib/task-tool-approvals';
 import { findTaskRunByRunTokenClaims } from '../lib/task-runs/find-task-run';
 import { authenticatedProcedure, isRunToken, router } from '../trpc';
+import { resolveTaskRunMcpServerConfigs } from './mcp-connections';
 
 /** A task run's own approvals only: the run token names the task. */
 const taskRunProcedure = authenticatedProcedure.use(async ({ ctx, next }) => {
@@ -17,7 +18,7 @@ const taskRunProcedure = authenticatedProcedure.use(async ({ ctx, next }) => {
       message: 'This endpoint is only available to a running task',
     });
   }
-  return next({ ctx: { ...ctx, runId: ctx.auth.runId } });
+  return next({ ctx: { ...ctx, auth: ctx.auth, runId: ctx.auth.runId } });
 });
 
 export const toolApprovalsRouter = router({
@@ -37,6 +38,7 @@ export const toolApprovalsRouter = router({
       requestTaskToolApproval({
         runId: ctx.runId,
         actingUserId: (await resolveActorScopedUserContext(ctx.auth)).userId,
+        resolveServers: () => resolveTaskRunMcpServerConfigs(ctx.auth, ctx.req),
         ...input,
       }),
     ),

@@ -1,6 +1,4 @@
 const mocks = vi.hoisted(() => ({
-  personalServers: vi.fn(async () => [] as { name: string }[]),
-  sharedServers: vi.fn(async () => [] as { name: string }[]),
   recordAuto: vi.fn(),
   experiment: vi.fn(async () => true),
   findRun: vi.fn(async () => ({ taskId: 'task-1' }) as unknown),
@@ -19,15 +17,6 @@ vi.mock(
   '@roomote/cloud-agents/server/integration-tool-auto-evaluation',
   () => ({ recordIntegrationToolAutoEvaluationInBackground: mocks.recordAuto }),
 );
-
-vi.mock('../mcp/custom-servers', () => ({
-  customMcpServerStore: (scope: { visibility: string }) => ({
-    list:
-      scope.visibility === 'owner'
-        ? mocks.personalServers
-        : mocks.sharedServers,
-  }),
-}));
 
 vi.mock('@roomote/db/server', () => ({
   db: { query: { taskRuns: { findFirst: mocks.findRun } } },
@@ -74,8 +63,6 @@ beforeEach(() => {
   mocks.userPolicies.mockResolvedValue([]);
   mocks.overrides.mockResolvedValue([]);
   mocks.claimAuto.mockResolvedValue(true);
-  mocks.personalServers.mockResolvedValue([]);
-  mocks.sharedServers.mockResolvedValue([]);
 });
 
 describe('resolveTaskIntegrationToolApprovals', () => {
@@ -150,8 +137,13 @@ describe('requestTaskToolApproval', () => {
     mocks.userPolicies.mockResolvedValue([
       { integrationId: 'linear', toolName: 'save_issue', mode: 'auto' },
     ]);
+    const resolveServers = async () => ({ linear: {} });
     await expect(
-      requestTaskToolApproval({ ...ask, actingUserId: 'user-1' }),
+      requestTaskToolApproval({
+        ...ask,
+        actingUserId: 'user-1',
+        resolveServers,
+      }),
     ).resolves.toEqual({ outcome: 'pending', approvalId: 'approval-1' });
     expect(mocks.recordAuto).toHaveBeenCalledWith(
       'approval-1',
@@ -168,29 +160,48 @@ describe('requestTaskToolApproval', () => {
     mocks.deploymentPolicies.mockResolvedValue([
       { integrationId: 'linear', toolName: 'save_issue', mode: 'ask' },
     ]);
-    await requestTaskToolApproval({ ...ask, actingUserId: 'user-1' });
+    await requestTaskToolApproval({
+      ...ask,
+      actingUserId: 'user-1',
+      resolveServers,
+    });
     expect(mocks.recordAuto).not.toHaveBeenCalled();
   });
 
-  it('reads a custom server under the one layer that governs it', async () => {
-    const autoAsk = { ...ask, integrationId: 'notes', actingUserId: 'user-1' };
-    // A personal Auto on a name the member does not own says nothing about
-    // the shared server of that name.
+  it('reads a custom server under the layer its mounted configuration names', async () => {
+    const resolveServers = vi.fn(async () => ({
+      notes: { toolApprovalPolicyScope: 'deployment' as const },
+    }));
+    const autoAsk = {
+      ...ask,
+      integrationId: 'notes',
+      actingUserId: 'user-1',
+      resolveServers,
+    };
+    // A personal Auto says nothing about the shared server that is mounted
+    // under that name, for instance while their own is not signed in.
     mocks.userPolicies.mockResolvedValue([
       { integrationId: 'notes', toolName: 'save_issue', mode: 'auto' },
     ]);
-    mocks.sharedServers.mockResolvedValue([{ name: 'notes' }]);
     await requestTaskToolApproval(autoAsk);
     expect(mocks.recordAuto).not.toHaveBeenCalled();
 
-    // Their own server of that name wins it, and a deployment Ask first on
-    // the shared one no longer outranks their personal Auto.
-    mocks.personalServers.mockResolvedValue([{ name: 'notes' }]);
+    // Mounted as their own, a deployment Ask first on the shared one no
+    // longer outranks their personal Auto.
+    resolveServers.mockResolvedValue({
+      notes: { toolApprovalPolicyScope: 'personal' as never },
+    });
     mocks.deploymentPolicies.mockResolvedValue([
       { integrationId: 'notes', toolName: 'save_issue', mode: 'ask' },
     ]);
     await requestTaskToolApproval(autoAsk);
     expect(mocks.recordAuto).toHaveBeenCalledTimes(1);
+
+    // No Auto policy anywhere: the configuration is never resolved.
+    resolveServers.mockClear();
+    mocks.userPolicies.mockResolvedValue([]);
+    await requestTaskToolApproval(autoAsk);
+    expect(resolveServers).not.toHaveBeenCalled();
   });
 
   it('answers without a card once the owner allowed the tool for the session', async () => {

@@ -1,5 +1,6 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
+import type { RunTokenContext } from '@roomote/types';
 import { ROOMOTE_MCP_PATH } from '@roomote/auth';
 import {
   Env,
@@ -224,6 +225,23 @@ export async function resolveUserMcpServerConfigs(options: {
   });
 }
 
+/**
+ * What a task run mounts, with the policy scope of each custom server. The
+ * one source for a task's approval rules and for anything else that has to
+ * agree with them about which policy layer governs a server.
+ */
+export function resolveTaskRunMcpServerConfigs(
+  auth: RunTokenContext,
+  req: { url?: string } | undefined,
+): Promise<ResolvedMcpServerConfigs> {
+  return resolveMcpServerConfigs({
+    auth,
+    requestOrigin: getRequestOrigin(req),
+    includeSessionMetadata: true,
+    quiet: true,
+  });
+}
+
 export const mcpConnectionsRouter = router({
   isOrgEnabled: authenticatedProcedure
     .input(
@@ -323,16 +341,11 @@ export const mcpConnectionsRouter = router({
         message: 'This endpoint is only available to run tokens',
       });
     }
+    const auth = ctx.auth;
     const toolApprovals = await resolveTaskIntegrationToolApprovals({
-      runId: ctx.auth.runId,
+      runId: auth.runId,
       actingUserId: (await resolveActorScopedUserContext(ctx.auth)).userId,
-      resolveServers: () =>
-        resolveMcpServerConfigs({
-          auth: ctx.auth,
-          requestOrigin: getRequestOrigin(ctx.req),
-          includeSessionMetadata: true,
-          quiet: true,
-        }),
+      resolveServers: () => resolveTaskRunMcpServerConfigs(auth, ctx.req),
     });
     return { toolApprovals: toolApprovals ?? null };
   }),

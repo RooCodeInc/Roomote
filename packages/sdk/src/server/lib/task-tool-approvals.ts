@@ -15,8 +15,6 @@ import {
   taskRuns,
 } from '@roomote/db/server';
 import { recordIntegrationToolAutoEvaluationInBackground } from '@roomote/cloud-agents/server/integration-tool-auto-evaluation';
-import { customMcpServerStore } from './mcp/custom-servers';
-
 import {
   compileTaskIntegrationToolApprovals,
   resolveGoverningIntegrationToolPolicies,
@@ -48,14 +46,17 @@ async function resolveTaskApprovalSession(runId: number) {
   };
 }
 
+/** What the task run mounts, with each custom server's policy scope. */
+type ResolveTaskServers = () => Promise<
+  Record<string, { toolApprovalPolicyScope?: IntegrationToolPolicyScope }>
+>;
+
 /** The native rules for the servers a task run is about to mount. */
 export async function resolveTaskIntegrationToolApprovals(input: {
   runId: number;
   actingUserId: string | undefined;
   /** Resolved only while the experiment is on. */
-  resolveServers: () => Promise<
-    Record<string, { toolApprovalPolicyScope?: IntegrationToolPolicyScope }>
-  >;
+  resolveServers: ResolveTaskServers;
 }): Promise<TaskIntegrationToolApprovals | undefined> {
   if (!(await isDeploymentExperimentEnabled('integrationToolApprovals'))) {
     return undefined;
@@ -102,6 +103,8 @@ export async function requestTaskToolApproval(input: {
   args?: unknown;
   /** Whose personal policies apply; see `resolveTaskIntegrationToolApprovals`. */
   actingUserId?: string;
+  /** Only needed to tell whether the tool is in `auto` mode. */
+  resolveServers?: ResolveTaskServers;
 }): Promise<TaskToolApprovalRequestResult> {
   if (!(await isDeploymentExperimentEnabled('integrationToolApprovals'))) {
     return { outcome: 'not_required' };
@@ -158,60 +161,43 @@ export async function requestTaskToolApproval(input: {
 }
 
 /**
- * Which policy layer governs a custom server of this name for the acting
- * member, mirroring how their servers are mounted: their own enabled personal
- * server wins the name, then a shared one. Anything else is a built-in
- * integration, which both layers govern.
+ * Whether the mode governing this tool for the task is `auto`. A custom
+ * server is governed by one policy layer, which only the mounted
+ * configuration knows (a name can exist in both scopes, and which one is
+ * mounted depends on more than the name), so the scope comes from the same
+ * resolver the task's rules are compiled from. It is only resolved when some
+ * layer has an Auto policy for the tool at all.
  */
-async function resolveCustomServerPolicyScope(
-  name: string,
-  actingUserId: string | undefined,
-): Promise<IntegrationToolPolicyScope | undefined> {
-  const named = (rows: { name: string }[]) =>
-    rows.some((row) => row.name === name);
-  if (
-    actingUserId &&
-    named(
-      await customMcpServerStore({
-        visibility: 'owner',
-        ownerUserId: actingUserId,
-      }).list({ enabledOnly: true }),
-    )
-  ) {
-    return 'personal';
-  }
-  return named(
-    await customMcpServerStore({ visibility: 'deployment' }).list({
-      enabledOnly: true,
-    }),
-  )
-    ? 'deployment'
-    : undefined;
-}
-
-/** Whether the mode governing this tool for the task is `auto`. */
 async function isAutoTool(input: {
   integrationId: string;
   toolName: string;
   actingUserId?: string;
+  resolveServers?: ResolveTaskServers;
 }): Promise<boolean> {
-  const [deploymentPolicies, userPolicies, scope] = await Promise.all([
+  const isThisTool = (policy: { integrationId: string; toolName: string }) =>
+    policy.integrationId === input.integrationId &&
+    policy.toolName === input.toolName;
+  const [deploymentPolicies, userPolicies] = await Promise.all([
     listIntegrationToolPolicies(),
     input.actingUserId
       ? listIntegrationToolUserPolicies(input.actingUserId)
       : Promise.resolve([]),
-    resolveCustomServerPolicyScope(input.integrationId, input.actingUserId),
   ]);
+  if (
+    ![...deploymentPolicies, ...userPolicies].some(
+      (policy) => policy.mode === 'auto' && isThisTool(policy),
+    )
+  ) {
+    return false;
+  }
+  const server = (await input.resolveServers?.())?.[input.integrationId];
+  // Not mounted, or nothing to say which layer governs it: no evaluation.
+  if (!server) return false;
   return resolveGoverningIntegrationToolPolicies({
     deploymentPolicies,
     userPolicies,
-    scopeOf: () => scope,
-  }).some(
-    (policy) =>
-      policy.mode === 'auto' &&
-      policy.integrationId === input.integrationId &&
-      policy.toolName === input.toolName,
-  );
+    scopeOf: () => server.toolApprovalPolicyScope,
+  }).some((policy) => policy.mode === 'auto' && isThisTool(policy));
 }
 
 /** The worker's poll while the Session owner decides. */
