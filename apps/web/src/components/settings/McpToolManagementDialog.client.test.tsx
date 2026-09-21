@@ -114,7 +114,8 @@ describe('McpToolManagementDialog tool approvals', () => {
     state.approvalsEnabled = true;
     state.policiesQueryEnabled = undefined;
     renderDialog({ open: false, isAdmin: true });
-    expect(state.policiesQueryEnabled).toBe(false);
+    // A closed dialog never mounts the tool list, so the query hook never runs.
+    expect(state.policiesQueryEnabled).not.toBe(true);
     state.policiesQueryEnabled = undefined;
     renderDialog({ open: true, isAdmin: false });
     expect(state.policiesQueryEnabled).toBe(false);

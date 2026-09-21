@@ -33,20 +33,12 @@ import {
   parseCustomMcpServerJson,
   type CustomMcpJsonImport,
 } from '@/lib/custom-mcp-json-import';
-import { integrationToolPolicyKey } from '@roomote/types';
 import type { CustomMcpServerVisibility } from '@roomote/types';
 import type { CustomMcpServerListEntry } from '@/trpc/commands/custom-mcp-servers';
 import { useAuthorizedUser } from '@/hooks/useUser';
-import { useIntegrationToolApprovalsExperiment } from '@/hooks/useIntegrationToolApprovalsExperiment';
-import { useIntegrationToolPolicies } from '@/hooks/useIntegrationToolPolicies';
 
 import type { IntegrationItem } from './integration-card';
-import {
-  INTEGRATION_TOOL_APPROVAL_SAVE_HINT,
-  IntegrationToolApprovalGroup,
-  IntegrationToolApprovalModeControl,
-  groupIntegrationToolsByAccess,
-} from './IntegrationToolApprovalControls';
+import { IntegrationToolApprovalList } from './IntegrationToolApprovalControls';
 import { useTRPC } from '@/trpc/client';
 
 type Transport = 'remote' | 'stdio';
@@ -794,18 +786,9 @@ function CustomToolManagementDialog({
 }) {
   const trpc = useTRPC();
   const { isAdmin } = useAuthorizedUser();
-  const toolApprovalsExperiment = useIntegrationToolApprovalsExperiment();
   // A custom server mounts under its name. Shared servers take the
-  // deployment-wide, admin-managed policies (the admin-only list query never
-  // fires otherwise); a personal server takes its owner's personal policies,
-  // which apply to their own Sessions only.
-  const toolApprovalsActive =
-    toolApprovalsExperiment.enabled && (scope === 'owner' || isAdmin);
-  const toolPolicies = useIntegrationToolPolicies({
-    enabled: open && toolApprovalsActive,
-    scope: scope === 'owner' ? 'personal' : 'deployment',
-  });
-
+  // deployment-wide, admin-managed approval policies; a personal server takes
+  // its owner's personal policies, which apply to their own Sessions only.
   const toolsQuery = useQuery(
     trpc.customMcpServers.listTools.queryOptions(
       { id: server?.id ?? '' },
@@ -818,11 +801,6 @@ function CustomToolManagementDialog({
   );
 
   const [disabledNames, setDisabledNames] = useState<Set<string>>(new Set());
-  const approvalModeFor = (toolName: string) =>
-    (server
-      ? toolPolicies.modes.get(integrationToolPolicyKey(server.name, toolName))
-      : undefined) ?? 'allow';
-
   const loadedKey = useMemo(
     () =>
       toolsQuery.data
@@ -883,85 +861,49 @@ function CustomToolManagementDialog({
           </p>
         ) : (
           <div className="space-y-2 max-h-96 overflow-y-auto">
-            {toolApprovalsActive && server ? (
-              <p className="text-xs text-muted-foreground">
-                {INTEGRATION_TOOL_APPROVAL_SAVE_HINT}
-                {scope === 'owner'
-                  ? ' These apply to your own sessions only.'
-                  : ''}{' '}
-                Tool enable/disable still needs Save.
-              </p>
-            ) : null}
-            {groupIntegrationToolsByAccess(toolsQuery.data?.tools ?? []).map(
-              (group) => (
-                <IntegrationToolApprovalGroup
-                  key={group.id}
-                  title={group.title}
-                  count={group.tools.length}
-                  disabled={toolPolicies.isUpdating}
-                  {...(toolApprovalsActive && server
-                    ? {
-                        modes: group.tools.map((tool) =>
-                          approvalModeFor(tool.name),
-                        ),
-                        onChangeAll: (mode) =>
-                          toolPolicies.setModes(
-                            server.name,
-                            group.tools.map((tool) => tool.name),
-                            mode,
-                          ),
-                      }
-                    : {})}
-                >
-                  {group.tools.map((tool) => (
-                    <div
-                      key={tool.name}
-                      className="flex items-start gap-3 py-2.5"
+            <IntegrationToolApprovalList
+              integrationId={server?.name ?? null}
+              scope={scope === 'owner' ? 'personal' : 'deployment'}
+              canManage={scope === 'owner' || isAdmin}
+              open={open}
+              tools={toolsQuery.data?.tools ?? []}
+              saveNote="Tool enable/disable still needs Save."
+              rowClassName="flex items-start gap-3 py-2.5"
+            >
+              {(tool) => (
+                <>
+                  <Checkbox
+                    id={`custom-mcp-tool-${tool.name}`}
+                    checked={!disabledNames.has(tool.name)}
+                    onCheckedChange={(checked) => {
+                      setDisabledNames((current) => {
+                        const next = new Set(current);
+
+                        if (checked === true) {
+                          next.delete(tool.name);
+                        } else {
+                          next.add(tool.name);
+                        }
+
+                        return next;
+                      });
+                    }}
+                    className="mt-0.5"
+                  />
+                  <div className="min-w-0 flex-1 text-sm">
+                    <label
+                      htmlFor={`custom-mcp-tool-${tool.name}`}
+                      className="cursor-pointer font-mono"
                     >
-                      <Checkbox
-                        id={`custom-mcp-tool-${tool.name}`}
-                        checked={!disabledNames.has(tool.name)}
-                        onCheckedChange={(checked) => {
-                          setDisabledNames((current) => {
-                            const next = new Set(current);
-
-                            if (checked === true) {
-                              next.delete(tool.name);
-                            } else {
-                              next.add(tool.name);
-                            }
-
-                            return next;
-                          });
-                        }}
-                        className="mt-0.5"
-                      />
-                      <div className="min-w-0 flex-1 text-sm">
-                        <label
-                          htmlFor={`custom-mcp-tool-${tool.name}`}
-                          className="cursor-pointer font-mono"
-                        >
-                          {tool.name}
-                        </label>
-                        {tool.description ? (
-                          <ToolDescription text={tool.description} />
-                        ) : null}
-                      </div>
-                      {toolApprovalsActive && server ? (
-                        <IntegrationToolApprovalModeControl
-                          toolName={tool.name}
-                          value={approvalModeFor(tool.name)}
-                          disabled={toolPolicies.isUpdating}
-                          onChange={(mode) =>
-                            toolPolicies.setMode(server.name, tool.name, mode)
-                          }
-                        />
-                      ) : null}
-                    </div>
-                  ))}
-                </IntegrationToolApprovalGroup>
-              ),
-            )}
+                      {tool.name}
+                    </label>
+                    {tool.description ? (
+                      <ToolDescription text={tool.description} />
+                    ) : null}
+                  </div>
+                </>
+              )}
+            </IntegrationToolApprovalList>
           </div>
         )}
 

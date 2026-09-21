@@ -2,7 +2,13 @@
 
 import { useState, type ReactNode } from 'react';
 
-import type { IntegrationToolPolicyMode } from '@roomote/types';
+import {
+  integrationToolPolicyKey,
+  type IntegrationToolPolicyMode,
+} from '@roomote/types';
+
+import { useIntegrationToolApprovalsExperiment } from '@/hooks/useIntegrationToolApprovalsExperiment';
+import { useIntegrationToolPolicies } from '@/hooks/useIntegrationToolPolicies';
 
 import { cn } from '@/lib/utils';
 import {
@@ -31,7 +37,7 @@ const APPROVAL_MODES: {
   { mode: 'reject', label: 'Reject', icon: Ban },
 ];
 
-export const INTEGRATION_TOOL_APPROVAL_SAVE_HINT =
+const INTEGRATION_TOOL_APPROVAL_SAVE_HINT =
   'Approval changes save immediately and apply from the next session turn.';
 
 /**
@@ -40,7 +46,7 @@ export const INTEGRATION_TOOL_APPROVAL_SAVE_HINT =
  * Shared by every integration tool management dialog so built-in and custom
  * MCP integrations offer the same choices.
  */
-export function IntegrationToolApprovalModeControl({
+function IntegrationToolApprovalModeControl({
   toolName,
   value,
   disabled,
@@ -94,7 +100,7 @@ type GroupableTool = { name: string; readOnly?: boolean | null };
  * unannotated tool on an annotating server counts as able to write, which is
  * the MCP default for a missing `readOnlyHint`.
  */
-export function groupIntegrationToolsByAccess<T extends GroupableTool>(
+function groupIntegrationToolsByAccess<T extends GroupableTool>(
   tools: T[],
 ): { id: string; title: string | null; tools: T[] }[] {
   if (!tools.some((tool) => typeof tool.readOnly === 'boolean')) {
@@ -120,7 +126,7 @@ export function groupIntegrationToolsByAccess<T extends GroupableTool>(
  * select that applies to every tool in the group; it shows the shared mode,
  * or "Custom" when the group's tools differ.
  */
-export function IntegrationToolApprovalGroup({
+function IntegrationToolApprovalGroup({
   title,
   count,
   modes,
@@ -211,5 +217,96 @@ export function IntegrationToolApprovalGroup({
       </div>
       {open ? <div className="divide-y divide-border">{children}</div> : null}
     </section>
+  );
+}
+
+/**
+ * The grouped tool list every integration tool dialog renders, with the
+ * experiment-gated approval controls wired in one place. The dialog supplies
+ * each tool's own row content (its enable toggle, label, description); this
+ * adds the per-tool mode control, the group-level control, and the save hint,
+ * or nothing but the grouping when approvals are not active for the viewer.
+ */
+export function IntegrationToolApprovalList<T extends GroupableTool>({
+  integrationId,
+  scope,
+  canManage,
+  open,
+  tools,
+  saveNote,
+  rowClassName,
+  children,
+}: {
+  /** The id policies are keyed on: the mount name agents see. */
+  integrationId: string | null;
+  /** `personal` policies apply to the viewer's own sessions only. */
+  scope: 'deployment' | 'personal';
+  /** Deployment policies are admin-managed; never load them otherwise. */
+  canManage: boolean;
+  open: boolean;
+  tools: T[];
+  /** How the dialog's own enable/disable changes are saved. */
+  saveNote: string;
+  rowClassName: string;
+  children: (tool: T) => ReactNode;
+}) {
+  const experiment = useIntegrationToolApprovalsExperiment();
+  const active = experiment.enabled && canManage && integrationId != null;
+  const policies = useIntegrationToolPolicies({
+    enabled: open && active,
+    scope,
+  });
+  const modeFor = (toolName: string) =>
+    (integrationId
+      ? policies.modes.get(integrationToolPolicyKey(integrationId, toolName))
+      : undefined) ?? 'allow';
+
+  return (
+    <>
+      {active ? (
+        <p className="text-xs text-muted-foreground">
+          {INTEGRATION_TOOL_APPROVAL_SAVE_HINT}
+          {scope === 'personal'
+            ? ' These apply to your own sessions only.'
+            : ''}{' '}
+          {saveNote}
+        </p>
+      ) : null}
+      {groupIntegrationToolsByAccess(tools).map((group) => (
+        <IntegrationToolApprovalGroup
+          key={group.id}
+          title={group.title}
+          count={group.tools.length}
+          disabled={policies.isUpdating}
+          {...(active
+            ? {
+                modes: group.tools.map((tool) => modeFor(tool.name)),
+                onChangeAll: (mode: IntegrationToolPolicyMode) =>
+                  policies.setModes(
+                    integrationId,
+                    group.tools.map((tool) => tool.name),
+                    mode,
+                  ),
+              }
+            : {})}
+        >
+          {group.tools.map((tool) => (
+            <div key={tool.name} className={rowClassName}>
+              {children(tool)}
+              {active ? (
+                <IntegrationToolApprovalModeControl
+                  toolName={tool.name}
+                  value={modeFor(tool.name)}
+                  disabled={policies.isUpdating}
+                  onChange={(mode) =>
+                    policies.setMode(integrationId, tool.name, mode)
+                  }
+                />
+              ) : null}
+            </div>
+          ))}
+        </IntegrationToolApprovalGroup>
+      ))}
+    </>
   );
 }

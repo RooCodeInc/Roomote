@@ -37,6 +37,9 @@ export async function setIntegrationToolPolicyCommand(
   return listIntegrationToolPolicies();
 }
 
+const toolApprovalsEnabled = () =>
+  isDeploymentExperimentEnabled('integrationToolApprovals');
+
 /**
  * The caller's personal policies for their own Sessions. They layer on the
  * deployment policies and only ever tighten them. Inert while the experiment
@@ -45,9 +48,7 @@ export async function setIntegrationToolPolicyCommand(
 export async function listPersonalIntegrationToolPoliciesCommand(
   auth: UserAuthSuccess,
 ) {
-  if (!(await isDeploymentExperimentEnabled('integrationToolApprovals'))) {
-    return [];
-  }
+  if (!(await toolApprovalsEnabled())) return [];
   return listIntegrationToolUserPolicies(auth.userId);
 }
 
@@ -55,7 +56,7 @@ export async function setPersonalIntegrationToolPolicyCommand(
   auth: UserAuthSuccess,
   input: IntegrationToolPolicyUpsert,
 ) {
-  if (!(await isDeploymentExperimentEnabled('integrationToolApprovals'))) {
+  if (!(await toolApprovalsEnabled())) {
     throw new TRPCError({
       code: 'NOT_FOUND',
       message: 'Tool approvals are not enabled.',

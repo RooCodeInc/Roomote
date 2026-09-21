@@ -131,81 +131,109 @@ function approvalMetadata(
 }
 
 /**
- * Every configured policy, keyed for both the admin settings surface and the
- * per-turn permission compilation. Rows with mode `allow` are not stored:
- * deleting the row restores the default, which keeps this list small and
- * makes policy removal the same operation as setting the default.
+ * The deployment and personal policy tables share one shape and one set of
+ * rules: rows with mode `allow` are not stored, so deleting the row restores
+ * the default and "reset to default" is the same write as "remove policy".
+ * Only `ask` and `reject` rows exist. A store names the table, the rows it
+ * owns, and the columns only that table has.
  */
-export async function listIntegrationToolPolicies(): Promise<
-  IntegrationToolPolicyMetadata[]
-> {
+function deploymentPolicyStore(updatedByUserId?: string) {
+  const table = integrationToolPolicies;
+  return {
+    table,
+    owns: undefined,
+    conflictTarget: [table.integrationId, table.toolName],
+    ownValues: updatedByUserId ? { updatedByUserId } : {},
+    keyValues: {},
+  };
+}
+
+function userPolicyStore(userId: string) {
+  const table = integrationToolUserPolicies;
+  return {
+    table,
+    owns: eq(table.userId, userId),
+    conflictTarget: [table.userId, table.integrationId, table.toolName],
+    ownValues: {},
+    keyValues: { userId },
+  };
+}
+
+type PolicyStore =
+  | ReturnType<typeof deploymentPolicyStore>
+  | ReturnType<typeof userPolicyStore>;
+
+async function listPolicies(
+  store: PolicyStore,
+): Promise<IntegrationToolPolicyMetadata[]> {
+  const { table } = store;
   const rows = await db
     .select()
-    .from(integrationToolPolicies)
-    .orderBy(
-      integrationToolPolicies.integrationId,
-      integrationToolPolicies.toolName,
-    );
+    .from(table as typeof integrationToolPolicies)
+    .where(store.owns)
+    .orderBy(table.integrationId, table.toolName);
   return rows.map(policyMetadata);
 }
 
-/**
- * Configure one tool's approval mode. `allow` is the deployment default and
- * is stored as no row at all, so "reset to default" and "remove policy" are
- * the same write. Only `ask` and `reject` rows exist.
- */
-export async function upsertIntegrationToolPolicy(input: {
-  integrationId: string;
-  toolName: string;
-  mode: IntegrationToolPolicyMode;
-  updatedByUserId: string;
-}): Promise<void> {
+async function upsertPolicy(
+  store: PolicyStore,
+  input: {
+    integrationId: string;
+    toolName: string;
+    mode: IntegrationToolPolicyMode;
+  },
+): Promise<void> {
+  // Both tables have every column this writes; the store supplies the rest.
+  const table = store.table as typeof integrationToolPolicies;
   if (input.mode === 'allow') {
     await db
-      .delete(integrationToolPolicies)
+      .delete(table)
       .where(
         and(
-          eq(integrationToolPolicies.integrationId, input.integrationId),
-          eq(integrationToolPolicies.toolName, input.toolName),
+          store.owns,
+          eq(table.integrationId, input.integrationId),
+          eq(table.toolName, input.toolName),
         ),
       );
     return;
   }
+  const changes = {
+    mode: input.mode,
+    ...store.ownValues,
+    updatedAt: sql`clock_timestamp()`,
+  };
   await db
-    .insert(integrationToolPolicies)
+    .insert(table)
     .values({
+      ...store.keyValues,
       integrationId: input.integrationId,
       toolName: input.toolName,
-      mode: input.mode,
-      updatedByUserId: input.updatedByUserId,
-      updatedAt: sql`clock_timestamp()`,
+      ...changes,
     })
-    .onConflictDoUpdate({
-      target: [
-        integrationToolPolicies.integrationId,
-        integrationToolPolicies.toolName,
-      ],
-      set: {
-        mode: input.mode,
-        updatedByUserId: input.updatedByUserId,
-        updatedAt: sql`clock_timestamp()`,
-      },
-    });
+    .onConflictDoUpdate({ target: store.conflictTarget, set: changes });
 }
 
-/** One user's personal policies; `allow` is stored as no row. */
-export async function listIntegrationToolUserPolicies(
-  userId: string,
-): Promise<IntegrationToolPolicyMetadata[]> {
-  const rows = await db
-    .select()
-    .from(integrationToolUserPolicies)
-    .where(eq(integrationToolUserPolicies.userId, userId))
-    .orderBy(
-      integrationToolUserPolicies.integrationId,
-      integrationToolUserPolicies.toolName,
-    );
-  return rows.map(policyMetadata);
+/**
+ * Every deployment policy, for both the admin settings surface and the
+ * per-turn permission compilation.
+ */
+export function listIntegrationToolPolicies() {
+  return listPolicies(deploymentPolicyStore());
+}
+
+/** Configure one tool's deployment-wide approval mode. */
+export function upsertIntegrationToolPolicy(input: {
+  integrationId: string;
+  toolName: string;
+  mode: IntegrationToolPolicyMode;
+  updatedByUserId: string;
+}) {
+  return upsertPolicy(deploymentPolicyStore(input.updatedByUserId), input);
+}
+
+/** One user's personal policies. */
+export function listIntegrationToolUserPolicies(userId: string) {
+  return listPolicies(userPolicyStore(userId));
 }
 
 /**
@@ -213,41 +241,13 @@ export async function listIntegrationToolUserPolicies(
  * on the deployment policy and never loosens it; see
  * `resolveStricterIntegrationToolPolicyMode`.
  */
-export async function upsertIntegrationToolUserPolicy(input: {
+export function upsertIntegrationToolUserPolicy(input: {
   userId: string;
   integrationId: string;
   toolName: string;
   mode: IntegrationToolPolicyMode;
-}): Promise<void> {
-  if (input.mode === 'allow') {
-    await db
-      .delete(integrationToolUserPolicies)
-      .where(
-        and(
-          eq(integrationToolUserPolicies.userId, input.userId),
-          eq(integrationToolUserPolicies.integrationId, input.integrationId),
-          eq(integrationToolUserPolicies.toolName, input.toolName),
-        ),
-      );
-    return;
-  }
-  await db
-    .insert(integrationToolUserPolicies)
-    .values({
-      userId: input.userId,
-      integrationId: input.integrationId,
-      toolName: input.toolName,
-      mode: input.mode,
-      updatedAt: sql`clock_timestamp()`,
-    })
-    .onConflictDoUpdate({
-      target: [
-        integrationToolUserPolicies.userId,
-        integrationToolUserPolicies.integrationId,
-        integrationToolUserPolicies.toolName,
-      ],
-      set: { mode: input.mode, updatedAt: sql`clock_timestamp()` },
-    });
+}) {
+  return upsertPolicy(userPolicyStore(input.userId), input);
 }
 
 async function requireSessionOwner(
