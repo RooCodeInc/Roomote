@@ -378,8 +378,8 @@ type PermissionReplyClient = {
  * paused call waits on an unresponsive server. A reply is keyed by the
  * request id and a repeat for an already-answered request changes nothing,
  * so one retry is safe and covers a reply that was dropped in transit. A
- * second failure surfaces as an error for the caller to log; the decision
- * record stays as committed.
+ * second failure throws, so the caller can fail the ask closed instead of
+ * assuming it landed; the decision record stays as committed.
  */
 export async function replyToPermissionAsk(
   client: PermissionReplyClient,
@@ -389,8 +389,12 @@ export async function replyToPermissionAsk(
   message?: string,
   timeoutMs: number = PERMISSION_REPLY_TIMEOUT_MS,
 ): Promise<{ error?: unknown }> {
-  const attempt = () =>
-    client.permission.reply(
+  // The SDK reports a failed request as a resolved `{ error }` rather than a
+  // rejection, so both shapes count as a failed attempt. Treating a returned
+  // error as delivered would leave the native ask pending while the caller
+  // believes it landed, and its reject fallback would never run.
+  const attempt = async () => {
+    const result = await client.permission.reply(
       {
         requestID: requestId,
         directory: sessionDirectory,
@@ -399,10 +403,23 @@ export async function replyToPermissionAsk(
       },
       { signal: AbortSignal.timeout(timeoutMs) },
     );
+    if (result.error) throw new PermissionReplyFailedError(result.error);
+    return result;
+  };
   try {
     return await attempt();
   } catch {
     return attempt();
+  }
+}
+
+/** A native permission reply that could not be delivered after its retry. */
+export class PermissionReplyFailedError extends Error {
+  readonly cause: unknown;
+
+  constructor(cause: unknown) {
+    super('OpenCode permission reply failed');
+    this.cause = cause;
   }
 }
 
@@ -1380,17 +1397,23 @@ async function runNonTaskSdkPrompt(
         return undefined;
       },
       reply: async (requestId, response, message) => {
-        const result = await replyToPermissionAsk(
-          client,
-          sessionDirectory,
-          requestId,
-          response,
-          message,
-        );
-        if (result.error) {
-          console.warn(
-            `[NonTaskProviderUsage] OpenCode permission reply failed: ${formatOpenCodeSdkError(result.error)}`,
+        try {
+          await replyToPermissionAsk(
+            client,
+            sessionDirectory,
+            requestId,
+            response,
+            message,
           );
+        } catch (error) {
+          console.warn(
+            `[NonTaskProviderUsage] OpenCode permission reply failed: ${formatOpenCodeSdkError(
+              error instanceof PermissionReplyFailedError ? error.cause : error,
+            )}`,
+          );
+          // Propagate: the approval bridge rejects the ask when a claimed
+          // `once` cannot be delivered, so the session is never left paused.
+          throw error;
         }
       },
     };

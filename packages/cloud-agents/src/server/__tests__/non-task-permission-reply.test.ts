@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { replyToPermissionAsk } from '../non-task-provider-usage';
+import {
+  PermissionReplyFailedError,
+  replyToPermissionAsk,
+} from '../non-task-provider-usage';
 
 function clientWith(reply: ReturnType<typeof vi.fn>) {
   return { permission: { reply } } as unknown as Parameters<
@@ -52,6 +55,26 @@ describe('replyToPermissionAsk', () => {
     const reply = vi
       .fn()
       .mockRejectedValueOnce(new Error('dropped'))
+      .mockResolvedValueOnce({});
+    await expect(
+      replyToPermissionAsk(clientWith(reply), '/dir', 'req-1', 'once'),
+    ).resolves.toEqual({});
+    expect(reply).toHaveBeenCalledTimes(2);
+  });
+
+  it('treats a returned SDK error as a failed attempt, retries, then throws', async () => {
+    // The SDK resolves with `{ error }` instead of rejecting.
+    const reply = vi.fn(async () => ({ error: { name: 'NotFound' } }));
+    await expect(
+      replyToPermissionAsk(clientWith(reply), '/dir', 'req-1', 'once'),
+    ).rejects.toBeInstanceOf(PermissionReplyFailedError);
+    expect(reply).toHaveBeenCalledTimes(2);
+  });
+
+  it('recovers when only the first attempt returns an SDK error', async () => {
+    const reply = vi
+      .fn()
+      .mockResolvedValueOnce({ error: { name: 'Transient' } })
       .mockResolvedValueOnce({});
     await expect(
       replyToPermissionAsk(clientWith(reply), '/dir', 'req-1', 'once'),
