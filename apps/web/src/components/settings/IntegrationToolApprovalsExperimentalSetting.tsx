@@ -92,7 +92,7 @@ function IntegrationToolPolicyList({
               }
             >
               <SelectTrigger
-                className="w-44 shrink-0"
+                className="w-56 shrink-0"
                 aria-label={`Approval mode for ${tool.name}`}
               >
                 <SelectValue />
