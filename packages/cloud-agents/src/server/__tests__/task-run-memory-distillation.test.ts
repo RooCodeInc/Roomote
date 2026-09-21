@@ -20,26 +20,32 @@ const {
   mockTurnRows: vi.fn(),
 }));
 
-vi.mock('@roomote/db/server', () => ({
-  and: vi.fn(),
-  desc: vi.fn(),
-  eq: vi.fn(),
-  inArray: vi.fn(),
-  sql: vi.fn(),
-  taskMessages: {},
-  getBrainMemorySummary: mockGetBrainMemorySummary,
-  isBrainEnabled: mockIsBrainEnabled,
-  isTaskRunSharedBrainEligible: mockIsTaskRunSharedBrainEligible,
-  saveBrainDistilledSummary: mockSaveBrainDistilledSummary,
-  db: {
-    insert: () => ({ values: mockInsertTaskMemoryValues }),
+vi.mock('@roomote/db/server', () => {
+  const insert = () => ({ values: mockInsertTaskMemoryValues });
+  const database = {
+    insert,
     select: () => ({
       from: () => ({
         where: () => ({ orderBy: () => ({ limit: mockTurnRows }) }),
       }),
     }),
-  },
-}));
+    transaction: async (callback: (tx: { insert: typeof insert }) => unknown) =>
+      callback({ insert }),
+  };
+  return {
+    and: vi.fn(),
+    desc: vi.fn(),
+    eq: vi.fn(),
+    inArray: vi.fn(),
+    sql: vi.fn(),
+    taskMessages: {},
+    getBrainMemorySummary: mockGetBrainMemorySummary,
+    isBrainEnabled: mockIsBrainEnabled,
+    isTaskRunSharedBrainEligible: mockIsTaskRunSharedBrainEligible,
+    saveBrainDistilledSummary: mockSaveBrainDistilledSummary,
+    db: database,
+  };
+});
 
 vi.mock('../typesafe-judgment', () => ({
   evaluateDecisionModel: mockEvaluateDecisionModel,
@@ -205,13 +211,17 @@ describe('distillTaskRunTurnMemory', () => {
     });
   });
 
-  it('keeps a successful summary save when event publication is temporarily unavailable', async () => {
+  it('rolls back the summary when event publication fails so retry can publish it', async () => {
     mockInsertTaskMemoryEvent.mockRejectedValueOnce(new Error('database busy'));
 
+    await expect(distillTaskRunTurnMemory(run)).resolves.toBeNull();
+    expect(mockSaveBrainDistilledSummary).toHaveBeenCalledOnce();
+
+    mockInsertTaskMemoryEvent.mockResolvedValueOnce(undefined);
     await expect(distillTaskRunTurnMemory(run)).resolves.toContain(
       'Webhook retries are capped',
     );
-    expect(mockSaveBrainDistilledSummary).toHaveBeenCalledOnce();
+    expect(mockInsertTaskMemoryEvent).toHaveBeenCalledTimes(2);
   });
 
   it('builds on its own earlier memory and saves against that exact text', async () => {

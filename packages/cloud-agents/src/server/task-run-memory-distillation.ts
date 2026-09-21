@@ -11,6 +11,7 @@ import {
   sql,
   taskMessages,
 } from '@roomote/db/server';
+import type { DatabaseOrTransaction } from '@roomote/db/server';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   MEMORY_SAVED_EVENT_TEXT,
@@ -196,6 +197,7 @@ async function loadLatestTurn(
 }
 
 async function publishTaskMemorySavedEvent(input: {
+  database: DatabaseOrTransaction;
   runId: number;
   taskId: string;
   userId?: string | null;
@@ -209,7 +211,7 @@ async function publishTaskMemorySavedEvent(input: {
 
   if (memories.length === 0) return;
 
-  await db
+  await input.database
     .insert(taskMessages)
     .values({
       runId: input.runId,
@@ -238,6 +240,37 @@ async function publishTaskMemorySavedEvent(input: {
         taskMessages.eventType,
       ],
     });
+}
+
+async function saveSummaryAndPublishTaskMemoryEvent(input: {
+  runId: number;
+  taskId: string;
+  userId?: string | null;
+  turnTs: number;
+  summary: string;
+  existing: string | null;
+  requeue: boolean;
+}): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    const saved = await saveBrainDistilledSummary(
+      tx,
+      input.runId,
+      input.summary,
+      input.existing,
+      { requeue: input.requeue },
+    );
+    if (!saved) return false;
+
+    await publishTaskMemorySavedEvent({
+      database: tx,
+      runId: input.runId,
+      taskId: input.taskId,
+      userId: input.userId,
+      turnTs: input.turnTs,
+      summary: input.summary,
+    });
+    return true;
+  });
 }
 
 /**
@@ -338,27 +371,17 @@ export async function distillTaskRunTurnMemory(input: {
     const summary = `${renderTaskMemorySummary(object)}\n\n${DISTILLED_SUMMARY_NOTE}`;
 
     if (
-      !(await saveBrainDistilledSummary(db, input.runId, summary, existing, {
-        requeue: input.requeue,
-      }))
-    ) {
-      return null;
-    }
-
-    try {
-      await publishTaskMemorySavedEvent({
+      !(await saveSummaryAndPublishTaskMemoryEvent({
         runId: input.runId,
         taskId: input.taskId,
         userId: input.userId,
         turnTs: turn.turnTs,
         summary,
-      });
-    } catch (error) {
-      // The Brain summary is already persisted; a transcript event can be
-      // retried by the durable drainer without turning the save into failure.
-      console.warn(
-        `[TaskRunMemoryDistillation] Failed to publish save event. runId=${input.runId} error="${error instanceof Error ? error.message : String(error)}"`,
-      );
+        existing,
+        requeue: input.requeue,
+      }))
+    ) {
+      return null;
     }
 
     console.info(
