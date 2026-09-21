@@ -71,6 +71,6 @@ export function describeProxyToolApprovalBlock(
   block: ProxyToolApprovalBlock,
 ): string {
   return block === 'reject'
-    ? `Tool "${toolName}" is blocked by this deployment's tool approval policy.`
+    ? `Tool "${toolName}" is blocked by a tool approval policy.`
     : `Tool "${toolName}" needs approval before it runs, and tasks cannot request approval yet. Ask the user to run it from a Session instead.`;
 }
