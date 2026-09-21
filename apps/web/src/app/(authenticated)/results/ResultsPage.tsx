@@ -445,6 +445,7 @@ export function ResultsPage() {
                 initialPrompt={resultPrompt(selected)}
                 placeholder="Add details"
                 textareaMaxHeight={320}
+                modelSelectorSize="base"
                 onTaskStarted={() => actOnResult(selected, 'accept')}
               />
               <DialogFooter>

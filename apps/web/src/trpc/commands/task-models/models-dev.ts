@@ -1,5 +1,6 @@
 import {
   GATEWAY_TASK_MODEL_PROVIDER_IDS,
+  REASONING_EFFORT_VALUES,
   buildTaskModelOption,
   type TaskModelInputType,
   type TaskModelMetadata,
@@ -162,6 +163,20 @@ function extractMetadataFromEntry(
         Array.isArray(entry.reasoning_options) &&
         entry.reasoning_options.length === 0
       );
+    const effortOption = entry.reasoning_options?.find(
+      (option): option is { type: string; values: unknown[] } =>
+        typeof option === 'object' &&
+        option !== null &&
+        'type' in option &&
+        option.type === 'effort' &&
+        'values' in option &&
+        Array.isArray(option.values),
+    );
+    if (effortOption) {
+      metadata.supportedReasoningEfforts = REASONING_EFFORT_VALUES.filter(
+        (effort) => effortOption.values.includes(effort),
+      );
+    }
   }
   return { metadata, displayName };
 }

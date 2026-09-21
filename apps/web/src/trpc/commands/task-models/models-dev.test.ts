@@ -274,6 +274,10 @@ describe('lookupModelMetadataFromCatalog', () => {
       lookupModelMetadataFromCatalog(catalog, 'github-copilot/gpt-5.6-luna')
         .metadata.supportsReasoning,
     ).toBe(true);
+    expect(
+      lookupModelMetadataFromCatalog(catalog, 'github-copilot/gpt-5.6-luna')
+        .metadata.supportedReasoningEfforts,
+    ).toEqual(['low', 'medium', 'high']);
     // Entries predating reasoning_options keep the bare flag's meaning.
     expect(
       lookupModelMetadataFromCatalog(catalog, 'github-copilot/claude-haiku-4.5')

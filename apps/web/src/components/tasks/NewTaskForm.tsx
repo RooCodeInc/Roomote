@@ -38,6 +38,7 @@ type NewTaskFormProps = {
   autoFocus?: boolean;
   textareaMaxHeight?: number;
   promptContainerRef?: Ref<HTMLDivElement>;
+  modelSelectorSize?: 'compact' | 'base';
 };
 
 export function NewTaskForm({
@@ -50,6 +51,7 @@ export function NewTaskForm({
   autoFocus = true,
   textareaMaxHeight,
   promptContainerRef,
+  modelSelectorSize = 'compact',
 }: NewTaskFormProps) {
   const { managedAccess = DEFAULT_MANAGED_DEPLOYMENT_ACCESS } =
     useAuthorizedUser();
@@ -203,6 +205,7 @@ export function NewTaskForm({
             onReasoningEffortChange={setSelectedReasoningEffort}
             defaultModelId={defaultModelId}
             defaultReasoningEffort={defaultReasoningEffort}
+            size={modelSelectorSize}
           />
         }
         submitLeadingAction={

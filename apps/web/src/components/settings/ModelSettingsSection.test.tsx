@@ -454,33 +454,14 @@ describe('ModelSettingsSection', () => {
 
     const { container } = renderModelSettingsSection();
 
-    const triggers = Array.from(
+    const pickerTriggers = Array.from(
       container.querySelectorAll<HTMLButtonElement>(
-        '[data-slot="select-trigger"]',
+        '[data-slot="model-reasoning-picker-trigger"]',
       ),
     );
-    // 7 model selects + 7 reasoning selects + the judgment model select + the
-    // add-model provider select.
-    expect(triggers).toHaveLength(16);
-    expect(triggers[0]).toBeDisabled();
-    expect(triggers[2]).toBeDisabled();
-    expect(triggers[4]).toBeDisabled();
-    expect(triggers[6]).toBeDisabled();
-    expect(triggers[8]).toBeDisabled();
-    expect(triggers[10]).toBeDisabled();
-    expect(triggers[12]).toBeDisabled();
-    // Reasoning selects stay enabled unless the reasoning env override is set.
-    expect(triggers[1]).not.toBeDisabled();
-    expect(triggers[3]).not.toBeDisabled();
-    expect(triggers[5]).not.toBeDisabled();
-    expect(triggers[7]).not.toBeDisabled();
-    expect(triggers[9]).not.toBeDisabled();
-    expect(triggers[11]).not.toBeDisabled();
-    expect(triggers[13]).not.toBeDisabled();
-    // The judgment model and add-model provider selects stay enabled
-    // regardless of env-managed runtime models.
-    expect(triggers[14]).not.toBeDisabled();
-    expect(triggers[15]).not.toBeDisabled();
+    expect(pickerTriggers).toHaveLength(7);
+    // The combined picker stays available because reasoning is not env-managed.
+    for (const trigger of pickerTriggers) expect(trigger).not.toBeDisabled();
 
     expect(screen.queryByText('Make default')).toBeNull();
     expect(screen.queryByText('Env-managed')).toBeNull();
@@ -503,15 +484,13 @@ describe('ModelSettingsSection', () => {
 
     const triggers = Array.from(
       container.querySelectorAll<HTMLButtonElement>(
-        '[data-slot="select-trigger"]',
+        '[data-slot="model-reasoning-picker-trigger"]',
       ),
     );
 
-    expect(triggers).toHaveLength(16);
+    expect(triggers).toHaveLength(7);
     expect(triggers[0]).not.toBeDisabled();
-    expect(triggers[1]).toBeDisabled();
-    expect(triggers[12]).not.toBeDisabled();
-    expect(triggers[13]).toBeDisabled();
+    expect(triggers[6]).not.toBeDisabled();
     expect(screen.queryByText('Reasoning env-managed')).toBeNull();
     expect(
       screen.getByLabelText(
@@ -584,8 +563,10 @@ describe('ModelSettingsSection', () => {
 
     const { container } = renderModelSettingsSection();
 
-    const triggers = container.querySelectorAll('[data-slot="select-trigger"]');
-    expect(triggers).toHaveLength(16);
+    const triggers = container.querySelectorAll(
+      '[data-slot="model-reasoning-picker-trigger"]',
+    );
+    expect(triggers).toHaveLength(7);
     for (const trigger of Array.from(triggers)) {
       expect(trigger).not.toBeDisabled();
     }
@@ -754,12 +735,12 @@ describe('ModelSettingsSection', () => {
     data.models[0]!.metadata.supportsReasoning = false;
     settingsData.current = data;
 
-    const { container } = renderModelSettingsSection();
+    renderModelSettingsSection();
 
-    const triggers = container.querySelectorAll('[data-slot="select-trigger"]');
-    // 7 model selects + the judgment model select + the add-model provider
-    // select; no reasoning selectors.
-    expect(triggers).toHaveLength(9);
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Coding model and reasoning' }),
+    );
+    expect(screen.getByText('No reasoning')).toBeInTheDocument();
   });
 
   it('clears orchestration reasoning when switching to a non-reasoning model', async () => {
@@ -772,12 +753,12 @@ describe('ModelSettingsSection', () => {
     data.models[1]!.metadata.supportsReasoning = false;
     settingsData.current = data;
 
-    const { container } = renderModelSettingsSection();
-    const triggers = container.querySelectorAll<HTMLButtonElement>(
-      '[data-slot="select-trigger"]',
+    renderModelSettingsSection();
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Orchestration model and reasoning',
+      }),
     );
-
-    fireEvent.click(triggers[2]!);
     fireEvent.click(await screen.findByRole('option', { name: 'GLM 5.2' }));
 
     await waitFor(() => {
@@ -790,10 +771,10 @@ describe('ModelSettingsSection', () => {
       }),
     );
     expect(
-      screen.queryByRole('combobox', {
-        name: 'Orchestration model reasoning level',
+      screen.getByRole('button', {
+        name: 'Orchestration model and reasoning',
       }),
-    ).toBeNull();
+    ).toHaveTextContent('GLM 5.2');
   });
 
   it('stops retrying a rejected save and allows a deliberate retry', async () => {
@@ -806,11 +787,11 @@ describe('ModelSettingsSection', () => {
       .mockRejectedValueOnce(new Error('Network unavailable'))
       // Bound a regression to one extra attempt instead of an infinite loop.
       .mockImplementationOnce(() => new Promise(() => {}));
-    const { container } = renderModelSettingsSection();
+    renderModelSettingsSection();
     const orchestrationTrigger = () =>
-      container.querySelectorAll<HTMLButtonElement>(
-        '[data-slot="select-trigger"]',
-      )[2]!;
+      screen.getByRole('button', {
+        name: 'Orchestration model and reasoning',
+      });
     const originalSelection = orchestrationTrigger().textContent;
 
     fireEvent.click(orchestrationTrigger());
@@ -824,7 +805,6 @@ describe('ModelSettingsSection', () => {
     expect(orchestrationTrigger().textContent).toBe(originalSelection);
 
     updateMutateAsyncMock.mockReset().mockResolvedValue({ success: true });
-    fireEvent.click(orchestrationTrigger());
     fireEvent.click(await screen.findByRole('option', { name: 'GLM 5.2' }));
     await waitFor(() => expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1));
     expect(orchestrationTrigger()).toHaveTextContent('GLM 5.2');
@@ -1841,7 +1821,7 @@ describe('ModelSettingsSection', () => {
 
     expect(screen.getByText('Advisor model')).toBeInTheDocument();
     expect(
-      screen.getByRole('combobox', { name: 'Advisor model reasoning level' }),
+      screen.getByRole('button', { name: 'Advisor model and reasoning' }),
     ).toBeInTheDocument();
   });
 
@@ -1852,8 +1832,8 @@ describe('ModelSettingsSection', () => {
 
     expect(screen.getByText('Orchestration model')).toBeInTheDocument();
     expect(
-      screen.getByRole('combobox', {
-        name: 'Orchestration model reasoning level',
+      screen.getByRole('button', {
+        name: 'Orchestration model and reasoning',
       }),
     ).toBeInTheDocument();
   });
@@ -1865,7 +1845,7 @@ describe('ModelSettingsSection', () => {
 
     expect(screen.getByText('Explore model')).toBeInTheDocument();
     expect(
-      screen.getByRole('combobox', { name: 'Explore model reasoning level' }),
+      screen.getByRole('button', { name: 'Explore model and reasoning' }),
     ).toBeInTheDocument();
   });
 });

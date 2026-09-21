@@ -16,7 +16,6 @@ vi.mock('@/hooks/task-models/useLaunchTaskModels', () => ({
 }));
 
 vi.mock('@/components/system', () => ({
-  BasicTooltip: ({ children }: { children: ReactNode }) => children,
   Button: (props: ButtonHTMLAttributes<HTMLButtonElement>) => (
     <button type="button" {...props} />
   ),
@@ -28,19 +27,39 @@ vi.mock('@/components/system', () => ({
   PopoverTrigger: ({ children }: { children: ReactNode }) => children,
 }));
 
-vi.mock('@/components/tasks/ModelSelect', () => ({
-  ModelSelect: ({ emptyOptionLabel }: { emptyOptionLabel?: string }) => (
-    <div data-testid="model-default-option">{emptyOptionLabel}</div>
-  ),
-}));
-
-vi.mock('@/components/tasks/ReasoningEffortSelect', () => ({
-  ReasoningEffortSelect: ({
-    defaultEffort,
+vi.mock('@/components/tasks/ModelReasoningPicker', () => ({
+  ModelReasoningPickerTrigger: ({
+    label,
+    reasoningEffort,
+    ariaLabel,
   }: {
-    defaultEffort?: string | null;
+    label: string;
+    reasoningEffort?: string | null;
+    ariaLabel: string;
   }) => (
-    <div data-testid="reasoning-default">{defaultEffort ?? 'Reasoning'}</div>
+    <button aria-label={ariaLabel}>
+      {label}
+      {reasoningEffort
+        ? reasoningEffort[0]?.toUpperCase() + reasoningEffort.slice(1)
+        : ''}
+    </button>
+  ),
+  ModelReasoningPicker: ({
+    trigger,
+    emptyModelLabel,
+    defaultReasoningEffort,
+  }: {
+    trigger: ReactNode;
+    emptyModelLabel?: string;
+    defaultReasoningEffort?: string | null;
+  }) => (
+    <div>
+      {trigger}
+      <div data-testid="model-default-option">{emptyModelLabel}</div>
+      <div data-testid="reasoning-default">
+        {defaultReasoningEffort ?? 'Reasoning'}
+      </div>
+    </div>
   ),
 }));
 

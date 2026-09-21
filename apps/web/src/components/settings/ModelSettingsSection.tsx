@@ -50,7 +50,10 @@ import {
 } from '@/components/system';
 import type { LucideIcon } from '@/components/system';
 import { Section } from '@/components/settings';
-import { ReasoningEffortSelect } from '@/components/tasks/ReasoningEffortSelect';
+import {
+  ModelReasoningPicker,
+  ModelReasoningPickerTrigger,
+} from '@/components/tasks/ModelReasoningPicker';
 import { JudgmentModelRow } from './JudgmentModelRow';
 import {
   CodingModelRoutingRulesEditor,
@@ -62,10 +65,7 @@ import {
   type CodingModelRoutingRulesDraft,
 } from './CodingModelRoutingRulesEditor';
 import { formatMetadataSummary } from './model-metadata';
-import {
-  TaskModelSelect,
-  type EditableRuntimeModelOption,
-} from './TaskModelSelect';
+import { type EditableRuntimeModelOption } from './TaskModelSelect';
 import {
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
   DEFAULT_MODEL_ROLE_REASONING_EFFORTS,
@@ -243,6 +243,7 @@ function TaskModelRoleEditor({
   onReasoningChange: (value: ReasoningEffort | null) => void;
   children?: ReactNode;
 }) {
+  const [pickerOpen, setPickerOpen] = useState(false);
   const Icon = config.icon;
   const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[config.role];
   const lockLabel =
@@ -257,6 +258,20 @@ function TaskModelRoleEditor({
       : managedByEnv
         ? `Set by ${descriptor.modelEnvVar}, not changeable in the UI.`
         : `Set by ${descriptor.reasoningEnvVar}, not changeable in the UI.`;
+  const sameAsCoding = descriptor.modelFallback === 'coding';
+  const models = optionGroups.flatMap((group) => group.items);
+  const pickerModels = sameAsCoding
+    ? [
+        {
+          id: SAME_AS_CODING_MODEL_VALUE,
+          displayName: 'Same as coding model',
+        },
+        ...models,
+      ]
+    : models;
+  const selectedModel = pickerModels.find(({ id }) => id === selectValue);
+  const selectedReasoningEffort =
+    reasoningEffort ?? DEFAULT_MODEL_ROLE_REASONING_EFFORTS[config.role];
 
   return (
     <div className="flex items-start gap-3 py-3 first:pt-0 last:pb-0">
@@ -278,29 +293,35 @@ function TaskModelRoleEditor({
           </div>
           <p className="text-xs text-muted-foreground">{config.description}</p>
         </div>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <TaskModelSelect
-            value={selectValue}
-            disabled={managedByEnv || optionGroups.length === 0}
-            placeholder={config.placeholder}
-            optionGroups={optionGroups}
-            sameAsCodingModelValue={
-              descriptor.modelFallback === 'coding'
-                ? SAME_AS_CODING_MODEL_VALUE
-                : undefined
-            }
-            onValueChange={onModelChange}
-          />
-          {supportsReasoning && (
-            <ReasoningEffortSelect
-              value={reasoningEffort}
-              defaultEffort={DEFAULT_MODEL_ROLE_REASONING_EFFORTS[config.role]}
-              onChange={onReasoningChange}
-              disabled={reasoningManagedByEnv}
-              ariaLabel={config.reasoningAriaLabel}
+        <ModelReasoningPicker
+          open={pickerOpen}
+          onOpenChange={setPickerOpen}
+          trigger={
+            <ModelReasoningPickerTrigger
+              label={selectedModel?.displayName ?? config.placeholder}
+              reasoningEffort={
+                supportsReasoning ? selectedReasoningEffort : null
+              }
+              disabled={
+                (managedByEnv && reasoningManagedByEnv) ||
+                optionGroups.length === 0
+              }
+              size="base"
+              ariaLabel={`${config.label} and reasoning`}
             />
-          )}
-        </div>
+          }
+          models={pickerModels}
+          model={selectValue}
+          onModelChange={onModelChange}
+          reasoningEffort={reasoningEffort}
+          defaultReasoningEffort={
+            DEFAULT_MODEL_ROLE_REASONING_EFFORTS[config.role]
+          }
+          onReasoningEffortChange={onReasoningChange}
+          supportedReasoningEfforts={supportsReasoning ? undefined : []}
+          modelDisabled={managedByEnv}
+          reasoningDisabled={reasoningManagedByEnv}
+        />
         {children}
       </div>
     </div>
