@@ -11,6 +11,7 @@ import type {
 } from '@roomote/types';
 
 import { db, type DatabaseOrTransaction } from '../db';
+import { isDeploymentExperimentEnabledWithShareLock } from './deployment-experiments';
 import {
   integrationToolApprovalRequests,
   integrationToolPolicies,
@@ -353,6 +354,48 @@ export async function decideIntegrationToolApproval(
 }
 
 /**
+ * Claim an unrelayed `approved` row for relay, serialized against the
+ * experiment toggle. Disabling commits `enabled=false` first and sweeps open
+ * rows second, so a bare conditional update could still claim a row in
+ * between and relay under a disabled experiment. Reading the setting with a
+ * share lock in the same transaction closes that: either the disable already
+ * committed and the claim fails, or the claim holds the lock and the disable
+ * waits until the claim has committed — so the call was genuinely authorized
+ * before the experiment went off. It also covers a row inserted after the
+ * sweep already ran, which the sweep alone can never cancel.
+ */
+async function claimApprovedIntegrationToolApproval(
+  input: { approvalId: string; requesterUserId: string },
+  claimedStatus: 'consumed' | 'auto_approved',
+): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    if (
+      !(await isDeploymentExperimentEnabledWithShareLock(
+        'integrationToolApprovals',
+        tx,
+      ))
+    ) {
+      return false;
+    }
+    const [row] = await tx
+      .update(integrationToolApprovalRequests)
+      .set({ status: claimedStatus })
+      .where(
+        and(
+          eq(integrationToolApprovalRequests.id, input.approvalId),
+          eq(
+            integrationToolApprovalRequests.requesterUserId,
+            input.requesterUserId,
+          ),
+          eq(integrationToolApprovalRequests.status, 'approved'),
+        ),
+      )
+      .returning({ id: integrationToolApprovalRequests.id });
+    return Boolean(row);
+  });
+}
+
+/**
  * Record that the approved decision was relayed to the native runtime and the
  * call resumed exactly once. Only an approved, unclaimed row transitions, so
  * a second relay attempt or a late relay after cancellation matches zero
@@ -362,21 +405,7 @@ export async function markIntegrationToolApprovalConsumed(input: {
   approvalId: string;
   requesterUserId: string;
 }): Promise<boolean> {
-  const [row] = await db
-    .update(integrationToolApprovalRequests)
-    .set({ status: 'consumed' })
-    .where(
-      and(
-        eq(integrationToolApprovalRequests.id, input.approvalId),
-        eq(
-          integrationToolApprovalRequests.requesterUserId,
-          input.requesterUserId,
-        ),
-        eq(integrationToolApprovalRequests.status, 'approved'),
-      ),
-    )
-    .returning({ id: integrationToolApprovalRequests.id });
-  return Boolean(row);
+  return claimApprovedIntegrationToolApproval(input, 'consumed');
 }
 
 /** Lazily fail an unanswered window closed; safe to call on any pending row. */
@@ -575,21 +604,7 @@ export async function claimAutoApprovedIntegrationToolApproval(input: {
   approvalId: string;
   requesterUserId: string;
 }): Promise<boolean> {
-  const [row] = await db
-    .update(integrationToolApprovalRequests)
-    .set({ status: 'auto_approved' })
-    .where(
-      and(
-        eq(integrationToolApprovalRequests.id, input.approvalId),
-        eq(
-          integrationToolApprovalRequests.requesterUserId,
-          input.requesterUserId,
-        ),
-        eq(integrationToolApprovalRequests.status, 'approved'),
-      ),
-    )
-    .returning({ id: integrationToolApprovalRequests.id });
-  return Boolean(row);
+  return claimApprovedIntegrationToolApproval(input, 'auto_approved');
 }
 
 export {

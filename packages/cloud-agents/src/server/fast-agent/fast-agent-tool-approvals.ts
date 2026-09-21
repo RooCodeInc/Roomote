@@ -430,11 +430,13 @@ export function createFastAgentToolApprovalBridge(input: {
       );
       if (allowedForSession) {
         // The audit row starts as an unrelayed `approved` decision; claiming
-        // it is the atomic reservation. The disable sweep cancels `approved`
-        // rows, so a disable landing anywhere before the claim makes it fail
-        // and the ask rejects — never relaying after the final experiment
-        // state, and never recording auto_approved for a call that did not
-        // run.
+        // it is the atomic reservation. The claim reads the experiment under
+        // a share lock in its own transaction, so it serializes against the
+        // toggle: a disable that committed first fails the claim (whether or
+        // not its sweep has run yet, and even for a row written after the
+        // sweep), and a disable that arrives later waits for the claim. The
+        // ask therefore never relays after the final experiment state, and
+        // no auto_approved record exists for a call that did not run.
         const reservation = await insertAutoApprovedIntegrationToolApproval(
           { sessionId: input.sessionId, userId: input.userId },
           {
