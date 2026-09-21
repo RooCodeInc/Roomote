@@ -146,17 +146,28 @@ export async function requestTaskToolApproval(input: {
     return claimed ? { outcome: 'approved' } : { outcome: 'not_required' };
   }
   const approval = await insertIntegrationToolApproval(context, call);
-  if (await isAutoTool(input)) {
-    // Auto is a preview: the owner is still asked, and the decision model's
-    // view of the call is recorded beside their answer.
-    recordIntegrationToolAutoEvaluationInBackground(approval.approvalId, {
-      integrationId: input.integrationId,
-      toolName: input.toolName,
-      args: input.args,
-      userId: session.ownerUserId,
-      taskId: session.taskId,
+  // Auto is a preview: the owner is still asked, and the decision model's
+  // view of the call is recorded beside their answer. None of it is awaited,
+  // so nothing about it, not even finding out whether the tool is in Auto
+  // mode, can fail or delay the ask.
+  void isAutoTool(input)
+    .then((auto) => {
+      if (!auto) return;
+      recordIntegrationToolAutoEvaluationInBackground(approval.approvalId, {
+        integrationId: input.integrationId,
+        toolName: input.toolName,
+        args: input.args,
+        userId: session.ownerUserId,
+        taskId: session.taskId,
+      });
+    })
+    .catch((error) => {
+      console.warn(
+        `[Tool approvals] Could not tell whether ${input.integrationId}/${input.toolName} is in Auto mode: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     });
-  }
   return { outcome: 'pending', approvalId: approval.approvalId };
 }
 
