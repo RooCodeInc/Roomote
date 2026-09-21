@@ -747,52 +747,6 @@ function normalizeThreadText(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
 
-function canonicalizeIntegrationCallValue(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(canonicalizeIntegrationCallValue);
-  }
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([key, nestedValue]) => [
-          key,
-          canonicalizeIntegrationCallValue(nestedValue),
-        ]),
-    );
-  }
-  return value;
-}
-
-function buildIntegrationCallSignature({
-  integrationId,
-  toolName,
-  args,
-}: {
-  integrationId: string;
-  toolName: string;
-  args: Record<string, unknown>;
-}): string {
-  return JSON.stringify([
-    integrationId,
-    toolName,
-    canonicalizeIntegrationCallValue(args),
-  ]);
-}
-
-function isReadOnlyIntegrationTool(
-  integrations: FastAgentIntegration[],
-  integrationId: string,
-  toolName: string,
-): boolean {
-  return (
-    integrations
-      .find((integration) => integration.id === integrationId)
-      ?.tools.find((tool) => tool.name === toolName)?.annotations
-      ?.readOnlyHint === true
-  );
-}
-
 function resolveFastAgentChatLookupProvider(
   args: Record<string, unknown>,
   conversation: FastAgentConversation,
@@ -2459,7 +2413,6 @@ export async function answerFastAgentQuestion({
     });
     return { success: true, imageIds: requestedIds, observations };
   };
-  const integrationCallSignatures = new Set<string>();
   const completedChatReactionSignatures = new Set<string>();
   const completedChatReplySignatures = new Set<string>();
   const completedTaskActions = new Set<string>();
@@ -2861,8 +2814,7 @@ export async function answerFastAgentQuestion({
       injectedHumanFollowUpFiles.push(...batchFiles);
       // Native steering starts a new human instruction boundary inside the
       // same OpenCode run. Prior tool results remain in-session, while local
-      // duplicate guards reset so the user may intentionally repeat an action.
-      integrationCallSignatures.clear();
+      // action guards reset so the user may intentionally repeat an action.
       completedChatReactionSignatures.clear();
       completedChatReplySignatures.clear();
       completedTaskActions.clear();
@@ -4333,9 +4285,6 @@ export async function answerFastAgentQuestion({
       let canonicalToolEvent:
         | Awaited<ReturnType<typeof beginCanonicalToolEvent>>
         | undefined;
-      let integrationCallSignature: string | undefined;
-      let readOnlyIntegrationTool = false;
-      let reservedIntegrationCall = false;
       try {
         const closedError = requireOpen();
         if (closedError) return closedError;
@@ -4443,25 +4392,6 @@ export async function answerFastAgentQuestion({
         const sendsChatReaction =
           call.integrationId === ROOMOTE_MCP_ID &&
           call.toolName === CHAT_REACTION_EMOJI_TOOL_NAME;
-        const signature = buildIntegrationCallSignature({
-          integrationId: call.integrationId,
-          toolName: call.toolName,
-          args: actorScopedIntegrationArguments,
-        });
-        integrationCallSignature = signature;
-        readOnlyIntegrationTool = isReadOnlyIntegrationTool(
-          availableIntegrations,
-          call.integrationId,
-          call.toolName,
-        );
-        if (integrationCallSignatures.has(signature)) {
-          return {
-            success: false,
-            error: 'The same integration call already ran in this turn.',
-          };
-        }
-        integrationCallSignatures.add(signature);
-        reservedIntegrationCall = true;
         throwIfTurnCancelled();
         canonicalToolEvent = await beginCanonicalToolEvent({
           title: call.toolName,
@@ -4520,13 +4450,6 @@ export async function answerFastAgentQuestion({
         }
         return failure;
       } finally {
-        if (
-          reservedIntegrationCall &&
-          readOnlyIntegrationTool &&
-          integrationCallSignature
-        ) {
-          integrationCallSignatures.delete(integrationCallSignature);
-        }
         activeToolExecutions -= 1;
         schedulePendingHumanSteerDrain();
       }
@@ -4627,7 +4550,7 @@ export async function answerFastAgentQuestion({
     };
     // Subagents may look up and call on-demand deployment MCP tools; every
     // other Fast tool stays with the parent. Calls run through the parent's
-    // MCP executor, so gating and duplicate detection are shared.
+    // MCP executor, so tool gating is shared.
     const executeSubagentNativeTool = async (
       call: FastAgentNativeToolCall,
     ): Promise<unknown> => {
