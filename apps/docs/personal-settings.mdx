@@ -49,8 +49,8 @@ agents receive an opaque reference or a task-scoped substitute rather than the
 key itself.
 
 An integration-key approval created from a Session also appears here when you
-choose **Only me**. Deployment-wide integration keys instead appear under the
-administrator's **Settings → Integrations** page. If an administrator changes a
+choose **Only me**. Deployment-wide integration keys instead appear on the
+administrator's **Integrations** page. If an administrator changes a
 shared integration to owner-only access, Roomote moves it to that owner's
 Personal integrations card.
 
@@ -65,7 +65,7 @@ account. Roomote reaches the server through its proxy and keeps headers and
 OAuth tokens server-side. A server you ask Roomote to connect privately in a
 Session appears here too. Open a server to edit it, manage which tools agents
 may use, or share it with everyone in the deployment; Roomote then moves it to
-**Settings → Integrations**.
+**Integrations**.
 
 See [Custom MCP servers](/integrations/custom-mcp-servers) for authentication
 options and security boundaries.
@@ -98,21 +98,18 @@ Personal Settings also include app preferences such as:
 
 Most teammates only need profile, linked accounts, and theme settings.
 
-### Try personalized Home suggestions
+### Use personalized Home suggestions
 
-**Home suggestions** is a deployment-wide experiment. When an admin enables it
-under **Settings > Experimental**, Roomote uses up to
-five of your recent successfully completed and ingested task memories to prepare
-short ideas for what to do next in the Home composer. Suggestions are prepared
-in the background when possible and rotate until you focus the composer; press
-Tab to accept the current suggestion.
+When [Memory](/memory) is configured, Roomote uses up to five of your recent
+successfully completed and ingested task memories to prepare short ideas for
+what to do next in the Home composer. Suggestions are prepared in the
+background when possible and rotate until you focus the composer; press Tab to
+accept the current suggestion.
 
 Only your visible, manually initiated work is eligible. Roomote excludes other
 members' work, automations, system tasks, hidden or deleted tasks, incomplete
 runs, and memories that have not finished ingesting. If Memory or helper-model
 generation is unavailable, Home keeps the standard non-personalized suggestions.
-An admin can turn the experiment off to stop personalized suggestion requests
-for every member.
 
 ### Continue peer conversations
 
@@ -173,7 +170,7 @@ feature.
 ## Common issues
 
 - **A linked account is missing.** Ask an admin to enable the integration from
-  **Settings > Integrations**.
+  **Integrations**.
 - **A task uses the wrong identity.** Check that the relevant account is
   linked and that you started the task from the expected chat, source-control,
   or dashboard user.
