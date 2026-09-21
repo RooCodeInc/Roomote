@@ -67,7 +67,6 @@ import { shouldOverrideFastProjectConfigForTaskSandbox } from './fast-agent-runt
 import {
   buildFastAgentCodeModeServerNames,
   buildFastAgentToolFilter,
-  isFastAgentNativeIntegration,
 } from './fast-agent-tool-policy';
 
 export {
