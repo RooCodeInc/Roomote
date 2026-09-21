@@ -34,6 +34,7 @@ import {
   heartbeatJob,
   sleepCheckJob,
   refreshSnapshotsJob,
+  rebuildRetiredSnapshotsJob,
   pullRequestAnalyticsSyncJob,
   instancePingJob,
   licenseUsageSyncJob,
@@ -114,6 +115,11 @@ async function createJobs(queue: Queue): Promise<void> {
   await queue.upsertJobScheduler(
     ScheduledJobName.RefreshSnapshots,
     { every: 24 * 60 * 60 * 1000 }, // Every 24 hours.
+  );
+
+  await queue.upsertJobScheduler(
+    ScheduledJobName.RebuildRetiredSnapshots,
+    { every: 5 * 60 * 1000 }, // Every 5 minutes.
   );
 
   // Automation jobs tick at their minimum supported cadence and due-gate
@@ -273,6 +279,8 @@ const runJobs = async (job: ScheduledJob): Promise<void> => {
       return sleepCheckJob();
     case ScheduledJobName.RefreshSnapshots:
       return refreshSnapshotsJob();
+    case ScheduledJobName.RebuildRetiredSnapshots:
+      return rebuildRetiredSnapshotsJob();
     case ScheduledJobName.PullRequestAnalyticsSync:
       return pullRequestAnalyticsSyncJob(job.data ?? {});
     case ScheduledJobName.InstancePing:

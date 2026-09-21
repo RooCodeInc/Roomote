@@ -180,6 +180,50 @@ describe('environment snapshot helpers', () => {
     );
   });
 
+  it('leaves a failed snapshot row alone when the caller requires no snapshot row', async () => {
+    const failedAt = new Date('2026-02-03T00:00:00.000Z');
+
+    await upsertEnvironmentSnapshot(db, {
+      environmentId: testEnvironmentId,
+      provider: 'modal',
+      snapshotId: null,
+      snapshotStatus: 'failed',
+      snapshotCreatedAt: null,
+      snapshotExpiresAt: null,
+      updatedAt: failedAt,
+    });
+
+    const claimedOverFailure = await claimPendingEnvironmentSnapshot(db, {
+      environmentId: testEnvironmentId,
+      provider: 'modal',
+      updatedAt: new Date('2026-02-03T00:01:00.000Z'),
+      requireMissingSnapshot: true,
+      requireNoSnapshotRow: true,
+    });
+    const snapshotRow = await db.query.environmentSnapshots.findFirst({
+      where: eq(environmentSnapshots.environmentId, testEnvironmentId),
+    });
+
+    expect(claimedOverFailure).toBe(false);
+    expect(snapshotRow).toEqual(
+      expect.objectContaining({ snapshotStatus: 'failed', deletedAt: null }),
+    );
+
+    // Once an edit retires that row there is no live row, and the claim wins.
+    await softDeleteEnvironmentSnapshots(db, {
+      environmentId: testEnvironmentId,
+    });
+
+    expect(
+      await claimPendingEnvironmentSnapshot(db, {
+        environmentId: testEnvironmentId,
+        provider: 'modal',
+        requireMissingSnapshot: true,
+        requireNoSnapshotRow: true,
+      }),
+    ).toBe(true);
+  });
+
   it('attaches completed manual snapshots only through an active pending row', async () => {
     const now = new Date('2026-02-03T00:00:00.000Z');
     const expiresAt = new Date('2026-02-04T00:00:00.000Z');
