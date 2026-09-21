@@ -81,7 +81,10 @@ import { notifyFastAgentParentOnSettle } from './notify-fast-agent-parent-on-set
 import { notifyWebTaskInitiatorOnSettle } from './notify-web-task-initiator-on-settle';
 import { enqueueWebTaskInitiatorSettleNotification } from './enqueue-web-task-initiator-settle-notification';
 import { settleLiveTaskMessageOnExit } from './settle-live-task-message-on-exit';
-import { refreshTaskTitleOnCompletion } from './record-task-message-envelope';
+import {
+  refreshTaskSessionTitleOnCompletion,
+  refreshTaskTitleOnCompletion,
+} from './record-task-message-envelope';
 import { getRedis } from '@roomote/redis';
 import { resolveSlackTaskRunRouting } from './slack-task-run-routing';
 import {
@@ -498,6 +501,16 @@ export const finishRun = async ({
     } catch (error) {
       console.warn(
         `[finishRun] Failed to refresh final title for run ${id}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  } else if (status === RunStatus.Canceled) {
+    try {
+      await refreshTaskSessionTitleOnCompletion({ taskId: run.taskId });
+    } catch (error) {
+      console.warn(
+        `[finishRun] Failed to refresh final Session title for run ${id}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );

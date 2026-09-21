@@ -34,7 +34,11 @@ const {
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: (...args: unknown[]) => mockEnqueueTask(...args),
-  refreshFastAgentSessionTitle: vi.fn().mockResolvedValue(null),
+  refreshFastAgentSessionTitleWithRetry: vi.fn().mockResolvedValue({
+    status: 'noop',
+    checkpoint: 1,
+    reason: 'checkpoint_reached',
+  }),
   launchPinnedFastSessionTask: (...args: unknown[]) =>
     mockLaunchPinned(...args),
   DeploymentReadOnlyError: class DeploymentReadOnlyError extends Error {

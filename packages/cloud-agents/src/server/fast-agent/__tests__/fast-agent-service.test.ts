@@ -366,8 +366,8 @@ vi.mock('../../user-personalization', async (importOriginal) => {
   };
 });
 
-vi.mock('../fast-agent-title', () => ({
-  refreshFastAgentSessionTitle: mocks.refreshTitle,
+vi.mock('../session-title-refresh-job', () => ({
+  refreshFastAgentSessionTitleWithRetry: mocks.refreshTitle,
 }));
 
 vi.mock('../fast-agent-surface-reply-stream', async (importOriginal) => {
@@ -515,7 +515,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.listNativeIntegrations.mockResolvedValue([]);
-    mocks.refreshTitle.mockResolvedValue(null);
+    mocks.refreshTitle.mockResolvedValue({
+      status: 'noop',
+      checkpoint: 1,
+      reason: 'checkpoint_reached',
+    });
     mocks.resolveImageDelivery.mockResolvedValue({
       delivery: 'direct',
       model: 'openrouter/openai/gpt-5.4',

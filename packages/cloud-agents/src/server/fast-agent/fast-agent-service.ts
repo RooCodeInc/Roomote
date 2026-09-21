@@ -132,7 +132,7 @@ import {
   upsertFastAgentMessage,
   type FastAgentActiveTask,
 } from './fast-agent-session';
-import { refreshFastAgentSessionTitle } from './fast-agent-title';
+import { refreshFastAgentSessionTitleWithRetry } from './session-title-refresh-job';
 import {
   classifyNonTaskInferenceError,
   FAST_AGENT_SESSION_PERMISSIONS,
@@ -3679,13 +3679,16 @@ export async function answerFastAgentQuestion({
       substantiveHumanInput ||
       (platformEvent && platformEventKind === 'automation')
     ) {
-      void refreshFastAgentSessionTitle({ sessionId: session.id, userId }).then(
-        (generated) =>
-          adapter.activity?.updateTitle?.(generated?.title ?? null, {
-            iconEmoji: generated?.iconEmoji ?? null,
-            titleChanged: generated?.titleChanged,
-          }),
-      );
+      void refreshFastAgentSessionTitleWithRetry({
+        sessionId: session.id,
+        userId,
+      }).then((result) => {
+        const generated = result.status === 'updated' ? result : null;
+        return adapter.activity?.updateTitle?.(generated?.title ?? null, {
+          iconEmoji: generated?.iconEmoji ?? null,
+          titleChanged: generated?.titleChanged,
+        });
+      });
     }
     const sessionActiveTasks = await getActiveFastAgentTasks(session.id);
     const sessionGoal = await getSessionGoalForConversation(session.id);

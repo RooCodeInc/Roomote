@@ -44,6 +44,10 @@ const mockGetCustomAutomationById = vi.fn();
 const mockRefreshAutomationRootFooter = vi.fn().mockResolvedValue(true);
 const mockResolveAutomationResultSubtitle = vi.fn();
 const mockRetryFailedTaskStart = vi.fn();
+const mockRefreshTaskTitleOnCompletion = vi.fn().mockResolvedValue(undefined);
+const mockRefreshTaskSessionTitleOnCompletion = vi
+  .fn()
+  .mockResolvedValue(undefined);
 
 /**
  * Rows resolved by db.select() chains that join tasks with task_runs (the
@@ -367,6 +371,13 @@ vi.mock('../../automation-result-metadata', () => ({
     mockResolveAutomationResultSubtitle(...args),
 }));
 
+vi.mock('../record-task-message-envelope', () => ({
+  refreshTaskTitleOnCompletion: (...args: unknown[]) =>
+    mockRefreshTaskTitleOnCompletion(...args),
+  refreshTaskSessionTitleOnCompletion: (...args: unknown[]) =>
+    mockRefreshTaskSessionTitleOnCompletion(...args),
+}));
+
 import { finishRun } from '../finish-run';
 import { createTaskRunGitHubToken } from '@roomote/github';
 import { enqueueTask } from '@roomote/cloud-agents/server';
@@ -521,6 +532,17 @@ describe('finishRun', () => {
     });
 
     expect(mockCleanupSandboxOidcTargetsForTaskRun).toHaveBeenCalledWith(1);
+  });
+
+  it('runs the final title repair when a task is canceled', async () => {
+    mockFindFirstRun.mockResolvedValue(makeRun());
+
+    await finishRun({ id: 1, status: RunStatus.Canceled });
+
+    expect(mockRefreshTaskSessionTitleOnCompletion).toHaveBeenCalledWith({
+      taskId: 'task-1',
+    });
+    expect(mockRefreshTaskTitleOnCompletion).not.toHaveBeenCalled();
   });
 
   it('refreshes finalized metadata on a custom automation Slack result', async () => {
