@@ -4966,7 +4966,7 @@ export async function answerFastAgentQuestion({
               if (preview.status === 'name_unavailable') {
                 return {
                   success: false,
-                  error: `The name "${preview.name}" is unavailable because it belongs to an incompatible environment. Choose another meaningful qualifier instead of appending a hash.`,
+                  error: `The name "${preview.name}" is unavailable because it belongs to an incompatible environment. Keep the same requested package set, choose another meaningful qualifier instead of appending a hash, and preview again. Do not launch or verify the incompatible environment.`,
                 };
               }
               return { success: true, ...preview };
@@ -5142,6 +5142,13 @@ export async function answerFastAgentQuestion({
               };
             }
             if (args.mode === 'environment_verification') {
+              if (!platformEvent) {
+                return {
+                  success: false,
+                  error:
+                    'Environment verification cannot be started directly from a human turn. Use ensure_environment to preview and create the recipe environment; creation starts verification automatically.',
+                };
+              }
               if (!currentUser.isAdmin) {
                 return {
                   success: false,

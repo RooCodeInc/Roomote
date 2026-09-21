@@ -11480,6 +11480,40 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
+  it('rejects direct environment verification from a human turn', async () => {
+    const launchTask = vi.fn<LaunchFastAgentTask>();
+    const adapter = callbacks({ launchTask });
+    let toolResult: unknown;
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’m checking the environment state.',
+        });
+        toolResult = await invokeTool(nativeToolNames.launchTask, {
+          mode: 'environment_verification',
+          prompt: 'Verify the environment.',
+          environmentId: 'env-1',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'The environment must go through the provisioning flow.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+
+    expect(toolResult).toEqual({
+      success: false,
+      error:
+        'Environment verification cannot be started directly from a human turn. Use ensure_environment to preview and create the recipe environment; creation starts verification automatically.',
+    });
+    expect(launchTask).not.toHaveBeenCalled();
+  });
+
   it('allows a trusted admin child continuation to launch environment verification', async () => {
     const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
       success: true,
@@ -11613,6 +11647,44 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(assertTaskLaunch).toHaveBeenCalledOnce();
     expect(mocks.createEnvironmentRecipeCandidate).not.toHaveBeenCalled();
     expect(launchTask).not.toHaveBeenCalled();
+  });
+
+  it('directs an incompatible environment name back through preview', async () => {
+    const adapter = callbacks();
+    let toolResult: unknown;
+    mocks.previewEnsureEnvironment.mockReturnValue({
+      status: 'name_unavailable',
+      name: 'R + Tidymodels — Conversion Analysis',
+    });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’m checking the environment proposal.',
+        });
+        toolResult = await invokeTool(nativeToolNames.ensureEnvironment, {
+          action: 'preview',
+          type: 'r-bioconductor',
+          packages: ['DALEX', 'themis', 'tidymodels', 'xgboost'],
+          name: 'R + Tidymodels — Conversion Analysis',
+          purpose: 'Conversion analysis',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'A different environment name is required.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+
+    expect(toolResult).toEqual({
+      success: false,
+      error:
+        'The name "R + Tidymodels — Conversion Analysis" is unavailable because it belongs to an incompatible environment. Keep the same requested package set, choose another meaningful qualifier instead of appending a hash, and preview again. Do not launch or verify the incompatible environment.',
+    });
   });
 
   it('honors a surface launch gate before creating a task', async () => {
