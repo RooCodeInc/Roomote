@@ -125,6 +125,7 @@ function approvalMetadata(
     toolName: row.toolName,
     argsSummary: row.argsSummary,
     status: row.status,
+    taskId: row.taskId,
     expiresAt: row.expiresAt.toISOString(),
     createdAt: row.createdAt.toISOString(),
   };
@@ -281,6 +282,8 @@ export async function insertIntegrationToolApproval(
     nativeRequestId: string;
     argsFingerprint: string;
     argsSummary: unknown;
+    /** Set when a task's agent asked; see `claimTaskIntegrationToolCall`. */
+    taskId?: string;
   },
 ): Promise<IntegrationToolApprovalMetadata> {
   return db.transaction(async (tx) => {
@@ -305,6 +308,7 @@ export async function insertIntegrationToolApproval(
       .values({
         sessionId: context.sessionId,
         requesterUserId: owner.id,
+        taskId: input.taskId ?? null,
         integrationId: input.integrationId,
         toolName: input.toolName,
         nativeRequestId: input.nativeRequestId,
@@ -624,6 +628,8 @@ export async function insertAutoApprovedIntegrationToolApproval(
     nativeRequestId: string;
     argsFingerprint: string;
     argsSummary: unknown;
+    /** Set when a task's agent asked; see `claimTaskIntegrationToolCall`. */
+    taskId?: string;
   },
 ): Promise<IntegrationToolApprovalMetadata> {
   return db.transaction(async (tx) => {
@@ -637,6 +643,7 @@ export async function insertAutoApprovedIntegrationToolApproval(
       .values({
         sessionId: context.sessionId,
         requesterUserId: owner.id,
+        taskId: input.taskId ?? null,
         integrationId: input.integrationId,
         toolName: input.toolName,
         nativeRequestId: input.nativeRequestId,
@@ -666,6 +673,57 @@ export async function claimAutoApprovedIntegrationToolApproval(input: {
   requesterUserId: string;
 }): Promise<boolean> {
   return claimApprovedIntegrationToolApproval(input, 'auto_approved');
+}
+
+/**
+ * A task's gated call, at the integration proxy: claim the Session owner's
+ * approval of this exact call. The agent's native ask is advisory inside a
+ * sandbox, so the proxy is what makes Ask first real for a task: a call runs
+ * only by consuming an approved row for the same task, tool, and arguments,
+ * once. Serialized against the experiment toggle like every other claim.
+ */
+export async function claimTaskIntegrationToolCall(input: {
+  taskId: string;
+  argsFingerprint: string;
+}): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    if (
+      !(await isDeploymentExperimentEnabledWithShareLock(
+        'integrationToolApprovals',
+        tx,
+      ))
+    ) {
+      return false;
+    }
+    const [approved] = await tx
+      .select({ id: integrationToolApprovalRequests.id })
+      .from(integrationToolApprovalRequests)
+      .where(
+        and(
+          eq(integrationToolApprovalRequests.taskId, input.taskId),
+          eq(
+            integrationToolApprovalRequests.argsFingerprint,
+            input.argsFingerprint,
+          ),
+          eq(integrationToolApprovalRequests.status, 'approved'),
+          // An approval answers the ask that was open then, not a call the
+          // agent makes much later with the same arguments.
+          gt(
+            integrationToolApprovalRequests.decidedAt,
+            sql`clock_timestamp() - ${INTEGRATION_TOOL_APPROVAL_WINDOW_MINUTES} * interval '1 minute'`,
+          ),
+        ),
+      )
+      .orderBy(integrationToolApprovalRequests.createdAt)
+      .limit(1)
+      .for('update', { skipLocked: true });
+    if (!approved) return false;
+    await tx
+      .update(integrationToolApprovalRequests)
+      .set({ status: 'consumed' })
+      .where(eq(integrationToolApprovalRequests.id, approved.id));
+    return true;
+  });
 }
 
 export {

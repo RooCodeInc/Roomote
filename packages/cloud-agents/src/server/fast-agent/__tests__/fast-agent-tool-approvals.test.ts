@@ -729,6 +729,7 @@ describe('tool approval bridge', () => {
       toolName: 'post_message',
       argsSummary: { channel: 'C1', text: 'hi' },
       status: 'pending',
+      taskId: null,
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
       createdAt: new Date().toISOString(),
     });
@@ -954,11 +955,13 @@ describe('tool approval bridge', () => {
       toolName: 'post_message',
       argsSummary: {},
       status: 'pending',
+      taskId: null,
       expiresAt: new Date(Date.now() - 1_000).toISOString(),
       createdAt: new Date().toISOString(),
     });
     vi.mocked(getIntegrationToolApproval).mockResolvedValue({
       status: 'pending',
+      taskId: null,
     } as never);
     const helperMocks = helpers();
     bridge().handleAsk(ask, helperMocks);

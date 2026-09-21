@@ -12,6 +12,7 @@ const pending: IntegrationToolApprovalMetadata[] = [
     toolName: 'post_message',
     argsSummary: { channel: 'C1' },
     status: 'pending',
+    taskId: null,
     expiresAt: new Date(Date.now() + 60_000).toISOString(),
     createdAt: new Date().toISOString(),
   },
