@@ -49,6 +49,7 @@ import {
   sendMessageToFastSessionForUser,
 } from '../tasks/fastSessionCommunication';
 import { getSessionRelayUpdates } from '../tasks/getRelayUpdates';
+import { decodeMessageHistoryCursor } from '../tasks/message-history-pagination';
 
 type SessionContext = Context<{
   Variables: Variables & { mcpAuth: McpAuth };
@@ -468,20 +469,50 @@ async function getSessionMessages(c: SessionContext): Promise<Response> {
       return c.json({ error: 'limit must be a number' }, 400);
     }
     const limit = Math.min(Math.max(Math.trunc(parsedLimit), 1), 1000);
-    const messages = session.fastConversationId
+    const cursorValue = c.req.query('cursor');
+    if (
+      !session.fastConversationId &&
+      cursorValue !== undefined &&
+      !decodeMessageHistoryCursor({
+        value: cursorValue,
+        target: { kind: 'session', id: session.id },
+        order: 'desc',
+      })
+    ) {
+      return c.json({ error: 'cursor is invalid for this Session' }, 400);
+    }
+    const messagePage = session.fastConversationId
       ? await getFastSessionMessagesForUser({
           sessionId: session.fastConversationId,
           userId,
           limit,
           order: 'desc',
+          cursor: cursorValue,
+          target: { kind: 'session', id: session.id },
         })
-      : [];
+      : {
+          messages: [],
+          returned: 0,
+          order: 'desc' as const,
+          hasMore: false,
+          nextCursor: null,
+          truncated: false,
+          hasNewer: false,
+          coverage: {
+            complete: true,
+            newestTs: null,
+            oldestTs: null,
+          },
+        };
+    if (!messagePage) return c.json({ error: 'Session not found' }, 404);
+    if ('invalidCursor' in messagePage) {
+      return c.json({ error: 'cursor is invalid for this Session' }, 400);
+    }
     const childTasks = await getChildTasks([session.id], c.get('mcpAuth'));
 
     const response = {
       sessionId: session.id,
-      messages: messages ?? [],
-      returned: messages?.length ?? 0,
+      ...messagePage,
       tasks: childTasks.get(session.id) ?? [],
     } satisfies RoomoteSessionMessagesResponse;
     return c.json(response);

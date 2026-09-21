@@ -99,11 +99,24 @@ export interface RoomoteTranscriptMessage {
   images: string[];
   metadata: TaskMessageMetadata | null;
   visibleInTranscript: boolean;
+  truncated?: boolean;
+}
+
+export interface RoomoteTranscriptMessagesCoverage {
+  complete: boolean;
+  newestTs: number | null;
+  oldestTs: number | null;
 }
 
 export interface RoomoteTranscriptMessagesResponse {
   messages: RoomoteTranscriptMessage[];
   returned: number;
+  order: 'asc' | 'desc';
+  hasMore: boolean;
+  nextCursor: string | null;
+  truncated: boolean;
+  hasNewer: boolean;
+  coverage: RoomoteTranscriptMessagesCoverage;
 }
 
 export const TRANSCRIPT_VISIBILITY_METADATA_KEY = 'visibleInTranscript';

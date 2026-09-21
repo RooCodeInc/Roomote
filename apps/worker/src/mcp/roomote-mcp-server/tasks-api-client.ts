@@ -116,8 +116,9 @@ export async function getSessionMessages(
   config: RoomoteConfig,
   sessionId: string,
   limit?: number,
+  cursor?: string,
 ): Promise<RoomoteSessionMessagesResponse> {
-  const qs = buildSearchParams({ limit });
+  const qs = buildSearchParams({ limit, cursor });
   return apiFetch(
     config,
     `/api/mcp/sessions/${encodeURIComponent(sessionId)}/messages${qs}`,
@@ -280,11 +281,12 @@ export async function getTaskComputeLogs(
 export async function getTaskMessages(
   config: RoomoteConfig,
   taskId: string,
-  params?: { limit?: number; order?: 'asc' | 'desc' },
+  params?: { limit?: number; order?: 'asc' | 'desc'; cursor?: string },
 ): Promise<TaskMessagesResponse> {
   const qs = buildSearchParams({
     limit: params?.limit,
     order: params?.order,
+    cursor: params?.cursor,
   });
   return apiFetch(
     config,

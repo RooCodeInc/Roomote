@@ -39,6 +39,12 @@ describe('handleGetTaskMessages', () => {
         },
       ],
       returned: 2,
+      order: 'desc',
+      hasMore: false,
+      nextCursor: null,
+      truncated: false,
+      hasNewer: false,
+      coverage: { complete: true, newestTs: 1700000001, oldestTs: 1700000000 },
     });
 
     const result = await handleGetTaskMessages({ taskId: 'task-1' }, config);
@@ -71,6 +77,12 @@ describe('handleGetTaskMessages', () => {
         },
       ],
       returned: 1,
+      order: 'desc',
+      hasMore: false,
+      nextCursor: null,
+      truncated: false,
+      hasNewer: false,
+      coverage: { complete: true, newestTs: 1700000002, oldestTs: 1700000002 },
     });
 
     const result = await handleGetTaskMessages(
@@ -87,6 +99,40 @@ describe('handleGetTaskMessages', () => {
     const text = result.content[0]?.text ?? '';
     expect(text).toContain('Latest 1 message(s)');
     expect(text).toContain('Most recent message');
+  });
+
+  it('exposes bounded-history metadata and forwards the continuation cursor', async () => {
+    vi.mocked(tasksApiClient.getTaskMessages).mockResolvedValueOnce({
+      messages: [],
+      returned: 0,
+      order: 'desc',
+      hasMore: true,
+      nextCursor: 'cursor-page-2',
+      truncated: true,
+      hasNewer: true,
+      coverage: { complete: false, newestTs: null, oldestTs: null },
+    });
+
+    const result = await handleGetTaskMessages(
+      { taskId: 'task-1', limit: 2, cursor: 'cursor-page-1' },
+      config,
+    );
+
+    expect(vi.mocked(tasksApiClient.getTaskMessages)).toHaveBeenCalledWith(
+      config,
+      'task-1',
+      { limit: 2, order: 'desc', cursor: 'cursor-page-1' },
+    );
+    expect(result.structuredContent).toMatchObject({
+      hasMore: true,
+      nextCursor: 'cursor-page-2',
+      truncated: true,
+      hasNewer: true,
+    });
+    expect(result.content[0]?.text).toContain(
+      'call get_messages with cursor: cursor-page-2',
+    );
+    expect(result.content[0]?.text).toContain('Newer messages arrived');
   });
 
   it('labels linked subagent messages without changing parent message labels', async () => {
@@ -121,6 +167,12 @@ describe('handleGetTaskMessages', () => {
         },
       ],
       returned: 2,
+      order: 'desc',
+      hasMore: false,
+      nextCursor: null,
+      truncated: false,
+      hasNewer: false,
+      coverage: { complete: true, newestTs: 1700000002, oldestTs: 1700000001 },
     });
 
     const result = await handleGetTaskMessages({ taskId: 'task-1' }, config);
@@ -137,6 +189,12 @@ describe('handleGetTaskMessages', () => {
     vi.mocked(tasksApiClient.getTaskMessages).mockResolvedValueOnce({
       messages: [],
       returned: 0,
+      order: 'desc',
+      hasMore: false,
+      nextCursor: null,
+      truncated: false,
+      hasNewer: false,
+      coverage: { complete: true, newestTs: null, oldestTs: null },
     });
 
     const result = await handleGetTaskMessages({ taskId: 'task-1' }, config);
@@ -172,6 +230,12 @@ describe('handleGetTaskMessages', () => {
         },
       ],
       returned: 1,
+      order: 'desc',
+      hasMore: false,
+      nextCursor: null,
+      truncated: false,
+      hasNewer: false,
+      coverage: { complete: true, newestTs: 1700000000, oldestTs: 1700000000 },
     });
 
     const result = await handleGetTaskMessages({ taskId: 'task-1' }, config);
@@ -198,6 +262,12 @@ describe('handleGetTaskMessages', () => {
         },
       ],
       returned: 1,
+      order: 'desc',
+      hasMore: false,
+      nextCursor: null,
+      truncated: false,
+      hasNewer: false,
+      coverage: { complete: true, newestTs: 1700000000, oldestTs: 1700000000 },
     });
 
     const result = await handleGetTaskMessages({ taskId: 'task-1' }, config);
@@ -223,6 +293,12 @@ describe('handleGetTaskMessages', () => {
         },
       ],
       returned: 1,
+      order: 'desc',
+      hasMore: false,
+      nextCursor: null,
+      truncated: false,
+      hasNewer: false,
+      coverage: { complete: true, newestTs: 1700000000, oldestTs: 1700000000 },
     });
 
     const result = await handleGetTaskMessages({ taskId: 'task-1' }, config);

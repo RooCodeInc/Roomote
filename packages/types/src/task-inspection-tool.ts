@@ -36,13 +36,13 @@ export const roomoteTaskInspectionFieldSchemas = {
     })
     .optional()
     .describe(
-      'Positive result limit: 1 to 100 for search/get_updates (default 20), or 1 to 1000 for get_messages (task or Fast session)',
+      'Positive result limit: 1 to 100 for search/get_updates (default 20), or 1 to 1000 for get_messages (default 100, task or Fast session)',
     ),
   cursor: z
     .string()
     .optional()
     .describe(
-      'Pagination cursor from a previous search or get_updates response (nextCursor)',
+      'Pagination cursor from a previous search, get_updates, or get_messages response (nextCursor)',
     ),
 } satisfies Record<string, z.ZodTypeAny>;
 
