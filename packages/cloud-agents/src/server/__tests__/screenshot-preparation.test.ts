@@ -49,10 +49,18 @@ const fillAction = {
   value: 'Roomote',
 };
 
+const navigateAction = {
+  id: 'navigate_settings',
+  kind: 'navigate' as const,
+  url: 'https://preview.example/settings?token=sk-live-navigation#secret',
+};
+
 const readyAction = { id: 'capture', kind: 'capture-ready' as const };
 
 function nextInput(
-  allowedActions: (typeof fillAction)[] | (typeof readyAction)[],
+  allowedActions: Array<
+    typeof fillAction | typeof navigateAction | typeof readyAction
+  >,
   loopId?: string,
   correction?: {
     reason: string;
@@ -130,6 +138,36 @@ describe('bounded screenshot preparation', () => {
     expect(state.page.visibleText).toContain('[redacted sensitive page text]');
     expect(state.page.visibleText).not.toContain('sk-live-secret');
     expect(state.page.visibleText).not.toContain('secret-value');
+  });
+
+  it('redacts navigation action URLs in the allowed-action state', async () => {
+    mockEvaluate.mockResolvedValueOnce({
+      answers: {
+        next_action: {
+          type: 'choice',
+          choice: 'navigate_settings',
+          probabilities: { fallback: 0.05, navigate_settings: 0.95 },
+          confidence: 0.95,
+        },
+      },
+    });
+
+    await prepareScreenshotStep({
+      runId: 'run-navigation-redaction',
+      enabled: true,
+      input: nextInput([navigateAction]),
+    });
+
+    const state = mockEvaluate.mock.calls[0]![0].state;
+    expect(state.allowedActions.navigate_settings).toContain(
+      '[query redacted]',
+    );
+    expect(state.allowedActions.navigate_settings).toContain(
+      '[fragment redacted]',
+    );
+    expect(state.allowedActions.navigate_settings).not.toContain(
+      'sk-live-navigation',
+    );
   });
 
   it('returns only an allowed action and carries timing and token metrics through acceptance', async () => {

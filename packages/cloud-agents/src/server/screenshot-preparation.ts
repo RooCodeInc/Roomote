@@ -130,7 +130,7 @@ function fallback(
 function describeAction(action: ScreenshotPreparationAction): string {
   switch (action.kind) {
     case 'navigate':
-      return `Navigate to the caller-provided URL ${action.url}.`;
+      return `Navigate to the caller-provided URL ${redactPageUrl(action.url)}.`;
     case 'click':
       return `Click the observed control ${action.targetId}.`;
     case 'fill':
