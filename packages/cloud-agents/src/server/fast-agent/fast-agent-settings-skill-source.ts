@@ -783,6 +783,16 @@ const promptMarketplaceSnapshotCache =
   new FastAgentPromptSkillSnapshotCache<SettingsSkillMarketplaceSnapshot>({
     cleanup: (snapshot) =>
       rm(dirname(snapshot.directory), { recursive: true, force: true }),
+    // The prompt lists names and descriptions; `load_skill` reads a skill's
+    // text and resources through its own source, so neither is kept here.
+    retain: (snapshot) => ({
+      ...snapshot,
+      records: snapshot.records.map((record) => ({
+        ...record,
+        content: '',
+        resources: new Map(),
+      })),
+    }),
   });
 
 /**

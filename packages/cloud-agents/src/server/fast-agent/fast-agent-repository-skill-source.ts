@@ -654,15 +654,16 @@ const promptSnapshotCache =
   new FastAgentPromptSkillSnapshotCache<RepositorySkillSnapshot>({
     cleanup: (snapshot) =>
       rm(snapshot.directory, { recursive: true, force: true }),
-    // A record carries the Git environment its checkout was fetched with and
-    // the skill's full text, for `load_skill` to read resources. The prompt
-    // lists names and descriptions, so neither outlives the load.
+    // A record carries the Git environment its checkout was fetched with,
+    // the skill's full text, and its resource index, for `load_skill`. The
+    // prompt lists names and descriptions, so none of them outlive the load.
     retain: (snapshot) => ({
       ...snapshot,
       records: snapshot.records.map((record) => ({
         ...record,
-        gitEnvironment: {},
+        gitEnvironment: {} as NodeJS.ProcessEnv,
         mainContent: '',
+        resources: new Map(),
       })),
     }),
   });
