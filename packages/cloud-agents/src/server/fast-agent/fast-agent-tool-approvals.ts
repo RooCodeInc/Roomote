@@ -24,6 +24,7 @@ import {
 } from '@roomote/types';
 
 import type { FastAgentIntegration } from './fast-agent-integration-broker';
+import { buildFastAgentCodeModeServerNames } from './fast-agent-tool-policy';
 
 /**
  * Experiment-gated (`integrationToolApprovals`) per-tool approvals for
@@ -50,13 +51,38 @@ const INTEGRATION_TOOL_APPROVAL_POLL_MS = 1_500;
 const INTEGRATION_TOOL_APPROVAL_CANCEL_EXPERIMENT_DISABLED =
   'experiment_disabled';
 
-/** OpenCode prefixes MCP tools with the sanitized server name. */
-function sanitizeCodeModeIntegrationPrefix(integrationId: string) {
-  return integrationId.replace(/[^a-zA-Z0-9_-]/gu, '_');
+/**
+ * OpenCode flattens every MCP tool to `<server name>_<tool name>`. The server
+ * name is the integration's code-mode mount name, which is the sanitized
+ * integration id made unique across the mounted set.
+ */
+export function codeModeToolKey(serverName: string, toolName: string) {
+  return `${serverName}_${toolName}`;
 }
 
-export function codeModeToolKey(integrationId: string, toolName: string) {
-  return `${sanitizeCodeModeIntegrationPrefix(integrationId)}_${toolName}`;
+type MountedIntegrationTool = {
+  integrationId: string;
+  toolName: string;
+  serverName: string;
+  key: string;
+};
+
+/** Every mounted tool with the native key and server name it runs under. */
+function listMountedIntegrationTools(
+  integrations: FastAgentIntegration[],
+): MountedIntegrationTool[] {
+  const serverNames = buildFastAgentCodeModeServerNames(
+    integrations.map((integration) => integration.id),
+  );
+  return integrations.flatMap((integration) => {
+    const serverName = serverNames.get(integration.id)!;
+    return integration.tools.map((tool) => ({
+      integrationId: integration.id,
+      toolName: tool.name,
+      serverName,
+      key: codeModeToolKey(serverName, tool.name),
+    }));
+  });
 }
 
 /**
@@ -83,35 +109,36 @@ export function buildIntegrationToolApprovalRules(
       override.mode,
     ]),
   );
-  const rules: PermissionRuleset = [];
-  for (const integration of integrations) {
-    for (const tool of integration.tools) {
-      const key = integrationToolPolicyKey(integration.id, tool.name);
-      const policyMode = modeByTool.get(key);
-      const mode = resolveEffectiveIntegrationToolMode({
-        policyMode,
-        sessionOverrideMode: overrideByTool.get(key),
-      });
-      // A session `allow` over a deployment `ask` deliberately keeps the
-      // native ask rule: the bridge answers those asks itself, so "don't ask
-      // again this session" works mid-turn, never changes the compiled rules
-      // (no instance dispose), and never relies on OpenCode's leaky native
-      // `always`.
-      if (mode === 'ask' || (mode === 'allow' && policyMode === 'ask')) {
-        rules.push({
-          permission: codeModeToolKey(integration.id, tool.name),
-          pattern: '*',
-          action: 'ask',
-        });
-      } else if (mode === 'reject') {
-        rules.push({
-          permission: codeModeToolKey(integration.id, tool.name),
-          pattern: '*',
-          action: 'deny',
-        });
-      }
+  // Server names are unique, but both halves of a flattened key may contain
+  // underscores, so two distinct tools can still share one native key (`a` /
+  // `b_c` and `a_b` / `c`). A native rule cannot tell them apart, so the most
+  // restrictive mode among them wins: a collision can only ever add an ask or
+  // a block, never let a gated tool run ungated.
+  const actionByKey = new Map<string, 'ask' | 'deny'>();
+  for (const tool of listMountedIntegrationTools(integrations)) {
+    const key = integrationToolPolicyKey(tool.integrationId, tool.toolName);
+    const policyMode = modeByTool.get(key);
+    const mode = resolveEffectiveIntegrationToolMode({
+      policyMode,
+      sessionOverrideMode: overrideByTool.get(key),
+    });
+    // A session `allow` over a deployment `ask` deliberately keeps the
+    // native ask rule: the bridge answers those asks itself, so "don't ask
+    // again this session" works mid-turn, never changes the compiled rules
+    // (no instance dispose), and never relies on OpenCode's leaky native
+    // `always`.
+    if (mode === 'reject') {
+      actionByKey.set(tool.key, 'deny');
+    } else if (
+      (mode === 'ask' || (mode === 'allow' && policyMode === 'ask')) &&
+      actionByKey.get(tool.key) !== 'deny'
+    ) {
+      actionByKey.set(tool.key, 'ask');
     }
   }
+  const rules: PermissionRuleset = [...actionByKey].map(
+    ([permission, action]) => ({ permission, pattern: '*', action }),
+  );
   return rules;
 }
 
@@ -206,10 +233,10 @@ export function extractApprovalCallArgs(
         toolCalls?: Array<{ tool?: unknown; input?: unknown }>;
       }
     | undefined,
-  tool: { integrationId: string; toolName: string },
+  tool: { serverName: string; toolName: string },
 ): unknown {
   if (!recovered) return undefined;
-  const dottedChildName = `${sanitizeCodeModeIntegrationPrefix(tool.integrationId)}.${tool.toolName}`;
+  const dottedChildName = `${tool.serverName}.${tool.toolName}`;
   // One script can call the same tool more than once. Child calls are
   // recorded as they run, so the paused call is the most recent match, not
   // the first; showing the first would put an earlier call's arguments on
@@ -228,12 +255,10 @@ export function extractApprovalCallArgs(
  * with and rebuilds on drift.
  */
 export async function resolveFastAgentToolApprovalRules(input: {
-  codeModeIntegrationsEffective: boolean;
   integrations: FastAgentIntegration[];
   /** The Session whose requester-owned overrides layer on the policies. */
   sessionId?: string;
 }): Promise<{ rules: PermissionRuleset; hash: string } | undefined> {
-  if (!input.codeModeIntegrationsEffective) return undefined;
   const enabled = await isDeploymentExperimentEnabled(
     'integrationToolApprovals',
   );
@@ -274,17 +299,13 @@ export function createFastAgentToolApprovalBridge(input: {
   notify?: (approval: IntegrationToolApprovalMetadata) => Promise<void>;
   signal?: AbortSignal;
 }) {
-  const toolByKey = new Map<
-    string,
-    { integrationId: string; toolName: string }
-  >();
-  for (const integration of input.integrations) {
-    for (const tool of integration.tools) {
-      toolByKey.set(codeModeToolKey(integration.id, tool.name), {
-        integrationId: integration.id,
-        toolName: tool.name,
-      });
-    }
+  // Two tools sharing one native key (see the rule compilation) cannot be
+  // told apart from the ask alone; the first mounted one names the card. The
+  // compiled rule is already the most restrictive of the pair, so this only
+  // affects the label, never whether the call is gated.
+  const toolByKey = new Map<string, MountedIntegrationTool>();
+  for (const tool of listMountedIntegrationTools(input.integrations)) {
+    if (!toolByKey.has(tool.key)) toolByKey.set(tool.key, tool);
   }
   const handledRequestIds = new Set<string>();
   const notifiedApprovalIds = new Set<string>();

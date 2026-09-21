@@ -1,7 +1,6 @@
 'use client';
 
 import { ShieldQuestion, Switch } from '@/components/system';
-import { useCodeModeIntegrationsExperiment } from '@/hooks/useCodeModeIntegrationsExperiment';
 import { useIntegrationToolApprovalsExperiment } from '@/hooks/useIntegrationToolApprovalsExperiment';
 
 import { Section } from './Section';
@@ -14,7 +13,6 @@ import { Section } from './Section';
 export function IntegrationToolApprovalsExperimentalSetting() {
   const { enabled, isLoading, isUpdating, setEnabled } =
     useIntegrationToolApprovalsExperiment();
-  const codeModeIntegrations = useCodeModeIntegrationsExperiment();
 
   return (
     <Section icon={ShieldQuestion} title="Integration tool approvals">
@@ -27,23 +25,16 @@ export function IntegrationToolApprovalsExperimentalSetting() {
         />
         <p className="text-sm text-muted-foreground">
           Gate individual integration tools behind a requester decision in
-          Sessions. Applies on top of Code Mode Integrations: while enabled,
-          each integration&apos;s Manage tools dialog in Settings → Integrations
-          offers Always allow (default), Ask first, and Reject per tool. Ask
-          first pauses each call until the Session owner allows it once, stops
-          the asks for the rest of that Session, or rejects it; Reject blocks it
-          outright. Session owners can also ask to be asked about any tool from
-          its call in the transcript. Tools left at the default run exactly as
-          before. Policies are deployment-wide and apply from the next session
-          turn.
+          Sessions. While enabled, each integration&apos;s Manage tools dialog
+          in Settings → Integrations offers Always allow (default), Ask first,
+          and Reject per tool. Ask first pauses each call until the Session
+          owner allows it once, stops the asks for the rest of that Session, or
+          rejects it; Reject blocks it outright. Session owners can also ask to
+          be asked about any tool from its call in the transcript. Tools left at
+          the default run exactly as before. Policies are deployment-wide and
+          apply from the next session turn.
         </p>
       </div>
-      {enabled && !codeModeIntegrations.enabled ? (
-        <p className="mt-3 text-sm text-muted-foreground">
-          Code Mode Integrations is off, so these policies currently have no
-          effect. Enable both experiments to gate integration tools.
-        </p>
-      ) : null}
     </Section>
   );
 }

@@ -130,6 +130,52 @@ describe('buildIntegrationToolApprovalRules', () => {
   });
 });
 
+describe('buildIntegrationToolApprovalRules with mounted server names', () => {
+  const mounted = (id: string, toolName: string) =>
+    ({
+      id,
+      name: id,
+      description: '',
+      tools: [{ name: toolName, description: '', inputSchema: {} }],
+    }) as unknown as FastAgentIntegration;
+  const ask = (integrationId: string, toolName: string) => ({
+    policyId: `${integrationId}/${toolName}`,
+    integrationId,
+    toolName,
+    mode: 'ask' as const,
+    updatedAt: '',
+    createdAt: '',
+  });
+
+  it('keys a rule on the unique mount name when sanitized ids collide', () => {
+    // `foo.bar` and `foo_bar` both sanitize to `foo_bar`; the second mounts
+    // under a suffixed name, and its policy must follow it there.
+    const rules = buildIntegrationToolApprovalRules(
+      [mounted('foo.bar', 'read'), mounted('foo_bar', 'read')],
+      [ask('foo_bar', 'read')],
+    );
+    expect(rules).toEqual([
+      { permission: 'foo_bar__roomote_2_read', pattern: '*', action: 'ask' },
+    ]);
+  });
+
+  it('applies the most restrictive mode when two tools flatten to one native key', () => {
+    // `a`/`b_c` and `a_b`/`c` both flatten to `a_b_c`. The native rule cannot
+    // tell them apart, so a gated tool must never run ungated through the
+    // other one's default allow.
+    const integrations = [mounted('a', 'b_c'), mounted('a_b', 'c')];
+    expect(
+      buildIntegrationToolApprovalRules(integrations, [ask('a_b', 'c')]),
+    ).toEqual([{ permission: 'a_b_c', pattern: '*', action: 'ask' }]);
+    expect(
+      buildIntegrationToolApprovalRules(integrations, [
+        ask('a', 'b_c'),
+        { ...ask('a_b', 'c'), mode: 'reject' as const },
+      ]),
+    ).toEqual([{ permission: 'a_b_c', pattern: '*', action: 'deny' }]);
+  });
+});
+
 describe('buildIntegrationToolApprovalRules with session overrides', () => {
   const policy = (toolName: string, mode: 'ask' | 'reject') => ({
     policyId: toolName,
@@ -229,7 +275,6 @@ describe('resolveFastAgentToolApprovalRules', () => {
       { integrationId: 'mock-slack', toolName: 'read_channel', mode: 'ask' },
     ]);
     const resolved = await resolveFastAgentToolApprovalRules({
-      codeModeIntegrationsEffective: true,
       integrations,
       sessionId: 'session-id',
     });
@@ -245,17 +290,10 @@ describe('resolveFastAgentToolApprovalRules', () => {
     ]);
   });
 
-  it('is inactive without code mode or without the experiment', async () => {
-    expect(
-      await resolveFastAgentToolApprovalRules({
-        codeModeIntegrationsEffective: false,
-        integrations,
-      }),
-    ).toBeUndefined();
+  it('is inactive without the experiment', async () => {
     vi.mocked(isDeploymentExperimentEnabled).mockResolvedValueOnce(false);
     expect(
       await resolveFastAgentToolApprovalRules({
-        codeModeIntegrationsEffective: true,
         integrations,
       }),
     ).toBeUndefined();
@@ -362,7 +400,7 @@ describe('ordering-equivalent policies share one hash', () => {
 });
 
 describe('extractApprovalCallArgs', () => {
-  const tool = { integrationId: 'mock-slack', toolName: 'post_message' };
+  const tool = { serverName: 'mock-slack', toolName: 'post_message' };
 
   it('returns a plain call input directly', () => {
     expect(extractApprovalCallArgs({ input: { channel: 'C1' } }, tool)).toEqual(

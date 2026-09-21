@@ -78,7 +78,6 @@ import {
   getActiveRecipeVerificationTaskId,
   inArray,
   isBrainEnabled,
-  isDeploymentExperimentEnabled,
   isPrivateSessionsExperimentEnabled,
   isNull,
   markSessionGoalForConversation,
@@ -215,13 +214,12 @@ import {
   bindFastAgentMcpToolExecutor,
   FAST_AGENT_NATIVE_TOOL_NAMES,
   getFastAgentNativeToolRuntime,
-  hasFastAgentCodeModeServerNameCollision,
-  hasFastAgentCodeModeToolKeyCollision,
   mountFastAgentIntegrationOnCodeModeServer,
   type FastAgentMcpToolCall,
   type FastAgentNativeToolCall,
 } from './fast-agent-native-tool-bridge';
 import {
+  buildFastAgentCodeModeServerNames,
   getFastAgentNativeAcpKind,
   isFastAgentNativeIntegration,
 } from './fast-agent-tool-policy';
@@ -2084,6 +2082,7 @@ export async function answerFastAgentQuestion({
   let codeModeMcpCapabilityForTurn: string | null = null;
   let codeModeDirectoryForTurn: string | null = null;
   let codeModeMountedIntegrationIdsForTurn = new Set<string>();
+  let codeModeServerNamesForTurn = new Map<string, string>();
   let codeModeOpenCodeServerUrl: string | null = null;
   let durableOpenCodeSessionId: string | null = null;
   let lastVisibleMessage = '';
@@ -3571,9 +3570,6 @@ export async function answerFastAgentQuestion({
       currentSessionPrivacy === 'private'
         ? await isPrivateSessionsExperimentEnabled()
         : false;
-    const codeModeIntegrationsEnabled = await isDeploymentExperimentEnabled(
-      'codeModeIntegrations',
-    );
     availableIntegrations = selectFastRoomoteChannelTools({
       integrations: discoveredIntegrations,
       conversation,
@@ -3833,24 +3829,16 @@ export async function answerFastAgentQuestion({
       Env.RELEASE_VERSION,
       packageJson.version,
     );
-    // Colliding sanitized server names or flattened tool keys keep the
-    // classic dispatcher at runtime; prompt, config mounting, and the lease
-    // must all agree.
-    const codeModeIntegrationsEffective =
-      codeModeIntegrationsEnabled &&
-      !hasFastAgentCodeModeServerNameCollision(availableIntegrations) &&
-      !hasFastAgentCodeModeToolKeyCollision(availableIntegrations);
-    // Experiment-gated (`integrationToolApprovals`) per-tool approval rules,
-    // layered on code mode: native ask rules pause gated tools behind a
-    // requester decision and deny rules hide rejected tools. Undefined when
-    // either experiment is inactive, which keeps today's ungated behavior.
+    // Experiment-gated (`integrationToolApprovals`) per-tool approval rules
+    // for code-mode integration calls: native ask rules pause gated tools
+    // behind a requester decision and deny rules hide rejected tools.
+    // Undefined while the experiment is off, which keeps ungated behavior.
     // Approvals and session overrides are keyed on the unified Session, not
     // the Fast conversation; resolve it once for the rules and the bridge.
-    const toolApprovalSessionId = codeModeIntegrationsEffective
-      ? await resolveFastAgentToolApprovalSessionId(session.id)
-      : session.id;
+    const toolApprovalSessionId = await resolveFastAgentToolApprovalSessionId(
+      session.id,
+    );
     const toolApprovalRules = await resolveFastAgentToolApprovalRules({
-      codeModeIntegrationsEffective,
       integrations: availableIntegrations,
       sessionId: toolApprovalSessionId,
     });
@@ -3882,7 +3870,6 @@ export async function answerFastAgentQuestion({
       setupSession,
       serviceCredentialToolsEnabled: currentUser.serviceCredentialToolsEnabled,
       addRemoteMcpEnabled: !platformEvent,
-      codeModeIntegrationsEnabled: codeModeIntegrationsEffective,
       personalizationContext,
       globalAgentInstructions: agentBehaviorSettings?.globalAgentInstructions,
       workspaceRoutingRules:
@@ -4283,6 +4270,12 @@ export async function answerFastAgentQuestion({
       const serverUrl = codeModeOpenCodeServerUrl;
       const mcpCapability = codeModeMcpCapabilityForTurn;
       const directory = codeModeDirectoryForTurn;
+      const serverNameIds = [
+        ...codeModeServerNamesForTurn.keys(),
+        ...refreshedIntegrations.map((integration) => integration.id),
+      ].filter((id, index, ids) => ids.indexOf(id) === index);
+      codeModeServerNamesForTurn =
+        buildFastAgentCodeModeServerNames(serverNameIds);
       for (const integration of refreshedIntegrations) {
         if (codeModeMountedIntegrationIdsForTurn.has(integration.id)) {
           continue;
@@ -4294,6 +4287,7 @@ export async function answerFastAgentQuestion({
             directory,
             mcpCapability,
             integrationId: integration.id,
+            serverName: codeModeServerNamesForTurn.get(integration.id),
           });
           if (mounted) {
             console.info(
@@ -6267,7 +6261,6 @@ export async function answerFastAgentQuestion({
             serviceCredentialPrepareEnabled:
               currentUser.serviceCredentialToolsEnabled && !platformEvent,
             addRemoteMcpEnabled: !platformEvent,
-            codeModeIntegrationsEnabled: codeModeIntegrationsEffective,
             ...(toolApprovalRules
               ? {
                   toolApprovalPermission: integrationToolApprovalRulesToConfig(
@@ -6289,6 +6282,9 @@ export async function answerFastAgentQuestion({
           nativeRuntime.codeModeIntegrationsActive
             ? availableIntegrations.map((integration) => integration.id)
             : [],
+        );
+        codeModeServerNamesForTurn = buildFastAgentCodeModeServerNames(
+          availableIntegrations.map((integration) => integration.id),
         );
         codeModeOpenCodeServerUrl = null;
         const unbindExecutors = new Set<() => void>();
@@ -6496,7 +6492,6 @@ export async function answerFastAgentQuestion({
                     {
                       directory: nativeRuntime.directory,
                       env: nativeRuntime.env,
-                      codeModeIntegrations: codeModeIntegrationsEffective,
                       onServerLeased: (url) => {
                         codeModeOpenCodeServerUrl = url;
                       },

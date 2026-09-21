@@ -312,14 +312,6 @@ export type NonTaskOpenCodeAssistantText = {
 export type NonTaskOpenCodeNativeSessionOptions = {
   directory: string;
   env?: Partial<Record<string, string>>;
-  /**
-   * Code-mode integrations experiment: the leased OpenCode server runs with
-   * code mode enabled and the prompt-only helper subagents drop the generic
-   * integration dispatcher from their tool filter. Forwarded into the server
-   * lease so experiment and non-experiment conversations never share a
-   * pooled server.
-   */
-  codeModeIntegrations?: boolean;
   onModelResolved?: (model: string) => void;
   onMessageCompleted?: (
     message: NonTaskOpenCodeCompletedMessage,
@@ -1176,7 +1168,6 @@ async function runNonTaskSdkPrompt(
     directory?: string;
     ephemeral?: boolean;
     env?: Partial<Record<string, string>>;
-    codeModeIntegrations?: boolean;
     onPromptStarted?: (setup: NonTaskOpenCodePromptSetupTiming) => void;
     /** Called with the leased server's base URL before the prompt starts. */
     onServerLeased?: (url: string) => void;
@@ -1242,7 +1233,6 @@ async function runNonTaskSdkPrompt(
     preserveReasoning:
       options.preserveReasoning ?? Boolean(params.reasoningEffort),
     promptOnlySubagents: options.promptOnlySubagents,
-    codeModeIntegrations: options.codeModeIntegrations,
     reasoningOverride: params.reasoningEffort
       ? { model, effort: params.reasoningEffort }
       : undefined,
@@ -2024,7 +2014,6 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
     {
       directory: options.directory,
       env: options.env,
-      codeModeIntegrations: options.codeModeIntegrations,
       onPromptStarted: options.onPromptStarted,
       onNativeSteerReady: options.onNativeSteerReady,
       onServerLeased: options.onServerLeased,
