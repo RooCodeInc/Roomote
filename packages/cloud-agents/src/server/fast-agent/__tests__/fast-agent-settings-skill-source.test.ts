@@ -19,9 +19,11 @@ function environmentConfig(overrides: Record<string, unknown>) {
 
 function marketplaceSnapshot({
   name = 'marketplace-review',
+  revision = 'abc123',
   source = 'example/skills',
 }: {
   name?: string;
+  revision?: string;
   source?: string;
 } = {}): SettingsSkillMarketplaceSnapshot {
   const content = [
@@ -52,7 +54,7 @@ function marketplaceSnapshot({
         sourceName: source,
       },
     ],
-    revision: 'abc123',
+    revision,
     source,
   };
 }
@@ -242,12 +244,64 @@ describe('RemoteFastAgentSettingsSkillSource', () => {
       }),
     ]);
     expect(catalog.skills[0]?.id).toMatch(
-      /^settings:marketplace:[a-f0-9]{64}$/u,
+      /^settings:marketplace:[A-Za-z0-9_-]+$/u,
     );
     await expect(source.read(catalog.skills[0]!.id)).resolves.toMatchObject({
       content: expect.stringContaining('# Marketplace review'),
       settingsSource: 'example/skills',
     });
+  });
+
+  it('loads a prompt-listed marketplace skill from its captured revision', async () => {
+    const resolveEnvironments = vi.fn().mockResolvedValue([
+      {
+        id: 'environment-1',
+        config: environmentConfig({
+          skills: { 'example/skills': 'all' },
+        }),
+      },
+    ]);
+    const promptSource = new RemoteFastAgentSettingsSkillSource({
+      allowedEnvironmentIds: ['environment-1'],
+      loadMarketplaceSnapshot: vi.fn().mockImplementation((source: string) =>
+        Promise.resolve(
+          marketplaceSnapshot({
+            revision: 'abcdef',
+            source,
+          }),
+        ),
+      ),
+      resolveEnvironments,
+    });
+    const promptCatalog = await promptSource.listPromptCatalog();
+    const promptSkill = promptCatalog.skills[0]!;
+
+    const loadMarketplaceSnapshot = vi
+      .fn()
+      .mockImplementation((source: string, revision?: string) =>
+        Promise.resolve(
+          marketplaceSnapshot({
+            revision: revision ?? 'fedcba',
+            source,
+          }),
+        ),
+      );
+    const executorSource = new RemoteFastAgentSettingsSkillSource({
+      allowedEnvironmentIds: ['environment-1'],
+      loadMarketplaceSnapshot,
+      resolveEnvironments,
+    });
+
+    await expect(executorSource.read(promptSkill.id)).resolves.toMatchObject({
+      id: promptSkill.id,
+      name: 'marketplace-review',
+      settingsSource: 'example/skills',
+      source: 'settings',
+    });
+    expect(loadMarketplaceSnapshot).toHaveBeenCalledWith(
+      'example/skills',
+      'abcdef',
+    );
   });
 
   it('filters exact-name sources before applying the marketplace source cap', async () => {
@@ -447,8 +501,20 @@ describe('RemoteFastAgentSettingsSkillSource', () => {
     expect(loadMarketplaceSnapshot).not.toHaveBeenCalled();
   });
 
-  it('lists inline environment skills and marketplace source names for the prompt without fetching', async () => {
-    const loadMarketplaceSnapshot = vi.fn();
+  it('lists authorized environment skills and marketplace source names for the prompt', async () => {
+    const loadMarketplaceSnapshot = vi
+      .fn()
+      .mockImplementation((source: string) =>
+        Promise.resolve(
+          marketplaceSnapshot({
+            name:
+              source === 'anthropics/skills'
+                ? 'frontend-design'
+                : 'dbt-modeling',
+            source,
+          }),
+        ),
+      );
     const source = new RemoteFastAgentSettingsSkillSource({
       allowedEnvironmentIds: ['environment-1'],
       loadMarketplaceSnapshot,
@@ -487,16 +553,30 @@ describe('RemoteFastAgentSettingsSkillSource', () => {
 
     const catalog = await source.listPromptCatalog();
 
-    expect(loadMarketplaceSnapshot).not.toHaveBeenCalled();
-    expect(catalog.skills).toEqual([
-      expect.objectContaining({
-        description: 'Use when triaging a support escalation.',
-        environmentIds: ['environment-1'],
-        invocation: 'support-triage',
-        name: 'support-triage',
-        source: 'settings',
-      }),
-    ]);
+    expect(loadMarketplaceSnapshot).toHaveBeenCalledTimes(2);
+    expect(catalog.skills).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          description: 'Use when triaging a support escalation.',
+          environmentIds: ['environment-1'],
+          invocation: 'support-triage',
+          name: 'support-triage',
+          source: 'settings',
+        }),
+        expect.objectContaining({
+          environmentIds: ['environment-1'],
+          name: 'frontend-design',
+          settingsSource: 'anthropics/skills',
+          source: 'settings',
+        }),
+        expect.objectContaining({
+          environmentIds: ['environment-1'],
+          name: 'dbt-modeling',
+          settingsSource: 'dbt-labs/dbt-agent-skills',
+          source: 'settings',
+        }),
+      ]),
+    );
     expect(catalog.marketplaceSources).toEqual([
       {
         environmentId: 'environment-1',
@@ -505,16 +585,16 @@ describe('RemoteFastAgentSettingsSkillSource', () => {
     ]);
     // The same ID resolves through `list`, so `load_skill` works on it.
     const listed = await source.list({});
-    expect(listed.skills.map((skill) => skill.id)).toEqual([
-      catalog.skills[0]!.id,
-    ]);
+    expect(listed.skills.map((skill) => skill.id)).toEqual(
+      expect.arrayContaining(catalog.skills.map((skill) => skill.id)),
+    );
     await expect(source.read(catalog.skills[0]!.id)).resolves.toMatchObject({
       name: 'support-triage',
       resource: 'SKILL.md',
     });
   });
 
-  it('reads a prompt-listed inline skill ID on a fresh source without a prior listing', async () => {
+  it('reads a prompt-listed settings skill ID on a fresh source without a prior listing', async () => {
     const resolveEnvironments = vi.fn().mockResolvedValue([
       {
         id: 'environment-1',

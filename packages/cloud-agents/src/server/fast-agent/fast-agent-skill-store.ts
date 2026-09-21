@@ -96,7 +96,7 @@ export type FastAgentSkillScope =
   | { environmentId?: never; repositoryId: string };
 
 export type FastAgentRepositorySkillSource = {
-  list(scope: FastAgentSkillScope): Promise<FastAgentSkillListResult>;
+  list(scope?: FastAgentSkillScope): Promise<FastAgentSkillListResult>;
   read(id: string, resource?: string): Promise<FastAgentSkillDocument>;
   dispose?(): Promise<void>;
 };
@@ -223,9 +223,9 @@ function packagedSkillId(name: string): string {
 
 // Packaged and instance skills never depend on the caller's scope, so their
 // failures (missing runtime files, an unauthorized actor) stay hard errors.
-// Settings and repository lookups depend on the scope a model passed, which
-// may be an unknown or filler environment ID, or on remote state, so a failure
-// there degrades to a warning instead of hiding the whole catalog.
+// Settings and repository lookups depend on an optional model scope or remote
+// state, so an unknown/filler scope or source failure degrades to a warning
+// instead of hiding the whole catalog.
 async function collectOptionalSource(
   label: string,
   list: () => Promise<FastAgentSkillListResult>,
@@ -244,6 +244,7 @@ async function collectOptionalSource(
 export class FastAgentSkillStore {
   private readonly resources = new Map<string, Promise<string[]>>();
   private readonly rootDirectory: Promise<string>;
+  private readonly authoritativeSettingsQueries = new Set<string>();
 
   constructor(
     rootDirectory?: string,
@@ -296,11 +297,29 @@ export class FastAgentSkillStore {
             this.settingsSkills!.list(query),
           )
         : { skills: [], warnings: [] };
+    const settingsQueryKey = query.name
+      ? `${query.name}\0${query.environmentId ?? ''}\0${query.repositoryId ?? ''}`
+      : undefined;
+    const settingsMatchInPage =
+      !!query.name &&
+      settings.skills.some(
+        (skill) =>
+          skill.name === query.name &&
+          !packagedNames.has(skill.name) &&
+          !instanceNames.has(skill.name),
+      );
+    if (settingsMatchInPage && settingsQueryKey) {
+      this.authoritativeSettingsQueries.add(settingsQueryKey);
+    }
+    const settingsMatchIsAuthoritative =
+      settingsMatchInPage ||
+      (settingsQueryKey !== undefined &&
+        this.authoritativeSettingsQueries.has(settingsQueryKey));
     const repository =
       !packagedMatchIsAuthoritative &&
       !instanceMatchIsAuthoritative &&
-      (query.sourceOffset ?? 0) === 0 &&
-      scope &&
+      !settingsMatchIsAuthoritative &&
+      settings.nextSourceOffset === undefined &&
       this.repositorySkills
         ? await collectOptionalSource('repository', () =>
             this.repositorySkills!.list(scope),
