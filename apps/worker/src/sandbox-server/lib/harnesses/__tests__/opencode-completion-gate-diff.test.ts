@@ -199,6 +199,16 @@ describe('collectShippedDiff', () => {
     expect(after?.fingerprint).not.toBe(before?.fingerprint);
   });
 
+  it('treats a change of parentheses as a change of code', async () => {
+    const repo = createCheckout();
+    write(repo, 'src/app.ts', 'export const app = (a + b) * c;\n');
+    const grouped = await collectShippedDiff(repo);
+    write(repo, 'src/app.ts', 'export const app = a + b * c;\n');
+    const ungrouped = await collectShippedDiff(repo);
+
+    expect(ungrouped?.fingerprint).not.toBe(grouped?.fingerprint);
+  });
+
   it('keeps its fingerprint when the work is committed', async () => {
     const repo = createCheckout();
     git(repo, 'checkout', '-q', '-b', 'task');

@@ -351,18 +351,14 @@ export function clipDiffByFile(
 }
 
 /**
- * What formatters and pre-commit hooks rewrite: whitespace, quote style,
- * trailing commas, semicolons, and wrapping parentheses.
- *
- * A deliberate trade. Each of these can carry meaning in principle (a
- * parenthesis that changes precedence most of all), so an edit made only of
- * them goes unseen and an earlier test run keeps vouching for it. Keeping
- * them would instead mark runs stale whenever a formatter wraps a return or
- * an arrow parameter in code the agent just wrote, which happens on most
- * tasks and would flag honest reports. A missed stale run leaves the agent's
- * claim trusted, which is how every run is treated without this check.
+ * What formatters and pre-commit hooks rewrite without changing behavior:
+ * whitespace, quote style, trailing commas, and semicolons. Parentheses stay
+ * in: a formatter adds them too (around an arrow parameter, a wrapped
+ * return), but they can also change precedence, and missing a real edit is
+ * the worse mistake. When a reformat does move parentheses after a test run,
+ * that run reads as stale and the agent is asked to run it again.
  */
-const FORMATTING_ONLY_CHARACTERS = /[\s'"`;,()]/g;
+const FORMATTING_ONLY_CHARACTERS = /[\s'"`;,]/g;
 
 /**
  * The code this task has changed, reduced to what a formatter cannot alter:
