@@ -601,9 +601,7 @@ describe('ModelSettingsSection', () => {
 
     const modelMappingSection = screen.getByTestId('section-Model mapping');
     expect(within(modelMappingSection).getAllByText('High')).toHaveLength(2);
-    expect(
-      within(modelMappingSection).getByText('Extra high'),
-    ).toBeInTheDocument();
+    expect(within(modelMappingSection).getByText('X-High')).toBeInTheDocument();
     // Orchestration, helper, vision, and explore fall back to Low.
     expect(within(modelMappingSection).getAllByText('Low')).toHaveLength(4);
   });
@@ -750,7 +748,7 @@ describe('ModelSettingsSection', () => {
     fireEvent.click(
       screen.getByRole('button', { name: 'Coding model and reasoning' }),
     );
-    expect(screen.getByText('No reasoning')).toBeInTheDocument();
+    expect(screen.getByText('N/A')).toBeInTheDocument();
   });
 
   it('limits the same-as-coding picker to the effective coding model efforts', () => {
