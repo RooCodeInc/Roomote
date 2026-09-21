@@ -109,6 +109,23 @@ function supportedEfforts(model: ModelReasoningPickerModel | undefined) {
   return model?.metadata?.supportedReasoningEfforts ?? REASONING_EFFORT_VALUES;
 }
 
+function closestSupportedEffort(
+  effort: ReasoningEffort,
+  supported: readonly ReasoningEffort[],
+): ReasoningEffort | undefined {
+  const effortIndex = REASONING_EFFORT_VALUES.indexOf(effort);
+  return supported.reduce<ReasoningEffort | undefined>((closest, candidate) => {
+    if (!closest) return candidate;
+    const candidateDistance = Math.abs(
+      REASONING_EFFORT_VALUES.indexOf(candidate) - effortIndex,
+    );
+    const closestDistance = Math.abs(
+      REASONING_EFFORT_VALUES.indexOf(closest) - effortIndex,
+    );
+    return candidateDistance < closestDistance ? candidate : closest;
+  }, undefined);
+}
+
 function getPickerReasoningEffortLabel(effort: ReasoningEffort): string {
   return effort === 'xhigh' ? 'X-High' : getReasoningEffortLabel(effort);
 }
@@ -156,10 +173,11 @@ function PickerContent({
   const selectedModel = models.find(({ id }) => id === effectiveModelId);
   const efforts = supportedReasoningEfforts ?? supportedEfforts(selectedModel);
   const reasoningUnavailable = efforts.length === 0;
-  const requestedEffort = reasoningEffort ?? defaultReasoningEffort;
   const effectiveEffort =
-    (requestedEffort && efforts.includes(requestedEffort)
-      ? requestedEffort
+    (reasoningEffort
+      ? efforts.includes(reasoningEffort)
+        ? reasoningEffort
+        : closestSupportedEffort(reasoningEffort, efforts)
       : efforts.find((effort) => effort === defaultReasoningEffort)) ??
     efforts[Math.floor((efforts.length - 1) / 2)];
   const effortIndex = effectiveEffort ? efforts.indexOf(effectiveEffort) : 0;
@@ -291,7 +309,13 @@ function PickerContent({
       if (reasoningEffort !== null) onReasoningEffortChange(null);
       return;
     }
-    if (reasoningEffort !== null && nextEfforts.includes(reasoningEffort)) {
+    if (reasoningEffort !== null) {
+      if (nextEfforts.includes(reasoningEffort)) return;
+      const closestEffort = closestSupportedEffort(
+        reasoningEffort,
+        nextEfforts,
+      );
+      if (closestEffort) onReasoningEffortChange(closestEffort);
       return;
     }
     onReasoningEffortChange(

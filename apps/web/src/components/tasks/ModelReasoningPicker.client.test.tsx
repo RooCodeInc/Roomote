@@ -277,6 +277,57 @@ describe('ModelReasoningPicker', () => {
     ).toHaveAttribute('aria-valuetext', 'High');
   });
 
+  it('uses the closest supported level when changing models', () => {
+    render(
+      <Harness
+        initialModel="provider/five-levels"
+        initialEffort="max"
+        availableModels={[
+          {
+            id: 'provider/five-levels',
+            displayName: 'Five levels',
+            metadata: {
+              contextWindow: null,
+              inputTypes: null,
+              inputPricePerToken: null,
+              outputPricePerToken: null,
+              lastRefreshedAt: null,
+              supportedReasoningEfforts: [
+                'low',
+                'medium',
+                'high',
+                'xhigh',
+                'max',
+              ],
+            },
+          },
+          {
+            id: 'provider/four-levels',
+            displayName: 'Four levels',
+            metadata: {
+              contextWindow: null,
+              inputTypes: null,
+              inputPricePerToken: null,
+              outputPricePerToken: null,
+              lastRefreshedAt: null,
+              supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
+            },
+          },
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Choose model' }));
+
+    fireEvent.click(screen.getByRole('option', { name: 'Four levels' }));
+
+    expect(screen.getByTestId('selection')).toHaveTextContent(
+      'provider/four-levels:xhigh',
+    );
+    expect(
+      screen.getByRole('slider', { name: 'Reasoning level' }),
+    ).toHaveAttribute('aria-valuetext', 'X-High');
+  });
+
   it('scrolls a partially clipped clicked model further into view', () => {
     render(<Harness />);
     fireEvent.click(screen.getByRole('button', { name: 'Choose model' }));
