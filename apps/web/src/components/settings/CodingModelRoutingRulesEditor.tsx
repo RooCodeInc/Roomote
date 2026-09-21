@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   ArrowDownIcon,
@@ -15,11 +15,12 @@ import {
   Plus,
   Trash2,
 } from '@/components/system';
-import { ReasoningEffortSelect } from '@/components/tasks/ReasoningEffortSelect';
 import {
-  TaskModelSelect,
-  type EditableRuntimeModelOption,
-} from './TaskModelSelect';
+  ModelReasoningPicker,
+  ModelReasoningPickerTrigger,
+  type ModelReasoningPickerModel,
+} from '@/components/tasks/ModelReasoningPicker';
+import { type EditableRuntimeModelOption } from './TaskModelSelect';
 import {
   MAX_CODING_MODEL_ROUTING_RULES,
   type CodingModelRoutingRule,
@@ -85,6 +86,103 @@ function supportsReasoning(models: RoutingModel[], modelId: string): boolean {
   );
 }
 
+function RoutingRuleEditorRow({
+  index,
+  rule,
+  pickerModels,
+  models,
+  updateRule,
+  removeRule,
+}: {
+  index: number;
+  rule: CodingModelRoutingRule;
+  pickerModels: ModelReasoningPickerModel[];
+  models: RoutingModel[];
+  updateRule: (index: number, rule: CodingModelRoutingRule) => void;
+  removeRule: (index: number) => void;
+}) {
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const pendingModelIdRef = useRef(rule.modelId);
+  const selectedModel = pickerModels.find(({ id }) => id === rule.modelId);
+  const modelSupportsReasoning = supportsReasoning(models, rule.modelId);
+
+  useEffect(() => {
+    pendingModelIdRef.current = rule.modelId;
+  }, [rule.modelId]);
+
+  return (
+    <div className="flex flex-col gap-2 md:flex-row md:items-center">
+      <Input
+        value={rule.condition}
+        onChange={(event) =>
+          updateRule(index, {
+            ...rule,
+            condition: event.target.value,
+          })
+        }
+        aria-label={`Routing rule ${index + 1} condition`}
+        placeholder="When should this model be used?"
+        className="min-w-0 flex-1"
+      />
+      <ArrowDownIcon className="ml-8 size-4 shrink-0 self-start text-muted-foreground md:hidden" />
+      <ArrowRight className="hidden size-4 shrink-0 self-center text-muted-foreground md:block" />
+      <div className="flex min-w-0 flex-1 flex-nowrap items-center gap-2">
+        <div className="min-w-0 flex-1">
+          <ModelReasoningPicker
+            open={pickerOpen}
+            onOpenChange={setPickerOpen}
+            trigger={
+              <ModelReasoningPickerTrigger
+                label={selectedModel?.displayName ?? rule.modelId}
+                reasoningEffort={
+                  modelSupportsReasoning
+                    ? (rule.reasoningEffort ?? 'medium')
+                    : null
+                }
+                appearance="select"
+                ariaLabel={`Routing rule ${index + 1} model and reasoning`}
+              />
+            }
+            models={pickerModels}
+            model={rule.modelId}
+            onModelChange={(modelId) => {
+              pendingModelIdRef.current = modelId;
+              updateRule(index, {
+                ...rule,
+                modelId,
+                reasoningEffort: supportsReasoning(models, modelId)
+                  ? (rule.reasoningEffort ?? 'medium')
+                  : null,
+              });
+            }}
+            reasoningEffort={rule.reasoningEffort}
+            defaultReasoningEffort="medium"
+            onReasoningEffortChange={(reasoningEffort) =>
+              updateRule(index, {
+                ...rule,
+                modelId: pendingModelIdRef.current,
+                reasoningEffort,
+              })
+            }
+          />
+        </div>
+        <BasicTooltip content="Remove routing rule">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="shrink-0 text-muted-foreground"
+            aria-label={`Remove routing rule ${index + 1}`}
+            onClick={() => removeRule(index)}
+          >
+            <Trash2 />
+          </Button>
+        </BasicTooltip>
+      </div>
+    </div>
+  );
+}
+
 export function CodingModelRoutingRulesEditor({
   rules,
   optionGroups,
@@ -101,6 +199,16 @@ export function CodingModelRoutingRulesEditor({
   onChange: (change: CodingModelRoutingRulesChange) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const pickerModels = useMemo(
+    () =>
+      optionGroups.flatMap((group) =>
+        group.items.map((item) => ({
+          ...item,
+          providerLabel: group.label,
+        })),
+      ),
+    [optionGroups],
+  );
 
   const updateRule = (index: number, rule: CodingModelRoutingRule) => {
     onChange({
@@ -155,80 +263,17 @@ export function CodingModelRoutingRulesEditor({
       <CollapsibleContent className="space-y-3">
         {rules.length > 0 ? (
           <div className="space-y-2">
-            {rules.map((rule, index) => {
-              const modelSupportsReasoning = supportsReasoning(
-                models,
-                rule.modelId,
-              );
-
-              return (
-                <div
-                  key={index}
-                  className="flex flex-col gap-2 md:flex-row md:items-center"
-                >
-                  <Input
-                    value={rule.condition}
-                    onChange={(event) =>
-                      updateRule(index, {
-                        ...rule,
-                        condition: event.target.value,
-                      })
-                    }
-                    aria-label={`Routing rule ${index + 1} condition`}
-                    placeholder="When should this model be used?"
-                    className="min-w-0 flex-1"
-                  />
-                  <ArrowDownIcon className="ml-8 size-4 shrink-0 self-start text-muted-foreground md:hidden" />
-                  <ArrowRight className="hidden size-4 shrink-0 self-center text-muted-foreground md:block" />
-                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-                    <div className="flex min-w-0 flex-1 flex-nowrap items-center gap-2">
-                      <div className="min-w-0 flex-1">
-                        <TaskModelSelect
-                          value={rule.modelId}
-                          optionGroups={optionGroups}
-                          placeholder="Select a coding model"
-                          ariaLabel={`Routing rule ${index + 1} model`}
-                          onValueChange={(modelId) =>
-                            updateRule(index, {
-                              ...rule,
-                              modelId,
-                              reasoningEffort: supportsReasoning(
-                                models,
-                                modelId,
-                              )
-                                ? (rule.reasoningEffort ?? 'medium')
-                                : null,
-                            })
-                          }
-                        />
-                      </div>
-                      {modelSupportsReasoning ? (
-                        <ReasoningEffortSelect
-                          value={rule.reasoningEffort}
-                          defaultEffort="medium"
-                          onChange={(reasoningEffort) =>
-                            updateRule(index, { ...rule, reasoningEffort })
-                          }
-                          ariaLabel={`Routing rule ${index + 1} reasoning level`}
-                        />
-                      ) : null}
-                    </div>
-                    <BasicTooltip content="Remove routing rule">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="shrink-0 text-muted-foreground"
-                        aria-label={`Remove routing rule ${index + 1}`}
-                        onClick={() => removeRule(index)}
-                      >
-                        <Trash2 />
-                      </Button>
-                    </BasicTooltip>
-                  </div>
-                </div>
-              );
-            })}
+            {rules.map((rule, index) => (
+              <RoutingRuleEditorRow
+                key={index}
+                index={index}
+                rule={rule}
+                pickerModels={pickerModels}
+                models={models}
+                updateRule={updateRule}
+                removeRule={removeRule}
+              />
+            ))}
           </div>
         ) : null}
         <Button

@@ -25,6 +25,7 @@ import {
   BasicTooltip,
   buttonVariants,
   ChevronDown,
+  ChevronsUpDown,
   Drawer,
   DrawerContent,
   DrawerDescription,
@@ -57,6 +58,7 @@ const ROW_HEIGHT_PX = 40;
 const LIST_HEIGHT_PX = ROW_HEIGHT_PX * 6.5;
 const SLIDER_THUMB_RADIUS_PX = 14;
 const TYPEAHEAD_IDLE_RESET_MS = 1000;
+const SELECTION_FLASH_HOLD_MS = 150;
 
 function supportedEfforts(model: ModelReasoningPickerModel | undefined) {
   if (model?.metadata?.supportsReasoning === false) return [];
@@ -295,7 +297,7 @@ function PickerContent({
         <span className="min-w-0 flex-1 truncate flex items-center gap-2">
           <span className="size-4">
             <ArrowDownIcon
-              className={`size-4 transition-opacity -rotate-90 ${selected ? 'opacity-100 animate-bounce' : 'opacity-0'}`}
+              className={`size-4 text-current transition-opacity -rotate-90 ${selected ? 'opacity-100 animate-bounce' : 'opacity-0'}`}
             />
           </span>
           {option.displayName}
@@ -470,6 +472,7 @@ export const ModelReasoningPickerTrigger = forwardRef<
     reasoningEffort?: ReasoningEffort | null;
     disabled?: boolean;
     size?: 'compact' | 'base';
+    appearance?: 'ghost' | 'select';
     ariaLabel: string;
   }
 >(function ModelReasoningPickerTrigger(
@@ -478,11 +481,34 @@ export const ModelReasoningPickerTrigger = forwardRef<
     reasoningEffort,
     disabled,
     size = 'compact',
+    appearance = 'ghost',
     ariaLabel,
+    className,
     ...buttonProps
   },
   ref,
 ) {
+  const previousSelectionRef = useRef({ label, reasoningEffort });
+  const [selectionFlash, setSelectionFlash] = useState(false);
+
+  useEffect(() => {
+    const previousSelection = previousSelectionRef.current;
+    previousSelectionRef.current = { label, reasoningEffort };
+    if (
+      previousSelection.label === label &&
+      previousSelection.reasoningEffort === reasoningEffort
+    ) {
+      return;
+    }
+
+    setSelectionFlash(true);
+    const timeout = window.setTimeout(
+      () => setSelectionFlash(false),
+      SELECTION_FLASH_HOLD_MS,
+    );
+    return () => window.clearTimeout(timeout);
+  }, [label, reasoningEffort]);
+
   return (
     <button
       ref={ref}
@@ -491,19 +517,41 @@ export const ModelReasoningPickerTrigger = forwardRef<
       type="button"
       aria-label={ariaLabel}
       disabled={disabled}
+      data-selection-flash={selectionFlash}
+      data-appearance={appearance}
       className={cn(
-        buttonVariants({ variant: 'ghost', size: 'sm' }),
-        'text-muted-foreground hover:bg-secondary gap-1 font-normal',
-        size === 'compact' ? 'h-8 px-1! text-xs' : 'h-10 px-2! text-base',
+        appearance === 'select'
+          ? [
+              'border-input bg-card text-foreground hover:border-accent-foreground hover:text-accent-foreground!',
+              'focus-visible:border-ring focus-visible:ring-ring/50 flex h-9 w-fit cursor-pointer items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm font-normal whitespace-nowrap outline-none focus-visible:ring-[3px]',
+              'disabled:cursor-not-allowed disabled:opacity-50 hover:disabled:text-muted-foreground!',
+            ]
+          : [
+              buttonVariants({ variant: 'ghost', size: 'sm' }),
+              'text-muted-foreground hover:bg-secondary gap-1 font-normal',
+              size === 'compact' ? 'h-8 px-1! text-xs' : 'h-10 px-2! text-base',
+            ],
+        'transition-colors duration-500 motion-reduce:transition-none',
+        selectionFlash && 'text-accent-foreground duration-0',
+        className,
       )}
     >
       <span className="max-w-48 truncate">{label}</span>
       {reasoningEffort ? (
-        <span className="text-muted-foreground/70">
+        <span
+          className={cn(
+            'text-muted-foreground/70 transition-colors duration-500 motion-reduce:transition-none',
+            selectionFlash && 'text-accent-foreground duration-0',
+          )}
+        >
           {getReasoningEffortLabel(reasoningEffort)}
         </span>
       ) : null}
-      <ChevronDown className="size-3 shrink-0" />
+      {appearance === 'select' ? (
+        <ChevronsUpDown className="size-4 shrink-0 opacity-50" />
+      ) : (
+        <ChevronDown className="size-3 shrink-0" />
+      )}
     </button>
   );
 });

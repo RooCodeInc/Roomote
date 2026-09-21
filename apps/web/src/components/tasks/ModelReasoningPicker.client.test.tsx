@@ -16,6 +16,7 @@ vi.mock('@/hooks/useIsMobile', () => ({
 
 import {
   ModelReasoningPicker,
+  ModelReasoningPickerTrigger,
   type ModelReasoningPickerModel,
 } from './ModelReasoningPicker';
 
@@ -144,6 +145,33 @@ describe('ModelReasoningPicker', () => {
     });
     expect(screen.getByTestId('selection')).toHaveTextContent(
       'provider/alpha:high',
+    );
+  });
+
+  it('briefly flashes the trigger when its selection changes', async () => {
+    const { rerender } = render(
+      <ModelReasoningPickerTrigger
+        label="Alpha"
+        reasoningEffort="low"
+        ariaLabel="Model selection"
+      />,
+    );
+    const trigger = screen.getByRole('button', { name: 'Model selection' });
+    expect(trigger).toHaveAttribute('data-selection-flash', 'false');
+
+    rerender(
+      <ModelReasoningPickerTrigger
+        label="Beta"
+        reasoningEffort="high"
+        ariaLabel="Model selection"
+      />,
+    );
+    await waitFor(() =>
+      expect(trigger).toHaveAttribute('data-selection-flash', 'true'),
+    );
+    await waitFor(
+      () => expect(trigger).toHaveAttribute('data-selection-flash', 'false'),
+      { timeout: 500 },
     );
   });
 

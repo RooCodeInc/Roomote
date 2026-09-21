@@ -314,7 +314,7 @@ function TaskModelRoleEditor({
                 (managedByEnv && reasoningManagedByEnv) ||
                 optionGroups.length === 0
               }
-              size="base"
+              appearance="select"
               ariaLabel={`${config.label} and reasoning`}
             />
           }

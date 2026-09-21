@@ -629,6 +629,16 @@ describe('ModelSettingsSection', () => {
         name: 'Add a model routing rule',
       }),
     );
+    const routingModelTrigger = screen.getByRole('button', {
+      name: 'Routing rule 1 model and reasoning',
+    });
+    expect(routingModelTrigger).toHaveAttribute(
+      'data-slot',
+      'model-reasoning-picker-trigger',
+    );
+    fireEvent.click(routingModelTrigger);
+    fireEvent.click(screen.getByRole('option', { name: 'GLM 5.2' }));
+    fireEvent.keyDown(document, { key: 'Escape' });
     const condition = screen.getByLabelText('Routing rule 1 condition');
     fireEvent.change(condition, {
       target: { value: 'Routine tasks where speed matters' },
@@ -641,7 +651,7 @@ describe('ModelSettingsSection', () => {
       expect.objectContaining({
         codingModelRoutingRules: [
           {
-            modelId: 'openrouter/openai/gpt-5.4',
+            modelId: 'openrouter/z-ai/glm-5.2',
             reasoningEffort: 'medium',
             condition: 'Routine tasks where speed matters',
           },
