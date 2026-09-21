@@ -9,9 +9,23 @@ import { useState } from 'react';
 import type { ReasoningEffort } from '@roomote/types';
 
 const mobileState = vi.hoisted(() => ({ current: false }));
+const userState = vi.hoisted(() => ({ isAdmin: false }));
+const pathnameState = vi.hoisted(() => ({ current: '/tasks' }));
+
+vi.mock('next/navigation', () => ({
+  usePathname: () => pathnameState.current,
+}));
 
 vi.mock('@/hooks/useIsMobile', () => ({
   useIsMobile: () => mobileState.current,
+}));
+
+vi.mock('@/hooks/useUser', () => ({
+  useUser: () => ({
+    authStatus: 'signed-in',
+    isSignedIn: true,
+    user: { isAdmin: userState.isAdmin },
+  }),
 }));
 
 import {
@@ -105,6 +119,8 @@ function Harness({
 describe('ModelReasoningPicker', () => {
   beforeEach(() => {
     mobileState.current = false;
+    userState.isAdmin = false;
+    pathnameState.current = '/tasks';
   });
 
   afterEach(async () => {
@@ -252,6 +268,43 @@ describe('ModelReasoningPicker', () => {
       top: 140,
       behavior: 'smooth',
     });
+  });
+
+  it('shows admins a model settings shortcut that opens in a new tab', () => {
+    userState.isAdmin = true;
+    render(<Harness />);
+    fireEvent.click(screen.getByRole('button', { name: 'Choose model' }));
+
+    const settingsLink = screen.getByRole('link', {
+      name: 'Open model settings in a new tab',
+    });
+    expect(settingsLink).toHaveAttribute('href', '/settings/models');
+    expect(settingsLink).toHaveAttribute('target', '_blank');
+    expect(settingsLink).toHaveAttribute('rel', 'noopener noreferrer');
+  });
+
+  it('hides the model settings shortcut from non-admins', () => {
+    render(<Harness />);
+    fireEvent.click(screen.getByRole('button', { name: 'Choose model' }));
+
+    expect(
+      screen.queryByRole('link', {
+        name: 'Open model settings in a new tab',
+      }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('hides the model settings shortcut on the model settings page', () => {
+    userState.isAdmin = true;
+    pathnameState.current = '/settings/models';
+    render(<Harness />);
+    fireEvent.click(screen.getByRole('button', { name: 'Choose model' }));
+
+    expect(
+      screen.queryByRole('link', {
+        name: 'Open model settings in a new tab',
+      }),
+    ).not.toBeInTheDocument();
   });
 
   it('groups model options under non-selectable provider labels', () => {

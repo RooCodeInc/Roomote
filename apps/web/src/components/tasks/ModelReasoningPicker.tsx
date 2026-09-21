@@ -17,6 +17,7 @@ import {
   useReducedMotion,
   type Variants,
 } from 'motion/react';
+import { usePathname } from 'next/navigation';
 import {
   getReasoningEffortLabel,
   groupModelsByDisplayProvider,
@@ -28,6 +29,7 @@ import {
 import {
   ArrowDownIcon,
   BasicTooltip,
+  Button,
   buttonVariants,
   ChevronDown,
   ChevronsUpDown,
@@ -39,9 +41,11 @@ import {
   Popover,
   PopoverContent,
   PopoverTrigger,
+  Settings,
   Slider,
 } from '@/components/system';
 import { useIsMobile } from '@/hooks/useIsMobile';
+import { useUser } from '@/hooks/useUser';
 import { cn } from '@/lib/utils';
 
 export type ModelReasoningPickerModel = {
@@ -137,6 +141,10 @@ function PickerContent({
   providerGrouping?: ProviderGroupingOptions;
   onClose?: () => void;
 }) {
+  const { user } = useUser();
+  const pathname = usePathname();
+  const showModelSettings =
+    user?.isAdmin === true && pathname !== '/settings/models';
   const listRef = useRef<HTMLDivElement>(null);
   const reasoningPanelRef = useRef<HTMLDivElement>(null);
   const previousEffortIndexRef = useRef(0);
@@ -413,7 +421,7 @@ function PickerContent({
 
   return (
     <div
-      className="grid grid-cols-[1fr_4rem] grid-rows-1 divide-x divide-border overflow-hidden border-t md:border-t-0 mt-4 md:mt-0"
+      className="grid grid-cols-[1fr_3.5rem] grid-rows-1 divide-x divide-border overflow-hidden border-t md:border-t-0 mt-4 md:mt-0"
       style={{ height: LIST_HEIGHT_PX }}
     >
       <div className="relative min-w-0 overflow-hidden">
@@ -464,14 +472,14 @@ function PickerContent({
 
       <div
         ref={reasoningPanelRef}
-        className="flex min-w-0 flex-col items-center gap-0 overflow-hidden space-y-2 pt-1"
+        className="flex min-w-0 flex-col items-center overflow-hidden pt-1"
       >
         <span
           data-testid="reasoning-level-label"
           data-transition-direction={
             effortTransitionDirection > 0 ? 'up' : 'down'
           }
-          className="relative h-7 w-full  text-center text-xs font-medium"
+          className="relative h-7 w-full shrink-0 text-center text-xs font-medium"
         >
           <AnimatePresence initial={false} custom={labelTransition}>
             <motion.span
@@ -489,7 +497,7 @@ function PickerContent({
           </AnimatePresence>
           <span className="sr-only" role="status" aria-label={effortLabel} />
         </span>
-        <div className="relative min-h-0 flex-1 pb-4">
+        <div className="relative min-h-0 flex-1 pb-4 pt-2">
           <div className="relative h-full cursor-ns-resize">
             {efforts.map((effort, index) => {
               const position = index / Math.max(1, efforts.length - 1);
@@ -519,11 +527,34 @@ function PickerContent({
                   ? getPickerReasoningEffortLabel(effectiveEffort)
                   : 'No reasoning'
               }
-              className="h-full min-h-0 data-[disabled]:opacity-70 [&>span:not([data-slot])]:transition-[bottom] [&>span:not([data-slot])]:duration-300 [&>span:not([data-slot])]:ease-out motion-reduce:[&>span:not([data-slot])]:transition-none [&_[data-slot=slider-track]]:w-4 [&_[data-slot=slider-track]]:border [&_[data-slot=slider-track]]:border-input [&_[data-slot=slider-track]]:bg-input [&_[data-slot=slider-range]]:bg-accent-foreground [&_[data-slot=slider-thumb]]:size-7 [&_[data-slot=slider-thumb]]:border-2 [&_[data-slot=slider-thumb]]:border-accent-foreground"
+              className="h-full min-h-0 data-[orientation=vertical]:min-h-0 data-[disabled]:opacity-70 [&>span:not([data-slot])]:transition-[bottom] [&>span:not([data-slot])]:duration-300 [&>span:not([data-slot])]:ease-out motion-reduce:[&>span:not([data-slot])]:transition-none [&_[data-slot=slider-track]]:w-4 [&_[data-slot=slider-track]]:border [&_[data-slot=slider-track]]:border-input [&_[data-slot=slider-track]]:bg-input [&_[data-slot=slider-range]]:bg-accent-foreground [&_[data-slot=slider-thumb]]:size-7 [&_[data-slot=slider-thumb]]:border-2 [&_[data-slot=slider-thumb]]:border-accent-foreground"
               onValueChange={([index]) => setEffortIndex(index ?? 0)}
             />
           </div>
         </div>
+        {showModelSettings ? (
+          <div className="h-14 w-full shrink-0 pt-2">
+            <div className="flex h-full items-center justify-center border-t">
+              <BasicTooltip content="Model settings">
+                <Button
+                  asChild
+                  variant="ghost"
+                  size="icon"
+                  className="shrink-0 text-muted-foreground"
+                >
+                  <a
+                    href="/settings/models"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="Open model settings in a new tab"
+                  >
+                    <Settings />
+                  </a>
+                </Button>
+              </BasicTooltip>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );
