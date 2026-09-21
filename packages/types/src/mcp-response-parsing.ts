@@ -3,6 +3,20 @@ export type McpToolsListJsonRpcPayload = {
   result?: { tools?: Array<Record<string, unknown>> };
 };
 
+/**
+ * The MCP `annotations.readOnlyHint` of one upstream `tools/list` entry, or
+ * null when the server does not say. The hint is advisory metadata from the
+ * server, so it only drives presentation (grouping read-only tools apart from
+ * ones that can write), never an access decision.
+ */
+export function readMcpToolReadOnlyHint(tool: unknown): boolean | null {
+  if (!tool || typeof tool !== 'object') return null;
+  const annotations = (tool as { annotations?: unknown }).annotations;
+  if (!annotations || typeof annotations !== 'object') return null;
+  const hint = (annotations as { readOnlyHint?: unknown }).readOnlyHint;
+  return typeof hint === 'boolean' ? hint : null;
+}
+
 function tryParseMcpJsonRpcPayload(value: string): unknown | null {
   try {
     return JSON.parse(value) as unknown;

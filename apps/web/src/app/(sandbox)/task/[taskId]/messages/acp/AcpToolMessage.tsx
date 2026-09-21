@@ -8,6 +8,7 @@ import {
 } from '@/lib';
 
 import { AlertCircle } from '@/components/system';
+import { IntegrationToolSessionMenu } from '@/components/sessions/IntegrationToolSessionControls';
 import { useTaskRobotIconContext } from '@/components/tasks/TaskRobotIcon';
 import {
   Message,
@@ -118,22 +119,40 @@ export function AcpToolMessage({
       ? presentation.providerLabel
       : undefined;
   const suffixPrefix = showSubagentRow ? '·' : 'from';
+  // Settled integration calls get the requester's session approval menu; it
+  // renders nothing outside the Session owner's transcript.
+  const integrationTool =
+    !isRunning &&
+    presentation.identity.providerKind === 'mcp' &&
+    presentation.identity.serverName &&
+    presentation.identity.toolName
+      ? {
+          integrationId: presentation.identity.serverName,
+          toolName: presentation.identity.toolName,
+        }
+      : null;
 
   return (
     <Message from="assistant" className="chat-tool-use-message">
       <MessageContent id={anchorId}>
         <Tool>
-          <ToolHeader
-            action={action}
-            object={object}
-            suffix={suffix}
-            suffixPrefix={suffixPrefix}
-            icon={ToolIcon}
-            {...taskIcon}
-            state={toolState}
-            params={sanitizedToolData}
-            collapsible={showCollapsibleContent}
-          />
+          <div className="flex items-center gap-1">
+            <ToolHeader
+              action={action}
+              object={object}
+              suffix={suffix}
+              suffixPrefix={suffixPrefix}
+              icon={ToolIcon}
+              {...taskIcon}
+              state={toolState}
+              params={sanitizedToolData}
+              collapsible={showCollapsibleContent}
+              className="min-w-0 flex-1"
+            />
+            {integrationTool ? (
+              <IntegrationToolSessionMenu {...integrationTool} />
+            ) : null}
+          </div>
           {showVisualProofPreview ? (
             <div className="mt-2 flex flex-wrap gap-2">
               {visualProofMedia.map((media) => (

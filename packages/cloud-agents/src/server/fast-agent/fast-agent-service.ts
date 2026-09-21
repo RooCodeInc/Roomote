@@ -225,6 +225,13 @@ import {
   isFastAgentNativeIntegration,
 } from './fast-agent-tool-policy';
 import {
+  createFastAgentToolApprovalBridge,
+  resolveFastAgentToolApprovalSessionId,
+  integrationToolApprovalRulesToConfig,
+  resolveFastAgentToolApprovalRules,
+  shouldDisposeInstanceForToolApprovalRules,
+} from './fast-agent-tool-approvals';
+import {
   callFastAgentIntegration,
   clearFastAgentIntegrationToolCache,
   listFastAgentIntegrations,
@@ -365,6 +372,18 @@ const FAST_AGENT_HUMAN_STEER_QUERY_LIMIT =
 const FAST_AGENT_HUMAN_STEER_MAX_TEXT_BYTES = 64 * 1024;
 const FAST_AGENT_HUMAN_STEER_MAX_FILES = 16;
 const FAST_AGENT_HUMAN_STEER_MAX_FILE_BYTES = 24 * 1024 * 1024;
+
+/**
+ * Process-local record of the compiled tool-approval rules hash whose
+ * per-conversation OpenCode instance last booted with. Entries die with the
+ * process, exactly like the instances they describe: after a restart there
+ * is no live instance, and the next instance boots from the freshly
+ * rewritten per-conversation config, so an unknown record is fresh state,
+ * never stale. A recorded hash that differs from the current turn's rules
+ * means the cached instance still holds last turn's agent state and is
+ * disposed (sessions persist on disk) rather than rebuilt.
+ */
+const fastAgentToolApprovalRulesHashes = new Map<string, string | null>();
 
 function buildFastAgentNativeSteerMessageId(
   rowId: string,
@@ -3817,6 +3836,19 @@ export async function answerFastAgentQuestion({
       Env.RELEASE_VERSION,
       packageJson.version,
     );
+    // Experiment-gated (`integrationToolApprovals`) per-tool approval rules
+    // for code-mode integration calls: native ask rules pause gated tools
+    // behind a requester decision and deny rules hide rejected tools.
+    // Undefined while the experiment is off, which keeps ungated behavior.
+    // Approvals and session overrides are keyed on the unified Session, not
+    // the Fast conversation; resolve it once for the rules and the bridge.
+    const toolApprovalSessionId = await resolveFastAgentToolApprovalSessionId(
+      session.id,
+    );
+    const toolApprovalRules = await resolveFastAgentToolApprovalRules({
+      integrations: availableIntegrations,
+      sessionId: toolApprovalSessionId,
+    });
     const system = buildFastAgentSystemPrompt({
       availableEnvironments,
       activeRepositories,
@@ -6160,6 +6192,37 @@ export async function answerFastAgentQuestion({
       return lastVisibleMessage;
     }
     diagnostics.markInferenceQueued();
+    // Tool-approval rules ride in the generated per-conversation agent
+    // config, which is rewritten on every turn, so a persisted OpenCode
+    // session can never carry stale approval rules across a restart: the
+    // servers are disposable child processes and the next instance boots
+    // from the current config. The only stale case is within one process,
+    // where the directory's cached instance still holds the agent state from
+    // a previous turn's config. A policy or experiment change then disposes
+    // that instance — preserving the session id, transcript, and context —
+    // instead of rebuilding the session. An unknown record after a restart
+    // is fresh state and must not dispose: that would be a false-positive
+    // cache break.
+    const toolApprovalRulesHash = toolApprovalRules?.hash ?? null;
+    const previousToolApprovalRulesHash = fastAgentToolApprovalRulesHashes.has(
+      session.id,
+    )
+      ? (fastAgentToolApprovalRulesHashes.get(session.id) ?? null)
+      : undefined;
+    const toolApprovalDisposeInstance =
+      shouldDisposeInstanceForToolApprovalRules({
+        recordedHash: previousToolApprovalRulesHash,
+        currentHash: toolApprovalRulesHash,
+      });
+    const toolApprovalDisposeState = toolApprovalDisposeInstance
+      ? { completed: false }
+      : undefined;
+    if (toolApprovalDisposeInstance) {
+      console.info(
+        `[Fast Agent] Tool approval rules changed for session ${session.id}; refreshing the OpenCode instance.`,
+      );
+    }
+    fastAgentToolApprovalRulesHashes.set(session.id, toolApprovalRulesHash);
     const promptTextPromise = fastAgentOpenCodeSessionManager.run({
       conversationId: session.id,
       persistedSessionId: session.openCodeSessionId,
@@ -6206,6 +6269,13 @@ export async function answerFastAgentQuestion({
             serviceCredentialPrepareEnabled:
               currentUser.serviceCredentialToolsEnabled && !platformEvent,
             addRemoteMcpEnabled: !platformEvent,
+            ...(toolApprovalRules
+              ? {
+                  toolApprovalPermission: integrationToolApprovalRulesToConfig(
+                    toolApprovalRules.rules,
+                  ),
+                }
+              : {}),
           },
         );
         codeModeIntegrationsActiveForTurn =
@@ -6324,6 +6394,37 @@ export async function answerFastAgentQuestion({
                 inferenceAttemptNumber += 1;
                 resolvedInferenceModel = undefined;
                 captureInferenceContext('prompt_submission');
+                // Native per-tool approval bridge for gated code-mode
+                // integration calls. Web conversations surface the pending
+                // card in the Session transcript; chat-originated
+                // conversations additionally get a posted notification with
+                // the decision link so a gated call is never stranded
+                // silently. Deliberately direct adapter posts, like the
+                // retry notice: a system notification must not satisfy the
+                // model's acknowledgement gate or close the turn.
+                const toolApprovalBridge = toolApprovalRules
+                  ? createFastAgentToolApprovalBridge({
+                      sessionId: toolApprovalSessionId,
+                      userId,
+                      integrations: availableIntegrations,
+                      signal: promptSignal,
+                      ...(conversation.surface === 'slack' ||
+                      conversation.surface === 'discord'
+                        ? {
+                            notify: async (approval) => {
+                              const sessionUrl = buildFastSessionUrl(
+                                conversation.surface as 'slack' | 'discord',
+                                session.id,
+                              );
+                              await adapter.postReply({
+                                purpose: 'progress',
+                                message: `Approval needed: ${approval.integrationId} wants to run ${approval.toolName}. Allow or reject it in the Session: ${sessionUrl}`,
+                              });
+                            },
+                          }
+                        : {}),
+                    })
+                  : undefined;
                 const resultPromise =
                   generateTrackedNonTaskTextInOpenCodeSession(
                     {
@@ -6402,7 +6503,21 @@ export async function answerFastAgentQuestion({
                       onServerLeased: (url) => {
                         codeModeOpenCodeServerUrl = url;
                       },
+                      // Approval rules live in the generated agent config,
+                      // never the session ruleset: the session record stays
+                      // policy-free, so a persisted session can never carry
+                      // stale approval rules across a restart or a policy
+                      // change.
                       permission: FAST_AGENT_SESSION_PERMISSIONS,
+                      ...(toolApprovalDisposeState
+                        ? {
+                            disposeInstanceBeforeSession:
+                              toolApprovalDisposeState,
+                          }
+                        : {}),
+                      ...(toolApprovalBridge
+                        ? { onPermissionAsked: toolApprovalBridge.handleAsk }
+                        : {}),
                       signal: promptSignal,
                       promptOnlySubagents: true,
                       trackSessionTreeUsage: true,
@@ -6768,6 +6883,24 @@ export async function answerFastAgentQuestion({
         }
       },
     });
+    if (toolApprovalDisposeState) {
+      // A failed dispose leaves the cached instance on the previous turn's
+      // rules. Restore the previous record so the next turn retries the
+      // refresh instead of trusting a stale instance.
+      void promptTextPromise
+        .catch(() => undefined)
+        .then(() => {
+          if (toolApprovalDisposeState.completed) return;
+          if (previousToolApprovalRulesHash === undefined) {
+            fastAgentToolApprovalRulesHashes.delete(session.id);
+          } else {
+            fastAgentToolApprovalRulesHashes.set(
+              session.id,
+              previousToolApprovalRulesHash,
+            );
+          }
+        });
+    }
     const promptText = await promptTextPromise.finally(() => {
       diagnostics.markInferenceFinished();
     });

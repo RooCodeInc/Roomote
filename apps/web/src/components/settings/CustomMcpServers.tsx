@@ -33,11 +33,20 @@ import {
   parseCustomMcpServerJson,
   type CustomMcpJsonImport,
 } from '@/lib/custom-mcp-json-import';
+import { integrationToolPolicyKey } from '@roomote/types';
 import type { CustomMcpServerVisibility } from '@roomote/types';
 import type { CustomMcpServerListEntry } from '@/trpc/commands/custom-mcp-servers';
 import { useAuthorizedUser } from '@/hooks/useUser';
+import { useIntegrationToolApprovalsExperiment } from '@/hooks/useIntegrationToolApprovalsExperiment';
+import { useIntegrationToolPolicies } from '@/hooks/useIntegrationToolPolicies';
 
 import type { IntegrationItem } from './integration-card';
+import {
+  INTEGRATION_TOOL_APPROVAL_SAVE_HINT,
+  IntegrationToolApprovalGroup,
+  IntegrationToolApprovalModeControl,
+  groupIntegrationToolsByAccess,
+} from './IntegrationToolApprovalControls';
 import { useTRPC } from '@/trpc/client';
 
 type Transport = 'remote' | 'stdio';
@@ -744,18 +753,56 @@ function ServerFormDialog({
   );
 }
 
+/**
+ * Some servers ship prompt-length tool descriptions. Two lines are enough to
+ * recognize a tool; the rest is one click away instead of burying the list.
+ * The toggle lives outside the row's label so it never flips the checkbox.
+ */
+function ToolDescription({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const isLong = text.length > 140;
+
+  return (
+    <div className="text-xs text-muted-foreground">
+      <p className={isLong && !expanded ? 'line-clamp-2' : undefined}>{text}</p>
+      {isLong ? (
+        <button
+          type="button"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((current) => !current)}
+          className="mt-0.5 cursor-pointer font-medium text-foreground/80 hover:text-foreground"
+        >
+          {expanded ? 'Show less' : 'Show more'}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 function CustomToolManagementDialog({
   server,
+  scope,
   open,
   onOpenChange,
   onSaved,
 }: {
   server: ListedServer | null;
+  scope: CustomMcpServerVisibility;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: () => void;
 }) {
   const trpc = useTRPC();
+  const { isAdmin } = useAuthorizedUser();
+  const toolApprovalsExperiment = useIntegrationToolApprovalsExperiment();
+  // Approval policies are deployment-wide and admin-managed, and a shared
+  // custom server mounts under its name, so only admins on the shared list
+  // get the control; the admin-only list query never fires otherwise.
+  const toolApprovalsActive =
+    toolApprovalsExperiment.enabled && isAdmin && scope === 'deployment';
+  const toolPolicies = useIntegrationToolPolicies({
+    enabled: open && toolApprovalsActive,
+  });
 
   const toolsQuery = useQuery(
     trpc.customMcpServers.listTools.queryOptions(
@@ -769,6 +816,10 @@ function CustomToolManagementDialog({
   );
 
   const [disabledNames, setDisabledNames] = useState<Set<string>>(new Set());
+  const approvalModeFor = (toolName: string) =>
+    (server
+      ? toolPolicies.modes.get(integrationToolPolicyKey(server.name, toolName))
+      : undefined) ?? 'allow';
 
   const loadedKey = useMemo(
     () =>
@@ -830,38 +881,82 @@ function CustomToolManagementDialog({
           </p>
         ) : (
           <div className="space-y-2 max-h-96 overflow-y-auto">
-            {toolsQuery.data?.tools.map((tool) => (
-              <label
-                key={tool.name}
-                className="flex items-start gap-3 text-sm cursor-pointer"
-              >
-                <Checkbox
-                  checked={!disabledNames.has(tool.name)}
-                  onCheckedChange={(checked) => {
-                    setDisabledNames((current) => {
-                      const next = new Set(current);
-
-                      if (checked === true) {
-                        next.delete(tool.name);
-                      } else {
-                        next.add(tool.name);
+            {toolApprovalsActive && server ? (
+              <p className="text-xs text-muted-foreground">
+                {INTEGRATION_TOOL_APPROVAL_SAVE_HINT} Tool enable/disable still
+                needs Save.
+              </p>
+            ) : null}
+            {groupIntegrationToolsByAccess(toolsQuery.data?.tools ?? []).map(
+              (group) => (
+                <IntegrationToolApprovalGroup
+                  key={group.id}
+                  title={group.title}
+                  count={group.tools.length}
+                  disabled={toolPolicies.isUpdating}
+                  {...(toolApprovalsActive && server
+                    ? {
+                        modes: group.tools.map((tool) =>
+                          approvalModeFor(tool.name),
+                        ),
+                        onChangeAll: (mode) =>
+                          toolPolicies.setModes(
+                            server.name,
+                            group.tools.map((tool) => tool.name),
+                            mode,
+                          ),
                       }
+                    : {})}
+                >
+                  {group.tools.map((tool) => (
+                    <div
+                      key={tool.name}
+                      className="flex items-start gap-3 py-2.5"
+                    >
+                      <Checkbox
+                        id={`custom-mcp-tool-${tool.name}`}
+                        checked={!disabledNames.has(tool.name)}
+                        onCheckedChange={(checked) => {
+                          setDisabledNames((current) => {
+                            const next = new Set(current);
 
-                      return next;
-                    });
-                  }}
-                  className="mt-0.5"
-                />
-                <span>
-                  <span className="font-mono">{tool.name}</span>
-                  {tool.description && (
-                    <span className="block text-xs text-muted-foreground">
-                      {tool.description}
-                    </span>
-                  )}
-                </span>
-              </label>
-            ))}
+                            if (checked === true) {
+                              next.delete(tool.name);
+                            } else {
+                              next.add(tool.name);
+                            }
+
+                            return next;
+                          });
+                        }}
+                        className="mt-0.5"
+                      />
+                      <div className="min-w-0 flex-1 text-sm">
+                        <label
+                          htmlFor={`custom-mcp-tool-${tool.name}`}
+                          className="cursor-pointer font-mono"
+                        >
+                          {tool.name}
+                        </label>
+                        {tool.description ? (
+                          <ToolDescription text={tool.description} />
+                        ) : null}
+                      </div>
+                      {toolApprovalsActive && server ? (
+                        <IntegrationToolApprovalModeControl
+                          toolName={tool.name}
+                          value={approvalModeFor(tool.name)}
+                          disabled={toolPolicies.isUpdating}
+                          onChange={(mode) =>
+                            toolPolicies.setMode(server.name, tool.name, mode)
+                          }
+                        />
+                      ) : null}
+                    </div>
+                  ))}
+                </IntegrationToolApprovalGroup>
+              ),
+            )}
           </div>
         )}
 
@@ -1133,6 +1228,7 @@ export function useCustomMcpServers(
         }}
       />
       <CustomToolManagementDialog
+        scope={scope}
         server={toolsServer}
         open={Boolean(toolsServer)}
         onOpenChange={(open) => {

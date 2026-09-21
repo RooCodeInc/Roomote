@@ -68,6 +68,10 @@ import {
   buildFastAgentCodeModeServerNames,
   buildFastAgentToolFilter,
 } from './fast-agent-tool-policy';
+import {
+  ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME,
+  ROOMOTE_OPENCODE_JUDGE_AGENT_NAME,
+} from '../../opencode-prompt-subagents';
 
 export {
   FAST_AGENT_NATIVE_TOOL_FILTER,
@@ -1627,6 +1631,16 @@ export async function getFastAgentNativeToolRuntime(
     serviceCredentialToolsEnabled?: boolean;
     serviceCredentialPrepareEnabled?: boolean;
     addRemoteMcpEnabled?: boolean;
+    /**
+     * Experiment-gated (`integrationToolApprovals`) per-tool approval rules
+     * in OpenCode config-permission shape, applied to the parent build agent
+     * and the helper subagents in the generated per-conversation config.
+     * Rules live in config rather than the session ruleset so a policy
+     * change never strands stale state in a persisted session: this file is
+     * rewritten every turn, and a policy change disposes the directory's
+     * cached instance instead of rebuilding the session.
+     */
+    toolApprovalPermission?: Record<string, 'ask' | 'deny'>;
   } = {},
 ): Promise<FastAgentNativeToolRuntime> {
   bridgePromise ??= startBridge();
@@ -1673,6 +1687,15 @@ export async function getFastAgentNativeToolRuntime(
   );
   runtime.env.OPENCODE_EXPERIMENTAL_CODE_MODE = '1';
   runtime.codeModeIntegrationsActive = true;
+  // Approval rules apply to the parent build agent and to the helper
+  // subagents. OpenCode merges this per-directory config over the shared
+  // server config, so a permission-only entry extends the existing advisor
+  // and judge definitions instead of replacing them.
+  const toolApprovalAgentEntries = options.toolApprovalPermission
+    ? {
+        permission: options.toolApprovalPermission,
+      }
+    : {};
   writeFileSync(
     join(runtime.directory, 'opencode.json'),
     JSON.stringify({
@@ -1695,7 +1718,14 @@ export async function getFastAgentNativeToolRuntime(
               addRemoteMcpEnabled: options.addRemoteMcpEnabled,
             },
           ),
+          ...toolApprovalAgentEntries,
         },
+        ...(options.toolApprovalPermission
+          ? {
+              [ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME]: toolApprovalAgentEntries,
+              [ROOMOTE_OPENCODE_JUDGE_AGENT_NAME]: toolApprovalAgentEntries,
+            }
+          : {}),
       },
       mcp: Object.fromEntries(
         mountedIntegrations.map((integration) => [
