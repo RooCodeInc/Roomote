@@ -120,6 +120,9 @@ export const MEDIA_PROVIDER_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
 const JUDGMENT_MODEL_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
   'R_TYPESAFE_API_KEY',
   'R_JUDGMENT_MODEL',
+  'R_JUDGMENT_UPSTREAM_URL',
+  'R_JUDGMENT_UPSTREAM_API_KEY',
+  'R_JUDGMENT_SHADOW',
 ]);
 
 /**

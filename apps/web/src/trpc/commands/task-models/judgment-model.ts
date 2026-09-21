@@ -13,6 +13,7 @@ import {
   isJudgmentModelSelection,
   JUDGMENT_MODEL_ENV_VAR_NAME,
   JUDGMENT_MODEL_SELECTION_LABELS,
+  JUDGMENT_UPSTREAM_URL_ENV_VAR_NAME,
   resolveEffectiveJudgmentModelSelection,
   TYPESAFE_API_KEY_ENV_VAR_NAME,
   type JudgmentModelSelection,
@@ -22,7 +23,8 @@ import { upsertDeploymentEnvironmentVariables } from '../environment-variables';
 import type { UserAuthSuccess } from '@/types';
 
 /**
- * Settings > Models controls for the optional judgment model (TypeSafe's Jev).
+ * Settings > Models controls for the optional judgment model: TypeSafe's Jev
+ * through one of its routes, or the judgment model Roomote runs itself.
  *
  * The TypeSafe key is stored as a deployment environment variable like chat
  * provider keys, but deliberately outside the chat provider catalog: it must
@@ -49,6 +51,8 @@ type JudgmentModelSettings = {
   };
   openRouterConnected: boolean;
   vercelGatewayConnected: boolean;
+  /** A Roomote-run judgment upstream is configured in the environment. */
+  roomoteConnected: boolean;
   storedSelection: JudgmentModelSelection | null;
   /** Set when `R_JUDGMENT_MODEL` manages the selection; the UI is locked. */
   envSelection: JudgmentModelSelection | null;
@@ -99,6 +103,16 @@ async function isOpenRouterConnected(): Promise<boolean> {
   return Boolean(await resolveModelProviderEnvValue(OPENROUTER_ENV_VAR_NAMES));
 }
 
+/**
+ * Environment only: hosting injects the upstream for managed deployments and
+ * a self-hosted operator sets it beside the other deployment variables. There
+ * is deliberately no Settings field, so an admin cannot point routing text at
+ * an arbitrary server from the browser.
+ */
+function isRoomoteUpstreamConfigured(): boolean {
+  return isConfiguredEnvValue(process.env[JUDGMENT_UPSTREAM_URL_ENV_VAR_NAME]);
+}
+
 export async function getJudgmentModelSettingsCommand(
   auth: UserAuthSuccess,
 ): Promise<JudgmentModelSettings> {
@@ -117,21 +131,25 @@ export async function getJudgmentModelSettingsCommand(
   ]);
   const envSelection = resolveEnvJudgmentModelSelection();
   const typeSafeConnected = typeSafeSource !== null;
+  const roomoteConnected = isRoomoteUpstreamConfigured();
   const effectiveSelection = resolveEffectiveJudgmentModelSelection({
     envSelection,
     storedSelection,
     hasTypeSafeKey: typeSafeConnected,
+    hasRoomoteUpstream: roomoteConnected,
   });
 
   return {
     typeSafe: { connected: typeSafeConnected, source: typeSafeSource },
     openRouterConnected,
     vercelGatewayConnected,
+    roomoteConnected,
     storedSelection,
     envSelection,
     effectiveSelection,
     effectiveSelectionUsable:
       effectiveSelection === 'off' ||
+      (effectiveSelection === 'roomote' && roomoteConnected) ||
       (effectiveSelection === 'typesafe' && typeSafeConnected) ||
       (effectiveSelection === 'openrouter' && openRouterConnected) ||
       (effectiveSelection === 'vercel' && vercelGatewayConnected),
@@ -250,6 +268,12 @@ export async function setJudgmentModelSelectionCommand(
   if (resolveEnvJudgmentModelSelection()) {
     throw new Error(
       `The judgment model is managed by ${JUDGMENT_MODEL_ENV_VAR_NAME} and cannot be changed in Settings.`,
+    );
+  }
+
+  if (input.selection === 'roomote' && !isRoomoteUpstreamConfigured()) {
+    throw new Error(
+      `Set ${JUDGMENT_UPSTREAM_URL_ENV_VAR_NAME} before choosing ${JUDGMENT_MODEL_SELECTION_LABELS.roomote}.`,
     );
   }
 

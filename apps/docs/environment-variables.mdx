@@ -391,7 +391,10 @@ manifest changes.
 | `R_ELEVENLABS_VOICE_ID`        | Optional          | ElevenLabs voice ID used for feature-demo narration. Required alongside the API key for narration to be available.                                                       |
 | `R_VOICE_OPENAI_API_KEY`       | Optional          | OpenAI key dedicated to GPT-Live voice conversations. Requires project access to `gpt-live-1`; the general `OPENAI_API_KEY` is not used for Voice. The key stays on the control plane; browsers receive only a server-negotiated WebRTC session answer. |
 | `R_TYPESAFE_API_KEY`           | Optional          | TypeSafe key for the optional [judgment model](/models#judgment-model). A key alone turns on Jev via TypeSafe unless `R_JUDGMENT_MODEL` or Settings chooses otherwise. The key stays on the control plane. |
-| `R_JUDGMENT_MODEL`             | Optional          | Selects the [judgment model](/models#judgment-model): `typesafe`, `openrouter` (using `OPENROUTER_API_KEY`), `vercel` (using `AI_GATEWAY_API_KEY`), or `off`. Overrides the choice in **Settings > Models**. |
+| `R_JUDGMENT_MODEL`             | Optional          | Selects the [judgment model](/models#judgment-model): `roomote` (using `R_JUDGMENT_UPSTREAM_URL`), `typesafe`, `openrouter` (using `OPENROUTER_API_KEY`), `vercel` (using `AI_GATEWAY_API_KEY`), or `off`. Overrides the choice in **Settings > Models**. |
+| `R_JUDGMENT_UPSTREAM_URL`      | Optional          | Base URL of a Roomote-run [judgment model](/models#judgment-model) that answers the same typed decisions request as Jev at `/v1/decisions`. Set automatically on Roomote Cloud. Used by default when no TypeSafe key is configured and no other judgment model is selected. |
+| `R_JUDGMENT_UPSTREAM_API_KEY`  | Optional          | Bearer credential for `R_JUDGMENT_UPSTREAM_URL`. Leave unset for a private-network upstream without auth. The credential stays on the control plane. |
+| `R_JUDGMENT_SHADOW`            | Optional          | `on` also scores every Jev judgment with the Roomote-run upstream and logs how the two agree, without changing the answer Roomote acts on. Calibration evidence for the hosted model; only affects deployments that already send decision text to Jev. |
 
 During Microsoft Teams setup, Roomote uses the Microsoft Entra app values for
 the Teams bot by default. Use **Show advanced config** after the Directory
