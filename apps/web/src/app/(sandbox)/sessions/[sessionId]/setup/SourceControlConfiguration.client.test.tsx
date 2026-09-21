@@ -1,19 +1,28 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import {
   SETUP_SOURCE_CONTROL_PROVIDER_CATALOG,
   type SetupSourceControlStatus,
 } from '@roomote/types';
 
-const { createGitHubAppManifestMock, saveMutationOptionsRef, mutateAsyncMock } =
-  vi.hoisted(() => ({
-    createGitHubAppManifestMock: vi.fn(),
-    mutateAsyncMock: vi.fn(async () => undefined),
-    saveMutationOptionsRef: {
-      current: null as {
-        mutationFn?: (variables: unknown) => Promise<unknown>;
-      } | null,
-    },
-  }));
+const {
+  createGitHubAppManifestMock,
+  createGitHubAppManifestOptionsRef,
+  saveMutationOptionsRef,
+  mutateAsyncMock,
+} = vi.hoisted(() => ({
+  createGitHubAppManifestMock: vi.fn(),
+  createGitHubAppManifestOptionsRef: {
+    current: null as {
+      onSuccess?: (result: unknown) => void;
+    } | null,
+  },
+  mutateAsyncMock: vi.fn(async () => undefined),
+  saveMutationOptionsRef: {
+    current: null as {
+      mutationFn?: (variables: unknown) => Promise<unknown>;
+    } | null,
+  },
+}));
 
 vi.mock('@tanstack/react-query', () => ({
   useQuery: () => ({ data: undefined }),
@@ -50,10 +59,15 @@ vi.mock('@/trpc/client', () => ({
 }));
 
 vi.mock('@/hooks/github', () => ({
-  useCreateGitHubAppManifest: () => ({
-    mutate: createGitHubAppManifestMock,
-    isPending: false,
-  }),
+  useCreateGitHubAppManifest: (options: {
+    onSuccess?: (result: unknown) => void;
+  }) => {
+    createGitHubAppManifestOptionsRef.current = options;
+    return {
+      mutate: createGitHubAppManifestMock,
+      isPending: false,
+    };
+  },
 }));
 
 import { SourceControlConfiguration } from './SourceControlConfiguration';
@@ -161,6 +175,7 @@ function buildCatalogProviderSetup(
 describe('SourceControlConfiguration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    createGitHubAppManifestOptionsRef.current = null;
   });
 
   it('defaults GitHub setup to the manifest CTA', () => {
@@ -179,11 +194,17 @@ describe('SourceControlConfiguration', () => {
       screen.queryByRole('button', { name: 'Enter values manually' }),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByLabelText('GitHub organization'),
+      screen.getByRole('radio', { name: 'Personal account' }),
+    ).toBeChecked();
+    expect(
+      screen.getByRole('radio', { name: 'Organization' }),
+    ).not.toBeChecked();
+    expect(
+      screen.queryByLabelText('GitHub organization slug'),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Show advanced config' }),
-    ).toBeInTheDocument();
+      screen.queryByRole('button', { name: 'Show advanced config' }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText('GitHub App ID')).not.toBeInTheDocument();
   });
 
@@ -213,18 +234,84 @@ describe('SourceControlConfiguration', () => {
       />,
     );
 
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Show advanced config' }),
-    );
-    fireEvent.change(screen.getByLabelText('GitHub organization'), {
+    fireEvent.click(screen.getByRole('radio', { name: 'Organization' }));
+    const createButton = screen.getByRole('button', {
+      name: 'Create GitHub App',
+    });
+    expect(createButton).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('GitHub organization slug'), {
       target: { value: ' example-org ' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Create GitHub App' }));
+    expect(createButton).toBeEnabled();
+    fireEvent.click(createButton);
 
     expect(createGitHubAppManifestMock).toHaveBeenCalledWith({
       redirect: '/setup?step=source-control-connect',
       organization: 'example-org',
     });
+  });
+
+  it('clears an organization when switching back to a personal owner', () => {
+    render(
+      <SourceControlConfiguration
+        sourceControlSetup={buildSourceControlSetup()}
+        selectedProviderId="github"
+        onContinue={vi.fn()}
+        returnPath="/sessions/session-1/setup"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Organization' }));
+    fireEvent.change(screen.getByLabelText('GitHub organization slug'), {
+      target: { value: 'example-org' },
+    });
+    fireEvent.click(screen.getByRole('radio', { name: 'Personal account' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create GitHub App' }));
+
+    expect(screen.queryByLabelText('GitHub organization slug')).toBeNull();
+    expect(createGitHubAppManifestMock).toHaveBeenCalledWith({
+      redirect: '/sessions/session-1/setup',
+      organization: null,
+    });
+  });
+
+  it('submits the returned manifest to GitHub after preserving the return path', () => {
+    const submit = vi
+      .spyOn(HTMLFormElement.prototype, 'submit')
+      .mockImplementation(() => undefined);
+
+    render(
+      <SourceControlConfiguration
+        sourceControlSetup={buildSourceControlSetup()}
+        selectedProviderId="github"
+        onContinue={vi.fn()}
+        returnPath="/sessions/session-1/setup"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create GitHub App' }));
+    expect(createGitHubAppManifestMock).toHaveBeenCalledWith({
+      redirect: '/sessions/session-1/setup',
+      organization: null,
+    });
+
+    act(() => {
+      createGitHubAppManifestOptionsRef.current?.onSuccess?.({
+        success: true,
+        postTarget: 'https://github.com/settings/apps/new',
+        values: { manifest: '{"name":"Roomote"}' },
+      });
+    });
+
+    expect(submit).toHaveBeenCalledOnce();
+    expect(document.querySelector('form')).toHaveAttribute(
+      'action',
+      'https://github.com/settings/apps/new',
+    );
+    expect(screen.getByDisplayValue('{"name":"Roomote"}')).toHaveAttribute(
+      'name',
+      'manifest',
+    );
   });
 
   it('keeps the GitHub field form hidden without a manual entry path', () => {

@@ -45,6 +45,7 @@ const state = vi.hoisted(() => ({
     },
   ],
   searchParams: '',
+  createGitHubAppManifestPending: false,
   prAction: 'draft' as 'draft' | 'create' | 'push',
   configProviders: [
     { provider: 'github', configSatisfied: true },
@@ -105,7 +106,7 @@ vi.mock('@/hooks/github', () => ({
     mutate: mutations.syncGitHub,
   }),
   useCreateGitHubAppManifest: () => ({
-    isPending: false,
+    isPending: state.createGitHubAppManifestPending,
     mutate: mutations.createGitHubAppManifest,
   }),
 }));
@@ -259,6 +260,37 @@ vi.mock('@/components/system', () => ({
   RefreshCw: (props: SVGProps<SVGSVGElement>) => (
     <svg aria-hidden="true" {...props} />
   ),
+  RadioGroup: ({
+    children,
+    value,
+    onValueChange,
+    disabled,
+  }: {
+    children: ReactNode;
+    value: string;
+    onValueChange: (value: string) => void;
+    disabled?: boolean;
+  }) => (
+    <div
+      role="radiogroup"
+      data-value={value}
+      aria-disabled={disabled}
+      onChange={(event) =>
+        onValueChange((event.target as HTMLInputElement).value)
+      }
+    >
+      {children}
+    </div>
+  ),
+  RadioGroupItem: ({ value, id }: { value: string; id: string }) => (
+    <input
+      type="radio"
+      id={id}
+      value={value}
+      name="github-app-owner"
+      onChange={() => undefined}
+    />
+  ),
   Sparkles: (props: SVGProps<SVGSVGElement>) => (
     <svg aria-hidden="true" {...props} />
   ),
@@ -369,6 +401,7 @@ describe('SourceControl settings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     state.searchParams = '';
+    state.createGitHubAppManifestPending = false;
     state.prAction = 'draft';
     state.gitHubInstallations = [{ id: 'gh-1' }];
     state.gitHubRepositories = [
@@ -532,6 +565,12 @@ describe('SourceControl settings', () => {
       screen.getByRole('button', { name: 'Create GitHub App' }),
     ).toBeInTheDocument();
     expect(
+      screen.getByRole('radio', { name: 'Personal account' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('radio', { name: 'Organization' }),
+    ).toBeInTheDocument();
+    expect(
       screen.queryByRole('button', { name: 'Enter values manually' }),
     ).not.toBeInTheDocument();
     expect(
@@ -540,6 +579,88 @@ describe('SourceControl settings', () => {
     expect(
       screen.queryByTestId('source-control-config-github'),
     ).not.toBeInTheDocument();
+  });
+
+  it('requires and trims an organization owner slug before creating the app', () => {
+    state.gitHubInstallations = [];
+    state.gitHubRepositories = [];
+    state.configProviders = [
+      { provider: 'github', configSatisfied: false },
+      { provider: 'gitlab', configSatisfied: true },
+      { provider: 'gitea', configSatisfied: true },
+      { provider: 'ado', configSatisfied: true },
+      { provider: 'bitbucket', configSatisfied: true },
+    ];
+
+    render(<SourceControl />);
+    fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Organization' }));
+
+    const createButton = screen.getByRole('button', {
+      name: 'Create GitHub App',
+    });
+    expect(createButton).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('GitHub organization slug'), {
+      target: { value: ' example-org ' },
+    });
+    expect(createButton).toBeEnabled();
+    fireEvent.click(createButton);
+
+    expect(mutations.createGitHubAppManifest).toHaveBeenCalledWith({
+      redirect: '/settings',
+      organization: 'example-org',
+    });
+  });
+
+  it('ignores a stale organization after switching back to personal ownership', () => {
+    state.gitHubInstallations = [];
+    state.gitHubRepositories = [];
+    state.configProviders = [
+      { provider: 'github', configSatisfied: false },
+      { provider: 'gitlab', configSatisfied: true },
+      { provider: 'gitea', configSatisfied: true },
+      { provider: 'ado', configSatisfied: true },
+      { provider: 'bitbucket', configSatisfied: true },
+    ];
+
+    render(<SourceControl />);
+    fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Organization' }));
+    fireEvent.change(screen.getByLabelText('GitHub organization slug'), {
+      target: { value: 'example-org' },
+    });
+    fireEvent.click(screen.getByRole('radio', { name: 'Personal account' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create GitHub App' }));
+
+    expect(screen.queryByLabelText('GitHub organization slug')).toBeNull();
+    expect(mutations.createGitHubAppManifest).toHaveBeenCalledWith({
+      redirect: '/settings',
+      organization: null,
+    });
+  });
+
+  it('disables GitHub App ownership and creation while the manifest is pending', () => {
+    state.gitHubInstallations = [];
+    state.gitHubRepositories = [];
+    state.createGitHubAppManifestPending = true;
+    state.configProviders = [
+      { provider: 'github', configSatisfied: false },
+      { provider: 'gitlab', configSatisfied: true },
+      { provider: 'gitea', configSatisfied: true },
+      { provider: 'ado', configSatisfied: true },
+      { provider: 'bitbucket', configSatisfied: true },
+    ];
+
+    render(<SourceControl />);
+    fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+
+    expect(
+      screen.getByRole('button', { name: 'Create GitHub App' }),
+    ).toBeDisabled();
+    expect(screen.getByRole('radiogroup')).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
   });
 
   it('shows the recommendation highlight copy when targeted from a setup link', () => {

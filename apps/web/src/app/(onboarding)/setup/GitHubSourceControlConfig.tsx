@@ -7,6 +7,8 @@ import {
   Button,
   Input,
   Label,
+  RadioGroup,
+  RadioGroupItem,
   Sparkles,
   Spinner,
 } from '@/components/system';
@@ -19,8 +21,10 @@ export function GitHubSourceControlConfig({
   onBack?: () => void;
   returnPath?: string;
 }) {
+  const [appOwner, setAppOwner] = useState<'personal' | 'organization'>(
+    'personal',
+  );
   const [githubOrganization, setGithubOrganization] = useState('');
-  const [showAdvancedConfig, setShowAdvancedConfig] = useState(false);
   const [manifestForm, setManifestForm] = useState<{
     postTarget: string;
     values: { manifest: string };
@@ -54,43 +58,68 @@ export function GitHubSourceControlConfig({
         <p>But it&apos;s super easy.</p>
       </div>
 
-      <div className="space-y-2 max-w-xl mt-6">
-        <div>
-          <button
-            type="button"
-            className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground cursor-pointer"
-            onClick={() => setShowAdvancedConfig((current) => !current)}
+      <div className="space-y-3 max-w-xl mt-6">
+        <div className="space-y-2">
+          <Label>GitHub App owner</Label>
+          <RadioGroup
+            aria-label="GitHub App owner"
+            value={appOwner}
+            onValueChange={(value) => {
+              const nextOwner = value as 'personal' | 'organization';
+              setAppOwner(nextOwner);
+              if (nextOwner === 'personal') {
+                setGithubOrganization('');
+              }
+            }}
+            disabled={
+              createGitHubAppManifest.isPending || manifestForm !== null
+            }
+            className="flex flex-col gap-2 sm:flex-row sm:gap-6"
           >
-            {showAdvancedConfig
-              ? 'Hide advanced config'
-              : 'Show advanced config'}
-          </button>
-        </div>
-        {showAdvancedConfig ? (
-          <>
-            <div className="grid gap-2 md:grid-cols-[200px_minmax(0,1fr)] md:items-center max-w-xl">
-              <Label htmlFor="github-app-organization">
-                GitHub organization
+            <div className="flex items-center gap-2">
+              <RadioGroupItem value="personal" id="github-app-owner-personal" />
+              <Label htmlFor="github-app-owner-personal">
+                Personal account
               </Label>
-              <Input
-                id="github-app-organization"
-                className="font-mono"
-                value={githubOrganization}
-                onChange={(event) => setGithubOrganization(event.target.value)}
-                placeholder="your-organization"
-                disabled={
-                  createGitHubAppManifest.isPending || manifestForm !== null
-                }
-                data-1p-ignore
-              />
             </div>
+            <div className="flex items-center gap-2">
+              <RadioGroupItem
+                value="organization"
+                id="github-app-owner-organization"
+              />
+              <Label htmlFor="github-app-owner-organization">
+                Organization
+              </Label>
+            </div>
+          </RadioGroup>
+        </div>
+        {appOwner === 'organization' ? (
+          <div className="space-y-2">
+            <Label htmlFor="github-app-organization">
+              GitHub organization slug
+            </Label>
+            <Input
+              id="github-app-organization"
+              className="font-mono"
+              value={githubOrganization}
+              onChange={(event) => setGithubOrganization(event.target.value)}
+              placeholder="your-organization"
+              required
+              disabled={
+                createGitHubAppManifest.isPending || manifestForm !== null
+              }
+              data-1p-ignore
+            />
             <p className="text-sm text-muted-foreground">
-              By default the app is created on your personal GitHub account and
-              can be installed on any organization you belong to. Enter an
-              organization name if the organization should own the app instead.
+              The GitHub organization that should own this app.
             </p>
-          </>
-        ) : null}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            The app will be created on your personal GitHub account and can be
+            installed on organizations you belong to.
+          </p>
+        )}
       </div>
 
       {manifestForm ? (
@@ -126,10 +155,15 @@ export function GitHubSourceControlConfig({
           onClick={() =>
             createGitHubAppManifest.mutate({
               redirect: returnPath,
-              organization: githubOrganization.trim() || null,
+              organization:
+                appOwner === 'organization' ? githubOrganization.trim() : null,
             })
           }
-          disabled={createGitHubAppManifest.isPending || manifestForm !== null}
+          disabled={
+            createGitHubAppManifest.isPending ||
+            manifestForm !== null ||
+            (appOwner === 'organization' && !githubOrganization.trim())
+          }
         >
           {createGitHubAppManifest.isPending || manifestForm ? (
             <Spinner />
