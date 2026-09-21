@@ -119,6 +119,16 @@ export type JudgmentBackend =
   | { provider: 'openrouter'; apiKey: string }
   | { provider: 'vercel'; apiKey: string };
 
+export type TypeSafeJudgmentUsage = {
+  inputTokens?: number;
+  outputTokens?: number;
+};
+
+type JudgmentResponse = {
+  answers?: Record<string, unknown>;
+  usage?: TypeSafeJudgmentUsage;
+};
+
 let cachedBackend:
   | { value: JudgmentBackend | undefined; expiresAt: number }
   | undefined;
@@ -279,20 +289,52 @@ async function requestNativeDecisions(
   questions: Record<string, TypeSafeQuestion>,
   timeoutMs: number,
   options: { url: string; model: string },
-): Promise<Record<string, unknown> | undefined> {
+): Promise<JudgmentResponse> {
   const body = await postJson(options.url, {
     headers: { Authorization: `Bearer ${apiKey}` },
     body: { state, model: options.model, questions },
     timeoutMs,
   });
 
-  return body.answers as Record<string, unknown> | undefined;
+  return {
+    answers: body.answers as Record<string, unknown> | undefined,
+    usage: parseUsage(body.usage),
+  };
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === 'object' && value !== null
     ? (value as Record<string, unknown>)
     : undefined;
+}
+
+function parseUsage(value: unknown): TypeSafeJudgmentUsage | undefined {
+  const record = asRecord(value);
+
+  if (!record) {
+    return undefined;
+  }
+
+  const inputTokens = record.input_tokens;
+  const outputTokens = record.output_tokens;
+
+  const usage: TypeSafeJudgmentUsage = {};
+  if (
+    typeof inputTokens === 'number' &&
+    Number.isInteger(inputTokens) &&
+    inputTokens >= 0
+  ) {
+    usage.inputTokens = inputTokens;
+  }
+  if (
+    typeof outputTokens === 'number' &&
+    Number.isInteger(outputTokens) &&
+    outputTokens >= 0
+  ) {
+    usage.outputTokens = outputTokens;
+  }
+
+  return Object.keys(usage).length > 0 ? usage : undefined;
 }
 
 function withDerivedConfidence(
@@ -344,7 +386,7 @@ async function requestVercelGateway(
   state: unknown,
   questions: Record<string, TypeSafeQuestion>,
   timeoutMs: number,
-): Promise<Record<string, unknown> | undefined> {
+): Promise<JudgmentResponse> {
   const body = await postJson(VERCEL_AI_GATEWAY_EVALUATION_URL, {
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -370,44 +412,47 @@ async function requestVercelGateway(
   const answers = asRecord(body.answers);
 
   if (!answers) {
-    return undefined;
+    return { usage: parseUsage(body.usage) };
   }
 
   const confidence = asRecord(
     asRecord(asRecord(body.providerMetadata)?.typesafe)?.confidence,
   );
 
-  return Object.fromEntries(
-    Object.entries(answers).map(([id, raw]) => {
-      const answer = asRecord(raw);
+  return {
+    answers: Object.fromEntries(
+      Object.entries(answers).map(([id, raw]) => {
+        const answer = asRecord(raw);
 
-      if (answer?.type === 'boolean') {
-        return [id, { type: 'noul', noul: answer.probability }];
-      }
+        if (answer?.type === 'boolean') {
+          return [id, { type: 'noul', noul: answer.probability }];
+        }
 
-      const probabilities = asRecord(answer?.probabilities);
-      const reportedConfidence = confidence?.[id];
+        const probabilities = asRecord(answer?.probabilities);
+        const reportedConfidence = confidence?.[id];
 
-      return [
-        id,
-        {
-          ...answer,
-          // Without TypeSafe's own confidence, the top probability is the
-          // closest stand-in for how concentrated the distribution is.
-          confidence:
-            typeof reportedConfidence === 'number'
-              ? reportedConfidence
-              : probabilities
-                ? Math.max(
-                    ...Object.values(probabilities).filter(
-                      (value): value is number => typeof value === 'number',
-                    ),
-                  )
-                : undefined,
-        },
-      ];
-    }),
-  );
+        return [
+          id,
+          {
+            ...answer,
+            // Without TypeSafe's own confidence, the top probability is the
+            // closest stand-in for how concentrated the distribution is.
+            confidence:
+              typeof reportedConfidence === 'number'
+                ? reportedConfidence
+                : probabilities
+                  ? Math.max(
+                      ...Object.values(probabilities).filter(
+                        (value): value is number => typeof value === 'number',
+                      ),
+                    )
+                  : undefined,
+          },
+        ];
+      }),
+    ),
+    usage: parseUsage(body.usage),
+  };
 }
 
 /**
@@ -424,6 +469,27 @@ export async function evaluateTypeSafeJudgments<
   questions: TQuestions;
   timeoutMs?: number;
 }): Promise<TypeSafeAnswers<TQuestions> | null> {
+  const result = await evaluateTypeSafeJudgmentsWithMetadata(params);
+
+  return result?.answers ?? null;
+}
+
+/**
+ * Variant of `evaluateTypeSafeJudgments` that preserves provider-reported token
+ * usage for bounded experiments and diagnostics. Gateways may omit usage, so it
+ * remains optional and no USD estimate is inferred here.
+ */
+export async function evaluateTypeSafeJudgmentsWithMetadata<
+  TQuestions extends Record<string, TypeSafeQuestion>,
+>(params: {
+  /** JSON-serializable context the questions are answered over. */
+  state: unknown;
+  questions: TQuestions;
+  timeoutMs?: number;
+}): Promise<{
+  answers: TypeSafeAnswers<TQuestions>;
+  usage?: TypeSafeJudgmentUsage;
+} | null> {
   const backend = await resolveJudgmentBackend();
 
   if (!backend) {
@@ -431,11 +497,11 @@ export async function evaluateTypeSafeJudgments<
   }
 
   const timeoutMs = params.timeoutMs ?? DEFAULT_TYPESAFE_TIMEOUT_MS;
-  let answers: Record<string, unknown> | undefined;
+  let response: JudgmentResponse | undefined;
 
   switch (backend.provider) {
     case 'typesafe':
-      answers = await requestNativeDecisions(
+      response = await requestNativeDecisions(
         backend.apiKey,
         params.state,
         params.questions,
@@ -443,22 +509,25 @@ export async function evaluateTypeSafeJudgments<
         { url: TYPESAFE_API_URL, model: TYPESAFE_MODEL },
       );
       break;
-    case 'openrouter':
-      answers = withDerivedConfidence(
-        await requestNativeDecisions(
-          backend.apiKey,
-          params.state,
-          params.questions,
-          timeoutMs,
-          {
-            url: OPENROUTER_DECISIONS_URL,
-            model: OPENROUTER_JEV_MODEL_ID,
-          },
-        ),
+    case 'openrouter': {
+      const result = await requestNativeDecisions(
+        backend.apiKey,
+        params.state,
+        params.questions,
+        timeoutMs,
+        {
+          url: OPENROUTER_DECISIONS_URL,
+          model: OPENROUTER_JEV_MODEL_ID,
+        },
       );
+      response = {
+        answers: withDerivedConfidence(result.answers),
+        usage: result.usage,
+      };
       break;
+    }
     case 'vercel':
-      answers = await requestVercelGateway(
+      response = await requestVercelGateway(
         backend.apiKey,
         params.state,
         params.questions,
@@ -468,14 +537,17 @@ export async function evaluateTypeSafeJudgments<
   }
 
   for (const [questionId, question] of Object.entries(params.questions)) {
-    if (!isValidAnswer(question, answers?.[questionId])) {
+    if (!isValidAnswer(question, response?.answers?.[questionId])) {
       throw new Error(
         `Judgment model response is missing a valid answer for "${questionId}"`,
       );
     }
   }
 
-  return answers as TypeSafeAnswers<TQuestions>;
+  return {
+    answers: response!.answers as TypeSafeAnswers<TQuestions>,
+    ...(response?.usage ? { usage: response.usage } : {}),
+  };
 }
 
 const DECISION_MODEL_CACHE_TTL_MS = 30_000;

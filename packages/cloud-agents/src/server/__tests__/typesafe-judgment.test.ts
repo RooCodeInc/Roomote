@@ -32,6 +32,7 @@ import {
   evaluateDecisionModel,
   resetDecisionModelCache,
   resolveDecisionModel,
+  evaluateTypeSafeJudgmentsWithMetadata,
   resetJudgmentBackendCache,
   scoreTypeSafeRelevance,
 } from '../typesafe-judgment';
@@ -182,6 +183,24 @@ describe('evaluateTypeSafeJudgments', () => {
       evaluateDecisionModel({ state: 'hi', questions }),
     ).rejects.toThrow('HTTP 529');
     expect(mockGenerateTrackedNonTaskObject).not.toHaveBeenCalled();
+  });
+
+  it('preserves provider-reported token usage for bounded experiments', async () => {
+    mockFetchResponse({
+      model: 'jev-1.13.0',
+      answers: directAnswers,
+      usage: { input_tokens: 120, output_tokens: 18 },
+    });
+
+    await expect(
+      evaluateTypeSafeJudgmentsWithMetadata({
+        state: { page: 'preview' },
+        questions: { urgent: questions.urgent },
+      }),
+    ).resolves.toMatchObject({
+      answers: { urgent: directAnswers.urgent },
+      usage: { inputTokens: 120, outputTokens: 18 },
+    });
   });
 
   it('stays off when an admin turned the judgment model off in Settings', async () => {

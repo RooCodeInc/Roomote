@@ -11,6 +11,9 @@ function read(relativePath: string) {
 
 describe('Capture visual proof skill', () => {
   const skillContent = read('../skills/standard/capture-visual-proof/SKILL.md');
+  const jevPreparationContent = read(
+    '../skills/standard/capture-visual-proof/references/jev-screenshot-preparation.md',
+  );
 
   it('frames parent-invoked proof as a result to carry forward instead of task completion', () => {
     expect(skillContent).toContain('<handoff_context>');
@@ -38,6 +41,26 @@ describe('Capture visual proof skill', () => {
     expect(skillContent).not.toContain('<background_delegation>');
     expect(skillContent).toContain('before the Task tool invokes `judge`');
     expect(skillContent).not.toContain('proof brief');
+  });
+
+  it('keeps Jev preparation opt-in, bounded, and subordinate to agent-browser', () => {
+    expect(skillContent).toContain('R_SCREENSHOT_PREPARATION_JEV_ENABLED');
+    expect(jevPreparationContent).toContain(
+      'This is an opt-in prototype, not a browser-navigation replacement.',
+    );
+    expect(jevPreparationContent).toContain(
+      'The allowed-action list is the only executable action space.',
+    );
+    expect(jevPreparationContent).toContain(
+      'never execute model text as a browser command',
+    );
+    expect(jevPreparationContent).toContain('Do not fabricate');
+    expect(jevPreparationContent).toContain('dispatch synthetic state');
+    expect(jevPreparationContent).toContain(
+      '`capture-ready` result only permits taking the screenshot; it is not acceptance.',
+    );
+    expect(jevPreparationContent).toContain('time to accepted screenshot');
+    expect(jevPreparationContent).toContain('false acceptance count');
   });
 
   it('visually verifies the exact final evidence before upload or sharing', () => {
@@ -298,7 +321,7 @@ describe('Capture visual proof skill', () => {
     expect(skillContent.match(/<rule>/g)?.length ?? 0).toBeLessThanOrEqual(16);
   });
 
-  it('no longer ships removed reference files', () => {
+  it('ships the optional Jev reference beside the capture skill', () => {
     expect(
       fs.existsSync(
         path.resolve(
@@ -306,6 +329,14 @@ describe('Capture visual proof skill', () => {
           '../skills/standard/capture-visual-proof/references',
         ),
       ),
-    ).toBe(false);
+    ).toBe(true);
+    expect(
+      fs.existsSync(
+        path.resolve(
+          thisDirPath,
+          '../skills/standard/capture-visual-proof/references/jev-screenshot-preparation.md',
+        ),
+      ),
+    ).toBe(true);
   });
 });

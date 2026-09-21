@@ -195,6 +195,9 @@ const serverSchema = {
   R_JUDGMENT_MODEL: z
     .enum(['off', 'typesafe', 'openrouter', 'vercel'])
     .optional(),
+  // Experimental opt-in for the bounded Jev screenshot-preparation loop. The
+  // existing capture flow remains the fallback when this is not enabled.
+  R_SCREENSHOT_PREPARATION_JEV_ENABLED: optInBoolean(),
   R_INTERCOM_APP_ID: z.string().min(1).optional(),
   R_POSTHOG_PROJECT_KEY: z.string().min(1).optional(),
   R_POSTHOG_HOST: z.string().url().optional(),
@@ -660,6 +663,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_VOICE_OPENAI_API_KEY',
   'R_TYPESAFE_API_KEY',
   'R_JUDGMENT_MODEL',
+  'R_SCREENSHOT_PREPARATION_JEV_ENABLED',
   'R_INTERCOM_APP_ID',
   'R_POSTHOG_PROJECT_KEY',
   'R_POSTHOG_HOST',

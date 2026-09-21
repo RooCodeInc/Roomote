@@ -27,6 +27,10 @@ Capture the smallest honest proof with `agent-browser`, visually inspect the exa
 <rule>If the captured UI shows the code change itself is wrong, return to implementation instead of presenting that as a terminal proof blocker. An obvious visual defect anywhere in a captured frame, such as broken layout, clipping, unreadable contrast, inconsistent theme treatment, or an unintended loading or error state, is a finding to report, not something to crop out.</rule>
 </execution_context>
 
+<optional_jev_preparation_prototype>
+<rule>With `R_SCREENSHOT_PREPARATION_JEV_ENABLED`+task opt-in, use `references/jev-screenshot-preparation.md`; uncertain: `agent-browser`.</rule>
+</optional_jev_preparation_prototype>
+
 <workflow>
   <phase name="applicability">
     <steps>

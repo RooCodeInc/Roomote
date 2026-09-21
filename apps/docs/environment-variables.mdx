@@ -392,6 +392,7 @@ manifest changes.
 | `R_VOICE_OPENAI_API_KEY`       | Optional          | OpenAI key dedicated to GPT-Live voice conversations. Requires project access to `gpt-live-1`; the general `OPENAI_API_KEY` is not used for Voice. The key stays on the control plane; browsers receive only a server-negotiated WebRTC session answer. |
 | `R_TYPESAFE_API_KEY`           | Optional          | TypeSafe key for the optional [judgment model](/models#judgment-model). A key alone turns on Jev via TypeSafe unless `R_JUDGMENT_MODEL` or Settings chooses otherwise. The key stays on the control plane. |
 | `R_JUDGMENT_MODEL`             | Optional          | Selects the [judgment model](/models#judgment-model): `typesafe`, `openrouter` (using `OPENROUTER_API_KEY`), `vercel` (using `AI_GATEWAY_API_KEY`), or `off`. Overrides the choice in **Settings > Models**. |
+| `R_SCREENSHOT_PREPARATION_JEV_ENABLED` | Optional | Explicitly enables the bounded Jev screenshot-preparation prototype. It is off by default; the existing browser capture flow remains the fallback, and the prototype never receives or executes browser commands. |
 
 During Microsoft Teams setup, Roomote uses the Microsoft Entra app values for
 the Teams bot by default. Use **Show advanced config** after the Directory

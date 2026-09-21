@@ -37,6 +37,7 @@ import {
   LIST_REPOSITORIES_DEFAULT_LIMIT,
   LIST_REPOSITORIES_MAX_LIMIT,
   LIST_REPOSITORIES_TOOL_NAME,
+  SCREENSHOT_PREPARATION_TOOL,
 } from '@roomote/types';
 import {
   captureWorkerException,
@@ -116,6 +117,7 @@ import { handleGetRelayUpdates } from './relay-updates.js';
 import { handleCloneRepository } from './clone-repository.js';
 import { handleListRepositories } from './list-repositories.js';
 import { handlePublicUrlFetch } from './public-url-fetch.js';
+import { handlePrepareScreenshot } from './screenshot-preparation.js';
 import {
   CLONE_REPOSITORY_TOOL_NAME,
   ON_DEMAND_REPOSITORIES_MANIFEST_FILE,
@@ -147,6 +149,24 @@ roomoteMcpServer.registerTool(
     }
 
     return handlePublicUrlFetch(params, config, extra.signal);
+  },
+);
+
+roomoteMcpServer.registerTool(
+  SCREENSHOT_PREPARATION_TOOL.name,
+  {
+    title: SCREENSHOT_PREPARATION_TOOL.title,
+    description: SCREENSHOT_PREPARATION_TOOL.description,
+    inputSchema: SCREENSHOT_PREPARATION_TOOL.inputSchema,
+    annotations: SCREENSHOT_PREPARATION_TOOL.annotations,
+  },
+  async (params, extra): Promise<ToolResult> => {
+    const config = getRoomoteConfig();
+    if (!config) {
+      return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
+    }
+
+    return handlePrepareScreenshot(params, config, extra.signal);
   },
 );
 

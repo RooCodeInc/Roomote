@@ -27,6 +27,11 @@
       "import": "./src/server/typesafe-judgment.ts",
       "require": "./src/server/typesafe-judgment.ts"
     },
+    "./server/screenshot-preparation": {
+      "types": "./src/server/screenshot-preparation.ts",
+      "import": "./src/server/screenshot-preparation.ts",
+      "require": "./src/server/screenshot-preparation.ts"
+    },
     "./show-widget": {
       "types": "./src/server/show-widget.ts",
       "import": "./src/server/show-widget.ts",
