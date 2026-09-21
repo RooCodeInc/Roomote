@@ -743,6 +743,25 @@ describe('ModelSettingsSection', () => {
     expect(screen.getByText('No reasoning')).toBeInTheDocument();
   });
 
+  it('limits the same-as-coding picker to the effective coding model efforts', () => {
+    const data = buildSettingsData();
+    // The coding default model publishes a restricted effort list; secondary
+    // roles resolve to it via the "Same as coding model" sentinel.
+    (data.models[0]!.metadata as TaskModelMetadata).supportedReasoningEfforts =
+      ['low', 'high'];
+    settingsData.current = data;
+
+    renderModelSettingsSection();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Orchestration model and reasoning' }),
+    );
+
+    // Two supported efforts (low, high) rather than the unrestricted scale.
+    const slider = screen.getByRole('slider', { name: 'Reasoning level' });
+    expect(slider).toHaveAttribute('aria-valuemax', '1');
+  });
+
   it('clears orchestration reasoning when switching to a non-reasoning model', async () => {
     const data = buildSettingsData({
       orchestrationEffectiveModelId: 'openrouter/openai/gpt-5.4',

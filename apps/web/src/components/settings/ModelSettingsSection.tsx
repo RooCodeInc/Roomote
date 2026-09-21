@@ -226,6 +226,7 @@ function TaskModelRoleEditor({
   reasoningManagedByEnv,
   selectValue,
   optionGroups,
+  codingModelMetadata,
   supportsReasoning,
   reasoningEffort,
   onModelChange,
@@ -237,6 +238,8 @@ function TaskModelRoleEditor({
   reasoningManagedByEnv: boolean;
   selectValue: string;
   optionGroups: DisplayModelProviderGroup<EditableRuntimeModelOption>[];
+  /** Metadata of the effective coding model, constraining the sentinel. */
+  codingModelMetadata?: TaskModelMetadata | null;
   supportsReasoning: boolean;
   reasoningEffort: ReasoningEffort | null;
   onModelChange: (value: string) => void;
@@ -265,6 +268,9 @@ function TaskModelRoleEditor({
         {
           id: SAME_AS_CODING_MODEL_VALUE,
           displayName: 'Same as coding model',
+          // "Same as coding" resolves to the effective coding model, so its
+          // supported reasoning efforts constrain the picker as well.
+          metadata: codingModelMetadata ?? null,
         },
         ...models,
       ]
@@ -1143,6 +1149,11 @@ export function ModelSettingsSection({
     },
     {} as Record<TaskModelRole, string>,
   );
+  // "Same as coding model" resolves to the effective coding model, including
+  // env-managed overrides; its metadata constrains the sentinel's efforts.
+  const effectiveCodingModelMetadata =
+    models.find((model) => model.id === roleSelectValues.coding)?.metadata ??
+    null;
 
   // Reasoning selectors are hidden when the resolved model for a role is
   // known not to support configurable reasoning. Unknown support (missing
@@ -1818,6 +1829,7 @@ export function ModelSettingsSection({
                 reasoningManagedByEnv={status.reasoningManagedByEnv}
                 selectValue={roleSelectValues[config.role]}
                 optionGroups={roleOptionGroups[config.role]}
+                codingModelMetadata={effectiveCodingModelMetadata}
                 supportsReasoning={roleSupportsReasoning[config.role]}
                 reasoningEffort={roleDrafts[config.role].reasoningEffort}
                 onModelChange={(value) =>
