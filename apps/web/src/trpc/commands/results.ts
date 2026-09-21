@@ -319,6 +319,18 @@ export async function listResultsCommand(
     .slice(0, 100);
 }
 
+export async function getResultCommand(
+  auth: UserAuthSuccess,
+  input: { id: string; kind: 'report' | 'suggestion' },
+) {
+  const results = await listResultsCommand(auth);
+  return (
+    results.find(
+      (result) => result.id === input.id && result.kind === input.kind,
+    ) ?? null
+  );
+}
+
 export async function getPendingResultCountCommand(_auth: UserAuthSuccess) {
   if (!(await isDeploymentExperimentEnabled('results'))) return 0;
   const [reportRows, suggestionRows] = await Promise.all([

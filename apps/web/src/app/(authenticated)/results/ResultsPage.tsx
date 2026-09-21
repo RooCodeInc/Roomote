@@ -1,6 +1,6 @@
 'use client';
 
-import { startTransition, useEffect, useRef, useState } from 'react';
+import { startTransition, useEffect, useRef, useState, type Ref } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -20,8 +20,6 @@ import {
   Empty,
   EmptyHeader,
   EmptyTitle,
-  ExternalLink,
-  Play,
   ResizableDivider,
   ResizablePanel,
   ResizablePanelGroup,
@@ -40,6 +38,8 @@ import { useTRPC } from '@/trpc/client';
 import type { ResultInboxItem } from '@/trpc/commands/results';
 
 const EMPTY_RESULTS: ResultInboxItem[] = [];
+const DETAIL_SKELETON_DELAY_MS = 500;
+const EMPTY_RESULT_ID = '00000000-0000-4000-8000-000000000000';
 
 function resultKey(result: Pick<ResultInboxItem, 'id' | 'kind'>) {
   return `${result.kind}:${result.id}`;
@@ -72,17 +72,28 @@ function PriorityMarker({ result }: { result: ResultInboxItem }) {
 
 function ResultsSkeleton() {
   return (
-    <div className="grid min-h-[34rem] grid-cols-1 gap-px overflow-hidden rounded-xl border bg-border lg:grid-cols-[24rem_1fr]">
+    <div className="grid min-h-[34rem] grid-cols-1 gap-px overflow-hidden rounded-xl border bg-border md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
       <div className="space-y-1 bg-card p-3">
         {Array.from({ length: 6 }).map((_, index) => (
           <Skeleton key={index} className="h-24 w-full" />
         ))}
       </div>
-      <div className="hidden space-y-4 bg-background p-8 lg:block">
+      <div className="hidden space-y-4 bg-background p-8 md:block">
         <Skeleton className="h-8 w-3/5" />
         <Skeleton className="h-4 w-2/5" />
         <Skeleton className="h-48 w-full" />
       </div>
+    </div>
+  );
+}
+
+function DetailSkeleton() {
+  return (
+    <div className="space-y-4 px-5 py-6 md:px-8 md:py-8">
+      <Skeleton className="h-7 w-3/5" />
+      <Skeleton className="h-4 w-4/5" />
+      <Skeleton className="h-4 w-2/5" />
+      <Skeleton className="mt-8 h-44 w-full" />
     </div>
   );
 }
@@ -94,7 +105,7 @@ export function ResultsPage() {
   const queryClient = useQueryClient();
   const { capture } = useTelemetry();
   const { enabled, isLoading: isFlagLoading } = useResultsPage();
-  const isDesktop = useMediaQuery('(min-width: 1024px)', {
+  const isDesktop = useMediaQuery('(min-width: 768px)', {
     initializeWithValue: false,
   });
   const [selectedKey, setSelectedKey] = useState(
@@ -102,8 +113,12 @@ export function ResultsPage() {
   );
   const [showSuggestionComposer, setShowSuggestionComposer] = useState(false);
   const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
+  const [displayedResult, setDisplayedResult] =
+    useState<ResultInboxItem | null>(null);
+  const [showDetailSkeleton, setShowDetailSkeleton] = useState(false);
   const rowRefs = useRef(new Map<string, HTMLButtonElement>());
   const detailHeadingRef = useRef<HTMLHeadingElement>(null);
+  const mainActionRef = useRef<HTMLAnchorElement | HTMLButtonElement>(null);
   const trackedInboxViewRef = useRef(false);
   const listQueryKey = trpc.results.list.queryKey();
   const listQuery = useQuery(
@@ -164,8 +179,21 @@ export function ResultsPage() {
   }, [enabled, isFlagLoading, router]);
 
   const results = listQuery.data ?? EMPTY_RESULTS;
-  const selected =
+  const selectedSummary =
     results.find((result) => resultKey(result) === selectedKey) ?? null;
+  const detailQuery = useQuery(
+    trpc.results.get.queryOptions(
+      {
+        id: selectedSummary?.id ?? EMPTY_RESULT_ID,
+        kind: selectedSummary?.kind ?? 'report',
+      },
+      { enabled: enabled && selectedSummary !== null },
+    ),
+  );
+  const displayedKey = displayedResult ? resultKey(displayedResult) : '';
+  const isDetailTransition =
+    selectedSummary !== null && displayedKey !== selectedKey;
+  const actionableResult = isDetailTransition ? null : displayedResult;
 
   useEffect(() => {
     if (isDesktop && !selectedKey && results[0]) {
@@ -180,6 +208,27 @@ export function ResultsPage() {
     }
   }, [capture, listQuery.isSuccess, results.length]);
 
+  useEffect(() => {
+    if (!selectedSummary || displayedKey === selectedKey) {
+      setShowDetailSkeleton(false);
+      return;
+    }
+
+    setShowDetailSkeleton(false);
+    const timeout = window.setTimeout(
+      () => setShowDetailSkeleton(true),
+      DETAIL_SKELETON_DELAY_MS,
+    );
+    return () => window.clearTimeout(timeout);
+  }, [displayedKey, selectedKey, selectedSummary]);
+
+  useEffect(() => {
+    const next = detailQuery.data;
+    if (!next || resultKey(next) !== selectedKey) return;
+    setDisplayedResult(next);
+    setShowDetailSkeleton(false);
+  }, [detailQuery.data, selectedKey]);
+
   const selectResult = (result: ResultInboxItem) => {
     const key = resultKey(result);
     setSelectedKey(key);
@@ -192,10 +241,13 @@ export function ResultsPage() {
     const params = new URLSearchParams(searchParams.toString());
     params.set('result', key);
     startTransition(() => router.replace(`/results?${params.toString()}`));
-    requestAnimationFrame(() => detailHeadingRef.current?.focus());
+    if (!isDesktop) {
+      requestAnimationFrame(() => detailHeadingRef.current?.focus());
+    }
   };
 
   const clearResult = (result: ResultInboxItem) => {
+    if (isDetailTransition || resultKey(result) !== selectedKey) return;
     const index = results.findIndex(
       (candidate) => resultKey(candidate) === resultKey(result),
     );
@@ -204,6 +256,57 @@ export function ResultsPage() {
     capture('result_cleared', { kind: result.kind, priority: result.priority });
     clearMutation.mutate({ id: result.id, kind: result.kind });
   };
+
+  useEffect(() => {
+    const handleKeyboardNavigation = (event: KeyboardEvent) => {
+      const target = event.target;
+      const element = target instanceof Element ? target : null;
+      const editable =
+        element instanceof HTMLInputElement ||
+        element instanceof HTMLTextAreaElement ||
+        element instanceof HTMLSelectElement ||
+        element?.getAttribute('contenteditable') === 'true';
+      if (editable) return;
+
+      const option = element?.closest('[role="option"]');
+      const ordinaryControl = element?.closest(
+        'a, button:not([role="option"]), [role="button"]',
+      );
+      if (ordinaryControl) return;
+
+      const selectedIndex = results.findIndex(
+        (result) => resultKey(result) === selectedKey,
+      );
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        if (selectedIndex === -1) return;
+        const nextIndex = selectedIndex + (event.key === 'ArrowDown' ? 1 : -1);
+        const next = results[nextIndex];
+        if (!next) return;
+        event.preventDefault();
+        selectResult(next);
+        requestAnimationFrame(() =>
+          rowRefs.current.get(resultKey(next))?.focus(),
+        );
+        return;
+      }
+
+      if (event.repeat || !actionableResult) return;
+      if (event.key === 'Delete') {
+        event.preventDefault();
+        clearResult(actionableResult);
+      } else if (event.key === 'Enter' && !option) {
+        event.preventDefault();
+        mainActionRef.current?.click();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyboardNavigation);
+    return () =>
+      document.removeEventListener('keydown', handleKeyboardNavigation);
+  });
+
+  const primaryAction = actionableResult?.actions[0] ?? null;
+  const secondaryActions = actionableResult?.actions.slice(1) ?? [];
 
   if (isFlagLoading || !enabled || listQuery.isPending) {
     return (
@@ -256,19 +359,20 @@ export function ResultsPage() {
           <ResizablePanel
             id="results-list"
             order={1}
-            defaultSize={34}
-            minSize={25}
-            maxSize={48}
-            className={selected ? 'hidden lg:block' : 'block'}
+            defaultSize={40}
+            minSize={30}
+            maxSize={55}
+            className={selectedSummary ? 'hidden md:block' : 'block'}
           >
             <div
               role="listbox"
               aria-label="Pending automation results"
-              className="h-full overflow-y-auto p-2"
+              className="h-full divide-y divide-background overflow-y-auto"
             >
-              {results.map((result, index) => {
+              {results.map((result) => {
                 const key = resultKey(result);
-                const isSelected = selected && resultKey(selected) === key;
+                const isSelected =
+                  selectedSummary && resultKey(selectedSummary) === key;
                 return (
                   <button
                     key={key}
@@ -279,26 +383,12 @@ export function ResultsPage() {
                     type="button"
                     role="option"
                     aria-selected={Boolean(isSelected)}
-                    className={`mb-1 flex w-full gap-3 rounded-lg p-3 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${
+                    className={`flex w-full gap-3 px-4 py-3 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${
                       isSelected
                         ? 'bg-accent text-accent-foreground'
                         : 'hover:bg-muted/70'
                     }`}
                     onClick={() => selectResult(result)}
-                    onKeyDown={(event) => {
-                      const nextIndex =
-                        event.key === 'ArrowDown'
-                          ? index + 1
-                          : event.key === 'ArrowUp'
-                            ? index - 1
-                            : -1;
-                      if (nextIndex >= 0 && nextIndex < results.length) {
-                        event.preventDefault();
-                        rowRefs.current
-                          .get(resultKey(results[nextIndex]!))
-                          ?.focus();
-                      }
-                    }}
                   >
                     <AutomationAvatar result={result} />
                     <span className="min-w-0 flex-1">
@@ -328,67 +418,146 @@ export function ResultsPage() {
               })}
             </div>
           </ResizablePanel>
-          <ResizableDivider className="hidden lg:flex" />
+          <ResizableDivider className="hidden bg-border md:flex" />
           <ResizablePanel
             id="result-detail"
             order={2}
-            defaultSize={66}
-            minSize={45}
-            className={selected ? 'block' : 'hidden lg:block'}
+            defaultSize={60}
+            minSize={40}
+            className={selectedSummary ? 'block' : 'hidden md:block'}
           >
-            {selected ? (
-              <article className="h-full overflow-y-auto">
-                <div className="mx-auto max-w-3xl px-5 py-6 md:px-8 md:py-8">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="mb-4 -ml-2 lg:hidden"
-                    onClick={() => {
-                      const prior = selectedKey;
-                      setSelectedKey('');
-                      const params = new URLSearchParams(
-                        searchParams.toString(),
-                      );
-                      params.delete('result');
-                      router.replace(
-                        params.size > 0
-                          ? `/results?${params.toString()}`
-                          : '/results',
-                      );
-                      requestAnimationFrame(() =>
-                        rowRefs.current.get(prior)?.focus(),
-                      );
-                    }}
-                  >
-                    <ArrowLeft />
-                    Back to results
-                  </Button>
-                  <div className="flex items-start gap-3">
-                    <AutomationAvatar result={selected} />
-                    <div className="min-w-0 flex-1">
-                      <h2
-                        ref={detailHeadingRef}
-                        tabIndex={-1}
-                        className="text-balance text-2xl font-semibold leading-tight outline-none"
+            {selectedSummary ? (
+              showDetailSkeleton ? (
+                <DetailSkeleton />
+              ) : displayedResult ? (
+                <article
+                  aria-busy={isDetailTransition}
+                  className="flex h-full min-h-0 flex-col"
+                >
+                  <div className="min-h-0 flex-1 overflow-y-auto">
+                    <div className="mx-auto max-w-3xl px-5 py-6 md:px-8 md:py-8">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="mb-4 -ml-2 md:hidden"
+                        onClick={() => {
+                          const prior = selectedKey;
+                          setSelectedKey('');
+                          const params = new URLSearchParams(
+                            searchParams.toString(),
+                          );
+                          params.delete('result');
+                          router.replace(
+                            params.size > 0
+                              ? `/results?${params.toString()}`
+                              : '/results',
+                          );
+                          requestAnimationFrame(() =>
+                            rowRefs.current.get(prior)?.focus(),
+                          );
+                        }}
                       >
-                        {selected.headline}
-                      </h2>
-                      <p className="mt-2 text-base leading-relaxed text-muted-foreground">
-                        {selected.decisionContext}
-                      </p>
-                      <p className="mt-3 text-sm text-muted-foreground">
-                        {selected.automationName} ·{' '}
-                        {formatDistanceToNowCompact(selected.createdAt, {
-                          addSuffix: true,
-                        })}
-                      </p>
+                        <ArrowLeft />
+                        Back to results
+                      </Button>
+                      <div className="flex items-start gap-3">
+                        <AutomationAvatar result={displayedResult} />
+                        <div className="min-w-0 flex-1">
+                          <h2
+                            ref={detailHeadingRef}
+                            tabIndex={-1}
+                            className="text-balance text-xl font-semibold leading-tight outline-none"
+                          >
+                            {displayedResult.headline}
+                          </h2>
+                          <p className="mt-2 text-base leading-relaxed text-muted-foreground">
+                            {displayedResult.decisionContext}
+                          </p>
+                          <p className="mt-3 text-sm text-muted-foreground">
+                            {displayedResult.automationName} ·{' '}
+                            {formatDistanceToNowCompact(
+                              displayedResult.createdAt,
+                              { addSuffix: true },
+                            )}
+                          </p>
+                        </div>
+                      </div>
+
+                      {showSuggestionComposer &&
+                      actionableResult?.kind === 'suggestion' ? (
+                        <div className="mt-6 rounded-xl border bg-card p-4">
+                          <NewTaskForm
+                            key={actionableResult.id}
+                            animate={false}
+                            initialPrompt={
+                              actionableResult.actions.find(
+                                (action) => action.kind === 'start_suggestion',
+                              )?.initialPrompt ?? ''
+                            }
+                            placeholder="Add details"
+                            textareaMaxHeight={260}
+                            onTaskStarted={() => {
+                              capture('suggestion_start_succeeded', {
+                                kind: actionableResult.kind,
+                              });
+                              acceptSuggestionMutation.mutate({
+                                id: actionableResult.id,
+                              });
+                            }}
+                          />
+                        </div>
+                      ) : null}
+
+                      <div className="mt-7 max-w-none pl-10">
+                        <MessageResponse className="break-words text-sm **:data-[streamdown='heading-1']:text-xl! **:data-[streamdown='heading-2']:text-base! **:data-[streamdown='heading-3']:text-base!">
+                          {displayedResult.content}
+                        </MessageResponse>
+                      </div>
                     </div>
                   </div>
 
-                  <div className="mt-6 flex flex-wrap gap-2 border-y py-4">
-                    {selected.actions.map((action) =>
+                  <div className="flex shrink-0 flex-wrap gap-2 border-t bg-card px-5 py-4 md:px-8">
+                    {primaryAction?.kind === 'navigate' ? (
+                      <Button asChild>
+                        <Link
+                          ref={mainActionRef as Ref<HTMLAnchorElement>}
+                          href={primaryAction.href}
+                          target={primaryAction.external ? '_blank' : undefined}
+                          rel={
+                            primaryAction.external
+                              ? 'noopener noreferrer'
+                              : undefined
+                          }
+                          onClick={() =>
+                            capture('result_navigation_opened', {
+                              kind: actionableResult!.kind,
+                              action: primaryAction.action,
+                            })
+                          }
+                        >
+                          {primaryAction.label}
+                        </Link>
+                      </Button>
+                    ) : primaryAction ? (
+                      <Button
+                        ref={mainActionRef as Ref<HTMLButtonElement>}
+                        onClick={() => {
+                          capture('suggestion_start_requested', {
+                            kind: actionableResult!.kind,
+                          });
+                          setShowSuggestionComposer(true);
+                        }}
+                      >
+                        {primaryAction.label}
+                      </Button>
+                    ) : null}
+                    {secondaryActions.map((action) =>
                       action.kind === 'navigate' ? (
-                        <Button key={`${action.action}:${action.href}`} asChild>
+                        <Button
+                          key={`${action.action}:${action.href}`}
+                          variant="outline"
+                          asChild
+                        >
                           <Link
                             href={action.href}
                             target={action.external ? '_blank' : undefined}
@@ -399,69 +568,44 @@ export function ResultsPage() {
                             }
                             onClick={() =>
                               capture('result_navigation_opened', {
-                                kind: selected.kind,
+                                kind: actionableResult!.kind,
                                 action: action.action,
                               })
                             }
                           >
                             {action.label}
-                            {action.external ? <ExternalLink /> : null}
                           </Link>
                         </Button>
                       ) : (
                         <Button
                           key={action.action}
+                          variant="outline"
                           onClick={() => {
                             capture('suggestion_start_requested', {
-                              kind: selected.kind,
+                              kind: actionableResult!.kind,
                             });
                             setShowSuggestionComposer(true);
                           }}
                         >
-                          <Play />
                           {action.label}
                         </Button>
                       ),
                     )}
                     <Button
                       variant="outline"
-                      disabled={clearMutation.isPending}
-                      onClick={() => clearResult(selected)}
+                      disabled={clearMutation.isPending || !actionableResult}
+                      onClick={() =>
+                        actionableResult && clearResult(actionableResult)
+                      }
                     >
                       <X />
                       Clear
                     </Button>
                   </div>
-
-                  {showSuggestionComposer && selected.kind === 'suggestion' ? (
-                    <div className="mt-6 rounded-xl border bg-card p-4">
-                      <NewTaskForm
-                        key={selected.id}
-                        animate={false}
-                        initialPrompt={
-                          selected.actions.find(
-                            (action) => action.kind === 'start_suggestion',
-                          )?.initialPrompt ?? ''
-                        }
-                        placeholder="Add details"
-                        textareaMaxHeight={260}
-                        onTaskStarted={() => {
-                          capture('suggestion_start_succeeded', {
-                            kind: selected.kind,
-                          });
-                          acceptSuggestionMutation.mutate({ id: selected.id });
-                        }}
-                      />
-                    </div>
-                  ) : null}
-
-                  <div className="prose prose-neutral mt-7 max-w-none dark:prose-invert">
-                    <MessageResponse>{selected.content}</MessageResponse>
-                  </div>
-                </div>
-              </article>
+                </article>
+              ) : null
             ) : (
-              <div className="hidden h-full items-center justify-center text-sm text-muted-foreground lg:flex">
+              <div className="hidden h-full items-center justify-center text-sm text-muted-foreground md:flex">
                 Select a result to read it.
               </div>
             )}

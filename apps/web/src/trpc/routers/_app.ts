@@ -442,6 +442,7 @@ import {
   clearResultsCommand,
   getUnreadResultCountCommand,
   getPendingResultCountCommand,
+  getResultCommand,
   clearResultCommand,
   acceptSuggestionResultCommand,
   listResultsCommand,
@@ -3142,6 +3143,14 @@ export const appRouter = createRouter({
     list: protectedProcedure.query(({ ctx: { auth } }) =>
       listResultsCommand(auth),
     ),
+    get: protectedProcedure
+      .input(
+        z.object({
+          id: z.string().uuid(),
+          kind: z.enum(['report', 'suggestion']),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) => getResultCommand(auth, input)),
     unreadCount: protectedProcedure.query(({ ctx: { auth } }) =>
       getUnreadResultCountCommand(auth),
     ),

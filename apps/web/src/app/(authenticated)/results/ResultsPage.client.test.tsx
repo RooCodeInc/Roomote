@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -14,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   clear: vi.fn(),
   clearOne: vi.fn(),
   list: vi.fn(),
+  get: vi.fn(),
   replace: vi.fn(),
   isDesktop: true,
 }));
@@ -37,6 +39,13 @@ const results: ResultInboxItem[] = [
         label: 'Open task',
         href: '/task/task-1',
         external: false,
+      },
+      {
+        kind: 'navigate',
+        action: 'open_pr',
+        label: 'Open pull request',
+        href: 'https://github.com/RooCodeInc/Roomote/pull/1',
+        external: true,
       },
     ],
   },
@@ -113,6 +122,12 @@ vi.mock('@/trpc/client', () => ({
           queryFn: mocks.list,
         }),
       },
+      get: {
+        queryOptions: (input: { id: string; kind: string }) => ({
+          queryKey: ['results', 'get', input],
+          queryFn: () => mocks.get(input),
+        }),
+      },
       pendingCount: { queryKey: () => ['results', 'pending-count'] },
       unreadCount: { queryKey: () => ['results', 'unread-count'] },
       clearOne: {
@@ -156,6 +171,12 @@ describe('ResultsPage', () => {
     mocks.isDesktop = true;
     currentResults = results;
     mocks.list.mockImplementation(async () => currentResults);
+    mocks.get.mockImplementation(
+      async (input: { id: string; kind: string }) =>
+        currentResults.find(
+          (result) => result.id === input.id && result.kind === input.kind,
+        ) ?? null,
+    );
     mocks.clearOne.mockImplementation(
       async (variables: { id: string; kind: string }) => {
         currentResults = currentResults.filter(
@@ -199,6 +220,14 @@ describe('ResultsPage', () => {
       '/task/task-1',
     );
     expect(
+      screen.getByRole('link', { name: 'Open task' }).querySelector('svg'),
+    ).toBeNull();
+    expect(
+      screen
+        .getByRole('link', { name: 'Open pull request' })
+        .querySelector('svg'),
+    ).toBeNull();
+    expect(
       screen.queryByRole('button', { name: 'Start investigation' }),
     ).not.toBeInTheDocument();
   });
@@ -216,7 +245,7 @@ describe('ResultsPage', () => {
     ).not.toBeInTheDocument();
     fireEvent.click(row);
     expect(
-      screen.getByRole('heading', {
+      await screen.findByRole('heading', {
         name: 'Three dependency risks need review',
       }),
     ).toBeInTheDocument();
@@ -243,7 +272,7 @@ describe('ResultsPage', () => {
       await screen.findByRole('option', { name: /Simplify the worker/ }),
     );
     fireEvent.click(
-      screen.getByRole('button', { name: 'Start investigation' }),
+      await screen.findByRole('button', { name: 'Start investigation' }),
     );
     const prompt = screen.getByLabelText('Suggestion prompt');
     expect(prompt).toHaveValue(
@@ -266,5 +295,110 @@ describe('ResultsPage', () => {
     mocks.list.mockResolvedValue([]);
     renderPage();
     expect(await screen.findByText('No pending results')).toBeInTheDocument();
+  });
+
+  it('retains prior detail for 500ms, hides stale actions, then swaps when ready', async () => {
+    let resolveSuggestion!: (result: ResultInboxItem) => void;
+    const delayedSuggestion = new Promise<ResultInboxItem>((resolve) => {
+      resolveSuggestion = resolve;
+    });
+    mocks.get.mockImplementation((input: { id: string }) =>
+      input.id === results[1]!.id
+        ? delayedSuggestion
+        : Promise.resolve(results[0]),
+    );
+    renderPage();
+    await screen.findByText('Full report');
+
+    fireEvent.click(
+      screen.getByRole('option', { name: /Simplify the worker/ }),
+    );
+    expect(screen.getByText('Full report')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Open task' })).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: 'Start investigation' }),
+    ).toBeNull();
+
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 510));
+    });
+    expect(screen.queryByText('Full report')).toBeNull();
+
+    await act(async () => {
+      resolveSuggestion(results[1]!);
+      await delayedSuggestion;
+    });
+    expect(
+      await screen.findByRole('heading', { name: 'Simplify the worker' }),
+    ).toBeInTheDocument();
+  });
+
+  it('ignores a stale detail response after selection returns to another row', async () => {
+    let resolveSuggestion!: (result: ResultInboxItem) => void;
+    const delayedSuggestion = new Promise<ResultInboxItem>((resolve) => {
+      resolveSuggestion = resolve;
+    });
+    mocks.get.mockImplementation((input: { id: string }) =>
+      input.id === results[1]!.id
+        ? delayedSuggestion
+        : Promise.resolve(results[0]),
+    );
+    renderPage();
+    await screen.findByText('Full report');
+    fireEvent.click(
+      screen.getByRole('option', { name: /Simplify the worker/ }),
+    );
+    fireEvent.click(
+      screen.getByRole('option', {
+        name: /Three dependency risks need review/,
+      }),
+    );
+    await act(async () => {
+      resolveSuggestion(results[1]!);
+      await delayedSuggestion;
+    });
+    expect(
+      screen.getByRole('heading', {
+        name: 'Three dependency risks need review',
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('heading', { name: 'Simplify the worker' }),
+    ).toBeNull();
+  });
+
+  it('navigates rows with arrows and activates the current main action with Enter', async () => {
+    renderPage();
+    await screen.findByText('Full report');
+    const first = screen.getByRole('option', {
+      name: /Three dependency risks need review/,
+    });
+    first.focus();
+    fireEvent.keyDown(first, { key: 'ArrowDown' });
+
+    const second = screen.getByRole('option', { name: /Simplify the worker/ });
+    await waitFor(() => expect(second).toHaveFocus());
+    expect(second).toHaveAttribute('aria-selected', 'true');
+    await screen.findByRole('button', { name: 'Start investigation' });
+
+    fireEvent.keyDown(document.body, { key: 'Enter' });
+    const prompt = await screen.findByLabelText('Suggestion prompt');
+    prompt.focus();
+    fireEvent.keyDown(prompt, { key: 'Delete' });
+    fireEvent.keyDown(prompt, { key: 'Enter' });
+    expect(mocks.clearOne).not.toHaveBeenCalled();
+    expect(mocks.acceptSuggestion).not.toHaveBeenCalled();
+  });
+
+  it('clears the current result with Delete without double activation', async () => {
+    renderPage();
+    await screen.findByText('Full report');
+    fireEvent.keyDown(document.body, { key: 'Delete', repeat: false });
+    fireEvent.keyDown(document.body, { key: 'Delete', repeat: true });
+    await waitFor(() => expect(mocks.clearOne).toHaveBeenCalledTimes(1));
+    expect(mocks.clearOne).toHaveBeenCalledWith(
+      { id: results[0]!.id, kind: 'report' },
+      expect.anything(),
+    );
   });
 });
