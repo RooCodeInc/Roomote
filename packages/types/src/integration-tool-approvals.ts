@@ -10,6 +10,10 @@ import { z } from 'zod';
  * tool. `ask` pauses the call behind a requester decision; `reject` blocks it
  * outright. Policies never widen access: the existing provider, actor, and
  * admin authorization ceilings decide which tools are mounted at all.
+ *
+ * A user can also keep personal policies for their own Sessions. Those use
+ * the same modes and only ever tighten: the stricter of the deployment and
+ * personal mode applies, so a personal `allow` never loosens an admin `ask`.
  */
 export const INTEGRATION_TOOL_POLICY_MODES = [
   'allow',
@@ -114,8 +118,27 @@ export type IntegrationToolSessionOverrideUpsert = z.infer<
   typeof integrationToolSessionOverrideUpsertSchema
 >;
 
+const INTEGRATION_TOOL_POLICY_MODE_STRICTNESS: Record<
+  IntegrationToolPolicyMode,
+  number
+> = { allow: 0, ask: 1, reject: 2 };
+
+/** The stricter of a tool's deployment policy and the requester's own. */
+export function resolveStricterIntegrationToolPolicyMode(
+  deploymentMode: IntegrationToolPolicyMode | undefined,
+  userMode: IntegrationToolPolicyMode | undefined,
+): IntegrationToolPolicyMode | undefined {
+  if (!deploymentMode) return userMode;
+  if (!userMode) return deploymentMode;
+  return INTEGRATION_TOOL_POLICY_MODE_STRICTNESS[userMode] >
+    INTEGRATION_TOOL_POLICY_MODE_STRICTNESS[deploymentMode]
+    ? userMode
+    : deploymentMode;
+}
+
 /**
- * The mode a tool actually runs under in one session. A deployment `reject`
+ * The mode a tool actually runs under in one session. `policyMode` is the
+ * stricter of the deployment and personal policy. A deployment `reject`
  * always wins; otherwise the session override, then the deployment policy,
  * then the default allow.
  */

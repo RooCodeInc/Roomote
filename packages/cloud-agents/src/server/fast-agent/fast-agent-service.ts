@@ -226,7 +226,7 @@ import {
 } from './fast-agent-tool-policy';
 import {
   createFastAgentToolApprovalBridge,
-  resolveFastAgentToolApprovalSessionId,
+  resolveFastAgentToolApprovalSession,
   integrationToolApprovalRulesToConfig,
   resolveFastAgentToolApprovalRules,
   shouldDisposeInstanceForToolApprovalRules,
@@ -3807,12 +3807,15 @@ export async function answerFastAgentQuestion({
     // Undefined while the experiment is off, which keeps ungated behavior.
     // Approvals and session overrides are keyed on the unified Session, not
     // the Fast conversation; resolve it once for the rules and the bridge.
-    const toolApprovalSessionId = await resolveFastAgentToolApprovalSessionId(
-      session.id,
-    );
+    const {
+      sessionId: toolApprovalSessionId,
+      ownerUserId: toolApprovalOwnerUserId,
+      deciderUserId: toolApprovalDeciderUserId,
+    } = await resolveFastAgentToolApprovalSession(session.id, userId);
     const toolApprovalRules = await resolveFastAgentToolApprovalRules({
       integrations: availableIntegrations,
       sessionId: toolApprovalSessionId,
+      ownerUserId: toolApprovalOwnerUserId,
     });
     const system = buildFastAgentSystemPrompt({
       availableEnvironments,
@@ -6358,7 +6361,8 @@ export async function answerFastAgentQuestion({
                 const toolApprovalBridge = toolApprovalRules
                   ? createFastAgentToolApprovalBridge({
                       sessionId: toolApprovalSessionId,
-                      userId,
+                      // The Session owner decides, even on a participant's turn.
+                      userId: toolApprovalDeciderUserId,
                       integrations: availableIntegrations,
                       signal: promptSignal,
                       ...(conversation.surface === 'slack' ||

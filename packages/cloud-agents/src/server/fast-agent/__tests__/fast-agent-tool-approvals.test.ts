@@ -15,6 +15,7 @@ vi.mock('@roomote/db/server', () => ({
   isDeploymentExperimentEnabled: vi.fn(async () => true),
   listIntegrationToolPolicies: vi.fn(async () => []),
   listIntegrationToolSessionOverrides: vi.fn(async () => []),
+  listIntegrationToolUserPolicies: vi.fn(async () => []),
   markIntegrationToolApprovalConsumed: vi.fn(async () => true),
 }));
 
@@ -28,6 +29,7 @@ import {
   isDeploymentExperimentEnabled,
   listIntegrationToolPolicies,
   listIntegrationToolSessionOverrides,
+  listIntegrationToolUserPolicies,
   markIntegrationToolApprovalConsumed,
 } from '@roomote/db/server';
 
@@ -38,8 +40,9 @@ import {
   extractApprovalCallArgs,
   hashIntegrationToolApprovalRules,
   integrationToolApprovalRulesToConfig,
+  mergeIntegrationToolPolicies,
   resolveFastAgentToolApprovalRules,
-  resolveFastAgentToolApprovalSessionId,
+  resolveFastAgentToolApprovalSession,
   shouldDisposeInstanceForToolApprovalRules,
 } from '../fast-agent-tool-approvals';
 import type { FastAgentIntegration } from '../fast-agent-integration-broker';
@@ -376,6 +379,49 @@ describe('resolveFastAgentToolApprovalRules', () => {
     ]);
   });
 
+  it("tightens with the requester's personal policies and never loosens a deployment one", async () => {
+    const policy = (toolName: string, mode: 'allow' | 'ask' | 'reject') => ({
+      policyId: `${toolName}-${mode}`,
+      integrationId: 'mock-slack',
+      toolName,
+      mode,
+      updatedAt: '',
+      createdAt: '',
+    });
+    vi.mocked(listIntegrationToolPolicies).mockResolvedValueOnce([
+      policy('delete_channel', 'reject'),
+      policy('post_message', 'ask'),
+    ]);
+    vi.mocked(listIntegrationToolUserPolicies).mockResolvedValueOnce([
+      policy('delete_channel', 'ask'),
+      policy('post_message', 'reject'),
+      policy('read_channel', 'ask'),
+    ]);
+    const resolved = await resolveFastAgentToolApprovalRules({
+      integrations,
+      sessionId: 'session-id',
+      ownerUserId: 'owner-id',
+    });
+    // The owner is the only one who can decide, so theirs are the personal
+    // policies that apply, whoever sent the turn.
+    expect(listIntegrationToolUserPolicies).toHaveBeenCalledWith('owner-id');
+    expect(
+      Object.fromEntries(
+        resolved!.rules.map((rule) => [rule.permission, rule.action]),
+      ),
+    ).toEqual({
+      [codeModeToolKey('mock-slack', 'delete_channel')]: 'deny',
+      [codeModeToolKey('mock-slack', 'post_message')]: 'deny',
+      [codeModeToolKey('mock-slack', 'read_channel')]: 'ask',
+    });
+  });
+
+  it('reads no personal policies without a Session owner', async () => {
+    await resolveFastAgentToolApprovalRules({ integrations });
+    expect(listIntegrationToolUserPolicies).not.toHaveBeenCalled();
+    expect(mergeIntegrationToolPolicies([], [])).toEqual([]);
+  });
+
   it('is inactive without the experiment', async () => {
     vi.mocked(isDeploymentExperimentEnabled).mockResolvedValueOnce(false);
     expect(
@@ -589,14 +635,20 @@ describe('extractApprovalCallArgs', () => {
   });
 });
 
-describe('resolveFastAgentToolApprovalSessionId', () => {
+describe('resolveFastAgentToolApprovalSession', () => {
   it('records approvals under the unified Session bound to the Fast conversation', async () => {
     vi.mocked(getSessionForFastConversation).mockResolvedValueOnce({
       id: 'unified-session',
+      ownerUserId: 'owner-1',
     } as never);
-    expect(await resolveFastAgentToolApprovalSessionId('conversation')).toBe(
-      'unified-session',
-    );
+    // A participant sent the turn; the owner is still the one who decides.
+    expect(
+      await resolveFastAgentToolApprovalSession('conversation', 'participant'),
+    ).toEqual({
+      sessionId: 'unified-session',
+      ownerUserId: 'owner-1',
+      deciderUserId: 'owner-1',
+    });
     expect(getSessionForFastConversation).toHaveBeenCalledWith(
       expect.anything(),
       'conversation',
@@ -605,9 +657,13 @@ describe('resolveFastAgentToolApprovalSessionId', () => {
 
   it('falls back to the conversation id so an unbound ask fails closed', async () => {
     vi.mocked(getSessionForFastConversation).mockResolvedValueOnce(null);
-    expect(await resolveFastAgentToolApprovalSessionId('conversation')).toBe(
-      'conversation',
-    );
+    expect(
+      await resolveFastAgentToolApprovalSession('conversation', 'acting-user'),
+    ).toEqual({
+      sessionId: 'conversation',
+      ownerUserId: undefined,
+      deciderUserId: 'acting-user',
+    });
   });
 });
 

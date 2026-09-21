@@ -152,6 +152,7 @@ export {
   serviceCredentialApprovals,
   serviceCredentialAudit,
   integrationToolPolicies,
+  integrationToolUserPolicies,
   integrationToolApprovalRequests,
   integrationToolSessionOverrides,
   credentialEgressWorkloads,

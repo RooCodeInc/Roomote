@@ -42,6 +42,7 @@ const {
   approvals: {
     experimentEnabled: false,
     listEnabled: [] as boolean[],
+    scopes: [] as string[],
     setMode: vi.fn(),
   },
   state: {
@@ -78,8 +79,12 @@ vi.mock('@/hooks/useIntegrationToolApprovalsExperiment', () => ({
 }));
 
 vi.mock('@/hooks/useIntegrationToolPolicies', () => ({
-  useIntegrationToolPolicies: (options: { enabled?: boolean }) => {
+  useIntegrationToolPolicies: (options: {
+    enabled?: boolean;
+    scope?: string;
+  }) => {
     approvals.listEnabled.push(options.enabled ?? true);
+    approvals.scopes.push(options.scope ?? 'deployment');
     return {
       modes: new Map([[JSON.stringify(['internal-tools', 'search']), 'ask']]),
       isUpdating: false,
@@ -858,6 +863,41 @@ describe('personal MCP servers in Personal settings', () => {
 
     expect(openKeyDialogMock).toHaveBeenCalledTimes(1);
     expect(createMock).not.toHaveBeenCalled();
+  });
+
+  it('lets a member set approval modes on their own server under the personal scope', async () => {
+    state.servers = [buildServer({ visibility: 'owner' })];
+    state.tools = [{ name: 'search', description: null, enabled: true }];
+    approvals.experimentEnabled = true;
+    approvals.scopes.length = 0;
+    approvals.setMode.mockClear();
+    try {
+      renderSection();
+      fireEvent.click(
+        await screen.findByRole('button', {
+          name: 'Manage internal-tools tools',
+        }),
+      );
+      const control = within(
+        await screen.findByRole('radiogroup', {
+          name: 'Approval mode for search',
+        }),
+      );
+      fireEvent.click(control.getByRole('radio', { name: 'Reject' }));
+      expect(approvals.setMode).toHaveBeenCalledWith(
+        'internal-tools',
+        'search',
+        'reject',
+      );
+      expect(approvals.scopes).toContain('personal');
+      expect(approvals.scopes).not.toContain('deployment');
+      expect(
+        screen.getByText(/These apply to your own sessions only/),
+      ).toBeInTheDocument();
+    } finally {
+      approvals.experimentEnabled = false;
+      state.tools = [];
+    }
   });
 
   it('lists a private server with its manage actions', async () => {

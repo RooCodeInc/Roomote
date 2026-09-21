@@ -14,11 +14,13 @@ import {
   isDeploymentExperimentEnabled,
   listIntegrationToolPolicies,
   listIntegrationToolSessionOverrides,
+  listIntegrationToolUserPolicies,
   markIntegrationToolApprovalConsumed,
 } from '@roomote/db/server';
 import {
   integrationToolPolicyKey,
   resolveEffectiveIntegrationToolMode,
+  resolveStricterIntegrationToolPolicyMode,
   type IntegrationToolApprovalMetadata,
   type IntegrationToolPolicyMetadata,
   type IntegrationToolSessionOverrideMetadata,
@@ -84,6 +86,32 @@ function listMountedIntegrationTools(
       key: codeModeToolKey(serverName, tool.name),
     }));
   });
+}
+
+/**
+ * Layer the Session owner's personal policies on the deployment ones. The
+ * stricter mode wins per tool, so a personal policy can gate or block calls
+ * in the owner's Sessions but never loosen what an admin configured.
+ */
+export function mergeIntegrationToolPolicies(
+  deploymentPolicies: IntegrationToolPolicyMetadata[],
+  userPolicies: IntegrationToolPolicyMetadata[],
+): IntegrationToolPolicyMetadata[] {
+  const merged = new Map(
+    deploymentPolicies.map((policy) => [
+      integrationToolPolicyKey(policy.integrationId, policy.toolName),
+      policy,
+    ]),
+  );
+  for (const policy of userPolicies) {
+    const key = integrationToolPolicyKey(policy.integrationId, policy.toolName);
+    const mode = resolveStricterIntegrationToolPolicyMode(
+      merged.get(key)?.mode,
+      policy.mode,
+    );
+    if (mode === policy.mode) merged.set(key, policy);
+  }
+  return [...merged.values()];
 }
 
 /**
@@ -262,37 +290,59 @@ export async function resolveFastAgentToolApprovalRules(input: {
   integrations: FastAgentIntegration[];
   /** The Session whose requester-owned overrides layer on the policies. */
   sessionId?: string;
+  /** The Session owner, whose personal policies tighten the deployment ones. */
+  ownerUserId?: string;
 }): Promise<{ rules: PermissionRuleset; hash: string } | undefined> {
   const enabled = await isDeploymentExperimentEnabled(
     'integrationToolApprovals',
   );
   if (!enabled) return undefined;
-  const [policies, sessionOverrides] = await Promise.all([
+  const [policies, userPolicies, sessionOverrides] = await Promise.all([
     listIntegrationToolPolicies(),
+    input.ownerUserId
+      ? listIntegrationToolUserPolicies(input.ownerUserId)
+      : Promise.resolve([]),
     input.sessionId
       ? listIntegrationToolSessionOverrides(input.sessionId)
       : Promise.resolve([]),
   ]);
   const rules = buildIntegrationToolApprovalRules(
     input.integrations,
-    policies,
+    mergeIntegrationToolPolicies(policies, userPolicies),
     sessionOverrides,
   );
   return { rules, hash: hashIntegrationToolApprovalRules(rules) };
 }
 
 /**
- * The id approvals are recorded and decided under. Approval rows, their
+ * The Session approvals are recorded and decided under. Approval rows, their
  * ownership check, and the requester's decision route are all keyed on the
  * unified Session, not the Fast conversation that runs the turn. Without a
  * bound Session there is nowhere for the requester to decide, so the
  * conversation id is returned and the ownership check fails the ask closed.
+ *
+ * Only the Session owner can decide an approval, so approvals are recorded
+ * for the owner even when a participant sent the turn, and the owner is
+ * whose personal policies apply: otherwise a participant's turn in a shared
+ * Session would pause a call nobody can approve. Without a bound owner the
+ * acting user stands in as the decider, and the ownership check fails the
+ * ask closed.
  */
-export async function resolveFastAgentToolApprovalSessionId(
+export async function resolveFastAgentToolApprovalSession(
   fastConversationId: string,
-): Promise<string> {
+  actingUserId: string,
+): Promise<{
+  sessionId: string;
+  ownerUserId: string | undefined;
+  deciderUserId: string;
+}> {
   const session = await getSessionForFastConversation(db, fastConversationId);
-  return session?.id ?? fastConversationId;
+  const ownerUserId = session?.ownerUserId ?? undefined;
+  return {
+    sessionId: session?.id ?? fastConversationId,
+    ownerUserId,
+    deciderUserId: ownerUserId ?? actingUserId,
+  };
 }
 
 export function createFastAgentToolApprovalBridge(input: {

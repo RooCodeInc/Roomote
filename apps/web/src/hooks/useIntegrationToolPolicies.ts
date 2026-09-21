@@ -12,22 +12,30 @@ import { integrationToolPolicyKey } from '@roomote/types';
 import { useTRPC } from '@/trpc/client';
 
 /**
- * Deployment-wide per-tool approval policies (`integrationToolApprovals`
+ * Per-tool approval policies (`integrationToolApprovals`
  * experiment). The list endpoint is admin-only server side, so callers gate
  * this query behind admin-only, open surfaces — for example the integration
  * tool management dialog only enables it while open for an admin with the
  * experiment on. Changes save immediately and take effect from the next
  * session turn.
+ *
+ * `scope: 'personal'` reads and writes the caller's own policies instead,
+ * which any user can manage and which only tighten the deployment ones.
  */
 export function useIntegrationToolPolicies(
-  options: { enabled?: boolean } = {},
+  options: { enabled?: boolean; scope?: 'deployment' | 'personal' } = {},
 ) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
+  const personal = options.scope === 'personal';
+  const list = personal
+    ? trpc.integrationToolPolicies.listPersonal
+    : trpc.integrationToolPolicies.list;
+  const set = personal
+    ? trpc.integrationToolPolicies.setPersonal
+    : trpc.integrationToolPolicies.set;
   const listQuery = useQuery(
-    trpc.integrationToolPolicies.list.queryOptions(undefined, {
-      enabled: options.enabled ?? true,
-    }),
+    list.queryOptions(undefined, { enabled: options.enabled ?? true }),
   );
 
   const modes = new Map(
@@ -38,12 +46,9 @@ export function useIntegrationToolPolicies(
   );
 
   const setPolicy = useMutation(
-    trpc.integrationToolPolicies.set.mutationOptions({
+    set.mutationOptions({
       onSuccess: (result) => {
-        queryClient.setQueryData(
-          trpc.integrationToolPolicies.list.queryKey(),
-          result,
-        );
+        queryClient.setQueryData(list.queryKey(), result);
       },
       onError: () => {
         toast.error('Failed to update the tool approval policy.');
@@ -69,9 +74,7 @@ export function useIntegrationToolPolicies(
       }
     },
     onSettled: () =>
-      queryClient.invalidateQueries({
-        queryKey: trpc.integrationToolPolicies.list.queryKey(),
-      }),
+      queryClient.invalidateQueries({ queryKey: list.queryKey() }),
   });
 
   return {
