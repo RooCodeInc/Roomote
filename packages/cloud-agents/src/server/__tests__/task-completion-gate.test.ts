@@ -123,7 +123,6 @@ describe('evaluateTaskCompletionGate', () => {
         c1: {
           command: 'pnpm vitest run src/guard.test.ts',
           exit_code: 0,
-          ran_before_later_edit: false,
           output_tail: 'Tests  12 passed (12)',
         },
       },
@@ -188,6 +187,32 @@ describe('evaluateTaskCompletionGate', () => {
     expect(mockEvaluateDecisionModel.mock.calls[0]![0].state).toMatchObject({
       request: 'Remove the duplicate-call guard.',
       follow_ups: '',
+    });
+  });
+
+  it('leaves out a validation run that predates the last source edit', async () => {
+    await evaluateTaskCompletionGate({
+      taskId: 'task-1',
+      check: {
+        ...check,
+        commands: [
+          { ...check.commands[0]!, ranBeforeLaterEdit: true },
+          {
+            command: 'git status --short',
+            exitCode: 0,
+            outputTail: ' M src/guard.ts',
+            ranBeforeLaterEdit: false,
+          },
+        ],
+      },
+    });
+
+    expect(mockEvaluateDecisionModel.mock.calls[0]![0].state.commands).toEqual({
+      c1: {
+        command: 'git status --short',
+        exit_code: 0,
+        output_tail: ' M src/guard.ts',
+      },
     });
   });
 
