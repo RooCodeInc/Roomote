@@ -78,7 +78,6 @@ import {
   getActiveRecipeVerificationTaskId,
   inArray,
   isBrainEnabled,
-  isDeploymentExperimentEnabled,
   isPrivateSessionsExperimentEnabled,
   isNull,
   markSessionGoalForConversation,
@@ -3551,9 +3550,6 @@ export async function answerFastAgentQuestion({
       currentSessionPrivacy === 'private'
         ? await isPrivateSessionsExperimentEnabled()
         : false;
-    const codeModeIntegrationsEnabled = await isDeploymentExperimentEnabled(
-      'codeModeIntegrations',
-    );
     availableIntegrations = selectFastRoomoteChannelTools({
       integrations: discoveredIntegrations,
       conversation,
@@ -3816,7 +3812,6 @@ export async function answerFastAgentQuestion({
     // Colliding sanitized server names keep the classic dispatcher at
     // runtime; prompt, config mounting, and the lease must all agree.
     const codeModeIntegrationsEffective =
-      codeModeIntegrationsEnabled &&
       !hasFastAgentCodeModeServerNameCollision(availableIntegrations);
     const system = buildFastAgentSystemPrompt({
       availableEnvironments,
@@ -3846,7 +3841,7 @@ export async function answerFastAgentQuestion({
       setupSession,
       serviceCredentialToolsEnabled: currentUser.serviceCredentialToolsEnabled,
       addRemoteMcpEnabled: !platformEvent,
-      codeModeIntegrationsEnabled: codeModeIntegrationsEffective,
+      codeModeIntegrationsActive: codeModeIntegrationsEffective,
       personalizationContext,
       globalAgentInstructions: agentBehaviorSettings?.globalAgentInstructions,
       workspaceRoutingRules:
@@ -6200,7 +6195,6 @@ export async function answerFastAgentQuestion({
             serviceCredentialPrepareEnabled:
               currentUser.serviceCredentialToolsEnabled && !platformEvent,
             addRemoteMcpEnabled: !platformEvent,
-            codeModeIntegrationsEnabled: codeModeIntegrationsEffective,
           },
         );
         codeModeIntegrationsActiveForTurn =
@@ -6391,7 +6385,6 @@ export async function answerFastAgentQuestion({
                     {
                       directory: nativeRuntime.directory,
                       env: nativeRuntime.env,
-                      codeModeIntegrations: codeModeIntegrationsEffective,
                       onServerLeased: (url) => {
                         codeModeOpenCodeServerUrl = url;
                       },

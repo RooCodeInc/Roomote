@@ -50,7 +50,9 @@ describe('getFastAgentNativeAcpKind', () => {
     expect(filter[FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools]).toBe(
       true,
     );
-    expect(filter[FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool]).toBe(true);
+    expect(filter[FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool]).toBe(
+      false,
+    );
     expect(
       FAST_AGENT_SUBAGENT_TOOL_FILTER[
         FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools
@@ -63,24 +65,24 @@ describe('getFastAgentNativeAcpKind', () => {
     ).toBe(true);
   });
 
-  it('keeps the dispatcher path unchanged when the code-mode experiment is off', () => {
+  it('always exposes code mode and retires the generic dispatcher', () => {
     const filter = buildFastAgentToolFilter(['github'], {
       surface: 'web',
-      codeModeIntegrationsEnabled: false,
     });
 
-    expect(filter.execute).not.toBe(true);
-    expect(filter[FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool]).toBe(true);
+    expect(filter.execute).toBe(true);
+    expect(filter[FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool]).toBe(
+      false,
+    );
     expect(filter[FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools]).toBe(
       true,
     );
     expect(filter['github_*']).toBe(true);
   });
 
-  it('retires call_integration_tool and exposes execute when the experiment is on', () => {
+  it('keeps code mode filtering consistent for every integration', () => {
     const filter = buildFastAgentToolFilter(['github'], {
       surface: 'web',
-      codeModeIntegrationsEnabled: true,
     });
 
     expect(filter.execute).toBe(true);
@@ -97,17 +99,8 @@ describe('getFastAgentNativeAcpKind', () => {
     expect(filter.bash).not.toBe(true);
   });
 
-  it('drops call_integration_tool for helper subagents only when the experiment is on', () => {
-    expect(buildFastAgentSubagentToolFilter()).toBe(
-      FAST_AGENT_SUBAGENT_TOOL_FILTER,
-    );
-    expect(
-      buildFastAgentSubagentToolFilter({ codeModeIntegrationsEnabled: false }),
-    ).toBe(FAST_AGENT_SUBAGENT_TOOL_FILTER);
-
-    const filter = buildFastAgentSubagentToolFilter({
-      codeModeIntegrationsEnabled: true,
-    });
+  it('drops call_integration_tool for helper subagents', () => {
+    const filter = buildFastAgentSubagentToolFilter();
     expect(filter[FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool]).toBe(
       false,
     );

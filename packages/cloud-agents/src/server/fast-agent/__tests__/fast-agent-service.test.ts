@@ -1079,10 +1079,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.getDeploymentSettings).toHaveBeenCalledTimes(2);
   });
 
-  it('keeps the dispatcher in the prompt when integration ids collide under the code-mode experiment', async () => {
-    mocks.deploymentExperimentEnabled.mockImplementation(
-      async (id: string) => id === 'codeModeIntegrations',
-    );
+  it('keeps the dispatcher in the prompt when integration ids collide', async () => {
     mocks.serverNameCollision.mockReturnValue(true);
     mocks.listIntegrations.mockResolvedValue([
       {
@@ -6148,9 +6145,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   });
 
   it('mounts an integration connected mid-turn on the code-mode server', async () => {
-    mocks.deploymentExperimentEnabled.mockImplementation(
-      async (id: string) => id === 'codeModeIntegrations',
-    );
     mocks.getNativeRuntime.mockImplementation(async () => {
       mocks.mcpCapabilityAvailable = true;
       return {
@@ -6228,7 +6222,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.listNativeIntegrations).toHaveBeenCalled();
   });
 
-  it('does not mount mid-turn connections when the code-mode experiment is off', async () => {
+  it('does not remount an integration that was already mounted at turn start', async () => {
     mocks.getUnifiedSession.mockResolvedValue({ id: 'session-1' });
     mocks.connectIntegration.mockResolvedValue({ status: 'connected' });
     mocks.listIntegrations.mockResolvedValue([
@@ -6411,7 +6405,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       ]),
       {
         addRemoteMcpEnabled: true,
-        codeModeIntegrationsEnabled: false,
         surface: 'slack',
         serviceCredentialToolsEnabled: true,
         serviceCredentialPrepareEnabled: true,

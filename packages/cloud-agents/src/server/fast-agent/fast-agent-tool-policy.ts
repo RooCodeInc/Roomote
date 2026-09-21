@@ -59,7 +59,7 @@ export function buildFastAgentToolFilter(
     serviceCredentialToolsEnabled?: boolean;
     serviceCredentialPrepareEnabled?: boolean;
     addRemoteMcpEnabled?: boolean;
-    codeModeIntegrationsEnabled?: boolean;
+    codeModeIntegrationsActive?: boolean;
   } = {},
 ): Record<string, boolean> {
   return {
@@ -77,33 +77,24 @@ export function buildFastAgentToolFilter(
           [FAST_AGENT_NATIVE_TOOL_NAMES.offerCapability]: false,
         }
       : {}),
-    ...(options.codeModeIntegrationsEnabled === true
-      ? {
-          // OpenCode code mode replaces every mounted MCP tool with the
-          // confined `execute` runner; the generic dispatcher must not stay
-          // reachable or the model keeps routing calls through it. Discovery
-          // (`find_integration_tools`) stays available for the built-in
-          // integration catalog and connection statuses.
-          execute: true,
-          [FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool]: false,
-        }
-      : {}),
+    // OpenCode code mode replaces every mounted MCP tool with the confined
+    // `execute` runner; the generic dispatcher must not stay reachable or the
+    // model keeps routing calls through it. Discovery (`find_integration_tools`)
+    // stays available for the built-in integration catalog and connection
+    // statuses.
+    execute: options.codeModeIntegrationsActive !== false,
+    [FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool]:
+      options.codeModeIntegrationsActive === false,
     ...Object.fromEntries(integrationIds.map((id) => [`${id}_*`, true])),
   };
 }
 
 /**
- * Subagent variant of the tool filter for the code-mode integrations
- * experiment. Helper subagents already see every MCP tool (`*': true`), so
- * OpenCode code mode's `execute` runner is visible to them unchanged; the
- * only adjustment is retiring the generic dispatcher alongside the parent.
+ * Helper subagents already see every MCP tool (`*': true`), so OpenCode code
+ * mode's `execute` runner is visible to them unchanged; the only adjustment is
+ * retiring the generic dispatcher alongside the parent.
  */
-export function buildFastAgentSubagentToolFilter(
-  options: { codeModeIntegrationsEnabled?: boolean } = {},
-): Record<string, boolean> {
-  if (options.codeModeIntegrationsEnabled !== true) {
-    return FAST_AGENT_SUBAGENT_TOOL_FILTER;
-  }
+export function buildFastAgentSubagentToolFilter(): Record<string, boolean> {
   return {
     ...FAST_AGENT_SUBAGENT_TOOL_FILTER,
     [FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool]: false,
