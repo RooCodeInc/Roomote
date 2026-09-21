@@ -73,6 +73,7 @@ const REASONING_LABEL_OFFSET_PX = 12;
 const REASONING_LABEL_DURATION_SECONDS = 0.2;
 const REASONING_LABEL_ENTER_DELAY_SECONDS = 0.05;
 const REASONING_LABEL_EASING = [0.22, 1, 0.36, 1] as const;
+const REASONING_UNAVAILABLE_LABEL = 'N/A';
 
 type ReasoningLabelTransition = {
   direction: 1 | -1;
@@ -154,6 +155,7 @@ function PickerContent({
   const effectiveModelId = model || defaultModelId || '';
   const selectedModel = models.find(({ id }) => id === effectiveModelId);
   const efforts = supportedReasoningEfforts ?? supportedEfforts(selectedModel);
+  const reasoningUnavailable = efforts.length === 0;
   const requestedEffort = reasoningEffort ?? defaultReasoningEffort;
   const effectiveEffort =
     (requestedEffort && efforts.includes(requestedEffort)
@@ -166,7 +168,7 @@ function PickerContent({
     effortIndex < previousEffortIndexRef.current ? -1 : 1;
   const effortLabel = effectiveEffort
     ? getPickerReasoningEffortLabel(effectiveEffort)
-    : 'No reasoning';
+    : REASONING_UNAVAILABLE_LABEL;
   const labelTransition: ReasoningLabelTransition = {
     direction: effortTransitionDirection,
     reducedMotion,
@@ -498,7 +500,12 @@ function PickerContent({
           <span className="sr-only" role="status" aria-label={effortLabel} />
         </span>
         <div className="relative min-h-0 flex-1 pb-4 pt-2">
-          <div className="relative h-full cursor-ns-resize">
+          <div
+            className={cn(
+              'relative h-full',
+              reasoningUnavailable ? 'cursor-not-allowed' : 'cursor-ns-resize',
+            )}
+          >
             {efforts.map((effort, index) => {
               const position = index / Math.max(1, efforts.length - 1);
               const endpointOffset =
@@ -525,9 +532,14 @@ function PickerContent({
               aria-valuetext={
                 effectiveEffort
                   ? getPickerReasoningEffortLabel(effectiveEffort)
-                  : 'No reasoning'
+                  : REASONING_UNAVAILABLE_LABEL
               }
-              className="h-full min-h-0 data-[orientation=vertical]:min-h-0 data-[disabled]:opacity-70 [&>span:not([data-slot])]:transition-[bottom] [&>span:not([data-slot])]:duration-300 [&>span:not([data-slot])]:ease-out motion-reduce:[&>span:not([data-slot])]:transition-none [&_[data-slot=slider-track]]:w-4 [&_[data-slot=slider-track]]:border [&_[data-slot=slider-track]]:border-input [&_[data-slot=slider-track]]:bg-input [&_[data-slot=slider-range]]:bg-accent-foreground [&_[data-slot=slider-thumb]]:size-7 [&_[data-slot=slider-thumb]]:border-2 [&_[data-slot=slider-thumb]]:border-accent-foreground"
+              className={cn(
+                'h-full min-h-0 data-[orientation=vertical]:min-h-0 [&>span:not([data-slot])]:transition-[bottom] [&>span:not([data-slot])]:duration-300 [&>span:not([data-slot])]:ease-out motion-reduce:[&>span:not([data-slot])]:transition-none [&_[data-slot=slider-track]]:w-4 [&_[data-slot=slider-track]]:border [&_[data-slot=slider-track]]:border-input [&_[data-slot=slider-track]]:bg-input [&_[data-slot=slider-thumb]]:size-7 [&_[data-slot=slider-thumb]]:border-2',
+                reasoningUnavailable
+                  ? '[&_[data-slot=slider-range]]:bg-transparent [&_[data-slot=slider-thumb]]:border-input [&_[data-slot=slider-thumb]]:hover:ring-0'
+                  : '[&_[data-slot=slider-range]]:bg-accent-foreground [&_[data-slot=slider-thumb]]:border-accent-foreground',
+              )}
               onValueChange={([index]) => setEffortIndex(index ?? 0)}
             />
           </div>

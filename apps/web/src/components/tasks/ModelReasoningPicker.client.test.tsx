@@ -235,13 +235,46 @@ describe('ModelReasoningPicker', () => {
     expect(screen.getByRole('option', { name: 'Plain' })).toHaveFocus();
     fireEvent.click(screen.getByRole('option', { name: 'Plain' }));
 
-    await waitFor(() => expect(screen.getByText('No reasoning')).toBeVisible());
-    expect(
-      screen.getByRole('slider', { name: 'Reasoning level' }),
-    ).toHaveAttribute('data-disabled');
+    await waitFor(() => expect(screen.getByText('N/A')).toBeVisible());
+    const slider = screen.getByRole('slider', { name: 'Reasoning level' });
+    expect(slider).toHaveAttribute('aria-valuetext', 'N/A');
+    expect(slider).toHaveAttribute('data-disabled');
     expect(screen.getByTestId('selection')).toHaveTextContent(
       'provider/plain:default',
     );
+  });
+
+  it('preserves a supported reasoning level when changing models', () => {
+    render(
+      <Harness
+        initialEffort="high"
+        availableModels={[
+          ...models,
+          {
+            id: 'provider/gamma',
+            displayName: 'Gamma',
+            metadata: {
+              contextWindow: null,
+              inputTypes: null,
+              inputPricePerToken: null,
+              outputPricePerToken: null,
+              lastRefreshedAt: null,
+              supportedReasoningEfforts: ['low', 'high'],
+            },
+          },
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Choose model' }));
+
+    fireEvent.click(screen.getByRole('option', { name: 'Gamma' }));
+
+    expect(screen.getByTestId('selection')).toHaveTextContent(
+      'provider/gamma:high',
+    );
+    expect(
+      screen.getByRole('slider', { name: 'Reasoning level' }),
+    ).toHaveAttribute('aria-valuetext', 'High');
   });
 
   it('scrolls a partially clipped clicked model further into view', () => {
