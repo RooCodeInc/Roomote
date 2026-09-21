@@ -6,12 +6,15 @@ import type {
   IntegrationToolApprovalMetadata,
   IntegrationToolPolicyMetadata,
   IntegrationToolPolicyMode,
+  IntegrationToolSessionOverrideMetadata,
+  IntegrationToolSessionOverrideMode,
 } from '@roomote/types';
 
 import { db, type DatabaseOrTransaction } from '../db';
 import {
   integrationToolApprovalRequests,
   integrationToolPolicies,
+  integrationToolSessionOverrides,
   sessions,
   users,
 } from '../schema';
@@ -307,29 +310,46 @@ export async function getIntegrationToolApproval(
  */
 export async function decideIntegrationToolApproval(
   context: { sessionId: string; userId: string },
-  input: { approvalId: string; decision: 'approved' | 'rejected' },
+  input: {
+    approvalId: string;
+    decision: 'approved' | 'approved_for_session' | 'rejected';
+  },
 ): Promise<IntegrationToolApprovalMetadata> {
-  const [row] = await db
-    .update(integrationToolApprovalRequests)
-    .set({
-      status: input.decision,
-      decidedByUserId: context.userId,
-      decidedAt: sql`clock_timestamp()`,
-    })
-    .where(
-      and(
-        eq(integrationToolApprovalRequests.id, input.approvalId),
-        eq(integrationToolApprovalRequests.sessionId, context.sessionId),
-        eq(integrationToolApprovalRequests.requesterUserId, context.userId),
-        eq(integrationToolApprovalRequests.status, 'pending'),
-        gt(integrationToolApprovalRequests.expiresAt, sql`clock_timestamp()`),
-      ),
-    )
-    .returning();
-  if (!row) {
-    throw new IntegrationToolApprovalUnavailableError('approval_not_found');
-  }
-  return approvalMetadata(row);
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(integrationToolApprovalRequests)
+      .set({
+        status: input.decision === 'rejected' ? 'rejected' : 'approved',
+        decidedByUserId: context.userId,
+        decidedAt: sql`clock_timestamp()`,
+      })
+      .where(
+        and(
+          eq(integrationToolApprovalRequests.id, input.approvalId),
+          eq(integrationToolApprovalRequests.sessionId, context.sessionId),
+          eq(integrationToolApprovalRequests.requesterUserId, context.userId),
+          eq(integrationToolApprovalRequests.status, 'pending'),
+          gt(integrationToolApprovalRequests.expiresAt, sql`clock_timestamp()`),
+        ),
+      )
+      .returning();
+    if (!row) {
+      throw new IntegrationToolApprovalUnavailableError('approval_not_found');
+    }
+    // "Don't ask again this session": the same authority check that accepted
+    // this decision also records the session-scoped allow, so the override
+    // can only ever come from the requester answering a real ask.
+    if (input.decision === 'approved_for_session') {
+      await upsertSessionOverride(tx, {
+        sessionId: context.sessionId,
+        integrationId: row.integrationId,
+        toolName: row.toolName,
+        mode: 'allow',
+        setByUserId: context.userId,
+      });
+    }
+    return approvalMetadata(row);
+  });
 }
 
 /**
@@ -391,6 +411,147 @@ export async function cancelOpenIntegrationToolApprovals(
     )
     .returning({ id: integrationToolApprovalRequests.id });
   return rows.length;
+}
+
+async function upsertSessionOverride(
+  tx: DatabaseOrTransaction,
+  input: {
+    sessionId: string;
+    integrationId: string;
+    toolName: string;
+    mode: IntegrationToolSessionOverrideMode;
+    setByUserId: string;
+  },
+): Promise<void> {
+  await tx
+    .insert(integrationToolSessionOverrides)
+    .values({ ...input, updatedAt: sql`clock_timestamp()` })
+    .onConflictDoUpdate({
+      target: [
+        integrationToolSessionOverrides.sessionId,
+        integrationToolSessionOverrides.integrationId,
+        integrationToolSessionOverrides.toolName,
+      ],
+      set: {
+        mode: input.mode,
+        setByUserId: input.setByUserId,
+        updatedAt: sql`clock_timestamp()`,
+      },
+    });
+}
+
+/**
+ * Every override in one session, for both the per-turn rule compilation and
+ * the requester's transcript controls. Session-scoped by construction: no
+ * caller can read or apply another session's rows through this.
+ */
+export async function listIntegrationToolSessionOverrides(
+  sessionId: string,
+): Promise<IntegrationToolSessionOverrideMetadata[]> {
+  const rows = await db
+    .select()
+    .from(integrationToolSessionOverrides)
+    .where(eq(integrationToolSessionOverrides.sessionId, sessionId))
+    .orderBy(
+      integrationToolSessionOverrides.integrationId,
+      integrationToolSessionOverrides.toolName,
+    );
+  return rows.map((row) => ({
+    integrationId: row.integrationId,
+    toolName: row.toolName,
+    mode: row.mode,
+  }));
+}
+
+/** The requester's own view of their session's overrides; empty for anyone else. */
+export async function listIntegrationToolSessionOverridesForRequester(context: {
+  sessionId: string;
+  userId: string;
+}): Promise<IntegrationToolSessionOverrideMetadata[]> {
+  const [owned] = await db
+    .select({ id: sessions.id })
+    .from(sessions)
+    .where(
+      and(
+        eq(sessions.id, context.sessionId),
+        eq(sessions.ownerUserId, context.userId),
+      ),
+    )
+    .limit(1);
+  return owned ? listIntegrationToolSessionOverrides(context.sessionId) : [];
+}
+
+/**
+ * Requester-only write of one session override; `null` clears it and
+ * restores the deployment policy. Only the Session owner may change how
+ * their own session asks.
+ */
+export async function setIntegrationToolSessionOverride(
+  context: { sessionId: string; userId: string },
+  input: {
+    integrationId: string;
+    toolName: string;
+    mode: IntegrationToolSessionOverrideMode | null;
+  },
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    await requireSessionOwner(tx, context);
+    if (input.mode === null) {
+      await tx
+        .delete(integrationToolSessionOverrides)
+        .where(
+          and(
+            eq(integrationToolSessionOverrides.sessionId, context.sessionId),
+            eq(
+              integrationToolSessionOverrides.integrationId,
+              input.integrationId,
+            ),
+            eq(integrationToolSessionOverrides.toolName, input.toolName),
+          ),
+        );
+      return;
+    }
+    await upsertSessionOverride(tx, {
+      sessionId: context.sessionId,
+      integrationId: input.integrationId,
+      toolName: input.toolName,
+      mode: input.mode,
+      setByUserId: context.userId,
+    });
+  });
+}
+
+/**
+ * Audit row for an ask the bridge relayed without a card because the
+ * requester already chose "don't ask again this session" for the tool. It is
+ * born terminal, so no later decision or relay can ever claim it.
+ */
+export async function insertAutoApprovedIntegrationToolApproval(
+  context: { sessionId: string; userId: string },
+  input: {
+    integrationId: string;
+    toolName: string;
+    nativeRequestId: string;
+    argsFingerprint: string;
+    argsSummary: unknown;
+  },
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    const owner = await requireSessionOwner(tx, context);
+    await tx.insert(integrationToolApprovalRequests).values({
+      sessionId: context.sessionId,
+      requesterUserId: owner.id,
+      integrationId: input.integrationId,
+      toolName: input.toolName,
+      nativeRequestId: input.nativeRequestId,
+      argsFingerprint: input.argsFingerprint,
+      argsSummary: redactIntegrationToolArgs(input.argsSummary),
+      status: 'auto_approved',
+      decidedByUserId: owner.id,
+      decidedAt: sql`clock_timestamp()`,
+      expiresAt: sql`clock_timestamp()`,
+    });
+  });
 }
 
 export {

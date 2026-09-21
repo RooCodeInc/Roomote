@@ -12,12 +12,16 @@ import {
   expireIntegrationToolApproval,
   fingerprintIntegrationToolCall,
   getIntegrationToolApproval,
+  insertAutoApprovedIntegrationToolApproval,
   insertIntegrationToolApproval,
   IntegrationToolApprovalUnavailableError,
   listIntegrationToolPolicies,
+  listIntegrationToolSessionOverrides,
+  listIntegrationToolSessionOverridesForRequester,
   listPendingIntegrationToolApprovals,
   markIntegrationToolApprovalConsumed,
   redactIntegrationToolArgs,
+  setIntegrationToolSessionOverride,
   upsertIntegrationToolPolicy,
 } from '../integration-tool-approvals';
 
@@ -360,5 +364,122 @@ describe('listPendingIntegrationToolApprovals', () => {
     expect(
       await listPendingIntegrationToolApprovals({ sessionId, userId }),
     ).toHaveLength(1);
+  });
+});
+
+describe('integration tool session overrides', () => {
+  const tool = { integrationId: call.integrationId, toolName: call.toolName };
+
+  it('records an allow override when the requester approves for the session', async () => {
+    const userId = await user();
+    const context = { sessionId: await ownedSession(userId), userId };
+    const pending = await insertPending(context);
+
+    const decided = await decideIntegrationToolApproval(context, {
+      approvalId: pending.approvalId,
+      decision: 'approved_for_session',
+    });
+
+    // The paused call still relays through the ordinary approved → consumed
+    // path; the override only affects later asks.
+    expect(decided.status).toBe('approved');
+    expect(
+      await listIntegrationToolSessionOverrides(context.sessionId),
+    ).toEqual([{ ...tool, mode: 'allow' }]);
+  });
+
+  it('never records an override from a wrong approver or a plain decision', async () => {
+    const userId = await user();
+    const context = { sessionId: await ownedSession(userId), userId };
+    const pending = await insertPending(context);
+
+    await expect(
+      decideIntegrationToolApproval(
+        { sessionId: context.sessionId, userId: await user() },
+        { approvalId: pending.approvalId, decision: 'approved_for_session' },
+      ),
+    ).rejects.toBeInstanceOf(IntegrationToolApprovalUnavailableError);
+    await decideIntegrationToolApproval(context, {
+      approvalId: pending.approvalId,
+      decision: 'approved',
+    });
+
+    expect(
+      await listIntegrationToolSessionOverrides(context.sessionId),
+    ).toEqual([]);
+  });
+
+  it('lets only the Session owner set, change, and clear an override', async () => {
+    const userId = await user();
+    const context = { sessionId: await ownedSession(userId), userId };
+    const stranger = { sessionId: context.sessionId, userId: await user() };
+
+    await expect(
+      setIntegrationToolSessionOverride(stranger, { ...tool, mode: 'ask' }),
+    ).rejects.toBeInstanceOf(IntegrationToolApprovalUnavailableError);
+
+    await setIntegrationToolSessionOverride(context, { ...tool, mode: 'ask' });
+    await setIntegrationToolSessionOverride(context, {
+      ...tool,
+      mode: 'allow',
+    });
+    expect(
+      await listIntegrationToolSessionOverridesForRequester(context),
+    ).toEqual([{ ...tool, mode: 'allow' }]);
+    expect(
+      await listIntegrationToolSessionOverridesForRequester(stranger),
+    ).toEqual([]);
+
+    await setIntegrationToolSessionOverride(context, { ...tool, mode: null });
+    expect(
+      await listIntegrationToolSessionOverrides(context.sessionId),
+    ).toEqual([]);
+  });
+
+  it('keeps overrides inside their own session and cascades with it', async () => {
+    const userId = await user();
+    const first = { sessionId: await ownedSession(userId), userId };
+    const second = { sessionId: await ownedSession(userId), userId };
+    await setIntegrationToolSessionOverride(first, { ...tool, mode: 'allow' });
+
+    expect(await listIntegrationToolSessionOverrides(second.sessionId)).toEqual(
+      [],
+    );
+
+    await db.delete(sessions).where(eq(sessions.id, first.sessionId));
+    expect(await listIntegrationToolSessionOverrides(first.sessionId)).toEqual(
+      [],
+    );
+  });
+
+  it('writes auto-approved asks as terminal audit rows no decision can claim', async () => {
+    const userId = await user();
+    const context = { sessionId: await ownedSession(userId), userId };
+    await insertAutoApprovedIntegrationToolApproval(context, {
+      ...tool,
+      nativeRequestId: nextNativeRequestId(),
+      argsFingerprint: fingerprint(),
+      argsSummary: { channel: 'C123', apiKey: 'sk-live' },
+    });
+
+    const [row] = await db
+      .select()
+      .from(integrationToolApprovalRequests)
+      .where(eq(integrationToolApprovalRequests.sessionId, context.sessionId));
+    expect(row?.status).toBe('auto_approved');
+    expect(row?.argsSummary).toEqual({ channel: 'C123', apiKey: '[redacted]' });
+    expect(await listPendingIntegrationToolApprovals(context)).toEqual([]);
+    expect(
+      await markIntegrationToolApprovalConsumed({
+        approvalId: row!.id,
+        requesterUserId: userId,
+      }),
+    ).toBe(false);
+    await expect(
+      decideIntegrationToolApproval(context, {
+        approvalId: row!.id,
+        decision: 'approved',
+      }),
+    ).rejects.toBeInstanceOf(IntegrationToolApprovalUnavailableError);
   });
 });

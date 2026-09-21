@@ -7,9 +7,11 @@ vi.mock('@roomote/db/server', () => ({
   expireIntegrationToolApproval: vi.fn(async () => undefined),
   fingerprintIntegrationToolCall: vi.fn(() => 'fingerprint'),
   getIntegrationToolApproval: vi.fn(),
+  insertAutoApprovedIntegrationToolApproval: vi.fn(async () => undefined),
   insertIntegrationToolApproval: vi.fn(),
   isDeploymentExperimentEnabled: vi.fn(async () => true),
   listIntegrationToolPolicies: vi.fn(async () => []),
+  listIntegrationToolSessionOverrides: vi.fn(async () => []),
   markIntegrationToolApprovalConsumed: vi.fn(async () => true),
 }));
 
@@ -17,8 +19,11 @@ import {
   expireIntegrationToolApproval,
   getIntegrationToolApproval,
   getSessionForFastConversation,
+  insertAutoApprovedIntegrationToolApproval,
   insertIntegrationToolApproval,
   isDeploymentExperimentEnabled,
+  listIntegrationToolPolicies,
+  listIntegrationToolSessionOverrides,
   markIntegrationToolApprovalConsumed,
 } from '@roomote/db/server';
 
@@ -125,6 +130,76 @@ describe('buildIntegrationToolApprovalRules', () => {
   });
 });
 
+describe('buildIntegrationToolApprovalRules with session overrides', () => {
+  const policy = (toolName: string, mode: 'ask' | 'reject') => ({
+    policyId: toolName,
+    integrationId: 'mock-slack',
+    toolName,
+    mode,
+    updatedAt: '',
+    createdAt: '',
+  });
+  const override = (toolName: string, mode: 'allow' | 'ask') => ({
+    integrationId: 'mock-slack',
+    toolName,
+    mode,
+  });
+
+  it('gates a default-allow tool the requester asked to be asked about', () => {
+    expect(
+      buildIntegrationToolApprovalRules(
+        integrations,
+        [],
+        [override('read_channel', 'ask')],
+      ),
+    ).toEqual([
+      {
+        permission: codeModeToolKey('mock-slack', 'read_channel'),
+        pattern: '*',
+        action: 'ask',
+      },
+    ]);
+  });
+
+  it('keeps the native ask under a session allow so the rules never change', () => {
+    const policies = [policy('post_message', 'ask')];
+    const withOverride = buildIntegrationToolApprovalRules(
+      integrations,
+      policies,
+      [override('post_message', 'allow')],
+    );
+    expect(withOverride).toEqual(
+      buildIntegrationToolApprovalRules(integrations, policies),
+    );
+  });
+
+  it('never lets a session override loosen a deployment reject', () => {
+    expect(
+      buildIntegrationToolApprovalRules(
+        integrations,
+        [policy('delete_channel', 'reject')],
+        [override('delete_channel', 'allow')],
+      ),
+    ).toEqual([
+      {
+        permission: codeModeToolKey('mock-slack', 'delete_channel'),
+        pattern: '*',
+        action: 'deny',
+      },
+    ]);
+  });
+
+  it('ignores overrides for tools the actor is not authorized to mount', () => {
+    expect(
+      buildIntegrationToolApprovalRules(
+        integrations,
+        [],
+        [override('tool_the_actor_cannot_see', 'ask')],
+      ),
+    ).toEqual([]);
+  });
+});
+
 describe('hashIntegrationToolApprovalRules', () => {
   it('is stable across rule order and changes with the rules', () => {
     const first = hashIntegrationToolApprovalRules([
@@ -146,6 +221,28 @@ describe('hashIntegrationToolApprovalRules', () => {
 describe('resolveFastAgentToolApprovalRules', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('layers the Session overrides on the deployment policies', async () => {
+    vi.mocked(listIntegrationToolPolicies).mockResolvedValueOnce([]);
+    vi.mocked(listIntegrationToolSessionOverrides).mockResolvedValueOnce([
+      { integrationId: 'mock-slack', toolName: 'read_channel', mode: 'ask' },
+    ]);
+    const resolved = await resolveFastAgentToolApprovalRules({
+      codeModeIntegrationsEffective: true,
+      integrations,
+      sessionId: 'session-id',
+    });
+    expect(listIntegrationToolSessionOverrides).toHaveBeenCalledWith(
+      'session-id',
+    );
+    expect(resolved?.rules).toEqual([
+      {
+        permission: codeModeToolKey('mock-slack', 'read_channel'),
+        pattern: '*',
+        action: 'ask',
+      },
+    ]);
   });
 
   it('is inactive without code mode or without the experiment', async () => {
@@ -366,6 +463,7 @@ describe('tool approval bridge', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(isDeploymentExperimentEnabled).mockResolvedValue(true);
+    vi.mocked(listIntegrationToolSessionOverrides).mockResolvedValue([]);
     vi.mocked(insertIntegrationToolApproval).mockResolvedValue({
       approvalId: 'approval-1',
       integrationId: 'mock-slack',
@@ -375,6 +473,71 @@ describe('tool approval bridge', () => {
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
       createdAt: new Date().toISOString(),
     });
+  });
+
+  it('relays an ask once without a card when the requester allowed the tool for the session', async () => {
+    vi.mocked(listIntegrationToolSessionOverrides).mockResolvedValue([
+      { integrationId: 'mock-slack', toolName: 'post_message', mode: 'allow' },
+    ]);
+    const helperMocks = helpers();
+    bridge().handleAsk(ask, helperMocks);
+    await vi.waitFor(() => expect(helperMocks.reply).toHaveBeenCalled());
+
+    expect(listIntegrationToolSessionOverrides).toHaveBeenCalledWith(
+      'session-id',
+    );
+    expect(insertAutoApprovedIntegrationToolApproval).toHaveBeenCalledWith(
+      { sessionId: 'session-id', userId: 'user-id' },
+      expect.objectContaining({
+        integrationId: 'mock-slack',
+        toolName: 'post_message',
+        nativeRequestId: 'req-1',
+        argsSummary: { channel: 'C1', text: 'hi' },
+      }),
+    );
+    expect(helperMocks.reply).toHaveBeenCalledTimes(1);
+    expect(helperMocks.reply).toHaveBeenCalledWith('req-1', 'once');
+    expect(insertIntegrationToolApproval).not.toHaveBeenCalled();
+  });
+
+  it('still asks when the session override is for a different tool or mode', async () => {
+    vi.mocked(listIntegrationToolSessionOverrides).mockResolvedValue([
+      { integrationId: 'mock-slack', toolName: 'read_channel', mode: 'allow' },
+      { integrationId: 'mock-slack', toolName: 'post_message', mode: 'ask' },
+    ]);
+    vi.mocked(getIntegrationToolApproval).mockResolvedValue({
+      status: 'rejected',
+    } as never);
+    const helperMocks = helpers();
+    bridge().handleAsk(ask, helperMocks);
+    await vi.waitFor(() => expect(helperMocks.reply).toHaveBeenCalled());
+
+    expect(insertIntegrationToolApproval).toHaveBeenCalled();
+    expect(insertAutoApprovedIntegrationToolApproval).not.toHaveBeenCalled();
+    expect(helperMocks.reply).toHaveBeenCalledWith(
+      'req-1',
+      'reject',
+      expect.any(String),
+    );
+  });
+
+  it('rejects instead of running unrecorded when the auto-approval audit write fails', async () => {
+    vi.mocked(listIntegrationToolSessionOverrides).mockResolvedValue([
+      { integrationId: 'mock-slack', toolName: 'post_message', mode: 'allow' },
+    ]);
+    vi.mocked(insertAutoApprovedIntegrationToolApproval).mockRejectedValueOnce(
+      new Error('write failed'),
+    );
+    const helperMocks = helpers();
+    bridge().handleAsk(ask, helperMocks);
+    await vi.waitFor(() => expect(helperMocks.reply).toHaveBeenCalled());
+
+    expect(helperMocks.reply).toHaveBeenCalledTimes(1);
+    expect(helperMocks.reply).toHaveBeenCalledWith(
+      'req-1',
+      'reject',
+      expect.any(String),
+    );
   });
 
   it('ignores asks for tools outside the mounted catalog', () => {

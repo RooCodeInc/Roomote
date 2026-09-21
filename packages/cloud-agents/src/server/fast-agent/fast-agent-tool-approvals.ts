@@ -8,15 +8,19 @@ import {
   fingerprintIntegrationToolCall,
   getIntegrationToolApproval,
   getSessionForFastConversation,
+  insertAutoApprovedIntegrationToolApproval,
   insertIntegrationToolApproval,
   isDeploymentExperimentEnabled,
   listIntegrationToolPolicies,
+  listIntegrationToolSessionOverrides,
   markIntegrationToolApprovalConsumed,
 } from '@roomote/db/server';
 import {
   integrationToolPolicyKey,
+  resolveEffectiveIntegrationToolMode,
   type IntegrationToolApprovalMetadata,
   type IntegrationToolPolicyMetadata,
+  type IntegrationToolSessionOverrideMetadata,
 } from '@roomote/types';
 
 import type { FastAgentIntegration } from './fast-agent-integration-broker';
@@ -65,6 +69,7 @@ export function codeModeToolKey(integrationId: string, toolName: string) {
 export function buildIntegrationToolApprovalRules(
   integrations: FastAgentIntegration[],
   policies: IntegrationToolPolicyMetadata[],
+  sessionOverrides: IntegrationToolSessionOverrideMetadata[] = [],
 ): PermissionRuleset {
   const modeByTool = new Map(
     policies.map((policy) => [
@@ -72,13 +77,27 @@ export function buildIntegrationToolApprovalRules(
       policy.mode,
     ]),
   );
+  const overrideByTool = new Map(
+    sessionOverrides.map((override) => [
+      integrationToolPolicyKey(override.integrationId, override.toolName),
+      override.mode,
+    ]),
+  );
   const rules: PermissionRuleset = [];
   for (const integration of integrations) {
     for (const tool of integration.tools) {
-      const mode = modeByTool.get(
-        integrationToolPolicyKey(integration.id, tool.name),
-      );
-      if (mode === 'ask') {
+      const key = integrationToolPolicyKey(integration.id, tool.name);
+      const policyMode = modeByTool.get(key);
+      const mode = resolveEffectiveIntegrationToolMode({
+        policyMode,
+        sessionOverrideMode: overrideByTool.get(key),
+      });
+      // A session `allow` over a deployment `ask` deliberately keeps the
+      // native ask rule: the bridge answers those asks itself, so "don't ask
+      // again this session" works mid-turn, never changes the compiled rules
+      // (no instance dispose), and never relies on OpenCode's leaky native
+      // `always`.
+      if (mode === 'ask' || (mode === 'allow' && policyMode === 'ask')) {
         rules.push({
           permission: codeModeToolKey(integration.id, tool.name),
           pattern: '*',
@@ -211,14 +230,25 @@ export function extractApprovalCallArgs(
 export async function resolveFastAgentToolApprovalRules(input: {
   codeModeIntegrationsEffective: boolean;
   integrations: FastAgentIntegration[];
+  /** The Session whose requester-owned overrides layer on the policies. */
+  sessionId?: string;
 }): Promise<{ rules: PermissionRuleset; hash: string } | undefined> {
   if (!input.codeModeIntegrationsEffective) return undefined;
   const enabled = await isDeploymentExperimentEnabled(
     'integrationToolApprovals',
   );
   if (!enabled) return undefined;
-  const policies = await listIntegrationToolPolicies();
-  const rules = buildIntegrationToolApprovalRules(input.integrations, policies);
+  const [policies, sessionOverrides] = await Promise.all([
+    listIntegrationToolPolicies(),
+    input.sessionId
+      ? listIntegrationToolSessionOverrides(input.sessionId)
+      : Promise.resolve([]),
+  ]);
+  const rules = buildIntegrationToolApprovalRules(
+    input.integrations,
+    policies,
+    sessionOverrides,
+  );
   return { rules, hash: hashIntegrationToolApprovalRules(rules) };
 }
 
@@ -285,17 +315,45 @@ export function createFastAgentToolApprovalBridge(input: {
         })
         .catch(() => undefined);
       const args = extractApprovalCallArgs(recovered, tool);
+      const argsFingerprint = fingerprintIntegrationToolCall({
+        integrationId: tool.integrationId,
+        toolName: tool.toolName,
+        args: args ?? null,
+      });
+      // "Don't ask again this session": read fresh on every ask so the
+      // requester's choice applies to the very next call, even mid-turn. The
+      // audit row is written before the relay; if it cannot be written the
+      // outer handler rejects the ask instead of running it unrecorded.
+      const sessionOverrides = await listIntegrationToolSessionOverrides(
+        input.sessionId,
+      );
+      const allowedForSession = sessionOverrides.some(
+        (override) =>
+          override.mode === 'allow' &&
+          override.integrationId === tool.integrationId &&
+          override.toolName === tool.toolName,
+      );
+      if (allowedForSession) {
+        await insertAutoApprovedIntegrationToolApproval(
+          { sessionId: input.sessionId, userId: input.userId },
+          {
+            integrationId: tool.integrationId,
+            toolName: tool.toolName,
+            nativeRequestId: ask.requestId,
+            argsFingerprint,
+            argsSummary: args ?? null,
+          },
+        );
+        await helpers.reply(ask.requestId, 'once');
+        return;
+      }
       const approval = await insertIntegrationToolApproval(
         { sessionId: input.sessionId, userId: input.userId },
         {
           integrationId: tool.integrationId,
           toolName: tool.toolName,
           nativeRequestId: ask.requestId,
-          argsFingerprint: fingerprintIntegrationToolCall({
-            integrationId: tool.integrationId,
-            toolName: tool.toolName,
-            args: args ?? null,
-          }),
+          argsFingerprint,
           argsSummary: args ?? null,
         },
       );

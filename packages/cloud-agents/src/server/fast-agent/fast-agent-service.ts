@@ -3844,9 +3844,15 @@ export async function answerFastAgentQuestion({
     // layered on code mode: native ask rules pause gated tools behind a
     // requester decision and deny rules hide rejected tools. Undefined when
     // either experiment is inactive, which keeps today's ungated behavior.
+    // Approvals and session overrides are keyed on the unified Session, not
+    // the Fast conversation; resolve it once for the rules and the bridge.
+    const toolApprovalSessionId = codeModeIntegrationsEffective
+      ? await resolveFastAgentToolApprovalSessionId(session.id)
+      : session.id;
     const toolApprovalRules = await resolveFastAgentToolApprovalRules({
       codeModeIntegrationsEffective,
       integrations: availableIntegrations,
+      sessionId: toolApprovalSessionId,
     });
     const system = buildFastAgentSystemPrompt({
       availableEnvironments,
@@ -6394,9 +6400,7 @@ export async function answerFastAgentQuestion({
                 // model's acknowledgement gate or close the turn.
                 const toolApprovalBridge = toolApprovalRules
                   ? createFastAgentToolApprovalBridge({
-                      sessionId: await resolveFastAgentToolApprovalSessionId(
-                        session.id,
-                      ),
+                      sessionId: toolApprovalSessionId,
                       userId,
                       integrations: availableIntegrations,
                       signal: promptSignal,
