@@ -19,6 +19,7 @@ import {
 } from '@roomote/types';
 
 import {
+  ArrowRight,
   BasicTooltip,
   buttonVariants,
   ChevronDown,
@@ -34,6 +35,7 @@ import {
 } from '@/components/system';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { cn } from '@/lib/utils';
+import { ArrowDown } from 'lucide-react';
 
 export type ModelReasoningPickerModel = {
   id: string;
@@ -44,9 +46,7 @@ export type ModelReasoningPickerModel = {
 
 const ROW_HEIGHT_PX = 40;
 const LIST_HEIGHT_PX = ROW_HEIGHT_PX * 6.5;
-const LABEL_HEIGHT_PX = 28;
-const SLIDER_TOP_INSET_PX = 8;
-const SLIDER_BOTTOM_INSET_PX = 16;
+const SLIDER_THUMB_RADIUS_PX = 14;
 const TYPEAHEAD_IDLE_RESET_MS = 1000;
 
 function supportedEfforts(model: ModelReasoningPickerModel | undefined) {
@@ -256,10 +256,10 @@ function PickerContent({
 
   return (
     <div
-      className="grid grid-cols-[minmax(0,1fr)_5.5rem] grid-rows-1 divide-x divide-border overflow-hidden md:grid-cols-[18rem_5.5rem]"
+      className="grid grid-cols-[1fr_4rem] grid-rows-1 divide-x divide-border overflow-hidden border-t md:border-t-0 mt-4 md:mt-0"
       style={{ height: LIST_HEIGHT_PX }}
     >
-      <div className="relative min-w-0">
+      <div className="relative min-w-0 overflow-hidden">
         <div
           ref={listRef}
           role="listbox"
@@ -281,13 +281,18 @@ function PickerContent({
                 tabIndex={selected ? 0 : -1}
                 disabled={disabled || modelDisabled}
                 className={cn(
-                  'flex h-10 w-full items-center rounded-md px-3 text-left text-lg transition-colors motion-reduce:transition-none',
-                  'hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                  selected && 'bg-accent-bright-foreground text-foreground',
+                  'flex h-10 w-full cursor-pointer items-center rounded-md px-3 text-left text-sm transition-colors motion-reduce:transition-none',
+                  'hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  selected && '',
                 )}
                 onClick={() => selectModel(option.id)}
               >
-                <span className="min-w-0 flex-1 truncate">
+                <span className="min-w-0 flex-1 truncate flex items-center gap-2">
+                  <span className="size-4">
+                    <ArrowDown
+                      className={`size-4 transition-opacity -rotate-90 ${selected ? 'opacity-100 animate-bounce' : 'opacity-0'}`}
+                    />
+                  </span>
                   {option.displayName}
                   {option.isDefault ? ' (Default)' : ''}
                 </span>
@@ -298,61 +303,67 @@ function PickerContent({
         <div
           aria-hidden="true"
           data-visible={canScrollUp}
-          className="pointer-events-none absolute inset-x-0 top-0 h-6 bg-linear-to-b from-popover to-transparent opacity-0 transition-opacity data-[visible=true]:opacity-100 motion-reduce:transition-none"
+          className={cn(
+            'pointer-events-none absolute inset-x-0 top-0 h-12 bg-linear-to-b from-background md:from-card to-transparent transition-transform motion-reduce:transition-none rounded-t-2xl',
+            canScrollUp ? 'opacity-80' : 'opacity-0',
+          )}
         />
         <div
           aria-hidden="true"
           data-visible={canScrollDown}
-          className="pointer-events-none absolute inset-x-0 bottom-0 h-6 bg-linear-to-t from-popover to-transparent opacity-0 transition-opacity data-[visible=true]:opacity-100 motion-reduce:transition-none"
+          className={cn(
+            'pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-linear-to-t from-background md:from-card to-transparent transition-transform motion-reduce:transition-none rounded-b-2xl',
+            canScrollDown ? 'opacity-80' : 'opacity-0',
+          )}
         />
       </div>
 
       <div
-        className="flex min-w-0 flex-col items-center gap-0 overflow-hidden px-1"
+        className="flex min-w-0 flex-col items-center gap-0 overflow-hidden space-y-2 pt-1"
         onWheel={handleWheel}
       >
         <span
-          className="h-7 pt-2 text-center text-sm font-medium"
+          className="h-7 pt-2 text-center text-xs font-medium"
           aria-live="polite"
         >
           {effectiveEffort
             ? getReasoningEffortLabel(effectiveEffort)
             : 'No reasoning'}
         </span>
-        <div className="relative min-h-0 flex-1">
-          {efforts.map((effort, index) => (
-            <span
-              key={effort}
-              aria-hidden="true"
-              className="pointer-events-none absolute left-1/2 z-10 h-0.5 w-4 -translate-x-1/2 rounded-full bg-background/70"
-              style={{
-                bottom: `${
-                  SLIDER_BOTTOM_INSET_PX +
-                  (index / Math.max(1, efforts.length - 1)) *
-                    (LIST_HEIGHT_PX -
-                      LABEL_HEIGHT_PX -
-                      SLIDER_TOP_INSET_PX -
-                      SLIDER_BOTTOM_INSET_PX)
-                }px`,
-              }}
+        <div className="relative min-h-0 flex-1 pb-4">
+          <div className="relative h-full">
+            {efforts.map((effort, index) => {
+              const position = index / Math.max(1, efforts.length - 1);
+              const endpointOffset =
+                SLIDER_THUMB_RADIUS_PX * (1 - position * 2);
+              return (
+                <span
+                  key={effort}
+                  aria-hidden="true"
+                  className="pointer-events-none absolute left-1/2 z-10 h-0.5 w-2 -translate-x-1/2 translate-y-1/2 rounded-full bg-background/40"
+                  style={{
+                    bottom: `calc(${position * 100}% + ${endpointOffset}px)`,
+                  }}
+                />
+              );
+            })}
+            <Slider
+              orientation="vertical"
+              min={0}
+              max={Math.max(0, efforts.length - 1)}
+              step={1}
+              value={[effortIndex]}
+              disabled={disabled || reasoningDisabled || efforts.length < 2}
+              aria-label="Reasoning level"
+              aria-valuetext={
+                effectiveEffort
+                  ? getReasoningEffortLabel(effectiveEffort)
+                  : 'No reasoning'
+              }
+              className="h-full min-h-0 data-[disabled]:opacity-70 [&_[data-slot=slider-track]]:w-4 [&_[data-slot=slider-track]]:border [&_[data-slot=slider-track]]:border-input [&_[data-slot=slider-track]]:bg-input [&_[data-slot=slider-range]]:bg-accent-foreground [&_[data-slot=slider-thumb]]:size-7 [&_[data-slot=slider-thumb]]:border-2 [&_[data-slot=slider-thumb]]:border-accent-foreground [&_[data-slot=slider-thumb]]:transition-transform motion-reduce:[&_[data-slot=slider-thumb]]:transition-none"
+              onValueChange={([index]) => setEffortIndex(index ?? 0)}
             />
-          ))}
-          <Slider
-            orientation="vertical"
-            min={0}
-            max={Math.max(0, efforts.length - 1)}
-            step={1}
-            value={[effortIndex]}
-            disabled={disabled || reasoningDisabled || efforts.length < 2}
-            aria-label="Reasoning level"
-            aria-valuetext={
-              effectiveEffort
-                ? getReasoningEffortLabel(effectiveEffort)
-                : 'No reasoning'
-            }
-            className="h-full min-h-0 pt-2 pb-4 data-[disabled]:opacity-70 [&_[data-slot=slider-track]]:w-8 [&_[data-slot=slider-track]]:border [&_[data-slot=slider-track]]:border-input [&_[data-slot=slider-track]]:bg-input [&_[data-slot=slider-range]]:bg-accent-foreground [&_[data-slot=slider-thumb]]:size-7 [&_[data-slot=slider-thumb]]:border-2 [&_[data-slot=slider-thumb]]:border-accent-foreground [&_[data-slot=slider-thumb]]:transition-transform motion-reduce:[&_[data-slot=slider-thumb]]:transition-none"
-            onValueChange={([index]) => setEffortIndex(index ?? 0)}
-          />
+          </div>
         </div>
       </div>
     </div>
@@ -402,12 +413,12 @@ export function ModelReasoningPicker({
         side="top"
         align="start"
         sideOffset={6}
-        className="relative w-[23.5rem] overflow-visible p-0"
+        className="relative w-[22rem] overflow-visible p-0 border rounded-2xl"
       >
         <PickerContent {...contentProps} onClose={() => onOpenChange(false)} />
         <span
           aria-hidden="true"
-          className="absolute -bottom-1 left-5 size-2 rotate-45 border-b border-r border-border bg-popover"
+          className="absolute -bottom-2 left-3.75 size-3 rotate-45 border-b border-r border-border bg-popover"
         />
       </PopoverContent>
     </Popover>
