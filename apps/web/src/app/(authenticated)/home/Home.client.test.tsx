@@ -902,7 +902,9 @@ describe('Home', () => {
 
   it('reuses the client conversation identity after an ambiguous start failure', async () => {
     mockStartFastSession
-      .mockRejectedValueOnce(new Error('Connection lost'))
+      .mockRejectedValueOnce(
+        new Error('Stream closed before head was received'),
+      )
       .mockResolvedValueOnce({
         sessionId: '11111111-1111-4111-8111-111111111111',
         fastConversationId: '22222222-2222-4222-8222-222222222222',
@@ -911,8 +913,11 @@ describe('Home', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Connection lost',
+      'Couldn’t start this session.',
     );
+    expect(
+      screen.queryByText('Stream closed before head was received'),
+    ).not.toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     // Editing the composer after the failure must not change what Retry sends.
     fireEvent.change(screen.getByRole('textbox', { name: 'Task prompt' }), {
@@ -938,7 +943,7 @@ describe('Home', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Connection lost',
+      'Couldn’t start this session.',
     );
     submittedPromptText = 'Corrected prompt';
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
