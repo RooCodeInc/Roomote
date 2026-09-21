@@ -23,10 +23,12 @@ import {
  * only need a bounded judgment use it when the deployment configures one,
  * and otherwise (or on any failure) keep their existing behavior.
  *
- * Two kinds of backend speak the same typed decisions request: TypeSafe's
- * Jev, reached directly or through a gateway with the deployment's own key,
- * and a judgment model Roomote runs itself (`R_JUDGMENT_UPSTREAM_URL`), which
- * keeps decision text on Roomote-operated infrastructure.
+ * The backend is TypeSafe's Jev, reached directly or through a gateway with
+ * the deployment's own key. A judgment model Roomote runs itself
+ * (`R_JUDGMENT_UPSTREAM_URL`) speaks the same typed decisions request, but it
+ * is not a backend yet: it only scores Jev's decisions in the background
+ * (`R_JUDGMENT_SHADOW`) so its agreement can be measured on real traffic
+ * before anything acts on its answers.
  *
  * Keys stay on the control plane; they are never injected into a sandbox.
  */
@@ -49,8 +51,8 @@ const VERCEL_AI_GATEWAY_JEV_MODEL_ID = 'typesafe-ai/jev';
 const ROOMOTE_JUDGMENT_MODEL_ID = 'roomote-judgment';
 const ROOMOTE_DECISIONS_PATH = '/v1/decisions';
 /**
- * A self-run model prefills large states on modest hardware, so it gets more
- * room than a hosted API before a caller gives up and falls back.
+ * A self-run model prefills large states on modest hardware, so a shadow
+ * request gets more room than a hosted API call does.
  */
 const DEFAULT_ROOMOTE_TIMEOUT_MS = 6_000;
 
@@ -130,7 +132,6 @@ export type DecisionModelResolution =
  * deployment gateway keys.
  */
 export type JudgmentBackend =
-  | { provider: 'roomote'; url: string; apiKey: string | undefined }
   | { provider: 'typesafe'; apiKey: string }
   | { provider: 'openrouter'; apiKey: string }
   | { provider: 'vercel'; apiKey: string };
@@ -164,9 +165,8 @@ let cachedDecisionModel:
 
 /**
  * `R_JUDGMENT_MODEL` wins, then the Settings > Models choice; with neither, a
- * TypeSafe key alone selects Jev via TypeSafe, and otherwise a configured
- * Roomote-run upstream is used. A selection whose provider key or upstream is
- * missing resolves to no backend rather than to a different provider.
+ * TypeSafe key alone selects Jev via TypeSafe. A selection whose provider key
+ * is missing resolves to no backend rather than to a different provider.
  */
 async function resolveJudgmentBackendUncached(): Promise<
   JudgmentBackend | undefined
@@ -175,19 +175,11 @@ async function resolveJudgmentBackendUncached(): Promise<
     resolveModelProviderEnvValue([TYPESAFE_API_KEY_ENV_VAR_NAME]),
     getDeploymentJudgmentModelSelection(),
   ]);
-  const roomoteUpstream = resolveRoomoteJudgmentUpstream();
   const selection = resolveEffectiveJudgmentModelSelection({
     envSelection: Env.R_JUDGMENT_MODEL,
     storedSelection,
     hasTypeSafeKey: Boolean(typeSafeKey),
-    hasRoomoteUpstream: Boolean(roomoteUpstream),
   });
-
-  if (selection === 'roomote') {
-    return roomoteUpstream
-      ? { provider: 'roomote', ...roomoteUpstream }
-      : undefined;
-  }
 
   if (selection === 'typesafe') {
     return typeSafeKey
@@ -504,22 +496,10 @@ export async function evaluateTypeSafeJudgments<
     return null;
   }
 
-  const timeoutMs =
-    params.timeoutMs ??
-    (backend.provider === 'roomote'
-      ? DEFAULT_ROOMOTE_TIMEOUT_MS
-      : DEFAULT_TYPESAFE_TIMEOUT_MS);
+  const timeoutMs = params.timeoutMs ?? DEFAULT_TYPESAFE_TIMEOUT_MS;
   let answers: Record<string, unknown> | undefined;
 
   switch (backend.provider) {
-    case 'roomote':
-      answers = await requestRoomoteDecisions(
-        backend,
-        params.state,
-        params.questions,
-        timeoutMs,
-      );
-      break;
     case 'typesafe':
       answers = await requestNativeDecisions(
         backend.apiKey,
@@ -561,7 +541,7 @@ export async function evaluateTypeSafeJudgments<
     }
   }
 
-  if (backend.provider !== 'roomote' && Env.R_JUDGMENT_SHADOW === 'on') {
+  if (Env.R_JUDGMENT_SHADOW === 'on') {
     void shadowRoomoteJudgment(backend.provider, params, answers);
   }
 
@@ -696,9 +676,9 @@ export function resetDecisionModelCache(): void {
 }
 
 /**
- * Resolve the decision model in precedence order: a configured judgment
- * backend first, then the deployment helper model. Only a judgment backend
- * (Jev or the Roomote-run model) takes high-volume decisions; helper fallback remains
+ * Resolve the decision model in precedence order: a configured hosted
+ * judgment backend first, then the deployment helper model. Only the hosted
+ * Jev backend is approved for high-volume decisions; helper fallback remains
  * ordinary-decision-only regardless of which helper model is configured.
  */
 export async function resolveDecisionModel(

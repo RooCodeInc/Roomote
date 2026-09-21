@@ -1,5 +1,5 @@
 ---
-'@roomote/web': minor
+'@roomote/web': patch
 ---
 
-Routing and triage judgments can now run against a judgment model the deployment operates itself. Set `R_JUDGMENT_UPSTREAM_URL` (and optionally `R_JUDGMENT_UPSTREAM_API_KEY`) to an endpoint that answers the typed decisions request, and it is used by default whenever no TypeSafe key is configured and no other judgment model was chosen; it also appears in Settings > Models as "Roomote judgment model". `R_JUDGMENT_SHADOW=on` additionally scores every Jev judgment with that endpoint and logs per-question agreement without changing the answer callers act on.
+Deployments can evaluate a judgment model they run themselves against Jev. With `R_JUDGMENT_UPSTREAM_URL` set (and optionally `R_JUDGMENT_UPSTREAM_API_KEY`) and `R_JUDGMENT_SHADOW=on`, every Jev judgment is also scored by that endpoint and per-question agreement is logged, without changing the answer Roomote acts on. The self-run model cannot be selected as the judgment model yet.

@@ -196,7 +196,6 @@ function buildJudgmentSettings(
   return {
     typeSafe,
     vercelGatewayConnected: false,
-    roomoteConnected: false,
     storedSelection: null,
     envSelection: null,
     effectiveSelection: typeSafe.connected ? 'typesafe' : 'off',

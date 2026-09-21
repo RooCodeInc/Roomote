@@ -305,30 +305,19 @@ The judgment model is optional. Many routing and triage steps are bounded
 decisions rather than text: whether a channel message should start work, which
 skill or tool fits a request, or whether a thread reply is meant for Roomote.
 A judgment model answers these as typed questions with probabilities in one
-fast call. Roomote supports a judgment model it runs itself and TypeSafe's Jev
-through these routes:
+fast call. Roomote currently supports TypeSafe's Jev through these routes:
 
 | Judgment model | Requires |
 | --- | --- |
-| **Roomote judgment model** | `R_JUDGMENT_UPSTREAM_URL` (set automatically on Roomote Cloud) |
 | **Jev via TypeSafe** | a [TypeSafe](/providers/inference/typesafe) API key |
 | **Jev via OpenRouter** | an [OpenRouter](/providers/inference/openrouter) API key |
 | **Jev via Vercel AI Gateway** | a [Vercel AI Gateway](/providers/inference/vercel-ai-gateway) key |
 
 Choose it under **Judgment model** in **Settings > Models**, or set
-`R_JUDGMENT_MODEL` to `roomote`, `typesafe`, `openrouter`, `vercel`, or `off`.
-A TypeSafe key alone turns on **Jev via TypeSafe**; otherwise a configured
-Roomote judgment model is used. OpenRouter and Vercel AI Gateway are used only
-when you select them, because many deployments already have those keys for
-task inference, and choosing them sends decision text to a third party.
-
-The **Roomote judgment model** is an open-weight model served on
-Roomote-operated infrastructure. The text a decision needs never leaves that
-infrastructure, which is why it is the default on Roomote Cloud. It answers
-the same typed questions as Jev; Roomote acts on it under the same confidence
-rules and falls back to the helper model in the same cases. Self-hosted
-deployments can point `R_JUDGMENT_UPSTREAM_URL` at any server that speaks the
-same typed decisions request.
+`R_JUDGMENT_MODEL` to `typesafe`, `openrouter`, `vercel`, or `off`. A TypeSafe
+key alone turns on **Jev via TypeSafe**. OpenRouter and Vercel AI Gateway are
+used only when you select them, because many deployments already have those
+keys for task inference.
 
 When a judgment model is on, Roomote asks it first for:
 
@@ -359,16 +348,14 @@ unsure, unavailable, or returns an error, Roomote keeps the behavior it has
 without a judgment model, usually through the deployment's helper model. The
 helper model is resolved from the **Helper model** role and does not require a
 separate decision-model connection. The text a decision needs is sent to the
-selected judgment model, so choosing Jev sends it to TypeSafe or the gateway
-you picked; keys stay on the control plane and are never sent to task
+selected provider; keys stay on the control plane and are never sent to task
 sandboxes.
 
 Some decisions evaluate many candidates in parallel, such as skill relevance
 and integration-tool ranking. Roomote only runs those high-volume workloads
-through a configured judgment model (Jev or the Roomote judgment model). A
-helper model never opts into these batches, so deployments without a judgment
-model keep the existing conservative behavior and do not incur new
-high-volume language-model calls.
+through an explicitly configured Jev judgment backend. A helper model never
+opts into these batches, so deployments without Jev keep the existing
+conservative behavior and do not incur new high-volume language-model calls.
 
 ## Reasoning settings
 

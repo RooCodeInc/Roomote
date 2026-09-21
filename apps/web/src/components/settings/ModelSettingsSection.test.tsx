@@ -101,7 +101,6 @@ vi.mock('@/hooks/task-models/useJudgmentModelSettings', () => ({
       typeSafe: { connected: false, source: null },
       openRouterConnected: false,
       vercelGatewayConnected: false,
-      roomoteConnected: false,
       storedSelection: null,
       envSelection: null,
       effectiveSelection: 'off',
