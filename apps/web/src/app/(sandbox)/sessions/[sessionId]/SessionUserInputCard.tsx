@@ -17,6 +17,7 @@ import {
   RadioGroupItem,
 } from '@/components/system';
 import { useTRPC } from '@/trpc/client';
+import { SensitiveValueDialog } from '@/components/sensitive-input/SensitiveValueDialog';
 import { useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
@@ -70,6 +71,9 @@ export function SessionUserInputCard({
     getInitialSelections(request),
   );
   const [freeText, setFreeText] = useState<Record<string, string>>({});
+  const [openSensitiveQuestionId, setOpenSensitiveQuestionId] = useState<
+    string | null
+  >(null);
 
   const submit = useMutation(
     (submission === 'setup'
@@ -108,6 +112,33 @@ export function SessionUserInputCard({
   }, [freeText, request.questions, selections]);
 
   const canSubmit = !submit.isPending && !validationError;
+
+  const renderSensitiveInput = (
+    question: (typeof request.questions)[number],
+  ) => (
+    <SensitiveValueDialog
+      open={openSensitiveQuestionId === question.id}
+      onOpenChange={(open) =>
+        setOpenSensitiveQuestionId(open ? question.id : null)
+      }
+      title="Enter sensitive response"
+      description="This value stays out of the conversation transcript and is handled as sensitive input."
+      label={question.question}
+      inputId={`${request.requestId}:${question.id}:sensitive-input`}
+      value={freeText[question.id] ?? ''}
+      onChange={(value) =>
+        setFreeText((current) => ({ ...current, [question.id]: value }))
+      }
+      onSubmit={() => setOpenSensitiveQuestionId(null)}
+      triggerLabel={
+        freeText[question.id]
+          ? 'Edit sensitive response'
+          : 'Enter sensitive response'
+      }
+      placeholder="Enter API key, token, or secret"
+      disabled={submit.isPending}
+    />
+  );
 
   const buildAnswers = () => {
     const answers: Record<string, { answers: string[] }> = {};
@@ -262,18 +293,22 @@ export function SessionUserInputCard({
                     </label>
                   ) : null}
                   {selected.includes(OTHER_VALUE) ? (
-                    <Input
-                      type={question.isSecret ? 'password' : 'text'}
-                      value={freeText[question.id] ?? ''}
-                      disabled={submit.isPending}
-                      aria-label={`${question.question} other answer`}
-                      onChange={(event) =>
-                        setFreeText((current) => ({
-                          ...current,
-                          [question.id]: event.target.value,
-                        }))
-                      }
-                    />
+                    question.isSecret ? (
+                      renderSensitiveInput(question)
+                    ) : (
+                      <Input
+                        type="text"
+                        value={freeText[question.id] ?? ''}
+                        disabled={submit.isPending}
+                        aria-label={`${question.question} other answer`}
+                        onChange={(event) =>
+                          setFreeText((current) => ({
+                            ...current,
+                            [question.id]: event.target.value,
+                          }))
+                        }
+                      />
+                    )
                   ) : null}
                 </div>
               ) : (
@@ -310,24 +345,30 @@ export function SessionUserInputCard({
                     </label>
                   ) : null}
                   {selected[0] === OTHER_VALUE ? (
-                    <Input
-                      type={question.isSecret ? 'password' : 'text'}
-                      value={freeText[question.id] ?? ''}
-                      disabled={submit.isPending}
-                      aria-label={`${question.question} other answer`}
-                      onChange={(event) =>
-                        setFreeText((current) => ({
-                          ...current,
-                          [question.id]: event.target.value,
-                        }))
-                      }
-                    />
+                    question.isSecret ? (
+                      renderSensitiveInput(question)
+                    ) : (
+                      <Input
+                        type="text"
+                        value={freeText[question.id] ?? ''}
+                        disabled={submit.isPending}
+                        aria-label={`${question.question} other answer`}
+                        onChange={(event) =>
+                          setFreeText((current) => ({
+                            ...current,
+                            [question.id]: event.target.value,
+                          }))
+                        }
+                      />
+                    )
                   ) : null}
                 </RadioGroup>
               )
+            ) : question.isSecret ? (
+              renderSensitiveInput(question)
             ) : (
               <Input
-                type={question.isSecret ? 'password' : 'text'}
+                type="text"
                 value={freeText[question.id] ?? ''}
                 disabled={submit.isPending}
                 aria-label={question.question}

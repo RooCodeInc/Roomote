@@ -49,9 +49,9 @@ export function ComposerErrorDialog(props: {
               {attachmentLimit ? 'Attachment too large' : 'Message not sent'}
             </DialogTitle>
             <DialogDescription className="text-foreground">
-              <p className="whitespace-pre-line">{message}</p>
+              <span className="block whitespace-pre-line">{message}</span>
               {attachmentLimit ? (
-                <p className="mt-2">{ATTACHMENT_LIMIT_GUIDANCE}</p>
+                <span className="mt-2 block">{ATTACHMENT_LIMIT_GUIDANCE}</span>
               ) : null}
             </DialogDescription>
           </DialogHeader>

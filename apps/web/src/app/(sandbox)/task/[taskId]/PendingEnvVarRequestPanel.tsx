@@ -18,6 +18,12 @@ import { useTRPC, useTRPCClient } from '@/trpc/client';
 
 import {
   Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
   Input,
   Label,
   Loader2,
@@ -118,6 +124,7 @@ export function PendingEnvVarRequestPanel({
   const [dismissedRequestKey, setDismissedRequestKey] = useState<string | null>(
     null,
   );
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
 
   const visibleRequest =
     request && request.key !== dismissedRequestKey ? request : null;
@@ -201,6 +208,7 @@ export function PendingEnvVarRequestPanel({
           return [{ name, value }];
         }),
       });
+      setIsDialogOpen(false);
 
       if (!result.canReload || !client) {
         recordFulfillmentLocally(clientMessageId);
@@ -268,36 +276,53 @@ export function PendingEnvVarRequestPanel({
   };
 
   return (
-    <div className="min-h-80 md:min-h-auto border-b border-background">
-      <div className="mx-auto w-full max-w-4xl p-4 text-foreground">
-        <div className="md:space-y-2">
-          <div className="flex items-start justify-between gap-3 mb-2 md:mb-0">
-            <div className="flex items-center gap-2">
-              <MessageSquareCode className="hidden md:inline size-4 text-muted-foreground" />
-              <span className="font-semibold text-sm text-foreground">
-                I need some environment variables to finish
-              </span>
-            </div>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              onClick={() => setDismissedRequestKey(visibleRequest.key)}
-              aria-label="Dismiss environment variable request"
-              title="Dismiss environment variable request"
-            >
-              <X className="size-4" />
-            </Button>
+    <div className="border-b border-background">
+      <div className="mx-auto flex w-full max-w-4xl items-center justify-between gap-3 p-4 text-foreground">
+        <div className="flex min-w-0 items-center gap-2">
+          <MessageSquareCode className="hidden size-4 shrink-0 text-muted-foreground md:inline" />
+          <div className="min-w-0">
+            <p className="text-sm font-semibold">
+              I need some environment variables to finish
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {visibleRequest.variables.length} sensitive value
+              {visibleRequest.variables.length === 1 ? '' : 's'} requested
+            </p>
           </div>
-
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button type="button" size="sm" onClick={() => setIsDialogOpen(true)}>
+            <Lock />
+            Enter values
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={() => setDismissedRequestKey(visibleRequest.key)}
+            aria-label="Dismiss environment variable request"
+            title="Dismiss environment variable request"
+          >
+            <X className="size-4" />
+          </Button>
+        </div>
+      </div>
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent size="2xl">
+          <DialogHeader>
+            <DialogTitle>Enter environment variables</DialogTitle>
+            <DialogDescription>
+              Values are saved in your account&apos;s secure vault and never
+              added to the task transcript or sent to the model provider.
+            </DialogDescription>
+          </DialogHeader>
           {!isAdmin ? (
             <div className="inline-flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-1.5 text-xs text-destructive">
               <TriangleAlert className="size-3.5" />
               <span>Admin required</span>
             </div>
           ) : null}
-
-          <div className="overflow-hidden">
+          <div className="space-y-1">
             {visibleRequest.variables.map((variable, index) => {
               const value = values[variable.name] ?? '';
               const hasSavedValue = isConfiguredVariable(variable.name);
@@ -305,9 +330,7 @@ export function PendingEnvVarRequestPanel({
               return (
                 <Label
                   key={variable.name}
-                  className={`py-1 flex flex-col items-start md:grid md:gap-2 md:grid-cols-3 md:items-center ${
-                    index > 0 ? 'border-t' : ''
-                  }`}
+                  className={`flex flex-col items-start gap-2 py-3 md:grid md:grid-cols-3 md:items-center ${index > 0 ? 'border-t' : ''}`}
                 >
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-xs font-semibold">
@@ -317,8 +340,7 @@ export function PendingEnvVarRequestPanel({
                       className={`size-4 shrink-0 text-red-600 transition-opacity opacity-${needsValue ? '100' : '0'}`}
                     />
                   </div>
-
-                  <div className="col-span-2 space-y-1">
+                  <div className="w-full md:col-span-2">
                     <Input
                       secret
                       value={
@@ -327,32 +349,26 @@ export function PendingEnvVarRequestPanel({
                           : value
                       }
                       onFocus={() => {
-                        if (!isShowingConfiguredMask(variable.name)) {
-                          return;
-                        }
-
-                        setRevealedVariables((currentRevealedValues) => ({
-                          ...currentRevealedValues,
+                        if (!isShowingConfiguredMask(variable.name)) return;
+                        setRevealedVariables((current) => ({
+                          ...current,
                           [variable.name]: true,
                         }));
                       }}
                       onBlur={() => {
-                        if (!isConfiguredVariable(variable.name)) {
+                        if (
+                          !isConfiguredVariable(variable.name) ||
+                          (values[variable.name] ?? '').length > 0
+                        )
                           return;
-                        }
-
-                        if ((values[variable.name] ?? '').length > 0) {
-                          return;
-                        }
-
-                        setRevealedVariables((currentRevealedValues) => ({
-                          ...currentRevealedValues,
+                        setRevealedVariables((current) => ({
+                          ...current,
                           [variable.name]: false,
                         }));
                       }}
                       onChange={(event) =>
-                        setValues((currentValues) => ({
-                          ...currentValues,
+                        setValues((current) => ({
+                          ...current,
                           [variable.name]: event.target.value,
                         }))
                       }
@@ -366,46 +382,38 @@ export function PendingEnvVarRequestPanel({
               );
             })}
           </div>
-
           {isAdmin ? (
-            <div className="mt-2 flex flex-col md:flex-row gap-2 md:gap-4 md:items-center">
+            <DialogFooter>
               <Button
                 type="button"
-                size="sm"
+                variant="outline"
+                onClick={() => setIsDialogOpen(false)}
+                disabled={fulfillRequest.isPending}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
                 onClick={handleSubmit}
                 disabled={fulfillRequest.isPending}
-                className="w-full sm:w-auto"
               >
                 {fulfillRequest.isPending ? (
                   <Loader2 className="size-4 animate-spin" />
                 ) : (
-                  <>
-                    <Lock />
-                    Save
-                  </>
+                  <Lock />
                 )}
+                Save values
               </Button>
-              <p className="flex items-center gap-2 text-xs text-muted-foreground">
-                Saved in your account&apos;s secure vault. Never sent to the
-                model provider.
-              </p>
-            </div>
+            </DialogFooter>
           ) : (
-            <div className="space-y-2">
-              <p className="flex items-center gap-2 text-xs text-muted-foreground">
-                <Lock className="size-3.5" />
-                <span>
-                  Saved securely and never added to the task transcript.
-                </span>
-              </p>
-              <p className="text-xs text-muted-foreground">
-                An admin needs to provide these values before the task can
-                continue.
-              </p>
-            </div>
+            <p className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Lock className="size-3.5" />
+              An admin needs to provide these values before the task can
+              continue.
+            </p>
           )}
-        </div>
-      </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
