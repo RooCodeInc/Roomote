@@ -172,6 +172,29 @@ describe('distillTaskRunTurnMemory', () => {
     );
   });
 
+  it('scrubs credentials before anything reaches the decision or helper model', async () => {
+    const token = `ghp_${'a'.repeat(36)}`;
+    const key = `sk-${'b'.repeat(40)}`;
+    mockGetBrainMemorySummary.mockResolvedValue(
+      `## Outcome\n\nThe sender signs with ${key}.\n\n${DISTILLED_NOTE}`,
+    );
+    mockTurnRows.mockResolvedValue([
+      assistant(`Retries skip 4xx. I used ${token} to test against staging.`),
+      user(`Do not retry 4xx. Use ${token} for the staging check.`),
+    ]);
+
+    await distillTaskRunTurnMemory(run);
+
+    const sent = JSON.stringify([
+      mockEvaluateDecisionModel.mock.calls,
+      mockGenerateTrackedNonTaskObject.mock.calls,
+    ]);
+    expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledTimes(1);
+    expect(sent).toContain('Retries skip 4xx.');
+    expect(sent).not.toContain(token);
+    expect(sent).not.toContain(key);
+  });
+
   it('stands down for a memory the agent recorded', async () => {
     mockGetBrainMemorySummary.mockResolvedValue('## Outcome\n\nAgent text.');
 

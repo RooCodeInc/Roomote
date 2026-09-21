@@ -163,6 +163,33 @@ describe('saveFastAgentPostTurnMemory', () => {
     );
   });
 
+  it('scrubs credentials before anything reaches the decision or helper model', async () => {
+    const token = `ghp_${'a'.repeat(36)}`;
+    const key = `sk-${'b'.repeat(40)}`;
+    mockGetFastAgentConversationMemory.mockResolvedValueOnce(
+      `- The deploy bot authenticates with ${key}`,
+    );
+    mockEvaluateDecisionModel.mockResolvedValueOnce(
+      answers({ statedDurable: 0.95 }),
+    );
+
+    await saveFastAgentPostTurnMemory({
+      ...turn,
+      request: `Always deploy from release. The CI token is ${token}.`,
+      steeredRequests: [`Also the fallback token is ${token}`],
+      reply: `Noted, I will use ${key} for the deploy bot.`,
+    });
+
+    const sent = JSON.stringify([
+      mockEvaluateDecisionModel.mock.calls,
+      mockGenerateTrackedNonTaskObject.mock.calls,
+    ]);
+    expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledTimes(1);
+    expect(sent).toContain('Always deploy from release.');
+    expect(sent).not.toContain(token);
+    expect(sent).not.toContain(key);
+  });
+
   it('never pays for distillation on an unremarkable turn', async () => {
     mockEvaluateDecisionModel.mockResolvedValueOnce(
       answers({ statedDurable: 0.6 }),
