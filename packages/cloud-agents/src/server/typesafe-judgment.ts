@@ -17,14 +17,20 @@ import {
 } from './non-task-provider-usage';
 
 /**
- * Optional judgment-model backend (TypeSafe's Jev). Jev answers typed
- * questions (yes/no probabilities, one-of-N choices, graded scores) over a
- * piece of state in a single fast HTTP call, without generating text.
- * Surfaces that only need a bounded judgment use it when the deployment
- * configures a TypeSafe key, and otherwise (or on any failure) keep their
- * existing behavior.
+ * Optional judgment-model backend. A judgment model answers typed questions
+ * (yes/no probabilities, one-of-N choices, graded scores) over a piece of
+ * state in a single fast HTTP call, without generating text. Surfaces that
+ * only need a bounded judgment use it when the deployment configures one,
+ * and otherwise (or on any failure) keep their existing behavior.
  *
- * The key stays on the control plane; it is never injected into a sandbox.
+ * The backend is TypeSafe's Jev, reached directly or through a gateway with
+ * the deployment's own key. A judgment model Roomote runs itself
+ * (`R_JUDGMENT_UPSTREAM_URL`) speaks the same typed decisions request, but it
+ * is not a backend yet: it only scores Jev's decisions in the background
+ * (`R_JUDGMENT_SHADOW`) so its agreement can be measured on real traffic
+ * before anything acts on its answers.
+ *
+ * Keys stay on the control plane; they are never injected into a sandbox.
  */
 const TYPESAFE_API_URL = 'https://api.typesafe.ai/v1/systemone';
 const TYPESAFE_MODEL = 'jev-latest';
@@ -38,6 +44,17 @@ const VERCEL_AI_GATEWAY_EVALUATION_URL =
   'https://ai-gateway.vercel.sh/v4/ai/evaluation-model';
 const VERCEL_AI_GATEWAY_PROTOCOL_VERSION = '0.0.1';
 const VERCEL_AI_GATEWAY_JEV_MODEL_ID = 'typesafe-ai/jev';
+/**
+ * The Roomote-run upstream serves one model under this name; it is echoed
+ * back so a response can be tied to the model revision that produced it.
+ */
+const ROOMOTE_JUDGMENT_MODEL_ID = 'roomote-judgment';
+const ROOMOTE_DECISIONS_PATH = '/v1/decisions';
+/**
+ * A self-run model prefills large states on modest hardware, so a shadow
+ * request gets more room than a hosted API call does.
+ */
+const DEFAULT_ROOMOTE_TIMEOUT_MS = 6_000;
 
 /**
  * One request carries at most this many questions. The API accepts more, but
@@ -118,6 +135,26 @@ export type JudgmentBackend =
   | { provider: 'typesafe'; apiKey: string }
   | { provider: 'openrouter'; apiKey: string }
   | { provider: 'vercel'; apiKey: string };
+
+type RoomoteJudgmentUpstream = { url: string; apiKey: string | undefined };
+
+/**
+ * The Roomote-run upstream, read from the environment on every resolution so
+ * hosting can rotate the credential without a restart. No key is a valid
+ * configuration for a private-network upstream.
+ */
+function resolveRoomoteJudgmentUpstream(): RoomoteJudgmentUpstream | undefined {
+  const url = Env.R_JUDGMENT_UPSTREAM_URL?.trim();
+
+  if (!url) {
+    return undefined;
+  }
+
+  return {
+    url: url.replace(/\/+$/u, ''),
+    apiKey: Env.R_JUDGMENT_UPSTREAM_API_KEY?.trim() || undefined,
+  };
+}
 
 let cachedBackend:
   | { value: JudgmentBackend | undefined; expiresAt: number }
@@ -250,6 +287,21 @@ function isValidAnswer(question: TypeSafeQuestion, answer: unknown): boolean {
   );
 }
 
+/** Carries the status separately so a caller can report it without the body. */
+class JudgmentHttpError extends Error {
+  constructor(
+    readonly status: number,
+    detail: string,
+  ) {
+    super(
+      `Judgment model request failed with HTTP ${status}${
+        detail ? `: ${detail.slice(0, 200)}` : ''
+      }`,
+    );
+    this.name = 'JudgmentHttpError';
+  }
+}
+
 async function postJson(
   url: string,
   init: { headers: Record<string, string>; body: unknown; timeoutMs: number },
@@ -262,11 +314,9 @@ async function postJson(
   });
 
   if (!response.ok) {
-    const detail = await response.text().catch(() => '');
-    throw new Error(
-      `Judgment model request failed with HTTP ${response.status}${
-        detail ? `: ${detail.slice(0, 200)}` : ''
-      }`,
+    throw new JudgmentHttpError(
+      response.status,
+      await response.text().catch(() => ''),
     );
   }
 
@@ -274,19 +324,35 @@ async function postJson(
 }
 
 async function requestNativeDecisions(
-  apiKey: string,
+  apiKey: string | undefined,
   state: unknown,
   questions: Record<string, TypeSafeQuestion>,
   timeoutMs: number,
   options: { url: string; model: string },
 ): Promise<Record<string, unknown> | undefined> {
   const body = await postJson(options.url, {
-    headers: { Authorization: `Bearer ${apiKey}` },
+    headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
     body: { state, model: options.model, questions },
     timeoutMs,
   });
 
   return body.answers as Record<string, unknown> | undefined;
+}
+
+async function requestRoomoteDecisions(
+  upstream: RoomoteJudgmentUpstream,
+  state: unknown,
+  questions: Record<string, TypeSafeQuestion>,
+  timeoutMs: number,
+): Promise<Record<string, unknown> | undefined> {
+  // The upstream reports probabilities; confidence is derived here the same
+  // way it is for OpenRouter so every backend yields one answer shape.
+  return withDerivedConfidence(
+    await requestNativeDecisions(upstream.apiKey, state, questions, timeoutMs, {
+      url: `${upstream.url}${ROOMOTE_DECISIONS_PATH}`,
+      model: ROOMOTE_JUDGMENT_MODEL_ID,
+    }),
+  );
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -475,7 +541,131 @@ export async function evaluateTypeSafeJudgments<
     }
   }
 
+  if (Env.R_JUDGMENT_SHADOW === 'on') {
+    void shadowRoomoteJudgment(backend.provider, params, answers);
+  }
+
   return answers as TypeSafeAnswers<TQuestions>;
+}
+
+function asNumber(value: unknown): number | undefined {
+  return typeof value === 'number' ? value : undefined;
+}
+
+function fixed(value: unknown): string {
+  const number = asNumber(value);
+  return number === undefined ? 'n/a' : number.toFixed(2);
+}
+
+/** Whether two validated answers to `question` would drive the same decision. */
+function agrees(question: TypeSafeQuestion, a: unknown, b: unknown): boolean {
+  const left = asRecord(a) ?? {};
+  const right = asRecord(b) ?? {};
+
+  switch (question.type) {
+    case 'noul':
+      return (
+        (asNumber(left.noul) ?? 0) >= 0.5 === (asNumber(right.noul) ?? 0) >= 0.5
+      );
+    case 'choice':
+      return left.choice === right.choice;
+    case 'score':
+      return (
+        Math.round(asNumber(left.score) ?? 0) ===
+        Math.round(asNumber(right.score) ?? 0)
+      );
+  }
+}
+
+/** The one number worth comparing per answer: probability, confidence, or level. */
+function shadowMetric(question: TypeSafeQuestion, answer: unknown): string {
+  const record = asRecord(answer) ?? {};
+
+  switch (question.type) {
+    case 'noul':
+      return fixed(record.noul);
+    case 'choice':
+      return fixed(record.confidence);
+    case 'score':
+      return fixed(record.score);
+  }
+}
+
+/**
+ * What went wrong with a shadow request, as a fixed category. An error message
+ * can carry part of the upstream's response body, which may echo the request,
+ * so the shadow log never includes one.
+ */
+function shadowFailureCategory(error: unknown): string {
+  if (error instanceof JudgmentHttpError) {
+    return `http_${error.status}`;
+  }
+
+  if (
+    error instanceof Error &&
+    (error.name === 'TimeoutError' || error.name === 'AbortError')
+  ) {
+    return 'timeout';
+  }
+
+  return 'request_failed';
+}
+
+/**
+ * Score the same decision with the Roomote-run upstream after a third-party
+ * judgment model answered, and log how the two agree. The caller's answer is
+ * never affected: this runs detached, after the primary answer validated,
+ * and swallows its own failures. The log carries only question keys, choice
+ * agreement, and probabilities, never the state or the chosen values, so it
+ * is safe in ordinary deployment logs. Its purpose is calibration evidence
+ * for the hosted model, gathered only where the text already goes to Jev.
+ */
+async function shadowRoomoteJudgment(
+  primaryProvider: JudgmentBackend['provider'],
+  params: { state: unknown; questions: Record<string, TypeSafeQuestion> },
+  primary: Record<string, unknown> | undefined,
+): Promise<void> {
+  const upstream = resolveRoomoteJudgmentUpstream();
+
+  if (!upstream || !primary) {
+    return;
+  }
+
+  const started = Date.now();
+
+  try {
+    const shadow = await requestRoomoteDecisions(
+      upstream,
+      params.state,
+      params.questions,
+      DEFAULT_ROOMOTE_TIMEOUT_MS,
+    );
+    const entries = Object.entries(params.questions);
+    let agreed = 0;
+    const rows = entries.map(([id, question]) => {
+      const answer = shadow?.[id];
+
+      if (!isValidAnswer(question, answer)) {
+        return `${id}:${question.type}:invalid`;
+      }
+
+      const same = agrees(question, primary[id], answer);
+      agreed += same ? 1 : 0;
+
+      return `${id}:${question.type}:${same ? 'same' : 'differ'}:${shadowMetric(
+        question,
+        primary[id],
+      )}/${shadowMetric(question, answer)}`;
+    });
+
+    console.info(
+      `[JudgmentShadow] primary=${primaryProvider} questions=${entries.length} agreed=${agreed} latencyMs=${Date.now() - started} ${rows.join(' ')}`,
+    );
+  } catch (error) {
+    console.warn(
+      `[JudgmentShadow] Roomote judgment upstream failed after ${Date.now() - started}ms: ${shadowFailureCategory(error)}`,
+    );
+  }
 }
 
 const DECISION_MODEL_CACHE_TTL_MS = 30_000;
