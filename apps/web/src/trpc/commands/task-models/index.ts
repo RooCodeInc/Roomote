@@ -196,11 +196,14 @@ function resolveRuntimeModelStatus(options: {
       return [
         descriptor.runtimeStatusKey,
         {
-          effectiveModelId:
-            effectiveModel ??
-            (descriptor.modelFallback === 'deployment-default'
+          // Env overrides accept raw or bare gateway slugs, while the
+          // settings/launch catalogs normalize ids; expose the canonical id
+          // so every consumer resolves the same catalog entry.
+          effectiveModelId: effectiveModel
+            ? normalizeTaskModelId(effectiveModel)
+            : descriptor.modelFallback === 'deployment-default'
               ? options.settingsDefaultModelId
-              : null),
+              : null,
           persistedModelId: persistedModel,
           source,
           managedByEnv: envModel !== null,
