@@ -25,6 +25,7 @@ import {
   setIntegrationToolSessionOverride,
   upsertIntegrationToolPolicy,
 } from '../integration-tool-approvals';
+import { setDeploymentExperimentEnabled } from '../deployment-experiments';
 
 const userIds: string[] = [];
 const sessionIds: string[] = [];
@@ -321,6 +322,7 @@ describe('auto-approved reservations', () => {
   it('inserts an unrelayed approved decision and claims it exactly once', async () => {
     const userId = await user();
     const sessionId = await ownedSession(userId);
+    await setDeploymentExperimentEnabled('integrationToolApprovals', true);
     const reservation = await insertAutoApprovedIntegrationToolApproval(
       { sessionId, userId },
       {
@@ -355,6 +357,7 @@ describe('auto-approved reservations', () => {
   it('fails the claim when the disable sweep cancels the reservation first', async () => {
     const userId = await user();
     const sessionId = await ownedSession(userId);
+    await setDeploymentExperimentEnabled('integrationToolApprovals', true);
     const reservation = await insertAutoApprovedIntegrationToolApproval(
       { sessionId, userId },
       {
@@ -376,6 +379,36 @@ describe('auto-approved reservations', () => {
     const row = await getIntegrationToolApproval(reservation.approvalId);
     expect(row?.status).toBe('cancelled');
     expect(row?.cancelReason).toBe('experiment_disabled');
+  });
+
+  it('fails the claim in the window between the metadata disable and the sweep', async () => {
+    // The toggle commits `enabled=false` before the sweep runs; the claim
+    // re-reads the flag inside the same UPDATE, so this reservation cannot
+    // be claimed even though no sweep has cancelled it.
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    await setDeploymentExperimentEnabled('integrationToolApprovals', true);
+    const reservation = await insertAutoApprovedIntegrationToolApproval(
+      { sessionId, userId },
+      {
+        integrationId: call.integrationId,
+        toolName: call.toolName,
+        nativeRequestId: nextNativeRequestId(),
+        argsFingerprint: fingerprint(),
+        argsSummary: call.args,
+      },
+    );
+    await setDeploymentExperimentEnabled('integrationToolApprovals', false);
+    await expect(
+      claimAutoApprovedIntegrationToolApproval({
+        approvalId: reservation.approvalId,
+        requesterUserId: userId,
+      }),
+    ).resolves.toBe(false);
+    const row = await getIntegrationToolApproval(reservation.approvalId);
+    expect(row?.status).toBe('approved');
+    expect(row?.status).not.toBe('auto_approved');
+    await setDeploymentExperimentEnabled('integrationToolApprovals', true);
   });
 });
 
@@ -518,6 +551,7 @@ describe('integration tool session overrides', () => {
   it('writes auto-approved asks as terminal audit rows no decision can claim', async () => {
     const userId = await user();
     const context = { sessionId: await ownedSession(userId), userId };
+    await setDeploymentExperimentEnabled('integrationToolApprovals', true);
     const reservation = await insertAutoApprovedIntegrationToolApproval(
       context,
       {

@@ -10,6 +10,8 @@ import type {
   IntegrationToolSessionOverrideMode,
 } from '@roomote/types';
 
+import { DEPLOYMENT_EXPERIMENT_METADATA_KEYS } from '@roomote/feature-flags';
+
 import { db, type DatabaseOrTransaction } from '../db';
 import {
   integrationToolApprovalRequests,
@@ -564,12 +566,13 @@ export async function insertAutoApprovedIntegrationToolApproval(
 }
 
 /**
- * Atomically claim an unrelayed auto-approval for relay: only an `approved`,
- * unclaimed row transitions to terminal `auto_approved`. The experiment
- * disable sweep cancels `approved` rows, so a sweep that lands first makes
- * this return false and the caller rejects the native ask instead of
- * executing — no auto_approved record ever exists for a call that did not
- * run, and no disable can slip between the claim and the relay decision.
+ * Atomically claim an unrelayed auto-approval for relay: the single UPDATE
+ * both requires an unclaimed `approved` row and re-reads the experiment
+ * flag, so a disable committed anywhere before the claim — even in the
+ * window between the metadata write and the cancellation sweep — makes it
+ * match zero rows and the caller rejects the native ask instead of
+ * executing. A claim that commits first legitimately precedes the disable,
+ * and no auto_approved record ever exists for a call that did not run.
  */
 export async function claimAutoApprovedIntegrationToolApproval(input: {
   approvalId: string;
@@ -586,6 +589,11 @@ export async function claimAutoApprovedIntegrationToolApproval(input: {
           input.requesterUserId,
         ),
         eq(integrationToolApprovalRequests.status, 'approved'),
+        sql`coalesce((
+          select (settings.metadata ->> ${DEPLOYMENT_EXPERIMENT_METADATA_KEYS.integrationToolApprovals})::boolean
+          from deployment_settings settings
+          where settings.id = 'default'
+        ), false)`,
       ),
     )
     .returning({ id: integrationToolApprovalRequests.id });
