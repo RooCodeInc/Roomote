@@ -70,6 +70,9 @@ const state = vi.hoisted(() => ({
   xConnection: null as null | {
     authStatus?: string | null;
   },
+  stripeConnection: null as null | {
+    authStatus?: string | null;
+  },
   isAdmin: true,
   snowflakeConnection: null as null | {
     authStatus?: string | null;
@@ -130,6 +133,7 @@ const { mutations, selectMock } = vi.hoisted(() => ({
     saveSnowflakeConnection: vi.fn(),
     saveVercelConnection: vi.fn(),
     saveXConnection: vi.fn(),
+    saveStripeConnection: vi.fn(),
     saveLinearOauthSetup: vi.fn(),
     removeLinearOauthSetup: vi.fn(),
   },
@@ -394,6 +398,14 @@ vi.mock('@/hooks/mcp-connections', () => ({
     data: state.xConnection,
     isPending: false,
   }),
+  useSaveStripeConnection: () => ({
+    isPending: false,
+    mutate: mutations.saveStripeConnection,
+  }),
+  useStripeConnection: () => ({
+    data: state.stripeConnection,
+    isPending: false,
+  }),
 }));
 
 vi.mock('@/trpc/client', () => ({
@@ -622,6 +634,7 @@ describe('Integrations settings', () => {
     state.grafanaConnection = null;
     state.vercelConnection = null;
     state.xConnection = null;
+    state.stripeConnection = null;
     state.isAdmin = true;
     state.snowflakeConnection = null;
     state.searchParams = '';
@@ -1962,6 +1975,12 @@ describe('Integrations settings', () => {
       requiredMessage: 'Bearer token is required',
       saveMutation: mutations.saveXConnection,
     },
+    {
+      integration: 'Stripe',
+      inputLabel: 'Stripe Restricted API Key',
+      requiredMessage: 'Restricted API key is required',
+      saveMutation: mutations.saveStripeConnection,
+    },
   ])(
     'rejects a whitespace-only $integration credential before saving',
     ({ integration, inputLabel, requiredMessage, saveMutation }) => {
@@ -1998,6 +2017,21 @@ describe('Integrations settings', () => {
         onError: expect.any(Function),
       }),
     );
+  });
+
+  it('rejects unrestricted Stripe secret keys before saving', () => {
+    render(<Integrations />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Configure Stripe' }));
+    fireEvent.change(screen.getByLabelText('Stripe Restricted API Key'), {
+      target: { value: 'sk_live_unrestricted' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Stripe' }));
+
+    expect(
+      screen.getByText('Use a Stripe restricted API key starting with rk_'),
+    ).toBeInTheDocument();
+    expect(mutations.saveStripeConnection).not.toHaveBeenCalled();
   });
 
   it('keeps Exa off by default and enables keyless access explicitly', () => {

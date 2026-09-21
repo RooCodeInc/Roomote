@@ -38,6 +38,13 @@ export const MCP_SETUP_INTEGRATION_METADATA: Record<
   string,
   SetupMcpIntegrationMetadata
 > = {
+  stripe: {
+    capabilities: [
+      'Inspect Stripe accounts, payments, customers, and billing data',
+      'Search Stripe APIs and documentation during implementation work',
+      'Opt in to the general Stripe write tool only when needed',
+    ],
+  },
   buildkite: {
     capabilities: [
       'Inspect Buildkite pipelines, builds, jobs, and logs',

@@ -109,6 +109,20 @@ export const saveXConnectionSchema = z.object({
 
 export type SaveXConnectionInput = z.infer<typeof saveXConnectionSchema>;
 
+export const saveStripeConnectionSchema = z.object({
+  apiKey: z
+    .string()
+    .transform((value) => value.trim())
+    .refine(
+      (value) => value.length === 0 || value.startsWith('rk_'),
+      'Use a Stripe restricted API key starting with rk_',
+    ),
+});
+
+export type SaveStripeConnectionInput = z.infer<
+  typeof saveStripeConnectionSchema
+>;
+
 export const saveGrafanaConnectionSchema = z.object({
   baseUrl: z
     .string()
