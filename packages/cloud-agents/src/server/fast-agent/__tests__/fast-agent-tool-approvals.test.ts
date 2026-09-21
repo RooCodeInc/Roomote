@@ -7,7 +7,10 @@ vi.mock('@roomote/db/server', () => ({
   expireIntegrationToolApproval: vi.fn(async () => undefined),
   fingerprintIntegrationToolCall: vi.fn(() => 'fingerprint'),
   getIntegrationToolApproval: vi.fn(),
-  insertAutoApprovedIntegrationToolApproval: vi.fn(async () => undefined),
+  claimAutoApprovedIntegrationToolApproval: vi.fn(async () => true),
+  insertAutoApprovedIntegrationToolApproval: vi.fn(async () => ({
+    approvalId: 'auto-approval-1',
+  })),
   insertIntegrationToolApproval: vi.fn(),
   isDeploymentExperimentEnabled: vi.fn(async () => true),
   listIntegrationToolPolicies: vi.fn(async () => []),
@@ -16,7 +19,7 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 import {
-  cancelOpenIntegrationToolApprovals,
+  claimAutoApprovedIntegrationToolApproval,
   expireIntegrationToolApproval,
   getIntegrationToolApproval,
   getSessionForFastConversation,
@@ -674,13 +677,16 @@ describe('tool approval bridge', () => {
     expect(insertIntegrationToolApproval).not.toHaveBeenCalled();
   });
 
-  it('rejects instead of auto-allowing when the experiment is disabled before the session-allow relay', async () => {
+  it('rejects instead of auto-allowing when the disable sweep wins the reservation claim', async () => {
+    // The reservation is written as an unrelayed `approved` decision; the
+    // disable sweep cancels those, so a lost claim means the call rejects
+    // and no terminal auto_approved record exists for it.
     vi.mocked(listIntegrationToolSessionOverrides).mockResolvedValue([
       { integrationId: 'mock-slack', toolName: 'post_message', mode: 'allow' },
     ]);
-    vi.mocked(isDeploymentExperimentEnabled)
-      .mockResolvedValueOnce(true) // pre-insert experiment check
-      .mockResolvedValue(false); // recheck immediately before relay
+    vi.mocked(claimAutoApprovedIntegrationToolApproval).mockResolvedValue(
+      false,
+    );
     const helperMocks = helpers();
     bridge().handleAsk(ask, helperMocks);
     await vi.waitFor(() =>
@@ -690,9 +696,10 @@ describe('tool approval bridge', () => {
         'Tool approvals were disabled; the call was not run.',
       ),
     );
-    expect(cancelOpenIntegrationToolApprovals).toHaveBeenCalledWith(
-      'experiment_disabled',
-    );
+    expect(claimAutoApprovedIntegrationToolApproval).toHaveBeenCalledWith({
+      approvalId: 'auto-approval-1',
+      requesterUserId: 'user-id',
+    });
     expect(helperMocks.reply).not.toHaveBeenCalledWith('req-1', 'once');
     expect(insertIntegrationToolApproval).not.toHaveBeenCalled();
   });

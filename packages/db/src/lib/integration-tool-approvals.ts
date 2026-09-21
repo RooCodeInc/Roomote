@@ -535,23 +535,61 @@ export async function insertAutoApprovedIntegrationToolApproval(
     argsFingerprint: string;
     argsSummary: unknown;
   },
-): Promise<void> {
-  await db.transaction(async (tx) => {
+): Promise<IntegrationToolApprovalMetadata> {
+  return db.transaction(async (tx) => {
     const owner = await requireSessionOwner(tx, context);
-    await tx.insert(integrationToolApprovalRequests).values({
-      sessionId: context.sessionId,
-      requesterUserId: owner.id,
-      integrationId: input.integrationId,
-      toolName: input.toolName,
-      nativeRequestId: input.nativeRequestId,
-      argsFingerprint: input.argsFingerprint,
-      argsSummary: redactIntegrationToolArgs(input.argsSummary),
-      status: 'auto_approved',
-      decidedByUserId: owner.id,
-      decidedAt: sql`clock_timestamp()`,
-      expiresAt: sql`clock_timestamp()`,
-    });
+    // The row starts as an unrelayed `approved` decision, exactly like a
+    // requester click: the bridge claims it with a conditional transition
+    // before relaying, so a mid-turn disable sweep cancels it instead of
+    // leaving a terminal auto_approved record for a call that never ran.
+    const [row] = await tx
+      .insert(integrationToolApprovalRequests)
+      .values({
+        sessionId: context.sessionId,
+        requesterUserId: owner.id,
+        integrationId: input.integrationId,
+        toolName: input.toolName,
+        nativeRequestId: input.nativeRequestId,
+        argsFingerprint: input.argsFingerprint,
+        argsSummary: redactIntegrationToolArgs(input.argsSummary),
+        status: 'approved',
+        decidedByUserId: owner.id,
+        decidedAt: sql`clock_timestamp()`,
+        expiresAt: sql`clock_timestamp()`,
+      })
+      .returning();
+    if (!row) throw new IntegrationToolApprovalUnavailableError('write_failed');
+    return approvalMetadata(row);
   });
+}
+
+/**
+ * Atomically claim an unrelayed auto-approval for relay: only an `approved`,
+ * unclaimed row transitions to terminal `auto_approved`. The experiment
+ * disable sweep cancels `approved` rows, so a sweep that lands first makes
+ * this return false and the caller rejects the native ask instead of
+ * executing — no auto_approved record ever exists for a call that did not
+ * run, and no disable can slip between the claim and the relay decision.
+ */
+export async function claimAutoApprovedIntegrationToolApproval(input: {
+  approvalId: string;
+  requesterUserId: string;
+}): Promise<boolean> {
+  const [row] = await db
+    .update(integrationToolApprovalRequests)
+    .set({ status: 'auto_approved' })
+    .where(
+      and(
+        eq(integrationToolApprovalRequests.id, input.approvalId),
+        eq(
+          integrationToolApprovalRequests.requesterUserId,
+          input.requesterUserId,
+        ),
+        eq(integrationToolApprovalRequests.status, 'approved'),
+      ),
+    )
+    .returning({ id: integrationToolApprovalRequests.id });
+  return Boolean(row);
 }
 
 export {

@@ -8,6 +8,7 @@ import {
 } from '../../server';
 import {
   cancelOpenIntegrationToolApprovals,
+  claimAutoApprovedIntegrationToolApproval,
   decideIntegrationToolApproval,
   expireIntegrationToolApproval,
   fingerprintIntegrationToolCall,
@@ -316,6 +317,68 @@ describe('expireIntegrationToolApproval', () => {
   });
 });
 
+describe('auto-approved reservations', () => {
+  it('inserts an unrelayed approved decision and claims it exactly once', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const reservation = await insertAutoApprovedIntegrationToolApproval(
+      { sessionId, userId },
+      {
+        integrationId: call.integrationId,
+        toolName: call.toolName,
+        nativeRequestId: nextNativeRequestId(),
+        argsFingerprint: fingerprint(),
+        argsSummary: call.args,
+      },
+    );
+    // Unrelayed: the row is an ordinary approved decision the disable sweep
+    // can still cancel, never a terminal auto_approved record yet.
+    expect(reservation.status).toBe('approved');
+    await expect(
+      claimAutoApprovedIntegrationToolApproval({
+        approvalId: reservation.approvalId,
+        requesterUserId: userId,
+      }),
+    ).resolves.toBe(true);
+    expect(
+      (await getIntegrationToolApproval(reservation.approvalId))?.status,
+    ).toBe('auto_approved');
+    // A second claim matches nothing: the reservation is terminal.
+    await expect(
+      claimAutoApprovedIntegrationToolApproval({
+        approvalId: reservation.approvalId,
+        requesterUserId: userId,
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it('fails the claim when the disable sweep cancels the reservation first', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const reservation = await insertAutoApprovedIntegrationToolApproval(
+      { sessionId, userId },
+      {
+        integrationId: call.integrationId,
+        toolName: call.toolName,
+        nativeRequestId: nextNativeRequestId(),
+        argsFingerprint: fingerprint(),
+        argsSummary: call.args,
+      },
+    );
+    await cancelOpenIntegrationToolApprovals('experiment_disabled');
+    await expect(
+      claimAutoApprovedIntegrationToolApproval({
+        approvalId: reservation.approvalId,
+        requesterUserId: userId,
+      }),
+    ).resolves.toBe(false);
+    // The audit tells the truth: cancelled, never auto_approved.
+    const row = await getIntegrationToolApproval(reservation.approvalId);
+    expect(row?.status).toBe('cancelled');
+    expect(row?.cancelReason).toBe('experiment_disabled');
+  });
+});
+
 describe('cancelOpenIntegrationToolApprovals', () => {
   it('cancels pending and approved-unclaimed rows with a reason and never resurrects them', async () => {
     const userId = await user();
@@ -455,11 +518,19 @@ describe('integration tool session overrides', () => {
   it('writes auto-approved asks as terminal audit rows no decision can claim', async () => {
     const userId = await user();
     const context = { sessionId: await ownedSession(userId), userId };
-    await insertAutoApprovedIntegrationToolApproval(context, {
-      ...tool,
-      nativeRequestId: nextNativeRequestId(),
-      argsFingerprint: fingerprint(),
-      argsSummary: { channel: 'C123', apiKey: 'sk-live' },
+    const reservation = await insertAutoApprovedIntegrationToolApproval(
+      context,
+      {
+        ...tool,
+        nativeRequestId: nextNativeRequestId(),
+        argsFingerprint: fingerprint(),
+        argsSummary: { channel: 'C123', apiKey: 'sk-live' },
+      },
+    );
+    // The reservation is unrelayed until the bridge claims it atomically.
+    await claimAutoApprovedIntegrationToolApproval({
+      approvalId: reservation.approvalId,
+      requesterUserId: userId,
     });
 
     const [row] = await db

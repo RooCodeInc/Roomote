@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import type { PermissionRuleset } from '@opencode-ai/sdk/v2/client';
 import {
   cancelOpenIntegrationToolApprovals,
+  claimAutoApprovedIntegrationToolApproval,
   db,
   expireIntegrationToolApproval,
   fingerprintIntegrationToolCall,
@@ -428,7 +429,13 @@ export function createFastAgentToolApprovalBridge(input: {
           override.toolName === tool.toolName,
       );
       if (allowedForSession) {
-        await insertAutoApprovedIntegrationToolApproval(
+        // The audit row starts as an unrelayed `approved` decision; claiming
+        // it is the atomic reservation. The disable sweep cancels `approved`
+        // rows, so a disable landing anywhere before the claim makes it fail
+        // and the ask rejects — never relaying after the final experiment
+        // state, and never recording auto_approved for a call that did not
+        // run.
+        const reservation = await insertAutoApprovedIntegrationToolApproval(
           { sessionId: input.sessionId, userId: input.userId },
           {
             integrationId: tool.integrationId,
@@ -438,15 +445,11 @@ export function createFastAgentToolApprovalBridge(input: {
             argsSummary: args ?? null,
           },
         );
-        // Recheck immediately before relaying: a disable landing while the
-        // override was read or the audit row was written must not let this
-        // call execute under a disabled experiment.
-        if (
-          !(await isDeploymentExperimentEnabled('integrationToolApprovals'))
-        ) {
-          await cancelOpenIntegrationToolApprovals(
-            INTEGRATION_TOOL_APPROVAL_CANCEL_EXPERIMENT_DISABLED,
-          );
+        const claimed = await claimAutoApprovedIntegrationToolApproval({
+          approvalId: reservation.approvalId,
+          requesterUserId: input.userId,
+        });
+        if (!claimed) {
           await helpers
             .reply(
               ask.requestId,
