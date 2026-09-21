@@ -1741,10 +1741,14 @@ export class OpenCodeServerHarness
   private terminalChatReplyDeliveryFailed = false;
   private lastBlockedCloseoutAssistantText: string | null = null;
   private completionGateReminderCount = 0;
-  // Identity of the last diff the completion check saw, so a turn that changed
-  // nothing and carried no new request (a closeout reminder, a hidden
-  // follow-up) is never re-checked.
-  private completionGateLastDiffKey: string | null = null;
+  // Identity of the last work the completion check saw: the visible-request
+  // generation plus the diff. A turn that changed nothing and carried no new
+  // request (a closeout reminder, a hidden follow-up) is never re-checked.
+  private completionGateLastCheckedKey: string | null = null;
+  // Counts visible requests. A counter rather than clearing the key above, so
+  // a request that arrives while a check is awaiting git or the API is not
+  // overwritten when that older check records what it saw.
+  private completionGateRequestGeneration = 0;
   // The report the agent gave before the check reopened its turn. The
   // follow-up turn only adds a short correction, so the two are joined.
   private completionGateHeldReport: string | null = null;
@@ -2266,7 +2270,8 @@ export class OpenCodeServerHarness
     this.terminalChatReplyDeliveryFailed = false;
     this.lastBlockedCloseoutAssistantText = null;
     this.completionGateReminderCount = 0;
-    this.completionGateLastDiffKey = null;
+    this.completionGateLastCheckedKey = null;
+    this.completionGateRequestGeneration += 1;
     this.completionGateHeldReport = null;
     this.ignoreNextStopHookSessionIdle = false;
     this.ignoreNextQueuedDrainSessionIdle = false;
@@ -2316,7 +2321,7 @@ export class OpenCodeServerHarness
     if (command.data.visibleInTranscript !== false) {
       // A new request can leave the diff untouched (the agent only claims to
       // have acted on it), so an unchanged diff is checked again against it.
-      this.completionGateLastDiffKey = null;
+      this.completionGateRequestGeneration += 1;
     }
 
     // A soft cancel can race with the very first session creation and abort
@@ -5394,9 +5399,13 @@ export class OpenCodeServerHarness
     }
 
     try {
+      // Read before the first await: a request arriving mid-check belongs to
+      // the next turn's identity, not this one's.
+      const generation = this.completionGateRequestGeneration;
       const shipped = await collectShippedDiff(this.workspacePath);
+      const checkedKey = `${generation}:${shipped?.key}`;
 
-      if (!shipped || shipped.key === this.completionGateLastDiffKey) {
+      if (!shipped || checkedKey === this.completionGateLastCheckedKey) {
         return false;
       }
 
@@ -5406,7 +5415,7 @@ export class OpenCodeServerHarness
         return false;
       }
 
-      this.completionGateLastDiffKey = shipped.key;
+      this.completionGateLastCheckedKey = checkedKey;
       const startedAt = Date.now();
       const verdict = await requestTaskCompletionCheck(this.commandEnv, {
         report: report.slice(-TASK_COMPLETION_GATE_LIMITS.reportMaxChars),

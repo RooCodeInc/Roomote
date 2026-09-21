@@ -90,6 +90,21 @@ describe('collectShippedDiff', () => {
     expect(shipped?.diffTruncated).toBe(false);
   });
 
+  it('leaves untracked lockfiles, snapshots, and bundles out of the patch', async () => {
+    const repo = createCheckout();
+    write(repo, 'packages/app/pnpm-lock.yaml', 'lockfileVersion: 9\n');
+    write(repo, 'src/__snapshots__/app.test.ts.snap', 'exports[`a`] = `b`;\n');
+    write(repo, 'public/vendor.min.js', 'var a=1;\n');
+    write(repo, 'src/new.ts', 'export const added = true;\n');
+
+    const shipped = await collectShippedDiff(repo);
+
+    expect(shipped?.diff).toContain('+export const added = true;');
+    expect(shipped?.diff).not.toContain('lockfileVersion');
+    expect(shipped?.diff).not.toContain('exports[');
+    expect(shipped?.diff).not.toContain('var a=1');
+  });
+
   it('leaves lockfile noise out of the patch', async () => {
     const repo = createCheckout();
     write(repo, 'pnpm-lock.yaml', 'lockfileVersion: 9\n');

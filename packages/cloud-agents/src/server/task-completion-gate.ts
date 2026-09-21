@@ -1,5 +1,5 @@
 import { redactBrainText } from '@roomote/communication/redact-brain-text';
-import { and, asc, db, eq, sql, taskMessages } from '@roomote/db/server';
+import { and, asc, db, desc, eq, sql, taskMessages } from '@roomote/db/server';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   extractAcpMessageText,
@@ -31,7 +31,8 @@ const REQUEST_MAX_CHARS = 6_000;
 const FOLLOW_UPS_MAX_CHARS = 4_000;
 /** The opening prompt plus the most recent follow-ups. */
 const FOLLOW_UP_LIMIT = 5;
-const PROMPT_SCAN_LIMIT = 40;
+/** Rows read from each end; some visible prompts carry no text. */
+const PROMPT_SCAN_LIMIT = 12;
 
 const COMPLETION_GATE_QUESTIONS = {
   requestUnaddressed: {
@@ -90,53 +91,59 @@ function clip(text: string, maxChars: number): string {
 async function loadTaskRequests(
   taskId: string,
 ): Promise<{ request: string; followUps: string } | null> {
-  const rows = await db
-    .select({
-      contentBlocks: taskMessages.contentBlocks,
-      payload: taskMessages.payload,
-    })
-    .from(taskMessages)
-    .where(
-      and(
-        eq(taskMessages.taskId, taskId),
-        eq(taskMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.UserPrompt),
-        sql`coalesce(${taskMessages.metadata} ->> 'visibleInTranscript', 'true') <> 'false'`,
-      ),
-    )
-    .orderBy(asc(taskMessages.ts), asc(taskMessages.createdAt))
-    .limit(PROMPT_SCAN_LIMIT);
+  // Read from both ends so a long task still contributes its opening prompt
+  // and its newest follow-ups, whatever lies between.
+  const scan = (direction: typeof asc) =>
+    db
+      .select({
+        id: taskMessages.id,
+        contentBlocks: taskMessages.contentBlocks,
+        payload: taskMessages.payload,
+      })
+      .from(taskMessages)
+      .where(
+        and(
+          eq(taskMessages.taskId, taskId),
+          eq(taskMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.UserPrompt),
+          sql`coalesce(${taskMessages.metadata} ->> 'visibleInTranscript', 'true') <> 'false'`,
+        ),
+      )
+      .orderBy(direction(taskMessages.ts), direction(taskMessages.createdAt))
+      .limit(PROMPT_SCAN_LIMIT);
+  const visiblePrompts = (rows: Awaited<ReturnType<typeof scan>>) =>
+    rows.flatMap((row) => {
+      const payload =
+        row.payload && typeof row.payload === 'object'
+          ? (row.payload as Record<string, unknown>)
+          : null;
+      const raw = extractAcpMessageText(row.contentBlocks, payload)?.trim();
+      const text = raw
+        ? normalizeTranscriptUserText(
+            isSystemInjectedAcpPromptText(raw)
+              ? extractVisibleAcpPromptText(raw)
+              : raw,
+            ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+          )?.trim()
+        : '';
 
-  const prompts: string[] = [];
+      return text ? [{ id: row.id, text }] : [];
+    });
 
-  for (const row of rows) {
-    const payload =
-      row.payload && typeof row.payload === 'object'
-        ? (row.payload as Record<string, unknown>)
-        : null;
-    const raw = extractAcpMessageText(row.contentBlocks, payload)?.trim();
+  const [opening] = visiblePrompts(await scan(asc));
 
-    if (!raw) continue;
-
-    const visible = normalizeTranscriptUserText(
-      isSystemInjectedAcpPromptText(raw)
-        ? extractVisibleAcpPromptText(raw)
-        : raw,
-      ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
-    )?.trim();
-
-    if (visible) prompts.push(visible);
-  }
-
-  const [request, ...rest] = prompts;
-
-  if (!request) {
+  if (!opening) {
     return null;
   }
 
+  const followUps = visiblePrompts(await scan(desc))
+    .filter((prompt) => prompt.id !== opening.id)
+    .slice(0, FOLLOW_UP_LIMIT)
+    .reverse();
+
   return {
-    request: clip(request, REQUEST_MAX_CHARS),
+    request: clip(opening.text, REQUEST_MAX_CHARS),
     followUps: clip(
-      rest.slice(-FOLLOW_UP_LIMIT).join('\n\n'),
+      followUps.map((prompt) => prompt.text).join('\n\n'),
       FOLLOW_UPS_MAX_CHARS,
     ),
   };

@@ -274,6 +274,39 @@ describe('OpenCode harness completion check', () => {
     }
   });
 
+  it('checks a request that arrived while the previous check was still running', async () => {
+    let releaseCheck: (() => void) | undefined;
+    mockRequestTaskCompletionCheck.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseCheck = () => resolve({ status: 'clear', flags: [] });
+        }),
+    );
+    const { client, harness, prompts, completed } = await startTask();
+
+    try {
+      const firstTurn = completeTurn(client, 'msg_1', 'Removed the guard.');
+      await vi.waitFor(() => expect(releaseCheck).toBeDefined());
+
+      // Queues behind the in-flight turn; the older check then records what
+      // it saw, which must not cover this request.
+      harness.sendCommand({
+        commandName: TaskCommandName.SendMessage,
+        data: { text: 'Also remove the helper.', visibleInTranscript: true },
+      });
+      releaseCheck?.();
+      await firstTurn;
+      await vi.waitFor(() => expect(prompts).toHaveLength(2));
+
+      await completeTurn(client, 'msg_2', 'Removed the helper too.');
+
+      await vi.waitFor(() => expect(completed()).toHaveLength(2));
+      expect(mockRequestTaskCompletionCheck).toHaveBeenCalledTimes(2);
+    } finally {
+      harness.dispose();
+    }
+  });
+
   it('skips the check when nothing changed or the task is ineligible', async () => {
     mockCollectShippedDiff.mockResolvedValue(null);
     const unchanged = await startTask();

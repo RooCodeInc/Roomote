@@ -6,6 +6,7 @@ const { mockEvaluateDecisionModel, mockPromptRows } = vi.hoisted(() => ({
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn(),
   asc: vi.fn(),
+  desc: vi.fn(),
   eq: vi.fn(),
   sql: vi.fn(),
   taskMessages: {},
@@ -25,9 +26,19 @@ vi.mock('../typesafe-judgment', () => ({
 import { evaluateTaskCompletionGate } from '../task-completion-gate';
 
 const prompt = (text: string) => ({
+  id: text,
   contentBlocks: [{ type: 'text', text }],
   payload: null,
 });
+
+/** The gate scans oldest-first for the opening, then newest-first. */
+function mockTranscript(prompts: string[], scanLimit = 12): void {
+  const rows = prompts.map(prompt);
+  mockPromptRows
+    .mockReset()
+    .mockResolvedValueOnce(rows.slice(0, scanLimit))
+    .mockResolvedValueOnce([...rows].reverse().slice(0, scanLimit));
+}
 
 const check = {
   report: 'Removed the guard and its tests.',
@@ -56,12 +67,10 @@ function answers(
 
 describe('evaluateTaskCompletionGate', () => {
   beforeEach(() => {
-    mockPromptRows
-      .mockReset()
-      .mockResolvedValue([
-        prompt('Remove the duplicate-call guard.'),
-        prompt('Also drop the helper.'),
-      ]);
+    mockTranscript([
+      'Remove the duplicate-call guard.',
+      'Also drop the helper.',
+    ]);
     mockEvaluateDecisionModel.mockReset().mockResolvedValue(answers());
   });
 
@@ -85,6 +94,33 @@ describe('evaluateTaskCompletionGate', () => {
       'reportOverclaims',
       'leftoverArtifacts',
     ]);
+  });
+
+  it('keeps the opening prompt and the newest follow-ups on a long task', async () => {
+    mockTranscript([
+      'Remove the duplicate-call guard.',
+      ...Array.from({ length: 60 }, (_, index) => `Follow-up ${index + 1}.`),
+    ]);
+
+    await evaluateTaskCompletionGate({ taskId: 'task-1', check });
+
+    expect(mockEvaluateDecisionModel.mock.calls[0]![0].state).toMatchObject({
+      request: 'Remove the duplicate-call guard.',
+      follow_ups: [56, 57, 58, 59, 60]
+        .map((index) => `Follow-up ${index}.`)
+        .join('\n\n'),
+    });
+  });
+
+  it('does not repeat a lone opening prompt as its own follow-up', async () => {
+    mockTranscript(['Remove the duplicate-call guard.']);
+
+    await evaluateTaskCompletionGate({ taskId: 'task-1', check });
+
+    expect(mockEvaluateDecisionModel.mock.calls[0]![0].state).toMatchObject({
+      request: 'Remove the duplicate-call guard.',
+      follow_ups: '',
+    });
   });
 
   it('flags only confident judgments', async () => {
@@ -131,17 +167,19 @@ describe('evaluateTaskCompletionGate', () => {
   });
 
   it('is skipped without a request, without a decision model, or on failure', async () => {
-    mockPromptRows.mockResolvedValueOnce([]);
+    mockTranscript([]);
     await expect(
       evaluateTaskCompletionGate({ taskId: 'task-1', check }),
     ).resolves.toEqual({ status: 'skipped', flags: [] });
     expect(mockEvaluateDecisionModel).not.toHaveBeenCalled();
 
+    mockTranscript(['Remove the duplicate-call guard.']);
     mockEvaluateDecisionModel.mockResolvedValueOnce(null);
     await expect(
       evaluateTaskCompletionGate({ taskId: 'task-1', check }),
     ).resolves.toEqual({ status: 'skipped', flags: [] });
 
+    mockTranscript(['Remove the duplicate-call guard.']);
     mockEvaluateDecisionModel.mockRejectedValueOnce(new Error('timeout'));
     await expect(
       evaluateTaskCompletionGate({ taskId: 'task-1', check }),

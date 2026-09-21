@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { basename, join, relative } from 'node:path';
 
 import {
   TASK_COMPLETION_GATE_ENV_VAR,
@@ -31,16 +31,29 @@ const MAX_UNTRACKED_FILE_BYTES = 200_000;
 const CLIPPED_PATCH_MARKER = '\n[... rest of this patch clipped ...]\n';
 
 /** Generated files whose patches say nothing about whether the work is done. */
-const NOISE_PATHSPECS = [
-  ':(exclude,glob)**/pnpm-lock.yaml',
-  ':(exclude,glob)**/package-lock.json',
-  ':(exclude,glob)**/yarn.lock',
-  ':(exclude,glob)**/bun.lock',
-  ':(exclude,glob)**/Cargo.lock',
-  ':(exclude,glob)**/go.sum',
-  ':(exclude,glob)**/*.snap',
-  ':(exclude,glob)**/*.min.js',
+const NOISE_FILE_NAMES = [
+  'pnpm-lock.yaml',
+  'package-lock.json',
+  'yarn.lock',
+  'bun.lock',
+  'Cargo.lock',
+  'go.sum',
 ];
+const NOISE_FILE_SUFFIXES = ['.snap', '.min.js'];
+const NOISE_PATHSPECS = [
+  ...NOISE_FILE_NAMES.map((name) => `:(exclude,glob)**/${name}`),
+  ...NOISE_FILE_SUFFIXES.map((suffix) => `:(exclude,glob)**/*${suffix}`),
+];
+
+/** The same exclusion for untracked files, which no pathspec filters. */
+function isNoiseFile(file: string): boolean {
+  const name = basename(file);
+
+  return (
+    NOISE_FILE_NAMES.includes(name) ||
+    NOISE_FILE_SUFFIXES.some((suffix) => name.endsWith(suffix))
+  );
+}
 
 type GitRunner = (
   repoPath: string,
@@ -250,7 +263,10 @@ async function collectRepositoryDiff(
 
   const untracked = (untrackedList ?? '')
     .split('\0')
-    .filter((file) => file && isLikelyText(join(repoPath, file)))
+    .filter(
+      (file) =>
+        file && !isNoiseFile(file) && isLikelyText(join(repoPath, file)),
+    )
     .slice(0, MAX_UNTRACKED_FILES);
   const untrackedPatches = await Promise.all(
     untracked.map((file) =>
