@@ -100,6 +100,18 @@ describe('withNullableOptionals', () => {
     });
   });
 
+  it('rejects non-decimal numeric transport values', () => {
+    expect(() =>
+      schema.parse({ action: 'update', issueNumber: '0x10' }),
+    ).toThrow();
+    expect(() =>
+      schema.parse({ action: 'update', issueNumber: '0b10' }),
+    ).toThrow();
+    expect(() =>
+      schema.parse({ action: 'update', issueNumber: '0o10' }),
+    ).toThrow();
+  });
+
   it('keeps inner refinements for non-null values', () => {
     expect(() => schema.parse({ action: 'get', issueNumber: 0 })).toThrow(
       'Issue number must be positive.',

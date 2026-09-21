@@ -51,12 +51,14 @@ function keepDescription<T extends ZodTypeAny>(
     : (schema.describe(description) as T);
 }
 
+const DECIMAL_NUMBER_PATTERN = /^-?(?:\d+(?:\.\d*)?|\.\d+)$/;
+
 function deserializeTransportPrimitive(schema: ZodTypeAny): ZodTypeAny {
   if (schema instanceof z.ZodNumber) {
     return keepDescription(
       z.preprocess(
         (value) =>
-          typeof value === 'string' && value.trim() !== ''
+          typeof value === 'string' && DECIMAL_NUMBER_PATTERN.test(value.trim())
             ? Number(value)
             : value,
         schema,
