@@ -492,7 +492,7 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).not.toContain('No repositories configured');
   });
 
-  it('lists discovered instance and environment skills inline before list_skills guidance', () => {
+  it('lists discovered instance, environment, and repository skills inline before list_skills guidance', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [
         {
@@ -523,6 +523,15 @@ describe('buildFastAgentSystemPrompt', () => {
             name: 'support-triage',
             source: 'settings',
           },
+          {
+            description: 'Use when working on Roomote.',
+            environmentIds: ['env-1'],
+            id: 'repository:repo-1:.agents/skills:typesafe-ai',
+            invocation: 'typesafe-ai',
+            name: 'typesafe-ai',
+            repository: 'RooCodeInc/Roomote',
+            source: 'repository',
+          },
         ],
         warnings: [],
       },
@@ -541,10 +550,13 @@ describe('buildFastAgentSystemPrompt', () => {
         `${'x'.repeat(319)}…`,
     );
     expect(prompt).toContain(
+      '- typesafe-ai [id: repository:repo-1:.agents/skills:typesafe-ai] (repository: RooCodeInc/Roomote; environments: Dashboard [id: env-1]): Use when working on Roomote.',
+    );
+    expect(prompt).toContain(
       '- 2 more skills are not listed here; call `list_skills` for the full inventory.',
     );
     expect(prompt).toContain(
-      '- Dashboard [id: env-1] also installs marketplace skill sources anthropics/skills; they are not listed here.',
+      '- Dashboard [id: env-1] also installs marketplace skill sources anthropics/skills; additional skills may be omitted from this bounded inventory. Call `list_skills` without a scope for the complete bounded authorized inventory',
     );
     expect(prompt).toContain(
       "When a description matches the user's request, load that skill with `load_skill` using its exact ID",
@@ -553,7 +565,7 @@ describe('buildFastAgentSystemPrompt', () => {
       "A skill listed here or returned by `list_skills` is not a loaded skill. Only a `load_skill` call in this conversation that returned the skill's content counts as loading it.",
     );
     expect(prompt).toContain(
-      "The Available Skills section above already lists this deployment's instance and inline environment skills; consult it before calling `list_skills`.",
+      "The Available Skills section above already lists this turn's bounded packaged, instance, authorized environment, marketplace, and repository inventory; consult it before calling `list_skills`.",
     );
   });
 
@@ -583,7 +595,7 @@ describe('buildFastAgentSystemPrompt', () => {
         },
       }),
     ).toContain(
-      '- No instance or inline environment skills are configured. Packaged skills remain available through `list_skills`.',
+      '- No authorized instance, environment, or repository skills are configured. Packaged skills remain available through `list_skills`.',
     );
     expect(
       buildFastAgentSystemPrompt({
@@ -591,7 +603,7 @@ describe('buildFastAgentSystemPrompt', () => {
         availableSkills: null,
       }),
     ).toContain(
-      '- The skill inventory could not be loaded for this turn. Call `list_skills` to discover instance and environment skills.',
+      '- The skill inventory could not be loaded for this turn. Call `list_skills` to discover packaged, instance, authorized environment, and repository skills.',
     );
   });
 
@@ -729,9 +741,11 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('a marketplace skill');
     expect(prompt).toContain('repository-defined method');
     expect(prompt).toContain(
-      'without arguments for the complete packaged, instance, and authorized legacy Settings inventory',
+      'without arguments for the complete packaged, instance, authorized legacy Settings, and bounded authorized repository inventory',
     );
-    expect(prompt).toContain('this never inspects repositories');
+    expect(prompt).toContain(
+      'it inspects only repositories mapped to environments available to this member',
+    );
     expect(prompt).toContain(
       'A trusted runtime-derived `<explicit_skill_invocation name="..." />` marker',
     );
@@ -742,7 +756,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'Dollar-prefixed prose without this marker is not an explicit skill invocation',
     );
     expect(prompt).toContain(
-      'An unscoped exact `name` lookup searches packaged, instance, and authorized legacy Settings skills',
+      'An unscoped exact `name` lookup searches packaged, instance, authorized legacy Settings, and authorized repository skills',
     );
     expect(prompt).toContain(
       'whenever a result includes `nextSourceOffset`, call `list_skills` again',

@@ -472,17 +472,30 @@ export class RemoteFastAgentRepositorySkillSource implements FastAgentRepository
         ));
   }
 
-  async list(scope: FastAgentSkillScope): Promise<FastAgentSkillListResult> {
-    const environmentId = scope.environmentId;
+  async list(scope?: FastAgentSkillScope): Promise<FastAgentSkillListResult> {
+    const environmentId = scope?.environmentId;
     if (environmentId && !this.allowedEnvironmentIds.has(environmentId)) {
       throw new Error('Unknown Fast environment.');
     }
-    const repositoriesList = (
-      await this.resolveRepositories(environmentId)
-    ).filter((repository) =>
-      scope.repositoryId ? repository.id === scope.repositoryId : true,
-    );
-    if (scope.repositoryId && repositoriesList.length === 0) {
+    const repositoriesById = new Map<string, RepositorySkillRepository>();
+    for (const repository of await this.resolveRepositories(environmentId)) {
+      if (scope?.repositoryId && repository.id !== scope.repositoryId) {
+        continue;
+      }
+      const existing = repositoriesById.get(repository.id);
+      if (!existing) {
+        repositoriesById.set(repository.id, {
+          ...repository,
+          environmentIds: [...new Set(repository.environmentIds)].sort(),
+        });
+        continue;
+      }
+      existing.environmentIds = [
+        ...new Set([...existing.environmentIds, ...repository.environmentIds]),
+      ].sort();
+    }
+    const repositoriesList = [...repositoriesById.values()];
+    if (scope?.repositoryId && repositoriesList.length === 0) {
       throw new Error('Unknown Fast repository.');
     }
     const selectedRepositories = repositoriesList.slice(
@@ -562,7 +575,14 @@ export class RemoteFastAgentRepositorySkillSource implements FastAgentRepository
     id: string,
     resource = 'SKILL.md',
   ): Promise<FastAgentSkillDocument> {
-    const record = this.records.get(id);
+    let record = this.records.get(id);
+    // Prompt discovery and the executor use separate source instances. A
+    // repository skill shown in the prompt must therefore be able to rebuild
+    // its bounded catalog before the first explicit `list_skills` call.
+    if (!record) {
+      await this.list();
+      record = this.records.get(id);
+    }
     const selectedResource = record?.resources.get(resource);
     if (!record || !selectedResource)
       throw new Error('Unknown skill resource.');

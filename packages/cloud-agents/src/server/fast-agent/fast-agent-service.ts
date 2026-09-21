@@ -3500,10 +3500,9 @@ export async function answerFastAgentQuestion({
             );
             return null;
           }),
-      // Instance and inline environment skills go into the prompt so the
-      // model can recognize a relevant playbook without guessing that
-      // `list_skills` is worth a call. Marketplace and repository skills stay
-      // on demand: they need a git fetch.
+      // The prompt catalog uses the same bounded, authorized sources as
+      // `list_skills`, so the model can recognize environment and repository
+      // playbooks without guessing a scope before discovery.
       loadFastAgentPromptSkillCatalog(
         createFastAgentPromptSkillCatalogSources({
           allowedEnvironmentIds: availableEnvironments.map(

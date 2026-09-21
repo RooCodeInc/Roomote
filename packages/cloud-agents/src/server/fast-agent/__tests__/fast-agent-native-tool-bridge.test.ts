@@ -245,14 +245,12 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(bridgeSource).toContain('metadata: payload.metadata ?? {}');
     expect(spillReadSource).toContain('never pass filesystem paths');
     expect(skillListSource).toContain(
-      'authorized legacy settings-defined skills, plus optionally repository-defined skills',
+      'authorized legacy settings-defined skills, and authorized repository-defined skills',
     );
     expect(skillListSource).toContain(
-      'an exact name to find packaged, instance, and legacy Settings skills',
+      'an exact name to search all four sources without guessing an environment or repository',
     );
-    expect(skillListSource).toContain(
-      'complete packaged, instance, and authorized legacy Settings inventory',
-    );
+    expect(skillListSource).toContain('complete bounded inventory');
     expect(skillListSource).toContain(
       'packaged > instance > legacy Settings > repository',
     );
@@ -266,7 +264,9 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(skillListSource).toContain('name: z.string()');
     expect(skillListSource).toContain('sourceOffset: z.number()');
     expect(skillListSource).toContain('nextSourceOffset');
-    expect(skillListSource).toContain('Omit scope and name');
+    expect(skillListSource).toContain(
+      'Omit scope and name for the complete bounded inventory',
+    );
     expect(skillListSource).toContain('environmentId wins when both are given');
     expect(skillListSource).toContain('omit or pass null');
     // OpenCode wraps `args` in z.object itself; a bare union there produces
@@ -944,13 +944,19 @@ describe('Fast native OpenCode tool bridge', () => {
         result: {
           counts: {
             packaged: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
-            repository: 0,
+            repository: 1,
             settings: 0,
             instance: 0,
-            total: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
+            total: FAST_AGENT_PACKAGED_SKILL_NAMES.length + 1,
           },
           skills: expect.arrayContaining([
             expect.objectContaining({ id: 'packaged:security-review' }),
+            expect.objectContaining({
+              id: repositorySkillId,
+              environmentIds: ['environment-1'],
+              repository: 'RooCodeInc/Roomote',
+              source: 'repository',
+            }),
           ]),
         },
       });
