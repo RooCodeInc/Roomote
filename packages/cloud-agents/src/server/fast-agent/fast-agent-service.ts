@@ -227,6 +227,7 @@ import {
 } from './fast-agent-tool-policy';
 import {
   createFastAgentToolApprovalBridge,
+  resolveFastAgentToolApprovalSessionId,
   integrationToolApprovalRulesToConfig,
   resolveFastAgentToolApprovalRules,
   shouldDisposeInstanceForToolApprovalRules,
@@ -6393,7 +6394,9 @@ export async function answerFastAgentQuestion({
                 // model's acknowledgement gate or close the turn.
                 const toolApprovalBridge = toolApprovalRules
                   ? createFastAgentToolApprovalBridge({
-                      sessionId: session.id,
+                      sessionId: await resolveFastAgentToolApprovalSessionId(
+                        session.id,
+                      ),
                       userId,
                       integrations: availableIntegrations,
                       signal: promptSignal,

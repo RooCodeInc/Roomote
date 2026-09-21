@@ -3,9 +3,11 @@ import { createHash } from 'node:crypto';
 import type { PermissionRuleset } from '@opencode-ai/sdk/v2/client';
 import {
   cancelOpenIntegrationToolApprovals,
+  db,
   expireIntegrationToolApproval,
   fingerprintIntegrationToolCall,
   getIntegrationToolApproval,
+  getSessionForFastConversation,
   insertIntegrationToolApproval,
   isDeploymentExperimentEnabled,
   listIntegrationToolPolicies,
@@ -189,9 +191,13 @@ export function extractApprovalCallArgs(
 ): unknown {
   if (!recovered) return undefined;
   const dottedChildName = `${sanitizeCodeModeIntegrationPrefix(tool.integrationId)}.${tool.toolName}`;
-  const child = recovered.toolCalls?.find(
-    (entry) => entry.tool === dottedChildName,
-  );
+  // One script can call the same tool more than once. Child calls are
+  // recorded as they run, so the paused call is the most recent match, not
+  // the first; showing the first would put an earlier call's arguments on
+  // this ask's card and audit row.
+  const child = [...(recovered.toolCalls ?? [])]
+    .reverse()
+    .find((entry) => entry.tool === dottedChildName);
   return child ? child.input : recovered.input;
 }
 
@@ -214,6 +220,20 @@ export async function resolveFastAgentToolApprovalRules(input: {
   const policies = await listIntegrationToolPolicies();
   const rules = buildIntegrationToolApprovalRules(input.integrations, policies);
   return { rules, hash: hashIntegrationToolApprovalRules(rules) };
+}
+
+/**
+ * The id approvals are recorded and decided under. Approval rows, their
+ * ownership check, and the requester's decision route are all keyed on the
+ * unified Session, not the Fast conversation that runs the turn. Without a
+ * bound Session there is nowhere for the requester to decide, so the
+ * conversation id is returned and the ownership check fails the ask closed.
+ */
+export async function resolveFastAgentToolApprovalSessionId(
+  fastConversationId: string,
+): Promise<string> {
+  const session = await getSessionForFastConversation(db, fastConversationId);
+  return session?.id ?? fastConversationId;
 }
 
 export function createFastAgentToolApprovalBridge(input: {

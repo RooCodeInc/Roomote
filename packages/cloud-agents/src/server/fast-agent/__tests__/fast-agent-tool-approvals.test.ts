@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@roomote/db/server', () => ({
   cancelOpenIntegrationToolApprovals: vi.fn(async () => 0),
+  db: {},
+  getSessionForFastConversation: vi.fn(),
   expireIntegrationToolApproval: vi.fn(async () => undefined),
   fingerprintIntegrationToolCall: vi.fn(() => 'fingerprint'),
   getIntegrationToolApproval: vi.fn(),
@@ -14,6 +16,7 @@ vi.mock('@roomote/db/server', () => ({
 import {
   expireIntegrationToolApproval,
   getIntegrationToolApproval,
+  getSessionForFastConversation,
   insertIntegrationToolApproval,
   isDeploymentExperimentEnabled,
   markIntegrationToolApprovalConsumed,
@@ -27,6 +30,7 @@ import {
   hashIntegrationToolApprovalRules,
   integrationToolApprovalRulesToConfig,
   resolveFastAgentToolApprovalRules,
+  resolveFastAgentToolApprovalSessionId,
   shouldDisposeInstanceForToolApprovalRules,
 } from '../fast-agent-tool-approvals';
 import type { FastAgentIntegration } from '../fast-agent-integration-broker';
@@ -292,6 +296,44 @@ describe('extractApprovalCallArgs', () => {
       extractApprovalCallArgs({ input: code, toolCalls: [] }, tool),
     ).toEqual(code);
     expect(extractApprovalCallArgs(undefined, tool)).toBeUndefined();
+  });
+
+  it('shows the paused call, not an earlier call to the same tool in one script', () => {
+    expect(
+      extractApprovalCallArgs(
+        {
+          input: { code: 'two calls' },
+          toolCalls: [
+            { tool: 'mock-slack.post_message', input: { channel: 'first' } },
+            { tool: 'mock-slack.read_channel', input: { channel: 'other' } },
+            { tool: 'mock-slack.post_message', input: { channel: 'second' } },
+          ],
+        },
+        tool,
+      ),
+    ).toEqual({ channel: 'second' });
+  });
+});
+
+describe('resolveFastAgentToolApprovalSessionId', () => {
+  it('records approvals under the unified Session bound to the Fast conversation', async () => {
+    vi.mocked(getSessionForFastConversation).mockResolvedValueOnce({
+      id: 'unified-session',
+    } as never);
+    expect(await resolveFastAgentToolApprovalSessionId('conversation')).toBe(
+      'unified-session',
+    );
+    expect(getSessionForFastConversation).toHaveBeenCalledWith(
+      expect.anything(),
+      'conversation',
+    );
+  });
+
+  it('falls back to the conversation id so an unbound ask fails closed', async () => {
+    vi.mocked(getSessionForFastConversation).mockResolvedValueOnce(null);
+    expect(await resolveFastAgentToolApprovalSessionId('conversation')).toBe(
+      'conversation',
+    );
   });
 });
 
