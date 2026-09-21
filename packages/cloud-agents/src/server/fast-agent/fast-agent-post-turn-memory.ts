@@ -254,6 +254,7 @@ export async function saveFastAgentPostTurnMemory(input: {
     });
 
     let saved = 0;
+    const savedFacts: string[] = [];
 
     for (const memory of object.memories) {
       const result = await appendFastAgentMemory(
@@ -266,6 +267,7 @@ export async function saveFastAgentPostTurnMemory(input: {
         if (saved > 0) break;
         return { status: 'skipped', reason: result.reason };
       }
+      savedFacts.push(memory);
       saved += 1;
     }
 
@@ -277,7 +279,7 @@ export async function saveFastAgentPostTurnMemory(input: {
       await appendFastAgentMemorySavedEvent({
         sessionId: input.conversationId,
         turnId: input.turnId,
-        memories: object.memories.map((memory) => scrubForMemoryCheck(memory)),
+        memories: savedFacts.map((memory) => scrubForMemoryCheck(memory)),
       });
     } catch (error) {
       // Memory persistence already succeeded; a transcript event is best

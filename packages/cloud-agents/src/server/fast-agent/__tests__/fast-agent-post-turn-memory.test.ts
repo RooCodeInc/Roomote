@@ -318,6 +318,28 @@ describe('saveFastAgentPostTurnMemory', () => {
     });
   });
 
+  it('only lists facts whose outbox appends succeeded', async () => {
+    mockEvaluateDecisionModel.mockResolvedValueOnce(
+      answers({ statedDurable: 0.95 }),
+    );
+    mockGenerateTrackedNonTaskObject.mockResolvedValueOnce({
+      object: { memories: ['First fact.', 'Second fact.'] },
+    });
+    mockAppendFastAgentMemory
+      .mockResolvedValueOnce({ saved: true })
+      .mockResolvedValueOnce({ saved: false, reason: 'memory_full' });
+
+    await expect(saveFastAgentPostTurnMemory(turn)).resolves.toEqual({
+      status: 'saved',
+      saved: 1,
+    });
+    expect(mockAppendFastAgentMemorySavedEvent).toHaveBeenCalledWith({
+      sessionId: 'conversation-1',
+      turnId: 'turn-1',
+      memories: ['First fact.'],
+    });
+  });
+
   it('never throws when the decision model or the helper model fails', async () => {
     mockEvaluateDecisionModel.mockRejectedValueOnce(new Error('jev timeout'));
     await expect(saveFastAgentPostTurnMemory(turn)).resolves.toEqual({

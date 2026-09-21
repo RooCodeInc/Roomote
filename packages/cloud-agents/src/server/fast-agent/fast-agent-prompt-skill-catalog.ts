@@ -111,9 +111,13 @@ async function loadRepositorySkillSource(
   source: NonNullable<PromptSkillCatalogSources['repositorySkills']>,
   cacheKey?: string,
 ): Promise<PromiseSettledResult<FastAgentSkillListResult>> {
+  const now = Date.now();
+  for (const [key, entry] of repositorySkillSourceCache) {
+    if (entry.expiresAt <= now) repositorySkillSourceCache.delete(key);
+  }
   if (!cacheKey) return settlePromptSkillSource(() => source.list());
   const cached = repositorySkillSourceCache.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now()) return cached.promise;
+  if (cached) return cached.promise;
 
   const promise = settlePromptSkillSource(() => source.list());
   repositorySkillSourceCache.set(cacheKey, {

@@ -159,6 +159,50 @@ describe('loadFastAgentPromptSkillCatalog', () => {
     expect(repositorySkills.dispose).toHaveBeenCalledTimes(2);
   });
 
+  it('prunes expired repository scopes when a later scope is loaded', async () => {
+    vi.useFakeTimers();
+    try {
+      const makeSources = () => ({
+        instanceSkills: {
+          list: vi.fn().mockResolvedValue({ skills: [], warnings: [] }),
+        },
+        settingsSkills: {
+          listPromptCatalog: vi.fn().mockResolvedValue({
+            marketplaceSources: [],
+            skills: [],
+            warnings: [],
+          }),
+        },
+        repositorySkills: {
+          list: vi.fn().mockResolvedValue({ skills: [], warnings: [] }),
+        },
+      });
+      const first = makeSources();
+      const second = makeSources();
+      const third = makeSources();
+
+      await loadFastAgentPromptSkillCatalog(first, {
+        repositoryCacheKey: 'cache-expiry-first',
+      });
+      await loadFastAgentPromptSkillCatalog(second, {
+        repositoryCacheKey: 'cache-expiry-second',
+      });
+      vi.advanceTimersByTime(30_001);
+      await loadFastAgentPromptSkillCatalog(third, {
+        repositoryCacheKey: 'cache-expiry-third',
+      });
+      await loadFastAgentPromptSkillCatalog(first, {
+        repositoryCacheKey: 'cache-expiry-first',
+      });
+
+      expect(first.repositorySkills.list).toHaveBeenCalledTimes(2);
+      expect(second.repositorySkills.list).toHaveBeenCalledOnce();
+      expect(third.repositorySkills.list).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('drops custom skills that collide with a packaged skill name', async () => {
     const catalog = await loadFastAgentPromptSkillCatalog({
       instanceSkills: {
