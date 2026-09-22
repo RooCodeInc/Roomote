@@ -48,6 +48,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 
 vi.mock('@roomote/sdk/server', () => ({
   buildFastAgentArtifactCreator: vi.fn(() => mocks.createConversationArtifact),
+  buildFastAgentMediaArtifactCreator: vi.fn(() => vi.fn()),
   buildFastAgentSurfaceReplyDelivery: mocks.buildReplyDelivery,
   createFastAgentSessionArtifact: mocks.createSessionArtifact,
   persistFastAgentInlineHumanTurn: vi.fn().mockResolvedValue(null),

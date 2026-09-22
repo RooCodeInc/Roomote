@@ -130,6 +130,44 @@ services:
       retries: 12
       start_period: 60s
 
+  # Self-hosted browser for the Fast `browse` tool: the api drives it with
+  # agent-browser over CDP. browserless starts a fresh Chrome for every
+  # websocket connection, so Sessions never share cookies or tabs. It joins
+  # only the `browser` network (reachable from the api, not from the
+  # datastores or task sandboxes) and is off unless the `browser` profile is
+  # enabled. Point the api at it with R_FAST_BROWSER_PROVIDER=cdp and
+  # R_FAST_BROWSER_CDP_URL=ws://127.0.0.1:13222/?token=<BROWSERLESS_TOKEN> in
+  # .env.local (the api runs on the host in development). Start it with
+  # `docker compose --profile browser up browserless -d`.
+  browserless:
+    profiles: [browser]
+    container_name: roomote-browserless
+    image: ghcr.io/browserless/chromium:v2.56.7@sha256:b1ba7b054af2891a8199f884d4bd249cf8c3bd2fa8a97b339077e40f92803ba8
+    restart: unless-stopped
+    networks: [browser]
+    ports:
+      - '127.0.0.1:13222:3000'
+    environment:
+      TOKEN: ${BROWSERLESS_TOKEN:-roomote-local-browserless-token}
+      # Longest a browser may live, in ms; browserless closes it at this point
+      # even mid-task. -1 does not disable the limit (connections fail at
+      # once), so keep a long finite value. agent-browser closes idle
+      # sessions itself well before this.
+      TIMEOUT: ${BROWSERLESS_TIMEOUT:-3600000}
+      # Browsers running at once; further connections wait in the queue.
+      CONCURRENT: ${BROWSERLESS_CONCURRENT:-10}
+      QUEUED: ${BROWSERLESS_QUEUED:-10}
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'curl -fsS --max-time 2 "http://127.0.0.1:3000/json/version?token=$$TOKEN" >/dev/null',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
 volumes:
   pg_data:
   redis_data:
@@ -140,4 +178,9 @@ volumes:
 networks:
   default:
     name: roomote_default
+    driver: bridge
+  # Only the api and the optional browserless service join this network, so
+  # a page the agent opens cannot reach Postgres, Redis, MinIO, or the Brain.
+  browser:
+    name: roomote_browser
     driver: bridge

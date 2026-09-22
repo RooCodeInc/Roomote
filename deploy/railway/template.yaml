@@ -160,6 +160,29 @@ services:
       history and integration sources re-ingest) but not free. Delete this
       service entirely if the deployment should have no memory.
 
+  browserless:
+    image: ghcr.io/browserless/chromium:v2.56.7@sha256:b1ba7b054af2891a8199f884d4bd249cf8c3bd2fa8a97b339077e40f92803ba8
+    public_domain: no # private network only; the api drives it over CDP
+    env:
+      # Railway's private network is IPv6-only; browserless binds localhost by
+      # default and must listen on :: to be reachable from the api at all.
+      HOST: '::'
+      TOKEN: ${{secret(32)}}
+      # Longest a browser may live, in ms; browserless closes it at this point
+      # even mid-task. -1 does not disable the limit, so keep a long finite
+      # value. agent-browser closes idle sessions itself well before this.
+      TIMEOUT: '3600000'
+      # Browsers running at once; further connections wait in the queue.
+      CONCURRENT: '10'
+      QUEUED: '10'
+    notes: >
+      Self-hosted browser for the Fast `browse` tool. browserless starts a
+      fresh Chrome for every websocket connection, so Sessions never share
+      cookies or tabs, and it is reachable only over the project's private
+      network. Budget roughly 500 MB of RAM per browser that is open at once;
+      idle, it holds about 150 MB. Delete this service and clear
+      R_FAST_BROWSER_PROVIDER on api if the deployment should have no browser.
+
   api:
     image: app
     start_command: /roomote/.docker/app/entrypoint.sh api
@@ -221,6 +244,10 @@ services:
       # service as its bootstrap token; gbrain requires >= 32 characters of
       # [A-Za-z0-9_-], so keep the generated form.
       R_GBRAIN_ADMIN_TOKEN: ${{secret(48)}}
+      # Fast `browse` tool: attach to the browserless service over the private
+      # network. Set R_FAST_BROWSER_PROVIDER to '' to turn the tool off.
+      R_FAST_BROWSER_PROVIDER: cdp
+      R_FAST_BROWSER_CDP_URL: ws://${{browserless.RAILWAY_PRIVATE_DOMAIN}}:3000/?token=${{browserless.TOKEN}}
       R_PING_BASE_URL: https://ping.roomote.dev # anonymous-analytics / version-check pings
       R_INSTANCE_ID: '' # optional deterministic Ping instance identity
       DEFAULT_COMPUTE_PROVIDER: modal

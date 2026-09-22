@@ -184,6 +184,7 @@ vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
       slackInstallations: { findFirst: mocks.findInstallation },
+      sessions: { findMany: vi.fn().mockResolvedValue([]) },
       taskArtifacts: { findMany: mocks.findArtifacts },
       taskPullRequests: {
         findFirst: vi.fn().mockResolvedValue(null),
@@ -207,6 +208,10 @@ vi.mock('@roomote/db/server', () => ({
   slackInstallations: {
     isActive: 'slack_installations.is_active',
     teamId: 'slack_installations.team_id',
+  },
+  sessions: {
+    id: 'sessions.id',
+    fastConversationId: 'sessions.fast_conversation_id',
   },
   taskArtifacts: { id: 'task_artifacts.id' },
   taskPullRequests: { taskId: 'task_pull_requests.task_id' },

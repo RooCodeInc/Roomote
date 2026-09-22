@@ -127,6 +127,19 @@ const JUDGMENT_MODEL_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Browser credentials for the Fast `browse` tool: a cloud provider key or the
+ * tokenized DevTools URL of a self-hosted browser. The api process drives the
+ * browser; a task sandbox has its own agent-browser install and never needs
+ * the control plane's endpoint.
+ */
+export const BROWSER_PROVIDER_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
+  'R_FAST_BROWSER_PROVIDER',
+  'R_BROWSER_USE_API_KEY',
+  'R_FAST_BROWSER_CDP_URL',
+  'R_AGENT_BROWSER_PATH',
+]);
+
+/**
  * Declarative environment provisioning inputs, managed through the deployment
  * environment. Not secrets per se, but they are control-plane configuration
  * (the inline YAML may carry per-environment env values) and a task never
@@ -163,6 +176,7 @@ export const CONTROL_PLANE_ENV_VAR_NAMES: ReadonlySet<string> = new Set<string>(
     ...INSTANCE_SECRET_ENV_VAR_NAMES,
     ...MEDIA_PROVIDER_ENV_VAR_NAMES,
     ...JUDGMENT_MODEL_ENV_VAR_NAMES,
+    ...BROWSER_PROVIDER_ENV_VAR_NAMES,
     ...DECLARATIVE_ENVIRONMENT_ENV_VAR_NAMES,
     ...DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
     // Hosting-managed Roomote inference is served only through the inference

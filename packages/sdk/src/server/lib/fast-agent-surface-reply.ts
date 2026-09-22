@@ -86,7 +86,10 @@ import {
   buildSourceControlFastDelivery,
   buildSourceControlReplyQuote,
 } from './source-control-fast-delivery';
-import { buildFastAgentArtifactCreator } from './artifacts/fast-agent-artifact-creator';
+import {
+  buildFastAgentArtifactCreator,
+  buildFastAgentMediaArtifactCreator,
+} from './artifacts/fast-agent-artifact-creator';
 import { createFastAgentTypingActivity } from './fast-agent-typing-activity';
 import {
   createFastAgentTelegramActivity,
@@ -109,6 +112,7 @@ export type FastAgentSurfaceReplyDelivery = {
     | 'createArtifact'
     | 'createReplyStream'
     | 'replyStreamStartDelayMs'
+    | 'createMediaArtifact'
     | 'launchTask'
     | 'postReply'
     | 'replaceReply'
@@ -220,7 +224,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     ...delivery,
     canonicalConversation: session.conversation,
   });
-
+  const createMediaArtifact = buildFastAgentMediaArtifactCreator(session.id);
   if (conversation.surface === 'web' || conversation.surface === 'automation') {
     // No side channel to post into: the canonical transcript the service
     // persists is the reply surface, and the shared conversation context
@@ -229,6 +233,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       conversation,
       adapter: {
         createArtifact,
+        createMediaArtifact,
         launchTask: createFastAgentWebTaskLauncher({
           userId: params.userId,
         }),
@@ -269,6 +274,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       conversation,
       adapter: {
         createArtifact,
+        createMediaArtifact,
         ...(senderSubject
           ? {
               createReplyStream: () =>
@@ -385,6 +391,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     const adapter: FastAgentTurnAdapter = {
       activity,
       createArtifact,
+      createMediaArtifact,
       launchTask: createFastAgentDiscordTaskLauncher({
         provider,
         userId: params.userId,
@@ -479,6 +486,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       conversation,
       adapter: {
         createArtifact,
+        createMediaArtifact,
         launchTask: createFastAgentCommunicationTaskLauncher({
           userId: params.userId,
           conversation,
@@ -538,6 +546,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       conversation,
       adapter: {
         createArtifact,
+        createMediaArtifact,
         launchTask: createFastAgentLinearTaskLauncher({
           userId: params.userId,
           conversation,
@@ -565,6 +574,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       conversation,
       adapter: {
         createArtifact,
+        createMediaArtifact,
         ...buildSourceControlFastAdapter({
           conversation,
           delivery,
@@ -662,6 +672,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
             }
           : {}),
         createArtifact,
+        createMediaArtifact,
         launchTask: async (input) => {
           return runWithFastAgentTelegramActivityReassertion(activity, () =>
             launchTask(input),
@@ -991,6 +1002,9 @@ async function runFastAgentSurfaceReplyWithLock(
             }
           : {}),
         createArtifact: buildFastAgentArtifactCreator(params.sessionId),
+        createMediaArtifact: buildFastAgentMediaArtifactCreator(
+          params.sessionId,
+        ),
         ...delivery.adapter,
       },
     }).then(

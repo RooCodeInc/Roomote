@@ -36,6 +36,7 @@ interface ResolvedToolPolicy {
 }
 
 const CONSEQUENTIAL_RECEIPTS = new Set([
+  'browse',
   'launch_task',
   'review_pull_request',
   'cancel_task',

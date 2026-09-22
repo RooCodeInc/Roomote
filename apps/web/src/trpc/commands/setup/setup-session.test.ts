@@ -21,6 +21,7 @@ vi.mock('@/lib/server/setup-funnel-telemetry', () => ({
 }));
 vi.mock('@roomote/sdk/server', () => ({
   buildFastAgentArtifactCreator: vi.fn(),
+  buildFastAgentMediaArtifactCreator: vi.fn(),
   LINEAR_ORG_CONNECTION_ROLE: 'organization',
   persistFastAgentInlineHumanTurn: vi.fn().mockResolvedValue(null),
   resolveUserMcpServerConfigs: vi.fn().mockResolvedValue([]),

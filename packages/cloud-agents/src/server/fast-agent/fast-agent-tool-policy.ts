@@ -85,6 +85,7 @@ export function buildFastAgentToolFilter(
     serviceCredentialToolsEnabled?: boolean;
     serviceCredentialPrepareEnabled?: boolean;
     addRemoteMcpEnabled?: boolean;
+    browserEnabled?: boolean;
   } = {},
 ): Record<string, boolean> {
   return {
@@ -101,11 +102,15 @@ export function buildFastAgentToolFilter(
           [FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput]: false,
           [FAST_AGENT_NATIVE_TOOL_NAMES.offerCapability]: false,
         }
-      : {}),
-    // OpenCode code mode replaces every mounted MCP tool with the confined
+      : {}), // OpenCode code mode replaces every mounted MCP tool with the confined
     // `execute` runner. Discovery stays available for the built-in integration
     // catalog and connection statuses.
     execute: true,
+    // `browse` needs a configured browser provider on the control plane;
+    // without one the tool is hidden rather than left to fail on every call.
+    ...(options.browserEnabled
+      ? {}
+      : { [FAST_AGENT_NATIVE_TOOL_NAMES.browse]: false }),
     ...Object.fromEntries(integrationIds.map((id) => [`${id}_*`, true])),
   };
 }

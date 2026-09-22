@@ -178,8 +178,7 @@ const serverSchema = {
   // their run-scoped token (see apps/api/src/handlers/tts). Unset means the
   // feature is off and the endpoint 404s.
   R_ELEVENLABS_API_KEY: z.string().min(1).optional(),
-  R_ELEVENLABS_VOICE_ID: z.string().min(1).optional(),
-  // OpenAI key for the live voice conversation feature (realtime
+  R_ELEVENLABS_VOICE_ID: z.string().min(1).optional(), // OpenAI key for the live voice conversation feature (realtime
   // transcription + spoken replies in the web app). Falls back to the
   // deployment's general OPENAI_API_KEY when unset. The key stays on the
   // control plane: the browser only ever receives short-lived ephemeral
@@ -212,6 +211,22 @@ const serverSchema = {
   // an operator to build a training set from. Off by default: it keeps
   // decision text, so only for deployments the operator owns.
   R_JUDGMENT_CAPTURE: z.enum(['on', 'off']).optional(),
+  // Fast `browse` tool. The api process drives agent-browser against a
+  // browser it does not host itself, so a Session gets a private browser
+  // without a sandbox. Credentials stay on the control plane.
+  // `browseruse` needs R_BROWSER_USE_API_KEY; `cdp` attaches to the Chrome
+  // DevTools endpoint in R_FAST_BROWSER_CDP_URL (for example the optional
+  // browserless service in the compose stack, which starts a fresh Chrome per
+  // connection); `local` launches Chrome on the api host and exists for
+  // development only. Unset disables the tool.
+  R_FAST_BROWSER_PROVIDER: z.enum(['browseruse', 'cdp', 'local']).optional(),
+  R_BROWSER_USE_API_KEY: z.string().min(1).optional(),
+  // ws:// or wss:// DevTools URL for the `cdp` provider, including any token
+  // the endpoint needs (ws://browserless:3000/?token=...). Treated as a
+  // secret because of that token.
+  R_FAST_BROWSER_CDP_URL: z.string().min(1).optional(),
+  // Path to the agent-browser CLI when it is not on PATH.
+  R_AGENT_BROWSER_PATH: z.string().min(1).optional(),
   R_INTERCOM_APP_ID: z.string().min(1).optional(),
   R_POSTHOG_PROJECT_KEY: z.string().min(1).optional(),
   R_POSTHOG_HOST: z.string().url().optional(),
@@ -681,6 +696,10 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_JUDGMENT_UPSTREAM_API_KEY',
   'R_JUDGMENT_SHADOW',
   'R_JUDGMENT_CAPTURE',
+  'R_FAST_BROWSER_PROVIDER',
+  'R_BROWSER_USE_API_KEY',
+  'R_FAST_BROWSER_CDP_URL',
+  'R_AGENT_BROWSER_PATH',
   'R_INTERCOM_APP_ID',
   'R_POSTHOG_PROJECT_KEY',
   'R_POSTHOG_HOST',

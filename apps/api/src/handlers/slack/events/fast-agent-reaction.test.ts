@@ -39,6 +39,7 @@ vi.mock('@roomote/communication', () => ({
 vi.mock('@roomote/sdk/server', () => ({
   findSlackConversationSubjectByUserId: vi.fn(async () => null),
   buildFastAgentArtifactCreator: vi.fn(() => mocks.createArtifact),
+  buildFastAgentMediaArtifactCreator: vi.fn(() => vi.fn()),
   findFastAgentSessionForProviderMessage: mocks.findSession,
   persistFastAgentInlineHumanTurn: mocks.persistAdmission,
   recordFastAgentConversationMessageBestEffort: mocks.recordProviderMessage,

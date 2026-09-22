@@ -81,6 +81,9 @@ x-roomote-inference-env: &roomote-inference-env
   R_CODE_REVIEW_MODEL: ${R_CODE_REVIEW_MODEL:-}
   R_EXPLORE_MODEL: ${R_EXPLORE_MODEL:-}
   R_MODEL_ENV_KEYS: ${R_MODEL_ENV_KEYS:-}
+  R_FAST_BROWSER_PROVIDER: ${R_FAST_BROWSER_PROVIDER:-}
+  R_BROWSER_USE_API_KEY: ${R_BROWSER_USE_API_KEY:-}
+  R_FAST_BROWSER_CDP_URL: ${R_FAST_BROWSER_CDP_URL:-}
   CUSTOM_PROVIDER_API_KEY: ${CUSTOM_PROVIDER_API_KEY:-}
   OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
   AI_GATEWAY_API_KEY: ${AI_GATEWAY_API_KEY:-}
@@ -439,7 +442,8 @@ services:
     image: *roomote-app-image
     command: ['api']
     # Reachable from task worker containers (worker -> API over TRPC_URL).
-    networks: [default, worker]
+    # `browser` carries only the optional browserless service.
+    networks: [default, worker, browser]
     depends_on:
       redis:
         condition: service_started
@@ -583,6 +587,45 @@ services:
       retries: 12
       start_period: 60s
 
+  # Self-hosted browser for the Fast `browse` tool: the api drives it with
+  # agent-browser over CDP. browserless starts a fresh Chrome for every
+  # websocket connection, so Sessions never share cookies or tabs. It joins
+  # only the `browser` network (reachable from the api, not from the
+  # datastores or task sandboxes) and is off unless the `browser` profile is
+  # enabled. Point the api at it with R_FAST_BROWSER_PROVIDER=cdp and
+  # R_FAST_BROWSER_CDP_URL=ws://browserless:3000/?token=<BROWSERLESS_TOKEN>.
+  browserless:
+    profiles:
+      - browser
+    image: ghcr.io/browserless/chromium:v2.56.7@sha256:b1ba7b054af2891a8199f884d4bd249cf8c3bd2fa8a97b339077e40f92803ba8
+    restart: unless-stopped
+    networks: [browser]
+    environment:
+      # Optional: only the api can reach this service, so an empty token is
+      # acceptable; set one to require it and put the same value in the
+      # api's R_FAST_BROWSER_CDP_URL query string.
+      TOKEN: ${BROWSERLESS_TOKEN:-}
+      # Longest a browser may live, in ms; browserless closes it at this point
+      # even mid-task. -1 does not disable the limit (connections fail at
+      # once), so keep a long finite value. agent-browser closes idle
+      # sessions itself well before this.
+      TIMEOUT: ${BROWSERLESS_TIMEOUT:-3600000}
+      # Browsers running at once; further connections wait in the queue.
+      CONCURRENT: ${BROWSERLESS_CONCURRENT:-10}
+      QUEUED: ${BROWSERLESS_QUEUED:-10}
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'curl -fsS --max-time 2 "http://127.0.0.1:3000/json/version?token=$$TOKEN" >/dev/null',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
   # Self-run embedding model for the Brain (opt-in, CPU).
   # Enable with the `local-inference` compose profile. The upstream URLs are
   # NOT sufficient on their own: R_BRAIN_EMBEDDING_MODEL and
@@ -690,6 +733,11 @@ networks:
   # datastores directly.
   worker:
     name: roomote_worker
+    driver: bridge
+  # Only the api and the optional browserless service join this network, so
+  # a page the agent opens cannot reach Postgres, Redis, MinIO, or the Brain.
+  browser:
+    name: roomote_browser
     driver: bridge
   # No published ports and no route to application/datastore networks. Only
   # the controller and the socket proxy join this network.

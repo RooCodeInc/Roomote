@@ -110,6 +110,7 @@ const mocks = vi.hoisted(() => ({
 const nativeToolNames = vi.hoisted(
   () =>
     ({
+      browse: 'browse',
       callIntegrationTool: 'call_integration_tool',
       addRemoteMcp: 'add_remote_mcp',
       connectIntegration: 'connect_integration',
@@ -281,7 +282,6 @@ const NonTaskInputModalityUnsupportedError = vi.hoisted(
       }
     },
 );
-
 vi.mock('../../non-task-provider-usage', async (importOriginal) => {
   const actual =
     await importOriginal<typeof import('../../non-task-provider-usage')>();
@@ -289,6 +289,7 @@ vi.mock('../../non-task-provider-usage', async (importOriginal) => {
     FAST_AGENT_SESSION_PERMISSIONS: fastAgentSessionPermissions,
     FAST_AGENT_SESSION_TOOL_FILTER: fastAgentSessionToolFilter,
     NON_TASK_INFERENCE_SURFACES: {
+      fastAgentBrowserScreenshot: 'fast_agent_browser_screenshot',
       fastAgentImageInspection: 'fast_agent_image_inspection',
       fastAgentQuestionAnswering: 'fast_agent',
     },
@@ -6565,6 +6566,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       ]),
       {
         addRemoteMcpEnabled: true,
+        browserEnabled: false,
         surface: 'slack',
         serviceCredentialToolsEnabled: true,
         serviceCredentialPrepareEnabled: true,

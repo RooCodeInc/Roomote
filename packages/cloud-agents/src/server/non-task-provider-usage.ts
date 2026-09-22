@@ -120,6 +120,7 @@ export const NON_TASK_INFERENCE_SURFACES = {
   customAutomationScheduleResolution: 'custom_automation_schedule_resolution',
   automationResultPreparation: 'automation_result_preparation',
   ciFailureTriageRulesResolution: 'ci_failure_triage_rules_resolution',
+  fastAgentBrowserScreenshot: 'fast_agent_browser_screenshot',
   fastAgentImageInspection: 'fast_agent_image_inspection',
   fastAgentMemoryDistillation: 'fast_agent_memory_distillation',
   fastAgentQuestionAnswering: 'fast_agent',

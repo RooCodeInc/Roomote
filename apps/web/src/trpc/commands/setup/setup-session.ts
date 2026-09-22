@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
-
-import { buildFastAgentArtifactCreator } from '@roomote/sdk/server';
+import {
+  buildFastAgentArtifactCreator,
+  buildFastAgentMediaArtifactCreator,
+} from '@roomote/sdk/server';
 import { buildFastAgentSetupAdapter } from '@roomote/cloud-agents/server';
 import {
   and,
@@ -792,6 +794,9 @@ async function buildSetupPlatformEventTurn(
       },
       adapter: {
         createArtifact: buildFastAgentArtifactCreator(
+          conversation.fastConversationId,
+        ),
+        createMediaArtifact: buildFastAgentMediaArtifactCreator(
           conversation.fastConversationId,
         ),
         launchTask: async (launchInput) => {

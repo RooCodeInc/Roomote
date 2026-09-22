@@ -323,6 +323,13 @@ RUN apt -qq update && \
   apt -qq install -y git ffmpeg util-linux && \
   rm -rf /var/lib/apt/lists/*
 
+# The Fast `browse` tool drives a cloud browser through the agent-browser CLI
+# from the api process. Only the CLI ships here; no Chrome is installed, so the
+# tool stays off until R_FAST_BROWSER_PROVIDER names a provider.
+ARG AGENT_BROWSER_VERSION=0.37.1
+RUN npm install -g "agent-browser@${AGENT_BROWSER_VERSION}" && \
+  npm cache clean --force
+
 # The install and version check run as root; with the image's HOME=/tmp they
 # would bake root-owned dotdirs (npm cache, OpenCode's data/config/cache
 # dirs) into the layer. The runtime user shares that HOME and must be able to

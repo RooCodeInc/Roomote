@@ -810,6 +810,7 @@ describe('tool presentation resolver', () => {
 
 describe('tool presentation policy', () => {
   it.each([
+    'browse',
     'inspect_images',
     'report_to_parent_session',
     'send_task_message',

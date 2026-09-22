@@ -81,6 +81,7 @@ vi.mock('@roomote/sdk/server', () => ({
   findSlackConversationSubjectByUserId: vi.fn(async () => null),
   admitFastAgentHumanFollowUp: mocks.admitHumanFollowUp,
   createFastAgentConversationArtifact: mocks.createConversationArtifact,
+  buildFastAgentMediaArtifactCreator: vi.fn(() => vi.fn()),
   persistFastAgentInlineHumanTurn: vi.fn(async () => null),
   wakeFastAgentParentEventNow: vi.fn(async () => undefined),
   wakeFastAgentParentEventsOnTurnRelease: vi.fn(),

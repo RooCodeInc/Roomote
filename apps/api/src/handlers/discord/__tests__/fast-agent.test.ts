@@ -68,6 +68,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 vi.mock('@roomote/sdk/server', () => ({
   admitFastAgentHumanFollowUp: mocks.admitHumanFollowUp,
   createFastAgentConversationArtifact: mocks.createConversationArtifact,
+  buildFastAgentMediaArtifactCreator: vi.fn(() => vi.fn()),
   persistFastAgentInlineHumanTurn: mocks.persistInlineHumanTurn,
   wakeFastAgentParentEventNow: vi.fn(async () => undefined),
   wakeFastAgentParentEventsOnTurnRelease: vi.fn(),
