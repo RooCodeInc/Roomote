@@ -29,7 +29,7 @@ type ArtifactMcpContext = Context<{
   Variables: Variables & { mcpAuth: McpAuth };
 }>;
 
-export const MAX_OPEN_ARTIFACT_BYTES = 1024 * 1024;
+const MAX_OPEN_ARTIFACT_BYTES = 1024 * 1024;
 
 function artifactMetadata(artifact: {
   id: string;
