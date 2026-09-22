@@ -43,7 +43,11 @@ import {
   type LinearSessionMessage,
 } from '@roomote/linear/client';
 import { prependSlackMessages } from '@roomote/slack/client';
-import { prependCommunicationMessages } from '@roomote/communication/messages';
+import {
+  peekTaskFollowUps,
+  prependCommunicationMessages,
+  removeTaskFollowUp,
+} from '@roomote/communication/messages';
 
 import {
   HarnessManager,
@@ -1836,6 +1840,118 @@ export const runTask = async ({
       });
     };
 
+    // Web/API follow-ups the API queued while the sandbox could not take
+    // commands. Each entry is removed only after the runtime accepts it, so
+    // anything left behind is retried on the next tick and the API keeps
+    // queueing later follow-ups behind it.
+    // The runtime lives in this process, so this set is exactly as durable as
+    // what it guards: if the removal below fails after the runtime accepted a
+    // prompt, later ticks retry the removal instead of sending it again.
+    const deliveredTaskFollowUpIds = new Set<string>();
+    let taskFollowUpDrainPromise: Promise<void> | null = null;
+    const drainTaskFollowUps = async (): Promise<void> => {
+      if (taskFollowUpDrainPromise) {
+        return taskFollowUpDrainPromise;
+      }
+
+      taskFollowUpDrainPromise = (async () => {
+        const queued = await peekTaskFollowUps(taskRun.id);
+
+        for (const { raw, message } of queued) {
+          if (!message) {
+            logger.warn(
+              `[runTask] Dropping unparseable queued task follow-up for run ${taskRun.id}`,
+            );
+            await removeTaskFollowUp(taskRun.id, raw);
+            continue;
+          }
+
+          if (deliveredTaskFollowUpIds.has(message.clientMessageId)) {
+            await removeTaskFollowUp(taskRun.id, raw);
+            continue;
+          }
+
+          const status = harnessManager.getStatus();
+          const hasRuntimeSession = Boolean(status.sessionId);
+
+          // A normal task may still be creating its initial session while the
+          // worker is already polling. Hold a steer until that session exists
+          // so the first startup steer uses native steering instead of being
+          // trapped in a queue that has no turn to drain it.
+          if (
+            !hasRuntimeSession &&
+            message.deliveryMode === 'steer' &&
+            status.phase !== 'waiting_for_prompt'
+          ) {
+            return;
+          }
+
+          const isEmptySession =
+            !hasRuntimeSession && status.phase === 'waiting_for_prompt';
+          const queueOnly =
+            !isEmptySession &&
+            message.deliveryMode === 'send' &&
+            (status.phase === 'running' ||
+              status.phase === 'waiting_for_user_input');
+          const promptOptions = {
+            prompt: message.prompt,
+            images: message.images,
+            source: message.source,
+            userId: message.userId,
+            clientMessageId: message.clientMessageId,
+          };
+
+          let sent: boolean;
+
+          if (queueOnly) {
+            // RuntimePromptQueue prepares the actor when it dequeues this.
+            sent = await sendPrompt({ ...promptOptions, queueOnly: true });
+          } else {
+            const actorChanged = Boolean(
+              message.userId && message.userId !== getLastKnownActorUserId(),
+            );
+            // The API already switched the actor when it queued this; a
+            // mismatch means a later sender took over, as with chat queues.
+            const prepared = await prepareActorScopedTurn(message.userId, {
+              ...(isEmptySession ? {} : { allowMcpReconnect: actorChanged }),
+              onMismatch: 'skip',
+            });
+
+            if (prepared === false) {
+              return;
+            }
+
+            if (prepared.skippedMismatch) {
+              await removeTaskFollowUp(taskRun.id, raw);
+              continue;
+            }
+
+            sent = isEmptySession
+              ? harnessManager.startNewTaskFromPrompt({
+                  ...promptOptions,
+                  workflowPhase:
+                    getFollowUpWorkflowPhase(message.prompt) ?? undefined,
+                })
+              : await sendPrompt({
+                  ...promptOptions,
+                  autoSteerWhenQueued: message.deliveryMode === 'steer',
+                });
+          }
+
+          if (!sent) {
+            return;
+          }
+
+          deliveredTaskFollowUpIds.add(message.clientMessageId);
+          await removeTaskFollowUp(taskRun.id, raw);
+        }
+      })().finally(() => {
+        taskFollowUpDrainPromise = null;
+      });
+
+      return taskFollowUpDrainPromise;
+    };
+
     const deliverQueuedSnapshotResumeSlackMessages = async (
       messages: QueuedSnapshotResumeSlackMessage[],
     ) => {
@@ -2266,6 +2382,7 @@ export const runTask = async ({
       prepareActorScopedTurn,
       getVisibleQueuedPromptCount: () =>
         harness.getQueuedMessages?.().length ?? 0,
+      drainTaskFollowUps,
     });
 
     // Wait for HarnessManager to signal that the container should shut down.

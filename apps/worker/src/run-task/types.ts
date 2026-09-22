@@ -298,6 +298,7 @@ export type PollingIntervals = {
   linearMessageInterval: NodeJS.Timeout | undefined;
   linearMessageCleanup?: () => Promise<void>;
   githubTokenRefreshInterval: NodeJS.Timeout | undefined;
+  taskFollowUpInterval?: NodeJS.Timeout;
 };
 
 export type RunTaskState = TaskState &
@@ -348,4 +349,5 @@ export interface ListenerOptions {
     },
   ) => Promise<PrepareActorScopedTurnResult>;
   getVisibleQueuedPromptCount?: () => number;
+  drainTaskFollowUps?: () => Promise<void>;
 }

@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { TRPCClientError } from '@trpc/client';
 import {
   enqueueTask,
@@ -24,7 +26,12 @@ import type {
   RunTokenContext,
   PullRequestStatus,
 } from '@roomote/types';
-import { trackLatestUserMessageForReplyQuote } from '@roomote/communication/messages';
+import {
+  hasQueuedTaskFollowUps,
+  queueTaskFollowUp,
+  trackLatestUserMessageForReplyQuote,
+  wasTaskFollowUpQueued,
+} from '@roomote/communication/messages';
 import {
   TaskPayloadKind,
   buildFastAgentChildTaskMetadata,
@@ -49,6 +56,7 @@ import {
 import { findLatestTaskRun, getTaskChannelBindings } from './helpers';
 import {
   restoreActingUserIdAfterFailedDelivery,
+  syncActingUserForQueuedFollowUp,
   updateActingUserIdIfNeeded,
 } from './acting-user-sync';
 import { logHandlerError } from '../utils';
@@ -137,6 +145,7 @@ type LatestTaskRun = {
   payload: Record<string, unknown> | null;
   port: number | null;
   result: unknown;
+  runtimeTaskStartedAt: Date | null;
 };
 
 type LinkedReviewFastHandoff = {
@@ -183,6 +192,57 @@ class SandboxNotReadyError extends Error {
     super(SANDBOX_BOOTING_ERROR);
     this.name = 'SandboxNotReadyError';
   }
+}
+
+function isSandboxStartupError(
+  error: unknown,
+  run?: Pick<LatestTaskRun, 'runtimeTaskStartedAt'>,
+): boolean {
+  if (error instanceof SandboxNotReadyError) {
+    return true;
+  }
+
+  if (error instanceof TRPCClientError) {
+    if (error.cause instanceof SandboxNotReadyError) {
+      return true;
+    }
+
+    if (
+      /not connected|not available|still booting|wait for the task to start|harness manager is not available/i.test(
+        error.message,
+      )
+    ) {
+      return true;
+    }
+  }
+
+  return !run?.runtimeTaskStartedAt && isUnsentRequestError(error);
+}
+
+// Connection-level failures where the request never reached the sandbox.
+// Resets, timeouts, and cut responses are ambiguous: the sandbox may already
+// have accepted the prompt, so re-admitting it would deliver it twice.
+const UNSENT_REQUEST_ERROR_CODES = new Set([
+  'ECONNREFUSED',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'UND_ERR_CONNECT_TIMEOUT',
+]);
+
+function isUnsentRequestError(error: unknown): boolean {
+  let current: unknown = error;
+
+  for (let depth = 0; depth < 5 && current; depth += 1) {
+    const code = (current as { code?: unknown }).code;
+    if (typeof code === 'string' && UNSENT_REQUEST_ERROR_CODES.has(code)) {
+      return true;
+    }
+    current = (current as { cause?: unknown }).cause;
+  }
+
+  return false;
 }
 
 async function fetchSandboxRpcResponseOrThrowIfNotReady(
@@ -876,6 +936,139 @@ async function resolveLinkedReviewHandoff({
   };
 }
 
+/**
+ * Queues a follow-up for the worker to deliver once the sandbox runtime can
+ * accept it. Like provider chat messages, the trusted actor switch happens
+ * here; the worker skips the prompt (with a resend notice) if a later sender
+ * has taken over the run by delivery time.
+ */
+async function queueTaskFollowUpForDelivery({
+  taskId,
+  runId,
+  senderUserId,
+  preserveActor,
+  message,
+  images,
+  source,
+  clientMessageId,
+  senderMode,
+  deliveryMode,
+}: {
+  taskId: string;
+  runId: number;
+  senderUserId: string;
+  preserveActor: boolean;
+  message: string;
+  images?: string[];
+  source?: string;
+  clientMessageId?: string;
+  senderMode?: SendMessageSenderMode;
+  deliveryMode: 'send' | 'steer';
+}): Promise<SendMessageToTaskResult> {
+  const queuedUserId = preserveActor ? undefined : senderUserId;
+  const messageId =
+    normalizeOptionalString(clientMessageId) ??
+    `task-follow-up:${randomUUID()}`;
+  const followUpSource = resolveFollowUpPromptSource({ senderMode, source });
+
+  // Re-read right before admission so a run that settled since the caller's
+  // read (or during a failed startup RPC) is not handed a message no worker
+  // will drain. This narrows the window without holding a row lock across the
+  // Redis write; a run settling after admission is the same accepted gap as
+  // the chat-provider queues.
+  const latestRun = await findLatestTaskRun(taskId, {
+    id: true,
+    status: true,
+    canceledAt: true,
+    taskPhase: true,
+    actingUserId: true,
+  });
+
+  if (
+    !latestRun ||
+    latestRun.id !== runId ||
+    latestRun.canceledAt ||
+    isExitedRunStatus(latestRun.status) ||
+    latestRun.taskPhase === 'stopped' ||
+    latestRun.taskPhase === 'shutting_down'
+  ) {
+    return {
+      success: false,
+      error: 'Task is no longer active.',
+      status: 409,
+      delivery: 'not_accepted',
+    };
+  }
+
+  let inserted: boolean;
+  try {
+    // The switch is part of admission: the worker skips a queued prompt
+    // whose sender is not the acting user.
+    await syncActingUserForQueuedFollowUp({
+      runId,
+      senderUserId: queuedUserId,
+    });
+    inserted = await queueTaskFollowUp(runId, {
+      clientMessageId: messageId,
+      deliveryMode,
+      prompt: message,
+      ...(images?.length ? { images } : {}),
+      ...(followUpSource ? { source: followUpSource } : {}),
+      ...(queuedUserId ? { userId: queuedUserId } : {}),
+    });
+  } catch (error) {
+    // A lost reply does not mean the queue write failed. Confirm by message
+    // id before rejecting; if even that is unknown, keep the actor as-is
+    // rather than roll back under a prompt that may already be queued.
+    let admitted: boolean | null;
+    try {
+      admitted = await wasTaskFollowUpQueued(runId, messageId);
+    } catch {
+      admitted = null;
+    }
+
+    if (admitted) {
+      return { success: true, result: { queued: true, messageId } };
+    }
+
+    // Do not leave a rejected sender as the actor the booting worker uses.
+    if (
+      admitted === false &&
+      queuedUserId &&
+      latestRun.actingUserId !== queuedUserId
+    ) {
+      await restoreActingUserIdAfterFailedDelivery({
+        handlerName:
+          deliveryMode === 'steer' ? 'steerMessageToTask' : 'sendMessageToTask',
+        runId,
+        previousActingUserId: latestRun.actingUserId,
+        attemptedActingUserId: queuedUserId,
+      });
+    }
+    logHandlerError(
+      'sendMessageToTask',
+      `Failed to queue follow-up for task run ${runId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return {
+      success: false,
+      error: 'Failed to queue the follow-up. Try again in a few seconds.',
+      status: 500,
+      delivery: 'not_accepted',
+    };
+  }
+
+  return {
+    success: true,
+    result: {
+      queued: true,
+      messageId,
+      ...(inserted ? {} : { alreadyQueued: true }),
+    },
+  };
+}
+
 export async function sendMessageToTask({
   taskId,
   userId,
@@ -919,6 +1112,7 @@ export async function sendMessageToTask({
       payload: true,
       port: true,
       result: true,
+      runtimeTaskStartedAt: true,
     });
 
     if (!run) {
@@ -1015,20 +1209,41 @@ export async function sendMessageToTask({
       };
     }
 
-    if (!run.sandboxServerUrl) {
-      return {
-        success: false,
-        error: 'Task has no active sandbox. The worker may still be booting.',
-        status: 409,
-      };
-    }
-
     const senderUserId = linkedReviewHandoff.senderUserId;
 
     const shouldPreserveActor =
       !!senderMode && ACTOR_PRESERVING_MODES.has(senderMode);
     const requiresActorHandoff =
       !shouldPreserveActor && run.actingUserId !== senderUserId;
+
+    // Queue while the sandbox cannot take commands, and keep queueing while
+    // earlier queued follow-ups are undelivered so this one cannot jump them.
+    const queueBeforeLiveDelivery =
+      !run.sandboxServerUrl || (await hasQueuedTaskFollowUps(run.id));
+
+    if (queueBeforeLiveDelivery) {
+      await touchTaskActivity(db, taskId);
+      await maybeCreateSlackReplyQuoteContext({
+        runId: run.id,
+        payload: run.payload as Record<string, unknown> | null,
+        slackThreadTs: channelBindings?.slackThreadTs ?? null,
+        userId: senderUserId,
+        message: quoteText,
+        senderMode,
+      });
+      return queueTaskFollowUpForDelivery({
+        taskId,
+        runId: run.id,
+        senderUserId,
+        preserveActor: shouldPreserveActor,
+        message,
+        images,
+        source,
+        clientMessageId,
+        senderMode,
+        deliveryMode: 'send',
+      });
+    }
 
     let didSwitchActingUser = false;
 
@@ -1067,7 +1282,7 @@ export async function sendMessageToTask({
       const result = await withSandboxServerRpcClient({
         runId: run.id,
         userId: senderUserId,
-        sandboxServerUrl: run.sandboxServerUrl,
+        sandboxServerUrl: run.sandboxServerUrl!,
         fetch: fetchSandboxRpcResponseOrThrowIfNotReady,
         call: async (client) => {
           return client.commands.sendPrompt.mutate({
@@ -1091,6 +1306,26 @@ export async function sendMessageToTask({
 
       return { success: true, result };
     } catch (error) {
+      if (isSandboxStartupError(error, run as LatestTaskRun)) {
+        // The queued prompt keeps the actor switch it was admitted under.
+        const queued = await queueTaskFollowUpForDelivery({
+          taskId,
+          runId: run.id,
+          senderUserId,
+          preserveActor: shouldPreserveActor,
+          message,
+          images,
+          source,
+          clientMessageId,
+          senderMode,
+          deliveryMode: 'send',
+        });
+
+        if (queued.success) {
+          return queued;
+        }
+      }
+
       if (didSwitchActingUser) {
         await restoreActingUserIdAfterFailedDelivery({
           handlerName: 'sendMessageToTask',
@@ -1143,6 +1378,7 @@ export async function steerMessageToTask({
   quoteText = message,
   images,
   senderMode,
+  clientMessageId,
   workerQuoteUserName,
 }: {
   taskId: string;
@@ -1151,6 +1387,7 @@ export async function steerMessageToTask({
   quoteText?: string;
   images?: string[];
   senderMode?: SendMessageSenderMode;
+  clientMessageId?: string;
   /**
    * Explicit display name for the worker-side Slack reply quote. See
    * {@link sendMessageToTask} for semantics.
@@ -1170,6 +1407,7 @@ export async function steerMessageToTask({
       payload: true,
       port: true,
       result: true,
+      runtimeTaskStartedAt: true,
     });
 
     if (!run) {
@@ -1207,13 +1445,30 @@ export async function steerMessageToTask({
       };
     }
 
-    if (!run.sandboxServerUrl) {
-      return {
-        success: false,
-        error: 'Task has no active sandbox. The worker may still be booting.',
-        status: 409,
-        delivery: 'not_accepted',
-      };
+    const queueBeforeLiveDelivery =
+      !run.sandboxServerUrl || (await hasQueuedTaskFollowUps(run.id));
+
+    if (queueBeforeLiveDelivery) {
+      await touchTaskActivity(db, taskId);
+      await maybeCreateSlackReplyQuoteContext({
+        runId: run.id,
+        payload: run.payload as Record<string, unknown> | null,
+        slackThreadTs: channelBindings?.slackThreadTs ?? null,
+        userId,
+        message: quoteText,
+        senderMode,
+      });
+      return queueTaskFollowUpForDelivery({
+        taskId,
+        runId: run.id,
+        senderUserId: userId,
+        preserveActor: false,
+        message,
+        images,
+        clientMessageId,
+        senderMode,
+        deliveryMode: 'steer',
+      });
     }
 
     let didSwitchActingUser = false;
@@ -1248,13 +1503,16 @@ export async function steerMessageToTask({
       const result = await withSandboxServerRpcClient({
         runId: run.id,
         userId,
-        sandboxServerUrl: run.sandboxServerUrl,
+        sandboxServerUrl: run.sandboxServerUrl!,
         fetch: fetchSandboxRpcResponseOrThrowIfNotReady,
         call: async (client) => {
           promptSubmitted = true;
           return client.commands.steerTask.mutate({
             prompt: message,
             quoteText,
+            ...(clientMessageId
+              ? { clientMessageId: normalizeOptionalString(clientMessageId) }
+              : {}),
             ...(getFastAgentParentFromPayload(run.payload)
               ? { answerPendingInput: true }
               : {}),
@@ -1271,6 +1529,25 @@ export async function steerMessageToTask({
 
       return { success: true, result };
     } catch (error) {
+      if (isSandboxStartupError(error, run as LatestTaskRun)) {
+        // The queued prompt keeps the actor switch it was admitted under.
+        const queued = await queueTaskFollowUpForDelivery({
+          taskId,
+          runId: run.id,
+          senderUserId: userId,
+          preserveActor: false,
+          message,
+          images,
+          clientMessageId,
+          senderMode,
+          deliveryMode: 'steer',
+        });
+
+        if (queued.success) {
+          return queued;
+        }
+      }
+
       if (didSwitchActingUser) {
         await restoreActingUserIdAfterFailedDelivery({
           handlerName: 'steerMessageToTask',
@@ -1292,6 +1569,7 @@ export async function steerMessageToTask({
         payload: true,
         port: true,
         result: true,
+        runtimeTaskStartedAt: true,
       });
       // A lost RPC response does not prove rejection. Resuming with the same
       // prompt could repeat an instruction already accepted by the worker.
