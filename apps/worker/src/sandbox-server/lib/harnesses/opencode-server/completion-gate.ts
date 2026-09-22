@@ -549,7 +549,6 @@ const REPORT_TOOL_NAMES = new Set([
 const SHIP_MCP_ACTIONS = new Set([
   'create_or_update_pull_request',
   'update_pull_request',
-  'reopen_pull_request',
 ]);
 const SHIP_SHELL_COMMAND =
   /\bgit\b[^|;&\n]*\bpush\b|\bgh\s+pr\s+(create|ready|edit)\b|\bglab\s+mr\s+create\b/;

@@ -313,15 +313,16 @@ describe('classifyCompletionCheckTool', () => {
     });
   });
 
-  it.each([
-    'create_or_update_pull_request',
-    'update_pull_request',
-    'reopen_pull_request',
-  ])('treats the platform action %s as shipping', (action) => {
-    expect(
-      classifyCompletionCheckTool('roomote_manage_source_control', { action }),
-    ).toEqual({ trigger: 'ship' });
-  });
+  it.each(['create_or_update_pull_request', 'update_pull_request'])(
+    'treats the platform action %s as shipping',
+    (action) => {
+      expect(
+        classifyCompletionCheckTool('roomote_manage_source_control', {
+          action,
+        }),
+      ).toEqual({ trigger: 'ship' });
+    },
+  );
 
   it.each([
     ['bash', { command: 'git status --short' }],
@@ -333,6 +334,7 @@ describe('classifyCompletionCheckTool', () => {
     ],
     ['roomote_manage_source_control', { action: 'get_pull_request' }],
     ['roomote_manage_source_control', { action: 'close_pull_request' }],
+    ['roomote_manage_source_control', { action: 'reopen_pull_request' }],
     ['read', { filePath: '/tmp/a.ts' }],
     ['roomote_save_task_memory', { outcome: 'x' }],
   ])('leaves %s alone', (tool, args) => {
