@@ -56,6 +56,7 @@ export * from './lib/tasks';
 export * from './lib/sessions';
 export * from './lib/service-credentials';
 export * from './lib/integration-tool-approvals';
+export * from './lib/integration-tool-auto-settings';
 export * from './lib/credential-egress';
 export * from './lib/session-goals';
 export * from './lib/source-control-provider';

@@ -9,7 +9,6 @@ import {
   listIntegrationToolUserPolicies,
 } from '@roomote/db/server';
 import {
-  integrationToolModeAsks,
   resolveEffectiveIntegrationToolMode,
   resolveGoverningIntegrationToolPolicies,
   type IntegrationToolPolicyMode,
@@ -99,7 +98,7 @@ export async function resolveProxyToolApprovalBlocks(input: {
     });
     if (mode === 'reject') {
       blocks.set(toolName, 'reject');
-    } else if (integrationToolModeAsks(mode) && input.tokenType === 'run') {
+    } else if (mode === 'ask' && input.tokenType === 'run') {
       blocks.set(toolName, 'needs_approval');
     }
   }

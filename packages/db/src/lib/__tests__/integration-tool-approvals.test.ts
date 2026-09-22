@@ -2,7 +2,6 @@ import {
   db,
   eq,
   integrationToolApprovalRequests,
-  integrationToolPolicies,
   sessionFactory,
   sessions,
   taskFactory,
@@ -35,6 +34,10 @@ import {
   isDeploymentExperimentEnabledWithShareLock,
   setDeploymentExperimentEnabled,
 } from '../deployment-experiments';
+import {
+  getIntegrationToolAutoSettings,
+  setIntegrationToolAutoSettings,
+} from '../integration-tool-auto-settings';
 
 const userIds: string[] = [];
 const sessionIds: string[] = [];
@@ -553,46 +556,21 @@ describe('auto-approved reservations', () => {
   });
 });
 
-describe('auto mode', () => {
-  it('stores auto as an ask row a previous release still asks about', async () => {
-    const userId = await user();
-    const integrationId = `auto-${Date.now()}`;
-    await upsertIntegrationToolPolicy({
-      integrationId,
-      toolName: 'save',
-      mode: 'auto',
-      updatedByUserId: userId,
+describe('Auto mode', () => {
+  it('keeps the deployment Auto settings, defaulting to shadow', async () => {
+    await expect(getIntegrationToolAutoSettings()).resolves.toEqual({
+      mode: 'shadow',
+      policy: '',
     });
-    await upsertIntegrationToolUserPolicy({
-      userId,
-      integrationId,
-      toolName: 'save',
-      mode: 'auto',
+    await setIntegrationToolAutoSettings({
+      mode: 'on',
+      policy: 'Reads are fine. Never send messages.',
     });
-    const [row] = await db
-      .select()
-      .from(integrationToolPolicies)
-      .where(eq(integrationToolPolicies.integrationId, integrationId));
-    expect(row).toMatchObject({ mode: 'ask', auto: true });
-    const modeOf = (policies: { integrationId: string; mode: string }[]) =>
-      policies.find((policy) => policy.integrationId === integrationId)?.mode;
-    expect(modeOf(await listIntegrationToolPolicies())).toBe('auto');
-    expect(modeOf(await listIntegrationToolUserPolicies(userId))).toBe('auto');
-
-    // Moving to plain Ask first clears the flag on the same row.
-    await upsertIntegrationToolPolicy({
-      integrationId,
-      toolName: 'save',
-      mode: 'ask',
-      updatedByUserId: userId,
+    await expect(getIntegrationToolAutoSettings()).resolves.toEqual({
+      mode: 'on',
+      policy: 'Reads are fine. Never send messages.',
     });
-    expect(modeOf(await listIntegrationToolPolicies())).toBe('ask');
-    await upsertIntegrationToolPolicy({
-      integrationId,
-      toolName: 'save',
-      mode: 'allow',
-      updatedByUserId: userId,
-    });
+    await setIntegrationToolAutoSettings({ mode: 'off', policy: '' });
   });
 
   it("records the model's view beside the requester's decision", async () => {
@@ -700,6 +678,39 @@ describe("claiming a task's approved call", () => {
     expect(
       (await getIntegrationToolApproval(sessionApproval.approvalId))?.status,
     ).toBe('approved');
+  });
+
+  it('consumes a model-approved call as auto_approved, since nobody decided it', async () => {
+    const userId = await user();
+    const sessionId = await ownedSession(userId);
+    const task = await taskFactory.create();
+    const evaluation = { recommendation: 'approve' as const, evaluatedAt: '' };
+    const approval = await insertAutoApprovedIntegrationToolApproval(
+      { sessionId, userId },
+      {
+        taskId: task.id,
+        integrationId: call.integrationId,
+        toolName: call.toolName,
+        nativeRequestId: nextNativeRequestId(),
+        argsFingerprint: fingerprint(),
+        argsSummary: call.args,
+        decidedBy: 'model',
+        autoEvaluation: evaluation,
+      },
+    );
+    await expect(
+      claimTaskIntegrationToolCall({
+        taskId: task.id,
+        argsFingerprint: fingerprint(),
+      }),
+    ).resolves.toBe(true);
+    expect(await getIntegrationToolApproval(approval.approvalId)).toMatchObject(
+      {
+        status: 'auto_approved',
+        decidedByUserId: null,
+        autoEvaluation: evaluation,
+      },
+    );
   });
 
   it('claims nothing while the experiment is off', async () => {

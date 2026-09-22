@@ -33,7 +33,7 @@ import {
 const policy = (
   integrationId: string,
   toolName: string,
-  mode: 'auto' | 'ask' | 'reject',
+  mode: 'ask' | 'reject',
 ) => ({ integrationId, toolName, mode });
 
 describe('resolveProxyToolApprovalBlocks', () => {
@@ -127,16 +127,6 @@ describe('resolveProxyToolApprovalBlocks', () => {
     expect(blocks.size).toBe(0);
     expect(mockDeployment).not.toHaveBeenCalled();
     expect(mockUser).not.toHaveBeenCalled();
-  });
-
-  it('holds an auto tool for a task run exactly like an ask tool', async () => {
-    mockDeployment.mockResolvedValue([policy('linear', 'save_issue', 'auto')]);
-    const task = await resolveProxyToolApprovalBlocks({
-      integrationId: 'linear',
-      tokenType: 'run',
-      resolveActingUserId: async () => 'user-1',
-    });
-    expect(Object.fromEntries(task)).toEqual({ save_issue: 'needs_approval' });
   });
 
   it("applies the task's session overrides to a task run only", async () => {

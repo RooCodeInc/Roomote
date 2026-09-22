@@ -37,6 +37,7 @@ function setup(
     api: api as never,
     logger: { warn: vi.fn() },
     signal: new AbortController().signal,
+    getUserRequest: () => 'File the bug.',
     pollMs: 1,
     onPendingCountChange: (pending) => pendingCounts.push(pending),
   });
@@ -63,6 +64,7 @@ describe('createTaskToolApprovalRelay', () => {
       toolName: 'save_issue',
       nativeRequestId: 'per_1',
       args: { title: 'Hi' },
+      userRequest: 'File the bug.',
     });
     expect(api.status).toHaveBeenCalledTimes(2);
     expect(client.replyPermission).toHaveBeenCalledWith(

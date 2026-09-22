@@ -166,10 +166,8 @@ describe('McpToolManagementDialog tool approvals', () => {
     ).toBeChecked();
 
     fireEvent.click(search.getByRole('radio', { name: 'Ask first' }));
-    fireEvent.click(search.getByRole('radio', { name: 'Auto (preview)' }));
     expect(state.setModeCalls).toEqual([
       { integrationId: 'exa', toolName: 'web_search_exa', mode: 'ask' },
-      { integrationId: 'exa', toolName: 'web_search_exa', mode: 'auto' },
     ]);
   });
 

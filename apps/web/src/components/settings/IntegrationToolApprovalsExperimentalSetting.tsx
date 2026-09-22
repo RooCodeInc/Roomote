@@ -3,6 +3,7 @@
 import { ShieldQuestion, Switch } from '@/components/system';
 import { useIntegrationToolApprovalsExperiment } from '@/hooks/useIntegrationToolApprovalsExperiment';
 
+import { IntegrationToolAutoModeSetting } from './IntegrationToolAutoModeSetting';
 import { Section } from './Section';
 
 /**
@@ -29,9 +30,9 @@ export function IntegrationToolApprovalsExperimentalSetting() {
           tools dialog in Settings → Integrations offers Always allow (default),
           Ask first, and Reject per tool. Ask first pauses each call until the
           session owner allows it once, stops the asks for the rest of that
-          session, or rejects it; Reject blocks it outright. Auto is a preview
-          that asks like Ask first and records what a decision model would have
-          decided, so its judgment can be compared with yours. A task asks the
+          session, or rejects it; Reject blocks it outright. Auto mode below
+          decides who answers those asks: a person, or a decision model that
+          runs a call it finds clearly safe under your policy. A task asks the
           owner of its session the same way, and a task nobody can answer for,
           such as one an automation started, cannot run an Ask first tool.
           Session owners can also ask to be asked about any tool from its call
@@ -39,6 +40,7 @@ export function IntegrationToolApprovalsExperimentalSetting() {
           Policies are deployment-wide and apply from the next session turn.
         </p>
       </div>
+      {enabled ? <IntegrationToolAutoModeSetting /> : null}
     </Section>
   );
 }

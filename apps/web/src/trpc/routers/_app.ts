@@ -34,6 +34,7 @@ import {
   sourceControlTokenBackedProviderSchema,
   sessionGoalInputSchema,
   codingModelRoutingRuleSchema,
+  integrationToolAutoSettingsSchema,
   integrationToolPolicyUpsertSchema,
   taskModelMetadataSchema,
   type ScheduleOnlyBackgroundAutomationFrequencyField,
@@ -226,7 +227,9 @@ import {
 } from '../commands/deployment-experiments';
 import {
   listIntegrationToolPoliciesCommand,
+  getIntegrationToolAutoSettingsCommand,
   listPersonalIntegrationToolPoliciesCommand,
+  setIntegrationToolAutoSettingsCommand,
   setIntegrationToolPolicyCommand,
   setPersonalIntegrationToolPolicyCommand,
 } from '../commands/integration-tool-policies';
@@ -3628,6 +3631,14 @@ export const appRouter = createRouter({
       .input(integrationToolPolicyUpsertSchema)
       .mutation(({ ctx: { auth }, input }) =>
         setPersonalIntegrationToolPolicyCommand(auth, input),
+      ),
+    getAuto: protectedProcedure.query(({ ctx: { auth } }) =>
+      getIntegrationToolAutoSettingsCommand(auth),
+    ),
+    setAuto: protectedProcedure
+      .input(integrationToolAutoSettingsSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        setIntegrationToolAutoSettingsCommand(auth, input),
       ),
   }),
 

@@ -104,20 +104,14 @@ type IntegrationToolApprovalRow =
 function policyMetadata(
   row: Pick<
     IntegrationToolPolicyRow,
-    | 'id'
-    | 'integrationId'
-    | 'toolName'
-    | 'mode'
-    | 'auto'
-    | 'updatedAt'
-    | 'createdAt'
+    'id' | 'integrationId' | 'toolName' | 'mode' | 'updatedAt' | 'createdAt'
   >,
 ): IntegrationToolPolicyMetadata {
   return {
     policyId: row.id,
     integrationId: row.integrationId,
     toolName: row.toolName,
-    mode: row.mode === 'ask' && row.auto ? 'auto' : row.mode,
+    mode: row.mode,
     updatedAt: row.updatedAt.toISOString(),
     createdAt: row.createdAt.toISOString(),
   };
@@ -205,11 +199,8 @@ async function upsertPolicy(
       );
     return;
   }
-  // `auto` is stored as `ask` with a flag, so a release that predates it
-  // still asks about the tool instead of reading an unknown mode as allow.
   const changes = {
-    mode: input.mode === 'auto' ? ('ask' as const) : input.mode,
-    auto: input.mode === 'auto',
+    mode: input.mode,
     ...store.ownValues,
     updatedAt: sql`clock_timestamp()`,
   };
@@ -294,6 +285,8 @@ export async function insertIntegrationToolApproval(
     argsSummary: unknown;
     /** Set when a task's agent asked; see `claimTaskIntegrationToolCall`. */
     taskId?: string;
+    /** The decision model's view under Auto mode, when already known. */
+    autoEvaluation?: IntegrationToolAutoEvaluation;
   },
 ): Promise<IntegrationToolApprovalMetadata> {
   return db.transaction(async (tx) => {
@@ -319,6 +312,7 @@ export async function insertIntegrationToolApproval(
         sessionId: context.sessionId,
         requesterUserId: owner.id,
         taskId: input.taskId ?? null,
+        autoEvaluation: input.autoEvaluation ?? null,
         integrationId: input.integrationId,
         toolName: input.toolName,
         nativeRequestId: input.nativeRequestId,
@@ -483,7 +477,7 @@ export async function markIntegrationToolApprovalConsumed(input: {
   return claimApprovedIntegrationToolApproval(input, 'consumed');
 }
 
-/** Record the decision model's view of a call to a tool in `auto` mode. */
+/** Record the decision model's view of an Ask first call under Auto mode. */
 export async function recordIntegrationToolAutoEvaluation(
   approvalId: string,
   autoEvaluation: IntegrationToolAutoEvaluation,
@@ -651,6 +645,13 @@ export async function insertAutoApprovedIntegrationToolApproval(
     argsSummary: unknown;
     /** Set when a task's agent asked; see `claimTaskIntegrationToolCall`. */
     taskId?: string;
+    /** The decision model's view under Auto mode, when already known. */
+    autoEvaluation?: IntegrationToolAutoEvaluation;
+    /**
+     * Who approved: the requester through an earlier "don't ask again this
+     * session", or Auto mode's decision model, which leaves no decider.
+     */
+    decidedBy?: 'requester' | 'model';
   },
 ): Promise<IntegrationToolApprovalMetadata> {
   return db.transaction(async (tx) => {
@@ -665,13 +666,14 @@ export async function insertAutoApprovedIntegrationToolApproval(
         sessionId: context.sessionId,
         requesterUserId: owner.id,
         taskId: input.taskId ?? null,
+        autoEvaluation: input.autoEvaluation ?? null,
         integrationId: input.integrationId,
         toolName: input.toolName,
         nativeRequestId: input.nativeRequestId,
         argsFingerprint: input.argsFingerprint,
         argsSummary: redactIntegrationToolArgs(input.argsSummary),
         status: 'approved',
-        decidedByUserId: owner.id,
+        decidedByUserId: input.decidedBy === 'model' ? null : owner.id,
         decidedAt: sql`clock_timestamp()`,
         expiresAt: sql`clock_timestamp()`,
       })
@@ -717,7 +719,10 @@ export async function claimTaskIntegrationToolCall(input: {
       return false;
     }
     const [approved] = await tx
-      .select({ id: integrationToolApprovalRequests.id })
+      .select({
+        id: integrationToolApprovalRequests.id,
+        decidedByUserId: integrationToolApprovalRequests.decidedByUserId,
+      })
       .from(integrationToolApprovalRequests)
       .where(
         and(
@@ -739,9 +744,10 @@ export async function claimTaskIntegrationToolCall(input: {
       .limit(1)
       .for('update', { skipLocked: true });
     if (!approved) return false;
+    // A decision nobody made is Auto mode's; its consumed row reads as such.
     await tx
       .update(integrationToolApprovalRequests)
-      .set({ status: 'consumed' })
+      .set({ status: approved.decidedByUserId ? 'consumed' : 'auto_approved' })
       .where(eq(integrationToolApprovalRequests.id, approved.id));
     return true;
   });

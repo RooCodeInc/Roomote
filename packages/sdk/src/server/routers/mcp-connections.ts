@@ -225,12 +225,8 @@ export async function resolveUserMcpServerConfigs(options: {
   });
 }
 
-/**
- * What a task run mounts, with the policy scope of each custom server. The
- * one source for a task's approval rules and for anything else that has to
- * agree with them about which policy layer governs a server.
- */
-export function resolveTaskRunMcpServerConfigs(
+/** What a task run mounts, with the policy scope of each custom server. */
+function resolveTaskRunMcpServerConfigs(
   auth: RunTokenContext,
   req: { url?: string } | undefined,
 ): Promise<ResolvedMcpServerConfigs> {

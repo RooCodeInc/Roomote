@@ -1,14 +1,12 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 
-import { resolveActorScopedUserContext } from '../lib/auth/resolve-actor-scoped-user';
 import {
   getTaskToolApprovalStatus,
   requestTaskToolApproval,
 } from '../lib/task-tool-approvals';
 import { findTaskRunByRunTokenClaims } from '../lib/task-runs/find-task-run';
 import { authenticatedProcedure, isRunToken, router } from '../trpc';
-import { resolveTaskRunMcpServerConfigs } from './mcp-connections';
 
 /** A task run's own approvals only: the run token names the task. */
 const taskRunProcedure = authenticatedProcedure.use(async ({ ctx, next }) => {
@@ -31,16 +29,12 @@ export const toolApprovalsRouter = router({
           toolName: z.string().min(1).max(200),
           nativeRequestId: z.string().min(1).max(200),
           args: z.unknown(),
+          userRequest: z.string().max(20_000).optional(),
         })
         .strict(),
     )
-    .mutation(async ({ ctx, input }) =>
-      requestTaskToolApproval({
-        runId: ctx.runId,
-        actingUserId: (await resolveActorScopedUserContext(ctx.auth)).userId,
-        resolveServers: () => resolveTaskRunMcpServerConfigs(ctx.auth, ctx.req),
-        ...input,
-      }),
+    .mutation(({ ctx, input }) =>
+      requestTaskToolApproval({ runId: ctx.runId, ...input }),
     ),
 
   /** Poll one of this task's approvals while the Session owner decides. */

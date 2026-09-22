@@ -17,7 +17,6 @@ import { z } from 'zod';
  */
 export const INTEGRATION_TOOL_POLICY_MODES = [
   'allow',
-  'auto',
   'ask',
   'reject',
 ] as const;
@@ -43,8 +42,9 @@ export const INTEGRATION_TOOL_APPROVAL_STATUSES = [
   'expired',
   'consumed',
   'cancelled',
-  // Relayed without a card because the requester chose "don't ask again this
-  // session" for the tool; kept as its own status for the audit trail.
+  // Ran without a card: the requester had chosen "don't ask again this
+  // session" for the tool, or Auto mode's decision model approved the call
+  // (then `decidedByUserId` is null). Its own status for the audit trail.
   'auto_approved',
 ] as const;
 export type IntegrationToolApprovalStatus =
@@ -69,10 +69,32 @@ export interface IntegrationToolApprovalMetadata {
 }
 
 /**
- * A decision model's view of one paused call to a tool in `auto` mode. While
- * Auto is a preview it is only recorded next to the requester's own decision,
- * so the two can be compared; it never approves or rejects anything. The
- * model can only ever recommend running the call or asking, never rejecting.
+ * Deployment-wide Auto mode: who answers an Ask first call. `off` asks a
+ * person; `shadow` asks a person and records what the decision model would
+ * have done; `on` lets the model run a call it finds clearly safe under the
+ * Auto policy, and asks a person about everything else. Reject is never
+ * touched.
+ */
+export const INTEGRATION_TOOL_AUTO_MODES = ['off', 'shadow', 'on'] as const;
+export type IntegrationToolAutoMode =
+  (typeof INTEGRATION_TOOL_AUTO_MODES)[number];
+export const INTEGRATION_TOOL_AUTO_POLICY_MAX_LENGTH = 4_000;
+
+export interface IntegrationToolAutoSettings {
+  mode: IntegrationToolAutoMode;
+  /** The admin's rules for what may run unattended, given to the model. */
+  policy: string;
+}
+
+export const integrationToolAutoSettingsSchema = z.object({
+  mode: z.enum(INTEGRATION_TOOL_AUTO_MODES),
+  policy: z.string().max(INTEGRATION_TOOL_AUTO_POLICY_MAX_LENGTH),
+});
+
+/**
+ * A decision model's view of one paused Ask first call, recorded beside the
+ * decision. In shadow mode it decides nothing. The model can only ever
+ * recommend running the call or asking, never rejecting.
  */
 export interface IntegrationToolAutoEvaluation {
   recommendation: 'approve' | 'ask';
@@ -139,18 +161,7 @@ export type IntegrationToolSessionOverrideUpsert = z.infer<
 const INTEGRATION_TOOL_POLICY_MODE_STRICTNESS: Record<
   IntegrationToolPolicyMode,
   number
-> = { allow: 0, auto: 1, ask: 2, reject: 3 };
-
-/**
- * `auto` is `ask` with a second opinion: every call still pauses for the
- * Session owner, and a decision model's view of the call is recorded next to
- * their answer. It gates exactly like `ask` everywhere a call is held.
- */
-export function integrationToolModeAsks(
-  mode: IntegrationToolPolicyMode | undefined,
-): boolean {
-  return mode === 'ask' || mode === 'auto';
-}
+> = { allow: 0, ask: 1, reject: 2 };
 
 /** The stricter of a tool's deployment policy and the requester's own. */
 function resolveStricterIntegrationToolPolicyMode(
@@ -297,7 +308,7 @@ export function compileTaskIntegrationToolApprovals(input: {
     const action =
       mode === 'reject'
         ? 'deny'
-        : integrationToolModeAsks(mode) || integrationToolModeAsks(policyMode)
+        : mode === 'ask' || policyMode === 'ask'
           ? 'ask'
           : undefined;
     if (!action) continue;

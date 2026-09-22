@@ -51,6 +51,8 @@ export function createTaskToolApprovalRelay(options: {
   client: Pick<OpenCodeServerClient, 'message' | 'replyPermission'>;
   logger: { warn: (message: string) => void };
   signal: AbortSignal;
+  /** What the user last asked for, shown to Auto mode's decision model. */
+  getUserRequest?: () => string | undefined;
   api?: TaskToolApprovalApi;
   pollMs?: number;
   /** Pending asks keep a quiet turn from looking stalled. */
@@ -98,10 +100,12 @@ export function createTaskToolApprovalRelay(options: {
       );
       return;
     }
+    const userRequest = options.getUserRequest?.();
     const result = await api.request({
       ...tool,
       nativeRequestId: ask.requestId,
       args: await fetchCallArgs(ask),
+      ...(userRequest ? { userRequest } : {}),
     });
     if (result.outcome === 'not_required' || result.outcome === 'approved') {
       await reply(ask, 'once');

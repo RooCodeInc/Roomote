@@ -4593,11 +4593,10 @@ export const integrationToolPolicies = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     integrationId: text('integration_id').notNull(),
     toolName: text('tool_name').notNull(),
-    /**
-     * Stored as `ask` or `reject`. The `auto` mode is an `ask` row with
-     * `auto` set, so a release that predates it still asks.
-     */
-    mode: text('mode').notNull().$type<'ask' | 'reject'>(),
+    mode: text('mode')
+      .notNull()
+      .$type<import('@roomote/types').IntegrationToolPolicyMode>(),
+    /** N-1: unused since Auto became a deployment setting; drop next release. */
     auto: boolean('auto').notNull().default(false),
     updatedByUserId: text('updated_by_user_id').references(() => users.id, {
       onDelete: 'set null',
@@ -4631,11 +4630,10 @@ export const integrationToolUserPolicies = pgTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     integrationId: text('integration_id').notNull(),
     toolName: text('tool_name').notNull(),
-    /**
-     * Stored as `ask` or `reject`. The `auto` mode is an `ask` row with
-     * `auto` set, so a release that predates it still asks.
-     */
-    mode: text('mode').notNull().$type<'ask' | 'reject'>(),
+    mode: text('mode')
+      .notNull()
+      .$type<import('@roomote/types').IntegrationToolPolicyMode>(),
+    /** N-1: unused since Auto became a deployment setting; drop next release. */
     auto: boolean('auto').notNull().default(false),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
@@ -4700,8 +4698,8 @@ export const integrationToolApprovalRequests = pgTable(
     /** Why a cancelled request was cancelled (for example experiment disabled). */
     cancelReason: text('cancel_reason'),
     /**
-     * What the decision model made of this call, for a tool in `auto` mode.
-     * Recorded beside the requester's own decision; it decides nothing.
+     * What the decision model made of this Ask first call under Auto mode,
+     * recorded beside the decision.
      */
     autoEvaluation:
       jsonb('auto_evaluation').$type<

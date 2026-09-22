@@ -5,6 +5,7 @@ export const request = (input: {
   toolName: string;
   nativeRequestId: string;
   args?: unknown;
+  userRequest?: string;
 }) => client.toolApprovals.request.mutate(input);
 
 export const status = (approvalId: string) =>

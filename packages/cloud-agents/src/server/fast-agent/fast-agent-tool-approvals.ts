@@ -18,7 +18,6 @@ import {
   markIntegrationToolApprovalConsumed,
 } from '@roomote/db/server';
 import {
-  integrationToolModeAsks,
   integrationToolPolicyKey,
   resolveEffectiveIntegrationToolMode,
   resolveGoverningIntegrationToolPolicies,
@@ -27,7 +26,10 @@ import {
   type IntegrationToolSessionOverrideMetadata,
 } from '@roomote/types';
 
-import { recordIntegrationToolAutoEvaluationInBackground } from '../integration-tool-auto-evaluation';
+import {
+  recordIntegrationToolAutoEvaluationInBackground,
+  resolveIntegrationToolAutoDecision,
+} from '../integration-tool-auto-evaluation';
 import type { FastAgentIntegration } from './fast-agent-integration-broker';
 import { buildFastAgentCodeModeServerNames } from './fast-agent-tool-policy';
 
@@ -137,8 +139,7 @@ export function buildIntegrationToolApprovalRules(
     if (mode === 'reject') {
       actionByKey.set(tool.key, 'deny');
     } else if (
-      (integrationToolModeAsks(mode) ||
-        (mode === 'allow' && integrationToolModeAsks(policyMode))) &&
+      (mode === 'ask' || (mode === 'allow' && policyMode === 'ask')) &&
       actionByKey.get(tool.key) !== 'deny'
     ) {
       actionByKey.set(tool.key, 'ask');
@@ -271,15 +272,7 @@ export async function resolveFastAgentToolApprovalRules(input: {
   sessionId?: string;
   /** The Session owner, whose personal policies tighten the deployment ones. */
   ownerUserId?: string;
-}): Promise<
-  | {
-      rules: PermissionRuleset;
-      hash: string;
-      /** Policy keys of the tools in `auto` mode; see the bridge. */
-      autoToolKeys: Set<string>;
-    }
-  | undefined
-> {
+}): Promise<{ rules: PermissionRuleset; hash: string } | undefined> {
   const enabled = await isDeploymentExperimentEnabled(
     'integrationToolApprovals',
   );
@@ -307,17 +300,7 @@ export async function resolveFastAgentToolApprovalRules(input: {
     governing,
     sessionOverrides,
   );
-  return {
-    rules,
-    hash: hashIntegrationToolApprovalRules(rules),
-    autoToolKeys: new Set(
-      governing
-        .filter((policy) => policy.mode === 'auto')
-        .map((policy) =>
-          integrationToolPolicyKey(policy.integrationId, policy.toolName),
-        ),
-    ),
-  };
+  return { rules, hash: hashIntegrationToolApprovalRules(rules) };
 }
 
 /**
@@ -355,12 +338,7 @@ export function createFastAgentToolApprovalBridge(input: {
   sessionId: string;
   userId: string;
   integrations: FastAgentIntegration[];
-  /**
-   * Tools in `auto` mode. Auto is a preview: their asks go to the requester
-   * like any other, and the decision model's view is recorded beside the
-   * answer. `userRequest` is what that model checks the call against.
-   */
-  autoToolKeys?: Set<string>;
+  /** What the user last asked; Auto mode checks each call against it. */
   userRequest?: string;
   /** Optional chat-surface notification for non-web conversations. */
   notify?: (approval: IntegrationToolApprovalMetadata) => Promise<void>;
@@ -491,7 +469,22 @@ export function createFastAgentToolApprovalBridge(input: {
           override.integrationId === tool.integrationId &&
           override.toolName === tool.toolName,
       );
-      if (allowedForSession) {
+      // Auto mode: with the deployment set to `on`, the decision model may
+      // find the call clearly safe under the Auto policy and run it without
+      // a card. It is consulted only for a call that would otherwise ask, so
+      // a session override, an experiment toggle, or a reject never reaches
+      // it. Any failure on this path asks a person.
+      const auto = allowedForSession
+        ? undefined
+        : await resolveIntegrationToolAutoDecision({
+            integrationId: tool.integrationId,
+            toolName: tool.toolName,
+            toolDescription: tool.description,
+            args,
+            userRequest: input.userRequest,
+            userId: input.userId,
+          }).catch(() => ({ action: 'ask' as const, mode: 'off' as const }));
+      if (allowedForSession || auto?.action === 'approve') {
         // The audit row starts as an unrelayed `approved` decision; claiming
         // it is the atomic reservation. The claim reads the experiment under
         // a share lock in its own transaction, so it serializes against the
@@ -508,6 +501,9 @@ export function createFastAgentToolApprovalBridge(input: {
             nativeRequestId: ask.requestId,
             argsFingerprint,
             argsSummary: args ?? null,
+            ...(auto?.action === 'approve'
+              ? { autoEvaluation: auto.evaluation }
+              : {}),
           },
         );
         const claimed = await claimAutoApprovedIntegrationToolApproval({
@@ -535,13 +531,10 @@ export function createFastAgentToolApprovalBridge(input: {
           nativeRequestId: ask.requestId,
           argsFingerprint,
           argsSummary: args ?? null,
+          ...(auto?.mode === 'on' ? { autoEvaluation: auto.evaluation } : {}),
         },
       );
-      if (
-        input.autoToolKeys?.has(
-          integrationToolPolicyKey(tool.integrationId, tool.toolName),
-        )
-      ) {
+      if (auto?.action === 'shadow') {
         recordIntegrationToolAutoEvaluationInBackground(approval.approvalId, {
           integrationId: tool.integrationId,
           toolName: tool.toolName,

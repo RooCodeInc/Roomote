@@ -6364,7 +6364,6 @@ export async function answerFastAgentQuestion({
                       // The Session owner decides, even on a participant's turn.
                       userId: toolApprovalDeciderUserId,
                       integrations: availableIntegrations,
-                      autoToolKeys: toolApprovalRules.autoToolKeys,
                       userRequest: question,
                       signal: promptSignal,
                       ...(conversation.surface === 'slack' ||
