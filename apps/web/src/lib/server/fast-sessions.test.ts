@@ -1973,13 +1973,19 @@ describe('Session queries', () => {
         conversationId: session.conversationId,
       },
     };
-    const event = (eventId: string, text: string, webFollowUp = true) => ({
+    const event = (
+      eventId: string,
+      text: string,
+      webFollowUp = true,
+      images?: string[],
+    ) => ({
       type: 'human_follow_up' as const,
       eventId,
       currentMessageId: eventId,
       userId: owner.id,
       question: text,
       webFollowUp,
+      ...(images ? { images } : {}),
     });
 
     await db.insert(fastAgentParentEvents).values([
@@ -1996,6 +2002,15 @@ describe('Session queries', () => {
         parent,
         event: event('queued-client-2', 'Second queued message'),
         createdAt: new Date('2026-01-01T00:00:02.000Z'),
+      },
+      {
+        conversationId: session.id,
+        eventKey: 'queued-image-follow-up',
+        parent,
+        event: event('queued-image-client', '', true, [
+          'data:image/png;base64,aGVsbG8=',
+        ]),
+        createdAt: new Date('2026-01-01T00:00:02.500Z'),
       },
       {
         conversationId: session.id,
@@ -2023,8 +2038,13 @@ describe('Session queries', () => {
     expect(polled.queuedMessages).toMatchObject([
       { clientMessageId: 'queued-client-1', text: 'First queued message' },
       { clientMessageId: 'queued-client-2', text: 'Second queued message' },
+      {
+        clientMessageId: 'queued-image-client',
+        text: '',
+        images: ['data:image/png;base64,aGVsbG8='],
+      },
     ]);
-    expect(polled.queuedMessages).toHaveLength(2);
+    expect(polled.queuedMessages).toHaveLength(3);
 
     const reloaded = await getFastSessionById(
       { userId: owner.id, isAdmin: false },

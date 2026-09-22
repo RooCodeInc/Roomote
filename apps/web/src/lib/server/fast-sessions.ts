@@ -615,21 +615,20 @@ function parseFastSessionQueuedMessage(row: {
 }): FastSessionQueuedMessage | null {
   const clientMessageId = row.event.currentMessageId;
   const text = row.event.question;
-
-  if (
-    typeof clientMessageId !== 'string' ||
-    clientMessageId.length === 0 ||
-    typeof text !== 'string' ||
-    text.length === 0
-  ) {
-    return null;
-  }
-
   const images = Array.isArray(row.event.images)
     ? row.event.images.filter(
         (image): image is string => typeof image === 'string',
       )
     : undefined;
+
+  if (
+    typeof clientMessageId !== 'string' ||
+    clientMessageId.length === 0 ||
+    typeof text !== 'string' ||
+    (text.length === 0 && !images?.length)
+  ) {
+    return null;
+  }
 
   return {
     id: row.id,
