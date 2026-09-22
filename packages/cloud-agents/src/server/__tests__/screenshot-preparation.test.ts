@@ -2,6 +2,8 @@ const { mockEvaluate } = vi.hoisted(() => ({
   mockEvaluate: vi.fn(),
 }));
 
+import { SCREENSHOT_PREPARATION_MAX_DURATION_MS } from '@roomote/types';
+
 vi.mock('../typesafe-judgment', () => ({
   evaluateTypeSafeJudgmentsWithMetadata: mockEvaluate,
 }));
@@ -346,5 +348,42 @@ describe('bounded screenshot preparation', () => {
         input: nextInput([fillAction]),
       }),
     ).resolves.toMatchObject({ status: 'fallback', reason: 'low_confidence' });
+  });
+
+  it('accepts a visual record after the preparation budget once capture-ready was reached', async () => {
+    let currentTime = 1_000;
+    mockEvaluate.mockResolvedValueOnce({
+      answers: {
+        next_action: {
+          type: 'choice',
+          choice: 'capture',
+          probabilities: { fallback: 0.01, capture: 0.99 },
+          confidence: 0.99,
+        },
+      },
+    });
+
+    const ready = await prepareScreenshotStep({
+      runId: 'run-late-visual-record',
+      enabled: true,
+      input: nextInput([readyAction]),
+      now: () => currentTime,
+    });
+    const loopId = ready.loopId!;
+    currentTime += SCREENSHOT_PREPARATION_MAX_DURATION_MS + 1_000;
+
+    await expect(
+      prepareScreenshotStep({
+        runId: 'run-late-visual-record',
+        enabled: true,
+        input: {
+          operation: 'record',
+          optIn: false,
+          loopId,
+          outcome: 'accepted',
+        },
+        now: () => currentTime,
+      }),
+    ).resolves.toMatchObject({ status: 'accepted' });
   });
 });

@@ -43,6 +43,7 @@ type PreparationLoop = {
   outputTokens: number;
   lastDecisionKind?: ScreenshotPreparationAction['kind'];
   pendingCorrection?: ScreenshotPreparationCorrection;
+  captureReadyAt?: number;
   acceptedAt?: number;
   completed: boolean;
 };
@@ -268,11 +269,17 @@ export async function prepareScreenshotStep(params: {
     if (loop.completed) {
       return fallback(loop, startedAt, 'loop_completed');
     }
-    if (startedAt - loop.startedAt > SCREENSHOT_PREPARATION_MAX_DURATION_MS) {
-      return fallback(loop, startedAt, 'time_budget_exhausted');
-    }
     if (loop.lastDecisionKind !== 'capture-ready') {
       return fallback(loop, startedAt, 'record_requires_capture_ready');
+    }
+    // The preparation budget ends when capture-ready is reached. Keep the
+    // bounded loop alive for post-capture visual inspection, but never permit
+    // a rejected inspection to start new work after that preparation deadline.
+    if (
+      params.input.outcome !== 'accepted' &&
+      startedAt - loop.startedAt > SCREENSHOT_PREPARATION_MAX_DURATION_MS
+    ) {
+      return fallback(loop, startedAt, 'time_budget_exhausted');
     }
 
     if (params.input.outcome === 'accepted') {
@@ -418,6 +425,9 @@ export async function prepareScreenshotStep(params: {
 
     loop.actionsUsed += 1;
     loop.lastDecisionKind = action.kind;
+    if (action.kind === 'capture-ready') {
+      loop.captureReadyAt = now();
+    }
     return {
       status: action.kind === 'capture-ready' ? 'ready' : 'running',
       loopId: loop.loopId,
