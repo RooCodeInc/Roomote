@@ -410,6 +410,33 @@ describe('createSlackFastReplyStream', () => {
     );
   });
 
+  it('retries footer finalization in place when the partial stream cannot be removed', async () => {
+    const slack = slackMock();
+    slack.stopMessageStream
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    let finalizationAttempts = 0;
+    mocks.updateWithFooter.mockImplementation(async () => {
+      finalizationAttempts += 1;
+      return finalizationAttempts > 1;
+    });
+    slack.deleteMessage.mockResolvedValue(false);
+    const { stream, onDelivered } = build(slack, null);
+
+    await stream.append('Looking');
+    await expect(
+      stream.finish({ purpose: 'progress', message: 'Looking.' }),
+    ).resolves.toEqual({ messageId: '200.1' });
+
+    expect(slack.stopMessageStream).toHaveBeenCalledTimes(2);
+    expect(mocks.updateWithFooter).toHaveBeenCalledTimes(2);
+    expect(slack.deleteMessage).toHaveBeenCalledOnce();
+    expect(mocks.recordMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 'session-1', messageId: '200.1' }),
+    );
+    expect(onDelivered).toHaveBeenCalledOnce();
+  });
+
   it('removes the partial stream when the final rewrite throws', async () => {
     const slack = slackMock();
     mocks.updateWithFooter.mockRejectedValue(new Error('lock timed out'));
