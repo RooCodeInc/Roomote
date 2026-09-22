@@ -14,6 +14,8 @@ describe('mergeOpenCodeChatGptFastModeOptions', () => {
       },
       [
         'openai/gpt-6-astra',
+        'openai/gpt-6-sol',
+        'openai/gpt-6-luna',
         'openai/gpt-5.6-terra',
         'openai/gpt-5.6-sol',
         'openai/gpt-5.6-luna',
@@ -24,6 +26,8 @@ describe('mergeOpenCodeChatGptFastModeOptions', () => {
       openai: {
         models: {
           'gpt-6-astra': { options: { serviceTier: 'priority' } },
+          'gpt-6-sol': { options: { serviceTier: 'priority' } },
+          'gpt-6-luna': { options: { serviceTier: 'priority' } },
           'gpt-5.6-terra': {
             options: { reasoningEffort: 'high', serviceTier: 'priority' },
           },

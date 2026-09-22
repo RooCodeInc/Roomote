@@ -1759,9 +1759,9 @@ describe('task model provider commands', () => {
       expect.objectContaining({
         taskModelSettings: expect.objectContaining({
           allowedModelIds: expect.arrayContaining([
-            'openai/gpt-5.6-sol',
+            'openai/gpt-6-sol',
             'openai/gpt-5.6-terra',
-            'openai/gpt-5.6-luna',
+            'openai/gpt-6-luna',
           ]),
         }),
       }),

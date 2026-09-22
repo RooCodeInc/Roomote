@@ -350,7 +350,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       id: 'roomote',
       hidden: true,
       envVarName: 'R_TRIAL_OPENROUTER_API_KEY',
-      defaultRoomoteModel: 'roomote/openai/gpt-5.6-luna',
+      defaultRoomoteModel: 'roomote/openai/gpt-6-luna',
     });
     expect(
       getSetupModelProvider('roomote').suggestedTaskModels.every((model) =>
@@ -657,6 +657,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       displayName: 'GPT-6 Astra',
       modelId: 'gpt-6-astra',
       providerIds: [
+        'roomote',
         'openrouter',
         'vercel',
         'openai',
@@ -666,29 +667,32 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       ],
     },
     {
-      displayName: 'GPT 5.6 Sol',
-      modelId: 'gpt-5.6-sol',
+      displayName: 'GPT-6 Sol',
+      modelId: 'gpt-6-sol',
     },
     {
       displayName: 'GPT 5.6 Terra',
       modelId: 'gpt-5.6-terra',
     },
     {
-      displayName: 'GPT 5.6 Luna',
-      modelId: 'gpt-5.6-luna',
+      displayName: 'GPT-6 Luna',
+      modelId: 'gpt-6-luna',
     },
   ])(
     'recommends $displayName only from providers that support it',
     ({ displayName, modelId, providerIds }) => {
-      const providersByModel = userSelectableProviders.flatMap((provider) => {
-        const model = provider.suggestedTaskModels.find(
-          (suggestion) => suggestion.displayName === displayName,
-        );
+      const providersByModel = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
+        (provider) => {
+          const model = provider.suggestedTaskModels.find(
+            (suggestion) => suggestion.displayName === displayName,
+          );
 
-        return model ? [{ providerId: provider.id, modelId: model.id }] : [];
-      });
+          return model ? [{ providerId: provider.id, modelId: model.id }] : [];
+        },
+      );
 
       const providerCandidates = [
+        { providerId: 'roomote', modelId: `roomote/openai/${modelId}` },
         { providerId: 'openrouter', modelId: `openrouter/openai/${modelId}` },
         { providerId: 'vercel', modelId: `vercel/openai/${modelId}` },
         { providerId: 'requesty', modelId: `requesty/${modelId}@eu` },
@@ -699,14 +703,6 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
           modelId: `azure-cognitive-services/${modelId}`,
         },
         { providerId: 'opencode', modelId: `opencode/${modelId}` },
-        ...(modelId === 'gpt-5.6-luna'
-          ? [
-              {
-                providerId: 'opencode-go',
-                modelId: 'opencode-go/gpt-5.6-luna',
-              },
-            ]
-          : []),
         {
           providerId: 'amazon-bedrock',
           modelId: `bedrock-mantle/openai.${modelId}`,
@@ -943,7 +939,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       id: 'chatgpt',
       label: 'ChatGPT (subscription)',
       authKind: 'oauth',
-      defaultRoomoteModel: 'openai/gpt-5.6-sol',
+      defaultRoomoteModel: 'openai/gpt-6-sol',
     });
     expect(chatgptProvider?.envVarName).toBeUndefined();
   });
@@ -1091,9 +1087,9 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       'requesty/claude-haiku-4-5',
       'requesty/anthropic/claude-opus-5-5',
       'requesty/claude-sonnet-5',
-      'requesty/gpt-5.6-sol@eu',
+      'requesty/gpt-6-sol@eu',
       'requesty/gpt-5.6-terra@eu',
-      'requesty/gpt-5.6-luna@eu',
+      'requesty/gpt-6-luna@eu',
       'requesty/gemini-3.8-flash',
       'requesty/glm-5.3-flash',
       'requesty/glm-5.3',
@@ -1150,20 +1146,20 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     });
   });
 
-  it('registers GitHub Copilot as an OAuth provider with github-copilot/ models', () => {
+  it('uses the GPT-6 Luna successor as the GitHub Copilot default', () => {
     const copilotProvider = SETUP_MODEL_PROVIDER_CATALOG.find(
       (provider) => provider.id === 'github-copilot',
     );
 
     expect(copilotProvider).toMatchObject({
       label: 'GitHub Copilot',
-      defaultRoomoteModel: 'github-copilot/gpt-5.6-luna',
+      defaultRoomoteModel: 'github-copilot/gpt-6-luna',
       authKind: 'oauth',
     });
     expect(copilotProvider?.envVarName).toBeUndefined();
     expect(
       copilotProvider?.suggestedTaskModels.some(
-        (suggestion) => suggestion.id === 'github-copilot/gpt-5.6-luna',
+        (suggestion) => suggestion.id === 'github-copilot/gpt-6-luna',
       ),
     ).toBe(true);
   });
@@ -1254,13 +1250,13 @@ describe('buildRecommendedDeploymentModelConfig', () => {
       const provider = getSetupModelProvider(providerId);
 
       expect(buildRecommendedDeploymentModelConfig(provider)).toEqual({
-        roomoteModel: 'openai/gpt-5.6-sol',
+        roomoteModel: 'openai/gpt-6-sol',
         roomoteOrchestrationModel: null,
-        roomoteSmallModel: 'openai/gpt-5.6-luna',
-        roomoteVisionModel: 'openai/gpt-5.6-sol',
+        roomoteSmallModel: 'openai/gpt-6-luna',
+        roomoteVisionModel: 'openai/gpt-6-sol',
         roomoteCodeReviewModel: 'openai/gpt-5.6-terra',
-        roomoteExploreModel: 'openai/gpt-5.6-luna',
-        roomotePlanningModel: 'openai/gpt-5.6-sol',
+        roomoteExploreModel: 'openai/gpt-6-luna',
+        roomotePlanningModel: 'openai/gpt-6-sol',
         roomoteModelReasoningEffort: 'medium',
         roomoteOrchestrationModelReasoningEffort: null,
         roomoteSmallModelReasoningEffort: 'low',
@@ -1272,13 +1268,13 @@ describe('buildRecommendedDeploymentModelConfig', () => {
       expect(
         buildRecommendedDeploymentModelConfig(provider, 'luna-max'),
       ).toEqual({
-        roomoteModel: 'openai/gpt-5.6-luna',
+        roomoteModel: 'openai/gpt-6-luna',
         roomoteOrchestrationModel: null,
-        roomoteSmallModel: 'openai/gpt-5.6-luna',
-        roomoteVisionModel: 'openai/gpt-5.6-sol',
+        roomoteSmallModel: 'openai/gpt-6-luna',
+        roomoteVisionModel: 'openai/gpt-6-sol',
         roomoteCodeReviewModel: 'openai/gpt-5.6-terra',
-        roomoteExploreModel: 'openai/gpt-5.6-luna',
-        roomotePlanningModel: 'openai/gpt-5.6-sol',
+        roomoteExploreModel: 'openai/gpt-6-luna',
+        roomotePlanningModel: 'openai/gpt-6-sol',
         roomoteModelReasoningEffort: 'max',
         roomoteOrchestrationModelReasoningEffort: null,
         roomoteSmallModelReasoningEffort: 'low',
@@ -1298,13 +1294,13 @@ describe('buildRecommendedDeploymentModelConfig', () => {
         'efficient',
       ),
     ).toEqual({
-      roomoteModel: 'openrouter/openai/gpt-5.6-luna',
+      roomoteModel: 'openrouter/openai/gpt-6-luna',
       roomoteOrchestrationModel: null,
-      roomoteSmallModel: 'openrouter/openai/gpt-5.6-luna',
+      roomoteSmallModel: 'openrouter/openai/gpt-6-luna',
       roomoteVisionModel: null,
-      roomoteCodeReviewModel: 'openrouter/openai/gpt-5.6-luna',
-      roomoteExploreModel: 'openrouter/openai/gpt-5.6-luna',
-      roomotePlanningModel: 'openrouter/openai/gpt-5.6-luna',
+      roomoteCodeReviewModel: 'openrouter/openai/gpt-6-luna',
+      roomoteExploreModel: 'openrouter/openai/gpt-6-luna',
+      roomotePlanningModel: 'openrouter/openai/gpt-6-luna',
       roomoteModelReasoningEffort: null,
       roomoteOrchestrationModelReasoningEffort: null,
       roomoteSmallModelReasoningEffort: null,
@@ -1314,6 +1310,25 @@ describe('buildRecommendedDeploymentModelConfig', () => {
       roomotePlanningModelReasoningEffort: null,
     });
   });
+
+  it.each([
+    ['azure', 'azure'],
+    ['azure-cognitive-services', 'azure-cognitive-services'],
+  ] as const)(
+    'uses the GPT-6 successors for %s role recommendations',
+    (providerId, modelPrefix) => {
+      expect(
+        buildRecommendedDeploymentModelConfig(
+          getSetupModelProvider(providerId),
+        ),
+      ).toMatchObject({
+        roomoteSmallModel: `${modelPrefix}/gpt-6-luna`,
+        roomoteCodeReviewModel: `${modelPrefix}/gpt-6-sol`,
+        roomoteExploreModel: `${modelPrefix}/gpt-6-luna`,
+        roomotePlanningModel: `${modelPrefix}/gpt-6-sol`,
+      });
+    },
+  );
 
   it('maps the provider default to coding and recommended models to their roles', () => {
     expect(
@@ -1389,13 +1404,13 @@ describe('buildRecommendedDeploymentModelConfig', () => {
     },
   );
 
-  it('uses Luna for GitHub Copilot with other roles following coding', () => {
+  it('uses GPT-6 Luna for GitHub Copilot with other roles following coding', () => {
     expect(
       buildRecommendedDeploymentModelConfig(
         getSetupModelProvider('github-copilot'),
       ),
     ).toEqual({
-      roomoteModel: 'github-copilot/gpt-5.6-luna',
+      roomoteModel: 'github-copilot/gpt-6-luna',
       roomoteOrchestrationModel: null,
       roomoteSmallModel: null,
       roomoteVisionModel: null,
