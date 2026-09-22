@@ -94,7 +94,7 @@ type CustomAutomationFormState = {
 };
 
 type CustomAutomationFieldErrors = Partial<
-  Record<'name' | 'prompt' | 'schedule', string>
+  Record<'name' | 'prompt' | 'schedule' | 'environment', string>
 >;
 
 const EMPTY_FORM: CustomAutomationFormState = {
@@ -456,6 +456,7 @@ export function CustomAutomationsSection({
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const cronExpressionRef = useRef<HTMLInputElement>(null);
+  const environmentRef = useRef<HTMLButtonElement>(null);
   // Email identities belong to the automation owner (runs execute as the
   // creator), so editing an existing automation lists the owner's identities
   // rather than the viewer's. Same shape as the base options query.
@@ -861,7 +862,14 @@ export function CustomAutomationsSection({
     setFieldErrors((current) => ({ schedule: current.schedule }));
 
     if (!form.environmentId) {
-      toast.error('Choose an environment.');
+      const environmentError = 'Choose an environment.';
+      setFieldErrors((current) => ({
+        ...current,
+        environment: environmentError,
+      }));
+      const environmentTrigger = environmentRef.current;
+      environmentTrigger?.focus();
+      environmentTrigger?.scrollIntoView?.({ block: 'center' });
       return;
     }
     if (form.scheduleMode === 'cron' && !effectiveResolvedCron) {
@@ -1134,16 +1142,29 @@ export function CustomAutomationsSection({
             <Select
               value={form.environmentId || undefined}
               disabled={busy || environmentOptions.length === 0}
-              onValueChange={(value) =>
+              onValueChange={(value) => {
                 setForm((current) => ({
                   ...current,
                   environmentId: value,
-                }))
-              }
+                }));
+                if (fieldErrors.environment) {
+                  setFieldErrors((current) => ({
+                    ...current,
+                    environment: undefined,
+                  }));
+                }
+              }}
             >
               <SelectTrigger
+                ref={environmentRef}
                 id="custom-automation-environment"
                 className="w-full"
+                aria-invalid={fieldErrors.environment ? true : undefined}
+                aria-describedby={
+                  fieldErrors.environment
+                    ? 'custom-automation-environment-error'
+                    : undefined
+                }
               >
                 <SelectValue placeholder="Select environment" />
               </SelectTrigger>
@@ -1155,6 +1176,15 @@ export function CustomAutomationsSection({
                 ))}
               </SelectContent>
             </Select>
+            {fieldErrors.environment ? (
+              <p
+                id="custom-automation-environment-error"
+                role="alert"
+                className="text-sm text-destructive"
+              >
+                {fieldErrors.environment}
+              </p>
+            ) : null}
           </div>
 
           <div className="min-w-0 flex-1 space-y-2">
