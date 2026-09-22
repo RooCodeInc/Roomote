@@ -246,6 +246,7 @@ describe('evaluateUnmentionedThreadReplyRouting', () => {
 function addresseeAnswer(
   choice: 'roomote' | 'participant' | 'unclear',
   probability: number,
+  expectsResponse = 0.9,
 ) {
   const rest = (1 - probability) / 2;
   return {
@@ -259,6 +260,7 @@ function addresseeAnswer(
         unclear: choice === 'unclear' ? probability : rest,
       },
     },
+    expectsResponse: { type: 'noul', noul: expectsResponse },
   };
 }
 
@@ -481,6 +483,40 @@ describe('resolveUnmentionedThreadReplyRouting', () => {
       shouldRoute: false,
       interjectionDetected: false,
     });
+  });
+
+  it('keeps an acknowledgement addressed to Roomote silent', async () => {
+    mockEvaluateTypeSafeJudgments.mockResolvedValue(
+      addresseeAnswer('roomote', 0.95, 0.1),
+    );
+
+    await expect(
+      resolve({
+        eventText: 'hmm ok, thanks',
+        threadMessages: [human('100', 'U1'), bot('200')],
+      }),
+    ).resolves.toEqual({ shouldRoute: false, interjectionDetected: false });
+
+    const { questions } = mockEvaluateTypeSafeJudgments.mock.calls[0]![0];
+    expect(Object.keys(questions)).toEqual(['addressee', 'expectsResponse']);
+    expect(questions.expectsResponse.type).toBe('noul');
+  });
+
+  it('fails closed when the expects-response answer is malformed', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockEvaluateTypeSafeJudgments.mockResolvedValue({
+      ...addresseeAnswer('roomote', 0.95),
+      expectsResponse: { type: 'noul', noul: 2 },
+    });
+
+    await expect(
+      resolve({
+        eventText: 'Can you check this?',
+        threadMessages: [human('100', 'U1'), bot('200')],
+      }),
+    ).resolves.toEqual({ shouldRoute: false, interjectionDetected: false });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('invalid'));
+    warn.mockRestore();
   });
 
   it('fails closed when a configured judgment answer is malformed', async () => {

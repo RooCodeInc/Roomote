@@ -199,6 +199,40 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
     expect(recordInboundSlackConversationMessageMock).not.toHaveBeenCalled();
   }, 15_000);
 
+  it('never fetches history or consults the judgment model for an unlinked sender', async () => {
+    lookupSlackUserMappingMock.mockResolvedValue({ activeMapping: null });
+    getFastAgentSessionOwnerMock.mockResolvedValue({
+      kind: 'user',
+      userId: 'owner-user-id',
+    });
+    peerConversationsExperimentEnabledMock.mockResolvedValue(true);
+    evaluateTypeSafeJudgmentsMock.mockResolvedValue({
+      addressee: {
+        type: 'choice',
+        choice: 'roomote',
+        confidence: 1,
+        probabilities: { roomote: 1, participant: 0, unclear: 0 },
+      },
+      expectsResponse: { type: 'noul', noul: 1 },
+    });
+
+    await expect(
+      routeDecision(
+        threadReplyEvent({
+          user: 'U999',
+          ts: '102.000',
+          text: 'roomote what about the Telegram integration?',
+        }),
+      ),
+    ).resolves.toEqual({ shouldRoute: false });
+    expect(lookupSlackUserMappingMock).toHaveBeenCalledWith({
+      slackUserId: 'U999',
+      teamId: 'T123',
+    });
+    expect(fetchThreadMessagesMock).not.toHaveBeenCalled();
+    expect(evaluateTypeSafeJudgmentsMock).not.toHaveBeenCalled();
+  }, 15_000);
+
   it('routes an unmentioned reply in an existing fast-agent thread', async () => {
     getFastAgentSessionOwnerMock.mockResolvedValue({
       kind: 'user',
@@ -474,6 +508,7 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
         confidence: 0.92,
         probabilities: { roomote: 0.03, participant: 0.92, unclear: 0.05 },
       },
+      expectsResponse: { type: 'noul', noul: 0.9 },
     });
 
     await expect(
@@ -600,6 +635,7 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
         confidence: 0.95,
         probabilities: { roomote: 0.95, participant: 0.03, unclear: 0.02 },
       },
+      expectsResponse: { type: 'noul', noul: 0.9 },
     });
     fetchThreadMessagesMock.mockResolvedValue([
       humanMessage('U111', THREAD_TS, '<@UBOT> please fix the bug'),

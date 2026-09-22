@@ -208,6 +208,17 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
     return { shouldRoute: false };
   }
 
+  // Unmentioned routing needs a linked sender, as on Discord and Teams. The
+  // entry handler drops unlinked channel-thread replies anyway, so deciding it
+  // here keeps their text out of the history fetch and the judgment model.
+  const { activeMapping: senderMapping } = await lookupSlackUserMapping({
+    slackUserId: event.user,
+    teamId,
+  });
+  if (!senderMapping) {
+    return { shouldRoute: false };
+  }
+
   // Opted-in Fast owners may participate in an open conversation, but the
   // shared addressee gate still needs recent history before starting Fast.
   const fastSessionOwner = await getBoundSlackFastAgentSessionOwner({
