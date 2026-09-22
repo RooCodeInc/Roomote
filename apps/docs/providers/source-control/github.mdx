@@ -260,14 +260,18 @@ For example, ask Roomote to:
 - mark PR #42 in `example/repo` ready for review
 - request a review from `octocat` on that PR
 - merge PR #42 after its required checks and reviews pass
+- enable auto-merge on PR #42 so it merges once its checks and reviews pass
 - add a thumbs-up reaction to an existing comment, providing its GitHub URL
 
 Retargeting a pull request's base to an existing branch does not write a branch
-or change files. A merge requires an explicit request from the current human
-message. Roomote reads the pull request immediately before the merge, binds the
-request to the current head SHA when the native schema supports it, leaves
-branch protections and merge permissions to GitHub, and reads the pull request
-again before reporting success or retrying an ambiguous result. Work that needs a
+or change files. A merge or auto-merge request requires an explicit request
+from the current human message. Roomote reads the pull request immediately
+before the mutation, binds the request to the current head SHA when the native
+schema supports it, leaves branch protections, required checks, and merge
+permissions to GitHub, and reads the pull request again before reporting
+success or retrying an ambiguous result. Auto-merge is only enabled when
+GitHub confirms it, and only where the repository allows auto-merge and the
+requested merge method. Work that needs a
 checkout, a build, or tests to get right still belongs in a coding task, which
 also remains read-only on this GitHub tool path and writes through its own
 checkout instead.

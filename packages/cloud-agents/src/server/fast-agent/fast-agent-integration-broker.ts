@@ -558,7 +558,7 @@ export async function listFastAgentIntegrations(
       id: 'github',
       name: 'GitHub',
       description:
-        'Read public github.com repositories and connected private repositories using the deployment GitHub App. Public repositories do not need to be connected. In active connected repositories, use the native GitHub tools directly for pull request and issue edits, comments, reviews, labels, branches, merges, and small file changes. Follow the discovered native tool descriptions and schemas for supported arguments.',
+        'Read public github.com repositories and connected private repositories using the deployment GitHub App. Public repositories do not need to be connected. In active connected repositories, use the native GitHub tools directly for pull request and issue edits, comments, reviews, labels, branches, merges, enabling pull request auto-merge, and small file changes. Follow the discovered native tool descriptions and schemas for supported arguments.',
       endpoint: {
         url: integrationProxyUrl(apiBaseUrl, 'github'),
         headers: { Authorization: `Bearer ${authToken}` },
