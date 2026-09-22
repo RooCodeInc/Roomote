@@ -50,6 +50,12 @@ vi.mock('@roomote/types', async (importOriginal) => ({
   getMcpIntegration: mockGetMcpIntegration,
 }));
 
+// The Auto mode commands in the same module resolve the decision model; keep
+// that out of these personal-policy tests.
+vi.mock('@roomote/cloud-agents/server/typesafe-judgment', () => ({
+  resolveDecisionModel: vi.fn(async () => null),
+}));
+
 vi.mock('../../setup/shared', () => ({ assertAdmin: vi.fn() }));
 
 import {

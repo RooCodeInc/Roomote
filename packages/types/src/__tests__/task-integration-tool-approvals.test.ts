@@ -3,7 +3,7 @@ import { compileTaskIntegrationToolApprovals } from '../integration-tool-approva
 const policy = (
   integrationId: string,
   toolName: string,
-  mode: 'auto' | 'ask' | 'reject',
+  mode: 'always_allow' | 'ask' | 'reject',
 ) => ({ integrationId, toolName, mode });
 
 describe('compileTaskIntegrationToolApprovals', () => {
@@ -37,6 +37,7 @@ describe('compileTaskIntegrationToolApprovals', () => {
           toolName: 'run.query',
         },
       },
+      autoServers: [],
     });
   });
 
@@ -62,20 +63,30 @@ describe('compileTaskIntegrationToolApprovals', () => {
     });
   });
 
-  it('holds an auto tool exactly like an ask tool', () => {
-    const { permission } = compileTaskIntegrationToolApprovals({
-      serverNames: ['linear'],
-      policies: [
-        policy('linear', 'save_issue', 'auto'),
-        policy('linear', 'list_issues', 'auto'),
-      ],
-      sessionOverrides: [
-        { integrationId: 'linear', toolName: 'list_issues', mode: 'allow' },
-      ],
-    });
-    expect(permission).toEqual({
-      linear_save_issue: 'ask',
-      linear_list_issues: 'ask',
+  it('gates every default tool of a mounted server while Auto is on', () => {
+    expect(
+      compileTaskIntegrationToolApprovals({
+        serverNames: ['linear', 'my-server'],
+        policies: [
+          policy('linear', 'delete_issue', 'reject'),
+          policy('linear', 'get_issue', 'always_allow'),
+          policy('linear', 'save_issue', 'ask'),
+        ],
+        sessionOverrides: [
+          { integrationId: 'linear', toolName: 'list_issues', mode: 'allow' },
+        ],
+        autoOn: true,
+      }),
+    ).toMatchObject({
+      permission: {
+        'linear_*': 'ask',
+        'my-server_*': 'ask',
+        linear_delete_issue: 'deny',
+        linear_get_issue: 'allow',
+        linear_save_issue: 'ask',
+        linear_list_issues: 'allow',
+      },
+      autoServers: ['linear', 'my-server'],
     });
   });
 
@@ -85,7 +96,11 @@ describe('compileTaskIntegrationToolApprovals', () => {
       policies: [policy('a', 'b_c', 'ask'), policy('a_b', 'c', 'ask')],
       sessionOverrides: [],
     });
-    expect(compiled).toEqual({ permission: { a_b_c: 'deny' }, tools: {} });
+    expect(compiled).toEqual({
+      permission: { a_b_c: 'deny' },
+      tools: {},
+      autoServers: [],
+    });
   });
 
   it('never emits rules for Roomote-internal MCP servers', () => {
@@ -105,6 +120,7 @@ describe('compileTaskIntegrationToolApprovals', () => {
       tools: {
         linear_save_issue: { integrationId: 'linear', toolName: 'save_issue' },
       },
+      autoServers: [],
     });
   });
 
@@ -146,6 +162,7 @@ describe('compileTaskIntegrationToolApprovals', () => {
         },
         linear_save_issue: { integrationId: 'linear', toolName: 'save_issue' },
       },
+      autoServers: [],
     });
   });
 
@@ -161,6 +178,22 @@ describe('compileTaskIntegrationToolApprovals', () => {
       tools: {
         gbrain_get_page: { integrationId: 'gbrain_get', toolName: 'page' },
       },
+      autoServers: [],
+    });
+  });
+
+  it('never wildcard-gates internal servers while Auto is on', () => {
+    expect(
+      compileTaskIntegrationToolApprovals({
+        serverNames: ['gbrain', 'linear'],
+        policies: [],
+        sessionOverrides: [],
+        autoOn: true,
+      }),
+    ).toEqual({
+      permission: { 'linear_*': 'ask' },
+      tools: {},
+      autoServers: ['linear'],
     });
   });
 });

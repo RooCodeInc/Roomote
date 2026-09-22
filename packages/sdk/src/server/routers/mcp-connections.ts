@@ -44,6 +44,7 @@ import {
   isMcpConnectionVercelConfig,
   isMcpConnectionXConfig,
   isDeploymentScopedMcpIntegration,
+  isInternalMcpServerNamePrefix,
   BRAIN_MCP_ID,
   BRAIN_PROXY_PATH,
   CUSTOM_MCP_PROXY_PATH_PREFIX,
@@ -225,11 +226,7 @@ export async function resolveUserMcpServerConfigs(options: {
   });
 }
 
-/**
- * What a task run mounts, with the policy scope of each custom server. The
- * one source for a task's approval rules and for anything else that has to
- * agree with them about which policy layer governs a server.
- */
+/** What a task run mounts, with the policy scope of each custom server. */
 export function resolveTaskRunMcpServerConfigs(
   auth: RunTokenContext,
   req: { url?: string } | undefined,
@@ -417,6 +414,14 @@ export const mcpConnectionsRouter = router({
         continue;
       }
 
+      // Same legacy-name exclusion as the remote path above.
+      if (isInternalMcpServerNamePrefix(row.name)) {
+        console.warn(
+          `[getCustomStdioMcpServers] Skipping custom server '${row.name}': name starts with a Roomote-internal MCP server name, so its tools cannot be told apart from the internal server's`,
+        );
+        continue;
+      }
+
       servers[row.name] = {
         command: row.stdio.command,
         ...(row.stdio.args ? { args: row.stdio.args } : {}),
@@ -453,6 +458,18 @@ async function buildScopedCustomMcpServerConfigs(
   for (const row of rows) {
     // stdio servers ride the worker merge path via getCustomStdioMcpServers.
     if (row.stdio || !row.url) {
+      continue;
+    }
+
+    // Legacy rows whose names collide with an internal server's native tool
+    // keys (rejected for new servers at create time) are never mounted:
+    // their flattened keys could gate an exempt internal tool, or leave
+    // their own `ask` policy permanently unapprovable. The row stays
+    // manageable in Settings; it just never reaches a task.
+    if (isInternalMcpServerNamePrefix(row.name)) {
+      logInfo(
+        `[getMcpServerConfigs] Skipping custom server '${row.name}': name starts with a Roomote-internal MCP server name, so its tools cannot be told apart from the internal server's`,
+      );
       continue;
     }
 

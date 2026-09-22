@@ -458,6 +458,35 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
     expect(connected['intercom']?.url).toContain('/api/mcp/custom/');
   });
 
+  it('never mounts a legacy custom server whose name starts with an internal server name', async () => {
+    mockFindCustomServers.mockResolvedValue([
+      {
+        id: '22222222-2222-4222-8222-222222222222',
+        name: 'gbrain_get',
+        url: 'https://shared.example.com/mcp',
+        stdio: null,
+        authType: 'none',
+        updatedAt: new Date('2026-09-16T00:00:00.000Z'),
+      },
+      {
+        id: '33333333-3333-4333-8333-333333333333',
+        name: 'intercom',
+        url: 'https://shared.example.com/mcp',
+        stdio: null,
+        authType: 'none',
+        updatedAt: new Date('2026-09-16T00:00:00.000Z'),
+      },
+    ]);
+
+    const result = await resolveUserMcpServerConfigs({
+      userId: 'user-1',
+      apiBaseUrl: 'https://api.preview.roomote.run',
+    });
+
+    expect(result['gbrain_get']).toBeUndefined();
+    expect(result['intercom']?.url).toContain('/api/mcp/custom/');
+  });
+
   it('routes the seeded development fixture to the local inert adapter', async () => {
     mockFindCustomServers.mockResolvedValue([
       {

@@ -148,7 +148,7 @@ describe('McpToolManagementDialog tool approvals', () => {
     expect(state.policiesQueryEnabled).toBe(true);
   });
 
-  it('shows the four approval modes in Auto-first order and saves changes in one click', () => {
+  it('shows the three stored choices with Auto as nothing pressed and saves changes in one click', () => {
     state.approvalsEnabled = true;
     state.policies = [
       { integrationId: 'exa', toolName: 'web_fetch_exa', mode: 'reject' },
@@ -160,12 +160,14 @@ describe('McpToolManagementDialog tool approvals', () => {
         name: 'Approval mode for web_search_exa',
       }),
     );
+    // Auto, the default, is nothing pressed, and it is not a button of its own.
     expect(
       search.getAllByRole('button').map((button) => button.textContent),
-    ).toEqual(['', '', '', '']);
-    expect(
-      search.getByRole('button', { name: 'Always allow' }),
-    ).toHaveAttribute('aria-pressed', 'true');
+    ).toEqual(['', '', '']);
+    expect(search.queryByRole('button', { name: 'Auto' })).toBeNull();
+    for (const button of search.getAllByRole('button')) {
+      expect(button).toHaveAttribute('aria-pressed', 'false');
+    }
     expect(
       within(
         screen.getByRole('group', {
@@ -175,11 +177,22 @@ describe('McpToolManagementDialog tool approvals', () => {
     ).toHaveAttribute('aria-pressed', 'true');
 
     fireEvent.click(search.getByRole('button', { name: 'Always ask' }));
-    fireEvent.click(search.getByRole('button', { name: 'Auto' }));
     expect(state.setModeCalls).toEqual([
       { integrationId: 'exa', toolName: 'web_search_exa', mode: 'ask' },
-      { integrationId: 'exa', toolName: 'web_search_exa', mode: 'auto' },
     ]);
+    // Clicking the selected choice again returns the tool to Auto.
+    fireEvent.click(
+      within(
+        screen.getByRole('group', {
+          name: 'Approval mode for web_fetch_exa',
+        }),
+      ).getByRole('button', { name: 'Disable' }),
+    );
+    expect(state.setModeCalls.at(-1)).toEqual({
+      integrationId: 'exa',
+      toolName: 'web_fetch_exa',
+      mode: 'allow',
+    });
   });
 
   it('keeps approval mode buttons enabled while a policy save is pending', () => {
@@ -232,6 +245,13 @@ describe('McpToolManagementDialog tool approvals', () => {
         mode: 'reject',
       },
     ]);
+    // Only the group row offers Auto, returning every tool to the default.
+    fireEvent.click(group.getByRole('button', { name: 'Auto' }));
+    expect(state.setModesCalls.at(-1)).toEqual({
+      integrationId: 'exa',
+      toolNames: ['web_search_exa', 'web_fetch_exa'],
+      mode: 'allow',
+    });
   });
 
   it('groups annotated tools by access and sets a whole group at once', async () => {
@@ -275,11 +295,11 @@ describe('McpToolManagementDialog tool approvals', () => {
         name: 'Approval mode for web_search_exa',
       }),
     );
-    fireEvent.mouseOver(search.getByRole('button', { name: 'Auto' }));
+    // The dialog focuses its first button on open, which opens that button's
+    // tooltip; focusing the one under test moves the tooltip to it.
+    fireEvent.focus(search.getByRole('button', { name: 'Always ask' }));
     expect(
-      await screen.findByRole('tooltip', {
-        name: 'Defer to the configured judgement model',
-      }),
+      await screen.findByRole('tooltip', { name: 'Always ask' }),
     ).toBeInTheDocument();
   });
 });

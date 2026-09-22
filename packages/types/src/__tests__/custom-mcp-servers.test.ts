@@ -4,6 +4,7 @@ import {
   CUSTOM_MCP_SERVER_NAME_PATTERN,
   HTTP_INTEGRATIONS_MCP_ID,
   RESERVED_CUSTOM_MCP_SERVER_NAMES,
+  customMcpServerCreateInputSchema,
   customMcpServerInputSchema,
   isInternalMcpServer,
   validateCustomMcpHeaderName,
@@ -43,11 +44,11 @@ describe('isInternalMcpServer', () => {
     ).toBe(false);
   });
 
-  it('rejects custom names that could collide with internal tool keys', () => {
+  it('rejects new custom names that could collide with internal tool keys', () => {
     // OpenCode flattens tools to `<server>_<tool>`, so `gbrain_get` / `page`
     // would share `gbrain_get_page` with the Brain's own `get_page`.
     for (const name of ['gbrain_get', 'roomote_manage']) {
-      const result = customMcpServerInputSchema.safeParse({
+      const result = customMcpServerCreateInputSchema.safeParse({
         ...validServer,
         name,
       });
@@ -55,14 +56,28 @@ describe('isInternalMcpServer', () => {
     }
     // Merely similar names that cannot collide stay valid.
     expect(
-      customMcpServerInputSchema.safeParse({
+      customMcpServerCreateInputSchema.safeParse({
         ...validServer,
         name: 'gbrain-reports',
       }).success,
     ).toBe(true);
     expect(
-      customMcpServerInputSchema.safeParse({ ...validServer, name: 'linear_x' })
-        .success,
+      customMcpServerCreateInputSchema.safeParse({
+        ...validServer,
+        name: 'linear_x',
+      }).success,
+    ).toBe(true);
+  });
+
+  it('lets the update path keep a legacy internal-prefixed name', () => {
+    // Names are immutable, so an update always carries the existing name;
+    // rejecting it would lock the row out of every other edit. Legacy rows
+    // are excluded at mount time instead.
+    expect(
+      customMcpServerInputSchema.safeParse({
+        ...validServer,
+        name: 'gbrain_get',
+      }).success,
     ).toBe(true);
   });
 });

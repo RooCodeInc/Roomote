@@ -1,13 +1,28 @@
-const { mockResolveBlocks, mockClaim } = vi.hoisted(() => ({
-  mockResolveBlocks: vi.fn(async () => new Map<string, string>()),
+type Approvals = {
+  blocks: Map<string, string>;
+  defaultBlock?: 'needs_approval';
+  shadowDefaultTools: boolean;
+};
+
+const { mockResolveBlocks, mockClaim, mockShadow } = vi.hoisted(() => ({
+  mockResolveBlocks: vi.fn(
+    async (): Promise<Approvals> => ({
+      blocks: new Map<string, string>(),
+      shadowDefaultTools: false,
+    }),
+  ),
   mockClaim: vi.fn(async () => false),
+  mockShadow: vi.fn(),
 }));
 
 vi.mock('../tool-approval-enforcement', () => ({
   claimProxyTaskToolCall: mockClaim,
   describeProxyToolApprovalBlock: (toolName: string, block: string) =>
     `${toolName}:${block}`,
+  resolveProxyToolApprovalBlock: (approvals: Approvals, toolName: string) =>
+    approvals.blocks.get(toolName) ?? approvals.defaultBlock,
   resolveProxyToolApprovalBlocks: mockResolveBlocks,
+  shadowProxyToolCall: mockShadow,
 }));
 
 vi.mock('../proxy-utils', () => ({
@@ -39,17 +54,21 @@ import { resolveNativeToolApprovalGuard } from '../native-tool-approvals';
 describe('resolveNativeToolApprovalGuard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockResolveBlocks.mockResolvedValue(new Map());
+    mockResolveBlocks.mockResolvedValue({
+      blocks: new Map(),
+      shadowDefaultTools: false,
+    });
     mockClaim.mockResolvedValue(false);
   });
 
   it('hides disabled tools from native tools/list responses', async () => {
-    mockResolveBlocks.mockResolvedValue(
-      new Map([
+    mockResolveBlocks.mockResolvedValue({
+      blocks: new Map([
         ['disabled_tool', 'reject'],
         ['ask_tool', 'needs_approval'],
       ]),
-    );
+      shadowDefaultTools: false,
+    });
     const guard = await resolveNativeToolApprovalGuard({
       auth: { userId: 'user-1', tokenType: 'auth' },
       integrationId: 'notion',
@@ -79,12 +98,13 @@ describe('resolveNativeToolApprovalGuard', () => {
   });
 
   it('refuses disabled calls and only releases ask calls after approval', async () => {
-    mockResolveBlocks.mockResolvedValue(
-      new Map([
+    mockResolveBlocks.mockResolvedValue({
+      blocks: new Map([
         ['disabled_tool', 'reject'],
         ['ask_tool', 'needs_approval'],
       ]),
-    );
+      shadowDefaultTools: false,
+    });
     const guard = await resolveNativeToolApprovalGuard({
       auth: { userId: null, tokenType: 'run', runId: 42 },
       integrationId: 'notion',
@@ -111,6 +131,49 @@ describe('resolveNativeToolApprovalGuard', () => {
         id: 2,
         method: 'tools/call',
         params: { name: 'ask_tool', arguments: {} },
+      }),
+    ).resolves.toBeNull();
+  });
+
+  it('holds default tools for a claim while Auto mode is on and offers every call for shadow assessment', async () => {
+    mockResolveBlocks.mockResolvedValue({
+      blocks: new Map(),
+      defaultBlock: 'needs_approval',
+      shadowDefaultTools: true,
+    });
+    const guard = await resolveNativeToolApprovalGuard({
+      auth: { userId: null, tokenType: 'run', runId: 42 },
+      integrationId: 'notion',
+    });
+
+    const held = await guard.checkCall({
+      id: 3,
+      method: 'tools/call',
+      params: { name: 'any_tool', arguments: { q: 1 } },
+    });
+    expect(held?.status).toBe(403);
+    expect(mockShadow).toHaveBeenCalledWith(
+      expect.objectContaining({ defaultBlock: 'needs_approval' }),
+      expect.objectContaining({
+        integrationId: 'notion',
+        toolName: 'any_tool',
+        args: { q: 1 },
+        taskId: 'task-1',
+      }),
+    );
+    expect(mockClaim).toHaveBeenCalledWith({
+      taskId: 'task-1',
+      integrationId: 'notion',
+      toolName: 'any_tool',
+      args: { q: 1 },
+    });
+
+    mockClaim.mockResolvedValue(true);
+    await expect(
+      guard.checkCall({
+        id: 3,
+        method: 'tools/call',
+        params: { name: 'any_tool', arguments: { q: 1 } },
       }),
     ).resolves.toBeNull();
   });

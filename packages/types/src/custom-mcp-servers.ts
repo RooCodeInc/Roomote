@@ -237,14 +237,6 @@ export const customMcpServerNameSchema = z
     (name) => ({
       message: `'${name}' is reserved by a built-in ${PRODUCT_NAME} integration.`,
     }),
-  )
-  .refine(
-    (name) => !isInternalMcpServerNamePrefix(name),
-    (name) => ({
-      message:
-        `'${name}' starts with a Roomote-internal MCP server name; agent tool ` +
-        `permissions could not tell its tools apart from the internal server's.`,
-    }),
   );
 
 export const customMcpServerHeadersSchema = z
@@ -415,3 +407,25 @@ export type CustomMcpStdioServerInput = z.infer<
   typeof customMcpStdioServerInputSchema
 >;
 export type CustomMcpServerInput = z.infer<typeof customMcpServerInputSchema>;
+
+/**
+ * Create-only name rule, on top of the base input schema: new servers may
+ * not take a name that could collide with an internal server's native tool
+ * keys (`isInternalMcpServerNamePrefix`). Updates deliberately use the base
+ * schema instead: names are immutable, so an update always carries the
+ * existing name, and rejecting it would lock a legacy row out of every
+ * other edit. Legacy rows are kept out of tasks by the mount-time exclusion
+ * in the MCP config resolver, not by blocking edits.
+ */
+export const customMcpServerCreateInputSchema =
+  customMcpServerInputSchema.superRefine((server, ctx) => {
+    if (isInternalMcpServerNamePrefix(server.name)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['name'],
+        message:
+          `'${server.name}' starts with a Roomote-internal MCP server name; agent tool ` +
+          `permissions could not tell its tools apart from the internal server's.`,
+      });
+    }
+  });
