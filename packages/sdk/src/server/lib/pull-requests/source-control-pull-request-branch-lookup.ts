@@ -48,6 +48,7 @@ export const giteaPullRequestSchema = z
       .array(
         z.object({ login: z.string().nullable().optional() }).passthrough(),
       )
+      .nullable()
       .optional(),
   })
   .passthrough();

@@ -89,7 +89,7 @@ function userAuth(userId: string): AuthTokenContext {
   return { userId, tokenType: 'auth', version: 1 };
 }
 
-describe('Fast session communication through task routes', () => {
+describe('Session communication through task routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.queueReply.mockResolvedValue(true);
@@ -206,7 +206,7 @@ describe('Fast session communication through task routes', () => {
     });
   });
 
-  it('shares Fast sessions with bystanders but rejects absent or invalid IDs', async () => {
+  it('shares sessions with bystanders but rejects absent or invalid IDs', async () => {
     const owner = await userFactory.create();
     const bystander = await userFactory.create();
     const session = await createSession(owner.id);

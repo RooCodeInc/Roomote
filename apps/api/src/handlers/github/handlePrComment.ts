@@ -669,8 +669,8 @@ async function resolvePullRequestActiveTasks({
 }
 
 /**
- * Every @mention on a pull request enters the pull request's Fast Session.
- * The Session reads the discussion, replies as a comment, and delegates work
+ * Every @mention on a pull request enters the pull request's session.
+ * The session reads the discussion, replies as a comment, and delegates work
  * to a task on the pull request's branch when the request needs one. Only an
  * explicit @mention counts: a reply inside a review thread without one is
  * left alone, so people can discuss a finding without summoning Roomote.

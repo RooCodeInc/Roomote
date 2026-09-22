@@ -2471,7 +2471,7 @@ describe('SessionWorkspace', () => {
     expect(screen.queryByLabelText('Full task task-2')).toBeNull();
   });
 
-  it('populates the Artifacts panel from refreshed Fast-session tasks', async () => {
+  it('populates the Artifacts panel from refreshed session tasks', async () => {
     renderWorkspace({
       isMobile: false,
       sessionOverride: { taskSource: 'fast', taskCards: [] },

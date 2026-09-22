@@ -7,6 +7,9 @@ import {
   getSessionGoal,
   replaceSessionGoal,
   sessionFactory,
+  sessionTasks,
+  taskFactory,
+  tasks,
   userFactory,
 } from '@roomote/db/server';
 import { fastConversationMemorySlug } from '@roomote/types';
@@ -223,9 +226,18 @@ describe('archiveSessionCommand turn serialization', () => {
 
   it('archives task-only sessions without a turn lock', async () => {
     const { auth, session } = await fixture(false);
+    const task = await taskFactory.create({ initiatorUserId: auth.userId });
+    await db.insert(sessionTasks).values({
+      sessionId: session.id,
+      taskId: task.id,
+      origin: 'direct_launch',
+    });
     expect(await archiveSessionCommand(auth, session.id)).toMatchObject({
       archivedAt: expect.any(Date),
     });
+    await expect(
+      db.query.tasks.findFirst({ where: eq(tasks.id, task.id) }),
+    ).resolves.toMatchObject({ archivedAt: expect.any(Date) });
     expect(mocks.acquireRedisLock).not.toHaveBeenCalled();
   });
 

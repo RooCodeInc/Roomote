@@ -21,6 +21,7 @@ export const ENABLED_DIRECT_TASK_MODEL_PROVIDER_IDS = [
   'requesty',
   'baseten',
   'togetherai',
+  'deepseek',
   'openai',
   'azure',
   'azure-cognitive-services',
@@ -105,6 +106,10 @@ export const taskModelMetadataSchema = z.object({
    * list. Absent or null when the catalogs do not say either way.
    */
   supportsReasoning: z.boolean().nullable().optional(),
+  /** Supported configurable effort values when the provider publishes them. */
+  supportedReasoningEfforts: z
+    .array(z.enum(['low', 'medium', 'high', 'xhigh', 'max']))
+    .optional(),
 });
 
 export type TaskModelMetadata = z.infer<typeof taskModelMetadataSchema>;

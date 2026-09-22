@@ -263,6 +263,12 @@ export function UsersSettings() {
     license.expiresAt != null &&
     new Date(license.expiresAt).getTime() - Date.now() <=
       LICENSE_EXPIRY_WARNING_MS;
+  const parsedMaxUses = Number(maxUses);
+  const maxUsesIsValid =
+    maxUses.trim() !== '' &&
+    Number.isInteger(parsedMaxUses) &&
+    parsedMaxUses >= 1 &&
+    parsedMaxUses <= 1000;
   const licenseBadge =
     license.status === 'valid' ? (
       <Badge variant="success">Licensed</Badge>
@@ -308,18 +314,14 @@ export function UsersSettings() {
   const handleCreate = (event?: FormEvent<HTMLFormElement>) => {
     event?.preventDefault();
 
-    if (createInvite.isPending || isAtSeatCapacity) {
+    if (createInvite.isPending || isAtSeatCapacity || !maxUsesIsValid) {
       return;
     }
-
-    const parsedMaxUses = Number.parseInt(maxUses, 10);
 
     createInvite.mutate({
       label: label.trim() || undefined,
       role: inviteRole,
-      maxUses: Number.isFinite(parsedMaxUses)
-        ? Math.min(Math.max(parsedMaxUses, 1), 1000)
-        : 1,
+      maxUses: parsedMaxUses,
     });
   };
 
@@ -518,21 +520,36 @@ export function UsersSettings() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="w-20 space-y-2">
+            <div className="w-36 space-y-2">
               <Label htmlFor="invite-max-uses">Uses</Label>
               <Input
                 id="invite-max-uses"
                 type="number"
                 min={1}
                 max={1000}
+                step={1}
                 value={maxUses}
                 onChange={(event) => setMaxUses(event.target.value)}
                 disabled={createInvite.isPending}
+                aria-invalid={!maxUsesIsValid}
+                aria-describedby={
+                  maxUsesIsValid ? undefined : 'invite-max-uses-error'
+                }
               />
+              {!maxUsesIsValid ? (
+                <p
+                  id="invite-max-uses-error"
+                  className="text-xs text-destructive"
+                >
+                  Enter a whole number from 1 to 1,000.
+                </p>
+              ) : null}
             </div>
             <Button
               type="submit"
-              disabled={createInvite.isPending || isAtSeatCapacity}
+              disabled={
+                createInvite.isPending || isAtSeatCapacity || !maxUsesIsValid
+              }
             >
               {createInvite.isPending ? <Spinner /> : null}
               Create invite

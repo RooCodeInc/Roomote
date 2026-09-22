@@ -680,7 +680,7 @@ describe('optional setup integration discovery', () => {
     try {
       await expect(
         resolveSetupSessionTurnContext(collaboratorAuth, sessionId),
-      ).rejects.toThrow('Only the setup Session owner can reply during setup.');
+      ).rejects.toThrow('Only the setup session owner can reply during setup.');
     } finally {
       await db.delete(users).where(eq(users.id, collaborator.id));
     }
@@ -1252,7 +1252,7 @@ describe('optional setup integration discovery', () => {
         { ...auth, userId: 'other-admin' },
         sessionId,
       ),
-    ).rejects.toThrow('Only the setup Session owner can reply during setup.');
+    ).rejects.toThrow('Only the setup session owner can reply during setup.');
     expect(mocks.submit).not.toHaveBeenCalled();
   });
 });

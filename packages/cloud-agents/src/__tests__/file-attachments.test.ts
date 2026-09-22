@@ -14,6 +14,8 @@ describe('ROOMOTE_FILE_ATTACHMENT_ACCEPT', () => {
     expect(acceptValues).toContain('image/svg+xml');
     expect(acceptValues).toContain('text/*');
     expect(acceptValues).toContain('.pdf');
+    expect(acceptValues).toContain('.r');
+    expect(acceptValues).toContain('.ipynb');
     expect(acceptValues).toContain('.tsx');
     expect(acceptValues).toContain(
       'application/vnd.openxmlformats-officedocument.presentationml.presentation',
@@ -50,5 +52,15 @@ describe('file attachment classification', () => {
         mimeType: 'image/svg+xml',
       }),
     ).toBe(true);
+  });
+
+  it.each([
+    ['analysis.R', ''],
+    ['analysis.R', 'text/x-r-source'],
+    ['analysis.ipynb', 'application/x-ipynb+json'],
+  ])('treats source file %s as text-extractable', (filename, mimeType) => {
+    expect(isRoomoteTextExtractableAttachment({ filename, mimeType })).toBe(
+      true,
+    );
   });
 });

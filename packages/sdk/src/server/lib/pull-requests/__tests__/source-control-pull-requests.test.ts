@@ -1971,7 +1971,7 @@ Done.`,
 
   it.each([
     {
-      label: 'uses the associated Fast session as the primary web link',
+      label: 'uses the associated session as the primary web link',
       payload: {
         repo: 'acme/web',
         fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
@@ -1994,7 +1994,7 @@ Done.`,
       queriesSession: false,
     },
     {
-      label: 'falls back to the task link when the Fast session is absent',
+      label: 'falls back to the task link when the session is absent',
       payload: {
         repo: 'acme/web',
         fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
@@ -2006,7 +2006,7 @@ Done.`,
     },
     {
       label:
-        'falls back to the task link when the Fast session association does not match',
+        'falls back to the task link when the session association does not match',
       payload: {
         repo: 'acme/web',
         fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
@@ -2021,7 +2021,7 @@ Done.`,
       queriesSession: true,
     },
     {
-      label: 'falls back to the task link when the Fast session is hidden',
+      label: 'falls back to the task link when the session is hidden',
       payload: {
         repo: 'acme/web',
         fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
@@ -2803,6 +2803,78 @@ Done.`,
     head: { ref: 'feature/x' },
     base: { ref: 'develop' },
   };
+
+  it.each([
+    { requestedAssignees: [], expectedAssignees: undefined },
+    {
+      requestedAssignees: ['bot-user'],
+      expectedAssignees: ['bot-user'],
+    },
+  ])(
+    'creates a Gitea pull request when an unrelated open pull request has null assignees: $requestedAssignees',
+    async ({ requestedAssignees, expectedAssignees }) => {
+      mockRepositoriesFindFirst.mockResolvedValue({
+        installationId: null,
+        externalRepoId: '7',
+        fullName: 'acme/tools',
+        htmlUrl: 'https://git.example.com/acme/tools',
+      });
+      const fetchImpl = vi
+        .fn()
+        .mockResolvedValueOnce(
+          jsonResponse([
+            {
+              number: 2,
+              title: 'Unrelated pull request',
+              html_url: 'https://git.example.com/acme/tools/pulls/2',
+              draft: false,
+              head: { ref: 'feature/unrelated' },
+              base: { ref: 'develop' },
+              assignees: null,
+            },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            number: 3,
+            title: 'WIP: [Feature] X',
+            html_url: 'https://git.example.com/acme/tools/pulls/3',
+            draft: false,
+            assignees: expectedAssignees?.map((login) => ({ login })) ?? null,
+          }),
+        );
+
+      const result = await createOrUpdateSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({
+          repo: 'acme/tools',
+          sourceControlProvider: 'gitea',
+        }),
+        input: {
+          ...baseInput,
+          repositoryFullName: 'acme/tools',
+          sourceControlProvider: 'gitea' as const,
+          targetBranch: 'develop',
+          assignees: requestedAssignees,
+        },
+        fetchImpl,
+      });
+
+      expect(fetchImpl.mock.calls[1]?.[1]).toMatchObject({ method: 'POST' });
+      const createBody = JSON.parse(
+        (fetchImpl.mock.calls[1]?.[1] as { body: string }).body,
+      );
+      if (expectedAssignees) {
+        expect(createBody).toMatchObject({ assignees: expectedAssignees });
+      } else {
+        expect(createBody).not.toHaveProperty('assignees');
+      }
+      expect(result).toMatchObject({
+        action: 'created',
+        number: 3,
+        targetBranch: 'develop',
+      });
+    },
+  );
 
   it('walks Gitea pages until it finds the pull request for the source branch', async () => {
     mockRepositoriesFindFirst.mockResolvedValue({

@@ -1,11 +1,11 @@
 ---
 title: Roomote MCP
 icon: '/favicon.svg'
-description: Start, inspect, and continue Roomote Sessions and tasks from your MCP client.
+description: Start, inspect, and continue Roomote sessions and tasks from your MCP client.
 ---
 
 Roomote MCP brings your Roomote workspace into the coding tools you already
-use. From any OAuth-capable MCP client, you can start a Session, inspect its
+use. From any OAuth-capable MCP client, you can start a session, inspect its
 conversation and delegated tasks, and follow up without switching back and
 forth between tools.
 
@@ -15,7 +15,7 @@ forth between tools.
 
 Ask your MCP client to start Roomote with a clear message. The ordinary start
 action creates a session, where Roomote can answer directly or delegate repository
-work to tasks. You can keep working locally and return to the same Session for
+work to tasks. You can keep working locally and return to the same session for
 the result. When work must start directly in a known compute environment, your
 client can still use the explicit environment-targeted task launch action.
 
@@ -31,7 +31,7 @@ task-specific operations.
 For extended coordination, clients can use `get_updates` instead of re-reading
 the full transcript. Each response contains only new user-visible
 narrative in chronological order, an opaque cursor for the next poll, current
-Session or task state, and an explicit response-needed flag. Tool calls, tool
+session or task state, and an explicit response-needed flag. Tool calls, tool
 results, hidden reasoning, and transcript metadata are excluded. Reusing the
 cursor after no new activity returns an empty narrative delta rather than the
 same messages again; full transcript reads remain available for debugging.
@@ -46,7 +46,7 @@ by Roomote so the client can summarize the outbound message without guessing.
 
 This is useful when you want to:
 
-- catch up on a Session that is already active
+- catch up on a session that is already active
 - find an earlier investigation or implementation
 - inspect a delegated task when you need its execution details
 - pull the result of a Roomote task into your current conversation
@@ -98,8 +98,8 @@ coding sandbox.
 
 - “Push what I’m working on to a remote branch, then start a Roomote task from
   that branch to take over.”
-- “Start a Roomote Session to investigate this bug.”
-- “Find my active Sessions related to OAuth and summarize their progress.”
+- “Start a Roomote session to investigate this bug.”
+- “Find my active sessions related to OAuth and summarize their progress.”
 - “Find the coding task for this pull request and show its compute logs.”
 - “Show me the messages and compute logs from the task that failed this
   morning.”

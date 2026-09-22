@@ -22,6 +22,11 @@
       "import": "./src/server/non-task-provider-usage.ts",
       "require": "./src/server/non-task-provider-usage.ts"
     },
+    "./server/integration-tool-auto-evaluation": {
+      "types": "./src/server/integration-tool-auto-evaluation.ts",
+      "import": "./src/server/integration-tool-auto-evaluation.ts",
+      "require": "./src/server/integration-tool-auto-evaluation.ts"
+    },
     "./server/typesafe-judgment": {
       "types": "./src/server/typesafe-judgment.ts",
       "import": "./src/server/typesafe-judgment.ts",

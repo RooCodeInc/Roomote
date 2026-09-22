@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
@@ -36,7 +37,14 @@ const {
   listInputs,
   toastSuccessMock,
   toastErrorMock,
+  approvals,
 } = vi.hoisted(() => ({
+  approvals: {
+    experimentEnabled: false,
+    listEnabled: [] as boolean[],
+    scopes: [] as string[],
+    setMode: vi.fn(),
+  },
   state: {
     availability: { enabled: true },
     isAdmin: true,
@@ -62,6 +70,28 @@ const {
 
 vi.mock('sonner', () => ({
   toast: { success: toastSuccessMock, error: toastErrorMock },
+}));
+
+vi.mock('@/hooks/useIntegrationToolApprovalsExperiment', () => ({
+  useIntegrationToolApprovalsExperiment: () => ({
+    enabled: approvals.experimentEnabled,
+  }),
+}));
+
+vi.mock('@/hooks/useIntegrationToolPolicies', () => ({
+  useIntegrationToolPolicies: (options: {
+    enabled?: boolean;
+    scope?: string;
+  }) => {
+    approvals.listEnabled.push(options.enabled ?? true);
+    approvals.scopes.push(options.scope ?? 'deployment');
+    return {
+      modes: new Map([[JSON.stringify(['internal-tools', 'search']), 'ask']]),
+      isUpdating: false,
+      setMode: approvals.setMode,
+      setModes: vi.fn(),
+    };
+  },
 }));
 
 vi.mock('@/hooks/useUser', () => ({
@@ -319,6 +349,99 @@ describe('useCustomMcpServers', () => {
         name: 'Manage tools for internal-tools',
       }),
     ).toBeInTheDocument();
+  });
+
+  it('truncates a prompt-length tool description behind a toggle that leaves the checkbox alone', async () => {
+    const long = `Resolves a package name. ${'Details. '.repeat(40)}`.trim();
+    state.servers = [buildServer()];
+    state.tools = [
+      { name: 'resolve', description: long, enabled: true },
+      { name: 'ping', description: 'Short.', enabled: true },
+    ];
+    renderHarness();
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Manage internal-tools tools',
+      }),
+    );
+
+    const toggle = await screen.findByRole('button', { name: 'Show more' });
+    expect(
+      screen.getAllByRole('button', { name: /Show (more|less)/ }),
+    ).toHaveLength(1);
+    expect(screen.getByText(long)).toHaveClass('line-clamp-2');
+
+    fireEvent.click(toggle);
+    expect(screen.getByText(long)).not.toHaveClass('line-clamp-2');
+    expect(
+      screen.getByRole('button', { name: 'Show less' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Resolve' })).toBeChecked();
+    state.tools = [];
+  });
+
+  describe('tool approval modes', () => {
+    beforeEach(() => {
+      state.isAdmin = true;
+      state.servers = [buildServer()];
+      state.tools = [{ name: 'search', description: null, enabled: true }];
+      approvals.experimentEnabled = true;
+      approvals.listEnabled.length = 0;
+      approvals.setMode.mockClear();
+      Element.prototype.scrollIntoView = vi.fn();
+    });
+
+    afterEach(() => {
+      approvals.experimentEnabled = false;
+      state.tools = [];
+    });
+
+    async function openToolsDialog() {
+      renderHarness();
+      fireEvent.click(
+        await screen.findByRole('button', {
+          name: 'Manage internal-tools tools',
+        }),
+      );
+    }
+
+    it('lets an admin set a shared custom server tool to ask first, keyed by the server name', async () => {
+      await openToolsDialog();
+
+      const control = within(
+        await screen.findByRole('radiogroup', {
+          name: 'Approval mode for search',
+        }),
+      );
+      expect(control.getByRole('radio', { name: 'Ask first' })).toBeChecked();
+      fireEvent.click(control.getByRole('radio', { name: 'Reject' }));
+      expect(approvals.setMode).toHaveBeenCalledWith(
+        'internal-tools',
+        'search',
+        'reject',
+      );
+    });
+
+    it('never loads or shows approval policies for non-admins or with the experiment off', async () => {
+      state.isAdmin = false;
+      await openToolsDialog();
+      await screen.findByText('Search');
+      expect(
+        screen.queryByRole('radiogroup', { name: 'Approval mode for search' }),
+      ).not.toBeInTheDocument();
+      expect(approvals.listEnabled).not.toContain(true);
+
+      cleanup();
+      state.isAdmin = true;
+      approvals.experimentEnabled = false;
+      approvals.listEnabled.length = 0;
+      await openToolsDialog();
+      await screen.findByText('Search');
+      expect(
+        screen.queryByRole('radiogroup', { name: 'Approval mode for search' }),
+      ).not.toBeInTheDocument();
+      expect(approvals.listEnabled).not.toContain(true);
+    });
   });
 
   it('offers Connect and a status for unauthenticated oauth servers', async () => {
@@ -658,7 +781,7 @@ describe('personal MCP servers in Personal settings', () => {
     expect(screen.queryByLabelText('Local (stdio)')).toBeNull();
     expect(screen.queryByLabelText('Everyone in this deployment')).toBeNull();
     expect(
-      screen.getByText(/available only to your own Sessions and tasks/),
+      screen.getByText(/available only to your own sessions and tasks/),
     ).toBeInTheDocument();
 
     fireEvent.change(screen.getByPlaceholderText('e.g. internal-tools'), {
@@ -740,6 +863,41 @@ describe('personal MCP servers in Personal settings', () => {
 
     expect(openKeyDialogMock).toHaveBeenCalledTimes(1);
     expect(createMock).not.toHaveBeenCalled();
+  });
+
+  it('lets a member set approval modes on their own server under the personal scope', async () => {
+    state.servers = [buildServer({ visibility: 'owner' })];
+    state.tools = [{ name: 'search', description: null, enabled: true }];
+    approvals.experimentEnabled = true;
+    approvals.scopes.length = 0;
+    approvals.setMode.mockClear();
+    try {
+      renderSection();
+      fireEvent.click(
+        await screen.findByRole('button', {
+          name: 'Manage internal-tools tools',
+        }),
+      );
+      const control = within(
+        await screen.findByRole('radiogroup', {
+          name: 'Approval mode for search',
+        }),
+      );
+      fireEvent.click(control.getByRole('radio', { name: 'Reject' }));
+      expect(approvals.setMode).toHaveBeenCalledWith(
+        'internal-tools',
+        'search',
+        'reject',
+      );
+      expect(approvals.scopes).toContain('personal');
+      expect(approvals.scopes).not.toContain('deployment');
+      expect(
+        screen.getByText(/These apply to your own sessions only/),
+      ).toBeInTheDocument();
+    } finally {
+      approvals.experimentEnabled = false;
+      state.tools = [];
+    }
   });
 
   it('lists a private server with its manage actions', async () => {

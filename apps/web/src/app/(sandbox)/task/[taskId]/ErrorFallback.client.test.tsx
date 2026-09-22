@@ -461,14 +461,15 @@ describe('ConnectionStatusBanner', () => {
     ).toBeInTheDocument();
   });
 
-  it('shows a reconnect-specific message when the live reconnect budget is exhausted', () => {
+  it('reconnects when the live reconnect budget is exhausted', () => {
+    const reconnect = vi.fn();
     useSandboxConnectionStatusMock.mockReturnValue({
       connected: false,
       hasConnectedOnce: true,
       connectionError: true,
       connectionFailureCategory: 'client_reconnect_failed',
       reconnecting: false,
-      reconnect: vi.fn(),
+      reconnect,
     });
 
     render(
@@ -487,6 +488,8 @@ describe('ConnectionStatusBanner', () => {
     expect(
       screen.getByText('Could not restore the live task connection'),
     ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Reconnect' }));
+    expect(reconnect).toHaveBeenCalledTimes(1);
   });
 
   it('refreshes and reconnects for token/bootstrap failures', async () => {

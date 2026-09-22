@@ -406,6 +406,9 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
     expect(result['intercom']?.url).toBe(
       'https://api.preview.roomote.run/api/mcp/custom/11111111-1111-4111-8111-111111111111',
     );
+    // The name is shared, so the scope is what says whose approval policies
+    // govern the server that won.
+    expect(result['intercom']?.toolApprovalPolicyScope).toBe('personal');
     expect(mockFindPersonalServers).toHaveBeenCalledTimes(1);
   });
 
@@ -476,6 +479,7 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
       url: 'https://api.preview.roomote.run/api/mcp/development-fixtures',
       headers: {},
       cacheRevision: '1789516800000',
+      toolApprovalPolicyScope: 'deployment',
     });
   });
 
@@ -1342,9 +1346,11 @@ describe('custom MCP server delivery', () => {
         }),
       ).toEqual({
         ...expected,
+        // Session-only metadata the worker delivery above never carries.
         'http-integrations': {
           ...expected['http-integrations'],
           cacheRevision: '0:',
+          toolApprovalPolicyScope: 'deployment',
         },
       });
     },

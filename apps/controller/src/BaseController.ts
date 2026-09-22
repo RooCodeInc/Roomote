@@ -24,6 +24,7 @@ import {
   recordTaskRunLifecycleEvent,
   resolveDefaultComputeProvider,
   syncTaskStateFromRuns,
+  markEnvironmentVerificationFailedIfCurrent,
   eq,
   and,
   asc,
@@ -786,6 +787,31 @@ export abstract class BaseController {
         `[BaseController] Ignoring worker bootstrap failure for task run #${taskRun.id} because the run already advanced`,
       );
       return false;
+    }
+
+    // An environment-bound verification task that never reached the agent
+    // (this Docker/bootstrap failure happens before the harness starts) marks
+    // its bound environment failed when it is still the current attempt.
+    const verifiesEnvironmentId =
+      taskRun.payload && typeof taskRun.payload === 'object'
+        ? (taskRun.payload as Record<string, unknown>).verifiesEnvironmentId
+        : null;
+    if (typeof verifiesEnvironmentId === 'string') {
+      try {
+        await markEnvironmentVerificationFailedIfCurrent(db, {
+          environmentId: verifiesEnvironmentId,
+          verificationTaskId: taskRun.taskId,
+          error:
+            'The verification task failed before the agent could report a result.',
+        });
+      } catch (error) {
+        captureControllerException(error, {
+          runId: taskRun.id,
+          payloadKind: taskRun.payloadKind,
+          provider: taskRun.vendor,
+          phase: 'environment-verification-failure-mark',
+        });
+      }
     }
 
     captureControllerMessage(

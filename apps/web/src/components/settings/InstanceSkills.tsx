@@ -89,7 +89,7 @@ function SkillEditor({
         <DialogHeader>
           <DialogTitle>{skill ? 'Edit Skill' : 'Add Custom Skill'}</DialogTitle>
           <DialogDescription>
-            Available across this instance in Sessions and coding tasks.
+            Available across this instance in sessions and coding tasks.
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>

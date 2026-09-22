@@ -38,6 +38,18 @@ describe('searchTasks', () => {
       payloadKind: TaskPayloadKind.StandardTask,
     });
 
+    const myArchivedTask = await taskFactory.create({
+      title: 'Archived pinned task',
+      initiatorUserId: me.id,
+      activityAt: 2_000,
+      timestamp: 2_000,
+      archivedAt: new Date(),
+    });
+    await runFactory.create({
+      taskId: myArchivedTask.id,
+      payloadKind: TaskPayloadKind.StandardTask,
+    });
+
     const results = await searchTasks({ userId: me.id, limit: 20 });
 
     expect(results.map((task) => task.id)).toEqual([myTask.id]);
@@ -80,10 +92,22 @@ describe('searchTasks', () => {
       payloadKind: TaskPayloadKind.StandardTask,
     });
 
+    const myArchivedTask = await taskFactory.create({
+      title: 'Archived pinned task',
+      initiatorUserId: me.id,
+      activityAt: 2_000,
+      timestamp: 2_000,
+      archivedAt: new Date(),
+    });
+    await runFactory.create({
+      taskId: myArchivedTask.id,
+      payloadKind: TaskPayloadKind.StandardTask,
+    });
+
     const results = await searchTasks({
       userId: me.id,
       limit: 1,
-      includeIds: [myIncludedTask.id, theirTask.id],
+      includeIds: [myIncludedTask.id, theirTask.id, myArchivedTask.id],
     });
 
     expect(results.map((task) => task.id)).toEqual([

@@ -10,6 +10,9 @@ interface TaskRunErrorSource {
   result?: unknown | null;
 }
 
+const SNAPSHOT_UNAVAILABLE_ERROR =
+  /^Sandbox .+ was .+ before its snapshot completed; the run cannot be resumed$/;
+
 type OpenAiAdminErrorResponse = {
   error?: {
     message?: string;
@@ -215,6 +218,13 @@ export function getTaskRunError(
   }
 
   return undefined;
+}
+
+export function isSnapshotUnavailableError(
+  taskRun?: TaskRunErrorSource | null,
+): boolean {
+  const error = getTaskRunError(taskRun);
+  return error ? SNAPSHOT_UNAVAILABLE_ERROR.test(error.trim()) : false;
 }
 
 export function getTaskRunErrorDisplayMessage(

@@ -320,6 +320,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       'requesty',
       'baseten',
       'togetherai',
+      'deepseek',
       'openai',
       'azure',
       'azure-cognitive-services',
@@ -728,6 +729,10 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         modelId: 'vercel/deepseek/deepseek-v4.1-flash',
       },
       {
+        providerId: 'deepseek',
+        modelId: 'deepseek/deepseek-flash',
+      },
+      {
         providerId: 'opencode-go',
         modelId: 'opencode-go/deepseek-v4.1-flash',
       },
@@ -761,6 +766,10 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       {
         providerId: 'togetherai',
         modelId: 'togetherai/deepseek-ai/DeepSeek-V4-Pro',
+      },
+      {
+        providerId: 'deepseek',
+        modelId: 'deepseek/deepseek-v4-pro',
       },
       {
         providerId: 'opencode',
@@ -987,8 +996,8 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       [
         { id: 'openai/gpt-5.6-terra', displayName: 'GPT 5.6 Terra' },
         {
-          id: 'openrouter/x-ai/grok-4.6',
-          displayName: 'Grok 4.6',
+          id: 'openrouter/x-ai/grok-4.7',
+          displayName: 'Grok 4.7',
         },
         {
           id: 'openrouter/anthropic/claude-sonnet-5',
@@ -1005,7 +1014,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(groups[0]).toMatchObject({
       label: 'OpenRouter',
       items: [
-        { id: 'openrouter/x-ai/grok-4.6' },
+        { id: 'openrouter/x-ai/grok-4.7' },
         { id: 'openrouter/anthropic/claude-sonnet-5' },
       ],
     });
@@ -1046,7 +1055,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       'requesty/glm-5.3-flash',
       'requesty/glm-5.3',
       'requesty/kimi-k3',
-      'requesty/grok-4.6',
+      'requesty/xai/grok-4.7',
     ]);
   });
 
@@ -1081,6 +1090,20 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       envVarName: 'TOGETHER_API_KEY',
       defaultRoomoteModel: 'togetherai/deepseek-ai/DeepSeek-V4-Pro',
       authKind: 'api-key',
+    });
+  });
+
+  it('maps DeepSeek to its direct API models and credential', () => {
+    expect(getSetupModelProvider('deepseek')).toMatchObject({
+      label: 'DeepSeek',
+      envVarName: 'DEEPSEEK_API_KEY',
+      defaultRoomoteModel: 'deepseek/deepseek-v4-pro',
+      authKind: 'api-key',
+      recommendedRoleModels: {
+        helper: 'deepseek/deepseek-flash',
+        vision: 'deepseek/deepseek-flash',
+        explore: 'deepseek/deepseek-flash',
+      },
     });
   });
 
@@ -1122,20 +1145,40 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(getSetupProviderTaskModelPrefix('anthropic')).toBe('anthropic');
   });
 
-  it('recommends only Grok 4.6 for xAI API and Grok subscription', () => {
+  it('recommends only Grok 4.7 for xAI API and Grok subscription', () => {
     for (const providerId of ['xai', 'xai-subscription'] as const) {
       const provider = SETUP_MODEL_PROVIDER_CATALOG.find(
         (entry) => entry.id === providerId,
       );
 
-      expect(provider?.defaultRoomoteModel).toBe('xai/grok-4.6');
+      expect(provider?.defaultRoomoteModel).toBe('xai/grok-4.7');
       expect(provider?.suggestedTaskModels.map((model) => model.id)).toEqual([
-        'xai/grok-4.6',
+        'xai/grok-4.7',
       ]);
       expect(
         provider?.suggestedTaskModels.map((model) => model.displayName),
-      ).toEqual(['Grok 4.6']);
+      ).toEqual(['Grok 4.7']);
     }
+  });
+
+  it('uses the verified Grok 4.7 route for every supported provider', () => {
+    const grok47ByProvider = userSelectableProviders.flatMap((provider) => {
+      const model = provider.suggestedTaskModels.find(
+        (suggestion) => suggestion.displayName === 'Grok 4.7',
+      );
+
+      return model ? [{ providerId: provider.id, modelId: model.id }] : [];
+    });
+
+    expect(grok47ByProvider).toEqual([
+      { providerId: 'openrouter', modelId: 'openrouter/x-ai/grok-4.7' },
+      { providerId: 'vercel', modelId: 'vercel/spacexai/grok-4.7' },
+      { providerId: 'requesty', modelId: 'requesty/xai/grok-4.7' },
+      { providerId: 'opencode', modelId: 'opencode/grok-4.7' },
+      { providerId: 'opencode-go', modelId: 'opencode-go/grok-4.7' },
+      { providerId: 'xai', modelId: 'xai/grok-4.7' },
+      { providerId: 'xai-subscription', modelId: 'xai/grok-4.7' },
+    ]);
   });
 
   it('marks xAI Grok subscription connected as its own OAuth provider without an API key', () => {
@@ -1331,7 +1374,7 @@ describe('buildRecommendedDeploymentModelConfig', () => {
       buildRecommendedDeploymentModelConfig(getSetupModelProvider('xai')),
     ).toEqual({
       ...createEmptyDeploymentModelConfig(),
-      roomoteModel: 'xai/grok-4.6',
+      roomoteModel: 'xai/grok-4.7',
     });
   });
 
@@ -1515,6 +1558,14 @@ describe('getModelProviderEnvKeyCandidates', () => {
     ).toEqual(['TOGETHER_API_KEY']);
   });
 
+  it('derives the DeepSeek provider key from the shared setup catalog metadata', () => {
+    expect(
+      getModelProviderEnvKeyCandidates({
+        providerId: 'deepseek',
+      }),
+    ).toEqual(['DEEPSEEK_API_KEY']);
+  });
+
   it('includes configured custom provider env keys after the known defaults', () => {
     expect(
       getModelProviderEnvKeyCandidates({
@@ -1562,6 +1613,7 @@ describe('getModelProviderEnvKeyCandidates', () => {
     expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain('REQUESTY_API_KEY');
     expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain('BASETEN_API_KEY');
     expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain('TOGETHER_API_KEY');
+    expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain('DEEPSEEK_API_KEY');
     expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain(
       'GOOGLE_GENERATIVE_AI_API_KEY',
     );

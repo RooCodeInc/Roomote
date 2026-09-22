@@ -993,6 +993,47 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
   });
 
+  it('keeps Suggest Ideas and Summarize Merged PRs setup available without a default destination', async () => {
+    state.settingsQuery.data.settings.managerSlackChannelId = null as never;
+    state.settingsQuery.data.settings.defaultAutomationTarget = null as never;
+    state.settingsQuery.data.resolvedDestinations.suggester = null;
+    state.settingsQuery.data.resolvedDestinations.announcer = null;
+
+    render(<AutomationsSettings />);
+
+    const suggesterSwitch = await screen.findByRole('switch', {
+      name: 'Enable Suggest Ideas',
+    });
+    const announcerSwitch = screen.getByRole('switch', {
+      name: 'Enable Summarize Merged PRs',
+    });
+    expect(suggesterSwitch).toBeEnabled();
+    expect(announcerSwitch).toBeEnabled();
+    expect(
+      screen.getByRole('button', { name: 'Set up Suggest Ideas' }),
+    ).toBeEnabled();
+    expect(
+      screen.getByRole('button', { name: 'Set up Summarize Merged PRs' }),
+    ).toBeEnabled();
+
+    fireEvent.click(suggesterSwitch);
+    expect(
+      await screen.findByRole('dialog', { name: 'Suggest Ideas' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('combobox', { name: 'Destination provider' }),
+    ).toBeInTheDocument();
+    closeAutomationDialog();
+
+    fireEvent.click(announcerSwitch);
+    expect(
+      await screen.findByRole('dialog', { name: 'Summarize Merged PRs' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('combobox', { name: 'Destination provider' }),
+    ).toBeInTheDocument();
+  });
+
   it('loads a built-in Email destination in the shared picker', async () => {
     state.settingsQuery.data.settings.managerStatsFrequency = 'weekly' as never;
     (
@@ -2263,7 +2304,7 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
   });
 
-  it('explains that Teams replies continue the Fast session', async () => {
+  it('explains that Teams replies continue the session', async () => {
     state.settingsQuery.data.capabilities.teamsConnected = true;
     state.customAutomations = [
       {
@@ -2306,7 +2347,7 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
   });
 
-  it('explains that Telegram replies continue the Fast session', async () => {
+  it('explains that Telegram replies continue the session', async () => {
     state.settingsQuery.data.capabilities.telegramConnected = true;
     state.customAutomations = [
       {

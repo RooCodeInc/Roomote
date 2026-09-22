@@ -954,7 +954,7 @@ describe('processFastAgentMessage', () => {
     );
   });
 
-  it('resumes the canonical Fast session bound to a delayed Slack root', async () => {
+  it('resumes the canonical session bound to a delayed Slack root', async () => {
     const canonicalConversation = {
       surface: 'slack' as const,
       workspaceId: 'T123',

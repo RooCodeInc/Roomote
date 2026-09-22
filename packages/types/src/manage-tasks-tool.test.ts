@@ -20,7 +20,7 @@ describe('Roomote MCP management contract', () => {
     );
     expect(ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION).not.toContain('launch');
     expect(ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION).toContain(
-      'Use start to begin new work in a Session',
+      'Use start to begin new work in a session',
     );
     expect(ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION).toContain(
       'direct task operations retained for compatibility',
@@ -51,7 +51,7 @@ describe('Roomote MCP management contract', () => {
       'when taskId is omitted',
     );
     expect(roomoteManagementFieldSchemas.sessionId.description).toContain(
-      'responses return the canonical Session ID',
+      'responses return the canonical session ID',
     );
   });
 

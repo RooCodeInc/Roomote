@@ -1,9 +1,9 @@
-const { mockEvaluateTypeSafeJudgments } = vi.hoisted(() => ({
-  mockEvaluateTypeSafeJudgments: vi.fn(),
+const { mockEvaluateDecisionModel } = vi.hoisted(() => ({
+  mockEvaluateDecisionModel: vi.fn(),
 }));
 
 vi.mock('../../typesafe-judgment', () => ({
-  evaluateTypeSafeJudgments: mockEvaluateTypeSafeJudgments,
+  evaluateDecisionModel: mockEvaluateDecisionModel,
 }));
 
 import type { IntegrationToolCandidate } from '@roomote/types';
@@ -48,13 +48,13 @@ function answerByToolName(scores: Record<string, number>) {
 }
 
 function judgedParams(call = 0): JudgmentParams {
-  return mockEvaluateTypeSafeJudgments.mock.calls[call]![0] as JudgmentParams;
+  return mockEvaluateDecisionModel.mock.calls[call]![0] as JudgmentParams;
 }
 
 describe('matchIntegrationToolsWithRanking', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockEvaluateTypeSafeJudgments.mockResolvedValue(null);
+    mockEvaluateDecisionModel.mockResolvedValue(null);
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
   });
 
@@ -71,7 +71,7 @@ describe('matchIntegrationToolsWithRanking', () => {
       'create_issue',
       'list_issues',
     ]);
-    expect(mockEvaluateTypeSafeJudgments).not.toHaveBeenCalled();
+    expect(mockEvaluateDecisionModel).not.toHaveBeenCalled();
   });
 
   it('does not judge exact tool-name or query-less lookups', async () => {
@@ -83,7 +83,7 @@ describe('matchIntegrationToolsWithRanking', () => {
       integrationId: 'tracker',
     });
 
-    expect(mockEvaluateTypeSafeJudgments).not.toHaveBeenCalled();
+    expect(mockEvaluateDecisionModel).not.toHaveBeenCalled();
   });
 
   it('keeps the keyword result when the judgment model is unconfigured', async () => {
@@ -96,11 +96,11 @@ describe('matchIntegrationToolsWithRanking', () => {
       truncated: false,
       availableToolCount: 3,
     });
-    expect(mockEvaluateTypeSafeJudgments).toHaveBeenCalledOnce();
+    expect(mockEvaluateDecisionModel).toHaveBeenCalledOnce();
   });
 
   it('returns relevant tools by probability when keywords match nothing', async () => {
-    mockEvaluateTypeSafeJudgments.mockImplementation(
+    mockEvaluateDecisionModel.mockImplementation(
       answerByToolName({
         'tracker/create_issue': 0.94,
         'tracker/list_issues': 0.55,
@@ -119,6 +119,9 @@ describe('matchIntegrationToolsWithRanking', () => {
       availableToolCount: 3,
     });
     const { state, questions } = judgedParams();
+    expect(mockEvaluateDecisionModel.mock.calls[0]?.[0]).toMatchObject({
+      highVolume: true,
+    });
     expect(state).toEqual({
       query: 'file a bug ticket',
       tools: {
@@ -131,7 +134,7 @@ describe('matchIntegrationToolsWithRanking', () => {
   });
 
   it('judges only the requested integration', async () => {
-    mockEvaluateTypeSafeJudgments.mockImplementation(
+    mockEvaluateDecisionModel.mockImplementation(
       answerByToolName({ 'pager/get_schedule': 0.9 }),
     );
 
@@ -157,7 +160,7 @@ describe('matchIntegrationToolsWithRanking', () => {
         description: 'deploy helper',
       }),
     );
-    mockEvaluateTypeSafeJudgments.mockImplementation(
+    mockEvaluateDecisionModel.mockImplementation(
       answerByToolName({ 'deploys/tool_7': 0.8, 'deploys/tool_3': 0.9 }),
     );
 
@@ -173,7 +176,7 @@ describe('matchIntegrationToolsWithRanking', () => {
   });
 
   it('keeps the keyword result when no tool is relevant enough', async () => {
-    mockEvaluateTypeSafeJudgments.mockImplementation(
+    mockEvaluateDecisionModel.mockImplementation(
       answerByToolName({ 'tracker/create_issue': 0.45 }),
     );
 
@@ -185,7 +188,7 @@ describe('matchIntegrationToolsWithRanking', () => {
   });
 
   it('keeps the keyword result when the judgment model fails', async () => {
-    mockEvaluateTypeSafeJudgments.mockRejectedValue(new Error('timeout'));
+    mockEvaluateDecisionModel.mockRejectedValue(new Error('timeout'));
 
     const result = await matchIntegrationToolsWithRanking(catalog, {
       query: 'file a bug ticket',
@@ -209,7 +212,7 @@ describe('matchIntegrationToolsWithRanking', () => {
             : 'unrelated helper',
       }),
     );
-    mockEvaluateTypeSafeJudgments.mockImplementation(
+    mockEvaluateDecisionModel.mockImplementation(
       answerByToolName({ 'big/tool_299': 0.9 }),
     );
 
@@ -218,8 +221,8 @@ describe('matchIntegrationToolsWithRanking', () => {
     });
 
     expect(result.tools).toEqual([large[299]]);
-    expect(mockEvaluateTypeSafeJudgments).toHaveBeenCalledTimes(4);
-    const judgedKeys = mockEvaluateTypeSafeJudgments.mock.calls.flatMap(
+    expect(mockEvaluateDecisionModel).toHaveBeenCalledTimes(4);
+    const judgedKeys = mockEvaluateDecisionModel.mock.calls.flatMap(
       ([params]) => Object.keys((params as JudgmentParams).state.tools),
     );
     expect(judgedKeys).toHaveLength(256);

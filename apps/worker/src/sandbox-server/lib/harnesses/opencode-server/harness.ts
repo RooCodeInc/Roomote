@@ -17,7 +17,9 @@ import {
   OPENCODE_ARCHITECT_AGENT,
   OPENCODE_BUILD_AGENT,
   PROVIDER_RETRY_NOTICE_PAYLOAD_KEY,
+  TASK_COMPLETION_GATE_LIMITS,
   TERMINAL_PROVIDER_ERROR_PAYLOAD_KEY,
+  type TaskCompletionCommand,
   TaskEventName,
 } from '@roomote/types';
 import { redactSecrets } from '@roomote/communication/redact-secrets';
@@ -31,6 +33,7 @@ import type {
   AcpTurnCompletedEvent,
   ProviderRetryNotice,
   TaskEvent,
+  TaskIntegrationToolApprovals,
 } from '@roomote/types';
 
 import type {
@@ -61,6 +64,7 @@ import {
 import { RuntimePromptQueue } from '../runtime-prompt-queue';
 
 import { OpenCodeRuntimeEventEmitter } from './runtime-event-emitter';
+import { createTaskToolApprovalRelay } from './tool-approvals';
 import {
   OpenCodeServerClient,
   createOpenCodePromptParts,
@@ -110,6 +114,13 @@ import {
   type OpenCodeModelSelection,
   resolveOpenCodeModelSelection,
 } from '../../../../run-task/opencode-model';
+import {
+  buildCompletionGateReminder,
+  collectShippedDiff,
+  isCompletionGateEligible,
+  requestTaskCompletionCheck,
+  UNCHANGED_WORKSPACE_FINGERPRINT,
+} from './completion-gate';
 
 interface OpenCodeServerHarnessOptions {
   client: OpenCodeServerClient;
@@ -140,6 +151,8 @@ interface OpenCodeServerHarnessOptions {
   providerErrorBaseDelayMs?: number;
   providerErrorMaxDelayMs?: number;
   mcpServerNames?: string[];
+  /** Which integration tool each gated native permission key stands for. */
+  toolApprovalTools?: TaskIntegrationToolApprovals['tools'];
   /**
    * Observer-only breadcrumb for rare harness failures that need a durable
    * post-mortem outside the sandbox (e.g. infinite OpenCode session create).
@@ -301,6 +314,10 @@ const OPEN_CODE_EXECUTE_TOOLS = new Set(['bash', 'shell']);
 const OPEN_CODE_READ_TOOLS = new Set(['read']);
 const OPEN_CODE_SEARCH_TOOLS = new Set(['grep', 'glob', 'find', 'list', 'ls']);
 const MAX_OPENCODE_STOP_HOOK_REMINDERS = 3;
+// The completion check is a fast, fallible read of the diff. It gets one
+// chance per user turn to reopen the work; after that the turn completes and
+// pull-request review is the next line of defense.
+const MAX_COMPLETION_GATE_REMINDERS = 1;
 const MAX_OPENCODE_INTERNAL_RETRY_ATTEMPTS = 3;
 // Fail-safe for a wedged stop-hook reminder cycle. After a turn finishes
 // without the required Slack closeout, we resubmit a reminder prompt and then
@@ -852,6 +869,8 @@ function extractOpenCodeExitCode(
 
   return (
     asFiniteNumber(metadata.exitCode) ??
+    // OpenCode's shell tool (1.18) reports the code as `metadata.exit`.
+    asFiniteNumber(metadata.exit) ??
     asFiniteNumber(metadata.code) ??
     asFiniteNumber(outputRecord?.exitCode) ??
     asFiniteNumber(outputRecord?.code) ??
@@ -1660,6 +1679,10 @@ export class OpenCodeServerHarness
     HarnessPendingUserInputRequest
   >();
   private readonly nativeQuestionRequestIds = new Map<string, string>();
+  private readonly toolApprovalRelay?: ReturnType<
+    typeof createTaskToolApprovalRelay
+  >;
+  private pendingToolApprovals = 0;
   // Request ids that have already been answered or abandoned. A late answer
   // (e.g. a web POST opened before a steer abandoned the question) for one
   // of these must be rejected rather than fabricated into the replayed turn.
@@ -1729,6 +1752,42 @@ export class OpenCodeServerHarness
   private stopHookReminderCount = 0;
   private terminalChatReplyDeliveryFailed = false;
   private lastBlockedCloseoutAssistantText: string | null = null;
+  private completionGateReminderCount = 0;
+  // Identity of the last work the completion check saw: the visible-request
+  // generation plus the diff. A turn that changed nothing and carried no new
+  // request (a closeout reminder, a hidden follow-up) is never re-checked.
+  private completionGateLastCheckedKey: string | null = null;
+  // Counts visible requests. A counter rather than clearing the key above, so
+  // a request that arrives while a check is awaiting git or the API is not
+  // overwritten when that older check records what it saw.
+  private completionGateRequestGeneration = 0;
+  // True from the moment a finished turn starts closing (finalizing its last
+  // message, then the check itself) until it has completed, and the promise
+  // that settles at that point. Messages arriving in between are held so the
+  // check reads the transcript of the turn it is judging.
+  private completionGateChecking = false;
+  private turnSettling: Promise<void> | null = null;
+  private lastSettledTurnSource: 'session_status' | 'session_idle' | null =
+    null;
+  // Bumped when the task is cancelled or closed, so a message held for a
+  // closing turn is dropped rather than restarting a task the user stopped.
+  private taskStopGeneration = 0;
+  // The parent agent's latest shell commands, as observed from OpenCode: the
+  // validation evidence the completion check holds the report against. Each
+  // carries a fingerprint of the workspace diff taken right after it ran. A
+  // run counts only while that still matches the code being shipped, however
+  // the code was changed since (editor tool, `sed -i`, heredoc script, git),
+  // in this turn or a later one. Nothing here guesses from the command text.
+  private completionGateCommands: Array<
+    Omit<TaskCompletionCommand, 'ranBeforeLaterEdit'> & {
+      fingerprintAfter: Promise<string | null>;
+    }
+  > = [];
+  // Serializes the snapshots so each reads the workspace in command order.
+  private completionGateSnapshots: Promise<unknown> = Promise.resolve();
+  // The report the agent gave before the check reopened its turn. The
+  // follow-up turn only adds a short correction, so the two are joined.
+  private completionGateHeldReport: string | null = null;
   private stopHookReminderStallTimer: ReturnType<typeof setTimeout> | null =
     null;
   // OpenCode 1.17 emits session.status(idle) followed by session.idle for the
@@ -1818,6 +1877,18 @@ export class OpenCodeServerHarness
     ].sort((left, right) => right.length - left.length);
     this.beforeQueuedPrompt = options.beforeQueuedPrompt;
     this.onDiagnostic = options.onDiagnostic;
+    if (options.toolApprovalTools) {
+      this.toolApprovalRelay = createTaskToolApprovalRelay({
+        tools: options.toolApprovalTools,
+        client: this.client,
+        logger: this.logger,
+        signal: this.eventAbortController.signal,
+        onPendingCountChange: (pending) => {
+          this.pendingToolApprovals = pending;
+          this.stallWatchdogs.noteActivity();
+        },
+      });
+    }
     this.runtimeEvents = new OpenCodeRuntimeEventEmitter({
       taskEvent: (event) => this.emit('taskEvent', event),
       runtimeOutput: (event) => this.emit('runtimeOutput', event),
@@ -1839,6 +1910,7 @@ export class OpenCodeServerHarness
       getSessionId: () => this.sessionId,
       hasDeferringActivity: () =>
         this.pendingUserInputRequests.size > 0 ||
+        this.pendingToolApprovals > 0 ||
         this.activeExecuteToolProgress.size > 0 ||
         this.activeSubagentWatchdogs.size > 0 ||
         this.nativeSteerSubmissionsInFlight > 0,
@@ -2176,6 +2248,15 @@ export class OpenCodeServerHarness
   }
 
   private async handleCommand(command: TaskCommand): Promise<void> {
+    if (
+      command.commandName === TaskCommandName.CancelTask ||
+      command.commandName === TaskCommandName.CloseTask
+    ) {
+      // A completion check still in flight must not reopen a stopped turn.
+      this.completionGateRequestGeneration += 1;
+      this.taskStopGeneration += 1;
+    }
+
     switch (command.commandName) {
       case TaskCommandName.StartNewTask:
         await this.handleStartNewTask(command);
@@ -2246,6 +2327,11 @@ export class OpenCodeServerHarness
     this.stopHookReminderCount = 0;
     this.terminalChatReplyDeliveryFailed = false;
     this.lastBlockedCloseoutAssistantText = null;
+    this.completionGateReminderCount = 0;
+    this.completionGateLastCheckedKey = null;
+    this.completionGateRequestGeneration += 1;
+    this.completionGateHeldReport = null;
+    this.completionGateCommands = [];
     this.ignoreNextStopHookSessionIdle = false;
     this.ignoreNextQueuedDrainSessionIdle = false;
     this.currentWorkflowPhase = command.data.workflowPhase ?? null;
@@ -2286,9 +2372,43 @@ export class OpenCodeServerHarness
   }
 
   private async handleSendMessage(command: SendMessageCommand): Promise<void> {
+    if (this.completionGateChecking && this.turnSettling) {
+      // The previous turn has already ended; only its completion check is
+      // outstanding. Handle this message once that turn has completed, as a
+      // message sent after it, so the check judges the turn it belongs to and
+      // the message is never steered into a turn that is closing.
+      const stopGeneration = this.taskStopGeneration;
+      await this.turnSettling;
+
+      if (this.disposed || this.taskStopGeneration !== stopGeneration) {
+        // Cancelled or closed while held. Without the hold this message would
+        // have been steered into the turn the cancel then aborted; submitting
+        // it now would restart the task instead.
+        this.logger.info(
+          'OpenCode dropping a message held for a closing turn because the task was stopped meanwhile',
+        );
+        return;
+      }
+
+      if (this.lastSettledTurnSource === 'session_status' && !this.inFlight) {
+        // This message is released in the gap between the status-sourced idle
+        // that completed the turn and its paired session.idle. Submitting now
+        // re-arms inFlight, so that paired idle would complete this new turn
+        // at once. Swallow it, as the queued-drain path does.
+        this.ignoreNextQueuedDrainSessionIdle = true;
+      }
+    }
+
     const text = command.data.text ?? '';
     this.stopHookReminderCount = 0;
     this.lastBlockedCloseoutAssistantText = null;
+    this.completionGateReminderCount = 0;
+
+    if (command.data.visibleInTranscript !== false) {
+      // A new request can leave the diff untouched (the agent only claims to
+      // have acted on it), so an unchanged diff is checked again against it.
+      this.completionGateRequestGeneration += 1;
+    }
 
     // A soft cancel can race with the very first session creation and abort
     // its dedicated controller before a session id exists. SendMessage is the
@@ -3780,6 +3900,7 @@ export class OpenCodeServerHarness
     const queuedId = this.prompts.enqueue({
       text: VISUAL_PROOF_TIMEOUT_RECOVERY_PROMPT,
       visibleInTranscript: false,
+      source: 'opencode-visual-proof-recovery',
     });
     this.prompts.prioritize(queuedId);
 
@@ -3816,6 +3937,7 @@ export class OpenCodeServerHarness
     this.prompts.enqueue({
       text: PLAN_EXIT_CONTINUATION_PROMPT,
       visibleInTranscript: false,
+      source: 'opencode-plan-exit-continuation',
     });
   }
 
@@ -3933,6 +4055,14 @@ export class OpenCodeServerHarness
     }
 
     const payload = unwrapped.payload;
+
+    // A subagent's gated call pauses its own session, so an ask is relayed
+    // whichever session in this workspace raised it.
+    if (payload.type === 'permission.asked') {
+      this.handlePermissionAsked(payload);
+      return;
+    }
+
     const sessionId = eventSessionId(payload);
 
     if (sessionId && this.sessionId && sessionId !== this.sessionId) {
@@ -4393,6 +4523,7 @@ export class OpenCodeServerHarness
     const queuedId = this.prompts.enqueue({
       text: recovery.promptText,
       visibleInTranscript: false,
+      source: 'opencode-provider-error-recovery',
     });
     this.prompts.prioritize(queuedId);
     this.providerErrorRecoveryQueuedPromptId = queuedId;
@@ -4454,6 +4585,7 @@ export class OpenCodeServerHarness
     const queuedId = this.prompts.enqueue({
       text: OPENCODE_RATE_LIMIT_RETRY_PROMPT_TEXT,
       visibleInTranscript: false,
+      source: 'opencode-rate-limit-retry',
     });
     this.prompts.prioritize(queuedId);
 
@@ -4932,6 +5064,7 @@ export class OpenCodeServerHarness
       !this.persistedToolResultKeys.has(eventKey)
     ) {
       this.persistedToolResultKeys.add(eventKey);
+      this.recordCompletionGateCommand(context.sessionId, normalized);
       this.runtimeEvents.toolResult({
         sessionId: context.sessionId,
         messageId: context.messageId,
@@ -4998,6 +5131,26 @@ export class OpenCodeServerHarness
 
     this.pendingUserInputRequests.set(request.requestId, pendingRequest);
     this.runtimeEvents.requestUserInput(pendingRequest);
+  }
+
+  private handlePermissionAsked(payload: OpenCodeEventPayload): void {
+    const properties = asRecord(payload.properties);
+    const requestId = asString(properties?.id);
+    const sessionId = asString(properties?.sessionID);
+    const permission = asString(properties?.permission);
+    const tool = asRecord(properties?.tool);
+
+    if (!this.toolApprovalRelay || !requestId || !sessionId || !permission) {
+      return;
+    }
+
+    this.toolApprovalRelay.handleAsk({
+      requestId,
+      sessionId,
+      permission,
+      messageId: asString(tool?.messageID),
+      callId: asString(tool?.callID),
+    });
   }
 
   private handleQuestionAsked(payload: OpenCodeEventPayload): void {
@@ -5191,6 +5344,28 @@ export class OpenCodeServerHarness
   private async finishCurrentTurn(
     source: 'session_status' | 'session_idle' = 'session_idle',
   ): Promise<void> {
+    let settle: () => void = () => {};
+    const settling = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    this.turnSettling = settling;
+
+    try {
+      await this.completeCurrentTurn(source);
+    } finally {
+      this.completionGateChecking = false;
+      this.lastSettledTurnSource = source;
+      settle();
+
+      if (this.turnSettling === settling) {
+        this.turnSettling = null;
+      }
+    }
+  }
+
+  private async completeCurrentTurn(
+    source: 'session_status' | 'session_idle',
+  ): Promise<void> {
     if (!this.inFlight && !this.prompts.hasQueuedMessages()) {
       return;
     }
@@ -5202,6 +5377,11 @@ export class OpenCodeServerHarness
       return;
     }
 
+    // Set before the first await of the closing path, not just around the
+    // check: a follow-up steered in while the last message is finalized would
+    // already be in the transcript the check reads.
+    this.completionGateChecking = isCompletionGateEligible(this.commandEnv);
+
     if (await this.recoverInterruptedToolTurn(source)) {
       return;
     }
@@ -5210,6 +5390,15 @@ export class OpenCodeServerHarness
       (await this.finalizeLatestAssistantMessage()) ??
       this.finalizedAssistantTurn;
     const sessionId = this.sessionId;
+
+    // Checked while the turn is still in flight, so a message arriving during
+    // the check queues behind it instead of racing the reminder.
+    if (
+      sessionId &&
+      (await this.reopenTurnForCompletionGate(sessionId, finalized, source))
+    ) {
+      return;
+    }
 
     this.inFlight = false;
     this.finalizedAssistantTurn = null;
@@ -5294,10 +5483,16 @@ export class OpenCodeServerHarness
       this.stopHookReminderCount = 0;
       this.terminalChatReplyDeliveryFailed = false;
 
-      const completionText =
+      const closingText =
         missingChatCloseoutReminderCount !== null && !finalized?.text.trim()
           ? this.lastBlockedCloseoutAssistantText
           : finalized?.text;
+      const completionText = this.completionGateHeldReport
+        ? [this.completionGateHeldReport, closingText?.trim()]
+            .filter(Boolean)
+            .join('\n\n')
+        : closingText;
+      this.completionGateHeldReport = null;
 
       if (completionText?.trim()) {
         this.runtimeEvents.turnCompleted(sessionId, completionText);
@@ -5323,6 +5518,167 @@ export class OpenCodeServerHarness
     // empty queue, premature run finalization). Swallow that exact idle.
     if (source === 'session_status' && this.inFlight) {
       this.ignoreNextQueuedDrainSessionIdle = true;
+    }
+  }
+
+  /**
+   * Keeps the parent agent's most recent shell commands for the check, each
+   * with a snapshot of what the workspace held once it finished.
+   */
+  private recordCompletionGateCommand(
+    sessionId: string,
+    normalized: ReturnType<typeof normalizeOpenCodeToolPart>,
+  ): void {
+    const { isExecute, command, exitCode } = normalized.resultPayload;
+
+    // Subagent sessions run their own commands; the report under check is the
+    // parent's, and so is the evidence.
+    if (
+      !isExecute ||
+      typeof command !== 'string' ||
+      !command ||
+      sessionId !== this.sessionId
+    ) {
+      return;
+    }
+
+    if (!isCompletionGateEligible(this.commandEnv)) {
+      return;
+    }
+
+    // Taken off the event path: the model needs seconds to issue its next
+    // tool call, git needs a fraction of one. A failed snapshot is `null`,
+    // which never matches, so the run is left out rather than trusted.
+    const fingerprintAfter = this.completionGateSnapshots.then(() =>
+      collectShippedDiff(this.workspacePath).then(
+        (shipped) => shipped?.fingerprint ?? UNCHANGED_WORKSPACE_FINGERPRINT,
+        () => null,
+      ),
+    );
+    this.completionGateSnapshots = fingerprintAfter;
+
+    this.completionGateCommands.push({
+      fingerprintAfter,
+      command: command.slice(0, TASK_COMPLETION_GATE_LIMITS.commandMaxChars),
+      exitCode:
+        typeof exitCode === 'number' && Number.isInteger(exitCode)
+          ? exitCode
+          : // A failed tool with no exit code (timeout, spawn error) still failed.
+            normalized.status === 'failed'
+            ? 1
+            : null,
+      outputTail: normalized.output.slice(
+        -TASK_COMPLETION_GATE_LIMITS.commandOutputTailMaxChars,
+      ),
+    });
+
+    if (
+      this.completionGateCommands.length >
+      TASK_COMPLETION_GATE_LIMITS.commandsMax
+    ) {
+      this.completionGateCommands.shift();
+    }
+  }
+
+  /**
+   * The realtime completion check: when a turn ends with a diff it has not
+   * seen, ask the platform whether the work matches the request and the
+   * agent's own report. A clear or unavailable verdict costs the turn a
+   * moment; a flagged one reopens the turn once with a hidden prompt, the way
+   * the closeout stop hook does. Returns true when the turn was reopened.
+   */
+  private async reopenTurnForCompletionGate(
+    sessionId: string,
+    finalized: FinalizedAssistantTurn | null,
+    source: 'session_status' | 'session_idle',
+  ): Promise<boolean> {
+    const report = finalized?.text.trim();
+
+    if (
+      !report ||
+      !this.commandEnv ||
+      this.completionGateReminderCount >= MAX_COMPLETION_GATE_REMINDERS ||
+      !isCompletionGateEligible(this.commandEnv)
+    ) {
+      return false;
+    }
+
+    try {
+      // Read before the first await: anything that moves it mid-check (a new
+      // task, a cancel) makes this verdict stale.
+      const generation = this.completionGateRequestGeneration;
+      const shipped = await collectShippedDiff(this.workspacePath);
+      const checkedKey = `${generation}:${shipped?.key}`;
+
+      if (!shipped || checkedKey === this.completionGateLastCheckedKey) {
+        return false;
+      }
+
+      // A stale idle can arrive while tool work is still settling; the
+      // genuine idle that follows runs the check against the finished diff.
+      if (await this.hasUnsettledToolWork(sessionId)) {
+        return false;
+      }
+
+      this.completionGateLastCheckedKey = checkedKey;
+      // A run vouches for the code only if the code is still what it was when
+      // the run finished. Reformatting alone does not change the fingerprint.
+      const commands = await Promise.all(
+        this.completionGateCommands.map(
+          async ({ fingerprintAfter, ...command }) => ({
+            ...command,
+            ranBeforeLaterEdit:
+              (await fingerprintAfter) !== shipped.fingerprint,
+          }),
+        ),
+      );
+      const startedAt = Date.now();
+      const verdict = await requestTaskCompletionCheck(this.commandEnv, {
+        report: report.slice(-TASK_COMPLETION_GATE_LIMITS.reportMaxChars),
+        diff: shipped.diff,
+        diffStat: shipped.diffStat,
+        diffTruncated: shipped.diffTruncated,
+        commands,
+      });
+
+      this.logger.info(
+        `OpenCode completion check status=${verdict.status} flags=${
+          verdict.flags.map((flag) => flag.id).join(',') || 'none'
+        } diffChars=${shipped.diff.length} truncated=${shipped.diffTruncated} elapsedMs=${
+          Date.now() - startedAt
+        } sessionId=${sessionId}`,
+      );
+
+      if (
+        verdict.status !== 'flagged' ||
+        this.disposed ||
+        this.sessionId !== sessionId ||
+        this.completionGateRequestGeneration !== generation
+      ) {
+        return false;
+      }
+
+      this.completionGateReminderCount += 1;
+      this.completionGateHeldReport = finalized?.text ?? null;
+      this.finalizedAssistantTurn = null;
+      this.clearVisualProofTimeout();
+      await this.submitPrompt({
+        text: buildCompletionGateReminder(verdict.flags),
+        visibleInTranscript: false,
+        source: 'opencode-completion-gate',
+      });
+      // Same pairing as the closeout reminder: the session.idle that follows a
+      // status-sourced idle belongs to the turn that just ended.
+      this.ignoreNextStopHookSessionIdle = source === 'session_status';
+      this.armStopHookReminderStall(sessionId);
+      return true;
+    } catch (error) {
+      this.logger.warn(
+        `OpenCode completion check failed; completing the turn without it. ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return false;
     }
   }
 
@@ -5364,18 +5720,24 @@ export class OpenCodeServerHarness
     this.inFlight = false;
     const reminderCount = this.stopHookReminderCount;
     this.stopHookReminderCount = 0;
+    const heldText =
+      this.lastBlockedCloseoutAssistantText ?? this.completionGateHeldReport;
+    // A wedged completion-check reminder is not a missing chat closeout: the
+    // agent had already closed out before the check reopened its turn.
+    const closeoutMissing =
+      reminderCount > 0 || this.completionGateHeldReport === null;
 
-    if (this.lastBlockedCloseoutAssistantText?.trim()) {
-      this.runtimeEvents.turnCompleted(
-        sessionId,
-        this.lastBlockedCloseoutAssistantText,
-      );
+    if (heldText?.trim()) {
+      this.runtimeEvents.turnCompleted(sessionId, heldText);
     }
 
     this.lastBlockedCloseoutAssistantText = null;
-    this.runtimeEvents.taskCompleted(sessionId, undefined, {
-      missingChatCloseout: { reminderCount },
-    });
+    this.completionGateHeldReport = null;
+    this.runtimeEvents.taskCompleted(
+      sessionId,
+      undefined,
+      closeoutMissing ? { missingChatCloseout: { reminderCount } } : {},
+    );
 
     await this.drainQueuedPrompts();
   }
@@ -5683,6 +6045,7 @@ export class OpenCodeServerHarness
       userName: next.userName,
       userImageUrl: next.userImageUrl,
       clientMessageId: next.clientMessageId,
+      source: next.source,
     });
     await this.submitPrompt({
       text: next.text,
@@ -5693,6 +6056,7 @@ export class OpenCodeServerHarness
       userName: next.userName,
       userImageUrl: next.userImageUrl,
       clientMessageId: next.clientMessageId,
+      source: next.source,
     });
   }
 

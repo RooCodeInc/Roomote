@@ -537,6 +537,10 @@ describe('SourceControl settings', () => {
     expect(
       screen.queryByRole('button', { name: 'Connect GitHub' }),
     ).not.toBeInTheDocument();
+    expect(screen.getByLabelText('GitHub organization')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Show advanced config' }),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByTestId('source-control-config-github'),
     ).not.toBeInTheDocument();

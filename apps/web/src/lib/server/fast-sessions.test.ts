@@ -118,7 +118,7 @@ async function createFastMessage({
   return message!;
 }
 
-describe('Fast session queries', () => {
+describe('Session queries', () => {
   it.each([
     'event',
     'prompt',
@@ -1198,7 +1198,7 @@ describe('Fast session queries', () => {
     ]);
   });
 
-  it('lists every task associated with a Fast session', async () => {
+  it('lists every task associated with a session', async () => {
     const owner = await userFactory.create();
     const session = await createFastSession({
       userId: owner.id,

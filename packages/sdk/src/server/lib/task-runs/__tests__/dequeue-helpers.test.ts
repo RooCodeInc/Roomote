@@ -16,6 +16,7 @@ const {
   mockNotifyWebTaskInitiatorOnSettle,
   mockEnqueueWebTaskInitiatorSettleNotification,
   mockCaptureTaskSettled,
+  mockIsTypeSafeJudgmentConfigured,
 } = vi.hoisted(() => ({
   mockDecryptSecrets: vi.fn(),
   mockEnvironmentVariablesFindMany: vi.fn(),
@@ -31,6 +32,7 @@ const {
   mockNotifyWebTaskInitiatorOnSettle: vi.fn(),
   mockEnqueueWebTaskInitiatorSettleNotification: vi.fn(),
   mockCaptureTaskSettled: vi.fn(),
+  mockIsTypeSafeJudgmentConfigured: vi.fn(async () => false),
 }));
 
 vi.mock('@roomote/db/encryption', () => ({
@@ -64,6 +66,10 @@ vi.mock('@roomote/db/server', () => ({
   // fall through to the GitHub default. Provider-stamped payloads never reach
   // it. Individual tests override with mockResolvedValueOnce when needed.
   resolveWorkspaceSourceControlProvider: vi.fn(async () => undefined),
+  workspaceRequiresSourceControlCredentials: vi.fn(
+    async (_dbOrTx: unknown, workspace: { type: string }) =>
+      workspace.type !== 'no_repositories',
+  ),
   resolveSandboxModelRuntimeEnv: (...args: unknown[]) =>
     mockResolveSandboxModelRuntimeEnv(...args),
   inArray: vi.fn(),
@@ -105,6 +111,10 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   releaseTaskRun: vi.fn(),
 }));
 
+vi.mock('@roomote/cloud-agents/server/typesafe-judgment', () => ({
+  isTypeSafeJudgmentConfigured: mockIsTypeSafeJudgmentConfigured,
+}));
+
 vi.mock('@roomote/telemetry/server', () => ({
   captureTaskSettled: (...args: unknown[]) => mockCaptureTaskSettled(...args),
 }));
@@ -128,7 +138,10 @@ vi.mock('../enqueue-web-task-initiator-settle-notification', () => ({
     mockEnqueueWebTaskInitiatorSettleNotification(...args),
 }));
 
-import { resolveWorkspaceSourceControlProvider } from '@roomote/db/server';
+import {
+  resolveWorkspaceSourceControlProvider,
+  workspaceRequiresSourceControlCredentials,
+} from '@roomote/db/server';
 
 import {
   createSourceControlTokenForTaskRun,
@@ -158,6 +171,9 @@ describe('createSourceControlTokenForTaskRun', () => {
     // default. clearAllMocks keeps implementations, so reset it explicitly.
     vi.mocked(resolveWorkspaceSourceControlProvider).mockResolvedValue(
       undefined,
+    );
+    vi.mocked(workspaceRequiresSourceControlCredentials).mockImplementation(
+      async (_dbOrTx, workspace) => workspace.type !== 'no_repositories',
     );
     mockDecryptSecrets.mockImplementation(async (value) => value);
     mockEnvironmentVariablesFindMany.mockResolvedValue([]);
@@ -258,6 +274,38 @@ describe('createSourceControlTokenForTaskRun', () => {
       source: 'app',
       expiresAt: null,
     });
+    expect(
+      mockCreateTaskRunWorkerGitHubTokenWithMetadata,
+    ).not.toHaveBeenCalled();
+    expect(mockCreateTaskRunScopedGitLabTokens).not.toHaveBeenCalled();
+    expect(mockCreateTaskRunGiteaCredentials).not.toHaveBeenCalled();
+    expect(mockCreateTaskRunAdoCredentials).not.toHaveBeenCalled();
+    expect(mockCreateTaskRunBitbucketCredentials).not.toHaveBeenCalled();
+  });
+
+  it('does not require or mint credentials for a repository-free environment', async () => {
+    vi.mocked(workspaceRequiresSourceControlCredentials).mockResolvedValueOnce(
+      false,
+    );
+
+    const result = await createSourceControlTokenForTaskRun(
+      makeTaskRun({
+        repo: '__all_repositories__',
+        environmentId: 'env-without-repositories',
+        description: 'Verify a repository-free environment',
+      }),
+      '[test]',
+      { maxRetries: 1 },
+    );
+
+    expect(result).toMatchObject({
+      provider: 'github',
+      token: '',
+      envVars: {},
+      source: 'app',
+      expiresAt: null,
+    });
+    expect(resolveWorkspaceSourceControlProvider).not.toHaveBeenCalled();
     expect(
       mockCreateTaskRunWorkerGitHubTokenWithMetadata,
     ).not.toHaveBeenCalled();
@@ -1063,6 +1111,20 @@ describe('redactControlPlaneEnvVars', () => {
 });
 
 describe('fetchResolvedRuntimeEnvVars', () => {
+  it('turns on the turn-end completion check only with a hosted judgment model', async () => {
+    mockResolveSandboxModelRuntimeEnv.mockResolvedValue({});
+
+    // An operator-set value never stands in for the platform's own answer.
+    await expect(
+      fetchResolvedRuntimeEnvVars({ ROOMOTE_COMPLETION_GATE: 'true' }),
+    ).resolves.not.toHaveProperty('ROOMOTE_COMPLETION_GATE');
+
+    mockIsTypeSafeJudgmentConfigured.mockResolvedValueOnce(true);
+    await expect(fetchResolvedRuntimeEnvVars({})).resolves.toMatchObject({
+      ROOMOTE_COMPLETION_GATE: 'true',
+    });
+  });
+
   it('withholds the sandbox OpenRouter key from ordinary tasks', async () => {
     mockResolveSandboxModelRuntimeEnv.mockResolvedValueOnce({});
 

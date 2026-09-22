@@ -22,18 +22,21 @@ export async function buildWorkspaceConfig({
   environmentId,
   repo,
   branch,
+  allowMissingBranchFallback,
   sha,
   selectedRepositories,
 }: {
   environmentId?: string;
   repo?: string;
   branch?: string;
+  allowMissingBranchFallback?: boolean;
   sha?: string;
   selectedRepositories?: string[];
 }): Promise<WorkspaceConfig> {
   const workspace = resolveTaskWorkspace({
     repo,
     branch,
+    allowMissingBranchFallback,
     sha,
     environmentId,
     selectedRepositories,
@@ -54,6 +57,9 @@ export async function buildWorkspaceConfig({
       environmentConfig,
       sourceRepo: workspace.sourceRepo,
       sourceBranch: workspace.sourceBranch,
+      ...(workspace.allowMissingBranchFallback
+        ? { allowMissingBranchFallback: true }
+        : {}),
       sourceSha: workspace.sourceSha,
     } satisfies EnvironmentWorkspace;
   }
@@ -67,6 +73,9 @@ export async function buildWorkspaceConfig({
       type: 'repository',
       repository: workspace.repo,
       branch: workspace.branch,
+      ...(workspace.allowMissingBranchFallback
+        ? { allowMissingBranchFallback: true }
+        : {}),
       sha: workspace.sha,
     } satisfies RepositoryWorkspace;
   }
