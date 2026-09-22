@@ -1,7 +1,6 @@
 import {
   getIntegrationToolAutoSettings,
   isDeploymentExperimentEnabled,
-  recordIntegrationToolAutoEvaluation,
   recordIntegrationToolShadowEvaluation,
   redactIntegrationToolArgs,
 } from '@roomote/db/server';
