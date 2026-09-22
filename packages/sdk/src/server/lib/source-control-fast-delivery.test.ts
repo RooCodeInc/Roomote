@@ -228,6 +228,51 @@ describe('createFastAgentSourceControlTaskLauncher', () => {
     expect(task.payload).not.toHaveProperty('linkedWorkItems');
   });
 
+  it('marks a terminal pull request branch as eligible for missing-branch fallback', async () => {
+    const conversation = buildSourceControlFastConversation({
+      provider: 'github',
+      host: 'github.com',
+      repositoryFullName: 'acme/api',
+      kind: 'pull',
+      number: 42,
+    });
+    const launch = createFastAgentSourceControlTaskLauncher({
+      userId: 'user-1',
+      conversation,
+      resolveTarget: vi.fn().mockResolvedValue({
+        repositoryId: 'repo-1',
+        branch: 'develop',
+        pullRequest: {
+          url: 'https://github.com/acme/api/pull/42',
+          terminal: true,
+        },
+      }),
+    });
+
+    await launch({
+      prompt: 'Follow up on the merged change',
+      environmentId: null,
+      parentSessionId: 'fast-1',
+      postKickoff: vi.fn(),
+    });
+
+    const params = mocks.createFastAgentTaskLauncher.mock.calls[0]?.[0] as {
+      buildTask: (input: Record<string, unknown>) => {
+        payload: Record<string, unknown>;
+      };
+    };
+    expect(
+      params.buildTask({
+        prompt: 'Follow up on the merged change',
+        environmentId: null,
+        parentSessionId: 'fast-1',
+      }).payload,
+    ).toMatchObject({
+      branch: 'develop',
+      allowMissingBranchFallback: true,
+    });
+  });
+
   it('keeps the discussion repository and drops the sentinel when a blank slate is requested', async () => {
     const conversation = buildSourceControlFastConversation({
       provider: 'github',
@@ -458,6 +503,7 @@ describe('GitHub Fast delivery', () => {
     });
     await expect(delivery!.resolveTarget()).resolves.toMatchObject({
       branch: 'develop',
+      pullRequest: { terminal: true },
     });
 
     pullsGet.mockResolvedValueOnce({
@@ -471,6 +517,7 @@ describe('GitHub Fast delivery', () => {
     });
     await expect(delivery!.resolveTarget()).resolves.toMatchObject({
       branch: 'main',
+      pullRequest: { terminal: true },
     });
   });
 
@@ -963,6 +1010,7 @@ describe('other provider Fast deliveries', () => {
 
     await expect(delivery!.resolveTarget()).resolves.toMatchObject({
       branch: 'develop',
+      pullRequest: { terminal: true },
     });
   });
 
@@ -1107,6 +1155,7 @@ describe('other provider Fast deliveries', () => {
 
     await expect(delivery!.resolveTarget()).resolves.toMatchObject({
       branch: 'develop',
+      pullRequest: { terminal: true },
     });
   });
 
@@ -1132,6 +1181,7 @@ describe('other provider Fast deliveries', () => {
 
     await expect(delivery!.resolveTarget()).resolves.toMatchObject({
       branch: 'develop',
+      pullRequest: { terminal: true },
     });
   });
 
@@ -1165,6 +1215,7 @@ describe('other provider Fast deliveries', () => {
 
     await expect(delivery!.resolveTarget()).resolves.toMatchObject({
       branch: 'develop',
+      pullRequest: { terminal: true },
     });
   });
 });

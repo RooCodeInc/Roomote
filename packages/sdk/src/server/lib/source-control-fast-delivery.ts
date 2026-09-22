@@ -112,6 +112,7 @@ export type SourceControlFastLaunchTarget = {
     url: string;
     title?: string | null;
     sha?: string | null;
+    terminal?: boolean;
   };
   issue?: {
     identifier: string;
@@ -210,6 +211,9 @@ export function createFastAgentSourceControlTaskLauncher(params: {
           sourceControlHost: discussion.host,
           ...((branch ?? target.branch)
             ? { branch: branch ?? target.branch }
+            : {}),
+          ...(target.pullRequest?.terminal
+            ? { allowMissingBranchFallback: true }
             : {}),
           ...(linkedIssue ? { linkedWorkItems: [linkedIssue] } : {}),
           ...buildFastAgentChildTaskMetadata({
@@ -402,9 +406,10 @@ async function buildGitHubFastDelivery(
         .get({ owner, repo, pull_number: discussion.number })
         .then((response) => response.data)
         .catch(() => null);
+      const terminal = pullRequest?.state === 'closed';
       const branch = pullRequest
         ? resolveFastPullRequestBranch({
-            terminal: pullRequest.state === 'closed',
+            terminal,
             headBranch: pullRequest.head?.ref,
             baseBranch: pullRequest.base?.ref,
             defaultBranch: repository.defaultBranch,
@@ -419,6 +424,7 @@ async function buildGitHubFastDelivery(
             `https://${discussion.host}/${discussion.repositoryFullName}/pull/${discussion.number}`,
           title: pullRequest?.title ?? null,
           sha: pullRequest?.head?.sha ?? null,
+          ...(terminal ? { terminal: true } : {}),
         },
       };
     },
@@ -574,11 +580,11 @@ async function buildGitLabFastDelivery(
         projectId: discussion.repositoryFullName,
         mergeRequestIid: discussion.number,
       }).catch(() => null);
+      const terminal =
+        mergeRequest?.state === 'closed' || mergeRequest?.state === 'merged';
       const branch = mergeRequest
         ? resolveFastPullRequestBranch({
-            terminal:
-              mergeRequest.state === 'closed' ||
-              mergeRequest.state === 'merged',
+            terminal,
             headBranch: mergeRequest.source_branch,
             baseBranch: mergeRequest.target_branch,
             defaultBranch: repository.defaultBranch,
@@ -591,6 +597,7 @@ async function buildGitLabFastDelivery(
           url: mergeRequest?.web_url ?? pullRequestPageUrl(discussion),
           title: mergeRequest?.title ?? null,
           sha: mergeRequest?.sha ?? null,
+          ...(terminal ? { terminal: true } : {}),
         },
       };
     },
@@ -641,11 +648,12 @@ async function buildBitbucketFastDelivery(
         repositoryFullName: discussion.repositoryFullName,
         pullRequestNumber: discussion.number,
       }).catch(() => null);
+      const terminal = ['MERGED', 'DECLINED', 'SUPERSEDED'].includes(
+        pullRequest?.state?.toUpperCase() ?? '',
+      );
       const branch = pullRequest
         ? resolveFastPullRequestBranch({
-            terminal: ['MERGED', 'DECLINED', 'SUPERSEDED'].includes(
-              pullRequest.state?.toUpperCase() ?? '',
-            ),
+            terminal,
             headBranch: pullRequest.source?.branch?.name,
             baseBranch: pullRequest.destination?.branch?.name,
             defaultBranch: repository.defaultBranch,
@@ -658,6 +666,7 @@ async function buildBitbucketFastDelivery(
           url: pullRequest?.links?.html?.href ?? pullRequestPageUrl(discussion),
           title: pullRequest?.title ?? null,
           sha: pullRequest?.source?.commit?.hash ?? null,
+          ...(terminal ? { terminal: true } : {}),
         },
       };
     },
@@ -723,11 +732,12 @@ async function buildGiteaFastDelivery(
         repositoryFullName: discussion.repositoryFullName,
         pullRequestNumber: discussion.number,
       }).catch(() => null);
+      const terminal =
+        pullRequest?.merged === true ||
+        pullRequest?.state?.toLowerCase() === 'closed';
       const branch = pullRequest
         ? resolveFastPullRequestBranch({
-            terminal:
-              pullRequest.merged === true ||
-              pullRequest.state?.toLowerCase() === 'closed',
+            terminal,
             headBranch: pullRequest.head?.ref,
             baseBranch: pullRequest.base?.ref,
             defaultBranch: repository.defaultBranch,
@@ -740,6 +750,7 @@ async function buildGiteaFastDelivery(
           url: pullRequest?.html_url ?? pullRequestPageUrl(discussion),
           title: pullRequest?.title ?? null,
           sha: pullRequest?.head?.sha ?? null,
+          ...(terminal ? { terminal: true } : {}),
         },
       };
     },
@@ -907,11 +918,12 @@ async function buildAdoFastDelivery(
         lastMergeSourceCommit?: { commitId?: string };
         repository?: { webUrl?: string };
       } | null;
+      const terminal =
+        details?.status?.toLowerCase() === 'completed' ||
+        details?.status?.toLowerCase() === 'abandoned';
       const branch = details
         ? resolveFastPullRequestBranch({
-            terminal:
-              details.status?.toLowerCase() === 'completed' ||
-              details.status?.toLowerCase() === 'abandoned',
+            terminal,
             headBranch: details.sourceRefName?.replace(/^refs\/heads\//, ''),
             baseBranch: details.targetRefName?.replace(/^refs\/heads\//, ''),
             defaultBranch: repository.defaultBranch,
@@ -926,6 +938,7 @@ async function buildAdoFastDelivery(
             : `https://${discussion.host}/${parsed.organization}/${parsed.project}/_git/${parsed.repository}/pullrequest/${discussion.number}`,
           title: details?.title ?? null,
           sha: details?.lastMergeSourceCommit?.commitId ?? null,
+          ...(terminal ? { terminal: true } : {}),
         },
       };
     },
