@@ -1,5 +1,5 @@
 import { redactBrainText } from '@roomote/communication/redact-brain-text';
-import { and, asc, db, desc, eq, sql, taskMessages } from '@roomote/db/server';
+import { and, asc, db, desc, eq, taskMessages } from '@roomote/db/server';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   extractAcpMessageText,
@@ -144,7 +144,42 @@ function clip(text: string, maxChars: number): string {
  * What the person asked this task for: the opening prompt and the latest
  * follow-ups. Read from the transcript rather than taken from the sandbox so
  * the agent cannot restate its own request.
+ *
+ * The opening prompt counts whether or not it is visible: a task delegated
+ * from a Session gets its request as a hidden `<request>` prompt. Later
+ * hidden prompts never count. Those are the platform's and the harness's own
+ * notices (an environment-setup notice, a recovery or continuation nudge, a
+ * completion-check reminder), and reading one back as a follow-up would have
+ * the check judging its own instructions. A person's follow-up, from the web
+ * or a chat thread, is always visible.
  */
+const HARNESS_PROMPT_SOURCE_PREFIX = 'opencode-';
+
+type PromptRow = {
+  id: string;
+  contentBlocks: unknown;
+  payload: unknown;
+  metadata: unknown;
+};
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object'
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function isHiddenPrompt(row: PromptRow): boolean {
+  return asRecord(row.metadata)?.visibleInTranscript === false;
+}
+
+function isHarnessPrompt(row: PromptRow): boolean {
+  return [asRecord(row.payload)?.source, asRecord(row.metadata)?.source].some(
+    (source) =>
+      typeof source === 'string' &&
+      source.startsWith(HARNESS_PROMPT_SOURCE_PREFIX),
+  );
+}
+
 async function loadTaskRequests(
   taskId: string,
 ): Promise<{ request: string; followUps: string } | null> {
@@ -156,24 +191,34 @@ async function loadTaskRequests(
         id: taskMessages.id,
         contentBlocks: taskMessages.contentBlocks,
         payload: taskMessages.payload,
+        metadata: taskMessages.metadata,
       })
       .from(taskMessages)
       .where(
         and(
           eq(taskMessages.taskId, taskId),
           eq(taskMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.UserPrompt),
-          sql`coalesce(${taskMessages.metadata} ->> 'visibleInTranscript', 'true') <> 'false'`,
         ),
       )
       .orderBy(direction(taskMessages.ts), direction(taskMessages.createdAt))
       .limit(PROMPT_SCAN_LIMIT);
-  const visiblePrompts = (rows: Awaited<ReturnType<typeof scan>>) =>
+  const requestPrompts = (
+    rows: PromptRow[],
+    options: { includeHidden: boolean },
+  ) =>
     rows.flatMap((row) => {
-      const payload =
-        row.payload && typeof row.payload === 'object'
-          ? (row.payload as Record<string, unknown>)
-          : null;
-      const raw = extractAcpMessageText(row.contentBlocks, payload)?.trim();
+      if (
+        isHarnessPrompt(row) ||
+        (!options.includeHidden && isHiddenPrompt(row))
+      ) {
+        return [];
+      }
+
+      const payload = asRecord(row.payload);
+      const raw = extractAcpMessageText(
+        row.contentBlocks as Parameters<typeof extractAcpMessageText>[0],
+        payload,
+      )?.trim();
       const text = raw
         ? normalizeTranscriptUserText(
             isSystemInjectedAcpPromptText(raw)
@@ -186,13 +231,13 @@ async function loadTaskRequests(
       return text ? [{ id: row.id, text }] : [];
     });
 
-  const [opening] = visiblePrompts(await scan(asc));
+  const [opening] = requestPrompts(await scan(asc), { includeHidden: true });
 
   if (!opening) {
     return null;
   }
 
-  const followUps = visiblePrompts(await scan(desc))
+  const followUps = requestPrompts(await scan(desc), { includeHidden: false })
     .filter((prompt) => prompt.id !== opening.id)
     .slice(0, FOLLOW_UP_LIMIT)
     .reverse();

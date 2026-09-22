@@ -4114,6 +4114,21 @@ describe('OpenCodeServerHarness', () => {
         .filter((text): text is string => typeof text === 'string')
         .join('\n');
       expect(secondPromptText).toContain('temporary provider rate limit');
+      // The hidden continue prompt is persisted marked as the harness's own,
+      // so transcript readers never mistake it for a request from a person.
+      expect(
+        persistedEnvelopes.find(
+          (envelope) =>
+            envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt &&
+            String(envelope.payload.text ?? '').includes(
+              'temporary provider rate limit',
+            ),
+        ),
+      ).toMatchObject({
+        visibleInTranscript: false,
+        metadata: { source: 'opencode-rate-limit-retry' },
+        payload: { source: 'opencode-rate-limit-retry' },
+      });
       expect(
         taskEvents.some(
           (event) => event.eventName === TaskEventName.TaskAborted,

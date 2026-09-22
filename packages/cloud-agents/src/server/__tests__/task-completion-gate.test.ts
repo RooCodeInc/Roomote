@@ -25,10 +25,17 @@ vi.mock('../typesafe-judgment', () => ({
 
 import { evaluateTaskCompletionGate } from '../task-completion-gate';
 
-const prompt = (text: string) => ({
+const prompt = (
+  text: string,
+  options: { source?: string; hidden?: boolean } = {},
+) => ({
   id: text,
   contentBlocks: [{ type: 'text', text }],
-  payload: null,
+  payload: options.source ? { source: options.source } : null,
+  metadata: {
+    ...(options.source ? { source: options.source } : {}),
+    ...(options.hidden || options.source ? { visibleInTranscript: false } : {}),
+  },
 });
 
 /**
@@ -36,10 +43,12 @@ const prompt = (text: string) => ({
  * then reads the latest plan.
  */
 function mockTranscript(
-  prompts: string[],
+  prompts: Array<string | ReturnType<typeof prompt>>,
   options: { plan?: string; scanLimit?: number } = {},
 ): void {
-  const rows = prompts.map(prompt);
+  const rows = prompts.map((entry) =>
+    typeof entry === 'string' ? prompt(entry) : entry,
+  );
   const scanLimit = options.scanLimit ?? 12;
   mockPromptRows
     .mockReset()
@@ -176,6 +185,60 @@ describe('evaluateTaskCompletionGate', () => {
       follow_ups: [56, 57, 58, 59, 60]
         .map((index) => `Follow-up ${index}.`)
         .join('\n\n'),
+    });
+  });
+
+  it('reads a request that arrived as a hidden prompt, as a delegated task gets it', async () => {
+    mockTranscript([
+      prompt(
+        '<workflow>Standard task workflow.</workflow>\n<request>Remove the duplicate-call guard.</request>',
+        { hidden: true },
+      ),
+    ]);
+
+    await evaluateTaskCompletionGate({ taskId: 'task-1', check });
+
+    expect(mockEvaluateDecisionModel).toHaveBeenCalledTimes(1);
+    expect(mockEvaluateDecisionModel.mock.calls[0]![0].state.request).toContain(
+      'Remove the duplicate-call guard.',
+    );
+  });
+
+  it('reads only visible follow-ups, never notices or reminders', async () => {
+    mockTranscript([
+      'Remove the duplicate-call guard.',
+      prompt(
+        'Roomote automatically compared what was asked, your closing report, and everything this task changed, and flagged the following: ...',
+        { source: 'opencode-completion-gate' },
+      ),
+      prompt('Before finalizing, post a terminal chat-visible reply.', {
+        source: 'opencode-stop-hook',
+      }),
+      // Queued by the harness itself after a provider rate limit.
+      prompt(
+        'Continue where you left off after the temporary provider rate limit.',
+        { source: 'opencode-rate-limit-retry' },
+      ),
+      // A platform notice, hidden, with its own source.
+      prompt('The environment setup finished; the snapshot is ready.', {
+        source: 'environment-setup',
+      }),
+      // A hidden follow-up with no source at all still never counts.
+      prompt(
+        'The visual proof step exceeded its shared five-minute deadline.',
+        {
+          hidden: true,
+        },
+      ),
+      // A person's follow-up is visible and does count.
+      'Also drop the helper.',
+    ]);
+
+    await evaluateTaskCompletionGate({ taskId: 'task-1', check });
+
+    expect(mockEvaluateDecisionModel.mock.calls[0]![0].state).toMatchObject({
+      request: 'Remove the duplicate-call guard.',
+      follow_ups: 'Also drop the helper.',
     });
   });
 
