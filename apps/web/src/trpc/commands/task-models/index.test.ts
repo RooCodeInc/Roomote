@@ -1783,7 +1783,7 @@ describe('task model provider commands', () => {
     expect(anthropicModels.map((model) => model.id)).toEqual(
       expect.arrayContaining([
         'anthropic/claude-sonnet-5',
-        'anthropic/claude-opus-5',
+        'anthropic/claude-opus-5-5',
         'anthropic/claude-haiku-4-5',
       ]),
     );
@@ -2023,14 +2023,14 @@ describe('task model provider commands', () => {
       'anthropic/claude-fable-5',
       'anthropic/claude-fable-5-1',
       'anthropic/claude-haiku-4-5',
-      'anthropic/claude-opus-5',
+      'anthropic/claude-opus-5-5',
       'anthropic/claude-sonnet-5',
     ]);
     expect([...seededSettings.allowedModelIds].sort()).toEqual([
       'anthropic/claude-fable-5',
       'anthropic/claude-fable-5-1',
       'anthropic/claude-haiku-4-5',
-      'anthropic/claude-opus-5',
+      'anthropic/claude-opus-5-5',
       'anthropic/claude-sonnet-5',
     ]);
     expect(seededSettings?.defaultModelId).toBe('anthropic/claude-sonnet-5');
