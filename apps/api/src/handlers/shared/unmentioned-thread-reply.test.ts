@@ -522,6 +522,47 @@ describe('resolveUnmentionedThreadReplyRouting', () => {
     });
   });
 
+  it('fails closed when the addressee probabilities do not form a distribution', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockEvaluateTypeSafeJudgments.mockResolvedValue({
+      ...addresseeAnswer('roomote', 0.95),
+      addressee: {
+        type: 'choice',
+        choice: 'roomote',
+        confidence: 0.5,
+        probabilities: { roomote: 0.5, participant: 0.6, unclear: 0 },
+      },
+    });
+
+    await expect(
+      resolve({
+        eventText: 'Can you check this?',
+        threadMessages: [human('100', 'U1'), bot('200')],
+      }),
+    ).resolves.toEqual({ shouldRoute: false, interjectionDetected: false });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('invalid'));
+    warn.mockRestore();
+  });
+
+  it('does not trust the reported choice over the probabilities', async () => {
+    mockEvaluateTypeSafeJudgments.mockResolvedValue({
+      ...addresseeAnswer('roomote', 0.95),
+      addressee: {
+        type: 'choice',
+        choice: 'roomote',
+        confidence: 0.5,
+        probabilities: { roomote: 0.45, participant: 0.5, unclear: 0.05 },
+      },
+    });
+
+    await expect(
+      resolve({
+        eventText: 'Can you check this?',
+        threadMessages: [human('100', 'U1'), bot('200')],
+      }),
+    ).resolves.toEqual({ shouldRoute: false, interjectionDetected: false });
+  });
+
   it('fails closed when the acknowledgement answer is malformed', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     mockEvaluateTypeSafeJudgments.mockResolvedValue({

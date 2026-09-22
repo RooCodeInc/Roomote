@@ -336,9 +336,32 @@ function isValidAddresseeAnswer(value: unknown): value is {
 
   const probabilityRecord = probabilities as Record<string, unknown>;
   const choices: AddresseeChoice[] = ['roomote', 'participant', 'unclear'];
-  return (
-    Object.keys(probabilityRecord).length === choices.length &&
-    choices.every((choice) => isUnitInterval(probabilityRecord[choice]))
+  if (
+    Object.keys(probabilityRecord).length !== choices.length ||
+    !choices.every((choice) => isUnitInterval(probabilityRecord[choice]))
+  ) {
+    return false;
+  }
+
+  // The majority threshold only means something over a real distribution,
+  // so a vector that does not sum to one is treated as malformed.
+  const total = choices.reduce(
+    (sum, choice) => sum + (probabilityRecord[choice] as number),
+    0,
+  );
+  return Math.abs(total - 1) <= PROBABILITY_SUM_TOLERANCE;
+}
+
+/** Probabilities are reported rounded, so the sum may miss one slightly. */
+const PROBABILITY_SUM_TOLERANCE = 0.05;
+
+/** The option with the most probability; `choice` is not trusted for this. */
+function likeliestAddressee(
+  probabilities: Record<AddresseeChoice, number>,
+): AddresseeChoice {
+  return (['roomote', 'participant', 'unclear'] as const).reduce(
+    (best, choice) =>
+      probabilities[choice] > probabilities[best] ? choice : best,
   );
 }
 
@@ -383,7 +406,7 @@ async function judgeUnmentionedReplyAddressee(params: {
     const { probabilities } = answers.addressee;
     const acknowledgement = answers.closingAcknowledgement.noul;
     const shouldRoute =
-      answers.addressee.choice === 'roomote' &&
+      likeliestAddressee(probabilities) === 'roomote' &&
       probabilities.roomote >= JUDGMENT_ROUTE_TO_ROOMOTE_MIN &&
       acknowledgement < JUDGMENT_CLOSING_ACKNOWLEDGEMENT_MAX;
 
