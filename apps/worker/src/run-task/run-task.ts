@@ -1910,15 +1910,11 @@ export const runTask = async ({
 
           const isEmptySession =
             !hasRuntimeSession && status.phase === 'waiting_for_prompt';
-          const actorChanged = Boolean(
-            message.userId && message.userId !== getLastKnownActorUserId(),
-          );
           const queueOnly =
             !isEmptySession &&
-            (message.deliveryMode === 'send'
-              ? status.phase === 'running' ||
-                status.phase === 'waiting_for_user_input'
-              : actorChanged);
+            message.deliveryMode === 'send' &&
+            (status.phase === 'running' ||
+              status.phase === 'waiting_for_user_input');
 
           let sent: boolean;
 

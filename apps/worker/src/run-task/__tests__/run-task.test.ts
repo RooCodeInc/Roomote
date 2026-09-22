@@ -3288,7 +3288,7 @@ describe('runTask', () => {
     expect(harnessManager?.sendFollowUpPrompt).not.toHaveBeenCalled();
   });
 
-  it('preserves startup steer semantics once a runtime session exists', async () => {
+  it('preserves startup steer semantics across an actor transition', async () => {
     taskRunsClaimFollowUpMessagesMock.mockResolvedValueOnce([
       {
         id: 'follow-up-steer',
@@ -3297,7 +3297,7 @@ describe('runTask', () => {
         prompt: 'Steer the active task now.',
         images: null,
         source: null,
-        userId: null,
+        userId: 'user-2',
         userName: null,
         userImageUrl: null,
         clientMessageId: 'client-startup-steer',
@@ -3305,7 +3305,13 @@ describe('runTask', () => {
       },
     ]);
 
-    await runTask(createFollowUpRunTaskInput({ id: 153, taskId: 'task-153' }));
+    await runTask(
+      createFollowUpRunTaskInput({
+        id: 153,
+        taskId: 'task-153',
+        actingUserId: 'user-1',
+      }),
+    );
 
     const harnessManager = harnessManagerInstances.at(-1)!;
     harnessManager.currentSessionId = 'runtime-session-153';
@@ -3320,9 +3326,14 @@ describe('runTask', () => {
       expect.objectContaining({
         prompt: 'Steer the active task now.',
         autoSteerWhenQueued: true,
+        userId: 'user-2',
         clientMessageId: 'client-startup-steer',
       }),
     );
+    expect(taskRunsActivateFollowUpActorMock).toHaveBeenCalledWith({
+      runId: 153,
+      id: 'follow-up-steer',
+    });
     expect(taskRunsMarkFollowUpAcceptedMock).toHaveBeenCalledWith({
       runId: 153,
       id: 'follow-up-steer',
