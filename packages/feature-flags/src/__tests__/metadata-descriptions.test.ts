@@ -51,7 +51,6 @@ describe('metadata descriptions', () => {
       }),
     ).toEqual({
       results: true,
-      slackPeerConversations: false,
       privateSessions: false,
       browserNotifications: false,
       integrationToolApprovals: false,

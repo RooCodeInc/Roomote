@@ -60,15 +60,6 @@ vi.mock('@/components/settings/ResultsExperimentalSetting', () => ({
 }));
 
 vi.mock(
-  '@/components/settings/SlackPeerConversationsExperimentalSetting',
-  () => ({
-    SlackPeerConversationsExperimentalSetting: () => (
-      <div>Slack peer conversations setting</div>
-    ),
-  }),
-);
-
-vi.mock(
   '@/components/settings/FastSessionCommunicationJevExperimentalSetting',
   () => ({
     FastSessionCommunicationJevExperimentalSetting: () => (
@@ -76,7 +67,6 @@ vi.mock(
     ),
   }),
 );
-
 import { ExperimentalSettingsPage } from './ExperimentalSettingsPage';
 
 describe('ExperimentalSettingsPage', () => {
@@ -120,9 +110,6 @@ describe('ExperimentalSettingsPage', () => {
       screen.queryByText('Home suggestions setting'),
     ).not.toBeInTheDocument();
     expect(screen.queryByText('Results setting')).not.toBeInTheDocument();
-    expect(
-      screen.queryByText('Slack peer conversations setting'),
-    ).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(refetchMock).toHaveBeenCalledOnce();
@@ -135,9 +122,6 @@ describe('ExperimentalSettingsPage', () => {
       screen.queryByText('Home suggestions setting'),
     ).not.toBeInTheDocument();
     expect(screen.getByText('Results setting')).toBeInTheDocument();
-    expect(
-      screen.getByText('Slack peer conversations setting'),
-    ).toBeInTheDocument();
     expect(
       screen.queryByText('Failed to load experimental settings.'),
     ).not.toBeInTheDocument();
@@ -167,9 +151,6 @@ describe('ExperimentalSettingsPage', () => {
       screen.queryByText('Home suggestions setting'),
     ).not.toBeInTheDocument();
     expect(screen.getByText('Results setting')).toBeInTheDocument();
-    expect(
-      screen.getByText('Slack peer conversations setting'),
-    ).toBeInTheDocument();
     expect(
       screen.queryByText('Failed to load experimental settings.'),
     ).not.toBeInTheDocument();

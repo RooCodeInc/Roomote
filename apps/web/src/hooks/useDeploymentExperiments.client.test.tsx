@@ -95,14 +95,14 @@ describe('useDeploymentExperiments', () => {
     renderHook(() => useDeploymentExperiments('Save failed'));
 
     const variables = {
-      id: 'slackPeerConversations',
+      id: 'browserNotifications',
       enabled: true,
     } as const;
     const context = await mutationOptions.onMutate!(variables as never);
 
     expect(mocks.setQueryData).toHaveBeenCalledWith(
       ['deployment-experiments'],
-      { ...previous, slackPeerConversations: true },
+      { ...previous, browserNotifications: true },
     );
 
     const updater = vi.fn((current) => current);

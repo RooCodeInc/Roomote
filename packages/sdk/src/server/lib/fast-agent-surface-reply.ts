@@ -8,6 +8,7 @@ import {
   FastAgentDurableRetryScheduledError,
   fastAgentConversationRepository,
   getActiveFastAgentTasks,
+  registerFastAgentTurnActivity,
   resolveApiBaseUrl,
   type FastAgentActiveTask,
   type FastAgentConversation,
@@ -891,12 +892,6 @@ async function runFastAgentSurfaceReplyWithLock(
 
   const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
   {
-    const activeTasks = params.externalInput
-      ? [
-          ...(params.activeTasks ?? []),
-          ...(await getActiveFastAgentTasks(params.sessionId)),
-        ]
-      : params.activeTasks;
     // Durable admission: persisted under this owner's claim before the turn
     // runs. A reaction rides the same row with its input recorded, so the
     // queue resumes it as a reaction turn rather than a typed message. A
@@ -933,6 +928,43 @@ async function runFastAgentSurfaceReplyWithLock(
           conversationId: params.sessionId,
           eventKey,
         });
+    }
+    const earlyActivity =
+      admittedTurn && delivery.conversation.surface === 'slack'
+        ? delivery.adapter.activity
+        : undefined;
+    const unregisterActivity = earlyActivity
+      ? registerFastAgentTurnActivity(release.signal, earlyActivity)
+      : undefined;
+    if (earlyActivity) {
+      try {
+        earlyActivity.start();
+      } catch (error) {
+        console.warn(
+          `[Fast Agent] Failed to start Slack session activity: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
+    const disposeEarlyActivity = async () => {
+      await earlyActivity?.dispose().catch((error) => {
+        console.warn(
+          `[Fast Agent] Failed to dispose Slack session activity: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+      unregisterActivity?.();
+    };
+    let activeTasks: FastAgentActiveTask[] | undefined;
+    try {
+      activeTasks = params.externalInput
+        ? [
+            ...(params.activeTasks ?? []),
+            ...(await getActiveFastAgentTasks(params.sessionId)),
+          ]
+        : params.activeTasks;
+    } catch (error) {
+      await disposeEarlyActivity();
+      throw error;
     }
     return answerFastAgentQuestion({
       question: params.question,
@@ -993,20 +1025,22 @@ async function runFastAgentSurfaceReplyWithLock(
         createArtifact: buildFastAgentArtifactCreator(params.sessionId),
         ...delivery.adapter,
       },
-    }).then(
-      (): FastAgentSurfaceReplyWithLockOutcome => ({ outcome: 'delivered' }),
-      (error: unknown): FastAgentSurfaceReplyWithLockOutcome => {
-        // Not a failure: the turn parked itself for a durable retry and the
-        // queue re-runs it at the scheduled time, so the reply is on its way.
-        if (error instanceof FastAgentDurableRetryScheduledError) {
-          console.info(
-            `[Fast Agent] Surface reply turn parked for a durable retry: ${error.message}`,
-          );
-          return { outcome: 'parked', retryAt: error.retryAt };
-        }
-        throw error;
-      },
-    );
+    })
+      .then(
+        (): FastAgentSurfaceReplyWithLockOutcome => ({ outcome: 'delivered' }),
+        (error: unknown): FastAgentSurfaceReplyWithLockOutcome => {
+          // Not a failure: the turn parked itself for a durable retry and the
+          // queue re-runs it at the scheduled time, so the reply is on its way.
+          if (error instanceof FastAgentDurableRetryScheduledError) {
+            console.info(
+              `[Fast Agent] Surface reply turn parked for a durable retry: ${error.message}`,
+            );
+            return { outcome: 'parked', retryAt: error.retryAt };
+          }
+          throw error;
+        },
+      )
+      .finally(disposeEarlyActivity);
   }
 }
 

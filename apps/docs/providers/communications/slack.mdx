@@ -256,12 +256,14 @@ channels implicitly or inspect repository contents without delegating the work
 to a task. When the request spans every repository, Roomote can delegate it to the
 deployment's all-repositories environment.
 
-**Peer conversations** under **Settings > Experimental** is off by default. A
-deployment admin can enable it so eligible human discussion in an
-established Roomote Slack thread continues reaching Roomote after another participant
-is mentioned. Roomote stays quiet around peer discussion unless directly
-addressed, and direct mentions continue to work normally whether the experiment
-is on or off.
+Eligible human discussion in an established Roomote Slack thread keeps reaching
+Roomote after another participant is mentioned. When a
+[judgment model](/models#judgment-model) is configured, every unmentioned
+reply from a linked member in a Roomote thread is judged before it can start a
+turn: it routes only when the model finds it is addressed to Roomote and
+expects a response, so messages meant for a colleague and simple
+acknowledgements stay silent. Without a judgment model, Roomote stays quiet
+around peer discussion unless directly addressed. Direct mentions always work.
 
 Every Roomote reply ends with a compact footer: **Reply anytime**, a plain
 running-task count when at least one task is running, links to pull requests the

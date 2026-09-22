@@ -7,6 +7,7 @@ import {
   FastAgentDurableRetryScheduledError,
   fastAgentConversationRepository,
   getActiveFastAgentTasks,
+  registerFastAgentTurnActivity,
   type FastAgentReactionExternalInput,
 } from '@roomote/cloud-agents/server';
 import {
@@ -127,6 +128,29 @@ async function processFastAgentReaction(params: {
         eventKey: durableTurn.eventKey,
       });
   }
+  const activity = createFastAgentSlackSessionActivity({
+    slack: context.slack,
+    workspaceId: context.teamId,
+    channel: event.item.channel,
+    threadTs,
+    title: session.title,
+    resolveTitle: async () =>
+      (await fastAgentConversationRepository.findById({ id: session.id }))
+        ?.title,
+  });
+  const unregisterActivity = registerFastAgentTurnActivity(
+    releaseTurnLock.signal,
+    activity,
+  );
+  if (durableTurn) {
+    try {
+      activity.start();
+    } catch (error) {
+      console.warn(
+        `[SlackWebhook] Failed to start Slack session activity: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
 
   try {
     const activeTasks = await getActiveFastAgentTasks(session.id);
@@ -167,16 +191,7 @@ async function processFastAgentReaction(params: {
             }
           : {}),
         createArtifact: buildFastAgentArtifactCreator(session.id),
-        activity: createFastAgentSlackSessionActivity({
-          slack: context.slack,
-          workspaceId: context.teamId,
-          channel: event.item.channel,
-          threadTs,
-          title: session.title,
-          resolveTitle: async () =>
-            (await fastAgentConversationRepository.findById({ id: session.id }))
-              ?.title,
-        }),
+        activity,
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({
             userId: actorUserId,
@@ -319,6 +334,12 @@ async function processFastAgentReaction(params: {
       }
     }
   } finally {
+    await activity.dispose().catch((error) => {
+      console.warn(
+        `[SlackWebhook] Failed to dispose Slack session activity: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
+    unregisterActivity?.();
     await releaseTurnLock().catch(() => {});
   }
 }

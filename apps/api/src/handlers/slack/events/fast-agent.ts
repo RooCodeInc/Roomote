@@ -3,6 +3,7 @@ import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
   fastAgentConversationRepository,
+  registerFastAgentTurnActivity,
   type FastAgentActiveTask,
   type LaunchFastAgentTask,
 } from '@roomote/cloud-agents/server';
@@ -66,7 +67,7 @@ export async function processFastAgentMessage(params: {
   launchTask: LaunchFastAgentTask;
   directedAtRoomote?: boolean;
   roomoteSlackUserId?: string;
-  peerConversationsExperimentEnabled?: boolean;
+  peerConversationsEnabled?: boolean;
   userInitiated?: boolean;
   originSessionId?: string;
   onAccepted?: (abort: () => Promise<void>) => void;
@@ -83,7 +84,7 @@ export async function processFastAgentMessage(params: {
     launchTask,
     directedAtRoomote = false,
     roomoteSlackUserId,
-    peerConversationsExperimentEnabled = false,
+    peerConversationsEnabled = false,
     userInitiated = true,
   } = params;
   const threadId = event.thread_ts || event.ts;
@@ -116,7 +117,7 @@ export async function processFastAgentMessage(params: {
     event.channel_type !== 'im' &&
     event.channel_type !== 'mpim';
   const eligiblePeerConversationMessage =
-    peerConversationsExperimentEnabled &&
+    peerConversationsEnabled &&
     Boolean(roomoteSlackUserId) &&
     eligibleAmbientHumanMessage;
   const currentMessagePeerDirected =
@@ -143,6 +144,10 @@ export async function processFastAgentMessage(params: {
   let releaseCanonicalFastAgentLock: Awaited<
     ReturnType<typeof acquireFastAgentTurnLock>
   > = null;
+  let activity:
+    | ReturnType<typeof createFastAgentSlackSessionActivity>
+    | undefined;
+  let unregisterActivity: (() => void) | undefined;
 
   try {
     // Resolve route-based aliases only after serializing the inbound Slack
@@ -368,6 +373,29 @@ export async function processFastAgentMessage(params: {
           eventKey: durableTurn.eventKey,
         });
     }
+    activity = createFastAgentSlackSessionActivity({
+      slack,
+      workspaceId: teamId,
+      channel: event.channel,
+      threadTs: threadId,
+      title: session.title,
+      resolveTitle: async () =>
+        (await fastAgentConversationRepository.findById({ id: session.id }))
+          ?.title,
+    });
+    unregisterActivity = registerFastAgentTurnActivity(
+      activeTurnLock.signal,
+      activity,
+    );
+    if (durableTurn && !allowSilentAmbientReply) {
+      try {
+        activity.start();
+      } catch (error) {
+        console.warn(
+          `[SlackWebhook] Failed to start Slack session activity: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
     params.onAccepted?.(() =>
       activeTurnLock.abort(
         new Error('Fast suggestion launch settlement failed.'),
@@ -432,16 +460,7 @@ export async function processFastAgentMessage(params: {
                 ),
             }
           : {}),
-        activity: createFastAgentSlackSessionActivity({
-          slack,
-          workspaceId: teamId,
-          channel: event.channel,
-          threadTs: threadId,
-          title: session.title,
-          resolveTitle: async () =>
-            (await fastAgentConversationRepository.findById({ id: session.id }))
-              ?.title,
-        }),
+        activity,
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({
             userId,
@@ -627,6 +646,12 @@ export async function processFastAgentMessage(params: {
       }
     }
   } finally {
+    await activity?.dispose().catch((error) => {
+      console.warn(
+        `[SlackWebhook] Failed to dispose Slack session activity: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
+    unregisterActivity?.();
     await releaseCanonicalFastAgentLock?.().catch(() => {});
     await releaseFastAgentLock?.().catch(() => {});
   }

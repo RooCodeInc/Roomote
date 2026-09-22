@@ -553,6 +553,33 @@ describe('tool presentation resolver', () => {
     },
   );
 
+  it('uses the path-only label for a missing native read result', () => {
+    expect(
+      resolveToolPresentation(
+        toolData({
+          toolName: 'read',
+          status: 'failed',
+          rawInput: { filePath: '/REPOSITORIES.md' },
+          output:
+            "Error: ENOENT: no such file or directory, open '/REPOSITORIES.md'",
+        } as never),
+      ),
+    ).toMatchObject({ verb: '', object: '/REPOSITORIES.md not found' });
+  });
+
+  it('preserves the generic label for unrelated native read failures', () => {
+    expect(
+      resolveToolPresentation(
+        toolData({
+          toolName: 'read',
+          status: 'failed',
+          rawInput: { filePath: '/REPOSITORIES.md' },
+          output: 'Error: permission denied',
+        } as never),
+      ),
+    ).toMatchObject({ verb: 'Failed to Read', object: '/REPOSITORIES.md' });
+  });
+
   it.each([
     ['read', 'Read', 'file', 'read'],
     ['apply_patch', 'Edited', '', 'edit'],
