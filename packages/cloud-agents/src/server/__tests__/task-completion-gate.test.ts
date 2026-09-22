@@ -25,10 +25,11 @@ vi.mock('../typesafe-judgment', () => ({
 
 import { evaluateTaskCompletionGate } from '../task-completion-gate';
 
-const prompt = (text: string) => ({
+const prompt = (text: string, source?: string) => ({
   id: text,
   contentBlocks: [{ type: 'text', text }],
-  payload: null,
+  payload: source ? { source } : null,
+  metadata: source ? { source, visibleInTranscript: false } : null,
 });
 
 /**
@@ -36,10 +37,12 @@ const prompt = (text: string) => ({
  * then reads the latest plan.
  */
 function mockTranscript(
-  prompts: string[],
+  prompts: Array<string | ReturnType<typeof prompt>>,
   options: { plan?: string; scanLimit?: number } = {},
 ): void {
-  const rows = prompts.map(prompt);
+  const rows = prompts.map((entry) =>
+    typeof entry === 'string' ? prompt(entry) : entry,
+  );
   const scanLimit = options.scanLimit ?? 12;
   mockPromptRows
     .mockReset()
@@ -190,6 +193,27 @@ describe('evaluateTaskCompletionGate', () => {
     expect(mockEvaluateDecisionModel.mock.calls[0]![0].state.request).toContain(
       'Remove the duplicate-call guard.',
     );
+  });
+
+  it("never reads the harness's own reminders back as requests", async () => {
+    mockTranscript([
+      'Remove the duplicate-call guard.',
+      prompt(
+        'Roomote automatically compared what was asked, your closing report, and everything this task changed, and flagged the following: ...',
+        'opencode-completion-gate',
+      ),
+      prompt(
+        'Before finalizing, post a terminal chat-visible reply.',
+        'opencode-stop-hook',
+      ),
+    ]);
+
+    await evaluateTaskCompletionGate({ taskId: 'task-1', check });
+
+    expect(mockEvaluateDecisionModel.mock.calls[0]![0].state).toMatchObject({
+      request: 'Remove the duplicate-call guard.',
+      follow_ups: '',
+    });
   });
 
   it('does not repeat a lone opening prompt as its own follow-up', async () => {

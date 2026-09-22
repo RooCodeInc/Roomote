@@ -145,11 +145,30 @@ function clip(text: string, maxChars: number): string {
  * follow-ups. Read from the transcript rather than taken from the sandbox so
  * the agent cannot restate its own request.
  *
- * Hidden prompts count. A task delegated from a Session gets its request as
- * a hidden `<request>` prompt, and the harness's own reminders are never
- * persisted as prompts, so every stored prompt is a request from a person or
- * the Session acting for one.
+ * Hidden prompts count: a task delegated from a Session gets its request as
+ * a hidden `<request>` prompt. The harness's own reminders (a completion
+ * check follow-up, a chat closeout nudge) are not persisted as prompts today;
+ * should that change, their `source` keeps them out, so the check never
+ * reads its own instructions back as a request.
  */
+const HARNESS_PROMPT_SOURCE_PREFIX = 'opencode-';
+
+function isHarnessPrompt(
+  payload: Record<string, unknown> | null,
+  metadata: unknown,
+): boolean {
+  const meta =
+    metadata && typeof metadata === 'object'
+      ? (metadata as Record<string, unknown>)
+      : null;
+
+  return [payload?.source, meta?.source].some(
+    (source) =>
+      typeof source === 'string' &&
+      source.startsWith(HARNESS_PROMPT_SOURCE_PREFIX),
+  );
+}
+
 async function loadTaskRequests(
   taskId: string,
 ): Promise<{ request: string; followUps: string } | null> {
@@ -161,6 +180,7 @@ async function loadTaskRequests(
         id: taskMessages.id,
         contentBlocks: taskMessages.contentBlocks,
         payload: taskMessages.payload,
+        metadata: taskMessages.metadata,
       })
       .from(taskMessages)
       .where(
@@ -177,6 +197,11 @@ async function loadTaskRequests(
         row.payload && typeof row.payload === 'object'
           ? (row.payload as Record<string, unknown>)
           : null;
+
+      if (isHarnessPrompt(payload, row.metadata)) {
+        return [];
+      }
+
       const raw = extractAcpMessageText(row.contentBlocks, payload)?.trim();
       const text = raw
         ? normalizeTranscriptUserText(
