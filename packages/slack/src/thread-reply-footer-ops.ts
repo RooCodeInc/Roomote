@@ -183,6 +183,7 @@ async function relocateSlackThreadFooter<TResult>(params: {
     Partial<Pick<SlackNotifier, 'getWorkspaceId'>>;
   channel: string;
   threadTs: string;
+  canPublish?: (current: { messageId: string } | null) => boolean;
   publish: () => Promise<{ messageId: string; result: TResult } | null>;
 }): Promise<TResult | null> {
   return relocateThreadFooterCarrier({
@@ -195,6 +196,7 @@ async function relocateSlackThreadFooter<TResult>(params: {
       return messageId ? { messageId } : null;
     },
     sameVersion: (current, seen) => current?.messageId === seen?.messageId,
+    canPublish: params.canPublish,
     publish: async () => {
       const published = await params.publish();
       return published
@@ -356,6 +358,8 @@ export async function updateSlackThreadMessageWithFooterText(params: {
   /** Body blocks without the footer context block. */
   bodyBlocks: unknown[];
   footerText: string;
+  /** Leave a later reply's sticky footer in place during recovery retries. */
+  preserveNewerCarrier?: boolean;
 }): Promise<boolean> {
   const footerBlock = buildSlackThreadReplyFooterBlock({
     footerText: params.footerText,
@@ -363,6 +367,10 @@ export async function updateSlackThreadMessageWithFooterText(params: {
 
   const result = await relocateSlackThreadFooter({
     ...params,
+    canPublish: (current) =>
+      !params.preserveNewerCarrier ||
+      !current ||
+      Number(current.messageId) <= Number(params.messageTs),
     publish: async () => {
       const updated = await params.slack.updateMessage({
         channel: params.channel,

@@ -289,6 +289,30 @@ describe('thread-reply-footer-ops', () => {
     });
   });
 
+  it('does not move the footer backward during a streamed reply recovery', async () => {
+    mockGetFooterTs.mockResolvedValue('444.000');
+    const slack = {
+      getMessageBlocks: vi.fn(),
+      updateMessage: vi.fn().mockResolvedValue(true),
+    };
+
+    await expect(
+      updateSlackThreadMessageWithFooterText({
+        slack,
+        channel: 'C1',
+        threadTs: '100.000',
+        messageTs: '333.000',
+        text: 'older streamed reply',
+        bodyBlocks: [{ type: 'markdown', text: 'older streamed reply' }],
+        footerText: 'footer',
+        preserveNewerCarrier: true,
+      }),
+    ).resolves.toBe(false);
+
+    expect(slack.updateMessage).not.toHaveBeenCalled();
+    expect(mockSetFooterTs).not.toHaveBeenCalled();
+  });
+
   it('preserves awake preview, zero status and Session navigation in reply-only posts', async () => {
     const context = {
       linkedPrs: [{ prNumber: 7, prUrl: 'https://github.com/o/r/pull/7' }],
