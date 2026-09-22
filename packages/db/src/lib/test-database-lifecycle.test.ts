@@ -132,10 +132,11 @@ describe('setupTestDatabaseLifecycle', () => {
           ? [{ table_name: 'users' }]
           : [],
       );
-    const teardownGate = Promise.withResolvers<void>();
-    mockUnsafe
-      .mockResolvedValueOnce([])
-      .mockReturnValueOnce(teardownGate.promise);
+    let finishTeardown!: () => void;
+    const teardownPromise = new Promise<void>((resolve) => {
+      finishTeardown = resolve;
+    });
+    mockUnsafe.mockResolvedValueOnce([]).mockReturnValueOnce(teardownPromise);
     const url =
       'postgres://postgres@localhost:5432/roomote_teardown_overlap_test';
     const releaseOld = await setupTestDatabaseLifecycle(url);
@@ -143,7 +144,7 @@ describe('setupTestDatabaseLifecycle', () => {
     await vi.waitFor(() => expect(mockUnsafe).toHaveBeenCalledTimes(2));
     const releaseNew = await setupTestDatabaseLifecycle(url);
     expect(mockPostgres).toHaveBeenCalledTimes(2);
-    teardownGate.resolve();
+    finishTeardown();
     await closing;
     const releaseJoined = await setupTestDatabaseLifecycle(url);
     expect(mockPostgres).toHaveBeenCalledTimes(2);
