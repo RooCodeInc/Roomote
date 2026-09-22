@@ -1056,6 +1056,34 @@ describe('enqueueTask Session linkage', () => {
     ).toHaveLength(0);
   });
 
+  it.each(['environmentDefinitionId', 'verifiesEnvironmentId'] as const)(
+    'captures Session creation for user-started launches carrying the %s environment marker',
+    async (marker) => {
+      const userId = await createUser();
+      mockCaptureEvent.mockClear();
+
+      await launchFresh({
+        initiator: { kind: 'user', userId },
+        workflow: 'standard',
+        surface: 'web',
+        trigger: 'manual',
+        task: standardTaskInput({
+          payload: {
+            repo: 'acme/widgets',
+            description: 'Do the thing',
+            [marker]: crypto.randomUUID(),
+          },
+        }),
+      });
+
+      expect(
+        mockCaptureEvent.mock.calls.filter(
+          ([event]) => event === 'session_created',
+        ),
+      ).toHaveLength(1);
+    },
+  );
+
   it('creates exactly one Session link for a visible fresh task', async () => {
     const userId = await createUser();
     const run = await launchFresh({
