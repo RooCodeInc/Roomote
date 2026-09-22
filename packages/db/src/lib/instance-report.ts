@@ -956,7 +956,15 @@ export async function collectInstanceReportStats(
     db
       .select({ id: personalMcpServers.id })
       .from(personalMcpServers)
-      .where(eq(personalMcpServers.enabled, true)),
+      .innerJoin(users, eq(users.id, personalMcpServers.ownerUserId))
+      .where(
+        and(
+          eq(personalMcpServers.enabled, true),
+          // The runtime treats personal rows of soft-deleted owners as gone,
+          // so they must not inflate the count (findCustomMcpServerById).
+          isNull(users.deletedAt),
+        ),
+      ),
     // Active API-key integrations: labels and origins are user-authored, so
     // only the count leaves the instance and stubs are numbered in order.
     db

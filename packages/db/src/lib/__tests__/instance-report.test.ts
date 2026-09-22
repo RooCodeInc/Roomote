@@ -10,6 +10,7 @@ import {
   db,
   githubInstallationFactory,
   llmUsageEvents,
+  personalMcpServers,
   pullRequestFacts,
   repositoryFactory,
   sessionFactory,
@@ -20,6 +21,7 @@ import {
   taskRuns,
   tasks,
   userFactory,
+  users,
 } from '../../server';
 import {
   bucketPullRequestStatus,
@@ -340,6 +342,63 @@ describe('instance-report pure helpers', () => {
 
     expect(deduped).toHaveLength(2);
     expect(new Set(deduped.map((entry) => entry.key)).size).toBe(2);
+  });
+});
+
+describe('collectInstanceReportStats integration summary', () => {
+  it('counts enabled personal servers only for live owners', async () => {
+    const suffix = Date.now().toString();
+    const activeOwner = await userFactory.create();
+    const deletedOwner = await userFactory.create();
+    await db
+      .update(users)
+      .set({ deletedAt: new Date() })
+      .where(eq(users.id, deletedOwner.id));
+
+    const before = await collectInstanceReportStats(new Date());
+
+    await db.insert(personalMcpServers).values([
+      {
+        ownerUserId: activeOwner.id,
+        name: `active-owner-${suffix}`,
+        url: 'https://example.com/mcp',
+        enabled: true,
+      },
+      {
+        ownerUserId: deletedOwner.id,
+        name: `deleted-owner-${suffix}`,
+        url: 'https://example.com/mcp',
+        enabled: true,
+      },
+      {
+        ownerUserId: activeOwner.id,
+        name: `disabled-${suffix}`,
+        url: 'https://example.com/mcp',
+        enabled: false,
+      },
+    ]);
+
+    const after = await collectInstanceReportStats(new Date());
+
+    // Exactly one new custom stub: the deleted-owner row and the disabled
+    // row must not contribute.
+    expect(after.integrations.enabled - before.integrations.enabled).toBe(1);
+    const newName =
+      after.integrations.enabledNames[before.integrations.enabled];
+    expect(newName).toMatch(/^custom-integration-\d+$/);
+
+    // Clean up so other suites sharing the database see a stable baseline.
+    await db
+      .delete(personalMcpServers)
+      .where(
+        and(
+          inArray(personalMcpServers.name, [
+            `active-owner-${suffix}`,
+            `deleted-owner-${suffix}`,
+            `disabled-${suffix}`,
+          ]),
+        ),
+      );
   });
 });
 
