@@ -71,6 +71,7 @@
     "check-types:fast": "tsgo --noEmit",
     "test": "dotenvx run -f ../../.env.test -- vitest",
     "deployment:launch-docker-task": "tsx src/server/deployment-ci-launch-task.ts",
+    "review-prescreen:eval": "tsx src/server/workflows/githubPrReviewPrescreenEval.ts",
     "clean": "rimraf .turbo"
   },
   "dependencies": {
