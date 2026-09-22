@@ -11,6 +11,23 @@ forth between tools.
 
 ## What you can do
 
+### Partner with Roomote
+
+For a joint investigation, design review, prompt review, or sustained
+discussion, start or continue the Roomote Session for that outcome and call
+`get_partnership_guide`. Then send Roomote a message beginning with
+`Agent (on behalf of user):` and ask it to load its packaged
+`roomote-partnership` skill by exact name with `list_skills`, then `load_skill`.
+Read Roomote's reply and confirm that it reports an actual successful load and
+its current state. A skill listing or mention is not a load; if loading is
+unavailable or fails, report that honestly before claiming the paired workflow
+is established.
+
+Use this client-initiated sequence for reciprocal judgment, not routine task
+dispatch or self-contained local work. Relay substantive exchanges as
+`Agent → Roomote` and `Roomote → Agent`, read the full reply before answering,
+and keep the final answer self-contained.
+
 ### Start a Session
 
 Ask your MCP client to start Roomote with a clear message. The ordinary start
@@ -37,7 +54,7 @@ cursor after no new activity returns an empty narrative delta rather than the
 same messages again; full transcript reads remain available for debugging.
 
 When relaying between an MCP client and Roomote, summarize substantive messages
-with the labels `Client → Roomote` and `Roomote → Client`. Relay questions or input
+with the labels `Agent → Roomote` and `Roomote → Agent`. Relay questions or input
 needs promptly, skip narration for unchanged polls, and make the final answer
 self-contained. Relay summaries should cover visible narrative and decisions,
 not credentials, raw tool traces, hidden reasoning, or oversized internal

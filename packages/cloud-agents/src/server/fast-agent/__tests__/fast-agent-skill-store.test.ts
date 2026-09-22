@@ -130,6 +130,45 @@ describe('FastAgentSkillStore', () => {
     expect(reference.content).toContain('Authentication');
   });
 
+  it('lists and loads the partnership skill with its parsed description and paired guide', async () => {
+    expect(FAST_AGENT_PACKAGED_SKILL_NAMES).toContain('roomote-partnership');
+
+    const skillRoot = resolve(
+      import.meta.dirname,
+      '../../workflows/skills/standard',
+    );
+    const store = new FastAgentSkillStore(skillRoot);
+    const catalog = await store.list({ name: 'roomote-partnership' });
+    const skill = await store.read('packaged:roomote-partnership');
+    const clientGuide = await readFile(
+      join(skillRoot, 'roomote-partnership', 'client-guide.md'),
+      'utf8',
+    );
+
+    expect(catalog).toMatchObject({
+      counts: { packaged: 1, total: 1 },
+      skills: [
+        expect.objectContaining({
+          description: expect.stringContaining('joint investigation'),
+          id: 'packaged:roomote-partnership',
+          name: 'roomote-partnership',
+          source: 'packaged',
+        }),
+      ],
+    });
+    expect(skill).toMatchObject({
+      description: expect.stringContaining('joint investigation'),
+      resource: 'SKILL.md',
+      resources: expect.arrayContaining(['SKILL.md', 'client-guide.md']),
+    });
+    expect(skill.content).toContain('name: roomote-partnership');
+    expect(clientGuide).toContain('roomote-partnership');
+    for (const content of [skill.content, clientGuide]) {
+      expect(content).not.toMatch(/http/iu);
+      expect(content).not.toContain('@');
+    }
+  });
+
   it('discovers delegation exploration as an unscoped packaged skill', async () => {
     const store = new FastAgentSkillStore();
 

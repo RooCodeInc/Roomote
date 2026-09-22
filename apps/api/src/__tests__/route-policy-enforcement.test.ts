@@ -313,6 +313,31 @@ describe('route policy enforcement', () => {
           params: {},
         }),
       };
+      const publicInitializeResponse = await createApiApp().request(
+        'http://localhost/mcp',
+        {
+          ...request,
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 0,
+            method: 'initialize',
+            params: {
+              protocolVersion: '2025-06-18',
+              capabilities: {},
+              clientInfo: { name: 'route-policy-test', version: '1' },
+            },
+          }),
+        },
+      );
+      const publicInitializeBody = (await publicInitializeResponse.json()) as {
+        result?: { instructions?: string };
+      };
+      expect(publicInitializeBody.result?.instructions).toContain(
+        'get_partnership_guide',
+      );
+      expect(publicInitializeBody.result?.instructions).toContain(
+        'joint investigations, design or prompt reviews, and sustained discussions',
+      );
       const publicResponse = await createApiApp().request(
         'http://localhost/mcp',
         request,
@@ -321,6 +346,8 @@ describe('route policy enforcement', () => {
         result?: {
           tools?: Array<{
             name: string;
+            annotations?: Record<string, unknown>;
+            description?: string;
             inputSchema?: {
               properties?: { action?: { enum?: string[] } };
             };
@@ -334,6 +361,16 @@ describe('route policy enforcement', () => {
       expect(publicBody.result?.tools?.map((tool) => tool.name)).toContain(
         'manage_custom_automations',
       );
+      const partnershipGuide = publicBody.result?.tools?.find(
+        (tool) => tool.name === 'get_partnership_guide',
+      );
+      expect(partnershipGuide?.description).toContain(
+        'joint investigations, design or prompt reviews, and sustained discussions',
+      );
+      expect(partnershipGuide?.annotations).toMatchObject({
+        readOnlyHint: true,
+        idempotentHint: true,
+      });
       const manageTasks = publicBody.result?.tools?.find(
         (tool) => tool.name === 'manage_tasks',
       );
@@ -468,6 +505,29 @@ describe('route policy enforcement', () => {
         environments: expect.any(Array),
       });
 
+      const guideResponse = await createApiApp().request(
+        'http://localhost/mcp',
+        {
+          ...request,
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 7,
+            method: 'tools/call',
+            params: { name: 'get_partnership_guide', arguments: {} },
+          }),
+        },
+      );
+      const guideBody = (await guideResponse.json()) as {
+        result?: { structuredContent?: Record<string, unknown> };
+      };
+      expect(guideResponse.status).toBe(200);
+      expect(guideBody.result?.structuredContent).toMatchObject({
+        markdown: expect.stringContaining(
+          '# Partnership guide for an MCP client',
+        ),
+        note: expect.stringContaining('grants no authorization'),
+      });
+
       const legacyResponse = await createApiApp().request(
         'http://localhost/api/mcp-routing/roomote',
         {
@@ -484,6 +544,35 @@ describe('route policy enforcement', () => {
       expect(legacyResponse.status).toBe(200);
       expect(legacyBody.result?.tools?.map((tool) => tool.name)).not.toContain(
         'manage_tasks',
+      );
+      expect(legacyBody.result?.tools?.map((tool) => tool.name)).not.toContain(
+        'get_partnership_guide',
+      );
+      const legacyInitializeResponse = await createApiApp().request(
+        'http://localhost/api/mcp-routing/roomote',
+        {
+          ...request,
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 0,
+            method: 'initialize',
+            params: {
+              protocolVersion: '2025-06-18',
+              capabilities: {},
+              clientInfo: { name: 'route-policy-test', version: '1' },
+            },
+          }),
+          headers: {
+            ...request.headers,
+            authorization: 'Bearer test-user-token',
+          },
+        },
+      );
+      const legacyInitializeBody = (await legacyInitializeResponse.json()) as {
+        result?: { instructions?: string };
+      };
+      expect(legacyInitializeBody.result?.instructions).not.toContain(
+        'get_partnership_guide',
       );
       expect(legacyBody.result?.tools?.map((tool) => tool.name)).toContain(
         'manage_custom_automations',
