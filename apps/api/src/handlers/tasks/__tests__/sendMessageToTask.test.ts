@@ -1,10 +1,11 @@
 const {
   mockCreateRunToken,
-  mockEnqueueTaskFollowUpMessage,
+  mockQueueTaskFollowUp,
+  mockSyncActingUserForInboundMessage,
   mockCreateTRPCProxyClient,
   mockEnqueueTask,
   mockGetTaskChannelBindings,
-  mockHasOpenTaskFollowUpMessages,
+  mockHasQueuedTaskFollowUps,
   mockFindLatestTaskRun,
   mockFindReusableGitHubPrFollowUpOwner,
   mockHttpBatchLink,
@@ -24,11 +25,12 @@ const {
   mockEq,
 } = vi.hoisted(() => ({
   mockCreateRunToken: vi.fn(),
-  mockEnqueueTaskFollowUpMessage: vi.fn(),
+  mockQueueTaskFollowUp: vi.fn(),
+  mockSyncActingUserForInboundMessage: vi.fn(),
   mockCreateTRPCProxyClient: vi.fn(),
   mockEnqueueTask: vi.fn(),
   mockGetTaskChannelBindings: vi.fn(),
-  mockHasOpenTaskFollowUpMessages: vi.fn(),
+  mockHasQueuedTaskFollowUps: vi.fn(),
   mockFindLatestTaskRun: vi.fn(),
   mockFindReusableGitHubPrFollowUpOwner: vi.fn(),
   mockHttpBatchLink: vi.fn((options) => options),
@@ -51,6 +53,7 @@ const {
 vi.mock('../acting-user-sync', () => ({
   restoreActingUserIdAfterFailedDelivery:
     mockRestoreActingUserIdAfterFailedDelivery,
+  syncActingUserForInboundMessage: mockSyncActingUserForInboundMessage,
   updateActingUserIdIfNeeded: mockUpdateActingUserIdIfNeeded,
 }));
 
@@ -86,6 +89,8 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 }));
 
 vi.mock('@roomote/communication/messages', () => ({
+  hasQueuedTaskFollowUps: mockHasQueuedTaskFollowUps,
+  queueTaskFollowUp: mockQueueTaskFollowUp,
   trackLatestUserMessageForReplyQuote: mockTrackLatestUserMessageForReplyQuote,
 }));
 
@@ -126,9 +131,7 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
 
   return {
     ...actual,
-    enqueueTaskFollowUpMessage: mockEnqueueTaskFollowUpMessage,
     findReusableGitHubPrFollowUpOwner: mockFindReusableGitHubPrFollowUpOwner,
-    hasOpenTaskFollowUpMessages: mockHasOpenTaskFollowUpMessages,
     touchTaskActivity: mockTouchTaskActivity,
     and: mockAnd,
     eq: mockEq,
@@ -209,11 +212,8 @@ describe('sendMessageToTask', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockCreateRunToken.mockResolvedValue('run-token');
-    mockEnqueueTaskFollowUpMessage.mockResolvedValue({
-      accepted: true,
-      inserted: true,
-      message: { clientMessageId: 'task-follow-up:1' },
-    });
+    mockQueueTaskFollowUp.mockResolvedValue(true);
+    mockSyncActingUserForInboundMessage.mockResolvedValue(undefined);
     mockCreateTRPCProxyClient.mockImplementation(() => ({
       commands: {
         sendPrompt: {
@@ -236,7 +236,7 @@ describe('sendMessageToTask', () => {
       linearOrganizationId: null,
     });
     mockFindReusableGitHubPrFollowUpOwner.mockResolvedValue(null);
-    mockHasOpenTaskFollowUpMessages.mockResolvedValue(false);
+    mockHasQueuedTaskFollowUps.mockResolvedValue(false);
     mockNotifyFastAgentParentOnPrFeedback.mockResolvedValue(undefined);
     mockTaskPullRequestFindFirst.mockResolvedValue(null);
     mockTaskRunFindFirst.mockResolvedValue(null);
@@ -346,15 +346,18 @@ describe('sendMessageToTask', () => {
 
     expect(result).toEqual({
       success: true,
-      result: { queued: true, messageId: 'task-follow-up:1' },
+      result: {
+        queued: true,
+        messageId: expect.stringMatching(/^task-follow-up:/),
+      },
     });
     expect(mockSteerTaskMutate).not.toHaveBeenCalled();
-    expect(mockEnqueueTaskFollowUpMessage).toHaveBeenCalledWith(
+    expect(mockQueueTaskFollowUp).toHaveBeenCalledWith(
+      42,
       expect.objectContaining({
-        runId: 42,
-        taskId: 'task-1',
         prompt: 'Include the additional context.',
         deliveryMode: 'steer',
+        userId: 'user-1',
       }),
     );
   });
@@ -373,10 +376,15 @@ describe('sendMessageToTask', () => {
 
     expect(result).toEqual({
       success: true,
-      result: { queued: true, messageId: 'task-follow-up:1' },
+      result: { queued: true, messageId: 'client-startup-follow-up' },
     });
     expect(mockSendPromptMutate).not.toHaveBeenCalled();
-    expect(mockEnqueueTaskFollowUpMessage).toHaveBeenCalledWith(
+    // Trusted actor sync happens at admission, as for chat-provider queues.
+    expect(mockSyncActingUserForInboundMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: 42, senderUserId: 'user-1' }),
+    );
+    expect(mockQueueTaskFollowUp).toHaveBeenCalledWith(
+      42,
       expect.objectContaining({
         clientMessageId: 'client-startup-follow-up',
         deliveryMode: 'send',
@@ -384,9 +392,9 @@ describe('sendMessageToTask', () => {
     );
   });
 
-  it('keeps a live follow-up behind an older startup outbox row', async () => {
+  it('keeps a live follow-up behind an undelivered queued follow-up', async () => {
     mockFindLatestTaskRun.mockResolvedValue(createActiveRun());
-    mockHasOpenTaskFollowUpMessages.mockResolvedValue(true);
+    mockHasQueuedTaskFollowUps.mockResolvedValue(true);
 
     const result = await sendMessageToTask({
       taskId: 'task-1',
@@ -400,7 +408,8 @@ describe('sendMessageToTask', () => {
       result: { queued: true },
     });
     expect(mockSendPromptMutate).not.toHaveBeenCalled();
-    expect(mockEnqueueTaskFollowUpMessage).toHaveBeenCalledWith(
+    expect(mockQueueTaskFollowUp).toHaveBeenCalledWith(
+      42,
       expect.objectContaining({
         clientMessageId: 'client-after-startup',
         deliveryMode: 'send',
@@ -430,7 +439,8 @@ describe('sendMessageToTask', () => {
       success: true,
       result: { queued: true },
     });
-    expect(mockEnqueueTaskFollowUpMessage).toHaveBeenCalledWith(
+    expect(mockQueueTaskFollowUp).toHaveBeenCalledWith(
+      42,
       expect.objectContaining({ deliveryMode: 'send' }),
     );
   });
@@ -454,7 +464,7 @@ describe('sendMessageToTask', () => {
     });
 
     expect(mockSteerTaskMutate).toHaveBeenCalledTimes(1);
-    expect(mockEnqueueTaskFollowUpMessage).not.toHaveBeenCalled();
+    expect(mockQueueTaskFollowUp).not.toHaveBeenCalled();
   });
 
   it.each([

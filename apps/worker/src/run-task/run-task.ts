@@ -43,7 +43,11 @@ import {
   type LinearSessionMessage,
 } from '@roomote/linear/client';
 import { prependSlackMessages } from '@roomote/slack/client';
-import { prependCommunicationMessages } from '@roomote/communication/messages';
+import {
+  peekTaskFollowUps,
+  prependCommunicationMessages,
+  removeTaskFollowUp,
+} from '@roomote/communication/messages';
 
 import {
   HarnessManager,
@@ -1145,7 +1149,6 @@ export const runTask = async ({
     // reconciliation knows when to refresh.
     let lastPreparedActorUserId: string | null = taskRun.actingUserId ?? null;
     let gitAuthorSyncPending = false;
-    const taskFollowUpClaims = new Map<string, { id: string }>();
     const getLastKnownActorUserId = () => lastPreparedActorUserId;
     const hasPendingGitAuthorSync = () => gitAuthorSyncPending;
     const onActorSynced = (userId: string | null) => {
@@ -1244,26 +1247,6 @@ export const runTask = async ({
           shouldReconnect: true,
           reason: 'Applying updated task model settings before the next turn',
         };
-      }
-
-      if (delivery?.kind === 'queuedPrompt' && delivery.clientMessageId) {
-        const claim = taskFollowUpClaims.get(delivery.clientMessageId);
-
-        if (claim) {
-          const activated = await sdk.taskRuns.activateFollowUpActor({
-            runId: taskRun.id,
-            id: claim.id,
-          });
-
-          if (!activated) {
-            return {
-              shouldReconnect: false,
-              shouldBlockPrompt: true,
-              reason:
-                'The queued follow-up is no longer eligible for actor activation',
-            };
-          }
-        }
       }
 
       const finishQueuedPromptPreparation = async (result: {
@@ -1857,6 +1840,10 @@ export const runTask = async ({
       });
     };
 
+    // Web/API follow-ups the API queued while the sandbox could not take
+    // commands. Each entry is removed only after the runtime accepts it, so
+    // anything left behind is retried on the next tick and the API keeps
+    // queueing later follow-ups behind it.
     let taskFollowUpDrainPromise: Promise<void> | null = null;
     const drainTaskFollowUps = async (): Promise<void> => {
       if (taskFollowUpDrainPromise) {
@@ -1864,30 +1851,14 @@ export const runTask = async ({
       }
 
       taskFollowUpDrainPromise = (async () => {
-        const messages = await sdk.taskRuns.claimFollowUpMessages({
-          runId: taskRun.id,
-          limit: 20,
-        });
+        const queued = await peekTaskFollowUps(taskRun.id);
 
-        for (const message of messages) {
-          taskFollowUpClaims.set(message.clientMessageId, { id: message.id });
-
-          // A lease can expire after the runtime queued the prompt but before
-          // markFollowUpAccepted landed. Record the handoff instead of queueing
-          // a second copy.
-          const runtimeAlreadyQueued = (
-            harness.getQueuedMessageSnapshots?.() ?? []
-          ).some(
-            (queuedMessage) =>
-              queuedMessage.clientMessageId === message.clientMessageId,
-          );
-
-          if (runtimeAlreadyQueued) {
-            await sdk.taskRuns.markFollowUpAccepted({
-              runId: taskRun.id,
-              id: message.id,
-              claimToken: message.claimToken!,
-            });
+        for (const { raw, message } of queued) {
+          if (!message) {
+            logger.warn(
+              `[runTask] Dropping unparseable queued task follow-up for run ${taskRun.id}`,
+            );
+            await removeTaskFollowUp(taskRun.id, raw);
             continue;
           }
 
@@ -1903,135 +1874,66 @@ export const runTask = async ({
             message.deliveryMode === 'steer' &&
             status.phase !== 'waiting_for_prompt'
           ) {
-            await sdk.taskRuns.releaseFollowUpMessage({
-              runId: taskRun.id,
-              id: message.id,
-              claimToken: message.claimToken!,
-            });
-            break;
+            return;
           }
 
           const isEmptySession =
             !hasRuntimeSession && status.phase === 'waiting_for_prompt';
-          const actorChanged = Boolean(
-            message.userId && message.userId !== getLastKnownActorUserId(),
-          );
           const queueOnly =
             !isEmptySession &&
             message.deliveryMode === 'send' &&
             (status.phase === 'running' ||
               status.phase === 'waiting_for_user_input');
+          const promptOptions = {
+            prompt: message.prompt,
+            images: message.images,
+            source: message.source,
+            userId: message.userId,
+            clientMessageId: message.clientMessageId,
+          };
 
           let sent: boolean;
 
-          if (isEmptySession) {
-            const activated = await sdk.taskRuns.activateFollowUpActor({
-              runId: taskRun.id,
-              id: message.id,
-            });
-            if (!activated) {
-              await sdk.taskRuns.releaseFollowUpMessage({
-                runId: taskRun.id,
-                id: message.id,
-                claimToken: message.claimToken!,
-                error: 'Queued follow-up actor activation failed.',
-              });
-              break;
-            }
-
-            const prepared = await prepareActorScopedTurn(
-              message.userId ?? undefined,
-            );
-            if (prepared === false || prepared.skippedMismatch) {
-              await sdk.taskRuns.releaseFollowUpMessage({
-                runId: taskRun.id,
-                id: message.id,
-                claimToken: message.claimToken!,
-                error: 'Queued follow-up actor preparation failed.',
-              });
-              break;
-            }
-
-            sent = harnessManager.startNewTaskFromPrompt({
-              prompt: message.prompt,
-              images: message.images ?? undefined,
-              workflowPhase:
-                getFollowUpWorkflowPhase(message.prompt) ?? undefined,
-              source: message.source ?? undefined,
-              userId: message.userId ?? undefined,
-              userName: message.userName ?? undefined,
-              userImageUrl: message.userImageUrl ?? undefined,
-              clientMessageId: message.clientMessageId,
-            });
-            taskFollowUpClaims.delete(message.clientMessageId);
-          } else if (!queueOnly) {
-            const activated = await sdk.taskRuns.activateFollowUpActor({
-              runId: taskRun.id,
-              id: message.id,
-            });
-            if (!activated) {
-              await sdk.taskRuns.releaseFollowUpMessage({
-                runId: taskRun.id,
-                id: message.id,
-                claimToken: message.claimToken!,
-                error: 'Queued follow-up actor activation failed.',
-              });
-              break;
-            }
-
-            const prepared = await prepareActorScopedTurn(
-              message.userId ?? undefined,
-              { allowMcpReconnect: actorChanged },
-            );
-            if (prepared === false || prepared.skippedMismatch) {
-              await sdk.taskRuns.releaseFollowUpMessage({
-                runId: taskRun.id,
-                id: message.id,
-                claimToken: message.claimToken!,
-                error: 'Queued follow-up actor preparation failed.',
-              });
-              break;
-            }
-
-            sent = await sendPrompt({
-              prompt: message.prompt,
-              images: message.images ?? undefined,
-              autoSteerWhenQueued: message.deliveryMode === 'steer',
-              source: message.source ?? undefined,
-              userId: message.userId ?? undefined,
-              userName: message.userName ?? undefined,
-              userImageUrl: message.userImageUrl ?? undefined,
-              clientMessageId: message.clientMessageId,
-            });
-            taskFollowUpClaims.delete(message.clientMessageId);
+          if (queueOnly) {
+            // RuntimePromptQueue prepares the actor when it dequeues this.
+            sent = await sendPrompt({ ...promptOptions, queueOnly: true });
           } else {
-            sent = await sendPrompt({
-              prompt: message.prompt,
-              images: message.images ?? undefined,
-              queueOnly: true,
-              source: message.source ?? undefined,
-              userId: message.userId ?? undefined,
-              userName: message.userName ?? undefined,
-              userImageUrl: message.userImageUrl ?? undefined,
-              clientMessageId: message.clientMessageId,
+            const actorChanged = Boolean(
+              message.userId && message.userId !== getLastKnownActorUserId(),
+            );
+            // The API already switched the actor when it queued this; a
+            // mismatch means a later sender took over, as with chat queues.
+            const prepared = await prepareActorScopedTurn(message.userId, {
+              ...(isEmptySession ? {} : { allowMcpReconnect: actorChanged }),
+              onMismatch: 'skip',
             });
+
+            if (prepared === false) {
+              return;
+            }
+
+            if (prepared.skippedMismatch) {
+              await removeTaskFollowUp(taskRun.id, raw);
+              continue;
+            }
+
+            sent = isEmptySession
+              ? harnessManager.startNewTaskFromPrompt({
+                  ...promptOptions,
+                  workflowPhase:
+                    getFollowUpWorkflowPhase(message.prompt) ?? undefined,
+                })
+              : await sendPrompt({
+                  ...promptOptions,
+                  autoSteerWhenQueued: message.deliveryMode === 'steer',
+                });
           }
 
           if (!sent) {
-            await sdk.taskRuns.releaseFollowUpMessage({
-              runId: taskRun.id,
-              id: message.id,
-              claimToken: message.claimToken!,
-              error: 'Runtime did not accept the queued follow-up.',
-            });
-            break;
+            return;
           }
 
-          await sdk.taskRuns.markFollowUpAccepted({
-            runId: taskRun.id,
-            id: message.id,
-            claimToken: message.claimToken!,
-          });
+          await removeTaskFollowUp(taskRun.id, raw);
         }
       })().finally(() => {
         taskFollowUpDrainPromise = null;

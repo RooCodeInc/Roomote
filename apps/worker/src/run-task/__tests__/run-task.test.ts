@@ -7,11 +7,9 @@ const {
   buildSandboxInstructionMock,
   taskRunsDoneMock,
   taskRunsActivateSlackReplyTargetMock,
-  taskRunsActivateFollowUpActorMock,
-  taskRunsClaimFollowUpMessagesMock,
+  peekTaskFollowUpsMock,
+  removeTaskFollowUpMock,
   taskRunsClearActiveSlackReplyTargetMock,
-  taskRunsMarkFollowUpAcceptedMock,
-  taskRunsReleaseFollowUpMessageMock,
   taskRunsRecordEventMock,
   taskRunsStampMilestoneMock,
   taskRunsSyncActingUserIdMock,
@@ -53,13 +51,9 @@ const {
     threadTs: '1710000000.456',
     reactionsAllowed: false,
   }),
-  taskRunsActivateFollowUpActorMock: vi.fn().mockResolvedValue({
-    userId: 'user-1',
-  }),
-  taskRunsClaimFollowUpMessagesMock: vi.fn().mockResolvedValue([]),
+  peekTaskFollowUpsMock: vi.fn().mockResolvedValue([]),
+  removeTaskFollowUpMock: vi.fn().mockResolvedValue(undefined),
   taskRunsClearActiveSlackReplyTargetMock: vi.fn().mockResolvedValue(undefined),
-  taskRunsMarkFollowUpAcceptedMock: vi.fn().mockResolvedValue(true),
-  taskRunsReleaseFollowUpMessageMock: vi.fn().mockResolvedValue(true),
   taskRunsRecordEventMock: vi.fn().mockResolvedValue(undefined),
   taskRunsStampMilestoneMock: vi.fn().mockResolvedValue(undefined),
   taskRunsSyncActingUserIdMock: vi
@@ -176,17 +170,19 @@ vi.mock('@roomote/cloud-agents', () => ({
   resolveRoomoteReleaseVersion: vi.fn(() => '0.40.2'),
 }));
 
+vi.mock('@roomote/communication/messages', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/communication/messages')>()),
+  peekTaskFollowUps: peekTaskFollowUpsMock,
+  removeTaskFollowUp: removeTaskFollowUpMock,
+}));
+
 vi.mock('@roomote/sdk/client', () => ({
   instanceSkills: { listForRuntime: listInstanceSkillsMock },
   sdk: {
     taskRuns: {
       activateSlackReplyTarget: taskRunsActivateSlackReplyTargetMock,
-      activateFollowUpActor: taskRunsActivateFollowUpActorMock,
-      claimFollowUpMessages: taskRunsClaimFollowUpMessagesMock,
       clearActiveSlackReplyTarget: taskRunsClearActiveSlackReplyTargetMock,
       done: taskRunsDoneMock,
-      markFollowUpAccepted: taskRunsMarkFollowUpAcceptedMock,
-      releaseFollowUpMessage: taskRunsReleaseFollowUpMessageMock,
       recordEvent: taskRunsRecordEventMock,
       stampMilestone: taskRunsStampMilestoneMock,
       setHarnessSessionId: taskRunsSetHarnessSessionIdMock,
@@ -374,12 +370,8 @@ describe('runTask', () => {
       threadTs: '1710000000.456',
       reactionsAllowed: false,
     });
-    taskRunsActivateFollowUpActorMock.mockReset().mockResolvedValue({
-      userId: 'user-1',
-    });
-    taskRunsClaimFollowUpMessagesMock.mockReset().mockResolvedValue([]);
-    taskRunsMarkFollowUpAcceptedMock.mockReset().mockResolvedValue(true);
-    taskRunsReleaseFollowUpMessageMock.mockReset().mockResolvedValue(true);
+    peekTaskFollowUpsMock.mockReset().mockResolvedValue([]);
+    removeTaskFollowUpMock.mockReset().mockResolvedValue(undefined);
 
     createHarnessMock.mockResolvedValue({
       harness: {},
@@ -3249,19 +3241,14 @@ describe('runTask', () => {
   });
 
   it('starts the first queued follow-up normally for an empty session', async () => {
-    taskRunsClaimFollowUpMessagesMock.mockResolvedValueOnce([
+    peekTaskFollowUpsMock.mockResolvedValueOnce([
       {
-        id: 'follow-up-empty-session',
-        status: 'pending',
-        deliveryMode: 'send',
-        prompt: 'Start with the queued request.',
-        images: null,
-        source: null,
-        userId: null,
-        userName: null,
-        userImageUrl: null,
-        clientMessageId: 'client-empty-session',
-        claimToken: 'claim-empty-session',
+        raw: 'raw-empty-session',
+        message: {
+          deliveryMode: 'send',
+          prompt: 'Start with the queued request.',
+          clientMessageId: 'client-empty-session',
+        },
       },
     ]);
 
@@ -3281,27 +3268,25 @@ describe('runTask', () => {
       workflowPhase: undefined,
       source: undefined,
       userId: undefined,
-      userName: undefined,
-      userImageUrl: undefined,
       clientMessageId: 'client-empty-session',
     });
     expect(harnessManager?.sendFollowUpPrompt).not.toHaveBeenCalled();
+    expect(removeTaskFollowUpMock).toHaveBeenCalledWith(
+      152,
+      'raw-empty-session',
+    );
   });
 
   it('preserves startup steer semantics across an actor transition', async () => {
-    taskRunsClaimFollowUpMessagesMock.mockResolvedValueOnce([
+    peekTaskFollowUpsMock.mockResolvedValueOnce([
       {
-        id: 'follow-up-steer',
-        status: 'pending',
-        deliveryMode: 'steer',
-        prompt: 'Steer the active task now.',
-        images: null,
-        source: null,
-        userId: 'user-2',
-        userName: null,
-        userImageUrl: null,
-        clientMessageId: 'client-startup-steer',
-        claimToken: 'claim-startup-steer',
+        raw: 'raw-startup-steer',
+        message: {
+          deliveryMode: 'steer',
+          prompt: 'Steer the active task now.',
+          userId: 'user-2',
+          clientMessageId: 'client-startup-steer',
+        },
       },
     ]);
 
@@ -3331,18 +3316,49 @@ describe('runTask', () => {
         clientMessageId: 'client-startup-steer',
       }),
     );
-    expect(taskRunsActivateFollowUpActorMock).toHaveBeenCalledWith({
-      runId: 153,
-      id: 'follow-up-steer',
-    });
     expect(getMcpServerConfigsMock.mock.calls.length).toBeGreaterThan(
       mcpRefreshCallsBefore,
     );
-    expect(taskRunsMarkFollowUpAcceptedMock).toHaveBeenCalledWith({
-      runId: 153,
-      id: 'follow-up-steer',
-      claimToken: 'claim-startup-steer',
-    });
+    expect(removeTaskFollowUpMock).toHaveBeenCalledWith(
+      153,
+      'raw-startup-steer',
+    );
+  });
+
+  it('leaves a queued follow-up in place when the runtime rejects it', async () => {
+    peekTaskFollowUpsMock.mockResolvedValueOnce([
+      {
+        raw: 'raw-rejected',
+        message: {
+          deliveryMode: 'send',
+          prompt: 'Retry me on the next tick.',
+          clientMessageId: 'client-rejected',
+        },
+      },
+      {
+        raw: 'raw-behind-rejected',
+        message: {
+          deliveryMode: 'send',
+          prompt: 'Stay behind the first message.',
+          clientMessageId: 'client-behind-rejected',
+        },
+      },
+    ]);
+
+    await runTask(createFollowUpRunTaskInput({ id: 154, taskId: 'task-154' }));
+
+    const harnessManager = harnessManagerInstances.at(-1)!;
+    harnessManager.currentSessionId = 'runtime-session-154';
+    harnessManager.currentPhase = 'idle';
+    harnessManager.sendFollowUpPrompt.mockReturnValueOnce(false);
+
+    const drain = startPollingMock.mock.calls.at(-1)?.[0].drainTaskFollowUps as
+      | (() => Promise<void>)
+      | undefined;
+    await drain?.();
+
+    expect(harnessManager.sendFollowUpPrompt).toHaveBeenCalledTimes(1);
+    expect(removeTaskFollowUpMock).not.toHaveBeenCalled();
   });
 
   it('does not start the initial prompt if cancellation is requested during startup', async () => {

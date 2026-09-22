@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { TRPCClientError } from '@trpc/client';
 import {
   enqueueTask,
@@ -10,10 +12,8 @@ import {
 import {
   and,
   db,
-  enqueueTaskFollowUpMessage,
   eq,
   findReusableGitHubPrFollowUpOwner,
-  hasOpenTaskFollowUpMessages,
   taskPullRequests,
   taskRuns,
   touchTaskActivity,
@@ -26,7 +26,11 @@ import type {
   RunTokenContext,
   PullRequestStatus,
 } from '@roomote/types';
-import { trackLatestUserMessageForReplyQuote } from '@roomote/communication/messages';
+import {
+  hasQueuedTaskFollowUps,
+  queueTaskFollowUp,
+  trackLatestUserMessageForReplyQuote,
+} from '@roomote/communication/messages';
 import {
   TaskPayloadKind,
   buildFastAgentChildTaskMetadata,
@@ -51,6 +55,7 @@ import {
 import { findLatestTaskRun, getTaskChannelBindings } from './helpers';
 import {
   restoreActingUserIdAfterFailedDelivery,
+  syncActingUserForInboundMessage,
   updateActingUserIdIfNeeded,
 } from './acting-user-sync';
 import { logHandlerError } from '../utils';
@@ -130,7 +135,6 @@ type SendMessageToTaskResult =
 type LatestTaskRun = {
   id: number;
   status: string;
-  taskPhase: string | null;
   sandboxServerUrl: string | null;
   actingUserId: string | null;
   snapshotId: string | null;
@@ -931,55 +935,66 @@ async function resolveLinkedReviewHandoff({
   };
 }
 
-async function persistQueuedTaskFollowUp({
-  run,
-  taskId,
+/**
+ * Queues a follow-up for the worker to deliver once the sandbox runtime can
+ * accept it. Like provider chat messages, the trusted actor switch happens
+ * here; the worker skips the prompt (with a resend notice) if a later sender
+ * has taken over the run by delivery time.
+ */
+async function queueTaskFollowUpForDelivery({
+  runId,
   senderUserId,
+  preserveActor,
   message,
-  quoteText,
   images,
   source,
   clientMessageId,
   senderMode,
-  workerQuoteUserName,
   deliveryMode,
 }: {
-  run: LatestTaskRun;
-  taskId: string;
+  runId: number;
   senderUserId: string;
+  preserveActor: boolean;
   message: string;
-  quoteText: string;
   images?: string[];
   source?: string;
   clientMessageId?: string;
   senderMode?: SendMessageSenderMode;
-  workerQuoteUserName?: string;
   deliveryMode: 'send' | 'steer';
 }): Promise<SendMessageToTaskResult> {
-  const followUp = await enqueueTaskFollowUpMessage({
-    runId: run.id,
-    taskId,
-    userId: senderUserId,
-    prompt: message,
-    quoteText,
-    images,
-    source: resolveFollowUpPromptSource({ senderMode, source }),
-    userName: undefined,
-    workerQuoteUserName:
-      workerQuoteUserName ??
-      (await resolveWorkerQuoteUserName(senderMode, senderUserId)),
-    clientMessageId: normalizeOptionalString(clientMessageId),
-    deliveryMode,
+  const queuedUserId = preserveActor ? undefined : senderUserId;
+  const messageId =
+    normalizeOptionalString(clientMessageId) ??
+    `task-follow-up:${randomUUID()}`;
+  const followUpSource = resolveFollowUpPromptSource({ senderMode, source });
+
+  await syncActingUserForInboundMessage({
+    logContext: 'sendMessageToTask',
+    runId,
+    senderUserId: queuedUserId,
   });
 
-  if (!followUp.accepted) {
+  let inserted: boolean;
+  try {
+    inserted = await queueTaskFollowUp(runId, {
+      clientMessageId: messageId,
+      deliveryMode,
+      prompt: message,
+      ...(images?.length ? { images } : {}),
+      ...(followUpSource ? { source: followUpSource } : {}),
+      ...(queuedUserId ? { userId: queuedUserId } : {}),
+    });
+  } catch (error) {
+    logHandlerError(
+      'sendMessageToTask',
+      `Failed to queue follow-up for task run ${runId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
     return {
       success: false,
-      error:
-        followUp.reason === 'settled_run'
-          ? `Task is not active (status: ${run.status})`
-          : 'Task not found',
-      status: followUp.reason === 'settled_run' ? 409 : 404,
+      error: 'Failed to queue the follow-up. Try again in a few seconds.',
+      status: 500,
       delivery: 'not_accepted',
     };
   }
@@ -988,8 +1003,8 @@ async function persistQueuedTaskFollowUp({
     success: true,
     result: {
       queued: true,
-      messageId: followUp.message.clientMessageId,
-      ...(followUp.inserted ? {} : { alreadyQueued: true }),
+      messageId,
+      ...(inserted ? {} : { alreadyQueued: true }),
     },
   };
 }
@@ -1028,7 +1043,6 @@ export async function sendMessageToTask({
     const run = await findLatestTaskRun(taskId, {
       id: true,
       status: true,
-      taskPhase: true,
       sandboxServerUrl: true,
       actingUserId: true,
       snapshotId: true,
@@ -1142,8 +1156,10 @@ export async function sendMessageToTask({
     const requiresActorHandoff =
       !shouldPreserveActor && run.actingUserId !== senderUserId;
 
+    // Queue while the sandbox cannot take commands, and keep queueing while
+    // earlier queued follow-ups are undelivered so this one cannot jump them.
     const queueBeforeLiveDelivery =
-      !run.sandboxServerUrl || (await hasOpenTaskFollowUpMessages(run.id));
+      !run.sandboxServerUrl || (await hasQueuedTaskFollowUps(run.id));
 
     if (queueBeforeLiveDelivery) {
       await touchTaskActivity(db, taskId);
@@ -1155,17 +1171,15 @@ export async function sendMessageToTask({
         message: quoteText,
         senderMode,
       });
-      return persistQueuedTaskFollowUp({
-        run: run as LatestTaskRun,
-        taskId,
+      return queueTaskFollowUpForDelivery({
+        runId: run.id,
         senderUserId,
+        preserveActor: shouldPreserveActor,
         message,
-        quoteText,
         images,
         source,
         clientMessageId,
         senderMode,
-        workerQuoteUserName,
         deliveryMode: 'send',
       });
     }
@@ -1232,29 +1246,20 @@ export async function sendMessageToTask({
       return { success: true, result };
     } catch (error) {
       if (isSandboxStartupError(error, run as LatestTaskRun)) {
-        const queued = await persistQueuedTaskFollowUp({
-          run: run as LatestTaskRun,
-          taskId,
+        // The queued prompt keeps the actor switch it was admitted under.
+        const queued = await queueTaskFollowUpForDelivery({
+          runId: run.id,
           senderUserId,
+          preserveActor: shouldPreserveActor,
           message,
-          quoteText,
           images,
           source,
           clientMessageId,
           senderMode,
-          workerQuoteUserName,
           deliveryMode: 'send',
         });
 
         if (queued.success) {
-          if (didSwitchActingUser) {
-            await restoreActingUserIdAfterFailedDelivery({
-              handlerName: 'sendMessageToTask',
-              runId: run.id,
-              previousActingUserId: run.actingUserId,
-              attemptedActingUserId: senderUserId,
-            });
-          }
           return queued;
         }
       }
@@ -1331,7 +1336,6 @@ export async function steerMessageToTask({
     const run = await findLatestTaskRun(taskId, {
       id: true,
       status: true,
-      taskPhase: true,
       sandboxServerUrl: true,
       actingUserId: true,
       snapshotId: true,
@@ -1380,7 +1384,7 @@ export async function steerMessageToTask({
     }
 
     const queueBeforeLiveDelivery =
-      !run.sandboxServerUrl || (await hasOpenTaskFollowUpMessages(run.id));
+      !run.sandboxServerUrl || (await hasQueuedTaskFollowUps(run.id));
 
     if (queueBeforeLiveDelivery) {
       await touchTaskActivity(db, taskId);
@@ -1392,16 +1396,14 @@ export async function steerMessageToTask({
         message: quoteText,
         senderMode,
       });
-      return persistQueuedTaskFollowUp({
-        run: run as LatestTaskRun,
-        taskId,
+      return queueTaskFollowUpForDelivery({
+        runId: run.id,
         senderUserId: userId,
+        preserveActor: false,
         message,
-        quoteText,
         images,
         clientMessageId,
         senderMode,
-        workerQuoteUserName,
         deliveryMode: 'steer',
       });
     }
@@ -1465,28 +1467,19 @@ export async function steerMessageToTask({
       return { success: true, result };
     } catch (error) {
       if (isSandboxStartupError(error, run as LatestTaskRun)) {
-        const queued = await persistQueuedTaskFollowUp({
-          run: run as LatestTaskRun,
-          taskId,
+        // The queued prompt keeps the actor switch it was admitted under.
+        const queued = await queueTaskFollowUpForDelivery({
+          runId: run.id,
           senderUserId: userId,
+          preserveActor: false,
           message,
-          quoteText,
           images,
           clientMessageId,
           senderMode,
-          workerQuoteUserName,
           deliveryMode: 'steer',
         });
 
         if (queued.success) {
-          if (didSwitchActingUser) {
-            await restoreActingUserIdAfterFailedDelivery({
-              handlerName: 'steerMessageToTask',
-              runId: run.id,
-              previousActingUserId: run.actingUserId,
-              attemptedActingUserId: userId,
-            });
-          }
           return queued;
         }
       }
@@ -1503,7 +1496,6 @@ export async function steerMessageToTask({
       const latestRun = await findLatestTaskRun(taskId, {
         id: true,
         status: true,
-        taskPhase: true,
         sandboxServerUrl: true,
         actingUserId: true,
         snapshotId: true,

@@ -87,7 +87,6 @@ export * from './lib/provider-usage-limits';
 export * from './lib/preview-runtime-config';
 export * from './lib/out-of-band-task-messages';
 export * from './lib/record-task-kickoff-message';
-export * from './lib/task-follow-up-messages';
 export * from './lib/slack-runtime-credentials';
 export * from './lib/slack-installations';
 export * from './lib/teams-runtime-credentials';
@@ -186,8 +185,6 @@ export {
   taskStartParallelCountsRelations,
   taskMessages,
   taskMessagesRelations,
-  taskFollowUpMessages,
-  taskFollowUpMessagesRelations,
   llmUsageEvents,
   llmUsageEventsRelations,
   taskSlackReplyDetails,

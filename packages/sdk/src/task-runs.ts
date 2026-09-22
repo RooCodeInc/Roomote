@@ -214,22 +214,6 @@ export const recordMessageEnvelope = (
   options: AppRouterInput['taskRuns']['recordMessageEnvelope'],
 ) => client.taskRuns.recordMessageEnvelope.mutate(options);
 
-export const claimFollowUpMessages = (
-  options: AppRouterInput['taskRuns']['claimFollowUpMessages'],
-) => client.taskRuns.claimFollowUpMessages.mutate(options);
-
-export const activateFollowUpActor = (
-  options: AppRouterInput['taskRuns']['activateFollowUpActor'],
-) => client.taskRuns.activateFollowUpActor.mutate(options);
-
-export const markFollowUpAccepted = (
-  options: AppRouterInput['taskRuns']['markFollowUpAccepted'],
-) => client.taskRuns.markFollowUpAccepted.mutate(options);
-
-export const releaseFollowUpMessage = (
-  options: AppRouterInput['taskRuns']['releaseFollowUpMessage'],
-) => client.taskRuns.releaseFollowUpMessage.mutate(options);
-
 export const claimShowWidgetFallbackDelivery = (
   options: AppRouterInput['taskRuns']['claimShowWidgetFallbackDelivery'],
 ) => client.taskRuns.claimShowWidgetFallbackDelivery.mutate(options);
