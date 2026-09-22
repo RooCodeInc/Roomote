@@ -7,7 +7,7 @@ settings:
 overrides:
   '@eslint/eslintrc>ajv': 6.14.0
   '@opentelemetry/core': 2.8.0
-  '@smithy/types': ^4.14.3
+  '@smithy/types': 4.15.1
   axios: 1.18.1
   '@vercel/routing-utils>ajv': 6.14.0
   '@vercel/routing-utils>path-to-regexp': 6.3.0
@@ -5503,10 +5503,6 @@ packages:
 
   '@smithy/smithy-client@4.13.6':
     resolution: {integrity: sha512-tAf35/JW/DvMlACcazcoIOKOV0JBqyOvxjPTEME9W+m9wLcE0G1rwADc7Ntu38rY5C9OH8jZjpo4tbtjmIjEBQ==}
-    engines: {node: '>=18.0.0'}
-
-  '@smithy/types@4.14.3':
-    resolution: {integrity: sha512-YupL0ZWmFtJexUN2cHzkvvF/b9pKrtAIfT1o7/oY/Ppu8IYeZ+lDPM5vZdQJaSeA132dJCqojjGC9NhXeF71VQ==}
     engines: {node: '>=18.0.0'}
 
   '@smithy/types@4.15.1':
@@ -12435,14 +12431,14 @@ snapshots:
       '@smithy/middleware-endpoint': 4.5.6
       '@smithy/protocol-http': 5.3.14
       '@smithy/smithy-client': 4.13.6
-      '@smithy/types': 4.14.3
+      '@smithy/types': 4.15.1
       tslib: 2.8.1
 
   '@aws-sdk/signature-v4-multi-region@3.996.31':
     dependencies:
       '@aws-sdk/types': 3.973.10
       '@smithy/signature-v4': 5.4.6
-      '@smithy/types': 4.14.3
+      '@smithy/types': 4.15.1
       tslib: 2.8.1
 
   '@aws-sdk/signature-v4-multi-region@3.996.38':
@@ -12472,7 +12468,7 @@ snapshots:
 
   '@aws-sdk/types@3.973.10':
     dependencies:
-      '@smithy/types': 4.14.3
+      '@smithy/types': 4.15.1
       tslib: 2.8.1
 
   '@aws-sdk/types@3.973.15':
@@ -12490,7 +12486,7 @@ snapshots:
     dependencies:
       '@aws-sdk/types': 3.973.10
       '@smithy/querystring-builder': 4.2.14
-      '@smithy/types': 4.14.3
+      '@smithy/types': 4.15.1
       tslib: 2.8.1
 
   '@aws-sdk/util-locate-window@3.957.0':
@@ -16077,7 +16073,7 @@ snapshots:
 
   '@smithy/protocol-http@5.3.14':
     dependencies:
-      '@smithy/types': 4.14.3
+      '@smithy/types': 4.15.1
       tslib: 2.8.1
 
   '@smithy/querystring-builder@4.2.14':
@@ -16111,11 +16107,7 @@ snapshots:
   '@smithy/smithy-client@4.13.6':
     dependencies:
       '@smithy/core': 3.24.6
-      '@smithy/types': 4.14.3
-      tslib: 2.8.1
-
-  '@smithy/types@4.14.3':
-    dependencies:
+      '@smithy/types': 4.15.1
       tslib: 2.8.1
 
   '@smithy/types@4.15.1':
