@@ -10,6 +10,7 @@ import {
 } from '@roomote/cloud-agents/show-widget';
 import {
   CREATE_CUSTOM_SKILL_TOOL,
+  CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
   OPEN_ARTIFACT_TOOL,
   PUBLIC_URL_FETCH_TOOL,
@@ -190,6 +191,28 @@ describe('roomote MCP tool descriptions', () => {
     expect(scheduleDescription).toContain(
       'Prefer a built-in preset when it matches the requested cadence.',
     );
+  });
+
+  it('enforces the shared custom automation prompt limit in the native tool schema', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const tool = getRegisteredTool(
+      registeredTools,
+      MANAGE_CUSTOM_AUTOMATIONS_TOOL.name,
+    );
+    const promptSchema = getInputSchemaField(
+      tool,
+      'prompt',
+    ) as unknown as z.ZodTypeAny;
+
+    expect(
+      promptSchema.safeParse('x'.repeat(CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH))
+        .success,
+    ).toBe(true);
+    expect(
+      promptSchema.safeParse(
+        'x'.repeat(CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH + 1),
+      ).success,
+    ).toBe(false);
   });
 
   it('registers the shared custom automation descriptor unchanged', async () => {
@@ -650,10 +673,36 @@ describe('roomote MCP tool descriptions', () => {
       'version',
     ]);
     expect(tool.config.description).toContain(
-      'Binary or otherwise unsupported formats return metadata without content',
+      'Binary or otherwise unsupported formats return an explicit unsupported-format error with metadata but no content',
     );
     expect(tool.config.description).toContain(
       'never guess an artifact ID or path',
+    );
+  });
+
+  it('does not add the current task when opening a Session artifact', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ content: 'session artifact' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { registeredTools } = await importRoomoteMcpServer({
+      ROOMOTE_CLOUD_TOKEN: 'run-token',
+      ROOMOTE_PLATFORM_API_URL: 'https://platform.example.com',
+      ROOMOTE_TASK_ID: 'current-task',
+    });
+    const tool = getRegisteredTool(registeredTools, OPEN_ARTIFACT_TOOL.name);
+
+    await tool.handler?.({ sessionId: 'session-1', path: 'notes/context.md' });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://platform.example.com/api/mcp/artifacts/open',
+      expect.objectContaining({
+        body: JSON.stringify({
+          sessionId: 'session-1',
+          path: 'notes/context.md',
+        }),
+      }),
     );
   });
 

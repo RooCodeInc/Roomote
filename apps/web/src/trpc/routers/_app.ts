@@ -18,6 +18,7 @@ import {
   workspaceRoutingSettingsSchema,
   REASONING_EFFORT_VALUES,
   AUTOMATION_RESULT_PRIORITIES,
+  CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH,
   isTriggerableBackgroundAutomationKey,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_IDS,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES,
@@ -943,7 +944,11 @@ const automationsRouter = createRouter({
     .input(
       z.object({
         name: z.string().trim().min(1).max(100),
-        prompt: z.string().trim().min(1).max(8_000),
+        prompt: z
+          .string()
+          .trim()
+          .min(1)
+          .max(CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH),
         enabled: z.boolean(),
         resultPriority: z.enum(AUTOMATION_RESULT_PRIORITIES).default('normal'),
         scheduleMode: z.enum([
@@ -986,7 +991,11 @@ const automationsRouter = createRouter({
       z.object({
         id: z.string().uuid(),
         name: z.string().trim().min(1).max(100),
-        prompt: z.string().trim().min(1).max(8_000),
+        prompt: z
+          .string()
+          .trim()
+          .min(1)
+          .max(CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH),
         enabled: z.boolean(),
         resultPriority: z.enum(AUTOMATION_RESULT_PRIORITIES).default('normal'),
         scheduleMode: z.enum([

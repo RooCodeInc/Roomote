@@ -43,7 +43,7 @@ export const OPEN_ARTIFACT_TOOL = {
   name: 'open_artifact',
   title: 'Open Artifact',
   description:
-    'Open an artifact that the current actor is authorized to access. Provide the exact owning taskId or sessionId and stored path; never guess an artifact ID or path. Omit taskId only when the current task run is the owner. Results include artifact metadata and bounded content for supported text artifacts. Binary or otherwise unsupported formats return metadata without content; missing, unauthorized, incomplete, and oversized artifacts return an error. Future artifact formats may add other representations without changing this tool name or ownership contract.',
+    'Open an artifact that the current actor is authorized to access. Provide the exact owning taskId or sessionId and stored path; never guess an artifact ID or path. Omit taskId only when the current task run is the owner. Results include artifact metadata and bounded content for supported text artifacts. Binary or otherwise unsupported formats return an explicit unsupported-format error with metadata but no content; missing, unauthorized, incomplete, and oversized artifacts return an error. Future artifact formats may add other representations without changing this tool name or ownership contract.',
   inputSchema: openArtifactInputSchema.shape,
   annotations: {
     readOnlyHint: true,

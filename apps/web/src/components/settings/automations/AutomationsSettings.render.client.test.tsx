@@ -8,6 +8,7 @@ import {
   waitFor,
 } from '@testing-library/react';
 import { toast } from 'sonner';
+import { CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH } from '@roomote/types';
 const managerInstructionsPlaceholder =
   /Optional guidance for which ideas to prioritize or avoid/;
 
@@ -693,6 +694,10 @@ it('validates required custom automation fields before creating', () => {
 
   const name = screen.getByRole('textbox', { name: 'Name' });
   const prompt = screen.getByRole('textbox', { name: 'Prompt' });
+  expect(prompt).toHaveAttribute(
+    'maxLength',
+    String(CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH),
+  );
   fireEvent.change(name, { target: { value: '   ' } });
   fireEvent.change(prompt, { target: { value: '\n ' } });
   mutations.updateSettings.mockClear();

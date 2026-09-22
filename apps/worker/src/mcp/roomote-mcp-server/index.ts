@@ -369,7 +369,9 @@ roomoteMcpServer.registerTool(
       return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
     }
 
-    const taskId = params.taskId ?? process.env.ROOMOTE_TASK_ID;
+    const taskId =
+      params.taskId ??
+      (!params.sessionId ? process.env.ROOMOTE_TASK_ID : undefined);
     if (!taskId && !params.sessionId) {
       return errorResult(
         'taskId or sessionId is required (taskId defaults to ROOMOTE_TASK_ID)',
