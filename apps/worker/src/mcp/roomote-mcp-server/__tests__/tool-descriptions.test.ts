@@ -465,6 +465,10 @@ describe('roomote MCP tool descriptions', () => {
     );
     expect(tool.config.description).toContain('Client → Roomote');
     expect(tool.config.description).toContain('Roomote → Client');
+    expect(tool.config.description).toContain('Agent (on behalf of user):');
+    expect(tool.config.description).toContain(
+      'Never present the agent as the user',
+    );
     expect(tool.config.description).toContain('do not narrate unchanged polls');
     expect(tool.config.description).toContain(
       'keep the final answer self-contained',

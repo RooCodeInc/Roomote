@@ -29,6 +29,12 @@ describe('Roomote MCP management contract', () => {
       'Summarize substantive outbound messages as “Client → Roomote”',
     );
     expect(ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION).toContain(
+      'Prefix agent-authored content sent to Roomote with “Agent (on behalf of user):”',
+    );
+    expect(ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION).toContain(
+      'Never present the agent as the user or imply that it can impersonate the user',
+    );
+    expect(ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION).toContain(
       'never expose hidden reasoning, credentials, raw tool traces, or giant internal payloads',
     );
   });

@@ -44,6 +44,11 @@ not credentials, raw tool traces, hidden reasoning, or oversized internal
 payloads. Successful follow-up sends include the exact target and text accepted
 by Roomote so the client can summarize the outbound message without guessing.
 
+For content authored by an agent and sent to Roomote, prefix the message with
+`Agent (on behalf of user):`. This identifies the agent as acting for the user
+and prevents Roomote from attributing the words to the human; it does not
+authorize the agent to speak as or impersonate the user.
+
 This is useful when you want to:
 
 - catch up on a session that is already active
