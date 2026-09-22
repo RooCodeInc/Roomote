@@ -20,6 +20,7 @@ type PolicyChange = {
 };
 
 type QueuedPolicyChange = {
+  operationId: number;
   change: PolicyChange;
   previous?: IntegrationToolPolicyMetadata[];
   revisions: Map<string, number>;
@@ -169,6 +170,8 @@ export function useIntegrationToolPolicies(
   const queryKey = list.queryKey();
   const revisionByPolicy = useRef(new Map<string, number>());
   const pendingRevisions = useRef(new Map<string, Set<number>>());
+  const pendingChanges = useRef(new Map<number, PolicyChange>());
+  const operationSequence = useRef(0);
   const writePolicies = useMutation(set.mutationOptions());
 
   const settleRevisions = (revisions: Map<string, number>) => {
@@ -178,6 +181,13 @@ export function useIntegrationToolPolicies(
       pending.delete(revision);
       if (pending.size === 0) pendingRevisions.current.delete(key);
     }
+  };
+  const settleOperation = ({
+    operationId,
+    revisions,
+  }: Pick<QueuedPolicyChange, 'operationId' | 'revisions'>) => {
+    settleRevisions(revisions);
+    pendingChanges.current.delete(operationId);
   };
 
   // Serialize whole user actions, while applying every selection to the cache
@@ -189,8 +199,8 @@ export function useIntegrationToolPolicies(
     },
     mutationFn: ({ change }: QueuedPolicyChange) =>
       writePolicies.mutateAsync(change),
-    onSuccess: (result, { change, revisions }) => {
-      settleRevisions(revisions);
+    onSuccess: (result, { change, operationId, revisions }) => {
+      settleOperation({ operationId, revisions });
       queryClient.setQueryData<IntegrationToolPolicyMetadata[]>(
         queryKey,
         (current) => reconcileSavedPolicies(current, result, change),
@@ -201,8 +211,8 @@ export function useIntegrationToolPolicies(
           : 'Tool approval policies updated.',
       );
     },
-    onError: async (_error, { change, previous, revisions }) => {
-      settleRevisions(revisions);
+    onError: async (_error, { change, operationId, previous, revisions }) => {
+      settleOperation({ operationId, revisions });
       const currentChange = {
         ...change,
         toolNames: change.toolNames.filter((toolName) => {
@@ -221,6 +231,18 @@ export function useIntegrationToolPolicies(
       // value before its write starts.
       if (pendingRevisions.current.size === 0) {
         await queryClient.invalidateQueries({ queryKey });
+        const queuedChanges = [...pendingChanges.current.values()];
+        if (queuedChanges.length > 0) {
+          queryClient.setQueryData<IntegrationToolPolicyMetadata[]>(
+            queryKey,
+            (current) =>
+              queuedChanges.reduce(
+                (policies, queuedChange) =>
+                  applyOptimisticPolicyChange(policies, queuedChange),
+                current,
+              ),
+          );
+        }
       }
       toast.error(
         change.toolNames.length === 1
@@ -234,6 +256,8 @@ export function useIntegrationToolPolicies(
     void queryClient.cancelQueries({ queryKey });
     const previous =
       queryClient.getQueryData<IntegrationToolPolicyMetadata[]>(queryKey);
+    const operationId = operationSequence.current + 1;
+    operationSequence.current = operationId;
     const revisions = new Map<string, number>();
     for (const toolName of change.toolNames) {
       const key = integrationToolPolicyKey(change.integrationId, toolName);
@@ -244,11 +268,12 @@ export function useIntegrationToolPolicies(
       pendingRevisions.current.set(key, pending);
       revisions.set(key, revision);
     }
+    pendingChanges.current.set(operationId, change);
     queryClient.setQueryData<IntegrationToolPolicyMetadata[]>(
       queryKey,
       (current) => applyOptimisticPolicyChange(current, change),
     );
-    savePolicies.mutate({ change, previous, revisions });
+    savePolicies.mutate({ change, operationId, previous, revisions });
   };
 
   return {

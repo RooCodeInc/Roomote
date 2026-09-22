@@ -239,4 +239,53 @@ describe('useIntegrationToolPolicies', () => {
     expect(mocks.invalidateQueries).toHaveBeenCalledTimes(1);
     expect(cache).toEqual([existingPolicy]);
   });
+
+  it('reapplies a new selection made while failure refetch is in flight', async () => {
+    const { result } = renderHook(() => useIntegrationToolPolicies());
+    let releaseRefetch = () => {};
+    let signalRefetch!: () => void;
+    const refetchStarted = new Promise<void>((resolve) => {
+      signalRefetch = resolve;
+    });
+
+    mocks.invalidateQueries.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          signalRefetch();
+          releaseRefetch = () => {
+            cache = [existingPolicy];
+            resolve();
+          };
+        }),
+    );
+
+    act(() => result.current.setMode('resend', 'send_email', 'ask'));
+    const mutation = mutationOptions[1] as SaveMutationOptions;
+    const firstChange = mocks.mutate.mock.calls[0]?.[0] as QueuedPolicyChange;
+    const firstFailure = mutation.onError(
+      new Error('first save failed'),
+      firstChange,
+    );
+
+    await refetchStarted;
+    act(() => result.current.setMode('resend', 'send_email', 'reject'));
+    const secondChange = mocks.mutate.mock.calls[1]?.[0] as QueuedPolicyChange;
+    releaseRefetch();
+
+    await act(async () => {
+      await firstFailure;
+      mutation.onSuccess(
+        [{ ...existingPolicy, policyId: 'saved-reject', mode: 'reject' }],
+        secondChange,
+      );
+    });
+
+    expect(cache).toEqual([
+      expect.objectContaining({
+        policyId: 'saved-reject',
+        toolName: 'send_email',
+        mode: 'reject',
+      }),
+    ]);
+  });
 });
