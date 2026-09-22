@@ -2670,14 +2670,13 @@ export async function answerFastAgentQuestion({
           requiresSeparateTurn = true;
           break;
         }
-        if (
-          !addressedToRoomote &&
+        const followUpAddressed =
           followUp.directedAtRoomote === true &&
-          followUp.allowSilentAmbientReply === true
-        ) {
-          // An addressed follow-up needs its own prompt guidance (answer, but
-          // honor a sign-off or an explicit ask for silence), which steering
-          // into a turn with different participation would not carry.
+          followUp.allowSilentAmbientReply === true;
+        if (followUpAddressed !== addressedToRoomote) {
+          // Addressed and non-addressed turns carry different participation
+          // guidance in the system prompt, which steering cannot change, so
+          // a follow-up of the other kind waits for its own turn.
           requiresSeparateTurn = true;
           break;
         }
