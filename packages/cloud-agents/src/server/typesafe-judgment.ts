@@ -500,8 +500,6 @@ export async function evaluateTypeSafeJudgments<
   timeoutMs?: number;
   /** Disable optional training capture for sensitive decision state. */
   capture?: boolean;
-  /** Disable optional Roomote shadow scoring for sensitive decision state. */
-  shadow?: boolean;
 }): Promise<TypeSafeAnswers<TQuestions> | null> {
   const backend = await resolveJudgmentBackend();
 
@@ -566,11 +564,7 @@ export async function evaluateTypeSafeJudgments<
     }
   }
 
-  if (
-    params.shadow !== false &&
-    backend.provider !== 'roomote' &&
-    Env.R_JUDGMENT_SHADOW === 'on'
-  ) {
+  if (backend.provider !== 'roomote' && Env.R_JUDGMENT_SHADOW === 'on') {
     void shadowRoomoteJudgment(backend.provider, params, answers);
   }
 
@@ -847,8 +841,6 @@ export async function evaluateDecisionModel<
   highVolume?: boolean;
   /** Disable optional training capture for sensitive decision state. */
   capture?: boolean;
-  /** Disable optional Roomote shadow scoring for sensitive decision state. */
-  shadow?: boolean;
   userId?: string | null;
   taskId?: string | null;
 }): Promise<TypeSafeAnswers<TQuestions> | null> {

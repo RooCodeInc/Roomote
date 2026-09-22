@@ -618,26 +618,31 @@ describe('evaluateTypeSafeJudgments', () => {
     ).rejects.toThrow('HTTP 529');
   });
 
-  it('can skip shadowing while retaining opt-in capture for decision state', async () => {
+  it('retains opt-in capture and shadowing for decision state', async () => {
     mockIsJudgmentCaptureEnabled.mockReturnValue(true);
     mockEnv.R_JUDGMENT_SHADOW = 'on';
     mockEnv.R_JUDGMENT_UPSTREAM_URL = 'https://judgment.internal.test';
-    const fetchMock = mockFetchResponse({
-      answers: { urgent: { type: 'noul', noul: 0.92 } },
-    });
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            answers: { urgent: { type: 'noul', noul: 0.92 } },
+          }),
+        ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
 
     await expect(
       evaluateTypeSafeJudgments({
         state: { diff: 'sensitive code' },
         questions: { urgent: questions.urgent },
-        shadow: false,
       }),
     ).resolves.toEqual({ urgent: { type: 'noul', noul: 0.92 } });
 
     expect(mockCaptureJudgment).toHaveBeenCalledWith(
       expect.objectContaining({ state: { diff: 'sensitive code' } }),
     );
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
   });
 
   it.each([

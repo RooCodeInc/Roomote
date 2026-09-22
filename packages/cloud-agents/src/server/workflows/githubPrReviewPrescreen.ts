@@ -241,9 +241,6 @@ export async function runGithubPrReviewPrescreen({
       questions: REVIEW_PRESCREEN_QUESTIONS,
       timeoutMs: REVIEW_PRESCREEN_TIMEOUT_MS,
       highVolume: true,
-      // Keep opt-in deployment capture governed by its existing setting, but do
-      // not send review diffs to the optional Roomote calibration shadow request.
-      shadow: false,
     });
 
     return formatReviewPrescreenHints(answers);

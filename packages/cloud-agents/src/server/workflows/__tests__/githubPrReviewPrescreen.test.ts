@@ -50,11 +50,13 @@ describe('github PR review pre-screen', () => {
       expect.objectContaining({
         timeoutMs: REVIEW_PRESCREEN_TIMEOUT_MS,
         highVolume: true,
-        shadow: false,
       }),
     );
     expect(mockEvaluateDecisionModel.mock.calls[0]![0]).not.toHaveProperty(
       'capture',
+    );
+    expect(mockEvaluateDecisionModel.mock.calls[0]![0]).not.toHaveProperty(
+      'shadow',
     );
     const request = mockEvaluateDecisionModel.mock.calls[0]![0] as {
       state: { title: string; changedFiles: string[]; diff: string };
