@@ -21,7 +21,7 @@ import { resolveOpenCodeCommand } from './opencode-command';
 import { waitForOpenCodeServer } from './readiness';
 import {
   fetchTaskToolApprovals,
-  resolveAutoServerTools,
+  resolveTaskToolsForAsks,
 } from './tool-approvals';
 
 interface StartOpenCodeServerHarnessOptions {
@@ -161,14 +161,11 @@ export async function startOpenCodeServerHarness({
   // The tools behind every native key an ask may name, incl. the servers
   // Auto mode gates as a whole.
   const toolApprovalTools = toolApprovals
-    ? {
-        ...(await resolveAutoServerTools({
-          mcpServers,
-          autoServers: toolApprovals.autoServers,
-          logger: log,
-        })),
-        ...toolApprovals.tools,
-      }
+    ? await resolveTaskToolsForAsks({
+        mcpServers,
+        approvals: toolApprovals,
+        logger: log,
+      })
     : undefined;
   const { commandEnv, model } = await prepareOpenCodeCommandEnv({
     runtimeEnv,

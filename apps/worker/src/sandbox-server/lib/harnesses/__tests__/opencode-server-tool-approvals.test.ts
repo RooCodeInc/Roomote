@@ -2,7 +2,7 @@ vi.mock('@roomote/sdk/client', () => ({ sdk: {} }));
 
 import {
   createTaskToolApprovalRelay,
-  resolveAutoServerTools,
+  resolveTaskToolsForAsks,
 } from '../opencode-server/tool-approvals';
 
 const ask = {
@@ -138,14 +138,9 @@ describe('createTaskToolApprovalRelay', () => {
     await vi.waitFor(() => expect(failing.pendingCounts).toEqual([1, 0]));
   });
 
-  it('maps the native keys of an Auto-gated server to its real tool names', async () => {
+  it('maps native keys to real tool names, refusing any key two tools share', async () => {
     const warn = vi.fn();
-    const listToolNames = vi.fn(async (server: { url: string }) =>
-      server.url.includes('notes')
-        ? ['run.query', 'run_query', 'list']
-        : ['save_issue'],
-    );
-    const tools = await resolveAutoServerTools({
+    const tools = await resolveTaskToolsForAsks({
       mcpServers: {
         linear: {
           type: 'streamable-http',
@@ -157,6 +152,8 @@ describe('createTaskToolApprovalRelay', () => {
           url: 'https://x/notes',
           headers: {},
         },
+        a: { type: 'streamable-http', url: 'https://x/a', headers: {} },
+        a_b: { type: 'streamable-http', url: 'https://x/a_b', headers: {} },
         local: { type: 'stdio', command: 'x', args: [], env: {} },
         broken: {
           type: 'streamable-http',
@@ -164,20 +161,35 @@ describe('createTaskToolApprovalRelay', () => {
           headers: {},
         },
       },
-      autoServers: ['linear', 'my.notes', 'local', 'broken'],
+      approvals: {
+        // An explicitly gated tool that collides with a listed one.
+        tools: {
+          linear_get_issue: { integrationId: 'linear', toolName: 'get.issue' },
+        },
+        autoServers: ['linear', 'my.notes', 'a', 'a_b', 'local', 'broken'],
+      },
       logger: { warn },
       listToolNames: async (server) => {
-        if (server.url.includes('broken')) throw new Error('offline');
-        return listToolNames(server);
+        if (server.url.endsWith('/broken')) throw new Error('offline');
+        if (server.url.endsWith('/notes'))
+          return ['run.query', 'run_query', 'list'];
+        if (server.url.endsWith('/a')) return ['b_c', 'x'];
+        if (server.url.endsWith('/a_b')) return ['c'];
+        return ['save_issue', 'get_issue'];
       },
     });
     expect(tools).toEqual({
       linear_save_issue: { integrationId: 'linear', toolName: 'save_issue' },
-      // Two real tools share one key: neither is mapped.
       my_notes_list: { integrationId: 'my.notes', toolName: 'list' },
+      a_x: { integrationId: 'a', toolName: 'x' },
     });
+    // Within a server, across servers, and against an explicit rule.
     expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining('share the native key'),
+      expect.stringContaining('my_notes_run_query'),
+    );
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('a_b_c'));
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('linear_get_issue'),
     );
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('broken'));
   });
