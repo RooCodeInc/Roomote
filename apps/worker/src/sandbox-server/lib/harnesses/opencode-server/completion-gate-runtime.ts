@@ -65,7 +65,7 @@ type CompletionCheckToolTrigger = Exclude<
   'turn_end'
 >;
 
-export interface CompletionCheckToolClassification {
+interface CompletionCheckToolClassification {
   trigger: CompletionCheckToolTrigger;
   report?: string;
 }
@@ -153,7 +153,7 @@ export async function requestTaskCompletionCheck(
   }
 }
 
-export interface CompletionGateCommandResult {
+interface CompletionGateCommandResult {
   sessionId: string;
   command: string;
   exitCode: number | null;
@@ -161,7 +161,7 @@ export interface CompletionGateCommandResult {
   status: 'completed' | 'failed';
 }
 
-export interface CompletionGateRuntimeOptions {
+interface CompletionGateRuntimeOptions {
   workspacePath: string;
   getCommandEnv: () => Record<string, string> | undefined;
   requestTaskCompletionCheck?: typeof requestTaskCompletionCheck;

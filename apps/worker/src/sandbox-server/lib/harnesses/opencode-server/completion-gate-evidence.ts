@@ -368,7 +368,7 @@ async function fingerprintChangedFiles(
   return hash.digest('hex');
 }
 
-export interface ShippedDiff {
+interface ShippedDiff {
   /** Hash of the unclipped diff: the identity of the work being checked. */
   key: string;
   /** Format-insensitive identity of the changed code; see above. */
