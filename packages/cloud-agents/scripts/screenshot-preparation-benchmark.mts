@@ -18,6 +18,10 @@
  *   ROOMOTE_BENCH_HELPER="$PWD/src/server/screenshot-preparation.ts" \
  *   pnpm exec dotenvx run --quiet -f .env.local -- \
  *   pnpm --filter @roomote/cloud-agents benchmark:screenshot-preparation -- --mode prototype
+ *
+ * Set BENCH_VISUAL_ACCEPTED=true only after opening and visually inspecting
+ * every exact final PNG from the run. Without that explicit gate, the harness
+ * reports DOM acceptance but deliberately does not call record accepted.
  */
 
 import { createServer } from 'node:http';
@@ -488,33 +492,41 @@ try {
     await browser(['screenshot', capturePath]);
     const captureMs = Number((performance.now() - captureStartedAt).toFixed(1));
     const finalText = await browser(['get', 'text', 'body']);
-    const accepted =
+    const domAccepted =
       finalText.includes('Profile saved') &&
       finalText.includes('Display name: Roomote') &&
       finalText.includes('Security checks complete');
     let recordStatus: string | null = null;
+    let visualAccepted: boolean | null = null;
     if (
       mode === 'prototype' &&
       preparationStatus === 'jev-capture-ready' &&
       loopId
     ) {
-      if (!accepted) {
+      if (!domAccepted) {
         throw new Error('visual_acceptance_failed');
       }
-      const recorded = await prepareScreenshotStep!({
-        runId: `complex-screenshot-benchmark-${mode}-${index}`,
-        enabled: true,
-        input: {
-          operation: 'record',
-          optIn: true,
-          loopId,
-          outcome: 'accepted',
-        } as ScreenshotPreparationInput,
-      });
-      recordStatus = recorded.status;
-      metrics = recorded.metrics as unknown as Record<string, unknown>;
-      if (recorded.status !== 'accepted') {
-        throw new Error(`record_failed:${recorded.reason ?? recorded.status}`);
+      if (process.env.BENCH_VISUAL_ACCEPTED === 'true') {
+        const recorded = await prepareScreenshotStep!({
+          runId: `complex-screenshot-benchmark-${mode}-${index}`,
+          enabled: true,
+          input: {
+            operation: 'record',
+            optIn: true,
+            loopId,
+            outcome: 'accepted',
+          } as ScreenshotPreparationInput,
+        });
+        recordStatus = recorded.status;
+        metrics = recorded.metrics as unknown as Record<string, unknown>;
+        visualAccepted = recorded.status === 'accepted';
+        if (!visualAccepted) {
+          throw new Error(
+            `record_failed:${recorded.reason ?? recorded.status}`,
+          );
+        }
+      } else {
+        recordStatus = 'visual-inspection-required';
       }
     }
     runs.push({
@@ -525,7 +537,9 @@ try {
       preparationMs,
       captureMs,
       totalMs: Number((performance.now() - runStartedAt).toFixed(1)),
-      accepted,
+      accepted: visualAccepted ?? false,
+      domAccepted,
+      visualAccepted,
       preparationStatus,
       ...(recordStatus ? { recordStatus } : {}),
       jevActionCount,
