@@ -10,6 +10,7 @@ import {
 } from '@roomote/types';
 import { z } from 'zod';
 
+import { captureJudgment, isJudgmentCaptureEnabled } from './judgment-capture';
 import {
   generateTrackedNonTaskObject,
   NON_TASK_INFERENCE_SURFACES,
@@ -565,6 +566,15 @@ export async function evaluateTypeSafeJudgments<
     void shadowRoomoteJudgment(backend.provider, params, answers);
   }
 
+  if (isJudgmentCaptureEnabled()) {
+    void captureJudgment({
+      answeredBy: backend.provider,
+      state: params.state,
+      questions: params.questions,
+      answers: answers as Record<string, unknown>,
+    });
+  }
+
   return answers as TypeSafeAnswers<TQuestions>;
 }
 
@@ -870,6 +880,15 @@ export async function evaluateDecisionModel<
         `Helper decision model response is missing a valid answer for "${questionId}"`,
       );
     }
+  }
+
+  if (isJudgmentCaptureEnabled()) {
+    void captureJudgment({
+      answeredBy: 'helper',
+      state: params.state,
+      questions: params.questions,
+      answers,
+    });
   }
 
   return answers as TypeSafeAnswers<TQuestions>;

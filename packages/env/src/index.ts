@@ -207,6 +207,11 @@ const serverSchema = {
   // get. Calibration evidence for the hosted model, collected only from
   // deployments that already send that text to Jev.
   R_JUDGMENT_SHADOW: z.enum(['on', 'off']).optional(),
+  // `on` writes every answered decision (scrubbed state, questions, answer)
+  // to the deployment's own artifact bucket under `judgment-capture/`, for
+  // an operator to build a training set from. Off by default: it keeps
+  // decision text, so only for deployments the operator owns.
+  R_JUDGMENT_CAPTURE: z.enum(['on', 'off']).optional(),
   R_INTERCOM_APP_ID: z.string().min(1).optional(),
   R_POSTHOG_PROJECT_KEY: z.string().min(1).optional(),
   R_POSTHOG_HOST: z.string().url().optional(),
@@ -675,6 +680,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_JUDGMENT_UPSTREAM_URL',
   'R_JUDGMENT_UPSTREAM_API_KEY',
   'R_JUDGMENT_SHADOW',
+  'R_JUDGMENT_CAPTURE',
   'R_INTERCOM_APP_ID',
   'R_POSTHOG_PROJECT_KEY',
   'R_POSTHOG_HOST',
