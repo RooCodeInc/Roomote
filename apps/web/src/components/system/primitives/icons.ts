@@ -95,7 +95,6 @@ export {
   GraduationCap,
   GripVertical,
   Hammer,
-  Hand,
   HandHelping,
   HandMetal,
   HatGlasses,

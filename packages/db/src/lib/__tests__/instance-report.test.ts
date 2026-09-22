@@ -10,6 +10,8 @@ import {
   db,
   githubInstallationFactory,
   llmUsageEvents,
+  mcpConnections,
+  personalMcpServers,
   pullRequestFacts,
   repositoryFactory,
   sessionFactory,
@@ -20,15 +22,19 @@ import {
   taskRuns,
   tasks,
   userFactory,
+  users,
 } from '../../server';
 import {
   bucketPullRequestStatus,
   collectConfiguredInferenceProviders,
   collectConfiguredRuntimeEnvVarNames,
+  collectEnabledCustomIntegrationIds,
+  collectEnabledMcpIds,
   collectInstanceReportStats,
   dedupeAuthoredPullRequests,
   median,
   summarizeAutomations,
+  summarizeIntegrations,
   summarizePullRequestCohort,
 } from '../instance-report';
 
@@ -93,6 +99,97 @@ describe('instance-report pure helpers', () => {
         },
       },
     });
+  });
+
+  it('keeps built-in catalog integration names safe and sorted', () => {
+    expect(
+      summarizeIntegrations({
+        mcpIds: ['sentry', 'exa'],
+        customIntegrationIds: [],
+        apiKeyIntegrationCount: 0,
+      }),
+    ).toEqual({
+      enabled: 2,
+      enabledNames: ['exa', 'sentry'],
+    });
+  });
+
+  it('numbers custom server rows as stubs without relying on connection rows', () => {
+    expect(
+      summarizeIntegrations({
+        mcpIds: [],
+        customIntegrationIds: ['server-1', 'server-2'],
+        apiKeyIntegrationCount: 2,
+      }),
+    ).toEqual({
+      enabled: 4,
+      enabledNames: [
+        'custom-integration-1',
+        'custom-integration-2',
+        'api-key-integration-1',
+        'api-key-integration-2',
+      ],
+    });
+  });
+
+  it('never double-counts a custom server reachable both ways', () => {
+    expect(
+      summarizeIntegrations({
+        mcpIds: ['sentry', 'custom:server-1'],
+        customIntegrationIds: ['server-1'],
+        apiKeyIntegrationCount: 1,
+      }),
+    ).toEqual({
+      enabled: 3,
+      enabledNames: ['sentry', 'custom-integration-1', 'api-key-integration-1'],
+    });
+  });
+
+  it('buckets unrecognized mcp ids defensively with the custom stubs', () => {
+    expect(
+      summarizeIntegrations({
+        mcpIds: ['totally_unknown_id'],
+        customIntegrationIds: [],
+        apiKeyIntegrationCount: null,
+      }),
+    ).toEqual({
+      enabled: 1,
+      enabledNames: ['custom-integration-1'],
+    });
+  });
+
+  it('dedupes custom ids from both sources before numbering the stubs', () => {
+    expect(
+      summarizeIntegrations({
+        mcpIds: ['custom:a', 'custom:b'],
+        customIntegrationIds: ['a', 'b', 'a'],
+        apiKeyIntegrationCount: '1',
+      }),
+    ).toEqual({
+      enabled: 3,
+      enabledNames: [
+        'custom-integration-1',
+        'custom-integration-2',
+        'api-key-integration-1',
+      ],
+    });
+  });
+
+  it('keeps the enabled total equal to the list length, including when empty', () => {
+    const empty = summarizeIntegrations({
+      mcpIds: [],
+      customIntegrationIds: [],
+      apiKeyIntegrationCount: 0,
+    });
+    expect(empty).toEqual({ enabled: 0, enabledNames: [] });
+
+    const mixed = summarizeIntegrations({
+      mcpIds: ['notion'],
+      customIntegrationIds: ['x', 'y', 'z', 'w', 'v'],
+      apiKeyIntegrationCount: 3,
+    });
+    expect(mixed.enabled).toBe(mixed.enabledNames.length);
+    expect(mixed.enabled).toBe(9);
   });
 
   it('dedupes by repo#number using earliest detection and latest status', () => {
@@ -248,6 +345,116 @@ describe('instance-report pure helpers', () => {
 
     expect(deduped).toHaveLength(2);
     expect(new Set(deduped.map((entry) => entry.key)).size).toBe(2);
+  });
+});
+
+describe('collectEnabledCustomIntegrationIds', () => {
+  it('includes enabled servers only for live owners', async () => {
+    // Assert id membership directly instead of comparing global report
+    // aggregates: this suite shares the test database, so before/after
+    // aggregate deltas and indexed stub assertions would be racy.
+    const suffix = Date.now().toString();
+    const activeOwner = await userFactory.create();
+    const deletedOwner = await userFactory.create();
+    await db
+      .update(users)
+      .set({ deletedAt: new Date() })
+      .where(eq(users.id, deletedOwner.id));
+
+    const inserted = await db
+      .insert(personalMcpServers)
+      .values([
+        {
+          ownerUserId: activeOwner.id,
+          name: `active-owner-${suffix}`,
+          url: 'https://example.com/mcp',
+          enabled: true,
+        },
+        {
+          ownerUserId: deletedOwner.id,
+          name: `deleted-owner-${suffix}`,
+          url: 'https://example.com/mcp',
+          enabled: true,
+        },
+        {
+          ownerUserId: activeOwner.id,
+          name: `disabled-${suffix}`,
+          url: 'https://example.com/mcp',
+          enabled: false,
+        },
+      ])
+      .returning({ id: personalMcpServers.id });
+    const [activeRow, deletedOwnerRow] = inserted;
+
+    const enabledIds = await collectEnabledCustomIntegrationIds();
+
+    expect(enabledIds).toContain(activeRow?.id);
+    expect(enabledIds).not.toContain(deletedOwnerRow?.id);
+    expect(enabledIds).not.toContain(inserted[2]?.id);
+
+    // Clean up so other suites sharing the database see a stable baseline.
+    await db.delete(personalMcpServers).where(
+      inArray(
+        personalMcpServers.id,
+        inserted.map((row) => row.id),
+      ),
+    );
+  });
+});
+
+describe('collectEnabledMcpIds', () => {
+  it('keeps deployment connections and drops soft-deleted user connections', async () => {
+    const suffix = Date.now().toString();
+    const activeOwner = await userFactory.create();
+    const deletedOwner = await userFactory.create();
+    await db
+      .update(users)
+      .set({ deletedAt: new Date() })
+      .where(eq(users.id, deletedOwner.id));
+
+    const inserted = await db
+      .insert(mcpConnections)
+      .values([
+        {
+          userId: activeOwner.id,
+          mcpId: `live-user-mcp-${suffix}`,
+          connectionRole: 'default',
+        },
+        {
+          userId: deletedOwner.id,
+          mcpId: `deleted-user-mcp-${suffix}`,
+          connectionRole: 'default',
+        },
+        {
+          userId: null,
+          mcpId: `deployment-mcp-${suffix}`,
+          connectionRole: 'default',
+        },
+        {
+          userId: activeOwner.id,
+          mcpId: `disabled-mcp-${suffix}`,
+          connectionRole: 'default',
+          enabled: false,
+        },
+      ])
+      .returning({ id: mcpConnections.id, mcpId: mcpConnections.mcpId });
+
+    const [liveUserRow, deletedUserRow, deploymentRow, disabledRow] = inserted;
+
+    const enabledIds = await collectEnabledMcpIds();
+
+    expect(enabledIds).toContain(liveUserRow?.mcpId);
+    expect(enabledIds).toContain(deploymentRow?.mcpId);
+    expect(enabledIds).not.toContain(deletedUserRow?.mcpId);
+    expect(enabledIds).not.toContain(disabledRow?.mcpId);
+
+    // Clean up so other suites sharing the database see a stable baseline.
+    await db.delete(mcpConnections).where(
+      inArray(
+        mcpConnections.id,
+        inserted.map((row) => row.id),
+      ),
+    );
   });
 });
 
@@ -493,6 +700,9 @@ describe('collectInstanceReportStats pullRequests7d isolation', () => {
     // Smoke: full collector still returns the new field shape under suite load.
     const report = await collectInstanceReportStats(now);
     expect(report.providers.computeConfigured).toContain('docker');
+    expect(report.integrations.enabled).toBe(
+      report.integrations.enabledNames.length,
+    );
     expect(report.pullRequests7d).toEqual(
       expect.objectContaining({
         opened: expect.any(Number),

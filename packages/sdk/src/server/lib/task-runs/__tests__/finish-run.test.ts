@@ -674,6 +674,15 @@ describe('finishRun', () => {
     expect(mockCaptureTaskSettled).not.toHaveBeenCalled();
     expect(mockTerminateCredentialEgress).not.toHaveBeenCalled();
     expect(mockNotifyWebTaskInitiatorOnSettle).not.toHaveBeenCalled();
+    expect(mockRecordTaskRunLifecycleEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        details: expect.objectContaining({
+          status: RunStatus.Idle,
+          terminalReason: null,
+        }),
+      }),
+    );
   });
 
   it('suppresses terminal notifications while an automatic startup retry is queued', async () => {
@@ -996,6 +1005,12 @@ describe('finishRun', () => {
           previousSnapshotCreatedAt: '2026-04-09T20:41:30.000Z',
           previousWorkerHeartbeatAt: '2026-04-09T20:38:58.630Z',
           error: 'spawn timeout',
+          terminalReason: {
+            kind: 'terminal',
+            status: RunStatus.Failed,
+            errorCode: null,
+            message: 'spawn timeout',
+          },
         }),
       }),
     );

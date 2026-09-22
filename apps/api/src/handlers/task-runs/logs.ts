@@ -9,8 +9,12 @@ import {
   taskRuns,
 } from '@roomote/db/server';
 import {
+  buildTaskRunDisconnectEvent,
+  formatOperationalEvent,
   isExitedRunStatus,
   resolveComputeProviderTarget,
+  type TaskRunDisconnectEvent,
+  type TaskRunDisconnectReasonCode,
 } from '@roomote/types';
 
 import type { Variables } from '../../types';
@@ -21,6 +25,22 @@ const LOG_STREAM_READINESS_MAX_WAIT_MS = 15 * 60_000;
 
 const UNSUPPORTED_LOG_STREAMING_ERROR =
   'Live log streaming is unavailable for this sandbox provider.';
+
+function logDisconnectEvent(event: TaskRunDisconnectEvent): void {
+  if (event.disconnectReason.code === 'stream_completed') {
+    return;
+  }
+
+  console.warn(
+    formatOperationalEvent('task_runtime_log_stream_disconnect', {
+      taskId: event.correlation.taskId,
+      runId: event.correlation.runId,
+      reason: event.disconnectReason.code,
+      outcome: event.terminalReason ? 'terminal' : 'disconnected',
+      status: event.terminalReason?.status,
+    }),
+  );
+}
 
 export async function getTaskRunLogs(c: Context<{ Variables: Variables }>) {
   const authContext = c.get('authContext');
@@ -79,7 +99,17 @@ async function streamTaskRunLogs({
       await writeSSE(stream, 'error', {
         error: UNSUPPORTED_LOG_STREAMING_ERROR,
       });
-      await writeSSE(stream, 'disconnect', null);
+      const disconnectEvent = buildTaskRunDisconnectEvent({
+        taskId: taskRun.taskId,
+        runId,
+        reasonCode: 'unsupported_provider',
+        source: 'api',
+        status: taskRun.status,
+        errorCode: taskRun.errorCode,
+        error: taskRun.error,
+      });
+      logDisconnectEvent(disconnectEvent);
+      await writeSSE(stream, 'disconnect', disconnectEvent);
     });
   }
 
@@ -89,15 +119,35 @@ async function streamTaskRunLogs({
     let machineId = taskRun.machineId;
     let sandboxCmdId = taskRun.sandboxCmdId;
     let status = taskRun.status;
+    let errorCode = taskRun.errorCode;
+    let error = taskRun.error;
     const startedAt = Date.now();
+
+    const disconnect = async (
+      stream: SSEStreamingApi,
+      reasonCode: TaskRunDisconnectReasonCode,
+    ) => {
+      const disconnectEvent = buildTaskRunDisconnectEvent({
+        taskId: taskRun.taskId,
+        runId,
+        reasonCode,
+        source: 'api',
+        status,
+        errorCode,
+        error,
+      });
+      logDisconnectEvent(disconnectEvent);
+      await writeSSE(stream, 'disconnect', disconnectEvent);
+    };
 
     while (!signal.aborted && (!machineId || !sandboxCmdId)) {
       if (isExitedRunStatus(status)) {
-        break;
+        await disconnect(stream, 'run_terminal');
+        return;
       }
 
       if (Date.now() - startedAt >= LOG_STREAM_READINESS_MAX_WAIT_MS) {
-        await writeSSE(stream, 'disconnect', null);
+        await disconnect(stream, 'readiness_timeout');
         return;
       }
 
@@ -105,17 +155,25 @@ async function streamTaskRunLogs({
 
       const latestTaskRun = await db.query.taskRuns.findFirst({
         where: eq(taskRuns.id, runId),
-        columns: { machineId: true, sandboxCmdId: true, status: true },
+        columns: {
+          machineId: true,
+          sandboxCmdId: true,
+          status: true,
+          error: true,
+          errorCode: true,
+        },
       });
 
       if (!latestTaskRun) {
-        await writeSSE(stream, 'disconnect', null);
+        await disconnect(stream, 'run_missing');
         return;
       }
 
       machineId = latestTaskRun.machineId;
       sandboxCmdId = latestTaskRun.sandboxCmdId;
       status = latestTaskRun.status;
+      errorCode = latestTaskRun.errorCode;
+      error = latestTaskRun.error;
     }
 
     if (signal.aborted || stream.aborted) {
@@ -123,9 +181,11 @@ async function streamTaskRunLogs({
     }
 
     if (!machineId || !sandboxCmdId) {
-      await writeSSE(stream, 'disconnect', null);
+      await disconnect(stream, 'sandbox_not_ready');
       return;
     }
+
+    let disconnectReason: TaskRunDisconnectReasonCode = 'stream_completed';
 
     try {
       for await (const entry of client.streamCommandOutput({
@@ -150,9 +210,27 @@ async function streamTaskRunLogs({
       await writeSSE(stream, 'error', {
         error: error instanceof Error ? error.message : 'Failed to stream logs',
       });
+      disconnectReason = 'provider_stream_error';
     }
 
-    await writeSSE(stream, 'disconnect', null);
+    const latestTaskRun = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, runId),
+      columns: {
+        status: true,
+        error: true,
+        errorCode: true,
+      },
+    });
+
+    if (!latestTaskRun) {
+      await disconnect(stream, 'run_missing');
+      return;
+    }
+
+    status = latestTaskRun.status;
+    errorCode = latestTaskRun.errorCode;
+    error = latestTaskRun.error;
+    await disconnect(stream, disconnectReason);
   });
 }
 

@@ -16,7 +16,9 @@ import {
 } from '@roomote/db/server';
 import { recordIntegrationToolAutoEvaluationInBackground } from '@roomote/cloud-agents/server/integration-tool-auto-evaluation';
 import {
+  BRAIN_MCP_ID,
   compileTaskIntegrationToolApprovals,
+  GBRAIN_READ_TOOL_NAMES,
   isInternalMcpServer,
   resolveGoverningIntegrationToolPolicies,
   type IntegrationToolApprovalStatus,
@@ -83,6 +85,11 @@ export async function resolveTaskIntegrationToolApprovals(input: {
         servers[integrationId]?.toolApprovalPolicyScope,
     }),
     sessionOverrides,
+    // The Brain's agent-facing tool set is a static allowlist, so the
+    // compiler can drop exactly the native keys that are genuinely the
+    // Brain's. `_roomote_http_integrations` needs no list: its flattened
+    // keys start with `_`, which no governable server name can produce.
+    internalToolNames: { [BRAIN_MCP_ID]: GBRAIN_READ_TOOL_NAMES },
   });
 }
 

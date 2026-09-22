@@ -128,6 +128,15 @@ export type IntegrationToolPolicyUpsert = z.infer<
   typeof integrationToolPolicyUpsertSchema
 >;
 
+export const integrationToolPoliciesUpsertSchema = z.object({
+  integrationId: z.string().min(1).max(200),
+  toolNames: z.array(z.string().min(1).max(200)).min(1).max(500),
+  mode: integrationToolPolicyModeSchema,
+});
+export type IntegrationToolPoliciesUpsert = z.infer<
+  typeof integrationToolPoliciesUpsertSchema
+>;
+
 export const integrationToolSessionOverrideUpsertSchema = z.object({
   integrationId: z.string().min(1).max(200),
   toolName: z.string().min(1).max(200),
@@ -269,11 +278,19 @@ function openCodeMcpToolKey(serverName: string, toolName: string): string {
  * then answered without a card, exactly as in a Session. Two tools that
  * flatten to one native key cannot be told apart by a native rule, so that
  * key is denied rather than asked about under the wrong tool's name.
+ *
+ * `internalToolNames` names the agent-facing tools of each mounted internal
+ * MCP server (for example the Brain's read-only allowlist). A native key
+ * cannot name which server half it came from, so a key an internal tool
+ * flattens to must not gate anything: enforcing it would also hold the
+ * exempt internal tool. Only exact keys are dropped — a custom server whose
+ * id merely starts with an internal server's name keeps its rules.
  */
 export function compileTaskIntegrationToolApprovals(input: {
   serverNames: string[];
   policies: IntegrationToolPolicyEntry[];
   sessionOverrides: IntegrationToolSessionOverrideMetadata[];
+  internalToolNames?: Record<string, readonly string[]>;
 }): TaskIntegrationToolApprovals {
   const mounted = new Set(input.serverNames);
   const policyModes = new Map(
@@ -290,16 +307,15 @@ export function compileTaskIntegrationToolApprovals(input: {
   );
   const result: TaskIntegrationToolApprovals = { permission: {}, tools: {} };
   const ambiguous = new Set<string>();
-  // A native key cannot name which server half it came from, so a key an
-  // internal server's tool could flatten to (for example a custom
-  // `roomote_manage` server's `tasks` tool colliding with `roomote` /
-  // `manage_tasks`) must not gate anything: enforcing it would also hold
-  // the internal tool, and internal MCPs are exempt.
-  const internalPrefixes = input.serverNames
-    .filter(isInternalMcpServer)
-    .map((name) => openCodeMcpToolKey(name, ''));
-  const isSharedWithInternal = (key: string) =>
-    internalPrefixes.some((prefix) => key.startsWith(prefix));
+  const internalKeys = new Set<string>();
+  for (const [serverName, toolNames] of Object.entries(
+    input.internalToolNames ?? {},
+  )) {
+    if (!mounted.has(serverName) || !isInternalMcpServer(serverName)) continue;
+    for (const toolName of toolNames) {
+      internalKeys.add(openCodeMcpToolKey(serverName, toolName));
+    }
+  }
   for (const { integrationId, toolName } of [
     ...input.policies,
     ...input.sessionOverrides,
@@ -322,7 +338,7 @@ export function compileTaskIntegrationToolApprovals(input: {
           : undefined;
     if (!action) continue;
     const key = openCodeMcpToolKey(integrationId, toolName);
-    if (isSharedWithInternal(key)) continue;
+    if (internalKeys.has(key)) continue;
     const known = result.tools[key];
     if (
       known &&

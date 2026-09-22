@@ -4,13 +4,13 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
-  buildCompletionGateDenial,
-  buildCompletionGateReminder,
-  classifyCompletionCheckTool,
   clipDiffByFile,
   collectShippedDiff,
+} from '../opencode-server/completion-gate-evidence';
+import {
+  classifyCompletionCheckTool,
   isCompletionGateEligible,
-} from '../opencode-server/completion-gate';
+} from '../opencode-server/completion-gate-runtime';
 
 const tempDirs: string[] = [];
 
@@ -339,33 +339,5 @@ describe('classifyCompletionCheckTool', () => {
     ['roomote_save_task_memory', { outcome: 'x' }],
   ])('leaves %s alone', (tool, args) => {
     expect(classifyCompletionCheckTool(tool, args)).toBeNull();
-  });
-});
-
-describe('buildCompletionGateDenial', () => {
-  it('tells the agent the next call for the same work goes through', () => {
-    const denial = buildCompletionGateDenial('ship', [
-      { id: 'validationMissing', probability: 0.9 },
-    ]);
-
-    expect(denial).toContain('before shipping it');
-    expect(denial).toContain('no test, type check, lint, or build was run');
-    expect(denial).toContain('will not be held back a second time');
-  });
-});
-
-describe('buildCompletionGateReminder', () => {
-  it('names each flagged point and tells the agent the check can be wrong', () => {
-    const reminder = buildCompletionGateReminder([
-      { id: 'reportOverclaims', probability: 0.9 },
-      { id: 'leftoverArtifacts', probability: 0.88 },
-    ]);
-
-    expect(reminder).toContain(
-      'Your report describes a code change that the diff does not contain.',
-    );
-    expect(reminder).toContain('debug logging');
-    expect(reminder).toContain('can be wrong');
-    expect(reminder).not.toContain('0.9');
   });
 });

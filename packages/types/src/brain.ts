@@ -15,6 +15,47 @@ import { z } from 'zod';
 
 export const BRAIN_MCP_ID = 'gbrain';
 
+/**
+ * Read-only tool allowlist over gbrain's MCP surface, which publishes over a
+ * hundred tools. The API proxy filters `tools/list` and calls to exactly
+ * these, so this is the complete agent-facing tool set — the same list the
+ * approval-rule compilers use to tell which native keys are genuinely the
+ * Brain's.
+ *
+ * `remember` and `forget` are deliberately absent: the agent path is
+ * structurally incapable of mutation, and memory writes flow only through
+ * the server-side ingestion pipeline with its own write-only credential.
+ *
+ * Deliberately absent for a second reason, that nothing here populates what
+ * they read:
+ * - `recall` leads with hot-memory facts saved via `remember`, which this
+ *   deployment never writes. Its page arm duplicates `search`, so exposing it
+ *   only offers a worse `search` with a permanently empty half.
+ * - `context_pack` and `delta` serve long-lived agents with standing entities
+ *   and heartbeats. Roomote's agents are per-task and start cold.
+ *
+ * Keep this list in sync with the instructions below: a tool exposed but
+ * unexplained is one the agent picks by gbrain's own description, which is
+ * written for a different product.
+ */
+export const GBRAIN_READ_TOOL_NAMES = [
+  // Ask. `query` adds multi-query expansion and is the right default when the
+  // agent does not know the corpus vocabulary; `search` is the cheaper exact
+  // -token path with no expansion call.
+  'query',
+  'search',
+  // Exact, zero-LLM lookup for canonical person cards populated from Roomote
+  // member identities. Prefer this over broad search for a known person.
+  'entity',
+  // Reason across pages. Expensive and slow, but bounded in tokens, which is
+  // the only reason to prefer it over reading pages directly.
+  'synthesize',
+  // Browse: without these an agent can only answer questions it already
+  // knows to ask, and "what do you know?" looks like an empty Brain.
+  'list_pages',
+  'get_page',
+] as const;
+
 export const BRAIN_MCP_DISCLOSURE_INSTRUCTIONS = `When specific information returned by a Brain memory retrieval materially informs your answer or work, naturally tell the user which remembered fact you retrieved and how you used it. Describe the memory in human terms, keep the disclosure incidental, and do not turn the response into tool narration. Do not mention retrieval that did not inform the outcome. Never expose internal memory IDs, page slugs, storage paths, raw metadata, source fields, or other internal provenance.`;
 
 /** API proxy mount; shared by SDK config delivery and the worker. */

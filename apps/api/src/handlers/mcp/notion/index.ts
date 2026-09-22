@@ -16,6 +16,10 @@ import { NOTION_API_ORIGIN } from '@roomote/sdk/server/notion-api';
 import type { Variables } from '../../../types';
 
 import { resolveDeploymentMcpAuth } from '../deployment-mcp-auth';
+import {
+  readNativeMcpRequestBody,
+  resolveNativeToolApprovalGuard,
+} from '../native-tool-approvals';
 import { McpProxyError } from '../proxy-utils';
 import { registerNotionTools } from './tools';
 
@@ -84,12 +88,22 @@ notionMcp.on(['POST', 'GET', 'DELETE'], '/', async (c) => {
   });
 
   try {
-    await resolveDeploymentMcpAuth(c.get('authContext'), 'Notion');
+    const auth = await resolveDeploymentMcpAuth(c.get('authContext'), 'Notion');
+    const guard = await resolveNativeToolApprovalGuard({
+      auth,
+      integrationId: 'notion',
+    });
+    const body = await readNativeMcpRequestBody(c.req.raw);
+    const refusal = await guard.checkCall(body);
+    if (refusal) return refusal;
     const connection = await resolveNotionConnection();
     const server = createNotionMcpServer(connection);
 
     await server.connect(transport);
-    return await transport.handleRequest(c.req.raw);
+    return guard.filterToolsList(
+      body,
+      await transport.handleRequest(c.req.raw),
+    );
   } catch (error) {
     if (error instanceof McpProxyError) {
       return Response.json(

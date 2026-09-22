@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  CUSTOM_MCP_SERVER_NAME_PATTERN,
+  HTTP_INTEGRATIONS_MCP_ID,
   RESERVED_CUSTOM_MCP_SERVER_NAMES,
   customMcpServerInputSchema,
   isInternalMcpServer,
   validateCustomMcpHeaderName,
   validateCustomMcpServerUrl,
 } from '../custom-mcp-servers';
+import { MCP_INTEGRATIONS } from '../mcp-oauth';
 
 const validServer = {
   transport: 'remote' as const,
@@ -27,6 +30,17 @@ describe('isInternalMcpServer', () => {
     expect(isInternalMcpServer('linear')).toBe(false);
     // Memory-category catalog entries are deployment integrations too.
     expect(isInternalMcpServer('supermemory')).toBe(false);
+  });
+
+  it('keeps the HTTP integrations broker structurally collision-free', () => {
+    // Its flattened native keys start with `_`, and no governable server
+    // name can produce a key like that: custom names reject a leading
+    // underscore and every catalog id starts alphanumeric.
+    expect(HTTP_INTEGRATIONS_MCP_ID.startsWith('_')).toBe(true);
+    expect(CUSTOM_MCP_SERVER_NAME_PATTERN.test('_anything')).toBe(false);
+    expect(
+      MCP_INTEGRATIONS.some((integration) => integration.id.startsWith('_')),
+    ).toBe(false);
   });
 });
 

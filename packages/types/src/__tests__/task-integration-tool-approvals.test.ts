@@ -108,26 +108,58 @@ describe('compileTaskIntegrationToolApprovals', () => {
     });
   });
 
-  it('drops a rule whose native key an internal tool could also flatten to', () => {
-    // A custom `roomote_manage` server's `tasks` tool flattens to
-    // `roomote_manage_tasks`, the same native key as `roomote` /
-    // `manage_tasks`. Gating it would also hold the exempt internal tool,
-    // so any key the internal server's tools could flatten to is left
-    // ungated natively; unrelated servers still gate normally.
+  it('drops only rules whose native key an actual internal tool flattens to', () => {
+    // A custom `gbrain_get` server's `page` tool flattens to
+    // `gbrain_get_page`, the same native key as the Brain's own `get_page`.
+    // Gating it would also hold the exempt Brain tool, so that one rule is
+    // dropped — while `gbrain_reports`/`status`, which no Brain tool
+    // flattens to, keeps its rule.
     expect(
       compileTaskIntegrationToolApprovals({
-        serverNames: ['roomote', 'roomote_manage', 'linear'],
+        serverNames: ['gbrain', 'gbrain_get', 'gbrain_reports', 'linear'],
         policies: [
-          policy('roomote_manage', 'tasks', 'ask'),
-          policy('roomote_manage', 'status', 'reject'),
+          policy('gbrain_get', 'page', 'ask'),
+          policy('gbrain_reports', 'status', 'reject'),
           policy('linear', 'save_issue', 'ask'),
         ],
         sessionOverrides: [],
+        internalToolNames: {
+          gbrain: [
+            'query',
+            'search',
+            'entity',
+            'synthesize',
+            'list_pages',
+            'get_page',
+          ],
+        },
       }),
     ).toEqual({
-      permission: { linear_save_issue: 'ask' },
+      permission: {
+        gbrain_reports_status: 'deny',
+        linear_save_issue: 'ask',
+      },
       tools: {
+        gbrain_reports_status: {
+          integrationId: 'gbrain_reports',
+          toolName: 'status',
+        },
         linear_save_issue: { integrationId: 'linear', toolName: 'save_issue' },
+      },
+    });
+  });
+
+  it('drops nothing for an internal server whose tool names are unknown', () => {
+    expect(
+      compileTaskIntegrationToolApprovals({
+        serverNames: ['gbrain', 'gbrain_get'],
+        policies: [policy('gbrain_get', 'page', 'ask')],
+        sessionOverrides: [],
+      }),
+    ).toEqual({
+      permission: { gbrain_get_page: 'ask' },
+      tools: {
+        gbrain_get_page: { integrationId: 'gbrain_get', toolName: 'page' },
       },
     });
   });

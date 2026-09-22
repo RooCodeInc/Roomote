@@ -5,6 +5,7 @@ import {
   type AcpOutputEvent,
   type AcpPlanTodo,
   type TaskStatusEvent,
+  type TaskRunDisconnectReason,
   ACP_ENVELOPE_EVENT_TYPES,
   ACP_LIVE_EVENT_TYPES,
   ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
@@ -87,6 +88,7 @@ interface SandboxState {
   hasConnectedOnce: boolean;
   connectionError: boolean;
   connectionFailureCategory: SandboxConnectionFailureCategory | null;
+  disconnectReason: TaskRunDisconnectReason | null;
   reconnecting: boolean;
   sandboxUrl: string | null;
   sandboxToken: string | undefined;
@@ -131,6 +133,7 @@ interface SandboxState {
   _setConnectionFailureCategory: (
     category: SandboxConnectionFailureCategory | null,
   ) => void;
+  _setDisconnectReason: (reason: TaskRunDisconnectReason | null) => void;
   _setReconnecting: (reconnecting: boolean) => void;
   _setSandboxUrl: (url: string | null) => void;
   _setSandboxToken: (token: string | undefined) => void;
@@ -442,6 +445,7 @@ export function createSandboxStore(
   hasConnectedOnce: boolean;
   connectionError: boolean;
   connectionFailureCategory: SandboxConnectionFailureCategory | null;
+  disconnectReason: TaskRunDisconnectReason | null;
   reconnecting: boolean;
   sandboxUrl: string | null;
   sandboxToken: string | undefined;
@@ -468,6 +472,7 @@ export function createSandboxStore(
   _setConnectionFailureCategory: (
     category: SandboxConnectionFailureCategory | null,
   ) => void;
+  _setDisconnectReason: (reason: TaskRunDisconnectReason | null) => void;
   _setReconnecting: (reconnecting: boolean) => void;
   _setSandboxUrl: (url: string | null) => void;
   _setSandboxToken: (token: string | undefined) => void;
@@ -565,6 +570,7 @@ export function createSandboxStore(
       hasConnectedOnce: false,
       connectionError: false,
       connectionFailureCategory: null,
+      disconnectReason: null,
       reconnecting: false,
       sandboxUrl: null,
       sandboxToken: undefined,
@@ -592,6 +598,7 @@ export function createSandboxStore(
       _setConnectionError: (connectionError) => set({ connectionError }),
       _setConnectionFailureCategory: (connectionFailureCategory) =>
         set({ connectionFailureCategory }),
+      _setDisconnectReason: (disconnectReason) => set({ disconnectReason }),
       _setReconnecting: (reconnecting) => set({ reconnecting }),
       _setSandboxUrl: (url) => set({ sandboxUrl: url }),
       _setSandboxToken: (token) => set({ sandboxToken: token }),
