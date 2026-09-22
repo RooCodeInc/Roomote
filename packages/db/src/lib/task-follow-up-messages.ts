@@ -81,6 +81,11 @@ export async function enqueueTaskFollowUpMessage(
   const clientMessageId = getTaskFollowUpMessageClientId(input.clientMessageId);
 
   return db.transaction(async (tx) => {
+    // FOR SHARE blocks a concurrent status/phase update until this admission
+    // commits, without conflicting with FK key-share locks from other writers.
+    await tx.execute(
+      sql`SELECT id FROM ${taskRuns} WHERE id = ${input.runId} FOR SHARE`,
+    );
     const run = await tx.query.taskRuns.findFirst({
       where: and(
         eq(taskRuns.id, input.runId),
@@ -151,7 +156,11 @@ export async function enqueueTaskFollowUpMessage(
   });
 }
 
-/** True while a startup/live handoff still owns an undelivered follow-up. */
+/**
+ * True while a follow-up has not yet been handed to the runtime. Once a row is
+ * 'accepted', RuntimePromptQueue owns its ordering, so later messages can use
+ * live delivery (including native steering) and still land after it.
+ */
 export async function hasOpenTaskFollowUpMessages(
   runId: number,
 ): Promise<boolean> {
@@ -161,7 +170,7 @@ export async function hasOpenTaskFollowUpMessages(
     .where(
       and(
         eq(taskFollowUpMessages.runId, runId),
-        inArray(taskFollowUpMessages.status, ['pending', 'accepted']),
+        eq(taskFollowUpMessages.status, 'pending'),
       ),
     )
     .limit(1);
@@ -224,10 +233,10 @@ export async function activateTaskFollowUpActor(input: {
 }
 
 /**
- * Claims the oldest pending/accepted messages for one worker run. Expired
- * leases are reclaimable after a worker crash; the caller still passes the
- * client id into RuntimePromptQueue, whose hidden-message replacement makes
- * a replay idempotent.
+ * Claims the oldest pending messages for one worker run. Expired leases are
+ * reclaimable after a worker crash. Accepted rows are never reclaimed: the
+ * runtime owns them, and a prompt the user deleted from the runtime queue must
+ * not be resurrected or block later follow-ups.
  */
 export async function claimTaskFollowUpMessages(
   runId: number,
@@ -281,7 +290,7 @@ export async function claimTaskFollowUpMessages(
       SELECT id
       FROM ${taskFollowUpMessages}
       WHERE run_id = ${runId}
-        AND status IN ('pending', 'accepted')
+        AND status = 'pending'
         AND (
           claim_token IS NULL
           OR claim_expires_at IS NULL
@@ -292,7 +301,7 @@ export async function claimTaskFollowUpMessages(
           FROM ${taskFollowUpMessages} AS earlier
           WHERE earlier.run_id = ${taskFollowUpMessages}.run_id
             AND earlier.sequence < ${taskFollowUpMessages}.sequence
-            AND earlier.status IN ('pending', 'accepted')
+            AND earlier.status = 'pending'
         )
       ORDER BY sequence ASC
       LIMIT ${Math.max(1, Math.min(limit, 100))}

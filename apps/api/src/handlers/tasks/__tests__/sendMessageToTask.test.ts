@@ -412,7 +412,13 @@ describe('sendMessageToTask', () => {
     mockFindLatestTaskRun.mockResolvedValue(
       createActiveRun({ runtimeTaskStartedAt: null }),
     );
-    mockSendPromptMutate.mockRejectedValueOnce(new TypeError('fetch failed'));
+    mockSendPromptMutate.mockRejectedValueOnce(
+      new TypeError('fetch failed', {
+        cause: Object.assign(new Error('connect ECONNREFUSED'), {
+          code: 'ECONNREFUSED',
+        }),
+      }),
+    );
 
     const result = await sendMessageToTask({
       taskId: 'task-1',
@@ -427,6 +433,28 @@ describe('sendMessageToTask', () => {
     expect(mockEnqueueTaskFollowUpMessage).toHaveBeenCalledWith(
       expect.objectContaining({ deliveryMode: 'send' }),
     );
+  });
+
+  it('does not re-admit a steer whose startup response was lost', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({ runtimeTaskStartedAt: null }),
+    );
+    mockSteerTaskMutate.mockRejectedValueOnce(
+      new TRPCClientError('fetch failed', {
+        cause: Object.assign(new Error('other side closed'), {
+          code: 'UND_ERR_SOCKET',
+        }),
+      }),
+    );
+
+    await steerMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-1',
+      message: 'Only apply this once.',
+    });
+
+    expect(mockSteerTaskMutate).toHaveBeenCalledTimes(1);
+    expect(mockEnqueueTaskFollowUpMessage).not.toHaveBeenCalled();
   });
 
   it.each([

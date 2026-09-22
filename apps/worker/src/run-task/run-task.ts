@@ -1872,15 +1872,18 @@ export const runTask = async ({
         for (const message of messages) {
           taskFollowUpClaims.set(message.clientMessageId, { id: message.id });
 
-          const runtimeAlreadyQueued =
-            message.status === 'accepted' &&
-            (harness.getQueuedMessageSnapshots?.() ?? []).some(
-              (queuedMessage) =>
-                queuedMessage.clientMessageId === message.clientMessageId,
-            );
+          // A lease can expire after the runtime queued the prompt but before
+          // markFollowUpAccepted landed. Record the handoff instead of queueing
+          // a second copy.
+          const runtimeAlreadyQueued = (
+            harness.getQueuedMessageSnapshots?.() ?? []
+          ).some(
+            (queuedMessage) =>
+              queuedMessage.clientMessageId === message.clientMessageId,
+          );
 
           if (runtimeAlreadyQueued) {
-            await sdk.taskRuns.releaseFollowUpMessage({
+            await sdk.taskRuns.markFollowUpAccepted({
               runId: taskRun.id,
               id: message.id,
               claimToken: message.claimToken!,

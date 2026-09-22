@@ -209,18 +209,35 @@ function isSandboxStartupError(
     ) {
       return true;
     }
-
-    return (
-      !run?.runtimeTaskStartedAt &&
-      /fetch failed|econnrefused|network/i.test(error.message)
-    );
   }
 
-  return (
-    !run?.runtimeTaskStartedAt &&
-    error instanceof TypeError &&
-    /fetch failed|network/i.test(error.message)
-  );
+  return !run?.runtimeTaskStartedAt && isUnsentRequestError(error);
+}
+
+// Connection-level failures where the request never reached the sandbox.
+// Resets, timeouts, and cut responses are ambiguous: the sandbox may already
+// have accepted the prompt, so re-admitting it would deliver it twice.
+const UNSENT_REQUEST_ERROR_CODES = new Set([
+  'ECONNREFUSED',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'UND_ERR_CONNECT_TIMEOUT',
+]);
+
+function isUnsentRequestError(error: unknown): boolean {
+  let current: unknown = error;
+
+  for (let depth = 0; depth < 5 && current; depth += 1) {
+    const code = (current as { code?: unknown }).code;
+    if (typeof code === 'string' && UNSENT_REQUEST_ERROR_CODES.has(code)) {
+      return true;
+    }
+    current = (current as { cause?: unknown }).cause;
+  }
+
+  return false;
 }
 
 async function fetchSandboxRpcResponseOrThrowIfNotReady(

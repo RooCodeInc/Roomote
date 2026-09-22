@@ -180,7 +180,7 @@ describe('task follow-up message outbox', () => {
     expect(await hasOpenTaskFollowUpMessages(testRunId)).toBe(false);
   });
 
-  it('serializes different sender actors behind earlier queued prompts', async () => {
+  it('serializes different sender actors behind earlier pending prompts', async () => {
     const first = await enqueueTaskFollowUpMessage({
       runId: testRunId,
       taskId: TEST_TASK_ID,
@@ -202,6 +202,9 @@ describe('task follow-up message outbox', () => {
     const [firstClaim] = await claimTaskFollowUpMessages(testRunId);
 
     expect(first.accepted && second.accepted && firstClaim).toBeTruthy();
+    // B cannot be claimed and overwrite the actor while A is still pending.
+    await expect(claimTaskFollowUpMessages(testRunId)).resolves.toEqual([]);
+
     await expect(
       activateTaskFollowUpActor({ id: firstClaim!.id, runId: testRunId }),
     ).resolves.toEqual({ userId: SENDER_A_ID });
@@ -211,18 +214,37 @@ describe('task follow-up message outbox', () => {
       claimToken: firstClaim!.claimToken!,
     });
 
-    // The second sender cannot claim and overwrite the actor before A starts.
-    await expect(claimTaskFollowUpMessages(testRunId)).resolves.toEqual([]);
-
-    await markTaskFollowUpDelivered({
-      runId: testRunId,
-      taskId: TEST_TASK_ID,
-      clientMessageId: 'client-a',
-    });
+    // Once A is in the runtime queue, that queue owns ordering and B follows.
     const [secondClaim] = await claimTaskFollowUpMessages(testRunId);
+    expect(secondClaim?.clientMessageId).toBe('client-b');
     await expect(
       activateTaskFollowUpActor({ id: secondClaim!.id, runId: testRunId }),
     ).resolves.toEqual({ userId: SENDER_B_ID });
+  });
+
+  it('never reclaims or waits on a prompt the runtime already accepted', async () => {
+    await enqueueTaskFollowUpMessage({
+      runId: testRunId,
+      taskId: TEST_TASK_ID,
+      prompt: 'deleted from the runtime queue',
+      quoteText: 'deleted from the runtime queue',
+      clientMessageId: 'client-deleted',
+      deliveryMode: 'send',
+    });
+    const [claimed] = await claimTaskFollowUpMessages(testRunId);
+    await markTaskFollowUpAccepted({
+      id: claimed!.id,
+      runId: testRunId,
+      claimToken: claimed!.claimToken!,
+    });
+    // Simulate the lease expiring with no transcript ack ever arriving.
+    await db
+      .update(taskFollowUpMessages)
+      .set({ claimExpiresAt: new Date(Date.now() - 60_000) })
+      .where(eq(taskFollowUpMessages.id, claimed!.id));
+
+    expect(await hasOpenTaskFollowUpMessages(testRunId)).toBe(false);
+    await expect(claimTaskFollowUpMessages(testRunId)).resolves.toEqual([]);
   });
 
   it('discards startup messages when the run settles instead of reactivating it', async () => {
