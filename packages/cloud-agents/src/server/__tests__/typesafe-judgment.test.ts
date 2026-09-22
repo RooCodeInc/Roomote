@@ -109,10 +109,104 @@ describe('evaluateTypeSafeJudgments', () => {
     vi.restoreAllMocks();
   });
 
-  describe('shadow comparison', () => {
+  describe('Roomote judgment upstream', () => {
+    const upstreamAnswers = {
+      urgent: { type: 'noul', noul: 0.92 },
+      team: {
+        type: 'choice',
+        choice: 'technical',
+        probabilities: { billing: 0.1, technical: 0.9 },
+      },
+    };
+
     beforeEach(() => {
       mockEnv.R_JUDGMENT_UPSTREAM_URL = 'https://judgment.internal.test/';
       mockEnv.R_JUDGMENT_UPSTREAM_API_KEY = 'upstream-key';
+    });
+
+    it('is used by default when no TypeSafe key is configured', async () => {
+      mockKeys({ OPENROUTER_API_KEY: 'or-key', AI_GATEWAY_API_KEY: 'gw-key' });
+      const fetchMock = mockFetchResponse({ answers: upstreamAnswers });
+
+      await expect(
+        evaluateTypeSafeJudgments({ state: { text: 'hi' }, questions }),
+      ).resolves.toEqual({
+        urgent: { type: 'noul', noul: 0.92 },
+        team: { ...upstreamAnswers.team, confidence: 0.9 },
+      });
+
+      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe('https://judgment.internal.test/v1/decisions');
+      expect(init.headers).toMatchObject({
+        Authorization: 'Bearer upstream-key',
+      });
+      expect(JSON.parse(init.body as string)).toEqual({
+        state: { text: 'hi' },
+        model: 'roomote-judgment',
+        questions,
+      });
+      // A self-run model gets more room than a hosted API.
+      expect((init.signal as AbortSignal | undefined)?.aborted).toBe(false);
+    });
+
+    it('sends no Authorization header for an upstream without a key', async () => {
+      mockEnv.R_JUDGMENT_UPSTREAM_API_KEY = undefined;
+      mockKeys({});
+      const fetchMock = mockFetchResponse({ answers: upstreamAnswers });
+
+      await evaluateTypeSafeJudgments({ state: 'hi', questions });
+
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(init.headers).not.toHaveProperty('Authorization');
+    });
+
+    it('yields to a TypeSafe key, which is an explicit opt-in', async () => {
+      const fetchMock = mockFetchResponse({ answers: directAnswers });
+
+      await evaluateTypeSafeJudgments({ state: 'hi', questions });
+
+      expect(fetchMock.mock.calls[0]?.[0]).toBe(
+        'https://api.typesafe.ai/v1/systemone',
+      );
+    });
+
+    it('is chosen over a TypeSafe key when selected explicitly', async () => {
+      mockGetJudgmentSelection.mockResolvedValue('roomote');
+      const fetchMock = mockFetchResponse({ answers: upstreamAnswers });
+
+      await evaluateTypeSafeJudgments({ state: 'hi', questions });
+
+      expect(fetchMock.mock.calls[0]?.[0]).toBe(
+        'https://judgment.internal.test/v1/decisions',
+      );
+    });
+
+    it('resolves to no backend when selected without an upstream', async () => {
+      mockEnv.R_JUDGMENT_UPSTREAM_URL = undefined;
+      mockEnv.R_JUDGMENT_MODEL = 'roomote';
+      const fetchMock = mockFetchResponse({ answers: upstreamAnswers });
+
+      await expect(
+        evaluateTypeSafeJudgments({ state: 'hi', questions }),
+      ).resolves.toBeNull();
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('validates upstream answers like any other backend', async () => {
+      mockKeys({});
+      mockFetchResponse({
+        answers: { urgent: { type: 'noul', noul: 0.5 } },
+      });
+
+      await expect(
+        evaluateTypeSafeJudgments({ state: 'hi', questions }),
+      ).rejects.toThrow('missing a valid answer');
+    });
+  });
+
+  describe('shadow comparison', () => {
+    beforeEach(() => {
+      mockEnv.R_JUDGMENT_UPSTREAM_URL = 'https://judgment.internal.test';
       mockEnv.R_JUDGMENT_SHADOW = 'on';
     });
 
@@ -145,16 +239,9 @@ describe('evaluateTypeSafeJudgments', () => {
 
       await vi.waitFor(() => expect(info).toHaveBeenCalledTimes(1));
       expect(fetchMock).toHaveBeenCalledTimes(2);
-      const [url, init] = fetchMock.mock.calls[1] as [string, RequestInit];
-      expect(url).toBe('https://judgment.internal.test/v1/decisions');
-      expect(init.headers).toMatchObject({
-        Authorization: 'Bearer upstream-key',
-      });
-      expect(JSON.parse(init.body as string)).toEqual({
-        state: { text: 'secret' },
-        model: 'roomote-judgment',
-        questions,
-      });
+      expect(fetchMock.mock.calls[1]?.[0]).toBe(
+        'https://judgment.internal.test/v1/decisions',
+      );
       const line = info.mock.calls[0]?.[0] as string;
       expect(line).toContain(
         '[JudgmentShadow] primary=typesafe questions=2 agreed=1',
@@ -205,45 +292,25 @@ describe('evaluateTypeSafeJudgments', () => {
       expect(line).not.toContain('secret');
     });
 
-    it('sends no Authorization header for an upstream without a key', async () => {
-      mockEnv.R_JUDGMENT_UPSTREAM_API_KEY = undefined;
+    it('does not shadow the upstream against itself', async () => {
+      mockKeys({});
       const info = vi.spyOn(console, 'info').mockImplementation(() => {});
-      const fetchMock = vi
-        .fn()
-        .mockImplementation(
-          async () => new Response(JSON.stringify({ answers: directAnswers })),
-        );
-      vi.stubGlobal('fetch', fetchMock);
-
-      await evaluateTypeSafeJudgments({ state: 'hi', questions });
-      await vi.waitFor(() => expect(info).toHaveBeenCalledTimes(1));
-
-      const [, init] = fetchMock.mock.calls[1] as [string, RequestInit];
-      expect(init.headers).not.toHaveProperty('Authorization');
-    });
-
-    it('stays out of the way when shadowing is off', async () => {
-      mockEnv.R_JUDGMENT_SHADOW = 'off';
-      const fetchMock = mockFetchResponse({ answers: directAnswers });
+      const fetchMock = mockFetchResponse({
+        answers: {
+          urgent: { type: 'noul', noul: 0.9 },
+          team: {
+            type: 'choice',
+            choice: 'billing',
+            probabilities: { billing: 0.7, technical: 0.3 },
+          },
+        },
+      });
 
       await evaluateTypeSafeJudgments({ state: 'hi', questions });
       await new Promise((resolve) => setTimeout(resolve, 0));
 
       expect(fetchMock).toHaveBeenCalledTimes(1);
-    });
-
-    it('never answers a decision itself', async () => {
-      // Without a judgment backend the upstream is not a fallback: nothing is
-      // sent to it, and the caller gets the same null it always did.
-      mockKeys({});
-      const fetchMock = mockFetchResponse({ answers: directAnswers });
-
-      await expect(
-        evaluateTypeSafeJudgments({ state: 'hi', questions }),
-      ).resolves.toBeNull();
-      await new Promise((resolve) => setTimeout(resolve, 0));
-
-      expect(fetchMock).not.toHaveBeenCalled();
+      expect(info).not.toHaveBeenCalled();
     });
   });
 

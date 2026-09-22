@@ -193,17 +193,19 @@ const serverSchema = {
   // `vercel`). Overrides the Settings > Models choice.
   // Unset defers to Settings, where a TypeSafe key alone selects `typesafe`.
   R_JUDGMENT_MODEL: z
-    .enum(['off', 'typesafe', 'openrouter', 'vercel'])
+    .enum(['off', 'roomote', 'typesafe', 'openrouter', 'vercel'])
     .optional(),
   // A judgment model Roomote runs itself, speaking the same typed decisions
-  // request as Jev. It is evaluation-only: nothing acts on its answers, and
-  // it is called only by the shadow comparison below. The key is optional
-  // because a private-network upstream may carry no auth.
+  // request as Jev. Hosting injects it for managed deployments so routing
+  // and triage text never leaves Roomote-operated infrastructure unless an
+  // admin explicitly chooses a third-party judgment model. The key is
+  // optional because a private-network upstream may carry no auth.
   R_JUDGMENT_UPSTREAM_URL: z.string().url().optional(),
   R_JUDGMENT_UPSTREAM_API_KEY: z.string().min(1).optional(),
-  // `on` also scores every Jev judgment with the Roomote-run upstream and
-  // logs how the two agree, without changing the answer callers get. The
-  // evidence for deciding whether that model can ever answer on its own.
+  // `on` also scores every third-party (Jev) judgment with the Roomote-run
+  // upstream and logs how the two agree, without changing the answer callers
+  // get. Calibration evidence for the hosted model, collected only from
+  // deployments that already send that text to Jev.
   R_JUDGMENT_SHADOW: z.enum(['on', 'off']).optional(),
   R_INTERCOM_APP_ID: z.string().min(1).optional(),
   R_POSTHOG_PROJECT_KEY: z.string().min(1).optional(),
