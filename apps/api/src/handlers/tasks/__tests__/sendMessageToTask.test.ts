@@ -1,8 +1,10 @@
 const {
   mockCreateRunToken,
+  mockEnqueueTaskFollowUpMessage,
   mockCreateTRPCProxyClient,
   mockEnqueueTask,
   mockGetTaskChannelBindings,
+  mockHasOpenTaskFollowUpMessages,
   mockFindLatestTaskRun,
   mockFindReusableGitHubPrFollowUpOwner,
   mockHttpBatchLink,
@@ -22,9 +24,11 @@ const {
   mockEq,
 } = vi.hoisted(() => ({
   mockCreateRunToken: vi.fn(),
+  mockEnqueueTaskFollowUpMessage: vi.fn(),
   mockCreateTRPCProxyClient: vi.fn(),
   mockEnqueueTask: vi.fn(),
   mockGetTaskChannelBindings: vi.fn(),
+  mockHasOpenTaskFollowUpMessages: vi.fn(),
   mockFindLatestTaskRun: vi.fn(),
   mockFindReusableGitHubPrFollowUpOwner: vi.fn(),
   mockHttpBatchLink: vi.fn((options) => options),
@@ -122,7 +126,9 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
 
   return {
     ...actual,
+    enqueueTaskFollowUpMessage: mockEnqueueTaskFollowUpMessage,
     findReusableGitHubPrFollowUpOwner: mockFindReusableGitHubPrFollowUpOwner,
+    hasOpenTaskFollowUpMessages: mockHasOpenTaskFollowUpMessages,
     touchTaskActivity: mockTouchTaskActivity,
     and: mockAnd,
     eq: mockEq,
@@ -159,6 +165,7 @@ function createActiveRun(
   overrides: Partial<{
     id: number;
     status: string;
+    taskPhase: string | null;
     sandboxServerUrl: string | null;
     userId: string | null;
     actingUserId: string | null;
@@ -171,11 +178,13 @@ function createActiveRun(
     linearSessionId: string | null;
     linearIssueId: string | null;
     linearOrganizationId: string | null;
+    runtimeTaskStartedAt: Date | null;
   }> = {},
 ) {
   return {
     id: 42,
     status: 'running',
+    taskPhase: 'running',
     sandboxServerUrl: 'https://sandbox.example.com',
     userId: 'user-1',
     actingUserId: 'user-1',
@@ -191,6 +200,7 @@ function createActiveRun(
     linearSessionId: null,
     linearIssueId: null,
     linearOrganizationId: null,
+    runtimeTaskStartedAt: new Date(),
     ...overrides,
   };
 }
@@ -199,6 +209,11 @@ describe('sendMessageToTask', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockCreateRunToken.mockResolvedValue('run-token');
+    mockEnqueueTaskFollowUpMessage.mockResolvedValue({
+      accepted: true,
+      inserted: true,
+      message: { clientMessageId: 'task-follow-up:1' },
+    });
     mockCreateTRPCProxyClient.mockImplementation(() => ({
       commands: {
         sendPrompt: {
@@ -221,6 +236,7 @@ describe('sendMessageToTask', () => {
       linearOrganizationId: null,
     });
     mockFindReusableGitHubPrFollowUpOwner.mockResolvedValue(null);
+    mockHasOpenTaskFollowUpMessages.mockResolvedValue(false);
     mockNotifyFastAgentParentOnPrFeedback.mockResolvedValue(undefined);
     mockTaskPullRequestFindFirst.mockResolvedValue(null);
     mockTaskRunFindFirst.mockResolvedValue(null);
@@ -294,7 +310,6 @@ describe('sendMessageToTask', () => {
   it.each([
     ['missing task', null, 404],
     ['settled without snapshot', createActiveRun({ status: 'completed' }), 409],
-    ['worker still booting', createActiveRun({ sandboxServerUrl: null }), 409],
   ])(
     'marks a steer rejected before delivery: %s',
     async (_name, run, status) => {
@@ -316,6 +331,103 @@ describe('sendMessageToTask', () => {
       expect(mockEnqueueTask).not.toHaveBeenCalled();
     },
   );
+
+  it('durably queues a Fast steer while the sandbox is still booting', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({ sandboxServerUrl: null }),
+    );
+
+    const result = await steerMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-1',
+      message: 'Include the additional context.',
+      senderMode: 'fast_agent',
+    });
+
+    expect(result).toEqual({
+      success: true,
+      result: { queued: true, messageId: 'task-follow-up:1' },
+    });
+    expect(mockSteerTaskMutate).not.toHaveBeenCalled();
+    expect(mockEnqueueTaskFollowUpMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: 42,
+        taskId: 'task-1',
+        prompt: 'Include the additional context.',
+        deliveryMode: 'steer',
+      }),
+    );
+  });
+
+  it('queues a normal follow-up before sandbox startup instead of rejecting it', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({ sandboxServerUrl: null }),
+    );
+
+    const result = await sendMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-1',
+      message: 'Use the expanded scope.',
+      clientMessageId: 'client-startup-follow-up',
+    });
+
+    expect(result).toEqual({
+      success: true,
+      result: { queued: true, messageId: 'task-follow-up:1' },
+    });
+    expect(mockSendPromptMutate).not.toHaveBeenCalled();
+    expect(mockEnqueueTaskFollowUpMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientMessageId: 'client-startup-follow-up',
+        deliveryMode: 'send',
+      }),
+    );
+  });
+
+  it('keeps a live follow-up behind an older startup outbox row', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(createActiveRun());
+    mockHasOpenTaskFollowUpMessages.mockResolvedValue(true);
+
+    const result = await sendMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-1',
+      message: 'Follow the first queued instruction.',
+      clientMessageId: 'client-after-startup',
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      result: { queued: true },
+    });
+    expect(mockSendPromptMutate).not.toHaveBeenCalled();
+    expect(mockEnqueueTaskFollowUpMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientMessageId: 'client-after-startup',
+        deliveryMode: 'send',
+      }),
+    );
+  });
+
+  it('queues a startup network failure before the runtime has started', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({ runtimeTaskStartedAt: null }),
+    );
+    mockSendPromptMutate.mockRejectedValueOnce(new TypeError('fetch failed'));
+
+    const result = await sendMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-1',
+      message: 'Retry this after startup.',
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      result: { queued: true },
+    });
+    expect(mockEnqueueTaskFollowUpMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ deliveryMode: 'send' }),
+    );
+  });
 
   it.each([
     [new TypeError('fetch failed'), 500, 'fetch failed'],

@@ -23,6 +23,7 @@ export const steerTask = publicProcedure
         prompt: z.string(),
         quoteText: z.string(),
         images: z.array(z.string()).optional(),
+        clientMessageId: z.string().optional(),
         userName: z.string().optional(),
         suppressSlackReplyQuote: z.boolean().optional(),
         answerPendingInput: z.boolean().optional(),
@@ -120,6 +121,7 @@ export const steerTask = publicProcedure
           ...(workflowPhase ? { workflowPhase } : {}),
           autoSteerWhenQueued: true,
           userId,
+          clientMessageId: input.clientMessageId,
         });
 
         if (!success) {
@@ -182,6 +184,7 @@ export const steerTask = publicProcedure
           images: input.images,
           ...(workflowPhase ? { workflowPhase } : {}),
           userId,
+          clientMessageId: input.clientMessageId,
         });
 
         if (!success) {
@@ -258,6 +261,7 @@ export const steerTask = publicProcedure
         images: input.images,
         ...(workflowPhase ? { workflowPhase } : {}),
         userId,
+        clientMessageId: input.clientMessageId,
       });
 
       if (!success) {

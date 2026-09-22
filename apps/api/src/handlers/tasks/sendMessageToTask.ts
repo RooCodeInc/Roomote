@@ -10,8 +10,10 @@ import {
 import {
   and,
   db,
+  enqueueTaskFollowUpMessage,
   eq,
   findReusableGitHubPrFollowUpOwner,
+  hasOpenTaskFollowUpMessages,
   taskPullRequests,
   taskRuns,
   touchTaskActivity,
@@ -128,6 +130,7 @@ type SendMessageToTaskResult =
 type LatestTaskRun = {
   id: number;
   status: string;
+  taskPhase: string | null;
   sandboxServerUrl: string | null;
   actingUserId: string | null;
   snapshotId: string | null;
@@ -137,6 +140,7 @@ type LatestTaskRun = {
   payload: Record<string, unknown> | null;
   port: number | null;
   result: unknown;
+  runtimeTaskStartedAt: Date | null;
 };
 
 type LinkedReviewFastHandoff = {
@@ -183,6 +187,40 @@ class SandboxNotReadyError extends Error {
     super(SANDBOX_BOOTING_ERROR);
     this.name = 'SandboxNotReadyError';
   }
+}
+
+function isSandboxStartupError(
+  error: unknown,
+  run?: Pick<LatestTaskRun, 'runtimeTaskStartedAt'>,
+): boolean {
+  if (error instanceof SandboxNotReadyError) {
+    return true;
+  }
+
+  if (error instanceof TRPCClientError) {
+    if (error.cause instanceof SandboxNotReadyError) {
+      return true;
+    }
+
+    if (
+      /not connected|not available|still booting|wait for the task to start|harness manager is not available/i.test(
+        error.message,
+      )
+    ) {
+      return true;
+    }
+
+    return (
+      !run?.runtimeTaskStartedAt &&
+      /fetch failed|econnrefused|network/i.test(error.message)
+    );
+  }
+
+  return (
+    !run?.runtimeTaskStartedAt &&
+    error instanceof TypeError &&
+    /fetch failed|network/i.test(error.message)
+  );
 }
 
 async function fetchSandboxRpcResponseOrThrowIfNotReady(
@@ -876,6 +914,69 @@ async function resolveLinkedReviewHandoff({
   };
 }
 
+async function persistQueuedTaskFollowUp({
+  run,
+  taskId,
+  senderUserId,
+  message,
+  quoteText,
+  images,
+  source,
+  clientMessageId,
+  senderMode,
+  workerQuoteUserName,
+  deliveryMode,
+}: {
+  run: LatestTaskRun;
+  taskId: string;
+  senderUserId: string;
+  message: string;
+  quoteText: string;
+  images?: string[];
+  source?: string;
+  clientMessageId?: string;
+  senderMode?: SendMessageSenderMode;
+  workerQuoteUserName?: string;
+  deliveryMode: 'send' | 'steer';
+}): Promise<SendMessageToTaskResult> {
+  const followUp = await enqueueTaskFollowUpMessage({
+    runId: run.id,
+    taskId,
+    userId: senderUserId,
+    prompt: message,
+    quoteText,
+    images,
+    source: resolveFollowUpPromptSource({ senderMode, source }),
+    userName: undefined,
+    workerQuoteUserName:
+      workerQuoteUserName ??
+      (await resolveWorkerQuoteUserName(senderMode, senderUserId)),
+    clientMessageId: normalizeOptionalString(clientMessageId),
+    deliveryMode,
+  });
+
+  if (!followUp.accepted) {
+    return {
+      success: false,
+      error:
+        followUp.reason === 'settled_run'
+          ? `Task is not active (status: ${run.status})`
+          : 'Task not found',
+      status: followUp.reason === 'settled_run' ? 409 : 404,
+      delivery: 'not_accepted',
+    };
+  }
+
+  return {
+    success: true,
+    result: {
+      queued: true,
+      messageId: followUp.message.clientMessageId,
+      ...(followUp.inserted ? {} : { alreadyQueued: true }),
+    },
+  };
+}
+
 export async function sendMessageToTask({
   taskId,
   userId,
@@ -910,6 +1011,7 @@ export async function sendMessageToTask({
     const run = await findLatestTaskRun(taskId, {
       id: true,
       status: true,
+      taskPhase: true,
       sandboxServerUrl: true,
       actingUserId: true,
       snapshotId: true,
@@ -919,6 +1021,7 @@ export async function sendMessageToTask({
       payload: true,
       port: true,
       result: true,
+      runtimeTaskStartedAt: true,
     });
 
     if (!run) {
@@ -1015,20 +1118,72 @@ export async function sendMessageToTask({
       };
     }
 
-    if (!run.sandboxServerUrl) {
-      return {
-        success: false,
-        error: 'Task has no active sandbox. The worker may still be booting.',
-        status: 409,
-      };
-    }
-
     const senderUserId = linkedReviewHandoff.senderUserId;
 
     const shouldPreserveActor =
       !!senderMode && ACTOR_PRESERVING_MODES.has(senderMode);
     const requiresActorHandoff =
       !shouldPreserveActor && run.actingUserId !== senderUserId;
+
+    const queueBeforeLiveDelivery =
+      !run.sandboxServerUrl || (await hasOpenTaskFollowUpMessages(run.id));
+
+    if (queueBeforeLiveDelivery) {
+      let didSwitchActingUser = false;
+
+      try {
+        await touchTaskActivity(db, taskId);
+        await maybeCreateSlackReplyQuoteContext({
+          runId: run.id,
+          payload: run.payload as Record<string, unknown> | null,
+          slackThreadTs: channelBindings?.slackThreadTs ?? null,
+          userId: senderUserId,
+          message: quoteText,
+          senderMode,
+        });
+        didSwitchActingUser = await syncActingUserIdBeforeDelivery({
+          runId: run.id,
+          currentActingUserId: run.actingUserId,
+          nextActingUserId: senderUserId,
+          preserveActor: shouldPreserveActor,
+        });
+
+        const queued = await persistQueuedTaskFollowUp({
+          run: run as LatestTaskRun,
+          taskId,
+          senderUserId,
+          message,
+          quoteText,
+          images,
+          source,
+          clientMessageId,
+          senderMode,
+          workerQuoteUserName,
+          deliveryMode: 'send',
+        });
+
+        if (!queued.success && didSwitchActingUser) {
+          await restoreActingUserIdAfterFailedDelivery({
+            handlerName: 'sendMessageToTask',
+            runId: run.id,
+            previousActingUserId: run.actingUserId,
+            attemptedActingUserId: senderUserId,
+          });
+        }
+
+        return queued;
+      } catch (error) {
+        if (didSwitchActingUser) {
+          await restoreActingUserIdAfterFailedDelivery({
+            handlerName: 'sendMessageToTask',
+            runId: run.id,
+            previousActingUserId: run.actingUserId,
+            attemptedActingUserId: senderUserId,
+          });
+        }
+        throw error;
+      }
+    }
 
     let didSwitchActingUser = false;
 
@@ -1067,7 +1222,7 @@ export async function sendMessageToTask({
       const result = await withSandboxServerRpcClient({
         runId: run.id,
         userId: senderUserId,
-        sandboxServerUrl: run.sandboxServerUrl,
+        sandboxServerUrl: run.sandboxServerUrl!,
         fetch: fetchSandboxRpcResponseOrThrowIfNotReady,
         call: async (client) => {
           return client.commands.sendPrompt.mutate({
@@ -1091,6 +1246,26 @@ export async function sendMessageToTask({
 
       return { success: true, result };
     } catch (error) {
+      if (isSandboxStartupError(error, run as LatestTaskRun)) {
+        const queued = await persistQueuedTaskFollowUp({
+          run: run as LatestTaskRun,
+          taskId,
+          senderUserId,
+          message,
+          quoteText,
+          images,
+          source,
+          clientMessageId,
+          senderMode,
+          workerQuoteUserName,
+          deliveryMode: 'send',
+        });
+
+        if (queued.success) {
+          return queued;
+        }
+      }
+
       if (didSwitchActingUser) {
         await restoreActingUserIdAfterFailedDelivery({
           handlerName: 'sendMessageToTask',
@@ -1143,6 +1318,7 @@ export async function steerMessageToTask({
   quoteText = message,
   images,
   senderMode,
+  clientMessageId,
   workerQuoteUserName,
 }: {
   taskId: string;
@@ -1151,6 +1327,7 @@ export async function steerMessageToTask({
   quoteText?: string;
   images?: string[];
   senderMode?: SendMessageSenderMode;
+  clientMessageId?: string;
   /**
    * Explicit display name for the worker-side Slack reply quote. See
    * {@link sendMessageToTask} for semantics.
@@ -1161,6 +1338,7 @@ export async function steerMessageToTask({
     const run = await findLatestTaskRun(taskId, {
       id: true,
       status: true,
+      taskPhase: true,
       sandboxServerUrl: true,
       actingUserId: true,
       snapshotId: true,
@@ -1170,6 +1348,7 @@ export async function steerMessageToTask({
       payload: true,
       port: true,
       result: true,
+      runtimeTaskStartedAt: true,
     });
 
     if (!run) {
@@ -1207,13 +1386,63 @@ export async function steerMessageToTask({
       };
     }
 
-    if (!run.sandboxServerUrl) {
-      return {
-        success: false,
-        error: 'Task has no active sandbox. The worker may still be booting.',
-        status: 409,
-        delivery: 'not_accepted',
-      };
+    const queueBeforeLiveDelivery =
+      !run.sandboxServerUrl || (await hasOpenTaskFollowUpMessages(run.id));
+
+    if (queueBeforeLiveDelivery) {
+      let didSwitchActingUser = false;
+
+      try {
+        await touchTaskActivity(db, taskId);
+        await maybeCreateSlackReplyQuoteContext({
+          runId: run.id,
+          payload: run.payload as Record<string, unknown> | null,
+          slackThreadTs: channelBindings?.slackThreadTs ?? null,
+          userId,
+          message: quoteText,
+          senderMode,
+        });
+        didSwitchActingUser = await syncActingUserIdBeforeDelivery({
+          runId: run.id,
+          currentActingUserId: run.actingUserId,
+          nextActingUserId: userId,
+          preserveActor: false,
+        });
+
+        const queued = await persistQueuedTaskFollowUp({
+          run: run as LatestTaskRun,
+          taskId,
+          senderUserId: userId,
+          message,
+          quoteText,
+          images,
+          clientMessageId,
+          senderMode,
+          workerQuoteUserName,
+          deliveryMode: 'steer',
+        });
+
+        if (!queued.success && didSwitchActingUser) {
+          await restoreActingUserIdAfterFailedDelivery({
+            handlerName: 'steerMessageToTask',
+            runId: run.id,
+            previousActingUserId: run.actingUserId,
+            attemptedActingUserId: userId,
+          });
+        }
+
+        return queued;
+      } catch (error) {
+        if (didSwitchActingUser) {
+          await restoreActingUserIdAfterFailedDelivery({
+            handlerName: 'steerMessageToTask',
+            runId: run.id,
+            previousActingUserId: run.actingUserId,
+            attemptedActingUserId: userId,
+          });
+        }
+        throw error;
+      }
     }
 
     let didSwitchActingUser = false;
@@ -1248,13 +1477,16 @@ export async function steerMessageToTask({
       const result = await withSandboxServerRpcClient({
         runId: run.id,
         userId,
-        sandboxServerUrl: run.sandboxServerUrl,
+        sandboxServerUrl: run.sandboxServerUrl!,
         fetch: fetchSandboxRpcResponseOrThrowIfNotReady,
         call: async (client) => {
           promptSubmitted = true;
           return client.commands.steerTask.mutate({
             prompt: message,
             quoteText,
+            ...(clientMessageId
+              ? { clientMessageId: normalizeOptionalString(clientMessageId) }
+              : {}),
             ...(getFastAgentParentFromPayload(run.payload)
               ? { answerPendingInput: true }
               : {}),
@@ -1271,6 +1503,25 @@ export async function steerMessageToTask({
 
       return { success: true, result };
     } catch (error) {
+      if (isSandboxStartupError(error, run as LatestTaskRun)) {
+        const queued = await persistQueuedTaskFollowUp({
+          run: run as LatestTaskRun,
+          taskId,
+          senderUserId: userId,
+          message,
+          quoteText,
+          images,
+          clientMessageId,
+          senderMode,
+          workerQuoteUserName,
+          deliveryMode: 'steer',
+        });
+
+        if (queued.success) {
+          return queued;
+        }
+      }
+
       if (didSwitchActingUser) {
         await restoreActingUserIdAfterFailedDelivery({
           handlerName: 'steerMessageToTask',
@@ -1283,6 +1534,7 @@ export async function steerMessageToTask({
       const latestRun = await findLatestTaskRun(taskId, {
         id: true,
         status: true,
+        taskPhase: true,
         sandboxServerUrl: true,
         actingUserId: true,
         snapshotId: true,
@@ -1292,6 +1544,7 @@ export async function steerMessageToTask({
         payload: true,
         port: true,
         result: true,
+        runtimeTaskStartedAt: true,
       });
       // A lost RPC response does not prove rejection. Resuming with the same
       // prompt could repeat an instruction already accepted by the worker.

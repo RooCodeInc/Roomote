@@ -6,6 +6,7 @@ import {
 } from '@roomote/cloud-agents/server';
 import {
   db,
+  markTaskFollowUpDelivered,
   taskMessages,
   taskPlatformIssueReports,
   tasks,
@@ -804,6 +805,21 @@ export async function recordTaskMessageEnvelope(
 
   if (!persistedTaskMessage) {
     return null;
+  }
+
+  if (envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt) {
+    const metadata = asRecord(envelope.metadata);
+    const payload = asRecord(envelope.payload);
+    const clientMessageId =
+      asString(metadata?.clientMessageId) ?? asString(payload?.clientMessageId);
+
+    if (clientMessageId) {
+      await markTaskFollowUpDelivered({
+        runId,
+        taskId,
+        clientMessageId,
+      });
+    }
   }
 
   const showWidgetFallbackDelivery = extractShowWidgetFallbackDelivery(

@@ -1,6 +1,13 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import { db, eq, slackInstallations } from '@roomote/db/server';
+import {
+  claimTaskFollowUpMessages,
+  db,
+  eq,
+  markTaskFollowUpAccepted,
+  releaseTaskFollowUpMessage,
+  slackInstallations,
+} from '@roomote/db/server';
 
 import {
   RunStatus,
@@ -351,6 +358,32 @@ export const taskRunsRouter = router({
       envelope: input.envelope,
     });
   }),
+  claimFollowUpMessages: runTokenOnlyScoped(
+    z.object({
+      runId: z.number(),
+      limit: z.number().int().min(1).max(100).optional(),
+    }),
+    'runId',
+  ).mutation(({ input }) =>
+    claimTaskFollowUpMessages(input.runId, input.limit),
+  ),
+  markFollowUpAccepted: runTokenOnlyScoped(
+    z.object({
+      runId: z.number(),
+      id: z.string().uuid(),
+      claimToken: z.string().uuid(),
+    }),
+    'runId',
+  ).mutation(({ input }) => markTaskFollowUpAccepted(input)),
+  releaseFollowUpMessage: runTokenOnlyScoped(
+    z.object({
+      runId: z.number(),
+      id: z.string().uuid(),
+      claimToken: z.string().uuid(),
+      error: z.string().max(2_000).optional(),
+    }),
+    'runId',
+  ).mutation(({ input }) => releaseTaskFollowUpMessage(input)),
   recordInferenceUsage: runTokenOnlyScoped(
     z.object({
       runId: z.number(),

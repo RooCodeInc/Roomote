@@ -1836,6 +1836,69 @@ export const runTask = async ({
       });
     };
 
+    let taskFollowUpDrainPromise: Promise<void> | null = null;
+    const drainTaskFollowUps = async (): Promise<void> => {
+      if (taskFollowUpDrainPromise) {
+        return taskFollowUpDrainPromise;
+      }
+
+      taskFollowUpDrainPromise = (async () => {
+        const messages = await sdk.taskRuns.claimFollowUpMessages({
+          runId: taskRun.id,
+          limit: 20,
+        });
+
+        for (const message of messages) {
+          const runtimeAlreadyQueued =
+            message.status === 'accepted' &&
+            (harness.getQueuedMessageSnapshots?.() ?? []).some(
+              (queuedMessage) =>
+                queuedMessage.clientMessageId === message.clientMessageId,
+            );
+
+          if (runtimeAlreadyQueued) {
+            await sdk.taskRuns.releaseFollowUpMessage({
+              runId: taskRun.id,
+              id: message.id,
+              claimToken: message.claimToken!,
+            });
+            continue;
+          }
+
+          const sent = await sendPrompt({
+            prompt: message.prompt,
+            images: message.images ?? undefined,
+            queueOnly: true,
+            source: message.source ?? undefined,
+            userId: message.userId ?? undefined,
+            userName: message.userName ?? undefined,
+            userImageUrl: message.userImageUrl ?? undefined,
+            clientMessageId: message.clientMessageId,
+          });
+
+          if (!sent) {
+            await sdk.taskRuns.releaseFollowUpMessage({
+              runId: taskRun.id,
+              id: message.id,
+              claimToken: message.claimToken!,
+              error: 'Runtime did not accept the queued follow-up.',
+            });
+            break;
+          }
+
+          await sdk.taskRuns.markFollowUpAccepted({
+            runId: taskRun.id,
+            id: message.id,
+            claimToken: message.claimToken!,
+          });
+        }
+      })().finally(() => {
+        taskFollowUpDrainPromise = null;
+      });
+
+      return taskFollowUpDrainPromise;
+    };
+
     const deliverQueuedSnapshotResumeSlackMessages = async (
       messages: QueuedSnapshotResumeSlackMessage[],
     ) => {
@@ -2266,6 +2329,7 @@ export const runTask = async ({
       prepareActorScopedTurn,
       getVisibleQueuedPromptCount: () =>
         harness.getQueuedMessages?.().length ?? 0,
+      drainTaskFollowUps,
     });
 
     // Wait for HarnessManager to signal that the container should shut down.
