@@ -996,6 +996,12 @@ describe('finishRun', () => {
           previousSnapshotCreatedAt: '2026-04-09T20:41:30.000Z',
           previousWorkerHeartbeatAt: '2026-04-09T20:38:58.630Z',
           error: 'spawn timeout',
+          terminalReason: {
+            kind: 'terminal',
+            status: RunStatus.Failed,
+            errorCode: null,
+            message: 'spawn timeout',
+          },
         }),
       }),
     );

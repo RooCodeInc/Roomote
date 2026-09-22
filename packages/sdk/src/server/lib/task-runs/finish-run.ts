@@ -360,6 +360,12 @@ export const finishRun = async ({
         taskPhase: status === RunStatus.Idle ? run.taskPhase : null,
         error: sanitizedError ?? null,
         errorCode: errorCode ?? null,
+        terminalReason: {
+          kind: 'terminal',
+          status,
+          errorCode: errorCode ?? null,
+          message: sanitizedError ?? null,
+        },
       },
       createdAt: now,
     });

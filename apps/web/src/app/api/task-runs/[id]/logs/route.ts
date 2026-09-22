@@ -6,8 +6,12 @@ import {
   getComputeProviderCapabilities,
 } from '@roomote/compute-providers/factory';
 import {
+  buildTaskRunDisconnectEvent,
+  formatOperationalEvent,
   isExitedRunStatus,
   resolveComputeProviderTarget,
+  type TaskRunDisconnectEvent,
+  type TaskRunDisconnectReasonCode,
 } from '@roomote/types';
 
 import {
@@ -26,6 +30,43 @@ const LOG_STREAM_READINESS_POLL_INTERVAL_MS = 2_000;
 const LOG_STREAM_READINESS_MAX_WAIT_MS = 15 * 60_000;
 const UNSUPPORTED_LOG_STREAMING_ERROR =
   'Live log streaming is unavailable for this sandbox provider.';
+
+function logDisconnectEvent(event: TaskRunDisconnectEvent): void {
+  if (event.disconnectReason.code === 'stream_completed') {
+    return;
+  }
+
+  console.warn(
+    formatOperationalEvent('task_runtime_log_stream_disconnect', {
+      taskId: event.correlation.taskId,
+      runId: event.correlation.runId,
+      reason: event.disconnectReason.code,
+      outcome: event.terminalReason ? 'terminal' : 'disconnected',
+      status: event.terminalReason?.status,
+    }),
+  );
+}
+
+function createDisconnectEvent(
+  taskRun: {
+    taskId: string;
+    status: Parameters<typeof buildTaskRunDisconnectEvent>[0]['status'];
+    errorCode?: string | null;
+    error?: string | null;
+  },
+  runId: number,
+  reasonCode: TaskRunDisconnectReasonCode,
+): TaskRunDisconnectEvent {
+  return buildTaskRunDisconnectEvent({
+    taskId: taskRun.taskId,
+    runId,
+    reasonCode,
+    source: 'web',
+    status: taskRun.status,
+    errorCode: taskRun.errorCode,
+    error: taskRun.error,
+  });
+}
 
 export async function GET(
   request: NextRequest,
@@ -57,7 +98,13 @@ export async function GET(
   if (!capabilities.supportsCommandOutputStreaming) {
     return createResponse(request, async (session) => {
       await pushSessionError(session, UNSUPPORTED_LOG_STREAMING_ERROR);
-      await pushSessionDisconnect(session);
+      const disconnectEvent = createDisconnectEvent(
+        taskRun,
+        runId,
+        'unsupported_provider',
+      );
+      logDisconnectEvent(disconnectEvent);
+      await pushSessionDisconnect(session, disconnectEvent);
     });
   }
 
@@ -68,6 +115,9 @@ export async function GET(
     let machineId = taskRun.machineId;
     let sandboxCmdId = taskRun.sandboxCmdId;
     let status = taskRun.status;
+    let errorCode = taskRun.errorCode;
+    let error = taskRun.error;
+    let runMissing = false;
     const startedAt = Date.now();
 
     session.on('disconnected', () => {
@@ -82,6 +132,15 @@ export async function GET(
 
       if (Date.now() - startedAt >= LOG_STREAM_READINESS_MAX_WAIT_MS) {
         shouldReconnect = true;
+        console.warn(
+          formatOperationalEvent('task_runtime_log_stream_disconnect', {
+            taskId: taskRun.taskId,
+            runId,
+            reason: 'readiness_timeout',
+            outcome: 'reconnecting',
+            status,
+          }),
+        );
         break;
       }
 
@@ -93,16 +152,21 @@ export async function GET(
           machineId: true,
           sandboxCmdId: true,
           status: true,
+          error: true,
+          errorCode: true,
         },
       });
 
       if (!latestTaskRun) {
+        runMissing = true;
         break;
       }
 
       machineId = latestTaskRun.machineId;
       sandboxCmdId = latestTaskRun.sandboxCmdId;
       status = latestTaskRun.status;
+      errorCode = latestTaskRun.errorCode;
+      error = latestTaskRun.error;
     }
 
     if (shouldReconnect || disconnected) {
@@ -110,9 +174,21 @@ export async function GET(
     }
 
     if (!machineId || !sandboxCmdId) {
-      await pushSessionDisconnect(session);
+      const disconnectEvent = createDisconnectEvent(
+        { ...taskRun, status, errorCode, error: error ?? null },
+        runId,
+        runMissing
+          ? 'run_missing'
+          : isExitedRunStatus(status)
+            ? 'run_terminal'
+            : 'sandbox_not_ready',
+      );
+      logDisconnectEvent(disconnectEvent);
+      await pushSessionDisconnect(session, disconnectEvent);
       return;
     }
+
+    let disconnectReason: TaskRunDisconnectReasonCode = 'stream_completed';
 
     try {
       const client = createComputeProviderClient({
@@ -122,7 +198,13 @@ export async function GET(
 
       if (!client.capabilities.supportsCommandOutputStreaming) {
         await pushSessionError(session, UNSUPPORTED_LOG_STREAMING_ERROR);
-        await pushSessionDisconnect(session);
+        const disconnectEvent = createDisconnectEvent(
+          { ...taskRun, status, errorCode, error: error ?? null },
+          runId,
+          'unsupported_provider',
+        );
+        logDisconnectEvent(disconnectEvent);
+        await pushSessionDisconnect(session, disconnectEvent);
         return;
       }
 
@@ -150,9 +232,16 @@ export async function GET(
         session,
         error instanceof Error ? error.message : 'Failed to stream logs',
       );
+      disconnectReason = 'provider_stream_error';
     }
 
-    await pushSessionDisconnect(session);
+    const disconnectEvent = createDisconnectEvent(
+      { ...taskRun, status, errorCode, error: error ?? null },
+      runId,
+      disconnectReason,
+    );
+    logDisconnectEvent(disconnectEvent);
+    await pushSessionDisconnect(session, disconnectEvent);
   });
 }
 
@@ -178,16 +267,19 @@ async function pushSessionError(
   }
 }
 
-async function pushSessionDisconnect(session: {
-  isConnected: boolean;
-  push: (data: unknown, event?: string) => unknown;
-}): Promise<void> {
+async function pushSessionDisconnect(
+  session: {
+    isConnected: boolean;
+    push: (data: unknown, event?: string) => unknown;
+  },
+  data?: TaskRunDisconnectEvent,
+): Promise<void> {
   if (!session.isConnected) {
     return;
   }
 
   try {
-    await session.push(null, 'disconnect');
+    await session.push(data ?? null, 'disconnect');
   } catch {
     // Client already disconnected, ignore.
   }

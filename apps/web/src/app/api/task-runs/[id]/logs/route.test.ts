@@ -130,10 +130,13 @@ describe('GET /api/task-runs/[id]/logs', () => {
       if (pollCount === 1) {
         return {
           id: 1,
+          taskId: 'task-1',
           machineId: null,
           sandboxCmdId: null,
           vendor: 'sandbox',
           status: 'running',
+          error: null,
+          errorCode: null,
         };
       }
 
@@ -175,15 +178,28 @@ describe('GET /api/task-runs/[id]/logs', () => {
     expect(logEvents).toHaveLength(1);
     expect(logEvents[0]?.[0]).toEqual({ stream: 'stdout', data: 'booting\n' });
     expect(disconnectEvents).toHaveLength(1);
+    expect(disconnectEvents[0]?.[0]).toEqual({
+      correlation: { taskId: 'task-1', runId: 1 },
+      disconnectReason: {
+        kind: 'disconnect',
+        code: 'stream_completed',
+        source: 'web',
+        exhausted: false,
+      },
+      terminalReason: null,
+    });
   });
 
   it('emits a readable error when live log streaming is unavailable', async () => {
     findFirstMock.mockResolvedValue({
       id: 1,
+      taskId: 'task-1',
       machineId: 'modal-123',
       sandboxCmdId: null,
       vendor: 'modal',
       status: 'running',
+      error: null,
+      errorCode: null,
     });
 
     const { GET } = await import('./route');
@@ -206,6 +222,14 @@ describe('GET /api/task-runs/[id]/logs', () => {
       error: 'Live log streaming is unavailable for this sandbox provider.',
     });
     expect(disconnectEvents).toHaveLength(1);
+    expect(disconnectEvents[0]?.[0]).toEqual(
+      expect.objectContaining({
+        correlation: { taskId: 'task-1', runId: 1 },
+        disconnectReason: expect.objectContaining({
+          code: 'unsupported_provider',
+        }),
+      }),
+    );
   });
 
   it('ends readiness polling without a custom disconnect event when the wait max is hit', async () => {
@@ -229,10 +253,13 @@ describe('GET /api/task-runs/[id]/logs', () => {
       if (pollCount === 1) {
         return {
           id: 1,
+          taskId: 'task-1',
           machineId: null,
           sandboxCmdId: null,
           vendor: 'sandbox',
           status: 'running',
+          error: null,
+          errorCode: null,
         };
       }
 
@@ -269,10 +296,13 @@ describe('GET /api/task-runs/[id]/logs', () => {
 
     findFirstMock.mockResolvedValue({
       id: 1,
+      taskId: 'task-1',
       machineId: null,
       sandboxCmdId: null,
       vendor: 'sandbox',
       status: 'completed',
+      error: 'finished',
+      errorCode: null,
     });
 
     const { GET } = await import('./route');

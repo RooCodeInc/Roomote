@@ -347,7 +347,11 @@ describe('BaseController.handleSpawnTaskRunError', () => {
     expect((capturedError as Error).message).not.toContain('super-secret');
     expect((capturedError as Error).cause).toBeUndefined();
     expect(context).toEqual(
-      expect.objectContaining({ phase: 'spawn_worker', runId: 42 }),
+      expect.objectContaining({
+        phase: 'spawn_worker',
+        runId: 42,
+        taskId: expect.any(String),
+      }),
     );
   });
 
