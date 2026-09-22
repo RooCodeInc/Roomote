@@ -669,7 +669,6 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     {
       displayName: 'GPT-6 Sol',
       modelId: 'gpt-6-sol',
-      providerIds: ['roomote', 'openrouter', 'openai', 'chatgpt'],
     },
     {
       displayName: 'GPT 5.6 Terra',
@@ -678,7 +677,6 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     {
       displayName: 'GPT-6 Luna',
       modelId: 'gpt-6-luna',
-      providerIds: ['roomote', 'openrouter', 'openai', 'chatgpt'],
     },
   ])(
     'recommends $displayName only from providers that support it',
@@ -1089,7 +1087,9 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       'requesty/claude-haiku-4-5',
       'requesty/anthropic/claude-opus-5-5',
       'requesty/claude-sonnet-5',
+      'requesty/gpt-6-sol@eu',
       'requesty/gpt-5.6-terra@eu',
+      'requesty/gpt-6-luna@eu',
       'requesty/gemini-3.8-flash',
       'requesty/glm-5.3-flash',
       'requesty/glm-5.3',
@@ -1146,22 +1146,22 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     });
   });
 
-  it('retains GitHub Copilot defaults that remain supported but are no longer curated', () => {
+  it('uses the GPT-6 Luna successor as the GitHub Copilot default', () => {
     const copilotProvider = SETUP_MODEL_PROVIDER_CATALOG.find(
       (provider) => provider.id === 'github-copilot',
     );
 
     expect(copilotProvider).toMatchObject({
       label: 'GitHub Copilot',
-      defaultRoomoteModel: 'github-copilot/gpt-5.6-luna',
+      defaultRoomoteModel: 'github-copilot/gpt-6-luna',
       authKind: 'oauth',
     });
     expect(copilotProvider?.envVarName).toBeUndefined();
     expect(
       copilotProvider?.suggestedTaskModels.some(
-        (suggestion) => suggestion.id === 'github-copilot/gpt-5.6-luna',
+        (suggestion) => suggestion.id === 'github-copilot/gpt-6-luna',
       ),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it('marks GitHub Copilot connected only from its OAuth record', () => {
@@ -1311,6 +1311,25 @@ describe('buildRecommendedDeploymentModelConfig', () => {
     });
   });
 
+  it.each([
+    ['azure', 'azure'],
+    ['azure-cognitive-services', 'azure-cognitive-services'],
+  ] as const)(
+    'uses the GPT-6 successors for %s role recommendations',
+    (providerId, modelPrefix) => {
+      expect(
+        buildRecommendedDeploymentModelConfig(
+          getSetupModelProvider(providerId),
+        ),
+      ).toMatchObject({
+        roomoteSmallModel: `${modelPrefix}/gpt-6-luna`,
+        roomoteCodeReviewModel: `${modelPrefix}/gpt-6-sol`,
+        roomoteExploreModel: `${modelPrefix}/gpt-6-luna`,
+        roomotePlanningModel: `${modelPrefix}/gpt-6-sol`,
+      });
+    },
+  );
+
   it('maps the provider default to coding and recommended models to their roles', () => {
     expect(
       buildRecommendedDeploymentModelConfig(getSetupModelProvider('anthropic')),
@@ -1385,13 +1404,13 @@ describe('buildRecommendedDeploymentModelConfig', () => {
     },
   );
 
-  it('uses Luna for GitHub Copilot with other roles following coding', () => {
+  it('uses GPT-6 Luna for GitHub Copilot with other roles following coding', () => {
     expect(
       buildRecommendedDeploymentModelConfig(
         getSetupModelProvider('github-copilot'),
       ),
     ).toEqual({
-      roomoteModel: 'github-copilot/gpt-5.6-luna',
+      roomoteModel: 'github-copilot/gpt-6-luna',
       roomoteOrchestrationModel: null,
       roomoteSmallModel: null,
       roomoteVisionModel: null,
