@@ -55,6 +55,11 @@ type PrResult = {
   hints: number;
   hintHits: number;
   hintedFindingHunks: number;
+  /** Inline findings, and how many fall inside a hinted range. */
+  findings: number;
+  findingsCovered: number;
+  /** Head-side lines the hints point the reviewer at. */
+  hintedLines: number;
   latencyMs: number;
 };
 
@@ -157,6 +162,7 @@ async function evaluatePr(
   repo: string,
   reviewers: ReadonlySet<string>,
   number: number,
+  chunkLines: number | undefined,
 ): Promise<PrResult | undefined> {
   const pr = gh<{ title: string; base: { sha: string } }>([
     'api',
@@ -189,7 +195,7 @@ async function evaluatePr(
     (comment) => comment.original_commit_id === commit,
   );
   const diff = compareDiff(repo, pr.base.sha, commit);
-  const hunks = selectReviewPrescreenHunks(diff);
+  const hunks = selectReviewPrescreenHunks(diff, { chunkLines });
 
   if (hunks.length === 0) {
     return undefined;
@@ -214,9 +220,13 @@ async function evaluatePr(
   const hints = collectReviewPrescreenHints(hunks, answers);
   const hintIndexes = hints.map((hint) =>
     hunks.findIndex(
-      (hunk) => hunk.file === hint.file && hunk.startLine === hint.startLine,
+      (hunk) =>
+        hunk.file === hint.file &&
+        hunk.header === hint.header &&
+        hunk.startLine === hint.startLine,
     ),
   );
+  const hintedHunks = hintIndexes.map((index) => hunks[index]!);
 
   return {
     number,
@@ -242,6 +252,14 @@ async function evaluatePr(
     hintHits: hintIndexes.filter((index) => isFinding[index]).length,
     hintedFindingHunks: new Set(hintIndexes.filter((index) => isFinding[index]))
       .size,
+    findings: findings.length,
+    findingsCovered: findings.filter((comment) =>
+      hintedHunks.some((hunk) => contains(hunk, comment)),
+    ).length,
+    hintedLines: hintedHunks.reduce(
+      (total, hunk) => total + Math.max(0, hunk.endLine - hunk.startLine + 1),
+      0,
+    ),
     latencyMs,
   };
 }
@@ -286,6 +304,8 @@ async function main() {
       limit: { type: 'string', default: '40' },
       // Writes per-hunk scores (paths, probabilities, labels) for offline tuning.
       out: { type: 'string' },
+      // 0 disables chunking, to compare against the unchunked baseline.
+      'chunk-lines': { type: 'string' },
     },
   });
 
@@ -317,7 +337,14 @@ async function main() {
     }
 
     try {
-      const result = await evaluatePr(values.repo, reviewers, number);
+      const result = await evaluatePr(
+        values.repo,
+        reviewers,
+        number,
+        values['chunk-lines'] === undefined
+          ? undefined
+          : Number(values['chunk-lines']),
+      );
 
       if (result) {
         results.push(result);
@@ -359,6 +386,14 @@ async function main() {
         prsWithHints: results.filter((result) => result.hints > 0).length,
         hintPrecision: hints ? hintHits / hints : null,
         hintRecall: sum((result) => result.hintedFindingHunks) / findingHunks,
+        findings: sum((result) => result.findings),
+        findingCoverage:
+          sum((result) => result.findingsCovered) /
+          sum((result) => result.findings),
+        medianHintedLinesPerPr: percentile(
+          results.map((result) => result.hintedLines),
+          0.5,
+        ),
         precisionLiftOverBaseRate: hints
           ? hintHits / hints / (findingHunks / totalHunks)
           : null,

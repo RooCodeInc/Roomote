@@ -9,6 +9,15 @@ import {
 const REVIEW_PRESCREEN_MAX_INPUT_CHARS = 48_000;
 /** Hunks judged per review; selected round-robin so every file is covered. */
 const REVIEW_PRESCREEN_MAX_HUNKS = 64;
+/**
+ * Hunks longer than this many diff lines (most often whole new files) are
+ * split into chunks of this size, so a hint points at a region a reviewer
+ * can inspect instead of an entire file. In the eval, 150 kept finding
+ * coverage while shrinking hinted regions; 50 lost about 8 points of
+ * coverage because small chunks strip the context the model ranks with.
+ */
+const REVIEW_PRESCREEN_CHUNK_LINES = 150;
+const CHUNK_BOUNDARY_OVERRUN_LINES = 10;
 export const REVIEW_PRESCREEN_MAX_HINTS = 3;
 export const REVIEW_PRESCREEN_MAX_HINTS_PER_FILE = 2;
 export const REVIEW_PRESCREEN_TIMEOUT_MS = 10_000;
@@ -98,7 +107,7 @@ type ReviewPrescreenHint = {
 
 type ParsedHunk = Omit<ReviewPrescreenHunk, 'text'> & { body: string };
 
-const HUNK_HEADER_PATTERN = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/u;
+const HUNK_HEADER_PATTERN = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/u;
 
 function truncate(value: string, maxChars: number, marker: string): string {
   if (value.length <= maxChars) {
@@ -187,20 +196,112 @@ function pathFromDiffGitHeader(line: string): string | undefined {
   return index === -1 ? undefined : rest.slice(index + 3).trim();
 }
 
+type RawHunk = {
+  file: string;
+  header: string;
+  oldStart: number;
+  oldCount: number;
+  newStart: number;
+  newCount: number;
+  scope: string;
+  lines: string[];
+};
+
+function isChangedLine(line: string): boolean {
+  return line.startsWith('+') || line.startsWith('-');
+}
+
 /**
- * Split a unified git diff into per-file hunks with head-side line ranges.
- * Lockfile and generated-asset hunks, and hunks with no changed lines, are
- * dropped because the decision model cannot say anything grounded about them.
+ * Split an oversized hunk into consecutive chunks with their own git-style
+ * headers and head-side ranges. A chunk with no changed lines is dropped.
  */
-function parseDiffHunks(diff: string): ParsedHunk[] {
+function chunkHunk(raw: RawHunk, chunkLines: number): ParsedHunk[] {
+  if (chunkLines <= 0 || raw.lines.length <= chunkLines) {
+    return raw.lines.some(isChangedLine)
+      ? [
+          {
+            file: raw.file,
+            header: raw.header,
+            startLine: raw.newStart,
+            endLine: raw.newStart + raw.newCount - 1,
+            body: [raw.header, ...raw.lines].join('\n'),
+          },
+        ]
+      : [];
+  }
+
+  const chunks: ParsedHunk[] = [];
+  // A zero-length side is numbered from the line before it; track the first
+  // line it would occupy instead so every chunk's counts stay in step.
+  let oldLine = raw.oldCount === 0 ? raw.oldStart + 1 : raw.oldStart;
+  let newLine = raw.newCount === 0 ? raw.newStart + 1 : raw.newStart;
+
+  for (let offset = 0; offset < raw.lines.length;) {
+    let end = Math.min(offset + chunkLines, raw.lines.length);
+
+    // Avoid splitting a replacement (removed lines followed by the lines that
+    // replace them) across two chunks, within a small overrun.
+    while (
+      end < raw.lines.length &&
+      end < offset + chunkLines + CHUNK_BOUNDARY_OVERRUN_LINES &&
+      isChangedLine(raw.lines[end - 1]!) &&
+      raw.lines[end]!.startsWith('+') &&
+      raw.lines.slice(offset, end).some((line) => line.startsWith('-'))
+    ) {
+      end += 1;
+    }
+
+    const lines = raw.lines.slice(offset, end);
+    offset = end;
+    const chunkOld = oldLine;
+    const chunkNew = newLine;
+
+    for (const line of lines) {
+      if (line.startsWith('-') || line.startsWith(' ')) {
+        oldLine += 1;
+      }
+      if (line.startsWith('+') || line.startsWith(' ')) {
+        newLine += 1;
+      }
+    }
+
+    if (!lines.some(isChangedLine)) {
+      continue;
+    }
+
+    const oldCount = oldLine - chunkOld;
+    const newCount = newLine - chunkNew;
+    // Git numbers a zero-length side from the line before it.
+    const oldHeaderStart = oldCount === 0 ? chunkOld - 1 : chunkOld;
+    const newHeaderStart = newCount === 0 ? chunkNew - 1 : chunkNew;
+    const header = `@@ -${oldHeaderStart},${oldCount} +${newHeaderStart},${newCount} @@${raw.scope}`;
+
+    chunks.push({
+      file: raw.file,
+      header,
+      startLine: newHeaderStart,
+      endLine: newHeaderStart + newCount - 1,
+      body: [header, ...lines].join('\n'),
+    });
+  }
+
+  return chunks;
+}
+
+/**
+ * Split a unified git diff into per-file hunks with head-side line ranges,
+ * chunking oversized hunks. Lockfile and generated-asset hunks, and hunks
+ * with no changed lines, are dropped because the decision model cannot say
+ * anything grounded about them.
+ */
+function parseDiffHunks(diff: string, chunkLines: number): ParsedHunk[] {
   const hunks: ParsedHunk[] = [];
   let file: string | undefined;
-  let current: { hunk: ParsedHunk; lines: string[]; changed: number } | null =
-    null;
+  let current: RawHunk | null = null;
 
   const flush = () => {
-    if (current && current.changed > 0) {
-      hunks.push({ ...current.hunk, body: current.lines.join('\n') });
+    if (current) {
+      hunks.push(...chunkHunk(current, chunkLines));
     }
     current = null;
   };
@@ -220,18 +321,15 @@ function parseDiffHunks(diff: string): ParsedHunk[] {
       flush();
 
       if (file && !UNREVIEWABLE_PATH_PATTERN.test(file)) {
-        const startLine = Number(header[1]);
-        const count = header[2] === undefined ? 1 : Number(header[2]);
         current = {
-          hunk: {
-            file,
-            header: line.trim(),
-            startLine,
-            endLine: startLine + count - 1,
-            body: '',
-          },
-          lines: [line],
-          changed: 0,
+          file,
+          header: line.trim(),
+          oldStart: Number(header[1]),
+          oldCount: header[2] === undefined ? 1 : Number(header[2]),
+          newStart: Number(header[3]),
+          newCount: header[4] === undefined ? 1 : Number(header[4]),
+          scope: header[5]!.trimEnd(),
+          lines: [],
         };
       }
       continue;
@@ -248,10 +346,6 @@ function parseDiffHunks(diff: string): ParsedHunk[] {
     }
 
     current.lines.push(line);
-
-    if (line.startsWith('+') || line.startsWith('-')) {
-      current.changed += 1;
-    }
   }
 
   flush();
@@ -268,11 +362,12 @@ export function selectReviewPrescreenHunks(
   {
     maxHunks = REVIEW_PRESCREEN_MAX_HUNKS,
     maxInputChars = REVIEW_PRESCREEN_MAX_INPUT_CHARS,
-  }: { maxHunks?: number; maxInputChars?: number } = {},
+    chunkLines = REVIEW_PRESCREEN_CHUNK_LINES,
+  }: { maxHunks?: number; maxInputChars?: number; chunkLines?: number } = {},
 ): ReviewPrescreenHunk[] {
   const byFile = new Map<string, ParsedHunk[]>();
 
-  for (const hunk of parseDiffHunks(diff)) {
+  for (const hunk of parseDiffHunks(diff, chunkLines)) {
     byFile.set(hunk.file, [...(byFile.get(hunk.file) ?? []), hunk]);
   }
 

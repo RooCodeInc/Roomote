@@ -137,6 +137,95 @@ describe('github PR review pre-screen', () => {
       );
     });
 
+    it('chunks oversized hunks into inspectable regions with their own ranges', () => {
+      const newFile = [
+        'diff --git a/src/new.ts b/src/new.ts',
+        'new file mode 100644',
+        '--- /dev/null',
+        '+++ b/src/new.ts',
+        '@@ -0,0 +1,120 @@',
+        ...Array.from({ length: 120 }, (_, index) => `+line ${index + 1}`),
+      ].join('\n');
+      const mixed = fileDiff('src/mixed.ts', [
+        {
+          start: 10,
+          lines: [
+            ...Array.from({ length: 49 }, (_, index) => ` context ${index}`),
+            '-removed',
+            '+added',
+            ' context tail',
+          ],
+        },
+      ]);
+      const deleted = [
+        'diff --git a/src/gone.ts b/src/gone.ts',
+        'deleted file mode 100644',
+        '--- a/src/gone.ts',
+        '+++ /dev/null',
+        '@@ -1,60 +0,0 @@',
+        ...Array.from({ length: 60 }, (_, index) => `-old ${index + 1}`),
+      ].join('\n');
+
+      const hunks = selectReviewPrescreenHunks(
+        [newFile, mixed, deleted].join('\n'),
+        { chunkLines: 50 },
+      );
+      const summary = hunks.map(({ file, header, startLine, endLine }) => ({
+        file,
+        header,
+        startLine,
+        endLine,
+      }));
+
+      expect(summary.filter((hunk) => hunk.file === 'src/new.ts')).toEqual([
+        {
+          file: 'src/new.ts',
+          header: '@@ -0,0 +1,50 @@',
+          startLine: 1,
+          endLine: 50,
+        },
+        {
+          file: 'src/new.ts',
+          header: '@@ -0,0 +51,50 @@',
+          startLine: 51,
+          endLine: 100,
+        },
+        {
+          file: 'src/new.ts',
+          header: '@@ -0,0 +101,20 @@',
+          startLine: 101,
+          endLine: 120,
+        },
+      ]);
+      // The chunk boundary falls inside the `-removed`/`+added` pair, so the
+      // chunk extends to keep it whole; the context-only remainder is dropped.
+      expect(summary.filter((hunk) => hunk.file === 'src/mixed.ts')).toEqual([
+        {
+          file: 'src/mixed.ts',
+          header: '@@ -10,50 +10,50 @@ function scope()',
+          startLine: 10,
+          endLine: 59,
+        },
+      ]);
+      expect(summary.filter((hunk) => hunk.file === 'src/gone.ts')).toEqual([
+        {
+          file: 'src/gone.ts',
+          header: '@@ -1,50 +0,0 @@',
+          startLine: 0,
+          endLine: -1,
+        },
+        {
+          file: 'src/gone.ts',
+          header: '@@ -51,10 +0,0 @@',
+          startLine: 0,
+          endLine: -1,
+        },
+      ]);
+      expect(hunks.find((hunk) => hunk.startLine === 51)!.text).toContain(
+        '+line 51',
+      );
+    });
+
     it('covers every file before a second hunk from any file', () => {
       const diff = [
         fileDiff(
