@@ -100,6 +100,16 @@ application-level SSRF protections, not network egress isolation: they do not
 restrict shell commands, browsers, or other networking available inside a
 coding sandbox.
 
+### Open an artifact
+
+Use `open_artifact` when you need to inspect an artifact from an accessible task or
+Session. Pass the exact owning task or Session ID and stored artifact path; a task
+run may omit the task ID to use its bound current task. The result includes artifact
+metadata and bounded content for supported text formats up to 64 KiB. Binary,
+unsupported, or oversized artifacts should be opened through their artifact link
+or downloaded instead. Roomote checks access to the owning task or Session before
+reading content.
+
 ## Things to try
 
 - “Push what I’m working on to a remote branch, then start a Roomote task from

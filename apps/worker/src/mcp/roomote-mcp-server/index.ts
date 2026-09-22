@@ -16,6 +16,7 @@ import {
   chatDestinationLookupInputSchema,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
   CREATE_CUSTOM_SKILL_TOOL,
+  OPEN_ARTIFACT_TOOL,
   UPDATE_CUSTOM_SKILL_TOOL,
   TaskPayloadKind,
   createTaskEnvVarRequestBaseSchema,
@@ -56,6 +57,7 @@ import { handleUpload } from './upload.js';
 import { handleDescribeVideo } from './describe-video.js';
 import { handleDownload } from './download.js';
 import { handleListArtifacts } from './list-artifacts.js';
+import { handleOpenArtifact } from './open-artifact.js';
 import { handleSearchTasks } from './search-tasks.js';
 import { handleGetTaskMessages } from './task-messages.js';
 import { handleGetTaskSummary } from './task-summary.js';
@@ -349,6 +351,39 @@ roomoteMcpServer.registerTool(
         workspacePath: process.env.ROOMOTE_WORKSPACE_PATH,
       },
       taskId,
+    );
+  },
+);
+
+roomoteMcpServer.registerTool(
+  OPEN_ARTIFACT_TOOL.name,
+  {
+    title: OPEN_ARTIFACT_TOOL.title,
+    description: OPEN_ARTIFACT_TOOL.description,
+    inputSchema: z.object(OPEN_ARTIFACT_TOOL.inputSchema).strict(),
+    annotations: OPEN_ARTIFACT_TOOL.annotations,
+  },
+  async (params): Promise<ToolResult> => {
+    const config = getArtifactConfig();
+    if (!config) {
+      return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
+    }
+
+    const taskId =
+      params.taskId ??
+      (!params.sessionId ? process.env.ROOMOTE_TASK_ID : undefined);
+    if (!taskId && !params.sessionId) {
+      return errorResult(
+        'taskId or sessionId is required (taskId defaults to ROOMOTE_TASK_ID)',
+      );
+    }
+
+    return handleOpenArtifact(
+      {
+        ...params,
+        ...(taskId ? { taskId } : {}),
+      },
+      config,
     );
   },
 );

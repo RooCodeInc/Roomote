@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   isBackgroundAutomationUserTargetKind,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES,
+  CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH,
 } from './background-agents';
 import { ALL_REPOSITORIES, FAST_EXECUTION, NO_REPOSITORIES } from './constants';
 import { REASONING_EFFORT_VALUES } from './task-runs';
@@ -31,6 +32,7 @@ export const manageCustomAutomationsFieldSchemas = {
   name: z.string().optional(),
   prompt: z
     .string()
+    .max(CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH)
     .optional()
     .describe(
       'Automation instructions written in product language. Do not include the automation cadence; keep it only in the schedule field. When the user intends actionable or launchable follow-up tasks and the automation has both a chat report destination and an executable workspace, instruct it to post qualifying actions as launchable suggested tasks alongside the report; otherwise keep actions as report text. Do not mention internal tool names or parameters.',

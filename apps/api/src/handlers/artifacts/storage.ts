@@ -17,6 +17,7 @@ const PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS = 3600;
 const HOST_LOCAL_ENDPOINT_HOSTNAMES = new Set(['localhost', '127.0.0.1']);
 
 const s3PresignClients = new Map<string, S3Client>();
+const s3StorageClients = new Map<string, S3Client>();
 
 function createS3Client(endpoint: string): S3Client {
   return new S3Client({
@@ -38,6 +39,17 @@ function getS3PresignClient(endpoint: string): S3Client {
 
   const client = createS3Client(endpoint);
   s3PresignClients.set(endpoint, client);
+  return client;
+}
+
+function getS3StorageClient(endpoint: string): S3Client {
+  const existingClient = s3StorageClients.get(endpoint);
+  if (existingClient) {
+    return existingClient;
+  }
+
+  const client = createS3Client(endpoint);
+  s3StorageClients.set(endpoint, client);
   return client;
 }
 
@@ -132,5 +144,19 @@ export async function generateDownloadUrl(
     {
       expiresIn: PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS,
     },
+  );
+}
+
+export async function getArtifactObject(
+  owner: { taskId: string } | { sessionId: string },
+  artifactId: string,
+  path: string,
+  version: number,
+) {
+  return getS3StorageClient(Env.S3_ENDPOINT).send(
+    new GetObjectCommand({
+      Bucket: Env.S3_BUCKET_ARTIFACTS,
+      Key: getArtifactStorageKey(owner, artifactId, path, version),
+    }),
   );
 }
