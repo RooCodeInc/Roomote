@@ -5608,7 +5608,10 @@ export class OpenCodeServerHarness
     finalized: FinalizedAssistantTurn | null,
     source: 'session_status' | 'session_idle',
   ): Promise<boolean> {
-    const report = finalized?.text.trim();
+    // A delegated task reports through a tool and often ends its turn with
+    // no text at all, so fall back to the last thing the agent said.
+    const report =
+      finalized?.text.trim() || this.latestParentAssistantText.trim();
 
     if (
       !report ||

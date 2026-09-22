@@ -817,6 +817,37 @@ describe('OpenCode harness completion check', () => {
     }
   });
 
+  it('checks a turn that ends with an empty message against the last thing the agent said', async () => {
+    const { client, harness, completed } = await startTask();
+
+    try {
+      client.message.mockResolvedValueOnce(
+        finalMessage('msg_0', 'Removed the guard; reporting to the session.'),
+      );
+      await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: 'msg_0',
+            sessionID: 'ses_1',
+            role: 'assistant',
+            time: { completed: 1 },
+          },
+        },
+      });
+      // The report tool call is the last action; the closing text is empty.
+      await completeTurn(client, 'msg_1', '');
+
+      await vi.waitFor(() => expect(completed()).toHaveLength(1));
+      expect(mockRequestTaskCompletionCheck).toHaveBeenCalledTimes(1);
+      expect(mockRequestTaskCompletionCheck.mock.calls[0]![1].report).toBe(
+        'Removed the guard; reporting to the session.',
+      );
+    } finally {
+      harness.dispose();
+    }
+  });
+
   it('skips the check when nothing changed or the task is ineligible', async () => {
     mockCollectShippedDiff.mockResolvedValue(null);
     const unchanged = await startTask();
