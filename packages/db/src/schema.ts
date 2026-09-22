@@ -3800,7 +3800,7 @@ export const fastAgentMessages = pgTable(
  * fast_agent_provider_messages
  *
  * Durable provider message bindings for communication surfaces whose stable
- * conversation address can host more than one Fast session. Inbound replies
+ * conversation address can host more than one session. Inbound replies
  * use these server-written rows to recover the canonical session without
  * trusting identifiers embedded in message text or webhook routing metadata.
  */
@@ -4273,7 +4273,7 @@ export const slackFastIntegrationCalls = pgTable(
  */
 
 /**
- * N-1 rollback: no longer written since Linear sessions enter Fast Sessions
+ * N-1 rollback: no longer written since Linear sessions use the session flow
  * (the workspace elicitation flow is gone). The previous release still reads
  * and writes this table; drop it only after that release is no longer the
  * supported rollback target.

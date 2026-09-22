@@ -41,7 +41,7 @@ async function createRun(input: {
       canceledAt: input.canceledAt,
       payload: {
         repo: 'acme/widgets',
-        description: 'Test Fast session task',
+        description: 'Test session task',
         ...(input.fastAgentSessionId
           ? { fastAgentSessionId: input.fastAgentSessionId }
           : {}),
@@ -57,7 +57,7 @@ async function createRun(input: {
     .returning();
 
   if (!run) {
-    throw new Error('Failed to create Fast session test run.');
+    throw new Error('Failed to create session test run.');
   }
 
   return run;
@@ -200,7 +200,7 @@ describe('getActiveFastAgentTasks', () => {
     ]);
   });
 
-  it('uses only the provider-neutral Fast session link', async () => {
+  it('uses only the provider-neutral session link', async () => {
     const canonicalTask = await createTask('Canonical session task');
     const parentOnlyTask = await createTask('Parent-only task');
 

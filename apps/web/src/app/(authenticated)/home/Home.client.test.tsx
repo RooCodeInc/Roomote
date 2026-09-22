@@ -385,7 +385,7 @@ describe('Home', () => {
     });
   });
 
-  it('leaves an untouched Fast session on the orchestration default', async () => {
+  it('leaves an untouched session on the orchestration default', async () => {
     render(<Home initialHeading="Let's cook!" initialPlaceholderIndex={0} />);
 
     expect(screen.getByRole('heading', { name: "Let's cook!" })).toHaveClass(
@@ -474,7 +474,7 @@ describe('Home', () => {
     });
   });
 
-  it('starts a new Fast session with the selected non-default model', async () => {
+  it('starts a new session with the selected non-default model', async () => {
     render(<Home initialPlaceholderIndex={0} />);
 
     fireEvent.click(
@@ -493,7 +493,7 @@ describe('Home', () => {
     });
   });
 
-  it('starts a new Fast session on the default after resetting the model', async () => {
+  it('starts a new session on the default after resetting the model', async () => {
     render(<Home initialPlaceholderIndex={0} />);
 
     fireEvent.click(
@@ -541,7 +541,7 @@ describe('Home', () => {
     await waitFor(() => expect(onTaskStarted).toHaveBeenCalledOnce());
   });
 
-  it('starts a Fast session with an image-only prompt', async () => {
+  it('starts a session with an image-only prompt', async () => {
     mockPreparePromptAttachments.mockResolvedValueOnce({
       text: '',
       images: ['data:image/png;base64,image-1'],
@@ -564,7 +564,7 @@ describe('Home', () => {
     );
   });
 
-  it('hands off seeded presence for an attachment-only Fast session', async () => {
+  it('hands off seeded presence for an attachment-only session', async () => {
     mockPreparePromptAttachments.mockResolvedValueOnce({
       text: '',
       attachmentTexts: ['Attachment contents'],
@@ -879,7 +879,7 @@ describe('Home', () => {
     expect(screen.getByRole('textbox')).toHaveValue('Summarize this plan');
   });
 
-  it('starts a Fast session without an environment', async () => {
+  it('starts a session without an environment', async () => {
     currentEnvironments = [];
 
     render(<Home initialPlaceholderIndex={0} />);

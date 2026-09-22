@@ -1412,9 +1412,7 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'The opening acknowledgement is already visible and needs no duplicate launch reply, but it does not suppress later useful updates while work continues',
     );
-    expect(prompt).toContain(
-      'Never expose Roomote-internal Fast terminology such as "Fast session" or "Roomote Fast mode"',
-    );
+    expect(prompt).toContain('Never expose Roomote-internal mode terminology');
     expect(prompt).toContain(
       'Preserve official names and capitalization for external or provider features, including ChatGPT Fast mode',
     );

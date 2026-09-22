@@ -2304,7 +2304,7 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
   });
 
-  it('explains that Teams replies continue the Fast session', async () => {
+  it('explains that Teams replies continue the session', async () => {
     state.settingsQuery.data.capabilities.teamsConnected = true;
     state.customAutomations = [
       {
@@ -2347,7 +2347,7 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
   });
 
-  it('explains that Telegram replies continue the Fast session', async () => {
+  it('explains that Telegram replies continue the session', async () => {
     state.settingsQuery.data.capabilities.telegramConnected = true;
     state.customAutomations = [
       {

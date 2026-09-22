@@ -719,7 +719,7 @@ describe('Telegram webhook handler', () => {
     );
   });
 
-  it('rejects a reaction from a different Fast session owner', async () => {
+  it('rejects a reaction from a different session owner', async () => {
     findFastMessageSessionMock.mockResolvedValue({
       id: 'fast-session-1',
       userId: 'another-user',
@@ -854,7 +854,7 @@ describe('Telegram webhook handler', () => {
     expect(postMessageMock).not.toHaveBeenCalled();
   });
 
-  it('durably marks the first Fast session in an implicit New Chat topic', async () => {
+  it('durably marks the first session in an implicit New Chat topic', async () => {
     mockTelegramLinkedSender('mapped-user-1');
     redisGetdelMock.mockResolvedValueOnce('1');
 
@@ -1090,7 +1090,7 @@ describe('Telegram webhook handler', () => {
     expect(enqueueTaskMock).not.toHaveBeenCalled();
   });
 
-  it('passes Telegram photos to a new Fast session', async () => {
+  it('passes Telegram photos to a new session', async () => {
     mockTelegramLinkedSender('mapped-user-1');
     getFastSessionMock.mockResolvedValueOnce({
       id: '33333333-3333-4333-8333-333333333333',
@@ -1127,7 +1127,7 @@ describe('Telegram webhook handler', () => {
     expect(enqueueTaskMock).not.toHaveBeenCalled();
   });
 
-  it('passes Telegram image documents to a new Fast session as images', async () => {
+  it('passes Telegram image documents to a new session as images', async () => {
     mockTelegramLinkedSender('mapped-user-1');
     downloadFileMock.mockResolvedValueOnce({
       bytes: new Uint8Array([1, 2, 3]),
@@ -1162,7 +1162,7 @@ describe('Telegram webhook handler', () => {
     );
   });
 
-  it('passes extracted Telegram documents to a new Fast session', async () => {
+  it('passes extracted Telegram documents to a new session', async () => {
     mockTelegramLinkedSender('mapped-user-1');
     downloadFileMock.mockResolvedValueOnce({
       bytes: new TextEncoder().encode('Deployment failed.'),
@@ -1222,28 +1222,25 @@ describe('Telegram webhook handler', () => {
         },
       },
     ],
-  ])(
-    'passes transcribed Telegram %s to a new Fast session',
-    async (_, message) => {
-      mockTelegramLinkedSender('mapped-user-1');
+  ])('passes transcribed Telegram %s to a new session', async (_, message) => {
+    mockTelegramLinkedSender('mapped-user-1');
 
-      const response = await postTelegramUpdate(
-        createTelegramUpdate({ message: { text: undefined, ...message } }),
-      );
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({ message: { text: undefined, ...message } }),
+    );
 
-      await expect(response.json()).resolves.toMatchObject({
-        fastAnswered: true,
-        fastDefaulted: true,
-      });
-      expect(continueFastReplyMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          attachmentTexts: [expect.stringContaining('Run the focused tests.')],
-        }),
-      );
-    },
-  );
+    await expect(response.json()).resolves.toMatchObject({
+      fastAnswered: true,
+      fastDefaulted: true,
+    });
+    expect(continueFastReplyMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attachmentTexts: [expect.stringContaining('Run the focused tests.')],
+      }),
+    );
+  });
 
-  it('passes bounded Telegram video descriptions to a new Fast session', async () => {
+  it('passes bounded Telegram video descriptions to a new session', async () => {
     mockTelegramLinkedSender('mapped-user-1');
     downloadFileMock.mockResolvedValueOnce({
       bytes: new Uint8Array([1, 2, 3]),
@@ -1316,7 +1313,7 @@ describe('Telegram webhook handler', () => {
     });
   });
 
-  it('uses a user-scoped Fast session for a Telegram group topic mention', async () => {
+  it('uses a user-scoped session for a Telegram group topic mention', async () => {
     mockTelegramLinkedSender('mapped-user-1');
     getFastSessionMock.mockResolvedValueOnce({
       id: '44444444-4444-4444-8444-444444444444',
@@ -1646,7 +1643,7 @@ describe('Telegram webhook handler', () => {
     expect(getFastSessionMock).not.toHaveBeenCalled();
   });
 
-  it('starts a Fast Session goal and acknowledges the objective literally', async () => {
+  it('starts a session goal and acknowledges the objective literally', async () => {
     mockTelegramLinkedSender();
 
     const response = await postTelegramUpdate(
@@ -1680,7 +1677,7 @@ describe('Telegram webhook handler', () => {
     expect(continueFastReplyMock).not.toHaveBeenCalled();
   });
 
-  it('starts a Fast Session goal without requiring a child task', async () => {
+  it('starts a session goal without requiring a child task', async () => {
     mockTelegramLinkedSender();
 
     const response = await postTelegramUpdate(
@@ -1747,7 +1744,7 @@ describe('Telegram webhook handler', () => {
     ).toBeLessThan(startFastSessionGoalMock.mock.invocationCallOrder[0]!);
   });
 
-  it('starts a group /goal on the Fast Session bound to the replied-to message', async () => {
+  it('starts a group /goal on the session bound to the replied-to message', async () => {
     mockTelegramLinkedSender('mapped-user-1');
     findFastReplySessionMock.mockResolvedValueOnce({
       id: '22222222-2222-4222-8222-222222222222',
@@ -2100,7 +2097,7 @@ describe('Telegram webhook handler', () => {
     expect(enqueueTaskMock).not.toHaveBeenCalled();
   });
 
-  it('replies with an error when the Fast session cannot be started', async () => {
+  it('replies with an error when the session cannot be started', async () => {
     mockTelegramLinkedSender('launch-owner-2');
     getFastSessionMock.mockRejectedValueOnce(new Error('Fast unavailable'));
 

@@ -349,7 +349,7 @@ describe('seedDemoData', () => {
     }
   });
 
-  it('fails before writes when the reserved Fast Session ID is occupied', async () => {
+  it('fails before writes when the reserved session ID is occupied', async () => {
     await db.insert(sessions).values({
       id: demoSeedFastSession.sessionId,
       title: 'Unrelated Session',
@@ -369,7 +369,7 @@ describe('seedDemoData', () => {
 
     try {
       await expect(seedDemoData()).rejects.toThrow(
-        `Cannot seed demo data: reserved Fast Session ID ${demoSeedFastSession.sessionId} is already used by an unrelated Session.`,
+        `Cannot seed demo data: reserved session ID ${demoSeedFastSession.sessionId} is already used by an unrelated session.`,
       );
 
       expect(

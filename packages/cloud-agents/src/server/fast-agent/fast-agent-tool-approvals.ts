@@ -33,7 +33,7 @@ import { buildFastAgentCodeModeServerNames } from './fast-agent-tool-policy';
 
 /**
  * Experiment-gated (`integrationToolApprovals`) per-tool approvals for
- * code-mode integration calls in Fast sessions.
+ * code-mode integration calls in sessions.
  *
  * Design notes:
  * - Policies compile into native OpenCode session permission rules (`ask` /

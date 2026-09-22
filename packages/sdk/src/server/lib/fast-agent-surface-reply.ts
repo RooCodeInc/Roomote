@@ -410,7 +410,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           channelId,
           footerStateThreadId,
           lockKey: `discord:thread_reply_footer_lock:${channelId}:${footerStateThreadId}`,
-          logRef: `fast session ${session.id}`,
+          logRef: `session ${session.id}`,
           logContext: 'fastAgentSurfaceReply',
           postReplyWithFooter: async () => {
             const result = await provider.postMessage({

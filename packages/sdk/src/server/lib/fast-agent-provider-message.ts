@@ -104,7 +104,7 @@ export async function recordFastAgentConversationMessageBestEffort(
     await recordFastAgentConversationMessage(input);
   } catch (error) {
     console.warn(
-      `[fast-agent-provider-message] Failed to bind ${input.conversation.surface} message to Fast session ${input.sessionId}: ${error instanceof Error ? error.message : String(error)}`,
+      `[fast-agent-provider-message] Failed to bind ${input.conversation.surface} message to session ${input.sessionId}: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 }

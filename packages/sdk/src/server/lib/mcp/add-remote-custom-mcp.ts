@@ -769,7 +769,7 @@ async function requireServer(id: string): Promise<ResolvedCustomMcpServer> {
 }
 
 /**
- * Add, or find again, a remote MCP server for a Fast Session. Any active
+ * Add, or find again, a remote MCP server for a session. Any active
  * member may call this, mirroring integration keys: `deployment` (the
  * default) shares the server with everyone, `owner` keeps it private to the
  * requesting member under Personal settings.

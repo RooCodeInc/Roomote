@@ -1132,7 +1132,7 @@ describe('enqueueTask Session linkage', () => {
     expect(run.actingUserId).toBe(userId);
   });
 
-  it('attaches an ownerless automation task to a Fast Session without a human actor', async () => {
+  it('attaches an ownerless automation task to a session without a human actor', async () => {
     const fastAgentSessionId = crypto.randomUUID();
     await db.insert(fastAgentConversations).values({
       id: fastAgentSessionId,
@@ -1666,7 +1666,7 @@ describe('enqueueTask snapshot resume', () => {
     expect(resumePayload.fastAgentSessionId).toBe(fastAgentSessionId);
   });
 
-  it('preserves a Discord Fast session across resume', async () => {
+  it('preserves a Discord session across resume', async () => {
     const userId = await createUser();
     const fastAgentSessionId = '33333333-3333-4333-8333-333333333333';
     const freshRun = await launchFresh({

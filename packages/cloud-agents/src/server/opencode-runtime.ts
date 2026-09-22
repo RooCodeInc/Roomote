@@ -1207,7 +1207,7 @@ export function leaseOpenCodeSdkServer(params: {
   ephemeral?: boolean;
   /** Preserve configured model reasoning for plain-text Fast native sessions. */
   preserveReasoning?: boolean;
-  /** Expose Roomote's controlled prompt-only subagents to Fast sessions. */
+  /** Expose Roomote's controlled prompt-only subagents to sessions. */
   promptOnlySubagents?: boolean;
   /** Override reasoning only for the model selected by this request. */
   reasoningOverride?: { model: string; effort: ReasoningEffort };

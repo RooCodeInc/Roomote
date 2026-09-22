@@ -3636,7 +3636,7 @@ export async function answerFastAgentQuestion({
       () => !signal?.aborted,
     ).catch((error) => {
       console.warn(
-        `[sessions] Failed to mark Fast Session active: ${formatErrorForLog(error)}`,
+        `[sessions] Failed to mark session active: ${formatErrorForLog(error)}`,
       );
     });
     // Assistant-message persists extend the lease as a side effect, but a
@@ -3656,7 +3656,7 @@ export async function answerFastAgentQuestion({
         if (signal?.aborted) return;
         await renewFastSessionRespondingLease(session.id).catch((error) => {
           console.warn(
-            `[sessions] Failed to renew Fast Session responding lease: ${formatErrorForLog(error)}`,
+            `[sessions] Failed to renew session responding lease: ${formatErrorForLog(error)}`,
           );
         });
         if (durableAdmission && durableTurnReplayable) {
@@ -7215,7 +7215,7 @@ export async function answerFastAgentQuestion({
       await setFastSessionResponding(canonicalConversationId, false).catch(
         (error) => {
           console.warn(
-            `[sessions] Failed to settle Fast Session status: ${formatErrorForLog(error)}`,
+            `[sessions] Failed to settle session status: ${formatErrorForLog(error)}`,
           );
         },
       );

@@ -1627,7 +1627,7 @@ async function enqueueFreshLaunch(
             existingFastAgentSessionId !== fastAgentSessionId
           ) {
             throw new Error(
-              'Launch idempotency key is already attached to another Fast session.',
+              'Launch idempotency key is already attached to another session.',
             );
           }
           if (fastAgentSessionId) {

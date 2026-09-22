@@ -269,7 +269,7 @@ describe('getTaskMessages', () => {
     await expect(response.json()).resolves.toEqual({ error: 'Task not found' });
   });
 
-  it('falls back to a Fast session when no task matches', async () => {
+  it('falls back to a session when no task matches', async () => {
     taskSelectLimitMock.mockResolvedValueOnce([]);
     mockGetFastSessionMessagesForUser.mockResolvedValueOnce([
       {
@@ -301,7 +301,7 @@ describe('getTaskMessages', () => {
     });
   });
 
-  it('forwards explicit descending order to Fast session fallback', async () => {
+  it('forwards explicit descending order to session fallback', async () => {
     taskSelectLimitMock.mockResolvedValueOnce([]);
     mockGetFastSessionMessagesForUser.mockResolvedValueOnce([]);
 
