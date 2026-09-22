@@ -30,6 +30,7 @@ import {
   type FastAgentSkillScope,
   type FastAgentSkillSummary,
 } from './fast-agent-skill-store';
+import { FastAgentPromptSkillSnapshotCache } from './fast-agent-prompt-skill-snapshot-cache';
 import { FAST_AGENT_SPILL_MAX_FILE_BYTES } from './fast-agent-spill-store';
 
 const execFileAsync = promisify(execFile);
@@ -99,6 +100,23 @@ function repositorySkillId(
   name: string,
 ): string {
   return `repository:${repositoryId}:${root}:${name}`;
+}
+
+type RepositorySkillReference = {
+  name: string;
+  repositoryId: string;
+  root: string;
+};
+
+function parseRepositorySkillId(
+  id: string,
+): RepositorySkillReference | undefined {
+  const match =
+    /^repository:([^:]+):((?:\.agents|\.claude)\/skills):([A-Za-z0-9._-]+)$/u.exec(
+      id,
+    );
+  if (!match?.[1] || !match[2] || !match[3]) return undefined;
+  return { name: match[3], repositoryId: match[1], root: match[2] };
 }
 
 function normalizeInvocationSegment(value: string, fallback: string): string {
@@ -472,17 +490,30 @@ export class RemoteFastAgentRepositorySkillSource implements FastAgentRepository
         ));
   }
 
-  async list(scope: FastAgentSkillScope): Promise<FastAgentSkillListResult> {
-    const environmentId = scope.environmentId;
+  async list(scope?: FastAgentSkillScope): Promise<FastAgentSkillListResult> {
+    const environmentId = scope?.environmentId;
     if (environmentId && !this.allowedEnvironmentIds.has(environmentId)) {
       throw new Error('Unknown Fast environment.');
     }
-    const repositoriesList = (
-      await this.resolveRepositories(environmentId)
-    ).filter((repository) =>
-      scope.repositoryId ? repository.id === scope.repositoryId : true,
-    );
-    if (scope.repositoryId && repositoriesList.length === 0) {
+    const repositoriesById = new Map<string, RepositorySkillRepository>();
+    for (const repository of await this.resolveRepositories(environmentId)) {
+      if (scope?.repositoryId && repository.id !== scope.repositoryId) {
+        continue;
+      }
+      const existing = repositoriesById.get(repository.id);
+      if (!existing) {
+        repositoriesById.set(repository.id, {
+          ...repository,
+          environmentIds: [...new Set(repository.environmentIds)].sort(),
+        });
+        continue;
+      }
+      existing.environmentIds = [
+        ...new Set([...existing.environmentIds, ...repository.environmentIds]),
+      ].sort();
+    }
+    const repositoriesList = [...repositoriesById.values()];
+    if (scope?.repositoryId && repositoriesList.length === 0) {
       throw new Error('Unknown Fast repository.');
     }
     const selectedRepositories = repositoriesList.slice(
@@ -562,7 +593,18 @@ export class RemoteFastAgentRepositorySkillSource implements FastAgentRepository
     id: string,
     resource = 'SKILL.md',
   ): Promise<FastAgentSkillDocument> {
-    const record = this.records.get(id);
+    let record = this.records.get(id);
+    // Prompt discovery and the executor use separate source instances. A
+    // repository skill shown in the prompt must therefore be able to rebuild
+    // its repository-scoped catalog before the first explicit `list_skills`
+    // call, even when the unscoped repository cap would choose a different set.
+    if (!record) {
+      const reference = parseRepositorySkillId(id);
+      await this.list(
+        reference ? { repositoryId: reference.repositoryId } : undefined,
+      );
+      record = this.records.get(id);
+    }
     const selectedResource = record?.resources.get(resource);
     if (!record || !selectedResource)
       throw new Error('Unknown skill resource.');
@@ -606,4 +648,46 @@ export class RemoteFastAgentRepositorySkillSource implements FastAgentRepository
     this.records.clear();
     this.snapshots.clear();
   }
+}
+
+const promptSnapshotCache =
+  new FastAgentPromptSkillSnapshotCache<RepositorySkillSnapshot>({
+    cleanup: (snapshot) =>
+      rm(snapshot.directory, { recursive: true, force: true }),
+    // A record carries the Git environment its checkout was fetched with,
+    // the skill's full text, and its resource index, for `load_skill`. The
+    // prompt lists names and descriptions, so none of them outlive the load.
+    retain: (snapshot) => ({
+      ...snapshot,
+      records: snapshot.records.map((record) => ({
+        ...record,
+        gitEnvironment: {} as NodeJS.ProcessEnv,
+        mainContent: '',
+        resources: new Map(),
+      })),
+    }),
+  });
+
+/**
+ * The repository source the system prompt lists from. It runs on every turn,
+ * so its snapshots come from the process-wide prompt cache rather than a fresh
+ * fetch. A snapshot's records carry the environments it was loaded for, so
+ * those are part of the key and one turn's scope never reaches another's.
+ */
+export function createFastAgentPromptRepositorySkillSource(
+  allowedEnvironmentIds: string[],
+): RemoteFastAgentRepositorySkillSource {
+  return new RemoteFastAgentRepositorySkillSource({
+    allowedEnvironmentIds,
+    loadSnapshot: (repository) =>
+      promptSnapshotCache.get(
+        [
+          repository.id,
+          repository.defaultBranch,
+          stripCloneUrlUserInfo(repository.cloneUrl),
+          [...new Set(repository.environmentIds)].sort().join(','),
+        ].join('\0'),
+        () => loadFastAgentRepositorySkillSnapshot(repository),
+      ),
+  });
 }

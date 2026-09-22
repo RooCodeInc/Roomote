@@ -126,6 +126,7 @@ export {
 export * from './lib/manager-slack';
 export * from './lib/automation-result-metadata';
 export * from './lib/automation-result-visibility';
+export * from './lib/automation-result-preparation';
 export * from './automations';
 export * from './lib/manager-stats';
 export {

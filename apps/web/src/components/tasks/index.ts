@@ -6,3 +6,4 @@ export { TaskFilters } from './TaskFilters';
 export { TaskCardSkeleton } from './TaskCardSkeleton';
 export { TaskCardError } from './TaskCardError';
 export { TaskBoard, TaskBoardSkeleton } from './TaskBoard';
+export { ComposerErrorDialog } from './ComposerErrorDialog';

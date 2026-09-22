@@ -91,6 +91,8 @@ export async function handleSendChatReply(
     await recordAutomationResult(roomoteConfig, input.taskId, {
       content: summary,
       dedupeKey: `task:${input.taskId}:${createHash('sha256').update(summary).digest('hex')}`,
+      resultKind:
+        input.purpose === 'clarification' ? 'input_request' : 'outcome',
     }).catch(() => undefined);
   }
 

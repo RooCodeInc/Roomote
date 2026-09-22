@@ -203,7 +203,7 @@ function pendingRow(id: string, queuedEvent: FastAgentParentEvent = event) {
   };
 }
 
-/** What the Fast Session throws when the model call itself failed. */
+/** What the session throws when the model call itself failed. */
 function inferenceError(reason: string, terminal: boolean) {
   return new mocks.DeliveryError(`Fast mode inference failed (${reason})`, {
     replyPosted: false,

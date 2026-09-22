@@ -6,6 +6,7 @@ import {
   INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
   OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
   SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
+  TASK_COMPLETION_GATE_ENV_VAR,
   TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME,
   parseInferenceGatewayKeys,
   parseModelProviderEnvKeys,
@@ -26,6 +27,7 @@ import {
   resolveSandboxModelRuntimeEnv,
   resolveWorkspaceSourceControlProvider,
   resolveWorkspaceSourceControlHost,
+  workspaceRequiresSourceControlCredentials,
   workspaceAllowsPrivateAttribution,
   workspaceUsesOnlySourceControlProvider,
   stringifyDecryptedEnvVarValue,
@@ -49,6 +51,7 @@ import {
   resolvePublicGitAuthor,
   resolveRunCommitAuthor,
 } from '@roomote/cloud-agents/server';
+import { isTypeSafeJudgmentConfigured } from '@roomote/cloud-agents/server/typesafe-judgment';
 
 import { withBootstrapFailureSignal } from '../../../bootstrap-failure-signal';
 import { notifySourceRunOnSettle } from './notify-source-run-on-settle';
@@ -291,6 +294,15 @@ export async function fetchResolvedRuntimeEnvVars(
     ),
   );
 
+  // The turn-end completion check only runs where a hosted judgment model can
+  // answer it; everywhere else the sandbox keeps the judge pass. Only the
+  // flag crosses into the sandbox, never the judgment model key.
+  if (await isTypeSafeJudgmentConfigured()) {
+    resolvedEnvVars[TASK_COMPLETION_GATE_ENV_VAR] = 'true';
+  } else {
+    delete resolvedEnvVars[TASK_COMPLETION_GATE_ENV_VAR];
+  }
+
   if (options?.includeSandboxOpenRouterApiKey) {
     return resolvedEnvVars;
   }
@@ -514,8 +526,10 @@ export async function resolveTaskRunSourceControlProviders(
 
   // A Blank slate is stamped at launch only when the deployment has active
   // repositories to check out on demand; without a stamp it needs no
-  // source-control credentials, so never fall back to a provider default.
-  if (workspace.type === 'no_repositories') {
+  // source-control credentials. Persisted environments with no configured
+  // repositories have the same requirement even though their workspace type
+  // remains `environment`, so never fall back to a provider default for either.
+  if (!(await workspaceRequiresSourceControlCredentials(dbOrTx, workspace))) {
     return [];
   }
 

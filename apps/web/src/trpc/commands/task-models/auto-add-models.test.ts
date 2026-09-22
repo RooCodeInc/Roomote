@@ -48,7 +48,7 @@ describe('buildAutoAddedTaskModelSettings', () => {
     );
   });
 
-  it('seeds only Grok 4.6 for a fresh Grok subscription connect', () => {
+  it('seeds only Grok 4.7 for a fresh Grok subscription connect', () => {
     const result = buildAutoAddedTaskModelSettings({
       provider: XAI_SUBSCRIPTION,
       persistedTaskModelSettings: null,
@@ -57,10 +57,10 @@ describe('buildAutoAddedTaskModelSettings', () => {
 
     expect(result).not.toBeNull();
     expect(result!.taskModelSettings.models?.map((model) => model.id)).toEqual([
-      'xai/grok-4.6',
+      'xai/grok-4.7',
     ]);
-    expect(result!.taskModelSettings.allowedModelIds).toEqual(['xai/grok-4.6']);
-    expect(result!.taskModelSettings.defaultModelId).toBe('xai/grok-4.6');
+    expect(result!.taskModelSettings.allowedModelIds).toEqual(['xai/grok-4.7']);
+    expect(result!.taskModelSettings.defaultModelId).toBe('xai/grok-4.7');
   });
 
   it('keeps the usable default-catalog models and effective default when another provider is also connected', () => {
@@ -129,7 +129,7 @@ describe('buildAutoAddedTaskModelSettings', () => {
     ).toBeNull();
   });
 
-  it('does not resurrect a removed Grok model when the subscription re-authenticates', () => {
+  it('does not resurrect a removed Grok 4.6 model when the subscription re-authenticates', () => {
     // xai-subscription serves `xai/` model ids: the "provider already has
     // models" guard must match on the model-id prefix, not the catalog id.
     expect(

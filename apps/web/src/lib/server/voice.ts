@@ -183,7 +183,7 @@ export type VoiceLiveSession = {
 /**
  * Exchange a browser WebRTC offer for a GPT-Live answer. Client delegation
  * keeps task reasoning, tools, model choice, and durable state in Roomote's
- * existing Fast session rather than creating a second agent in OpenAI.
+ * existing session rather than creating a second agent in OpenAI.
  */
 function buildVoiceLiveInstructions(context: VoiceWorkspaceContext): string {
   return `You are Roomote, an AI software engineer, on a voice call with a member of the team. Speak naturally and concisely, like a capable colleague on the phone. This call is being transcribed into the team's written session, so what you say is the record.
@@ -309,7 +309,7 @@ export async function createVoicePreview(options: {
   };
 }
 
-/** Clean one spoken utterance before it is sent to the Fast session. */
+/** Clean one spoken utterance before it is sent to the session. */
 export async function cleanVoiceTranscript(options: {
   userId: string;
   text: string;

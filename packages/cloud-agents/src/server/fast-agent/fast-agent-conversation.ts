@@ -123,6 +123,10 @@ export type LaunchFastAgentTask = (params: {
   prompt: string;
   images?: string[];
   environmentId: string | null;
+  /** Exact environment for a fresh, server-authorized verification task. */
+  verifiesEnvironmentId?: string;
+  /** Repository-free setup task that must receive environment-build resources. */
+  preparesEnvironment?: boolean;
   branch?: string;
   /** Optional launch idempotency key persisted in the standard task-run
    * payload; a partial unique index makes concurrent retries converge. */
@@ -174,6 +178,8 @@ export type FastAgentMcpServerConfig = {
   disabledTools?: string[];
   /** Opaque, non-secret revision used to invalidate process-local tool catalogs. */
   cacheRevision?: string;
+  /** Which approval policies govern a custom server; unset for built-ins. */
+  toolApprovalPolicyScope?: 'deployment' | 'personal';
 };
 
 /** Structured input request issued with the Fast-native request_user_input tool. */

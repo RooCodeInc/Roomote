@@ -410,7 +410,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           channelId,
           footerStateThreadId,
           lockKey: `discord:thread_reply_footer_lock:${channelId}:${footerStateThreadId}`,
-          logRef: `fast session ${session.id}`,
+          logRef: `session ${session.id}`,
           logContext: 'fastAgentSurfaceReply',
           postReplyWithFooter: async () => {
             const result = await provider.postMessage({
@@ -1063,7 +1063,7 @@ export async function startFastSessionGoal(
     await activation.rollback();
     return {
       success: false,
-      error: 'The Session goal could not be delivered. Please try again.',
+      error: 'The session goal could not be delivered. Please try again.',
     };
   } catch (error) {
     await activation.rollback().catch(() => undefined);

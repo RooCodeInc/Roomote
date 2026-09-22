@@ -1069,7 +1069,7 @@ describe('PromptInput', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     expect(toastErrorMock).toHaveBeenCalledWith(
-      'Start Goal Mode from the Session conversation.',
+      'Start Goal Mode from the session conversation.',
     );
     expect(sandboxSendPromptMutateMock).not.toHaveBeenCalled();
   });

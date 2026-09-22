@@ -18,7 +18,7 @@ export function BrowserNotificationsExperimentalSetting() {
           onCheckedChange={setEnabled}
         />
         <p className="text-sm text-muted-foreground">
-          Let open Session and task pages offer desktop notifications before
+          Let open session and task pages offer desktop notifications before
           falling back to a connected personal provider.
         </p>
       </div>

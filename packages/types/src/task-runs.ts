@@ -1022,6 +1022,9 @@ const sharedTaskPayloadSchema = z.object({
    */
   environmentDefinitionId: z.string().uuid().optional(),
 
+  /** Marks a repository-free environment-definition task that needs nested Docker. */
+  preparesEnvironment: z.boolean().optional(),
+
   /**
    * Marks this task as an environment verification flow for the given
    * environment id. Set by the verification-retry command and by the

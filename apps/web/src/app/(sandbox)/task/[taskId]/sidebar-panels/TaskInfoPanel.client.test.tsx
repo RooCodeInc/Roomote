@@ -6,7 +6,7 @@ import {
   waitFor,
 } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { TaskPayloadKind } from '@roomote/types';
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
 
 const { useSandboxMessagesMock, useTaskSummaryMock, fetchSessionMock } =
   vi.hoisted(() => ({
@@ -466,6 +466,51 @@ describe('TaskInfoPanel', () => {
     expect(screen.getByText('Started At')).toBeInTheDocument();
     expect(screen.getByText('Started From')).toBeInTheDocument();
     expect(screen.getByText('Last Error')).toBeInTheDocument();
+  });
+
+  it('shows a neutral note for completed runs without an available snapshot', () => {
+    render(
+      <TaskInfoPanel
+        active={true}
+        task={baseTask as never}
+        taskRun={
+          {
+            ...baseTaskRun,
+            status: RunStatus.Completed,
+            error:
+              'Sandbox instance-123 was terminated before its snapshot completed; the run cannot be resumed',
+          } as never
+        }
+        harness="opencode-server"
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Snapshot unavailable')).toBeInTheDocument();
+    expect(screen.getByText(/cannot be resumed/)).toBeInTheDocument();
+    expect(screen.queryByText('Last Error')).not.toBeInTheDocument();
+  });
+
+  it('keeps real execution failures under Last Error', () => {
+    render(
+      <TaskInfoPanel
+        active={true}
+        task={baseTask as never}
+        taskRun={
+          {
+            ...baseTaskRun,
+            status: RunStatus.Completed,
+            error: 'Model provider failed',
+          } as never
+        }
+        harness="opencode-server"
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Last Error')).toBeInTheDocument();
+    expect(screen.getByText('Model provider failed')).toBeInTheDocument();
+    expect(screen.queryByText('Snapshot unavailable')).not.toBeInTheDocument();
   });
 
   it('links titled work items from the task payload', () => {

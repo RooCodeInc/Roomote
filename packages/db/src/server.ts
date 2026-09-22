@@ -55,6 +55,7 @@ export * from './lib/task-start-parallel-counts';
 export * from './lib/tasks';
 export * from './lib/sessions';
 export * from './lib/service-credentials';
+export * from './lib/integration-tool-approvals';
 export * from './lib/credential-egress';
 export * from './lib/session-goals';
 export * from './lib/source-control-provider';
@@ -71,6 +72,7 @@ export * from './lib/task-run-events';
 export * from './lib/declarative-environments';
 export * from './lib/environment-config-versions';
 export * from './lib/environment-definitions';
+export * from './lib/environment-recipes';
 export * from './lib/environment-snapshots';
 export * from './lib/github-branch-activity';
 export * from './lib/compute-runtime-config';
@@ -149,6 +151,10 @@ export {
   serviceCredentials,
   serviceCredentialApprovals,
   serviceCredentialAudit,
+  integrationToolPolicies,
+  integrationToolUserPolicies,
+  integrationToolApprovalRequests,
+  integrationToolSessionOverrides,
   credentialEgressWorkloads,
   credentialEgressSubstitutes,
   credentialEgressAudit,

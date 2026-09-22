@@ -40,10 +40,18 @@ const mockDbTransaction = vi.fn();
 const mockCaptureTaskSettled = vi.fn();
 const mockResolveDefaultComputeProvider = vi.fn().mockResolvedValue('modal');
 const mockUpdatePendingEnvironmentSnapshot = vi.fn().mockResolvedValue(true);
+const mockMarkEnvironmentVerificationFailedIfCurrent = vi
+  .fn()
+  .mockResolvedValue({ marked: true });
 const mockGetCustomAutomationById = vi.fn();
 const mockRefreshAutomationRootFooter = vi.fn().mockResolvedValue(true);
 const mockResolveAutomationResultSubtitle = vi.fn();
 const mockRetryFailedTaskStart = vi.fn();
+const mockDistillTaskRunTurnMemory = vi.fn();
+const mockRefreshTaskTitleOnCompletion = vi.fn().mockResolvedValue(undefined);
+const mockRefreshTaskSessionTitleOnCompletion = vi
+  .fn()
+  .mockResolvedValue(undefined);
 
 /**
  * Rows resolved by db.select() chains that join tasks with task_runs (the
@@ -178,6 +186,8 @@ vi.mock('@roomote/db/server', async () => {
       mockResolveDiscordRuntimeCredentials(...args),
     updatePendingEnvironmentSnapshot: (...args: unknown[]) =>
       mockUpdatePendingEnvironmentSnapshot(...args),
+    markEnvironmentVerificationFailedIfCurrent: (...args: unknown[]) =>
+      mockMarkEnvironmentVerificationFailedIfCurrent(...args),
   };
 });
 
@@ -191,6 +201,8 @@ const mockFinalizeGithubPrReviewComment = vi.fn().mockResolvedValue({
 });
 
 vi.mock('@roomote/cloud-agents/server', () => ({
+  distillTaskRunTurnMemory: (...args: unknown[]) =>
+    mockDistillTaskRunTurnMemory(...args),
   enqueueTask: vi.fn(),
   releaseTaskRun: vi.fn().mockResolvedValue(undefined),
   getTaskUrl: vi.fn().mockReturnValue('https://example.com/task'),
@@ -367,6 +379,13 @@ vi.mock('../../automation-result-metadata', () => ({
     mockResolveAutomationResultSubtitle(...args),
 }));
 
+vi.mock('../record-task-message-envelope', () => ({
+  refreshTaskTitleOnCompletion: (...args: unknown[]) =>
+    mockRefreshTaskTitleOnCompletion(...args),
+  refreshTaskSessionTitleOnCompletion: (...args: unknown[]) =>
+    mockRefreshTaskSessionTitleOnCompletion(...args),
+}));
+
 import { finishRun } from '../finish-run';
 import { createTaskRunGitHubToken } from '@roomote/github';
 import { enqueueTask } from '@roomote/cloud-agents/server';
@@ -456,6 +475,9 @@ describe('finishRun', () => {
     mockDbExecute.mockResolvedValue([]);
     mockResolveDefaultComputeProvider.mockResolvedValue('modal');
     mockUpdatePendingEnvironmentSnapshot.mockResolvedValue(true);
+    mockMarkEnvironmentVerificationFailedIfCurrent.mockResolvedValue({
+      marked: true,
+    });
     mockNotifyFastAgentParentOnSettle.mockResolvedValue('admitted');
     mockNotifyWebTaskInitiatorOnSettle.mockResolvedValue('delivered');
     mockRetryFailedTaskStart.mockResolvedValue({
@@ -521,6 +543,17 @@ describe('finishRun', () => {
     });
 
     expect(mockCleanupSandboxOidcTargetsForTaskRun).toHaveBeenCalledWith(1);
+  });
+
+  it('runs the final title repair when a task is canceled', async () => {
+    mockFindFirstRun.mockResolvedValue(makeRun());
+
+    await finishRun({ id: 1, status: RunStatus.Canceled });
+
+    expect(mockRefreshTaskSessionTitleOnCompletion).toHaveBeenCalledWith({
+      taskId: 'task-1',
+    });
+    expect(mockRefreshTaskTitleOnCompletion).not.toHaveBeenCalled();
   });
 
   it('refreshes finalized metadata on a custom automation Slack result', async () => {
@@ -602,6 +635,36 @@ describe('finishRun', () => {
       );
     },
   );
+
+  it.each([RunStatus.Idle, RunStatus.Completed] as const)(
+    'checks a settled turn for a memory worth saving when the run becomes %s',
+    async (status) => {
+      mockFindFirstRun.mockResolvedValue(makeRun());
+
+      await finishRun({ id: 1, status });
+
+      expect(mockDistillTaskRunTurnMemory).toHaveBeenCalledExactlyOnceWith({
+        runId: 1,
+        taskId: 'task-1',
+        userId: 'user-1',
+        workflow: 'standard',
+        requeue: true,
+      });
+    },
+  );
+
+  it('does not check failed, canceled, or snapshot maintenance runs for memories', async () => {
+    mockFindFirstRun.mockResolvedValue(makeRun());
+    await finishRun({ id: 1, status: RunStatus.Failed });
+    await finishRun({ id: 1, status: RunStatus.Canceled });
+
+    mockFindFirstRun.mockResolvedValue(
+      makeRun({ payloadKind: TaskPayloadKind.SnapshotEnvironment }),
+    );
+    await finishRun({ id: 1, status: RunStatus.Completed });
+
+    expect(mockDistillTaskRunTurnMemory).not.toHaveBeenCalled();
+  });
 
   it('does not capture a settled event when a run becomes idle', async () => {
     mockFindFirstRun.mockResolvedValue(makeRun());
@@ -1071,6 +1134,53 @@ describe('finishRun', () => {
       expect(mockDbUpdateSet).toHaveBeenCalledWith(
         expect.objectContaining({ status: RunStatus.Failed }),
       );
+    });
+  });
+
+  describe('environment verification failure state', () => {
+    it('marks a bound environment failed when worker setup fails', async () => {
+      mockFindFirstRun.mockResolvedValue(
+        makeRun({
+          taskId: 'verification-task',
+          payload: {
+            repo: '',
+            environmentId: 'environment-1',
+            verifiesEnvironmentId: 'environment-1',
+          },
+        }),
+      );
+
+      await finishRun({
+        id: 1,
+        status: RunStatus.Failed,
+        error: 'recipe restore failed',
+      });
+
+      expect(
+        mockMarkEnvironmentVerificationFailedIfCurrent,
+      ).toHaveBeenCalledWith(expect.anything(), {
+        environmentId: 'environment-1',
+        verificationTaskId: 'verification-task',
+        error: 'The verification task failed before reporting a result.',
+      });
+    });
+
+    it('does not mark the environment for a completed verification run', async () => {
+      mockFindFirstRun.mockResolvedValue(
+        makeRun({
+          payload: {
+            repo: '',
+            environmentId: 'environment-1',
+            verifiesEnvironmentId: 'environment-1',
+          },
+        }),
+      );
+
+      await finishRun({ id: 1, status: RunStatus.Completed });
+
+      expect(
+        mockMarkEnvironmentVerificationFailedIfCurrent,
+      ).not.toHaveBeenCalled();
     });
   });
 

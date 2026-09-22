@@ -513,7 +513,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
         }
 
         if (!shouldAnswerPendingFreeText && /^\/goal(?:\s|$)/i.test(text)) {
-          toast.error('Start Goal Mode from the Session conversation.');
+          toast.error('Start Goal Mode from the session conversation.');
           return false;
         }
 

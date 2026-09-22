@@ -22,6 +22,7 @@ import {
   desc,
   asc,
   inArray,
+  isVisibleTask,
   like,
   lt,
   isNull,
@@ -424,7 +425,10 @@ export const getTasks = async ({
   const hasTaskTypeFilter = effectiveFilters.some(
     (filter) => filter.type === 'taskType',
   );
-  const conditions: TaskFilterCondition[] = [isNull(tasks.deletedAt)];
+  const conditions: TaskFilterCondition[] = [
+    isNull(tasks.archivedAt),
+    isNull(tasks.deletedAt),
+  ];
   const access = customAutomationTaskAccess({ userId, isAdmin });
   if (access) conditions.push(access);
 
@@ -581,8 +585,7 @@ export const searchTasks = async ({
   includeIds?: string[];
 }): Promise<SearchTaskResult[]> => {
   const visibleConditions = [
-    isNull(tasks.deletedAt),
-    eq(tasks.visibility, 'visible'),
+    isVisibleTask(),
     customAutomationTaskAccess({ userId }),
   ];
 

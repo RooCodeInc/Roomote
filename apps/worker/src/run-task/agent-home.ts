@@ -66,6 +66,7 @@ import {
   resolveOpenRouterVariantModelAlias,
   toBedrockMantleRuntimeModelId,
   OPENCODE_ARCHITECT_AGENT,
+  TASK_COMPLETION_GATE_ENV_VAR,
   TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME,
   TASK_MODEL_COSTS_ENV_VAR_NAME,
   CREDENTIAL_EGRESS_METHODS,
@@ -658,6 +659,7 @@ interface GenerateOpenCodeConfigOptions {
   runtimeEnv: Record<string, string>;
   developerInstructionsContent?: string;
   mcpServers?: OpenCodeConfigMcpServer[];
+  toolApprovalPermission?: Record<string, 'ask' | 'deny'>;
   model?: string;
   reasoningEffortOverride?: ReasoningEffort;
 }
@@ -1404,6 +1406,33 @@ function createJudgeModelInstructions(): string {
 }
 
 /**
+ * With the turn-end completion check active, the platform already compares
+ * the request, the report, and the diff, so the judge is left with the one
+ * thing that check cannot do: open proof images.
+ */
+function createProofOnlyJudgeModelInstructions(): string {
+  return [
+    `A hidden OpenCode \`${ROOMOTE_OPENCODE_JUDGE_AGENT_NAME}\` subagent is configured for visual-proof checks only.`,
+    '',
+    'When `R_VISION_MODEL` is configured, the judge runs on that vision model so it can open proof screenshots directly. Otherwise it falls back to the active coding model for the task.',
+    '',
+    `Delegate one focused pass to the \`${ROOMOTE_OPENCODE_JUDGE_AGENT_NAME}\` subagent with the Task tool only when a pre-delivery \`capture-visual-proof\` step for this shipped change kept screenshots or keyframes. When that step kept no images (a no-op, not-applicable, unnecessary, or blocked result), or the workflow required no proof step, do not spawn the judge. Whether the work matches the request is checked by the platform automatically when your turn ends: it compares the request, your closing report, and the diff, and sends you a follow-up only if something needs another look.`,
+    '',
+    'Include in the judge brief: the plan or requested outcome, the validation results, the proof report verbatim, the path `/tmp/capture-visual-proof/diff-at-start.patch`, and the local paths of every kept screenshot and keyframe so the judge can open them.',
+    '',
+    'Treat the judge as a narrow proof check. Ask it to open the kept screenshot and keyframe images and verify them against the plan and shipped change, to treat weak, mismatched, or falsely claimed proof as a gap, and to report any undisclosed source drift between the proof snapshot and the shipped diff. Do not ask for an open-ended repo review.',
+    '',
+    'Do not spawn the judge subagent when the current task is itself a pull-request or workspace code review (`review-code`, PR review, or PR re-review). Those workflows are already the review pass and must produce findings directly.',
+    '',
+    'Keep judge tool use minimal and targeted. Prefer the supplied diff and proof evidence, and only read extra files to resolve a specific ambiguity or verify an obvious risk.',
+    '',
+    'Treat the judge response as review input for the parent workflow. If judge-driven fixes change repository files, re-run the `capture-visual-proof` step once for the updated shipped change, replace prior proof evidence with that latest result, then run one more focused judge pass against the refreshed diff and refreshed proof result before delivery. Keep orchestration, code changes, and final user-facing decisions in the parent agent.',
+    '',
+    "Do not paste the judge's full output into chat or any user-facing reply. The judge verdict is internal review material; surface at most a brief, parent-authored summary of the actionable outcome (what was fixed or what still needs attention), never the raw review dump.",
+  ].join('\n');
+}
+
+/**
  * PR review/re-review tasks already run as the code-reviewer on the review
  * model. Configuring and instructing a nested judge pass would double the
  * review cost without adding a useful second role.
@@ -1961,6 +1990,7 @@ export function generateOpenCodeConfig({
   runtimeEnv,
   developerInstructionsContent,
   mcpServers,
+  toolApprovalPermission,
   model,
   reasoningEffortOverride,
 }: GenerateOpenCodeConfigOptions): GenerateOpenCodeConfigResult {
@@ -2026,7 +2056,9 @@ export function generateOpenCodeConfig({
     );
     fs.writeFileSync(
       judgeModelInstructionsPath,
-      createJudgeModelInstructions(),
+      runtimeEnv[TASK_COMPLETION_GATE_ENV_VAR] === 'true'
+        ? createProofOnlyJudgeModelInstructions()
+        : createJudgeModelInstructions(),
       'utf8',
     );
     instructions.push(judgeModelInstructionsPath);
@@ -2124,6 +2156,9 @@ export function generateOpenCodeConfig({
     permission: {
       ...operatorPermission,
       ...OPENCODE_ALLOW_ALL_PERMISSION,
+      // Per-tool approval rules for integration tools. Advisory here, since
+      // the agent can read this file; the integration proxy enforces them.
+      ...toolApprovalPermission,
     },
     provider: operatorProvider,
     skills: {

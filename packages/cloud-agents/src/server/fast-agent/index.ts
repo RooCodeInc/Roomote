@@ -11,5 +11,6 @@ export * from './fast-agent-turn-shutdown';
 export * from './fast-agent-session';
 export * from './fast-agent-task-launcher';
 export * from './fast-agent-title';
+export * from './session-title-refresh-job';
 export * from './fast-agent-tasks';
 export * from './fast-agent-pinned-launch';

@@ -77,15 +77,16 @@ describe('RemoteFastAgentRepositorySkillSource', () => {
     ]);
   });
 
-  it('lists scoped skills, qualifies collisions, and loads only cataloged IDs', async () => {
+  it('lists scoped and unscoped skills, qualifies collisions, and loads only cataloged IDs', async () => {
     const repositories = [
       repository('repo-1', 'acme/one'),
       repository('repo-2', 'acme/two'),
     ];
     const directories: string[] = [];
+    const resolveRepositories = vi.fn().mockResolvedValue(repositories);
     const source = new RemoteFastAgentRepositorySkillSource({
       allowedEnvironmentIds: ['environment-1'],
-      resolveRepositories: vi.fn().mockResolvedValue(repositories),
+      resolveRepositories,
       loadSnapshot: async (value) => {
         const loaded = await snapshot(value);
         directories.push(loaded.directory);
@@ -106,6 +107,9 @@ describe('RemoteFastAgentRepositorySkillSource', () => {
         repository: 'acme/two',
       }),
     ]);
+    const unscopedCatalog = await source.list();
+    expect(unscopedCatalog.skills).toEqual(catalog.skills);
+    expect(resolveRepositories).toHaveBeenCalledWith(undefined);
     await expect(
       source.read('repository:repo-1:.agents/skills:release'),
     ).resolves.toMatchObject({
@@ -129,6 +133,76 @@ describe('RemoteFastAgentRepositorySkillSource', () => {
     ).rejects.toThrow('Unknown Fast repository.');
 
     await source.dispose();
+    for (const directory of directories) {
+      await expect(access(directory)).rejects.toThrow();
+    }
+  });
+
+  it('deduplicates repository mappings while retaining every authorized environment', async () => {
+    const firstMapping = repository('repo-1', 'acme/one');
+    const secondMapping = repository('repo-1', 'acme/one');
+    secondMapping.environmentIds = ['environment-2'];
+    const source = new RemoteFastAgentRepositorySkillSource({
+      allowedEnvironmentIds: ['environment-1', 'environment-2'],
+      resolveRepositories: vi
+        .fn()
+        .mockResolvedValue([firstMapping, secondMapping]),
+      loadSnapshot: snapshot,
+    });
+
+    const catalog = await source.list();
+
+    expect(catalog.skills).toEqual([
+      expect.objectContaining({
+        environmentIds: ['environment-1', 'environment-2'],
+        repository: 'acme/one',
+      }),
+    ]);
+    await source.dispose();
+  });
+
+  it('rebuilds a prompt-listed skill by repository when the unscoped cap changes', async () => {
+    const target = repository('repo-target', 'acme/target');
+    const otherRepositories = Array.from({ length: 8 }, (_, index) =>
+      repository(`repo-${index + 1}`, `acme/repo-${index + 1}`),
+    );
+    const directories: string[] = [];
+    const loadSnapshot = async (value: RepositorySkillRepository) => {
+      const loaded = await snapshot(value);
+      directories.push(loaded.directory);
+      return loaded;
+    };
+    const promptSource = new RemoteFastAgentRepositorySkillSource({
+      allowedEnvironmentIds: ['environment-1'],
+      resolveRepositories: vi
+        .fn()
+        .mockResolvedValue([target, ...otherRepositories]),
+      loadSnapshot,
+    });
+    const promptCatalog = await promptSource.list();
+    const promptSkill = promptCatalog.skills.find((skill) =>
+      skill.id.includes('repo-target'),
+    );
+    expect(promptSkill).toBeDefined();
+
+    const executorResolveRepositories = vi
+      .fn()
+      .mockResolvedValue([...otherRepositories, target]);
+    const executorSource = new RemoteFastAgentRepositorySkillSource({
+      allowedEnvironmentIds: ['environment-1'],
+      resolveRepositories: executorResolveRepositories,
+      loadSnapshot,
+    });
+
+    await expect(executorSource.read(promptSkill!.id)).resolves.toMatchObject({
+      id: promptSkill!.id,
+      repository: 'acme/target',
+      source: 'repository',
+    });
+    expect(executorResolveRepositories).toHaveBeenCalledWith(undefined);
+
+    await promptSource.dispose();
+    await executorSource.dispose();
     for (const directory of directories) {
       await expect(access(directory)).rejects.toThrow();
     }

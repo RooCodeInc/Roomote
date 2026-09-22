@@ -246,7 +246,7 @@ it.each([401, 403, 500])(
     window.location.hash = '#integrations';
     render(<ServiceCredentials sessionId={sessionId} />);
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Sign in as this Session',
+      'Sign in as this session',
     );
     expect(document.body.textContent).not.toContain(credential);
   },
@@ -448,7 +448,7 @@ it('closes with recovery feedback when the saved response reports no scheduled c
   );
   expect(toastSuccessMock).not.toHaveBeenCalled();
   expect(toastWarningMock).toHaveBeenCalledWith(
-    'Integration saved. The Session could not be notified. Ask the agent to check list_integration_keys and continue.',
+    'Integration saved. The session could not be notified. Ask the agent to check list_integration_keys and continue.',
   );
   expect(fetchMock).toHaveBeenCalledTimes(2);
   expect(document.body.textContent).not.toContain(credential);

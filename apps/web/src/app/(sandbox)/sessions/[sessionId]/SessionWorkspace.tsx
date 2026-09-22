@@ -87,7 +87,7 @@ import {
   useSandboxLayout,
 } from '../../use-sandbox-layout';
 import { NestedTaskSidePanel } from './NestedTaskSidePanel';
-import { SessionDeleteAction } from './SessionDeleteAction';
+import { SessionActions } from './SessionDeleteAction';
 import {
   OpenSessionArtifactViewerContext,
   OpenSessionTaskPanelContext,
@@ -1135,7 +1135,7 @@ export function SessionWorkspace({
                 onShowMain={showMain}
                 footer={
                   session.canDelete ? (
-                    <SessionDeleteAction sessionId={session.id} />
+                    <SessionActions sessionId={session.id} />
                   ) : null
                 }
               >

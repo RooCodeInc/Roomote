@@ -8,7 +8,6 @@ import { toast } from 'sonner';
 
 import {
   Button,
-  Checkbox,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -38,6 +37,7 @@ import type { CustomMcpServerListEntry } from '@/trpc/commands/custom-mcp-server
 import { useAuthorizedUser } from '@/hooks/useUser';
 
 import type { IntegrationItem } from './integration-card';
+import { IntegrationToolApprovalList } from './IntegrationToolApprovalControls';
 import { useTRPC } from '@/trpc/client';
 
 type Transport = 'remote' | 'stdio';
@@ -377,7 +377,7 @@ function ServerFormDialog({
           </DialogTitle>
           <DialogDescription>
             {visibility === 'owner'
-              ? 'A personal server is available only to your own Sessions and tasks. It is reached through an authenticated Roomote proxy, so credentials stay server-side.'
+              ? 'A personal server is available only to your own sessions and tasks. It is reached through an authenticated Roomote proxy, so credentials stay server-side.'
               : 'Custom servers are available to agents in every task. Remote servers are reached through an authenticated Roomote proxy, so credentials stay server-side. Local servers run inside the task sandbox with the same privileges as the agent.'}
           </DialogDescription>
         </DialogHeader>
@@ -746,17 +746,22 @@ function ServerFormDialog({
 
 function CustomToolManagementDialog({
   server,
+  scope,
   open,
   onOpenChange,
   onSaved,
 }: {
   server: ListedServer | null;
+  scope: CustomMcpServerVisibility;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: () => void;
 }) {
   const trpc = useTRPC();
-
+  const { isAdmin } = useAuthorizedUser();
+  // A custom server mounts under its name. Shared servers take the
+  // deployment-wide, admin-managed approval policies; a personal server takes
+  // its owner's personal policies, which apply to their own Sessions only.
   const toolsQuery = useQuery(
     trpc.customMcpServers.listTools.queryOptions(
       { id: server?.id ?? '' },
@@ -769,7 +774,6 @@ function CustomToolManagementDialog({
   );
 
   const [disabledNames, setDisabledNames] = useState<Set<string>>(new Set());
-
   const loadedKey = useMemo(
     () =>
       toolsQuery.data
@@ -830,38 +834,29 @@ function CustomToolManagementDialog({
           </p>
         ) : (
           <div className="space-y-2 max-h-96 overflow-y-auto">
-            {toolsQuery.data?.tools.map((tool) => (
-              <label
-                key={tool.name}
-                className="flex items-start gap-3 text-sm cursor-pointer"
-              >
-                <Checkbox
-                  checked={!disabledNames.has(tool.name)}
-                  onCheckedChange={(checked) => {
-                    setDisabledNames((current) => {
-                      const next = new Set(current);
+            <IntegrationToolApprovalList
+              integrationId={server?.name ?? null}
+              integrationName={server?.name ?? null}
+              scope={scope === 'owner' ? 'personal' : 'deployment'}
+              canManage={scope === 'owner' || isAdmin}
+              open={open}
+              tools={toolsQuery.data?.tools ?? []}
+              saveNote="Tool enable/disable still needs Save."
+              isToolEnabled={(toolName) => !disabledNames.has(toolName)}
+              onToggleTool={(toolName, enabled) =>
+                setDisabledNames((current) => {
+                  const next = new Set(current);
 
-                      if (checked === true) {
-                        next.delete(tool.name);
-                      } else {
-                        next.add(tool.name);
-                      }
+                  if (enabled) {
+                    next.delete(toolName);
+                  } else {
+                    next.add(toolName);
+                  }
 
-                      return next;
-                    });
-                  }}
-                  className="mt-0.5"
-                />
-                <span>
-                  <span className="font-mono">{tool.name}</span>
-                  {tool.description && (
-                    <span className="block text-xs text-muted-foreground">
-                      {tool.description}
-                    </span>
-                  )}
-                </span>
-              </label>
-            ))}
+                  return next;
+                })
+              }
+            />
           </div>
         )}
 
@@ -1133,6 +1128,7 @@ export function useCustomMcpServers(
         }}
       />
       <CustomToolManagementDialog
+        scope={scope}
         server={toolsServer}
         open={Boolean(toolsServer)}
         onOpenChange={(open) => {

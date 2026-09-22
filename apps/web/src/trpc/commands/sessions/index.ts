@@ -62,6 +62,72 @@ const TASK_STOP_POLL_MS = 100;
 
 export const sessionIdInputSchema = z.object({ sessionId: z.string().uuid() });
 
+type AccessibleSession = Awaited<ReturnType<typeof findAccessibleSession>>;
+
+function canManageSession(
+  auth: UserAuthSuccess,
+  session: AccessibleSession,
+): session is NonNullable<AccessibleSession> {
+  if (!session) return false;
+  return session.privacy === 'private'
+    ? session.privateOwnerUserId === auth.userId
+    : auth.isAdmin || session.ownerUserId === auth.userId;
+}
+
+export async function stopSessionTasksCommand(
+  auth: UserAuthSuccess,
+  sessionId: string,
+) {
+  const session = await findAccessibleSession(auth, sessionId);
+  if (!canManageSession(auth, session)) {
+    return { success: false as const, stoppedCount: 0 };
+  }
+
+  const runs = await db
+    .select({
+      id: taskRuns.id,
+      taskId: taskRuns.taskId,
+      payload: taskRuns.payload,
+      status: taskRuns.status,
+      sandboxServerUrl: taskRuns.sandboxServerUrl,
+      actingUserId: taskRuns.actingUserId,
+    })
+    .from(taskRuns)
+    .innerJoin(sessionTasks, eq(sessionTasks.taskId, taskRuns.taskId))
+    .where(
+      and(
+        eq(sessionTasks.sessionId, sessionId),
+        inArray(taskRuns.status, activeRunStatuses as readonly RunStatus[]),
+      ),
+    );
+
+  const results = await Promise.all(
+    runs.map(async (run) => {
+      const result = await stopTaskRun({
+        run,
+        authUserId: auth.userId,
+        terminate: false,
+        cancelledBy: { name: auth.name ?? undefined, source: 'web' },
+      }).catch(() => null);
+      if (result?.success) return true;
+
+      const current = await db.query.taskRuns.findFirst({
+        where: eq(taskRuns.id, run.id),
+        columns: { status: true },
+      });
+      return !current || isExitedRunStatus(current.status);
+    }),
+  );
+  const stoppedCount = results.filter(Boolean).length;
+  return {
+    success: stoppedCount === runs.length,
+    stoppedCount,
+    ...(stoppedCount === runs.length
+      ? {}
+      : { failedCount: runs.length - stoppedCount }),
+  };
+}
+
 export async function deleteSessionCommand(
   auth: UserAuthSuccess,
   sessionId: string,
@@ -566,7 +632,7 @@ export async function archiveSessionCommand(
   sessionId: string,
 ) {
   const session = await findAccessibleSession(auth, sessionId);
-  if (!session || (!auth.isAdmin && session.ownerUserId !== auth.userId)) {
+  if (!canManageSession(auth, session)) {
     return null;
   }
 

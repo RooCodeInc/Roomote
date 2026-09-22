@@ -23,6 +23,7 @@ export * from './ci-failure-triage-claims';
 export * from './automation-root-summary';
 export * from './audio-transcription';
 export * from './file-attachments';
+export * from './environment-recipes';
 export * from './fast-agent';
 export * from './session-wakeups';
 // Canonical API base URL fallback chain (explicit -> TRPC_URL -> R_APP_URL).
@@ -35,6 +36,8 @@ export * from './untrusted-content';
 export * from './workflows/githubPrReviewComment';
 export * from './linked-task-relay';
 export * from './llm-task-title';
+export { distillTaskRunTurnMemory } from './task-run-memory-distillation';
+export { evaluateTaskCompletionGate } from './task-completion-gate';
 export * from './user-personalization';
 export * from './mcp-self-setup';
 export * from './mcp-tool-client';

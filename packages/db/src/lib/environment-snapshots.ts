@@ -39,6 +39,13 @@ export interface ClaimPendingEnvironmentSnapshotInput {
   updatedAt?: Date;
   allowStalePendingBefore?: Date;
   requireMissingSnapshot?: boolean;
+  /**
+   * Claim only when the environment has no live snapshot row at all for this
+   * provider. Stricter than `requireMissingSnapshot`, which still claims over
+   * a live `failed` row: a caller that must not repeat another build's failed
+   * attempt uses this.
+   */
+  requireNoSnapshotRow?: boolean;
 }
 
 export interface EnvironmentSnapshotLockInput {
@@ -321,6 +328,10 @@ export async function claimPendingEnvironmentSnapshotForAttachment(
         updatedAt: true,
       },
     });
+
+    if (params.requireNoSnapshotRow && existingSnapshot) {
+      return null;
+    }
 
     if (
       params.requireMissingSnapshot &&

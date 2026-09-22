@@ -50,6 +50,7 @@ import {
   type SlackMentionScope,
 } from '@/components/ai-elements/slack-mention-context';
 import { WorkspaceHeader } from '@/components/layout';
+import { Alert, AlertDescription, AlertTitle } from '@/components/system';
 import { PrivateSessionIcon } from '@/components/sessions/PrivateSessionIcon';
 import { useLiveVoice } from '@/hooks/useLiveVoice';
 import { useSessionVoiceCallLease } from '@/hooks/useSessionVoiceCallLease';
@@ -61,6 +62,9 @@ import {
   type SessionPromptSubmission,
 } from './SessionPromptInput';
 import { preparePromptAttachments } from '@/lib/prompt-attachments';
+import { describeValidationError } from '@/lib/validation-error';
+import { isComposerValidationError } from '@/lib/validation-error';
+import { ComposerErrorDialog } from '@/components/tasks/ComposerErrorDialog';
 import {
   useOpenSessionTaskPanel,
   useOpenSessionTasksPanel,
@@ -85,10 +89,20 @@ import {
 import { SetupStarterTasksCard } from './setup/SetupStarterTasksCard';
 import { SetupIntegrationsCard } from './setup/SetupIntegrationsCard';
 import { SESSION_HEADER_CONTENT_CLASS_NAME } from './session-header-layout';
+import { EditableSessionTitle } from './EditableSessionTitle';
 import { isRequestUserInputResponseRepresentedByCanonicalReceipt } from '@/lib/setup-receipt-transcript';
 import { CapabilityOfferCard } from './CapabilityOfferCard';
 import { PendingIntegrationKeys } from '@/components/sessions/PendingIntegrationKeys';
+import { PendingIntegrationToolApprovals } from '@/components/sessions/PendingIntegrationToolApprovals';
+import { useIntegrationToolApprovalsExperiment } from '@/hooks/useIntegrationToolApprovalsExperiment';
+import {
+  useSessionIntegrationToolApprovals,
+  useSetSessionIntegrationToolOverride,
+} from '@/hooks/useSessionIntegrationToolApprovals';
+import { IntegrationToolSessionControlsProvider } from '@/components/sessions/IntegrationToolSessionControls';
 import { openIntegrationKeyDialog } from '@/components/sessions/integration-key-dialog';
+import { useSessionTitlePropagation } from './use-session-title-propagation';
+import { MemorySavedMessage } from '@/components/ai-elements/MemorySavedMessage';
 
 import {
   AcpMessageItem,
@@ -444,6 +458,8 @@ export function FastSessionTranscript({
   headerExtras,
   privateSession = false,
   headerActions,
+  canRenameTitle = false,
+  titleSessionId = sessionId,
   secretSessionId,
   sessionGoal,
   autoStartVoice = false,
@@ -462,6 +478,8 @@ export function FastSessionTranscript({
   headerExtras?: ReactNode;
   privateSession?: boolean;
   headerActions?: ReactNode;
+  canRenameTitle?: boolean;
+  titleSessionId?: string;
   secretSessionId?: string;
   sessionGoal?: SessionGoal | null;
   /**
@@ -561,7 +579,9 @@ export function FastSessionTranscript({
       ),
   );
   const [replyError, setReplyError] = useState<string | null>(null);
+  const [validationError, setValidationError] = useState<unknown>(null);
   const [title, setTitle] = useState<string | null>(initialTitle);
+  useSessionTitlePropagation(title, initialTitle);
   const [goal, setGoal] = useState<SessionGoal | null>(sessionGoal ?? null);
   const [conversationResponding, setConversationResponding] = useState<
     boolean | null
@@ -929,6 +949,9 @@ export function FastSessionTranscript({
   );
   const renderCapabilityOfferMessage = useCallback(
     (message: AcpUiMessage) => {
+      if (message.updateType === ACP_ENVELOPE_EVENT_TYPES.MemorySaved) {
+        return <MemorySavedMessage message={message} />;
+      }
       const offer = capabilityOffersByMessageId.get(message.id);
       if (!offer) return undefined;
       const introMessage: AcpUiMessage = {
@@ -1300,10 +1323,13 @@ export function FastSessionTranscript({
       let optimisticId: string | null = null;
       let clientMessageId: string | undefined;
       try {
-        const prepared = await preparePromptAttachments({
-          text: message.text.trim(),
-          attachments: message.files,
-        });
+        const prepared = await preparePromptAttachments(
+          {
+            text: message.text.trim(),
+            attachments: message.files,
+          },
+          { enforceAttachmentTextLimit: true },
+        );
         const images = prepared.images ?? [];
         if (!prepared.text && images.length === 0) {
           return false;
@@ -1375,9 +1401,13 @@ export function FastSessionTranscript({
             ),
           );
         }
-        setReplyError(
-          error instanceof Error ? error.message : 'Failed to send message',
-        );
+        if (isComposerValidationError(error)) {
+          setValidationError(error);
+        } else {
+          setReplyError(
+            describeValidationError(error, 'Failed to send message'),
+          );
+        }
         if (optimisticId) {
           dispatchPendingResponse({
             type: 'rollbackOptimistic',
@@ -1783,6 +1813,19 @@ export function FastSessionTranscript({
     }
   }, [openIntegrationKeyRequestId, secretSessionId]);
 
+  const toolApprovalsExperiment = useIntegrationToolApprovalsExperiment();
+  const toolApprovals = useSessionIntegrationToolApprovals(
+    secretSessionId,
+    toolApprovalsExperiment.enabled,
+  );
+  const setToolOverride = useSetSessionIntegrationToolOverride(secretSessionId);
+  const toolSessionControlsActive =
+    Boolean(secretSessionId) && toolApprovalsExperiment.enabled;
+  const toolSessionOverrides = useMemo(
+    () => toolApprovals.data?.sessionOverrides ?? [],
+    [toolApprovals.data?.sessionOverrides],
+  );
+
   useEffect(() => {
     if (pendingInputRequest && (liveVoiceActive || liveVoiceConnecting)) {
       stopLiveVoiceRef.current();
@@ -1810,12 +1853,13 @@ export function FastSessionTranscript({
           }
         >
           <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <h1
-              className="ph-no-capture min-w-0 truncate cursor-default text-sm font-medium"
+            <EditableSessionTitle
+              sessionId={titleSessionId}
               title={title ?? fallbackTitle}
-            >
-              {title ?? fallbackTitle}
-            </h1>
+              canRename={canRenameTitle}
+              className="ph-no-capture min-w-0 truncate cursor-default text-sm font-medium"
+              onTitleChange={setTitle}
+            />
             {(privateSession || effectiveSessionModel || headerExtras) && (
               <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-2 text-xs text-muted-foreground">
                 {privateSession ? (
@@ -1860,17 +1904,25 @@ export function FastSessionTranscript({
                 Older messages in this session are not shown.
               </p>
             ) : null}
-            <AcpTranscriptBlockList
-              blocks={renderBlocksBeforeInput}
-              showInternalMessages={false}
-              onSuppress={suppressMessageBeforeInput}
-              onOpenDelegatedTask={openTaskPanel ?? undefined}
-              renderMessage={renderCapabilityOfferMessage}
-            />
+            <IntegrationToolSessionControlsProvider
+              active={toolSessionControlsActive}
+              overrides={toolSessionOverrides}
+              setOverride={setToolOverride.mutate}
+              isUpdating={setToolOverride.isPending}
+            >
+              <AcpTranscriptBlockList
+                blocks={renderBlocksBeforeInput}
+                showInternalMessages={false}
+                onSuppress={suppressMessageBeforeInput}
+                onOpenDelegatedTask={openTaskPanel ?? undefined}
+                renderMessage={renderCapabilityOfferMessage}
+              />
+            </IntegrationToolSessionControlsProvider>
             {pendingInputRequest ? (
               <div className="mt-3">
                 {pendingInputRequest.preset === 'setup_starter_tasks' ? (
                   <SetupStarterTasksCard
+                    key={pendingInputRequest.requestId}
                     sessionId={sessionId}
                     request={pendingInputRequest}
                   />
@@ -1882,19 +1934,27 @@ export function FastSessionTranscript({
                   />
                 ) : (
                   <SessionUserInputCard
+                    key={pendingInputRequest.requestId}
                     sessionId={sessionId}
                     request={pendingInputRequest}
                   />
                 )}
               </div>
             ) : null}
-            <AcpTranscriptBlockList
-              blocks={renderBlocksAfterInput}
-              showInternalMessages={false}
-              onSuppress={suppressMessageAfterInput}
-              onOpenDelegatedTask={openTaskPanel ?? undefined}
-              renderMessage={renderCapabilityOfferMessage}
-            />
+            <IntegrationToolSessionControlsProvider
+              active={toolSessionControlsActive}
+              overrides={toolSessionOverrides}
+              setOverride={setToolOverride.mutate}
+              isUpdating={setToolOverride.isPending}
+            >
+              <AcpTranscriptBlockList
+                blocks={renderBlocksAfterInput}
+                showInternalMessages={false}
+                onSuppress={suppressMessageAfterInput}
+                onOpenDelegatedTask={openTaskPanel ?? undefined}
+                renderMessage={renderCapabilityOfferMessage}
+              />
+            </IntegrationToolSessionControlsProvider>
             {pendingResponseState.pendingAfter !== null &&
             streamMessages.length === 0 &&
             !hasLiveActivity([
@@ -1930,6 +1990,12 @@ export function FastSessionTranscript({
               <PendingIntegrationKeys
                 sessionId={secretSessionId}
                 openRequest={openIntegrationKeyRequest}
+              />
+            ) : null}
+            {secretSessionId && toolApprovalsExperiment.enabled ? (
+              <PendingIntegrationToolApprovals
+                sessionId={secretSessionId}
+                pending={toolApprovals.data?.pending ?? []}
               />
             ) : null}
           </ConversationContent>
@@ -1976,8 +2042,21 @@ export function FastSessionTranscript({
               }}
             />
             {replyError ? (
-              <p className="px-4 pb-2 text-xs text-destructive">{replyError}</p>
+              <Alert
+                variant="destructive"
+                className="mx-4 mb-2 [&>svg]:size-4"
+                role="alert"
+              >
+                <AlertTitle>Message not sent</AlertTitle>
+                <AlertDescription>
+                  <p className="whitespace-pre-line">{replyError}</p>
+                </AlertDescription>
+              </Alert>
             ) : null}
+            <ComposerErrorDialog
+              error={validationError}
+              onClose={() => setValidationError(null)}
+            />
           </div>
         ) : null}
       </SlackMentionProvider>

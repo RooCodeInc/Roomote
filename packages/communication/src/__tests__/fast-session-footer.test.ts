@@ -33,7 +33,7 @@ describe('buildSelectedTaskSessionUrl', () => {
 
 describe('buildFastSessionReplyFooterText', () => {
   it.each(['slack', 'discord', 'teams', 'telegram'] as const)(
-    'builds a provider-attributed Fast session link for %s',
+    'builds a provider-attributed session link for %s',
     (provider) => {
       const footer = buildFastSessionReplyFooterText({
         provider,

@@ -1798,6 +1798,34 @@ describe('task model provider commands', () => {
     );
   });
 
+  it('lists env-only coding overrides in the settings catalog', async () => {
+    mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+      'OPENROUTER_API_KEY',
+    ]);
+    // The env override is a bare gateway slug for a model that is neither
+    // persisted nor in the recommended catalog; the catalog and the runtime
+    // status must agree on its canonical id so metadata (including
+    // supported reasoning efforts) resolves for it.
+    process.env.R_MODEL = 'z-ai/glm-9.9';
+
+    const result = await getTaskModelSettingsCommand(buildMockAuth());
+    const modelById = new Map(result.models.map((model) => [model.id, model]));
+
+    expect(result.runtimeModels.codingModel.effectiveModelId).toBe(
+      'openrouter/z-ai/glm-9.9',
+    );
+    expect(modelById.get('openrouter/z-ai/glm-9.9')).toMatchObject({
+      enabled: true,
+    });
+    expect(
+      result.helperModelOptions.some(
+        (option) => option.id === 'openrouter/z-ai/glm-9.9',
+      ),
+    ).toBe(true);
+
+    delete process.env.R_MODEL;
+  });
+
   it('keeps role-selected models listed and enabled after they leave the recommended list', async () => {
     mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
       'OPENROUTER_API_KEY',

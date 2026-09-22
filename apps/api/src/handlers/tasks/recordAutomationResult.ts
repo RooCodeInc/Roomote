@@ -7,6 +7,7 @@ import {
   recordAutomationResultForTask,
   taskRuns,
 } from '@roomote/db/server';
+import { enqueueAutomationResultPreparation } from '@roomote/sdk/server/automation-result-preparation';
 import { resolveTaskAutomationResultVisibility } from '@roomote/sdk/server/automation-result-visibility';
 
 import type { Variables } from '../../types';
@@ -16,6 +17,7 @@ import { isRunTokenContext } from '../mcp/proxy-utils';
 const bodySchema = z.object({
   content: z.string().trim().min(1),
   dedupeKey: z.string().trim().min(1).max(256),
+  resultKind: z.enum(['outcome', 'input_request']).optional(),
 });
 
 export async function recordAutomationResult(
@@ -50,7 +52,12 @@ export async function recordAutomationResult(
     content: body.data.content,
     dedupeKey: body.data.dedupeKey,
     visibility,
+    sourceRunId: auth.authContext.runId,
+    resultKind: body.data.resultKind,
   });
+  if (result) {
+    await enqueueAutomationResultPreparation(result.id);
+  }
 
   return c.json({ recorded: Boolean(result) });
 }

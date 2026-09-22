@@ -51,6 +51,36 @@ function keepDescription<T extends ZodTypeAny>(
     : (schema.describe(description) as T);
 }
 
+const DECIMAL_NUMBER_PATTERN = /^-?(?:\d+(?:\.\d*)?|\.\d+)$/;
+
+function deserializeTransportPrimitive(schema: ZodTypeAny): ZodTypeAny {
+  if (schema instanceof z.ZodNumber) {
+    return keepDescription(
+      z.preprocess(
+        (value) =>
+          typeof value === 'string' && DECIMAL_NUMBER_PATTERN.test(value.trim())
+            ? Number(value)
+            : value,
+        schema,
+      ),
+      schema.description,
+    );
+  }
+
+  if (schema instanceof z.ZodBoolean) {
+    return keepDescription(
+      z.preprocess(
+        (value) =>
+          value === 'true' ? true : value === 'false' ? false : value,
+        schema,
+      ),
+      schema.description,
+    );
+  }
+
+  return schema;
+}
+
 function allowNullDeep(schema: ZodTypeAny): ZodTypeAny {
   if (schema instanceof z.ZodOptional) {
     const inner = allowNullDeep(schema.unwrap());
@@ -108,7 +138,7 @@ function allowNullDeep(schema: ZodTypeAny): ZodTypeAny {
       schema.description,
     );
   }
-  return schema;
+  return deserializeTransportPrimitive(schema);
 }
 
 /**
