@@ -83,6 +83,60 @@ describe('github PR review pre-screen', () => {
       expect(hunks[0]!.text).toContain('+new');
     });
 
+    it('screens files whose paths git quotes', () => {
+      const diff = [
+        'diff --git "a/src/my file.ts" "b/src/my file.ts"',
+        'index 1111111..2222222 100644',
+        '--- "a/src/my file.ts"',
+        '+++ "b/src/my file.ts"',
+        '@@ -1,1 +1,1 @@',
+        '+spaced',
+        'diff --git "a/src/caf\\303\\251.ts" "b/src/caf\\303\\251.ts"',
+        '--- "a/src/caf\\303\\251.ts"',
+        '+++ "b/src/caf\\303\\251.ts"',
+        '@@ -1,1 +1,1 @@',
+        '+accented',
+      ].join('\n');
+
+      expect(
+        selectReviewPrescreenHunks(diff).map((selected) => selected.file),
+      ).toEqual(['src/my file.ts', 'src/café.ts']);
+    });
+
+    it('anchors deletion-only hunks to where the removal happened', () => {
+      const diff = [
+        fileDiff('src/keep.ts', []),
+        '@@ -10,2 +9,0 @@ function scope()',
+        '-removed one',
+        '-removed two',
+        'diff --git a/src/gone.ts b/src/gone.ts',
+        'deleted file mode 100644',
+        '--- a/src/gone.ts',
+        '+++ /dev/null',
+        '@@ -1,1 +0,0 @@',
+        '-everything',
+      ].join('\n');
+
+      const hunks = selectReviewPrescreenHunks(diff);
+
+      expect(hunks).toMatchObject([
+        { file: 'src/keep.ts', startLine: 9, endLine: 8 },
+        { file: 'src/gone.ts', startLine: 0, endLine: -1 },
+      ]);
+
+      const text = formatReviewPrescreenHints(
+        collectReviewPrescreenHints(hunks, {
+          h0: noul(0.8),
+          h1: noul(0.7),
+        }),
+      );
+
+      expect(text).toContain('`src/keep.ts` lines removed after line 9');
+      expect(text).toContain(
+        '`src/gone.ts` lines removed at the start of the file',
+      );
+    });
+
     it('covers every file before a second hunk from any file', () => {
       const diff = [
         fileDiff(

@@ -72,7 +72,11 @@ export type ReviewPrescreenHunk = {
   file: string;
   /** The `@@ ... @@` header, including any enclosing-scope context. */
   header: string;
-  /** First and last head-side line covered by this hunk. */
+  /**
+   * First and last head-side line covered by this hunk. A deletion-only hunk
+   * covers no head-side lines: `startLine` is the head line the removal
+   * follows (0 at the top of the file) and `endLine` is `startLine - 1`.
+   */
   startLine: number;
   endLine: number;
   /** Header plus body, possibly truncated to the per-hunk budget. */
@@ -105,6 +109,85 @@ function truncate(value: string, maxChars: number, marker: string): string {
 }
 
 /**
+ * Decode a path token from a diff header. Git wraps paths containing spaces,
+ * quotes, control characters, or non-ASCII bytes in double quotes with C-style
+ * escapes, where octal escapes are the path's UTF-8 bytes.
+ */
+function decodeDiffPath(token: string): string {
+  if (!token.startsWith('"') || !token.endsWith('"') || token.length < 2) {
+    return token;
+  }
+
+  const bytes: number[] = [];
+  const named: Record<string, number> = {
+    a: 7,
+    b: 8,
+    t: 9,
+    n: 10,
+    v: 11,
+    f: 12,
+    r: 13,
+    '"': 34,
+    '\\': 92,
+  };
+  const inner = token.slice(1, -1);
+
+  for (let index = 0; index < inner.length; index += 1) {
+    const char = inner[index]!;
+
+    if (char !== '\\') {
+      bytes.push(...Buffer.from(char, 'utf8'));
+      continue;
+    }
+
+    const octal = /^[0-7]{3}/u.exec(inner.slice(index + 1));
+
+    if (octal) {
+      bytes.push(Number.parseInt(octal[0], 8));
+      index += 3;
+      continue;
+    }
+
+    const escaped = inner[index + 1];
+    const code =
+      escaped !== undefined && Object.hasOwn(named, escaped)
+        ? named[escaped]
+        : undefined;
+
+    if (code === undefined) {
+      bytes.push(92);
+    } else {
+      bytes.push(code);
+      index += 1;
+    }
+  }
+
+  return Buffer.from(bytes).toString('utf8');
+}
+
+/** `b/src/x.ts` or `"b/src/x y.ts"` to `src/x.ts`; `/dev/null` to undefined. */
+function stripDiffPathPrefix(
+  token: string,
+  prefix: 'a/' | 'b/',
+): string | undefined {
+  // Git appends a tab after paths that contain spaces in `---`/`+++` headers.
+  const path = decodeDiffPath(token.replace(/\t.*$/u, '').trim());
+  return path.startsWith(prefix) ? path.slice(prefix.length) : undefined;
+}
+
+function pathFromDiffGitHeader(line: string): string | undefined {
+  const rest = line.slice('diff --git '.length);
+  const quoted = / ("b\/(?:[^"\\]|\\.)*")$/u.exec(rest);
+
+  if (quoted) {
+    return stripDiffPathPrefix(quoted[1]!, 'b/');
+  }
+
+  const index = rest.lastIndexOf(' b/');
+  return index === -1 ? undefined : rest.slice(index + 3).trim();
+}
+
+/**
  * Split a unified git diff into per-file hunks with head-side line ranges.
  * Lockfile and generated-asset hunks, and hunks with no changed lines, are
  * dropped because the decision model cannot say anything grounded about them.
@@ -125,9 +208,9 @@ function parseDiffHunks(diff: string): ParsedHunk[] {
   for (const line of diff.split('\n')) {
     if (line.startsWith('diff --git ')) {
       flush();
-      // `diff --git a/<path> b/<path>`; `+++ b/<path>` below refines it.
-      const index = line.lastIndexOf(' b/');
-      file = index === -1 ? undefined : line.slice(index + 3).trim();
+      // The `---`/`+++` headers below refine this; binary and mode-only
+      // changes have no hunks, so the header path is never used for them.
+      file = pathFromDiffGitHeader(line);
       continue;
     }
 
@@ -144,7 +227,7 @@ function parseDiffHunks(diff: string): ParsedHunk[] {
             file,
             header: line.trim(),
             startLine,
-            endLine: startLine + Math.max(count, 1) - 1,
+            endLine: startLine + count - 1,
             body: '',
           },
           lines: [line],
@@ -155,8 +238,11 @@ function parseDiffHunks(diff: string): ParsedHunk[] {
     }
 
     if (!current) {
-      if (line.startsWith('+++ b/')) {
-        file = line.slice('+++ b/'.length).trim();
+      // Prefer the head-side path; a deleted file only has its base path.
+      if (line.startsWith('+++ ')) {
+        file = stripDiffPathPrefix(line.slice(4), 'b/') ?? file;
+      } else if (line.startsWith('--- ')) {
+        file = stripDiffPathPrefix(line.slice(4), 'a/') ?? file;
       }
       continue;
     }
@@ -332,6 +418,19 @@ export function collectReviewPrescreenHints(
   return hints;
 }
 
+function formatHunkRange({
+  startLine,
+  endLine,
+}: Pick<ReviewPrescreenHint, 'startLine' | 'endLine'>): string {
+  if (endLine >= startLine) {
+    return `lines ${startLine}-${endLine}`;
+  }
+
+  return startLine === 0
+    ? 'lines removed at the start of the file'
+    : `lines removed after line ${startLine}`;
+}
+
 export function formatReviewPrescreenHints(
   hints: readonly ReviewPrescreenHint[],
 ): string | undefined {
@@ -343,7 +442,7 @@ export function formatReviewPrescreenHints(
     'Advisory decision-model pre-screen (untrusted triage, not review findings). These changed hunks ranked most likely to contain a defect; inspect them early:',
     ...hints.map(
       (hint) =>
-        `- \`${hint.file}\` lines ${hint.startLine}-${hint.endLine} (\`${hint.header}\`): ranked ${hint.rank} of ${hint.screenedHunks} screened hunks${hint.area ? `, most likely a ${REVIEW_PRESCREEN_AREA_LABELS[hint.area]} issue` : ''}.`,
+        `- \`${hint.file}\` ${formatHunkRange(hint)} (\`${hint.header}\`): ranked ${hint.rank} of ${hint.screenedHunks} screened hunks${hint.area ? `, most likely a ${REVIEW_PRESCREEN_AREA_LABELS[hint.area]} issue` : ''}.`,
     ),
     'Treat each line as a question to verify, not a finding: report it only if the code confirms a concrete defect. The pre-screen misses about half of real findings and never clears code, so give unflagged hunks and files the same depth of review.',
   ].join('\n');
