@@ -18,7 +18,7 @@ type QueuedPolicyChange = {
 };
 
 type SaveMutationOptions = {
-  onError: (error: Error, input: QueuedPolicyChange) => void;
+  onError: (error: Error, input: QueuedPolicyChange) => Promise<void>;
 };
 
 const { mocks, mutationOptions } = vi.hoisted(() => ({
@@ -26,6 +26,7 @@ const { mocks, mutationOptions } = vi.hoisted(() => ({
   mocks: {
     cancelQueries: vi.fn(),
     getQueryData: vi.fn(),
+    invalidateQueries: vi.fn(),
     setQueryData: vi.fn(),
     mutate: vi.fn(),
     mutateAsync: vi.fn(),
@@ -46,6 +47,7 @@ vi.mock('@tanstack/react-query', () => ({
   useQueryClient: () => ({
     cancelQueries: mocks.cancelQueries,
     getQueryData: mocks.getQueryData,
+    invalidateQueries: mocks.invalidateQueries,
     setQueryData: mocks.setQueryData,
   }),
 }));
@@ -83,13 +85,31 @@ const existingPolicy: IntegrationToolPolicyMetadata = {
 };
 
 describe('useIntegrationToolPolicies', () => {
+  let cache: IntegrationToolPolicyMetadata[];
+
   beforeEach(() => {
     vi.clearAllMocks();
     mutationOptions.length = 0;
-    mocks.getQueryData.mockReturnValue([existingPolicy]);
+    cache = [existingPolicy];
+    mocks.getQueryData.mockImplementation(() => cache);
+    mocks.setQueryData.mockImplementation(
+      (
+        _queryKey: unknown,
+        updater:
+          | IntegrationToolPolicyMetadata[]
+          | ((
+              current: IntegrationToolPolicyMetadata[],
+            ) => IntegrationToolPolicyMetadata[]),
+      ) => {
+        cache = typeof updater === 'function' ? updater(cache) : updater;
+      },
+    );
+    mocks.invalidateQueries.mockImplementation(async () => {
+      cache = [existingPolicy];
+    });
   });
 
-  it('updates the cached mode immediately and preserves a newer choice when an older save fails', () => {
+  it('updates the cached mode immediately and preserves a newer choice when an older save fails', async () => {
     const { result } = renderHook(() => useIntegrationToolPolicies());
 
     act(() => result.current.setMode('resend', 'send_email', 'ask'));
@@ -108,7 +128,9 @@ describe('useIntegrationToolPolicies', () => {
 
     const queuedChange = mocks.mutate.mock.calls[0]?.[0] as QueuedPolicyChange;
     const mutation = mutationOptions[1] as SaveMutationOptions;
-    mutation.onError(new Error('save failed'), queuedChange);
+    await act(async () => {
+      await mutation.onError(new Error('save failed'), queuedChange);
+    });
     const rollbackUpdater = mocks.setQueryData.mock.calls[1]?.[1] as (
       current: IntegrationToolPolicyMetadata[],
     ) => IntegrationToolPolicyMetadata[];
@@ -153,5 +175,28 @@ describe('useIntegrationToolPolicies', () => {
       ['send_email', 'reject'],
       ['delete_email', 'reject'],
     ]);
+  });
+
+  it('refetches server truth after two consecutive queued failures', async () => {
+    const { result } = renderHook(() => useIntegrationToolPolicies());
+
+    act(() => result.current.setMode('resend', 'send_email', 'ask'));
+    act(() => result.current.setMode('resend', 'send_email', 'reject'));
+
+    const queuedChanges = mocks.mutate.mock.calls.map(
+      ([input]) => input as QueuedPolicyChange,
+    );
+    const mutation = mutationOptions[1] as SaveMutationOptions;
+
+    await act(async () => {
+      await mutation.onError(new Error('first save failed'), queuedChanges[0]!);
+      await mutation.onError(
+        new Error('second save failed'),
+        queuedChanges[1]!,
+      );
+    });
+
+    expect(mocks.invalidateQueries).toHaveBeenCalledTimes(2);
+    expect(cache).toEqual([existingPolicy]);
   });
 });

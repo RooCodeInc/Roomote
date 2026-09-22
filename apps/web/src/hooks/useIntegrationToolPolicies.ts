@@ -190,7 +190,7 @@ export function useIntegrationToolPolicies(
           : 'Tool approval policies updated.',
       );
     },
-    onError: (_error, { change, previous, revisions }) => {
+    onError: async (_error, { change, previous, revisions }) => {
       const currentChange = {
         ...change,
         toolNames: change.toolNames.filter((toolName) => {
@@ -203,6 +203,10 @@ export function useIntegrationToolPolicies(
         (current) =>
           rollbackOptimisticPolicyChange(current, previous, currentChange),
       );
+      // A queued failure may have an older snapshot than the cache now in
+      // memory. Refetch after every failure so the queue settles on server
+      // truth instead of restoring a stale optimistic mode.
+      await queryClient.invalidateQueries({ queryKey });
       toast.error(
         change.toolNames.length === 1
           ? 'Failed to update the tool approval policy.'
