@@ -25,11 +25,17 @@ vi.mock('../typesafe-judgment', () => ({
 
 import { evaluateTaskCompletionGate } from '../task-completion-gate';
 
-const prompt = (text: string, source?: string) => ({
+const prompt = (
+  text: string,
+  options: { source?: string; hidden?: boolean } = {},
+) => ({
   id: text,
   contentBlocks: [{ type: 'text', text }],
-  payload: source ? { source } : null,
-  metadata: source ? { source, visibleInTranscript: false } : null,
+  payload: options.source ? { source: options.source } : null,
+  metadata: {
+    ...(options.source ? { source: options.source } : {}),
+    ...(options.hidden || options.source ? { visibleInTranscript: false } : {}),
+  },
 });
 
 /**
@@ -184,7 +190,10 @@ describe('evaluateTaskCompletionGate', () => {
 
   it('reads a request that arrived as a hidden prompt, as a delegated task gets it', async () => {
     mockTranscript([
-      '<request>Remove the duplicate-call guard.</request>\n<hidden>true</hidden>',
+      prompt(
+        '<workflow>Standard task workflow.</workflow>\n<request>Remove the duplicate-call guard.</request>',
+        { hidden: true },
+      ),
     ]);
 
     await evaluateTaskCompletionGate({ taskId: 'task-1', check });
@@ -195,29 +204,41 @@ describe('evaluateTaskCompletionGate', () => {
     );
   });
 
-  it("never reads the harness's own reminders back as requests", async () => {
+  it('reads only visible follow-ups, never notices or reminders', async () => {
     mockTranscript([
       'Remove the duplicate-call guard.',
       prompt(
         'Roomote automatically compared what was asked, your closing report, and everything this task changed, and flagged the following: ...',
-        'opencode-completion-gate',
+        { source: 'opencode-completion-gate' },
       ),
-      prompt(
-        'Before finalizing, post a terminal chat-visible reply.',
-        'opencode-stop-hook',
-      ),
+      prompt('Before finalizing, post a terminal chat-visible reply.', {
+        source: 'opencode-stop-hook',
+      }),
       // Queued by the harness itself after a provider rate limit.
       prompt(
         'Continue where you left off after the temporary provider rate limit.',
-        'opencode-rate-limit-retry',
+        { source: 'opencode-rate-limit-retry' },
       ),
+      // A platform notice, hidden, with its own source.
+      prompt('The environment setup finished; the snapshot is ready.', {
+        source: 'environment-setup',
+      }),
+      // A hidden follow-up with no source at all still never counts.
+      prompt(
+        'The visual proof step exceeded its shared five-minute deadline.',
+        {
+          hidden: true,
+        },
+      ),
+      // A person's follow-up is visible and does count.
+      'Also drop the helper.',
     ]);
 
     await evaluateTaskCompletionGate({ taskId: 'task-1', check });
 
     expect(mockEvaluateDecisionModel.mock.calls[0]![0].state).toMatchObject({
       request: 'Remove the duplicate-call guard.',
-      follow_ups: '',
+      follow_ups: 'Also drop the helper.',
     });
   });
 

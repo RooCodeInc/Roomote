@@ -145,24 +145,35 @@ function clip(text: string, maxChars: number): string {
  * follow-ups. Read from the transcript rather than taken from the sandbox so
  * the agent cannot restate its own request.
  *
- * Hidden prompts count: a task delegated from a Session gets its request as
- * a hidden `<request>` prompt. The harness's own reminders (a completion
- * check follow-up, a chat closeout nudge) are not persisted as prompts today;
- * should that change, their `source` keeps them out, so the check never
- * reads its own instructions back as a request.
+ * The opening prompt counts whether or not it is visible: a task delegated
+ * from a Session gets its request as a hidden `<request>` prompt. Later
+ * hidden prompts never count. Those are the platform's and the harness's own
+ * notices (an environment-setup notice, a recovery or continuation nudge, a
+ * completion-check reminder), and reading one back as a follow-up would have
+ * the check judging its own instructions. A person's follow-up, from the web
+ * or a chat thread, is always visible.
  */
 const HARNESS_PROMPT_SOURCE_PREFIX = 'opencode-';
 
-function isHarnessPrompt(
-  payload: Record<string, unknown> | null,
-  metadata: unknown,
-): boolean {
-  const meta =
-    metadata && typeof metadata === 'object'
-      ? (metadata as Record<string, unknown>)
-      : null;
+type PromptRow = {
+  id: string;
+  contentBlocks: unknown;
+  payload: unknown;
+  metadata: unknown;
+};
 
-  return [payload?.source, meta?.source].some(
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object'
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function isHiddenPrompt(row: PromptRow): boolean {
+  return asRecord(row.metadata)?.visibleInTranscript === false;
+}
+
+function isHarnessPrompt(row: PromptRow): boolean {
+  return [asRecord(row.payload)?.source, asRecord(row.metadata)?.source].some(
     (source) =>
       typeof source === 'string' &&
       source.startsWith(HARNESS_PROMPT_SOURCE_PREFIX),
@@ -191,18 +202,23 @@ async function loadTaskRequests(
       )
       .orderBy(direction(taskMessages.ts), direction(taskMessages.createdAt))
       .limit(PROMPT_SCAN_LIMIT);
-  const visiblePrompts = (rows: Awaited<ReturnType<typeof scan>>) =>
+  const requestPrompts = (
+    rows: PromptRow[],
+    options: { includeHidden: boolean },
+  ) =>
     rows.flatMap((row) => {
-      const payload =
-        row.payload && typeof row.payload === 'object'
-          ? (row.payload as Record<string, unknown>)
-          : null;
-
-      if (isHarnessPrompt(payload, row.metadata)) {
+      if (
+        isHarnessPrompt(row) ||
+        (!options.includeHidden && isHiddenPrompt(row))
+      ) {
         return [];
       }
 
-      const raw = extractAcpMessageText(row.contentBlocks, payload)?.trim();
+      const payload = asRecord(row.payload);
+      const raw = extractAcpMessageText(
+        row.contentBlocks as Parameters<typeof extractAcpMessageText>[0],
+        payload,
+      )?.trim();
       const text = raw
         ? normalizeTranscriptUserText(
             isSystemInjectedAcpPromptText(raw)
@@ -215,13 +231,13 @@ async function loadTaskRequests(
       return text ? [{ id: row.id, text }] : [];
     });
 
-  const [opening] = visiblePrompts(await scan(asc));
+  const [opening] = requestPrompts(await scan(asc), { includeHidden: true });
 
   if (!opening) {
     return null;
   }
 
-  const followUps = visiblePrompts(await scan(desc))
+  const followUps = requestPrompts(await scan(desc), { includeHidden: false })
     .filter((prompt) => prompt.id !== opening.id)
     .slice(0, FOLLOW_UP_LIMIT)
     .reverse();
