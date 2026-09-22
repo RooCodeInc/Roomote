@@ -6,7 +6,6 @@ import {
   hasQueuedTaskFollowUps,
   peekTaskFollowUps,
   queueTaskFollowUp,
-  removeTaskFollowUp,
 } from '../messages';
 
 const RUN_ID = 987_654_321;
