@@ -64,17 +64,18 @@ const REVIEW_PRESCREEN_AREAS = {
     'Performance: unbounded work, N+1 queries, leaks, or hot-path latency regressions.',
 } as const;
 
-type ReviewPrescreenArea = keyof typeof REVIEW_PRESCREEN_AREAS;
+export type ReviewPrescreenArea = keyof typeof REVIEW_PRESCREEN_AREAS;
 
-const REVIEW_PRESCREEN_AREA_LABELS: Record<ReviewPrescreenArea, string> = {
-  security: 'security',
-  correctness: 'correctness',
-  dataIntegrity: 'data-integrity',
-  concurrency: 'concurrency or lifecycle',
-  compatibility: 'compatibility',
-  failureHandling: 'failure-handling',
-  performance: 'performance',
-};
+export const REVIEW_PRESCREEN_AREA_LABELS: Record<ReviewPrescreenArea, string> =
+  {
+    security: 'security',
+    correctness: 'correctness',
+    dataIntegrity: 'data-integrity',
+    concurrency: 'concurrency or lifecycle',
+    compatibility: 'compatibility',
+    failureHandling: 'failure-handling',
+    performance: 'performance',
+  };
 
 export type ReviewPrescreenHunk = {
   file: string;
@@ -91,7 +92,7 @@ export type ReviewPrescreenHunk = {
   text: string;
 };
 
-type ReviewPrescreenHint = {
+export type ReviewPrescreenHint = {
   file: string;
   header: string;
   startLine: number;
@@ -179,7 +180,12 @@ function stripDiffPathPrefix(
   prefix: 'a/' | 'b/',
 ): string | undefined {
   // Git appends a tab after paths that contain spaces in `---`/`+++` headers.
-  const path = decodeDiffPath(token.replace(/\t.*$/u, '').trim());
+  // Cut at the first tab with indexOf: a `/\t.*$/` replace is quadratic on
+  // a header full of tabs, and the diff here comes from the sandbox.
+  const tab = token.indexOf('\t');
+  const path = decodeDiffPath(
+    (tab === -1 ? token : token.slice(0, tab)).trim(),
+  );
   return path.startsWith(prefix) ? path.slice(prefix.length) : undefined;
 }
 
@@ -543,7 +549,7 @@ export function collectReviewPrescreenHints(
   return hints;
 }
 
-function formatHunkRange({
+export function formatHunkRange({
   startLine,
   endLine,
 }: Pick<ReviewPrescreenHint, 'startLine' | 'endLine'>): string {
@@ -637,7 +643,7 @@ export function buildReviewPrescreenBatches({
  * reviewable hunks; throws when any request fails so callers never act on a
  * partial screen.
  */
-async function screenReviewHunks({
+export async function screenReviewHunks({
   title,
   changedFiles,
   diff,
