@@ -27,9 +27,10 @@ const COPY = {
     'Let Roomote handle routine work and ask before anything risky. Your other tool choices stay the same.',
   off: 'Keep each tool’s current choice.',
   on: 'Handle routine work automatically and ask before anything risky.',
-  disclosure: 'Add team guidance',
-  guidanceLabel: 'Team guidance',
-  guidanceHelp: 'Describe what your team considers routine or risky. Optional.',
+  disclosure: 'Additional instructions',
+  guidanceLabel: 'Additional instructions',
+  guidanceHelp:
+    'Describe what your deployment considers routine or risky. Optional.',
   guidancePlaceholder:
     'Reading and searching are routine. Anything sent to customers is risky.',
   save: 'Save changes',
@@ -121,7 +122,7 @@ export function IntegrationToolAutoModeSetting() {
           {COPY.disclosure}
         </CollapsibleTrigger>
         <CollapsibleContent className="mt-3 flex flex-col gap-2">
-          <Label htmlFor="integration-tool-auto-policy">
+          <Label htmlFor="integration-tool-auto-policy" className="sr-only">
             {COPY.guidanceLabel}
           </Label>
           {COPY.guidanceHelp ? (

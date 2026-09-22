@@ -48,9 +48,15 @@ describe('IntegrationToolAutoModeSetting', () => {
   it('shows the current mode and keeps the guidance behind a disclosure', () => {
     render(<IntegrationToolAutoModeSetting />);
     expect(screen.getByRole('radio', { name: /^Off/ })).toBeChecked();
-    expect(screen.queryByLabelText('Team guidance')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Add team guidance' }));
-    expect(screen.getByLabelText('Team guidance')).toBeInTheDocument();
+    expect(
+      screen.queryByLabelText('Additional instructions'),
+    ).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Additional instructions' }),
+    );
+    expect(
+      screen.getByLabelText('Additional instructions'),
+    ).toBeInTheDocument();
   });
 
   it('switches the mode and saves the guidance separately', async () => {
@@ -58,8 +64,10 @@ describe('IntegrationToolAutoModeSetting', () => {
     fireEvent.click(screen.getByRole('radio', { name: /^On/ }));
     expect(state.setAuto).toHaveBeenLastCalledWith({ mode: 'on', policy: '' });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add team guidance' }));
-    const guidance = screen.getByLabelText('Team guidance');
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Additional instructions' }),
+    );
+    const guidance = screen.getByLabelText('Additional instructions');
     expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
     fireEvent.change(guidance, { target: { value: 'Reads only.' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
