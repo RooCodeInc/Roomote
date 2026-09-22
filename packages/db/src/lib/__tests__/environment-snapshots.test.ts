@@ -17,6 +17,7 @@ import {
   getEnvironmentSnapshot,
   loadEnvironmentSnapshots,
   softDeleteEnvironmentSnapshots,
+  updatePendingEnvironmentSnapshot,
   upsertEnvironmentSnapshot,
 } from '../environment-snapshots';
 import { updateEnvironmentDefinition } from '../environment-definitions';
@@ -642,6 +643,51 @@ describe('environment snapshot helpers', () => {
         snapshotStatus: 'ready',
         snapshotCreatedAt: manualCreatedAt,
         snapshotExpiresAt: manualExpiresAt,
+      }),
+    );
+  });
+
+  it('preserves a ready snapshot when a replacement refresh fails', async () => {
+    const createdAt = new Date('2026-02-01T00:00:00.000Z');
+
+    await upsertEnvironmentSnapshot(db, {
+      environmentId: testEnvironmentId,
+      provider: 'modal',
+      snapshotId: 'sandbox-snapshot-known-good',
+      snapshotStatus: 'ready',
+      snapshotCreatedAt: createdAt,
+      snapshotExpiresAt: null,
+    });
+
+    const activeSnapshot = await db.query.environmentSnapshots.findFirst({
+      where: eq(environmentSnapshots.environmentId, testEnvironmentId),
+    });
+
+    const updated = await updatePendingEnvironmentSnapshot(db, {
+      environmentId: testEnvironmentId,
+      provider: 'modal',
+      snapshotId: null,
+      snapshotStatus: 'failed',
+      snapshotCreatedAt: null,
+      snapshotExpiresAt: null,
+      attachmentSource: {
+        source: 'active_snapshot_row',
+        environmentSnapshotId: activeSnapshot!.id,
+        sourceSnapshotId: activeSnapshot!.snapshotId,
+        sourceSnapshotCreatedAt: createdAt.toISOString(),
+      },
+    });
+
+    const currentSnapshot = await db.query.environmentSnapshots.findFirst({
+      where: eq(environmentSnapshots.environmentId, testEnvironmentId),
+    });
+
+    expect(updated).toBe(false);
+    expect(currentSnapshot).toEqual(
+      expect.objectContaining({
+        snapshotId: 'sandbox-snapshot-known-good',
+        snapshotStatus: 'ready',
+        snapshotCreatedAt: createdAt,
       }),
     );
   });
