@@ -198,13 +198,13 @@ describe('github PR review pre-screen', () => {
         },
       ]);
       // The chunk boundary falls inside the `-removed`/`+added` pair, so the
-      // chunk extends to keep it whole; the context-only remainder is dropped.
+      // chunk ends before it; the context-only first chunk is dropped.
       expect(summary.filter((hunk) => hunk.file === 'src/mixed.ts')).toEqual([
         {
           file: 'src/mixed.ts',
-          header: '@@ -10,50 +10,50 @@ function scope()',
-          startLine: 10,
-          endLine: 59,
+          header: '@@ -59,2 +59,2 @@ function scope()',
+          startLine: 59,
+          endLine: 60,
         },
       ]);
       expect(summary.filter((hunk) => hunk.file === 'src/gone.ts')).toEqual([
@@ -224,6 +224,31 @@ describe('github PR review pre-screen', () => {
       expect(hunks.find((hunk) => hunk.startLine === 51)!.text).toContain(
         '+line 51',
       );
+    });
+
+    it('keeps a replacement longer than a chunk in one hunk', () => {
+      const diff = fileDiff('src/rewrite.ts', [
+        {
+          start: 1,
+          lines: [
+            ...Array.from({ length: 10 }, (_, index) => ` before ${index}`),
+            ...Array.from({ length: 60 }, (_, index) => `-old ${index}`),
+            ...Array.from({ length: 60 }, (_, index) => `+new ${index}`),
+            ...Array.from({ length: 10 }, (_, index) => ` after ${index}`),
+          ],
+        },
+      ]);
+
+      const hunks = selectReviewPrescreenHunks(diff, { chunkLines: 50 });
+
+      expect(hunks).toHaveLength(1);
+      expect(hunks[0]).toMatchObject({
+        header: '@@ -11,60 +11,60 @@ function scope()',
+        startLine: 11,
+        endLine: 70,
+      });
+      expect(hunks[0]!.text).toContain('-old 0');
+      expect(hunks[0]!.text).toContain('+new 59');
     });
 
     it('covers every file before a second hunk from any file', () => {

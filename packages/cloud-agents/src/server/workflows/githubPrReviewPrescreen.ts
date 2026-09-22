@@ -17,7 +17,6 @@ const REVIEW_PRESCREEN_MAX_HUNKS = 64;
  * coverage because small chunks strip the context the model ranks with.
  */
 const REVIEW_PRESCREEN_CHUNK_LINES = 150;
-const CHUNK_BOUNDARY_OVERRUN_LINES = 10;
 export const REVIEW_PRESCREEN_MAX_HINTS = 3;
 export const REVIEW_PRESCREEN_MAX_HINTS_PER_FILE = 2;
 export const REVIEW_PRESCREEN_TIMEOUT_MS = 10_000;
@@ -212,6 +211,50 @@ function isChangedLine(line: string): boolean {
 }
 
 /**
+ * Where a chunk starting at `offset` should end. A boundary never falls
+ * inside a replacement (a contiguous run of changed lines with both removals
+ * and additions): the chunk ends before the replacement instead, or, when the
+ * replacement starts the chunk, takes the whole replacement however long it
+ * is. Pure-addition and pure-removal runs split normally.
+ */
+function chunkEnd(
+  lines: readonly string[],
+  offset: number,
+  chunkLines: number,
+): number {
+  const end = Math.min(offset + chunkLines, lines.length);
+
+  if (
+    end === lines.length ||
+    !isChangedLine(lines[end - 1]!) ||
+    !isChangedLine(lines[end]!)
+  ) {
+    return end;
+  }
+
+  let runStart = end - 1;
+  while (runStart > offset && isChangedLine(lines[runStart - 1]!)) {
+    runStart -= 1;
+  }
+
+  let runEnd = end;
+  while (runEnd < lines.length && isChangedLine(lines[runEnd]!)) {
+    runEnd += 1;
+  }
+
+  const run = lines.slice(runStart, runEnd);
+  const isReplacement =
+    run.some((line) => line.startsWith('-')) &&
+    run.some((line) => line.startsWith('+'));
+
+  if (!isReplacement) {
+    return end;
+  }
+
+  return runStart > offset ? runStart : runEnd;
+}
+
+/**
  * Split an oversized hunk into consecutive chunks with their own git-style
  * headers and head-side ranges. A chunk with no changed lines is dropped.
  */
@@ -237,20 +280,7 @@ function chunkHunk(raw: RawHunk, chunkLines: number): ParsedHunk[] {
   let newLine = raw.newCount === 0 ? raw.newStart + 1 : raw.newStart;
 
   for (let offset = 0; offset < raw.lines.length;) {
-    let end = Math.min(offset + chunkLines, raw.lines.length);
-
-    // Avoid splitting a replacement (removed lines followed by the lines that
-    // replace them) across two chunks, within a small overrun.
-    while (
-      end < raw.lines.length &&
-      end < offset + chunkLines + CHUNK_BOUNDARY_OVERRUN_LINES &&
-      isChangedLine(raw.lines[end - 1]!) &&
-      raw.lines[end]!.startsWith('+') &&
-      raw.lines.slice(offset, end).some((line) => line.startsWith('-'))
-    ) {
-      end += 1;
-    }
-
+    const end = chunkEnd(raw.lines, offset, chunkLines);
     const lines = raw.lines.slice(offset, end);
     offset = end;
     const chunkOld = oldLine;
