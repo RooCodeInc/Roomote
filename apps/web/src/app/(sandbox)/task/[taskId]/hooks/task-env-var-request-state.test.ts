@@ -95,6 +95,48 @@ describe('getPendingTaskEnvVarRequest', () => {
     });
   });
 
+  it('preserves credential access guidance from the persisted tool result', () => {
+    const request = getPendingTaskEnvVarRequest([
+      createToolResultEvent(
+        'request-guidance',
+        1,
+        JSON.stringify({
+          success: true,
+          requestedNames: ['VERCEL_TOKEN'],
+          requestedVariables: [
+            {
+              name: 'VERCEL_TOKEN',
+              purpose: 'Deploy the preview build',
+              credentialAccess: {
+                operation: 'write',
+                scope: 'The target Vercel team and project',
+                permissions: ['project:write'],
+                documentationUrl: 'https://vercel.com/docs/rest-api/reference',
+              },
+            },
+          ],
+        }),
+      ),
+    ]);
+
+    expect(request).toEqual({
+      key: 'request-guidance:tool-call',
+      ts: 1,
+      variables: [
+        {
+          name: 'VERCEL_TOKEN',
+          purpose: 'Deploy the preview build',
+          credentialAccess: {
+            operation: 'write',
+            scope: 'The target Vercel team and project',
+            permissions: ['project:write'],
+            documentationUrl: 'https://vercel.com/docs/rest-api/reference',
+          },
+        },
+      ],
+    });
+  });
+
   it('clears the pending request after a fulfillment marker prompt', () => {
     const request = getPendingTaskEnvVarRequest([
       createToolResultEvent(

@@ -217,6 +217,63 @@ describe('ReconnectableHarness', () => {
     });
   });
 
+  it('preserves credential access guidance from persisted tool results', async () => {
+    const harness = new FakeHarness();
+    const reconnectableHarness = new ReconnectableHarness({
+      logger: createLogger(),
+      spawnHarness: async () => ({
+        harness,
+        subprocess: createSubprocess() as never,
+      }),
+    });
+
+    await reconnectableHarness.start();
+
+    harness.emit('runtimePersistedEnvelope', {
+      ts: 101,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+      role: 'tool',
+      protocol: 'roomote_runtime',
+      contentBlocks: [],
+      metadata: null,
+      payload: {
+        toolCallId: 'tool-call-env-guidance',
+        isMcp: true,
+        toolName: 'request_environment_variables',
+        mcpToolName: 'request_environment_variables',
+        output: JSON.stringify({
+          success: true,
+          requestedNames: ['VERCEL_TOKEN'],
+          requestedVariables: [
+            {
+              name: 'VERCEL_TOKEN',
+              credentialAccess: {
+                operation: 'write',
+                scope: 'The target Vercel team and project',
+                permissions: ['project:write'],
+              },
+            },
+          ],
+        }),
+      },
+    });
+
+    expect(reconnectableHarness.getPendingEnvVarRequest()).toEqual({
+      key: 'tool-call-env-guidance',
+      ts: 101,
+      variables: [
+        {
+          name: 'VERCEL_TOKEN',
+          credentialAccess: {
+            operation: 'write',
+            scope: 'The target Vercel team and project',
+            permissions: ['project:write'],
+          },
+        },
+      ],
+    });
+  });
+
   it('clears cached pending env-var requests when a task starts or closes', async () => {
     const harness = new FakeHarness();
 

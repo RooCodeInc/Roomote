@@ -21,6 +21,7 @@ describe('handleRequestEnvironmentVariables', () => {
       success: true,
       requestCreated: true,
       requestedNames: ['OPENAI_API_KEY'],
+      requestedVariables: [{ name: 'OPENAI_API_KEY' }],
       taskStopRequested: false,
     });
   });
@@ -46,8 +47,42 @@ describe('handleRequestEnvironmentVariables', () => {
       success: true,
       requestCreated: true,
       requestedNames: ['OPENAI_API_KEY'],
+      requestedVariables: [{ name: 'OPENAI_API_KEY' }],
       taskStopRequested: true,
     });
+  });
+
+  it('preserves credential access guidance in the tool result', async () => {
+    const result = await handleRequestEnvironmentVariables({
+      variables: [
+        {
+          name: 'VERCEL_TOKEN',
+          purpose: 'Deploy the preview build',
+          credentialAccess: {
+            operation: 'write',
+            scope: 'The target Vercel team and project',
+            permissions: ['project:write', 'deployment:write'],
+            documentationUrl: 'https://vercel.com/docs/rest-api/reference',
+          },
+        },
+      ],
+    });
+
+    const text = result.content[0]?.text ?? '';
+    const parsed = JSON.parse(text);
+
+    expect(parsed.requestedVariables).toEqual([
+      {
+        name: 'VERCEL_TOKEN',
+        purpose: 'Deploy the preview build',
+        credentialAccess: {
+          operation: 'write',
+          scope: 'The target Vercel team and project',
+          permissions: ['project:write', 'deployment:write'],
+          documentationUrl: 'https://vercel.com/docs/rest-api/reference',
+        },
+      },
+    ]);
   });
 
   it('returns an error when the input is invalid', async () => {

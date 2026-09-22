@@ -3,8 +3,51 @@ import { z } from 'zod';
 import { deploymentEnvVarNameSchema } from './environment-variables';
 import { asBoolean, asRecord, asString } from './primitives';
 
+export const taskEnvVarCredentialAccessSchema = z.object({
+  operation: z
+    .enum(['read', 'write'])
+    .describe(
+      'Whether the credential needs read-only access or permission to make changes',
+    ),
+  scope: z
+    .string()
+    .trim()
+    .min(1)
+    .max(500)
+    .describe(
+      'The provider project, team, account, or other resource boundary the credential must access',
+    ),
+  permissions: z
+    .array(z.string().trim().min(1).max(200))
+    .max(20)
+    .optional()
+    .describe(
+      'Exact provider permission or scope names, included only when verified in provider documentation',
+    ),
+  documentationUrl: z
+    .string()
+    .url()
+    .refine((value) => new URL(value).protocol === 'https:', {
+      message: 'Documentation URL must use HTTPS',
+    })
+    .optional()
+    .describe('Optional provider token-creation or permission documentation'),
+});
+
 export const taskEnvVarRequestVariableSchema = z.object({
   name: deploymentEnvVarNameSchema,
+  purpose: z
+    .string()
+    .trim()
+    .min(1)
+    .max(300)
+    .optional()
+    .describe('A concise description of what this variable unblocks'),
+  credentialAccess: taskEnvVarCredentialAccessSchema
+    .optional()
+    .describe(
+      'Required access for a credential or token. Omit for noncredential environment variables.',
+    ),
 });
 
 export type TaskEnvVarRequestVariable = z.output<
@@ -45,6 +88,7 @@ export const REQUEST_ENVIRONMENT_VARIABLES_TOOL_NAME =
 const taskEnvVarRequestToolResultSchema = z.object({
   success: z.literal(true),
   requestedNames: z.array(deploymentEnvVarNameSchema),
+  requestedVariables: z.array(taskEnvVarRequestVariableSchema).optional(),
 });
 
 export const ENV_VAR_REQUEST_FULFILLED_CLIENT_MESSAGE_ID_PREFIX =
@@ -121,9 +165,9 @@ function unwrapTaskEnvVarRequestToolResult(value: unknown): unknown {
   return value;
 }
 
-export function getRequestedDeploymentEnvVarNamesFromToolPayload(
+export function getRequestedDeploymentEnvVarsFromToolPayload(
   payload: Record<string, unknown> | null | undefined,
-): string[] {
+): TaskEnvVarRequestVariable[] {
   const resolvedPayload = asRecord(payload);
 
   if (!resolvedPayload || asBoolean(resolvedPayload.isMcp) !== true) {
@@ -157,5 +201,19 @@ export function getRequestedDeploymentEnvVarNamesFromToolPayload(
     return [];
   }
 
-  return Array.from(new Set(result.data.requestedNames));
+  const variables =
+    result.data.requestedVariables ??
+    result.data.requestedNames.map((name) => ({ name }));
+
+  return Array.from(
+    new Map(variables.map((variable) => [variable.name, variable])).values(),
+  );
+}
+
+export function getRequestedDeploymentEnvVarNamesFromToolPayload(
+  payload: Record<string, unknown> | null | undefined,
+): string[] {
+  return getRequestedDeploymentEnvVarsFromToolPayload(payload).map(
+    (variable) => variable.name,
+  );
 }

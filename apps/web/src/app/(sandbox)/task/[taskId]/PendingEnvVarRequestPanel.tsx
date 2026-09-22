@@ -319,6 +319,41 @@ export function PendingEnvVarRequestPanel({
                   </div>
 
                   <div className="col-span-2 space-y-1">
+                    {variable.purpose ? (
+                      <p className="text-xs text-muted-foreground">
+                        {variable.purpose}
+                      </p>
+                    ) : null}
+                    {variable.credentialAccess ? (
+                      <div className="space-y-1 rounded-md border bg-muted/30 px-2.5 py-2 text-xs">
+                        <p>
+                          <span className="font-medium">Access:</span>{' '}
+                          {variable.credentialAccess.operation === 'read'
+                            ? 'Read only'
+                            : 'Write'}
+                        </p>
+                        <p>
+                          <span className="font-medium">Scope:</span>{' '}
+                          {variable.credentialAccess.scope}
+                        </p>
+                        {variable.credentialAccess.permissions?.length ? (
+                          <p>
+                            <span className="font-medium">Permissions:</span>{' '}
+                            {variable.credentialAccess.permissions.join(', ')}
+                          </p>
+                        ) : null}
+                        {variable.credentialAccess.documentationUrl ? (
+                          <a
+                            href={variable.credentialAccess.documentationUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex text-primary underline underline-offset-2"
+                          >
+                            Provider documentation
+                          </a>
+                        ) : null}
+                      </div>
+                    ) : null}
                     <Input
                       secret
                       value={

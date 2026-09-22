@@ -19,6 +19,7 @@ export async function handleRequestEnvironmentVariables(
     return successResult({
       requestCreated: true,
       requestedNames,
+      requestedVariables: parsed.variables,
       taskStopRequested: Boolean(options?.taskId),
     });
   } catch (error) {
