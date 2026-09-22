@@ -1,9 +1,14 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import Link from 'next/link';
 
-const { replaceMock, searchParamsMock } = vi.hoisted(() => ({
+const { replaceMock, searchParamsMock, viewport } = vi.hoisted(() => ({
   replaceMock: vi.fn(),
   searchParamsMock: { current: new URLSearchParams() },
+  viewport: { isMobile: false },
+}));
+
+vi.mock('@/hooks/useIsMobile', () => ({
+  useIsMobile: () => viewport.isMobile,
 }));
 
 vi.mock('next/navigation', () => ({
@@ -48,6 +53,7 @@ const baseProps = {
 
 describe('SessionsFilters', () => {
   beforeEach(() => {
+    viewport.isMobile = false;
     replaceMock.mockReset();
     searchParamsMock.current = new URLSearchParams();
     localStorage.clear();
@@ -87,25 +93,29 @@ describe('SessionsFilters', () => {
     );
   });
 
-  it('keeps primary navigation available while a filter menu is open', async () => {
-    render(
-      <>
-        <Link href="/automations">Automations</Link>
-        <SessionsFilters {...baseProps} />
-      </>,
-    );
+  it.each([false, true])(
+    'keeps primary navigation available while a filter menu is open (mobile: %s)',
+    async (isMobile) => {
+      viewport.isMobile = isMobile;
+      render(
+        <>
+          <Link href="/automations">Automations</Link>
+          <SessionsFilters {...baseProps} />
+        </>,
+      );
 
-    fireEvent.keyDown(screen.getByRole('button', { name: 'Session scope' }), {
-      key: 'ArrowDown',
-    });
+      fireEvent.keyDown(screen.getByRole('button', { name: 'Session scope' }), {
+        key: 'ArrowDown',
+      });
 
-    expect(
-      await screen.findByRole('menuitemcheckbox', { name: 'All sessions' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('link', { name: 'Automations' }),
-    ).toBeInTheDocument();
-  });
+      expect(
+        await screen.findByRole('menuitemcheckbox', { name: 'All sessions' }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('link', { name: 'Automations' }),
+      ).toBeInTheDocument();
+    },
+  );
 
   it('keeps a selected user filter in the primary controls', () => {
     searchParamsMock.current = new URLSearchParams('user=user-1');
