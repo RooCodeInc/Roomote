@@ -15,16 +15,16 @@ import { Button, Label, Textarea } from '@/components/system';
 
 const MODES: { mode: IntegrationToolAutoMode; label: string; hint: string }[] =
   [
-    { mode: 'off', label: 'Off', hint: 'Ask first tools always ask a person.' },
+    { mode: 'off', label: 'Off', hint: 'Always ask a person.' },
     {
       mode: 'shadow',
       label: 'Shadow',
-      hint: 'Ask a person, and record how risky Roomote judged the call.',
+      hint: 'Ask a person and record Auto’s decision.',
     },
     {
       mode: 'on',
       label: 'On',
-      hint: 'Roomote runs a call it judges routine, such as reading or searching, and asks a person about anything risky.',
+      hint: 'Run routine calls automatically and ask a person about risky ones.',
     },
   ];
 
@@ -53,7 +53,7 @@ export function IntegrationToolAutoModeSetting() {
           result,
         );
       },
-      onError: () => toast.error('Failed to update Auto mode.'),
+      onError: () => toast.error('Failed to update automatic approvals.'),
     }),
   );
   if (!settings.data) return null;
@@ -65,10 +65,9 @@ export function IntegrationToolAutoModeSetting() {
   return (
     <div className="mt-4 flex flex-col gap-3 border-t pt-4">
       <div className="flex flex-col gap-1">
-        <p className="text-sm font-medium">Auto mode</p>
+        <p className="text-sm font-medium">Automatic approvals</p>
         <p className="text-sm text-muted-foreground">
-          Whether a decision model may answer an Ask first call by judging how
-          risky it is.{' '}
+          Let a decision model handle Ask first calls based on risk.{' '}
           {model === null
             ? 'No decision model is available, so Auto can only ask.'
             : model.kind === 'judgment'
@@ -78,7 +77,7 @@ export function IntegrationToolAutoModeSetting() {
       </div>
       <div
         role="radiogroup"
-        aria-label="Auto mode"
+        aria-label="Automatic approvals"
         className="flex flex-col gap-2 sm:flex-row"
       >
         {MODES.map((option) => {
@@ -104,12 +103,12 @@ export function IntegrationToolAutoModeSetting() {
         })}
       </div>
       <div className="flex flex-col gap-2">
-        <Label htmlFor="integration-tool-auto-policy">Risk guidance</Label>
+        <Label htmlFor="integration-tool-auto-policy">Approval guidance</Label>
         <Textarea
           id="integration-tool-auto-policy"
           value={policy}
           maxLength={INTEGRATION_TOOL_AUTO_POLICY_MAX_LENGTH}
-          placeholder="What this deployment treats as routine or risky, in your own words. For example: anything sent to customers is high risk; reading and searching our internal tools is routine."
+          placeholder="Describe what’s routine and what’s risky. For example: Reading and searching are routine. Anything sent to customers is risky."
           rows={4}
           onChange={(event) => setPolicy(event.target.value)}
         />

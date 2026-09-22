@@ -62,7 +62,7 @@ describe('IntegrationToolAutoModeSetting', () => {
     fireEvent.click(screen.getByRole('radio', { name: /^On/ }));
     expect(state.setAuto).toHaveBeenLastCalledWith({ mode: 'on', policy: '' });
 
-    const policy = screen.getByLabelText('Risk guidance');
+    const policy = screen.getByLabelText('Approval guidance');
     expect(
       screen.getByRole('button', { name: 'Save guidance' }),
     ).toBeDisabled();
