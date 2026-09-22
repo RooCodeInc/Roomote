@@ -55,7 +55,7 @@ import {
 import { findLatestTaskRun, getTaskChannelBindings } from './helpers';
 import {
   restoreActingUserIdAfterFailedDelivery,
-  syncActingUserForInboundMessage,
+  syncActingUserForQueuedFollowUp,
   updateActingUserIdIfNeeded,
 } from './acting-user-sync';
 import { logHandlerError } from '../utils';
@@ -998,14 +998,14 @@ async function queueTaskFollowUpForDelivery({
     };
   }
 
-  await syncActingUserForInboundMessage({
-    logContext: 'sendMessageToTask',
-    runId,
-    senderUserId: queuedUserId,
-  });
-
   let inserted: boolean;
   try {
+    // The switch is part of admission: the worker skips a queued prompt
+    // whose sender is not the acting user.
+    await syncActingUserForQueuedFollowUp({
+      runId,
+      senderUserId: queuedUserId,
+    });
     inserted = await queueTaskFollowUp(runId, {
       clientMessageId: messageId,
       deliveryMode,

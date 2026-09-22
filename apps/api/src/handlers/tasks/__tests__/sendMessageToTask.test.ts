@@ -1,7 +1,7 @@
 const {
   mockCreateRunToken,
   mockQueueTaskFollowUp,
-  mockSyncActingUserForInboundMessage,
+  mockSyncActingUserForQueuedFollowUp,
   mockCreateTRPCProxyClient,
   mockEnqueueTask,
   mockGetTaskChannelBindings,
@@ -26,7 +26,7 @@ const {
 } = vi.hoisted(() => ({
   mockCreateRunToken: vi.fn(),
   mockQueueTaskFollowUp: vi.fn(),
-  mockSyncActingUserForInboundMessage: vi.fn(),
+  mockSyncActingUserForQueuedFollowUp: vi.fn(),
   mockCreateTRPCProxyClient: vi.fn(),
   mockEnqueueTask: vi.fn(),
   mockGetTaskChannelBindings: vi.fn(),
@@ -53,7 +53,7 @@ const {
 vi.mock('../acting-user-sync', () => ({
   restoreActingUserIdAfterFailedDelivery:
     mockRestoreActingUserIdAfterFailedDelivery,
-  syncActingUserForInboundMessage: mockSyncActingUserForInboundMessage,
+  syncActingUserForQueuedFollowUp: mockSyncActingUserForQueuedFollowUp,
   updateActingUserIdIfNeeded: mockUpdateActingUserIdIfNeeded,
 }));
 
@@ -213,7 +213,7 @@ describe('sendMessageToTask', () => {
     vi.clearAllMocks();
     mockCreateRunToken.mockResolvedValue('run-token');
     mockQueueTaskFollowUp.mockResolvedValue(true);
-    mockSyncActingUserForInboundMessage.mockResolvedValue(undefined);
+    mockSyncActingUserForQueuedFollowUp.mockResolvedValue(undefined);
     mockCreateTRPCProxyClient.mockImplementation(() => ({
       commands: {
         sendPrompt: {
@@ -380,7 +380,7 @@ describe('sendMessageToTask', () => {
     });
     expect(mockSendPromptMutate).not.toHaveBeenCalled();
     // Trusted actor sync happens at admission, as for chat-provider queues.
-    expect(mockSyncActingUserForInboundMessage).toHaveBeenCalledWith(
+    expect(mockSyncActingUserForQueuedFollowUp).toHaveBeenCalledWith(
       expect.objectContaining({ runId: 42, senderUserId: 'user-1' }),
     );
     expect(mockQueueTaskFollowUp).toHaveBeenCalledWith(
@@ -465,7 +465,29 @@ describe('sendMessageToTask', () => {
       delivery: 'not_accepted',
     });
     expect(mockQueueTaskFollowUp).not.toHaveBeenCalled();
-    expect(mockSyncActingUserForInboundMessage).not.toHaveBeenCalled();
+    expect(mockSyncActingUserForQueuedFollowUp).not.toHaveBeenCalled();
+  });
+
+  it('does not queue a follow-up when the actor switch fails', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({ sandboxServerUrl: null, actingUserId: 'user-2' }),
+    );
+    mockSyncActingUserForQueuedFollowUp.mockRejectedValueOnce(
+      new Error('database unavailable'),
+    );
+
+    const result = await sendMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-1',
+      message: 'Only queue me under my own identity.',
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      status: 500,
+      delivery: 'not_accepted',
+    });
+    expect(mockQueueTaskFollowUp).not.toHaveBeenCalled();
   });
 
   it('does not re-admit a steer whose startup response was lost', async () => {
