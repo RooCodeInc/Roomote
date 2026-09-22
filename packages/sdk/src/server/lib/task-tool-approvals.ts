@@ -14,9 +14,14 @@ import {
   listIntegrationToolUserPolicies,
   taskRuns,
 } from '@roomote/db/server';
-import { recordIntegrationToolAutoEvaluationInBackground } from '@roomote/cloud-agents/server/integration-tool-auto-evaluation';
+import {
+  resolveIntegrationToolAutoDecision,
+  resolveIntegrationToolAutoState,
+} from '@roomote/cloud-agents/server/integration-tool-auto-evaluation';
 import {
   compileTaskIntegrationToolApprovals,
+  integrationToolModeIsAutoAssessed,
+  resolveEffectiveIntegrationToolMode,
   resolveGoverningIntegrationToolPolicies,
   type IntegrationToolApprovalStatus,
   type IntegrationToolPolicyScope,
@@ -46,10 +51,38 @@ async function resolveTaskApprovalSession(runId: number) {
   };
 }
 
-/** What the task run mounts, with each custom server's policy scope. */
 type ResolveTaskServers = () => Promise<
   Record<string, { toolApprovalPolicyScope?: IntegrationToolPolicyScope }>
 >;
+
+/** The policies and session overrides that govern one task run's tools. */
+async function resolveTaskGoverningPolicies(input: {
+  actingUserId: string | undefined;
+  resolveServers: ResolveTaskServers;
+  sessionId: string | undefined;
+}) {
+  const servers = await input.resolveServers();
+  const [deploymentPolicies, userPolicies, sessionOverrides] =
+    await Promise.all([
+      listIntegrationToolPolicies(),
+      input.actingUserId
+        ? listIntegrationToolUserPolicies(input.actingUserId)
+        : Promise.resolve([]),
+      input.sessionId
+        ? listIntegrationToolSessionOverrides(input.sessionId)
+        : Promise.resolve([]),
+    ]);
+  return {
+    servers,
+    policies: resolveGoverningIntegrationToolPolicies({
+      deploymentPolicies,
+      userPolicies,
+      scopeOf: (integrationId) =>
+        servers[integrationId]?.toolApprovalPolicyScope,
+    }),
+    sessionOverrides,
+  };
+}
 
 /** The native rules for the servers a task run is about to mount. */
 export async function resolveTaskIntegrationToolApprovals(input: {
@@ -61,27 +94,21 @@ export async function resolveTaskIntegrationToolApprovals(input: {
   if (!(await isDeploymentExperimentEnabled('integrationToolApprovals'))) {
     return undefined;
   }
-  const servers = await input.resolveServers();
   const session = await resolveTaskApprovalSession(input.runId);
-  const [deploymentPolicies, userPolicies, sessionOverrides] =
+  const [{ servers, policies, sessionOverrides }, autoState] =
     await Promise.all([
-      listIntegrationToolPolicies(),
-      input.actingUserId
-        ? listIntegrationToolUserPolicies(input.actingUserId)
-        : Promise.resolve([]),
-      session
-        ? listIntegrationToolSessionOverrides(session.sessionId)
-        : Promise.resolve([]),
+      resolveTaskGoverningPolicies({
+        actingUserId: input.actingUserId,
+        resolveServers: input.resolveServers,
+        sessionId: session?.sessionId,
+      }),
+      resolveIntegrationToolAutoState(),
     ]);
   return compileTaskIntegrationToolApprovals({
     serverNames: Object.keys(servers),
-    policies: resolveGoverningIntegrationToolPolicies({
-      deploymentPolicies,
-      userPolicies,
-      scopeOf: (integrationId) =>
-        servers[integrationId]?.toolApprovalPolicyScope,
-    }),
+    policies,
     sessionOverrides,
+    autoOn: autoState.mode === 'on',
   });
 }
 
@@ -101,9 +128,10 @@ export async function requestTaskToolApproval(input: {
   toolName: string;
   nativeRequestId: string;
   args?: unknown;
-  /** Whose personal policies apply; see `resolveTaskIntegrationToolApprovals`. */
+  /** What the user last asked for; Auto mode checks the call against it. */
+  userRequest?: string;
+  /** Whose personal policies apply, and what the run mounts: they decide who answers. */
   actingUserId?: string;
-  /** Only needed to tell whether the tool is in `auto` mode. */
   resolveServers?: ResolveTaskServers;
 }): Promise<TaskToolApprovalRequestResult> {
   if (!(await isDeploymentExperimentEnabled('integrationToolApprovals'))) {
@@ -124,15 +152,42 @@ export async function requestTaskToolApproval(input: {
     }),
     argsSummary: input.args ?? null,
   };
-  const overrides = await listIntegrationToolSessionOverrides(
-    session.sessionId,
-  );
-  const allowedForSession = overrides.some(
-    (override) =>
-      override.mode === 'allow' &&
-      override.integrationId === input.integrationId &&
-      override.toolName === input.toolName,
-  );
+  // Who answers is decided here, from the governing policies, never from
+  // what the worker says: the agent shares a sandbox with the worker.
+  const { policies, sessionOverrides } = await resolveTaskGoverningPolicies({
+    actingUserId: input.actingUserId,
+    resolveServers: input.resolveServers ?? (async () => ({})),
+    sessionId: session.sessionId,
+  });
+  const isThisTool = (entry: { integrationId: string; toolName: string }) =>
+    entry.integrationId === input.integrationId &&
+    entry.toolName === input.toolName;
+  const policyMode = policies.find(isThisTool)?.mode;
+  const overrideForSession = sessionOverrides.find(isThisTool)?.mode;
+  const effectiveMode = resolveEffectiveIntegrationToolMode({
+    policyMode,
+    sessionOverrideMode: overrideForSession,
+  });
+  const allowedForSession =
+    overrideForSession === 'allow' || effectiveMode === 'always_allow';
+  // Auto mode assesses a call to a default tool only; a tool someone made a
+  // choice about is theirs to decide. Any failure on this path asks a person.
+  const auto = integrationToolModeIsAutoAssessed({
+    policyMode,
+    sessionOverrideMode: overrideForSession,
+  })
+    ? await resolveIntegrationToolAutoDecision({
+        integrationId: input.integrationId,
+        toolName: input.toolName,
+        args: input.args,
+        userRequest: input.userRequest,
+        userId: session.ownerUserId,
+        taskId: session.taskId,
+      }).catch(() => ({ action: 'ask' as const, mode: 'failed' as const }))
+    : undefined;
+  // A default tool asked while Auto is off (a stale native rule) runs as it
+  // always has; a failed assessment asks a person instead.
+  if (auto?.mode === 'off') return { outcome: 'not_required' };
   if (allowedForSession) {
     // Same reservation-and-claim audit path as a Session's own agent.
     const reservation = await insertAutoApprovedIntegrationToolApproval(
@@ -145,70 +200,21 @@ export async function requestTaskToolApproval(input: {
     });
     return claimed ? { outcome: 'approved' } : { outcome: 'not_required' };
   }
-  const approval = await insertIntegrationToolApproval(context, call);
-  // Auto is a preview: the owner is still asked, and the decision model's
-  // view of the call is recorded beside their answer. None of it is awaited,
-  // so nothing about it, not even finding out whether the tool is in Auto
-  // mode, can fail or delay the ask.
-  void isAutoTool(input)
-    .then((auto) => {
-      if (!auto) return;
-      recordIntegrationToolAutoEvaluationInBackground(approval.approvalId, {
-        integrationId: input.integrationId,
-        toolName: input.toolName,
-        args: input.args,
-        userId: session.ownerUserId,
-        taskId: session.taskId,
-      });
-    })
-    .catch((error) => {
-      console.warn(
-        `[Tool approvals] Could not tell whether ${input.integrationId}/${input.toolName} is in Auto mode: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
+  if (auto?.action === 'approve') {
+    // Left `approved` rather than claimed here: for a task the integration
+    // proxy is what consumes the approval, for this exact call, once.
+    await insertAutoApprovedIntegrationToolApproval(context, {
+      ...call,
+      decidedBy: 'model',
+      autoEvaluation: auto.evaluation,
     });
-  return { outcome: 'pending', approvalId: approval.approvalId };
-}
-
-/**
- * Whether the mode governing this tool for the task is `auto`. A custom
- * server is governed by one policy layer, which only the mounted
- * configuration knows (a name can exist in both scopes, and which one is
- * mounted depends on more than the name), so the scope comes from the same
- * resolver the task's rules are compiled from. It is only resolved when some
- * layer has an Auto policy for the tool at all.
- */
-async function isAutoTool(input: {
-  integrationId: string;
-  toolName: string;
-  actingUserId?: string;
-  resolveServers?: ResolveTaskServers;
-}): Promise<boolean> {
-  const isThisTool = (policy: { integrationId: string; toolName: string }) =>
-    policy.integrationId === input.integrationId &&
-    policy.toolName === input.toolName;
-  const [deploymentPolicies, userPolicies] = await Promise.all([
-    listIntegrationToolPolicies(),
-    input.actingUserId
-      ? listIntegrationToolUserPolicies(input.actingUserId)
-      : Promise.resolve([]),
-  ]);
-  if (
-    ![...deploymentPolicies, ...userPolicies].some(
-      (policy) => policy.mode === 'auto' && isThisTool(policy),
-    )
-  ) {
-    return false;
+    return { outcome: 'approved' };
   }
-  const server = (await input.resolveServers?.())?.[input.integrationId];
-  // Not mounted, or nothing to say which layer governs it: no evaluation.
-  if (!server) return false;
-  return resolveGoverningIntegrationToolPolicies({
-    deploymentPolicies,
-    userPolicies,
-    scopeOf: () => server.toolApprovalPolicyScope,
-  }).some((policy) => policy.mode === 'auto' && isThisTool(policy));
+  const approval = await insertIntegrationToolApproval(context, {
+    ...call,
+    ...(auto?.mode === 'on' ? { autoEvaluation: auto.evaluation } : {}),
+  });
+  return { outcome: 'pending', approvalId: approval.approvalId };
 }
 
 /** The worker's poll while the Session owner decides. */

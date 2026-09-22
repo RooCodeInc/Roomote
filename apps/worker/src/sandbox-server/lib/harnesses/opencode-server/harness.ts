@@ -1678,6 +1678,8 @@ export class OpenCodeServerHarness
     typeof createTaskToolApprovalRelay
   >;
   private pendingToolApprovals = 0;
+  /** What the user last asked for; Auto mode checks a gated call against it. */
+  private latestUserRequest: string | undefined;
   // Request ids that have already been answered or abandoned. A late answer
   // (e.g. a web POST opened before a steer abandoned the question) for one
   // of these must be rejected rather than fabricated into the replayed turn.
@@ -1869,6 +1871,7 @@ export class OpenCodeServerHarness
         client: this.client,
         logger: this.logger,
         signal: this.eventAbortController.signal,
+        getUserRequest: () => this.latestUserRequest,
         onPendingCountChange: (pending) => {
           this.pendingToolApprovals = pending;
           this.stallWatchdogs.noteActivity();
@@ -3939,6 +3942,7 @@ export class OpenCodeServerHarness
 
   private async submitPrompt(prompt: PromptInput): Promise<void> {
     this.suppressAssistantOutputUntilNextPrompt = false;
+    this.latestUserRequest = prompt.text;
     const sessionId = await this.ensureSession(prompt.text);
     // OpenCode determines whether a user turn is pending by comparing message
     // IDs lexicographically. A snapshot can resume on a process whose clock or

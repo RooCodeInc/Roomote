@@ -26,18 +26,18 @@ export function IntegrationToolApprovalsExperimentalSetting() {
         <p className="text-sm text-muted-foreground">
           Gate individual integration tools behind a requester decision in
           sessions and tasks. While enabled, each integration&apos;s Manage
-          tools dialog in Settings → Integrations offers Auto, Always allow
-          (default), Always ask, and Disable per tool. Always ask pauses each
-          call until the session owner allows it once, stops the asks for the
-          rest of that session, or declines it; Disable hides the tool and
-          blocks it outright. Auto is a preview that asks like Always ask and
-          records what a decision model would have decided, so its judgment can
-          be compared with yours. A task asks the owner of its session the same
-          way, and a task nobody can answer for, such as one an automation
-          started, cannot run an Always ask tool. Session owners can also ask to
-          be asked about any tool from its call in the transcript. Tools left at
-          the default run exactly as before. Policies are deployment-wide and
-          apply from the next session turn.
+          tools dialog in Settings → Integrations offers Auto (default, shown
+          with no choice selected), Always allow, Always ask, and Disable per
+          tool. Set up Auto mode in Settings → Integrations to handle routine
+          work automatically and ask before anything risky. Always ask pauses
+          each call until the session owner allows it once, stops the asks for
+          the rest of that session, or declines it; Disable hides the tool and
+          blocks it outright. A task asks the owner of its session the same way,
+          and a task nobody can answer for, such as one an automation started,
+          cannot run an Always ask tool. Session owners can also ask to be asked
+          about any tool from its call in the transcript. Tools left on Auto
+          with Auto mode off run exactly as before. Policies are deployment-wide
+          and apply from the next session turn.
         </p>
       </div>
     </Section>

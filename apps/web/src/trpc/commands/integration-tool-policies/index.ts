@@ -6,17 +6,21 @@ import {
   db,
   deploymentMcpEnablements,
   eq,
+  getIntegrationToolAutoSettings,
   isDeploymentExperimentEnabled,
   listIntegrationToolPolicies,
   listIntegrationToolUserPolicies,
   personalMcpServers,
+  setIntegrationToolAutoSettings,
   upsertIntegrationToolPolicies,
   upsertIntegrationToolPolicy,
   upsertIntegrationToolUserPolicies,
   upsertIntegrationToolUserPolicy,
 } from '@roomote/db/server';
+import { resolveDecisionModel } from '@roomote/cloud-agents/server/typesafe-judgment';
 import {
   getMcpIntegration,
+  type IntegrationToolAutoSettings,
   type IntegrationToolPoliciesUpsert,
   type IntegrationToolPolicyMode,
   type IntegrationToolPolicyUpsert,
@@ -210,4 +214,46 @@ export async function setPersonalIntegrationToolPoliciesCommand(
     userId: auth.userId,
   });
   return listIntegrationToolUserPolicies(auth.userId);
+}
+
+/**
+ * Deployment-wide Auto mode, admin only. `model` names what Auto will
+ * consult, so an admin sees the cost of turning it on: the hosted judgment
+ * model, or the helper model when none is configured.
+ */
+export async function getIntegrationToolAutoSettingsCommand(
+  auth: UserAuthSuccess,
+) {
+  assertAdmin(auth);
+  const [settings, model] = await Promise.all([
+    getIntegrationToolAutoSettings(),
+    resolveDecisionModel().catch(() => null),
+  ]);
+  return {
+    ...settings,
+    model:
+      model === null
+        ? null
+        : model.kind === 'judgment'
+          ? { kind: 'judgment' as const }
+          : { kind: 'helper' as const, model: model.model },
+  };
+}
+
+export async function setIntegrationToolAutoSettingsCommand(
+  auth: UserAuthSuccess,
+  input: IntegrationToolAutoSettings,
+) {
+  assertAdmin(auth);
+  if (!(await toolApprovalsEnabled())) {
+    throw new TRPCError({
+      code: 'NOT_FOUND',
+      message: 'Integration tool approvals are not enabled.',
+    });
+  }
+  await setIntegrationToolAutoSettings({
+    mode: input.mode,
+    policy: input.policy.trim(),
+  });
+  return getIntegrationToolAutoSettingsCommand(auth);
 }

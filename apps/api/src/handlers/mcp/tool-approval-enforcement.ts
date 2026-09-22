@@ -9,13 +9,30 @@ import {
   listIntegrationToolUserPolicies,
 } from '@roomote/db/server';
 import {
-  integrationToolModeAsks,
+  integrationToolModeIsAutoAssessed,
   resolveEffectiveIntegrationToolMode,
   resolveGoverningIntegrationToolPolicies,
   type IntegrationToolPolicyMode,
 } from '@roomote/types';
+import {
+  recordIntegrationToolShadowEvaluationInBackground,
+  resolveIntegrationToolAutoState,
+} from '@roomote/cloud-agents/server/integration-tool-auto-evaluation';
 
-export type ProxyToolApprovalBlock = 'reject' | 'needs_approval';
+export type ProxyToolApprovalBlock = 'reject' | 'needs_approval' | 'allow';
+
+export type ProxyToolApprovals = {
+  /** Per-tool blocks from stored choices and session overrides. */
+  blocks: Map<string, ProxyToolApprovalBlock>;
+  /**
+   * What a tool with no entry in `blocks` gets. `needs_approval` while Auto
+   * mode is on and the caller is a task: every default tool call must then
+   * claim an approval, whether a person's or the model's.
+   */
+  defaultBlock?: 'needs_approval';
+  /** Whether a call to a default tool should be shadow-assessed. */
+  shadowDefaultTools: boolean;
+};
 
 /**
  * Experiment-gated (`integrationToolApprovals`) enforcement of per-tool
@@ -50,10 +67,16 @@ export async function resolveProxyToolApprovalBlocks(input: {
   resolveActingUserId: () => Promise<string | null>;
   /** The run token's task, for its Session's overrides. */
   resolveTaskId?: () => Promise<string | null>;
-}): Promise<Map<string, ProxyToolApprovalBlock>> {
+}): Promise<ProxyToolApprovals> {
   const blocks = new Map<string, ProxyToolApprovalBlock>();
+  const result: ProxyToolApprovals = { blocks, shadowDefaultTools: false };
   if (!(await isDeploymentExperimentEnabled('integrationToolApprovals'))) {
-    return blocks;
+    return result;
+  }
+  const autoState = await resolveIntegrationToolAutoState();
+  result.shadowDefaultTools = autoState.mode === 'shadow';
+  if (autoState.mode === 'on' && input.tokenType === 'run') {
+    result.defaultBlock = 'needs_approval';
   }
   const actingUserId =
     input.policyScope === 'deployment'
@@ -99,11 +122,45 @@ export async function resolveProxyToolApprovalBlocks(input: {
     });
     if (mode === 'reject') {
       blocks.set(toolName, 'reject');
-    } else if (integrationToolModeAsks(mode) && input.tokenType === 'run') {
+    } else if (mode === 'ask' && input.tokenType === 'run') {
       blocks.set(toolName, 'needs_approval');
+    } else if (
+      result.defaultBlock &&
+      !integrationToolModeIsAutoAssessed({
+        policyMode: policyModes.get(toolName),
+        sessionOverrideMode: overrideModes.get(toolName),
+      })
+    ) {
+      // A person's choice to run this tool: no approval to claim.
+      blocks.set(toolName, 'allow');
     }
   }
-  return blocks;
+  return result;
+}
+
+/** How the proxy treats one named tool call. */
+export function resolveProxyToolApprovalBlock(
+  approvals: ProxyToolApprovals,
+  toolName: string,
+): ProxyToolApprovalBlock | 'allow' | undefined {
+  return approvals.blocks.get(toolName) ?? approvals.defaultBlock;
+}
+
+/** Shadow-assess a call to a default tool; never awaited. */
+export function shadowProxyToolCall(
+  approvals: ProxyToolApprovals,
+  input: {
+    integrationId: string;
+    toolName: string;
+    args: unknown;
+    userId: string | null;
+    taskId: string | null;
+  },
+): void {
+  if (!approvals.shadowDefaultTools || approvals.blocks.has(input.toolName)) {
+    return;
+  }
+  recordIntegrationToolShadowEvaluationInBackground(input);
 }
 
 /**
@@ -133,5 +190,7 @@ export function describeProxyToolApprovalBlock(
 ): string {
   return block === 'reject'
     ? `Tool "${toolName}" is disabled by a tool approval policy.`
-    : `Tool "${toolName}" needs approval before it runs, and this call has not been approved.`;
+    : block === 'needs_approval'
+      ? `Tool "${toolName}" needs approval before it runs, and this call has not been approved.`
+      : `Tool "${toolName}" is allowed.`;
 }

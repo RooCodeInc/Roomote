@@ -19,7 +19,10 @@ import { isExpectedSubprocessExit } from './expected-exit';
 import { OpenCodeServerHarness } from './harness';
 import { resolveOpenCodeCommand } from './opencode-command';
 import { waitForOpenCodeServer } from './readiness';
-import { fetchTaskToolApprovals } from './tool-approvals';
+import {
+  fetchTaskToolApprovals,
+  resolveTaskToolsForAsks,
+} from './tool-approvals';
 
 interface StartOpenCodeServerHarnessOptions {
   workspacePath: string;
@@ -155,6 +158,15 @@ export async function startOpenCodeServerHarness({
   const log = createPrefixedLogger(logger, '[opencode-server]');
   const port = await getAvailableLocalPort();
   const toolApprovals = await fetchTaskToolApprovals(log);
+  // The tools behind every native key an ask may name, incl. the servers
+  // Auto mode gates as a whole.
+  const toolApprovalTools = toolApprovals
+    ? await resolveTaskToolsForAsks({
+        mcpServers,
+        approvals: toolApprovals,
+        logger: log,
+      })
+    : undefined;
   const { commandEnv, model } = await prepareOpenCodeCommandEnv({
     runtimeEnv,
     workspacePath,
@@ -336,7 +348,7 @@ export async function startOpenCodeServerHarness({
         process.env.ROOMOTE_SUBAGENT_SETTLEMENT_GRACE_MS,
       ),
       mcpServerNames: Object.keys(mcpServers),
-      toolApprovalTools: toolApprovals?.tools,
+      toolApprovalTools,
       onDiagnostic,
       beforeQueuedPrompt,
     });

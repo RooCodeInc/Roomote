@@ -662,7 +662,7 @@ interface GenerateOpenCodeConfigOptions {
   runtimeEnv: Record<string, string>;
   developerInstructionsContent?: string;
   mcpServers?: OpenCodeConfigMcpServer[];
-  toolApprovalPermission?: Record<string, 'ask' | 'deny'>;
+  toolApprovalPermission?: Record<string, 'allow' | 'ask' | 'deny'>;
   model?: string;
   reasoningEffortOverride?: ReasoningEffort;
 }

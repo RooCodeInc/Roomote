@@ -4,12 +4,20 @@ import type { RunTokenContext } from '@roomote/types';
 import type { Variables } from '../../../types';
 
 const { mockResolveApprovalBlocks } = vi.hoisted(() => ({
-  mockResolveApprovalBlocks: vi.fn(async () => new Map<string, string>()),
+  mockResolveApprovalBlocks: vi.fn(async () => ({
+    blocks: new Map<string, string>(),
+    shadowDefaultTools: false,
+  })),
 }));
 
 vi.mock('../tool-approval-enforcement', () => ({
   describeProxyToolApprovalBlock: () => 'blocked by policy',
   resolveProxyToolApprovalBlocks: mockResolveApprovalBlocks,
+  resolveProxyToolApprovalBlock: (
+    approvals: { blocks: Map<string, string>; defaultBlock?: string },
+    toolName: string,
+  ) => approvals.blocks.get(toolName) ?? approvals.defaultBlock,
+  shadowProxyToolCall: () => undefined,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -73,9 +81,10 @@ describe('createLinearMcp tool approval policies', () => {
   it('refuses a policy-blocked tool under the linear id without contacting Linear', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
-    mockResolveApprovalBlocks.mockResolvedValue(
-      new Map([['save_issue', 'needs_approval']]),
-    );
+    mockResolveApprovalBlocks.mockResolvedValue({
+      blocks: new Map([['save_issue', 'needs_approval']]),
+      shadowDefaultTools: false,
+    });
 
     const response = await post({
       jsonrpc: '2.0',

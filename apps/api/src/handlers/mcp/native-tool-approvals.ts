@@ -1,8 +1,10 @@
 import {
   claimProxyTaskToolCall,
   describeProxyToolApprovalBlock,
+  resolveProxyToolApprovalBlock,
   resolveProxyToolApprovalBlocks,
-  type ProxyToolApprovalBlock,
+  shadowProxyToolCall,
+  type ProxyToolApprovals,
 } from './tool-approval-enforcement';
 import {
   getJsonRpcMethod,
@@ -43,25 +45,31 @@ export async function readNativeMcpRequestBody(
  * Native in-process MCP handlers do not pass through createMcpProxy, so they
  * need the same policy guard explicitly. Reject hides a tool from tools/list;
  * ask still appears for the model and is held until the Session owner decides.
+ * A tool nobody has made a choice about follows Auto mode exactly as it does
+ * at the proxy: shadow-assessed, or held for a claim while Auto is on.
  */
 export async function resolveNativeToolApprovalGuard(input: {
   auth: McpAuthContext;
   integrationId: string;
 }): Promise<NativeToolApprovalGuard> {
-  const blocks = await resolveProxyToolApprovalBlocks({
+  const approvals = await resolveProxyToolApprovalBlocks({
     integrationId: input.integrationId,
     tokenType: input.auth.tokenType,
     resolveActingUserId: () => resolveTaskOrSessionUserIdOrNull(input.auth),
     resolveTaskId: () => resolveRunTokenTaskId(input.auth),
   });
 
-  return blocks.size === 0 ? NOOP_GUARD : new NativeGuard(input, blocks);
+  const inert =
+    approvals.blocks.size === 0 &&
+    !approvals.defaultBlock &&
+    !approvals.shadowDefaultTools;
+  return inert ? NOOP_GUARD : new NativeGuard(input, approvals);
 }
 
 class NativeGuard implements NativeToolApprovalGuard {
   constructor(
     private readonly input: { auth: McpAuthContext; integrationId: string },
-    private readonly blocks: ReadonlyMap<string, ProxyToolApprovalBlock>,
+    private readonly approvals: ProxyToolApprovals,
   ) {}
 
   async checkCall(body: unknown): Promise<Response | null> {
@@ -76,17 +84,27 @@ class NativeGuard implements NativeToolApprovalGuard {
     const toolName = getToolCallName(body);
     if (!toolName) return null;
 
-    const block = this.blocks.get(toolName);
-    if (!block) return null;
+    const args = (body as { params?: { arguments?: unknown } }).params
+      ?.arguments;
+    const taskId = await resolveRunTokenTaskId(this.input.auth);
+    shadowProxyToolCall(this.approvals, {
+      integrationId: this.input.integrationId,
+      toolName,
+      args,
+      userId: this.input.auth.userId ?? null,
+      taskId,
+    });
+
+    const block = resolveProxyToolApprovalBlock(this.approvals, toolName);
+    if (!block || block === 'allow') return null;
 
     if (block === 'needs_approval') {
       try {
         const approved = await claimProxyTaskToolCall({
-          taskId: await resolveRunTokenTaskId(this.input.auth),
+          taskId,
           integrationId: this.input.integrationId,
           toolName,
-          args: (body as { params?: { arguments?: unknown } }).params
-            ?.arguments,
+          args,
         });
         if (approved) return null;
       } catch {
@@ -135,7 +153,7 @@ class NativeGuard implements NativeToolApprovalGuard {
           typeof tool === 'object' &&
           'name' in tool &&
           typeof tool.name === 'string' &&
-          this.blocks.get(tool.name) === 'reject'
+          this.approvals.blocks.get(tool.name) === 'reject'
         ),
     );
 

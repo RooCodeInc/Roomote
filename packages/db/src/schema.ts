@@ -4593,11 +4593,10 @@ export const integrationToolPolicies = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     integrationId: text('integration_id').notNull(),
     toolName: text('tool_name').notNull(),
-    /**
-     * Stored as `ask` or `reject`. The `auto` mode is an `ask` row with
-     * `auto` set, so a release that predates it still asks.
-     */
-    mode: text('mode').notNull().$type<'ask' | 'reject'>(),
+    mode: text('mode')
+      .notNull()
+      .$type<import('@roomote/types').IntegrationToolPolicyMode>(),
+    /** N-1: unused since Auto became a deployment setting; drop next release. */
     auto: boolean('auto').notNull().default(false),
     updatedByUserId: text('updated_by_user_id').references(() => users.id, {
       onDelete: 'set null',
@@ -4631,11 +4630,10 @@ export const integrationToolUserPolicies = pgTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     integrationId: text('integration_id').notNull(),
     toolName: text('tool_name').notNull(),
-    /**
-     * Stored as `ask` or `reject`. The `auto` mode is an `ask` row with
-     * `auto` set, so a release that predates it still asks.
-     */
-    mode: text('mode').notNull().$type<'ask' | 'reject'>(),
+    mode: text('mode')
+      .notNull()
+      .$type<import('@roomote/types').IntegrationToolPolicyMode>(),
+    /** N-1: unused since Auto became a deployment setting; drop next release. */
     auto: boolean('auto').notNull().default(false),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
@@ -4700,8 +4698,8 @@ export const integrationToolApprovalRequests = pgTable(
     /** Why a cancelled request was cancelled (for example experiment disabled). */
     cancelReason: text('cancel_reason'),
     /**
-     * What the decision model made of this call, for a tool in `auto` mode.
-     * Recorded beside the requester's own decision; it decides nothing.
+     * What the decision model made of this Ask first call under Auto mode,
+     * recorded beside the decision.
      */
     autoEvaluation:
       jsonb('auto_evaluation').$type<
@@ -4727,6 +4725,38 @@ export const integrationToolApprovalRequests = pgTable(
     uniqueIndex('integration_tool_approvals_pending_native_idx')
       .on(table.sessionId, table.nativeRequestId)
       .where(sql`status = 'pending'`),
+  ],
+);
+
+/**
+ * Risk assessments Auto mode made of calls it did not decide (Auto off,
+ * hosted judgment model present): a log for comparing the model's view with
+ * real traffic before Auto is turned on. Not tied to an approval row, since
+ * those calls never asked anyone.
+ */
+export const integrationToolAutoEvaluations = pgTable(
+  'integration_tool_auto_evaluations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    taskId: text('task_id').references(() => tasks.id, {
+      onDelete: 'cascade',
+    }),
+    integrationId: text('integration_id').notNull(),
+    toolName: text('tool_name').notNull(),
+    /** Redacted argument preview, as on an approval row. */
+    argsSummary: jsonb('args_summary').notNull(),
+    evaluation: jsonb('evaluation')
+      .notNull()
+      .$type<import('@roomote/types').IntegrationToolAutoEvaluation>(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('integration_tool_auto_evaluations_created_at_idx').on(
+      table.createdAt.desc(),
+    ),
   ],
 );
 

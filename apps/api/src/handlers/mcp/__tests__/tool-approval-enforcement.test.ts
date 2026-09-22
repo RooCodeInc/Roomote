@@ -5,6 +5,8 @@ const {
   mockSessionForTask,
   mockOverrides,
   mockClaim,
+  mockAutoState,
+  mockShadow,
 } = vi.hoisted(() => ({
   mockExperiment: vi.fn(async () => true),
   mockDeployment: vi.fn(async () => [] as unknown[]),
@@ -12,6 +14,8 @@ const {
   mockSessionForTask: vi.fn(async () => null as { id: string } | null),
   mockOverrides: vi.fn(async () => [] as unknown[]),
   mockClaim: vi.fn(async () => true),
+  mockAutoState: vi.fn(async () => ({ mode: 'off' }) as unknown),
+  mockShadow: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -24,17 +28,29 @@ vi.mock('@roomote/db/server', () => ({
   claimTaskIntegrationToolCall: mockClaim,
   fingerprintIntegrationToolCall: (input: unknown) => JSON.stringify(input),
 }));
+vi.mock(
+  '@roomote/cloud-agents/server/integration-tool-auto-evaluation',
+  () => ({
+    resolveIntegrationToolAutoState: mockAutoState,
+    recordIntegrationToolShadowEvaluationInBackground: mockShadow,
+  }),
+);
 
 import {
   claimProxyTaskToolCall,
+  resolveProxyToolApprovalBlock,
   resolveProxyToolApprovalBlocks,
+  shadowProxyToolCall,
 } from '../tool-approval-enforcement';
 
 const policy = (
   integrationId: string,
   toolName: string,
-  mode: 'auto' | 'ask' | 'reject',
+  mode: 'always_allow' | 'ask' | 'reject',
 ) => ({ integrationId, toolName, mode });
+
+const blocksOf = (approvals: { blocks: Map<string, string> }) =>
+  Object.fromEntries(approvals.blocks);
 
 describe('resolveProxyToolApprovalBlocks', () => {
   beforeEach(() => {
@@ -48,6 +64,7 @@ describe('resolveProxyToolApprovalBlocks', () => {
     mockUser.mockResolvedValue([]);
     mockSessionForTask.mockResolvedValue(null);
     mockOverrides.mockResolvedValue([]);
+    mockAutoState.mockResolvedValue({ mode: 'off' });
   });
 
   it('blocks reject for every caller and ask only for task runs', async () => {
@@ -56,10 +73,12 @@ describe('resolveProxyToolApprovalBlocks', () => {
       tokenType: 'run',
       resolveActingUserId: async () => 'user-1',
     });
-    expect(Object.fromEntries(task)).toEqual({
+    expect(blocksOf(task)).toEqual({
       delete_issue: 'reject',
       save_issue: 'needs_approval',
     });
+    expect(task.defaultBlock).toBeUndefined();
+    expect(task.shadowDefaultTools).toBe(false);
 
     // A Session already decided its native ask before the call got here.
     const session = await resolveProxyToolApprovalBlocks({
@@ -67,7 +86,7 @@ describe('resolveProxyToolApprovalBlocks', () => {
       tokenType: 'auth',
       resolveActingUserId: async () => 'user-1',
     });
-    expect(Object.fromEntries(session)).toEqual({ delete_issue: 'reject' });
+    expect(blocksOf(session)).toEqual({ delete_issue: 'reject' });
   });
 
   it("applies the stricter of the deployment and the acting user's policy", async () => {
@@ -81,8 +100,7 @@ describe('resolveProxyToolApprovalBlocks', () => {
       tokenType: 'run',
       resolveActingUserId: async () => 'user-1',
     });
-    expect(mockUser).toHaveBeenCalledWith('user-1');
-    expect(Object.fromEntries(blocks)).toEqual({
+    expect(blocksOf(blocks)).toEqual({
       delete_issue: 'reject',
       save_issue: 'reject',
       list_issues: 'needs_approval',
@@ -90,53 +108,53 @@ describe('resolveProxyToolApprovalBlocks', () => {
   });
 
   it('governs a custom server by its own layer only, since names can coincide', async () => {
-    mockDeployment.mockResolvedValue([
-      policy('tools', 'shared_only', 'reject'),
-    ]);
-    mockUser.mockResolvedValue([policy('tools', 'personal_only', 'reject')]);
-    const resolve = (policyScope?: 'deployment' | 'personal') =>
-      resolveProxyToolApprovalBlocks({
-        integrationId: 'tools',
-        policyScope,
-        tokenType: 'run',
-        resolveActingUserId: async () => 'user-1',
-      }).then((blocks) => [...blocks.keys()].sort());
+    mockUser.mockResolvedValue([policy('linear', 'list_issues', 'reject')]);
+    const shared = await resolveProxyToolApprovalBlocks({
+      integrationId: 'linear',
+      policyScope: 'deployment',
+      tokenType: 'run',
+      resolveActingUserId: async () => 'user-1',
+    });
+    expect(blocksOf(shared)).toEqual({
+      delete_issue: 'reject',
+      save_issue: 'needs_approval',
+    });
+    expect(mockUser).not.toHaveBeenCalled();
 
-    expect(await resolve('deployment')).toEqual(['shared_only']);
-    expect(await resolve('personal')).toEqual(['personal_only']);
-    // Built-in integrations take both layers.
-    expect(await resolve()).toEqual(['personal_only', 'shared_only']);
+    const personal = await resolveProxyToolApprovalBlocks({
+      integrationId: 'linear',
+      policyScope: 'personal',
+      tokenType: 'run',
+      resolveActingUserId: async () => 'user-1',
+    });
+    expect(blocksOf(personal)).toEqual({ list_issues: 'reject' });
   });
 
   it('reads no personal policies for a run without a human actor', async () => {
-    await resolveProxyToolApprovalBlocks({
+    const blocks = await resolveProxyToolApprovalBlocks({
       integrationId: 'linear',
       tokenType: 'run',
       resolveActingUserId: async () => null,
     });
     expect(mockUser).not.toHaveBeenCalled();
+    expect(blocksOf(blocks)).toEqual({
+      delete_issue: 'reject',
+      save_issue: 'needs_approval',
+    });
   });
 
   it('blocks nothing and reads nothing while the experiment is off', async () => {
     mockExperiment.mockResolvedValue(false);
+    const resolveActingUserId = vi.fn(async () => 'user-1');
     const blocks = await resolveProxyToolApprovalBlocks({
       integrationId: 'linear',
       tokenType: 'run',
-      resolveActingUserId: async () => 'user-1',
+      resolveActingUserId,
     });
-    expect(blocks.size).toBe(0);
+    expect(blocks.blocks.size).toBe(0);
+    expect(resolveActingUserId).not.toHaveBeenCalled();
     expect(mockDeployment).not.toHaveBeenCalled();
-    expect(mockUser).not.toHaveBeenCalled();
-  });
-
-  it('holds an auto tool for a task run exactly like an ask tool', async () => {
-    mockDeployment.mockResolvedValue([policy('linear', 'save_issue', 'auto')]);
-    const task = await resolveProxyToolApprovalBlocks({
-      integrationId: 'linear',
-      tokenType: 'run',
-      resolveActingUserId: async () => 'user-1',
-    });
-    expect(Object.fromEntries(task)).toEqual({ save_issue: 'needs_approval' });
+    expect(mockAutoState).not.toHaveBeenCalled();
   });
 
   it("applies the task's session overrides to a task run only", async () => {
@@ -156,7 +174,7 @@ describe('resolveProxyToolApprovalBlocks', () => {
       resolveActingUserId: async () => 'user-1',
       resolveTaskId: async () => 'task-1',
     });
-    expect(Object.fromEntries(task)).toEqual({
+    expect(blocksOf(task)).toEqual({
       delete_issue: 'reject',
       list_issues: 'needs_approval',
     });
@@ -169,8 +187,76 @@ describe('resolveProxyToolApprovalBlocks', () => {
       resolveActingUserId: async () => 'user-1',
       resolveTaskId: async () => 'task-1',
     });
-    expect(Object.fromEntries(session)).toEqual({ delete_issue: 'reject' });
+    expect(blocksOf(session)).toEqual({ delete_issue: 'reject' });
     expect(mockOverrides).not.toHaveBeenCalled();
+  });
+
+  it("gates every default tool of a task while Auto is on, except a person's choices", async () => {
+    mockAutoState.mockResolvedValue({ mode: 'on' });
+    mockDeployment.mockResolvedValue([
+      policy('linear', 'get_issue', 'always_allow'),
+      policy('linear', 'delete_issue', 'reject'),
+    ]);
+    mockSessionForTask.mockResolvedValue({ id: 'session-1' });
+    mockOverrides.mockResolvedValue([
+      { integrationId: 'linear', toolName: 'list_issues', mode: 'allow' },
+    ]);
+    const task = await resolveProxyToolApprovalBlocks({
+      integrationId: 'linear',
+      tokenType: 'run',
+      resolveActingUserId: async () => 'user-1',
+      resolveTaskId: async () => 'task-1',
+    });
+    expect(task.defaultBlock).toBe('needs_approval');
+    expect(blocksOf(task)).toEqual({
+      get_issue: 'allow',
+      delete_issue: 'reject',
+      list_issues: 'allow',
+    });
+    expect(resolveProxyToolApprovalBlock(task, 'save_issue')).toBe(
+      'needs_approval',
+    );
+    expect(resolveProxyToolApprovalBlock(task, 'get_issue')).toBe('allow');
+
+    // A Session decided its own native asks; nothing extra at the proxy.
+    const session = await resolveProxyToolApprovalBlocks({
+      integrationId: 'linear',
+      tokenType: 'auth',
+      resolveActingUserId: async () => 'user-1',
+    });
+    expect(session.defaultBlock).toBeUndefined();
+  });
+
+  it('shadow-assesses default tool calls only while shadowing', async () => {
+    mockAutoState.mockResolvedValue({ mode: 'shadow' });
+    const approvals = await resolveProxyToolApprovalBlocks({
+      integrationId: 'linear',
+      tokenType: 'auth',
+      resolveActingUserId: async () => 'user-1',
+    });
+    expect(approvals.shadowDefaultTools).toBe(true);
+    const call = {
+      integrationId: 'linear',
+      args: {},
+      userId: 'user-1',
+      taskId: null,
+    };
+    shadowProxyToolCall(approvals, { ...call, toolName: 'list_issues' });
+    expect(mockShadow).toHaveBeenCalledWith(
+      expect.objectContaining({ toolName: 'list_issues' }),
+    );
+    // A tool with a stored choice is not Auto's to assess.
+    shadowProxyToolCall(approvals, { ...call, toolName: 'delete_issue' });
+    expect(mockShadow).toHaveBeenCalledTimes(1);
+
+    mockAutoState.mockResolvedValue({ mode: 'off' });
+    const off = await resolveProxyToolApprovalBlocks({
+      integrationId: 'linear',
+      tokenType: 'auth',
+      resolveActingUserId: async () => 'user-1',
+    });
+    shadowProxyToolCall(off, { ...call, toolName: 'list_issues' });
+    expect(mockShadow).toHaveBeenCalledTimes(1);
   });
 });
 

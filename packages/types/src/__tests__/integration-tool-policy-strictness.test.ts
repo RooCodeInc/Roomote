@@ -5,7 +5,7 @@ import { resolveGoverningIntegrationToolPolicies } from '../integration-tool-app
 const policy = (
   integrationId: string,
   toolName: string,
-  mode: 'allow' | 'auto' | 'ask' | 'reject',
+  mode: 'allow' | 'always_allow' | 'ask' | 'reject',
 ) => ({ integrationId, toolName, mode });
 
 const modes = (policies: ReturnType<typeof policy>[]): Record<string, string> =>
@@ -35,27 +35,22 @@ describe('resolveGoverningIntegrationToolPolicies', () => {
     });
   });
 
-  it('orders auto between allow and ask', () => {
+  it('keeps a stored Always allow unless the other layer is stricter', () => {
     const governing = resolveGoverningIntegrationToolPolicies({
       deploymentPolicies: [
-        policy('linear', 'save_issue', 'auto'),
-        policy('linear', 'list_issues', 'ask'),
-        policy('linear', 'delete_issue', 'reject'),
+        policy('linear', 'get_issue', 'always_allow'),
+        policy('linear', 'save_issue', 'always_allow'),
       ],
       userPolicies: [
-        // A personal ask tightens a deployment auto, never the reverse.
         policy('linear', 'save_issue', 'ask'),
-        policy('linear', 'list_issues', 'auto'),
-        policy('linear', 'delete_issue', 'auto'),
-        policy('linear', 'get_issue', 'auto'),
+        policy('linear', 'list_issues', 'always_allow'),
       ],
       scopeOf: () => undefined,
     });
     expect(modes(governing)).toEqual({
+      get_issue: 'always_allow',
       save_issue: 'ask',
-      list_issues: 'ask',
-      delete_issue: 'reject',
-      get_issue: 'auto',
+      list_issues: 'always_allow',
     });
   });
 

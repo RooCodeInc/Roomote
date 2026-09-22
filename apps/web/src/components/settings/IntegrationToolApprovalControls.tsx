@@ -24,20 +24,21 @@ import {
   type LucideIcon,
 } from '@/components/system';
 
-const APPROVAL_MODES: {
+/**
+ * The stored choices a tool can be given. Auto, the default, is no choice at
+ * all: a row shows it as nothing pressed, and pressing the selected choice
+ * again returns to it. The group row also offers Auto, so a whole group can
+ * be returned to it in one step.
+ */
+type ApprovalModeOption = {
   mode: IntegrationToolPolicyMode;
   label: string;
   tooltip: string;
   icon: LucideIcon;
-}[] = [
+};
+const STORED_MODES: ApprovalModeOption[] = [
   {
-    mode: 'auto',
-    label: 'Auto',
-    tooltip: 'Defer to the configured judgement model',
-    icon: Scale,
-  },
-  {
-    mode: 'allow',
+    mode: 'always_allow',
     label: 'Always allow',
     tooltip: 'Always allow',
     icon: CheckCheck,
@@ -50,6 +51,10 @@ const APPROVAL_MODES: {
   },
   { mode: 'reject', label: 'Disable', tooltip: 'Disable', icon: Ban },
 ];
+const BULK_MODES: ApprovalModeOption[] = [
+  { mode: 'allow', label: 'Auto', tooltip: 'Auto', icon: Scale },
+  ...STORED_MODES,
+];
 
 /**
  * Experiment-gated (`integrationToolApprovals`) per-tool approval mode: one
@@ -61,11 +66,13 @@ function IntegrationToolApprovalModeControl({
   toolName,
   value,
   disabled,
+  options = STORED_MODES,
   onChange,
 }: {
   toolName: string;
   value?: IntegrationToolPolicyMode;
   disabled?: boolean;
+  options?: ApprovalModeOption[];
   onChange: (mode: IntegrationToolPolicyMode) => void;
 }) {
   return (
@@ -74,7 +81,7 @@ function IntegrationToolApprovalModeControl({
       aria-label={`Approval mode for ${toolName}`}
       className="flex shrink-0 items-center"
     >
-      {APPROVAL_MODES.map(({ mode, label, tooltip, icon: Icon }) => {
+      {options.map(({ mode, label, tooltip, icon: Icon }) => {
         const checked = mode === value;
         return (
           <BasicTooltip key={mode} content={tooltip}>
@@ -86,7 +93,9 @@ function IntegrationToolApprovalModeControl({
                 aria-label={label}
                 disabled={disabled}
                 onPressedChange={() => {
+                  // Pressing the selected choice again returns to Auto.
                   if (!checked) onChange(mode);
+                  else if (mode !== 'allow') onChange('allow');
                 }}
               >
                 <Icon aria-hidden="true" />
@@ -131,9 +140,9 @@ function groupIntegrationToolsByAccess<T extends GroupableTool>(
 
 /**
  * One tool group. A titled group collapses; an untitled one (unclassified
- * tools) is just the list. With approvals active the header carries a four
- * button row that applies to every tool in the group; mixed groups leave all
- * four choices unselected.
+ * tools) is just the list. With approvals active the header carries the same
+ * button row plus Auto, applying to every tool in the group; a mixed group
+ * leaves every choice unpressed.
  */
 function IntegrationToolApprovalGroup({
   title,
@@ -165,6 +174,7 @@ function IntegrationToolApprovalGroup({
         toolName={`all ${title?.toLowerCase() ?? 'tools'}`}
         value={sharedMode}
         disabled={disabled}
+        options={BULK_MODES}
         onChange={onChangeAll}
       />
     ) : null;
