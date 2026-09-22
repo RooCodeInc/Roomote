@@ -235,11 +235,30 @@ export async function GET(
       disconnectReason = 'provider_stream_error';
     }
 
-    const disconnectEvent = createDisconnectEvent(
-      { ...taskRun, status, errorCode, error: error ?? null },
-      runId,
-      disconnectReason,
-    );
+    const latestTaskRun = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, runId),
+      columns: {
+        status: true,
+        error: true,
+        errorCode: true,
+      },
+    });
+    const disconnectEvent = latestTaskRun
+      ? createDisconnectEvent(
+          {
+            ...taskRun,
+            status: latestTaskRun.status,
+            errorCode: latestTaskRun.errorCode,
+            error: latestTaskRun.error,
+          },
+          runId,
+          disconnectReason,
+        )
+      : createDisconnectEvent(
+          { ...taskRun, status, errorCode, error: error ?? null },
+          runId,
+          'run_missing',
+        );
     logDisconnectEvent(disconnectEvent);
     await pushSessionDisconnect(session, disconnectEvent);
   });

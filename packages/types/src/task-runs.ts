@@ -880,7 +880,7 @@ export interface TaskRunDisconnectEvent {
 export interface RunEventDetails extends Record<string, unknown> {
   correlation?: TaskRunCorrelation;
   disconnectReason?: TaskRunDisconnectReason;
-  terminalReason?: TaskRunTerminalReason;
+  terminalReason?: TaskRunTerminalReason | null;
 }
 
 export const computeProviderLaunchModes = [

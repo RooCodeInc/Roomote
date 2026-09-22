@@ -213,6 +213,23 @@ async function streamTaskRunLogs({
       disconnectReason = 'provider_stream_error';
     }
 
+    const latestTaskRun = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, runId),
+      columns: {
+        status: true,
+        error: true,
+        errorCode: true,
+      },
+    });
+
+    if (!latestTaskRun) {
+      await disconnect(stream, 'run_missing');
+      return;
+    }
+
+    status = latestTaskRun.status;
+    errorCode = latestTaskRun.errorCode;
+    error = latestTaskRun.error;
     await disconnect(stream, disconnectReason);
   });
 }

@@ -140,11 +140,19 @@ describe('GET /api/task-runs/[id]/logs', () => {
         };
       }
 
+      if (pollCount === 2) {
+        return {
+          machineId: 'sb-123',
+          sandboxCmdId: 'cmd-123',
+          vendor: 'sandbox',
+          status: 'running',
+        };
+      }
+
       return {
-        machineId: 'sb-123',
-        sandboxCmdId: 'cmd-123',
-        vendor: 'sandbox',
-        status: 'running',
+        status: 'failed',
+        error: 'stream finished after the run failed',
+        errorCode: 'docker_worker_start_timeout',
       };
     });
 
@@ -186,7 +194,12 @@ describe('GET /api/task-runs/[id]/logs', () => {
         source: 'web',
         exhausted: false,
       },
-      terminalReason: null,
+      terminalReason: {
+        kind: 'terminal',
+        status: 'failed',
+        errorCode: 'docker_worker_start_timeout',
+        message: 'stream finished after the run failed',
+      },
     });
   });
 

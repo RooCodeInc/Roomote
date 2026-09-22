@@ -674,6 +674,15 @@ describe('finishRun', () => {
     expect(mockCaptureTaskSettled).not.toHaveBeenCalled();
     expect(mockTerminateCredentialEgress).not.toHaveBeenCalled();
     expect(mockNotifyWebTaskInitiatorOnSettle).not.toHaveBeenCalled();
+    expect(mockRecordTaskRunLifecycleEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        details: expect.objectContaining({
+          status: RunStatus.Idle,
+          terminalReason: null,
+        }),
+      }),
+    );
   });
 
   it('suppresses terminal notifications while an automatic startup retry is queued', async () => {
