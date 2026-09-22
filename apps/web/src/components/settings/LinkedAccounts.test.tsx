@@ -106,6 +106,7 @@ const state = vi.hoisted(() => ({
     configured: boolean;
     mapping: { telegramUserId: string; telegramUsername: string | null } | null;
   } | null,
+  telegramAccountIsPending: false,
   discordAccount: null as {
     configured: boolean;
     mapping: {
@@ -449,7 +450,7 @@ vi.mock('@/hooks/linked-accounts', () => ({
   }),
   useTelegramLinkedAccount: () => ({
     data: state.telegramAccount,
-    isPending: false,
+    isPending: state.telegramAccountIsPending,
     refetch: vi.fn(),
   }),
   useCreateTelegramLinkCode: () => ({
@@ -629,6 +630,7 @@ describe('LinkedAccounts settings', () => {
     state.adoAccount = { configured: false, account: null };
     state.adoAccountIsPending = false;
     state.telegramAccount = null;
+    state.telegramAccountIsPending = false;
     state.discordAccount = null;
     state.slackInstallation = null;
     state.slackInstallationIsPending = false;
@@ -933,6 +935,21 @@ describe('LinkedAccounts settings', () => {
     state.linearInstallation = null;
     state.linearAccount = null;
     state.bitbucketAccountIsPending = true;
+
+    render(<LinkedAccounts />);
+
+    expect(
+      screen.queryByText(/No personal linked accounts/),
+    ).not.toBeInTheDocument();
+    expect(document.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(6);
+  });
+
+  it('keeps the loading state while only the Telegram account is pending', () => {
+    state.deploymentEnablements = [];
+    state.gitHubInstallations = [];
+    state.linearInstallation = null;
+    state.linearAccount = null;
+    state.telegramAccountIsPending = true;
 
     render(<LinkedAccounts />);
 
