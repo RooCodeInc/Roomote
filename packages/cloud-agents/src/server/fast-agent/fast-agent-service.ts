@@ -2026,7 +2026,16 @@ export async function answerFastAgentQuestion({
   const humanInput = input ?? ({ type: 'message' } as const);
   const reactionInput =
     !platformEvent && humanInput.type === FAST_AGENT_REACTION_INPUT_TYPE;
+  // Directed and silence-eligible together means the surface's judgment
+  // found this unmentioned message for Roomote: show that Roomote is working,
+  // but a sign-off or an explicit "don't reply" may still settle silently.
+  const addressedToRoomote =
+    !platformEvent &&
+    humanInput.type !== FAST_AGENT_REACTION_INPUT_TYPE &&
+    allowSilentAmbientReply &&
+    directedAtRoomote === true;
   const resolvedPeerDirectedTurn =
+    !addressedToRoomote &&
     peerDirectedTurn &&
     allowSilentAmbientReply &&
     !platformEvent &&
@@ -2661,6 +2670,16 @@ export async function answerFastAgentQuestion({
           requiresSeparateTurn = true;
           break;
         }
+        const followUpAddressed =
+          followUp.directedAtRoomote === true &&
+          followUp.allowSilentAmbientReply === true;
+        if (followUpAddressed !== addressedToRoomote) {
+          // Addressed and non-addressed turns carry different participation
+          // guidance in the system prompt, which steering cannot change, so
+          // a follow-up of the other kind waits for its own turn.
+          requiresSeparateTurn = true;
+          break;
+        }
         if (followUp.sourceControlReplyTarget) {
           // A mention routed in from a pull request needs its own turn: the
           // answer must also post on that discussion and delegated work must
@@ -2834,6 +2853,11 @@ export async function answerFastAgentQuestion({
         batch.some(({ followUp }) => followUp.allowSilentAmbientReply !== true)
       ) {
         steeredDirectedFollowUp = true;
+        startSurfaceActivity();
+      } else if (
+        batch.some(({ followUp }) => followUp.directedAtRoomote === true)
+      ) {
+        // Addressed follow-ups show activity without forbidding silence.
         startSurfaceActivity();
       }
       injectedHumanFollowUpMessages.push(...batchMessages);
@@ -3348,7 +3372,7 @@ export async function answerFastAgentQuestion({
         `[Fast Agent] Failed to dispose surface activity: ${formatErrorForLog(error)}`,
       );
     });
-  } else if (!allowSilentAmbientReply) {
+  } else if (!allowSilentAmbientReply || addressedToRoomote) {
     startSurfaceActivity();
   }
 
@@ -3836,6 +3860,7 @@ export async function answerFastAgentQuestion({
       retryTaskStartAvailable: Boolean(adapter.retryTaskStart),
       allowSilentAmbientReply,
       peerDirectedTurn: resolvedPeerDirectedTurn,
+      addressedToRoomote,
       implicitAutomationOffersEnabled: !Env.R_FAST_AUTOMATION_OFFERS_DISABLED,
       releaseVersion,
       commitSha: process.env.GITHUB_SHA || process.env.VERCEL_GIT_COMMIT_SHA,

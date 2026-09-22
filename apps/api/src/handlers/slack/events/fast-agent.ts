@@ -66,6 +66,11 @@ export async function processFastAgentMessage(params: {
   resolveActiveTasks?: () => Promise<FastAgentActiveTask[]>;
   launchTask: LaunchFastAgentTask;
   directedAtRoomote?: boolean;
+  /**
+   * The judgment model found this unmentioned reply addressed to Roomote.
+   * The turn shows activity and answers, but may still end silently.
+   */
+  addressedToRoomote?: boolean;
   roomoteSlackUserId?: string;
   peerConversationsEnabled?: boolean;
   userInitiated?: boolean;
@@ -83,6 +88,7 @@ export async function processFastAgentMessage(params: {
     resolveActiveTasks,
     launchTask,
     directedAtRoomote = false,
+    addressedToRoomote = false,
     roomoteSlackUserId,
     peerConversationsEnabled = false,
     userInitiated = true,
@@ -254,7 +260,9 @@ export async function processFastAgentMessage(params: {
       !roomoteWasLastSpeaker &&
       (previousSenderMessageWasPeerDirected ||
         recentHistoryAddressedAnotherHuman);
+    // Peer caution only applies when no judgment model decided the addressee.
     const peerDirectedTurn =
+      !addressedToRoomote &&
       !roomoteStartedThread &&
       (currentMessagePeerDirected || continuesPeerConversation);
     const peerDirectedContext =
@@ -304,11 +312,13 @@ export async function processFastAgentMessage(params: {
         Boolean(message.user) &&
         message.user !== event.user,
     );
+    // One rule: an unmentioned message in a thread with other people may end
+    // silently. Who spoke last no longer forces a reply; the judgment model
+    // (when configured) already decided whether the message is for Roomote.
     const allowSilentAmbientReply =
       eligibleAmbientHumanMessage &&
-      !roomoteStartedThread &&
-      (peerDirectedTurn ||
-        (!roomoteWasLastSpeaker && hasOtherHumanParticipant));
+      (addressedToRoomote || peerDirectedTurn || hasOtherHumanParticipant);
+    const turnDirectedAtRoomote = isDirected || addressedToRoomote;
 
     const needsCanonicalAdmission =
       !releaseFastAgentLock ||
@@ -327,7 +337,7 @@ export async function processFastAgentMessage(params: {
         ? { senderDisplayName: currentMessage.username }
         : {}),
       ...(event.user ? { senderExternalId: event.user } : {}),
-      directedAtRoomote: isDirected,
+      directedAtRoomote: turnDirectedAtRoomote,
       allowSilentAmbientReply,
       ...(peerDirectedTurn ? { peerDirectedTurn: true } : {}),
       ...(params.originSessionId
@@ -387,7 +397,7 @@ export async function processFastAgentMessage(params: {
       activeTurnLock.signal,
       activity,
     );
-    if (durableTurn && !allowSilentAmbientReply) {
+    if (durableTurn && (!allowSilentAmbientReply || addressedToRoomote)) {
       try {
         activity.start();
       } catch (error) {
@@ -433,7 +443,7 @@ export async function processFastAgentMessage(params: {
           ? currentMessage.username
           : undefined,
       activeTasks: resolvedActiveTasks,
-      directedAtRoomote: isDirected,
+      directedAtRoomote: turnDirectedAtRoomote,
       allowSilentAmbientReply,
       peerDirectedTurn,
       ...(roomoteSlackUserId ? { slackRoomoteUserId: roomoteSlackUserId } : {}),

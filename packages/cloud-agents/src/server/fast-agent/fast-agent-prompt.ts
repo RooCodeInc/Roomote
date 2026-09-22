@@ -319,6 +319,7 @@ export function buildFastAgentSystemPrompt({
   retryTaskStartAvailable = false,
   allowSilentAmbientReply = false,
   peerDirectedTurn = false,
+  addressedToRoomote = false,
   implicitAutomationOffersEnabled = true,
   releaseVersion,
   commitSha,
@@ -360,6 +361,11 @@ export function buildFastAgentSystemPrompt({
   retryTaskStartAvailable?: boolean;
   allowSilentAmbientReply?: boolean;
   peerDirectedTurn?: boolean;
+  /**
+   * The surface's judgment model found this unmentioned message addressed to
+   * Roomote; silence stays available only for sign-offs and explicit asks.
+   */
+  addressedToRoomote?: boolean;
   implicitAutomationOffersEnabled?: boolean;
   releaseVersion?: string;
   commitSha?: string;
@@ -476,11 +482,21 @@ ${
     !reactionInput &&
     allowSilentAmbientReply &&
     peerDirectedTurn;
-  const humanTurnDirectednessGuidance =
+  const resolvedAddressedToRoomote =
     !platformEvent &&
     !reactionInput &&
     allowSilentAmbientReply &&
-    !resolvedPeerDirectedTurn
+    addressedToRoomote;
+  const humanTurnDirectednessGuidance = resolvedAddressedToRoomote
+    ? `- The communication surface already judged this unmentioned message, in the context of the recent thread, to be addressed to Roomote. Treat it as a message to you and answer it; do not re-decide whether it is for you.
+- Call \`ignore_event\` only when the message asks Roomote not to reply, or only thanks, acknowledges, or signs off and needs nothing back.
+- \`retry_task_start\` is invalid for a human-authored turn.
+
+`
+    : !platformEvent &&
+        !reactionInput &&
+        allowSilentAmbientReply &&
+        !resolvedPeerDirectedTurn
       ? `- For an eligible unmentioned multi-human turn, first decide from the current message and recent thread whether it is specifically directed at Roomote.
 - Respond to explicit platform mentions or commands, direct replies or answers to Roomote, requests about Roomote's work, and contextually clear follow-ups. A first-time participant is not ambient when the context shows they are addressing Roomote.
 - Messages to another person or to the whole group default to ambient, even when actionable. A message that explicitly addresses another person remains ambient when it asks about Roomote's work. Call \`ignore_event\` without acknowledging, using integrations, or starting work.
