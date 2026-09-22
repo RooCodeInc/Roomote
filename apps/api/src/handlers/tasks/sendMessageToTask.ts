@@ -14,6 +14,7 @@ import {
   db,
   eq,
   findReusableGitHubPrFollowUpOwner,
+  sql,
   taskPullRequests,
   taskRuns,
   touchTaskActivity,
@@ -33,6 +34,7 @@ import {
 } from '@roomote/communication/messages';
 import {
   TaskPayloadKind,
+  RunStatus,
   buildFastAgentChildTaskMetadata,
   EXPIRED_SNAPSHOT_RESUME_ERROR,
   getFastAgentParentFromPayload,
@@ -976,14 +978,51 @@ async function queueTaskFollowUpForDelivery({
 
   let inserted: boolean;
   try {
-    inserted = await queueTaskFollowUp(runId, {
-      clientMessageId: messageId,
-      deliveryMode,
-      prompt: message,
-      ...(images?.length ? { images } : {}),
-      ...(followUpSource ? { source: followUpSource } : {}),
-      ...(queuedUserId ? { userId: queuedUserId } : {}),
+    const admission = await db.transaction(async (tx) => {
+      const [lockedRun] = await tx.execute<{
+        status: string;
+        canceled_at: Date | null;
+        task_phase: string | null;
+      }>(sql`
+        SELECT status, canceled_at, task_phase
+        FROM ${taskRuns}
+        WHERE id = ${runId}
+        FOR SHARE
+      `);
+
+      if (
+        !lockedRun ||
+        lockedRun.canceled_at ||
+        isExitedRunStatus(lockedRun.status as RunStatus) ||
+        lockedRun.task_phase === 'stopped' ||
+        lockedRun.task_phase === 'shutting_down'
+      ) {
+        return { accepted: false as const, inserted: false };
+      }
+
+      return {
+        accepted: true as const,
+        inserted: await queueTaskFollowUp(runId, {
+          clientMessageId: messageId,
+          deliveryMode,
+          prompt: message,
+          ...(images?.length ? { images } : {}),
+          ...(followUpSource ? { source: followUpSource } : {}),
+          ...(queuedUserId ? { userId: queuedUserId } : {}),
+        }),
+      };
     });
+
+    if (!admission.accepted) {
+      return {
+        success: false,
+        error: 'Task is no longer active.',
+        status: 409,
+        delivery: 'not_accepted',
+      };
+    }
+
+    inserted = admission.inserted;
   } catch (error) {
     logHandlerError(
       'sendMessageToTask',

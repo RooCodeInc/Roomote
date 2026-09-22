@@ -1,5 +1,6 @@
 const {
   mockCreateRunToken,
+  mockDbTransaction,
   mockQueueTaskFollowUp,
   mockSyncActingUserForInboundMessage,
   mockCreateTRPCProxyClient,
@@ -25,6 +26,7 @@ const {
   mockEq,
 } = vi.hoisted(() => ({
   mockCreateRunToken: vi.fn(),
+  mockDbTransaction: vi.fn(),
   mockQueueTaskFollowUp: vi.fn(),
   mockSyncActingUserForInboundMessage: vi.fn(),
   mockCreateTRPCProxyClient: vi.fn(),
@@ -136,6 +138,7 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
     and: mockAnd,
     eq: mockEq,
     db: {
+      transaction: mockDbTransaction,
       query: {
         users: {
           findFirst: mockUserFindFirst,
@@ -212,6 +215,15 @@ describe('sendMessageToTask', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockCreateRunToken.mockResolvedValue('run-token');
+    mockDbTransaction.mockImplementation(async (callback) =>
+      callback({
+        execute: vi
+          .fn()
+          .mockResolvedValue([
+            { status: 'running', canceled_at: null, task_phase: 'running' },
+          ]),
+      }),
+    );
     mockQueueTaskFollowUp.mockResolvedValue(true);
     mockSyncActingUserForInboundMessage.mockResolvedValue(undefined);
     mockCreateTRPCProxyClient.mockImplementation(() => ({
@@ -443,6 +455,35 @@ describe('sendMessageToTask', () => {
       42,
       expect.objectContaining({ deliveryMode: 'send' }),
     );
+  });
+
+  it('does not admit a follow-up after the run settles before Redis admission', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({ sandboxServerUrl: null }),
+    );
+    mockDbTransaction.mockImplementationOnce(async (callback) =>
+      callback({
+        execute: vi
+          .fn()
+          .mockResolvedValue([
+            { status: 'completed', canceled_at: new Date(), task_phase: null },
+          ]),
+      }),
+    );
+
+    const result = await steerMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-1',
+      message: 'Do not revive this run.',
+      senderMode: 'fast_agent',
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      status: 409,
+      delivery: 'not_accepted',
+    });
+    expect(mockQueueTaskFollowUp).not.toHaveBeenCalled();
   });
 
   it('does not re-admit a steer whose startup response was lost', async () => {

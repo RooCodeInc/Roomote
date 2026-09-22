@@ -7,6 +7,7 @@ const {
   buildSandboxInstructionMock,
   taskRunsDoneMock,
   taskRunsActivateSlackReplyTargetMock,
+  acknowledgeTaskFollowUpMock,
   peekTaskFollowUpsMock,
   removeTaskFollowUpMock,
   taskRunsClearActiveSlackReplyTargetMock,
@@ -51,6 +52,7 @@ const {
     threadTs: '1710000000.456',
     reactionsAllowed: false,
   }),
+  acknowledgeTaskFollowUpMock: vi.fn().mockResolvedValue(undefined),
   peekTaskFollowUpsMock: vi.fn().mockResolvedValue([]),
   removeTaskFollowUpMock: vi.fn().mockResolvedValue(undefined),
   taskRunsClearActiveSlackReplyTargetMock: vi.fn().mockResolvedValue(undefined),
@@ -172,6 +174,7 @@ vi.mock('@roomote/cloud-agents', () => ({
 
 vi.mock('@roomote/communication/messages', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/communication/messages')>()),
+  acknowledgeTaskFollowUp: acknowledgeTaskFollowUpMock,
   peekTaskFollowUps: peekTaskFollowUpsMock,
   removeTaskFollowUp: removeTaskFollowUpMock,
 }));
@@ -370,6 +373,7 @@ describe('runTask', () => {
       threadTs: '1710000000.456',
       reactionsAllowed: false,
     });
+    acknowledgeTaskFollowUpMock.mockReset().mockResolvedValue(undefined);
     peekTaskFollowUpsMock.mockReset().mockResolvedValue([]);
     removeTaskFollowUpMock.mockReset().mockResolvedValue(undefined);
 
@@ -3271,9 +3275,10 @@ describe('runTask', () => {
       clientMessageId: 'client-empty-session',
     });
     expect(harnessManager?.sendFollowUpPrompt).not.toHaveBeenCalled();
-    expect(removeTaskFollowUpMock).toHaveBeenCalledWith(
+    expect(acknowledgeTaskFollowUpMock).toHaveBeenCalledWith(
       152,
       'raw-empty-session',
+      'client-empty-session',
     );
   });
 
@@ -3319,9 +3324,10 @@ describe('runTask', () => {
     expect(getMcpServerConfigsMock.mock.calls.length).toBeGreaterThan(
       mcpRefreshCallsBefore,
     );
-    expect(removeTaskFollowUpMock).toHaveBeenCalledWith(
+    expect(acknowledgeTaskFollowUpMock).toHaveBeenCalledWith(
       153,
       'raw-startup-steer',
+      'client-startup-steer',
     );
   });
 

@@ -44,6 +44,7 @@ import {
 } from '@roomote/linear/client';
 import { prependSlackMessages } from '@roomote/slack/client';
 import {
+  acknowledgeTaskFollowUp,
   peekTaskFollowUps,
   prependCommunicationMessages,
   removeTaskFollowUp,
@@ -1933,7 +1934,11 @@ export const runTask = async ({
             return;
           }
 
-          await removeTaskFollowUp(taskRun.id, raw);
+          await acknowledgeTaskFollowUp(
+            taskRun.id,
+            raw,
+            message.clientMessageId,
+          );
         }
       })().finally(() => {
         taskFollowUpDrainPromise = null;
