@@ -1,5 +1,5 @@
 import { redactBrainText } from '@roomote/communication/redact-brain-text';
-import { and, asc, db, desc, eq, sql, taskMessages } from '@roomote/db/server';
+import { and, asc, db, desc, eq, taskMessages } from '@roomote/db/server';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   extractAcpMessageText,
@@ -144,6 +144,11 @@ function clip(text: string, maxChars: number): string {
  * What the person asked this task for: the opening prompt and the latest
  * follow-ups. Read from the transcript rather than taken from the sandbox so
  * the agent cannot restate its own request.
+ *
+ * Hidden prompts count. A task delegated from a Session gets its request as
+ * a hidden `<request>` prompt, and the harness's own reminders are never
+ * persisted as prompts, so every stored prompt is a request from a person or
+ * the Session acting for one.
  */
 async function loadTaskRequests(
   taskId: string,
@@ -162,7 +167,6 @@ async function loadTaskRequests(
         and(
           eq(taskMessages.taskId, taskId),
           eq(taskMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.UserPrompt),
-          sql`coalesce(${taskMessages.metadata} ->> 'visibleInTranscript', 'true') <> 'false'`,
         ),
       )
       .orderBy(direction(taskMessages.ts), direction(taskMessages.createdAt))

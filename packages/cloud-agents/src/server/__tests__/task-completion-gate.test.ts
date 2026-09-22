@@ -179,6 +179,19 @@ describe('evaluateTaskCompletionGate', () => {
     });
   });
 
+  it('reads a request that arrived as a hidden prompt, as a delegated task gets it', async () => {
+    mockTranscript([
+      '<request>Remove the duplicate-call guard.</request>\n<hidden>true</hidden>',
+    ]);
+
+    await evaluateTaskCompletionGate({ taskId: 'task-1', check });
+
+    expect(mockEvaluateDecisionModel).toHaveBeenCalledTimes(1);
+    expect(mockEvaluateDecisionModel.mock.calls[0]![0].state.request).toContain(
+      'Remove the duplicate-call guard.',
+    );
+  });
+
   it('does not repeat a lone opening prompt as its own follow-up', async () => {
     mockTranscript(['Remove the duplicate-call guard.']);
 
