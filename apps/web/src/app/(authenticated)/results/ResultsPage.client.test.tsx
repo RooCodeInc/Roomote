@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   replace: vi.fn(),
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
+  searchParams: new URLSearchParams(),
   isDesktop: true,
 }));
 
@@ -75,7 +76,7 @@ const results: ResultInboxItem[] = [
 let currentResults = results;
 
 vi.mock('next/navigation', () => ({
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => mocks.searchParams,
   useRouter: () => ({ replace: mocks.replace }),
 }));
 
@@ -171,6 +172,7 @@ describe('ResultsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.isDesktop = true;
+    mocks.searchParams = new URLSearchParams();
     currentResults = results;
     mocks.list.mockImplementation(async () => currentResults);
     mocks.get.mockImplementation(
@@ -243,6 +245,24 @@ describe('ResultsPage', () => {
     expect(
       screen.queryByRole('button', { name: 'Start investigation' }),
     ).not.toBeInTheDocument();
+  });
+
+  it('opens an explicitly selected result from the URL', async () => {
+    mocks.searchParams = new URLSearchParams({
+      result: `report:${results[0]!.id}`,
+    });
+    renderPage();
+
+    expect(
+      await screen.findByRole('heading', {
+        name: 'Three dependency risks need review',
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('option', {
+        name: /Three dependency risks need review/,
+      }),
+    ).toHaveAttribute('aria-selected', 'true');
   });
 
   it('closes the selected detail panel without selecting another result', async () => {

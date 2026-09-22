@@ -121,7 +121,9 @@ export function ResultsPage() {
   const isDesktop = useMediaQuery('(min-width: 768px)', {
     initializeWithValue: false,
   });
-  const [selectedKey, setSelectedKey] = useState('');
+  const requestedResultKey = searchParams.get('result') ?? '';
+  const [selectedKey, setSelectedKey] = useState(requestedResultKey);
+  const previousResultParamRef = useRef(requestedResultKey);
   const [showSuggestionComposer, setShowSuggestionComposer] = useState(false);
   const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
   const [displayedResult, setDisplayedResult] =
@@ -203,6 +205,13 @@ export function ResultsPage() {
   useEffect(() => {
     if (!isFlagLoading && !enabled) router.replace('/');
   }, [enabled, isFlagLoading, router]);
+
+  useEffect(() => {
+    if (previousResultParamRef.current === requestedResultKey) return;
+    previousResultParamRef.current = requestedResultKey;
+    setSelectedKey(requestedResultKey);
+    setShowSuggestionComposer(false);
+  }, [requestedResultKey]);
 
   const results = listQuery.data ?? EMPTY_RESULTS;
   const selectedSummary =
@@ -455,7 +464,7 @@ export function ResultsPage() {
                           role="option"
                           aria-selected={isSelected}
                           className={cn(
-                            'group flex w-full cursor-pointer items-start gap-3 p-4 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+                            'group flex w-full cursor-pointer items-start gap-3 px-3 py-4 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
                             isSelected
                               ? 'bg-accent text-accent-foreground'
                               : 'hover:bg-accent-foreground/10',
@@ -510,13 +519,13 @@ export function ResultsPage() {
               panel={
                 selectedSummary ? (
                   showDetailSkeleton || !displayedResult ? (
-                    <div className="h-full overflow-y-auto bg-background">
+                    <div className="h-full overflow-y-auto bg-card">
                       <DetailSkeleton />
                     </div>
                   ) : (
                     <article
                       aria-busy={isDetailTransition}
-                      className="flex h-full min-h-0 flex-col bg-background text-left"
+                      className="flex h-full min-h-0 flex-col bg-card text-left"
                     >
                       <div className="min-h-0 flex-1 overflow-y-auto">
                         <div className="mr-auto w-full max-w-3xl px-5 pb-5 pt-6 text-left md:px-8 md:pb-5 md:pt-8">
@@ -553,7 +562,7 @@ export function ResultsPage() {
                           </div>
                         </div>
                         <div aria-hidden="true" className="border-t" />
-                        <div className="mr-auto w-full max-w-3xl px-5 pb-6 pt-4 text-left md:px-8 md:pb-8">
+                        <div className="mr-auto w-full max-w-3xl px-5 pb-6 pl-10 pt-4 text-left md:px-8 md:pb-8 md:pl-10">
                           {displayedResult.decisionContext ? (
                             <p className="text-base leading-relaxed text-muted-foreground">
                               {displayedResult.decisionContext}
