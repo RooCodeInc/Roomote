@@ -1755,7 +1755,9 @@ describe('Fast conversation repository', () => {
         purpose: 'progress',
         inferenceRetryNotice: true,
       },
-      payload: { purpose: 'progress' },
+      // A replaced retry notice keeps the attachments it delivered, so a
+      // resumed run never sends them twice.
+      payload: { purpose: 'progress', imageArtifactIds: ['img-1'] },
       source: 'slack',
     });
     // A completed launch, a failed message, and a call the process died on
@@ -1845,6 +1847,7 @@ describe('Fast conversation repository', () => {
           text: 'Starting on it.',
           purpose: 'progress',
           inferenceRetryNotice: true,
+          imageArtifactIds: ['img-1'],
         },
         {
           kind: 'action',

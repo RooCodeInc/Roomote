@@ -140,16 +140,24 @@ type RecordedTurnEvent =
       status: 'completed' | 'failed' | 'unknown';
       result?: string;
     }
-  | { kind: 'reply'; inferenceRetryNotice?: boolean };
+  | {
+      kind: 'reply';
+      inferenceRetryNotice?: boolean;
+      imageArtifactIds?: string[];
+      videoArtifactIds?: string[];
+    };
 
 /**
  * Captures a previous attempt at this turn took with `deliverToUser` that no
  * reply has carried yet. The pending list otherwise lives only in process
  * memory, so a resumed turn rebuilds it from the attempt's recorded tool
  * results: every `browse` result that promised attachment, after the last
- * visible reply (which would have carried anything pending before it). The
- * recorded result may be truncated, which is why `runBrowseCommand` callers
- * put `delivery`, `captureKind`, and `artifactId` first in the result.
+ * visible reply (which would have carried anything pending before it). A
+ * reply that replaced a retry notice is recorded as a notice, but the IDs it
+ * carries were delivered by the capture follow-up, so those are dropped too.
+ * The recorded result may be truncated, which is why `runBrowseCommand`
+ * callers put `delivery`, `captureKind`, and `artifactId` first in the
+ * result.
  */
 export function rebuildPendingCaptureDeliveries(
   events: ReadonlyArray<RecordedTurnEvent>,
@@ -161,6 +169,17 @@ export function rebuildPendingCaptureDeliveries(
       if (!event.inferenceRetryNotice) {
         imageArtifactIds.length = 0;
         videoArtifactIds.length = 0;
+        continue;
+      }
+      for (const [pending, carried] of [
+        [imageArtifactIds, event.imageArtifactIds],
+        [videoArtifactIds, event.videoArtifactIds],
+      ] as const) {
+        if (!carried?.length) continue;
+        const delivered = new Set(carried);
+        const kept = pending.filter((id) => !delivered.has(id));
+        pending.length = 0;
+        pending.push(...kept);
       }
       continue;
     }

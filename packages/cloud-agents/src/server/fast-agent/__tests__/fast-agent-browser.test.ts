@@ -390,6 +390,30 @@ describe('rebuildPendingCaptureDeliveries', () => {
     ).toEqual({ imageArtifactIds: ['img-1'], videoArtifactIds: ['vid-1'] });
   });
 
+  it('treats a retry-notice replacement that carried IDs as delivered', () => {
+    expect(
+      rebuildPendingCaptureDeliveries([
+        browse({
+          success: true,
+          delivery: 'attached_to_next_reply',
+          captureKind: 'screenshot',
+          artifactId: 'img-sent',
+        }),
+        browse({
+          success: true,
+          delivery: 'attached_to_next_reply',
+          captureKind: 'recording',
+          artifactId: 'vid-pending',
+        }),
+        {
+          kind: 'reply',
+          inferenceRetryNotice: true,
+          imageArtifactIds: ['img-sent'],
+        },
+      ]),
+    ).toEqual({ imageArtifactIds: [], videoArtifactIds: ['vid-pending'] });
+  });
+
   it('drops captures a visible reply already carried and ignores failed or truncated results', () => {
     expect(
       rebuildPendingCaptureDeliveries([

@@ -288,7 +288,18 @@ export type FastAgentTurnAttemptReply = {
   purpose?: FastAgentTurnAttemptReplyPurpose;
   /** System retry notices are visible but do not acknowledge model work. */
   inferenceRetryNotice?: boolean;
+  /** Session artifacts the reply delivered, so a resumed run never re-sends them. */
+  imageArtifactIds?: string[];
+  videoArtifactIds?: string[];
 };
+
+function stringArray(value: unknown): string[] | undefined {
+  return Array.isArray(value) &&
+    value.length > 0 &&
+    value.every((item) => typeof item === 'string')
+    ? (value as string[])
+    : undefined;
+}
 
 function isFastAgentTurnAttemptReplyPurpose(
   value: unknown,
@@ -462,6 +473,8 @@ export async function loadFastAgentTurnAttemptSummary(
       const reply = text(row.contentBlocks).trim();
       if (!reply) continue;
       const purpose = payload.purpose ?? metadata.purpose;
+      const imageArtifactIds = stringArray(payload.imageArtifactIds);
+      const videoArtifactIds = stringArray(payload.videoArtifactIds);
       events.push({
         kind: 'reply',
         text: reply,
@@ -469,6 +482,8 @@ export async function loadFastAgentTurnAttemptSummary(
         ...(metadata.inferenceRetryNotice === true
           ? { inferenceRetryNotice: true }
           : {}),
+        ...(imageArtifactIds ? { imageArtifactIds } : {}),
+        ...(videoArtifactIds ? { videoArtifactIds } : {}),
       });
     }
   }
