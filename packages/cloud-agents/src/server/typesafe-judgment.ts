@@ -498,8 +498,6 @@ export async function evaluateTypeSafeJudgments<
   state: unknown;
   questions: TQuestions;
   timeoutMs?: number;
-  /** Disable optional training capture for sensitive decision state. */
-  capture?: boolean;
 }): Promise<TypeSafeAnswers<TQuestions> | null> {
   const backend = await resolveJudgmentBackend();
 
@@ -568,7 +566,7 @@ export async function evaluateTypeSafeJudgments<
     void shadowRoomoteJudgment(backend.provider, params, answers);
   }
 
-  if (params.capture !== false && isJudgmentCaptureEnabled()) {
+  if (isJudgmentCaptureEnabled()) {
     void captureJudgment({
       answeredBy: backend.provider,
       state: params.state,
@@ -839,8 +837,6 @@ export async function evaluateDecisionModel<
   questions: TQuestions;
   timeoutMs?: number;
   highVolume?: boolean;
-  /** Disable optional training capture for sensitive decision state. */
-  capture?: boolean;
   userId?: string | null;
   taskId?: string | null;
 }): Promise<TypeSafeAnswers<TQuestions> | null> {
@@ -886,7 +882,7 @@ export async function evaluateDecisionModel<
     }
   }
 
-  if (params.capture !== false && isJudgmentCaptureEnabled()) {
+  if (isJudgmentCaptureEnabled()) {
     void captureJudgment({
       answeredBy: 'helper',
       state: params.state,
