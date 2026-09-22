@@ -425,6 +425,7 @@ describe('GitHub MCP native enable_pull_request_auto_merge', () => {
       expect(mutation?.[1]).toEqual({
         pullRequestId: 'PR_node_id',
         mergeMethod: 'SQUASH',
+        expectedHeadOid: headSha,
       });
       expect(JSON.stringify(log.mock.calls)).toContain(
         'source_control_mcp_auto_merge_authorized',
@@ -458,5 +459,47 @@ describe('GitHub MCP native enable_pull_request_auto_merge', () => {
     const { body } = await callAndParse();
     expect(body.result?.isError).toBe(true);
     expect(body.result?.content?.[0]?.text).toContain('has not confirmed');
+  });
+
+  it('surfaces GitHub rejecting a head that moved before the mutation as a stale head', async () => {
+    targetReads = [autoMergeTarget()];
+    mocks.graphql.mockImplementation(async (query: unknown) => {
+      if (String(query).includes('EnablePullRequestAutoMerge')) {
+        const error = new Error('GraphQL mutation failed') as Error & {
+          errors: { message: string; type: string }[];
+        };
+        error.errors = [
+          {
+            message: `Expected head OID ${headSha} does not match the pull request head`,
+            type: 'UNPROCESSABLE',
+          },
+        ];
+        throw error;
+      }
+      return targetReads.shift() ?? autoMergeTarget();
+    });
+    const { body } = await callAndParse();
+    expect(body.result?.isError).toBe(true);
+    expect(body.result?.content?.[0]?.text).toContain(
+      'not at the expected head SHA',
+    );
+  });
+
+  it('returns an explicit ambiguous result when the head moved during the call', async () => {
+    targetReads = [
+      autoMergeTarget(),
+      autoMergeTarget({
+        pullRequest: {
+          headRefOid: otherHeadSha,
+          autoMergeRequest: { mergeMethod: 'MERGE' },
+        },
+      }),
+    ];
+    const { body } = await callAndParse();
+    expect(body.result?.isError).toBe(true);
+    const text = body.result?.content?.[0]?.text ?? '';
+    expect(text).toContain('head moved');
+    expect(text).toContain('ambiguous');
+    expect(text).not.toContain('enabled');
   });
 });

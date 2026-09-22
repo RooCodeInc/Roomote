@@ -266,10 +266,11 @@ For example, ask Roomote to:
 Retargeting a pull request's base to an existing branch does not write a branch
 or change files. A merge or auto-merge request requires an explicit request
 from the current human message. Roomote reads the pull request immediately
-before the mutation, binds the request to the current head SHA when the native
-schema supports it, leaves branch protections, required checks, and merge
-permissions to GitHub, and reads the pull request again before reporting
-success or retrying an ambiguous result. Auto-merge is only enabled when
+before the mutation and binds the request to the current head SHA; for
+auto-merge, GitHub enforces that binding atomically and rejects the call when
+the head has moved. Branch protections, required checks, and merge
+permissions stay with GitHub, and Roomote reads the pull request again before
+reporting success or retrying an ambiguous result. Auto-merge is only enabled when
 GitHub confirms it, and only where the repository allows auto-merge and the
 requested merge method. Work that needs a
 checkout, a build, or tests to get right still belongs in a coding task, which

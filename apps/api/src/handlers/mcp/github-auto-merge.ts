@@ -9,10 +9,12 @@ import { McpProxyError, toMcpToolResult } from './proxy-utils';
  * GitHub's own MCP server has no auto-merge tool, so the endpoint answers this
  * one in-process under the same installation token a member's proxied calls
  * use. It mirrors the ADO/Gitea native merge handler conventions: the caller
- * binds the action to a freshly read head SHA, GitHub enforces permissions,
- * branch protections, required checks, and allowed merge methods, and the
- * pull request is re-read after the mutation so success is only reported when
- * auto-merge is actually enabled.
+ * binds the action to a freshly read head SHA, which the mutation passes to
+ * GitHub as `expectedHeadOid` so a moved head is rejected atomically rather
+ * than detected after the fact; GitHub enforces permissions, branch
+ * protections, required checks, and allowed merge methods; and the pull
+ * request is re-read after the mutation so success is only reported when
+ * auto-merge is actually enabled at the expected head.
  */
 export const ENABLE_PULL_REQUEST_AUTO_MERGE_TOOL =
   'enable_pull_request_auto_merge';
@@ -48,9 +50,9 @@ export const enablePullRequestAutoMergeToolDefinition = {
   description:
     'Enable auto-merge on an open GitHub pull request in an active connected repository. ' +
     'Only signed-in members may call it. Read the pull request immediately before calling and pass its current head SHA as expectedHeadSha; ' +
-    'the call is rejected when the pull request is closed, already merged, or its head has moved, so a stale read is never acted on. ' +
+    'the mutation is bound to that head atomically on GitHub, so the call is rejected when the pull request is closed, already merged, or its head has moved, and a stale read is never acted on. ' +
     'GitHub enforces repository permissions, branch protections, required checks and reviews, and the merge methods the repository allows. ' +
-    'The pull request is re-read after the mutation and success is only reported when auto-merge is actually enabled.',
+    'The pull request is re-read after the mutation and success is only reported when auto-merge is actually enabled at the expected head.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -132,8 +134,8 @@ const AUTO_MERGE_TARGET_QUERY = `query PullRequestAutoMergeTarget($owner: String
   }
 }`;
 
-const ENABLE_AUTO_MERGE_MUTATION = `mutation EnablePullRequestAutoMerge($pullRequestId: ID!, $mergeMethod: PullRequestMergeMethod) {
-  enablePullRequestAutoMerge(input: { pullRequestId: $pullRequestId, mergeMethod: $mergeMethod }) {
+const ENABLE_AUTO_MERGE_MUTATION = `mutation EnablePullRequestAutoMerge($pullRequestId: ID!, $mergeMethod: PullRequestMergeMethod, $expectedHeadOid: GitObjectID!) {
+  enablePullRequestAutoMerge(input: { pullRequestId: $pullRequestId, mergeMethod: $mergeMethod, expectedHeadOid: $expectedHeadOid }) {
     pullRequest { autoMergeRequest { mergeMethod enabledAt enabledBy { login } } }
   }
 }`;
@@ -180,6 +182,14 @@ function toAutoMergeError(repositoryFullName: string, error: unknown): unknown {
           ? error.message
           : String(error);
     const status = first?.type === 'FORBIDDEN' ? 403 : 422;
+    if (status !== 403 && /head/i.test(message)) {
+      // GitHub rejects a moved expectedHeadOid with its own validation error;
+      // surface it as the same stale-head signal the pre-read check uses.
+      return new McpProxyError(
+        409,
+        `GitHub pull request in ${repositoryFullName} is not at the expected head SHA (${message}). Read it again before enabling auto-merge.`,
+      );
+    }
     return new McpProxyError(
       status,
       `GitHub could not enable auto-merge in ${repositoryFullName}: ${message}`,
@@ -299,11 +309,15 @@ export async function callEnablePullRequestAutoMerge({
       );
     }
 
+    // expectedHeadOid makes GitHub itself reject the mutation when the head
+    // moved after the pre-read, closing the read-then-mutate race atomically
+    // on the provider side instead of only detecting it after the fact.
     await octokit.graphql(ENABLE_AUTO_MERGE_MUTATION, {
       pullRequestId: pullRequest.id,
       mergeMethod: input.mergeMethod
         ? GRAPHQL_MERGE_METHODS[input.mergeMethod]
         : null,
+      expectedHeadOid: input.expectedHeadSha,
     });
 
     const verified = (await readTarget())?.pullRequest;
@@ -311,6 +325,14 @@ export async function callEnablePullRequestAutoMerge({
       throw new McpProxyError(
         409,
         `GitHub accepted the auto-merge request for pull request #${input.pullNumber} in ${repositoryFullName} but has not confirmed it is enabled. Read the pull request again before retrying.`,
+      );
+    }
+    if (
+      verified.headRefOid.toLowerCase() !== input.expectedHeadSha.toLowerCase()
+    ) {
+      throw new McpProxyError(
+        409,
+        `Auto-merge was requested for pull request #${input.pullNumber} in ${repositoryFullName}, but its head moved to ${verified.headRefOid} during the call, so the result is ambiguous. Read the pull request again and re-apply at the current head if still intended.`,
       );
     }
 
