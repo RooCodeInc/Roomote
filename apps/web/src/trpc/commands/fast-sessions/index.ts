@@ -813,7 +813,15 @@ export async function replyToFastSessionCommand(
     model: settings.model,
     reasoningEffort: settings.reasoningEffort,
     ...(senderDisplayName ? { senderDisplayName } : {}),
-    currentMessageId: input.clientMessageId,
+    ...(input.clientMessageId
+      ? {
+          currentMessageId: input.clientMessageId,
+          skipIfEventExists: {
+            conversationId: session.id,
+            eventId: `${input.clientMessageId}:user`,
+          },
+        }
+      : {}),
     durableSessionId: session.id,
     ...(input.voiceMode ? { voiceMode: true } : {}),
     ...setupContext,

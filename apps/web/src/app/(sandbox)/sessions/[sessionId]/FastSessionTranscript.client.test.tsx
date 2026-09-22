@@ -2511,6 +2511,72 @@ describe('FastSessionTranscript', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('turn is busy');
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+  });
+
+  it('retries a failed reply with the same idempotency key and clears the draft', async () => {
+    replyMutate
+      .mockRejectedValueOnce(new Error('NetworkError'))
+      .mockResolvedValueOnce({ success: true });
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+
+    const input = screen.getByPlaceholderText(
+      'Message agent',
+    ) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: 'Retry this reply' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+
+    const alert = await screen.findByRole('alert');
+    const firstRequest = replyMutate.mock.calls[0]?.[0];
+    expect(firstRequest?.clientMessageId).toEqual(expect.any(String));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    await waitFor(() => expect(replyMutate).toHaveBeenCalledTimes(2));
+    expect(replyMutate.mock.calls[1]?.[0]).toEqual(
+      expect.objectContaining({
+        clientMessageId: firstRequest?.clientMessageId,
+        sessionId: 'session-1',
+        text: 'Retry this reply',
+      }),
+    );
+    await waitFor(() => expect(alert).not.toBeInTheDocument());
+    expect(input).toHaveValue('');
+  });
+
+  it('keeps a newer draft when retrying the captured failed reply', async () => {
+    replyMutate
+      .mockRejectedValueOnce(new Error('NetworkError'))
+      .mockResolvedValueOnce({ success: true });
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+
+    const input = screen.getByPlaceholderText(
+      'Message agent',
+    ) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: 'Original reply' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+    await screen.findByRole('alert');
+
+    fireEvent.change(input, { target: { value: 'Edited draft' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    await waitFor(() => expect(replyMutate).toHaveBeenCalledTimes(2));
+    expect(replyMutate.mock.calls[1]?.[0]).toEqual(
+      expect.objectContaining({ text: 'Original reply' }),
+    );
+    expect(input).toHaveValue('Edited draft');
   });
 
   it('keeps Working for an earlier pending response when a later send fails', async () => {
@@ -3115,6 +3181,7 @@ describe('FastSessionTranscript', () => {
     expect(await screen.findByText('Follow up question')).toBeInTheDocument();
     expect(replyMutate).toHaveBeenCalledWith({
       sessionId: 'session-1',
+      clientMessageId: expect.any(String),
       text: 'Follow up question',
       model: null,
       reasoningEffort: null,
@@ -3363,6 +3430,7 @@ describe('FastSessionTranscript', () => {
     await waitFor(() => {
       expect(replyMutate).toHaveBeenCalledWith({
         sessionId: 'session-1',
+        clientMessageId: expect.any(String),
         text: 'Use these settings',
         model: 'openrouter/z-ai/glm-5.2',
         reasoningEffort: 'high',
@@ -3459,6 +3527,7 @@ describe('FastSessionTranscript', () => {
     await waitFor(() => {
       expect(replyMutate).toHaveBeenCalledWith({
         sessionId: 'session-1',
+        clientMessageId: expect.any(String),
         text: 'Wait for the model save',
         model: 'openrouter/z-ai/glm-5.2',
         reasoningEffort: null,
@@ -3488,6 +3557,7 @@ describe('FastSessionTranscript', () => {
     await waitFor(() => {
       expect(replyMutate).toHaveBeenCalledWith({
         sessionId: 'session-1',
+        clientMessageId: expect.any(String),
         text: '',
         images: ['data:image/png;base64,image-1'],
         model: null,

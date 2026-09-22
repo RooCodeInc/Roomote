@@ -50,7 +50,6 @@ import {
   type SlackMentionScope,
 } from '@/components/ai-elements/slack-mention-context';
 import { WorkspaceHeader } from '@/components/layout';
-import { Alert, AlertDescription, AlertTitle } from '@/components/system';
 import { PrivateSessionIcon } from '@/components/sessions/PrivateSessionIcon';
 import { useLiveVoice } from '@/hooks/useLiveVoice';
 import { useSessionVoiceCallLease } from '@/hooks/useSessionVoiceCallLease';
@@ -304,6 +303,36 @@ function isVisibleResponseActivity(message: TranscriptMessage) {
   return (
     message.role !== 'user' && message.metadata?.visibleInTranscript !== false
   );
+}
+
+type PreparedReply = {
+  text: string;
+  images: string[];
+  attachmentTexts: string[];
+  model: string | null;
+  reasoningEffort: ReasoningEffort | null;
+};
+
+type PreparedReplyAttempt = {
+  payload: PreparedReply;
+  identity: string;
+  clientMessageId: string;
+  voiceDelegationId?: string | null;
+};
+
+type FailedReply = {
+  attempt: PreparedReplyAttempt;
+  message: string;
+};
+
+function getPreparedReplyIdentity(reply: PreparedReply) {
+  return JSON.stringify([
+    reply.text,
+    reply.images,
+    reply.attachmentTexts,
+    reply.model,
+    reply.reasoningEffort,
+  ]);
 }
 
 export function pendingResponseReducer(
@@ -578,7 +607,7 @@ export function FastSessionTranscript({
         { type: 'hydrate', messages },
       ),
   );
-  const [replyError, setReplyError] = useState<string | null>(null);
+  const [failedReply, setFailedReply] = useState<FailedReply | null>(null);
   const [validationError, setValidationError] = useState<unknown>(null);
   const [title, setTitle] = useState<string | null>(initialTitle);
   useSessionTitlePropagation(title, initialTitle);
@@ -1313,33 +1342,59 @@ export function FastSessionTranscript({
     async (
       message: SessionPromptSubmission,
       options?: { voiceDelegationId?: string | null },
+      retryAttempt?: PreparedReplyAttempt,
     ): Promise<boolean> => {
       if (isSending) {
         return false;
       }
 
       setIsSending(true);
-      setReplyError(null);
+      const previousFailedReply = failedReply;
+      if (!retryAttempt) {
+        setFailedReply(null);
+      }
       let optimisticId: string | null = null;
       let clientMessageId: string | undefined;
+      let attempt: PreparedReplyAttempt | null = retryAttempt ?? null;
       try {
-        const prepared = await preparePromptAttachments(
-          {
-            text: message.text.trim(),
-            attachments: message.files,
-          },
-          { enforceAttachmentTextLimit: true },
-        );
-        const images = prepared.images ?? [];
-        if (!prepared.text && images.length === 0) {
+        const preparedPrompt =
+          retryAttempt?.payload ??
+          (await preparePromptAttachments(
+            {
+              text: message.text.trim(),
+              attachments: message.files,
+            },
+            { enforceAttachmentTextLimit: true },
+          ));
+        const prepared: PreparedReply = retryAttempt?.payload ?? {
+          text: preparedPrompt.text,
+          images: preparedPrompt.images ?? [],
+          attachmentTexts: preparedPrompt.attachmentTexts ?? [],
+          model: message.model ?? null,
+          reasoningEffort: message.reasoningEffort ?? null,
+        };
+        if (!prepared.text && prepared.images.length === 0) {
           return false;
         }
 
-        if (options?.voiceDelegationId !== undefined) {
-          clientMessageId = crypto.randomUUID();
+        const identity =
+          retryAttempt?.identity ?? getPreparedReplyIdentity(prepared);
+        attempt ??= {
+          payload: prepared,
+          identity,
+          clientMessageId:
+            previousFailedReply?.attempt.identity === identity
+              ? previousFailedReply.attempt.clientMessageId
+              : crypto.randomUUID(),
+          ...(options?.voiceDelegationId !== undefined
+            ? { voiceDelegationId: options.voiceDelegationId }
+            : {}),
+        };
+        clientMessageId = attempt.clientMessageId;
+        if (attempt.voiceDelegationId !== undefined) {
           voiceDelegationByTurnIdRef.current.set(
             clientMessageId,
-            options.voiceDelegationId,
+            attempt.voiceDelegationId,
           );
         }
         optimisticId = `optimistic:${Date.now()}:${Math.random().toString(36).slice(2)}`;
@@ -1351,7 +1406,10 @@ export function FastSessionTranscript({
           ts: Date.now(),
           eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
           role: 'user',
-          contentBlocks: buildOptimisticContentBlocks(prepared.text, images),
+          contentBlocks: buildOptimisticContentBlocks(
+            prepared.text,
+            prepared.images,
+          ),
           metadata: {
             visibleInTranscript: true,
             ...(currentUser ? { userId: currentUser.userId } : {}),
@@ -1372,25 +1430,26 @@ export function FastSessionTranscript({
         dispatchPendingResponse({ type: 'optimistic', message: optimistic });
         await trpcClient.fastSessions.reply.mutate({
           sessionId,
-          ...(clientMessageId ? { clientMessageId } : {}),
-          ...(options?.voiceDelegationId !== undefined
+          clientMessageId,
+          ...(attempt.voiceDelegationId !== undefined
             ? { voiceMode: true }
             : {}),
           text: prepared.text,
-          ...(images.length > 0 ? { images } : {}),
-          ...(prepared.attachmentTexts?.length
+          ...(prepared.images.length > 0 ? { images: prepared.images } : {}),
+          ...(prepared.attachmentTexts.length
             ? { attachmentTexts: prepared.attachmentTexts }
             : {}),
-          model: message.model ?? null,
-          reasoningEffort: message.reasoningEffort ?? null,
+          model: prepared.model,
+          reasoningEffort: prepared.reasoningEffort,
         });
         dispatchPendingResponse({
           type: 'commitOptimistic',
           optimisticId,
         });
+        setFailedReply(null);
         return true;
       } catch (error) {
-        if (clientMessageId) {
+        if (clientMessageId && attempt?.voiceDelegationId !== undefined) {
           voiceDelegationByTurnIdRef.current.delete(clientMessageId);
         }
         if (optimisticId) {
@@ -1403,10 +1462,11 @@ export function FastSessionTranscript({
         }
         if (isComposerValidationError(error)) {
           setValidationError(error);
-        } else {
-          setReplyError(
-            describeValidationError(error, 'Failed to send message'),
-          );
+        } else if (attempt) {
+          setFailedReply({
+            attempt,
+            message: describeValidationError(error, 'Failed to send message'),
+          });
         }
         if (optimisticId) {
           dispatchPendingResponse({
@@ -1419,8 +1479,33 @@ export function FastSessionTranscript({
         setIsSending(false);
       }
     },
-    [currentUser, isSending, replaceOptimisticMessages, sessionId, trpcClient],
+    [
+      currentUser,
+      failedReply,
+      isSending,
+      replaceOptimisticMessages,
+      sessionId,
+      trpcClient,
+    ],
   );
+
+  const retryFailedReply = useCallback(() => {
+    if (!failedReply) return Promise.resolve(false);
+
+    const { attempt } = failedReply;
+    return sendReply(
+      {
+        text: attempt.payload.text,
+        files: [],
+        model: attempt.payload.model,
+        reasoningEffort: attempt.payload.reasoningEffort,
+      },
+      attempt.voiceDelegationId !== undefined
+        ? { voiceDelegationId: attempt.voiceDelegationId }
+        : undefined,
+      attempt,
+    );
+  }, [failedReply, sendReply]);
 
   const handleReviewAction = useCallback(
     async (deliveryId: string, choice: PrReviewActionChoice) => {
@@ -2008,6 +2093,16 @@ export function FastSessionTranscript({
               sessionId={sessionId}
               isBusy={isSending}
               onSend={sendReply}
+              sendFailure={
+                failedReply
+                  ? {
+                      draftText: failedReply.attempt.payload.text,
+                      message: failedReply.message,
+                      isRetrying: isSending,
+                      onRetry: retryFailedReply,
+                    }
+                  : undefined
+              }
               historyMessageCount={suggestionHistory.messageCount}
               assistantMessageCount={suggestionHistory.assistantCount}
               taskStateRevision={taskStateRevision}
@@ -2041,18 +2136,6 @@ export function FastSessionTranscript({
                 modelSelectionRef.current = selection;
               }}
             />
-            {replyError ? (
-              <Alert
-                variant="destructive"
-                className="mx-4 mb-2 [&>svg]:size-4"
-                role="alert"
-              >
-                <AlertTitle>Message not sent</AlertTitle>
-                <AlertDescription>
-                  <p className="whitespace-pre-line">{replyError}</p>
-                </AlertDescription>
-              </Alert>
-            ) : null}
             <ComposerErrorDialog
               error={validationError}
               onClose={() => setValidationError(null)}

@@ -1332,6 +1332,14 @@ describe('Session PR review actions', () => {
         currentMessageId: '11111111-1111-4111-8111-111111111111',
       }),
     );
+    const { persistFastAgentInlineHumanTurn } =
+      await import('@roomote/sdk/server');
+    expect(vi.mocked(persistFastAgentInlineHumanTurn)).toHaveBeenCalledWith({
+      parent: expect.objectContaining({ sessionId: automationSession.id }),
+      event: expect.objectContaining({
+        eventId: '11111111-1111-4111-8111-111111111111',
+      }),
+    });
     expect(release).toHaveBeenCalledOnce();
   });
 });
