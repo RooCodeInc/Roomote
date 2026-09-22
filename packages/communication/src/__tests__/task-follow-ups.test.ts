@@ -2,10 +2,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { getRedis } from '@roomote/redis';
 
 import {
-  acknowledgeTaskFollowUp,
   hasQueuedTaskFollowUps,
   peekTaskFollowUps,
   queueTaskFollowUp,
+  removeTaskFollowUp,
 } from '../messages';
 
 const RUN_ID = 987_654_321;
@@ -72,29 +72,8 @@ describe('task follow-up queue', () => {
     // follow-ups queued behind them.
     expect(await hasQueuedTaskFollowUps(RUN_ID)).toBe(true);
 
-    await acknowledgeTaskFollowUp(
-      RUN_ID,
-      entry!.raw,
-      entry!.message!.clientMessageId,
-    );
+    await removeTaskFollowUp(RUN_ID, entry!.raw);
 
-    expect(await hasQueuedTaskFollowUps(RUN_ID)).toBe(false);
-  });
-
-  it('does not replay an accepted prompt when list cleanup is delayed', async () => {
-    const message = {
-      clientMessageId: 'client-accepted',
-      deliveryMode: 'steer' as const,
-      prompt: 'already sent',
-    };
-    const raw = JSON.stringify(message);
-    await queueTaskFollowUp(RUN_ID, message);
-    await acknowledgeTaskFollowUp(RUN_ID, raw, message.clientMessageId);
-
-    // Simulate a list entry left behind after the acceptance marker landed.
-    await getRedis().rpush(`task_follow_ups:${RUN_ID}`, raw);
-
-    await expect(peekTaskFollowUps(RUN_ID)).resolves.toEqual([]);
     expect(await hasQueuedTaskFollowUps(RUN_ID)).toBe(false);
   });
 

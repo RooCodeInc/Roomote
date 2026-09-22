@@ -7,7 +7,6 @@ const {
   buildSandboxInstructionMock,
   taskRunsDoneMock,
   taskRunsActivateSlackReplyTargetMock,
-  acknowledgeTaskFollowUpMock,
   peekTaskFollowUpsMock,
   removeTaskFollowUpMock,
   taskRunsClearActiveSlackReplyTargetMock,
@@ -52,7 +51,6 @@ const {
     threadTs: '1710000000.456',
     reactionsAllowed: false,
   }),
-  acknowledgeTaskFollowUpMock: vi.fn().mockResolvedValue(undefined),
   peekTaskFollowUpsMock: vi.fn().mockResolvedValue([]),
   removeTaskFollowUpMock: vi.fn().mockResolvedValue(undefined),
   taskRunsClearActiveSlackReplyTargetMock: vi.fn().mockResolvedValue(undefined),
@@ -174,7 +172,6 @@ vi.mock('@roomote/cloud-agents', () => ({
 
 vi.mock('@roomote/communication/messages', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/communication/messages')>()),
-  acknowledgeTaskFollowUp: acknowledgeTaskFollowUpMock,
   peekTaskFollowUps: peekTaskFollowUpsMock,
   removeTaskFollowUp: removeTaskFollowUpMock,
 }));
@@ -373,7 +370,6 @@ describe('runTask', () => {
       threadTs: '1710000000.456',
       reactionsAllowed: false,
     });
-    acknowledgeTaskFollowUpMock.mockReset().mockResolvedValue(undefined);
     peekTaskFollowUpsMock.mockReset().mockResolvedValue([]);
     removeTaskFollowUpMock.mockReset().mockResolvedValue(undefined);
 
@@ -3275,10 +3271,9 @@ describe('runTask', () => {
       clientMessageId: 'client-empty-session',
     });
     expect(harnessManager?.sendFollowUpPrompt).not.toHaveBeenCalled();
-    expect(acknowledgeTaskFollowUpMock).toHaveBeenCalledWith(
+    expect(removeTaskFollowUpMock).toHaveBeenCalledWith(
       152,
       'raw-empty-session',
-      'client-empty-session',
     );
   });
 
@@ -3324,10 +3319,44 @@ describe('runTask', () => {
     expect(getMcpServerConfigsMock.mock.calls.length).toBeGreaterThan(
       mcpRefreshCallsBefore,
     );
-    expect(acknowledgeTaskFollowUpMock).toHaveBeenCalledWith(
+    expect(removeTaskFollowUpMock).toHaveBeenCalledWith(
       153,
       'raw-startup-steer',
-      'client-startup-steer',
+    );
+  });
+
+  it('retries only the removal when it fails after the runtime accepted the prompt', async () => {
+    const entry = {
+      raw: 'raw-accepted',
+      message: {
+        deliveryMode: 'send' as const,
+        prompt: 'Deliver me exactly once.',
+        clientMessageId: 'client-accepted',
+      },
+    };
+    peekTaskFollowUpsMock
+      .mockResolvedValueOnce([entry])
+      .mockResolvedValueOnce([entry]);
+    removeTaskFollowUpMock
+      .mockRejectedValueOnce(new Error('Redis unavailable'))
+      .mockResolvedValueOnce(undefined);
+
+    await runTask(createFollowUpRunTaskInput({ id: 155, taskId: 'task-155' }));
+
+    const harnessManager = harnessManagerInstances.at(-1)!;
+    harnessManager.currentSessionId = 'runtime-session-155';
+    harnessManager.currentPhase = 'idle';
+
+    const drain = startPollingMock.mock.calls.at(-1)?.[0]
+      .drainTaskFollowUps as () => Promise<void>;
+    await expect(drain()).rejects.toThrow('Redis unavailable');
+    await drain();
+
+    expect(harnessManager.sendFollowUpPrompt).toHaveBeenCalledTimes(1);
+    expect(removeTaskFollowUpMock).toHaveBeenCalledTimes(2);
+    expect(removeTaskFollowUpMock).toHaveBeenLastCalledWith(
+      155,
+      'raw-accepted',
     );
   });
 

@@ -44,7 +44,6 @@ import {
 } from '@roomote/linear/client';
 import { prependSlackMessages } from '@roomote/slack/client';
 import {
-  acknowledgeTaskFollowUp,
   peekTaskFollowUps,
   prependCommunicationMessages,
   removeTaskFollowUp,
@@ -1845,6 +1844,10 @@ export const runTask = async ({
     // commands. Each entry is removed only after the runtime accepts it, so
     // anything left behind is retried on the next tick and the API keeps
     // queueing later follow-ups behind it.
+    // The runtime lives in this process, so this set is exactly as durable as
+    // what it guards: if the removal below fails after the runtime accepted a
+    // prompt, later ticks retry the removal instead of sending it again.
+    const deliveredTaskFollowUpIds = new Set<string>();
     let taskFollowUpDrainPromise: Promise<void> | null = null;
     const drainTaskFollowUps = async (): Promise<void> => {
       if (taskFollowUpDrainPromise) {
@@ -1859,6 +1862,11 @@ export const runTask = async ({
             logger.warn(
               `[runTask] Dropping unparseable queued task follow-up for run ${taskRun.id}`,
             );
+            await removeTaskFollowUp(taskRun.id, raw);
+            continue;
+          }
+
+          if (deliveredTaskFollowUpIds.has(message.clientMessageId)) {
             await removeTaskFollowUp(taskRun.id, raw);
             continue;
           }
@@ -1934,11 +1942,8 @@ export const runTask = async ({
             return;
           }
 
-          await acknowledgeTaskFollowUp(
-            taskRun.id,
-            raw,
-            message.clientMessageId,
-          );
+          deliveredTaskFollowUpIds.add(message.clientMessageId);
+          await removeTaskFollowUp(taskRun.id, raw);
         }
       })().finally(() => {
         taskFollowUpDrainPromise = null;

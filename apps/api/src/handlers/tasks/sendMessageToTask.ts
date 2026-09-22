@@ -14,7 +14,6 @@ import {
   db,
   eq,
   findReusableGitHubPrFollowUpOwner,
-  sql,
   taskPullRequests,
   taskRuns,
   touchTaskActivity,
@@ -34,7 +33,6 @@ import {
 } from '@roomote/communication/messages';
 import {
   TaskPayloadKind,
-  RunStatus,
   buildFastAgentChildTaskMetadata,
   EXPIRED_SNAPSHOT_RESUME_ERROR,
   getFastAgentParentFromPayload,
@@ -944,6 +942,7 @@ async function resolveLinkedReviewHandoff({
  * has taken over the run by delivery time.
  */
 async function queueTaskFollowUpForDelivery({
+  taskId,
   runId,
   senderUserId,
   preserveActor,
@@ -954,6 +953,7 @@ async function queueTaskFollowUpForDelivery({
   senderMode,
   deliveryMode,
 }: {
+  taskId: string;
   runId: number;
   senderUserId: string;
   preserveActor: boolean;
@@ -970,6 +970,34 @@ async function queueTaskFollowUpForDelivery({
     `task-follow-up:${randomUUID()}`;
   const followUpSource = resolveFollowUpPromptSource({ senderMode, source });
 
+  // Re-read right before admission so a run that settled since the caller's
+  // read (or during a failed startup RPC) is not handed a message no worker
+  // will drain. This narrows the window without holding a row lock across the
+  // Redis write; a run settling after admission is the same accepted gap as
+  // the chat-provider queues.
+  const latestRun = await findLatestTaskRun(taskId, {
+    id: true,
+    status: true,
+    canceledAt: true,
+    taskPhase: true,
+  });
+
+  if (
+    !latestRun ||
+    latestRun.id !== runId ||
+    latestRun.canceledAt ||
+    isExitedRunStatus(latestRun.status) ||
+    latestRun.taskPhase === 'stopped' ||
+    latestRun.taskPhase === 'shutting_down'
+  ) {
+    return {
+      success: false,
+      error: 'Task is no longer active.',
+      status: 409,
+      delivery: 'not_accepted',
+    };
+  }
+
   await syncActingUserForInboundMessage({
     logContext: 'sendMessageToTask',
     runId,
@@ -978,51 +1006,14 @@ async function queueTaskFollowUpForDelivery({
 
   let inserted: boolean;
   try {
-    const admission = await db.transaction(async (tx) => {
-      const [lockedRun] = await tx.execute<{
-        status: string;
-        canceled_at: Date | null;
-        task_phase: string | null;
-      }>(sql`
-        SELECT status, canceled_at, task_phase
-        FROM ${taskRuns}
-        WHERE id = ${runId}
-        FOR SHARE
-      `);
-
-      if (
-        !lockedRun ||
-        lockedRun.canceled_at ||
-        isExitedRunStatus(lockedRun.status as RunStatus) ||
-        lockedRun.task_phase === 'stopped' ||
-        lockedRun.task_phase === 'shutting_down'
-      ) {
-        return { accepted: false as const, inserted: false };
-      }
-
-      return {
-        accepted: true as const,
-        inserted: await queueTaskFollowUp(runId, {
-          clientMessageId: messageId,
-          deliveryMode,
-          prompt: message,
-          ...(images?.length ? { images } : {}),
-          ...(followUpSource ? { source: followUpSource } : {}),
-          ...(queuedUserId ? { userId: queuedUserId } : {}),
-        }),
-      };
+    inserted = await queueTaskFollowUp(runId, {
+      clientMessageId: messageId,
+      deliveryMode,
+      prompt: message,
+      ...(images?.length ? { images } : {}),
+      ...(followUpSource ? { source: followUpSource } : {}),
+      ...(queuedUserId ? { userId: queuedUserId } : {}),
     });
-
-    if (!admission.accepted) {
-      return {
-        success: false,
-        error: 'Task is no longer active.',
-        status: 409,
-        delivery: 'not_accepted',
-      };
-    }
-
-    inserted = admission.inserted;
   } catch (error) {
     logHandlerError(
       'sendMessageToTask',
@@ -1211,6 +1202,7 @@ export async function sendMessageToTask({
         senderMode,
       });
       return queueTaskFollowUpForDelivery({
+        taskId,
         runId: run.id,
         senderUserId,
         preserveActor: shouldPreserveActor,
@@ -1287,6 +1279,7 @@ export async function sendMessageToTask({
       if (isSandboxStartupError(error, run as LatestTaskRun)) {
         // The queued prompt keeps the actor switch it was admitted under.
         const queued = await queueTaskFollowUpForDelivery({
+          taskId,
           runId: run.id,
           senderUserId,
           preserveActor: shouldPreserveActor,
@@ -1436,6 +1429,7 @@ export async function steerMessageToTask({
         senderMode,
       });
       return queueTaskFollowUpForDelivery({
+        taskId,
         runId: run.id,
         senderUserId: userId,
         preserveActor: false,
@@ -1508,6 +1502,7 @@ export async function steerMessageToTask({
       if (isSandboxStartupError(error, run as LatestTaskRun)) {
         // The queued prompt keeps the actor switch it was admitted under.
         const queued = await queueTaskFollowUpForDelivery({
+          taskId,
           runId: run.id,
           senderUserId: userId,
           preserveActor: false,

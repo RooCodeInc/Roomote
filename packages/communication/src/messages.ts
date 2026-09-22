@@ -107,11 +107,6 @@ redis.call('SET', KEYS[2], '1', 'EX', ARGV[3])
 return queueLength
 `;
 
-const ACK_TASK_FOLLOW_UP_SCRIPT = `
-redis.call('SET', KEYS[2], '1', 'EX', ARGV[2])
-return redis.call('LREM', KEYS[1], 1, ARGV[1])
-`;
-
 function getCommunicationMessagesKey(
   provider: CommunicationProvider,
   runId: number,
@@ -175,13 +170,6 @@ function getCommunicationMessageDedupeKey(
   messageId: string,
 ): string {
   return `${provider}:messages:dedupe:${runId}:${messageId}`;
-}
-
-function getTaskFollowUpAcceptedKey(
-  runId: number,
-  clientMessageId: string,
-): string {
-  return `task_follow_ups:accepted:${runId}:${clientMessageId}`;
 }
 
 function getRedisExecCommandError(
@@ -456,28 +444,10 @@ export async function peekTaskFollowUps(
     limit - 1,
   );
 
-  const peeked: PeekedTaskFollowUp[] = [];
-
-  for (const raw of rawMessages) {
-    const message = parseQueuedTaskFollowUp(raw);
-
-    if (message) {
-      const alreadyAccepted = await getRedis().exists(
-        getTaskFollowUpAcceptedKey(runId, message.clientMessageId),
-      );
-
-      if (alreadyAccepted) {
-        // The acknowledgement may have persisted before the list removal;
-        // never replay a prompt just because cleanup was interrupted.
-        await getRedis().lrem(getTaskFollowUpsKey(runId), 1, raw);
-        continue;
-      }
-    }
-
-    peeked.push({ raw, message });
-  }
-
-  return peeked;
+  return rawMessages.map((raw) => ({
+    raw,
+    message: parseQueuedTaskFollowUp(raw),
+  }));
 }
 
 export async function removeTaskFollowUp(
@@ -485,22 +455,6 @@ export async function removeTaskFollowUp(
   raw: string,
 ): Promise<void> {
   await getRedis().lrem(getTaskFollowUpsKey(runId), 1, raw);
-}
-
-/** Atomically record runtime acceptance and remove the queue entry. */
-export async function acknowledgeTaskFollowUp(
-  runId: number,
-  raw: string,
-  clientMessageId: string,
-): Promise<void> {
-  await getRedis().eval(
-    ACK_TASK_FOLLOW_UP_SCRIPT,
-    2,
-    getTaskFollowUpsKey(runId),
-    getTaskFollowUpAcceptedKey(runId, clientMessageId),
-    raw,
-    COMMUNICATION_MESSAGE_DEDUPE_TTL_SECONDS.toString(),
-  );
 }
 
 /**
