@@ -624,6 +624,25 @@ describe('resolveUnmentionedThreadReplyRouting', () => {
     ).resolves.toEqual({ shouldRoute: false, interjectionDetected: false });
   });
 
+  it('does not route Roomote at exactly half the probability', async () => {
+    mockEvaluateTypeSafeJudgments.mockResolvedValue({
+      ...addresseeAnswer('roomote', 0.95),
+      addressee: {
+        type: 'choice',
+        choice: 'roomote',
+        confidence: 0.3,
+        probabilities: { roomote: 0.5, participant: 0.3, unclear: 0.2 },
+      },
+    });
+
+    await expect(
+      resolve({
+        eventText: 'Can you check this?',
+        threadMessages: twoHumanThread,
+      }),
+    ).resolves.toEqual({ shouldRoute: false, interjectionDetected: false });
+  });
+
   it('does not route a tied addressee distribution', async () => {
     mockEvaluateTypeSafeJudgments.mockResolvedValue({
       ...addresseeAnswer('roomote', 0.95),

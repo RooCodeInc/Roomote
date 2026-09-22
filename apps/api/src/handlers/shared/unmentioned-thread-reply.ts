@@ -179,8 +179,8 @@ const JUDGMENT_MAX_MESSAGE_LENGTH = 1_500;
 const JUDGMENT_MAX_REPLY_LENGTH = 4_000;
 
 /**
- * An unmentioned reply routes when Roomote is the majority addressee: more
- * probability than the other two options combined. Human-to-human traffic
+ * An unmentioned reply routes when Roomote is the strict majority addressee:
+ * more probability than the other two options combined, exceeding this value. Human-to-human traffic
  * scores far below this, while the bar stays meaningful across judgment
  * backends whose absolute probabilities are calibrated differently. Routing
  * is not yet a reply: Fast may still stay silent in a multi-human thread when
@@ -428,7 +428,7 @@ async function judgeUnmentionedReplyAddressee(params: {
     const acknowledgement = answers.closingAcknowledgement.noul;
     const shouldRoute =
       likeliestAddressee(probabilities) === 'roomote' &&
-      probabilities.roomote >= JUDGMENT_ROUTE_TO_ROOMOTE_MIN &&
+      probabilities.roomote > JUDGMENT_ROUTE_TO_ROOMOTE_MIN &&
       acknowledgement < JUDGMENT_CLOSING_ACKNOWLEDGEMENT_MAX;
 
     // Scores only, never message text, so operators can read the gate's
