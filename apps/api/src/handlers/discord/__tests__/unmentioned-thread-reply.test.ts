@@ -444,6 +444,7 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
   it('gates an opted-in peer message with the configured judgment model', async () => {
     fetchThreadMessagesMock.mockResolvedValue([
       humanHistory(THREAD_ROOT_ID, USER_1, 'Can you summarize this?'),
+      humanHistory('150', USER_2, 'following along'),
       botHistory('200', 'Hi there.'),
     ]);
     evaluateTypeSafeJudgmentsMock.mockResolvedValue({

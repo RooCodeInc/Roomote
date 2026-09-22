@@ -135,6 +135,11 @@ describe('shouldRouteUnmentionedTeamsThreadReplyToAgent', () => {
         text: '@Roomote please fix the bug',
         mentions: [botMention()],
       }),
+      humanGraphMessage({
+        id: '1700000000050',
+        userId: 'aad-user-2',
+        text: 'following along',
+      }),
       botGraphMessage('1700000000100'),
     ]);
 
@@ -157,6 +162,11 @@ describe('shouldRouteUnmentionedTeamsThreadReplyToAgent', () => {
         userId: 'aad-user-1',
         text: '@Roomote please fix the bug',
         mentions: [botMention()],
+      }),
+      humanGraphMessage({
+        id: '1700000000050',
+        userId: 'aad-user-2',
+        text: 'following along',
       }),
       botGraphMessage('1700000000100'),
     ]);
@@ -183,6 +193,11 @@ describe('shouldRouteUnmentionedTeamsThreadReplyToAgent', () => {
         userId: 'aad-user-1',
         text: '@Roomote please fix the bug',
         mentions: [botMention()],
+      }),
+      humanGraphMessage({
+        id: '1700000000050',
+        userId: 'aad-user-2',
+        text: 'following along',
       }),
       botGraphMessage('1700000000100'),
     ]);

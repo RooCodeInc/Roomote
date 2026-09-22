@@ -427,11 +427,30 @@ async function judgeUnmentionedReplyAddressee(params: {
   }
 }
 
+function hasAnotherHumanInConversation(input: {
+  senderUserId: string;
+  eventMentionsSomebodyElse?: boolean;
+  threadMessages: UnmentionedThreadHistoryMessage[];
+}): boolean {
+  return (
+    input.eventMentionsSomebodyElse === true ||
+    input.threadMessages.some(
+      (message) =>
+        message.mentionsSomebodyElse ||
+        (!message.isBot &&
+          Boolean(message.authorUserId) &&
+          message.authorUserId !== input.senderUserId),
+    )
+  );
+}
+
 /**
  * `evaluateUnmentionedThreadReplyRouting` plus the optional judgment model.
  *
  * The model is consulted only after the sender passed the eligibility checks,
- * so it can never route a reply from an ineligible sender. Explicit Roomote
+ * so it can never route a reply from an ineligible sender, and only when
+ * another human is part of the conversation, since a sender alone with
+ * Roomote can be addressing nobody else. Explicit Roomote
  * mentions do not enter this helper and therefore cannot be vetoed here. A
  * configured model must find Roomote the likeliest addressee and the reply
  * more than a closing acknowledgement; an unconfigured model falls back to the
@@ -442,6 +461,8 @@ export async function resolveUnmentionedThreadReplyRouting(
   input: Parameters<typeof evaluateUnmentionedThreadReplyRouting>[0] & {
     /** Text of the reply being routed. */
     eventText: string;
+    /** True when the reply itself mentions a human other than the sender. */
+    eventMentionsSomebodyElse?: boolean;
   },
 ): Promise<UnmentionedThreadReplyEvaluation> {
   const decision = evaluateUnmentionedThreadReplyRouting(input);
@@ -449,6 +470,16 @@ export async function resolveUnmentionedThreadReplyRouting(
   // A false/non-interjected result is either an ineligible sender or unreliable
   // empty history. Do not spend a judgment request on either case.
   if (!decision.shouldRoute && !decision.interjectionDetected) {
+    return decision;
+  }
+
+  // Alone with Roomote and nobody else mentioned, the sender has only one
+  // possible addressee; the model would add latency and a false-silence risk.
+  if (
+    decision.shouldRoute &&
+    !decision.interjectionDetected &&
+    !hasAnotherHumanInConversation(input)
+  ) {
     return decision;
   }
 

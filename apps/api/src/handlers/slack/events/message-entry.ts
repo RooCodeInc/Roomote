@@ -228,12 +228,13 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
   });
   const peerConversationsEnabled = fastSessionOwner?.kind === 'user';
 
-  const requiresExplicitMentionForPeerMessage =
-    !peerConversationsEnabled &&
+  const eventMentionsSomebodyElse =
     mentionsSlackUserOtherThanBotWithoutMentioningBot(
       event,
       slackInstallation.botUserId,
     );
+  const requiresExplicitMentionForPeerMessage =
+    !peerConversationsEnabled && eventMentionsSomebodyElse;
 
   let roomoteThreadMatch: Awaited<
     ReturnType<typeof findRoomoteOwnedSlackThread>
@@ -338,6 +339,7 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
     ),
     isOpenConversationThread: isFastAgentThread,
     allowPeerConversationMessages: peerConversationsEnabled,
+    eventMentionsSomebodyElse,
     threadMessages: sharedHistory,
     compareMessageIds: compareNumericMessageIds,
   });

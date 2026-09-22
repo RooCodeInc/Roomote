@@ -265,6 +265,11 @@ function addresseeAnswer(
 }
 
 describe('resolveUnmentionedThreadReplyRouting', () => {
+  const twoHumanThread = [
+    human('100', 'U1', { text: 'can you have a look?' }),
+    human('150', 'U2', { text: 'following along' }),
+    bot('200', 'Sure, looking now.'),
+  ];
   const interjectedThread = [
     human('100', 'U1', { mentionsBot: true, text: 'please fix the bug' }),
     bot('200', 'I opened a PR with the fix.'),
@@ -406,9 +411,10 @@ describe('resolveUnmentionedThreadReplyRouting', () => {
   });
 
   it('consults the judgment model once when the heuristic admits a reply', async () => {
-    await expect(
-      resolve({ threadMessages: [human('100', 'U1'), bot('200')] }),
-    ).resolves.toEqual({ shouldRoute: true, interjectionDetected: false });
+    await expect(resolve({ threadMessages: twoHumanThread })).resolves.toEqual({
+      shouldRoute: true,
+      interjectionDetected: false,
+    });
     expect(mockEvaluateTypeSafeJudgments).toHaveBeenCalledOnce();
   });
 
@@ -444,7 +450,7 @@ describe('resolveUnmentionedThreadReplyRouting', () => {
       await expect(
         resolve({
           eventText,
-          threadMessages: [human('100', 'U1'), bot('200')],
+          threadMessages: twoHumanThread,
         }),
       ).resolves.toEqual({ shouldRoute: false, interjectionDetected: false });
     },
@@ -477,12 +483,48 @@ describe('resolveUnmentionedThreadReplyRouting', () => {
     await expect(
       resolve({
         eventText: 'Sounds good',
-        threadMessages: [human('100', 'U1'), bot('200')],
+        threadMessages: twoHumanThread,
       }),
     ).resolves.toEqual({
       shouldRoute: false,
       interjectionDetected: false,
     });
+  });
+
+  it('routes a sender alone with Roomote without consulting the judgment model', async () => {
+    mockEvaluateTypeSafeJudgments.mockResolvedValue(
+      addresseeAnswer('participant', 0.95),
+    );
+
+    await expect(
+      resolve({
+        eventText: 'ok thanks',
+        threadMessages: [human('100', 'U1'), bot('200')],
+      }),
+    ).resolves.toEqual({ shouldRoute: true, interjectionDetected: false });
+    expect(mockEvaluateTypeSafeJudgments).not.toHaveBeenCalled();
+  });
+
+  it('consults the judgment model when a lone sender mentions somebody else', async () => {
+    mockEvaluateTypeSafeJudgments.mockResolvedValue(
+      addresseeAnswer('participant', 0.95),
+    );
+
+    await expect(
+      resolveUnmentionedThreadReplyRouting({
+        eventMessageId: '500',
+        eventText: '@dan can you take this one?',
+        eventMentionsSomebodyElse: true,
+        senderUserId: 'U1',
+        isThreadTaskOwner: true,
+        isThreadRootAuthor: false,
+        isOpenConversationThread: true,
+        allowPeerConversationMessages: true,
+        threadMessages: [human('100', 'U1'), bot('200')],
+        compareMessageIds: compareNumericMessageIds,
+      }),
+    ).resolves.toEqual({ shouldRoute: false, interjectionDetected: false });
+    expect(mockEvaluateTypeSafeJudgments).toHaveBeenCalledOnce();
   });
 
   it('keeps an acknowledgement addressed to Roomote silent', async () => {
@@ -493,7 +535,7 @@ describe('resolveUnmentionedThreadReplyRouting', () => {
     await expect(
       resolve({
         eventText: 'hmm ok, thanks',
-        threadMessages: [human('100', 'U1'), bot('200')],
+        threadMessages: twoHumanThread,
       }),
     ).resolves.toEqual({ shouldRoute: false, interjectionDetected: false });
 
@@ -513,7 +555,7 @@ describe('resolveUnmentionedThreadReplyRouting', () => {
     await expect(
       resolve({
         eventText: 'Lol you ARE Roomote',
-        threadMessages: [human('100', 'U1'), bot('200')],
+        threadMessages: twoHumanThread,
       }),
     ).resolves.toEqual({
       shouldRoute: true,
@@ -537,7 +579,7 @@ describe('resolveUnmentionedThreadReplyRouting', () => {
     await expect(
       resolve({
         eventText: 'Can you check this?',
-        threadMessages: [human('100', 'U1'), bot('200')],
+        threadMessages: twoHumanThread,
       }),
     ).resolves.toEqual({ shouldRoute: false, interjectionDetected: false });
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('invalid'));
@@ -558,7 +600,7 @@ describe('resolveUnmentionedThreadReplyRouting', () => {
     await expect(
       resolve({
         eventText: 'Can you check this?',
-        threadMessages: [human('100', 'U1'), bot('200')],
+        threadMessages: twoHumanThread,
       }),
     ).resolves.toEqual({ shouldRoute: false, interjectionDetected: false });
   });
@@ -573,7 +615,7 @@ describe('resolveUnmentionedThreadReplyRouting', () => {
     await expect(
       resolve({
         eventText: 'Can you check this?',
-        threadMessages: [human('100', 'U1'), bot('200')],
+        threadMessages: twoHumanThread,
       }),
     ).resolves.toEqual({ shouldRoute: false, interjectionDetected: false });
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('invalid'));
@@ -594,7 +636,7 @@ describe('resolveUnmentionedThreadReplyRouting', () => {
     await expect(
       resolve({
         eventText: 'Can you check this?',
-        threadMessages: [human('100', 'U1'), bot('200')],
+        threadMessages: twoHumanThread,
       }),
     ).resolves.toEqual({
       shouldRoute: false,
