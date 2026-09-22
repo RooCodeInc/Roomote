@@ -8,6 +8,8 @@ import {
   resolveRuntimeGitHubAppCredentials,
   type GitHubAppCredentials,
 } from '@roomote/auth';
+import { Hono } from 'hono';
+import { isUserToken } from '@roomote/types';
 import {
   and,
   db,
@@ -23,8 +25,19 @@ import {
 import { Env } from '@roomote/env';
 import { z } from 'zod';
 
+import type { Variables } from '../../types';
+
+import {
+  callEnablePullRequestAutoMerge,
+  ENABLE_PULL_REQUEST_AUTO_MERGE_TOOL,
+  enablePullRequestAutoMergeToolDefinition,
+} from './github-auto-merge';
 import {
   createMcpProxy,
+  getJsonRpcMethod,
+  getJsonRpcRequestId,
+  getToolCallName,
+  jsonRpcErrorResponse,
   McpProxyError,
   resolveActingUserId,
 } from './proxy-utils';
@@ -44,6 +57,7 @@ const writeToolNames = [
   'merge_pull_request',
   'add_issue_comment',
   'add_reply_to_pull_request_comment',
+  ENABLE_PULL_REQUEST_AUTO_MERGE_TOOL,
 ];
 const unsupportedGistToolNames = [
   'create_gist',
@@ -242,7 +256,7 @@ export function createGithubMcp(options?: {
     (name) =>
       !options?.allowedToolNames || options.allowedToolNames.includes(name),
   );
-  return createMcpProxy({
+  const proxy = createMcpProxy({
     name: 'GitHub',
     upstream: Env.GITHUB_MCP_SERVER_URL ?? DEFAULT_GITHUB_MCP_URL,
     allowAuthTokens: options?.allowAuthTokens,
@@ -330,4 +344,177 @@ export function createGithubMcp(options?: {
       };
     },
   });
+
+  // GitHub's own MCP server has no auto-merge tool, so this endpoint answers
+  // enable_pull_request_auto_merge in-process under the same member-only
+  // write boundary as the proxied write tools, and lists it for members only.
+  const app = new Hono<{ Variables: Variables }>();
+  app.use('*', async (c, next) => {
+    if (c.req.method !== 'POST') {
+      await next();
+      return;
+    }
+    const body = await c.req.raw
+      .clone()
+      .json()
+      .catch(() => undefined);
+    if (getToolCallName(body) === ENABLE_PULL_REQUEST_AUTO_MERGE_TOOL) {
+      return handleEnablePullRequestAutoMerge(c, body);
+    }
+    await next();
+    if (getJsonRpcMethod(body) === 'tools/list') {
+      c.res = await appendAutoMergeToolDefinition(c.res, c.get('authContext'));
+    }
+  });
+  app.route('/', proxy);
+  return app;
+}
+
+async function handleEnablePullRequestAutoMerge(
+  c: {
+    get: (key: 'authContext') => Variables['authContext'];
+  },
+  body: unknown,
+): Promise<Response> {
+  const requestId = getJsonRpcRequestId(body);
+  const rawAuth = c.get('authContext');
+  if (!rawAuth) {
+    return jsonRpcErrorResponse(
+      401,
+      -32001,
+      'Unauthorized: missing or invalid bearer token',
+      requestId,
+    );
+  }
+  // Writes on this endpoint require explicit human intent: a signed-in
+  // member's user-scoped auth token, never a coding task's run token.
+  if (!isUserToken(rawAuth)) {
+    return jsonRpcErrorResponse(
+      403,
+      -32000,
+      'GitHub MCP writes require a user-scoped auth token',
+      requestId,
+    );
+  }
+
+  try {
+    const userId = await resolveActingUserId({
+      userId: rawAuth.userId ?? null,
+      tokenType: 'auth',
+    });
+    const actor = await db.query.users.findFirst({
+      where: and(eq(users.id, userId), isNull(users.deletedAt)),
+      columns: { id: true },
+    });
+    if (!actor) {
+      throw new McpProxyError(
+        403,
+        'GitHub MCP requires an active Roomote member',
+      );
+    }
+
+    const args = (body as { params?: { arguments?: unknown } }).params
+      ?.arguments;
+    const target = getTargetHint(args);
+    const picked = await pickInstallation(target);
+    if (!picked.connectedTarget) {
+      throw new McpProxyError(
+        403,
+        'Active connected GitHub repository required',
+      );
+    }
+    const token = await mintInstallationToken(picked);
+    const pullNumber =
+      args && typeof args === 'object' && 'pullNumber' in args
+        ? (args as { pullNumber?: unknown }).pullNumber
+        : undefined;
+    console.info(
+      JSON.stringify({
+        event: 'source_control_mcp_auto_merge_authorized',
+        provider: 'github',
+        userId: actor.id,
+        repositoryId: picked.connectedTarget.id,
+        repositoryFullName: picked.connectedTarget.fullName,
+        targetNumber: typeof pullNumber === 'number' ? pullNumber : undefined,
+      }),
+    );
+
+    const result = await callEnablePullRequestAutoMerge({
+      token,
+      repositoryFullName: picked.connectedTarget.fullName,
+      arguments: args,
+    });
+    return Response.json({ jsonrpc: '2.0', id: requestId, result });
+  } catch (error) {
+    if (error instanceof McpProxyError) {
+      return jsonRpcErrorResponse(
+        error.httpStatus,
+        -32000,
+        error.message,
+        requestId,
+      );
+    }
+    return jsonRpcErrorResponse(
+      500,
+      -32603,
+      'GitHub auto-merge operation failed',
+      requestId,
+    );
+  }
+}
+
+async function appendAutoMergeToolDefinition(
+  response: Response,
+  auth: Variables['authContext'],
+): Promise<Response> {
+  // Run tokens never see write tools; the tool is also absent upstream, so
+  // there is nothing to hide for them here.
+  if (!auth || !isUserToken(auth)) {
+    return response;
+  }
+  if (
+    !response.ok ||
+    !response.headers.get('content-type')?.includes('application/json')
+  ) {
+    return response;
+  }
+
+  let payload: unknown;
+  try {
+    payload = await response.clone().json();
+  } catch {
+    return response;
+  }
+  if (!payload || typeof payload !== 'object' || !('result' in payload)) {
+    return response;
+  }
+  const result = (payload as { result?: unknown }).result;
+  if (!result || typeof result !== 'object') return response;
+  const tools = (result as { tools?: unknown }).tools;
+  if (!Array.isArray(tools)) return response;
+  if (
+    tools.some(
+      (tool) =>
+        tool &&
+        typeof tool === 'object' &&
+        'name' in tool &&
+        tool.name === ENABLE_PULL_REQUEST_AUTO_MERGE_TOOL,
+    )
+  ) {
+    return response;
+  }
+
+  const headers = new Headers(response.headers);
+  headers.delete('content-length');
+  headers.set('content-type', 'application/json');
+  return new Response(
+    JSON.stringify({
+      ...payload,
+      result: {
+        ...(result as object),
+        tools: [...tools, enablePullRequestAutoMergeToolDefinition],
+      },
+    }),
+    { status: response.status, headers },
+  );
 }
