@@ -22,7 +22,7 @@ type SaveMutationOptions = {
   onSuccess: (
     result: IntegrationToolPolicyMetadata[],
     input: QueuedPolicyChange,
-  ) => void;
+  ) => Promise<void>;
 };
 
 const { mocks, mutationOptions } = vi.hoisted(() => ({
@@ -183,6 +183,9 @@ describe('useIntegrationToolPolicies', () => {
 
   it('keeps a newer optimistic mode visible until its own save settles', async () => {
     const { result } = renderHook(() => useIntegrationToolPolicies());
+    mocks.invalidateQueries.mockImplementation(async () => {
+      cache = [{ ...existingPolicy, policyId: 'saved-reject', mode: 'reject' }];
+    });
 
     act(() => result.current.setMode('resend', 'send_email', 'ask'));
     act(() => result.current.setMode('resend', 'send_email', 'reject'));
@@ -201,12 +204,12 @@ describe('useIntegrationToolPolicies', () => {
     ]);
     expect(mocks.invalidateQueries).not.toHaveBeenCalled();
 
-    act(() =>
-      mutation.onSuccess(
+    await act(async () => {
+      await mutation.onSuccess(
         [{ ...existingPolicy, policyId: 'saved-reject', mode: 'reject' }],
         queuedChanges[1]!,
-      ),
-    );
+      );
+    });
 
     expect(cache).toEqual([
       expect.objectContaining({
@@ -214,6 +217,50 @@ describe('useIntegrationToolPolicies', () => {
         toolName: 'send_email',
         mode: 'reject',
       }),
+    ]);
+  });
+
+  it('refetches after a failed operation when a later queued save succeeds', async () => {
+    const { result } = renderHook(() => useIntegrationToolPolicies());
+    mocks.invalidateQueries.mockImplementation(async () => {
+      cache = [
+        { ...existingPolicy, mode: 'ask' },
+        {
+          ...existingPolicy,
+          policyId: 'saved-delete',
+          toolName: 'delete_email',
+          mode: 'reject',
+        },
+      ];
+    });
+
+    act(() => result.current.setMode('resend', 'send_email', 'ask'));
+    act(() => result.current.setMode('resend', 'delete_email', 'reject'));
+
+    const queuedChanges = mocks.mutate.mock.calls.map(
+      ([input]) => input as QueuedPolicyChange,
+    );
+    const mutation = mutationOptions[1] as SaveMutationOptions;
+
+    await act(async () => {
+      await mutation.onError(new Error('first save failed'), queuedChanges[0]!);
+      await mutation.onSuccess(
+        [
+          {
+            ...existingPolicy,
+            policyId: 'saved-delete',
+            toolName: 'delete_email',
+            mode: 'reject',
+          },
+        ],
+        queuedChanges[1]!,
+      );
+    });
+
+    expect(mocks.invalidateQueries).toHaveBeenCalledTimes(1);
+    expect(cache).toEqual([
+      expect.objectContaining({ toolName: 'send_email', mode: 'ask' }),
+      expect.objectContaining({ toolName: 'delete_email', mode: 'reject' }),
     ]);
   });
 

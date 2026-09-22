@@ -172,6 +172,7 @@ export function useIntegrationToolPolicies(
   const pendingRevisions = useRef(new Map<string, Set<number>>());
   const pendingChanges = useRef(new Map<number, PolicyChange>());
   const operationSequence = useRef(0);
+  const refreshNeeded = useRef(false);
   const writePolicies = useMutation(set.mutationOptions());
 
   const settleRevisions = (revisions: Map<string, number>) => {
@@ -189,6 +190,24 @@ export function useIntegrationToolPolicies(
     settleRevisions(revisions);
     pendingChanges.current.delete(operationId);
   };
+  const refreshSettledPoliciesIfNeeded = async () => {
+    if (!refreshNeeded.current || pendingRevisions.current.size > 0) return;
+
+    refreshNeeded.current = false;
+    await queryClient.invalidateQueries({ queryKey });
+    const queuedChanges = [...pendingChanges.current.values()];
+    if (queuedChanges.length > 0) {
+      queryClient.setQueryData<IntegrationToolPolicyMetadata[]>(
+        queryKey,
+        (current) =>
+          queuedChanges.reduce(
+            (policies, queuedChange) =>
+              applyOptimisticPolicyChange(policies, queuedChange),
+            current,
+          ),
+      );
+    }
+  };
 
   // Serialize whole user actions, while applying every selection to the cache
   // before it enters the queue. This keeps the controls instant and preserves
@@ -199,7 +218,7 @@ export function useIntegrationToolPolicies(
     },
     mutationFn: ({ change }: QueuedPolicyChange) =>
       writePolicies.mutateAsync(change),
-    onSuccess: (result, { change, operationId, revisions }) => {
+    onSuccess: async (result, { change, operationId, revisions }) => {
       settleOperation({ operationId, revisions });
       queryClient.setQueryData<IntegrationToolPolicyMetadata[]>(
         queryKey,
@@ -210,8 +229,10 @@ export function useIntegrationToolPolicies(
           ? 'Tool approval policy updated.'
           : 'Tool approval policies updated.',
       );
+      await refreshSettledPoliciesIfNeeded();
     },
     onError: async (_error, { change, operationId, previous, revisions }) => {
+      refreshNeeded.current = true;
       settleOperation({ operationId, revisions });
       const currentChange = {
         ...change,
@@ -229,21 +250,7 @@ export function useIntegrationToolPolicies(
       // memory. Wait until the whole serialized queue settles before
       // refetching, so an earlier failure cannot erase a later optimistic
       // value before its write starts.
-      if (pendingRevisions.current.size === 0) {
-        await queryClient.invalidateQueries({ queryKey });
-        const queuedChanges = [...pendingChanges.current.values()];
-        if (queuedChanges.length > 0) {
-          queryClient.setQueryData<IntegrationToolPolicyMetadata[]>(
-            queryKey,
-            (current) =>
-              queuedChanges.reduce(
-                (policies, queuedChange) =>
-                  applyOptimisticPolicyChange(policies, queuedChange),
-                current,
-              ),
-          );
-        }
-      }
+      await refreshSettledPoliciesIfNeeded();
       toast.error(
         change.toolNames.length === 1
           ? 'Failed to update the tool approval policy.'
