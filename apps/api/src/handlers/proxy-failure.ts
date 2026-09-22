@@ -1,16 +1,16 @@
-export type ProxyFailureOutcome =
+type ProxyFailureOutcome =
   | 'client_cancelled'
   | 'timeout'
   | 'transport_abort'
   | 'transport_error';
 
-export type ProxyFailureClassification = {
+type ProxyFailureClassification = {
   outcome: ProxyFailureOutcome;
   expected: boolean;
   retryable: boolean;
 };
 
-export type ProxyFailureErrorFields = Record<string, string | undefined>;
+type ProxyFailureErrorFields = Record<string, string | undefined>;
 
 function errorCode(error: unknown): string | undefined {
   if (!error || typeof error !== 'object' || !('code' in error)) {
