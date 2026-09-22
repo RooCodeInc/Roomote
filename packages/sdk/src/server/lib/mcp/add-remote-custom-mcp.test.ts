@@ -177,6 +177,20 @@ describe('addRemoteCustomMcpForFast', () => {
     expect(await db.query.customMcpServers.findMany()).toEqual([]);
   });
 
+  it('rejects a name starting with an internal server prefix', async () => {
+    await expect(
+      addRemoteCustomMcpForFast({
+        userId: adminId,
+        sessionId: crypto.randomUUID(),
+        name: 'gbrain_get',
+        url: 'https://mcp.example.com/mcp',
+      }),
+    ).rejects.toThrow('starts with a Roomote-internal MCP server name');
+
+    expect(guardedFetchMock).not.toHaveBeenCalled();
+    expect(await db.query.customMcpServers.findMany()).toEqual([]);
+  });
+
   describe('for any member, like integration keys', () => {
     it('shares a server with everyone by default and lets its creator authorize it', async () => {
       guardedFetchMock.mockImplementation(

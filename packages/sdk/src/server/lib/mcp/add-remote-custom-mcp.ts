@@ -18,6 +18,7 @@ import {
   PRODUCT_NAME,
   customMcpConnectionId,
   customMcpRemoteServerInputSchema,
+  isInternalMcpServerNamePrefix,
   parseMcpJsonRpcPayload,
   type OAuthClientInformation,
   type CustomMcpServerVisibility,
@@ -796,9 +797,18 @@ export async function addRemoteCustomMcpForFast(input: {
   const actor = { userId: input.userId, isAdmin: user.role === 'admin' };
   const visibility = input.visibility ?? DEFAULT_CUSTOM_MCP_SERVER_VISIBILITY;
 
+  const normalizedName = normalizeFastRemoteMcpName(input.name);
+  // Same guard as the web create path: a name starting with an internal
+  // server's prefix can collide with internal tools in native permissions,
+  // which the mount-time exclusion would then silently drop.
+  if (isInternalMcpServerNamePrefix(normalizedName)) {
+    throw new Error(
+      `'${normalizedName}' starts with a Roomote-internal MCP server name; rename it so its tools cannot collide with the internal server's.`,
+    );
+  }
   const parsed = customMcpRemoteServerInputSchema.parse({
     transport: 'remote',
-    name: normalizeFastRemoteMcpName(input.name),
+    name: normalizedName,
     url: input.url,
     authType: 'none',
   });
