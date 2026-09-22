@@ -539,7 +539,7 @@ function PickerContent({
           aria-hidden="true"
           data-visible={canScrollUp}
           className={cn(
-            'pointer-events-none absolute inset-x-0 top-0 h-12 bg-linear-to-b from-background md:from-card to-transparent transition-transform motion-reduce:transition-none rounded-tl-2xl',
+            'pointer-events-none absolute inset-x-0 top-0 h-12 bg-linear-to-b from-background md:from-popover to-transparent transition-transform motion-reduce:transition-none rounded-tl-2xl',
             canScrollUp ? 'opacity-80' : 'opacity-0',
           )}
         />
@@ -547,7 +547,7 @@ function PickerContent({
           aria-hidden="true"
           data-visible={canScrollDown}
           className={cn(
-            'pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-linear-to-t from-background md:from-card to-transparent transition-transform motion-reduce:transition-none rounded-bl-2xl',
+            'pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-linear-to-t from-background md:from-popover to-transparent transition-transform motion-reduce:transition-none rounded-bl-2xl',
             canScrollDown ? 'opacity-80' : 'opacity-0',
           )}
         />
@@ -705,7 +705,7 @@ export function ModelReasoningPicker({
           fill="none"
           className="pointer-events-none absolute -bottom-[9px] left-5 h-[9px] w-4 overflow-visible"
         >
-          <path d="M0 0H16L8 8Z" className="fill-popover" />
+          <path d="M0 -1H16V0L8 8L0 0Z" className="fill-popover" />
           <path
             d="M0 0.5L8 8.5L16 0.5"
             className="stroke-border"
