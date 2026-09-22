@@ -605,6 +605,25 @@ describe('resolveUnmentionedThreadReplyRouting', () => {
     ).resolves.toEqual({ shouldRoute: false, interjectionDetected: false });
   });
 
+  it('does not route a tied addressee distribution', async () => {
+    mockEvaluateTypeSafeJudgments.mockResolvedValue({
+      ...addresseeAnswer('roomote', 0.95),
+      addressee: {
+        type: 'choice',
+        choice: 'roomote',
+        confidence: 0.25,
+        probabilities: { roomote: 0.5, participant: 0.5, unclear: 0 },
+      },
+    });
+
+    await expect(
+      resolve({
+        eventText: 'Can you check this?',
+        threadMessages: twoHumanThread,
+      }),
+    ).resolves.toEqual({ shouldRoute: false, interjectionDetected: false });
+  });
+
   it('fails closed when the acknowledgement answer is malformed', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     mockEvaluateTypeSafeJudgments.mockResolvedValue({

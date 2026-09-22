@@ -355,14 +355,19 @@ function isValidAddresseeAnswer(value: unknown): value is {
 /** Probabilities are reported rounded, so the sum may miss one slightly. */
 const PROBABILITY_SUM_TOLERANCE = 0.05;
 
-/** The option with the most probability; `choice` is not trusted for this. */
+/**
+ * The option with strictly the most probability, or null on a tie; `choice`
+ * is not trusted for this.
+ */
 function likeliestAddressee(
   probabilities: Record<AddresseeChoice, number>,
-): AddresseeChoice {
-  return (['roomote', 'participant', 'unclear'] as const).reduce(
-    (best, choice) =>
-      probabilities[choice] > probabilities[best] ? choice : best,
-  );
+): AddresseeChoice | null {
+  const ranked = (['roomote', 'participant', 'unclear'] as const)
+    .map((choice) => ({ choice, probability: probabilities[choice] }))
+    .sort((left, right) => right.probability - left.probability);
+  return ranked[0]!.probability > ranked[1]!.probability
+    ? ranked[0]!.choice
+    : null;
 }
 
 /**
