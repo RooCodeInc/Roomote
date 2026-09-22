@@ -30,6 +30,7 @@ import {
   hasQueuedTaskFollowUps,
   queueTaskFollowUp,
   trackLatestUserMessageForReplyQuote,
+  wasTaskFollowUpQueued,
 } from '@roomote/communication/messages';
 import {
   TaskPayloadKind,
@@ -1016,8 +1017,26 @@ async function queueTaskFollowUpForDelivery({
       ...(queuedUserId ? { userId: queuedUserId } : {}),
     });
   } catch (error) {
+    // A lost reply does not mean the queue write failed. Confirm by message
+    // id before rejecting; if even that is unknown, keep the actor as-is
+    // rather than roll back under a prompt that may already be queued.
+    let admitted: boolean | null;
+    try {
+      admitted = await wasTaskFollowUpQueued(runId, messageId);
+    } catch {
+      admitted = null;
+    }
+
+    if (admitted) {
+      return { success: true, result: { queued: true, messageId } };
+    }
+
     // Do not leave a rejected sender as the actor the booting worker uses.
-    if (queuedUserId && latestRun.actingUserId !== queuedUserId) {
+    if (
+      admitted === false &&
+      queuedUserId &&
+      latestRun.actingUserId !== queuedUserId
+    ) {
       await restoreActingUserIdAfterFailedDelivery({
         handlerName:
           deliveryMode === 'steer' ? 'steerMessageToTask' : 'sendMessageToTask',

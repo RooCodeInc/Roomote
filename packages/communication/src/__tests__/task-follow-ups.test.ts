@@ -6,6 +6,7 @@ import {
   peekTaskFollowUps,
   queueTaskFollowUp,
   removeTaskFollowUp,
+  wasTaskFollowUpQueued,
 } from '../messages';
 
 const RUN_ID = 987_654_321;
@@ -75,6 +76,18 @@ describe('task follow-up queue', () => {
     await removeTaskFollowUp(RUN_ID, entry!.raw);
 
     expect(await hasQueuedTaskFollowUps(RUN_ID)).toBe(false);
+  });
+
+  it('confirms admission by client message id', async () => {
+    expect(await wasTaskFollowUpQueued(RUN_ID, 'client-confirm')).toBe(false);
+
+    await queueTaskFollowUp(RUN_ID, {
+      clientMessageId: 'client-confirm',
+      deliveryMode: 'send',
+      prompt: 'confirm me',
+    });
+
+    expect(await wasTaskFollowUpQueued(RUN_ID, 'client-confirm')).toBe(true);
   });
 
   it('surfaces unparseable entries as null so the worker can drop them', async () => {

@@ -429,6 +429,21 @@ export async function queueTaskFollowUp(
   return typeof result === 'number' && result > 0;
 }
 
+/**
+ * Whether this client message id was admitted. Lets a caller resolve an
+ * ambiguous queue write (the script ran but its reply was lost).
+ */
+export async function wasTaskFollowUpQueued(
+  runId: number,
+  clientMessageId: string,
+): Promise<boolean> {
+  return (
+    (await getRedis().exists(
+      getTaskFollowUpDedupeKey(runId, clientMessageId),
+    )) > 0
+  );
+}
+
 export async function hasQueuedTaskFollowUps(runId: number): Promise<boolean> {
   return (await getRedis().llen(getTaskFollowUpsKey(runId))) > 0;
 }
