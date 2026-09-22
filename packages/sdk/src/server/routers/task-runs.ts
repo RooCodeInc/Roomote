@@ -2,6 +2,7 @@ import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import {
   claimTaskFollowUpMessages,
+  activateTaskFollowUpActor,
   db,
   eq,
   markTaskFollowUpAccepted,
@@ -367,6 +368,13 @@ export const taskRunsRouter = router({
   ).mutation(({ input }) =>
     claimTaskFollowUpMessages(input.runId, input.limit),
   ),
+  activateFollowUpActor: runTokenOnlyScoped(
+    z.object({
+      runId: z.number(),
+      id: z.string().uuid(),
+    }),
+    'runId',
+  ).mutation(({ input }) => activateTaskFollowUpActor(input)),
   markFollowUpAccepted: runTokenOnlyScoped(
     z.object({
       runId: z.number(),

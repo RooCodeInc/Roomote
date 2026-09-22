@@ -1,6 +1,7 @@
 import {
   db,
   eq,
+  activateTaskFollowUpActor,
   enqueueTaskFollowUpMessage,
   claimTaskFollowUpMessages,
   hasOpenTaskFollowUpMessages,
@@ -18,6 +19,8 @@ import {
 import { RunStatus } from '@roomote/types';
 
 const TEST_USER_ID = 'user_test_task_follow_up_messages';
+const SENDER_A_ID = 'user_test_task_follow_up_sender_a';
+const SENDER_B_ID = 'user_test_task_follow_up_sender_b';
 const TEST_TASK_ID = 'task_test_task_follow_up_messages';
 let testRunId = -1;
 
@@ -44,6 +47,8 @@ describe('task follow-up message outbox', () => {
   beforeEach(async () => {
     await cleanup();
     await userFactory.create({ id: TEST_USER_ID }).catch(() => {});
+    await userFactory.create({ id: SENDER_A_ID }).catch(() => {});
+    await userFactory.create({ id: SENDER_B_ID }).catch(() => {});
     await taskFactory.create({
       id: TEST_TASK_ID,
       initiatorUserId: TEST_USER_ID,
@@ -93,11 +98,21 @@ describe('task follow-up message outbox', () => {
     ).toBe(first.accepted ? first.message.id : undefined);
 
     const claimed = await claimTaskFollowUpMessages(testRunId);
-    expect(claimed.map((message) => message.prompt)).toEqual([
-      'first',
-      'second',
-    ]);
-    expect(claimed.every((message) => message.claimToken)).toBe(true);
+    expect(claimed.map((message) => message.prompt)).toEqual(['first']);
+    expect(claimed[0]?.claimToken).toBeTruthy();
+    await markTaskFollowUpAccepted({
+      id: claimed[0]!.id,
+      runId: testRunId,
+      claimToken: claimed[0]!.claimToken!,
+    });
+    await markTaskFollowUpDelivered({
+      runId: testRunId,
+      taskId: TEST_TASK_ID,
+      clientMessageId: 'client-first',
+    });
+
+    const secondClaim = await claimTaskFollowUpMessages(testRunId);
+    expect(secondClaim.map((message) => message.prompt)).toEqual(['second']);
   });
 
   it('releases a claimed message for retry and keeps the outbox open until delivery', async () => {
@@ -163,6 +178,51 @@ describe('task follow-up message outbox', () => {
 
     await expect(claimTaskFollowUpMessages(testRunId)).resolves.toEqual([]);
     expect(await hasOpenTaskFollowUpMessages(testRunId)).toBe(false);
+  });
+
+  it('serializes different sender actors behind earlier queued prompts', async () => {
+    const first = await enqueueTaskFollowUpMessage({
+      runId: testRunId,
+      taskId: TEST_TASK_ID,
+      userId: SENDER_A_ID,
+      prompt: 'from A',
+      quoteText: 'from A',
+      clientMessageId: 'client-a',
+      deliveryMode: 'send',
+    });
+    const second = await enqueueTaskFollowUpMessage({
+      runId: testRunId,
+      taskId: TEST_TASK_ID,
+      userId: SENDER_B_ID,
+      prompt: 'from B',
+      quoteText: 'from B',
+      clientMessageId: 'client-b',
+      deliveryMode: 'send',
+    });
+    const [firstClaim] = await claimTaskFollowUpMessages(testRunId);
+
+    expect(first.accepted && second.accepted && firstClaim).toBeTruthy();
+    await expect(
+      activateTaskFollowUpActor({ id: firstClaim!.id, runId: testRunId }),
+    ).resolves.toEqual({ userId: SENDER_A_ID });
+    await markTaskFollowUpAccepted({
+      id: firstClaim!.id,
+      runId: testRunId,
+      claimToken: firstClaim!.claimToken!,
+    });
+
+    // The second sender cannot claim and overwrite the actor before A starts.
+    await expect(claimTaskFollowUpMessages(testRunId)).resolves.toEqual([]);
+
+    await markTaskFollowUpDelivered({
+      runId: testRunId,
+      taskId: TEST_TASK_ID,
+      clientMessageId: 'client-a',
+    });
+    const [secondClaim] = await claimTaskFollowUpMessages(testRunId);
+    await expect(
+      activateTaskFollowUpActor({ id: secondClaim!.id, runId: testRunId }),
+    ).resolves.toEqual({ userId: SENDER_B_ID });
   });
 
   it('discards startup messages when the run settles instead of reactivating it', async () => {

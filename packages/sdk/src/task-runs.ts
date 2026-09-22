@@ -218,6 +218,10 @@ export const claimFollowUpMessages = (
   options: AppRouterInput['taskRuns']['claimFollowUpMessages'],
 ) => client.taskRuns.claimFollowUpMessages.mutate(options);
 
+export const activateFollowUpActor = (
+  options: AppRouterInput['taskRuns']['activateFollowUpActor'],
+) => client.taskRuns.activateFollowUpActor.mutate(options);
+
 export const markFollowUpAccepted = (
   options: AppRouterInput['taskRuns']['markFollowUpAccepted'],
 ) => client.taskRuns.markFollowUpAccepted.mutate(options);

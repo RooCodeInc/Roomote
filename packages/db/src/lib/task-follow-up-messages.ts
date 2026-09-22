@@ -170,6 +170,60 @@ export async function hasOpenTaskFollowUpMessages(
 }
 
 /**
+ * Activate the sender for one admitted message immediately before its prompt
+ * reaches the runtime. Queue admission deliberately does not change the run
+ * actor: a later sender must not strand an earlier queued message.
+ */
+export async function activateTaskFollowUpActor(input: {
+  id: string;
+  runId: number;
+}): Promise<{ userId: string | null } | null> {
+  return db.transaction(async (tx) => {
+    const message = await tx.query.taskFollowUpMessages.findFirst({
+      where: and(
+        eq(taskFollowUpMessages.id, input.id),
+        eq(taskFollowUpMessages.runId, input.runId),
+        inArray(taskFollowUpMessages.status, ['pending', 'accepted']),
+      ),
+      columns: { userId: true },
+    });
+
+    if (!message) {
+      return null;
+    }
+
+    const run = await tx.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, input.runId),
+      columns: { status: true, canceledAt: true, taskPhase: true },
+    });
+
+    if (
+      !run ||
+      run.canceledAt ||
+      isExitedRunStatus(run.status) ||
+      run.taskPhase === 'stopped' ||
+      run.taskPhase === 'shutting_down'
+    ) {
+      return null;
+    }
+
+    if (!message.userId) {
+      return { userId: null };
+    }
+
+    await tx.execute(
+      sql`SELECT id FROM ${taskRuns} WHERE id = ${input.runId} FOR UPDATE`,
+    );
+    await tx
+      .update(taskRuns)
+      .set({ actingUserId: message.userId })
+      .where(eq(taskRuns.id, input.runId));
+
+    return { userId: message.userId };
+  });
+}
+
+/**
  * Claims the oldest pending/accepted messages for one worker run. Expired
  * leases are reclaimable after a worker crash; the caller still passes the
  * client id into RuntimePromptQueue, whose hidden-message replacement makes
@@ -232,6 +286,13 @@ export async function claimTaskFollowUpMessages(
           claim_token IS NULL
           OR claim_expires_at IS NULL
           OR claim_expires_at < ${now.toISOString()}
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM ${taskFollowUpMessages} AS earlier
+          WHERE earlier.run_id = ${taskFollowUpMessages}.run_id
+            AND earlier.sequence < ${taskFollowUpMessages}.sequence
+            AND earlier.status IN ('pending', 'accepted')
         )
       ORDER BY sequence ASC
       LIMIT ${Math.max(1, Math.min(limit, 100))}

@@ -1145,6 +1145,7 @@ export const runTask = async ({
     // reconciliation knows when to refresh.
     let lastPreparedActorUserId: string | null = taskRun.actingUserId ?? null;
     let gitAuthorSyncPending = false;
+    const taskFollowUpClaims = new Map<string, { id: string }>();
     const getLastKnownActorUserId = () => lastPreparedActorUserId;
     const hasPendingGitAuthorSync = () => gitAuthorSyncPending;
     const onActorSynced = (userId: string | null) => {
@@ -1243,6 +1244,26 @@ export const runTask = async ({
           shouldReconnect: true,
           reason: 'Applying updated task model settings before the next turn',
         };
+      }
+
+      if (delivery?.kind === 'queuedPrompt' && delivery.clientMessageId) {
+        const claim = taskFollowUpClaims.get(delivery.clientMessageId);
+
+        if (claim) {
+          const activated = await sdk.taskRuns.activateFollowUpActor({
+            runId: taskRun.id,
+            id: claim.id,
+          });
+
+          if (!activated) {
+            return {
+              shouldReconnect: false,
+              shouldBlockPrompt: true,
+              reason:
+                'The queued follow-up is no longer eligible for actor activation',
+            };
+          }
+        }
       }
 
       const finishQueuedPromptPreparation = async (result: {
@@ -1849,6 +1870,8 @@ export const runTask = async ({
         });
 
         for (const message of messages) {
+          taskFollowUpClaims.set(message.clientMessageId, { id: message.id });
+
           const runtimeAlreadyQueued =
             message.status === 'accepted' &&
             (harness.getQueuedMessageSnapshots?.() ?? []).some(
@@ -1865,16 +1888,132 @@ export const runTask = async ({
             continue;
           }
 
-          const sent = await sendPrompt({
-            prompt: message.prompt,
-            images: message.images ?? undefined,
-            queueOnly: true,
-            source: message.source ?? undefined,
-            userId: message.userId ?? undefined,
-            userName: message.userName ?? undefined,
-            userImageUrl: message.userImageUrl ?? undefined,
-            clientMessageId: message.clientMessageId,
-          });
+          const status = harnessManager.getStatus();
+          const hasRuntimeSession = Boolean(status.sessionId);
+
+          // A normal task may still be creating its initial session while the
+          // worker is already polling. Hold a steer until that session exists
+          // so the first startup steer uses native steering instead of being
+          // trapped in a queue that has no turn to drain it.
+          if (
+            !hasRuntimeSession &&
+            message.deliveryMode === 'steer' &&
+            status.phase !== 'waiting_for_prompt'
+          ) {
+            await sdk.taskRuns.releaseFollowUpMessage({
+              runId: taskRun.id,
+              id: message.id,
+              claimToken: message.claimToken!,
+            });
+            break;
+          }
+
+          const isEmptySession =
+            !hasRuntimeSession && status.phase === 'waiting_for_prompt';
+          const actorChanged = Boolean(
+            message.userId && message.userId !== getLastKnownActorUserId(),
+          );
+          const queueOnly =
+            !isEmptySession &&
+            (message.deliveryMode === 'send'
+              ? status.phase === 'running' ||
+                status.phase === 'waiting_for_user_input'
+              : actorChanged);
+
+          let sent: boolean;
+
+          if (isEmptySession) {
+            const activated = await sdk.taskRuns.activateFollowUpActor({
+              runId: taskRun.id,
+              id: message.id,
+            });
+            if (!activated) {
+              await sdk.taskRuns.releaseFollowUpMessage({
+                runId: taskRun.id,
+                id: message.id,
+                claimToken: message.claimToken!,
+                error: 'Queued follow-up actor activation failed.',
+              });
+              break;
+            }
+
+            const prepared = await prepareActorScopedTurn(
+              message.userId ?? undefined,
+            );
+            if (prepared === false || prepared.skippedMismatch) {
+              await sdk.taskRuns.releaseFollowUpMessage({
+                runId: taskRun.id,
+                id: message.id,
+                claimToken: message.claimToken!,
+                error: 'Queued follow-up actor preparation failed.',
+              });
+              break;
+            }
+
+            sent = harnessManager.startNewTaskFromPrompt({
+              prompt: message.prompt,
+              images: message.images ?? undefined,
+              workflowPhase:
+                getFollowUpWorkflowPhase(message.prompt) ?? undefined,
+              source: message.source ?? undefined,
+              userId: message.userId ?? undefined,
+              userName: message.userName ?? undefined,
+              userImageUrl: message.userImageUrl ?? undefined,
+              clientMessageId: message.clientMessageId,
+            });
+            taskFollowUpClaims.delete(message.clientMessageId);
+          } else if (!queueOnly) {
+            const activated = await sdk.taskRuns.activateFollowUpActor({
+              runId: taskRun.id,
+              id: message.id,
+            });
+            if (!activated) {
+              await sdk.taskRuns.releaseFollowUpMessage({
+                runId: taskRun.id,
+                id: message.id,
+                claimToken: message.claimToken!,
+                error: 'Queued follow-up actor activation failed.',
+              });
+              break;
+            }
+
+            const prepared = await prepareActorScopedTurn(
+              message.userId ?? undefined,
+              { allowMcpReconnect: false },
+            );
+            if (prepared === false || prepared.skippedMismatch) {
+              await sdk.taskRuns.releaseFollowUpMessage({
+                runId: taskRun.id,
+                id: message.id,
+                claimToken: message.claimToken!,
+                error: 'Queued follow-up actor preparation failed.',
+              });
+              break;
+            }
+
+            sent = await sendPrompt({
+              prompt: message.prompt,
+              images: message.images ?? undefined,
+              autoSteerWhenQueued: message.deliveryMode === 'steer',
+              source: message.source ?? undefined,
+              userId: message.userId ?? undefined,
+              userName: message.userName ?? undefined,
+              userImageUrl: message.userImageUrl ?? undefined,
+              clientMessageId: message.clientMessageId,
+            });
+            taskFollowUpClaims.delete(message.clientMessageId);
+          } else {
+            sent = await sendPrompt({
+              prompt: message.prompt,
+              images: message.images ?? undefined,
+              queueOnly: true,
+              source: message.source ?? undefined,
+              userId: message.userId ?? undefined,
+              userName: message.userName ?? undefined,
+              userImageUrl: message.userImageUrl ?? undefined,
+              clientMessageId: message.clientMessageId,
+            });
+          }
 
           if (!sent) {
             await sdk.taskRuns.releaseFollowUpMessage({

@@ -7,7 +7,11 @@ const {
   buildSandboxInstructionMock,
   taskRunsDoneMock,
   taskRunsActivateSlackReplyTargetMock,
+  taskRunsActivateFollowUpActorMock,
+  taskRunsClaimFollowUpMessagesMock,
   taskRunsClearActiveSlackReplyTargetMock,
+  taskRunsMarkFollowUpAcceptedMock,
+  taskRunsReleaseFollowUpMessageMock,
   taskRunsRecordEventMock,
   taskRunsStampMilestoneMock,
   taskRunsSyncActingUserIdMock,
@@ -49,7 +53,13 @@ const {
     threadTs: '1710000000.456',
     reactionsAllowed: false,
   }),
+  taskRunsActivateFollowUpActorMock: vi.fn().mockResolvedValue({
+    userId: 'user-1',
+  }),
+  taskRunsClaimFollowUpMessagesMock: vi.fn().mockResolvedValue([]),
   taskRunsClearActiveSlackReplyTargetMock: vi.fn().mockResolvedValue(undefined),
+  taskRunsMarkFollowUpAcceptedMock: vi.fn().mockResolvedValue(true),
+  taskRunsReleaseFollowUpMessageMock: vi.fn().mockResolvedValue(true),
   taskRunsRecordEventMock: vi.fn().mockResolvedValue(undefined),
   taskRunsStampMilestoneMock: vi.fn().mockResolvedValue(undefined),
   taskRunsSyncActingUserIdMock: vi
@@ -121,7 +131,10 @@ type FakeHarnessManager = EventEmitter & {
   resumeTask: ReturnType<typeof vi.fn>;
   sendFollowUpPrompt: ReturnType<typeof vi.fn>;
   startNewTask: ReturnType<typeof vi.fn>;
+  startNewTaskFromPrompt: ReturnType<typeof vi.fn>;
   initializeWithoutPrompt: ReturnType<typeof vi.fn>;
+  currentPhase: string;
+  currentSessionId?: string;
   cancelTask: ReturnType<typeof vi.fn>;
   dispose: ReturnType<typeof vi.fn>;
 };
@@ -168,8 +181,12 @@ vi.mock('@roomote/sdk/client', () => ({
   sdk: {
     taskRuns: {
       activateSlackReplyTarget: taskRunsActivateSlackReplyTargetMock,
+      activateFollowUpActor: taskRunsActivateFollowUpActorMock,
+      claimFollowUpMessages: taskRunsClaimFollowUpMessagesMock,
       clearActiveSlackReplyTarget: taskRunsClearActiveSlackReplyTargetMock,
       done: taskRunsDoneMock,
+      markFollowUpAccepted: taskRunsMarkFollowUpAcceptedMock,
+      releaseFollowUpMessage: taskRunsReleaseFollowUpMessageMock,
       recordEvent: taskRunsRecordEventMock,
       stampMilestone: taskRunsStampMilestoneMock,
       setHarnessSessionId: taskRunsSetHarnessSessionIdMock,
@@ -198,16 +215,21 @@ vi.mock('../../sandbox-server', () => ({
   HarnessManager: class FakeHarnessManager extends EventEmitter {
     currentIsConnected = true;
     currentSleepAt: number | null = null;
+    currentPhase = 'running';
+    currentSessionId: string | undefined;
     callbacks?: HarnessManagerCallbacks;
     getStatus = vi.fn(() => ({
       isConnected: this.currentIsConnected,
-      phase: 'running',
-      sessionId: undefined,
+      phase: this.currentPhase,
+      sessionId: this.currentSessionId,
     }));
     resumeTask = vi.fn();
     sendFollowUpPrompt = vi.fn(() => true);
     startNewTask = vi.fn();
-    initializeWithoutPrompt = vi.fn();
+    startNewTaskFromPrompt = vi.fn(() => true);
+    initializeWithoutPrompt = vi.fn(() => {
+      this.currentPhase = 'waiting_for_prompt';
+    });
     cancelTask = vi.fn();
     dispose = vi.fn();
 
@@ -294,6 +316,49 @@ import { getDefaultKeepaliveMs } from '../completion';
 import { runTask } from '../run-task';
 import type { EnvironmentSetupSettledOutcome } from '../types';
 
+function createFollowUpRunTaskInput(input: {
+  id: number;
+  taskId: string;
+  prompt?: string;
+  actingUserId?: string | null;
+}) {
+  return {
+    taskRun: {
+      id: input.id,
+      taskId: input.taskId,
+      actingUserId: input.actingUserId ?? null,
+      payloadKind: TaskPayloadKind.StandardTask,
+      harness: 'opencode-server',
+      payload: {},
+      result: null,
+    },
+    envVars: {},
+    workspacePath: '/tmp/workspace',
+    prompt: input.prompt ?? '',
+    harnessInstructions: undefined,
+    agentInstructions: undefined,
+    environmentConfig: undefined,
+    callbacks: {},
+    context: {},
+    logger: {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      log: vi.fn(),
+    },
+    harnessSessionId: undefined,
+    workerEnv: {
+      authToken: 'cloud-token',
+      roomoteAppUrl: 'https://api.example.test',
+      trpcUrl: 'https://web.example.test',
+      buildUserFacingEnv: vi.fn(() => ({
+        HOME: '/tmp/home',
+        PATH: '/usr/bin',
+      })),
+    },
+  } as never;
+}
+
 describe('runTask', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -309,6 +374,12 @@ describe('runTask', () => {
       threadTs: '1710000000.456',
       reactionsAllowed: false,
     });
+    taskRunsActivateFollowUpActorMock.mockReset().mockResolvedValue({
+      userId: 'user-1',
+    });
+    taskRunsClaimFollowUpMessagesMock.mockReset().mockResolvedValue([]);
+    taskRunsMarkFollowUpAcceptedMock.mockReset().mockResolvedValue(true);
+    taskRunsReleaseFollowUpMessageMock.mockReset().mockResolvedValue(true);
 
     createHarnessMock.mockResolvedValue({
       harness: {},
@@ -3175,6 +3246,88 @@ describe('runTask', () => {
       visibleInTranscript: false,
     });
     expect(harnessManager?.initializeWithoutPrompt).not.toHaveBeenCalled();
+  });
+
+  it('starts the first queued follow-up normally for an empty session', async () => {
+    taskRunsClaimFollowUpMessagesMock.mockResolvedValueOnce([
+      {
+        id: 'follow-up-empty-session',
+        status: 'pending',
+        deliveryMode: 'send',
+        prompt: 'Start with the queued request.',
+        images: null,
+        source: null,
+        userId: null,
+        userName: null,
+        userImageUrl: null,
+        clientMessageId: 'client-empty-session',
+        claimToken: 'claim-empty-session',
+      },
+    ]);
+
+    await runTask(createFollowUpRunTaskInput({ id: 152, taskId: 'task-152' }));
+
+    const drain = startPollingMock.mock.calls.at(-1)?.[0].drainTaskFollowUps as
+      | (() => Promise<void>)
+      | undefined;
+    expect(drain).toBeTypeOf('function');
+    await drain?.();
+
+    const harnessManager = harnessManagerInstances.at(-1);
+    expect(harnessManager?.initializeWithoutPrompt).toHaveBeenCalledTimes(1);
+    expect(harnessManager?.startNewTaskFromPrompt).toHaveBeenCalledWith({
+      prompt: 'Start with the queued request.',
+      images: undefined,
+      workflowPhase: undefined,
+      source: undefined,
+      userId: undefined,
+      userName: undefined,
+      userImageUrl: undefined,
+      clientMessageId: 'client-empty-session',
+    });
+    expect(harnessManager?.sendFollowUpPrompt).not.toHaveBeenCalled();
+  });
+
+  it('preserves startup steer semantics once a runtime session exists', async () => {
+    taskRunsClaimFollowUpMessagesMock.mockResolvedValueOnce([
+      {
+        id: 'follow-up-steer',
+        status: 'pending',
+        deliveryMode: 'steer',
+        prompt: 'Steer the active task now.',
+        images: null,
+        source: null,
+        userId: null,
+        userName: null,
+        userImageUrl: null,
+        clientMessageId: 'client-startup-steer',
+        claimToken: 'claim-startup-steer',
+      },
+    ]);
+
+    await runTask(createFollowUpRunTaskInput({ id: 153, taskId: 'task-153' }));
+
+    const harnessManager = harnessManagerInstances.at(-1)!;
+    harnessManager.currentSessionId = 'runtime-session-153';
+    harnessManager.currentPhase = 'running';
+
+    const drain = startPollingMock.mock.calls.at(-1)?.[0].drainTaskFollowUps as
+      | (() => Promise<void>)
+      | undefined;
+    await drain?.();
+
+    expect(harnessManager.sendFollowUpPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: 'Steer the active task now.',
+        autoSteerWhenQueued: true,
+        clientMessageId: 'client-startup-steer',
+      }),
+    );
+    expect(taskRunsMarkFollowUpAcceptedMock).toHaveBeenCalledWith({
+      runId: 153,
+      id: 'follow-up-steer',
+      claimToken: 'claim-startup-steer',
+    });
   });
 
   it('does not start the initial prompt if cancellation is requested during startup', async () => {

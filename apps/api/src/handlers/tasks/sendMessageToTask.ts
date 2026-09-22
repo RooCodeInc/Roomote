@@ -1129,8 +1129,6 @@ export async function sendMessageToTask({
       !run.sandboxServerUrl || (await hasOpenTaskFollowUpMessages(run.id));
 
     if (queueBeforeLiveDelivery) {
-      let didSwitchActingUser = false;
-
       try {
         await touchTaskActivity(db, taskId);
         await maybeCreateSlackReplyQuoteContext({
@@ -1141,13 +1139,6 @@ export async function sendMessageToTask({
           message: quoteText,
           senderMode,
         });
-        didSwitchActingUser = await syncActingUserIdBeforeDelivery({
-          runId: run.id,
-          currentActingUserId: run.actingUserId,
-          nextActingUserId: senderUserId,
-          preserveActor: shouldPreserveActor,
-        });
-
         const queued = await persistQueuedTaskFollowUp({
           run: run as LatestTaskRun,
           taskId,
@@ -1162,25 +1153,8 @@ export async function sendMessageToTask({
           deliveryMode: 'send',
         });
 
-        if (!queued.success && didSwitchActingUser) {
-          await restoreActingUserIdAfterFailedDelivery({
-            handlerName: 'sendMessageToTask',
-            runId: run.id,
-            previousActingUserId: run.actingUserId,
-            attemptedActingUserId: senderUserId,
-          });
-        }
-
         return queued;
       } catch (error) {
-        if (didSwitchActingUser) {
-          await restoreActingUserIdAfterFailedDelivery({
-            handlerName: 'sendMessageToTask',
-            runId: run.id,
-            previousActingUserId: run.actingUserId,
-            attemptedActingUserId: senderUserId,
-          });
-        }
         throw error;
       }
     }
@@ -1262,6 +1236,14 @@ export async function sendMessageToTask({
         });
 
         if (queued.success) {
+          if (didSwitchActingUser) {
+            await restoreActingUserIdAfterFailedDelivery({
+              handlerName: 'sendMessageToTask',
+              runId: run.id,
+              previousActingUserId: run.actingUserId,
+              attemptedActingUserId: senderUserId,
+            });
+          }
           return queued;
         }
       }
@@ -1390,8 +1372,6 @@ export async function steerMessageToTask({
       !run.sandboxServerUrl || (await hasOpenTaskFollowUpMessages(run.id));
 
     if (queueBeforeLiveDelivery) {
-      let didSwitchActingUser = false;
-
       try {
         await touchTaskActivity(db, taskId);
         await maybeCreateSlackReplyQuoteContext({
@@ -1402,13 +1382,6 @@ export async function steerMessageToTask({
           message: quoteText,
           senderMode,
         });
-        didSwitchActingUser = await syncActingUserIdBeforeDelivery({
-          runId: run.id,
-          currentActingUserId: run.actingUserId,
-          nextActingUserId: userId,
-          preserveActor: false,
-        });
-
         const queued = await persistQueuedTaskFollowUp({
           run: run as LatestTaskRun,
           taskId,
@@ -1422,25 +1395,8 @@ export async function steerMessageToTask({
           deliveryMode: 'steer',
         });
 
-        if (!queued.success && didSwitchActingUser) {
-          await restoreActingUserIdAfterFailedDelivery({
-            handlerName: 'steerMessageToTask',
-            runId: run.id,
-            previousActingUserId: run.actingUserId,
-            attemptedActingUserId: userId,
-          });
-        }
-
         return queued;
       } catch (error) {
-        if (didSwitchActingUser) {
-          await restoreActingUserIdAfterFailedDelivery({
-            handlerName: 'steerMessageToTask',
-            runId: run.id,
-            previousActingUserId: run.actingUserId,
-            attemptedActingUserId: userId,
-          });
-        }
         throw error;
       }
     }
@@ -1518,6 +1474,14 @@ export async function steerMessageToTask({
         });
 
         if (queued.success) {
+          if (didSwitchActingUser) {
+            await restoreActingUserIdAfterFailedDelivery({
+              handlerName: 'steerMessageToTask',
+              runId: run.id,
+              previousActingUserId: run.actingUserId,
+              attemptedActingUserId: userId,
+            });
+          }
           return queued;
         }
       }
