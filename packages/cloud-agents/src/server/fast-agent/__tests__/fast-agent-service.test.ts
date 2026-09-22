@@ -5634,7 +5634,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
-  it('reports a platform issue with Fast session and acting-user context', async () => {
+  it('reports a platform issue with session and acting-user context', async () => {
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
@@ -10147,7 +10147,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   });
 
   it.each(['web', 'telegram'] as const)(
-    'lets a %s Fast session use the unified sender for an actor-scoped self DM',
+    'lets a %s session use the unified sender for an actor-scoped self DM',
     async (surface) => {
       let unauthorizedRecipientResult: unknown;
       mocks.listIntegrations.mockResolvedValue([

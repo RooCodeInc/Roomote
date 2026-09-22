@@ -790,7 +790,7 @@ describe('deliverFastAgentParentEvent', () => {
     );
   });
 
-  it('rejects a recovered image from a task outside the Fast Session', async () => {
+  it('rejects a recovered image from a task outside the session', async () => {
     mocks.findTaskRuns.mockResolvedValueOnce([]);
 
     await expect(

@@ -43,7 +43,7 @@ Roomote 1.12.2 improves model compatibility, integration access, artifact sharin
 - Buildkite and Cloudflare are available as built-in integrations, and Sessions use the Code Mode Integrations workflow by default.
 - Authorized users can open artifacts directly and share standalone links from artifact creation results without first opening the parent task or Session.
 - Failed sandbox starts and undeliverable Session events recover with bounded retries and clear in-place failure handling instead of remaining stuck indefinitely.
-- Quote web-entered follow-ups in the first Fast session reply on every communication provider.
+- Quote web-entered follow-ups in the first session reply on every communication provider.
 - Session events that cannot be delivered no longer retry indefinitely. An event whose model call fails for a configuration reason (rejected credentials, no credits, an unavailable model) is settled at once and the Session is told once; other failures retry with backoff and are abandoned after a bounded number of attempts. `/health/bullmq` no longer reports the worker unhealthy for events it attempted and could not deliver.
 - Tell Roomote what to do when someone asks to connect a built-in integration privately. Most built-ins connect once for the whole deployment, so a request to keep a connection to oneself cannot be answered by connecting one silently. Roomote now says that the integration connects for everyone, offers the routes that can be private instead, and connects the built-in only when the person accepts the shared connection.
 - Seven recommended models used ids the model catalog does not list, so selecting them failed with a model-not-found error: Grok 4.6 and DeepSeek V4.1 Flash on Vercel AI Gateway, Claude Fable 5.1 and Gemini 3.8 Flash on Requesty, DeepSeek V4.1 Flash on OpenCode Go, Qwen3.8 Max on OpenRouter, and the vision default for the Z.AI Coding Plan (now GLM-5.3 Flash, the plan's image-capable model). Saved selections of the old ids are migrated automatically.
@@ -51,26 +51,26 @@ Roomote 1.12.2 improves model compatibility, integration access, artifact sharin
 
 ## 1.12.1 (2026-09-19)
 
-Roomote 1.12.1 restores model and messaging reliability, strengthens Fast Session evidence and credential handling, and improves automation delivery.
+Roomote 1.12.1 restores model and messaging reliability, strengthens session evidence and credential handling, and improves automation delivery.
 
 ### Highlights
 
 - Restore Kimi for Coding and resolve saved provider credentials for models selected on individual Sessions.
 - Keep Slack and Telegram messaging reliable with bounded provider handling, authenticated destinations, and traceable self-DM delivery.
 - Deliver complete automation outcomes and email actions while verifying delegated-task reports against concrete evidence.
-- Restore integration authentication for self-hosted Fast Sessions and limit helper processes to the environment values they need.
+- Restore integration authentication for self-hosted sessions and limit helper processes to the environment values they need.
 
 ### Patch changes
 
-- Self-hosted Fast Sessions running through BullMQ can mint the authentication tokens required by structured review and deployment integrations instead of starting with no available integration tools. Thanks to @pridemusvaire for contributing this fix.
+- Self-hosted sessions running through BullMQ can mint the authentication tokens required by structured review and deployment integrations instead of starting with no available integration tools. Thanks to @pridemusvaire for contributing this fix.
 - Automation reports now wait for delegated work to finish instead of publishing an internal handoff, and email reports include the same relevant navigation and configuration actions as Slack whenever those actions are available.
-- Fast Sessions now verify delegated-task completion and blocker reports against concrete evidence, reuse sufficient proof already supplied, and make one bounded recovery attempt when the reported result is incomplete or inconsistent.
+- Sessions now verify delegated-task completion and blocker reports against concrete evidence, reuse sufficient proof already supplied, and make one bounded recovery attempt when the reported result is incomplete or inconsistent.
 - Picking a model for a single Session from a provider that none of the deployment's default models use no longer fails with a missing API key error. The provider credential saved in Settings is now resolved for the picked model.
 - Kimi for Coding works again in sessions and tasks. The public model catalog OpenCode reads at runtime renamed this provider, so every request failed before it was sent. Roomote now registers the provider itself instead of depending on that catalog entry. Saved `kimi-for-coding/k2p7` selections move to `kimi-for-coding/kimi-for-coding`, the id Kimi now documents for that model.
 - Keep Slack messages reliable under provider limits by safely truncating oversized content, bounding rate-limit retries, and preventing cached thread reads from overwriting newer edits or hiding deletions.
 - Standalone Telegram messages to your linked account now use a managed private topic when Threaded Mode is enabled and return provider delivery details, so accepted self-DMs are reliably received and traceable without inheriting an unrelated chat or topic.
-- The OpenCode helper process used for Fast Sessions and helper model calls now receives only the environment it uses: model-provider credentials (including any declared in `R_MODEL_ENV_KEYS`) and the variables passed to it explicitly.
-- Explicit messaging requests now use one provider-neutral destination lookup and send flow across Fast Sessions and tasks, with bounded Slack discovery, authenticated self destinations for Slack and Telegram, and the existing provider access checks.
+- The OpenCode helper process used for sessions and helper model calls now receives only the environment it uses: model-provider credentials (including any declared in `R_MODEL_ENV_KEYS`) and the variables passed to it explicitly.
+- Explicit messaging requests now use one provider-neutral destination lookup and send flow across sessions and tasks, with bounded Slack discovery, authenticated self destinations for Slack and Telegram, and the existing provider access checks.
 
 ## 1.12.0 (2026-09-18)
 
@@ -79,7 +79,7 @@ Roomote 1.12 expands self-service integrations and repository discovery, adds br
 ### Highlights
 
 - Connect built-in integrations and personal or shared remote MCP servers directly from Sessions, with integration keys available to every active member.
-- Find connected repositories live by name or description from Fast Sessions and task sandboxes, including deployments without configured environments.
+- Find connected repositories live by name or description from sessions and task sandboxes, including deployments without configured environments.
 - Receive browser attention alerts and automation reports by email, with secure implicit verification when replying to Roomote-initiated email.
 - Delete Sessions with their direct Memory, cycle through artifacts, and recover more reliably from setup, worker, and initial page-loading failures.
 
@@ -87,10 +87,10 @@ Roomote 1.12 expands self-service integrations and repository discovery, adds br
 
 - Built-in automations can deliver reports to an account email address, automations use the configurable Default destination when one is available, and custom automations no longer stop at an arbitrary limit of 25.
 - Verify an unverified account email implicitly when its owner replies to a Roomote-initiated email: the reply must pass DMARC and quote the single-use reference token the outbound email carried, after which the reply is processed normally without a separate verification message or Settings visit.
-- Agents have a read-only `list_repositories` tool that searches connected repositories live, by name or description, with paging. In Fast Sessions it covers every active repository and returns each one's ID, default branch, provider, host, URL, and mapped environments, so a loosely named repository ("my fork of X") is resolved without asking for a URL even on deployments with more repositories than the prompt lists. In task sandboxes it covers the repositories the task is authorized to check out, with their checkout state, alongside the existing `REPOSITORIES.md` index and `clone_repository` tool; it appears in sandboxes once the worker image from this release is in use.
+- Agents have a read-only `list_repositories` tool that searches connected repositories live, by name or description, with paging. In sessions it covers every active repository and returns each one's ID, default branch, provider, host, URL, and mapped environments, so a loosely named repository ("my fork of X") is resolved without asking for a URL even on deployments with more repositories than the prompt lists. In task sandboxes it covers the repositories the task is authorized to check out, with their checkout state, alongside the existing `REPOSITORIES.md` index and `clone_repository` tool; it appears in sandboxes once the worker image from this release is in use.
 - Integration keys are now available to active members without an Experimental settings opt-in. Existing owner and administrator permissions, secure credential substitution, approved origin and method limits, and network safeguards remain unchanged.
 - Home composer suggestions are now available to every user instead of requiring an Experimental setting.
-- Fast Sessions now expose the complete built-in integration catalog and connection status through read-only discovery, then use a separate canonical-ID `connect_integration` action to start the provider's supported OAuth, secure Settings, already-connected, or keyless path. Native, remote MCP, and API-key instructions now share one decision flow that respects explicit choices and never bypasses permission or authorization outcomes. OAuth callbacks remain bound to the requester and Session, then resume the conversation after success, cancellation, or failure. Notion additionally supports an operator-configured public-connection OAuth client while retaining its internal integration secret flow.
+- Sessions now expose the complete built-in integration catalog and connection status through read-only discovery, then use a separate canonical-ID `connect_integration` action to start the provider's supported OAuth, secure Settings, already-connected, or keyless path. Native, remote MCP, and API-key instructions now share one decision flow that respects explicit choices and never bypasses permission or authorization outcomes. OAuth callbacks remain bound to the requester and session, then resume the conversation after success, cancellation, or failure. Notion additionally supports an operator-configured public-connection OAuth client while retaining its internal integration secret flow.
 - Add OpenRouter as a selectable backend for the optional Jev judgment model, reusing the deployment's existing OpenRouter connection while preserving strict response validation and existing fallbacks.
 - Any member can now add a remote MCP server, the way they add an integration key: shared with everyone in the deployment, or private to them. Private servers live under Personal Settings → Personal MCP servers, reach only their owner's Sessions and tasks, and stay invisible to everyone else, administrators included. Shared servers are managed by the member who added them and by administrators, and other members see them read-only. A server can be moved between private and shared without authorizing again. Asking Roomote in a Session to connect a service's MCP server now works for every member, shared by default and private on request. Local (stdio) servers remain administrator-only.
 - Delete a Session and its directly associated Memory from the Session menu, with clear safeguards for active work and private data.
@@ -102,7 +102,7 @@ Roomote 1.12 expands self-service integrations and repository discovery, adds br
 - Cycle directly between artifacts in the artifact viewer without returning to the artifact list.
 - Use a neutral reaction when a pull request closes without merging instead of presenting the closure as a celebration.
 - Block custom integration requests from targeting internal network addresses while preserving explicitly approved public endpoints and methods.
-- Fast Sessions now see the deployment's active connected repositories even when no environments are configured, so a request that names a repository (or "my fork of X") launches an All repositories task instead of asking for a repository URL. The list is capped for large deployments, and the agent only asks when several repositories plausibly match.
+- Sessions now see the deployment's active connected repositories even when no environments are configured, so a request that names a repository (or "my fork of X") launches an All repositories task instead of asking for a repository URL. The list is capped for large deployments, and the agent only asks when several repositories plausibly match.
 - Move Integrations into the top-level navigation and make each integration's connection status easier to scan in its details.
 - Improve mobile Session and task controls by preventing prompts from stealing focus, keeping the Session drawer above the keyboard, and placing Session overflow actions in the bottom-right action rail.
 - Make model selection clearer by refining coding-model routing controls, showing the selected default model in the Session composer, and restoring metadata for recommended Amazon Bedrock models.
@@ -128,8 +128,8 @@ Roomote 1.11 adds private Sessions, smarter model routing and triage, cross-plat
 - Let admins define natural-language coding-model routing rules in Settings > Models, selecting an enabled model and reasoning level for strongly matching work while explicit choices and deployment defaults remain authoritative.
 - Extend experimental peer conversations from Slack to established Discord Fast threads, so linked participants can continue discussion after mentioning one another while Roomote stays quiet unless addressed or clearly needed.
 - Allow Roomote to send notifications and automation reports to account email addresses before they are verified, while keeping verification required for inbound email commands and replies.
-- Let deployment administrators add and authorize custom remote MCP integrations from Fast Sessions without sharing credentials in chat, and prefer a service's official remote MCP server over an integration key when nothing connected covers it.
-- Let tasks and Fast Sessions report admin-fixable platform, configuration, and access issues through the existing Platform Issue Alerts flow. Admins review the exact details in a confirmation page before sending anything to Roomote.
+- Let deployment administrators add and authorize custom remote MCP integrations from sessions without sharing credentials in chat, and prefer a service's official remote MCP server over an integration key when nothing connected covers it.
+- Let tasks and sessions report admin-fixable platform, configuration, and access issues through the existing Platform Issue Alerts flow. Admins review the exact details in a confirmation page before sending anything to Roomote.
 - Add optional Private Sessions that keep transcripts, tasks, artifacts, and integration data owner-only and out of shared Memory. Admins enable them deployment-wide; owners can publish through normal tools after explicitly approving what leaves the Session.
 - Add an optional judgment model for fast routing and triage decisions. Admins can connect TypeSafe in Settings > Models and choose Jev via TypeSafe or Jev via Vercel AI Gateway under Judgment model (or set `R_JUDGMENT_MODEL`). When it is on, Roomote uses it for channel launch criteria, request classification, unmentioned thread replies, Fast environment and skill hints, integration tool search, Memory result ordering, PR review noise, email auto-replies, and Discord forum tags, and keeps its existing behavior whenever the judgment model is unsure or unavailable.
 
@@ -137,9 +137,9 @@ Roomote 1.11 adds private Sessions, smarter model routing and triage, cross-plat
 
 - Make automation controls predictable: scheduled automations ask for a frequency before enabling, required custom fields show validation guidance, and Results shares only output proven safe for the whole deployment.
 - Apply Experimental settings deployment-wide under admin control, keep the peer-conversation control consistent with neighboring settings, and preserve configured Auto-respond channels when the automation is disabled and re-enabled.
-- Give Fast Sessions the same repository access a coding task has. A signed-in member can use GitHub repository tools under one cached installation token that reaches only the connected repositories. Searches pass through with GitHub's own query syntax, `org:` and `repo:` qualifiers pick the right installation, and reads no longer have to name a repository. Calls routed across installations no longer fail with `invalid session` because the GitHub proxy does not carry MCP sessions upstream. Coding tasks stay read-only on this tool path and keep writing through their own checkout.
-- Keep Fast Sessions responsive through transient connection resets, show Working only while Roomote is actually responding, and surface delegated task reports immediately instead of waiting for the parent turn to finish.
-- Fast Sessions find out what connecting to a service's remote MCP server requires before suggesting it. Roomote now registers the deployment with the provider when the server is added, so an authorization link is only shared when it can succeed; a provider that only accepts approved clients is reported in its own words and Roomote continues with your integration key. When an authorization link does fail, the Session is told why instead of landing on a silent page.
+- Give sessions the same repository access a coding task has. A signed-in member can use GitHub repository tools under one cached installation token that reaches only the connected repositories. Searches pass through with GitHub's own query syntax, `org:` and `repo:` qualifiers pick the right installation, and reads no longer have to name a repository. Calls routed across installations no longer fail with `invalid session` because the GitHub proxy does not carry MCP sessions upstream. Coding tasks stay read-only on this tool path and keep writing through their own checkout.
+- Keep sessions responsive through transient connection resets, show Working only while Roomote is actually responding, and surface delegated task reports immediately instead of waiting for the parent turn to finish.
+- Sessions find out what connecting to a service's remote MCP server requires before suggesting it. Roomote now registers the deployment with the provider when the server is added, so an authorization link is only shared when it can succeed; a provider that only accepts approved clients is reported in its own words and Roomote continues with your integration key. When an authorization link does fail, the session is told why instead of landing on a silent page.
 - Agents now check shared Memory for unfamiliar people, projects, companies, and terms before asking users to provide context that Roomote may already know.
 - The "Add your key" card on a Session page now goes away once the conversation moves past the agent's request. It shows only while that request is the open ask, and it disappears when the owner replies without saving a key, saves one, or the approval expires. The approval itself stays available in the key dialog.
 - Allow an owning user to continue a private Session without restating its privacy mode on every turn, while keeping explicit privacy mismatches and non-owner access rejected.
@@ -164,7 +164,7 @@ Roomote 1.10 expands agent research and multi-repository work, reorganizes perso
 ### Minor changes
 
 - Sandbox tasks can now check out additional authorized repositories from environment, repository, repository-set, all-repositories, and connected Blank slate workspaces while keeping the selected workspace responsible for initial tooling and services.
-- Add guarded public URL fetching to the Roomote MCP for Fast Sessions, coding tasks, and external clients, with text formatting, image support, bounded time and size, explicit caller headers, and public-destination checks on every redirect while unrestricted runtime fetching remains disabled.
+- Add guarded public URL fetching to the Roomote MCP for sessions, coding tasks, and external clients, with text formatting, image support, bounded time and size, explicit caller headers, and public-destination checks on every redirect while unrestricted runtime fetching remains disabled.
 
 ### Patch changes
 
@@ -219,7 +219,7 @@ Roomote 1.9.3 makes integration keys personal and reusable, improves artifact an
 
 - Background Session delivery is more resilient: review-feedback dispatch no longer stalls BullMQ through a database lock cycle, and operators get a queue-processing watchdog plus `/health/bullmq` diagnostics when a worker is alive but no longer processing jobs.
 - After an integration key is saved through a Session, the transcript now shows a short, friendly continuation instead of exposing the technical instruction used to resume Fast.
-- Expanded activity groups now preserve reasoning and nested Session details while letting users inspect each tool call through the same shared detail view used elsewhere in task and Fast Session transcripts.
+- Expanded activity groups now preserve reasoning and nested session details while letting users inspect each tool call through the same shared detail view used elsewhere in task and session transcripts.
 - Fast now prepares an integration key directly when a linked SaaS resource needs one, without first probing public access or delegating that probe to a coding task. The secure approval link opens the integration-key dialog correctly, and Fast no longer asks users to enable a setting that is already available.
 - Fast now recognizes when a request needs a service with no connected integration and offers to use an owner-provided integration key instead of asking for screenshots, requiring an administrator-installed connector, or launching work to build one. When integration keys are disabled, Fast points to the correct Experimental setting.
 - Integration keys now belong to their owner instead of one Session, so every Session and coding task that owner starts can use them until they expire or are revoked. Users can add, review, and revoke keys directly under Settings > Integrations without first asking an agent to prepare an approval.
@@ -227,7 +227,7 @@ Roomote 1.9.3 makes integration keys personal and reusable, improves artifact an
 - Roomote code-review checks now recover from transient GitHub summary-read failures and report a neutral, linked diagnostic when the summary remains unavailable instead of incorrectly failing as though no review result was published.
 - CSV and TSV artifacts are easier to scan: gallery cards show abstract table previews, wide tables scroll without clipping columns, and users can choose whether the first row should be treated as column headers.
 - Telegram now resolves automatic pull-request review offers in place, removing stale controls and keeping the confirmation with the original review summary instead of posting a separate reply.
-- Fast Session and coding-task transcripts now show which skills were actually loaded, keep skill instructions private, and prevent agents from claiming that a listed but unloaded skill was used.
+- Session and coding-task transcripts now show which skills were actually loaded, keep skill instructions private, and prevent agents from claiming that a listed but unloaded skill was used.
 - When an absent web user needs a new personal notification thread, Roomote now prefers the Slack, Teams, Telegram, or Discord platform that user most recently chose to start work while preserving existing Session threads and the standard provider fallback order.
 - Self-hosted upgrades now retry the bundled database migration runner when Postgres briefly drops its connection, avoiding a failed deployment when the transaction can safely restart while still failing immediately for migration and SQL errors.
 - Automatic pull-request review follow-ups now confirm the pull request is still open before launching or resuming work, and retire deliveries that have remained stuck for too long, preventing stale feedback from reopening completed work days after a pull request merged.
@@ -309,7 +309,7 @@ Roomote 1.9 adds a native Telegram Fast experience, Session-owned Goal Mode, dir
 - All-repositories coding workspaces now start from a repository index and check out only the repositories a task needs, avoiding slow or stalled startup caused by cloning every active repository in advance.
 - Users can opt into experimental Home suggestions generated from their own recent completed task memories, with privacy-filtered sources, background precomputation, resilient static fallbacks, and support across configured helper-model providers.
 - Web Session notifications now arrive when an absent user needs to review a response or provide input, carry the actual reply into one personal provider thread, and accept replies that continue the same Session or pending task without duplicate or stale notifications.
-- Goal Mode now belongs to the Fast Session instead of one child task, so Roomote can pursue an objective across turns and delegated tasks, continue automatically within a bounded budget, and preserve goal state across web, Telegram, and Discord conversations.
+- Goal Mode now belongs to the session instead of one child task, so Roomote can pursue an objective across turns and delegated tasks, continue automatically within a bounded budget, and preserve goal state across web, Telegram, and Discord conversations.
 - Session owners can now approve narrowly scoped API keys through a secure form without placing credentials in chat or agent context. Fast and attached Docker coding runs can use approved keys only for the selected public HTTPS origin, allowed methods, and lifetime, with revocation and expiry enforced before requests and responses.
 - Cloud users now explicitly accept the experimental Voice data flow before their first call, before microphone capture or OpenAI contact begins. The consent explains that audio, transcripts, and workspace context are sent to OpenAI, is stored per user, and does not change self-hosted Voice behavior.
 
@@ -332,8 +332,8 @@ Roomote 1.9 adds a native Telegram Fast experience, Session-owned Goal Mode, dir
 - Signed-in users no longer remain on the login page, and safe local return paths now resume the requested page without allowing external, protocol-relative, or sign-in-loop redirects.
 - Custom automations can now run for discoverable Slack channels even when the local channel cache has no row, while ambiguous, inaccessible, or unverified workspace matches continue to fail closed.
 - The web app now preserves composer focus after sends, announces integration validation errors to assistive technology, stabilizes optimistic avatars, labels collapsed navigation actions, and keeps rendered text artifacts readable on wide screens.
-- Fast sessions now reject integration tool calls that pass undeclared argument keys, such as chat history bounds wrapped in a stringified `args` field, with an error naming the accepted arguments. Previously the MCP server silently dropped those keys, so the default 24-hour history window applied and the model kept repeating the malformed shape.
-- Fast Sessions now see the names and descriptions of instance skills and inline environment skills in every turn, so Roomote recognizes a matching playbook from the request and loads it without being asked. Previously skills were only discoverable after the model chose to call `list_skills`, so custom skills from Settings > Skills went unused unless a user typed `$skill-name`. Marketplace and repository skills stay on demand; the prompt names each environment's marketplace sources so the model knows when to look them up.
+- Sessions now reject integration tool calls that pass undeclared argument keys, such as chat history bounds wrapped in a stringified `args` field, with an error naming the accepted arguments. Previously the MCP server silently dropped those keys, so the default 24-hour history window applied and the model kept repeating the malformed shape.
+- Sessions now see the names and descriptions of instance skills and inline environment skills in every turn, so Roomote recognizes a matching playbook from the request and loads it without being asked. Previously skills were only discoverable after the model chose to call `list_skills`, so custom skills from Settings > Skills went unused unless a user typed `$skill-name`. Marketplace and repository skills stay on demand; the prompt names each environment's marketplace sources so the model knows when to look them up.
 - Closed agent panels now stay dismissed when users navigate away from a Session and return, while explicitly reopening or deep-linking a task still restores its panel. Thanks to @PierrunoYT for contributing this improvement.
 - Chat channel history results are now bounded to the newest messages that fit a fixed size, with a note telling the agent how to page further back, instead of being cut mid-JSON by the agent's output limit.
 - Long reasoning turns now stay connected through silent inference-provider gaps instead of resetting the stream, aborting in-flight tools, and regenerating the same work. The inference gateway sends standards-compatible SSE keepalives without changing model events or non-streaming responses.
@@ -396,7 +396,7 @@ Roomote 1.8 adds a durable automation results inbox, private personalization, mo
 - Email setup gives unverified members an achievable admin-assisted path when verification delivery is unavailable, and oversized Fast replies retain their trusted reply footer.
 - Fast reports actionable MCP tool failures instead of presenting upstream validation errors with empty structured data as successful results.
 - Clarify how environments help Roomote verify its work.
-- Pull request feedback reaches idle Fast Sessions promptly while delegated tasks continue, while still waiting when the Session is actively responding.
+- Pull request feedback reaches idle sessions promptly while delegated tasks continue, while still waiting when the Session is actively responding.
 - Visual proof work continues with an honestly disclosed representative UI when genuine application state is unavailable instead of stopping at the first infrastructure limitation.
 - Recent Sessions show the current user's genuinely latest work, reveal full truncated titles on hover, and keep the shared rail responsive while a selected Session loads. Thanks to @stea9499 for contributing the title improvement.
 - Coding agents wait for Roomote-managed Docker startup instead of launching duplicate services and can install a necessary system dependency inside the disposable sandbox when authorized work requires it.
@@ -414,7 +414,7 @@ Roomote 1.7 adds natural voice and email conversations, smarter follow-through f
 
 ### Highlights
 
-- Talk with Fast Sessions through configurable GPT-Live voices and previews, or continue Roomote work and private automation reports over email with AgentMail.
+- Talk with sessions through configurable GPT-Live voices and previews, or continue Roomote work and private automation reports over email with AgentMail.
 - Let Fast quietly follow delegated coding tasks, surface meaningful developments, and correct work that drifts from the request.
 - Add natural-language routing rules to built-in automations and manage existing pull requests across supported providers.
 - Track token usage alongside spend in Cost Analytics, including historical totals when tasks are deleted.
@@ -425,20 +425,20 @@ Roomote 1.7 adds natural voice and email conversations, smarter follow-through f
 - Built-in automations can use natural-language Additional rules for repository scope, per-repository routing, and report guidance.
 - Track token usage alongside spend in Cost Analytics with a total-token trend line, provider and model totals and averages, and token-aware drilldowns.
 - DeepSeek V4.1 Flash replaces the dated Flash recommendation across OpenRouter, Vercel AI Gateway, and OpenCode Go.
-- Fast Sessions quietly follow launched coding tasks, report meaningful developments, apply evidence-backed corrections until work settles, and distinguish task-history checks from incoming task reports.
+- Sessions quietly follow launched coding tasks, report meaningful developments, apply evidence-backed corrections until work settles, and distinguish task-history checks from incoming task reports.
 - Agents can close, reopen, retarget, and edit existing pull requests across supported source-control providers without creating replacements.
 - Weekly Manager Stats includes a daily created-versus-merged pull request chart and starts enabled on new deployments once a destination is configured.
 - Unify shared and environment-specific skills in one searchable Settings catalog with availability filters and a marketplace dialog.
-- Talk naturally with Roomote from Fast Sessions, with deployment-wide voice selection and previews while GPT-Live handles audio and Fast handles every utterance with the Session's model, tools, and context.
+- Talk naturally with Roomote from sessions, with deployment-wide voice selection and previews while GPT-Live handles audio and Fast handles every utterance with the Session's model, tools, and context.
 
 ### Patch changes
 
 - Custom automation task models can be changed only by the automation owner or an administrator.
 - Built-in automation switches clearly show whether each automation is enabled or off.
 - Saved automation cards show cadence in the deployment scheduling timezone used for execution.
-- Fast Sessions can manage reminders and automations directly again without a scheduling-discovery step.
-- Fast Sessions can use deployment-wide custom remote MCP integrations without exposing upstream credentials.
-- Fast Sessions honor saved Routing Rules when selecting an environment or delegated coding-task model.
+- Sessions can manage reminders and automations directly again without a scheduling-discovery step.
+- Sessions can use deployment-wide custom remote MCP integrations without exposing upstream credentials.
+- Sessions honor saved Routing Rules when selecting an environment or delegated coding-task model.
 - Source-control and Linear webhook redeliveries no longer risk repeating actions when the original audit outcome was not finalized.
 - Route every voice utterance through Fast so product answers use the Session's tools, context, and safeguards instead of unverified direct voice output.
 - Move focus into required follow-up fields and dependent selectors after committed choices in guided setup flows.
@@ -477,7 +477,7 @@ Roomote 1.6 adds flexible sandbox and public-repository work, native conversatio
 - Sessions and custom automations can delegate sandbox work to a Blank slate target that starts without cloning repositories or requiring source-control credentials.
 - Agent replies and delegated reports can present pie, bar, area, and line charts in Slack and Roomote web transcripts, with accessible data tables and text fallbacks for other chat providers.
 - Fast and coding tasks can inspect public GitHub repositories through native tools without connecting the target repository or linking a personal account, while private access and writes remain connection-scoped.
-- Operators can opt into progressive scheduling discovery for Fast Sessions, reducing the tools and guidance sent on ordinary turns while preserving reminder and custom automation behavior when scheduling is needed.
+- Operators can opt into progressive scheduling discovery for sessions, reducing the tools and guidance sent on ordinary turns while preserving reminder and custom automation behavior when scheduling is needed.
 
 ### Patch changes
 
@@ -499,7 +499,7 @@ Roomote 1.5.1 makes Fast guidance and follow-up behavior more reliable, clarifie
 ### Patch changes
 
 - Session task cards now label pull request review work as a Code review agent and use matching task descriptions, making review work easier to distinguish from ordinary coding tasks on desktop and mobile.
-- Fast Sessions now apply deployment-wide Agent Guidance and reload saved guidance for each new turn, matching the behavior promised in Settings while leaving already-running coding tasks unchanged.
+- Sessions now apply deployment-wide Agent Guidance and reload saved guidance for each new turn, matching the behavior promised in Settings while leaving already-running coding tasks unchanged.
 - Fast now evaluates bounded monitoring at eligible closeouts, offering a specific follow-up when an unresolved outcome can be checked while preserving consent, evidence, deduplication, and finite monitoring bounds.
 - On-demand integration tools can be found reliably by exact name again, restoring capability discovery for Better Stack operational triage without weakening integration scope or authorization checks.
 
@@ -567,7 +567,7 @@ Roomote 1.4 brings reminders, clearer shared Sessions, and richer video evidence
 - Expand Session tool exchanges to inspect image questions and results, instructions sent to delegated tasks, and incoming task reports. Consistent robot identities and task links make handoffs easier to follow, and expanded task inspections include the latest submitted report with secret redaction rather than unrelated assistant messages.
 - OpenCode subagents can make one further nested delegation or consultation, allowing depth-two assistance while preserving each role's existing tool permissions.
 - Custom automations now run through Sessions, report delegated results together with actionable suggestions, and keep accepted suggestions in their originating Session and, on Slack, its report thread, including suggestions published directly by Fast reports. Configured environments are delegation preferences rather than guaranteed sandbox launches. Configure a report destination for chat delivery; otherwise results remain in the web Session without an owner-DM fallback. Runs use the creator's credentials, automations without a creator need an admin to re-save them, and Run now reports queued rather than a launched task ID.
-- Ask a Fast Session for a reminder or recurring check, including whole-second delays, and receive results in the same conversation. Fast can offer a specific, bounded follow-up when it can verify an outstanding outcome, scheduling it after you accept; explicit monitoring requests need no additional opt-in. Ongoing-process monitoring stays quiet without news and stops at the agreed bound or earlier when resolved or no longer actionable. Upcoming wakeups show countdowns above the Session composer and can be cancelled by the Session owner or an admin. Wakeups require no administrator to schedule, are limited to ten per Session, and are cancelled when the Session is archived; delivery is best effort rather than an exact-time guarantee.
+- Ask a session for a reminder or recurring check, including whole-second delays, and receive results in the same conversation. Fast can offer a specific, bounded follow-up when it can verify an outstanding outcome, scheduling it after you accept; explicit monitoring requests need no additional opt-in. Ongoing-process monitoring stays quiet without news and stops at the agreed bound or earlier when resolved or no longer actionable. Upcoming wakeups show countdowns above the Session composer and can be cancelled by the Session owner or an admin. Wakeups require no administrator to schedule, are limited to ten per Session, and are cancelled when the Session is archived; delivery is best effort rather than an exact-time guarantee.
 - See other people viewing a Session through header avatars and name tooltips; your own avatar is omitted, and the indicator disappears when you are the only viewer.
 - Connecting a Slack account can set up a public #roomote-managers channel when no Manager Channel is configured, without enabling automations or replacing explicit report destinations. Existing Slack apps need updated permissions, reinstallation, and an account reconnect to use automatic channel setup.
 - Fast replies can deliver task recordings as native Slack videos, with authorized viewer links when delivery is unavailable. Motion-heavy demos can opt into native recording up to 60 FPS while ordinary recordings remain at 30 FPS. Existing Slack installations need the new files:write permission, and higher-FPS capture requires the updated recording runtime.
@@ -582,7 +582,7 @@ Roomote 1.4 brings reminders, clearer shared Sessions, and richer video evidence
 - USD costs use consistent thousands separators, and Task Info refreshes inference costs when opened and while visible instead of leaving stale totals on screen.
 - Device-code connections can recover after a failed authorization dialog is closed and reopened, including GitHub Copilot, ChatGPT, and xAI connections.
 - Discord automation threads accept directed follow-ups without another mention, thread replies avoid invalid inline reply references, and coding-task links clearly identify newly started work.
-- Honor custom automation model and reasoning overrides for the Fast session across initial and resumed turns, without applying them to delegated coding tasks.
+- Honor custom automation model and reasoning overrides for the session across initial and resumed turns, without applying them to delegated coding tasks.
 - Fast retains follow-up messages sent during response closeout for the next turn, while reactions and platform events no longer discard parked questions or turn their retry notices into false interruptions.
 - Merge announcements recover uniquely matched signed pull request screenshot URLs after redaction so images remain available without relaxing safe-fetch restrictions.
 - Session board cards and long labels stay within mobile layouts, composer suggestion hints no longer overlap typed text, and mobile suggestion buttons use a shorter Accept label while desktop retains the keyboard hint. Automations uses more of the available screen width.
@@ -647,7 +647,7 @@ Roomote 1.3.1 improves Fast, Live Preview, chat, and MCP coordination while addi
 - On-demand integration tools now accept their discovered required arguments, including nested objects and arrays, instead of rejecting otherwise valid calls.
 - Live Preview now explains setup, startup, timeout, expiry, and wake failures with actionable retry states, while concurrent resume requests converge on the same recovery instead of showing a false failure.
 - Organization-wide tasks no longer create invalid pull request links when a bare GitHub checkout result does not identify a concrete repository.
-- Fast Sessions can run structured pull request reviews with an explicitly enabled model and reasoning effort, while omitted choices continue to use the deployment's review defaults.
+- Sessions can run structured pull request reviews with an explicitly enabled model and reasoning effort, while omitted choices continue to use the deployment's review defaults.
 - Fast now stays out of Slack conversations between people unless a message is directed at Roomote or it has a useful contribution, while mentions, direct messages, and directed follow-ups remain responsive without a separate `!fast` command.
 - Expanded Slack task cards now stay open while live progress and terminal results update in place.
 - Roomote MCP clients can poll compact cursor-based Session and task updates without repeatedly loading full transcripts or raw tool activity.
@@ -680,7 +680,7 @@ Roomote 1.3 brings every supported entry point into continuous Sessions, expands
 - Resume interrupted Fast work promptly when queue workers restart by draining active turns and handing unfinished work back immediately. Operators can tune the shutdown window with `R_BULLMQ_SHUTDOWN_DRAIN_MS`.
 - Repair GitHub account linking and completed-deployment setup redirects, report missing GitHub App credentials clearly, preserve Linear refresh tokens during same-account reconnects, and work from the real Linear issue instead of its generated delegation stub.
 - Keep image-containing Fast turns on the configured orchestration model, delegate image inspection only when needed, and reliably attach screenshots produced by delegated tasks to Fast replies.
-- Let teammates participate in shared Fast Sessions from the web or a connected chat thread instead of rejecting every message from someone other than the Session owner.
+- Let teammates participate in shared sessions from the web or a connected chat thread instead of rejecting every message from someone other than the Session owner.
 - Resume interrupted Fast turns from their recorded conversation, replies, and tool results, including turns that launched tasks, posted their final reply, reacted with emoji, or started from a platform event. Unfinished work continues without asking the user to repeat the request or duplicating an identical task launch.
 - Let Fast stay silent when people are talking among themselves instead of posting a false turn-budget error, while asking for a rephrase when a request directed at Roomote genuinely goes unanswered.
 - Give self-hosted Fast processes more configurable temporary storage and report actionable filesystem diagnostics instead of failing opaquely when that storage fills.
@@ -715,15 +715,15 @@ Roomote 1.2.4 completes setup from infrastructure readiness and makes unavailabl
 
 ## 1.2.3 (2026-09-03)
 
-Roomote 1.2.3 restores Fast Sessions for deployments that rely on the default task model.
+Roomote 1.2.3 restores sessions for deployments that rely on the default task model.
 
 ### Highlights
 
-- Start Fast Sessions with the default task model when no explicit model override is configured.
+- Start sessions with the default task model when no explicit model override is configured.
 
 ### Patch changes
 
-- Use the task model catalog default for Fast sessions when no explicit orchestration or coding model override is configured.
+- Use the task model catalog default for sessions when no explicit orchestration or coding model override is configured.
 
 ## 1.2.2 (2026-09-03)
 
@@ -740,7 +740,7 @@ Roomote 1.2.2 strengthens deployment and setup reliability while making Slack-dr
 
 - Fixed the Brain (gbrain) service crash-looping after a deploy when its job worker found the queue lock still held by the container being replaced. The worker now retries within the lock's TTL instead of taking the whole service down, so a fresh or redeployed Brain comes up on its own.
 - Render standard Slack and Microsoft Teams reaction receipts as emoji in Fast web transcripts without exposing the internal reaction tool activity, while leaving unknown workspace emoji names visible.
-- Render Slack user mentions as readable, linked names in web task and Fast Session transcripts while preserving the original message text for replies and follow-up tasks.
+- Render Slack user mentions as readable, linked names in web task and session transcripts while preserving the original message text for replies and follow-up tasks.
 - Fixed the setup session failing to offer starter-work choices when the orchestration model passes the trusted `setup_starter_tasks` preset together with placeholder questions. The preset now wins and model-supplied questions are discarded instead of rejecting the call, so onboarding no longer stalls at "choose your first work" on models that fill every optional tool parameter.
 - Resume a Slack user's original request through Fast after account linking instead of starting a separate legacy task, while preserving the original message and thread context.
 - Fixed the bullmq and controller services crashing during upgrades when they started before the database migration finished. On platforms that roll every service at once, a boot that reads a column the pending migration adds could exhaust the restart budget within seconds and stay down until someone redeployed it; both services now wait for the migration to land and then start normally.
@@ -861,7 +861,7 @@ Roomote 1.0.1 improves Session access and task navigation, brings automated Slac
 ### Highlights
 
 - Share Session links across the deployment, see attached work in task-only Sessions, and keep task timelines consistently ordered.
-- Route eligible Slack and Discord automation feeds through Fast, and let authorized Slack Fast sessions discover channels and post standalone updates.
+- Route eligible Slack and Discord automation feeds through Fast, and let authorized Slack sessions discover channels and post standalone updates.
 - Open direct environment launches in their task workspace while keeping Fast retries, model defaults, and pull-request auto-resolve behavior reliable.
 
 ### Patch changes
@@ -869,8 +869,8 @@ Roomote 1.0.1 improves Session access and task navigation, brings automated Slac
 - Route eligible Slack and Discord messages from bots, webhooks, and automated feeds through Fast first, while retaining direct task launch as a fallback so automated work is not dropped.
 - Open the task workspace immediately after a user selects an environment and launches work from the web, instead of routing them through the owning Session first.
 - Show and honor the deployment's Fast orchestration model in the new-Session picker instead of silently persisting the coding model default as a Session override.
-- Recover Fast Sessions whose owner disappears during a quiet provider retry, preserving the silent short-retry experience while ensuring abandoned turns settle to a visible interruption instead of remaining stuck.
-- Give Slack-originated Fast sessions authorized channel discovery and standalone posting while keeping reactions safely scoped to the current inbound message and honoring deployment-disabled tools.
+- Recover sessions whose owner disappears during a quiet provider retry, preserving the silent short-retry experience while ensuring abandoned turns settle to a visible interruption instead of remaining stuck.
+- Give Slack-originated sessions authorized channel discovery and standalone posting while keeping reactions safely scoped to the current inbound message and honoring deployment-disabled tools.
 - Keep pull-request auto-resolve enabled through temporary task snapshot gaps so later review and CI cycles retry automatic dispatch instead of showing duplicate review prompts.
 - Make Sessions reliable and shareable across deployments: any signed-in user with the link can view and contribute like they can with tasks, task-only Sessions show their attached work, and concurrently attached tasks stay consistently ordered.
 - Render Session and task start times in each viewer's local format without triggering hydration errors when the browser and server use different locales or time zones.
@@ -913,11 +913,11 @@ Roomote 1.0 makes Fast the default entry point for conversations, enables Memory
 
 ### Patch changes
 
-- Keep Fast sessions quiet through short transient provider recoveries: retries stay silent unless the wait grows past 30 seconds, all retryable provider errors share a six-retry budget with bounded jittered backoff, and warm-session progress refreshes the recovery budget the way completed coding-task turns do.
+- Keep sessions quiet through short transient provider recoveries: retries stay silent unless the wait grows past 30 seconds, all retryable provider errors share a six-retry budget with bounded jittered backoff, and warm-session progress refreshes the recovery budget the way completed coding-task turns do.
 - Queue delegated-task updates durably for their Fast parent so busy conversations process child progress and completion in order instead of rejecting or killing the parent event after 30 seconds.
 - Keep pull-request review follow-through reliable by showing actionable feedback in Fast and standard web tasks, clearing resolved Roomote findings, preserving the correct destination branch and attribution, and avoiding duplicate review requests.
 - Disable anonymous usage reporting in the bundled Infinity service so self-hosted local Memory embeddings stay quiet by default.
-- Keep Fast Sessions stable through cold starts and refreshes by preserving conversation context, model and reasoning choices, generated titles, pull-request status, and recovery state without duplicate or stale transcript notices.
+- Keep sessions stable through cold starts and refreshes by preserving conversation context, model and reasoning choices, generated titles, pull-request status, and recovery state without duplicate or stale transcript notices.
 - Keep Slack Fast thread titles synchronized with generated and manually edited Session titles instead of leaving conversations labeled `Thread`.
 - Show platform issue alerts sent directly to Slack deployment admins with the same actionable automation card used for configured alert destinations.
 - Keep expanded tool-call details readable in Task and Fast transcripts by wrapping long YAML values within the transcript instead of clipping or overflowing them.
@@ -947,14 +947,14 @@ This patch restores complete Notion database discovery across Memory and the bui
 
 ## 0.45.0 (2026-08-27)
 
-This release adds secure hosted trial inference and self-run Brain model options, expands GLM 5.3 support, and improves reliability across Fast sessions, pull-request reviews, Memory, and chat.
+This release adds secure hosted trial inference and self-run Brain model options, expands GLM 5.3 support, and improves reliability across sessions, pull-request reviews, Memory, and chat.
 
 ### Highlights
 
 - Start hosted deployments with secure, spend-capped Roomote trial inference and accurate cost reporting.
 - Run Brain embeddings and reranking on self-hosted infrastructure with multilingual bundled defaults.
 - Use GLM 5.3 and GLM 5.3 Flash across more existing inference providers.
-- Keep Fast sessions, pull-request re-reviews, Memory ingestion, and chat reporting reliable through retries and resumptions.
+- Keep sessions, pull-request re-reviews, Memory ingestion, and chat reporting reliable through retries and resumptions.
 
 ### Minor changes
 
@@ -969,7 +969,7 @@ This release adds secure hosted trial inference and self-run Brain model options
 - Render Fast replies as rich Markdown in Discord guild channels instead of falling back to plain unformatted messages.
 - Make suggested tasks in Fast automation reports launch reliably across Slack, Discord, Microsoft Teams, and Telegram while keeping each suggestion card's state in sync.
 - Preserve the full Fast conversation context across resumed turns so follow-up answers continue from the existing thread instead of losing earlier messages.
-- Keep Fast session sidebars and information panels usable on mobile by switching them to the same single-panel layout as task workspaces.
+- Keep session sidebars and information panels usable on mobile by switching them to the same single-panel layout as task workspaces.
 - Discover Notion pages and database rows that inherit integration access through shared parents, even when Notion search does not return them.
 - Keep automatic pull-request re-reviews running after their previous sandbox shuts down and anchor each sync review on the head commit that was actually reviewed.
 - Keep Standard tasks and Fast web sessions running through retryable inference-provider failures instead of ending the work prematurely.
@@ -981,27 +981,27 @@ This release adds secure hosted trial inference and self-run Brain model options
 
 ## 0.44.0 (2026-08-26)
 
-This release adds shared memory, skill discovery, and presentational widgets to Fast sessions, expands automation delivery across chat providers, and improves session and pull request review reliability.
+This release adds shared memory, skill discovery, and presentational widgets to sessions, expands automation delivery across chat providers, and improves session and pull request review reliability.
 
 ### Highlights
 
-- Save durable context from Fast sessions and recall it in later work through connected memory providers.
+- Save durable context from sessions and recall it in later work through connected memory providers.
 - Discover and load packaged or repository-defined skills from Fast before delegating work.
-- Render safe status cards, tables, plans, and other presentational widgets in Fast session transcripts.
+- Render safe status cards, tables, plans, and other presentational widgets in session transcripts.
 - Deliver Fast automation reports across Slack, Discord, Microsoft Teams, and Telegram, with direct chat continuation where supported.
 
 ### Minor changes
 
-- Deliver Fast automation reports across Slack, Discord, Microsoft Teams, and Telegram channel or direct-message destinations, with web continuation everywhere and direct chat continuation where the provider supports Fast session identity.
-- Let Fast sessions discover and load packaged and repository-defined skill documents through bounded, session-safe tools without exposing filesystem access.
+- Deliver Fast automation reports across Slack, Discord, Microsoft Teams, and Telegram channel or direct-message destinations, with web continuation everywhere and direct chat continuation where the provider supports session identity.
+- Let sessions discover and load packaged and repository-defined skill documents through bounded, session-safe tools without exposing filesystem access.
 - Let Fast save durable preferences, decisions, corrections, and facts to shared memory so they can be recalled in later sessions, while supporting pluggable memory providers and making concurrent memory ingestion more reliable.
-- Render safe presentational widgets such as status cards, tables, and plans directly in Fast session transcripts while keeping raw HTML confined to the sandboxed web view.
+- Render safe presentational widgets such as status cards, tables, and plans directly in session transcripts while keeping raw HTML confined to the sandboxed web view.
 
 ### Patch changes
 
 - Deliver Fast custom automation reports to their owners through configured Slack direct messages, and fail runs clearly when their configured Fast destination cannot be resolved or supported.
 - Reconcile image-only Fast replies with their canonical transcript events so optimistic messages do not remain duplicated or stale.
-- Keep Fast sessions moving through retryable provider failures without repeating completed tool effects, and forward follow-up instructions to active tasks before posting the confirmation reply.
+- Keep sessions moving through retryable provider failures without repeating completed tool effects, and forward follow-up instructions to active tasks before posting the confirmation reply.
 - Make Fast coding-task kickoffs clearer by describing the repository work and naming the target repository when it is known without exposing internal orchestration details.
 - Restore web-initiated Fast turns in standalone production images by shipping native-tool runtime dependencies and removing stale generated tool files during setup.
 - Honor each user's Fast response mode preference on the homepage even when the browser has a saved workspace, while keeping explicit environment links and active workspace choices ahead of the personal default.
@@ -1015,18 +1015,18 @@ This release adds shared memory, skill discovery, and presentational widgets to 
 
 ## 0.43.0 (2026-08-26)
 
-This release brings Fast sessions into the dashboard, introduces a streamlined Memory experience, launches useful starter tasks directly from setup, and adds optional GitHub review checks.
+This release brings sessions into the dashboard, introduces a streamlined Memory experience, launches useful starter tasks directly from setup, and adds optional GitHub review checks.
 
 ### Highlights
 
-- Start and continue Fast sessions from the dashboard with generated titles and live canonical transcripts.
+- Start and continue sessions from the dashboard with generated titles and live canonical transcripts.
 - Browse and share individual memories from a streamlined Memory settings experience.
 - Launch preselected starter tasks as soon as setup completes.
 - Publish Review Code results as optional GitHub checks for branch protection and rulesets.
 
 ### Minor changes
 
-- Start, title, inspect, and continue Fast sessions from the web dashboard with live canonical transcripts, while Slack and Discord replies link back to the same session view.
+- Start, title, inspect, and continue sessions from the web dashboard with live canonical transcripts, while Slack and Discord replies link back to the same session view.
 - Publish Review Code results as an optional GitHub check that teams can use with branch protection and rulesets.
 - Use consistent Memory naming across Roomote and browse, focus, and share individual memories from a streamlined settings page with recovery controls when ingestion needs attention.
 - Replace the final setup step with preselected starter tasks (speed up CI, security scan, fix test flakes, update dependencies) that launch idempotently as standard tasks when setup completes.
@@ -1034,11 +1034,11 @@ This release brings Fast sessions into the dashboard, introduces a streamlined M
 ### Patch changes
 
 - Keep Slack pull request status and resumed task previews accurate across ordinary, Fast-delegated, retried, reopened, and completed task paths.
-- Keep Fast sessions useful across follow-ups and longer work by preserving native context through helper restarts, exposing deployment task inspection, responding naturally to corrections, and sharing concise progress when work takes time.
+- Keep sessions useful across follow-ups and longer work by preserving native context through helper restarts, exposing deployment task inspection, responding naturally to corrections, and sharing concise progress when work takes time.
 - Make pull request feedback and review checks more reliable by coalescing duplicate actionable notifications, completing checks when reviews finish, and showing provisional findings sooner when a summary is delayed.
 - Render automation result tables in Slack with valid cell payloads, including tables with visually empty cells.
-- Show the first user message as a Fast session's temporary title instead of exposing a timestamp-like conversation identifier while title generation finishes.
-- Allow image-only prompts when starting or continuing Fast sessions while continuing to reject invalid images and empty messages.
+- Show the first user message as a session's temporary title instead of exposing a timestamp-like conversation identifier while title generation finishes.
+- Allow image-only prompts when starting or continuing sessions while continuing to reject invalid images and empty messages.
 
 ## 0.42.0 (2026-08-25)
 
@@ -1082,7 +1082,7 @@ This release adds a shared task board, expands Fast delegation and preferences, 
 ### Highlights
 
 - Coordinate team work from a shared board organized by task lifecycle, ownership, and context.
-- Launch multiple independent tasks from one Fast session, choose their coding models, and consult focused reasoning subagents.
+- Launch multiple independent tasks from one session, choose their coding models, and consult focused reasoning subagents.
 - Send actionable GitHub check failures back to linked tasks and their originating conversations.
 - Warn operators about provider usage limits and deliver configuration issues to admins even without a configured channel.
 
@@ -1099,11 +1099,11 @@ This release adds a shared task board, expands Fast delegation and preferences, 
 
 - Give Brain pull-request pages the PR description and labels from GitHub, GitLab, Gitea, Bitbucket, and Azure DevOps so agents can recall why a change was made, not only its title.
 - Enrich Brain pull-request pages with files changed, code areas, line totals, and review outcomes across supported source-control providers so agents can find the changes that affected a part of the codebase.
-- Keep Fast sessions moving with clearer delegated replies, Slack task cards that resume after follow-ups, recovery from missing runtime dependencies and transient provider outages, and accurate guidance when a provider blocks a response.
+- Keep sessions moving with clearer delegated replies, Slack task cards that resume after follow-ups, recovery from missing runtime dependencies and transient provider outages, and accurate guidance when a provider blocks a response.
 - Show Fast response mode to every user in Personal Settings and apply each saved preference to eligible linked Slack and Discord messages without requiring deployment configuration.
 - Trust only explicitly configured Roomote GitHub App slugs for managed pull-request activity, and keep Roomote attribution in pull-request descriptions to one canonical entry.
 - Make onboarding easier to follow with clearer account, inference-provider, source-control, and environment guidance throughout the setup flow.
-- Make pull-request feedback in Fast sessions reliable by delivering review activity consistently, keeping Slack review actions usable after delegated tasks settle, suppressing duplicate or stale results, and reducing notification pressure on provider quotas.
+- Make pull-request feedback in sessions reliable by delivering review activity consistently, keeping Slack review actions usable after delegated tasks settle, suppressing duplicate or stale results, and reducing notification pressure on provider quotas.
 - Keep Brain task-memory history accurate by recording completed tasks reliably, distinguishing real ingestion gaps from completed backfills, and preventing the history-ingestion banner from returning after completion.
 - Finish Slack task cards with the delegated agent's real result after Fast work settles, preserve actionable input requests, and keep terminal error cards stable while delivery retries.
 - Give Fast and normal Roomote agents the semantic product release in their core prompt context while omitting channel tags and unavailable versions.

@@ -31,7 +31,7 @@ const SOURCE_CONTROL_PROVIDERS: FastAgentSourceControlSurface[] = [
 
 /**
  * Launches the structured review pipeline on a pull request, on behalf of a
- * Fast session. The review task attaches to the requesting session (so it
+ * session. The review task attaches to the requesting session (so it
  * shows up there like any delegated task) and, unlike automatic reviews, its
  * outcome reaches that session as pull-request feedback because the
  * requester is waiting.

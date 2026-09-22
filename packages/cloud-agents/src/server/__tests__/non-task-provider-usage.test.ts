@@ -291,7 +291,7 @@ describe('resolveOpenCodeSmallModel', () => {
     );
   });
 
-  it('runs a held Fast session with native tools and a session-ready binding', async () => {
+  it('runs a held session with native tools and a session-ready binding', async () => {
     process.env = {
       ...originalEnv,
       OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4999',
@@ -734,7 +734,7 @@ describe('resolveOpenCodeSmallModel', () => {
     });
   });
 
-  it('records completed parent and advisor/judge messages once from a Fast session tree', async () => {
+  it('records completed parent and advisor/judge messages once from a session tree', async () => {
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
       R_MODEL: 'openrouter/openai/gpt-5.4',
     });
@@ -1338,7 +1338,7 @@ describe('resolveOpenCodeSmallModel', () => {
     expect(sessionCreateMock).not.toHaveBeenCalled();
   });
 
-  it('validates a durable Fast session before sending its delta prompt', async () => {
+  it('validates a durable session before sending its delta prompt', async () => {
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
       R_MODEL: 'openrouter/openai/gpt-5.4',
     });
@@ -2903,7 +2903,7 @@ describe('resolveOpenCodeSmallModel', () => {
     expect(sessionPromptMock).not.toHaveBeenCalled();
   });
 
-  it('keeps a native Fast session on its own model when it can view attached images', async () => {
+  it('keeps a native session on its own model when it can view attached images', async () => {
     process.env = {
       ...originalEnv,
       OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',

@@ -215,7 +215,7 @@ describe('Discord component callbacks', () => {
     expect(mocks.claimSuggestionByMessage).not.toHaveBeenCalled();
   });
 
-  it('starts a Fast session for a router-backed suggestion when Fast is the default', async () => {
+  it('starts a session for a router-backed suggestion when Fast is the default', async () => {
     mocks.claimSuggestionByMessage.mockResolvedValue({
       outcome: 'claimed',
       suggestion: {
@@ -584,11 +584,11 @@ describe('Discord component callbacks', () => {
     expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 
-  it('releases the suggestion when the Fast session is busy', async () => {
+  it('releases the suggestion when the session is busy', async () => {
     const claimedAt = new Date('2026-08-28T00:00:00.000Z');
     mocks.processFastAgentMessage.mockResolvedValue({
       accepted: false,
-      reason: 'Fast session is busy.',
+      reason: 'Session is busy.',
     });
     mocks.claimSuggestionByMessage.mockResolvedValue({
       outcome: 'claimed',

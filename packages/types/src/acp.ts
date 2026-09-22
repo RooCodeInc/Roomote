@@ -34,7 +34,7 @@ export const ACP_ENVELOPE_EVENT_TYPES = {
   CapabilityOffer: 'roomote_runtime.capability_offer',
   CapabilityOfferResponse: 'roomote_runtime.capability_offer_response',
   TaskCancelled: 'roomote_runtime.task_cancelled',
-  /** Voice call lifecycle marker persisted in a Fast Session transcript. */
+  /** Voice call lifecycle marker persisted in a session transcript. */
   VoiceCall: 'roomote_runtime.voice_call',
   MemorySaved: 'roomote_runtime.memory_saved',
 } as const;
@@ -331,7 +331,7 @@ export function parseAcpTaskCancelledPayload(
 
 /**
  * Payload of the persisted `voice_call` marker written when a voice call on a
- * Fast Session starts or ends. Transcript-only: never sent to the model.
+ * session starts or ends. Transcript-only: never sent to the model.
  */
 export interface AcpVoiceCallPayload {
   phase: 'started' | 'ended';

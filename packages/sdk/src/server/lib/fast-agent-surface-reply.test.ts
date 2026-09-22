@@ -810,7 +810,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
   });
 
   it.each(['', '[View video](https://roomote.example/video)'])(
-    'binds Slack surface replies and selected videos to the Fast session with fallback %j',
+    'binds Slack surface replies and selected videos to the session with fallback %j',
     async (fallback) => {
       mocks.deliverVideos.mockResolvedValueOnce(fallback);
       const user = await userFactory.create();

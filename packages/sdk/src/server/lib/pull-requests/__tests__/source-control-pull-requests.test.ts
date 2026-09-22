@@ -1971,7 +1971,7 @@ Done.`,
 
   it.each([
     {
-      label: 'uses the associated Fast session as the primary web link',
+      label: 'uses the associated session as the primary web link',
       payload: {
         repo: 'acme/web',
         fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
@@ -1994,7 +1994,7 @@ Done.`,
       queriesSession: false,
     },
     {
-      label: 'falls back to the task link when the Fast session is absent',
+      label: 'falls back to the task link when the session is absent',
       payload: {
         repo: 'acme/web',
         fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
@@ -2006,7 +2006,7 @@ Done.`,
     },
     {
       label:
-        'falls back to the task link when the Fast session association does not match',
+        'falls back to the task link when the session association does not match',
       payload: {
         repo: 'acme/web',
         fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
@@ -2021,7 +2021,7 @@ Done.`,
       queriesSession: true,
     },
     {
-      label: 'falls back to the task link when the Fast session is hidden',
+      label: 'falls back to the task link when the session is hidden',
       payload: {
         repo: 'acme/web',
         fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
