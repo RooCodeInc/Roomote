@@ -69,6 +69,15 @@ describe('screenDiffRiskHints', () => {
     expect(result.text).toContain('does not clear the change');
   });
 
+  it('fails open when the decision model errors', async () => {
+    mockScreenReviewHunks.mockRejectedValue(new Error('HTTP 529'));
+
+    await expect(screenDiffRiskHints({ diff })).resolves.toMatchObject({
+      available: false,
+      reason: expect.stringContaining('Continue without it'),
+    });
+  });
+
   it('reports unavailable when there is no judgment model or nothing reviewable', async () => {
     mockScreenReviewHunks.mockResolvedValue(undefined);
 

@@ -30,11 +30,27 @@ export async function screenDiffRiskHints(input: {
       [...input.diff.matchAll(CHANGED_FILE_PATTERN)].map((m) => m[1]!),
     ),
   ];
-  const hints = await screenReviewHunks({
-    title: input.title,
-    changedFiles,
-    diff: input.diff,
-  });
+  let hints: ReviewPrescreenHint[] | undefined;
+
+  try {
+    hints = await screenReviewHunks({
+      title: input.title,
+      changedFiles,
+      diff: input.diff,
+    });
+  } catch (error) {
+    // Advisory: a judgment-model failure must never become a tool error.
+    console.warn(
+      `[DiffRiskHints] Pre-screen failed; returning no hints. ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return {
+      available: false,
+      reason:
+        'The risk pre-screen is unavailable right now. Continue without it.',
+    };
+  }
 
   if (!hints) {
     return {
