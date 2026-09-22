@@ -159,9 +159,9 @@ class NativeGuard implements NativeToolApprovalGuard {
 
     if (visible.length === tools.length) return response;
 
-    return Response.json({
-      ...payload,
-      result: { ...(result as object), tools: visible },
-    });
+    return Response.json(
+      { ...payload, result: { ...(result as object), tools: visible } },
+      { status: response.status },
+    );
   }
 }
