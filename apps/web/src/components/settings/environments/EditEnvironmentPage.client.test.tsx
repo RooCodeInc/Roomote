@@ -28,6 +28,7 @@ const {
   mockYamlEditorState,
   mockEnvironment,
   mockRepositories,
+  mockRepositoriesState,
 } = vi.hoisted(() => {
   const initialConfig = {
     name: 'Warned Project',
@@ -75,6 +76,17 @@ const {
     },
   } as const;
 
+  const repositories = [
+    {
+      id: 'repo-1',
+      fullName: 'acme/api',
+    },
+    {
+      id: 'repo-2',
+      fullName: 'acme/web',
+    },
+  ];
+
   return {
     mockStartDefinitionTask: vi.fn().mockResolvedValue({
       taskId: 'task-1',
@@ -99,16 +111,14 @@ const {
       description: 'Original description',
       config: initialConfig,
     },
-    mockRepositories: [
-      {
-        id: 'repo-1',
-        fullName: 'acme/api',
-      },
-      {
-        id: 'repo-2',
-        fullName: 'acme/web',
-      },
-    ],
+    mockRepositories: repositories,
+    mockRepositoriesState: {
+      data: repositories as Array<{ id: string; fullName: string }> | undefined,
+      isError: false,
+      isFetching: false,
+      isPending: false,
+      refetch: vi.fn(),
+    },
     mockYamlEditorState: {
       initialConfig,
       editedConfig,
@@ -163,8 +173,11 @@ vi.mock('@/hooks/environments', () => ({
 
 vi.mock('@/hooks/source-control', () => ({
   useRepositories: () => ({
-    data: mockRepositories,
-    isPending: false,
+    data: mockRepositoriesState.data,
+    isError: mockRepositoriesState.isError,
+    isFetching: mockRepositoriesState.isFetching,
+    isPending: mockRepositoriesState.isPending,
+    refetch: mockRepositoriesState.refetch,
   }),
 }));
 
@@ -344,6 +357,10 @@ describe('EditEnvironmentPage', () => {
     vi.clearAllMocks();
     mockConfigVersionsState.reset();
     mockYamlEditorState.nextMountId = 0;
+    mockRepositoriesState.data = mockRepositories;
+    mockRepositoriesState.isError = false;
+    mockRepositoriesState.isFetching = false;
+    mockRepositoriesState.isPending = false;
   });
 
   it('links back to the environments settings page', () => {
@@ -623,5 +640,44 @@ describe('EditEnvironmentPage', () => {
       selectedModelId: 'openrouter/z-ai/glm-5.2',
     });
     expect(mockRouterPush).toHaveBeenCalledWith('/task/task-1');
+  });
+
+  it('offers repository retry and blocks the agent while the repository read fails', async () => {
+    mockRepositoriesState.data = undefined;
+    mockRepositoriesState.isError = true;
+
+    const queryClient = new QueryClient();
+    const view = (
+      <QueryClientProvider client={queryClient}>
+        <EditEnvironmentPage environmentId="env-1" />
+      </QueryClientProvider>
+    );
+
+    const { rerender } = render(view);
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: /Use the Onboarding Agent/i }),
+    );
+
+    expect(
+      await screen.findByText('Failed to load repositories.'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Start Agent/i })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: /^Retry$/i }));
+    expect(mockRepositoriesState.refetch).toHaveBeenCalled();
+
+    mockRepositoriesState.data = mockRepositories;
+    mockRepositoriesState.isError = false;
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <EditEnvironmentPage environmentId="env-1" />
+      </QueryClientProvider>,
+    );
+
+    expect(
+      screen.queryByText('Failed to load repositories.'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Start Agent/i })).toBeEnabled();
   });
 });
