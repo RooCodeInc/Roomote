@@ -2,7 +2,11 @@ const mocks = vi.hoisted(() => ({
   redisState: new Map<string, string>(),
   acquireLock: vi.fn(),
   acquireRootBindingLock: vi.fn(),
-  createActivity: vi.fn(() => ({ beginTurn: vi.fn() })),
+  createActivity: vi.fn(() => ({
+    start: vi.fn(),
+    settle: vi.fn().mockResolvedValue(undefined),
+    dispose: vi.fn().mockResolvedValue(undefined),
+  })),
   releaseLock: vi.fn(),
   releaseRootBindingLock: vi.fn(),
   answerQuestion: vi.fn(),
@@ -11,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   postThreadMessage: vi.fn(),
   recordProviderMessage: vi.fn(),
   admitHumanFollowUp: vi.fn(),
+  persistAdmission: vi.fn(),
   resolveFooterContext: vi.fn(),
   createConversationArtifact: vi.fn(),
   resolveSessionImages: vi.fn(),
@@ -47,6 +52,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireLock,
   answerFastAgentQuestion: mocks.answerQuestion,
   fastAgentConversationRepository: { findById: mocks.findConversation },
+  registerFastAgentTurnActivity: vi.fn(() => vi.fn()),
   extractPromptTextAttachments: vi.fn(
     async (inputs: Array<{ filename: string; bytes: Uint8Array }>) => ({
       attachmentTexts: inputs.map(
@@ -81,7 +87,7 @@ vi.mock('@roomote/sdk/server', () => ({
   findSlackConversationSubjectByUserId: vi.fn(async () => null),
   admitFastAgentHumanFollowUp: mocks.admitHumanFollowUp,
   createFastAgentConversationArtifact: mocks.createConversationArtifact,
-  persistFastAgentInlineHumanTurn: vi.fn(async () => null),
+  persistFastAgentInlineHumanTurn: mocks.persistAdmission,
   wakeFastAgentParentEventNow: vi.fn(async () => undefined),
   wakeFastAgentParentEventsOnTurnRelease: vi.fn(),
   recordFastAgentConversationMessageBestEffort: mocks.recordProviderMessage,
@@ -147,6 +153,7 @@ describe('processFastAgentMessage', () => {
       kind: 'turn',
       turnLock: mocks.releaseLock,
     });
+    mocks.persistAdmission.mockResolvedValue(null);
     mocks.answerQuestion.mockImplementation(
       async ({
         adapter,
@@ -1150,6 +1157,51 @@ describe('processFastAgentMessage', () => {
     );
   });
 
+  it('starts Slack activity after durable admission before resolving reply tasks', async () => {
+    const activity = {
+      start: vi.fn(),
+      settle: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn().mockResolvedValue(undefined),
+    };
+    mocks.createActivity.mockReturnValueOnce(activity);
+    mocks.persistAdmission.mockResolvedValueOnce({
+      id: 'row-1',
+      eventKey: 'event-1',
+    });
+    const resolveActiveTasks = vi
+      .fn()
+      .mockResolvedValue([{ taskId: 'review-task' }]);
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => []),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'C123',
+        user: 'U123',
+        text: 'start work',
+        thread_ts: '100.001',
+        ts: '100.002',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+      resolveActiveTasks,
+    });
+
+    expect(activity.start).toHaveBeenCalledOnce();
+    expect(activity.start.mock.invocationCallOrder[0]).toBeLessThan(
+      resolveActiveTasks.mock.invocationCallOrder[0]!,
+    );
+    expect(activity.start.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.answerQuestion.mock.invocationCallOrder[0]!,
+    );
+  });
+
   it('does not add a processing reaction before the Fast turn', async () => {
     const threadMessages = createDeferred<never[]>();
     const slack = {
@@ -1705,7 +1757,7 @@ describe('processFastAgentMessage', () => {
         threadContext: [],
         adapter: expect.objectContaining({
           activity: expect.objectContaining({
-            beginTurn: expect.any(Function),
+            start: expect.any(Function),
           }),
         }),
       }),

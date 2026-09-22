@@ -15,7 +15,11 @@ const mocks = vi.hoisted(() => ({
   discordPostMessage: vi.fn(),
   discordEditMessage: vi.fn(),
   findTeamsConversationRoute: vi.fn(),
-  createActivity: vi.fn(() => ({ start: vi.fn(), settle: vi.fn() })),
+  createActivity: vi.fn(() => ({
+    start: vi.fn(),
+    settle: vi.fn(),
+    dispose: vi.fn().mockResolvedValue(undefined),
+  })),
   slackPostThreadMessage: vi.fn(),
   deliverVideos: vi.fn(),
   slackUpdateMessage: vi.fn(),
