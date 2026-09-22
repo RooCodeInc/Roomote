@@ -28,4 +28,20 @@ describe('fastAgentHumanFollowUpEventSchema', () => {
       }),
     ).toThrow('A human follow-up needs text or an attachment.');
   });
+
+  it('accepts an attachment-text-only human follow-up', () => {
+    expect(
+      fastAgentHumanFollowUpEventSchema.parse({
+        type: 'human_follow_up',
+        eventId: 'message-1',
+        currentMessageId: 'message-1',
+        userId: 'user-1',
+        question: '',
+        attachmentTexts: ['Attachment: notes.txt\nFollow up details.'],
+      }),
+    ).toMatchObject({
+      question: '',
+      attachmentTexts: ['Attachment: notes.txt\nFollow up details.'],
+    });
+  });
 });

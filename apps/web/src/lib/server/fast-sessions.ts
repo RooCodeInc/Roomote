@@ -620,12 +620,17 @@ function parseFastSessionQueuedMessage(row: {
         (image): image is string => typeof image === 'string',
       )
     : undefined;
+  const attachmentTexts = Array.isArray(row.event.attachmentTexts)
+    ? row.event.attachmentTexts.filter(
+        (text): text is string => typeof text === 'string' && text.length > 0,
+      )
+    : undefined;
 
   if (
     typeof clientMessageId !== 'string' ||
     clientMessageId.length === 0 ||
     typeof text !== 'string' ||
-    (text.length === 0 && !images?.length)
+    (text.length === 0 && !images?.length && !attachmentTexts?.length)
   ) {
     return null;
   }
@@ -633,7 +638,7 @@ function parseFastSessionQueuedMessage(row: {
   return {
     id: row.id,
     clientMessageId,
-    text,
+    text: text || (attachmentTexts?.length ? '(queued attachment)' : ''),
     ...(images && images.length > 0 ? { images } : {}),
     timestamp: row.createdAt.getTime(),
   };

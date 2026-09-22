@@ -1978,6 +1978,7 @@ describe('Session queries', () => {
       text: string,
       webFollowUp = true,
       images?: string[],
+      attachmentTexts?: string[],
     ) => ({
       type: 'human_follow_up' as const,
       eventId,
@@ -1986,6 +1987,7 @@ describe('Session queries', () => {
       question: text,
       webFollowUp,
       ...(images ? { images } : {}),
+      ...(attachmentTexts ? { attachmentTexts } : {}),
     });
 
     await db.insert(fastAgentParentEvents).values([
@@ -2011,6 +2013,15 @@ describe('Session queries', () => {
           'data:image/png;base64,aGVsbG8=',
         ]),
         createdAt: new Date('2026-01-01T00:00:02.500Z'),
+      },
+      {
+        conversationId: session.id,
+        eventKey: 'queued-attachment-follow-up',
+        parent,
+        event: event('queued-attachment-client', '', true, undefined, [
+          'Attachment: notes.txt\nFollow up details.',
+        ]),
+        createdAt: new Date('2026-01-01T00:00:02.750Z'),
       },
       {
         conversationId: session.id,
@@ -2043,8 +2054,12 @@ describe('Session queries', () => {
         text: '',
         images: ['data:image/png;base64,aGVsbG8='],
       },
+      {
+        clientMessageId: 'queued-attachment-client',
+        text: '(queued attachment)',
+      },
     ]);
-    expect(polled.queuedMessages).toHaveLength(3);
+    expect(polled.queuedMessages).toHaveLength(4);
 
     const reloaded = await getFastSessionById(
       { userId: owner.id, isAdmin: false },
