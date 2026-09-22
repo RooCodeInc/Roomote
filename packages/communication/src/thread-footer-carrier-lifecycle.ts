@@ -39,6 +39,7 @@ export async function relocateThreadFooterCarrier<
 >(
   params: ThreadFooterCarrierIdentity<TCarrier> & {
     publish: () => Promise<{ carrier: TCarrier; result: TResult } | null>;
+    canPublish?: (current: TCarrier | null) => boolean;
     remember: (
       carrier: TCarrier,
       lock: ThreadReplyFooterLock,
@@ -65,6 +66,7 @@ export async function relocateThreadFooterCarrier<
       }
 
       await assertLock();
+      if (params.canPublish && !params.canPublish(previous)) return null;
       const published = await params.publish();
       if (!published) return null;
 

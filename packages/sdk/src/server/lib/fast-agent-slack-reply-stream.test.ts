@@ -430,6 +430,9 @@ describe('createSlackFastReplyStream', () => {
 
     expect(slack.stopMessageStream).toHaveBeenCalledTimes(2);
     expect(mocks.updateWithFooter).toHaveBeenCalledTimes(2);
+    expect(mocks.updateWithFooter).toHaveBeenLastCalledWith(
+      expect.objectContaining({ preserveNewerCarrier: true }),
+    );
     expect(slack.deleteMessage).toHaveBeenCalledOnce();
     expect(mocks.recordMessage).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: 'session-1', messageId: '200.1' }),

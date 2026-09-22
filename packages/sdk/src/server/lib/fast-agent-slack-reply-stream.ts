@@ -91,7 +91,10 @@ export function createSlackFastReplyStream(params: {
       const images = reply.imageArtifactIds?.length
         ? ((await params.resolveImages?.(reply.imageArtifactIds)) ?? [])
         : [];
-      const updateBody = async (message: string) => {
+      const updateBody = async (
+        message: string,
+        preserveNewerCarrier = false,
+      ) => {
         try {
           return await updateSlackThreadMessageWithFooterText({
             slack: params.slack,
@@ -110,6 +113,7 @@ export function createSlackFastReplyStream(params: {
               sessionId: params.sessionId,
               ...params.footerContext,
             }),
+            preserveNewerCarrier,
           });
         } catch (error) {
           console.warn(
@@ -164,7 +168,7 @@ export function createSlackFastReplyStream(params: {
             sessionStatus: 'processing',
           });
         }
-        updated = await updateBody(reply.message);
+        updated = await updateBody(reply.message, true);
         if (!updated) {
           console.error(
             `[Fast Agent] Slack did not accept the final body for streamed reply ${ts}, and the partial stream could not be removed; keeping it as the delivery.`,
