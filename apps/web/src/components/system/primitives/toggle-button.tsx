@@ -40,7 +40,7 @@ const ToggleButton = React.forwardRef<HTMLButtonElement, ToggleButtonProps>(
         variant === 'ghost'
           ? 'border border-transparent'
           : 'data-[state=on]:border-accent-foreground',
-        'data-[state=on]:text-accent-foreground!',
+        'data-[state=on]:bg-accent-foreground data-[state=on]:text-black',
         className,
       )}
       {...props}
