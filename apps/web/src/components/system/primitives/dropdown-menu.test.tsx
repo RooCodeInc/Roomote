@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import Link from 'next/link';
 
 const state = vi.hoisted(() => ({
   isMobile: false,
@@ -68,7 +69,7 @@ describe('DropdownMenuItem', () => {
       const navigate = vi.fn();
       render(
         <>
-          <a
+          <Link
             href="/automations"
             onClick={(event) => {
               event.preventDefault();
@@ -76,7 +77,7 @@ describe('DropdownMenuItem', () => {
             }}
           >
             Automations
-          </a>
+          </Link>
           <DropdownMenu defaultOpen modal={false}>
             <DropdownMenuTrigger asChild>
               <button>Filter</button>
@@ -100,7 +101,7 @@ describe('DropdownMenuItem', () => {
     state.isMobile = true;
     render(
       <>
-        <a href="/automations">Automations</a>
+        <Link href="/automations">Automations</Link>
         <DropdownMenu defaultOpen>
           <DropdownMenuTrigger asChild>
             <button>Open</button>
