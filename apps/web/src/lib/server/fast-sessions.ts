@@ -18,6 +18,7 @@ import {
   eq,
   fastAgentConversations,
   fastAgentMessages,
+  fastAgentParentEvents,
   llmUsageEvents,
   inArray,
   isNull,
@@ -89,6 +90,15 @@ export type FastSessionMessage = Pick<
   userImageUrl?: string | null;
 };
 
+export type FastSessionQueuedMessage = {
+  id: string;
+  clientMessageId: string;
+  text: string;
+  images?: string[];
+  timestamp: number;
+  optimistic?: boolean;
+};
+
 const fastSessionMessageSelection = {
   id: fastAgentMessages.id,
   eventId: fastAgentMessages.eventId,
@@ -129,6 +139,14 @@ const fastSessionTranscriptVisibilityWhere = sql`(
     and ${fastAgentMessages.metadata} ->> 'platformEventKind' = 'delegated_task'
   )
 )`;
+
+const fastSessionQueuedFollowUpWhere = and(
+  isNull(fastAgentParentEvents.deliveredAt),
+  isNull(fastAgentParentEvents.discardedAt),
+  isNull(fastAgentParentEvents.admission),
+  sql`${fastAgentParentEvents.event} ->> 'type' = 'human_follow_up'`,
+  sql`${fastAgentParentEvents.event} ->> 'webFollowUp' = 'true'`,
+);
 
 /** Signed raw URLs are bucketed so a polling transcript stays byte-stable. */
 const REPLY_IMAGE_SIGNATURE_WINDOW_SECONDS = 60 * 60;
@@ -590,6 +608,82 @@ async function attachFastSessionTaskTitles(messages: FastSessionMessage[]) {
   });
 }
 
+function parseFastSessionQueuedMessage(row: {
+  id: string;
+  event: Record<string, unknown>;
+  createdAt: Date;
+}): FastSessionQueuedMessage | null {
+  const clientMessageId = row.event.currentMessageId;
+  const text = row.event.question;
+
+  if (
+    typeof clientMessageId !== 'string' ||
+    clientMessageId.length === 0 ||
+    typeof text !== 'string' ||
+    text.length === 0
+  ) {
+    return null;
+  }
+
+  const images = Array.isArray(row.event.images)
+    ? row.event.images.filter(
+        (image): image is string => typeof image === 'string',
+      )
+    : undefined;
+
+  return {
+    id: row.id,
+    clientMessageId,
+    text,
+    ...(images && images.length > 0 ? { images } : {}),
+    timestamp: row.createdAt.getTime(),
+  };
+}
+
+export async function getFastSessionQueuedMessages(
+  sessionId: string,
+): Promise<FastSessionQueuedMessage[]> {
+  const rows = await db
+    .select({
+      id: fastAgentParentEvents.id,
+      event: fastAgentParentEvents.event,
+      createdAt: fastAgentParentEvents.createdAt,
+    })
+    .from(fastAgentParentEvents)
+    .where(
+      and(
+        eq(fastAgentParentEvents.conversationId, sessionId),
+        fastSessionQueuedFollowUpWhere,
+      ),
+    )
+    .orderBy(
+      asc(fastAgentParentEvents.createdAt),
+      asc(fastAgentParentEvents.id),
+    );
+
+  return rows.flatMap((row) => {
+    const message = parseFastSessionQueuedMessage(row);
+    return message ? [message] : [];
+  });
+}
+
+export async function hasFastSessionQueuedMessages(
+  sessionId: string,
+): Promise<boolean> {
+  const [row] = await db
+    .select({ id: fastAgentParentEvents.id })
+    .from(fastAgentParentEvents)
+    .where(
+      and(
+        eq(fastAgentParentEvents.conversationId, sessionId),
+        fastSessionQueuedFollowUpWhere,
+      ),
+    )
+    .limit(1);
+
+  return Boolean(row);
+}
+
 function prepareFastSessionMessageRow<
   T extends Pick<
     FastSessionMessage,
@@ -726,6 +820,7 @@ export async function getFastSessionMessagesSince(
   sinceMs: number,
 ): Promise<{
   messages: FastSessionMessage[];
+  queuedMessages: FastSessionQueuedMessage[];
   cursor: number;
 }> {
   const rows = await db
@@ -761,8 +856,13 @@ export async function getFastSessionMessagesSince(
       return prepared ? [prepared] : [];
     }),
   );
+  const queuedMessages = await getFastSessionQueuedMessages(sessionId);
 
-  return { messages: await attachFastSessionTaskTitles(messages), cursor };
+  return {
+    messages: await attachFastSessionTaskTitles(messages),
+    queuedMessages,
+    cursor,
+  };
 }
 
 /**
@@ -901,6 +1001,7 @@ export async function getFastSessionById(
     session.id,
     await attachFastSessionTaskTitles(windowed.reverse()),
   );
+  const queuedMessages = await getFastSessionQueuedMessages(session.id);
 
   // Fast usage events carry the OpenCode session id; a conversation can span
   // several (cold rebuilds), so sum across every session id the transcript
@@ -929,6 +1030,7 @@ export async function getFastSessionById(
   return {
     ...session,
     messages,
+    queuedMessages,
     hasOlderMessages,
     directInferenceCostMicroUsd,
     inferenceCostMicroUsd: directInferenceCostMicroUsd,

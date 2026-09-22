@@ -166,6 +166,7 @@ export default async function SessionDetailPage({
                       : undefined
                   }
                   initialMessages={session.messages}
+                  initialQueuedMessages={session.queuedMessages}
                   hasOlderMessages={session.hasOlderMessages}
                   canReply
                   initialTitle={unifiedSession.title}
@@ -287,6 +288,7 @@ export default async function SessionDetailPage({
         <FastSessionTranscript
           sessionId={session.id}
           initialMessages={session.messages}
+          initialQueuedMessages={session.queuedMessages}
           hasOlderMessages={session.hasOlderMessages}
           canReply
           initialTitle={session.title}

@@ -4,6 +4,7 @@ import {
   fireEvent,
   render,
   screen,
+  within,
   waitFor,
 } from '@testing-library/react';
 import { useState } from 'react';
@@ -3113,12 +3114,142 @@ describe('FastSessionTranscript', () => {
     // Attachment preparation is async before the mutation fires.
     await waitFor(() => expect(replyMutate).toHaveBeenCalled());
     expect(await screen.findByText('Follow up question')).toBeInTheDocument();
-    expect(replyMutate).toHaveBeenCalledWith({
-      sessionId: 'session-1',
-      text: 'Follow up question',
-      model: null,
-      reasoningEffort: null,
+    expect(replyMutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'session-1',
+        text: 'Follow up question',
+        model: null,
+        reasoningEffort: null,
+        clientMessageId: expect.any(String),
+      }),
+    );
+  });
+
+  it('keeps a durably queued admission out of the transcript until delivery', async () => {
+    replyMutate.mockResolvedValue({
+      success: true,
+      admission: 'queued',
+      clientMessageId: 'queued-client-1',
     });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          textMessage({
+            id: 'assistant-1',
+            role: 'assistant',
+            text: 'The active turn is still running.',
+            ts: 1,
+          }),
+        ]}
+        canReply
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, { target: { value: 'Queued follow-up' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+
+    await waitFor(() => expect(replyMutate).toHaveBeenCalled());
+    expect(screen.getByText('Queued follow-up')).toBeInTheDocument();
+    expect(screen.getByRole('log')).not.toHaveTextContent('Queued follow-up');
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [
+          {
+            ...textMessage({
+              id: 'delivered-user-1',
+              role: 'user',
+              text: 'Queued follow-up',
+              ts: 3,
+            }),
+            eventId: 'queued-client-1:user',
+            turnId: 'queued-client-1',
+            metadata: {
+              visibleInTranscript: true,
+              clientMessageId: 'queued-client-1',
+            },
+          },
+        ],
+      });
+    });
+
+    expect(screen.getByRole('log')).toHaveTextContent('Queued follow-up');
+    expect(
+      within(screen.getByRole('log')).getAllByText('Queued follow-up'),
+    ).toHaveLength(1);
+  });
+
+  it('hydrates a pending queue item after reload and reconciles it by client id', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        initialQueuedMessages={[
+          {
+            id: 'parent-event-1',
+            clientMessageId: 'reload-client-1',
+            text: 'Survives reload',
+            timestamp: 2,
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('Survives reload')).toBeInTheDocument();
+    expect(screen.getByRole('log')).not.toHaveTextContent('Survives reload');
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [
+          {
+            ...textMessage({
+              id: 'reload-delivered-user',
+              role: 'user',
+              text: 'Survives reload',
+              ts: 3,
+            }),
+            eventId: 'reload-client-1:user',
+            turnId: 'reload-client-1',
+            metadata: {
+              visibleInTranscript: true,
+              clientMessageId: 'reload-client-1',
+            },
+          },
+        ],
+      });
+    });
+
+    expect(screen.getByRole('log')).toHaveTextContent('Survives reload');
+    expect(
+      within(screen.getByRole('log')).getAllByText('Survives reload'),
+    ).toHaveLength(1);
+  });
+
+  it('renders an immediate turn admission in the transcript without queueing it', async () => {
+    replyMutate.mockResolvedValue({
+      success: true,
+      admission: 'turn',
+      clientMessageId: 'immediate-client-1',
+    });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, { target: { value: 'Immediate message' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+
+    await waitFor(() => expect(replyMutate).toHaveBeenCalled());
+    expect(screen.getByRole('log')).toHaveTextContent('Immediate message');
+    expect(screen.queryByText('Queued messages')).not.toBeInTheDocument();
   });
 
   it('keeps the current-user avatar mounted while an optimistic reply reconciles', async () => {
@@ -3361,12 +3492,15 @@ describe('FastSessionTranscript', () => {
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
 
     await waitFor(() => {
-      expect(replyMutate).toHaveBeenCalledWith({
-        sessionId: 'session-1',
-        text: 'Use these settings',
-        model: 'openrouter/z-ai/glm-5.2',
-        reasoningEffort: 'high',
-      });
+      expect(replyMutate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: 'session-1',
+          text: 'Use these settings',
+          model: 'openrouter/z-ai/glm-5.2',
+          reasoningEffort: 'high',
+          clientMessageId: expect.any(String),
+        }),
+      );
     });
   });
 
@@ -3457,12 +3591,15 @@ describe('FastSessionTranscript', () => {
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
 
     await waitFor(() => {
-      expect(replyMutate).toHaveBeenCalledWith({
-        sessionId: 'session-1',
-        text: 'Wait for the model save',
-        model: 'openrouter/z-ai/glm-5.2',
-        reasoningEffort: null,
-      });
+      expect(replyMutate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: 'session-1',
+          text: 'Wait for the model save',
+          model: 'openrouter/z-ai/glm-5.2',
+          reasoningEffort: null,
+          clientMessageId: expect.any(String),
+        }),
+      );
     });
   });
 
@@ -3486,13 +3623,16 @@ describe('FastSessionTranscript', () => {
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
 
     await waitFor(() => {
-      expect(replyMutate).toHaveBeenCalledWith({
-        sessionId: 'session-1',
-        text: '',
-        images: ['data:image/png;base64,image-1'],
-        model: null,
-        reasoningEffort: null,
-      });
+      expect(replyMutate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: 'session-1',
+          text: '',
+          images: ['data:image/png;base64,image-1'],
+          model: null,
+          reasoningEffort: null,
+          clientMessageId: expect.any(String),
+        }),
+      );
     });
 
     expect(
