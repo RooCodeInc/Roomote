@@ -980,6 +980,7 @@ async function queueTaskFollowUpForDelivery({
     status: true,
     canceledAt: true,
     taskPhase: true,
+    actingUserId: true,
   });
 
   if (
@@ -1015,6 +1016,16 @@ async function queueTaskFollowUpForDelivery({
       ...(queuedUserId ? { userId: queuedUserId } : {}),
     });
   } catch (error) {
+    // Do not leave a rejected sender as the actor the booting worker uses.
+    if (queuedUserId && latestRun.actingUserId !== queuedUserId) {
+      await restoreActingUserIdAfterFailedDelivery({
+        handlerName:
+          deliveryMode === 'steer' ? 'steerMessageToTask' : 'sendMessageToTask',
+        runId,
+        previousActingUserId: latestRun.actingUserId,
+        attemptedActingUserId: queuedUserId,
+      });
+    }
     logHandlerError(
       'sendMessageToTask',
       `Failed to queue follow-up for task run ${runId}: ${

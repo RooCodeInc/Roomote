@@ -490,6 +490,35 @@ describe('sendMessageToTask', () => {
     expect(mockQueueTaskFollowUp).not.toHaveBeenCalled();
   });
 
+  it('rolls the actor back when queue admission fails after the switch', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({ sandboxServerUrl: null, actingUserId: 'user-2' }),
+    );
+    mockQueueTaskFollowUp.mockRejectedValueOnce(new Error('Redis unavailable'));
+
+    const result = await sendMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-1',
+      message: 'Rejected, so do not keep my identity.',
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      status: 500,
+      delivery: 'not_accepted',
+    });
+    expect(mockSyncActingUserForQueuedFollowUp).toHaveBeenCalledWith({
+      runId: 42,
+      senderUserId: 'user-1',
+    });
+    expect(mockRestoreActingUserIdAfterFailedDelivery).toHaveBeenCalledWith({
+      handlerName: 'sendMessageToTask',
+      runId: 42,
+      previousActingUserId: 'user-2',
+      attemptedActingUserId: 'user-1',
+    });
+  });
+
   it('does not re-admit a steer whose startup response was lost', async () => {
     mockFindLatestTaskRun.mockResolvedValue(
       createActiveRun({ runtimeTaskStartedAt: null }),
