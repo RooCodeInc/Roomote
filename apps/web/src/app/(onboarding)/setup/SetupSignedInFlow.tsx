@@ -214,6 +214,7 @@ export function SetupSignedInFlow() {
             />
           ) : step === 'inference' ? (
             <StepConfigureInference
+              cloudEnabled={user?.cloudEnabled === true}
               onUseTrial={goToNextStep}
               onConfigureProvider={() =>
                 goToStep('env-vars', { revisit: true })

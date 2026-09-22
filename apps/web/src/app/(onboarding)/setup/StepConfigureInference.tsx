@@ -15,10 +15,12 @@ import { getSetupStepDefinition } from './types';
 const INFERENCE_STEP = getSetupStepDefinition('inference');
 
 export function StepConfigureInference({
+  cloudEnabled,
   onUseTrial,
   onConfigureProvider,
   onBack,
 }: {
+  cloudEnabled: boolean;
   onUseTrial: () => void;
   onConfigureProvider: () => void;
   onBack?: () => void;
@@ -46,12 +48,22 @@ export function StepConfigureInference({
       <StepTitle text={INFERENCE_STEP.title} />
       <div className="space-y-4 max-w-xl">
         <p>
-          Roomote needs a model provider for, you know, AI stuff.
+          Choose a provider for task inference, the model Roomote uses to work
+          on your tasks.
           <br />
-          Your Roomote Cloud trial includes $5 of inference, enough to complete
-          several tasks and get a practical sense of what Roomote can do. You
-          can also configure your own provider directly.
+          Your Roomote Cloud trial includes $5 of inference, or you can
+          configure your own provider directly.
         </p>
+        {cloudEnabled ? (
+          <p className="text-sm text-muted-foreground">
+            Task inference is separate from judgment. Managed Roomote Cloud uses
+            Kev, a hosted judgment model for fast routing and triage, by default
+            unless you configure another judgment model. Its endpoint does not
+            retain decision text. Connect TypeSafe, OpenRouter, or Vercel AI
+            Gateway in <strong>Settings &gt; Models</strong> to choose a
+            different route.
+          </p>
+        ) : null}
 
         <div className="space-y-0.5 max-w-sm">
           <Button
@@ -67,7 +79,7 @@ export function StepConfigureInference({
               <Gift className="size-4 shrink-0" />
             )}
             <span className="font-medium grow text-left">
-              Use free Roomote trial inference
+              Use Roomote trial for task inference
             </span>
             <ArrowRight />
           </Button>
@@ -80,7 +92,7 @@ export function StepConfigureInference({
           >
             <Plug className="size-4 shrink-0" />
             <span className="font-medium grow text-left">
-              Configure your provider
+              Use my own task-inference provider
             </span>
             <ArrowRight />
           </Button>

@@ -89,6 +89,7 @@ describe('StepConfigureInference', () => {
   it('renders the trial and custom choices with the requested copy', () => {
     render(
       <StepConfigureInference
+        cloudEnabled
         onUseTrial={vi.fn()}
         onConfigureProvider={vi.fn()}
       />,
@@ -97,16 +98,25 @@ describe('StepConfigureInference', () => {
     expect(
       screen.getByRole('heading', { name: 'Configure inference' }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/Roomote needs a model provider/).textContent).toBe(
-      'Roomote needs a model provider for, you know, AI stuff.Your Roomote Cloud trial includes $5 of inference, enough to complete several tasks and get a practical sense of what Roomote can do. You can also configure your own provider directly.',
+    expect(
+      screen.getByText(/Choose a provider for task inference/),
+    ).toHaveTextContent(
+      'Choose a provider for task inference, the model Roomote uses to work on your tasks.Your Roomote Cloud trial includes $5 of inference, or you can configure your own provider directly.',
+    );
+    expect(
+      screen.getByText(/Managed Roomote Cloud uses Kev/),
+    ).toHaveTextContent(
+      'Task inference is separate from judgment. Managed Roomote Cloud uses Kev, a hosted judgment model for fast routing and triage, by default unless you configure another judgment model. Its endpoint does not retain decision text. Connect TypeSafe, OpenRouter, or Vercel AI Gateway in Settings > Models to choose a different route.',
     );
     expect(
       screen.getByRole('button', {
-        name: 'Use free Roomote trial inference',
+        name: 'Use Roomote trial for task inference',
       }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Configure your provider' }),
+      screen.getByRole('button', {
+        name: 'Use my own task-inference provider',
+      }),
     ).toBeInTheDocument();
     expect(screen.getByTestId('gift')).toBeInTheDocument();
     expect(screen.getByTestId('plug')).toBeInTheDocument();
@@ -116,6 +126,7 @@ describe('StepConfigureInference', () => {
     const onUseTrial = vi.fn();
     render(
       <StepConfigureInference
+        cloudEnabled={false}
         onUseTrial={onUseTrial}
         onConfigureProvider={vi.fn()}
       />,
@@ -123,7 +134,7 @@ describe('StepConfigureInference', () => {
 
     fireEvent.click(
       screen.getByRole('button', {
-        name: 'Use free Roomote trial inference',
+        name: 'Use Roomote trial for task inference',
       }),
     );
 
@@ -140,13 +151,16 @@ describe('StepConfigureInference', () => {
     const onConfigureProvider = vi.fn();
     render(
       <StepConfigureInference
+        cloudEnabled={false}
         onUseTrial={vi.fn()}
         onConfigureProvider={onConfigureProvider}
       />,
     );
 
     fireEvent.click(
-      screen.getByRole('button', { name: 'Configure your provider' }),
+      screen.getByRole('button', {
+        name: 'Use my own task-inference provider',
+      }),
     );
 
     expect(onConfigureProvider).toHaveBeenCalledOnce();
@@ -157,6 +171,7 @@ describe('StepConfigureInference', () => {
     const onBack = vi.fn();
     render(
       <StepConfigureInference
+        cloudEnabled={false}
         onUseTrial={vi.fn()}
         onConfigureProvider={vi.fn()}
         onBack={onBack}
