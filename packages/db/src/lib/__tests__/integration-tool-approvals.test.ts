@@ -2,6 +2,7 @@ import {
   db,
   eq,
   integrationToolApprovalRequests,
+  integrationToolAutoEvaluations,
   sessionFactory,
   sessions,
   taskFactory,
@@ -24,6 +25,7 @@ import {
   listPendingIntegrationToolApprovals,
   markIntegrationToolApprovalConsumed,
   recordIntegrationToolAutoEvaluation,
+  recordIntegrationToolShadowEvaluation,
   redactIntegrationToolArgs,
   setIntegrationToolSessionOverride,
   upsertIntegrationToolPolicy,
@@ -557,9 +559,9 @@ describe('auto-approved reservations', () => {
 });
 
 describe('Auto mode', () => {
-  it('keeps the deployment Auto settings, defaulting to shadow', async () => {
+  it('keeps the deployment Auto settings, defaulting to off', async () => {
     await expect(getIntegrationToolAutoSettings()).resolves.toEqual({
-      mode: 'shadow',
+      mode: 'off',
       policy: '',
     });
     await setIntegrationToolAutoSettings({
@@ -571,6 +573,56 @@ describe('Auto mode', () => {
       policy: 'Reads are fine. Never send messages.',
     });
     await setIntegrationToolAutoSettings({ mode: 'off', policy: '' });
+  });
+
+  it('stores Always allow as a choice of its own, unlike the default', async () => {
+    const userId = await user();
+    const integrationId = `always-${Date.now()}`;
+    const modeOf = async () =>
+      (await listIntegrationToolPolicies()).find(
+        (entry) => entry.integrationId === integrationId,
+      )?.mode;
+    await upsertIntegrationToolPolicy({
+      integrationId,
+      toolName: 'read',
+      mode: 'always_allow',
+      updatedByUserId: userId,
+    });
+    expect(await modeOf()).toBe('always_allow');
+    await upsertIntegrationToolPolicy({
+      integrationId,
+      toolName: 'read',
+      mode: 'allow',
+      updatedByUserId: userId,
+    });
+    expect(await modeOf()).toBeUndefined();
+  });
+
+  it('records a shadow assessment of a call nobody was asked about', async () => {
+    const userId = await user();
+    const evaluation = {
+      recommendation: 'approve' as const,
+      answers: { riskScore: 0 },
+      evaluatedAt: new Date().toISOString(),
+    };
+    await recordIntegrationToolShadowEvaluation({
+      userId,
+      taskId: null,
+      integrationId: call.integrationId,
+      toolName: call.toolName,
+      argsSummary: { ...call.args, apiKey: 'sk-live' },
+      evaluation,
+    });
+    const [row] = await db
+      .select()
+      .from(integrationToolAutoEvaluations)
+      .where(eq(integrationToolAutoEvaluations.userId, userId));
+    expect(row).toMatchObject({
+      integrationId: call.integrationId,
+      toolName: call.toolName,
+      argsSummary: { ...call.args, apiKey: '[redacted]' },
+      evaluation,
+    });
   });
 
   it("records the model's view beside the requester's decision", async () => {

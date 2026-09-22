@@ -156,7 +156,7 @@ describe('McpToolManagementDialog tool approvals', () => {
         name: 'Approval mode for web_search_exa',
       }),
     );
-    expect(search.getByRole('radio', { name: 'Always allow' })).toBeChecked();
+    expect(search.getByRole('radio', { name: 'Auto' })).toBeChecked();
     expect(
       within(
         screen.getByRole('radiogroup', {

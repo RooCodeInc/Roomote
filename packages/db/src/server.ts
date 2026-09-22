@@ -155,6 +155,7 @@ export {
   integrationToolPolicies,
   integrationToolUserPolicies,
   integrationToolApprovalRequests,
+  integrationToolAutoEvaluations,
   integrationToolSessionOverrides,
   credentialEgressWorkloads,
   credentialEgressSubstitutes,

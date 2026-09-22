@@ -1,14 +1,19 @@
 import {
   getIntegrationToolAutoSettings,
+  isDeploymentExperimentEnabled,
   recordIntegrationToolAutoEvaluation,
+  recordIntegrationToolShadowEvaluation,
   redactIntegrationToolArgs,
 } from '@roomote/db/server';
 import type {
   IntegrationToolAutoEvaluation,
-  IntegrationToolAutoMode,
+  IntegrationToolAutoSettings,
 } from '@roomote/types';
 
-import { evaluateDecisionModel } from './typesafe-judgment';
+import {
+  evaluateDecisionModel,
+  resolveDecisionModel,
+} from './typesafe-judgment';
 
 const AUTO_EVALUATION_TIMEOUT_MS = 20_000;
 
@@ -67,7 +72,8 @@ const NO = 0.2;
 
 export type AutoRiskAnswers = {
   risk: { score: number; confidence: number };
-  matchesRequest: number;
+  /** Absent when there was no user request to judge the call against. */
+  matchesRequest?: number;
   steeredByUntrustedContent: number;
   /** Absent when the deployment has no guidance to judge against. */
   guidanceFlagsRisk?: number;
@@ -75,10 +81,10 @@ export type AutoRiskAnswers = {
 
 /**
  * Run without a person only when the call reads and changes nothing (with
- * confidence), is what the user asked for, is not steered by untrusted
- * content, and the deployment's guidance does not flag it. Anything less asks.
- * The model can only ever recommend running the call or asking, never
- * rejecting.
+ * confidence), is what the user asked for when that is known, is not steered
+ * by untrusted content, and the deployment's guidance does not flag it.
+ * Anything less asks. The model can only ever recommend running the call or
+ * asking, never rejecting.
  */
 export function recommendFromAutoAnswers(
   answers: AutoRiskAnswers,
@@ -86,7 +92,7 @@ export function recommendFromAutoAnswers(
   const routine =
     answers.risk.score <= RUN_MAX_RISK_SCORE &&
     answers.risk.confidence >= RUN_MIN_RISK_CONFIDENCE &&
-    answers.matchesRequest >= YES &&
+    (answers.matchesRequest ?? 1) >= YES &&
     answers.steeredByUntrustedContent <= NO &&
     (answers.guidanceFlagsRisk ?? 0) <= NO;
   return routine ? 'approve' : 'ask';
@@ -109,11 +115,14 @@ export async function evaluateIntegrationToolAutoDecision(input: {
       (input.deploymentGuidance ??
         (await getIntegrationToolAutoSettings()).policy) ||
       null;
-    // The guidance question has nothing to judge against without guidance.
-    const { guidanceFlagsRisk, ...core } = QUESTIONS;
-    const questions = deploymentGuidance
-      ? { ...core, guidanceFlagsRisk }
-      : core;
+    // A question with nothing to judge against is not asked: the guidance
+    // one without guidance, the request one without a request.
+    const { guidanceFlagsRisk, matchesRequest, ...core } = QUESTIONS;
+    const questions = {
+      ...core,
+      ...(input.userRequest ? { matchesRequest } : {}),
+      ...(deploymentGuidance ? { guidanceFlagsRisk } : {}),
+    };
     const answers = await evaluateDecisionModel({
       state: {
         call: {
@@ -141,9 +150,11 @@ export async function evaluateIntegrationToolAutoDecision(input: {
         score: answers.risk.score,
         confidence: answers.risk.confidence,
       },
-      matchesRequest: answers.matchesRequest.noul,
+      ...(answers.matchesRequest
+        ? { matchesRequest: answers.matchesRequest.noul }
+        : {}),
       steeredByUntrustedContent: answers.steeredByUntrustedContent.noul,
-      ...('guidanceFlagsRisk' in answers
+      ...(answers.guidanceFlagsRisk
         ? { guidanceFlagsRisk: answers.guidanceFlagsRisk.noul }
         : {}),
     };
@@ -152,7 +163,9 @@ export async function evaluateIntegrationToolAutoDecision(input: {
       answers: {
         riskScore: riskAnswers.risk.score,
         riskConfidence: riskAnswers.risk.confidence,
-        matchesRequest: riskAnswers.matchesRequest,
+        ...(riskAnswers.matchesRequest === undefined
+          ? {}
+          : { matchesRequest: riskAnswers.matchesRequest }),
         steeredByUntrustedContent: riskAnswers.steeredByUntrustedContent,
         ...(riskAnswers.guidanceFlagsRisk === undefined
           ? {}
@@ -166,21 +179,65 @@ export async function evaluateIntegrationToolAutoDecision(input: {
 }
 
 /**
- * Shadow: the requester is asked as usual, and the model's view is recorded
- * on the approval so the two can be compared. Never awaited by the ask, and
- * never able to fail it.
+ * What Auto mode is doing right now. `on` needs the experiment, the setting,
+ * and a hosted judgment model: the helper-model fallback is an LLM call per
+ * tool call, which is never turned on implicitly. `shadow` is the same
+ * assessment recorded without acting, while Auto is off and a hosted model
+ * is there to do it cheaply.
  */
-export function recordIntegrationToolAutoEvaluationInBackground(
-  approvalId: string,
-  input: Parameters<typeof evaluateIntegrationToolAutoDecision>[0],
-): void {
-  void evaluateIntegrationToolAutoDecision(input)
-    .then((evaluation) =>
-      recordIntegrationToolAutoEvaluation(approvalId, evaluation),
-    )
+export type IntegrationToolAutoState = {
+  mode: 'off' | 'shadow' | 'on';
+  settings: IntegrationToolAutoSettings;
+  model: 'judgment' | 'helper' | null;
+};
+
+export async function resolveIntegrationToolAutoState(): Promise<IntegrationToolAutoState> {
+  const [enabled, settings, model] = await Promise.all([
+    isDeploymentExperimentEnabled('integrationToolApprovals'),
+    getIntegrationToolAutoSettings(),
+    resolveDecisionModel().catch(() => null),
+  ]);
+  const hosted = model?.kind === 'judgment';
+  const mode =
+    !enabled || !hosted ? 'off' : settings.mode === 'on' ? 'on' : 'shadow';
+  return { mode, settings, model: model?.kind ?? null };
+}
+
+/**
+ * Record the assessment of a call Auto did not decide, so the model's
+ * judgment can be checked against real traffic. Only while shadowing, and
+ * never awaited: nothing here can fail or delay the call.
+ */
+export function recordIntegrationToolShadowEvaluationInBackground(input: {
+  integrationId: string;
+  toolName: string;
+  args: unknown;
+  userId: string | null;
+  taskId: string | null;
+}): void {
+  void resolveIntegrationToolAutoState()
+    .then(async (state) => {
+      if (state.mode !== 'shadow') return;
+      const evaluation = await evaluateIntegrationToolAutoDecision({
+        integrationId: input.integrationId,
+        toolName: input.toolName,
+        args: input.args,
+        deploymentGuidance: state.settings.policy,
+        userId: input.userId,
+        taskId: input.taskId,
+      });
+      await recordIntegrationToolShadowEvaluation({
+        userId: input.userId,
+        taskId: input.taskId,
+        integrationId: input.integrationId,
+        toolName: input.toolName,
+        argsSummary: input.args ?? null,
+        evaluation,
+      });
+    })
     .catch((error) => {
       console.warn(
-        `[Tool approvals] Could not record the auto evaluation for ${approvalId}: ${
+        `[Tool approvals] Could not record the shadow evaluation for ${input.integrationId}/${input.toolName}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
@@ -188,8 +245,7 @@ export function recordIntegrationToolAutoEvaluationInBackground(
 }
 
 export type IntegrationToolAutoDecision =
-  | { action: 'ask'; mode: Exclude<IntegrationToolAutoMode, 'on'> }
-  | { action: 'shadow'; mode: 'shadow' }
+  | { action: 'ask'; mode: 'off' }
   | {
       action: 'approve' | 'ask';
       mode: 'on';
@@ -197,21 +253,18 @@ export type IntegrationToolAutoDecision =
     };
 
 /**
- * How Auto treats one Ask first call, by the deployment's current mode.
- * `ask` shows the card with nothing else; `shadow` shows it and records the
- * model's view; `approve` means the call is routine enough to run without a
- * card. Only `on` can produce `approve`, and only after the evaluation has
- * actually run, so a missing model or an error still asks.
+ * How Auto treats one call to a default tool. `approve` means the call is
+ * routine enough to run without a card. Only `on` can produce it, and only
+ * after the assessment has actually run, so an error still asks.
  */
 export async function resolveIntegrationToolAutoDecision(
   input: Parameters<typeof evaluateIntegrationToolAutoDecision>[0],
 ): Promise<IntegrationToolAutoDecision> {
-  const settings = await getIntegrationToolAutoSettings();
-  if (settings.mode === 'off') return { action: 'ask', mode: 'off' };
-  if (settings.mode === 'shadow') return { action: 'shadow', mode: 'shadow' };
+  const state = await resolveIntegrationToolAutoState();
+  if (state.mode !== 'on') return { action: 'ask', mode: 'off' };
   const evaluation = await evaluateIntegrationToolAutoDecision({
     ...input,
-    deploymentGuidance: settings.policy,
+    deploymentGuidance: state.settings.policy,
   });
   return evaluation.recommendation === 'approve'
     ? { action: 'approve', mode: 'on', evaluation }

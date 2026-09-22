@@ -13,7 +13,10 @@ const {
   mockGetTaskHumanOwnerUserIds,
   mockResolveApprovalBlocks,
 } = vi.hoisted(() => ({
-  mockResolveApprovalBlocks: vi.fn(async () => new Map<string, string>()),
+  mockResolveApprovalBlocks: vi.fn(async () => ({
+    blocks: new Map<string, string>(),
+    shadowDefaultTools: false,
+  })),
   mockFindTaskRun: vi.fn(),
   mockFindConnection: vi.fn(),
   mockFindEnablement: vi.fn(),
@@ -25,6 +28,11 @@ const {
 vi.mock('../tool-approval-enforcement', () => ({
   describeProxyToolApprovalBlock: () => '',
   resolveProxyToolApprovalBlocks: mockResolveApprovalBlocks,
+  resolveProxyToolApprovalBlock: (
+    approvals: { blocks: Map<string, string>; defaultBlock?: string },
+    toolName: string,
+  ) => approvals.blocks.get(toolName) ?? approvals.defaultBlock,
+  shadowProxyToolCall: () => undefined,
 }));
 
 vi.mock('@roomote/db/server', () => ({

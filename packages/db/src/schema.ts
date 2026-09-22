@@ -4729,6 +4729,38 @@ export const integrationToolApprovalRequests = pgTable(
 );
 
 /**
+ * Risk assessments Auto mode made of calls it did not decide (Auto off,
+ * hosted judgment model present): a log for comparing the model's view with
+ * real traffic before Auto is turned on. Not tied to an approval row, since
+ * those calls never asked anyone.
+ */
+export const integrationToolAutoEvaluations = pgTable(
+  'integration_tool_auto_evaluations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    taskId: text('task_id').references(() => tasks.id, {
+      onDelete: 'cascade',
+    }),
+    integrationId: text('integration_id').notNull(),
+    toolName: text('tool_name').notNull(),
+    /** Redacted argument preview, as on an approval row. */
+    argsSummary: jsonb('args_summary').notNull(),
+    evaluation: jsonb('evaluation')
+      .notNull()
+      .$type<import('@roomote/types').IntegrationToolAutoEvaluation>(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('integration_tool_auto_evaluations_created_at_idx').on(
+      table.createdAt.desc(),
+    ),
+  ],
+);
+
+/**
  * integration_tool_session_overrides
  *
  * Experiment-gated (`integration_tool_approvals_experiment_enabled`)

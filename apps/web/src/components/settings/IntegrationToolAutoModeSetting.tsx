@@ -15,16 +15,15 @@ import { Button, Label, Textarea } from '@/components/system';
 
 const MODES: { mode: IntegrationToolAutoMode; label: string; hint: string }[] =
   [
-    { mode: 'off', label: 'Off', hint: 'Always ask a person.' },
     {
-      mode: 'shadow',
-      label: 'Shadow',
-      hint: 'Ask a person and record Auto’s decision.',
+      mode: 'off',
+      label: 'Off',
+      hint: 'Tools run as they always have. Ask first still asks a person.',
     },
     {
       mode: 'on',
       label: 'On',
-      hint: 'Run routine calls automatically and ask a person about risky ones.',
+      hint: 'Roomote assesses each call to a tool left on Auto, runs routine ones, and asks a person about risky ones.',
     },
   ];
 
@@ -60,19 +59,23 @@ export function IntegrationToolAutoModeSetting() {
 
   const mode = settings.data.mode;
   const model = settings.data.model;
+  const hosted = model?.kind === 'judgment';
   const policyDirty = policy.trim() !== settings.data.policy;
+  const modelNote = hosted
+    ? mode === 'on'
+      ? 'Uses the hosted judgment model.'
+      : 'While off, the hosted judgment model still assesses each call in the background so its judgment can be reviewed before turning this on.'
+    : model === null
+      ? 'Needs a hosted judgment model, and none is available.'
+      : `Needs a hosted judgment model. The helper model (${model.model}) is an LLM call per tool call, so Auto stays off until one is configured.`;
 
   return (
     <div className="mt-4 flex flex-col gap-3 border-t pt-4">
       <div className="flex flex-col gap-1">
         <p className="text-sm font-medium">Automatic approvals</p>
         <p className="text-sm text-muted-foreground">
-          Let a decision model handle Ask first calls based on risk.{' '}
-          {model === null
-            ? 'No decision model is available, so Auto can only ask.'
-            : model.kind === 'judgment'
-              ? 'Uses the hosted judgment model.'
-              : `No judgment model is configured, so Auto uses the helper model (${model.model}), which costs an inference call per ask.`}
+          Let a decision model handle tool calls based on risk. Tools you set to
+          Always allow, Ask first, or Reject keep that choice. {modelNote}
         </p>
       </div>
       <div
@@ -88,7 +91,7 @@ export function IntegrationToolAutoModeSetting() {
               type="button"
               role="radio"
               aria-checked={checked}
-              disabled={save.isPending}
+              disabled={save.isPending || (option.mode === 'on' && !hosted)}
               onClick={() => {
                 if (!checked) save.mutate({ mode: option.mode, policy });
               }}

@@ -15,6 +15,7 @@ import { db, type DatabaseOrTransaction } from '../db';
 import { isDeploymentExperimentEnabledWithShareLock } from './deployment-experiments';
 import {
   integrationToolApprovalRequests,
+  integrationToolAutoEvaluations,
   integrationToolPolicies,
   integrationToolUserPolicies,
   integrationToolSessionOverrides,
@@ -188,6 +189,8 @@ async function upsertPolicy(
 ): Promise<void> {
   // Both tables have every column this writes; the store supplies the rest.
   const table = store.table as typeof integrationToolPolicies;
+  // The default has no row; every stored choice, Always allow included, is a
+  // person's decision that Auto mode leaves alone.
   if (input.mode === 'allow') {
     await db
       .delete(table)
@@ -751,6 +754,29 @@ export async function claimTaskIntegrationToolCall(input: {
       .set({ status: approved.decidedByUserId ? 'consumed' : 'auto_approved' })
       .where(eq(integrationToolApprovalRequests.id, approved.id));
     return true;
+  });
+}
+
+/**
+ * A recorded risk assessment of a call Auto mode did not decide: while Auto
+ * is off, calls to default tools are assessed in the background and kept
+ * here so the model's judgment can be checked against real traffic.
+ */
+export async function recordIntegrationToolShadowEvaluation(input: {
+  userId: string | null;
+  taskId: string | null;
+  integrationId: string;
+  toolName: string;
+  argsSummary: unknown;
+  evaluation: IntegrationToolAutoEvaluation;
+}): Promise<void> {
+  await db.insert(integrationToolAutoEvaluations).values({
+    userId: input.userId,
+    taskId: input.taskId,
+    integrationId: input.integrationId,
+    toolName: input.toolName,
+    argsSummary: redactIntegrationToolArgs(input.argsSummary),
+    evaluation: input.evaluation,
   });
 }
 

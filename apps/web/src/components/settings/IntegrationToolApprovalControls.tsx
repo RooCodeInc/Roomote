@@ -25,6 +25,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  Sparkles,
   type LucideIcon,
 } from '@/components/system';
 
@@ -33,7 +34,10 @@ const APPROVAL_MODES: {
   label: string;
   icon: LucideIcon;
 }[] = [
-  { mode: 'allow', label: 'Always allow', icon: CircleCheck },
+  // The default: runs, and is risk-assessed first when Auto mode is on.
+  { mode: 'allow', label: 'Auto', icon: Sparkles },
+  // A stored choice: runs, and Auto never looks.
+  { mode: 'always_allow', label: 'Always allow', icon: CircleCheck },
   { mode: 'ask', label: 'Ask first', icon: Hand },
   { mode: 'reject', label: 'Reject', icon: Ban },
 ];

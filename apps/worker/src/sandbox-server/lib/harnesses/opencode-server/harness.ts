@@ -153,6 +153,8 @@ interface OpenCodeServerHarnessOptions {
   mcpServerNames?: string[];
   /** Which integration tool each gated native permission key stands for. */
   toolApprovalTools?: TaskIntegrationToolApprovals['tools'];
+  /** Servers whose every tool asks natively (Auto mode). */
+  toolApprovalAutoServers?: TaskIntegrationToolApprovals['autoServers'];
   /**
    * Observer-only breadcrumb for rare harness failures that need a durable
    * post-mortem outside the sandbox (e.g. infinite OpenCode session create).
@@ -1882,6 +1884,7 @@ export class OpenCodeServerHarness
     if (options.toolApprovalTools) {
       this.toolApprovalRelay = createTaskToolApprovalRelay({
         tools: options.toolApprovalTools,
+        autoServers: options.toolApprovalAutoServers,
         client: this.client,
         logger: this.logger,
         signal: this.eventAbortController.signal,

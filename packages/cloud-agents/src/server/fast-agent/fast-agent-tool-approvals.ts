@@ -18,6 +18,7 @@ import {
   markIntegrationToolApprovalConsumed,
 } from '@roomote/db/server';
 import {
+  integrationToolModeIsAutoAssessed,
   integrationToolPolicyKey,
   resolveEffectiveIntegrationToolMode,
   resolveGoverningIntegrationToolPolicies,
@@ -27,8 +28,8 @@ import {
 } from '@roomote/types';
 
 import {
-  recordIntegrationToolAutoEvaluationInBackground,
   resolveIntegrationToolAutoDecision,
+  resolveIntegrationToolAutoState,
 } from '../integration-tool-auto-evaluation';
 import type { FastAgentIntegration } from './fast-agent-integration-broker';
 import { buildFastAgentCodeModeServerNames } from './fast-agent-tool-policy';
@@ -105,6 +106,14 @@ export function buildIntegrationToolApprovalRules(
   integrations: FastAgentIntegration[],
   policies: IntegrationToolPolicyMetadata[],
   sessionOverrides: IntegrationToolSessionOverrideMetadata[] = [],
+  options: {
+    /**
+     * Auto mode on: every default tool asks natively too, so the bridge can
+     * assess each call. Their policy keys are collected in `autoToolKeys`.
+     */
+    autoOn?: boolean;
+    autoToolKeys?: Set<string>;
+  } = {},
 ): PermissionRuleset {
   const modeByTool = new Map(
     policies.map((policy) => [
@@ -136,13 +145,20 @@ export function buildIntegrationToolApprovalRules(
     // again this session" works mid-turn, never changes the compiled rules
     // (no instance dispose), and never relies on OpenCode's leaky native
     // `always`.
+    const sessionOverrideMode = overrideByTool.get(key);
+    const autoAssessed =
+      options.autoOn === true &&
+      integrationToolModeIsAutoAssessed({ policyMode, sessionOverrideMode });
     if (mode === 'reject') {
       actionByKey.set(tool.key, 'deny');
     } else if (
-      (mode === 'ask' || (mode === 'allow' && policyMode === 'ask')) &&
+      (mode === 'ask' ||
+        (mode === 'allow' && policyMode === 'ask') ||
+        autoAssessed) &&
       actionByKey.get(tool.key) !== 'deny'
     ) {
       actionByKey.set(tool.key, 'ask');
+      if (autoAssessed) options.autoToolKeys?.add(key);
     }
   }
   const rules: PermissionRuleset = [...actionByKey].map(
@@ -272,20 +288,30 @@ export async function resolveFastAgentToolApprovalRules(input: {
   sessionId?: string;
   /** The Session owner, whose personal policies tighten the deployment ones. */
   ownerUserId?: string;
-}): Promise<{ rules: PermissionRuleset; hash: string } | undefined> {
+}): Promise<
+  | {
+      rules: PermissionRuleset;
+      hash: string;
+      /** Policy keys of the tools that ask only because Auto mode is on. */
+      autoToolKeys: Set<string>;
+    }
+  | undefined
+> {
   const enabled = await isDeploymentExperimentEnabled(
     'integrationToolApprovals',
   );
   if (!enabled) return undefined;
-  const [policies, userPolicies, sessionOverrides] = await Promise.all([
-    listIntegrationToolPolicies(),
-    input.ownerUserId
-      ? listIntegrationToolUserPolicies(input.ownerUserId)
-      : Promise.resolve([]),
-    input.sessionId
-      ? listIntegrationToolSessionOverrides(input.sessionId)
-      : Promise.resolve([]),
-  ]);
+  const [policies, userPolicies, sessionOverrides, autoState] =
+    await Promise.all([
+      listIntegrationToolPolicies(),
+      input.ownerUserId
+        ? listIntegrationToolUserPolicies(input.ownerUserId)
+        : Promise.resolve([]),
+      input.sessionId
+        ? listIntegrationToolSessionOverrides(input.sessionId)
+        : Promise.resolve([]),
+      resolveIntegrationToolAutoState(),
+    ]);
   // The Session owner's personal policies layer on the deployment ones; see
   // `resolveGoverningIntegrationToolPolicies` for the rule.
   const governing = resolveGoverningIntegrationToolPolicies({
@@ -295,12 +321,14 @@ export async function resolveFastAgentToolApprovalRules(input: {
       input.integrations.find((integration) => integration.id === integrationId)
         ?.toolApprovalPolicyScope,
   });
+  const autoToolKeys = new Set<string>();
   const rules = buildIntegrationToolApprovalRules(
     input.integrations,
     governing,
     sessionOverrides,
+    { autoOn: autoState.mode === 'on', autoToolKeys },
   );
-  return { rules, hash: hashIntegrationToolApprovalRules(rules) };
+  return { rules, hash: hashIntegrationToolApprovalRules(rules), autoToolKeys };
 }
 
 /**
@@ -338,6 +366,11 @@ export function createFastAgentToolApprovalBridge(input: {
   sessionId: string;
   userId: string;
   integrations: FastAgentIntegration[];
+  /**
+   * Tools that ask only because Auto mode is on. Their asks are assessed
+   * by the decision model; every other ask is a person's own choice.
+   */
+  autoToolKeys?: Set<string>;
   /** What the user last asked; Auto mode checks each call against it. */
   userRequest?: string;
   /** Optional chat-surface notification for non-web conversations. */
@@ -469,22 +502,32 @@ export function createFastAgentToolApprovalBridge(input: {
           override.toolName === tool.toolName,
       )?.mode;
       const allowedForSession = overrideForSession === 'allow';
-      // Auto mode: with the deployment set to `on`, the decision model may
-      // find the call clearly safe under the Auto policy and run it without
-      // a card. It is consulted only for a call that would otherwise ask by
-      // policy: a session `allow` needs no decision, and a session `ask` is
-      // the requester asking to decide this tool themselves, which Auto must
-      // not answer for them. Any failure on this path asks a person.
-      const auto = overrideForSession
-        ? undefined
-        : await resolveIntegrationToolAutoDecision({
+      // Auto mode: a call to a default tool is risk-assessed, and a routine
+      // one runs without a card. A tool someone made a choice about (a
+      // stored mode or a session override) is theirs to decide, so it never
+      // reaches the model. Any failure on this path asks a person.
+      const autoAssessed =
+        !overrideForSession &&
+        input.autoToolKeys?.has(
+          integrationToolPolicyKey(tool.integrationId, tool.toolName),
+        ) === true;
+      const auto = autoAssessed
+        ? await resolveIntegrationToolAutoDecision({
             integrationId: tool.integrationId,
             toolName: tool.toolName,
             toolDescription: tool.description,
             args,
             userRequest: input.userRequest,
             userId: input.userId,
-          }).catch(() => ({ action: 'ask' as const, mode: 'off' as const }));
+          }).catch(() => ({ action: 'ask' as const, mode: 'failed' as const }))
+        : undefined;
+      // A default tool asked under a rule compiled while Auto was on, after
+      // Auto went off: it runs as it always has, and there is nothing to
+      // record. A failed assessment asks a person instead.
+      if (auto?.mode === 'off') {
+        await helpers.reply(ask.requestId, 'once');
+        return;
+      }
       if (allowedForSession || auto?.action === 'approve') {
         // The audit row starts as an unrelayed `approved` decision; claiming
         // it is the atomic reservation. The claim reads the experiment under
@@ -535,16 +578,6 @@ export function createFastAgentToolApprovalBridge(input: {
           ...(auto?.mode === 'on' ? { autoEvaluation: auto.evaluation } : {}),
         },
       );
-      if (auto?.action === 'shadow') {
-        recordIntegrationToolAutoEvaluationInBackground(approval.approvalId, {
-          integrationId: tool.integrationId,
-          toolName: tool.toolName,
-          toolDescription: tool.description,
-          args,
-          userRequest: input.userRequest,
-          userId: input.userId,
-        });
-      }
       if (input.notify && !notifiedApprovalIds.has(approval.approvalId)) {
         notifiedApprovalIds.add(approval.approvalId);
         await input.notify(approval);

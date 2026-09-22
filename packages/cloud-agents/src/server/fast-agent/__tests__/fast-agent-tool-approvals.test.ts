@@ -1,10 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../integration-tool-auto-evaluation', () => ({
-  recordIntegrationToolAutoEvaluationInBackground: vi.fn(),
   resolveIntegrationToolAutoDecision: vi.fn(async () => ({
     action: 'ask',
     mode: 'off',
+  })),
+  resolveIntegrationToolAutoState: vi.fn(async () => ({
+    mode: 'off',
+    settings: { mode: 'off', policy: '' },
+    model: null,
   })),
 }));
 
@@ -53,8 +57,8 @@ import {
   shouldDisposeInstanceForToolApprovalRules,
 } from '../fast-agent-tool-approvals';
 import {
-  recordIntegrationToolAutoEvaluationInBackground,
   resolveIntegrationToolAutoDecision,
+  resolveIntegrationToolAutoState,
 } from '../../integration-tool-auto-evaluation';
 import type { FastAgentIntegration } from '../fast-agent-integration-broker';
 
@@ -319,6 +323,59 @@ describe('buildIntegrationToolApprovalRules with session overrides', () => {
     );
   });
 
+  it('makes every default tool ask while Auto is on, and names them', () => {
+    const autoToolKeys = new Set<string>();
+    const rules = buildIntegrationToolApprovalRules(
+      integrations,
+      [policy('post_message', 'ask'), policy('delete_channel', 'reject')],
+      [],
+      { autoOn: true, autoToolKeys },
+    );
+    expect(rules).toEqual(
+      expect.arrayContaining([
+        {
+          permission: codeModeToolKey('mock-slack', 'read_channel'),
+          pattern: '*',
+          action: 'ask',
+        },
+        {
+          permission: codeModeToolKey('mock-slack', 'post_message'),
+          pattern: '*',
+          action: 'ask',
+        },
+        {
+          permission: codeModeToolKey('mock-slack', 'delete_channel'),
+          pattern: '*',
+          action: 'deny',
+        },
+      ]),
+    );
+    // Only the default tool is Auto's; the manual ask and reject are not.
+    expect([...autoToolKeys]).toEqual([
+      JSON.stringify(['mock-slack', 'read_channel']),
+    ]);
+  });
+
+  it('leaves a stored Always allow and a session allow out of Auto', () => {
+    const autoToolKeys = new Set<string>();
+    const rules = buildIntegrationToolApprovalRules(
+      integrations,
+      [{ ...policy('post_message', 'ask'), mode: 'always_allow' as const }],
+      [
+        {
+          integrationId: 'mock-slack',
+          toolName: 'read_channel',
+          mode: 'allow',
+        },
+      ],
+      { autoOn: true, autoToolKeys },
+    );
+    expect(rules.map((rule) => rule.permission)).toEqual([
+      codeModeToolKey('mock-slack', 'delete_channel'),
+    ]);
+    expect(autoToolKeys.size).toBe(1);
+  });
+
   it('never lets a session override loosen a deployment reject', () => {
     expect(
       buildIntegrationToolApprovalRules(
@@ -388,6 +445,22 @@ describe('resolveFastAgentToolApprovalRules', () => {
         action: 'ask',
       },
     ]);
+  });
+
+  it('asks about every default tool once Auto mode is on', async () => {
+    vi.mocked(resolveIntegrationToolAutoState).mockResolvedValueOnce({
+      mode: 'on',
+      settings: { mode: 'on', policy: '' },
+      model: 'judgment',
+    });
+    vi.mocked(listIntegrationToolPolicies).mockResolvedValueOnce([]);
+    vi.mocked(listIntegrationToolSessionOverrides).mockResolvedValueOnce([]);
+    const resolved = await resolveFastAgentToolApprovalRules({
+      integrations,
+      sessionId: 'session-id',
+    });
+    expect(resolved?.rules).toHaveLength(3);
+    expect(resolved?.autoToolKeys.size).toBe(3);
   });
 
   it("tightens with the requester's personal policies and never loosens a deployment one", async () => {
@@ -747,43 +820,7 @@ describe('tool approval bridge', () => {
     });
   });
 
-  it("records the model's view beside the ask in shadow mode, and runs a call Auto approves", async () => {
-    vi.mocked(resolveIntegrationToolAutoDecision).mockResolvedValue({
-      action: 'shadow',
-      mode: 'shadow',
-    });
-    vi.mocked(getIntegrationToolApproval).mockResolvedValue({
-      status: 'rejected',
-    } as never);
-    const shadow = helpers();
-    createFastAgentToolApprovalBridge({
-      sessionId: 'session-id',
-      userId: 'user-id',
-      integrations,
-      userRequest: 'Tell the team we shipped.',
-    }).handleAsk(ask, shadow);
-    await vi.waitFor(() =>
-      expect(shadow.reply).toHaveBeenCalledWith(
-        'req-1',
-        'reject',
-        expect.any(String),
-      ),
-    );
-    expect(insertIntegrationToolApproval).toHaveBeenCalled();
-    expect(
-      recordIntegrationToolAutoEvaluationInBackground,
-    ).toHaveBeenCalledWith(
-      'approval-1',
-      expect.objectContaining({
-        integrationId: 'mock-slack',
-        toolName: 'post_message',
-        args: { channel: 'C1', text: 'hi' },
-        userRequest: 'Tell the team we shipped.',
-      }),
-    );
-
-    // On: a clearly safe call runs through the reservation-and-claim path,
-    // with the model's view on the audit row and no card.
+  it('runs a default tool Auto finds routine, and asks about one it finds risky', async () => {
     const evaluation = {
       recommendation: 'approve' as const,
       answers: {},
@@ -794,35 +831,56 @@ describe('tool approval bridge', () => {
       mode: 'on',
       evaluation,
     });
-    vi.mocked(insertIntegrationToolApproval).mockClear();
+    const autoBridge = () =>
+      createFastAgentToolApprovalBridge({
+        sessionId: 'session-id',
+        userId: 'user-id',
+        integrations,
+        autoToolKeys: new Set([JSON.stringify(['mock-slack', 'post_message'])]),
+        userRequest: 'Tell the team we shipped.',
+      });
+
+    // Routine: the reservation-and-claim path, the model's view on the
+    // audit row, no decider, no card.
     const on = helpers();
-    bridge().handleAsk({ ...ask, requestId: 'req-2' }, on);
+    autoBridge().handleAsk(ask, on);
     await vi.waitFor(() =>
-      expect(on.reply).toHaveBeenCalledWith('req-2', 'once'),
+      expect(on.reply).toHaveBeenCalledWith('req-1', 'once'),
+    );
+    expect(resolveIntegrationToolAutoDecision).toHaveBeenCalledWith(
+      expect.objectContaining({
+        integrationId: 'mock-slack',
+        toolName: 'post_message',
+        args: { channel: 'C1', text: 'hi' },
+        userRequest: 'Tell the team we shipped.',
+      }),
     );
     expect(insertIntegrationToolApproval).not.toHaveBeenCalled();
     expect(insertAutoApprovedIntegrationToolApproval).toHaveBeenCalledWith(
       { sessionId: 'session-id', userId: 'user-id' },
       expect.objectContaining({
-        nativeRequestId: 'req-2',
+        nativeRequestId: 'req-1',
         decidedBy: 'model',
         autoEvaluation: evaluation,
       }),
     );
 
-    // On, but not clearly safe: the card shows with the model's view on it.
+    // Risky: the card, with the model's view on it.
     vi.mocked(resolveIntegrationToolAutoDecision).mockResolvedValue({
       action: 'ask',
       mode: 'on',
       evaluation: { ...evaluation, recommendation: 'ask' },
     });
+    vi.mocked(getIntegrationToolApproval).mockResolvedValue({
+      status: 'rejected',
+    } as never);
     const unsure = helpers();
-    bridge().handleAsk({ ...ask, requestId: 'req-3' }, unsure);
+    autoBridge().handleAsk({ ...ask, requestId: 'req-2' }, unsure);
     await vi.waitFor(() => expect(unsure.reply).toHaveBeenCalled());
     expect(insertIntegrationToolApproval).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        nativeRequestId: 'req-3',
+        nativeRequestId: 'req-2',
         autoEvaluation: { ...evaluation, recommendation: 'ask' },
       }),
     );
@@ -832,12 +890,19 @@ describe('tool approval bridge', () => {
       new Error('settings unavailable'),
     );
     const failing = helpers();
-    bridge().handleAsk({ ...ask, requestId: 'req-4' }, failing);
+    autoBridge().handleAsk({ ...ask, requestId: 'req-3' }, failing);
     await vi.waitFor(() => expect(failing.reply).toHaveBeenCalled());
     expect(insertIntegrationToolApproval).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ nativeRequestId: 'req-4' }),
+      expect.objectContaining({ nativeRequestId: 'req-3' }),
     );
+
+    // A manual Ask first tool (not in the Auto set) never reaches the model.
+    vi.mocked(resolveIntegrationToolAutoDecision).mockClear();
+    const manual = helpers();
+    bridge().handleAsk({ ...ask, requestId: 'req-4' }, manual);
+    await vi.waitFor(() => expect(manual.reply).toHaveBeenCalled());
+    expect(resolveIntegrationToolAutoDecision).not.toHaveBeenCalled();
   });
 
   it('never consults Auto for a tool the requester asked to decide themselves', async () => {
@@ -848,7 +913,12 @@ describe('tool approval bridge', () => {
       status: 'rejected',
     } as never);
     const helperMocks = helpers();
-    bridge().handleAsk(ask, helperMocks);
+    createFastAgentToolApprovalBridge({
+      sessionId: 'session-id',
+      userId: 'user-id',
+      integrations,
+      autoToolKeys: new Set([JSON.stringify(['mock-slack', 'post_message'])]),
+    }).handleAsk(ask, helperMocks);
     await vi.waitFor(() => expect(helperMocks.reply).toHaveBeenCalled());
     expect(resolveIntegrationToolAutoDecision).not.toHaveBeenCalled();
     expect(insertIntegrationToolApproval).toHaveBeenCalled();

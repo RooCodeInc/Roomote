@@ -5,7 +5,7 @@ import { resolveGoverningIntegrationToolPolicies } from '../integration-tool-app
 const policy = (
   integrationId: string,
   toolName: string,
-  mode: 'allow' | 'ask' | 'reject',
+  mode: 'allow' | 'always_allow' | 'ask' | 'reject',
 ) => ({ integrationId, toolName, mode });
 
 const modes = (policies: ReturnType<typeof policy>[]): Record<string, string> =>
@@ -32,6 +32,25 @@ describe('resolveGoverningIntegrationToolPolicies', () => {
       delete_issue: 'reject',
       list_issues: 'ask',
       get_issue: 'ask',
+    });
+  });
+
+  it('keeps a stored Always allow unless the other layer is stricter', () => {
+    const governing = resolveGoverningIntegrationToolPolicies({
+      deploymentPolicies: [
+        policy('linear', 'get_issue', 'always_allow'),
+        policy('linear', 'save_issue', 'always_allow'),
+      ],
+      userPolicies: [
+        policy('linear', 'save_issue', 'ask'),
+        policy('linear', 'list_issues', 'always_allow'),
+      ],
+      scopeOf: () => undefined,
+    });
+    expect(modes(governing)).toEqual({
+      get_issue: 'always_allow',
+      save_issue: 'ask',
+      list_issues: 'always_allow',
     });
   });
 

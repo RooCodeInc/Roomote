@@ -337,6 +337,7 @@ export async function startOpenCodeServerHarness({
       ),
       mcpServerNames: Object.keys(mcpServers),
       toolApprovalTools: toolApprovals?.tools,
+      toolApprovalAutoServers: toolApprovals?.autoServers,
       onDiagnostic,
       beforeQueuedPrompt,
     });

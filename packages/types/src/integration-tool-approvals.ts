@@ -16,7 +16,10 @@ import { z } from 'zod';
  * personal mode applies, so a personal `allow` never loosens an admin `ask`.
  */
 export const INTEGRATION_TOOL_POLICY_MODES = [
+  /** The default: no row. Runs, and under Auto mode is risk-assessed first. */
   'allow',
+  /** A stored choice to run without any assessment; Auto never looks. */
+  'always_allow',
   'ask',
   'reject',
 ] as const;
@@ -71,12 +74,16 @@ export interface IntegrationToolApprovalMetadata {
 }
 
 /**
- * Deployment-wide Auto mode: who answers an Ask first call. `off` asks a
- * person; `shadow` asks a person and records what the decision model would
- * have done; `on` lets a call the model finds routine run without a person,
- * and asks a person about everything risky. Reject is never touched.
+ * Deployment-wide Auto mode. `on`: every call to a tool nobody has made a
+ * choice about (the default mode) is risk-assessed by the decision model
+ * first; a routine call runs, a risky one asks a person. A manual choice
+ * always wins: Always allow is never assessed, Ask first always asks, Reject
+ * always blocks. `off`: default tools run as they always have. While off,
+ * and only with a hosted judgment model configured, the assessment still
+ * runs in the background and is recorded, so its judgment can be checked
+ * against real calls before it is turned on.
  */
-export const INTEGRATION_TOOL_AUTO_MODES = ['off', 'shadow', 'on'] as const;
+export const INTEGRATION_TOOL_AUTO_MODES = ['off', 'on'] as const;
 export type IntegrationToolAutoMode =
   (typeof INTEGRATION_TOOL_AUTO_MODES)[number];
 export const INTEGRATION_TOOL_AUTO_POLICY_MAX_LENGTH = 4_000;
@@ -92,7 +99,11 @@ export interface IntegrationToolAutoSettings {
 }
 
 export const integrationToolAutoSettingsSchema = z.object({
-  mode: z.enum(INTEGRATION_TOOL_AUTO_MODES),
+  // An earlier preview stored a `shadow` mode; it reads as off.
+  mode: z.preprocess(
+    (value) => (value === 'shadow' ? 'off' : value),
+    z.enum(INTEGRATION_TOOL_AUTO_MODES),
+  ),
   policy: z.string().max(INTEGRATION_TOOL_AUTO_POLICY_MAX_LENGTH),
 });
 
@@ -170,7 +181,7 @@ export type IntegrationToolSessionOverrideUpsert = z.infer<
 const INTEGRATION_TOOL_POLICY_MODE_STRICTNESS: Record<
   IntegrationToolPolicyMode,
   number
-> = { allow: 0, ask: 1, reject: 2 };
+> = { always_allow: 0, allow: 0, ask: 1, reject: 2 };
 
 /** The stricter of a tool's deployment policy and the requester's own. */
 function resolveStricterIntegrationToolPolicyMode(
@@ -246,6 +257,20 @@ export function resolveEffectiveIntegrationToolMode(input: {
 }
 
 /**
+ * Whether Auto mode, when on, assesses a call to a tool in this effective
+ * mode: only the default. Every stored choice, and a session override, is a
+ * person's decision that Auto leaves alone.
+ */
+export function integrationToolModeIsAutoAssessed(input: {
+  policyMode: IntegrationToolPolicyMode | undefined;
+  sessionOverrideMode: IntegrationToolSessionOverrideMode | undefined;
+}): boolean {
+  return (
+    input.policyMode === undefined && input.sessionOverrideMode === undefined
+  );
+}
+
+/**
  * Unambiguous composite key for one (integration, tool) policy entry. A
  * delimiter-joined string would let distinct pairs collide (for example
  * `a`/`bc` and `ab`/`c`), which would apply one tool's configured mode to a
@@ -265,8 +290,14 @@ export function integrationToolPolicyKey(
  * tool. Advisory inside the sandbox; the integration proxy is the boundary.
  */
 export interface TaskIntegrationToolApprovals {
-  permission: Record<string, 'ask' | 'deny'>;
+  permission: Record<string, 'allow' | 'ask' | 'deny'>;
   tools: Record<string, { integrationId: string; toolName: string }>;
+  /**
+   * Servers whose every tool asks natively because Auto mode is on. An ask
+   * for a key outside `tools` is one of these; the worker names the tool
+   * from the key, and the server decides who answers.
+   */
+  autoServers: string[];
 }
 
 /** OpenCode names an MCP tool `<server>_<tool>`, each half sanitized. */
@@ -287,6 +318,8 @@ export function compileTaskIntegrationToolApprovals(input: {
   serverNames: string[];
   policies: IntegrationToolPolicyEntry[];
   sessionOverrides: IntegrationToolSessionOverrideMetadata[];
+  /** Auto mode on: every default tool asks natively, `<server>_*`. */
+  autoOn?: boolean;
 }): TaskIntegrationToolApprovals {
   const mounted = new Set(input.serverNames);
   const policyModes = new Map(
@@ -301,7 +334,18 @@ export function compileTaskIntegrationToolApprovals(input: {
       override.mode,
     ]),
   );
-  const result: TaskIntegrationToolApprovals = { permission: {}, tools: {} };
+  const result: TaskIntegrationToolApprovals = {
+    permission: {},
+    tools: {},
+    autoServers: [],
+  };
+  if (input.autoOn) {
+    // Wildcards first: a tool's own rule below wins over its server's.
+    for (const serverName of input.serverNames) {
+      result.permission[`${openCodeMcpToolKey(serverName, '')}*`] = 'ask';
+      result.autoServers.push(serverName);
+    }
+  }
   const ambiguous = new Set<string>();
   for (const { integrationId, toolName } of [
     ...input.policies,
@@ -319,7 +363,11 @@ export function compileTaskIntegrationToolApprovals(input: {
         ? 'deny'
         : mode === 'ask' || policyMode === 'ask'
           ? 'ask'
-          : undefined;
+          : // A session `allow` over an ask policy keeps the native ask.
+            input.autoOn
+            ? // A stored Always allow, or a session allow, opts out of Auto.
+              'allow'
+            : undefined;
     if (!action) continue;
     const key = openCodeMcpToolKey(integrationId, toolName);
     const known = result.tools[key];

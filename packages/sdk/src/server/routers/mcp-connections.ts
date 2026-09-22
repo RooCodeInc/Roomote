@@ -226,7 +226,7 @@ export async function resolveUserMcpServerConfigs(options: {
 }
 
 /** What a task run mounts, with the policy scope of each custom server. */
-function resolveTaskRunMcpServerConfigs(
+export function resolveTaskRunMcpServerConfigs(
   auth: RunTokenContext,
   req: { url?: string } | undefined,
 ): Promise<ResolvedMcpServerConfigs> {

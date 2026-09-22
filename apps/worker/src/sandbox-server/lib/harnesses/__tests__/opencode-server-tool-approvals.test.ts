@@ -1,6 +1,9 @@
 vi.mock('@roomote/sdk/client', () => ({ sdk: {} }));
 
-import { createTaskToolApprovalRelay } from '../opencode-server/tool-approvals';
+import {
+  createTaskToolApprovalRelay,
+  resolveTaskToolForAsk,
+} from '../opencode-server/tool-approvals';
 
 const ask = {
   requestId: 'per_1',
@@ -133,5 +136,28 @@ describe('createTaskToolApprovalRelay', () => {
       }),
     );
     await vi.waitFor(() => expect(failing.pendingCounts).toEqual([1, 0]));
+  });
+
+  it('names a tool from a server-wide Auto rule, longest server name first', () => {
+    const approvals = {
+      tools: {
+        linear_save_issue: { integrationId: 'linear', toolName: 'save_issue' },
+      },
+      autoServers: ['linear', 'linear_v2', 'my.server'],
+    };
+    expect(resolveTaskToolForAsk(approvals, 'linear_save_issue')).toEqual({
+      integrationId: 'linear',
+      toolName: 'save_issue',
+    });
+    expect(resolveTaskToolForAsk(approvals, 'linear_v2_get_issue')).toEqual({
+      integrationId: 'linear_v2',
+      toolName: 'get_issue',
+    });
+    expect(resolveTaskToolForAsk(approvals, 'my_server_run')).toEqual({
+      integrationId: 'my.server',
+      toolName: 'run',
+    });
+    expect(resolveTaskToolForAsk(approvals, 'other_tool')).toBeUndefined();
+    expect(resolveTaskToolForAsk(approvals, 'linear_')).toBeUndefined();
   });
 });

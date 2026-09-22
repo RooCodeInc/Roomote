@@ -2,9 +2,9 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 const state = vi.hoisted(() => ({
   settings: {
-    mode: 'shadow' as 'off' | 'shadow' | 'on',
+    mode: 'off' as 'off' | 'on',
     policy: '',
-    model: { kind: 'helper', model: 'openai/gpt-5.6-mini' } as
+    model: { kind: 'judgment' } as
       | { kind: 'judgment' }
       | { kind: 'helper'; model: string }
       | null,
@@ -41,46 +41,51 @@ import { IntegrationToolAutoModeSetting } from './IntegrationToolAutoModeSetting
 
 describe('IntegrationToolAutoModeSetting', () => {
   beforeEach(() => {
-    state.settings = {
-      mode: 'shadow',
-      policy: '',
-      model: { kind: 'helper', model: 'openai/gpt-5.6-mini' },
-    };
+    state.settings = { mode: 'off', policy: '', model: { kind: 'judgment' } };
     state.setAuto.mockClear();
   });
 
-  it('shows the current mode and which model Auto would consult', () => {
+  it('shows the current mode and that the hosted model is shadowing while off', () => {
     render(<IntegrationToolAutoModeSetting />);
-    expect(screen.getByRole('radio', { name: /Shadow/ })).toBeChecked();
+    expect(screen.getByRole('radio', { name: /^Off/ })).toBeChecked();
     expect(
-      screen.getByText(/helper model \(openai\/gpt-5.6-mini\)/),
+      screen.getByText(/assesses each call in the background/),
     ).toBeInTheDocument();
   });
 
-  it('switches the mode and saves the policy separately', async () => {
+  it('switches the mode and saves the guidance separately', async () => {
     render(<IntegrationToolAutoModeSetting />);
     fireEvent.click(screen.getByRole('radio', { name: /^On/ }));
     expect(state.setAuto).toHaveBeenLastCalledWith({ mode: 'on', policy: '' });
 
-    const policy = screen.getByLabelText('Approval guidance');
+    const guidance = screen.getByLabelText('Approval guidance');
     expect(
       screen.getByRole('button', { name: 'Save guidance' }),
     ).toBeDisabled();
-    fireEvent.change(policy, { target: { value: 'Reads only.' } });
+    fireEvent.change(guidance, { target: { value: 'Reads only.' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save guidance' }));
     await waitFor(() =>
       expect(state.setAuto).toHaveBeenLastCalledWith({
-        mode: 'shadow',
+        mode: 'off',
         policy: 'Reads only.',
       }),
     );
   });
 
-  it('says so when no decision model is available', () => {
+  it('cannot be turned on without a hosted judgment model, and says why', () => {
+    state.settings = {
+      mode: 'off',
+      policy: '',
+      model: { kind: 'helper', model: 'openai/gpt-5.6-mini' },
+    };
+    render(<IntegrationToolAutoModeSetting />);
+    expect(screen.getByRole('radio', { name: /^On/ })).toBeDisabled();
+    expect(
+      screen.getByText(/helper model \(openai\/gpt-5.6-mini\)/),
+    ).toBeInTheDocument();
+
     state.settings = { mode: 'off', policy: '', model: null };
     render(<IntegrationToolAutoModeSetting />);
-    expect(
-      screen.getByText(/No decision model is available/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/none is available/)).toBeInTheDocument();
   });
 });

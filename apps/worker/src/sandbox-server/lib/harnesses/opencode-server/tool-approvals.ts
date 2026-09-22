@@ -46,8 +46,33 @@ export async function fetchTaskToolApprovals(logger: {
  * arguments, so the relay never has to be trusted. Every failure rejects the
  * ask, so a turn is never left paused on a call nobody can resume.
  */
+/** OpenCode's sanitization of one half of a `<server>_<tool>` key. */
+const sanitizeNativeKeyPart = (value: string) =>
+  value.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+/**
+ * The integration tool a native ask is for. A tool with its own rule is
+ * looked up; one gated by its server's wildcard (Auto mode) is named from
+ * the key, longest server name first. The tool name comes back sanitized,
+ * which is the name the call is made under too.
+ */
+export function resolveTaskToolForAsk(
+  approvals: Pick<TaskIntegrationToolApprovals, 'tools' | 'autoServers'>,
+  permission: string,
+): { integrationId: string; toolName: string } | undefined {
+  const known = approvals.tools[permission];
+  if (known) return known;
+  const server = [...approvals.autoServers]
+    .sort((a, b) => b.length - a.length)
+    .find((name) => permission.startsWith(`${sanitizeNativeKeyPart(name)}_`));
+  if (!server) return undefined;
+  const toolName = permission.slice(sanitizeNativeKeyPart(server).length + 1);
+  return toolName ? { integrationId: server, toolName } : undefined;
+}
+
 export function createTaskToolApprovalRelay(options: {
   tools: TaskIntegrationToolApprovals['tools'];
+  autoServers?: TaskIntegrationToolApprovals['autoServers'];
   client: Pick<OpenCodeServerClient, 'message' | 'replyPermission'>;
   logger: { warn: (message: string) => void };
   signal: AbortSignal;
@@ -91,7 +116,10 @@ export function createTaskToolApprovalRelay(options: {
   };
 
   const decide = async (ask: TaskToolApprovalAsk): Promise<void> => {
-    const tool = options.tools[ask.permission];
+    const tool = resolveTaskToolForAsk(
+      { tools: options.tools, autoServers: options.autoServers ?? [] },
+      ask.permission,
+    );
     if (!tool) {
       await reply(
         ask,

@@ -13,11 +13,10 @@ const METADATA_KEY = 'integration_tool_auto';
 
 /**
  * Deployment-wide Auto mode for tool approvals, kept with the other
- * deployment settings. Shadow is the default: with the experiment on, the
- * decision model's view is recorded from the first ask, and it runs nothing
- * until an admin turns it on.
+ * deployment settings. Off by default: default tools run as they always
+ * have until an admin turns Auto on.
  */
-const DEFAULTS: IntegrationToolAutoSettings = { mode: 'shadow', policy: '' };
+const DEFAULTS: IntegrationToolAutoSettings = { mode: 'off', policy: '' };
 
 export async function getIntegrationToolAutoSettings(
   database: DatabaseOrTransaction = db,
