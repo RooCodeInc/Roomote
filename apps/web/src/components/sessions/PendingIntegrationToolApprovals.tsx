@@ -66,7 +66,7 @@ function approvalPrompt(item: IntegrationToolApprovalMetadata): string {
 }
 
 /**
- * One line on what Auto mode made of the call, so the person deciding knows
+ * One line on what Auto made of the call, so the person deciding knows
  * why they are being asked. Auto never rejects, so this only ever explains
  * why it did not run the call on its own.
  */
@@ -74,14 +74,14 @@ function describeAutoEvaluation(
   evaluation: IntegrationToolAutoEvaluation,
 ): string {
   if (evaluation.unavailable === 'no_model') {
-    return 'Auto mode could not check this call: no decision model is available.';
+    return 'Auto couldn’t check this call because no decision model is available.';
   }
   if (evaluation.unavailable === 'error') {
-    return 'Auto mode could not check this call.';
+    return 'Auto couldn’t check this call.';
   }
   return evaluation.recommendation === 'approve'
-    ? 'Auto mode judged this call routine and would have run it.'
-    : 'Auto mode found this call risky enough to ask you.';
+    ? 'Auto would have run this call.'
+    : 'Auto flagged this call as risky and asked you.';
 }
 
 function summarizeArgs(argsSummary: unknown): string | null {

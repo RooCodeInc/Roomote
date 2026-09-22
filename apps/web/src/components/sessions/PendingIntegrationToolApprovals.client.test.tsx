@@ -141,7 +141,7 @@ describe('PendingIntegrationToolApprovals', () => {
     expect(screen.queryByText('No arguments')).not.toBeInTheDocument();
   });
 
-  it('tells the person what Auto mode made of the call, when it looked', () => {
+  it('tells the person what Auto made of the call, when it looked', () => {
     render(
       <QueryClientProvider client={new QueryClient()}>
         <PendingIntegrationToolApprovals
@@ -160,7 +160,7 @@ describe('PendingIntegrationToolApprovals', () => {
       </QueryClientProvider>,
     );
     expect(screen.getByTestId('auto-evaluation')).toHaveTextContent(
-      'Auto mode found this call risky enough to ask you.',
+      'Auto flagged this call as risky and asked you.',
     );
   });
 });
