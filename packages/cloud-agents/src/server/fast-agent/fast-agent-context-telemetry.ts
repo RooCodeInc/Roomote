@@ -27,6 +27,33 @@ export function captureFastAgentCapabilityOffer(input: {
   });
 }
 
+/** Records bounded Jev-vs-regular communication decisions without task text. */
+export function captureFastAgentCommunicationDecision(input: {
+  userId: string;
+  sessionId: string;
+  eventType: string;
+  arm: 'jev' | 'regular-llm';
+  action: string;
+  confidence?: number | null;
+  needsUserInputProbability?: number | null;
+  latencyMs?: number | null;
+  fallbackReason?: string | null;
+}): void {
+  void captureEvent('fast_agent_communication_decision', {
+    userId: input.userId,
+    properties: {
+      session_id_hash: sha256(input.sessionId),
+      event_type: input.eventType,
+      arm: input.arm,
+      action: input.action,
+      confidence: input.confidence ?? null,
+      needs_user_input_probability: input.needsUserInputProbability ?? null,
+      latency_ms: input.latencyMs ?? null,
+      fallback_reason: input.fallbackReason ?? null,
+    },
+  });
+}
+
 export type FastAgentSessionPath =
   | 'warm'
   | 'cold_resume'

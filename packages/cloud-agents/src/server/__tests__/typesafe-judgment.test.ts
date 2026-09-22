@@ -470,7 +470,10 @@ describe('evaluateTypeSafeJudgments', () => {
 
     await expect(
       evaluateTypeSafeJudgments({ state: 'hi', questions }),
-    ).resolves.toEqual(directAnswers);
+    ).resolves.toEqual({
+      ...directAnswers,
+      team: { ...directAnswers.team, confidence: 0.82 },
+    });
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('https://ai-gateway.vercel.sh/v4/ai/evaluation-model');
@@ -518,6 +521,27 @@ describe('evaluateTypeSafeJudgments', () => {
       model: 'typesafe/jev-1.13',
       questions,
     });
+  });
+
+  it('uses an explicit experiment backend selection without changing Settings', async () => {
+    mockEnv.R_JUDGMENT_MODEL = 'off';
+    mockGetJudgmentSelection.mockResolvedValue('off');
+    mockKeys({ OPENROUTER_API_KEY: 'or-key' });
+    const fetchMock = mockFetchResponse({ answers: directAnswers });
+
+    await expect(
+      evaluateTypeSafeJudgments({
+        state: 'experiment',
+        questions,
+        selectionOverride: 'openrouter',
+      }),
+    ).resolves.toEqual(directAnswers);
+
+    expect(mockEnv.R_JUDGMENT_MODEL).toBe('off');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://openrouter.ai/api/alpha/decisions',
+      expect.any(Object),
+    );
   });
 
   it('does not replace malformed OpenRouter confidence', async () => {

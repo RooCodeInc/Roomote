@@ -70,6 +70,7 @@
     "check-types": "tsc --noEmit",
     "check-types:fast": "tsgo --noEmit",
     "test": "dotenvx run -f ../../.env.test -- vitest",
+    "benchmark:session-communication-latency": "tsx scripts/session-communication-latency.mts",
     "deployment:launch-docker-task": "tsx src/server/deployment-ci-launch-task.ts",
     "review-prescreen:eval": "tsx src/server/workflows/githubPrReviewPrescreenEval.ts",
     "clean": "rimraf .turbo"
