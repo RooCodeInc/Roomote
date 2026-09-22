@@ -701,7 +701,7 @@ export async function callFastAgentIntegration(
       context.privateOwnerUserId !== context.userId)
   ) {
     throw new Error(
-      'Private integrations require a private Session owned by the current user.',
+      'Private integrations require a private session owned by the current user.',
     );
   }
   if (
@@ -709,10 +709,10 @@ export async function callFastAgentIntegration(
     isMemoryMcpServer(request.integrationId) &&
     request.integrationId !== BRAIN_MCP_ID
   ) {
-    throw new Error('Private Sessions cannot write to shared memory.');
+    throw new Error('Private sessions cannot write to shared memory.');
   }
   if (privateBrainRead && request.toolName === 'synthesize') {
-    throw new Error('Brain synthesis is unavailable in private Sessions.');
+    throw new Error('Brain synthesis is unavailable in private sessions.');
   }
   if (
     request.integrationId === ROOMOTE_MCP_ID &&

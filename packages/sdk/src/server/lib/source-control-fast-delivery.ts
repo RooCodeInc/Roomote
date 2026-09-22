@@ -145,7 +145,7 @@ export function createFastAgentSourceControlTaskLauncher(params: {
     if (!discussion) {
       return {
         success: false,
-        error: 'The discussion for this Session could not be resolved.',
+        error: 'The discussion for this session could not be resolved.',
       };
     }
     const target = await loadTarget();
@@ -1211,7 +1211,7 @@ export function buildSourceControlFastAdapter(params: {
         fn: async (assertLock, lock) => {
           if (!discussion) {
             throw new Error(
-              'The discussion for this Session could not be resolved.',
+              'The discussion for this session could not be resolved.',
             );
           }
           if (!turnComment) {

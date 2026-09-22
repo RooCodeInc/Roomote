@@ -58,18 +58,18 @@ export const DEPLOYMENT_METADATA_BOOLEAN_CONFIG: Record<
     kind: 'deployment-control',
     group: null,
     description:
-      'Allow members to create owner-only private Sessions. Disabled by default; absent means disabled.',
+      'Allow members to create owner-only private sessions. Disabled by default; absent means disabled.',
   },
   [DEPLOYMENT_EXPERIMENT_METADATA_KEYS.browserNotifications]: {
     kind: 'deployment-control',
     group: null,
     description:
-      'Offer desktop browser notifications while the relevant Session or task page remains open',
+      'Offer desktop browser notifications while the relevant session or task page remains open',
   },
   [DEPLOYMENT_EXPERIMENT_METADATA_KEYS.integrationToolApprovals]: {
     kind: 'deployment-control',
     group: null,
     description:
-      'Configure per-integration-tool approval policies for code-mode integration calls in Sessions and let the Session requester allow or reject each gated call before it runs. Disabled by default; absent means disabled.',
+      'Configure per-integration-tool approval policies for code-mode integration calls in sessions and let the session requester allow or reject each gated call before it runs. Disabled by default; absent means disabled.',
   },
 };

@@ -2775,7 +2775,7 @@ function createScheduledWakeupReplyGuard(params: {
         );
         controller.abort(
           new Error(
-            'Scheduled wakeup was cancelled or its Session archived while the turn was running.',
+            'Scheduled wakeup was cancelled or its session archived while the turn was running.',
           ),
         );
       }

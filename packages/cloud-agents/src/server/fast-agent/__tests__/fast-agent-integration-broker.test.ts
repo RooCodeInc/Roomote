@@ -2034,7 +2034,7 @@ describe('fast-agent integration broker', () => {
         [integration],
         request,
       ),
-    ).rejects.toThrow('require a private Session');
+    ).rejects.toThrow('require a private session');
   });
 
   it('preserves private policy through discovery and shared rejection', async () => {
@@ -2062,7 +2062,7 @@ describe('fast-agent integration broker', () => {
     };
     await expect(
       callFastAgentIntegration(auditContext, integrations, request),
-    ).rejects.toThrow('require a private Session');
+    ).rejects.toThrow('require a private session');
     await expect(
       callFastAgentIntegration(
         {

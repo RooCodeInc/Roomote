@@ -441,7 +441,7 @@ function resolveReceiptLanguage(
   if (toolName === 'report_to_parent_session')
     return {
       verb: byPhase('Sending', 'Sent', 'Failed to Send'),
-      object: 'report to Session',
+      object: 'report to session',
     };
   if (toolName === 'receive_task_report')
     return {

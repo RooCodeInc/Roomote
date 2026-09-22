@@ -215,7 +215,7 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(showWidgetSource).toContain('invoke("show_widget"');
     expect(showWidgetSource).toContain('textFallback: z.string().max(4000)');
     expect(showWidgetSource).toContain(
-      'Create and share a rendered visual in the Session transcript',
+      'Create and share a rendered visual in the session transcript',
     );
     expect(showWidgetSource).toContain(
       'Use it proactively to show, mock up, preview, or visualize an interface or interaction',

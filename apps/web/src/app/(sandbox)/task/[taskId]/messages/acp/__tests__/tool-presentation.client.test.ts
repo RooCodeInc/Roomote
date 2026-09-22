@@ -863,7 +863,7 @@ describe('tool presentation policy', () => {
       ),
     ).toMatchObject({
       verb,
-      object: 'report to Session',
+      object: 'report to session',
       category: 'communication',
     });
   });
