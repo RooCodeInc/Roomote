@@ -114,23 +114,24 @@ generation is unavailable, Home keeps the standard non-personalized suggestions.
 An admin can turn the experiment off to stop personalized suggestion requests
 for every member.
 
-### Continue peer conversations
+### Peer conversations
 
-**Peer conversations** is a deployment-wide experiment controlled by admins
-under **Settings > Experimental**. When enabled, eligible human replies in
-established Slack or Discord session threads can continue reaching Roomote after
-someone mentions another participant. Roomote is instructed to stay quiet around
-peer discussion unless Roomote is addressed directly or the context clearly
-calls for its response. Direct Roomote mentions work normally with the experiment
-on or off.
+In an established Slack or Discord session thread, eligible human replies keep
+reaching Roomote after someone mentions another participant. When a
+[judgment model](/models#judgment-model) is configured, each unmentioned reply
+is first judged on who it is addressed to and whether it expects a response;
+only replies meant for Roomote that call for an answer start a turn, so
+side discussion and acknowledgements stay silent. Without a judgment model,
+Roomote is instructed to stay quiet around peer discussion unless it is
+addressed directly. Direct Roomote mentions always work.
 
-The experiment does not monitor whole channels. Discord supplies messages from
-the established thread and resolved user mentions. Telegram is not included:
-bot privacy settings can prevent ambient group messages from reaching Roomote,
-and Telegram sessions are isolated per linked sender. Microsoft Teams
-is also not included because its channel sessions are isolated per
-linked sender; webhook delivery and delegated Graph history are not a single
-shared, owner-bound session signal.
+Peer conversations do not monitor whole channels. Discord supplies messages
+from the established thread and resolved user mentions. Telegram is not
+included: bot privacy settings can prevent ambient group messages from reaching
+Roomote, and Telegram sessions are isolated per linked sender. Microsoft Teams
+is also not included because its channel sessions are isolated per linked
+sender; webhook delivery and delegated Graph history are not a single shared,
+owner-bound session signal.
 
 ## Personalize how Roomote works with you
 

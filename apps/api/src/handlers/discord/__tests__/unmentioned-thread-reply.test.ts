@@ -74,7 +74,7 @@ async function routeDecision(
     isRoomoteThread?: boolean;
     isAutomationReportThread?: boolean;
     isOpenConversationThread?: boolean;
-    peerConversationsExperimentEnabled?: boolean;
+    peerConversationsEnabled?: boolean;
     botUserId?: string;
   } = {},
 ) {
@@ -92,8 +92,7 @@ async function routeDecision(
         ? 'roomote-user-1'
         : options.ownedThreadUserId,
     isOpenConversationThread: options.isOpenConversationThread,
-    peerConversationsExperimentEnabled:
-      options.peerConversationsExperimentEnabled,
+    peerConversationsEnabled: options.peerConversationsEnabled,
     isAutomationReportThread: options.isAutomationReportThread,
     fetchThreadMessages: fetchThreadMessagesMock,
   });
@@ -237,6 +236,7 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
         confidence: 0.95,
         probabilities: { roomote: 0.95, participant: 0.03, unclear: 0.02 },
       },
+      expectsResponse: { type: 'noul', noul: 0.9 },
     });
     fetchThreadMessagesMock.mockResolvedValue([
       humanHistory(
@@ -402,9 +402,15 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
         }),
       ),
     ).resolves.toBe(false);
+    expect(evaluateTypeSafeJudgmentsMock).not.toHaveBeenCalled();
   });
 
   it('routes peer discussion in an opted-in open Fast conversation', async () => {
+    fetchThreadMessagesMock.mockResolvedValue([
+      humanHistory(THREAD_ROOT_ID, USER_1, 'Can you summarize this?'),
+      botHistory('200', 'Hi there.'),
+    ]);
+
     await expect(
       routeDecision(
         threadReplyMessage({
@@ -413,21 +419,51 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
         }),
         {
           isOpenConversationThread: true,
-          peerConversationsExperimentEnabled: true,
+          peerConversationsEnabled: true,
         },
       ),
     ).resolves.toBe(true);
-    expect(fetchThreadMessagesMock).not.toHaveBeenCalled();
+    expect(fetchThreadMessagesMock).toHaveBeenCalledOnce();
   });
 
   it('keeps subsequent ambient turns in the opted-in Fast conversation', async () => {
+    fetchThreadMessagesMock.mockResolvedValue([
+      humanHistory(THREAD_ROOT_ID, USER_1, 'Can you summarize this?'),
+      botHistory('200', 'Hi there.'),
+    ]);
+
     await expect(
       routeDecision(threadReplyMessage({ content: 'I agree' }), {
         isOpenConversationThread: true,
-        peerConversationsExperimentEnabled: true,
+        peerConversationsEnabled: true,
       }),
     ).resolves.toBe(true);
-    expect(fetchThreadMessagesMock).not.toHaveBeenCalled();
+    expect(fetchThreadMessagesMock).toHaveBeenCalledOnce();
+  });
+
+  it('gates an opted-in peer message with the configured judgment model', async () => {
+    fetchThreadMessagesMock.mockResolvedValue([
+      humanHistory(THREAD_ROOT_ID, USER_1, 'Can you summarize this?'),
+      botHistory('200', 'Hi there.'),
+    ]);
+    evaluateTypeSafeJudgmentsMock.mockResolvedValue({
+      addressee: {
+        type: 'choice',
+        choice: 'participant',
+        confidence: 0.92,
+        probabilities: { roomote: 0.03, participant: 0.92, unclear: 0.05 },
+      },
+      expectsResponse: { type: 'noul', noul: 0.9 },
+    });
+
+    await expect(
+      routeDecision(threadReplyMessage({ content: 'I agree' }), {
+        isOpenConversationThread: true,
+        peerConversationsEnabled: true,
+      }),
+    ).resolves.toBe(false);
+    expect(fetchThreadMessagesMock).toHaveBeenCalledOnce();
+    expect(evaluateTypeSafeJudgmentsMock).toHaveBeenCalledOnce();
   });
 
   it('does not route a forwarded snapshot that mentions someone else', async () => {
@@ -506,7 +542,7 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
       routeDecision(threadReplyMessage({}), {
         isRoomoteThread: false,
         isOpenConversationThread: true,
-        peerConversationsExperimentEnabled: true,
+        peerConversationsEnabled: true,
       }),
     ).resolves.toBe(false);
   });

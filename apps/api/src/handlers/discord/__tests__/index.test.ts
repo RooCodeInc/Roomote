@@ -359,7 +359,6 @@ describe('Discord Gateway event handler', () => {
     mocks.answerFast.mockResolvedValue('A quick answer');
     mocks.hasFastSession.mockResolvedValue(false);
     mocks.getFastSessionOwner.mockResolvedValue(null);
-    mocks.peerConversationsEnabled.mockResolvedValue(false);
     mocks.mentionsPeer.mockReturnValue(false);
     mocks.findFastMessageSession.mockResolvedValue(null);
     mocks.findFastReplySession.mockResolvedValue(null);
@@ -1498,7 +1497,6 @@ describe('Discord Gateway event handler', () => {
       kind: 'user',
       userId: 'roomote-user-owner',
     });
-    mocks.peerConversationsEnabled.mockResolvedValue(true);
     mocks.mentionsPeer.mockReturnValue(true);
     mocks.shouldRouteUnmentioned.mockResolvedValue(true);
 
@@ -1515,11 +1513,8 @@ describe('Discord Gateway event handler', () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.peerConversationsEnabled).toHaveBeenCalledWith(
-      'slackPeerConversations',
-    );
     expect(mocks.shouldRouteUnmentioned).toHaveBeenCalledWith(
-      expect.objectContaining({ peerConversationsExperimentEnabled: true }),
+      expect.objectContaining({ peerConversationsEnabled: true }),
     );
     expect(mocks.answerFast).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1542,7 +1537,6 @@ describe('Discord Gateway event handler', () => {
     mocks.findMappedUserId.mockResolvedValue('roomote-user-peer');
     mocks.hasFastSession.mockResolvedValue(true);
     mocks.getFastSessionOwner.mockResolvedValue(null);
-    mocks.peerConversationsEnabled.mockResolvedValue(true);
     mocks.mentionsPeer.mockReturnValue(true);
     mocks.shouldRouteUnmentioned.mockResolvedValue(false);
 
@@ -1559,9 +1553,8 @@ describe('Discord Gateway event handler', () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.peerConversationsEnabled).not.toHaveBeenCalled();
     expect(mocks.shouldRouteUnmentioned).toHaveBeenCalledWith(
-      expect.objectContaining({ peerConversationsExperimentEnabled: false }),
+      expect.objectContaining({ peerConversationsEnabled: false }),
     );
     expect(mocks.answerFast).not.toHaveBeenCalled();
   });
