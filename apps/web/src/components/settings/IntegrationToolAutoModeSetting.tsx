@@ -28,9 +28,8 @@ const MODES: { mode: IntegrationToolAutoMode; label: string; hint: string }[] =
   ];
 
 /**
- * Deployment-wide Auto mode for tool approvals: who answers an Ask first
- * call. Rendered inside the experiment section, only while the experiment
- * is on. Reject is never affected, and the model can only ever run a call
+ * Deployment-wide Auto mode for tool approvals. Rendered on the
+ * Integrations page, only while the experiment is on. Reject is never affected, and the model can only ever run a call
  * or ask; it never rejects one.
  */
 export function IntegrationToolAutoModeSetting() {
@@ -52,7 +51,7 @@ export function IntegrationToolAutoModeSetting() {
           result,
         );
       },
-      onError: () => toast.error('Failed to update automatic approvals.'),
+      onError: () => toast.error('Failed to update Auto mode.'),
     }),
   );
   if (!settings.data) return null;
@@ -70,9 +69,8 @@ export function IntegrationToolAutoModeSetting() {
       : `Requires a hosted judgment model. The helper model (${model.model}) makes a full LLM call for every tool call.`;
 
   return (
-    <div className="mt-4 flex flex-col gap-3 border-t pt-4">
+    <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-1">
-        <p className="text-sm font-medium">Automatic approvals</p>
         <p className="text-sm text-muted-foreground">
           Let a decision model handle tools set to Auto. Your other choices stay
           fixed. {modelNote}
@@ -80,7 +78,7 @@ export function IntegrationToolAutoModeSetting() {
       </div>
       <div
         role="radiogroup"
-        aria-label="Automatic approvals"
+        aria-label="Auto mode"
         className="flex flex-col gap-2 sm:flex-row"
       >
         {MODES.map((option) => {

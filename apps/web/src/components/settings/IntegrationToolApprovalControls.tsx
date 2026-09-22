@@ -29,17 +29,24 @@ import {
   type LucideIcon,
 } from '@/components/system';
 
-const APPROVAL_MODES: {
+/**
+ * The stored choices a tool can be given. Auto, the default, is no choice at
+ * all: a row shows it as nothing selected, and clicking the selected choice
+ * again returns to it. The bulk select names it, so a whole group can be
+ * returned to Auto in one step.
+ */
+const STORED_MODES: {
   mode: IntegrationToolPolicyMode;
   label: string;
   icon: LucideIcon;
 }[] = [
-  // The default: runs, and is risk-assessed first when Auto mode is on.
-  { mode: 'allow', label: 'Auto', icon: Sparkles },
-  // A stored choice: runs, and Auto never looks.
   { mode: 'always_allow', label: 'Always allow', icon: CircleCheck },
   { mode: 'ask', label: 'Ask first', icon: Hand },
   { mode: 'reject', label: 'Reject', icon: Ban },
+];
+const BULK_MODES = [
+  { mode: 'allow' as const, label: 'Auto', icon: Sparkles },
+  ...STORED_MODES,
 ];
 
 const INTEGRATION_TOOL_APPROVAL_SAVE_HINT =
@@ -68,7 +75,7 @@ function IntegrationToolApprovalModeControl({
       aria-label={`Approval mode for ${toolName}`}
       className="flex shrink-0 items-center gap-0.5 rounded-md bg-muted/50 p-0.5"
     >
-      {APPROVAL_MODES.map(({ mode, label, icon: Icon }) => {
+      {STORED_MODES.map(({ mode, label, icon: Icon }) => {
         const checked = mode === value;
         return (
           <button
@@ -77,11 +84,9 @@ function IntegrationToolApprovalModeControl({
             role="radio"
             aria-checked={checked}
             aria-label={label}
-            title={label}
+            title={checked ? `${label} (click again for Auto)` : label}
             disabled={disabled}
-            onClick={() => {
-              if (!checked) onChange(mode);
-            }}
+            onClick={() => onChange(checked ? 'allow' : mode)}
             className={cn(
               'flex size-7 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring disabled:cursor-default disabled:opacity-60',
               checked && 'bg-background text-foreground shadow-sm',
@@ -176,7 +181,7 @@ function IntegrationToolApprovalGroup({
           />
         </SelectTrigger>
         <SelectContent>
-          {APPROVAL_MODES.map(({ mode, label, icon: Icon }) => (
+          {BULK_MODES.map(({ mode, label, icon: Icon }) => (
             <SelectItem key={mode} value={mode}>
               <Icon aria-hidden="true" className="size-4" />
               {label}

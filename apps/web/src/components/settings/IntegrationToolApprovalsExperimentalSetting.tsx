@@ -3,7 +3,6 @@
 import { ShieldQuestion, Switch } from '@/components/system';
 import { useIntegrationToolApprovalsExperiment } from '@/hooks/useIntegrationToolApprovalsExperiment';
 
-import { IntegrationToolAutoModeSetting } from './IntegrationToolAutoModeSetting';
 import { Section } from './Section';
 
 /**
@@ -40,7 +39,6 @@ export function IntegrationToolApprovalsExperimentalSetting() {
           Policies are deployment-wide and apply from the next session turn.
         </p>
       </div>
-      {enabled ? <IntegrationToolAutoModeSetting /> : null}
     </Section>
   );
 }

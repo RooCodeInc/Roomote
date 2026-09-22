@@ -156,7 +156,8 @@ describe('McpToolManagementDialog tool approvals', () => {
         name: 'Approval mode for web_search_exa',
       }),
     );
-    expect(search.getByRole('radio', { name: 'Auto' })).toBeChecked();
+    // Auto, the default, is nothing selected.
+    expect(search.queryByRole('radio', { checked: true })).toBeNull();
     expect(
       within(
         screen.getByRole('radiogroup', {
@@ -169,6 +170,19 @@ describe('McpToolManagementDialog tool approvals', () => {
     expect(state.setModeCalls).toEqual([
       { integrationId: 'exa', toolName: 'web_search_exa', mode: 'ask' },
     ]);
+    // Clicking the selected choice again returns the tool to Auto.
+    fireEvent.click(
+      within(
+        screen.getByRole('radiogroup', {
+          name: 'Approval mode for web_fetch_exa',
+        }),
+      ).getByRole('radio', { name: 'Reject' }),
+    );
+    expect(state.setModeCalls.at(-1)).toEqual({
+      integrationId: 'exa',
+      toolName: 'web_fetch_exa',
+      mode: 'allow',
+    });
   });
 
   it('shows unclassified tools as a plain list with one Custom bulk select', () => {
