@@ -481,6 +481,41 @@ describe('OpenCode harness completion check', () => {
     }
   });
 
+  it("reads the exit code the way OpenCode's shell tool reports it", async () => {
+    const { client, harness, completed } = await startTask();
+
+    try {
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'prt_call_1',
+            sessionID: 'ses_1',
+            messageID: 'msg_1',
+            type: 'tool',
+            tool: 'bash',
+            callID: 'call_1',
+            state: {
+              status: 'completed',
+              input: { command: 'pnpm vitest run' },
+              output: 'Tests  1 failed | 11 passed (12)',
+              // OpenCode 1.18 shell tool metadata: `exit`, not `exitCode`.
+              metadata: { exit: 1, truncated: false },
+            },
+          },
+        },
+      });
+      await completeTurn(client, 'msg_1', 'Removed the guard. Tests pass.');
+
+      await vi.waitFor(() => expect(completed()).toHaveLength(1));
+      expect(
+        mockRequestTaskCompletionCheck.mock.calls[0]![1].commands[0],
+      ).toMatchObject({ command: 'pnpm vitest run', exitCode: 1 });
+    } finally {
+      harness.dispose();
+    }
+  });
+
   it('marks a run stale when the code changed after it, however it was changed', async () => {
     const { client, harness, completed } = await startTask();
     const diffAt = (code: string) => ({

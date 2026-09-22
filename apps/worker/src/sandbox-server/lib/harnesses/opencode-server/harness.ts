@@ -869,6 +869,8 @@ function extractOpenCodeExitCode(
 
   return (
     asFiniteNumber(metadata.exitCode) ??
+    // OpenCode's shell tool (1.18) reports the code as `metadata.exit`.
+    asFiniteNumber(metadata.exit) ??
     asFiniteNumber(metadata.code) ??
     asFiniteNumber(outputRecord?.exitCode) ??
     asFiniteNumber(outputRecord?.code) ??
