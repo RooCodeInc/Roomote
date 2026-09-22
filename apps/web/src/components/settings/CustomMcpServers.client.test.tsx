@@ -162,12 +162,6 @@ vi.mock('@/trpc/client', () => ({
           ...options,
         }),
       },
-      setDisabledTools: {
-        mutationOptions: (options = {}) => ({
-          mutationFn: vi.fn(),
-          ...options,
-        }),
-      },
       connect: {
         mutationOptions: (options = {}) => ({
           mutationFn: vi.fn(async () => '/api/mcp-oauth/initiate/conn-1'),
@@ -351,7 +345,7 @@ describe('useCustomMcpServers', () => {
     ).toBeInTheDocument();
   });
 
-  it('truncates a prompt-length tool description behind a toggle that leaves the checkbox alone', async () => {
+  it('truncates a prompt-length tool description without an availability checkbox', async () => {
     const long = `Resolves a package name. ${'Details. '.repeat(40)}`.trim();
     state.servers = [buildServer()];
     state.tools = [
@@ -376,7 +370,7 @@ describe('useCustomMcpServers', () => {
     expect(
       screen.getByRole('button', { name: 'Show less' }),
     ).toBeInTheDocument();
-    expect(screen.getByRole('checkbox', { name: 'Resolve' })).toBeChecked();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
     state.tools = [];
   });
 
@@ -409,12 +403,14 @@ describe('useCustomMcpServers', () => {
       await openToolsDialog();
 
       const control = within(
-        await screen.findByRole('radiogroup', {
+        await screen.findByRole('group', {
           name: 'Approval mode for search',
         }),
       );
-      expect(control.getByRole('radio', { name: 'Ask first' })).toBeChecked();
-      fireEvent.click(control.getByRole('radio', { name: 'Reject' }));
+      expect(
+        control.getByRole('button', { name: 'Always ask' }),
+      ).toHaveAttribute('aria-pressed', 'true');
+      fireEvent.click(control.getByRole('button', { name: 'Disable' }));
       expect(approvals.setMode).toHaveBeenCalledWith(
         'internal-tools',
         'search',
@@ -427,7 +423,7 @@ describe('useCustomMcpServers', () => {
       await openToolsDialog();
       await screen.findByText('Search');
       expect(
-        screen.queryByRole('radiogroup', { name: 'Approval mode for search' }),
+        screen.queryByRole('group', { name: 'Approval mode for search' }),
       ).not.toBeInTheDocument();
       expect(approvals.listEnabled).not.toContain(true);
 
@@ -438,7 +434,7 @@ describe('useCustomMcpServers', () => {
       await openToolsDialog();
       await screen.findByText('Search');
       expect(
-        screen.queryByRole('radiogroup', { name: 'Approval mode for search' }),
+        screen.queryByRole('group', { name: 'Approval mode for search' }),
       ).not.toBeInTheDocument();
       expect(approvals.listEnabled).not.toContain(true);
     });
@@ -879,11 +875,11 @@ describe('personal MCP servers in Personal settings', () => {
         }),
       );
       const control = within(
-        await screen.findByRole('radiogroup', {
+        await screen.findByRole('group', {
           name: 'Approval mode for search',
         }),
       );
-      fireEvent.click(control.getByRole('radio', { name: 'Reject' }));
+      fireEvent.click(control.getByRole('button', { name: 'Disable' }));
       expect(approvals.setMode).toHaveBeenCalledWith(
         'internal-tools',
         'search',
@@ -892,8 +888,8 @@ describe('personal MCP servers in Personal settings', () => {
       expect(approvals.scopes).toContain('personal');
       expect(approvals.scopes).not.toContain('deployment');
       expect(
-        screen.getByText(/These apply to your own sessions only/),
-      ).toBeInTheDocument();
+        screen.queryByText(/These apply to your own sessions only/),
+      ).not.toBeInTheDocument();
     } finally {
       approvals.experimentEnabled = false;
       state.tools = [];

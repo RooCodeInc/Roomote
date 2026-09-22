@@ -1,13 +1,23 @@
 import { TRPCError } from '@trpc/server';
 
 import {
+  and,
+  customMcpServers,
+  db,
+  deploymentMcpEnablements,
+  eq,
   isDeploymentExperimentEnabled,
   listIntegrationToolPolicies,
   listIntegrationToolUserPolicies,
+  personalMcpServers,
   upsertIntegrationToolPolicy,
   upsertIntegrationToolUserPolicy,
 } from '@roomote/db/server';
-import type { IntegrationToolPolicyUpsert } from '@roomote/types';
+import {
+  getMcpIntegration,
+  type IntegrationToolPolicyMode,
+  type IntegrationToolPolicyUpsert,
+} from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
 
@@ -34,11 +44,91 @@ export async function setIntegrationToolPolicyCommand(
     ...input,
     updatedByUserId: auth.userId,
   });
+  await syncLegacyDisabledTool({ ...input, scope: 'deployment' });
   return listIntegrationToolPolicies();
 }
 
 const toolApprovalsEnabled = () =>
   isDeploymentExperimentEnabled('integrationToolApprovals');
+
+/**
+ * Keep pre-policy availability rows compatible while the policy surface rolls
+ * them into the `reject`/Disable mode. The columns remain for N-1 rollback;
+ * current policy edits are the only user-facing source of truth.
+ */
+async function syncLegacyDisabledTool(input: {
+  integrationId: string;
+  toolName: string;
+  mode: IntegrationToolPolicyMode;
+  scope: 'deployment' | 'personal';
+  userId?: string;
+}) {
+  if (input.scope === 'personal') {
+    if (!input.userId) return;
+    const server = await db.query.personalMcpServers.findFirst({
+      where: and(
+        eq(personalMcpServers.ownerUserId, input.userId),
+        eq(personalMcpServers.name, input.integrationId),
+      ),
+      columns: { id: true, disabledTools: true },
+    });
+    if (!server) return;
+
+    const disabledTools = new Set(server.disabledTools ?? []);
+    if (input.mode === 'reject') disabledTools.add(input.toolName);
+    else disabledTools.delete(input.toolName);
+
+    await db
+      .update(personalMcpServers)
+      .set({
+        disabledTools:
+          disabledTools.size > 0 ? [...disabledTools].sort() : null,
+        updatedAt: new Date(),
+      })
+      .where(eq(personalMcpServers.id, server.id));
+    return;
+  }
+
+  if (getMcpIntegration(input.integrationId)) {
+    const enablement = await db.query.deploymentMcpEnablements.findFirst({
+      where: eq(deploymentMcpEnablements.mcpId, input.integrationId),
+      columns: { mcpId: true, disabledTools: true },
+    });
+    if (!enablement) return;
+
+    const disabledTools = new Set(enablement.disabledTools ?? []);
+    if (input.mode === 'reject') disabledTools.add(input.toolName);
+    else disabledTools.delete(input.toolName);
+
+    await db
+      .update(deploymentMcpEnablements)
+      .set({
+        disabledTools:
+          disabledTools.size > 0 ? [...disabledTools].sort() : null,
+        updatedAt: new Date(),
+      })
+      .where(eq(deploymentMcpEnablements.mcpId, enablement.mcpId));
+    return;
+  }
+
+  const server = await db.query.customMcpServers.findFirst({
+    where: eq(customMcpServers.name, input.integrationId),
+    columns: { id: true, disabledTools: true },
+  });
+  if (!server) return;
+
+  const disabledTools = new Set(server.disabledTools ?? []);
+  if (input.mode === 'reject') disabledTools.add(input.toolName);
+  else disabledTools.delete(input.toolName);
+
+  await db
+    .update(customMcpServers)
+    .set({
+      disabledTools: disabledTools.size > 0 ? [...disabledTools].sort() : null,
+      updatedAt: new Date(),
+    })
+    .where(eq(customMcpServers.id, server.id));
+}
 
 /**
  * The caller's personal policies for their own Sessions. They layer on the
@@ -63,5 +153,10 @@ export async function setPersonalIntegrationToolPolicyCommand(
     });
   }
   await upsertIntegrationToolUserPolicy({ ...input, userId: auth.userId });
+  await syncLegacyDisabledTool({
+    ...input,
+    scope: 'personal',
+    userId: auth.userId,
+  });
   return listIntegrationToolUserPolicies(auth.userId);
 }

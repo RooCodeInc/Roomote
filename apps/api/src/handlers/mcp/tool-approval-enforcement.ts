@@ -132,6 +132,6 @@ export function describeProxyToolApprovalBlock(
   block: ProxyToolApprovalBlock,
 ): string {
   return block === 'reject'
-    ? `Tool "${toolName}" is blocked by a tool approval policy.`
+    ? `Tool "${toolName}" is disabled by a tool approval policy.`
     : `Tool "${toolName}" needs approval before it runs, and this call has not been approved.`;
 }

@@ -11,7 +11,6 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
   Input,
@@ -749,13 +748,11 @@ function CustomToolManagementDialog({
   scope,
   open,
   onOpenChange,
-  onSaved,
 }: {
   server: ListedServer | null;
   scope: CustomMcpServerVisibility;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSaved: () => void;
 }) {
   const trpc = useTRPC();
   const { isAdmin } = useAuthorizedUser();
@@ -769,54 +766,15 @@ function CustomToolManagementDialog({
     ),
   );
 
-  const setDisabledTools = useMutation(
-    trpc.customMcpServers.setDisabledTools.mutationOptions(),
-  );
-
-  const [disabledNames, setDisabledNames] = useState<Set<string>>(new Set());
-  const loadedKey = useMemo(
-    () =>
-      toolsQuery.data
-        ? `${server?.id}:${toolsQuery.data.tools.map((tool) => tool.name).join(',')}`
-        : null,
-    [toolsQuery.data, server?.id],
-  );
-
-  useEffect(() => {
-    if (loadedKey && toolsQuery.data) {
-      setDisabledNames(
-        new Set(
-          toolsQuery.data.tools
-            .filter((tool) => !tool.enabled)
-            .map((tool) => tool.name),
-        ),
-      );
-    }
-  }, [loadedKey, toolsQuery.data]);
-
-  const save = async () => {
-    if (!server) {
-      return;
-    }
-
-    await setDisabledTools.mutateAsync({
-      id: server.id,
-      disabledTools: [...disabledNames],
-    });
-    onSaved();
-    onOpenChange(false);
-  };
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="xl">
+      <DialogContent size="2xl">
         <DialogHeader>
           <DialogTitle>
             Manage tools for {server?.name ?? 'integration'}
           </DialogTitle>
           <DialogDescription>
-            Disabled tools are blocked at the Roomote proxy and hidden from
-            agents.
+            Choose how the model can use tools from this integration.
           </DialogDescription>
         </DialogHeader>
 
@@ -841,41 +799,9 @@ function CustomToolManagementDialog({
               canManage={scope === 'owner' || isAdmin}
               open={open}
               tools={toolsQuery.data?.tools ?? []}
-              saveNote="Tool enable/disable still needs Save."
-              isToolEnabled={(toolName) => !disabledNames.has(toolName)}
-              onToggleTool={(toolName, enabled) =>
-                setDisabledNames((current) => {
-                  const next = new Set(current);
-
-                  if (enabled) {
-                    next.delete(toolName);
-                  } else {
-                    next.add(toolName);
-                  }
-
-                  return next;
-                })
-              }
             />
           </div>
         )}
-
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-          >
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            onClick={save}
-            disabled={setDisabledTools.isPending || toolsQuery.isPending}
-          >
-            {setDisabledTools.isPending ? <Loading /> : 'Save'}
-          </Button>
-        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -1136,7 +1062,6 @@ export function useCustomMcpServers(
             setToolsServer(null);
           }
         }}
-        onSaved={refresh}
       />
     </>
   );

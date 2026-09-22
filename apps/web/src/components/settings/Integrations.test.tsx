@@ -116,7 +116,6 @@ const { mutations, selectMock } = vi.hoisted(() => ({
     setDeploymentEnabled: vi.fn(),
     connectMcp: vi.fn(),
     disconnectMcp: vi.fn(),
-    setDisabledTools: vi.fn(),
     saveAsanaConnection: vi.fn(),
     saveNotionConnection: vi.fn(),
     saveRipplingConnection: vi.fn(),
@@ -233,22 +232,14 @@ vi.mock('@/hooks/linear', () => ({
 vi.mock('./IntegrationToolApprovalControls', () => ({
   IntegrationToolApprovalList: <T extends { name: string }>({
     tools,
-    isToolEnabled,
-    onToggleTool,
   }: {
     tools: T[];
-    isToolEnabled: (toolName: string) => boolean;
-    onToggleTool: (toolName: string, enabled: boolean) => void;
   }) => (
     <div>
       {tools.map((tool) => (
-        <input
-          key={tool.name}
-          type="checkbox"
-          aria-label={tool.name}
-          checked={isToolEnabled(tool.name)}
-          onChange={(event) => onToggleTool(tool.name, event.target.checked)}
-        />
+        <span key={tool.name} data-testid="managed-tool">
+          {tool.name}
+        </span>
       ))}
     </div>
   ),
@@ -337,10 +328,6 @@ vi.mock('@/hooks/mcp-connections', () => ({
     isPending: false,
     mutate: mutations.disconnectMcp,
     variables: undefined,
-  }),
-  useSetDisabledMcpTools: () => ({
-    isPending: false,
-    mutate: mutations.setDisabledTools,
   }),
   useSaveAsanaConnection: () => ({
     isPending: false,
@@ -617,8 +604,6 @@ vi.mock('@/components/system', () => ({
   TriangleAlert: ({ className }: { className?: string }) => (
     <svg aria-hidden="true" className={className} data-icon="triangle-alert" />
   ),
-  ToggleLeft: () => <svg aria-hidden="true" />,
-  ToggleRight: () => <svg aria-hidden="true" />,
   Wrench: () => <svg aria-hidden="true" data-icon="wrench" />,
   X: () => <svg aria-hidden="true" />,
 }));
@@ -1564,7 +1549,7 @@ describe('Integrations settings', () => {
     ).not.toBeNull();
   });
 
-  it('opens the manage tools dialog with a toggle per tool', () => {
+  it('opens the manage tools dialog without staged availability controls', () => {
     state.deploymentEnablements = [{ mcpId: 'sentry', enabled: true }];
     state.userConnections = [
       { id: 'conn-sentry', mcpId: 'sentry', authStatus: 'authenticated' },
@@ -1589,12 +1574,10 @@ describe('Integrations settings', () => {
     expect(
       screen.getByRole('heading', { name: 'Manage tools for Sentry' }),
     ).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
     expect(
-      screen.getByRole('checkbox', { name: 'get_sentry_resource' }),
-    ).toBeChecked();
-    expect(
-      screen.getByRole('button', { name: 'Save changes' }),
-    ).toBeInTheDocument();
+      screen.queryByRole('button', { name: 'Save changes' }),
+    ).not.toBeInTheDocument();
   });
 
   it('links user-scoped MCP tool authentication errors to personal settings in a new tab', () => {
@@ -2605,7 +2588,7 @@ describe('Integrations settings', () => {
     ).toBeInTheDocument();
   });
 
-  it('preserves unsaved tool toggles when the same upstream tool state is returned again', () => {
+  it('does not reintroduce staged availability controls when the list rerenders', () => {
     state.deploymentEnablements = [{ mcpId: 'sentry', enabled: true }];
     state.userConnections = [
       { id: 'conn-sentry', mcpId: 'sentry', authStatus: 'authenticated' },
@@ -2631,21 +2614,15 @@ describe('Integrations settings', () => {
     fireEvent.click(
       screen.getByRole('button', { name: 'Manage Sentry tools' }),
     );
-    fireEvent.click(
-      screen.getByRole('checkbox', { name: 'get_sentry_resource' }),
-    );
-
     rerender(<Integrations />);
 
     expect(
       screen.getByRole('heading', { name: 'Manage tools for Sentry' }),
     ).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
     expect(
-      screen.getByRole('checkbox', { name: 'get_sentry_resource' }),
-    ).not.toBeChecked();
-    expect(
-      screen.getByRole('checkbox', { name: 'search_events' }),
-    ).not.toBeChecked();
+      screen.queryByRole('button', { name: 'Save changes' }),
+    ).not.toBeInTheDocument();
   });
 
   it('lets an admin store a voice key from the Voice card', async () => {
