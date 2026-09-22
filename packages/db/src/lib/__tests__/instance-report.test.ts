@@ -27,6 +27,7 @@ import {
   bucketPullRequestStatus,
   collectConfiguredInferenceProviders,
   collectConfiguredRuntimeEnvVarNames,
+  collectEnabledCustomIntegrationIds,
   collectInstanceReportStats,
   dedupeAuthoredPullRequests,
   median,
@@ -345,8 +346,11 @@ describe('instance-report pure helpers', () => {
   });
 });
 
-describe('collectInstanceReportStats integration summary', () => {
-  it('counts enabled personal servers only for live owners', async () => {
+describe('collectEnabledCustomIntegrationIds', () => {
+  it('includes enabled servers only for live owners', async () => {
+    // Assert id membership directly instead of comparing global report
+    // aggregates: this suite shares the test database, so before/after
+    // aggregate deltas and indexed stub assertions would be racy.
     const suffix = Date.now().toString();
     const activeOwner = await userFactory.create();
     const deletedOwner = await userFactory.create();
@@ -355,50 +359,44 @@ describe('collectInstanceReportStats integration summary', () => {
       .set({ deletedAt: new Date() })
       .where(eq(users.id, deletedOwner.id));
 
-    const before = await collectInstanceReportStats(new Date());
+    const inserted = await db
+      .insert(personalMcpServers)
+      .values([
+        {
+          ownerUserId: activeOwner.id,
+          name: `active-owner-${suffix}`,
+          url: 'https://example.com/mcp',
+          enabled: true,
+        },
+        {
+          ownerUserId: deletedOwner.id,
+          name: `deleted-owner-${suffix}`,
+          url: 'https://example.com/mcp',
+          enabled: true,
+        },
+        {
+          ownerUserId: activeOwner.id,
+          name: `disabled-${suffix}`,
+          url: 'https://example.com/mcp',
+          enabled: false,
+        },
+      ])
+      .returning({ id: personalMcpServers.id });
+    const [activeRow, deletedOwnerRow] = inserted;
 
-    await db.insert(personalMcpServers).values([
-      {
-        ownerUserId: activeOwner.id,
-        name: `active-owner-${suffix}`,
-        url: 'https://example.com/mcp',
-        enabled: true,
-      },
-      {
-        ownerUserId: deletedOwner.id,
-        name: `deleted-owner-${suffix}`,
-        url: 'https://example.com/mcp',
-        enabled: true,
-      },
-      {
-        ownerUserId: activeOwner.id,
-        name: `disabled-${suffix}`,
-        url: 'https://example.com/mcp',
-        enabled: false,
-      },
-    ]);
+    const enabledIds = await collectEnabledCustomIntegrationIds();
 
-    const after = await collectInstanceReportStats(new Date());
-
-    // Exactly one new custom stub: the deleted-owner row and the disabled
-    // row must not contribute.
-    expect(after.integrations.enabled - before.integrations.enabled).toBe(1);
-    const newName =
-      after.integrations.enabledNames[before.integrations.enabled];
-    expect(newName).toMatch(/^custom-integration-\d+$/);
+    expect(enabledIds).toContain(activeRow?.id);
+    expect(enabledIds).not.toContain(deletedOwnerRow?.id);
+    expect(enabledIds).not.toContain(inserted[2]?.id);
 
     // Clean up so other suites sharing the database see a stable baseline.
-    await db
-      .delete(personalMcpServers)
-      .where(
-        and(
-          inArray(personalMcpServers.name, [
-            `active-owner-${suffix}`,
-            `deleted-owner-${suffix}`,
-            `disabled-${suffix}`,
-          ]),
-        ),
-      );
+    await db.delete(personalMcpServers).where(
+      inArray(
+        personalMcpServers.id,
+        inserted.map((row) => row.id),
+      ),
+    );
   });
 });
 

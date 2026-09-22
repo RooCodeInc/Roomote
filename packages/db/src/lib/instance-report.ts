@@ -339,6 +339,34 @@ export function summarizeIntegrations(options: {
   };
 }
 
+/**
+ * Ids of enabled custom/personal MCP server rows: the authoritative custom
+ * bucket. Personal rows of soft-deleted owners are excluded, matching
+ * `findCustomMcpServerById` runtime semantics, and disabled rows are
+ * filtered out. Exported so tests can assert on ids instead of the report's
+ * anonymized stubs.
+ */
+export async function collectEnabledCustomIntegrationIds(): Promise<string[]> {
+  const [deploymentRows, personalRows] = await Promise.all([
+    db
+      .select({ id: customMcpServers.id })
+      .from(customMcpServers)
+      .where(eq(customMcpServers.enabled, true)),
+    db
+      .select({ id: personalMcpServers.id })
+      .from(personalMcpServers)
+      .innerJoin(users, eq(users.id, personalMcpServers.ownerUserId))
+      .where(
+        and(eq(personalMcpServers.enabled, true), isNull(users.deletedAt)),
+      ),
+  ]);
+
+  return [
+    ...deploymentRows.map((row) => row.id),
+    ...personalRows.map((row) => row.id),
+  ];
+}
+
 function getAuthoredPullRequestKey(row: {
   sourceControlProvider: string;
   host: string | null;
@@ -787,8 +815,7 @@ export async function collectInstanceReportStats(
     xaiSubscriptionConnected,
     mcpEnablements,
     mcpConnectionIds,
-    customServerIds,
-    personalServerIds,
+    customIntegrationIds,
     activeApiKeyIntegrations,
     pullRequests7d,
     customAutomationTotals,
@@ -946,25 +973,7 @@ export async function collectInstanceReportStats(
       .selectDistinct({ mcpId: mcpConnections.mcpId })
       .from(mcpConnections)
       .where(eq(mcpConnections.enabled, true)),
-    // Enabled custom/personal servers are the authoritative custom bucket:
-    // `none`, `static_headers`, and stdio servers have no OAuth connection
-    // row, so counting connections alone would miss them.
-    db
-      .select({ id: customMcpServers.id })
-      .from(customMcpServers)
-      .where(eq(customMcpServers.enabled, true)),
-    db
-      .select({ id: personalMcpServers.id })
-      .from(personalMcpServers)
-      .innerJoin(users, eq(users.id, personalMcpServers.ownerUserId))
-      .where(
-        and(
-          eq(personalMcpServers.enabled, true),
-          // The runtime treats personal rows of soft-deleted owners as gone,
-          // so they must not inflate the count (findCustomMcpServerById).
-          isNull(users.deletedAt),
-        ),
-      ),
+    collectEnabledCustomIntegrationIds(),
     // Active API-key integrations: labels and origins are user-authored, so
     // only the count leaves the instance and stubs are numbered in order.
     db
@@ -1039,10 +1048,7 @@ export async function collectInstanceReportStats(
 
   const integrations = summarizeIntegrations({
     mcpIds: enabledMcpIds,
-    customIntegrationIds: [
-      ...customServerIds.map((row) => row.id),
-      ...personalServerIds.map((row) => row.id),
-    ],
+    customIntegrationIds,
     apiKeyIntegrationCount: activeApiKeyIntegrations[0]?.total,
   });
 
