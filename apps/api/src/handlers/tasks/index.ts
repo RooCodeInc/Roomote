@@ -19,7 +19,6 @@ import { manageSourceControl } from './manageSourceControl';
 import { updateTaskModelSelection } from './updateModelSelection';
 import { listTaskModels } from './listModels';
 import { saveTaskMemory } from './saveTaskMemory';
-import { checkTaskCompletion } from './checkTaskCompletion';
 import { recordAutomationResult } from './recordAutomationResult';
 import { updatePersonalization } from './updatePersonalization';
 
@@ -44,5 +43,4 @@ tasksRouter.post('/:taskId/task_suggestions', submitTaskSuggestions);
 tasksRouter.post('/:taskId/automation_result', recordAutomationResult);
 tasksRouter.post('/:taskId/mcp_recommendations', submitMcpRecommendations);
 tasksRouter.post('/runs/:runId/memory', saveTaskMemory);
-tasksRouter.post('/runs/:runId/completion_check', checkTaskCompletion);
 tasksRouter.post('/runs/:runId/personalization', updatePersonalization);

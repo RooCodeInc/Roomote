@@ -34,7 +34,6 @@ export * from './constants';
 export * from './deploy-marker';
 export * from './deployment-access-policy';
 export * from './brain';
-export * from './task-completion-gate';
 export * from './memory-mcp';
 export * from './memory-events';
 export * from './custom-mcp-servers';
