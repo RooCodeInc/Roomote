@@ -58,6 +58,7 @@ function mockTranscript(
 }
 
 const check = {
+  trigger: 'turn_end' as const,
   report: 'Removed the guard and its tests.',
   diffStat: ' src/guard.ts | 40 ----',
   diff: 'diff --git a/src/guard.ts b/src/guard.ts\n-export const guard = true;\n',
@@ -159,9 +160,12 @@ describe('evaluateTaskCompletionGate', () => {
 
     await expect(
       evaluateTaskCompletionGate({ taskId: 'task-1', check }),
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       status: 'flagged',
       flags: [{ id: 'planIncomplete', probability: 0.9 }],
+      message: expect.stringContaining(
+        'Your checklist still has an item that is not completed',
+      ),
     });
 
     const call = mockEvaluateDecisionModel.mock.calls[0]![0];
@@ -170,6 +174,22 @@ describe('evaluateTaskCompletionGate', () => {
       '- [completed] Remove the guard\n- [pending] Update the docs',
     );
     expect(Object.keys(call.questions)).toContain('planIncomplete');
+  });
+
+  it('builds report-trigger instructions on the server', async () => {
+    mockEvaluateDecisionModel.mockResolvedValue(
+      answers({ validationMissing: 0.9 }),
+    );
+
+    await expect(
+      evaluateTaskCompletionGate({
+        taskId: 'task-1',
+        check: { ...check, trigger: 'report' },
+      }),
+    ).resolves.toMatchObject({
+      status: 'flagged',
+      message: expect.stringContaining('before sending it'),
+    });
   });
 
   it('keeps the opening prompt and the newest follow-ups on a long task', async () => {
@@ -260,9 +280,12 @@ describe('evaluateTaskCompletionGate', () => {
 
     await expect(
       evaluateTaskCompletionGate({ taskId: 'task-1', check }),
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       status: 'flagged',
       flags: [{ id: 'validationContradicted', probability: 0.7 }],
+      message: expect.stringContaining(
+        'Your report claims a validation result that the commands you actually ran do not support',
+      ),
     });
   });
 
@@ -299,9 +322,12 @@ describe('evaluateTaskCompletionGate', () => {
 
     await expect(
       evaluateTaskCompletionGate({ taskId: 'task-1', check }),
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       status: 'flagged',
       flags: [{ id: 'requestUnaddressed', probability: 0.91 }],
+      message: expect.stringContaining(
+        'Part of what was asked does not appear to be done',
+      ),
     });
   });
 
