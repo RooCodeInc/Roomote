@@ -465,6 +465,27 @@ try {
       finalText.includes('Profile saved') &&
       finalText.includes('Display name: Roomote') &&
       finalText.includes('Security checks complete');
+    let recordStatus: string | null = null;
+    if (mode === 'prototype' && preparationStatus === 'jev-guided' && loopId) {
+      if (!accepted) {
+        throw new Error('visual_acceptance_failed');
+      }
+      const recorded = await prepareScreenshotStep!({
+        runId: `complex-screenshot-benchmark-${mode}-${index}`,
+        enabled: true,
+        input: {
+          operation: 'record',
+          optIn: true,
+          loopId,
+          outcome: 'accepted',
+        } as ScreenshotPreparationInput,
+      });
+      recordStatus = recorded.status;
+      metrics = recorded.metrics as unknown as Record<string, unknown>;
+      if (recorded.status !== 'accepted') {
+        throw new Error(`record_failed:${recorded.reason ?? recorded.status}`);
+      }
+    }
     runs.push({
       mode,
       run: index + 1,
@@ -475,6 +496,7 @@ try {
       totalMs: Number((performance.now() - runStartedAt).toFixed(1)),
       accepted,
       preparationStatus,
+      ...(recordStatus ? { recordStatus } : {}),
       jevActionCount,
       fallbackCount,
       capturePath,
