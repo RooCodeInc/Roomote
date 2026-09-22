@@ -2670,6 +2670,17 @@ export async function answerFastAgentQuestion({
           requiresSeparateTurn = true;
           break;
         }
+        if (
+          !addressedToRoomote &&
+          followUp.directedAtRoomote === true &&
+          followUp.allowSilentAmbientReply === true
+        ) {
+          // An addressed follow-up needs its own prompt guidance (answer, but
+          // honor a sign-off or an explicit ask for silence), which steering
+          // into a turn with different participation would not carry.
+          requiresSeparateTurn = true;
+          break;
+        }
         if (followUp.sourceControlReplyTarget) {
           // A mention routed in from a pull request needs its own turn: the
           // answer must also post on that discussion and delegated work must

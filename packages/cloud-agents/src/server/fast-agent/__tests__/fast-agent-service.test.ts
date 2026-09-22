@@ -3158,6 +3158,52 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
+  it('leaves an addressed follow-up for a separate system-prompted turn', async () => {
+    vi.useFakeTimers();
+    try {
+      const addressed = {
+        id: '99999999-9999-4999-8999-999999999998',
+        createdAt: new Date('2026-08-31T12:00:00.000Z'),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: '100.12',
+          currentMessageId: '100.12',
+          userId: 'user-1',
+          question: "Ok don't respond to me now",
+          directedAtRoomote: true,
+          allowSilentAmbientReply: true,
+        },
+      };
+      mocks.getPendingHumanFollowUp.mockResolvedValue([addressed]);
+
+      let finishGeneration: ((value: string) => void) | undefined;
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          return await new Promise<string>((resolve) => {
+            finishGeneration = resolve;
+          });
+        },
+      );
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+      });
+      await vi.advanceTimersByTimeAsync(250);
+
+      expect(mocks.nativeSteer).not.toHaveBeenCalled();
+
+      finishGeneration?.('Original answer');
+      await expect(resultPromise).resolves.toBe('Original answer');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('leaves a peer-directed follow-up for a separate system-prompted turn', async () => {
     vi.useFakeTimers();
     try {
