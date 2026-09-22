@@ -85,6 +85,74 @@ describe('setupTestDatabaseLifecycle', () => {
     expect(mockEnd).toHaveBeenCalledTimes(1);
   });
 
+  it('shares ownership across independently evaluated setup modules', async () => {
+    vi.resetModules();
+    const otherModule = await import('./test-database-lifecycle');
+    expect(otherModule.setupTestDatabaseLifecycle).not.toBe(
+      setupTestDatabaseLifecycle,
+    );
+    const url =
+      'postgres://postgres@localhost:5432/roomote_separate_modules_test';
+    const releaseFirst = await setupTestDatabaseLifecycle(url);
+    const releaseSecond = await otherModule.setupTestDatabaseLifecycle(url);
+
+    await releaseFirst();
+    expect(mockRelease).not.toHaveBeenCalled();
+    expect(mockUnsafe).toHaveBeenCalledTimes(1);
+
+    await releaseSecond();
+    await releaseSecond();
+    expect(mockRelease).toHaveBeenCalledOnce();
+    expect(mockUnsafe).toHaveBeenCalledTimes(2);
+  });
+
+  it('propagates shared setup failure to every independently loaded participant', async () => {
+    vi.resetModules();
+    const otherModule = await import('./test-database-lifecycle');
+    const setupError = new Error('shared setup failed');
+    mockUnsafe.mockRejectedValueOnce(setupError);
+    const url =
+      'postgres://postgres@localhost:5432/roomote_shared_failure_test';
+    const results = await Promise.allSettled([
+      setupTestDatabaseLifecycle(url),
+      otherModule.setupTestDatabaseLifecycle(url),
+    ]);
+    expect(results).toEqual([
+      { status: 'rejected', reason: setupError },
+      { status: 'rejected', reason: setupError },
+    ]);
+    expect(mockEnd).toHaveBeenCalledOnce();
+  });
+
+  it('does not let a new setup join a lifecycle that is already tearing down', async () => {
+    mockReservedSql
+      .mockReset()
+      .mockImplementation(async (query: TemplateStringsArray) =>
+        query.join('').includes('information_schema')
+          ? [{ table_name: 'users' }]
+          : [],
+      );
+    const teardownGate = Promise.withResolvers<void>();
+    mockUnsafe
+      .mockResolvedValueOnce([])
+      .mockReturnValueOnce(teardownGate.promise);
+    const url =
+      'postgres://postgres@localhost:5432/roomote_teardown_overlap_test';
+    const releaseOld = await setupTestDatabaseLifecycle(url);
+    const closing = releaseOld();
+    await vi.waitFor(() => expect(mockUnsafe).toHaveBeenCalledTimes(2));
+    const releaseNew = await setupTestDatabaseLifecycle(url);
+    expect(mockPostgres).toHaveBeenCalledTimes(2);
+    teardownGate.resolve();
+    await closing;
+    const releaseJoined = await setupTestDatabaseLifecycle(url);
+    expect(mockPostgres).toHaveBeenCalledTimes(2);
+    await releaseNew();
+    expect(mockEnd).toHaveBeenCalledTimes(1);
+    await releaseJoined();
+    expect(mockEnd).toHaveBeenCalledTimes(2);
+  });
+
   it('releases the lock and client when setup truncation fails', async () => {
     const setupError = new Error('setup truncate failed');
     mockUnsafe.mockRejectedValueOnce(setupError);

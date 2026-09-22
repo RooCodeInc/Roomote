@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-
 import postgres from 'postgres';
 
 import { assertSafeTestDatabaseUrl } from '../db';
@@ -11,14 +9,13 @@ type ActiveLifecycle = {
   teardown: () => Promise<void>;
 };
 
-const activeLifecycles = new Map<string, Promise<ActiveLifecycle>>();
-
-function getProcessMarker(databaseUrl: string) {
-  return `ROOMOTE_TEST_DATABASE_LIFECYCLE_${createHash('sha256')
-    .update(databaseUrl)
-    .digest('hex')
-    .slice(0, 16)}`;
-}
+const lifecycleStateKey = Symbol.for('roomote.test-database-lifecycles');
+const lifecycleProcess = process as typeof process & {
+  [lifecycleStateKey]?: Map<string, Promise<ActiveLifecycle>>;
+};
+// Vitest can evaluate setup modules separately in one process. Every module
+// must share both the pending setup and its ownership count.
+const activeLifecycles = (lifecycleProcess[lifecycleStateKey] ??= new Map());
 
 async function createTestDatabaseLifecycle(databaseUrl: string) {
   assertSafeTestDatabaseUrl(databaseUrl, 'test');
@@ -136,27 +133,10 @@ async function createTestDatabaseLifecycle(databaseUrl: string) {
 export async function setupTestDatabaseLifecycle(databaseUrl: string) {
   let lifecyclePromise = activeLifecycles.get(databaseUrl);
   if (!lifecyclePromise) {
-    const processMarker = getProcessMarker(databaseUrl);
-    const processId = String(process.pid);
-    if (process.env[processMarker] === processId) return async () => {};
-    process.env[processMarker] = processId;
-
     lifecyclePromise = createTestDatabaseLifecycle(databaseUrl).then(
       (teardown) => ({ references: 0, teardown }),
     );
     activeLifecycles.set(databaseUrl, lifecyclePromise);
-
-    try {
-      await lifecyclePromise;
-    } catch (error) {
-      if (activeLifecycles.get(databaseUrl) === lifecyclePromise) {
-        activeLifecycles.delete(databaseUrl);
-      }
-      if (process.env[processMarker] === processId) {
-        delete process.env[processMarker];
-      }
-      throw error;
-    }
   }
 
   let lifecycle: ActiveLifecycle;
@@ -178,17 +158,11 @@ export async function setupTestDatabaseLifecycle(databaseUrl: string) {
     lifecycle.references -= 1;
     if (lifecycle.references > 0) return;
 
-    try {
-      await lifecycle.teardown();
-    } finally {
-      if (activeLifecycles.get(databaseUrl) === lifecyclePromise) {
-        activeLifecycles.delete(databaseUrl);
-      }
-
-      const processMarker = getProcessMarker(databaseUrl);
-      if (process.env[processMarker] === String(process.pid)) {
-        delete process.env[processMarker];
-      }
+    // A new setup must not join a lifecycle whose final teardown has begun.
+    // Its fresh connection waits for this lifecycle's advisory lock instead.
+    if (activeLifecycles.get(databaseUrl) === lifecyclePromise) {
+      activeLifecycles.delete(databaseUrl);
     }
+    await lifecycle.teardown();
   };
 }
