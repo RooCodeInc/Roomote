@@ -1,8 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../integration-tool-auto-evaluation', () => ({
+  describeIntegrationToolAutoDeny: vi.fn(
+    (evaluation: { unavailable?: string }) =>
+      evaluation.unavailable === 'no_model'
+        ? 'no decision model is configured to check it'
+        : evaluation.unavailable === 'error'
+          ? 'the automatic check failed'
+          : 'it was assessed as risky',
+  ),
   resolveIntegrationToolAutoDecision: vi.fn(async () => ({
-    action: 'ask',
+    action: 'run',
     mode: 'off',
   })),
   resolveIntegrationToolAutoState: vi.fn(async () => ({
@@ -23,6 +31,9 @@ vi.mock('@roomote/db/server', () => ({
   insertAutoApprovedIntegrationToolApproval: vi.fn(async () => ({
     approvalId: 'auto-approval-1',
   })),
+  insertAutoRejectedIntegrationToolApproval: vi.fn(async () => ({
+    approvalId: 'auto-rejection-1',
+  })),
   insertIntegrationToolApproval: vi.fn(),
   isDeploymentExperimentEnabled: vi.fn(async () => true),
   listIntegrationToolPolicies: vi.fn(async () => []),
@@ -37,6 +48,7 @@ import {
   getIntegrationToolApproval,
   getSessionForFastConversation,
   insertAutoApprovedIntegrationToolApproval,
+  insertAutoRejectedIntegrationToolApproval,
   insertIntegrationToolApproval,
   isDeploymentExperimentEnabled,
   listIntegrationToolPolicies,
@@ -792,7 +804,13 @@ describe('tool approval bridge', () => {
       fetchCallArgs: vi.fn(async () => ({
         input: { channel: 'C1', text: 'hi' },
       })),
-      reply: vi.fn(async () => undefined),
+      reply: vi.fn(
+        async (
+          _requestId: string,
+          _response: 'once' | 'reject',
+          _message?: string,
+        ) => undefined,
+      ),
     };
   }
 
@@ -820,7 +838,7 @@ describe('tool approval bridge', () => {
     });
   });
 
-  it('runs a default tool Auto finds routine, and asks about one it finds risky', async () => {
+  it('runs a default tool Auto finds routine, and denies one it finds risky', async () => {
     const evaluation = {
       recommendation: 'approve' as const,
       answers: {},
@@ -865,36 +883,56 @@ describe('tool approval bridge', () => {
       }),
     );
 
-    // Risky: the card, with the model's view on it.
+    // Risky: no card, a terminal auto_rejected audit row, and a tool error
+    // to the model naming Auto mode and the reason.
+    const riskyEvaluation = { ...evaluation, recommendation: 'deny' as const };
     vi.mocked(resolveIntegrationToolAutoDecision).mockResolvedValue({
-      action: 'ask',
+      action: 'deny',
       mode: 'on',
-      evaluation: { ...evaluation, recommendation: 'ask' },
+      evaluation: riskyEvaluation,
     });
-    vi.mocked(getIntegrationToolApproval).mockResolvedValue({
-      status: 'rejected',
-    } as never);
     const unsure = helpers();
     autoBridge().handleAsk({ ...ask, requestId: 'req-2' }, unsure);
-    await vi.waitFor(() => expect(unsure.reply).toHaveBeenCalled());
-    expect(insertIntegrationToolApproval).toHaveBeenCalledWith(
-      expect.anything(),
+    await vi.waitFor(() =>
+      expect(unsure.reply).toHaveBeenCalledWith(
+        'req-2',
+        'reject',
+        expect.stringContaining('Auto mode blocked this tool call'),
+      ),
+    );
+    expect(unsure.reply.mock.calls[0]![2]).toContain('assessed as risky');
+    expect(insertIntegrationToolApproval).not.toHaveBeenCalled();
+    expect(insertAutoRejectedIntegrationToolApproval).toHaveBeenCalledWith(
+      { sessionId: 'session-id', userId: 'user-id' },
       expect.objectContaining({
         nativeRequestId: 'req-2',
-        autoEvaluation: { ...evaluation, recommendation: 'ask' },
+        autoEvaluation: riskyEvaluation,
       }),
     );
 
-    // Auto failing outright asks a person.
+    // Auto failing outright fails closed to the same denial.
     vi.mocked(resolveIntegrationToolAutoDecision).mockRejectedValue(
       new Error('settings unavailable'),
     );
     const failing = helpers();
     autoBridge().handleAsk({ ...ask, requestId: 'req-3' }, failing);
-    await vi.waitFor(() => expect(failing.reply).toHaveBeenCalled());
-    expect(insertIntegrationToolApproval).toHaveBeenCalledWith(
+    await vi.waitFor(() =>
+      expect(failing.reply).toHaveBeenCalledWith(
+        'req-3',
+        'reject',
+        expect.stringContaining('Auto mode blocked this tool call'),
+      ),
+    );
+    expect(insertIntegrationToolApproval).not.toHaveBeenCalled();
+    expect(insertAutoRejectedIntegrationToolApproval).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ nativeRequestId: 'req-3' }),
+      expect.objectContaining({
+        nativeRequestId: 'req-3',
+        autoEvaluation: expect.objectContaining({
+          recommendation: 'deny',
+          unavailable: 'error',
+        }),
+      }),
     );
 
     // A manual Ask first tool (not in the Auto set) never reaches the model.

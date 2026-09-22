@@ -140,27 +140,4 @@ describe('PendingIntegrationToolApprovals', () => {
     expect(screen.getByText('No additional details.')).toBeInTheDocument();
     expect(screen.queryByText('No arguments')).not.toBeInTheDocument();
   });
-
-  it('tells the person what Auto made of the call, when it looked', () => {
-    render(
-      <QueryClientProvider client={new QueryClient()}>
-        <PendingIntegrationToolApprovals
-          sessionId="session-1"
-          pending={[
-            {
-              ...pending[0]!,
-              autoEvaluation: {
-                recommendation: 'ask',
-                answers: {},
-                evaluatedAt: new Date().toISOString(),
-              },
-            },
-          ]}
-        />
-      </QueryClientProvider>,
-    );
-    expect(screen.getByTestId('auto-evaluation')).toHaveTextContent(
-      'Auto flagged this call as risky and asked you.',
-    );
-  });
 });

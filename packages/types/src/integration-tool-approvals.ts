@@ -49,6 +49,9 @@ export const INTEGRATION_TOOL_APPROVAL_STATUSES = [
   // session" for the tool, or Auto mode's decision model approved the call
   // (then `decidedByUserId` is null). Its own status for the audit trail.
   'auto_approved',
+  // Blocked without a card: Auto mode's decision model denied the call, or
+  // the assessment failed closed. Born terminal; `decidedByUserId` is null.
+  'auto_rejected',
 ] as const;
 export type IntegrationToolApprovalStatus =
   (typeof INTEGRATION_TOOL_APPROVAL_STATUSES)[number];
@@ -66,7 +69,7 @@ export interface IntegrationToolApprovalMetadata {
   status: IntegrationToolApprovalStatus;
   /** The task whose agent asked; null when the Session's own agent did. */
   taskId: string | null;
-  /** Auto mode's view of the call, when it was consulted before this card. */
+  /** Auto mode's assessment of the call, on the rows it decided. */
   autoEvaluation?: IntegrationToolAutoEvaluation;
   /** When this approval stops accepting a decision and fails closed. */
   expiresAt: string;
@@ -76,8 +79,9 @@ export interface IntegrationToolApprovalMetadata {
 /**
  * Deployment-wide Auto mode. `on`: every call to a tool nobody has made a
  * choice about (the default mode) is risk-assessed by the decision model
- * first; a routine call runs, a risky one asks a person. A manual choice
- * always wins: Always allow is never assessed, Ask first always asks, Reject
+ * first; a routine call runs, anything else is blocked with a tool error
+ * returned to the model — Auto never asks a person. A manual choice always
+ * wins: Always allow is never assessed, Ask first always asks, Reject
  * always blocks. `off`: default tools run as they always have. While off,
  * and only with a hosted judgment model configured, the assessment still
  * runs in the background and is recorded, so its judgment can be checked
@@ -108,12 +112,12 @@ export const integrationToolAutoSettingsSchema = z.object({
 });
 
 /**
- * A decision model's risk assessment of one paused Ask first call, recorded
- * beside the decision. In shadow mode it decides nothing. The model can only
- * ever recommend running the call or asking, never rejecting.
+ * A decision model's risk assessment of one Auto-gated call, recorded on the
+ * call's audit row. In shadow mode it decides nothing. The model can only
+ * ever run the call or block it; it never asks a person.
  */
 export interface IntegrationToolAutoEvaluation {
-  recommendation: 'approve' | 'ask';
+  recommendation: 'approve' | 'deny';
   /**
    * The raw judgments the recommendation was computed from: the risk level
    * (`riskScore`, a weighted position on the ordered risk levels, with

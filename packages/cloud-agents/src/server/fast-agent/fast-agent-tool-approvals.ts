@@ -10,6 +10,7 @@ import {
   getIntegrationToolApproval,
   getSessionForFastConversation,
   insertAutoApprovedIntegrationToolApproval,
+  insertAutoRejectedIntegrationToolApproval,
   insertIntegrationToolApproval,
   isDeploymentExperimentEnabled,
   listIntegrationToolPolicies,
@@ -28,6 +29,7 @@ import {
 } from '@roomote/types';
 
 import {
+  describeIntegrationToolAutoDeny,
   resolveIntegrationToolAutoDecision,
   resolveIntegrationToolAutoState,
 } from '../integration-tool-auto-evaluation';
@@ -505,7 +507,9 @@ export function createFastAgentToolApprovalBridge(input: {
       // Auto mode: a call to a default tool is risk-assessed, and a routine
       // one runs without a card. A tool someone made a choice about (a
       // stored mode or a session override) is theirs to decide, so it never
-      // reaches the model. Any failure on this path asks a person.
+      // reaches the model. Auto never asks a person: anything it does not
+      // approve — a risky call, an evaluation error, or no decision model —
+      // is denied, and the denial is returned to the model as a tool error.
       const autoAssessed =
         !overrideForSession &&
         input.autoToolKeys?.has(
@@ -519,13 +523,47 @@ export function createFastAgentToolApprovalBridge(input: {
             args,
             userRequest: input.userRequest,
             userId: input.userId,
-          }).catch(() => ({ action: 'ask' as const, mode: 'failed' as const }))
+          }).catch(() => ({
+            action: 'deny' as const,
+            mode: 'on' as const,
+            evaluation: {
+              recommendation: 'deny' as const,
+              unavailable: 'error' as const,
+              evaluatedAt: new Date().toISOString(),
+            },
+          }))
         : undefined;
       // A default tool asked under a rule compiled while Auto was on, after
       // Auto went off: it runs as it always has, and there is nothing to
-      // record. A failed assessment asks a person instead.
+      // record.
       if (auto?.mode === 'off') {
         await helpers.reply(ask.requestId, 'once');
+        return;
+      }
+      if (auto?.action === 'deny') {
+        // The audit row is born terminal `auto_rejected` with the model's
+        // assessment; if it cannot be written the outer handler rejects the
+        // ask instead of denying it unrecorded. No card is ever shown.
+        await insertAutoRejectedIntegrationToolApproval(
+          { sessionId: input.sessionId, userId: input.userId },
+          {
+            integrationId: tool.integrationId,
+            toolName: tool.toolName,
+            nativeRequestId: ask.requestId,
+            argsFingerprint,
+            argsSummary: args ?? null,
+            autoEvaluation: auto.evaluation,
+          },
+        );
+        await helpers
+          .reply(
+            ask.requestId,
+            'reject',
+            `Auto mode blocked this tool call because ${describeIntegrationToolAutoDeny(
+              auto.evaluation,
+            )}. The call was not run, and this call cannot proceed.`,
+          )
+          .catch(() => undefined);
         return;
       }
       if (allowedForSession || auto?.action === 'approve') {
@@ -575,7 +613,6 @@ export function createFastAgentToolApprovalBridge(input: {
           nativeRequestId: ask.requestId,
           argsFingerprint,
           argsSummary: args ?? null,
-          ...(auto?.mode === 'on' ? { autoEvaluation: auto.evaluation } : {}),
         },
       );
       if (input.notify && !notifiedApprovalIds.has(approval.approvalId)) {

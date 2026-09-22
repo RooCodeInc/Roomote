@@ -7,6 +7,7 @@ import {
   getIntegrationToolApproval,
   getSessionForTask,
   insertAutoApprovedIntegrationToolApproval,
+  insertAutoRejectedIntegrationToolApproval,
   insertIntegrationToolApproval,
   isDeploymentExperimentEnabled,
   listIntegrationToolPolicies,
@@ -15,6 +16,7 @@ import {
   taskRuns,
 } from '@roomote/db/server';
 import {
+  describeIntegrationToolAutoDeny,
   resolveIntegrationToolAutoDecision,
   resolveIntegrationToolAutoState,
 } from '@roomote/cloud-agents/server/integration-tool-auto-evaluation';
@@ -119,6 +121,8 @@ type TaskToolApprovalRequestResult =
   | { outcome: 'unavailable' }
   /** The Session owner already chose not to be asked about this tool. */
   | { outcome: 'approved' }
+  /** Auto mode blocked the call; the reason goes back to the model. */
+  | { outcome: 'denied'; reason: string }
   | { outcome: 'pending'; approvalId: string };
 
 /** Record one native ask from a task's agent. */
@@ -171,7 +175,8 @@ export async function requestTaskToolApproval(input: {
   const allowedForSession =
     overrideForSession === 'allow' || effectiveMode === 'always_allow';
   // Auto mode assesses a call to a default tool only; a tool someone made a
-  // choice about is theirs to decide. Any failure on this path asks a person.
+  // choice about is theirs to decide. Auto never asks a person: anything it
+  // does not approve is denied, and any failure on this path denies too.
   const auto = integrationToolModeIsAutoAssessed({
     policyMode,
     sessionOverrideMode: overrideForSession,
@@ -183,10 +188,18 @@ export async function requestTaskToolApproval(input: {
         userRequest: input.userRequest,
         userId: session.ownerUserId,
         taskId: session.taskId,
-      }).catch(() => ({ action: 'ask' as const, mode: 'failed' as const }))
+      }).catch(() => ({
+        action: 'deny' as const,
+        mode: 'on' as const,
+        evaluation: {
+          recommendation: 'deny' as const,
+          unavailable: 'error' as const,
+          evaluatedAt: new Date().toISOString(),
+        },
+      }))
     : undefined;
   // A default tool asked while Auto is off (a stale native rule) runs as it
-  // always has; a failed assessment asks a person instead.
+  // always has.
   if (auto?.mode === 'off') return { outcome: 'not_required' };
   if (allowedForSession) {
     // Same reservation-and-claim audit path as a Session's own agent.
@@ -210,10 +223,18 @@ export async function requestTaskToolApproval(input: {
     });
     return { outcome: 'approved' };
   }
-  const approval = await insertIntegrationToolApproval(context, {
-    ...call,
-    ...(auto?.mode === 'on' ? { autoEvaluation: auto.evaluation } : {}),
-  });
+  if (auto?.action === 'deny') {
+    // Born-terminal audit row; no card is ever shown for an Auto denial.
+    await insertAutoRejectedIntegrationToolApproval(context, {
+      ...call,
+      autoEvaluation: auto.evaluation,
+    });
+    return {
+      outcome: 'denied',
+      reason: describeIntegrationToolAutoDeny(auto.evaluation),
+    };
+  }
+  const approval = await insertIntegrationToolApproval(context, call);
   return { outcome: 'pending', approvalId: approval.approvalId };
 }
 

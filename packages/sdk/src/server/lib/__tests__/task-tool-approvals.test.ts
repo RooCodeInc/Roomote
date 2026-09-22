@@ -1,5 +1,5 @@
 const mocks = vi.hoisted(() => ({
-  resolveAuto: vi.fn(async () => ({ action: 'ask', mode: 'off' }) as unknown),
+  resolveAuto: vi.fn(async () => ({ action: 'run', mode: 'off' }) as unknown),
   autoState: vi.fn(async () => ({ mode: 'off' }) as unknown),
   experiment: vi.fn(async () => true),
   findRun: vi.fn(async () => ({ taskId: 'task-1' }) as unknown),
@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   overrides: vi.fn(async () => [] as unknown[]),
   insert: vi.fn(async () => ({ approvalId: 'approval-1' })),
   insertAuto: vi.fn(async () => ({ approvalId: 'approval-auto' })),
+  insertAutoRejected: vi.fn(async () => ({ approvalId: 'approval-denied' })),
   claimAuto: vi.fn(async () => true),
   getApproval: vi.fn(async () => undefined as unknown),
   expire: vi.fn(async () => undefined),
@@ -17,6 +18,12 @@ const mocks = vi.hoisted(() => ({
 vi.mock(
   '@roomote/cloud-agents/server/integration-tool-auto-evaluation',
   () => ({
+    describeIntegrationToolAutoDeny: (evaluation: { unavailable?: string }) =>
+      evaluation.unavailable === 'no_model'
+        ? 'no decision model is configured to check it'
+        : evaluation.unavailable === 'error'
+          ? 'the automatic check failed'
+          : 'it was assessed as risky',
     resolveIntegrationToolAutoDecision: mocks.resolveAuto,
     resolveIntegrationToolAutoState: mocks.autoState,
   }),
@@ -33,6 +40,7 @@ vi.mock('@roomote/db/server', () => ({
   listIntegrationToolSessionOverrides: mocks.overrides,
   insertIntegrationToolApproval: mocks.insert,
   insertAutoApprovedIntegrationToolApproval: mocks.insertAuto,
+  insertAutoRejectedIntegrationToolApproval: mocks.insertAutoRejected,
   claimAutoApprovedIntegrationToolApproval: mocks.claimAuto,
   getIntegrationToolApproval: mocks.getApproval,
   expireIntegrationToolApproval: mocks.expire,
@@ -74,7 +82,7 @@ beforeEach(() => {
   mocks.userPolicies.mockResolvedValue([]);
   mocks.overrides.mockResolvedValue([]);
   mocks.claimAuto.mockResolvedValue(true);
-  mocks.resolveAuto.mockResolvedValue({ action: 'ask', mode: 'off' });
+  mocks.resolveAuto.mockResolvedValue({ action: 'run', mode: 'off' });
   mocks.autoState.mockResolvedValue({ mode: 'off' });
 });
 
@@ -195,33 +203,48 @@ describe('requestTaskToolApproval', () => {
     expect(mocks.claimAuto).not.toHaveBeenCalled();
     expect(mocks.insert).not.toHaveBeenCalled();
 
-    // Risky: the card, with the model's view on it.
+    // Risky: denied with a terminal audit row and the reason for the
+    // model; no card is ever created.
+    const riskyEvaluation = { ...evaluation, recommendation: 'deny' };
     mocks.resolveAuto.mockResolvedValue({
-      action: 'ask',
+      action: 'deny',
       mode: 'on',
-      evaluation: { ...evaluation, recommendation: 'ask' },
+      evaluation: riskyEvaluation,
     });
     await expect(requestTaskToolApproval(ask)).resolves.toEqual({
-      outcome: 'pending',
-      approvalId: 'approval-1',
+      outcome: 'denied',
+      reason: 'it was assessed as risky',
     });
-    expect(mocks.insert).toHaveBeenLastCalledWith(
-      expect.anything(),
+    expect(mocks.insertAutoRejected).toHaveBeenCalledWith(
+      { sessionId: 'session-1', userId: 'owner-1' },
       expect.objectContaining({
-        autoEvaluation: { ...evaluation, recommendation: 'ask' },
+        taskId: 'task-1',
+        nativeRequestId: 'per_1',
+        autoEvaluation: riskyEvaluation,
       }),
     );
+    expect(mocks.insert).not.toHaveBeenCalled();
 
-    // Auto failing outright asks a person.
+    // Auto failing outright fails closed to the same denial.
     mocks.resolveAuto.mockRejectedValue(new Error('settings unavailable'));
     await expect(requestTaskToolApproval(ask)).resolves.toEqual({
-      outcome: 'pending',
-      approvalId: 'approval-1',
+      outcome: 'denied',
+      reason: 'the automatic check failed',
     });
+    expect(mocks.insertAutoRejected).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        autoEvaluation: expect.objectContaining({
+          recommendation: 'deny',
+          unavailable: 'error',
+        }),
+      }),
+    );
+    expect(mocks.insert).not.toHaveBeenCalled();
   });
 
   it('runs a default tool asked under a stale rule once Auto is off', async () => {
-    mocks.resolveAuto.mockResolvedValue({ action: 'ask', mode: 'off' });
+    mocks.resolveAuto.mockResolvedValue({ action: 'run', mode: 'off' });
     await expect(requestTaskToolApproval(ask)).resolves.toEqual({
       outcome: 'not_required',
     });

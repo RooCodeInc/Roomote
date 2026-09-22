@@ -29,9 +29,9 @@ export function IntegrationToolApprovalsExperimentalSetting() {
           tools dialog in Settings → Integrations offers Auto (default, shown
           with no choice selected), Always allow, Always ask, and Disable per
           tool. Set up Auto mode in Settings → Integrations to handle routine
-          work automatically and ask before anything risky. Always ask pauses
-          each call until the session owner allows it once, stops the asks for
-          the rest of that session, or declines it; Disable hides the tool and
+          work automatically and block anything risky. Always ask pauses each
+          call until the session owner allows it once, stops the asks for the
+          rest of that session, or declines it; Disable hides the tool and
           blocks it outright. A task asks the owner of its session the same way,
           and a task nobody can answer for, such as one an automation started,
           cannot run an Always ask tool. Session owners can also ask to be asked
