@@ -32,7 +32,6 @@ import {
   CardContent,
   Check,
   Loader2,
-  RetryableLoadError,
   Spinner,
   Textarea,
 } from '@/components/system';
@@ -728,12 +727,20 @@ function AgentRepositorySelectionSubview({
                   <Loader2 className="size-4 animate-spin" />
                 </div>
               ) : repositoriesError ? (
-                <RetryableLoadError
-                  className="border"
-                  message="Failed to load repositories."
-                  isRetrying={repositoriesRetrying}
-                  onRetry={onRetryRepositories}
-                />
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p role="alert" className="text-sm text-muted-foreground">
+                    Failed to load repositories.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={repositoriesRetrying}
+                    onClick={onRetryRepositories}
+                  >
+                    Retry
+                  </Button>
+                </div>
               ) : repositories.length > 0 ? (
                 <div className="min-h-0 flex-1 overflow-auto">
                   <EnvironmentRepositorySelector

@@ -642,7 +642,7 @@ describe('EditEnvironmentPage', () => {
     expect(mockRouterPush).toHaveBeenCalledWith('/task/task-1');
   });
 
-  it('offers repository retry and blocks the agent while the repository read fails', async () => {
+  it('recovers repository loading without losing the change request', async () => {
     mockRepositoriesState.data = undefined;
     mockRepositoriesState.isError = true;
 
@@ -663,6 +663,14 @@ describe('EditEnvironmentPage', () => {
       await screen.findByText('Failed to load repositories.'),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Start Agent/i })).toBeDisabled();
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Failed to load repositories.',
+    );
+
+    const changeRequest = screen.getByPlaceholderText(/^Example: Add Redis/);
+    fireEvent.change(changeRequest, {
+      target: { value: 'Add Redis and preserve this request through retry.' },
+    });
 
     fireEvent.click(screen.getByRole('button', { name: /^Retry$/i }));
     expect(mockRepositoriesState.refetch).toHaveBeenCalled();
@@ -679,5 +687,18 @@ describe('EditEnvironmentPage', () => {
       screen.queryByText('Failed to load repositories.'),
     ).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Start Agent/i })).toBeEnabled();
+    expect(changeRequest).toHaveValue(
+      'Add Redis and preserve this request through retry.',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Start Agent/i }));
+    await waitFor(() => {
+      expect(mockStartDefinitionTask.mock.calls[0]?.[0]).toEqual(
+        expect.objectContaining({
+          repositoryIds: ['repo-1'],
+          changeRequest: 'Add Redis and preserve this request through retry.',
+        }),
+      );
+    });
   });
 });
