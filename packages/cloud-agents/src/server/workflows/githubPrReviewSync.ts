@@ -27,6 +27,7 @@ import {
   mergeLinkedWorkItems,
 } from './pr-linked-work-items';
 import { resolveLinkedTaskReviewHandoff } from './resolve-linked-task-review-handoff';
+import { runGithubPrReviewPrescreen } from './githubPrReviewPrescreen';
 import { standardTask } from './standardTask';
 
 function buildGitLabMergeRequestSyncReviewPrompt({
@@ -472,6 +473,13 @@ export async function githubPrReviewSync({
     rangeDiff: rangeResult,
   });
   const pullRequestChangedFiles = pullRequestDiffResult.changedFiles;
+  const reviewPrescreenPromise = hasReviewableChanges
+    ? runGithubPrReviewPrescreen({
+        title: pr.title,
+        changedFiles,
+        diff,
+      })
+    : Promise.resolve(undefined);
 
   const commits = hasReviewableChanges
     ? await GitHubCli.fetchCommitsInRange({ ...prParams, sha })
@@ -511,6 +519,7 @@ export async function githubPrReviewSync({
     : 'sync-github-pr-review';
   const command = `${delimiter}review-code`;
   const priorSummaryChecklist = getMarkdownChecklist(prReviewerComment.body);
+  const reviewPrescreen = await reviewPrescreenPromise;
 
   const prompt = buildStructuredTaskRequest({
     command,
@@ -555,6 +564,7 @@ export async function githubPrReviewSync({
             charLimit: 100_000,
           })
         : undefined,
+      review_prescreen: reviewPrescreen,
       existing_review_comments: getReviewComments(reviewComments),
       issue_comments: getIssueComments(issueComments),
     },

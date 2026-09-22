@@ -3,12 +3,16 @@ const {
   mockGetJudgmentSelection,
   mockGenerateTrackedNonTaskObject,
   mockResolveNonTaskHelperModel,
+  mockCaptureJudgment,
+  mockIsJudgmentCaptureEnabled,
   mockEnv,
 } = vi.hoisted(() => ({
   mockResolveModelProviderEnvValue: vi.fn(),
   mockGetJudgmentSelection: vi.fn(),
   mockGenerateTrackedNonTaskObject: vi.fn(),
   mockResolveNonTaskHelperModel: vi.fn(),
+  mockCaptureJudgment: vi.fn(),
+  mockIsJudgmentCaptureEnabled: vi.fn(),
   mockEnv: {
     R_JUDGMENT_MODEL: undefined as string | undefined,
     R_JUDGMENT_UPSTREAM_URL: undefined as string | undefined,
@@ -30,6 +34,11 @@ vi.mock('../non-task-provider-usage', () => ({
     decisionModelFallback: 'decision_model_fallback',
   },
   resolveNonTaskHelperModel: mockResolveNonTaskHelperModel,
+}));
+
+vi.mock('../judgment-capture', () => ({
+  captureJudgment: mockCaptureJudgment,
+  isJudgmentCaptureEnabled: mockIsJudgmentCaptureEnabled,
 }));
 
 import {
@@ -97,6 +106,7 @@ describe('evaluateTypeSafeJudgments', () => {
     mockEnv.R_JUDGMENT_UPSTREAM_API_KEY = undefined;
     mockEnv.R_JUDGMENT_SHADOW = undefined;
     mockGetJudgmentSelection.mockResolvedValue(null);
+    mockIsJudgmentCaptureEnabled.mockReturnValue(false);
     mockResolveNonTaskHelperModel.mockResolvedValue({
       model: 'openrouter/helper',
       catalogModelId: 'openrouter/helper',
@@ -606,6 +616,23 @@ describe('evaluateTypeSafeJudgments', () => {
     await expect(
       evaluateTypeSafeJudgments({ state: 'hi', questions }),
     ).rejects.toThrow('HTTP 529');
+  });
+
+  it('can skip optional capture for sensitive decision state', async () => {
+    mockIsJudgmentCaptureEnabled.mockReturnValue(true);
+    mockFetchResponse({
+      answers: { urgent: { type: 'noul', noul: 0.92 } },
+    });
+
+    await expect(
+      evaluateTypeSafeJudgments({
+        state: { diff: 'sensitive code' },
+        questions: { urgent: questions.urgent },
+        capture: false,
+      }),
+    ).resolves.toEqual({ urgent: { type: 'noul', noul: 0.92 } });
+
+    expect(mockCaptureJudgment).not.toHaveBeenCalled();
   });
 
   it.each([
