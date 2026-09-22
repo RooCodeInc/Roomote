@@ -58,6 +58,7 @@ export {
   type DiscordForumTagSelection,
 } from './discord-forum-tag';
 export { resolveRequestedWorkKindDecision } from './requested-work-kind';
+export { isRecognizedInitialSkillInvocation } from './workflows/skillInvocationRouting';
 export {
   getRouterMcpServerPolicy,
   getRouterMcpUpstreamConstraints,
