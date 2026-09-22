@@ -124,7 +124,9 @@ async function hasTaskReadAccess(taskId: string, auth: McpAuth) {
 }
 
 async function hasSessionReadAccess(sessionId: string, auth: McpAuth) {
-  const session = await findAccessibleSession(sessionId, auth);
+  const session = await findAccessibleSession(sessionId, auth, {
+    backfill: false,
+  });
 
   return session
     ? { ok: true as const, sessionId: session.id }

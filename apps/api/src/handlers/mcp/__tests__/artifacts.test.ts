@@ -213,7 +213,9 @@ it.each([
     });
 
     expect(response.status).toBe(200);
-    expect(mockFindAccessibleSession).toHaveBeenCalledWith(requestedId, auth);
+    expect(mockFindAccessibleSession).toHaveBeenCalledWith(requestedId, auth, {
+      backfill: false,
+    });
     expect(mockGetSessionArtifactByPath).toHaveBeenCalledWith({
       sessionId: canonicalId,
       path: 'notes/context.md',

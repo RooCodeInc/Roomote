@@ -56,7 +56,11 @@ type SessionContext = Context<{
 
 // Ordinary Sessions remain collaborative; custom automation history is private
 // to the current automation owner and deployment admins.
-export async function findAccessibleSession(sessionId: string, auth: McpAuth) {
+export async function findAccessibleSession(
+  sessionId: string,
+  auth: McpAuth,
+  options: { backfill?: boolean } = {},
+) {
   const [session] = await db
     .select()
     .from(sessions)
@@ -97,6 +101,8 @@ export async function findAccessibleSession(sessionId: string, auth: McpAuth) {
       ? alternate.session
       : null;
   }
+
+  if (options.backfill === false) return null;
 
   const ensured = await ensureSessionForFastConversation(
     db,
