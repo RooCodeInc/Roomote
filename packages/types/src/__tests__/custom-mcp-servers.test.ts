@@ -42,6 +42,29 @@ describe('isInternalMcpServer', () => {
       MCP_INTEGRATIONS.some((integration) => integration.id.startsWith('_')),
     ).toBe(false);
   });
+
+  it('rejects custom names that could collide with internal tool keys', () => {
+    // OpenCode flattens tools to `<server>_<tool>`, so `gbrain_get` / `page`
+    // would share `gbrain_get_page` with the Brain's own `get_page`.
+    for (const name of ['gbrain_get', 'roomote_manage']) {
+      const result = customMcpServerInputSchema.safeParse({
+        ...validServer,
+        name,
+      });
+      expect(result.success).toBe(false);
+    }
+    // Merely similar names that cannot collide stay valid.
+    expect(
+      customMcpServerInputSchema.safeParse({
+        ...validServer,
+        name: 'gbrain-reports',
+      }).success,
+    ).toBe(true);
+    expect(
+      customMcpServerInputSchema.safeParse({ ...validServer, name: 'linear_x' })
+        .success,
+    ).toBe(true);
+  });
 });
 
 describe('customMcpServerInputSchema', () => {

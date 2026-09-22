@@ -59,6 +59,20 @@ export function isInternalMcpServer(serverId: string): boolean {
   return INTERNAL_MCP_SERVER_IDS.has(serverId);
 }
 
+/**
+ * OpenCode flattens every MCP tool to `<server>_<tool>`, so a custom server
+ * whose name starts with an internal server's name plus an underscore can
+ * produce the same native permission key as an internal tool (for example
+ * `gbrain_get` / `page` collides with `gbrain` / `get_page`). Native rules
+ * cannot tell the two apart, which would either gate the exempt internal
+ * tool or leave the external tool's approval unanswerable, so these names
+ * are rejected at save time. `_roomote_http_integrations` needs no prefix
+ * guard: custom names cannot start with an underscore at all.
+ */
+export function isInternalMcpServerNamePrefix(name: string): boolean {
+  return [...INTERNAL_MCP_SERVER_IDS].some((id) => name.startsWith(`${id}_`));
+}
+
 export const RESERVED_CUSTOM_MCP_SERVER_NAMES: ReadonlySet<string> = new Set([
   ...INTERNAL_MCP_SERVER_IDS,
   'github',
@@ -222,6 +236,14 @@ export const customMcpServerNameSchema = z
     (name) => !RESERVED_CUSTOM_MCP_SERVER_NAMES.has(name),
     (name) => ({
       message: `'${name}' is reserved by a built-in ${PRODUCT_NAME} integration.`,
+    }),
+  )
+  .refine(
+    (name) => !isInternalMcpServerNamePrefix(name),
+    (name) => ({
+      message:
+        `'${name}' starts with a Roomote-internal MCP server name; agent tool ` +
+        `permissions could not tell its tools apart from the internal server's.`,
     }),
   );
 
