@@ -1166,8 +1166,8 @@ describe('generateOpenCodeConfig provider support', () => {
 
   it('enables ChatGPT fast mode on supported models without replacing reasoning options', () => {
     const runtimeEnv = {
-      R_MODEL: 'openai/gpt-5.6-terra',
-      R_SMALL_MODEL: 'openai/gpt-5.6-luna',
+      R_MODEL: 'openai/gpt-6-sol',
+      R_SMALL_MODEL: 'openai/gpt-6-luna',
       R_MODEL_REASONING_EFFORT: 'high',
       R_CHATGPT_FAST_MODE: '1',
     };
@@ -1182,11 +1182,11 @@ describe('generateOpenCodeConfig provider support', () => {
       >;
     };
 
-    expect(config.provider.openai?.models?.['gpt-5.6-terra']?.options).toEqual({
+    expect(config.provider.openai?.models?.['gpt-6-sol']?.options).toEqual({
       reasoningEffort: 'high',
       serviceTier: 'priority',
     });
-    expect(config.provider.openai?.models?.['gpt-5.6-luna']?.options).toEqual({
+    expect(config.provider.openai?.models?.['gpt-6-luna']?.options).toEqual({
       serviceTier: 'priority',
     });
     expect(runtimeEnv).not.toHaveProperty('R_CHATGPT_FAST_MODE');

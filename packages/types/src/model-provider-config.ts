@@ -384,15 +384,15 @@ const OPENAI_RECOMMENDED_MODEL_PRESETS = [
     default: true,
     roles: {
       coding: {
-        modelId: 'openai/gpt-5.6-sol',
+        modelId: 'openai/gpt-6-sol',
         reasoningEffort: 'medium',
       },
       helper: {
-        modelId: 'openai/gpt-5.6-luna',
+        modelId: 'openai/gpt-6-luna',
         reasoningEffort: 'low',
       },
       vision: {
-        modelId: 'openai/gpt-5.6-sol',
+        modelId: 'openai/gpt-6-sol',
         reasoningEffort: 'low',
       },
       codeReview: {
@@ -400,11 +400,11 @@ const OPENAI_RECOMMENDED_MODEL_PRESETS = [
         reasoningEffort: 'high',
       },
       explore: {
-        modelId: 'openai/gpt-5.6-luna',
+        modelId: 'openai/gpt-6-luna',
         reasoningEffort: 'low',
       },
       planning: {
-        modelId: 'openai/gpt-5.6-sol',
+        modelId: 'openai/gpt-6-sol',
         reasoningEffort: 'xhigh',
       },
     },
@@ -414,15 +414,15 @@ const OPENAI_RECOMMENDED_MODEL_PRESETS = [
     label: 'Luna Max',
     roles: {
       coding: {
-        modelId: 'openai/gpt-5.6-luna',
+        modelId: 'openai/gpt-6-luna',
         reasoningEffort: 'max',
       },
       helper: {
-        modelId: 'openai/gpt-5.6-luna',
+        modelId: 'openai/gpt-6-luna',
         reasoningEffort: 'low',
       },
       vision: {
-        modelId: 'openai/gpt-5.6-sol',
+        modelId: 'openai/gpt-6-sol',
         reasoningEffort: 'low',
       },
       codeReview: {
@@ -430,11 +430,11 @@ const OPENAI_RECOMMENDED_MODEL_PRESETS = [
         reasoningEffort: 'high',
       },
       explore: {
-        modelId: 'openai/gpt-5.6-luna',
+        modelId: 'openai/gpt-6-luna',
         reasoningEffort: 'low',
       },
       planning: {
-        modelId: 'openai/gpt-5.6-sol',
+        modelId: 'openai/gpt-6-sol',
         reasoningEffort: 'xhigh',
       },
     },
@@ -447,11 +447,11 @@ const OPENROUTER_EFFICIENT_MODEL_PRESET = {
   // Reasoning efforts are intentionally unset so the shared per-role
   // defaults apply, exactly as they do for a hand-configured model.
   roles: {
-    coding: { modelId: 'openrouter/openai/gpt-5.6-luna' },
-    helper: { modelId: 'openrouter/openai/gpt-5.6-luna' },
-    codeReview: { modelId: 'openrouter/openai/gpt-5.6-luna' },
-    explore: { modelId: 'openrouter/openai/gpt-5.6-luna' },
-    planning: { modelId: 'openrouter/openai/gpt-5.6-luna' },
+    coding: { modelId: 'openrouter/openai/gpt-6-luna' },
+    helper: { modelId: 'openrouter/openai/gpt-6-luna' },
+    codeReview: { modelId: 'openrouter/openai/gpt-6-luna' },
+    explore: { modelId: 'openrouter/openai/gpt-6-luna' },
+    planning: { modelId: 'openrouter/openai/gpt-6-luna' },
   },
 } as const satisfies RecommendedModelPreset;
 
@@ -600,9 +600,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'claude-opus-5-5': 'vercel/anthropic/claude-opus-5.5',
       'claude-sonnet-5': 'vercel/anthropic/claude-sonnet-5',
       'gpt-6-astra': 'vercel/openai/gpt-6-astra',
-      'gpt-5-6-sol': 'vercel/openai/gpt-5.6-sol',
       'gpt-5-6-terra': 'vercel/openai/gpt-5.6-terra',
-      'gpt-5-6-luna': 'vercel/openai/gpt-5.6-luna',
       'gemini-3-8-flash': 'vercel/google/gemini-3.8-flash',
       'deepseek-v4-1-flash': 'vercel/deepseek/deepseek-v4.1-flash',
       'deepseek-v4-pro-0813': 'vercel/deepseek/deepseek-v4-pro-0813',
@@ -637,9 +635,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'claude-haiku-4-5': 'requesty/claude-haiku-4-5',
       'claude-opus-5-5': 'requesty/anthropic/claude-opus-5-5',
       'claude-sonnet-5': 'requesty/claude-sonnet-5',
-      'gpt-5-6-sol': 'requesty/gpt-5.6-sol@eu',
       'gpt-5-6-terra': 'requesty/gpt-5.6-terra@eu',
-      'gpt-5-6-luna': 'requesty/gpt-5.6-luna@eu',
       'gemini-3-8-flash': 'requesty/gemini-3.8-flash',
       'glm-5-3-flash': 'requesty/glm-5.3-flash',
       'glm-5-3': 'requesty/glm-5.3',
@@ -711,13 +707,13 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     id: 'openai',
     label: 'OpenAI',
     envVarName: 'OPENAI_API_KEY',
-    defaultRoomoteModel: 'openai/gpt-5.6-sol',
+    defaultRoomoteModel: 'openai/gpt-6-sol',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
       'gpt-6-astra': 'openai/gpt-6-astra',
-      'gpt-5-6-sol': 'openai/gpt-5.6-sol',
+      'gpt-6-sol': 'openai/gpt-6-sol',
       'gpt-5-6-terra': 'openai/gpt-5.6-terra',
-      'gpt-5-6-luna': 'openai/gpt-5.6-luna',
+      'gpt-6-luna': 'openai/gpt-6-luna',
     }),
     recommendedPresets: OPENAI_RECOMMENDED_MODEL_PRESETS,
   },
@@ -742,9 +738,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       },
     ],
     suggestedTaskModels: mapRecommendedTaskModels({
-      'gpt-5-6-sol': 'azure/gpt-5.6-sol',
       'gpt-5-6-terra': 'azure/gpt-5.6-terra',
-      'gpt-5-6-luna': 'azure/gpt-5.6-luna',
       'claude-opus-5-5': 'azure/claude-opus-5-5',
     }),
     recommendedRoleModels: {
@@ -775,9 +769,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       },
     ],
     suggestedTaskModels: mapRecommendedTaskModels({
-      'gpt-5-6-sol': 'azure-cognitive-services/gpt-5.6-sol',
       'gpt-5-6-terra': 'azure-cognitive-services/gpt-5.6-terra',
-      'gpt-5-6-luna': 'azure-cognitive-services/gpt-5.6-luna',
       'claude-opus-5-5': 'azure-cognitive-services/claude-opus-5-5',
     }),
     recommendedRoleModels: {
@@ -880,9 +872,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'claude-opus-5-5': 'opencode/claude-opus-5-5',
       'claude-sonnet-5': 'opencode/claude-sonnet-5',
       'gpt-6-astra': 'opencode/gpt-6-astra',
-      'gpt-5-6-sol': 'opencode/gpt-5.6-sol',
       'gpt-5-6-terra': 'opencode/gpt-5.6-terra',
-      'gpt-5-6-luna': 'opencode/gpt-5.6-luna',
       'gemini-3-8-flash': 'opencode/gemini-3.8-flash',
       'deepseek-v4-pro-0813': 'opencode/deepseek-v4-pro',
       'glm-5-2': 'opencode/glm-5.2',
@@ -921,7 +911,6 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'deepseek-v4-pro-0813': 'opencode-go/deepseek-v4-pro',
       'glm-5-3-flash': 'opencode-go/glm-5.3-flash',
       'glm-5-3': 'opencode-go/glm-5.3',
-      'gpt-5-6-luna': 'opencode-go/gpt-5.6-luna',
       'grok-4-7': 'opencode-go/grok-4.7',
       'kimi-k2-7-code': 'opencode-go/kimi-k2.7-code',
       'kimi-k3': 'opencode-go/kimi-k3',
@@ -966,9 +955,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'claude-haiku-4-5': 'bedrock-mantle/anthropic.claude-haiku-4-5',
       'claude-opus-5-5': 'bedrock-mantle/anthropic.claude-opus-5-5',
       'claude-sonnet-5': 'bedrock-mantle/anthropic.claude-sonnet-5',
-      'gpt-5-6-sol': 'bedrock-mantle/openai.gpt-5.6-sol',
       'gpt-5-6-terra': 'bedrock-mantle/openai.gpt-5.6-terra',
-      'gpt-5-6-luna': 'bedrock-mantle/openai.gpt-5.6-luna',
     }),
     recommendedRoleModels: {
       helper: 'bedrock-mantle/anthropic.claude-haiku-4-5',
@@ -1086,9 +1073,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'claude-opus-5-5': 'github-copilot/claude-opus-5.5',
       'claude-sonnet-5': 'github-copilot/claude-sonnet-5',
       'gpt-6-astra': 'github-copilot/gpt-6-astra',
-      'gpt-5-6-sol': 'github-copilot/gpt-5.6-sol',
       'gpt-5-6-terra': 'github-copilot/gpt-5.6-terra',
-      'gpt-5-6-luna': 'github-copilot/gpt-5.6-luna',
       'kimi-k3': 'github-copilot/kimi-k3',
       'kimi-k2-7-code': 'github-copilot/kimi-k2.7-code',
     }),
@@ -1175,13 +1160,13 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     id: CHATGPT_SUBSCRIPTION_PROVIDER_ID,
     label: 'ChatGPT (subscription)',
     envVarName: undefined,
-    defaultRoomoteModel: 'openai/gpt-5.6-sol',
+    defaultRoomoteModel: 'openai/gpt-6-sol',
     authKind: 'oauth',
     suggestedTaskModels: mapRecommendedTaskModels({
       'gpt-6-astra': 'openai/gpt-6-astra',
-      'gpt-5-6-sol': 'openai/gpt-5.6-sol',
+      'gpt-6-sol': 'openai/gpt-6-sol',
       'gpt-5-6-terra': 'openai/gpt-5.6-terra',
-      'gpt-5-6-luna': 'openai/gpt-5.6-luna',
+      'gpt-6-luna': 'openai/gpt-6-luna',
     }),
     recommendedPresets: OPENAI_RECOMMENDED_MODEL_PRESETS,
   },

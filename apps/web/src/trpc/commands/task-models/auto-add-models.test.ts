@@ -15,6 +15,7 @@ import type { ModelsDevCatalog } from './models-dev';
 
 const ANTHROPIC = getSetupModelProvider('anthropic');
 const OPENROUTER = getSetupModelProvider('openrouter');
+const OPENAI = getSetupModelProvider('openai');
 const GOOGLE = getSetupModelProvider('google');
 const XAI_SUBSCRIPTION = getSetupModelProvider('xai-subscription');
 
@@ -61,6 +62,24 @@ describe('buildAutoAddedTaskModelSettings', () => {
     ]);
     expect(result!.taskModelSettings.allowedModelIds).toEqual(['xai/grok-4.7']);
     expect(result!.taskModelSettings.defaultModelId).toBe('xai/grok-4.7');
+  });
+
+  it('seeds the current GPT-6 successors for a fresh OpenAI connection', () => {
+    const result = buildAutoAddedTaskModelSettings({
+      provider: OPENAI,
+      persistedTaskModelSettings: null,
+      connectedProviderIds: new Set(['openai']),
+    });
+
+    const modelIds = result!.taskModelSettings.models?.map((model) => model.id);
+
+    expect(modelIds).toEqual(
+      expect.arrayContaining(['openai/gpt-6-sol', 'openai/gpt-6-luna']),
+    );
+    expect(modelIds).not.toEqual(
+      expect.arrayContaining(['openai/gpt-5.6-sol', 'openai/gpt-5.6-luna']),
+    );
+    expect(result!.taskModelSettings.defaultModelId).toBe('openai/gpt-6-sol');
   });
 
   it('keeps the usable default-catalog models and effective default when another provider is also connected', () => {
