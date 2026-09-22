@@ -24,10 +24,10 @@ describe('implement-changes parent review override guidance', () => {
       'if the workflow says the parent step is only a brief author sanity check before a child review loop',
     );
     expect(skillContent).toContain(
-      'Ask it specifically to compare plan versus built result, to open the images and verify visual proof when evidence was captured or when proof should have applied, and to report undisclosed source drift between the proof snapshot and the shipped diff, not to repeat generic code review',
+      'The judge checks the visual proof only: whether the images show the shipped change and whether source changed after capture began.',
     );
     expect(skillContent).toContain(
-      'keep any repo reads minimal and targeted instead of doing open-ended exploration',
+      'When the proof step kept no images, do not run the judge.',
     );
     expect(skillContent).toContain(
       'Once the required parent review step reaches a known state, update the todo list and continue to the branch/push/PR step.',

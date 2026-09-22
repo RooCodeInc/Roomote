@@ -14,7 +14,7 @@ import {
   OPENCODE_IDENTITY_PLUGIN_SCRIPT,
   ROOMOTE_OPENCODE_ADVISOR_AGENT_DESCRIPTION,
   ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME,
-  ROOMOTE_OPENCODE_JUDGE_AGENT_DESCRIPTION,
+  ROOMOTE_OPENCODE_PROOF_JUDGE_AGENT_DESCRIPTION,
   ROOMOTE_OPENCODE_JUDGE_AGENT_NAME,
 } from '@roomote/cloud-agents';
 import {
@@ -1279,7 +1279,7 @@ function createJudgeAgentConfig(
   reasoningOptions?: Record<string, unknown> | null,
 ): Record<string, unknown> {
   return {
-    description: ROOMOTE_OPENCODE_JUDGE_AGENT_DESCRIPTION,
+    description: ROOMOTE_OPENCODE_PROOF_JUDGE_AGENT_DESCRIPTION,
     mode: 'subagent',
     hidden: true,
     model,

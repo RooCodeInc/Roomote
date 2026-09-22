@@ -845,12 +845,12 @@ describe('opencode-server bootstrap', () => {
 
     expect(baseConfig.agent?.judge).toEqual({
       description:
-        'Compares completed implementation against a plan or requested outcome after validation and any pre-delivery visual proof, opens captured proof images to verify them, and returns concise review findings.',
+        'Opens the screenshots and keyframes a visual-proof step kept, checks that they show the shipped change honestly, and reports source changes made after proof capture began.',
       mode: 'subagent',
       hidden: true,
       model: 'test-provider/vision-model',
       options: { reasoningEffort: 'high' },
-      prompt: expect.stringContaining('implementation review support'),
+      prompt: expect.stringContaining('visual-proof review support'),
       permission: {
         read: 'allow',
         list: 'allow',
@@ -870,12 +870,12 @@ describe('opencode-server bootstrap', () => {
     });
     expect(baseConfig.agent?.judge).toMatchObject({
       prompt: expect.stringContaining(
-        'Avoid open-ended repository exploration',
+        'Do not review the implementation, plan coverage, logic, or tests',
       ),
     });
     expect(baseConfig.agent?.judge).toMatchObject({
       prompt: expect.stringContaining(
-        'When visual-proof evidence is included, verify it as part of the check',
+        'Open every supplied local screenshot and keyframe path with the read tool',
       ),
     });
     expect(config.agent).toEqual(baseConfig.agent);
@@ -977,11 +977,11 @@ describe('opencode-server bootstrap', () => {
 
     expect(baseConfig.agent?.judge).toEqual({
       description:
-        'Compares completed implementation against a plan or requested outcome after validation and any pre-delivery visual proof, opens captured proof images to verify them, and returns concise review findings.',
+        'Opens the screenshots and keyframes a visual-proof step kept, checks that they show the shipped change honestly, and reports source changes made after proof capture began.',
       mode: 'subagent',
       hidden: true,
       model: 'test-provider/main-model',
-      prompt: expect.stringContaining('implementation review support'),
+      prompt: expect.stringContaining('visual-proof review support'),
       permission: {
         read: 'allow',
         list: 'allow',
@@ -1001,7 +1001,7 @@ describe('opencode-server bootstrap', () => {
     });
     expect(baseConfig.agent?.judge).toMatchObject({
       prompt: expect.stringContaining(
-        'Avoid open-ended repository exploration',
+        'Do not review the implementation, plan coverage, logic, or tests',
       ),
     });
     expect(config.agent).toEqual(baseConfig.agent);
