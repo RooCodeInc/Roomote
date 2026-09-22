@@ -109,6 +109,9 @@ describe('Standard Task visual-proof step', () => {
       'the path `/tmp/capture-visual-proof/diff-at-start.patch`, and the local paths of every kept screenshot and keyframe so the judge can open them',
     );
     expect(skillContent).toContain(
+      'Supply the final shipped diff (branch base through working tree, including untracked files, computed the same way as the snapshot)',
+    );
+    expect(skillContent).toContain(
       'The judge checks the visual proof only: whether the images show the shipped change and whether source changed after capture began.',
     );
     expect(skillContent).toContain(
