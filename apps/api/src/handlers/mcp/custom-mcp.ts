@@ -105,6 +105,8 @@ export function createCustomMcpProxy() {
         authHeader,
         extraHeaders,
         disabledToolNames: server.disabledTools,
+        toolApprovalIntegrationId: server.name,
+        toolApprovalPolicyScope: server.ownerUserId ? 'personal' : 'deployment',
         upstream: server.url,
       };
     },

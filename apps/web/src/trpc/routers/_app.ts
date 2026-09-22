@@ -34,6 +34,7 @@ import {
   sourceControlTokenBackedProviderSchema,
   sessionGoalInputSchema,
   codingModelRoutingRuleSchema,
+  integrationToolPolicyUpsertSchema,
   taskModelMetadataSchema,
   type ScheduleOnlyBackgroundAutomationFrequencyField,
 } from '@roomote/types';
@@ -223,6 +224,12 @@ import {
   getDeploymentExperimentsCommand,
   setDeploymentExperimentCommand,
 } from '../commands/deployment-experiments';
+import {
+  listIntegrationToolPoliciesCommand,
+  listPersonalIntegrationToolPoliciesCommand,
+  setIntegrationToolPolicyCommand,
+  setPersonalIntegrationToolPolicyCommand,
+} from '../commands/integration-tool-policies';
 import {
   type EnvironmentConfigVersionDetail,
   getActiveEnvironmentDefinitionTaskCommand,
@@ -3602,6 +3609,25 @@ export const appRouter = createRouter({
       )
       .mutation(({ ctx: { auth }, input }) =>
         setDeploymentExperimentCommand(auth, input),
+      ),
+  }),
+
+  integrationToolPolicies: createRouter({
+    list: protectedProcedure.query(({ ctx: { auth } }) =>
+      listIntegrationToolPoliciesCommand(auth),
+    ),
+    set: protectedProcedure
+      .input(integrationToolPolicyUpsertSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        setIntegrationToolPolicyCommand(auth, input),
+      ),
+    listPersonal: protectedProcedure.query(({ ctx: { auth } }) =>
+      listPersonalIntegrationToolPoliciesCommand(auth),
+    ),
+    setPersonal: protectedProcedure
+      .input(integrationToolPolicyUpsertSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        setPersonalIntegrationToolPolicyCommand(auth, input),
       ),
   }),
 

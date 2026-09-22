@@ -41,6 +41,7 @@ const mocks = vi.hoisted(() => ({
   getUserIdentity: vi.fn(),
   getPersonalization: vi.fn(),
   refreshTitle: vi.fn(),
+  savePostTurnMemory: vi.fn(),
   bindExecutor: vi.fn(),
   bindMcpExecutor: vi.fn(),
   captureInferenceContext: vi.fn(),
@@ -378,6 +379,10 @@ vi.mock('../../user-personalization', async (importOriginal) => {
   };
 });
 
+vi.mock('../fast-agent-post-turn-memory', () => ({
+  saveFastAgentPostTurnMemory: mocks.savePostTurnMemory,
+}));
+
 vi.mock('../session-title-refresh-job', () => ({
   refreshFastAgentSessionTitleWithRetry: mocks.refreshTitle,
 }));
@@ -522,6 +527,19 @@ async function invokeMcpTool(
   if (!mocks.mcpExecutor) throw new Error('MCP executor is not bound.');
   return mocks.mcpExecutor({ integrationId, toolName, args });
 }
+
+// An expectation that fails inside the model mock rejects the mocked call,
+// which the turn handles as an inference failure, so the test would still
+// pass. Rethrow it here so it fails the test that made it.
+afterEach(() => {
+  const swallowed = mocks.generateText.mock.settledResults.find(
+    (result) =>
+      result.type === 'rejected' &&
+      result.value instanceof Error &&
+      result.value.name === 'AssertionError',
+  );
+  if (swallowed) throw swallowed.value;
+});
 
 describe('answerFastAgentQuestion native OpenCode tools', () => {
   beforeEach(() => {
@@ -2707,6 +2725,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       finishGeneration?.('Steered answer');
       await expect(resultPromise).resolves.toBe('Steered answer');
       expect(mocks.invalidateSession).not.toHaveBeenCalled();
+      // The accepted steer is judged for memory along with the opening message.
+      expect(mocks.savePostTurnMemory).toHaveBeenCalledWith(
+        expect.objectContaining({
+          request: baseParams.question,
+          steeredRequests: ['Use the corrected requirement.'],
+        }),
+      );
     } finally {
       vi.useRealTimers();
     }
@@ -5589,7 +5614,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
               'https://roomote.example/artifacts/session/session-1?path=notes%2Fdecision.md&v=1',
           },
           guidance:
-            'The artifact viewUrl opens in its Session; standaloneViewUrl opens the document, image, or file on its own page with a direct shareable link. Share whichever returned URL fits the context, unchanged, instead of constructing an artifact URL.',
+            'The artifact viewUrl opens in its session; standaloneViewUrl opens the document, image, or file on its own page with a direct shareable link. Share whichever returned URL fits the context, unchanged, instead of constructing an artifact URL.',
         });
         await invokeTool(nativeToolNames.sendChatReply, {
           purpose: 'closeout',
@@ -5609,7 +5634,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
-  it('reports a platform issue with Fast session and acting-user context', async () => {
+  it('reports a platform issue with session and acting-user context', async () => {
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
@@ -6000,19 +6025,110 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
-  it('refuses a memory save when no Brain is configured', async () => {
-    mocks.isBrainEnabled.mockResolvedValue(false);
+  it('hands each settled human turn to the post-turn memory pass', async () => {
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'It routes inbound webhooks.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.savePostTurnMemory).toHaveBeenCalledTimes(1);
+    expect(mocks.savePostTurnMemory).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationId: 'conversation-1',
+        userId: 'user-1',
+        request: baseParams.question,
+        reply: 'It routes inbound webhooks.',
+        agentSavedMemory: false,
+      }),
+    );
+  });
+
+  it('tells the post-turn memory pass when the agent already saved', async () => {
+    mocks.isBrainEnabled.mockResolvedValue(true);
+    mocks.appendMemory.mockResolvedValue({ saved: true });
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         options.onModelResolved?.('openrouter/openai/gpt-5.4');
         await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'On it.',
+        });
         options.onPromptStarted?.();
-        const result = await invokeTool(nativeToolNames.saveMemory, {
+        await invokeTool(nativeToolNames.saveMemory, {
           memory: 'Prefers deploys on Fridays',
         });
-        expect(result).toMatchObject({
-          success: false,
-          error: 'This deployment has no Brain configured.',
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Remembered.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.savePostTurnMemory).toHaveBeenCalledWith(
+      expect.objectContaining({ agentSavedMemory: true }),
+    );
+  });
+
+  it('keeps private Sessions and platform events out of the post-turn memory pass', async () => {
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Done.',
+        });
+        return '';
+      },
+    );
+
+    mocks.getSession.mockResolvedValueOnce({
+      id: 'conversation-1',
+      compatibilityMessages: [],
+      openCodeSessionId: null,
+      privacy: 'private',
+      privateOwnerUserId: 'user-1',
+    });
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter: callbacks(),
+      turnSource: 'platform_event',
+    });
+
+    expect(mocks.savePostTurnMemory).not.toHaveBeenCalled();
+  });
+
+  it('refuses a memory save when no Brain is configured', async () => {
+    mocks.isBrainEnabled.mockResolvedValue(false);
+    // Asserted after the turn: a failed expectation inside the model mock
+    // would be swallowed as an inference failure.
+    let saveResult: unknown;
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        options.onModelResolved?.('openrouter/openai/gpt-5.4');
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'On it.',
+        });
+        options.onPromptStarted?.();
+        saveResult = await invokeTool(nativeToolNames.saveMemory, {
+          memory: 'Prefers deploys on Fridays',
         });
         await invokeTool(nativeToolNames.sendChatReply, {
           purpose: 'closeout',
@@ -6024,6 +6140,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
     await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
 
+    expect(saveResult).toMatchObject({
+      success: false,
+      error: 'This deployment has no Brain configured.',
+    });
     expect(mocks.appendMemory).not.toHaveBeenCalled();
   });
 
@@ -6033,17 +6153,18 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       saved: false,
       reason: 'memory_full',
     });
+    let saveResult: unknown;
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         options.onModelResolved?.('openrouter/openai/gpt-5.4');
         await options.onSessionReady('opencode-session-1');
-        options.onPromptStarted?.();
-        const result = await invokeTool(nativeToolNames.saveMemory, {
-          memory: 'One fact too many',
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'On it.',
         });
-        expect(result).toMatchObject({
-          success: false,
-          error: expect.stringContaining('memory is full'),
+        options.onPromptStarted?.();
+        saveResult = await invokeTool(nativeToolNames.saveMemory, {
+          memory: 'One fact too many',
         });
         await invokeTool(nativeToolNames.sendChatReply, {
           purpose: 'closeout',
@@ -6054,6 +6175,16 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
 
     await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(saveResult).toMatchObject({
+      success: false,
+      error: expect.stringContaining('memory is full'),
+    });
+    expect(mocks.appendMemory).toHaveBeenCalledWith(
+      expect.anything(),
+      'conversation-1',
+      'One fact too many',
+    );
   });
 
   it('validates a durable session before resuming with the new turn', async () => {
@@ -10016,7 +10147,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   });
 
   it.each(['web', 'telegram'] as const)(
-    'lets a %s Fast session use the unified sender for an actor-scoped self DM',
+    'lets a %s session use the unified sender for an actor-scoped self DM',
     async (surface) => {
       let unauthorizedRecipientResult: unknown;
       mocks.listIntegrations.mockResolvedValue([
@@ -10633,10 +10764,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
             result,
           });
           expect(toolResults[1]).toEqual({
-            success: false,
-            error: 'The same integration call already ran in this turn.',
+            success: true,
+            result,
           });
-          expect(mocks.callIntegration).toHaveBeenCalledOnce();
+          expect(mocks.callIntegration).toHaveBeenCalledTimes(2);
           expect(mocks.listIntegrations).toHaveBeenCalledWith(
             { userId: 'user-1', apiBaseUrl: 'https://api.example.com' },
             resolveMcpServerConfigs,

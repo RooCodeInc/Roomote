@@ -117,7 +117,7 @@ import {
 } from './index';
 
 describe('getFastSessionTasksCommand', () => {
-  it('adds stable image and video preview URLs to Fast-session artifacts', async () => {
+  it('adds stable image and video preview URLs to session artifacts', async () => {
     mocks.currentEpochSeconds.mockReturnValue(7_201);
     mocks.getFastSessionTasks.mockResolvedValue([
       {
@@ -164,7 +164,7 @@ describe('getFastSessionTasksCommand', () => {
   });
 });
 
-describe('setup context on ordinary Fast session input', () => {
+describe('setup context on ordinary session input', () => {
   afterEach(() => {
     mocks.resolveSetupContext.mockReset().mockResolvedValue(null);
   });
@@ -645,7 +645,7 @@ describe('Session Goal Mode commands', () => {
     mocks.startSessionGoal.mockResolvedValue({ success: true, goal: {} });
   });
 
-  it('starts a goal directly on the Fast Session', async () => {
+  it('starts a goal directly on the session', async () => {
     await startFastSessionGoalCommand(auth, {
       sessionId: session.id,
       objective: 'Ship the release',
@@ -934,7 +934,7 @@ describe('startFastSessionCommand', () => {
     expect(mocks.after).toHaveBeenCalledOnce();
   });
 
-  it('lets the initial Fast Session turn create a Session-owned artifact', async () => {
+  it('lets the initial session turn create a session-owned artifact', async () => {
     let scheduled: (() => Promise<void>) | undefined;
     mocks.after.mockImplementation((callback) => {
       scheduled = callback;
@@ -1202,7 +1202,7 @@ describe('startSetupFastSessionCommand', () => {
   });
 });
 
-describe('Fast session PR review actions', () => {
+describe('Session PR review actions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.findAccessibleSession.mockResolvedValue(session);

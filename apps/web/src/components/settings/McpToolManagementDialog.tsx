@@ -16,9 +16,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  Label,
   Spinner,
-  Switch,
   ToggleLeft,
   ToggleRight,
 } from '@/components/system';
@@ -26,6 +24,8 @@ import {
   useMcpConnectionTools,
   useSetDisabledMcpTools,
 } from '@/hooks/mcp-connections';
+
+import { IntegrationToolApprovalList } from './IntegrationToolApprovalControls';
 import { MCP_TOOL_CATALOG_REQUIRES_PERSONAL_CONNECTION } from '@/lib/mcp-tool-errors';
 import { SETTINGS_PATHS } from '@/lib/settings';
 
@@ -34,37 +34,9 @@ type McpToolManagementDialogProps = {
   integrationName: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Admin-only approval policy state is never loaded for non-admin viewers. */
+  isAdmin?: boolean;
 };
-
-function splitToolNameParts(name: string): string[] {
-  return name.split(/[-_\s]+/).filter((part) => part.length > 0);
-}
-
-function titleCaseToolNamePart(part: string): string {
-  return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
-}
-
-function prettifyToolName(
-  name: string,
-  integrationName: string | null,
-): string {
-  const nameParts = splitToolNameParts(name);
-  const integrationParts = integrationName
-    ? splitToolNameParts(integrationName)
-    : [];
-  const hasIntegrationPrefix =
-    integrationParts.length > 0 &&
-    integrationParts.every(
-      (part, index) => nameParts[index]?.toLowerCase() === part.toLowerCase(),
-    );
-  const displayParts = hasIntegrationPrefix
-    ? nameParts.slice(integrationParts.length)
-    : nameParts;
-
-  return (displayParts.length > 0 ? displayParts : nameParts)
-    .map(titleCaseToolNamePart)
-    .join(' ');
-}
 
 function McpToolLoadErrorMessage({
   integrationName,
@@ -103,6 +75,7 @@ export function McpToolManagementDialog({
   integrationName,
   open,
   onOpenChange,
+  isAdmin,
 }: McpToolManagementDialogProps) {
   const toolsQuery = useMcpConnectionTools(open ? mcpId : null);
   const setDisabledTools = useSetDisabledMcpTools();
@@ -270,39 +243,20 @@ export function McpToolManagementDialog({
 
           {hasLoadedTools ? (
             <div className="space-y-3 py-3">
-              {loadedTools.map((tool, index) => {
-                const enabled = !normalizedDisabledToolNames.includes(
-                  tool.name,
-                );
-                const switchId = `mcp-tool-${mcpId ?? 'unknown'}-${index}`;
-
-                return (
-                  <div
-                    key={tool.name}
-                    className="flex min-w-0 items-start gap-4"
-                  >
-                    <div className="min-w-0 flex-1 space-y-1.5">
-                      <div className="flex min-w-0 items-center gap-4">
-                        <Switch
-                          id={switchId}
-                          checked={enabled}
-                          aria-label={`${enabled ? 'Disable' : 'Enable'} ${tool.name}`}
-                          disabled={setDisabledTools.isPending}
-                          onCheckedChange={(nextEnabled) =>
-                            handleToggle(tool.name, nextEnabled)
-                          }
-                        />
-                        <Label
-                          htmlFor={switchId}
-                          className="min-w-0 truncate text-sm text-foreground"
-                        >
-                          {prettifyToolName(tool.name, integrationName)}
-                        </Label>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+              <IntegrationToolApprovalList
+                integrationId={mcpId}
+                integrationName={integrationName}
+                scope="deployment"
+                canManage={isAdmin !== false}
+                open={open}
+                tools={loadedTools}
+                saveNote="Tool enable/disable still needs Save changes."
+                isToolEnabled={(toolName) =>
+                  !normalizedDisabledToolNames.includes(toolName)
+                }
+                onToggleTool={handleToggle}
+                toggleDisabled={setDisabledTools.isPending}
+              />
             </div>
           ) : null}
         </div>

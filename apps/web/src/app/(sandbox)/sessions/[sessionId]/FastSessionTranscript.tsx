@@ -93,8 +93,16 @@ import { EditableSessionTitle } from './EditableSessionTitle';
 import { isRequestUserInputResponseRepresentedByCanonicalReceipt } from '@/lib/setup-receipt-transcript';
 import { CapabilityOfferCard } from './CapabilityOfferCard';
 import { PendingIntegrationKeys } from '@/components/sessions/PendingIntegrationKeys';
+import { PendingIntegrationToolApprovals } from '@/components/sessions/PendingIntegrationToolApprovals';
+import { useIntegrationToolApprovalsExperiment } from '@/hooks/useIntegrationToolApprovalsExperiment';
+import {
+  useSessionIntegrationToolApprovals,
+  useSetSessionIntegrationToolOverride,
+} from '@/hooks/useSessionIntegrationToolApprovals';
+import { IntegrationToolSessionControlsProvider } from '@/components/sessions/IntegrationToolSessionControls';
 import { openIntegrationKeyDialog } from '@/components/sessions/integration-key-dialog';
 import { useSessionTitlePropagation } from './use-session-title-propagation';
+import { MemorySavedMessage } from '@/components/ai-elements/MemorySavedMessage';
 
 import {
   AcpMessageItem,
@@ -941,6 +949,9 @@ export function FastSessionTranscript({
   );
   const renderCapabilityOfferMessage = useCallback(
     (message: AcpUiMessage) => {
+      if (message.updateType === ACP_ENVELOPE_EVENT_TYPES.MemorySaved) {
+        return <MemorySavedMessage message={message} />;
+      }
       const offer = capabilityOffersByMessageId.get(message.id);
       if (!offer) return undefined;
       const introMessage: AcpUiMessage = {
@@ -1802,6 +1813,19 @@ export function FastSessionTranscript({
     }
   }, [openIntegrationKeyRequestId, secretSessionId]);
 
+  const toolApprovalsExperiment = useIntegrationToolApprovalsExperiment();
+  const toolApprovals = useSessionIntegrationToolApprovals(
+    secretSessionId,
+    toolApprovalsExperiment.enabled,
+  );
+  const setToolOverride = useSetSessionIntegrationToolOverride(secretSessionId);
+  const toolSessionControlsActive =
+    Boolean(secretSessionId) && toolApprovalsExperiment.enabled;
+  const toolSessionOverrides = useMemo(
+    () => toolApprovals.data?.sessionOverrides ?? [],
+    [toolApprovals.data?.sessionOverrides],
+  );
+
   useEffect(() => {
     if (pendingInputRequest && (liveVoiceActive || liveVoiceConnecting)) {
       stopLiveVoiceRef.current();
@@ -1880,13 +1904,20 @@ export function FastSessionTranscript({
                 Older messages in this session are not shown.
               </p>
             ) : null}
-            <AcpTranscriptBlockList
-              blocks={renderBlocksBeforeInput}
-              showInternalMessages={false}
-              onSuppress={suppressMessageBeforeInput}
-              onOpenDelegatedTask={openTaskPanel ?? undefined}
-              renderMessage={renderCapabilityOfferMessage}
-            />
+            <IntegrationToolSessionControlsProvider
+              active={toolSessionControlsActive}
+              overrides={toolSessionOverrides}
+              setOverride={setToolOverride.mutate}
+              isUpdating={setToolOverride.isPending}
+            >
+              <AcpTranscriptBlockList
+                blocks={renderBlocksBeforeInput}
+                showInternalMessages={false}
+                onSuppress={suppressMessageBeforeInput}
+                onOpenDelegatedTask={openTaskPanel ?? undefined}
+                renderMessage={renderCapabilityOfferMessage}
+              />
+            </IntegrationToolSessionControlsProvider>
             {pendingInputRequest ? (
               <div className="mt-3">
                 {pendingInputRequest.preset === 'setup_starter_tasks' ? (
@@ -1910,13 +1941,20 @@ export function FastSessionTranscript({
                 )}
               </div>
             ) : null}
-            <AcpTranscriptBlockList
-              blocks={renderBlocksAfterInput}
-              showInternalMessages={false}
-              onSuppress={suppressMessageAfterInput}
-              onOpenDelegatedTask={openTaskPanel ?? undefined}
-              renderMessage={renderCapabilityOfferMessage}
-            />
+            <IntegrationToolSessionControlsProvider
+              active={toolSessionControlsActive}
+              overrides={toolSessionOverrides}
+              setOverride={setToolOverride.mutate}
+              isUpdating={setToolOverride.isPending}
+            >
+              <AcpTranscriptBlockList
+                blocks={renderBlocksAfterInput}
+                showInternalMessages={false}
+                onSuppress={suppressMessageAfterInput}
+                onOpenDelegatedTask={openTaskPanel ?? undefined}
+                renderMessage={renderCapabilityOfferMessage}
+              />
+            </IntegrationToolSessionControlsProvider>
             {pendingResponseState.pendingAfter !== null &&
             streamMessages.length === 0 &&
             !hasLiveActivity([
@@ -1952,6 +1990,12 @@ export function FastSessionTranscript({
               <PendingIntegrationKeys
                 sessionId={secretSessionId}
                 openRequest={openIntegrationKeyRequest}
+              />
+            ) : null}
+            {secretSessionId && toolApprovalsExperiment.enabled ? (
+              <PendingIntegrationToolApprovals
+                sessionId={secretSessionId}
+                pending={toolApprovals.data?.pending ?? []}
               />
             ) : null}
           </ConversationContent>

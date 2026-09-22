@@ -68,6 +68,10 @@ import {
   buildFastAgentCodeModeServerNames,
   buildFastAgentToolFilter,
 } from './fast-agent-tool-policy';
+import {
+  ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME,
+  ROOMOTE_OPENCODE_JUDGE_AGENT_NAME,
+} from '../../opencode-prompt-subagents';
 
 export {
   FAST_AGENT_NATIVE_TOOL_FILTER,
@@ -400,7 +404,7 @@ export default {
     purpose: z.enum(["ack", "progress", "closeout", "clarification"]),
     imageArtifactIds: z.array(z.string()).optional().describe("Stable IDs of uploaded images to attach. Never claim an image or screenshot is attached, shown, or included unless this list is non-empty. If attachment delivery fails, reply with an accessible artifact viewer link and say that the image could not be attached."),
     videoArtifactIds: z.array(z.string()).optional().describe("Stable IDs of uploaded videos explicitly selected for native Slack delivery. Recover IDs and viewer links with manage_tasks get_summary. Never claim a video is attached unless selected here and delivery succeeds; when native delivery fails or is unavailable, share only its viewer link without an error or unavailability explanation."),
-    charts: z.array(chartInput).max(2).optional().describe("Up to two pie, bar, area, or line charts. Charts render in the web Session transcript and as native Block Kit data visualization blocks on Slack; other chat providers retain the Markdown fallback. Keep the Markdown reply useful on its own. Cartesian series names and categories must be unique, and every series must contain exactly one point for every category."),
+    charts: z.array(chartInput).max(2).optional().describe("Up to two pie, bar, area, or line charts. Charts render in the web session transcript and as native Block Kit data visualization blocks on Slack; other chat providers retain the Markdown fallback. Keep the Markdown reply useful on its own. Cartesian series names and categories must be unique, and every series must contain exactly one point for every category."),
     suggestions: z.array(z.object({
       title: z.string().min(1).max(140),
       brief: z.string().min(1).max(2000),
@@ -430,7 +434,7 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Create a durable text artifact in this Session. Use this for documents the user should keep, share, or build from; use show_widget for transient visual presentation and launch_task for repository or filesystem work.",
+  description: "Create a durable text artifact in this session. Use this for documents the user should keep, share, or build from; use show_widget for transient visual presentation and launch_task for repository or filesystem work.",
   args: {
     path: z.string().min(1).max(255).describe("Relative artifact path, including a useful file extension"),
     content: z.string().min(1).max(131072).describe("UTF-8 text content; maximum 128 KiB"),
@@ -529,7 +533,7 @@ import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
   description: ${JSON.stringify(
-    `Create and share a rendered visual in the Session transcript when a structured or visual presentation communicates better than prose. Use it proactively to show, mock up, preview, or visualize an interface or interaction. ${SHOW_WIDGET_THEME_GUIDANCE} ${SHOW_WIDGET_FIXED_CANVAS_GUIDANCE} Use request_user_input for questions.`,
+    `Create and share a rendered visual in the session transcript when a structured or visual presentation communicates better than prose. Use it proactively to show, mock up, preview, or visualize an interface or interaction. ${SHOW_WIDGET_THEME_GUIDANCE} ${SHOW_WIDGET_FIXED_CANVAS_GUIDANCE} Use request_user_input for questions.`,
   )},
   args: {
     html: z.string().min(1).max(${SHOW_WIDGET_MAX_HTML_CHARS}).describe("Compact semantic HTML that fully fits the fixed canvas; avoid long prose, large lists, and dense data"),
@@ -580,7 +584,7 @@ export default {
     prompt: z.string().min(10).max(${SESSION_WAKEUP_PROMPT_MAX_LENGTH}).optional().describe("[create] What to do when it fires. This conversation stays in context, so keep it short: what to check, what counts as done, what to tell the user."),
     schedule: z.string().max(${SESSION_WAKEUP_SCHEDULE_MAX_LENGTH}).optional().describe(${JSON.stringify(`[create] ${SESSION_WAKEUP_SCHEDULE_GRAMMAR}`)}),
     reportPolicy: z.enum(["always", "only_when_notable"]).optional().describe("[create] 'always' replies on every run (default for one-shots); 'only_when_notable' stays silent unless there is news (default for repeating schedules). Omit to use the default."),
-    internal: z.boolean().optional().describe("[create] Set true only for automatic housekeeping required by system instructions. Internal wakeups are hidden from the Session timer list but still count toward the active limit and remain listable, gettable, and cancellable. Omit or set false for user-requested reminders and monitors."),
+    internal: z.boolean().optional().describe("[create] Set true only for automatic housekeeping required by system instructions. Internal wakeups are hidden from the session timer list but still count toward the active limit and remain listable, gettable, and cancellable. Omit or set false for user-requested reminders and monitors."),
   },
   execute: (args, context) => invoke("manage_wakeups", args, context),
 }
@@ -727,11 +731,11 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "List packaged Roomote skills, global instance skills, and authorized legacy settings-defined skills, plus optionally repository-defined skills, without filesystem access. Omit scope and name for the complete packaged, instance, and authorized legacy Settings inventory; this does not inspect repositories. Provide an exact name to find packaged, instance, and legacy Settings skills without inspecting repositories, following nextSourceOffset with sourceOffset until no continuation remains. Resolve same-name skills in this order: packaged > instance > legacy Settings > repository. Instance skills are available even with no environments configured, have IDs of the form instance:<uuid>, expose their current version for update_custom_skill, and have no environmentIds. Provide environmentId or repositoryId to include legacy Settings and repository skills from that scope; environmentId wins when both are given. Returns source counts plus exact IDs, task invocation names, descriptions, repositories, sources, versions when applicable, and applicable environment IDs for load_skill and task routing.",
+  description: "List packaged Roomote skills, global instance skills, authorized legacy settings-defined skills, and authorized repository-defined skills without filesystem access. Omit scope and name for the complete bounded inventory; repository discovery inspects only repositories mapped to environments available to this member and warns when the repository or marketplace source limit omits entries. Provide an exact name to search all four sources without guessing an environment or repository, following nextSourceOffset with sourceOffset to collect remaining same-precedence Settings variants; once a Settings match is returned, repository fallback remains suppressed. Resolve same-name skills in this order: packaged > instance > legacy Settings > repository. Instance skills are available even with no environments configured, have IDs of the form instance:<uuid>, expose their current version for update_custom_skill, and have no environmentIds. Provide environmentId or repositoryId only to limit legacy Settings and repository results to that scope; environmentId wins when both are given. Returns source counts plus exact IDs, task invocation names, descriptions, repositories, sources, versions when applicable, and applicable environment IDs for load_skill and task routing.",
   args: {
-    environmentId: z.string().min(1).nullable().optional().describe("Exact environment ID from the system prompt to include that environment's legacy Settings and repository skills; omit or pass null for an unscoped lookup"),
-    name: z.string().min(1).nullable().optional().describe("Exact skill invocation name; omit or pass null for the full inventory. An unscoped lookup checks packaged, instance, and authorized legacy Settings skills only"),
-    repositoryId: z.string().min(1).nullable().optional().describe("Exact repository ID from the system prompt to include that repository's skills; omit or pass null unless no environmentId is given"),
+    environmentId: z.string().min(1).nullable().optional().describe("Exact environment ID from the system prompt to limit legacy Settings and repository skills; omit or pass null for the complete authorized inventory"),
+    name: z.string().min(1).nullable().optional().describe("Exact skill invocation name; omit or pass null for the full inventory. An unscoped lookup checks packaged, instance, authorized legacy Settings, and authorized repository skills"),
+    repositoryId: z.string().min(1).nullable().optional().describe("Exact repository ID from the system prompt to limit repository and mapped environment skills; omit or pass null unless no environmentId is given"),
     sourceOffset: z.number().int().nonnegative().nullable().optional().describe("Continuation offset returned as nextSourceOffset by an exact-name lookup; omit or pass null unless continuing a lookup by name"),
   },
   execute: (args, context) => invoke("list_skills", args, context),
@@ -812,7 +816,7 @@ export default {
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Call this whenever a request involves a third-party service with a key-based HTTPS API that no connected integration, deployment MCP tool, official remote MCP, or skill covers; an empty connector search is not a reason to ask for exports or screenshots. List integrations available to this human (their own and deployment-visible grants, with origin, header, allowed methods, visibility, and expiry) and this Session's pending approvals, plus sessionUrl, the secure link where the human enters a key, without exposing credentials. Call this before preparing a new approval; for a pending approval, re-share sessionUrl rather than preparing again, and never ask the human to copy an opaque reference. Ready integrations are delivered automatically to coding tasks launched from this Session.",
+  description: "Call this whenever a request involves a third-party service with a key-based HTTPS API that no connected integration, deployment MCP tool, official remote MCP, or skill covers; an empty connector search is not a reason to ask for exports or screenshots. List integrations available to this human (their own and deployment-visible grants, with origin, header, allowed methods, visibility, and expiry) and this session's pending approvals, plus sessionUrl, the secure link where the human enters a key, without exposing credentials. Call this before preparing a new approval; for a pending approval, re-share sessionUrl rather than preparing again, and never ask the human to copy an opaque reference. Ready integrations are delivered automatically to coding tasks launched from this session.",
   args: {},
   execute: (args, context) => invoke("list_integration_keys", args, context),
 }
@@ -848,7 +852,7 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Present a trusted, non-blocking Roomote capability card in a web Session. Use it when the user's current goal needs an unavailable capability or when the setup guidance recommends the next capability. A previous Not now choice does not prevent a later relevant offer.",
+  description: "Present a trusted, non-blocking Roomote capability card in a web session. Use it when the user's current goal needs an unavailable capability or when the setup guidance recommends the next capability. A previous Not now choice does not prevent a later relevant offer.",
   args: {
     capability: z.enum(${JSON.stringify(FAST_AGENT_CAPABILITY_IDS)}),
     message: z.string().min(1).max(500).describe("Concise user-facing reason this capability is useful now"),
@@ -1627,6 +1631,16 @@ export async function getFastAgentNativeToolRuntime(
     serviceCredentialToolsEnabled?: boolean;
     serviceCredentialPrepareEnabled?: boolean;
     addRemoteMcpEnabled?: boolean;
+    /**
+     * Experiment-gated (`integrationToolApprovals`) per-tool approval rules
+     * in OpenCode config-permission shape, applied to the parent build agent
+     * and the helper subagents in the generated per-conversation config.
+     * Rules live in config rather than the session ruleset so a policy
+     * change never strands stale state in a persisted session: this file is
+     * rewritten every turn, and a policy change disposes the directory's
+     * cached instance instead of rebuilding the session.
+     */
+    toolApprovalPermission?: Record<string, 'ask' | 'deny'>;
   } = {},
 ): Promise<FastAgentNativeToolRuntime> {
   bridgePromise ??= startBridge();
@@ -1673,6 +1687,15 @@ export async function getFastAgentNativeToolRuntime(
   );
   runtime.env.OPENCODE_EXPERIMENTAL_CODE_MODE = '1';
   runtime.codeModeIntegrationsActive = true;
+  // Approval rules apply to the parent build agent and to the helper
+  // subagents. OpenCode merges this per-directory config over the shared
+  // server config, so a permission-only entry extends the existing advisor
+  // and judge definitions instead of replacing them.
+  const toolApprovalAgentEntries = options.toolApprovalPermission
+    ? {
+        permission: options.toolApprovalPermission,
+      }
+    : {};
   writeFileSync(
     join(runtime.directory, 'opencode.json'),
     JSON.stringify({
@@ -1695,7 +1718,14 @@ export async function getFastAgentNativeToolRuntime(
               addRemoteMcpEnabled: options.addRemoteMcpEnabled,
             },
           ),
+          ...toolApprovalAgentEntries,
         },
+        ...(options.toolApprovalPermission
+          ? {
+              [ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME]: toolApprovalAgentEntries,
+              [ROOMOTE_OPENCODE_JUDGE_AGENT_NAME]: toolApprovalAgentEntries,
+            }
+          : {}),
       },
       mcp: Object.fromEntries(
         mountedIntegrations.map((integration) => [

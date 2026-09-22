@@ -33,6 +33,7 @@ interface PrepareRepositoryOptions {
   toolVersionsConfig?: Record<string, string>;
   setDefaultRemote?: boolean;
   sourceControlProvider?: SourceControlProvider;
+  allowMissingBranchFallback?: boolean;
 }
 
 interface ExecuteEnvironmentRepositoryCommandsOptions {
@@ -744,6 +745,8 @@ export class WorkspaceManager {
         sha,
         repositoryId: repo?.id,
         allowRemoteHeadFallback: usesStoredDefaultBranch,
+        allowMissingBranchFallback: options.allowMissingBranchFallback === true,
+        fallbackBranch: defaultBranch,
         setDefaultRemote:
           sourceControlProvider === 'github' &&
           (options.setDefaultRemote ?? true),
@@ -765,6 +768,7 @@ export class WorkspaceManager {
     sourcePin?: {
       sourceRepo?: string;
       sourceBranch?: string;
+      allowMissingBranchFallback?: boolean;
       sourceSha?: string;
     },
     options: Pick<PrepareRepositoryOptions, 'sourceControlProvider'> & {
@@ -800,6 +804,8 @@ export class WorkspaceManager {
             sourceControlProvider:
               options.repositoryProviders?.[repoConfig.repository] ??
               options.sourceControlProvider,
+            allowMissingBranchFallback:
+              sourcePin?.allowMissingBranchFallback === true && isSourceRepo,
             toolVersionsConfig: repoConfig.tool_versions,
             setDefaultRemote: false,
           },
@@ -855,6 +861,8 @@ export class WorkspaceManager {
     sha,
     repositoryId,
     allowRemoteHeadFallback,
+    allowMissingBranchFallback,
+    fallbackBranch,
     setDefaultRemote,
   }: {
     executor: CommandExecutor;
@@ -863,6 +871,8 @@ export class WorkspaceManager {
     sha?: string;
     repositoryId?: string;
     allowRemoteHeadFallback: boolean;
+    allowMissingBranchFallback?: boolean;
+    fallbackBranch?: string;
     setDefaultRemote: boolean;
   }): Promise<void> {
     await this.timed(`prepare ${repoFullName}: git fetch`, () =>
@@ -880,6 +890,8 @@ export class WorkspaceManager {
         repoFullName,
         targetBranch,
         allowRemoteHeadFallback,
+        allowMissingBranchFallback: allowMissingBranchFallback === true,
+        fallbackBranch,
       });
     } catch (error) {
       // A branch that cannot be resolved is usually a real error, but a
@@ -1062,14 +1074,47 @@ export class WorkspaceManager {
     repoFullName,
     targetBranch,
     allowRemoteHeadFallback,
+    allowMissingBranchFallback,
+    fallbackBranch,
   }: {
     executor: CommandExecutor;
     repoFullName: string;
     targetBranch: string;
     allowRemoteHeadFallback: boolean;
+    allowMissingBranchFallback: boolean;
+    fallbackBranch?: string;
   }): Promise<string> {
-    if (!allowRemoteHeadFallback) {
+    if (!allowRemoteHeadFallback && !allowMissingBranchFallback) {
       return targetBranch;
+    }
+
+    if (allowMissingBranchFallback) {
+      if (await this.remoteTrackingBranchExists(executor, targetBranch)) {
+        return targetBranch;
+      }
+
+      const originHeadBranch = await this.resolveOriginHeadBranch(executor);
+      if (originHeadBranch) {
+        console.warn(
+          `Target branch ${targetBranch} for ${repoFullName} is unavailable; using origin/HEAD ${originHeadBranch}.`,
+        );
+        return originHeadBranch;
+      }
+
+      if (
+        fallbackBranch &&
+        fallbackBranch !== targetBranch &&
+        (await this.remoteTrackingBranchExists(executor, fallbackBranch))
+      ) {
+        console.warn(
+          `Target branch ${targetBranch} for ${repoFullName} is unavailable; using stored default branch ${fallbackBranch}.`,
+        );
+        return fallbackBranch;
+      }
+
+      throw new Error(
+        `Could not resolve target branch ${targetBranch} for ${repoFullName}: the branch is unavailable and no default branch could be verified.`,
+      );
     }
 
     const originHeadBranch = await this.resolveOriginHeadBranch(executor);

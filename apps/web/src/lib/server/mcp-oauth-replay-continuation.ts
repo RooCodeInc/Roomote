@@ -56,7 +56,7 @@ export async function resumeFastSessionFromReplay(input: {
         integrationId: input.mcpId,
         errorName: error instanceof Error ? error.name : typeof error,
       },
-      'Failed to continue the Fast Session after custom MCP OAuth',
+      'Failed to continue the session after custom MCP OAuth',
     );
     return false;
   }

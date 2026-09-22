@@ -1000,6 +1000,13 @@ const sharedTaskPayloadSchema = z.object({
   branch: z.string().optional(),
 
   /**
+   * Allows workspace preparation to fall back when an explicitly requested
+   * branch is no longer present. Used for terminal pull-request base refs;
+   * open pull-request head refs remain authoritative.
+   */
+  allowMissingBranchFallback: z.boolean().optional(),
+
+  /**
    * Specific commit SHA to pin checkout for legacy single-repository
    * workspace selection.
    * When provided, worker checkout will reset to this commit after branch setup.
@@ -2135,6 +2142,7 @@ export type TaskPayload<T extends TaskPayloadKind = TaskPayloadKind> = Extract<
 type TaskWorkspacePayload = {
   repo?: string;
   branch?: string;
+  allowMissingBranchFallback?: boolean;
   sha?: string;
   sourceControlHost?: string;
   environmentId?: string;
@@ -2149,6 +2157,7 @@ export type TaskWorkspace =
       type: 'repository';
       repo: string;
       branch?: string;
+      allowMissingBranchFallback?: boolean;
       sha?: string;
       sourceControlHost?: string;
     }
@@ -2165,6 +2174,7 @@ export type TaskWorkspace =
       environmentId: string;
       sourceRepo?: string;
       sourceBranch?: string;
+      allowMissingBranchFallback?: boolean;
       sourceSha?: string;
     };
 
@@ -2188,6 +2198,9 @@ export function resolveTaskWorkspace(
       environmentId: payload.environmentId,
       sourceRepo: payload.repo,
       sourceBranch: payload.branch,
+      ...(payload.allowMissingBranchFallback
+        ? { allowMissingBranchFallback: true }
+        : {}),
       sourceSha: payload.sha,
     };
   }
@@ -2222,6 +2235,9 @@ export function resolveTaskWorkspace(
     type: 'repository',
     repo: payload.repo,
     branch: payload.branch,
+    ...(payload.allowMissingBranchFallback
+      ? { allowMissingBranchFallback: true }
+      : {}),
     sha: payload.sha,
     sourceControlHost: payload.sourceControlHost,
   };

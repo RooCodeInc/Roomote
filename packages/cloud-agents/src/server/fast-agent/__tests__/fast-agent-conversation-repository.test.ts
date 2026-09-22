@@ -777,7 +777,7 @@ describe('Fast conversation repository', () => {
     expect(resolved?.conversation).toEqual(movedConversation);
   });
 
-  it('resolves a delayed Slack root to the original Fast session', async () => {
+  it('resolves a delayed Slack root to the original session', async () => {
     const user = await createUser();
     const pendingConversation = {
       surface: 'slack' as const,

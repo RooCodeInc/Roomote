@@ -52,7 +52,7 @@ export const startPolling = (options: ListenerOptions) => {
   }
 
   // Answers to a Linear elicitation reach the run through this poller, so a
-  // task delegated from a Linear Fast Session needs it as much as a direct
+  // task delegated from a Linear session needs it as much as a direct
   // Linear task does.
   if (
     taskRun.payloadKind === TaskPayloadKind.LinearAgentSession ||

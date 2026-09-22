@@ -370,7 +370,7 @@ export function buildFastAgentChildTaskMetadata(parent: FastAgentParent): {
 
 /**
  * Session linkage without orchestrator report ownership: the task shows up in
- * the parent Fast session (session_tasks + the fast task list) and can emit
+ * the parent session (session_tasks + the fast task list) and can emit
  * parent events, but keeps its own workflow's report and communication
  * behavior. Used for review-pipeline tasks attached to the session whose
  * delegated work opened the reviewed PR.

@@ -603,7 +603,7 @@ describe('handleTelegramCallbackQuery suggestion launch lifecycle', () => {
     );
   });
 
-  it('posts the rejection reason and releases the claim when the Fast session refuses the suggestion', async () => {
+  it('posts the rejection reason and releases the claim when the session refuses the suggestion', async () => {
     claimTelegramSuggestionLaunchMock.mockResolvedValue({
       id: WORK_ITEM_ID,
       title: 'Fix the flaky test',

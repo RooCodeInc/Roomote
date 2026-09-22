@@ -54,6 +54,7 @@ import {
 } from '@roomote/db/server';
 import {
   buildTerminalReviewStatus,
+  distillTaskRunTurnMemory,
   finalizeGithubPrReviewComment,
   getTaskUrl,
   releaseTaskRun,
@@ -521,6 +522,22 @@ export const finishRun = async ({
     status === RunStatus.Canceled
   ) {
     void captureTaskSettled(run.id, status, errorCode);
+  }
+
+  // A settled turn, whether the run stays up for follow-ups or ends here.
+  // Detached and best effort; the Memory outbox drainer repeats the check for
+  // a completed run, so a pass lost with this process is not lost for good.
+  if (
+    (status === RunStatus.Idle || status === RunStatus.Completed) &&
+    run.payloadKind !== TaskPayloadKind.SnapshotEnvironment
+  ) {
+    void distillTaskRunTurnMemory({
+      runId: run.id,
+      taskId: run.taskId,
+      userId: run.task.initiatorUserId,
+      workflow: run.task.workflow,
+      requeue: true,
+    });
   }
 
   if (status === RunStatus.Completed || status === RunStatus.Failed) {

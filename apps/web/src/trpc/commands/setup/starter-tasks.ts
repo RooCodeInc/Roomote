@@ -20,7 +20,7 @@ type CompleteSetupWithStarterTasksResult = {
 
 /**
  * Completes setup, then drops the administrator into one "Set up Roomote"
- * Fast session whose kickoff turn launches the selected starter tasks and
+ * session whose kickoff turn launches the selected starter tasks and
  * opens the conversation around them.
  *
  * Setup completion is deterministic and happens before the session's first

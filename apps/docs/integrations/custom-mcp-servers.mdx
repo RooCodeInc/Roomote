@@ -7,7 +7,7 @@ Custom MCP servers let agents use services that Roomote does not ship a
 built-in integration for. Any member can add a remote server, the same way
 they add an [integration key](/integration-keys): shared with everyone under
 **Integrations**, or private under **Personal Settings → Personal MCP
-servers**. You can also ask Roomote in a Session to connect a service's MCP
+servers**. You can also ask Roomote in a session to connect a service's MCP
 server. Remote servers become available to both sessions and sandbox tasks.
 Local stdio servers need a task sandbox because Roomote launches their
 process inside that workspace, and only deployment admins can add them.
@@ -84,11 +84,11 @@ The sandbox image ships `node`, `npx`, `uvx`, and `python`, so
 When you add a remote server you choose who can use it:
 
 - **Everyone in this deployment** (the default) shares it with every member.
-  Agents in every Session and task can use its tools, acting with the account
+  Agents in every session and task can use its tools, acting with the account
   that authorized it. It appears under **Settings → Integrations**. The member
   who added it and deployment admins can edit, connect, or remove it; everyone
   else sees it read-only.
-- **Only me** keeps it private. Only your own Sessions and tasks receive it,
+- **Only me** keeps it private. Only your own sessions and tasks receive it,
   it appears under **Personal Settings → Personal MCP servers**, and nobody
   else, admins included, can see or manage it. Roomote checks the owner on
   every request, so a personal server's credentials are never used on another

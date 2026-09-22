@@ -603,13 +603,13 @@ export const prReviewNotificationJob = async (
       });
 
       console.log(
-        `[PrReviewNotification] ${activity.source === 'fast_session' ? 'Fast Session is responding' : `Task ${data.taskId} is still running`}, deferred notification for ${data.repository}#${data.prNumber} (deferral ${data.deferrals + 1})`,
+        `[PrReviewNotification] ${activity.source === 'fast_session' ? 'Session is responding' : `Task ${data.taskId} is still running`}, deferred notification for ${data.repository}#${data.prNumber} (deferral ${data.deferrals + 1})`,
       );
       return;
     }
 
     console.warn(
-      `[PrReviewNotification] ${activity.source === 'fast_session' ? 'Fast Session never stopped responding' : `Task ${data.taskId} never went idle`} after ${data.deferrals} deferrals, dropping pending review activity for ${data.repository}#${data.prNumber}`,
+      `[PrReviewNotification] ${activity.source === 'fast_session' ? 'Session never stopped responding' : `Task ${data.taskId} never went idle`} after ${data.deferrals} deferrals, dropping pending review activity for ${data.repository}#${data.prNumber}`,
     );
     await consumePendingPrReviewActivity(target);
     await finalizePrReviewNotificationRequest(data, 'suppressed');

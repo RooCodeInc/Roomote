@@ -790,7 +790,7 @@ describe('deliverFastAgentParentEvent', () => {
     );
   });
 
-  it('rejects a recovered image from a task outside the Fast Session', async () => {
+  it('rejects a recovered image from a task outside the session', async () => {
     mocks.findTaskRuns.mockResolvedValueOnce([]);
 
     await expect(
@@ -1505,7 +1505,7 @@ describe('deliverFastAgentParentEvent', () => {
         );
       } else {
         await expect(delivery).rejects.toThrow(
-          'Fast suggestion origin Session was not found.',
+          'Fast suggestion origin session was not found.',
         );
         expect(mocks.postSlackSuggestions).not.toHaveBeenCalled();
       }

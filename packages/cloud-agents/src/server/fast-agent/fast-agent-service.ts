@@ -149,6 +149,7 @@ import {
   upsertFastAgentMessage,
   type FastAgentActiveTask,
 } from './fast-agent-session';
+import { saveFastAgentPostTurnMemory } from './fast-agent-post-turn-memory';
 import { refreshFastAgentSessionTitleWithRetry } from './session-title-refresh-job';
 import {
   classifyNonTaskInferenceError,
@@ -223,6 +224,13 @@ import {
   getFastAgentNativeAcpKind,
   isFastAgentNativeIntegration,
 } from './fast-agent-tool-policy';
+import {
+  createFastAgentToolApprovalBridge,
+  resolveFastAgentToolApprovalSession,
+  integrationToolApprovalRulesToConfig,
+  resolveFastAgentToolApprovalRules,
+  shouldDisposeInstanceForToolApprovalRules,
+} from './fast-agent-tool-approvals';
 import {
   callFastAgentIntegration,
   clearFastAgentIntegrationToolCache,
@@ -364,6 +372,18 @@ const FAST_AGENT_HUMAN_STEER_QUERY_LIMIT =
 const FAST_AGENT_HUMAN_STEER_MAX_TEXT_BYTES = 64 * 1024;
 const FAST_AGENT_HUMAN_STEER_MAX_FILES = 16;
 const FAST_AGENT_HUMAN_STEER_MAX_FILE_BYTES = 24 * 1024 * 1024;
+
+/**
+ * Process-local record of the compiled tool-approval rules hash whose
+ * per-conversation OpenCode instance last booted with. Entries die with the
+ * process, exactly like the instances they describe: after a restart there
+ * is no live instance, and the next instance boots from the freshly
+ * rewritten per-conversation config, so an unknown record is fresh state,
+ * never stale. A recorded hash that differs from the current turn's rules
+ * means the cached instance still holds last turn's agent state and is
+ * disposed (sessions persist on disk) rather than rebuilt.
+ */
+const fastAgentToolApprovalRulesHashes = new Map<string, string | null>();
 
 function buildFastAgentNativeSteerMessageId(
   rowId: string,
@@ -745,39 +765,6 @@ const requestUserInputArgsSchema = z.preprocess(
 
 function normalizeThreadText(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
-}
-
-function canonicalizeIntegrationCallValue(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(canonicalizeIntegrationCallValue);
-  }
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([key, nestedValue]) => [
-          key,
-          canonicalizeIntegrationCallValue(nestedValue),
-        ]),
-    );
-  }
-  return value;
-}
-
-function buildIntegrationCallSignature({
-  integrationId,
-  toolName,
-  args,
-}: {
-  integrationId: string;
-  toolName: string;
-  args: Record<string, unknown>;
-}): string {
-  return JSON.stringify([
-    integrationId,
-    toolName,
-    canonicalizeIntegrationCallValue(args),
-  ]);
 }
 
 function resolveFastAgentChatLookupProvider(
@@ -2067,6 +2054,10 @@ export async function answerFastAgentQuestion({
   let codeModeOpenCodeServerUrl: string | null = null;
   let durableOpenCodeSessionId: string | null = null;
   let lastVisibleMessage = '';
+  /** The agent called `save_memory` itself, so the post-turn pass stands down. */
+  let agentSavedMemoryThisTurn = false;
+  /** Human messages steered into this turn after it started, in order. */
+  const steeredHumanRequests: string[] = [];
   // The most recent assistant message already in the conversation, so a
   // repeat of the same terminal failure does not post the same closeout again.
   let priorAssistantMessage: string | undefined;
@@ -2446,7 +2437,6 @@ export async function answerFastAgentQuestion({
     });
     return { success: true, imageIds: requestedIds, observations };
   };
-  const integrationCallSignatures = new Set<string>();
   const completedChatReactionSignatures = new Set<string>();
   const completedChatReplySignatures = new Set<string>();
   const completedTaskActions = new Set<string>();
@@ -2835,7 +2825,10 @@ export async function answerFastAgentQuestion({
       console.info(
         `[Fast Agent] Native steer accepted. conversationId="${canonicalConversationId}" followUpCount=${batch.length}`,
       );
-      for (const { row } of batch) injectedHumanFollowUpIds.add(row.id);
+      for (const { row, followUp } of batch) {
+        injectedHumanFollowUpIds.add(row.id);
+        steeredHumanRequests.push(followUp.question);
+      }
       // Only a surface that explicitly marked the turn quiet-eligible may
       // leave it unanswered; unmarked follow-ups and older rows require one.
       if (
@@ -2848,8 +2841,7 @@ export async function answerFastAgentQuestion({
       injectedHumanFollowUpFiles.push(...batchFiles);
       // Native steering starts a new human instruction boundary inside the
       // same OpenCode run. Prior tool results remain in-session, while local
-      // duplicate guards reset so the user may intentionally repeat an action.
-      integrationCallSignatures.clear();
+      // action guards reset so the user may intentionally repeat an action.
       completedChatReactionSignatures.clear();
       completedChatReplySignatures.clear();
       completedTaskActions.clear();
@@ -3500,10 +3492,9 @@ export async function answerFastAgentQuestion({
             );
             return null;
           }),
-      // Instance and inline environment skills go into the prompt so the
-      // model can recognize a relevant playbook without guessing that
-      // `list_skills` is worth a call. Marketplace and repository skills stay
-      // on demand: they need a git fetch.
+      // The prompt catalog uses the same bounded, authorized sources as
+      // `list_skills`, so the model can recognize environment and repository
+      // playbooks without guessing a scope before discovery.
       loadFastAgentPromptSkillCatalog(
         createFastAgentPromptSkillCatalogSources({
           allowedEnvironmentIds: availableEnvironments.map(
@@ -3645,7 +3636,7 @@ export async function answerFastAgentQuestion({
       () => !signal?.aborted,
     ).catch((error) => {
       console.warn(
-        `[sessions] Failed to mark Fast Session active: ${formatErrorForLog(error)}`,
+        `[sessions] Failed to mark session active: ${formatErrorForLog(error)}`,
       );
     });
     // Assistant-message persists extend the lease as a side effect, but a
@@ -3665,7 +3656,7 @@ export async function answerFastAgentQuestion({
         if (signal?.aborted) return;
         await renewFastSessionRespondingLease(session.id).catch((error) => {
           console.warn(
-            `[sessions] Failed to renew Fast Session responding lease: ${formatErrorForLog(error)}`,
+            `[sessions] Failed to renew session responding lease: ${formatErrorForLog(error)}`,
           );
         });
         if (durableAdmission && durableTurnReplayable) {
@@ -3810,6 +3801,22 @@ export async function answerFastAgentQuestion({
       Env.RELEASE_VERSION,
       packageJson.version,
     );
+    // Experiment-gated (`integrationToolApprovals`) per-tool approval rules
+    // for code-mode integration calls: native ask rules pause gated tools
+    // behind a requester decision and deny rules hide rejected tools.
+    // Undefined while the experiment is off, which keeps ungated behavior.
+    // Approvals and session overrides are keyed on the unified Session, not
+    // the Fast conversation; resolve it once for the rules and the bridge.
+    const {
+      sessionId: toolApprovalSessionId,
+      ownerUserId: toolApprovalOwnerUserId,
+      deciderUserId: toolApprovalDeciderUserId,
+    } = await resolveFastAgentToolApprovalSession(session.id, userId);
+    const toolApprovalRules = await resolveFastAgentToolApprovalRules({
+      integrations: availableIntegrations,
+      sessionId: toolApprovalSessionId,
+      ownerUserId: toolApprovalOwnerUserId,
+    });
     const system = buildFastAgentSystemPrompt({
       availableEnvironments,
       activeRepositories,
@@ -4428,18 +4435,6 @@ export async function answerFastAgentQuestion({
         const sendsChatReaction =
           call.integrationId === ROOMOTE_MCP_ID &&
           call.toolName === CHAT_REACTION_EMOJI_TOOL_NAME;
-        const signature = buildIntegrationCallSignature({
-          integrationId: call.integrationId,
-          toolName: call.toolName,
-          args: actorScopedIntegrationArguments,
-        });
-        if (integrationCallSignatures.has(signature)) {
-          return {
-            success: false,
-            error: 'The same integration call already ran in this turn.',
-          };
-        }
-        integrationCallSignatures.add(signature);
         throwIfTurnCancelled();
         canonicalToolEvent = await beginCanonicalToolEvent({
           title: call.toolName,
@@ -4598,7 +4593,7 @@ export async function answerFastAgentQuestion({
     };
     // Subagents may look up and call on-demand deployment MCP tools; every
     // other Fast tool stays with the parent. Calls run through the parent's
-    // MCP executor, so gating and duplicate detection are shared.
+    // MCP executor, so tool gating is shared.
     const executeSubagentNativeTool = async (
       call: FastAgentNativeToolCall,
     ): Promise<unknown> => {
@@ -4683,7 +4678,7 @@ export async function answerFastAgentQuestion({
             if (!canonicalSession) {
               return {
                 success: false,
-                error: 'This Fast conversation is not attached to a Session.',
+                error: 'This Fast conversation is not attached to a session.',
               };
             }
             const result = await connectIntegrationForFast({
@@ -4720,7 +4715,7 @@ export async function answerFastAgentQuestion({
             if (!canonicalSession) {
               return {
                 success: false,
-                error: 'This Fast conversation is not attached to a Session.',
+                error: 'This Fast conversation is not attached to a session.',
               };
             }
             const result = await addRemoteCustomMcpForFast({
@@ -4885,7 +4880,7 @@ export async function answerFastAgentQuestion({
             if (!adapter.createArtifact) {
               return {
                 success: false,
-                error: 'Artifact creation is unavailable for this Session.',
+                error: 'Artifact creation is unavailable for this session.',
               };
             }
             const args = createArtifactArgsSchema.parse(call.args);
@@ -4922,7 +4917,7 @@ export async function answerFastAgentQuestion({
                 success: true,
                 artifact,
                 guidance:
-                  'The artifact viewUrl opens in its Session; standaloneViewUrl opens the document, image, or file on its own page with a direct shareable link. Share whichever returned URL fits the context, unchanged, instead of constructing an artifact URL.',
+                  'The artifact viewUrl opens in its session; standaloneViewUrl opens the document, image, or file on its own page with a direct shareable link. Share whichever returned URL fits the context, unchanged, instead of constructing an artifact URL.',
               };
             } catch (error) {
               completedTaskActions.delete(`artifact:${signature}`);
@@ -5518,7 +5513,7 @@ export async function answerFastAgentQuestion({
                 reason === 'human_turn_required'
                   ? 'New integration-key approvals require a human-authored turn. Ask the user to reply so you can continue.'
                   : reason === 'actor_owner_mismatch'
-                    ? 'Integration-key tools are unavailable because the task actor does not own this Session. Ask the Session owner to reply so you can continue.'
+                    ? 'Integration-key tools are unavailable because the task actor does not own this session. Ask the session owner to reply so you can continue.'
                     : 'Integration-key tools are unavailable because this turn has no acting user. Ask the user to reply so you can continue.';
               return {
                 success: false,
@@ -5675,7 +5670,7 @@ export async function answerFastAgentQuestion({
             if (!sessionGoal?.generation) {
               return {
                 success: false,
-                error: 'There is no active Session goal.',
+                error: 'There is no active session goal.',
               };
             }
             if (args.action === 'blocked' && !args.reason) {
@@ -5730,10 +5725,11 @@ export async function answerFastAgentQuestion({
                 success: false,
                 error:
                   result.reason === 'private_conversation'
-                    ? 'Private Sessions cannot write to shared memory.'
+                    ? 'Private sessions cannot write to shared memory.'
                     : "This conversation's memory is full. Start a new conversation to save further memories.",
               };
             }
+            agentSavedMemoryThisTurn = true;
             return {
               success: true,
               saved: true,
@@ -5769,7 +5765,7 @@ export async function answerFastAgentQuestion({
               return {
                 success: false,
                 error:
-                  'Trusted capability cards are available only to administrators in web Sessions.',
+                  'Trusted capability cards are available only to administrators in web sessions.',
               };
             }
             const requestedArgs = fastAgentCapabilityOfferInputSchema.parse(
@@ -5860,7 +5856,7 @@ export async function answerFastAgentQuestion({
             if (conversation.surface !== 'web') {
               return {
                 success: false,
-                error: 'Structured input is available only in web Sessions.',
+                error: 'Structured input is available only in web sessions.',
               };
             }
             const args = requestUserInputArgsSchema.parse(call.args);
@@ -6152,6 +6148,37 @@ export async function answerFastAgentQuestion({
       return lastVisibleMessage;
     }
     diagnostics.markInferenceQueued();
+    // Tool-approval rules ride in the generated per-conversation agent
+    // config, which is rewritten on every turn, so a persisted OpenCode
+    // session can never carry stale approval rules across a restart: the
+    // servers are disposable child processes and the next instance boots
+    // from the current config. The only stale case is within one process,
+    // where the directory's cached instance still holds the agent state from
+    // a previous turn's config. A policy or experiment change then disposes
+    // that instance — preserving the session id, transcript, and context —
+    // instead of rebuilding the session. An unknown record after a restart
+    // is fresh state and must not dispose: that would be a false-positive
+    // cache break.
+    const toolApprovalRulesHash = toolApprovalRules?.hash ?? null;
+    const previousToolApprovalRulesHash = fastAgentToolApprovalRulesHashes.has(
+      session.id,
+    )
+      ? (fastAgentToolApprovalRulesHashes.get(session.id) ?? null)
+      : undefined;
+    const toolApprovalDisposeInstance =
+      shouldDisposeInstanceForToolApprovalRules({
+        recordedHash: previousToolApprovalRulesHash,
+        currentHash: toolApprovalRulesHash,
+      });
+    const toolApprovalDisposeState = toolApprovalDisposeInstance
+      ? { completed: false }
+      : undefined;
+    if (toolApprovalDisposeInstance) {
+      console.info(
+        `[Fast Agent] Tool approval rules changed for session ${session.id}; refreshing the OpenCode instance.`,
+      );
+    }
+    fastAgentToolApprovalRulesHashes.set(session.id, toolApprovalRulesHash);
     const promptTextPromise = fastAgentOpenCodeSessionManager.run({
       conversationId: session.id,
       persistedSessionId: session.openCodeSessionId,
@@ -6198,6 +6225,13 @@ export async function answerFastAgentQuestion({
             serviceCredentialPrepareEnabled:
               currentUser.serviceCredentialToolsEnabled && !platformEvent,
             addRemoteMcpEnabled: !platformEvent,
+            ...(toolApprovalRules
+              ? {
+                  toolApprovalPermission: integrationToolApprovalRulesToConfig(
+                    toolApprovalRules.rules,
+                  ),
+                }
+              : {}),
           },
         );
         codeModeIntegrationsActiveForTurn =
@@ -6316,6 +6350,40 @@ export async function answerFastAgentQuestion({
                 inferenceAttemptNumber += 1;
                 resolvedInferenceModel = undefined;
                 captureInferenceContext('prompt_submission');
+                // Native per-tool approval bridge for gated code-mode
+                // integration calls. Web conversations surface the pending
+                // card in the Session transcript; chat-originated
+                // conversations additionally get a posted notification with
+                // the decision link so a gated call is never stranded
+                // silently. Deliberately direct adapter posts, like the
+                // retry notice: a system notification must not satisfy the
+                // model's acknowledgement gate or close the turn.
+                const toolApprovalBridge = toolApprovalRules
+                  ? createFastAgentToolApprovalBridge({
+                      sessionId: toolApprovalSessionId,
+                      // The Session owner decides, even on a participant's turn.
+                      userId: toolApprovalDeciderUserId,
+                      integrations: availableIntegrations,
+                      autoToolKeys: toolApprovalRules.autoToolKeys,
+                      userRequest: question,
+                      signal: promptSignal,
+                      ...(conversation.surface === 'slack' ||
+                      conversation.surface === 'discord'
+                        ? {
+                            notify: async (approval) => {
+                              const sessionUrl = buildFastSessionUrl(
+                                conversation.surface as 'slack' | 'discord',
+                                session.id,
+                              );
+                              await adapter.postReply({
+                                purpose: 'progress',
+                                message: `Approval needed: ${approval.integrationId} wants to run ${approval.toolName}. Allow or reject it in the session: ${sessionUrl}`,
+                              });
+                            },
+                          }
+                        : {}),
+                    })
+                  : undefined;
                 const resultPromise =
                   generateTrackedNonTaskTextInOpenCodeSession(
                     {
@@ -6394,7 +6462,21 @@ export async function answerFastAgentQuestion({
                       onServerLeased: (url) => {
                         codeModeOpenCodeServerUrl = url;
                       },
+                      // Approval rules live in the generated agent config,
+                      // never the session ruleset: the session record stays
+                      // policy-free, so a persisted session can never carry
+                      // stale approval rules across a restart or a policy
+                      // change.
                       permission: FAST_AGENT_SESSION_PERMISSIONS,
+                      ...(toolApprovalDisposeState
+                        ? {
+                            disposeInstanceBeforeSession:
+                              toolApprovalDisposeState,
+                          }
+                        : {}),
+                      ...(toolApprovalBridge
+                        ? { onPermissionAsked: toolApprovalBridge.handleAsk }
+                        : {}),
                       signal: promptSignal,
                       promptOnlySubagents: true,
                       trackSessionTreeUsage: true,
@@ -6760,6 +6842,24 @@ export async function answerFastAgentQuestion({
         }
       },
     });
+    if (toolApprovalDisposeState) {
+      // A failed dispose leaves the cached instance on the previous turn's
+      // rules. Restore the previous record so the next turn retries the
+      // refresh instead of trusting a stale instance.
+      void promptTextPromise
+        .catch(() => undefined)
+        .then(() => {
+          if (toolApprovalDisposeState.completed) return;
+          if (previousToolApprovalRulesHash === undefined) {
+            fastAgentToolApprovalRulesHashes.delete(session.id);
+          } else {
+            fastAgentToolApprovalRulesHashes.set(
+              session.id,
+              previousToolApprovalRulesHash,
+            );
+          }
+        });
+    }
     const promptText = await promptTextPromise.finally(() => {
       diagnostics.markInferenceFinished();
     });
@@ -6828,6 +6928,25 @@ export async function answerFastAgentQuestion({
       }
     }
     await settleDurableTurn();
+    if (
+      (substantiveHumanInput || steeredHumanRequests.length > 0) &&
+      !setupSession &&
+      currentSessionPrivacy === 'shared'
+    ) {
+      // Reply delivery has already settled before this detached best-effort
+      // pass starts; Jev and distillation never gate the visible response.
+      void saveFastAgentPostTurnMemory({
+        conversationId: session.id,
+        turnId,
+        userId,
+        // A platform event's own text is not something a person said.
+        request: substantiveHumanInput ? question : '',
+        steeredRequests: steeredHumanRequests,
+        reply: lastVisibleMessage,
+        senderDisplayName,
+        agentSavedMemory: agentSavedMemoryThisTurn,
+      });
+    }
     const settledGoal = await getSessionGoalForConversation(session.id);
     if (settledGoal?.status === 'active') {
       const activeGoalTasks = await getActiveFastAgentTasks(session.id);
@@ -7096,7 +7215,7 @@ export async function answerFastAgentQuestion({
       await setFastSessionResponding(canonicalConversationId, false).catch(
         (error) => {
           console.warn(
-            `[sessions] Failed to settle Fast Session status: ${formatErrorForLog(error)}`,
+            `[sessions] Failed to settle session status: ${formatErrorForLog(error)}`,
           );
         },
       );

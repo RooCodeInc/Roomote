@@ -396,7 +396,7 @@ describe('roomote MCP tool descriptions', () => {
     const manageTasksTool = getRegisteredTool(registeredTools, 'manage_tasks');
 
     expect(manageTasksTool.config.description).toContain(
-      'Manage Roomote Sessions by default',
+      'Manage Roomote sessions by default',
     );
     expect(manageTasksTool.config.description).not.toContain(
       'Not Slack-visible by itself',
@@ -446,10 +446,10 @@ describe('roomote MCP tool descriptions', () => {
     ]);
     expect(manageTasksTool.config.description).not.toContain('launch');
     expect(taskIdField.description).toBe(
-      'Optional concrete task ID. When provided to get_summary, get_messages, get_updates, or send_message, targets that task instead of a Session. Required for task-only controls such as get_compute_logs and cancel.',
+      'Optional concrete task ID. When provided to get_summary, get_messages, get_updates, or send_message, targets that task instead of a session. Required for task-only controls such as get_compute_logs and cancel.',
     );
     expect(limitField.description).toBe(
-      'Positive result limit: 1 to 100 for search/get_updates (default 20), or 1 to 1000 for get_messages (task or Fast session)',
+      'Positive result limit: 1 to 100 for search/get_updates (default 20), or 1 to 1000 for get_messages (task or session)',
     );
     expect(manageTasksTool.config.inputSchema).not.toHaveProperty(
       'targetTasks',
@@ -482,7 +482,7 @@ describe('roomote MCP tool descriptions', () => {
     const tool = getRegisteredTool(registeredTools, 'manage_tasks');
 
     expect(tool.config.description).toContain(
-      'Use action "get_messages" with sessionId for Session history, or taskId for a specific task transcript',
+      'Use action "get_messages" with sessionId for session history, or taskId for a specific task transcript',
     );
     expect(tool.config.description).toContain(
       'Use action "get_updates" with sessionId or taskId and its returned cursor',
@@ -494,7 +494,7 @@ describe('roomote MCP tool descriptions', () => {
       'keep the final answer self-contained',
     );
     expect(tool.config.description).toContain(
-      'Use start to begin new work in a Session',
+      'Use start to begin new work in a session',
     );
     expect(
       registeredTools.some((candidate) => candidate.name === 'manage_sessions'),
@@ -642,7 +642,7 @@ describe('roomote MCP tool descriptions', () => {
       'Use it to reuse previously uploaded artifact links (for example visual-proof links) instead of relying on transcript memory or re-uploading.',
     );
     expect(artifactsTool.config.description).toContain(
-      'Creation results return viewUrl for the artifact in its task or Session and standaloneViewUrl to open the document, image, or file on its own page with a direct shareable link; share whichever returned URL fits the context rather than constructing an artifact URL.',
+      'Creation results return viewUrl for the artifact in its task or session and standaloneViewUrl to open the document, image, or file on its own page with a direct shareable link; share whichever returned URL fits the context rather than constructing an artifact URL.',
     );
     expect(artifactTypeField.description).toBe(
       'Optional artifact type filter for list (one of "general", "plan", "visual-proof"). Omit to list all artifact types.',

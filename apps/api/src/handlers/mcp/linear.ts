@@ -54,7 +54,11 @@ export function createLinearMcp(options?: {
         );
       }
 
-      return { authHeader: linearAccessToken, disabledToolNames };
+      return {
+        authHeader: linearAccessToken,
+        disabledToolNames,
+        toolApprovalIntegrationId: 'linear',
+      };
     },
   });
 }

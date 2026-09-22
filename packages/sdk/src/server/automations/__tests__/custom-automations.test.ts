@@ -580,7 +580,7 @@ describe('customAutomationsJob', () => {
     expect(enqueued.event).not.toHaveProperty('preferredEnvironmentId');
   });
 
-  it('persists the model and effort for the scheduled Fast session, not its children', async () => {
+  it('persists the model and effort for the scheduled session, not its children', async () => {
     vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
       {
         ...automation,

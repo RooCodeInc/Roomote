@@ -22,7 +22,12 @@ import {
   SessionModelSwitcher,
   TaskPromptInput,
 } from '@/components/tasks';
-import { BasicTooltip, Button, HatGlasses } from '@/components/system';
+import {
+  AlertCircle,
+  BasicTooltip,
+  Button,
+  HatGlasses,
+} from '@/components/system';
 
 const DEFAULT_PROMPT_PLACEHOLDER = 'What do you want to do?';
 
@@ -42,6 +47,7 @@ type NewTaskFormProps = {
   autoFocus?: boolean;
   textareaMaxHeight?: number;
   promptContainerRef?: Ref<HTMLDivElement>;
+  modelSelectorSize?: 'compact' | 'base';
 };
 
 export function NewTaskForm({
@@ -54,6 +60,7 @@ export function NewTaskForm({
   autoFocus = true,
   textareaMaxHeight,
   promptContainerRef,
+  modelSelectorSize = 'compact',
 }: NewTaskFormProps) {
   const { managedAccess = DEFAULT_MANAGED_DEPLOYMENT_ACCESS } =
     useAuthorizedUser();
@@ -84,7 +91,13 @@ export function NewTaskForm({
     startFastSession,
     error: launcherError,
     clearError: clearLauncherError,
-  } = useFastSessionLauncher({ onSessionStarted: onTaskStarted });
+    retryableError: fastSessionError,
+    retryFastSession,
+  } = useFastSessionLauncher({
+    onSessionStarted: onTaskStarted,
+    // The inline Retry below already surfaces start failures here.
+    showErrorToast: false,
+  });
   const [submitError, setSubmitError] = useState<unknown>(null);
   const launchTaskModels = useLaunchTaskModels();
   const defaultModelId = launchTaskModels.data?.defaultFastModelId;
@@ -230,6 +243,7 @@ export function NewTaskForm({
             onReasoningEffortChange={setSelectedReasoningEffort}
             defaultModelId={defaultModelId}
             defaultReasoningEffort={defaultReasoningEffort}
+            size={modelSelectorSize}
           />
         }
         submitLeadingAction={
@@ -254,6 +268,26 @@ export function NewTaskForm({
           ) : null
         }
       />
+      {fastSessionError ? (
+        <div role="alert" className="flex items-center gap-2 px-3 py-2 text-sm">
+          <AlertCircle
+            aria-hidden="true"
+            className="text-destructive size-4 shrink-0"
+          />
+          <p className="text-muted-foreground min-w-0 flex-1">
+            Couldn’t start this session.
+          </p>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={isFastSessionPending}
+            onClick={() => void retryFastSession()}
+          >
+            Retry
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -78,6 +78,12 @@ export interface QueuedPromptMessageSnapshot {
   userName?: string;
   userImageUrl?: string;
   clientMessageId?: string;
+  /**
+   * Set on prompts the harness queues on its own (recovery and continuation
+   * nudges), so a reader of the transcript can tell them from a request a
+   * person or the platform sent.
+   */
+  source?: string;
   timestamp: number;
 }
 
@@ -308,6 +314,14 @@ export interface Harness extends EventEmitter<HarnessEvents> {
    * Returns an unsubscribe function.
    */
   subscribeRuntimeOutput(listener: (event: AcpMessage) => void): () => void;
+  /**
+   * Run the completion check before a tool call that reports to a person or
+   * ships the work. Harnesses without the check allow every call.
+   */
+  checkCompletionBeforeTool?(input: {
+    tool: string;
+    args?: unknown;
+  }): Promise<{ allowed: boolean; reason?: string }>;
 
   /**
    * Subscribe to persisted Roomote runtime envelope events.

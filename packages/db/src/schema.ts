@@ -3800,7 +3800,7 @@ export const fastAgentMessages = pgTable(
  * fast_agent_provider_messages
  *
  * Durable provider message bindings for communication surfaces whose stable
- * conversation address can host more than one Fast session. Inbound replies
+ * conversation address can host more than one session. Inbound replies
  * use these server-written rows to recover the canonical session without
  * trusting identifiers embedded in message text or webhook routing metadata.
  */
@@ -4273,7 +4273,7 @@ export const slackFastIntegrationCalls = pgTable(
  */
 
 /**
- * N-1 rollback: no longer written since Linear sessions enter Fast Sessions
+ * N-1 rollback: no longer written since Linear sessions use the session flow
  * (the workspace elicitation flow is gone). The previous release still reads
  * and writes this table; drop it only after that release is no longer the
  * supported rollback target.
@@ -4575,6 +4575,197 @@ export const serviceCredentialAudit = pgTable('service_credential_audit', {
     .$type<'started' | 'succeeded' | 'denied' | 'failed'>(),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
+
+/**
+ * integration_tool_policies
+ *
+ * Experiment-gated (`integration_tool_approvals_experiment_enabled`) durable
+ * approval policy for code-mode integration tool calls in Sessions. One row
+ * per (integration, tool); deployment-scoped and admin-configured. Absence of
+ * a row is the default `allow`, which preserves the pre-experiment behavior.
+ * Policies never widen access: provider, actor, and admin authorization
+ * ceilings still decide which tools are mounted at all. Additive; N-1 code
+ * never reads or writes it.
+ */
+export const integrationToolPolicies = pgTable(
+  'integration_tool_policies',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    integrationId: text('integration_id').notNull(),
+    toolName: text('tool_name').notNull(),
+    /**
+     * Stored as `ask` or `reject`. The `auto` mode is an `ask` row with
+     * `auto` set, so a release that predates it still asks.
+     */
+    mode: text('mode').notNull().$type<'ask' | 'reject'>(),
+    auto: boolean('auto').notNull().default(false),
+    updatedByUserId: text('updated_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('integration_tool_policies_tool_idx').on(
+      table.integrationId,
+      table.toolName,
+    ),
+  ],
+);
+
+/**
+ * integration_tool_user_policies
+ *
+ * Experiment-gated (`integration_tool_approvals_experiment_enabled`) personal
+ * per-tool approval modes. Same modes as `integration_tool_policies`, scoped
+ * to one user's own Sessions, and only ever tightening: the stricter of the
+ * deployment and personal mode applies. `allow` is stored as no row. Rows
+ * cascade with their user. Additive; N-1 code never reads or writes it.
+ */
+export const integrationToolUserPolicies = pgTable(
+  'integration_tool_user_policies',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    integrationId: text('integration_id').notNull(),
+    toolName: text('tool_name').notNull(),
+    /**
+     * Stored as `ask` or `reject`. The `auto` mode is an `ask` row with
+     * `auto` set, so a release that predates it still asks.
+     */
+    mode: text('mode').notNull().$type<'ask' | 'reject'>(),
+    auto: boolean('auto').notNull().default(false),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('integration_tool_user_policies_tool_idx').on(
+      table.userId,
+      table.integrationId,
+      table.toolName,
+    ),
+  ],
+);
+
+/**
+ * integration_tool_approval_requests
+ *
+ * Experiment-gated (`integration_tool_approvals_experiment_enabled`) pending
+ * and decided approval requests for code-mode integration tool calls gated by
+ * an `ask` policy. One row is both the pending request and its redacted audit
+ * outcome: arguments are stored only as a redacted display summary; the
+ * decision is bound to the exact native permission request and consumed once
+ * by the OpenCode runtime. Secret-looking values are redacted before insert;
+ * nothing here may carry raw credential material. Terminal states are never
+ * resurrected: an expired or cancelled row stays decided forever. Additive;
+ * N-1 code never reads or writes it.
+ */
+export const integrationToolApprovalRequests = pgTable(
+  'integration_tool_approval_requests',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    /** The Session owner the agent acts for; only this user may decide. */
+    requesterUserId: text('requester_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /**
+     * The task whose agent asked, or null for the Session's own agent. A
+     * task's approved row is claimed by the integration proxy for that task's
+     * exact call rather than relayed by a bridge.
+     */
+    taskId: text('task_id').references(() => tasks.id, {
+      onDelete: 'cascade',
+    }),
+    integrationId: text('integration_id').notNull(),
+    toolName: text('tool_name').notNull(),
+    /** The OpenCode permission request this decision replies to. */
+    nativeRequestId: text('native_request_id').notNull(),
+    /** SHA-256 hex of the canonical {integrationId, toolName, args} payload. */
+    argsFingerprint: text('args_fingerprint').notNull(),
+    /** Redacted argument preview for the approver and the audit trail. */
+    argsSummary: jsonb('args_summary').notNull(),
+    status: text('status')
+      .notNull()
+      .default('pending')
+      .$type<import('@roomote/types').IntegrationToolApprovalStatus>(),
+    decidedByUserId: text('decided_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    decidedAt: timestamp('decided_at'),
+    /** Why a cancelled request was cancelled (for example experiment disabled). */
+    cancelReason: text('cancel_reason'),
+    /**
+     * What the decision model made of this call, for a tool in `auto` mode.
+     * Recorded beside the requester's own decision; it decides nothing.
+     */
+    autoEvaluation:
+      jsonb('auto_evaluation').$type<
+        import('@roomote/types').IntegrationToolAutoEvaluation
+      >(),
+    /** The window for the requester to answer; unresolved rows fail closed. */
+    expiresAt: timestamp('expires_at').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('integration_tool_approvals_session_requester_idx').on(
+      table.sessionId,
+      table.requesterUserId,
+      table.status,
+    ),
+    index('integration_tool_approvals_task_call_idx').on(
+      table.taskId,
+      table.argsFingerprint,
+      table.status,
+    ),
+    // One open ask per native permission request; the runtime never reuses
+    // request ids, so identical re-asks are separate decisions by design.
+    uniqueIndex('integration_tool_approvals_pending_native_idx')
+      .on(table.sessionId, table.nativeRequestId)
+      .where(sql`status = 'pending'`),
+  ],
+);
+
+/**
+ * integration_tool_session_overrides
+ *
+ * Experiment-gated (`integration_tool_approvals_experiment_enabled`)
+ * requester-owned, session-scoped overrides of a tool's approval mode. `allow`
+ * records "don't ask again this session" for a tool the deployment gates with
+ * `ask`; `ask` gates a default-allow tool for this session only. A deployment
+ * `reject` policy is never loosened by a row here, and rows cascade with
+ * their session. Additive; N-1 code never reads or writes it.
+ */
+export const integrationToolSessionOverrides = pgTable(
+  'integration_tool_session_overrides',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    integrationId: text('integration_id').notNull(),
+    toolName: text('tool_name').notNull(),
+    mode: text('mode')
+      .notNull()
+      .$type<import('@roomote/types').IntegrationToolSessionOverrideMode>(),
+    setByUserId: text('set_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('integration_tool_session_overrides_tool_idx').on(
+      table.sessionId,
+      table.integrationId,
+      table.toolName,
+    ),
+  ],
+);
 
 /**
  * Credential egress control plane (additive, N-1 safe: previous releases never

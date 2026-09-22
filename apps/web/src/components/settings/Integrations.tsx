@@ -2732,6 +2732,7 @@ export function Integrations({
         mcpId={toolDialogState?.mcpId ?? null}
         integrationName={toolDialogState?.integrationName ?? null}
         open={toolDialogState != null}
+        isAdmin={isAdmin}
         onOpenChange={(open) => {
           if (!open) {
             setToolDialogState(null);

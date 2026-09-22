@@ -152,7 +152,7 @@ describe('buildOpenCodeCliEnv', () => {
     ).toBe(false);
   });
 
-  it('advertises image-only support for custom models in Fast sessions', () => {
+  it('advertises image-only support for custom models in sessions', () => {
     const env = buildOpenCodeCliEnv(
       {
         R_MODEL: 'litellm/qwen3.6:35b-unsloth',
@@ -284,7 +284,7 @@ describe('buildOpenCodeCliEnv', () => {
     });
   });
 
-  it('exposes only prompt-only advisor and judge subagents to Fast sessions', () => {
+  it('exposes only prompt-only advisor and judge subagents to sessions', () => {
     const env = buildOpenCodeCliEnv(
       {
         R_MODEL: 'openrouter/openai/gpt-5.4',

@@ -1008,7 +1008,7 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
         (resolvedOwner.kind !== 'user' || conversation.surface !== 'web')
       ) {
         throw new Error(
-          'Private Sessions require a user-owned web conversation.',
+          'Private sessions require a user-owned web conversation.',
         );
       }
       if (resolvedOwner.kind === 'automation') {

@@ -122,4 +122,10 @@ describe('Standard Task visual-proof step', () => {
     );
     expect(skillContent).not.toContain('background visual proof');
   });
+
+  it('skips the judge for proof without images where completion is checked at turn end', () => {
+    expect(readImplementChangesSkill()).toContain(
+      'When the runtime judge instructions say the platform checks completion automatically when the turn ends, run the judge pass described below only if the pre-delivery `capture-visual-proof` step kept screenshots or keyframes, and skip it otherwise.',
+    );
+  });
 });

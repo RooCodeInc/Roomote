@@ -19,6 +19,12 @@ import {
 import type { Variables } from '../../types';
 import { fetchWithLongLivedStreamDispatcher } from '../long-lived-fetch';
 import { createLoggedProxyResponseBody } from '../proxy-response-stream';
+import {
+  claimProxyTaskToolCall,
+  describeProxyToolApprovalBlock,
+  resolveProxyToolApprovalBlocks,
+  type ProxyToolApprovalBlock,
+} from './tool-approval-enforcement';
 
 type JsonRpcRequestId = string | number | null;
 
@@ -206,6 +212,18 @@ export async function resolveTaskOrSessionUserIdOrNull(
   return ownerUserId ?? null;
 }
 
+/** The task a run token was minted for; null for any other caller. */
+async function resolveRunTokenTaskId(
+  auth: McpAuthContext,
+): Promise<string | null> {
+  if (auth.tokenType !== 'run' || !auth.runId) return null;
+  const taskRun = await db.query.taskRuns.findFirst({
+    columns: { taskId: true },
+    where: eq(taskRuns.id, auth.runId),
+  });
+  return taskRun?.taskId ?? null;
+}
+
 /**
  * Validates that the run token's run still exists. No principal equality
  * check: the run-scoped token IS the authorization (only that run's sandbox
@@ -345,6 +363,14 @@ interface ResolvedCredentials {
    */
   allowedToolNames?: readonly string[] | null;
   disabledToolNames?: readonly string[] | null;
+  /**
+   * The id this integration's per-tool approval policies are keyed on (the
+   * built-in integration id, or a custom server's name). Set it to have the
+   * proxy enforce those policies; see `tool-approval-enforcement.ts`.
+   */
+  toolApprovalIntegrationId?: string;
+  /** The one policy layer governing a custom server; unset takes both. */
+  toolApprovalPolicyScope?: 'deployment' | 'personal';
   /**
    * Per-request upstream URL. Required when the proxy was constructed without
    * a static `upstream` (custom servers resolve theirs from the database).
@@ -1000,6 +1026,49 @@ export function createMcpProxy(config: McpProxyConfig) {
       );
     }
 
+    // A rejected tool is hidden and refused exactly like a disabled one; only
+    // the refusal message differs. A tool that needs approval stays listed,
+    // and each call to it must claim the Session owner's approval below.
+    let toolApprovalBlocks = new Map<string, ProxyToolApprovalBlock>();
+    if (credentials.toolApprovalIntegrationId) {
+      try {
+        toolApprovalBlocks = await resolveProxyToolApprovalBlocks({
+          integrationId: credentials.toolApprovalIntegrationId,
+          policyScope: credentials.toolApprovalPolicyScope,
+          tokenType: auth.tokenType,
+          resolveActingUserId: () => resolveTaskOrSessionUserIdOrNull(auth),
+          resolveTaskId: () => resolveRunTokenTaskId(auth),
+        });
+      } catch (error) {
+        // Fail closed: an unreadable policy must not let a gated tool run.
+        console.error(
+          formatSingleLineLog(`${logPrefix} Failed to resolve tool approvals`, {
+            requestId,
+            method,
+            path,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+        return jsonRpcErrorResponse(
+          500,
+          -32603,
+          `Failed to resolve ${name} tool approval policies`,
+        );
+      }
+      const rejectedToolNames = [...toolApprovalBlocks]
+        .filter(([, block]) => block === 'reject')
+        .map(([toolName]) => toolName);
+      if (rejectedToolNames.length > 0) {
+        credentials = {
+          ...credentials,
+          disabledToolNames: [
+            ...(credentials.disabledToolNames ?? []),
+            ...rejectedToolNames,
+          ],
+        };
+      }
+    }
+
     const effectiveUpstream = credentials.upstream ?? upstream;
 
     if (!effectiveUpstream) {
@@ -1027,7 +1096,9 @@ export function createMcpProxy(config: McpProxyConfig) {
         disabledToolNames: credentials.disabledToolNames,
       });
       const hasToolRestrictions = Boolean(
-        effectiveAllowedToolNames || credentials.disabledToolNames?.length,
+        effectiveAllowedToolNames ||
+        credentials.disabledToolNames?.length ||
+        toolApprovalBlocks.size,
       );
 
       if (
@@ -1073,10 +1144,49 @@ export function createMcpProxy(config: McpProxyConfig) {
               },
             ),
           );
+          const approvalBlock = toolApprovalBlocks.get(toolName);
           return jsonRpcErrorResponse(
             403,
             -32000,
-            `${name} MCP tool "${toolName}" is not allowed on this endpoint`,
+            approvalBlock
+              ? describeProxyToolApprovalBlock(toolName, approvalBlock)
+              : `${name} MCP tool "${toolName}" is not allowed on this endpoint`,
+            getJsonRpcRequestId(parsedBody),
+          );
+        }
+      }
+
+      const gatedToolName =
+        method === 'POST' ? getToolCallName(parsedBody) : null;
+      if (
+        gatedToolName &&
+        credentials.toolApprovalIntegrationId &&
+        toolApprovalBlocks.get(gatedToolName) === 'needs_approval'
+      ) {
+        let approved = false;
+        try {
+          approved = await claimProxyTaskToolCall({
+            taskId: await resolveRunTokenTaskId(auth),
+            integrationId: credentials.toolApprovalIntegrationId,
+            toolName: gatedToolName,
+            args: (parsedBody as { params?: { arguments?: unknown } }).params
+              ?.arguments,
+          });
+        } catch (error) {
+          // Fail closed: an unreadable approval is not an approval.
+          console.error(
+            formatSingleLineLog(`${logPrefix} Failed to claim tool approval`, {
+              requestId,
+              toolName: gatedToolName,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          );
+        }
+        if (!approved) {
+          return jsonRpcErrorResponse(
+            403,
+            -32000,
+            describeProxyToolApprovalBlock(gatedToolName, 'needs_approval'),
             getJsonRpcRequestId(parsedBody),
           );
         }

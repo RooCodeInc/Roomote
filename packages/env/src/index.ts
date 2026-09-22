@@ -198,6 +198,16 @@ const serverSchema = {
   // Experimental opt-in for the bounded Jev screenshot-preparation loop. The
   // existing capture flow remains the fallback when this is not enabled.
   R_SCREENSHOT_PREPARATION_JEV_ENABLED: optInBoolean(),
+  // A judgment model Roomote runs itself, speaking the same typed decisions
+  // request as Jev. It is evaluation-only: nothing acts on its answers, and
+  // it is called only by the shadow comparison below. The key is optional
+  // because a private-network upstream may carry no auth.
+  R_JUDGMENT_UPSTREAM_URL: z.string().url().optional(),
+  R_JUDGMENT_UPSTREAM_API_KEY: z.string().min(1).optional(),
+  // `on` also scores every Jev judgment with the Roomote-run upstream and
+  // logs how the two agree, without changing the answer callers get. The
+  // evidence for deciding whether that model can ever answer on its own.
+  R_JUDGMENT_SHADOW: z.enum(['on', 'off']).optional(),
   R_INTERCOM_APP_ID: z.string().min(1).optional(),
   R_POSTHOG_PROJECT_KEY: z.string().min(1).optional(),
   R_POSTHOG_HOST: z.string().url().optional(),
@@ -664,6 +674,9 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_TYPESAFE_API_KEY',
   'R_JUDGMENT_MODEL',
   'R_SCREENSHOT_PREPARATION_JEV_ENABLED',
+  'R_JUDGMENT_UPSTREAM_URL',
+  'R_JUDGMENT_UPSTREAM_API_KEY',
+  'R_JUDGMENT_SHADOW',
   'R_INTERCOM_APP_ID',
   'R_POSTHOG_PROJECT_KEY',
   'R_POSTHOG_HOST',

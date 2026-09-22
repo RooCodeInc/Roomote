@@ -18,7 +18,7 @@ import {
 } from '@roomote/types';
 import type { EnvironmentConfig } from '@roomote/types';
 
-/** An environment the Fast Session can delegate a task to. */
+/** An environment the session can delegate a task to. */
 export interface RoutableEnvironment {
   id: string;
   name: string;
@@ -30,7 +30,7 @@ export interface RoutableEnvironment {
   config?: EnvironmentConfig;
 }
 
-/** Active repository names the Fast Session can show, independent of environments. */
+/** Active repository names the session can show, independent of environments. */
 export interface ActiveRepositoryCatalog {
   /** Sorted full names, capped to keep the prompt bounded. Names shared across
    * providers or hosts are listed once each, qualified with both. */
@@ -139,7 +139,7 @@ export async function getAvailableEnvironments(): Promise<
 
 /**
  * Every active connected repository, whether or not an environment maps it.
- * Tasks can check any of these out on demand, so the Fast Session needs the
+ * Tasks can check any of these out on demand, so the session needs the
  * names even on deployments with no environments configured.
  */
 export async function getActiveRepositoryCatalog(): Promise<ActiveRepositoryCatalog> {

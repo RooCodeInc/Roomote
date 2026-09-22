@@ -1061,7 +1061,7 @@ export async function resolveFastSessionCapabilityOfferCommand(
 }
 
 /**
- * Submit an authenticated structured response to a Fast session's pending
+ * Submit an authenticated structured response to a session's pending
  * `request_user_input` request. The response is persisted as a canonical
  * transcript event, duplicate or already-resolved submissions are rejected,
  * and the same Fast conversation resumes automatically with a hidden

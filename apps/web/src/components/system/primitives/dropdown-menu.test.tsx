@@ -1,4 +1,5 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
+import Link from 'next/link';
 
 const state = vi.hoisted(() => ({
   isMobile: false,
@@ -59,5 +60,61 @@ describe('DropdownMenuItem', () => {
       'data-[vaul-drawer-direction=bottom]:w-full',
       'data-[vaul-drawer-direction=bottom]:max-w-none',
     );
+  });
+
+  it.each([false, true])(
+    'keeps outside navigation accessible for non-modal menus (mobile: %s)',
+    (isMobile) => {
+      state.isMobile = isMobile;
+      const navigate = vi.fn();
+      render(
+        <>
+          <Link
+            href="/automations"
+            onClick={(event) => {
+              event.preventDefault();
+              navigate();
+            }}
+          >
+            Automations
+          </Link>
+          <DropdownMenu defaultOpen modal={false}>
+            <DropdownMenuTrigger asChild>
+              <button>Filter</button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              <DropdownMenuItem>All sessions</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </>,
+      );
+
+      expect(
+        screen.getByRole('menuitem', { name: 'All sessions' }),
+      ).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('link', { name: 'Automations' }));
+      expect(navigate).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('keeps ordinary mobile dropdowns modal', () => {
+    state.isMobile = true;
+    render(
+      <>
+        <Link href="/automations">Automations</Link>
+        <DropdownMenu defaultOpen>
+          <DropdownMenuTrigger asChild>
+            <button>Open</button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent>
+            <DropdownMenuItem>Item</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </>,
+    );
+    expect(screen.getByRole('dialog', { name: 'Menu' })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('link', { name: 'Automations' }),
+    ).not.toBeInTheDocument();
   });
 });
