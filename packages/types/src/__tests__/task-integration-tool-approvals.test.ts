@@ -107,4 +107,28 @@ describe('compileTaskIntegrationToolApprovals', () => {
       },
     });
   });
+
+  it('drops a rule whose native key an internal tool could also flatten to', () => {
+    // A custom `roomote_manage` server's `tasks` tool flattens to
+    // `roomote_manage_tasks`, the same native key as `roomote` /
+    // `manage_tasks`. Gating it would also hold the exempt internal tool,
+    // so any key the internal server's tools could flatten to is left
+    // ungated natively; unrelated servers still gate normally.
+    expect(
+      compileTaskIntegrationToolApprovals({
+        serverNames: ['roomote', 'roomote_manage', 'linear'],
+        policies: [
+          policy('roomote_manage', 'tasks', 'ask'),
+          policy('roomote_manage', 'status', 'reject'),
+          policy('linear', 'save_issue', 'ask'),
+        ],
+        sessionOverrides: [],
+      }),
+    ).toEqual({
+      permission: { linear_save_issue: 'ask' },
+      tools: {
+        linear_save_issue: { integrationId: 'linear', toolName: 'save_issue' },
+      },
+    });
+  });
 });

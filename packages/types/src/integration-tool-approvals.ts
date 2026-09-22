@@ -290,6 +290,16 @@ export function compileTaskIntegrationToolApprovals(input: {
   );
   const result: TaskIntegrationToolApprovals = { permission: {}, tools: {} };
   const ambiguous = new Set<string>();
+  // A native key cannot name which server half it came from, so a key an
+  // internal server's tool could flatten to (for example a custom
+  // `roomote_manage` server's `tasks` tool colliding with `roomote` /
+  // `manage_tasks`) must not gate anything: enforcing it would also hold
+  // the internal tool, and internal MCPs are exempt.
+  const internalPrefixes = input.serverNames
+    .filter(isInternalMcpServer)
+    .map((name) => openCodeMcpToolKey(name, ''));
+  const isSharedWithInternal = (key: string) =>
+    internalPrefixes.some((prefix) => key.startsWith(prefix));
   for (const { integrationId, toolName } of [
     ...input.policies,
     ...input.sessionOverrides,
@@ -312,6 +322,7 @@ export function compileTaskIntegrationToolApprovals(input: {
           : undefined;
     if (!action) continue;
     const key = openCodeMcpToolKey(integrationId, toolName);
+    if (isSharedWithInternal(key)) continue;
     const known = result.tools[key];
     if (
       known &&

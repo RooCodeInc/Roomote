@@ -123,6 +123,16 @@ export function buildIntegrationToolApprovalRules(
   // restrictive mode among them wins: a collision can only ever add an ask or
   // a block, never let a gated tool run ungated.
   const actionByKey = new Map<string, 'ask' | 'deny'>();
+  // A native key cannot name which server half it came from, so a key an
+  // internal tool flattens to (for example a custom `roomote_manage`
+  // server's `tasks` tool colliding with `roomote` / `manage_tasks`) must
+  // not gate anything: enforcing it would also hold the internal tool, and
+  // internal MCPs are exempt.
+  const internalKeys = new Set(
+    listMountedIntegrationTools(integrations)
+      .filter((tool) => isInternalMcpServer(tool.integrationId))
+      .map((tool) => tool.key),
+  );
   for (const tool of listMountedIntegrationTools(integrations)) {
     // Roomote internal MCPs are outside approval control entirely; their
     // tools keep OpenCode's default allow even when a policy row exists.
@@ -147,6 +157,9 @@ export function buildIntegrationToolApprovalRules(
     ) {
       actionByKey.set(tool.key, 'ask');
     }
+  }
+  for (const key of internalKeys) {
+    actionByKey.delete(key);
   }
   const rules: PermissionRuleset = [...actionByKey].map(
     ([permission, action]) => ({ permission, pattern: '*', action }),

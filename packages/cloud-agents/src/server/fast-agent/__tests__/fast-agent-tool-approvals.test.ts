@@ -119,6 +119,50 @@ describe('buildIntegrationToolApprovalRules', () => {
     expect(rules).toEqual([]);
   });
 
+  it('drops a rule whose native key an internal tool also flattens to', () => {
+    // A custom `roomote_manage` server's `tasks` tool flattens to
+    // `roomote_manage_tasks`, the same native key as `roomote` /
+    // `manage_tasks`. Gating it would also hold the exempt internal tool.
+    const collidingIntegrations: FastAgentIntegration[] = [
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: '',
+        tools: [{ name: 'manage_tasks', description: '', inputSchema: {} }],
+      } as unknown as FastAgentIntegration,
+      {
+        id: 'roomote_manage',
+        name: 'Roomote Manage',
+        description: '',
+        tools: [
+          { name: 'tasks', description: '', inputSchema: {} },
+          { name: 'status', description: '', inputSchema: {} },
+        ],
+      } as unknown as FastAgentIntegration,
+    ];
+    const rules = buildIntegrationToolApprovalRules(collidingIntegrations, [
+      {
+        policyId: 'p1',
+        integrationId: 'roomote_manage',
+        toolName: 'tasks',
+        mode: 'ask',
+        updatedAt: '',
+        createdAt: '',
+      },
+      {
+        policyId: 'p2',
+        integrationId: 'roomote_manage',
+        toolName: 'status',
+        mode: 'reject',
+        updatedAt: '',
+        createdAt: '',
+      },
+    ]);
+    expect(rules).toEqual([
+      { permission: 'roomote_manage_status', pattern: '*', action: 'deny' },
+    ]);
+  });
+
   it('never lets distinct integration/tool pairs share one policy entry', () => {
     // Regression: a delimiter-less composite key makes `a`/`bc` and `ab`/`c`
     // the same map entry, so one pair's mode would gate the other.
