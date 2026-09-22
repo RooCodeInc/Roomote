@@ -36,8 +36,8 @@ results, hidden reasoning, and transcript metadata are excluded. Reusing the
 cursor after no new activity returns an empty narrative delta rather than the
 same messages again; full transcript reads remain available for debugging.
 
-When relaying between Codex and Roomote, summarize substantive messages with
-the labels `Codex → Roomote` and `Roomote → Codex`. Relay questions or input
+When relaying between an MCP client and Roomote, summarize substantive messages
+with the labels `Client → Roomote` and `Roomote → Client`. Relay questions or input
 needs promptly, skip narration for unchanged polls, and make the final answer
 self-contained. Relay summaries should cover visible narrative and decisions,
 not credentials, raw tool traces, hidden reasoning, or oversized internal

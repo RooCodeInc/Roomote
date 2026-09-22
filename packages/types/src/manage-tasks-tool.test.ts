@@ -26,7 +26,7 @@ describe('Roomote MCP management contract', () => {
       'direct task operations retained for compatibility',
     );
     expect(ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION).toContain(
-      'Summarize substantive outbound messages as “Codex → Roomote”',
+      'Summarize substantive outbound messages as “Client → Roomote”',
     );
     expect(ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION).toContain(
       'never expose hidden reasoning, credentials, raw tool traces, or giant internal payloads',
