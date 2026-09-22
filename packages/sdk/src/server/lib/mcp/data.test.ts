@@ -1,11 +1,11 @@
-const { findFirstMock, setMock, updateMock, updateWhereMock } = vi.hoisted(
-  () => ({
+const { findFirstMock, setMock, updateMock, updateWhereMock, returningMock } =
+  vi.hoisted(() => ({
     findFirstMock: vi.fn(),
     setMock: vi.fn(),
     updateMock: vi.fn(),
     updateWhereMock: vi.fn(),
-  }),
-);
+    returningMock: vi.fn(),
+  }));
 
 vi.mock('@roomote/db/server', () => ({
   db: {
@@ -18,6 +18,11 @@ vi.mock('@roomote/db/server', () => ({
   },
   mcpConnections: { id: 'mcp_connections.id' },
   eq: vi.fn((column: string, value: string) => ({ column, value })),
+  and: vi.fn((...conditions: unknown[]) => conditions),
+  sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({
+    strings,
+    values,
+  })),
 }));
 
 vi.mock('@roomote/db/encryption', () => ({
@@ -31,7 +36,8 @@ import { getClientInformation, getValidAccessToken, storeTokens } from './data';
 describe('storeTokens', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    updateWhereMock.mockResolvedValue(undefined);
+    updateWhereMock.mockReturnValue({ returning: returningMock });
+    returningMock.mockResolvedValue([{ id: 'conn-1' }]);
     setMock.mockReturnValue({ where: updateWhereMock });
     updateMock.mockReturnValue({ set: setMock });
   });
@@ -73,7 +79,8 @@ describe('storeTokens', () => {
 describe('getClientInformation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    updateWhereMock.mockResolvedValue(undefined);
+    updateWhereMock.mockReturnValue({ returning: returningMock });
+    returningMock.mockResolvedValue([{ id: 'conn-1' }]);
     setMock.mockReturnValue({ where: updateWhereMock });
     updateMock.mockReturnValue({ set: setMock });
   });
