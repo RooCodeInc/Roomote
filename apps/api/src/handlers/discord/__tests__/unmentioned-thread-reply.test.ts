@@ -236,7 +236,7 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
         confidence: 0.95,
         probabilities: { roomote: 0.95, participant: 0.03, unclear: 0.02 },
       },
-      expectsResponse: { type: 'noul', noul: 0.9 },
+      closingAcknowledgement: { type: 'noul', noul: 0.05 },
     });
     fetchThreadMessagesMock.mockResolvedValue([
       humanHistory(
@@ -453,7 +453,7 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
         confidence: 0.92,
         probabilities: { roomote: 0.03, participant: 0.92, unclear: 0.05 },
       },
-      expectsResponse: { type: 'noul', noul: 0.9 },
+      closingAcknowledgement: { type: 'noul', noul: 0.05 },
     });
 
     await expect(

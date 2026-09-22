@@ -246,7 +246,7 @@ describe('evaluateUnmentionedThreadReplyRouting', () => {
 function addresseeAnswer(
   choice: 'roomote' | 'participant' | 'unclear',
   probability: number,
-  expectsResponse = 0.9,
+  closingAcknowledgement = 0.05,
 ) {
   const rest = (1 - probability) / 2;
   return {
@@ -260,7 +260,7 @@ function addresseeAnswer(
         unclear: choice === 'unclear' ? probability : rest,
       },
     },
-    expectsResponse: { type: 'noul', noul: expectsResponse },
+    closingAcknowledgement: { type: 'noul', noul: closingAcknowledgement },
   };
 }
 
@@ -347,7 +347,7 @@ describe('resolveUnmentionedThreadReplyRouting', () => {
 
   it('keeps the refusal when Roomote is the likeliest addressee but below the threshold', async () => {
     mockEvaluateTypeSafeJudgments.mockResolvedValue(
-      addresseeAnswer('roomote', 0.7),
+      addresseeAnswer('roomote', 0.45),
     );
 
     await expect(resolve()).resolves.toEqual({
@@ -487,7 +487,7 @@ describe('resolveUnmentionedThreadReplyRouting', () => {
 
   it('keeps an acknowledgement addressed to Roomote silent', async () => {
     mockEvaluateTypeSafeJudgments.mockResolvedValue(
-      addresseeAnswer('roomote', 0.95, 0.1),
+      addresseeAnswer('roomote', 0.95, 0.9),
     );
 
     await expect(
@@ -498,15 +498,35 @@ describe('resolveUnmentionedThreadReplyRouting', () => {
     ).resolves.toEqual({ shouldRoute: false, interjectionDetected: false });
 
     const { questions } = mockEvaluateTypeSafeJudgments.mock.calls[0]![0];
-    expect(Object.keys(questions)).toEqual(['addressee', 'expectsResponse']);
-    expect(questions.expectsResponse.type).toBe('noul');
+    expect(Object.keys(questions)).toEqual([
+      'addressee',
+      'closingAcknowledgement',
+    ]);
+    expect(questions.closingAcknowledgement.type).toBe('noul');
   });
 
-  it('fails closed when the expects-response answer is malformed', async () => {
+  it('routes a remark aimed at Roomote that is not an acknowledgement', async () => {
+    mockEvaluateTypeSafeJudgments.mockResolvedValue(
+      addresseeAnswer('roomote', 0.6, 0.3),
+    );
+
+    await expect(
+      resolve({
+        eventText: 'Lol you ARE Roomote',
+        threadMessages: [human('100', 'U1'), bot('200')],
+      }),
+    ).resolves.toEqual({
+      shouldRoute: true,
+      interjectionDetected: false,
+      routedByJudgmentModel: true,
+    });
+  });
+
+  it('fails closed when the acknowledgement answer is malformed', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     mockEvaluateTypeSafeJudgments.mockResolvedValue({
       ...addresseeAnswer('roomote', 0.95),
-      expectsResponse: { type: 'noul', noul: 2 },
+      closingAcknowledgement: { type: 'noul', noul: 2 },
     });
 
     await expect(
