@@ -288,7 +288,7 @@ describe('createTaskRunGitHubToken', () => {
     });
   });
 
-  it('fails closed when an environment checkout stamp spans GitHub installations', async () => {
+  it('mints the environment installation when extra stamped GitHub repositories span installations', async () => {
     mockFindEnvironmentFirst.mockResolvedValue({
       id: 'environment-id',
       config: buildEnvironmentConfig(['Roomote/example-app']),
@@ -319,6 +319,59 @@ describe('createTaskRunGitHubToken', () => {
           repositoryProviders: {
             'Roomote/example-app': 'github',
             'Other/app': 'github',
+          },
+        } as TaskRun['payload']),
+      ),
+    ).resolves.toBe('ghs_test_token');
+    expect(mockCreateGitHubTokenWithMetadata).toHaveBeenCalledWith(
+      {
+        type: 'installationId',
+        installationId: 'install-roomote',
+        repositoryIds: [201],
+      },
+      undefined,
+      undefined,
+    );
+  });
+
+  it('fails closed when a GitLab environment stamp spans GitHub installations', async () => {
+    mockFindEnvironmentFirst.mockResolvedValue({
+      id: 'gitlab-environment',
+      config: buildEnvironmentConfig(['group/gitlab-app']),
+    });
+    mockFindMappings.mockResolvedValue([
+      {
+        repository: {
+          fullName: 'group/gitlab-app',
+          installationId: null,
+          githubRepoId: null,
+          isActive: true,
+          sourceControlProvider: 'gitlab',
+        },
+      },
+    ]);
+    mockFindMany.mockResolvedValue([
+      {
+        fullName: 'owner-a/api',
+        installationId: 'install-a',
+        githubRepoId: 401,
+      },
+      {
+        fullName: 'owner-b/web',
+        installationId: 'install-b',
+        githubRepoId: 402,
+      },
+    ]);
+
+    await expect(
+      createTaskRunGitHubToken(
+        buildTaskRun({
+          repo: 'group/gitlab-app',
+          environmentId: 'gitlab-environment',
+          repositoryProviders: {
+            'group/gitlab-app': 'gitlab',
+            'owner-a/api': 'github',
+            'owner-b/web': 'github',
           },
         } as TaskRun['payload']),
       ),

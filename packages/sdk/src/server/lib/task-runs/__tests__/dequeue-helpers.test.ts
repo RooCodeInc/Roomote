@@ -66,6 +66,9 @@ vi.mock('@roomote/db/server', () => ({
   // fall through to the GitHub default. Provider-stamped payloads never reach
   // it. Individual tests override with mockResolvedValueOnce when needed.
   resolveWorkspaceSourceControlProvider: vi.fn(async () => undefined),
+  // Empty initial workspace: every stamped provider stays required so existing
+  // mixed-provider failures keep failing the run.
+  resolveWorkspaceRepositoryProviders: vi.fn(async () => ({})),
   workspaceRequiresSourceControlCredentials: vi.fn(
     async (_dbOrTx: unknown, workspace: { type: string }) =>
       workspace.type !== 'no_repositories',
@@ -139,6 +142,7 @@ vi.mock('../enqueue-web-task-initiator-settle-notification', () => ({
 }));
 
 import {
+  resolveWorkspaceRepositoryProviders,
   resolveWorkspaceSourceControlProvider,
   workspaceRequiresSourceControlCredentials,
 } from '@roomote/db/server';
@@ -172,6 +176,7 @@ describe('createSourceControlTokenForTaskRun', () => {
     vi.mocked(resolveWorkspaceSourceControlProvider).mockResolvedValue(
       undefined,
     );
+    vi.mocked(resolveWorkspaceRepositoryProviders).mockResolvedValue({});
     vi.mocked(workspaceRequiresSourceControlCredentials).mockImplementation(
       async (_dbOrTx, workspace) => workspace.type !== 'no_repositories',
     );
@@ -691,6 +696,122 @@ describe('createSourceControlTokenForTaskRun', () => {
     );
 
     expect(result?.expiresAt).toEqual(new Date('2026-08-10T15:00:00.000Z'));
+  });
+
+  it('still mints GitLab when extra stamped GitHub repositories span installations', async () => {
+    mockCreateTaskRunWorkerGitHubTokenWithMetadata.mockRejectedValue(
+      new Error(
+        'Stamped repositories for task run 123 span multiple GitHub installations: owner-a/api, owner-b/web',
+      ),
+    );
+    vi.mocked(resolveWorkspaceRepositoryProviders).mockResolvedValue({
+      'group/gitlab-app': 'gitlab',
+    });
+    const consoleWarnSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+
+    try {
+      const result = await createSourceControlTokenForTaskRun(
+        makeTaskRun({
+          repo: '__all_repositories__',
+          environmentId: 'gitlab-environment',
+          sourceControlProvider: 'gitlab',
+          sourceControlHost: 'gitlab.com',
+          repositoryProviders: {
+            'group/gitlab-app': 'gitlab',
+            'owner-a/api': 'github',
+            'owner-b/web': 'github',
+          },
+          description: 'QA a GitLab merge request',
+        } as TaskRun['payload']),
+        '[test]',
+        { maxRetries: 3, baseDelayMs: 0 },
+      );
+
+      expect(result).toMatchObject({
+        provider: 'gitlab',
+        token: 'glptt_scoped_token',
+      });
+      expect(
+        mockCreateTaskRunWorkerGitHubTokenWithMetadata,
+      ).toHaveBeenCalledTimes(1);
+      expect(mockCreateTaskRunScopedGitLabTokens).toHaveBeenCalledTimes(1);
+    } finally {
+      consoleWarnSpy.mockRestore();
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it('still mints extra GitHub credentials for a GitLab-only workspace when they succeed', async () => {
+    vi.mocked(resolveWorkspaceRepositoryProviders).mockResolvedValue({
+      'group/gitlab-app': 'gitlab',
+    });
+
+    const result = await createSourceControlTokenForTaskRun(
+      makeTaskRun({
+        repo: '__all_repositories__',
+        environmentId: 'gitlab-environment',
+        sourceControlProvider: 'gitlab',
+        repositoryProviders: {
+          'group/gitlab-app': 'gitlab',
+          'owner-a/api': 'github',
+        },
+        description: 'QA a GitLab merge request',
+      } as TaskRun['payload']),
+      '[test]',
+      { maxRetries: 1 },
+    );
+
+    expect(result).toMatchObject({
+      provider: 'gitlab',
+      token: 'glptt_scoped_token',
+      envVars: { GH_TOKEN: 'ghs_app_token' },
+    });
+    expect(mockCreateTaskRunWorkerGitHubTokenWithMetadata).toHaveBeenCalled();
+    expect(mockCreateTaskRunScopedGitLabTokens).toHaveBeenCalled();
+  });
+
+  it('still fails the run when required GitHub minting spans installations', async () => {
+    mockCreateTaskRunWorkerGitHubTokenWithMetadata.mockRejectedValue(
+      new Error(
+        'Stamped repositories for task run 123 span multiple GitHub installations: owner-a/api, owner-b/web',
+      ),
+    );
+    vi.mocked(resolveWorkspaceRepositoryProviders).mockResolvedValue({
+      'owner-a/api': 'github',
+    });
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+
+    try {
+      const result = await createSourceControlTokenForTaskRun(
+        makeTaskRun({
+          repo: 'owner-a/api',
+          environmentId: 'github-environment',
+          sourceControlProvider: 'github',
+          repositoryProviders: {
+            'owner-a/api': 'github',
+            'owner-b/web': 'github',
+          },
+          description: 'Work in a GitHub environment',
+        } as TaskRun['payload']),
+        '[test]',
+        { maxRetries: 3, baseDelayMs: 0 },
+      );
+
+      expect(result).toBeNull();
+      expect(
+        mockCreateTaskRunWorkerGitHubTokenWithMetadata,
+      ).toHaveBeenCalledTimes(1);
+      expect(mockCreateTaskRunScopedGitLabTokens).not.toHaveBeenCalled();
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
   });
 
   it('retries only the failing provider and returns no partial token', async () => {

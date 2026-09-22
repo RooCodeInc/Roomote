@@ -27,6 +27,7 @@ import {
   resolveSandboxModelRuntimeEnv,
   resolveWorkspaceSourceControlProvider,
   resolveWorkspaceSourceControlHost,
+  resolveWorkspaceRepositoryProviders,
   workspaceRequiresSourceControlCredentials,
   workspaceAllowsPrivateAttribution,
   workspaceUsesOnlySourceControlProvider,
@@ -558,6 +559,42 @@ export async function resolveTaskRunSourceControlProviders(
   return [resolveSourceControlProviderFromPayload(taskRun.payload)];
 }
 
+/**
+ * Providers the initial workspace must have credentials for. Launch stamps
+ * every active deployment repository so extra checkouts can resolve provider
+ * identity later; those extra providers are optional at dequeue.
+ */
+async function resolveRequiredProvidersForMint(
+  taskRun: Pick<TaskRun, 'id' | 'payload'>,
+  providers: SourceControlProvider[],
+): Promise<Set<SourceControlProvider>> {
+  if (providers.length <= 1) {
+    return new Set(providers);
+  }
+
+  const workspace = resolveTaskWorkspace(taskRun.payload);
+  const initialScopeWorkspace =
+    workspace.type === 'no_repositories'
+      ? ({ type: 'all_repositories' } as const)
+      : workspace;
+  const initialRepositoryProviders = await resolveWorkspaceRepositoryProviders(
+    db,
+    initialScopeWorkspace,
+  );
+  const initialProviders = new Set(
+    Object.values(initialRepositoryProviders).map(
+      normalizeSourceControlProvider,
+    ),
+  );
+
+  return initialProviders.size > 0 ? initialProviders : new Set(providers);
+}
+
+function isNonRetryableSourceControlTokenError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('span multiple GitHub installations');
+}
+
 async function createProviderToken(
   taskRun: TaskRun,
   provider: SourceControlProvider,
@@ -701,6 +738,13 @@ async function createProviderTokenWithRetry(
       return await createProviderToken(taskRun, provider);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      if (isNonRetryableSourceControlTokenError(error)) {
+        console.error(
+          `${logPrefix} Failed to create ${label} token for task run ${taskRun.id}: ${message}`,
+        );
+        return null;
+      }
+
       const githubRetryAfterMs =
         provider === 'github' ? getGitHubRateLimitRetryAfterMs(error) : null;
 
@@ -778,6 +822,11 @@ export async function createSourceControlTokenForTaskRun(
     };
   }
 
+  const requiredProviders = await resolveRequiredProvidersForMint(
+    taskRun,
+    providers,
+  );
+
   // GitLab scoped tokens create revocable remote resources. Mint them last so
   // a later provider failure cannot orphan a successful GitLab token set.
   const mintOrder = [
@@ -799,14 +848,29 @@ export async function createSourceControlTokenForTaskRun(
     );
 
     if (!token) {
-      return null;
+      if (requiredProviders.has(provider)) {
+        return null;
+      }
+
+      console.warn(
+        `${logPrefix} Skipping optional ${getSourceControlProviderLabel(provider)} token for task run ${taskRun.id}; the initial workspace does not require it.`,
+      );
+      continue;
     }
 
     tokensByProvider.set(provider, token);
   }
 
+  const mintedProviders = providers.filter((provider) =>
+    tokensByProvider.has(provider),
+  );
+
+  if (mintedProviders.length === 0) {
+    return null;
+  }
+
   return mergeProviderTokens(
-    providers.map((provider) => tokensByProvider.get(provider)!),
+    mintedProviders.map((provider) => tokensByProvider.get(provider)!),
   );
 }
 

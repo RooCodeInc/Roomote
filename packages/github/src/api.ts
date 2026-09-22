@@ -254,9 +254,9 @@ async function resolveTaskRunGitHubTokenOptions(
 
   // Legacy environment payloads only stamped their initially prepared
   // repositories, so retain the same-installation expansion for those runs.
-  // New checkout-scope stamps include every advertised GitHub repository. If
-  // one falls outside the environment installation, resolve the full stamp so
-  // token creation fails closed instead of advertising an unusable checkout.
+  // New checkout-scope stamps include every advertised GitHub repository. Prefer
+  // a token that covers that full stamp, but fall back to the environment
+  // installation when the stamp spans GitHub App installations.
   const environmentRepositoryNames = new Set(
     repositoryRows?.map((repository) => repository.fullName) ?? [],
   );
@@ -265,12 +265,25 @@ async function resolveTaskRunGitHubTokenOptions(
       (repository) => !environmentRepositoryNames.has(repository),
     )
   ) {
-    return resolveTokenOptionsForRepositoryNames({
-      taskRun,
-      repositoryNames: stampedRepositories,
-      missingMessagePrefix: 'Stamped repositories not found',
-      spanningMessagePrefix: 'Stamped repositories',
-    });
+    try {
+      return await resolveTokenOptionsForRepositoryNames({
+        taskRun,
+        repositoryNames: stampedRepositories,
+        missingMessagePrefix: 'Stamped repositories not found',
+        spanningMessagePrefix: 'Stamped repositories',
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      // Extra advertised checkouts can span GitHub App installations. Mint the
+      // environment's installation instead of blocking a workspace that already
+      // has a single-installation GitHub scope.
+      if (
+        !repositoryRows?.length ||
+        !message.includes('span multiple GitHub installations')
+      ) {
+        throw error;
+      }
+    }
   }
 
   if (repositoryRows !== null) {
