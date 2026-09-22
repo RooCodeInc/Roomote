@@ -5,7 +5,7 @@ import { FAST_AGENT_NATIVE_TOOL_NAMES } from './fast-agent-tool-catalog';
 /**
  * Shared matching for the on-demand integration tool lookup that Fast
  * (`find_integration_tools`) and task sandboxes (`roomote_find_integration_tools`)
- * both expose. Each runtime gathers its catalog its own way; the selection,
+ * both expose. Each runtime gathers its catalog in its own way; the selection,
  * ranking, and bounding of results are the same on both sides.
  */
 
