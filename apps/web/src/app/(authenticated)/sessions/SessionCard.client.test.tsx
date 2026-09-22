@@ -254,9 +254,40 @@ describe('SessionCard', () => {
     expect(
       screen.getByText('Sentry Triage from Automation'),
     ).toBeInTheDocument();
-    expect(
-      screen.getByLabelText('Sentry Triage').querySelector('img'),
-    ).toBeInTheDocument();
+    expect(screen.queryByLabelText('Sentry Triage')).not.toBeInTheDocument();
+  });
+
+  it('keeps the user avatar decorative when the card text names the actor', () => {
+    render(
+      <SessionCard
+        viewerUserId="user-1"
+        session={{
+          id: 'session-avatar',
+          title: 'Review avatar semantics',
+          ownerKind: 'user',
+          ownerAutomation: null,
+          ownerName: 'Test User',
+          ownerEmail: 'test@example.com',
+          ownerImageUrl: null,
+          ownerUserId: 'user-1',
+          privacy: 'shared',
+          sourceSurface: 'web',
+          activityAt: Date.now() / 1000,
+          cachedStatus: 'ready',
+          executionCount: 0,
+          inferenceCostMicroUsd: 0,
+          directInferenceCostMicroUsd: 0,
+          unread: false,
+          artifactCount: 0,
+          singleArtifact: null,
+          pullRequests: [],
+          tasks: [],
+        }}
+      />,
+    );
+
+    expect(screen.getByText('Test User from Web')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Test User')).not.toBeInTheDocument();
   });
 
   it('uses canonical identity for the viewer without changing other users', () => {
@@ -291,7 +322,9 @@ describe('SessionCard', () => {
 
     rerender(<SessionCard session={session} viewerUserId="owner-user" />);
     expect(screen.getByText('Same Display Name from Web')).toBeInTheDocument();
-    expect(screen.getByLabelText('Same Display Name')).toHaveTextContent('SD');
+    expect(
+      screen.queryByLabelText('Same Display Name'),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText('Y')).not.toBeInTheDocument();
   });
 

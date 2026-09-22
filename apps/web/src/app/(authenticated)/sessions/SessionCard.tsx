@@ -113,7 +113,7 @@ export function SessionCard({
         {session.ownerKind === 'automation' ? (
           <span
             className="flex size-8 items-center justify-center overflow-clip rounded-full border border-border bg-white dark:bg-muted"
-            aria-label={actorName}
+            aria-hidden="true"
           >
             <TaskAutomationIcon
               automationKey={session.ownerAutomation}
@@ -126,7 +126,7 @@ export function SessionCard({
             name={ownerDisplayName}
             email={session.ownerEmail ?? undefined}
             size="md"
-            alt={ownerDisplayName}
+            alt=""
           />
         )}
         {session.unread && session.ownerUserId === viewerUserId ? (
