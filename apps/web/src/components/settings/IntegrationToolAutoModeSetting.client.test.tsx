@@ -48,9 +48,7 @@ describe('IntegrationToolAutoModeSetting', () => {
   it('shows the current mode and that the hosted model is shadowing while off', () => {
     render(<IntegrationToolAutoModeSetting />);
     expect(screen.getByRole('radio', { name: /^Off/ })).toBeChecked();
-    expect(
-      screen.getByText(/assesses each call in the background/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/assesses and logs each call/)).toBeInTheDocument();
   });
 
   it('switches the mode and saves the guidance separately', async () => {
@@ -86,6 +84,6 @@ describe('IntegrationToolAutoModeSetting', () => {
 
     state.settings = { mode: 'off', policy: '', model: null };
     render(<IntegrationToolAutoModeSetting />);
-    expect(screen.getByText(/none is available/)).toBeInTheDocument();
+    expect(screen.getByText(/None is available/)).toBeInTheDocument();
   });
 });

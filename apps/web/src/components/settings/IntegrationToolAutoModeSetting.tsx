@@ -18,12 +18,12 @@ const MODES: { mode: IntegrationToolAutoMode; label: string; hint: string }[] =
     {
       mode: 'off',
       label: 'Off',
-      hint: 'Tools run as they always have. Ask first still asks a person.',
+      hint: 'Tools follow their selected mode. Ask first still asks a person.',
     },
     {
       mode: 'on',
       label: 'On',
-      hint: 'Roomote assesses each call to a tool left on Auto, runs routine ones, and asks a person about risky ones.',
+      hint: 'Roomote runs routine calls for tools set to Auto and asks a person about risky ones.',
     },
   ];
 
@@ -64,18 +64,18 @@ export function IntegrationToolAutoModeSetting() {
   const modelNote = hosted
     ? mode === 'on'
       ? 'Uses the hosted judgment model.'
-      : 'While off, the hosted judgment model still assesses each call in the background so its judgment can be reviewed before turning this on.'
+      : 'While Off, the hosted judgment model assesses and logs each call for review.'
     : model === null
-      ? 'Needs a hosted judgment model, and none is available.'
-      : `Needs a hosted judgment model. The helper model (${model.model}) is an LLM call per tool call, so Auto stays off until one is configured.`;
+      ? 'Requires a hosted judgment model. None is available.'
+      : `Requires a hosted judgment model. The helper model (${model.model}) makes a full LLM call for every tool call.`;
 
   return (
     <div className="mt-4 flex flex-col gap-3 border-t pt-4">
       <div className="flex flex-col gap-1">
         <p className="text-sm font-medium">Automatic approvals</p>
         <p className="text-sm text-muted-foreground">
-          Let a decision model handle tool calls based on risk. Tools you set to
-          Always allow, Ask first, or Reject keep that choice. {modelNote}
+          Let a decision model handle tools set to Auto. Your other choices stay
+          fixed. {modelNote}
         </p>
       </div>
       <div
