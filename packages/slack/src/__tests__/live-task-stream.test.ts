@@ -22,6 +22,16 @@ describe('buildSlackLiveTaskTitle', () => {
   });
 
   it.each([
+    ['/review-code: Fix the task', ': Fix the task'],
+    ['$review-code, Fix the task', ', Fix the task'],
+  ])(
+    'removes a punctuation-delimited recognized skill: %s',
+    (prompt, title) => {
+      expect(buildSlackLiveTaskTitle(prompt)).toBe(title);
+    },
+  );
+
+  it.each([
     [
       '$implement-changes $not-a-real-skill Fix the task',
       '$not-a-real-skill Fix the task',
