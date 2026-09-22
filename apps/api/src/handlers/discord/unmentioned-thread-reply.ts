@@ -130,12 +130,14 @@ export async function shouldRouteUnmentionedDiscordThreadReplyToAgent(params: {
 
   // Replies that mention somebody else without addressing the bot are directed
   // at that person, not Roomote.
-  if (
+  const eventMentionsSomebodyElse =
     mentionsDiscordUserOtherThanBotWithoutMentioningBot(
       getDiscordMessageContent(message),
       getDiscordMessageMentions(message),
       botUserId,
-    ) &&
+    );
+  if (
+    eventMentionsSomebodyElse &&
     !(params.peerConversationsEnabled && params.isOpenConversationThread)
   ) {
     return false;
@@ -181,6 +183,7 @@ export async function shouldRouteUnmentionedDiscordThreadReplyToAgent(params: {
     allowPeerConversationMessages:
       params.peerConversationsEnabled === true &&
       params.isOpenConversationThread === true,
+    eventMentionsSomebodyElse,
     threadMessages: toSharedHistoryMessages(threadMessages, botUserId),
     compareMessageIds: compareBigIntMessageIds,
   });

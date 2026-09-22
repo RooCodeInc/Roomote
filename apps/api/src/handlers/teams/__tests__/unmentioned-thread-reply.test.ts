@@ -135,6 +135,11 @@ describe('shouldRouteUnmentionedTeamsThreadReplyToAgent', () => {
         text: '@Roomote please fix the bug',
         mentions: [botMention()],
       }),
+      humanGraphMessage({
+        id: '1700000000050',
+        userId: 'aad-user-2',
+        text: 'following along',
+      }),
       botGraphMessage('1700000000100'),
     ]);
 
@@ -149,7 +154,7 @@ describe('shouldRouteUnmentionedTeamsThreadReplyToAgent', () => {
         confidence: 0.94,
         probabilities: { roomote: 0.94, participant: 0.03, unclear: 0.03 },
       },
-      expectsResponse: { type: 'noul', noul: 0.9 },
+      closingAcknowledgement: { type: 'noul', noul: 0.05 },
     });
     fetchThreadMessagesMock.mockResolvedValue([
       humanGraphMessage({
@@ -157,6 +162,11 @@ describe('shouldRouteUnmentionedTeamsThreadReplyToAgent', () => {
         userId: 'aad-user-1',
         text: '@Roomote please fix the bug',
         mentions: [botMention()],
+      }),
+      humanGraphMessage({
+        id: '1700000000050',
+        userId: 'aad-user-2',
+        text: 'following along',
       }),
       botGraphMessage('1700000000100'),
     ]);
@@ -175,7 +185,7 @@ describe('shouldRouteUnmentionedTeamsThreadReplyToAgent', () => {
         confidence: 0.93,
         probabilities: { roomote: 0.02, participant: 0.93, unclear: 0.05 },
       },
-      expectsResponse: { type: 'noul', noul: 0.9 },
+      closingAcknowledgement: { type: 'noul', noul: 0.05 },
     });
     fetchThreadMessagesMock.mockResolvedValue([
       humanGraphMessage({
@@ -183,6 +193,11 @@ describe('shouldRouteUnmentionedTeamsThreadReplyToAgent', () => {
         userId: 'aad-user-1',
         text: '@Roomote please fix the bug',
         mentions: [botMention()],
+      }),
+      humanGraphMessage({
+        id: '1700000000050',
+        userId: 'aad-user-2',
+        text: 'following along',
       }),
       botGraphMessage('1700000000100'),
     ]);
@@ -280,7 +295,7 @@ describe('shouldRouteUnmentionedTeamsThreadReplyToAgent', () => {
         confidence: 0.95,
         probabilities: { roomote: 0.95, participant: 0.03, unclear: 0.02 },
       },
-      expectsResponse: { type: 'noul', noul: 0.9 },
+      closingAcknowledgement: { type: 'noul', noul: 0.05 },
     });
     fetchThreadMessagesMock.mockResolvedValue([
       humanGraphMessage({

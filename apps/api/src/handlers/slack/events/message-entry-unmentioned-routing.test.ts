@@ -208,7 +208,7 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
         confidence: 1,
         probabilities: { roomote: 1, participant: 0, unclear: 0 },
       },
-      expectsResponse: { type: 'noul', noul: 1 },
+      closingAcknowledgement: { type: 'noul', noul: 0.05 },
     });
 
     await expect(
@@ -490,7 +490,7 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
         confidence: 0.92,
         probabilities: { roomote: 0.03, participant: 0.92, unclear: 0.05 },
       },
-      expectsResponse: { type: 'noul', noul: 0.9 },
+      closingAcknowledgement: { type: 'noul', noul: 0.05 },
     });
 
     await expect(
@@ -617,7 +617,7 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
         confidence: 0.95,
         probabilities: { roomote: 0.95, participant: 0.03, unclear: 0.02 },
       },
-      expectsResponse: { type: 'noul', noul: 0.9 },
+      closingAcknowledgement: { type: 'noul', noul: 0.05 },
     });
     fetchThreadMessagesMock.mockResolvedValue([
       humanMessage('U111', THREAD_TS, '<@UBOT> please fix the bug'),
