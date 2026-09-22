@@ -14,6 +14,7 @@ import {
   Badge,
   BasicTooltip,
   Ban,
+  Checkbox,
   CheckCheck,
   ChevronDown,
   ChevronRight,
@@ -220,6 +221,9 @@ export function IntegrationToolApprovalList<T extends ManageableTool>({
   canManage,
   open,
   tools,
+  isToolEnabled,
+  onToggleTool,
+  toggleDisabled,
 }: {
   /** The id policies are keyed on: the mount name agents see. */
   integrationId: string | null;
@@ -231,9 +235,18 @@ export function IntegrationToolApprovalList<T extends ManageableTool>({
   canManage: boolean;
   open: boolean;
   tools: T[];
+  /** Legacy availability controls remain available while approvals are off. */
+  isToolEnabled?: (toolName: string) => boolean;
+  onToggleTool?: (toolName: string, enabled: boolean) => void;
+  toggleDisabled?: boolean;
 }) {
   const experiment = useIntegrationToolApprovalsExperiment();
   const active = experiment.enabled && canManage && integrationId != null;
+  const showLegacyAvailability =
+    !experiment.enabled &&
+    canManage &&
+    isToolEnabled != null &&
+    onToggleTool != null;
   const policies = useIntegrationToolPolicies({
     enabled: open && active,
     scope,
@@ -264,12 +277,34 @@ export function IntegrationToolApprovalList<T extends ManageableTool>({
             : {})}
         >
           {group.tools.map((tool) => {
+            const checkboxId = `integration-tool-${integrationId ?? 'unknown'}-${tool.name}`;
             return (
               <div key={tool.name} className="flex items-start gap-3 py-2.5">
+                {showLegacyAvailability ? (
+                  <Checkbox
+                    id={checkboxId}
+                    checked={isToolEnabled(tool.name)}
+                    disabled={toggleDisabled}
+                    onCheckedChange={(checked) =>
+                      onToggleTool(tool.name, checked === true)
+                    }
+                    className="mt-0.5"
+                  />
+                ) : null}
                 <div className="min-w-0 flex-1 text-sm">
-                  <span title={tool.name}>
-                    {prettifyToolName(tool.name, integrationName)}
-                  </span>
+                  {showLegacyAvailability ? (
+                    <label
+                      htmlFor={checkboxId}
+                      title={tool.name}
+                      className="cursor-pointer"
+                    >
+                      {prettifyToolName(tool.name, integrationName)}
+                    </label>
+                  ) : (
+                    <span title={tool.name}>
+                      {prettifyToolName(tool.name, integrationName)}
+                    </span>
+                  )}
                   {tool.description ? (
                     <ToolDescription text={tool.description} />
                   ) : null}

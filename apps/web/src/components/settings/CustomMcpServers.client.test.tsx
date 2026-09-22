@@ -162,6 +162,12 @@ vi.mock('@/trpc/client', () => ({
           ...options,
         }),
       },
+      setDisabledTools: {
+        mutationOptions: (options = {}) => ({
+          mutationFn: vi.fn(),
+          ...options,
+        }),
+      },
       connect: {
         mutationOptions: (options = {}) => ({
           mutationFn: vi.fn(async () => '/api/mcp-oauth/initiate/conn-1'),
@@ -345,7 +351,7 @@ describe('useCustomMcpServers', () => {
     ).toBeInTheDocument();
   });
 
-  it('truncates a prompt-length tool description without an availability checkbox', async () => {
+  it('truncates a prompt-length tool description with legacy availability controls', async () => {
     const long = `Resolves a package name. ${'Details. '.repeat(40)}`.trim();
     state.servers = [buildServer()];
     state.tools = [
@@ -370,7 +376,7 @@ describe('useCustomMcpServers', () => {
     expect(
       screen.getByRole('button', { name: 'Show less' }),
     ).toBeInTheDocument();
-    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Resolve' })).toBeChecked();
     state.tools = [];
   });
 

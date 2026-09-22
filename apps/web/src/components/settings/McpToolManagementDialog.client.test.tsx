@@ -73,6 +73,10 @@ vi.mock('@/hooks/mcp-connections', () => ({
     isError: false,
     status: 'success' as const,
   }),
+  useSetDisabledMcpTools: () => ({
+    isPending: false,
+    mutate: vi.fn(),
+  }),
 }));
 
 import { McpToolManagementDialog } from './McpToolManagementDialog';
@@ -100,7 +104,7 @@ describe('McpToolManagementDialog tool approvals', () => {
     Element.prototype.scrollIntoView = vi.fn();
   });
 
-  it('shows each tool with a readable name and its description without availability checkboxes', () => {
+  it('keeps legacy availability controls while the approvals experiment is off', () => {
     state.searchDescription = 'Search the web with Exa.';
     try {
       renderDialog();
@@ -109,7 +113,12 @@ describe('McpToolManagementDialog tool approvals', () => {
         'web_search_exa',
       );
       expect(screen.getByText('Search the web with Exa.')).toBeInTheDocument();
-      expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+      expect(
+        screen.getByRole('checkbox', { name: 'Web Search Exa' }),
+      ).toBeChecked();
+      expect(
+        screen.getByRole('button', { name: 'Save changes' }),
+      ).toBeDisabled();
       expect(screen.queryByRole('switch')).not.toBeInTheDocument();
     } finally {
       state.searchDescription = null;

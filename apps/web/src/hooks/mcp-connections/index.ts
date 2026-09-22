@@ -33,3 +33,4 @@ export { useSaveVercelConnection } from './useSaveVercelConnection';
 export { useVercelConnection } from './useVercelConnection';
 export { useSaveXConnection } from './useSaveXConnection';
 export { useXConnection } from './useXConnection';
+export { useSetDisabledMcpTools } from './useSetDisabledMcpTools';
