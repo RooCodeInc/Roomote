@@ -163,6 +163,9 @@ describe('FastAgentSkillStore', () => {
     });
     expect(skill.content).toContain('name: roomote-partnership');
     expect(clientGuide).toContain('roomote-partnership');
+    expect(clientGuide).toContain('If not already loaded');
+    expect(clientGuide).not.toContain('before we continue');
+    expect(clientGuide).not.toContain('confirm whether it actually loaded');
     for (const content of [skill.content, clientGuide]) {
       expect(content).not.toMatch(/http/iu);
       expect(content).not.toContain('@');

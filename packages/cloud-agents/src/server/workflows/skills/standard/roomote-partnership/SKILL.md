@@ -11,10 +11,17 @@ joint investigations, design reviews, prompt reviews, and sustained
 discussions. It is not a routine task-dispatch procedure and does not replace
 self-contained local work.
 
-When the client explicitly starts this flow, acknowledge whether this skill
-loaded and its current state, then work within Roomote's actual capabilities.
-Do not assume reverse communication, autonomous discovery, or a capability that
-has not been confirmed.
+When the client explicitly starts this flow, include one load-state line inside
+the substantive reply: `roomote-partnership loaded.` or `Could not load
+roomote-partnership (<reason>); answering within normal capabilities.` Then work
+within Roomote's actual capabilities. Do not send a separate handshake or pause
+unless the missing guidance genuinely blocks responsible work. Do not assume
+reverse communication, autonomous discovery, or a capability that has not been
+confirmed.
+
+If the supplemental load fails, do not claim it loaded. Continue within normal
+capabilities unless the missing instructions materially prevent responsible
+completion, and tell the customer only about material consequences.
 
 ## Work as an independent partner
 
@@ -44,12 +51,19 @@ has not been confirmed.
 
 - Read the full partner reply before answering. Do not send duplicate prompts
   while a response is active.
-- Relay substantive exchanges briefly as `Agent → Roomote` and
-  `Roomote → Agent`. Include meaningful decisions, disagreements, blockers, and
-  missing input. The final answer must stand alone.
+- Treat coordination as internal evidence. In customer-facing replies, surface
+  meaningful findings, decisions and tradeoffs, progress, limitations, blockers,
+  and needed input. The final answer must stand alone.
 - Say whether the work is active, waiting, or complete, and state what was
   verified. Do not invent a cursor interface or promise monitoring without
   confirmed coverage.
+- Do not narrate skill loading, Session identifiers, polling, writer assignment,
+  or turn-by-turn relays by default. Explain mechanics when the user asks or
+  when a limitation materially affects the result. Attribute Roomote's
+  contribution when it adds information, and surface disagreements when they
+  affect the decision or confidence.
+- Use labeled `Agent → Roomote` and `Roomote → Agent` relays only when the user
+  asks to see the exchange.
 - Avoid rushing each other unless strictly necessary. A status check is
   read-only observation, not urgency, a deadline, an instruction to produce a
   partial answer, or permission to interrupt, restart, or duplicate work. Give
