@@ -100,6 +100,7 @@ describe('instance-report pure helpers', () => {
     expect(
       summarizeIntegrations({
         mcpIds: ['sentry', 'exa'],
+        customIntegrationIds: [],
         apiKeyIntegrationCount: 0,
       }),
     ).toEqual({
@@ -108,10 +109,11 @@ describe('instance-report pure helpers', () => {
     });
   });
 
-  it('replaces custom and api-key integration names with numbered stubs', () => {
+  it('numbers custom server rows as stubs without relying on connection rows', () => {
     expect(
       summarizeIntegrations({
-        mcpIds: ['custom:server-1', 'custom:server-2'],
+        mcpIds: [],
+        customIntegrationIds: ['server-1', 'server-2'],
         apiKeyIntegrationCount: 2,
       }),
     ).toEqual({
@@ -125,10 +127,11 @@ describe('instance-report pure helpers', () => {
     });
   });
 
-  it('classifies each enabled id into exactly one category', () => {
+  it('never double-counts a custom server reachable both ways', () => {
     expect(
       summarizeIntegrations({
         mcpIds: ['sentry', 'custom:server-1'],
+        customIntegrationIds: ['server-1'],
         apiKeyIntegrationCount: 1,
       }),
     ).toEqual({
@@ -141,6 +144,7 @@ describe('instance-report pure helpers', () => {
     expect(
       summarizeIntegrations({
         mcpIds: ['totally_unknown_id'],
+        customIntegrationIds: [],
         apiKeyIntegrationCount: null,
       }),
     ).toEqual({
@@ -149,10 +153,11 @@ describe('instance-report pure helpers', () => {
     });
   });
 
-  it('dedupes mcp ids before numbering the stubs and accepts string counts', () => {
+  it('dedupes custom ids from both sources before numbering the stubs', () => {
     expect(
       summarizeIntegrations({
-        mcpIds: ['custom:b', 'custom:a', 'custom:b'],
+        mcpIds: ['custom:a', 'custom:b'],
+        customIntegrationIds: ['a', 'b', 'a'],
         apiKeyIntegrationCount: '1',
       }),
     ).toEqual({
@@ -168,16 +173,18 @@ describe('instance-report pure helpers', () => {
   it('keeps the enabled total equal to the list length, including when empty', () => {
     const empty = summarizeIntegrations({
       mcpIds: [],
+      customIntegrationIds: [],
       apiKeyIntegrationCount: 0,
     });
     expect(empty).toEqual({ enabled: 0, enabledNames: [] });
 
     const mixed = summarizeIntegrations({
-      mcpIds: ['notion', 'custom:x', 'custom:y'],
+      mcpIds: ['notion'],
+      customIntegrationIds: ['x', 'y', 'z', 'w', 'v'],
       apiKeyIntegrationCount: 3,
     });
     expect(mixed.enabled).toBe(mixed.enabledNames.length);
-    expect(mixed.enabled).toBe(6);
+    expect(mixed.enabled).toBe(9);
   });
 
   it('dedupes by repo#number using earliest detection and latest status', () => {

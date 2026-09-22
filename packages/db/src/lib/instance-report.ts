@@ -3,7 +3,6 @@ import {
   count,
   countDistinct,
   eq,
-  gt,
   gte,
   inArray,
   isNotNull,
@@ -33,6 +32,8 @@ import {
   environmentVariables,
   environments,
   mcpConnections,
+  customMcpServers,
+  personalMcpServers,
   pullRequestFacts,
   repositories,
   sessions,
@@ -48,6 +49,7 @@ import {
 import { isChatGptSubscriptionConnected } from './chatgpt-subscription';
 import { listConfiguredComputeProviders } from './compute-runtime-config';
 import { isGitHubCopilotSubscriptionConnected } from './github-copilot-subscription';
+import { liveServiceCredentialWhere } from './service-credentials';
 import { isXaiSubscriptionConnected } from './xai-subscription';
 
 const DEFAULT_DEPLOYMENT_ID = 'default';
@@ -279,12 +281,14 @@ export function summarizeAutomations(options: {
 /**
  * Enabled integration names for the report. Classification is per record, in
  * one fixed order, so nothing is double-counted: built-in catalog ids are
- * recognized first with `getMcpIntegration`; the remaining MCP ids (the
- * `custom:<id>` namespace for deployment/personal custom servers, and
- * unrecognized ids, defensively) count as custom; API-key integrations are
- * served from the service-credential table. A custom MCP id stays custom
- * even when it authenticates with an API-key-style header, so each category
- * consumes exactly one bucket.
+ * recognized first with `getMcpIntegration`; custom integrations come from
+ * the enabled custom/personal server rows (servers using `none`,
+ * `static_headers`, or stdio never create an OAuth connection row, so the
+ * `custom:<id>` connection ids must not be the only custom source);
+ * unrecognized MCP ids fall into the custom bucket defensively; and API-key
+ * integrations are counted from live service-credential rows. A custom MCP
+ * id stays custom even when it authenticates with an API-key-style header,
+ * so each category consumes exactly one bucket.
  *
  * Custom and API-key names are user-authored, so they are replaced with
  * deterministic numbered stubs (`custom-integration-N`,
@@ -293,6 +297,7 @@ export function summarizeAutomations(options: {
  */
 export function summarizeIntegrations(options: {
   mcpIds: string[];
+  customIntegrationIds: string[];
   apiKeyIntegrationCount: string | number | null | undefined;
 }): InstanceReportIntegrations {
   const builtInIds: string[] = [];
@@ -301,9 +306,21 @@ export function summarizeIntegrations(options: {
   for (const mcpId of new Set(options.mcpIds)) {
     if (getMcpIntegration(mcpId)) {
       builtInIds.push(mcpId);
-    } else {
-      customIds.push(mcpId);
+      continue;
     }
+    // `custom:<id>` connection entries are skipped here: custom/personal
+    // server rows are the authoritative custom bucket, so OAuth connection
+    // rows never double-count a server.
+    if (mcpId.startsWith('custom:')) {
+      continue;
+    }
+    // Unrecognized ids still count, defensively, so unknown MCP records do
+    // not vanish silently and no user-authored name can leak.
+    customIds.push(mcpId);
+  }
+
+  for (const customId of new Set(options.customIntegrationIds)) {
+    customIds.push(customId);
   }
 
   const enabledNames: string[] = [
@@ -770,6 +787,8 @@ export async function collectInstanceReportStats(
     xaiSubscriptionConnected,
     mcpEnablements,
     mcpConnectionIds,
+    customServerIds,
+    personalServerIds,
     activeApiKeyIntegrations,
     pullRequests7d,
     customAutomationTotals,
@@ -927,20 +946,23 @@ export async function collectInstanceReportStats(
       .selectDistinct({ mcpId: mcpConnections.mcpId })
       .from(mcpConnections)
       .where(eq(mcpConnections.enabled, true)),
+    // Enabled custom/personal servers are the authoritative custom bucket:
+    // `none`, `static_headers`, and stdio servers have no OAuth connection
+    // row, so counting connections alone would miss them.
+    db
+      .select({ id: customMcpServers.id })
+      .from(customMcpServers)
+      .where(eq(customMcpServers.enabled, true)),
+    db
+      .select({ id: personalMcpServers.id })
+      .from(personalMcpServers)
+      .where(eq(personalMcpServers.enabled, true)),
     // Active API-key integrations: labels and origins are user-authored, so
     // only the count leaves the instance and stubs are numbered in order.
     db
       .select({ total: count() })
       .from(serviceCredentials)
-      .where(
-        and(
-          isNull(serviceCredentials.revokedAt),
-          or(
-            isNull(serviceCredentials.expiresAt),
-            gt(serviceCredentials.expiresAt, now),
-          ),
-        ),
-      ),
+      .where(liveServiceCredentialWhere()),
     collectPullRequests7d(now),
     db.select({ total: count() }).from(customAutomations),
     db
@@ -1009,6 +1031,10 @@ export async function collectInstanceReportStats(
 
   const integrations = summarizeIntegrations({
     mcpIds: enabledMcpIds,
+    customIntegrationIds: [
+      ...customServerIds.map((row) => row.id),
+      ...personalServerIds.map((row) => row.id),
+    ],
     apiKeyIntegrationCount: activeApiKeyIntegrations[0]?.total,
   });
 
