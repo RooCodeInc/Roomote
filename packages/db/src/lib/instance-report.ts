@@ -3,6 +3,7 @@ import {
   count,
   countDistinct,
   eq,
+  gt,
   gte,
   inArray,
   isNotNull,
@@ -35,6 +36,7 @@ import {
   pullRequestFacts,
   repositories,
   sessions,
+  serviceCredentials,
   slackInstallations,
   llmUsageEvents,
   taskPullRequests,
@@ -139,6 +141,17 @@ export type InstanceReportAutomations = {
   };
 };
 
+export type InstanceReportIntegrations = {
+  enabled: number;
+  /**
+   * Built-in catalog integrations keep their safe catalog ids. Custom MCP
+   * integrations appear as `custom-integration-N` and API-key (service
+   * credential) integrations as `api-key-integration-N`: owner-authored
+   * names are sensitive metadata and never leave the instance.
+   */
+  enabledNames: string[];
+};
+
 /**
  * Anonymous daily instance stats blob sent to the Ping service and forwarded
  * to PostHog. Extensible: add fields freely, never repurpose existing ones.
@@ -205,6 +218,7 @@ export type InstanceReportStats = {
   mcp: {
     enabled: string[];
   };
+  integrations: InstanceReportIntegrations;
   automations: InstanceReportAutomations;
 };
 
@@ -259,6 +273,52 @@ export function summarizeAutomations(options: {
       enabled: Object.keys(enabledByKey).length,
       enabledByKey,
     },
+  };
+}
+
+/**
+ * Enabled integration names for the report. Classification is per record, in
+ * one fixed order, so nothing is double-counted: built-in catalog ids are
+ * recognized first with `getMcpIntegration`; the remaining MCP ids (the
+ * `custom:<id>` namespace for deployment/personal custom servers, and
+ * unrecognized ids, defensively) count as custom; API-key integrations are
+ * served from the service-credential table. A custom MCP id stays custom
+ * even when it authenticates with an API-key-style header, so each category
+ * consumes exactly one bucket.
+ *
+ * Custom and API-key names are user-authored, so they are replaced with
+ * deterministic numbered stubs (`custom-integration-N`,
+ * `api-key-integration-N`) derived from sorted underlying ids. The `enabled`
+ * total always equals `enabledNames.length`.
+ */
+export function summarizeIntegrations(options: {
+  mcpIds: string[];
+  apiKeyIntegrationCount: string | number | null | undefined;
+}): InstanceReportIntegrations {
+  const builtInIds: string[] = [];
+  const customIds: string[] = [];
+
+  for (const mcpId of new Set(options.mcpIds)) {
+    if (getMcpIntegration(mcpId)) {
+      builtInIds.push(mcpId);
+    } else {
+      customIds.push(mcpId);
+    }
+  }
+
+  const enabledNames: string[] = [
+    ...builtInIds.sort(),
+    ...customIds.sort().map((_, index) => `custom-integration-${index + 1}`),
+  ];
+
+  const apiKeyCount = toNumber(options.apiKeyIntegrationCount);
+  for (let index = 1; index <= apiKeyCount; index += 1) {
+    enabledNames.push(`api-key-integration-${index}`);
+  }
+
+  return {
+    enabled: enabledNames.length,
+    enabledNames,
   };
 }
 
@@ -710,6 +770,7 @@ export async function collectInstanceReportStats(
     xaiSubscriptionConnected,
     mcpEnablements,
     mcpConnectionIds,
+    activeApiKeyIntegrations,
     pullRequests7d,
     customAutomationTotals,
     enabledCustomAutomationTotals,
@@ -866,6 +927,20 @@ export async function collectInstanceReportStats(
       .selectDistinct({ mcpId: mcpConnections.mcpId })
       .from(mcpConnections)
       .where(eq(mcpConnections.enabled, true)),
+    // Active API-key integrations: labels and origins are user-authored, so
+    // only the count leaves the instance and stubs are numbered in order.
+    db
+      .select({ total: count() })
+      .from(serviceCredentials)
+      .where(
+        and(
+          isNull(serviceCredentials.revokedAt),
+          or(
+            isNull(serviceCredentials.expiresAt),
+            gt(serviceCredentials.expiresAt, now),
+          ),
+        ),
+      ),
     collectPullRequests7d(now),
     db.select({ total: count() }).from(customAutomations),
     db
@@ -920,14 +995,22 @@ export async function collectInstanceReportStats(
 
   // Only ship catalog MCP ids; anything unrecognized (defensive: custom or
   // future ids) is reported as 'custom' so no user-authored name can leak.
+  const enabledMcpIds = [
+    ...mcpEnablements.map((row) => row.mcpId),
+    ...mcpConnectionIds.map((row) => row.mcpId),
+  ];
   const mcpEnabled = [
     ...new Set(
-      [
-        ...mcpEnablements.map((row) => row.mcpId),
-        ...mcpConnectionIds.map((row) => row.mcpId),
-      ].map((mcpId) => (getMcpIntegration(mcpId) ? mcpId : 'custom')),
+      enabledMcpIds.map((mcpId) =>
+        getMcpIntegration(mcpId) ? mcpId : 'custom',
+      ),
     ),
   ].sort();
+
+  const integrations = summarizeIntegrations({
+    mcpIds: enabledMcpIds,
+    apiKeyIntegrationCount: activeApiKeyIntegrations[0]?.total,
+  });
 
   return {
     reportSchemaVersion: 1,
@@ -990,6 +1073,7 @@ export async function collectInstanceReportStats(
     mcp: {
       enabled: mcpEnabled,
     },
+    integrations,
     automations: summarizeAutomations({
       customTotal: customAutomationTotals[0]?.total,
       customEnabled: enabledCustomAutomationTotals[0]?.total,

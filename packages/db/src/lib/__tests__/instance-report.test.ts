@@ -29,6 +29,7 @@ import {
   dedupeAuthoredPullRequests,
   median,
   summarizeAutomations,
+  summarizeIntegrations,
   summarizePullRequestCohort,
 } from '../instance-report';
 
@@ -93,6 +94,90 @@ describe('instance-report pure helpers', () => {
         },
       },
     });
+  });
+
+  it('keeps built-in catalog integration names safe and sorted', () => {
+    expect(
+      summarizeIntegrations({
+        mcpIds: ['sentry', 'exa'],
+        apiKeyIntegrationCount: 0,
+      }),
+    ).toEqual({
+      enabled: 2,
+      enabledNames: ['exa', 'sentry'],
+    });
+  });
+
+  it('replaces custom and api-key integration names with numbered stubs', () => {
+    expect(
+      summarizeIntegrations({
+        mcpIds: ['custom:server-1', 'custom:server-2'],
+        apiKeyIntegrationCount: 2,
+      }),
+    ).toEqual({
+      enabled: 4,
+      enabledNames: [
+        'custom-integration-1',
+        'custom-integration-2',
+        'api-key-integration-1',
+        'api-key-integration-2',
+      ],
+    });
+  });
+
+  it('classifies each enabled id into exactly one category', () => {
+    expect(
+      summarizeIntegrations({
+        mcpIds: ['sentry', 'custom:server-1'],
+        apiKeyIntegrationCount: 1,
+      }),
+    ).toEqual({
+      enabled: 3,
+      enabledNames: ['sentry', 'custom-integration-1', 'api-key-integration-1'],
+    });
+  });
+
+  it('buckets unrecognized mcp ids defensively with the custom stubs', () => {
+    expect(
+      summarizeIntegrations({
+        mcpIds: ['totally_unknown_id'],
+        apiKeyIntegrationCount: null,
+      }),
+    ).toEqual({
+      enabled: 1,
+      enabledNames: ['custom-integration-1'],
+    });
+  });
+
+  it('dedupes mcp ids before numbering the stubs and accepts string counts', () => {
+    expect(
+      summarizeIntegrations({
+        mcpIds: ['custom:b', 'custom:a', 'custom:b'],
+        apiKeyIntegrationCount: '1',
+      }),
+    ).toEqual({
+      enabled: 3,
+      enabledNames: [
+        'custom-integration-1',
+        'custom-integration-2',
+        'api-key-integration-1',
+      ],
+    });
+  });
+
+  it('keeps the enabled total equal to the list length, including when empty', () => {
+    const empty = summarizeIntegrations({
+      mcpIds: [],
+      apiKeyIntegrationCount: 0,
+    });
+    expect(empty).toEqual({ enabled: 0, enabledNames: [] });
+
+    const mixed = summarizeIntegrations({
+      mcpIds: ['notion', 'custom:x', 'custom:y'],
+      apiKeyIntegrationCount: 3,
+    });
+    expect(mixed.enabled).toBe(mixed.enabledNames.length);
+    expect(mixed.enabled).toBe(6);
   });
 
   it('dedupes by repo#number using earliest detection and latest status', () => {
@@ -493,6 +578,9 @@ describe('collectInstanceReportStats pullRequests7d isolation', () => {
     // Smoke: full collector still returns the new field shape under suite load.
     const report = await collectInstanceReportStats(now);
     expect(report.providers.computeConfigured).toContain('docker');
+    expect(report.integrations.enabled).toBe(
+      report.integrations.enabledNames.length,
+    );
     expect(report.pullRequests7d).toEqual(
       expect.objectContaining({
         opened: expect.any(Number),
