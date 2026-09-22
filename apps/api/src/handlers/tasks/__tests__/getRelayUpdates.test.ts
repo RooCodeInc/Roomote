@@ -132,14 +132,14 @@ describe('getTaskRelayUpdates', () => {
       {
         id: expect.any(String),
         ts: 1,
-        direction: 'Codex → Roomote',
+        direction: 'Client → Roomote',
         text: 'Please inspect the failure.',
         truncated: false,
       },
       {
         id: expect.any(String),
         ts: 4,
-        direction: 'Roomote → Codex',
+        direction: 'Roomote → Client',
         text: 'Which rollout should I use?',
         truncated: false,
       },
@@ -151,7 +151,7 @@ describe('getTaskRelayUpdates', () => {
     expect(serialized).not.toContain('private narrative');
     expect(serialized).not.toContain('not-returned');
     expect(Buffer.byteLength(legacyPayload)).toBe(101_046);
-    expect(Buffer.byteLength(serialized)).toBe(840);
+    expect(Buffer.byteLength(serialized)).toBe(842);
 
     const unchangedResponse = await app.request(
       `/tasks/${task.id}/updates?cursor=${encodeURIComponent(first.nextCursor)}`,
@@ -322,7 +322,7 @@ describe('getTaskRelayUpdates', () => {
     expect(requestUpdate.responseNeeded).toBe(true);
     expect(requestUpdate.narrative).toEqual([
       expect.objectContaining({
-        direction: 'Roomote → Codex',
+        direction: 'Roomote → Client',
         text: [
           'Which rollout should I use?',
           '1. Canary - Start with a small cohort.',
@@ -362,7 +362,7 @@ describe('getTaskRelayUpdates', () => {
       responseNeeded: false,
       narrative: [
         {
-          direction: 'Codex → Roomote',
+          direction: 'Client → Roomote',
           text: 'Submitted input response',
         },
       ],

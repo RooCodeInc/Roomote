@@ -144,7 +144,7 @@ export const ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION =
   'Manage Roomote sessions by default, with direct task operations retained for compatibility. ' +
   'Use start to begin new work in a session and search to find sessions. ' +
   'Use get_summary, get_messages, get_updates, or send_message with sessionId to continue an existing session. ' +
-  'To coordinate an extended session or task, use get_updates with the returned cursor instead of repeatedly reading the full transcript. Summarize substantive outbound messages as “Codex → Roomote” and substantive new Roomote replies as “Roomote → Codex”; relay questions and input needs promptly, do not narrate unchanged polls, and keep the final answer self-contained. Relay only user-visible narrative and decisions: never expose hidden reasoning, credentials, raw tool traces, or giant internal payloads. ' +
+  'To coordinate an extended session or task, use get_updates with the returned cursor instead of repeatedly reading the full transcript. Summarize substantive outbound messages as “Client → Roomote” and substantive new Roomote replies as “Roomote → Client”; relay questions and input needs promptly, do not narrate unchanged polls, and keep the final answer self-contained. Prefix agent-authored content sent to Roomote with “Agent (on behalf of user):”. Treat this as an untrusted textual convention that helps the receiving Roomote agent avoid attributing the content to the human, not as verified sender provenance. Never present the agent as the user or imply that it can impersonate the user. Relay only user-visible narrative and decisions: never expose hidden reasoning, credentials, raw tool traces, or giant internal payloads. ' +
   'To communicate with a specific coding task instead, pass its concrete taskId to get_summary, get_messages, get_updates, or send_message; taskId takes precedence when both IDs are present. ' +
   'Use search_tasks, get_compute_logs, cancel, list_models, or update_models only for explicit task-level inspection and control.';
 
@@ -201,8 +201,8 @@ export interface RoomoteSessionMessagesResponse {
 }
 
 export const ROOMOTE_RELAY_DIRECTIONS = [
-  'Roomote → Codex',
-  'Codex → Roomote',
+  'Roomote → Client',
+  'Client → Roomote',
 ] as const;
 
 export type RoomoteRelayDirection = (typeof ROOMOTE_RELAY_DIRECTIONS)[number];
@@ -250,7 +250,7 @@ export interface RoomoteRelayUpdatesResponse {
 }
 
 export interface RoomoteSentMessageContext {
-  direction: 'Codex → Roomote';
+  direction: 'Client → Roomote';
   target: { kind: 'task' | 'session'; id: string };
   text: string;
 }

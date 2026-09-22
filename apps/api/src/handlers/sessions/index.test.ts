@@ -516,11 +516,11 @@ describe('MCP session routes', () => {
     };
     expect(updates.narrative).toEqual([
       expect.objectContaining({
-        direction: 'Codex → Roomote',
+        direction: 'Client → Roomote',
         text: 'Older message',
       }),
       expect.objectContaining({
-        direction: 'Roomote → Codex',
+        direction: 'Roomote → Client',
         text: 'Same timestamp, later sequence',
       }),
     ]);
@@ -547,7 +547,7 @@ describe('MCP session routes', () => {
     expect(sendResponse.status).toBe(200);
     await expect(sendResponse.clone().json()).resolves.toMatchObject({
       sent: {
-        direction: 'Codex → Roomote',
+        direction: 'Client → Roomote',
         target: { kind: 'session', id: session.id },
         text: 'Continue this Session',
       },
