@@ -64,17 +64,18 @@ const REVIEW_PRESCREEN_AREAS = {
     'Performance: unbounded work, N+1 queries, leaks, or hot-path latency regressions.',
 } as const;
 
-type ReviewPrescreenArea = keyof typeof REVIEW_PRESCREEN_AREAS;
+export type ReviewPrescreenArea = keyof typeof REVIEW_PRESCREEN_AREAS;
 
-const REVIEW_PRESCREEN_AREA_LABELS: Record<ReviewPrescreenArea, string> = {
-  security: 'security',
-  correctness: 'correctness',
-  dataIntegrity: 'data-integrity',
-  concurrency: 'concurrency or lifecycle',
-  compatibility: 'compatibility',
-  failureHandling: 'failure-handling',
-  performance: 'performance',
-};
+export const REVIEW_PRESCREEN_AREA_LABELS: Record<ReviewPrescreenArea, string> =
+  {
+    security: 'security',
+    correctness: 'correctness',
+    dataIntegrity: 'data-integrity',
+    concurrency: 'concurrency or lifecycle',
+    compatibility: 'compatibility',
+    failureHandling: 'failure-handling',
+    performance: 'performance',
+  };
 
 export type ReviewPrescreenHunk = {
   file: string;
@@ -91,7 +92,7 @@ export type ReviewPrescreenHunk = {
   text: string;
 };
 
-type ReviewPrescreenHint = {
+export type ReviewPrescreenHint = {
   file: string;
   header: string;
   startLine: number;
@@ -543,7 +544,7 @@ export function collectReviewPrescreenHints(
   return hints;
 }
 
-function formatHunkRange({
+export function formatHunkRange({
   startLine,
   endLine,
 }: Pick<ReviewPrescreenHint, 'startLine' | 'endLine'>): string {
@@ -637,7 +638,7 @@ export function buildReviewPrescreenBatches({
  * reviewable hunks; throws when any request fails so callers never act on a
  * partial screen.
  */
-async function screenReviewHunks({
+export async function screenReviewHunks({
   title,
   changedFiles,
   diff,
