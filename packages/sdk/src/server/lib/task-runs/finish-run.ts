@@ -9,6 +9,7 @@ import {
   getFastAgentParentFromPayload,
   getTriggerableBackgroundAutomationDescriptorByKey,
   getTriggerableBackgroundAutomationSettingsHash,
+  isExitedRunStatus,
   parseConflictResolutionSummary,
   resolveComputeProviderTarget,
   stripRunErrorMarkers,
@@ -360,6 +361,14 @@ export const finishRun = async ({
         taskPhase: status === RunStatus.Idle ? run.taskPhase : null,
         error: sanitizedError ?? null,
         errorCode: errorCode ?? null,
+        terminalReason: isExitedRunStatus(status)
+          ? {
+              kind: 'terminal',
+              status,
+              errorCode: errorCode ?? null,
+              message: sanitizedError ?? null,
+            }
+          : null,
       },
       createdAt: now,
     });

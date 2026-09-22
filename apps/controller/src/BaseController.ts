@@ -307,6 +307,7 @@ export abstract class BaseController {
                 'Controller started task using database fallback logic',
                 {
                   runId: taskRun.id,
+                  taskId: taskRun.taskId,
                   runStatus: taskRun.status,
                   payloadKind: taskRun.payloadKind,
                   provider: taskRun.vendor,
@@ -677,6 +678,7 @@ export abstract class BaseController {
 
     captureControllerException(reportError, {
       runId: taskRun.id,
+      taskId: taskRun.taskId,
       payloadKind: taskRun.payloadKind,
       provider: taskRun.vendor,
       repo: taskRun.payload.repo,
@@ -997,6 +999,7 @@ export abstract class BaseController {
       } catch (error) {
         captureControllerException(error, {
           runId: taskRun.id,
+          taskId: taskRun.taskId,
           payloadKind: taskRun.payloadKind,
           provider: taskRun.vendor,
           phase: 'environment-verification-failure-mark',
@@ -1008,6 +1011,7 @@ export abstract class BaseController {
       diagnostic.message,
       {
         runId: taskRun.id,
+        taskId: taskRun.taskId,
         payloadKind: taskRun.payloadKind,
         provider: taskRun.vendor,
         ...(diagnostic.exitCode === undefined
@@ -1030,6 +1034,7 @@ export abstract class BaseController {
     } catch (error) {
       captureControllerException(error, {
         runId: taskRun.id,
+        taskId: taskRun.taskId,
         payloadKind: taskRun.payloadKind,
         provider: taskRun.vendor,
         phase: 'worker_bootstrap_finalize',
@@ -1121,6 +1126,7 @@ export abstract class BaseController {
       'Controller scheduled a fresh sandbox after worker bootstrap failure',
       {
         runId: taskRun.id,
+        taskId: taskRun.taskId,
         payloadKind: taskRun.payloadKind,
         provider: taskRun.vendor,
         exitCode,

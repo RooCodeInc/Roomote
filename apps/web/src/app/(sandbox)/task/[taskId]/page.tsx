@@ -332,6 +332,7 @@ export default function SandboxPage() {
   return (
     <SandboxProvider
       taskId={taskId}
+      runId={taskRun.id}
       url={taskRun.sandboxServerUrl}
       token={token}
       refreshConnection={session.refreshConnection}
