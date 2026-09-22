@@ -199,6 +199,16 @@ describe('collectShippedDiff', () => {
     expect(after?.fingerprint).not.toBe(before?.fingerprint);
   });
 
+  it('treats a string becoming a template literal as a change of code', async () => {
+    const repo = createCheckout();
+    write(repo, 'src/app.ts', "export const url = '${base}/api';\n");
+    const plain = await collectShippedDiff(repo);
+    write(repo, 'src/app.ts', 'export const url = `${base}/api`;\n');
+    const interpolated = await collectShippedDiff(repo);
+
+    expect(interpolated?.fingerprint).not.toBe(plain?.fingerprint);
+  });
+
   it('treats a change of parentheses as a change of code', async () => {
     const repo = createCheckout();
     write(repo, 'src/app.ts', 'export const app = (a + b) * c;\n');

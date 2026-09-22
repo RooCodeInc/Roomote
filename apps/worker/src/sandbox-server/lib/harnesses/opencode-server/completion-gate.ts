@@ -353,14 +353,19 @@ export function clipDiffByFile(
 }
 
 /**
- * What formatters and pre-commit hooks rewrite without changing behavior:
- * whitespace, quote style, trailing commas, and semicolons. Parentheses stay
- * in: a formatter adds them too (around an arrow parameter, a wrapped
- * return), but they can also change precedence, and missing a real edit is
- * the worse mistake. When a reformat does move parentheses after a test run,
- * that run reads as stale and the agent is asked to run it again.
+ * What formatters and pre-commit hooks rewrite: whitespace, single versus
+ * double quotes, trailing commas, and semicolons. Not a semantics-preserving
+ * normalization of JavaScript, and not meant to be one: an edit that only
+ * moves one of these (a newline after `return`, say) is missed, and the
+ * earlier test run keeps vouching for it, which is how every claim is
+ * treated without this check. Keeping them would instead mark a run stale
+ * whenever the pre-commit hook reformats code the agent just wrote, which
+ * happens on most tasks and would ask for a rerun of tests that did cover
+ * the shipped code. Backticks and parentheses stay in: a formatter never
+ * turns a string into a template literal or regroups an expression, and
+ * both change behavior.
  */
-const FORMATTING_ONLY_CHARACTERS = /[\s'"`;,]/g;
+const FORMATTING_ONLY_CHARACTERS = /[\s'";,]/g;
 
 /**
  * The code this task has changed, reduced to what a formatter cannot alter:
