@@ -8,6 +8,7 @@ import {
   createFastAgentTaskLauncher,
   createFastAgentWebTaskLauncher,
   appendFastAgentVisibleMessages,
+  captureFastAgentCommunicationDecision,
   fastAgentConversationRepository,
   isFastAgentVoiceCallActive,
   publishFastAgentSessionRefresh,
@@ -27,6 +28,7 @@ import {
   customAutomations,
   eq,
   getCustomAutomationById,
+  isDeploymentExperimentEnabled,
   recordCustomAutomationResult,
   getSessionForFastConversation,
   getSessionWakeupById,
@@ -2794,6 +2796,7 @@ export async function deliverFastAgentParentEventWithLock(
   turnLock: FastAgentTurnLockHandle,
 ): Promise<'delivered' | 'skipped'> {
   let replyPosted = false;
+  let regularFallbackReason: string | null = null;
   // A wakeup turn revalidates at reply time as well as at start: a cancel or
   // archive that lands while the model is generating must still win, so the
   // guard suppresses the post and cancels the rest of the turn.
@@ -2922,41 +2925,133 @@ export async function deliverFastAgentParentEventWithLock(
       });
       return 'delivered';
     }
-    if (
+    const jevExperimentEnabled = await isDeploymentExperimentEnabled(
+      'fastSessionCommunicationJev',
+    ).catch(() => false);
+    const developmentEventOverride =
+      process.env.R_APP_ENV === 'development' &&
       params.event.type === 'child_message' &&
-      params.event.communicationExperiment === 'jev'
+      params.event.communicationExperiment === 'jev';
+    const experimentEvent =
+      params.event.type === 'child_message'
+        ? {
+            taskId: params.event.taskId,
+            messageId: params.event.messageId,
+            admittedAtMs: params.event.admittedAtMs,
+            message: params.event.message,
+            purpose: params.event.purpose,
+            taskStatus: 'reported',
+          }
+        : params.event.type === 'task_settled'
+          ? {
+              taskId: params.event.taskId,
+              messageId: buildEventClientMessageSeed(params.event),
+              admittedAtMs: undefined,
+              message: `${params.event.title ?? 'The delegated task'} ${params.event.status}.${params.event.error ? ` ${params.event.error}` : ''} ${params.event.taskUrl}`,
+              purpose: 'closeout' as const,
+              taskStatus: params.event.status,
+            }
+          : params.event.type === 'scheduled_wakeup'
+            ? {
+                taskId: `wakeup:${params.event.wakeupId}`,
+                messageId: buildEventClientMessageSeed(params.event),
+                admittedAtMs: undefined,
+                message: params.event.prompt,
+                purpose: 'closeout' as const,
+                taskStatus: 'scheduled_followup',
+              }
+            : null;
+    if (
+      experimentEvent &&
+      (jevExperimentEnabled || developmentEventOverride) &&
+      !humanFollowUp
     ) {
-      const experimentEvent = params.event;
-      const result = await runJevFastAgentCommunicationExperiment({
-        message: experimentEvent.message,
-        purpose: experimentEvent.purpose,
-        adapter: {
-          ...parentTurn.adapter,
-          postReply: async (reply) => {
-            await appendFastAgentVisibleMessages({
-              sessionId: params.parent.sessionId,
-              messages: [{ role: 'assistant', content: reply.message }],
-            });
-            await publishFastAgentSessionRefresh(params.parent.sessionId, {
-              type: 'task_report_admitted',
-              eventId: `${experimentEvent.messageId}:jev-reply`,
-              taskId: experimentEvent.taskId,
-              admittedAtMs: experimentEvent.admittedAtMs ?? Date.now(),
-            });
-            return parentTurn.adapter.postReply(reply);
+      try {
+        const result = await runJevFastAgentCommunicationExperiment({
+          message: experimentEvent.message,
+          purpose: experimentEvent.purpose,
+          taskStatus: experimentEvent.taskStatus,
+          adapter: {
+            ...parentTurn.adapter,
+            postReply: async (reply) => {
+              await appendFastAgentVisibleMessages({
+                sessionId: params.parent.sessionId,
+                messages: [{ role: 'assistant', content: reply.message }],
+              });
+              await publishFastAgentSessionRefresh(params.parent.sessionId, {
+                type: 'task_report_admitted',
+                eventId: `${experimentEvent.messageId}:jev-reply`,
+                taskId: experimentEvent.taskId,
+                admittedAtMs: experimentEvent.admittedAtMs ?? Date.now(),
+              });
+              return parentTurn.adapter.postReply(reply);
+            },
           },
-        },
+        });
+        captureFastAgentCommunicationDecision({
+          userId: parentTurn.userId,
+          sessionId: params.parent.sessionId,
+          eventType: params.event.type,
+          arm: 'jev',
+          action: result.action,
+          confidence: result.confidence,
+          needsUserInputProbability: result.needsUserInputProbability,
+          latencyMs: result.eventToActionMs,
+          fallbackReason: result.fallbackReason,
+        });
+        console.info(
+          `[FastAgentCommunicationExperiment] event=${experimentEvent.messageId} action=${result.action} confidence=${result.confidence.toFixed(2)} needsUserInputProbability=${result.needsUserInputProbability.toFixed(2)} modelInferenceMs=${result.modelInferenceMs.toFixed(1)} orchestrationMs=${result.orchestrationMs.toFixed(1)} eventToActionMs=${result.eventToActionMs.toFixed(1)} messagePosted=${result.messagePosted} fallbackReason=${result.fallbackReason ?? 'none'}`,
+        );
+        if (result.action !== 'fallback') return 'delivered';
+        regularFallbackReason = result.fallbackReason ?? 'jev_fallback';
+      } catch (error) {
+        regularFallbackReason =
+          error instanceof Error && error.message.includes('not configured')
+            ? 'judgment_model_unconfigured'
+            : 'judgment_provider_failure';
+        captureFastAgentCommunicationDecision({
+          userId: parentTurn.userId,
+          sessionId: params.parent.sessionId,
+          eventType: params.event.type,
+          arm: 'jev',
+          action: 'fallback',
+          confidence: null,
+          needsUserInputProbability: null,
+          latencyMs: null,
+          fallbackReason: regularFallbackReason,
+        });
+      }
+    } else if (humanFollowUp && jevExperimentEnabled) {
+      captureFastAgentCommunicationDecision({
+        userId: parentTurn.userId,
+        sessionId: params.parent.sessionId,
+        eventType: params.event.type,
+        arm: 'regular-llm',
+        action: 'deterministic_bypass',
+        confidence: null,
+        needsUserInputProbability: null,
+        latencyMs: null,
+        fallbackReason: 'explicit_human_instruction',
       });
-      console.info(
-        `[FastAgentCommunicationExperiment] event=${experimentEvent.messageId} action=${result.action} modelInferenceMs=${result.modelInferenceMs.toFixed(1)} orchestrationMs=${result.orchestrationMs.toFixed(1)} eventToActionMs=${result.eventToActionMs.toFixed(1)} messagePosted=${result.messagePosted}`,
-      );
-      return 'delivered';
     }
     // The same base URL must reach both the config resolver and the broker:
     // the broker only injects its auth header on deployment-proxy URLs whose
     // origin matches its own apiBaseUrl, so a mismatched pair silently drops
     // every deployment MCP server from parent-event turns.
     const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
+    if (regularFallbackReason) {
+      captureFastAgentCommunicationDecision({
+        userId: parentTurn.userId,
+        sessionId: params.parent.sessionId,
+        eventType: params.event.type,
+        arm: 'regular-llm',
+        action: 'regular_llm',
+        confidence: null,
+        needsUserInputProbability: null,
+        latencyMs: null,
+        fallbackReason: regularFallbackReason,
+      });
+    }
     const voiceMode =
       params.event.type === 'scheduled_wakeup'
         ? await isFastAgentVoiceCallActive(params.parent.sessionId)

@@ -15,3 +15,4 @@ export * from './session-title-refresh-job';
 export * from './fast-agent-tasks';
 export * from './fast-agent-pinned-launch';
 export * from './fast-agent-communication-experiment';
+export * from './fast-agent-context-telemetry';

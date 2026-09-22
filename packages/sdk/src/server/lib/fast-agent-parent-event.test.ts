@@ -68,6 +68,11 @@ const mocks = vi.hoisted(() => ({
   linearEmitResponse: vi.fn(),
   createConversationArtifact: vi.fn(),
   isVoiceCallActive: vi.fn(),
+  isDeploymentExperimentEnabled: vi.fn().mockResolvedValue(false),
+  appendVisibleMessages: vi.fn(),
+  publishSessionRefresh: vi.fn(),
+  runJevCommunicationExperiment: vi.fn(),
+  captureCommunicationDecision: vi.fn(),
 }));
 
 vi.mock('./fast-agent-session-videos', () => ({
@@ -178,6 +183,10 @@ vi.mock('@roomote/cloud-agents/server', () => ({
     },
   createFastAgentWebTaskLauncher: vi.fn(() => mocks.launchTask),
   isFastAgentVoiceCallActive: mocks.isVoiceCallActive,
+  appendFastAgentVisibleMessages: mocks.appendVisibleMessages,
+  publishFastAgentSessionRefresh: mocks.publishSessionRefresh,
+  runJevFastAgentCommunicationExperiment: mocks.runJevCommunicationExperiment,
+  captureFastAgentCommunicationDecision: mocks.captureCommunicationDecision,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -204,6 +213,7 @@ vi.mock('@roomote/db/server', () => ({
   recordCustomAutomationResult: mocks.recordCustomAutomationResult,
   getSessionWakeupById: mocks.findWakeup,
   getSessionForFastConversation: mocks.findWakeupSession,
+  isDeploymentExperimentEnabled: mocks.isDeploymentExperimentEnabled,
   slackInstallations: {
     isActive: 'slack_installations.is_active',
     teamId: 'slack_installations.team_id',
@@ -513,6 +523,77 @@ describe('deliverFastAgentParentEvent', () => {
           imageArtifactIds: ['artifact-1', 'artifact-1'],
         }),
     );
+  });
+
+  it('keeps ordinary child reports on the regular LLM path when Jev is off', async () => {
+    await deliverFastAgentParentEventWithLock(
+      {
+        parent,
+        event: {
+          type: 'child_message',
+          taskId: 'task-1',
+          runId: 42,
+          actingUserId: 'u1',
+          messageId: 'child-off',
+          purpose: 'progress',
+          message: 'A milestone is ready.',
+        },
+      },
+      mocks.releaseTurnLock,
+    );
+
+    expect(mocks.isDeploymentExperimentEnabled).toHaveBeenCalledWith(
+      'fastSessionCommunicationJev',
+    );
+    expect(mocks.runJevCommunicationExperiment).not.toHaveBeenCalled();
+    expect(mocks.answerQuestion).toHaveBeenCalledOnce();
+  });
+
+  it('uses the Jev branch when the instance experiment is enabled', async () => {
+    mocks.isDeploymentExperimentEnabled.mockResolvedValueOnce(true);
+    mocks.runJevCommunicationExperiment.mockImplementationOnce(
+      async ({
+        adapter,
+      }: {
+        adapter: { postReply: (reply: unknown) => unknown };
+      }) => {
+        await adapter.postReply({
+          purpose: 'closeout',
+          message: 'A milestone is ready.',
+        });
+        return {
+          action: 'report',
+          confidence: 0.94,
+          needsUserInputProbability: 0.04,
+          modelInferenceMs: 180,
+          orchestrationMs: 4,
+          eventToActionMs: 185,
+          messagePosted: true,
+        };
+      },
+    );
+
+    await deliverFastAgentParentEventWithLock(
+      {
+        parent,
+        event: {
+          type: 'child_message',
+          taskId: 'task-1',
+          runId: 42,
+          actingUserId: 'u1',
+          messageId: 'child-on',
+          purpose: 'progress',
+          message: 'A milestone is ready.',
+        },
+      },
+      mocks.releaseTurnLock,
+    );
+
+    expect(mocks.runJevCommunicationExperiment).toHaveBeenCalledOnce();
+    expect(mocks.appendVisibleMessages).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: parent.sessionId }),
+    );
+    expect(mocks.answerQuestion).not.toHaveBeenCalled();
   });
 
   it('delivers a human follow-up queued at response finalization as the next turn', async () => {
