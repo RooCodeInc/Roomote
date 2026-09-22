@@ -392,6 +392,7 @@ export async function getClientInformation(
 export async function getValidAccessToken(
   connectionId: string,
   mcpUrl: string,
+  signal?: AbortSignal,
 ): Promise<string | undefined> {
   const { discoverOAuthEndpoints, refreshOAuthToken, tokenNeedsRefresh } =
     await import('./oauth');
@@ -439,35 +440,40 @@ export async function getValidAccessToken(
           if (customTarget) {
             // Custom servers refresh against the pinned metadata through the
             // SSRF-guarded fetch; never against a catalog match by URL.
-            const metadata = await ensureCustomMcpServerMetadata(customTarget);
+            const metadata = await ensureCustomMcpServerMetadata(
+              customTarget,
+              signal,
+            );
             tokenEndpoint = metadata.token_endpoint;
-            oauthOptions = customTarget.oauthOptions;
+            oauthOptions = {
+              ...customTarget.oauthOptions,
+              ...(signal ? { signal } : {}),
+            };
           } else {
             const integration = MCP_INTEGRATIONS.find(
               (candidate) => candidate.url === mcpUrl,
             );
-            tokenEndpoint =
-              getMcpIntegrationOauthEndpoints(integration)?.tokenEndpoint ??
-              (await discoverOAuthEndpoints(mcpUrl)).token_endpoint;
             const resource = getMcpIntegrationOauthResource(integration);
+            const tokenRequestFormat = integration?.oauthTokenRequestFormat;
+            const usePkce = integration?.oauthPkce === false;
             oauthOptions =
               integration &&
-              (resource ||
-                integration.oauthTokenRequestFormat ||
-                integration.oauthPkce === false)
+              (signal || resource || tokenRequestFormat || usePkce)
                 ? {
+                    ...(signal ? { signal } : {}),
                     ...(resource ? { resource } : {}),
-                    ...(integration.oauthTokenRequestFormat
+                    ...(tokenRequestFormat
                       ? {
-                          tokenRequestFormat:
-                            integration.oauthTokenRequestFormat,
+                          tokenRequestFormat: tokenRequestFormat,
                         }
                       : {}),
-                    ...(integration.oauthPkce === false
-                      ? { usePkce: false }
-                      : {}),
+                    ...(usePkce ? { usePkce: false } : {}),
                   }
                 : undefined;
+            tokenEndpoint =
+              getMcpIntegrationOauthEndpoints(integration)?.tokenEndpoint ??
+              (await discoverOAuthEndpoints(mcpUrl, oauthOptions))
+                .token_endpoint;
           }
 
           const newTokens = await refreshOAuthToken(

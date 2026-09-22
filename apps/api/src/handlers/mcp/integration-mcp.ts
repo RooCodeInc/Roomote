@@ -28,6 +28,7 @@ async function resolveUpstreamCredentials(
   integration: McpIntegration,
   mcpUrl: string,
   userId: string | null,
+  signal?: AbortSignal,
 ): Promise<{
   authHeader: string | null;
   extraHeaders?: Record<string, string>;
@@ -88,7 +89,8 @@ async function resolveUpstreamCredentials(
   }
 
   return {
-    authHeader: (await getValidAccessToken(connection.id, mcpUrl)) ?? null,
+    authHeader:
+      (await getValidAccessToken(connection.id, mcpUrl, signal)) ?? null,
   };
 }
 
@@ -135,7 +137,7 @@ export function createIntegrationMcpProxy(
     stripToolSchemaPatterns: integration.id === 'resend',
     // Integration OAuth MCPs resolve acting-user credentials directly.
     validateTaskRunToken: async () => null,
-    resolveCredentials: async (auth) => {
+    resolveCredentials: async (auth, _routeParams, _request, signal) => {
       // Deployment-scoped integrations use an org-wide connection, so runs
       // without a human actor (deployment service principal jobs) can still
       // use them. User-scoped integrations require the acting human whose
@@ -152,6 +154,7 @@ export function createIntegrationMcpProxy(
           integration,
           upstreamUrl,
           actingUserId,
+          signal,
         );
         toolPolicy = await resolveDeploymentToolPolicy(integration.id);
       } catch (error) {
