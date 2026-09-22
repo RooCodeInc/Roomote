@@ -48,7 +48,8 @@ async function createConnection(mcpId = 'linear') {
       authConfig: {
         type: 'oauth_client',
         client_id: 'fixture-client',
-        registered_redirect_uri: 'http://localhost:13540/api/mcp-oauth/callback',
+        registered_redirect_uri:
+          'http://localhost:13540/api/mcp-oauth/callback',
         token_endpoint_auth_method: 'none',
       },
     })
