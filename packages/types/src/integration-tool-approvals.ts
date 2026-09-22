@@ -63,6 +63,8 @@ export interface IntegrationToolApprovalMetadata {
   status: IntegrationToolApprovalStatus;
   /** The task whose agent asked; null when the Session's own agent did. */
   taskId: string | null;
+  /** Auto mode's view of the call, when it was consulted before this card. */
+  autoEvaluation?: IntegrationToolAutoEvaluation;
   /** When this approval stops accepting a decision and fails closed. */
   expiresAt: string;
   createdAt: string;

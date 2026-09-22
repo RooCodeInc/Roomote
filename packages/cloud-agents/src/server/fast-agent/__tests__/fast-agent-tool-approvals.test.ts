@@ -840,6 +840,20 @@ describe('tool approval bridge', () => {
     );
   });
 
+  it('never consults Auto for a tool the requester asked to decide themselves', async () => {
+    vi.mocked(listIntegrationToolSessionOverrides).mockResolvedValue([
+      { integrationId: 'mock-slack', toolName: 'post_message', mode: 'ask' },
+    ]);
+    vi.mocked(getIntegrationToolApproval).mockResolvedValue({
+      status: 'rejected',
+    } as never);
+    const helperMocks = helpers();
+    bridge().handleAsk(ask, helperMocks);
+    await vi.waitFor(() => expect(helperMocks.reply).toHaveBeenCalled());
+    expect(resolveIntegrationToolAutoDecision).not.toHaveBeenCalled();
+    expect(insertIntegrationToolApproval).toHaveBeenCalled();
+  });
+
   it('relays an ask once without a card when the requester allowed the tool for the session', async () => {
     vi.mocked(listIntegrationToolSessionOverrides).mockResolvedValue([
       { integrationId: 'mock-slack', toolName: 'post_message', mode: 'allow' },

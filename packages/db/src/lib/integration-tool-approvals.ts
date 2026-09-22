@@ -127,6 +127,7 @@ function approvalMetadata(
     argsSummary: row.argsSummary,
     status: row.status,
     taskId: row.taskId,
+    ...(row.autoEvaluation ? { autoEvaluation: row.autoEvaluation } : {}),
     expiresAt: row.expiresAt.toISOString(),
     createdAt: row.createdAt.toISOString(),
   };

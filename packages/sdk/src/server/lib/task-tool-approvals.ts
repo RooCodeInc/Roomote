@@ -125,16 +125,18 @@ export async function requestTaskToolApproval(input: {
   const overrides = await listIntegrationToolSessionOverrides(
     session.sessionId,
   );
-  const allowedForSession = overrides.some(
+  const overrideForSession = overrides.find(
     (override) =>
-      override.mode === 'allow' &&
       override.integrationId === input.integrationId &&
       override.toolName === input.toolName,
-  );
-  // Auto mode is consulted only for a call that would otherwise ask, and any
-  // failure on its path asks a person. With the deployment set to `on`, a
-  // call the model finds clearly safe is approved for the proxy to claim.
-  const auto = allowedForSession
+  )?.mode;
+  const allowedForSession = overrideForSession === 'allow';
+  // Auto mode is consulted only for a call that would otherwise ask by
+  // policy, never for one the Session owner chose to decide themselves (a
+  // session `ask`), and any failure on its path asks a person. With the
+  // deployment set to `on`, a call the model finds clearly safe is approved
+  // for the proxy to claim.
+  const auto = overrideForSession
     ? undefined
     : await resolveIntegrationToolAutoDecision({
         integrationId: input.integrationId,

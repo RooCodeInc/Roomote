@@ -14,6 +14,7 @@ import {
 import {
   MCP_INTEGRATIONS,
   type IntegrationToolApprovalMetadata,
+  type IntegrationToolAutoEvaluation,
 } from '@roomote/types';
 
 const integrationNames = new Map(
@@ -62,6 +63,25 @@ function approvalPrompt(item: IntegrationToolApprovalMetadata): string {
   }
 
   return `Let ${name} use this tool?`;
+}
+
+/**
+ * One line on what Auto mode made of the call, so the person deciding knows
+ * why they are being asked. Auto never rejects, so this only ever explains
+ * why it did not run the call on its own.
+ */
+function describeAutoEvaluation(
+  evaluation: IntegrationToolAutoEvaluation,
+): string {
+  if (evaluation.unavailable === 'no_model') {
+    return 'Auto mode could not check this call: no decision model is available.';
+  }
+  if (evaluation.unavailable === 'error') {
+    return 'Auto mode could not check this call.';
+  }
+  return evaluation.recommendation === 'approve'
+    ? 'Auto mode would have run this call.'
+    : 'Auto mode was not sure this call is safe, so it is asking you.';
 }
 
 function summarizeArgs(argsSummary: unknown): string | null {
@@ -141,6 +161,14 @@ export function PendingIntegrationToolApprovals({
                 <p className="mt-1 text-xs text-muted-foreground">
                   Roomote is waiting for your approval to continue.
                 </p>
+                {item.autoEvaluation ? (
+                  <p
+                    className="mt-1 text-xs text-muted-foreground"
+                    data-testid="auto-evaluation"
+                  >
+                    {describeAutoEvaluation(item.autoEvaluation)}
+                  </p>
+                ) : null}
               </div>
             </div>
 

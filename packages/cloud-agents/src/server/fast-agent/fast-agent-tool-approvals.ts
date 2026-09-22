@@ -463,18 +463,19 @@ export function createFastAgentToolApprovalBridge(input: {
       const sessionOverrides = await listIntegrationToolSessionOverrides(
         input.sessionId,
       );
-      const allowedForSession = sessionOverrides.some(
+      const overrideForSession = sessionOverrides.find(
         (override) =>
-          override.mode === 'allow' &&
           override.integrationId === tool.integrationId &&
           override.toolName === tool.toolName,
-      );
+      )?.mode;
+      const allowedForSession = overrideForSession === 'allow';
       // Auto mode: with the deployment set to `on`, the decision model may
       // find the call clearly safe under the Auto policy and run it without
-      // a card. It is consulted only for a call that would otherwise ask, so
-      // a session override, an experiment toggle, or a reject never reaches
-      // it. Any failure on this path asks a person.
-      const auto = allowedForSession
+      // a card. It is consulted only for a call that would otherwise ask by
+      // policy: a session `allow` needs no decision, and a session `ask` is
+      // the requester asking to decide this tool themselves, which Auto must
+      // not answer for them. Any failure on this path asks a person.
+      const auto = overrideForSession
         ? undefined
         : await resolveIntegrationToolAutoDecision({
             integrationId: tool.integrationId,

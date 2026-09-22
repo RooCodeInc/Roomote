@@ -220,6 +220,17 @@ describe('requestTaskToolApproval', () => {
     });
   });
 
+  it('never consults Auto for a tool the owner asked to decide themselves', async () => {
+    mocks.overrides.mockResolvedValue([
+      { integrationId: 'linear', toolName: 'save_issue', mode: 'ask' },
+    ]);
+    await expect(requestTaskToolApproval(ask)).resolves.toEqual({
+      outcome: 'pending',
+      approvalId: 'approval-1',
+    });
+    expect(mocks.resolveAuto).not.toHaveBeenCalled();
+  });
+
   it('cannot be approved when the task has no human Session owner', async () => {
     mocks.sessionForTask.mockResolvedValue({
       id: 'session-1',
