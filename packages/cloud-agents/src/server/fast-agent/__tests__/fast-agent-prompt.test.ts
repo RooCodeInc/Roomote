@@ -693,6 +693,9 @@ describe('buildFastAgentSystemPrompt', () => {
       'A resumable settled task continues under the same task identity',
     );
     expect(prompt).toContain('Existing active tasks do not block');
+    expect(prompt).toContain(
+      'never add a no-commit, no-push, or no-PR constraint the user did not state',
+    );
     expect(prompt).toContain('send_chat_reply');
     expect(prompt).toContain(
       "use that task's known ID with `manage_tasks` `get_summary` to recover its stable image artifact IDs and viewer links",
