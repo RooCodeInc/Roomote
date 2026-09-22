@@ -123,10 +123,6 @@ function getWorkerExitShutdownReason(
     return 'snapshot_created';
   }
 
-  if (state.snapshotFailedAt) {
-    return 'snapshot_failed';
-  }
-
   if (state.status === RunStatus.Completed) {
     return 'completed';
   }

@@ -838,6 +838,7 @@ describe('BaseController.handleWorkerExitBeforeStart', () => {
       makeWorkerExitState({
         status: RunStatus.Preparing,
         sleepAt: new Date('2026-09-22T08:01:00.000Z'),
+        snapshotFailedAt: new Date('2026-09-22T08:02:00.000Z'),
       }),
     );
 
