@@ -617,9 +617,9 @@ async function upsertSessionOverride(
 }
 
 /**
- * Every override in one session, for both the per-turn rule compilation and
- * the requester's transcript controls. Session-scoped by construction: no
- * caller can read or apply another session's rows through this.
+ * Every override in one session for per-turn rule compilation. Session-scoped
+ * by construction: no caller can read or apply another session's rows through
+ * this.
  */
 export async function listIntegrationToolSessionOverrides(
   sessionId: string,
@@ -637,64 +637,6 @@ export async function listIntegrationToolSessionOverrides(
     toolName: row.toolName,
     mode: row.mode,
   }));
-}
-
-/** The requester's own view of their session's overrides; empty for anyone else. */
-export async function listIntegrationToolSessionOverridesForRequester(context: {
-  sessionId: string;
-  userId: string;
-}): Promise<IntegrationToolSessionOverrideMetadata[]> {
-  const [owned] = await db
-    .select({ id: sessions.id })
-    .from(sessions)
-    .where(
-      and(
-        eq(sessions.id, context.sessionId),
-        eq(sessions.ownerUserId, context.userId),
-      ),
-    )
-    .limit(1);
-  return owned ? listIntegrationToolSessionOverrides(context.sessionId) : [];
-}
-
-/**
- * Requester-only write of one session override; `null` clears it and
- * restores the deployment policy. Only the Session owner may change how
- * their own session asks.
- */
-export async function setIntegrationToolSessionOverride(
-  context: { sessionId: string; userId: string },
-  input: {
-    integrationId: string;
-    toolName: string;
-    mode: IntegrationToolSessionOverrideMode | null;
-  },
-): Promise<void> {
-  await db.transaction(async (tx) => {
-    await requireSessionOwner(tx, context);
-    if (input.mode === null) {
-      await tx
-        .delete(integrationToolSessionOverrides)
-        .where(
-          and(
-            eq(integrationToolSessionOverrides.sessionId, context.sessionId),
-            eq(
-              integrationToolSessionOverrides.integrationId,
-              input.integrationId,
-            ),
-            eq(integrationToolSessionOverrides.toolName, input.toolName),
-          ),
-        );
-      return;
-    }
-    await upsertSessionOverride(tx, {
-      sessionId: context.sessionId,
-      integrationId: input.integrationId,
-      toolName: input.toolName,
-      mode: input.mode,
-      setByUserId: context.userId,
-    });
-  });
 }
 
 /**

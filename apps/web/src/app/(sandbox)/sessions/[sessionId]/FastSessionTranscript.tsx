@@ -95,11 +95,7 @@ import { CapabilityOfferCard } from './CapabilityOfferCard';
 import { PendingIntegrationKeys } from '@/components/sessions/PendingIntegrationKeys';
 import { PendingIntegrationToolApprovals } from '@/components/sessions/PendingIntegrationToolApprovals';
 import { useIntegrationToolApprovalsExperiment } from '@/hooks/useIntegrationToolApprovalsExperiment';
-import {
-  useSessionIntegrationToolApprovals,
-  useSetSessionIntegrationToolOverride,
-} from '@/hooks/useSessionIntegrationToolApprovals';
-import { IntegrationToolSessionControlsProvider } from '@/components/sessions/IntegrationToolSessionControls';
+import { useSessionIntegrationToolApprovals } from '@/hooks/useSessionIntegrationToolApprovals';
 import { openIntegrationKeyDialog } from '@/components/sessions/integration-key-dialog';
 import { useSessionTitlePropagation } from './use-session-title-propagation';
 import { MemorySavedMessage } from '@/components/ai-elements/MemorySavedMessage';
@@ -1818,13 +1814,6 @@ export function FastSessionTranscript({
     secretSessionId,
     toolApprovalsExperiment.enabled,
   );
-  const setToolOverride = useSetSessionIntegrationToolOverride(secretSessionId);
-  const toolSessionControlsActive =
-    Boolean(secretSessionId) && toolApprovalsExperiment.enabled;
-  const toolSessionOverrides = useMemo(
-    () => toolApprovals.data?.sessionOverrides ?? [],
-    [toolApprovals.data?.sessionOverrides],
-  );
 
   useEffect(() => {
     if (pendingInputRequest && (liveVoiceActive || liveVoiceConnecting)) {
@@ -1904,20 +1893,13 @@ export function FastSessionTranscript({
                 Older messages in this session are not shown.
               </p>
             ) : null}
-            <IntegrationToolSessionControlsProvider
-              active={toolSessionControlsActive}
-              overrides={toolSessionOverrides}
-              setOverride={setToolOverride.mutate}
-              isUpdating={setToolOverride.isPending}
-            >
-              <AcpTranscriptBlockList
-                blocks={renderBlocksBeforeInput}
-                showInternalMessages={false}
-                onSuppress={suppressMessageBeforeInput}
-                onOpenDelegatedTask={openTaskPanel ?? undefined}
-                renderMessage={renderCapabilityOfferMessage}
-              />
-            </IntegrationToolSessionControlsProvider>
+            <AcpTranscriptBlockList
+              blocks={renderBlocksBeforeInput}
+              showInternalMessages={false}
+              onSuppress={suppressMessageBeforeInput}
+              onOpenDelegatedTask={openTaskPanel ?? undefined}
+              renderMessage={renderCapabilityOfferMessage}
+            />
             {pendingInputRequest ? (
               <div className="mt-3">
                 {pendingInputRequest.preset === 'setup_starter_tasks' ? (
@@ -1941,20 +1923,13 @@ export function FastSessionTranscript({
                 )}
               </div>
             ) : null}
-            <IntegrationToolSessionControlsProvider
-              active={toolSessionControlsActive}
-              overrides={toolSessionOverrides}
-              setOverride={setToolOverride.mutate}
-              isUpdating={setToolOverride.isPending}
-            >
-              <AcpTranscriptBlockList
-                blocks={renderBlocksAfterInput}
-                showInternalMessages={false}
-                onSuppress={suppressMessageAfterInput}
-                onOpenDelegatedTask={openTaskPanel ?? undefined}
-                renderMessage={renderCapabilityOfferMessage}
-              />
-            </IntegrationToolSessionControlsProvider>
+            <AcpTranscriptBlockList
+              blocks={renderBlocksAfterInput}
+              showInternalMessages={false}
+              onSuppress={suppressMessageAfterInput}
+              onOpenDelegatedTask={openTaskPanel ?? undefined}
+              renderMessage={renderCapabilityOfferMessage}
+            />
             {pendingResponseState.pendingAfter !== null &&
             streamMessages.length === 0 &&
             !hasLiveActivity([
