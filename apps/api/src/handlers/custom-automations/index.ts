@@ -435,6 +435,7 @@ customAutomationsRouter.get('/:id', async (c) => {
       id: automation.id,
       name: automation.name,
       prompt: automation.prompt,
+      judgmentSpec: automation.judgmentSpec,
     },
   });
 });

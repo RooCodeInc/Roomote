@@ -16,6 +16,7 @@ import {
   NO_REPOSITORIES,
   type ReasoningEffort,
   type AutomationResultPriority,
+  deriveCustomAutomationJudgmentSpec,
 } from '@roomote/types';
 
 import { type DatabaseOrTransaction, db } from '../db';
@@ -225,6 +226,7 @@ export async function createCustomAutomation(
     .values({
       name,
       prompt,
+      judgmentSpec: deriveCustomAutomationJudgmentSpec(prompt),
       enabled: input.enabled,
       resultPriority: input.resultPriority ?? 'normal',
       scheduleMode: input.scheduleMode,
@@ -288,6 +290,7 @@ export async function updateCustomAutomation(
     .set({
       name,
       prompt,
+      judgmentSpec: deriveCustomAutomationJudgmentSpec(prompt),
       enabled: input.enabled,
       resultPriority: input.resultPriority ?? existing.resultPriority,
       scheduleMode: input.scheduleMode,

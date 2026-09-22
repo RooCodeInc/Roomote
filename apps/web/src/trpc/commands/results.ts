@@ -21,6 +21,7 @@ import {
 } from '@roomote/db/server';
 import {
   AUTOMATION_RESULT_PRIORITY_RANK,
+  type CustomAutomationJudgmentResult,
   type AutomationResultPreparationStatus,
   type BackgroundAutomationKey,
   type AutomationResultPriority,
@@ -59,6 +60,7 @@ export type ResultInboxItem = {
   createdAt: Date;
   automationKey: BackgroundAutomationKey | null;
   preparationStatus: AutomationResultPreparationStatus | 'not_required';
+  judgment: CustomAutomationJudgmentResult | null;
   actions: ResultAction[];
 };
 
@@ -108,6 +110,7 @@ export async function listResultsCommand(
         content: automationResults.content,
         priority: automationResults.priority,
         preparationStatus: automationResults.preparationStatus,
+        judgment: automationResults.judgment,
         createdAt: automationResults.createdAt,
         sourceTaskId: tasks.id,
         sourceTaskState: tasks.state,
@@ -275,6 +278,7 @@ export async function listResultsCommand(
         content: report.content,
         priority: report.priority,
         preparationStatus: report.preparationStatus,
+        judgment: report.judgment,
         createdAt: report.createdAt,
         actions,
       };
@@ -290,6 +294,7 @@ export async function listResultsCommand(
         content: suggestion.decisionContext ?? '',
         priority: suggestion.priority ?? 'normal',
         preparationStatus: 'not_required',
+        judgment: null,
         createdAt: suggestion.createdAt,
         actions:
           suggestion.status === 'open'

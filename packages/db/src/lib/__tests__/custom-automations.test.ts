@@ -106,6 +106,11 @@ describe('custom automations helpers', () => {
 
     expect(created.id).toBeTruthy();
     expect(created.scheduleMode).toBe('daily');
+    expect(created.judgmentSpec).toMatchObject({
+      version: 1,
+      questionId: 'goal_addressed',
+      goal: 'Scan for flaky tests.',
+    });
 
     const listed = await listCustomAutomations();
     expect(listed.some((row) => row.id === created.id)).toBe(true);
@@ -126,6 +131,9 @@ describe('custom automations helpers', () => {
     expect(updated.enabled).toBe(false);
     expect(updated.scheduleMode).toBe('weekly');
     expect(updated.prompt).toContain('updated');
+    expect(updated.judgmentSpec).toMatchObject({
+      goal: 'Scan for flaky tests (updated).',
+    });
 
     await deleteCustomAutomation(created.id);
     expect(await getCustomAutomationById(created.id)).toBeNull();

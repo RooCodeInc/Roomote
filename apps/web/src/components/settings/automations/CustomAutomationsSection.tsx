@@ -19,6 +19,7 @@ import {
   AUTOMATION_RESULT_PRIORITY_LABELS,
   AUTOMATION_RESULT_PRIORITIES,
   type AutomationResultPriority,
+  type CustomAutomationJudgmentSpec,
   type CustomAutomationScheduleMode,
   type ReasoningEffort,
 } from '@roomote/types';
@@ -80,6 +81,7 @@ type ConnectedDestinationProvider = Exclude<
 type CustomAutomationFormState = {
   name: string;
   prompt: string;
+  judgmentSpec: CustomAutomationJudgmentSpec | null;
   enabled: boolean;
   resultPriority: AutomationResultPriority;
   scheduleMode: CustomAutomationScheduleMode;
@@ -100,6 +102,7 @@ type CustomAutomationFieldErrors = Partial<
 const EMPTY_FORM: CustomAutomationFormState = {
   name: '',
   prompt: '',
+  judgmentSpec: null,
   enabled: true,
   resultPriority: 'normal',
   scheduleMode: 'daily',
@@ -311,6 +314,7 @@ function formFromRow(
   return {
     name: row.name,
     prompt: row.prompt,
+    judgmentSpec: row.judgmentSpec,
     enabled: row.enabled,
     resultPriority: row.resultPriority ?? 'normal',
     scheduleMode: row.scheduleMode,
@@ -997,6 +1001,31 @@ export function CustomAutomationsSection({
               {fieldErrors.prompt}
             </p>
           ) : null}
+        </div>
+
+        <div className="space-y-2 rounded-lg border bg-muted/30 p-3 text-sm">
+          <p className="font-medium">Shadow evaluation</p>
+          <p className="text-muted-foreground">
+            When a judgment backend is configured, Roomote will check whether
+            each completed result addresses the saved goal. This advisory check
+            never changes delivery.
+          </p>
+          {form.judgmentSpec ? (
+            <div className="space-y-1 text-muted-foreground">
+              <p>
+                <span className="font-medium text-foreground">Question:</span>{' '}
+                {form.judgmentSpec.question.instructions}
+              </p>
+              <p>
+                <span className="font-medium text-foreground">Saved goal:</span>{' '}
+                {form.judgmentSpec.goal}
+              </p>
+            </div>
+          ) : (
+            <p className="text-muted-foreground">
+              The evaluation is compiled when you save this automation.
+            </p>
+          )}
         </div>
 
         <div className="space-y-2">

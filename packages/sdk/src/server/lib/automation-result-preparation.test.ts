@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   findPullRequests: vi.fn(),
   findArtifacts: vi.fn(),
   generate: vi.fn(),
+  evaluateJudgment: vi.fn(),
   update: vi.fn(),
   set: vi.fn(),
   where: vi.fn(),
@@ -50,6 +51,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   NON_TASK_INFERENCE_SURFACES: {
     automationResultPreparation: 'automation_result_preparation',
   },
+  evaluateCustomAutomationResultJudgment: mocks.evaluateJudgment,
   generateTrackedNonTaskObject: mocks.generate,
 }));
 
@@ -93,6 +95,8 @@ describe('automation result preparation', () => {
       { id: 'pr-1', prTitle: 'Update dependency', status: 'open' },
     ]);
     mocks.findArtifacts.mockResolvedValue([]);
+    mocks.findAutomation.mockResolvedValue(null);
+    mocks.evaluateJudgment.mockResolvedValue(null);
   });
 
   it('stores bounded copy and only validated reference keys', async () => {
@@ -139,4 +143,102 @@ describe('automation result preparation', () => {
       }),
     );
   });
+
+  it('stores a configured shadow judgment without changing result preparation', async () => {
+    mocks.findResult.mockResolvedValue({
+      id: 'result-1',
+      preparationStatus: 'pending',
+      preparationAttempts: 0,
+      automationName: 'Custom audit',
+      content: 'Found one actionable failure.',
+      resultKind: 'outcome',
+      sourceTaskId: 'task-1',
+      sourceRunId: 42,
+      sourceSessionId: 'session-1',
+      customAutomationId: 'automation-1',
+      userId: 'user-1',
+    });
+    mocks.findAutomation.mockResolvedValue({
+      prompt: 'Find actionable failures.',
+      judgmentSpec: { version: 1, questionId: 'goal_addressed' },
+    });
+    mocks.evaluateJudgment.mockResolvedValue({
+      specVersion: 1,
+      questionId: 'goal_addressed',
+      answer: { type: 'noul', noul: 0.91 },
+    });
+    mocks.generate.mockResolvedValue({
+      object: {
+        headline: 'One actionable failure needs review',
+        decisionContext: 'The finding is limited to the audited workspace.',
+        referenceKeys: [],
+      },
+    });
+
+    await processAutomationResultPreparation({
+      resultId: 'result-1',
+      finalAttempt: false,
+    });
+
+    expect(mocks.evaluateJudgment).toHaveBeenCalledWith({
+      spec: { version: 1, questionId: 'goal_addressed' },
+      result: 'Found one actionable failure.',
+    });
+    expect(mocks.set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        judgment: {
+          specVersion: 1,
+          questionId: 'goal_addressed',
+          answer: { type: 'noul', noul: 0.91 },
+        },
+        preparationStatus: 'ready',
+      }),
+    );
+  });
+
+  it.each(['no backend', 'a failed judgment'])(
+    'keeps delivery preparation successful when judgment has %s',
+    async (failure) => {
+      mocks.findResult.mockResolvedValue({
+        id: 'result-1',
+        preparationStatus: 'pending',
+        preparationAttempts: 0,
+        automationName: 'Custom audit',
+        content: 'The run completed.',
+        resultKind: 'outcome',
+        sourceTaskId: 'task-1',
+        sourceRunId: 42,
+        sourceSessionId: 'session-1',
+        customAutomationId: 'automation-1',
+        userId: 'user-1',
+      });
+      mocks.findAutomation.mockResolvedValue({
+        prompt: 'Summarize the run.',
+        judgmentSpec: { version: 1, questionId: 'goal_addressed' },
+      });
+      if (failure === 'a failed judgment') {
+        mocks.evaluateJudgment.mockRejectedValue(new Error('timeout'));
+      } else {
+        mocks.evaluateJudgment.mockResolvedValue(null);
+      }
+      mocks.generate.mockResolvedValue({
+        object: {
+          headline: 'Run completed',
+          decisionContext: 'The run completed without extra detail.',
+          referenceKeys: [],
+        },
+      });
+
+      await expect(
+        processAutomationResultPreparation({
+          resultId: 'result-1',
+          finalAttempt: false,
+        }),
+      ).resolves.toBeUndefined();
+      expect(mocks.set).toHaveBeenCalledWith(
+        expect.objectContaining({ preparationStatus: 'ready' }),
+      );
+      expect(mocks.set.mock.calls.at(-1)?.[0]).not.toHaveProperty('judgment');
+    },
+  );
 });

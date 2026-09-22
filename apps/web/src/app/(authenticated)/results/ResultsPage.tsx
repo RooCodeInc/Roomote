@@ -70,6 +70,27 @@ function PriorityMarker({ result }: { result: ResultInboxItem }) {
   );
 }
 
+function JudgmentSummary({ result }: { result: ResultInboxItem }) {
+  if (!result.judgment) return null;
+
+  const probability = Math.round(result.judgment.answer.noul * 100);
+  return (
+    <div
+      aria-label="Shadow evaluation"
+      className="mt-4 rounded-lg border bg-muted/30 p-3 text-sm"
+    >
+      <p className="font-medium">Shadow evaluation</p>
+      <p className="mt-1 text-muted-foreground">
+        Goal addressed probability: {probability}%.
+      </p>
+      <p className="mt-1 text-xs text-muted-foreground">
+        Advisory only. This judgment never changes delivery or authorizes an
+        action.
+      </p>
+    </div>
+  );
+}
+
 function ResultsSkeleton() {
   return (
     <div className="grid min-h-[34rem] grid-cols-1 gap-px overflow-hidden rounded-xl border bg-border md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
@@ -494,6 +515,7 @@ export function ResultsPage() {
                     </div>
                     <div aria-hidden="true" className="border-t" />
                     <div className="mx-auto max-w-3xl px-5 pb-6 pt-3 md:px-8 md:pb-8">
+                      <JudgmentSummary result={displayedResult} />
                       {showSuggestionComposer &&
                       actionableResult?.kind === 'suggestion' ? (
                         <div className="rounded-xl border bg-card p-4">
