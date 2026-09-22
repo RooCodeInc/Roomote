@@ -13,11 +13,10 @@ import { isRunTokenContext } from '../mcp/proxy-utils';
 import { logHandlerError } from '../utils';
 
 /**
- * The sandbox harness calls this when a coding turn ends with a changed diff.
- * The sandbox supplies only what lives there (the diff and the agent's
- * report); what was asked is read from the transcript server-side, and the
- * judgment model key never leaves the API. Every non-verdict outcome is
- * `skipped` so the harness completes the turn normally.
+ * The sandbox supplies the runtime trigger and workspace evidence; what was
+ * asked is read from the transcript server-side, and the judgment model key
+ * never leaves the API. Every non-verdict outcome is `skipped` so the harness
+ * completes the turn normally.
  */
 export async function checkTaskCompletion(
   c: Context<{ Variables: Variables & { mcpAuth: McpAuth } }>,

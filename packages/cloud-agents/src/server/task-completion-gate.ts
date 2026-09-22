@@ -8,6 +8,7 @@ import {
   normalizeTranscriptUserText,
   type TaskCompletionCheckRequest,
   type TaskCompletionCheckResponse,
+  type TaskCompletionGateTrigger,
   type TaskCompletionFlagId,
 } from '@roomote/types';
 
@@ -132,6 +133,49 @@ const COMPLETION_GATE_QUESTIONS = {
     },
   },
 } satisfies Record<TaskCompletionFlagId, TypeSafeNoulQuestion>;
+
+const FLAG_GUIDANCE: Record<TaskCompletionFlagId, string> = {
+  requestUnaddressed:
+    'Part of what was asked does not appear to be done, and your report does not say why.',
+  planIncomplete:
+    'Your checklist still has an item that is not completed, and your report does not account for it.',
+  validationContradicted:
+    'Your report claims a validation result that the commands you actually ran do not support: the last run failed, or no such command was run.',
+  validationMissing:
+    'Code changed but no test, type check, lint, or build was run, and your report does not say why.',
+  proofClaimDoubtful:
+    'The diff changes something a person sees in the interface, but your report waves off visual proof or never mentions it.',
+  evidentDefect:
+    'The changed lines appear to contain a plain defect: an inverted condition, a removed guard, error check, or await, a call left on an old signature, or a test weakened so it passes.',
+  reportOverclaims:
+    'Your report describes a code change that the diff does not contain.',
+  leftoverArtifacts:
+    'The diff appears to add something that should not ship: debug logging, commented-out code, a placeholder standing in for requested behavior, or a disabled test.',
+};
+
+function buildCompletionGateMessage(
+  trigger: TaskCompletionGateTrigger,
+  flags: TaskCompletionCheckResponse['flags'],
+): string {
+  const intro =
+    trigger === 'turn_end'
+      ? 'Roomote automatically compared what was asked, your closing report, and everything this task changed, and flagged the following:'
+      : trigger === 'report'
+        ? 'Roomote held this report against what was asked, the commands you ran, and everything this task changed before sending it, and flagged the following:'
+        : 'Roomote compared what was asked, the commands you ran, and everything this task changed before shipping it, and flagged the following:';
+  const closing =
+    trigger === 'turn_end'
+      ? 'This check is a quick automated read and can be wrong. Re-read the request and your diff against each point. If a point is right, make the smallest fix, re-run the validation it affects, deliver the update the same way you delivered the change, and send a short corrected report. If a point is wrong, change nothing and say in one sentence why the work is complete as it stands. Do not restart the task, do not repeat work that is already done, and do not mention this check to the user.'
+      : 'This check is a quick automated read and can be wrong. Re-read the request and your diff against each point. If a point is right, make the smallest fix and re-run the validation it affects. If a point is wrong, say in one sentence why the work is complete as it stands. Then call this tool again; it will not be held back a second time for the same work.';
+
+  return [
+    intro,
+    '',
+    ...flags.map((flag) => `- ${FLAG_GUIDANCE[flag.id]}`),
+    '',
+    closing,
+  ].join('\n');
+}
 
 function clip(text: string, maxChars: number): string {
   const trimmed = redactBrainText(text).trim();
@@ -287,7 +331,7 @@ async function loadLatestPlan(taskId: string): Promise<string> {
 }
 
 /**
- * The completion check a finished coding turn gets before it is reported:
+ * The server-side completion policy evaluates worker-supplied evidence:
  * typed yes/no judgments over what was asked, what the agent says it did, and
  * what the diff shows. It replaces the agent-driven `judge` subagent pass for
  * changes with no visual proof, which re-read the repository for minutes to
@@ -380,7 +424,13 @@ export async function evaluateTaskCompletionGate(input: {
         .join(' ')}`,
     );
 
-    return { status: flags.length > 0 ? 'flagged' : 'clear', flags };
+    return flags.length > 0
+      ? {
+          status: 'flagged',
+          flags,
+          message: buildCompletionGateMessage(input.check.trigger, flags),
+        }
+      : { status: 'clear', flags };
   } catch (error) {
     console.warn(
       `[TaskCompletionGate] Skipped after a failure. taskId=${input.taskId} error="${
