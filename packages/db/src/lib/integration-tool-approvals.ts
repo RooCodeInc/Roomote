@@ -15,6 +15,7 @@ import { db, type DatabaseOrTransaction } from '../db';
 import { isDeploymentExperimentEnabledWithShareLock } from './deployment-experiments';
 import {
   integrationToolApprovalRequests,
+  integrationToolAutoEvaluations,
   integrationToolPolicies,
   integrationToolUserPolicies,
   integrationToolSessionOverrides,
@@ -104,20 +105,14 @@ type IntegrationToolApprovalRow =
 function policyMetadata(
   row: Pick<
     IntegrationToolPolicyRow,
-    | 'id'
-    | 'integrationId'
-    | 'toolName'
-    | 'mode'
-    | 'auto'
-    | 'updatedAt'
-    | 'createdAt'
+    'id' | 'integrationId' | 'toolName' | 'mode' | 'updatedAt' | 'createdAt'
   >,
 ): IntegrationToolPolicyMetadata {
   return {
     policyId: row.id,
     integrationId: row.integrationId,
     toolName: row.toolName,
-    mode: row.mode === 'ask' && row.auto ? 'auto' : row.mode,
+    mode: row.mode,
     updatedAt: row.updatedAt.toISOString(),
     createdAt: row.createdAt.toISOString(),
   };
@@ -133,6 +128,7 @@ function approvalMetadata(
     argsSummary: row.argsSummary,
     status: row.status,
     taskId: row.taskId,
+    ...(row.autoEvaluation ? { autoEvaluation: row.autoEvaluation } : {}),
     expiresAt: row.expiresAt.toISOString(),
     createdAt: row.createdAt.toISOString(),
   };
@@ -193,6 +189,8 @@ async function upsertPolicy(
 ): Promise<void> {
   // Both tables have every column this writes; the store supplies the rest.
   const table = store.table as typeof integrationToolPolicies;
+  // The default has no row; every stored choice, Always allow included, is a
+  // person's decision that Auto mode leaves alone.
   if (input.mode === 'allow') {
     await db
       .delete(table)
@@ -205,11 +203,8 @@ async function upsertPolicy(
       );
     return;
   }
-  // `auto` is stored as `ask` with a flag, so a release that predates it
-  // still asks about the tool instead of reading an unknown mode as allow.
   const changes = {
-    mode: input.mode === 'auto' ? ('ask' as const) : input.mode,
-    auto: input.mode === 'auto',
+    mode: input.mode,
     ...store.ownValues,
     updatedAt: sql`clock_timestamp()`,
   };
@@ -221,6 +216,49 @@ async function upsertPolicy(
       toolName: input.toolName,
       ...changes,
     })
+    .onConflictDoUpdate({ target: store.conflictTarget, set: changes });
+}
+
+async function upsertPolicies(
+  store: PolicyStore,
+  input: {
+    integrationId: string;
+    toolNames: string[];
+    mode: IntegrationToolPolicyMode;
+  },
+): Promise<void> {
+  const toolNames = [...new Set(input.toolNames)];
+  if (toolNames.length === 0) return;
+
+  const table = store.table as typeof integrationToolPolicies;
+  if (input.mode === 'allow') {
+    await db
+      .delete(table)
+      .where(
+        and(
+          store.owns,
+          eq(table.integrationId, input.integrationId),
+          inArray(table.toolName, toolNames),
+        ),
+      );
+    return;
+  }
+
+  const changes = {
+    mode: input.mode,
+    ...store.ownValues,
+    updatedAt: sql`clock_timestamp()`,
+  };
+  await db
+    .insert(table)
+    .values(
+      toolNames.map((toolName) => ({
+        ...store.keyValues,
+        integrationId: input.integrationId,
+        toolName,
+        ...changes,
+      })),
+    )
     .onConflictDoUpdate({ target: store.conflictTarget, set: changes });
 }
 
@@ -242,6 +280,16 @@ export function upsertIntegrationToolPolicy(input: {
   return upsertPolicy(deploymentPolicyStore(input.updatedByUserId), input);
 }
 
+/** Configure many tools for one integration in a single database statement. */
+export function upsertIntegrationToolPolicies(input: {
+  integrationId: string;
+  toolNames: string[];
+  mode: IntegrationToolPolicyMode;
+  updatedByUserId: string;
+}) {
+  return upsertPolicies(deploymentPolicyStore(input.updatedByUserId), input);
+}
+
 /** One user's personal policies. */
 export function listIntegrationToolUserPolicies(userId: string) {
   return listPolicies(userPolicyStore(userId));
@@ -259,6 +307,16 @@ export function upsertIntegrationToolUserPolicy(input: {
   mode: IntegrationToolPolicyMode;
 }) {
   return upsertPolicy(userPolicyStore(input.userId), input);
+}
+
+/** Configure many tools for one user's integration in one statement. */
+export function upsertIntegrationToolUserPolicies(input: {
+  userId: string;
+  integrationId: string;
+  toolNames: string[];
+  mode: IntegrationToolPolicyMode;
+}) {
+  return upsertPolicies(userPolicyStore(input.userId), input);
 }
 
 async function requireSessionOwner(
@@ -294,6 +352,8 @@ export async function insertIntegrationToolApproval(
     argsSummary: unknown;
     /** Set when a task's agent asked; see `claimTaskIntegrationToolCall`. */
     taskId?: string;
+    /** The decision model's view under Auto mode, when already known. */
+    autoEvaluation?: IntegrationToolAutoEvaluation;
   },
 ): Promise<IntegrationToolApprovalMetadata> {
   return db.transaction(async (tx) => {
@@ -319,6 +379,7 @@ export async function insertIntegrationToolApproval(
         sessionId: context.sessionId,
         requesterUserId: owner.id,
         taskId: input.taskId ?? null,
+        autoEvaluation: input.autoEvaluation ?? null,
         integrationId: input.integrationId,
         toolName: input.toolName,
         nativeRequestId: input.nativeRequestId,
@@ -483,7 +544,7 @@ export async function markIntegrationToolApprovalConsumed(input: {
   return claimApprovedIntegrationToolApproval(input, 'consumed');
 }
 
-/** Record the decision model's view of a call to a tool in `auto` mode. */
+/** Record the decision model's view of an Ask first call under Auto mode. */
 export async function recordIntegrationToolAutoEvaluation(
   approvalId: string,
   autoEvaluation: IntegrationToolAutoEvaluation,
@@ -651,6 +712,13 @@ export async function insertAutoApprovedIntegrationToolApproval(
     argsSummary: unknown;
     /** Set when a task's agent asked; see `claimTaskIntegrationToolCall`. */
     taskId?: string;
+    /** The decision model's view under Auto mode, when already known. */
+    autoEvaluation?: IntegrationToolAutoEvaluation;
+    /**
+     * Who approved: the requester through an earlier "don't ask again this
+     * session", or Auto mode's decision model, which leaves no decider.
+     */
+    decidedBy?: 'requester' | 'model';
   },
 ): Promise<IntegrationToolApprovalMetadata> {
   return db.transaction(async (tx) => {
@@ -665,13 +733,14 @@ export async function insertAutoApprovedIntegrationToolApproval(
         sessionId: context.sessionId,
         requesterUserId: owner.id,
         taskId: input.taskId ?? null,
+        autoEvaluation: input.autoEvaluation ?? null,
         integrationId: input.integrationId,
         toolName: input.toolName,
         nativeRequestId: input.nativeRequestId,
         argsFingerprint: input.argsFingerprint,
         argsSummary: redactIntegrationToolArgs(input.argsSummary),
         status: 'approved',
-        decidedByUserId: owner.id,
+        decidedByUserId: input.decidedBy === 'model' ? null : owner.id,
         decidedAt: sql`clock_timestamp()`,
         expiresAt: sql`clock_timestamp()`,
       })
@@ -717,7 +786,10 @@ export async function claimTaskIntegrationToolCall(input: {
       return false;
     }
     const [approved] = await tx
-      .select({ id: integrationToolApprovalRequests.id })
+      .select({
+        id: integrationToolApprovalRequests.id,
+        decidedByUserId: integrationToolApprovalRequests.decidedByUserId,
+      })
       .from(integrationToolApprovalRequests)
       .where(
         and(
@@ -739,11 +811,35 @@ export async function claimTaskIntegrationToolCall(input: {
       .limit(1)
       .for('update', { skipLocked: true });
     if (!approved) return false;
+    // A decision nobody made is Auto mode's; its consumed row reads as such.
     await tx
       .update(integrationToolApprovalRequests)
-      .set({ status: 'consumed' })
+      .set({ status: approved.decidedByUserId ? 'consumed' : 'auto_approved' })
       .where(eq(integrationToolApprovalRequests.id, approved.id));
     return true;
+  });
+}
+
+/**
+ * A recorded risk assessment of a call Auto mode did not decide: while Auto
+ * is off, calls to default tools are assessed in the background and kept
+ * here so the model's judgment can be checked against real traffic.
+ */
+export async function recordIntegrationToolShadowEvaluation(input: {
+  userId: string | null;
+  taskId: string | null;
+  integrationId: string;
+  toolName: string;
+  argsSummary: unknown;
+  evaluation: IntegrationToolAutoEvaluation;
+}): Promise<void> {
+  await db.insert(integrationToolAutoEvaluations).values({
+    userId: input.userId,
+    taskId: input.taskId,
+    integrationId: input.integrationId,
+    toolName: input.toolName,
+    argsSummary: redactIntegrationToolArgs(input.argsSummary),
+    evaluation: input.evaluation,
   });
 }
 

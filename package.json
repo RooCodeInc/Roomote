@@ -39,7 +39,7 @@
     "storybook": "pnpm --filter @roomote/web storybook",
     "changeset": "changeset",
     "version": "node scripts/release/apply-version.mjs",
-    "test:release-scripts": "node --test scripts/release/__tests__/*.test.mjs"
+    "test:release-scripts": "node --test scripts/release/__tests__/*.test.mjs scripts/modal/__tests__/*.test.mjs"
   },
   "devDependencies": {
     "@changesets/cli": "^2.31.0",

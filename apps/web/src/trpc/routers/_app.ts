@@ -18,6 +18,7 @@ import {
   workspaceRoutingSettingsSchema,
   REASONING_EFFORT_VALUES,
   AUTOMATION_RESULT_PRIORITIES,
+  CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH,
   isTriggerableBackgroundAutomationKey,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_IDS,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES,
@@ -34,7 +35,9 @@ import {
   sourceControlTokenBackedProviderSchema,
   sessionGoalInputSchema,
   codingModelRoutingRuleSchema,
+  integrationToolAutoSettingsSchema,
   integrationToolPolicyUpsertSchema,
+  integrationToolPoliciesUpsertSchema,
   taskModelMetadataSchema,
   type ScheduleOnlyBackgroundAutomationFrequencyField,
 } from '@roomote/types';
@@ -226,9 +229,13 @@ import {
 } from '../commands/deployment-experiments';
 import {
   listIntegrationToolPoliciesCommand,
+  getIntegrationToolAutoSettingsCommand,
   listPersonalIntegrationToolPoliciesCommand,
+  setIntegrationToolAutoSettingsCommand,
   setIntegrationToolPolicyCommand,
+  setIntegrationToolPoliciesCommand,
   setPersonalIntegrationToolPolicyCommand,
+  setPersonalIntegrationToolPoliciesCommand,
 } from '../commands/integration-tool-policies';
 import {
   type EnvironmentConfigVersionDetail,
@@ -943,7 +950,11 @@ const automationsRouter = createRouter({
     .input(
       z.object({
         name: z.string().trim().min(1).max(100),
-        prompt: z.string().trim().min(1).max(8_000),
+        prompt: z
+          .string()
+          .trim()
+          .min(1)
+          .max(CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH),
         enabled: z.boolean(),
         resultPriority: z.enum(AUTOMATION_RESULT_PRIORITIES).default('normal'),
         scheduleMode: z.enum([
@@ -986,7 +997,11 @@ const automationsRouter = createRouter({
       z.object({
         id: z.string().uuid(),
         name: z.string().trim().min(1).max(100),
-        prompt: z.string().trim().min(1).max(8_000),
+        prompt: z
+          .string()
+          .trim()
+          .min(1)
+          .max(CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH),
         enabled: z.boolean(),
         resultPriority: z.enum(AUTOMATION_RESULT_PRIORITIES).default('normal'),
         scheduleMode: z.enum([
@@ -3621,6 +3636,11 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         setIntegrationToolPolicyCommand(auth, input),
       ),
+    setMany: protectedProcedure
+      .input(integrationToolPoliciesUpsertSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        setIntegrationToolPoliciesCommand(auth, input),
+      ),
     listPersonal: protectedProcedure.query(({ ctx: { auth } }) =>
       listPersonalIntegrationToolPoliciesCommand(auth),
     ),
@@ -3628,6 +3648,19 @@ export const appRouter = createRouter({
       .input(integrationToolPolicyUpsertSchema)
       .mutation(({ ctx: { auth }, input }) =>
         setPersonalIntegrationToolPolicyCommand(auth, input),
+      ),
+    setManyPersonal: protectedProcedure
+      .input(integrationToolPoliciesUpsertSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        setPersonalIntegrationToolPoliciesCommand(auth, input),
+      ),
+    getAuto: protectedProcedure.query(({ ctx: { auth } }) =>
+      getIntegrationToolAutoSettingsCommand(auth),
+    ),
+    setAuto: protectedProcedure
+      .input(integrationToolAutoSettingsSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        setIntegrationToolAutoSettingsCommand(auth, input),
       ),
   }),
 

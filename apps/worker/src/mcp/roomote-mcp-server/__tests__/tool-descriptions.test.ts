@@ -10,7 +10,9 @@ import {
 } from '@roomote/cloud-agents/show-widget';
 import {
   CREATE_CUSTOM_SKILL_TOOL,
+  CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
+  OPEN_ARTIFACT_TOOL,
   PUBLIC_URL_FETCH_TOOL,
   UPDATE_CUSTOM_SKILL_TOOL,
 } from '@roomote/types';
@@ -189,6 +191,28 @@ describe('roomote MCP tool descriptions', () => {
     expect(scheduleDescription).toContain(
       'Prefer a built-in preset when it matches the requested cadence.',
     );
+  });
+
+  it('enforces the shared custom automation prompt limit in the native tool schema', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const tool = getRegisteredTool(
+      registeredTools,
+      MANAGE_CUSTOM_AUTOMATIONS_TOOL.name,
+    );
+    const promptSchema = getInputSchemaField(
+      tool,
+      'prompt',
+    ) as unknown as z.ZodTypeAny;
+
+    expect(
+      promptSchema.safeParse('x'.repeat(CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH))
+        .success,
+    ).toBe(true);
+    expect(
+      promptSchema.safeParse(
+        'x'.repeat(CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH + 1),
+      ).success,
+    ).toBe(false);
   });
 
   it('registers the shared custom automation descriptor unchanged', async () => {
@@ -463,8 +487,14 @@ describe('roomote MCP tool descriptions', () => {
     expect(tool.config.description).toContain(
       'Use action "get_updates" with sessionId or taskId and its returned cursor',
     );
-    expect(tool.config.description).toContain('Client → Roomote');
-    expect(tool.config.description).toContain('Roomote → Client');
+    expect(tool.config.description).toContain(
+      'Toward the user, synthesize customer-relevant findings, decisions and tradeoffs, progress, and limitations',
+    );
+    expect(tool.config.description).toContain(
+      'use labeled “Agent → Roomote” / “Roomote → Agent” relays only when the user asks to see the exchange',
+    );
+    expect(tool.config.description).not.toContain('Client → Roomote');
+    expect(tool.config.description).not.toContain('Roomote → Client');
     expect(tool.config.description).toContain('Agent (on behalf of user):');
     expect(tool.config.description).toContain('untrusted textual convention');
     expect(tool.config.description).toContain(
@@ -630,6 +660,55 @@ describe('roomote MCP tool descriptions', () => {
     );
     expect(artifactTypeField.description).toBe(
       'Optional artifact type filter for list (one of "general", "plan", "visual-proof"). Omit to list all artifact types.',
+    );
+  });
+
+  it('registers the generic open_artifact capability', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const tool = getRegisteredTool(registeredTools, OPEN_ARTIFACT_TOOL.name);
+
+    expect(tool.config.title).toBe(OPEN_ARTIFACT_TOOL.title);
+    expect(tool.config.description).toBe(OPEN_ARTIFACT_TOOL.description);
+    expect(tool.config.annotations).toEqual(OPEN_ARTIFACT_TOOL.annotations);
+    const schema = tool.config
+      .inputSchema as unknown as z.ZodObject<z.ZodRawShape>;
+    expect(Object.keys(schema.shape)).toEqual([
+      'taskId',
+      'sessionId',
+      'path',
+      'version',
+    ]);
+    expect(tool.config.description).toContain(
+      'Binary or otherwise unsupported formats return an explicit unsupported-format error with metadata but no content',
+    );
+    expect(tool.config.description).toContain(
+      'never guess an artifact ID or path',
+    );
+  });
+
+  it('does not add the current task when opening a Session artifact', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ content: 'session artifact' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { registeredTools } = await importRoomoteMcpServer({
+      ROOMOTE_CLOUD_TOKEN: 'run-token',
+      ROOMOTE_PLATFORM_API_URL: 'https://platform.example.com',
+      ROOMOTE_TASK_ID: 'current-task',
+    });
+    const tool = getRegisteredTool(registeredTools, OPEN_ARTIFACT_TOOL.name);
+
+    await tool.handler?.({ sessionId: 'session-1', path: 'notes/context.md' });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://platform.example.com/api/mcp/artifacts/open',
+      expect.objectContaining({
+        body: JSON.stringify({
+          sessionId: 'session-1',
+          path: 'notes/context.md',
+        }),
+      }),
     );
   });
 

@@ -18,6 +18,7 @@ import {
   NO_REPOSITORIES,
   AUTOMATION_RESULT_PRIORITY_LABELS,
   AUTOMATION_RESULT_PRIORITIES,
+  CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH,
   type AutomationResultPriority,
   type CustomAutomationScheduleMode,
   type ReasoningEffort,
@@ -966,7 +967,7 @@ export function CustomAutomationsSection({
             ref={promptRef}
             id="custom-automation-prompt"
             value={form.prompt}
-            maxLength={8000}
+            maxLength={CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH}
             disabled={busy}
             rows={5}
             aria-invalid={fieldErrors.prompt ? true : undefined}

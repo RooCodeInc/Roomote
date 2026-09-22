@@ -13,7 +13,10 @@ const {
   mockGetTaskHumanOwnerUserIds,
   mockResolveApprovalBlocks,
 } = vi.hoisted(() => ({
-  mockResolveApprovalBlocks: vi.fn(async () => new Map<string, string>()),
+  mockResolveApprovalBlocks: vi.fn(async () => ({
+    blocks: new Map<string, string>(),
+    shadowDefaultTools: false,
+  })),
   mockFindTaskRun: vi.fn(),
   mockFindConnection: vi.fn(),
   mockFindEnablement: vi.fn(),
@@ -25,6 +28,11 @@ const {
 vi.mock('../tool-approval-enforcement', () => ({
   describeProxyToolApprovalBlock: () => '',
   resolveProxyToolApprovalBlocks: mockResolveApprovalBlocks,
+  resolveProxyToolApprovalBlock: (
+    approvals: { blocks: Map<string, string>; defaultBlock?: string },
+    toolName: string,
+  ) => approvals.blocks.get(toolName) ?? approvals.defaultBlock,
+  shadowProxyToolCall: () => undefined,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -655,5 +663,65 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
       type: ['array', 'null'],
       items: { type: 'string' },
     });
+  });
+
+  it('classifies a GET 405 as MCP protocol negotiation', async () => {
+    mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
+    mockFindConnection.mockResolvedValue({
+      id: 'conn-x',
+      userId: null,
+      authConfig: { type: 'x', encryptedBearerToken: 'encrypted-token' },
+    });
+    mockDecrypt.mockReturnValue('x-app-only-token');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response('Method Not Allowed', {
+          status: 405,
+          headers: { 'content-type': 'text/plain' },
+        }),
+      ),
+    );
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+
+    const response = await createApp('x', createRunToken()).request('/mcp', {
+      method: 'GET',
+      headers: { accept: 'text/event-stream' },
+    });
+
+    expect(response.status).toBe(405);
+    expect(info).toHaveBeenCalledWith(
+      expect.stringContaining('outcome="protocol_negotiation"'),
+    );
+    expect(info.mock.calls[0]?.[0]).toContain('retryable=false');
+  });
+
+  it('logs upstream transport failures as one structured line', async () => {
+    mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
+    mockFindConnection.mockResolvedValue({
+      id: 'conn-x',
+      userId: null,
+      authConfig: { type: 'x', encryptedBearerToken: 'encrypted-token' },
+    });
+    mockDecrypt.mockReturnValue('x-app-only-token');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockRejectedValue(new Error('connection reset')),
+    );
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const response = await postMcp(
+      createApp('x', createRunToken()),
+      createInitializeRequest(1),
+    );
+
+    expect(response.status).toBe(502);
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(error.mock.calls[0]?.[0]).toContain(
+      '[MCP Proxy:X] Upstream fetch failed',
+    );
+    expect(error.mock.calls[0]?.[0]).toContain('outcome="transport_error"');
+    expect(error.mock.calls[0]?.[0]).toContain('retryable=true');
+    expect(error.mock.calls[0]?.[0]).not.toContain('[object Object]');
   });
 });

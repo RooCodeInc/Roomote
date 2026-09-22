@@ -23,7 +23,13 @@ const {
   mockFindCustomServer: vi.fn(),
   mockFindConnection: vi.fn(),
   mockGetValidAccessToken: vi.fn(),
-  mockResolveApprovalBlocks: vi.fn(async () => new Map<string, string>()),
+  mockResolveApprovalBlocks: vi.fn(
+    async (): Promise<{
+      blocks: Map<string, string>;
+      defaultBlock?: 'needs_approval';
+      shadowDefaultTools: boolean;
+    }> => ({ blocks: new Map(), shadowDefaultTools: false }),
+  ),
   mockClaimTaskToolCall: vi.fn(async () => false),
 }));
 
@@ -463,7 +469,10 @@ describe('createCustomMcpProxy', () => {
 
   describe('tool approval policies', () => {
     afterEach(() => {
-      mockResolveApprovalBlocks.mockImplementation(async () => new Map());
+      mockResolveApprovalBlocks.mockImplementation(async () => ({
+        blocks: new Map(),
+        shadowDefaultTools: false,
+      }));
       mockClaimTaskToolCall.mockReset().mockResolvedValue(false);
     });
 
@@ -498,9 +507,10 @@ describe('createCustomMcpProxy', () => {
       mockFindCustomServer.mockResolvedValue(
         buildServerRow({ url: upstreamUrl() }),
       );
-      mockResolveApprovalBlocks.mockResolvedValue(
-        new Map([['dangerous_tool', 'needs_approval']]),
-      );
+      mockResolveApprovalBlocks.mockResolvedValue({
+        blocks: new Map([['dangerous_tool', 'needs_approval']]),
+        shadowDefaultTools: false,
+      });
 
       const response = await postMcp(createApp(), {
         jsonrpc: '2.0',
@@ -519,9 +529,10 @@ describe('createCustomMcpProxy', () => {
       mockFindCustomServer.mockResolvedValue(
         buildServerRow({ url: upstreamUrl() }),
       );
-      mockResolveApprovalBlocks.mockResolvedValue(
-        new Map([['dangerous_tool', 'needs_approval']]),
-      );
+      mockResolveApprovalBlocks.mockResolvedValue({
+        blocks: new Map([['dangerous_tool', 'needs_approval']]),
+        shadowDefaultTools: false,
+      });
       mockClaimTaskToolCall.mockResolvedValue(true);
 
       const response = await postMcp(createApp(), {
@@ -546,9 +557,10 @@ describe('createCustomMcpProxy', () => {
       mockFindCustomServer.mockResolvedValue(
         buildServerRow({ url: upstreamUrl() }),
       );
-      mockResolveApprovalBlocks.mockResolvedValue(
-        new Map([['dangerous_tool', 'needs_approval']]),
-      );
+      mockResolveApprovalBlocks.mockResolvedValue({
+        blocks: new Map([['dangerous_tool', 'needs_approval']]),
+        shadowDefaultTools: false,
+      });
 
       const list = await postMcp(createApp(), {
         jsonrpc: '2.0',
@@ -576,13 +588,43 @@ describe('createCustomMcpProxy', () => {
       expect(mockClaimTaskToolCall).not.toHaveBeenCalled();
     });
 
+    it('gates every default tool of a task while Auto mode is on', async () => {
+      mockFindCustomServer.mockResolvedValue(
+        buildServerRow({ url: upstreamUrl() }),
+      );
+      mockResolveApprovalBlocks.mockResolvedValue({
+        blocks: new Map([['safe_tool', 'allow']]),
+        defaultBlock: 'needs_approval',
+        shadowDefaultTools: false,
+      });
+      mockClaimTaskToolCall.mockResolvedValue(false);
+
+      const gated = await postMcp(createApp(), {
+        jsonrpc: '2.0',
+        id: 5,
+        method: 'tools/call',
+        params: { name: 'dangerous_tool', arguments: {} },
+      });
+      expect(gated.status).toBe(403);
+
+      // A tool someone chose to always allow needs no approval.
+      const allowed = await postMcp(createApp(), {
+        jsonrpc: '2.0',
+        id: 6,
+        method: 'tools/call',
+        params: { name: 'safe_tool', arguments: {} },
+      });
+      expect(allowed.status).toBe(200);
+    });
+
     it('hides blocked tools from tools/list', async () => {
       mockFindCustomServer.mockResolvedValue(
         buildServerRow({ url: upstreamUrl() }),
       );
-      mockResolveApprovalBlocks.mockResolvedValue(
-        new Map([['dangerous_tool', 'reject']]),
-      );
+      mockResolveApprovalBlocks.mockResolvedValue({
+        blocks: new Map([['dangerous_tool', 'reject']]),
+        shadowDefaultTools: false,
+      });
 
       const response = await postMcp(createApp(), {
         jsonrpc: '2.0',

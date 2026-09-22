@@ -42,6 +42,30 @@ const ANALYTICS_PULL_REQUESTS_PER_PAGE = 100;
 const ANALYTICS_MAX_ALL_TIME_PULL_REQUEST_PAGES = 50;
 const TASK_RUN_GITHUB_TOKEN_CACHE_MAX_AGE_MS = 15 * 60 * 1000;
 
+/**
+ * A single GitHub App token cannot cover repositories on more than one
+ * installation. This is a deployment configuration outcome, not a transient
+ * API failure: callers must not retry it, and dequeue may treat it as a
+ * reason to skip an optional provider.
+ */
+export class GitHubInstallationSpanError extends Error {
+  readonly repositoryNames: string[];
+
+  constructor(prefix: string, taskRunId: number, repositoryNames: string[]) {
+    super(
+      `${prefix} for task run ${taskRunId} span multiple GitHub installations: ${repositoryNames.join(', ')}`,
+    );
+    this.name = 'GitHubInstallationSpanError';
+    this.repositoryNames = repositoryNames;
+  }
+}
+
+export function isGitHubInstallationSpanError(
+  error: unknown,
+): error is GitHubInstallationSpanError {
+  return error instanceof GitHubInstallationSpanError;
+}
+
 async function resolveTokenOptionsForRepositoryNames({
   taskRun,
   repositoryNames,
@@ -125,8 +149,10 @@ async function resolveTokenOptionsForRepositoryNames({
     };
   }
 
-  throw new Error(
-    `${spanningMessagePrefix} for task run ${taskRun.id} span multiple GitHub installations: ${uniqueRepositoryNames.join(', ')}`,
+  throw new GitHubInstallationSpanError(
+    spanningMessagePrefix,
+    taskRun.id,
+    uniqueRepositoryNames,
   );
 }
 
@@ -254,9 +280,9 @@ async function resolveTaskRunGitHubTokenOptions(
 
   // Legacy environment payloads only stamped their initially prepared
   // repositories, so retain the same-installation expansion for those runs.
-  // New checkout-scope stamps include every advertised GitHub repository. If
-  // one falls outside the environment installation, resolve the full stamp so
-  // token creation fails closed instead of advertising an unusable checkout.
+  // New checkout-scope stamps include every advertised GitHub repository. Prefer
+  // a token that covers that full stamp, but fall back to the environment
+  // installation when the stamp spans GitHub App installations.
   const environmentRepositoryNames = new Set(
     repositoryRows?.map((repository) => repository.fullName) ?? [],
   );
@@ -265,12 +291,30 @@ async function resolveTaskRunGitHubTokenOptions(
       (repository) => !environmentRepositoryNames.has(repository),
     )
   ) {
-    return resolveTokenOptionsForRepositoryNames({
-      taskRun,
-      repositoryNames: stampedRepositories,
-      missingMessagePrefix: 'Stamped repositories not found',
-      spanningMessagePrefix: 'Stamped repositories',
-    });
+    try {
+      return await resolveTokenOptionsForRepositoryNames({
+        taskRun,
+        repositoryNames: stampedRepositories,
+        missingMessagePrefix: 'Stamped repositories not found',
+        spanningMessagePrefix: 'Stamped repositories',
+      });
+    } catch (error) {
+      // Extra advertised checkouts can span GitHub App installations. Mint the
+      // environment's installation instead of blocking a workspace that already
+      // has a single-installation GitHub scope.
+      if (!repositoryRows?.length || !isGitHubInstallationSpanError(error)) {
+        throw error;
+      }
+
+      // The payload still advertises the excluded repositories as on-demand
+      // checkouts, so name them: a later clone failure is otherwise opaque.
+      const excludedRepositories = stampedRepositories.filter(
+        (repository) => !environmentRepositoryNames.has(repository),
+      );
+      console.warn(
+        `[resolveTaskRunGitHubTokenOptions] Stamped GitHub repositories for task run ${taskRun.id} span multiple installations; minting the environment installation only. Not reachable with this token: ${excludedRepositories.join(', ')}`,
+      );
+    }
   }
 
   if (repositoryRows !== null) {

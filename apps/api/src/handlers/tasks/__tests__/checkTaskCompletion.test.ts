@@ -67,7 +67,7 @@ describe('checkTaskCompletion', () => {
       taskId: 'task-1',
       userId: 'user-1',
       // An older worker sends no command evidence.
-      check: { ...check, commands: [] },
+      check: { ...check, commands: [], trigger: 'turn_end' },
     });
   });
 

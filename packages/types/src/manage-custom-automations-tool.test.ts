@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { FAST_EXECUTION, NO_REPOSITORIES } from './constants';
+import { CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH } from './background-agents';
 import {
   MANAGE_CUSTOM_AUTOMATIONS_ACTIONS,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
@@ -16,6 +17,26 @@ describe('manage custom automations tool contract', () => {
         action,
       });
     }
+  });
+
+  it('accepts the full custom automation prompt limit and rejects one extra character', () => {
+    const input = {
+      action: 'create' as const,
+      name: 'Long prompt automation',
+      prompt: 'x'.repeat(CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH),
+      schedule: 'daily',
+      environmentId: 'environment-1',
+    };
+
+    expect(manageCustomAutomationsInputSchema.safeParse(input).success).toBe(
+      true,
+    );
+    expect(
+      manageCustomAutomationsInputSchema.safeParse({
+        ...input,
+        prompt: `${input.prompt}x`,
+      }).success,
+    ).toBe(false);
   });
 
   it('publishes the canonical descriptor and field descriptions', () => {

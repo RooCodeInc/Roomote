@@ -829,7 +829,59 @@ export const runEventTypes = [
 
 export type RunEventType = (typeof runEventTypes)[number];
 
-export type RunEventDetails = Record<string, unknown>;
+export interface TaskRunCorrelation {
+  taskId: string;
+  runId: number;
+}
+
+export const taskRunDisconnectReasonCodes = [
+  'connection_timeout',
+  'subscription_error',
+  'subscription_closed',
+  'connection_refresh_failed',
+  'auth_rejected',
+  'unsupported_provider',
+  'readiness_timeout',
+  'run_terminal',
+  'run_missing',
+  'sandbox_not_ready',
+  'provider_stream_error',
+  'stream_completed',
+] as const;
+
+export type TaskRunDisconnectReasonCode =
+  (typeof taskRunDisconnectReasonCodes)[number];
+
+export interface TaskRunDisconnectReason {
+  kind: 'disconnect';
+  code: TaskRunDisconnectReasonCode;
+  source: 'api' | 'web';
+  phase?: 'initial' | 'established';
+  closeCode?: number | null;
+  closeReason?: string | null;
+  reconnectAttempt?: number | null;
+  reconnectMaxAttempts?: number | null;
+  exhausted: boolean;
+}
+
+export interface TaskRunTerminalReason {
+  kind: 'terminal';
+  status: RunStatus;
+  errorCode: string | null;
+  message: string | null;
+}
+
+export interface TaskRunDisconnectEvent {
+  correlation: TaskRunCorrelation;
+  disconnectReason: TaskRunDisconnectReason;
+  terminalReason: TaskRunTerminalReason | null;
+}
+
+export interface RunEventDetails extends Record<string, unknown> {
+  correlation?: TaskRunCorrelation;
+  disconnectReason?: TaskRunDisconnectReason;
+  terminalReason?: TaskRunTerminalReason | null;
+}
 
 export const computeProviderLaunchModes = [
   'fresh',
@@ -2340,6 +2392,37 @@ export const isRunningRunStatus = (status?: RunStatus): boolean =>
 
 export const isExitedRunStatus = (status?: RunStatus): boolean =>
   !!status && exitedStatuses.has(status);
+
+export function buildTaskRunDisconnectEvent(input: {
+  taskId: string;
+  runId: number;
+  reasonCode: TaskRunDisconnectReasonCode;
+  source: 'api' | 'web';
+  status: RunStatus;
+  errorCode?: string | null;
+  error?: string | null;
+}): TaskRunDisconnectEvent {
+  return {
+    correlation: {
+      taskId: input.taskId,
+      runId: input.runId,
+    },
+    disconnectReason: {
+      kind: 'disconnect',
+      code: input.reasonCode,
+      source: input.source,
+      exhausted: false,
+    },
+    terminalReason: isExitedRunStatus(input.status)
+      ? {
+          kind: 'terminal',
+          status: input.status,
+          errorCode: input.errorCode ?? null,
+          message: input.error ?? null,
+        }
+      : null,
+  };
+}
 
 /**
  * Lifecycle of environment setup (repository setup commands and Docker

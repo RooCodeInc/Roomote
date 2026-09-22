@@ -10,6 +10,7 @@ LABEL org.opencontainers.image.source=https://github.com/RooCodeInc/Roomote
 
 ARG AGENT_BROWSER_VERSION=0.37.0
 ARG OPENCODE_CLI_VERSION=1.18.30
+ARG RELEASE_PRODUCT_VERSION
 ARG FFMPEG_INSTALLER_VERSION=1.1.0
 # @ffprobe-installer (not ffprobe-static, which ships no linux/arm64 binary
 # yet still reports a path for it) so amd64 and arm64 images share one recipe.
@@ -128,6 +129,7 @@ ENV FFMPEG_EXECUTABLE_PATH="/opt/ffmpeg/bin/ffmpeg"
 ENV FFPROBE_EXECUTABLE_PATH="/opt/ffmpeg/bin/ffprobe"
 ENV REMOTION_HEADLESS_SHELL_PATH="/opt/remotion/headless-shell"
 ENV ROOMOTE_BAKED_OPENCODE_CLI_VERSION=${OPENCODE_CLI_VERSION}
+ENV ROOMOTE_BAKED_WORKER_PRODUCT_VERSION=${RELEASE_PRODUCT_VERSION}
 
 COPY .docker/sandbox/install-browser-agent.sh /tmp/install-browser-agent.sh
 

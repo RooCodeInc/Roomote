@@ -1,12 +1,12 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 
-import { resolveActorScopedUserContext } from '../lib/auth/resolve-actor-scoped-user';
 import {
   getTaskToolApprovalStatus,
   requestTaskToolApproval,
 } from '../lib/task-tool-approvals';
 import { findTaskRunByRunTokenClaims } from '../lib/task-runs/find-task-run';
+import { resolveActorScopedUserContext } from '../lib/auth/resolve-actor-scoped-user';
 import { authenticatedProcedure, isRunToken, router } from '../trpc';
 import { resolveTaskRunMcpServerConfigs } from './mcp-connections';
 
@@ -31,6 +31,7 @@ export const toolApprovalsRouter = router({
           toolName: z.string().min(1).max(200),
           nativeRequestId: z.string().min(1).max(200),
           args: z.unknown(),
+          userRequest: z.string().max(20_000).optional(),
         })
         .strict(),
     )

@@ -207,7 +207,7 @@ export async function prepareOpenCodeCommandEnv(options: {
   runtimeEnv: Record<string, string>;
   workspacePath: string;
   mcpServers?: Record<string, unknown>;
-  toolApprovalPermission?: Record<string, 'ask' | 'deny'>;
+  toolApprovalPermission?: Record<string, 'allow' | 'ask' | 'deny'>;
   model?: string;
   reasoningEffortOverride?: ReasoningEffort;
   developerInstructionsContent?: string;

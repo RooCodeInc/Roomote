@@ -30,6 +30,7 @@ import {
   FAST_EXECUTION,
   REASONING_EFFORT_VALUES,
   AUTOMATION_RESULT_PRIORITIES,
+  CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH,
   getAutomationTargetEmailIdentityId,
   getAutomationTargetKind,
   type BackgroundAutomationProvider,
@@ -65,7 +66,7 @@ const environmentTargetSchema = z.union([
 
 const writeSchema = z.object({
   name: z.string().trim().min(1).max(100),
-  prompt: z.string().trim().min(1).max(8_000),
+  prompt: z.string().trim().min(1).max(CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH),
   enabled: z.boolean().default(true),
   resultPriority: z.enum(AUTOMATION_RESULT_PRIORITIES).default('normal'),
   schedule: z.string().trim().min(1).max(500),
@@ -81,7 +82,12 @@ const writeSchema = z.object({
 
 const updateSchema = z.object({
   name: z.string().trim().min(1).max(100).optional(),
-  prompt: z.string().trim().min(1).max(8_000).optional(),
+  prompt: z
+    .string()
+    .trim()
+    .min(1)
+    .max(CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH)
+    .optional(),
   enabled: z.boolean().optional(),
   resultPriority: z.enum(AUTOMATION_RESULT_PRIORITIES).optional(),
   schedule: z.string().trim().min(1).max(500).optional(),

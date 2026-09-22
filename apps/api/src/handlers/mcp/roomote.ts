@@ -61,6 +61,7 @@ import { resolveAboutMeVersion } from './about-me-version';
 import { registerRoomoteMemberTools } from './roomote-member-tools';
 import { registerRoomoteCustomAutomationsTool } from './roomote-custom-automations-tool';
 import { registerRoomoteCustomSkillsTool } from './roomote-custom-skills-tool';
+import { registerRoomoteArtifactTool } from './roomote-artifacts-tool';
 import { registerRoomoteCommunicationTools } from './roomote-communication-tools';
 import { registerRoomotePublicUrlFetchTool } from './roomote-public-url-fetch';
 
@@ -447,6 +448,7 @@ function createRoomoteMcpServer(
   }
   registerRoomoteCustomAutomationsTool(server, toolAuth);
   registerRoomoteCustomSkillsTool(server, toolAuth);
+  registerRoomoteArtifactTool(server, toolAuth);
   registerRoomotePublicUrlFetchTool(server);
 
   server.registerTool(

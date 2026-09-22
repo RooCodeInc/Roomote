@@ -57,6 +57,8 @@ vi.mock('@roomote/db/server', () => ({
   eq: mockEq,
   and: mockAnd,
   isNull: mockIsNull,
+  // The approval-policy experiment stays off in these auth tests.
+  isDeploymentExperimentEnabled: vi.fn(async () => false),
 }));
 
 vi.mock('@roomote/db/encryption', () => ({

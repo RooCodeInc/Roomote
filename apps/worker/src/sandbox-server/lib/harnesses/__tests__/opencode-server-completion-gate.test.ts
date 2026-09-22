@@ -23,13 +23,25 @@ vi.mock('../../../../monitoring/sentry', () => ({
   captureWorkerMessage: vi.fn(),
 }));
 
-vi.mock('../opencode-server/completion-gate', async (importOriginal) => ({
-  ...(await importOriginal<
-    typeof import('../opencode-server/completion-gate')
-  >()),
-  collectShippedDiff: mockCollectShippedDiff,
-  requestTaskCompletionCheck: mockRequestTaskCompletionCheck,
-}));
+vi.mock(
+  '../opencode-server/completion-gate-evidence',
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import('../opencode-server/completion-gate-evidence')
+    >()),
+    collectShippedDiff: mockCollectShippedDiff,
+  }),
+);
+
+vi.mock(
+  '../opencode-server/completion-gate-runtime',
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import('../opencode-server/completion-gate-runtime')
+    >()),
+    requestTaskCompletionCheck: mockRequestTaskCompletionCheck,
+  }),
+);
 
 const GATE_ENV = {
   ROOMOTE_COMPLETION_GATE: 'true',
@@ -197,6 +209,7 @@ describe('OpenCode harness completion check', () => {
       expect(mockRequestTaskCompletionCheck).toHaveBeenCalledWith(
         GATE_ENV,
         expect.objectContaining({
+          trigger: 'turn_end',
           report: 'Removed the guard.',
           diffTruncated: false,
         }),
@@ -210,6 +223,7 @@ describe('OpenCode harness completion check', () => {
     mockRequestTaskCompletionCheck.mockResolvedValue({
       status: 'flagged',
       flags: [{ id: 'requestUnaddressed', probability: 0.93 }],
+      message: 'Part of what was asked does not appear to be done.',
     });
     const { client, harness, prompts, completed, reports } = await startTask();
 
@@ -318,6 +332,8 @@ describe('OpenCode harness completion check', () => {
             resolve({
               status: 'flagged',
               flags: [{ id: 'reportOverclaims', probability: 0.9 }],
+              message:
+                'Your report describes a code change that the diff does not contain.',
             });
         }),
     );
@@ -353,6 +369,7 @@ describe('OpenCode harness completion check', () => {
       mockRequestTaskCompletionCheck.mockResolvedValueOnce({
         status: 'flagged',
         flags: [{ id: 'requestUnaddressed', probability: 0.92 }],
+        message: 'Part of what was asked does not appear to be done.',
       });
       await completeTurn(client, 'msg_2', 'Removed the helper too.');
 
@@ -695,6 +712,8 @@ describe('OpenCode harness completion check', () => {
             resolve({
               status: 'flagged',
               flags: [{ id: 'leftoverArtifacts', probability: 0.95 }],
+              message:
+                'The diff appears to add something that should not ship.',
             });
         }),
     );
@@ -719,6 +738,8 @@ describe('OpenCode harness completion check', () => {
     mockRequestTaskCompletionCheck.mockResolvedValue({
       status: 'flagged',
       flags: [{ id: 'reportOverclaims', probability: 0.9 }],
+      message:
+        'Roomote held this report against what was asked before sending it. Your report describes a code change that the diff does not contain.',
     });
     const { harness } = await startTask();
 
@@ -736,6 +757,9 @@ describe('OpenCode harness completion check', () => {
       // The report under check is the tool's own text.
       expect(mockRequestTaskCompletionCheck.mock.calls[0]![1].report).toBe(
         'Removed the guard and added a retry helper.',
+      );
+      expect(mockRequestTaskCompletionCheck.mock.calls[0]![1].trigger).toBe(
+        'report',
       );
 
       // Same work: one hold only, and no second request to the platform.
@@ -780,6 +804,9 @@ describe('OpenCode harness completion check', () => {
       expect(mockRequestTaskCompletionCheck).toHaveBeenCalledTimes(1);
       expect(mockRequestTaskCompletionCheck.mock.calls[0]![1].report).toBe(
         'Tests pass; pushing now.',
+      );
+      expect(mockRequestTaskCompletionCheck.mock.calls[0]![1].trigger).toBe(
+        'ship',
       );
 
       await completeTurn(client, 'msg_1', 'Pushed. Done.');
@@ -843,6 +870,47 @@ describe('OpenCode harness completion check', () => {
       expect(mockRequestTaskCompletionCheck.mock.calls[0]![1].report).toBe(
         'Removed the guard; reporting to the session.',
       );
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('keeps the test run in the evidence window through a long delivery tail', async () => {
+    const { client, harness, completed } = await startTask();
+    const run = async (index: number, command: string) =>
+      client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: `prt_${index}`,
+            sessionID: 'ses_1',
+            messageID: 'msg_1',
+            type: 'tool',
+            tool: 'bash',
+            callID: `call_${index}`,
+            state: {
+              status: 'completed',
+              input: { command },
+              output: 'ok',
+              metadata: { exit: 0 },
+            },
+          },
+        },
+      });
+
+    try {
+      await run(0, 'pnpm vitest run src/guard.test.ts');
+      for (let index = 1; index <= 20; index += 1) {
+        await run(index, `git status --short # ${index}`);
+      }
+      await completeTurn(client, 'msg_1', 'Removed the guard. Tests pass.');
+
+      await vi.waitFor(() => expect(completed()).toHaveLength(1));
+      const commands = mockRequestTaskCompletionCheck.mock.calls[0]![1]
+        .commands as Array<{ command: string }>;
+
+      expect(commands).toHaveLength(12);
+      expect(commands[0]!.command).toBe('pnpm vitest run src/guard.test.ts');
     } finally {
       harness.dispose();
     }
