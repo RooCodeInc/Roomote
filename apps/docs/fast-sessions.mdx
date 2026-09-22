@@ -42,7 +42,7 @@ search them live by name or description. An additional checkout does not
 provision another environment's services.
 
 You can name a repository loosely ("my fork of widgets", "the billing repo")
-without setting up an environment for it. Fast sees the deployment's active
+without setting up an environment for it. Roomote sees the deployment's active
 connected repositories and can search all of them by name or description, so it
 resolves the repository itself and asks only when several plausibly match.
 
@@ -123,7 +123,11 @@ requirements, pagination limits, and the code-search deprecation.
 ## The session view
 
 A session header shows the other people currently viewing that session. Your
-own avatar is omitted from the viewer list.
+own avatar is omitted from the viewer list. If you can manage the session,
+select its title to rename it. The **More actions** menu can stop every active
+task in the session without deleting its work, or archive the session and its
+attached tasks. Archiving is reversible, keeps artifacts and memories, and
+cancels the session's scheduled wakeups.
 
 A session timeline shows prompts, replies, and delegated execution activity.
 Execution cards show their status, workspace, pull requests, artifacts, latest

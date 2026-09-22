@@ -62,12 +62,35 @@ silently bypassed with another connection method.
 ## Manage available tools
 
 Some connected integrations expose a **Manage tools** action in
-**Settings > Integrations**. Admins can use it to restrict the types of
-operations Roomote can make with the service.
+**Settings > Integrations**. The dialog groups tools into read-only and
+write/delete sections when the integration supplies that metadata. Clear a
+tool's checkbox to hide it from agents and block direct calls to it at the
+Roomote proxy.
 
-Use this as a coarse permissions system, for example allowing only read
-operations or restricting access to a certain type of entity. The list varies
-depending on the integration.
+Admins can also enable **Integration tool approvals** under **Settings >
+Experimental**. Each tool then has one of four approval modes:
+
+- **Always allow** keeps the normal behavior.
+- **Ask first** pauses each call for the session owner.
+- **Auto (preview)** still asks first, but records what the configured decision
+  model would have recommended so you can compare it with the owner's choice.
+  The model never decides the call while this mode is a preview.
+- **Reject** blocks the tool outright.
+
+An approval card shows the integration and tool, with sanitized arguments under
+**Details**. The owner can **Allow once**, **Allow for this session**, or
+**Deny**. The session-wide choice applies only to later calls to that tool in
+the same session; it does not change the saved policy. Unanswered requests
+expire and fail closed. A delegated task asks its parent session's owner, while
+an unattended task with nobody who can answer cannot run an **Ask first** tool.
+
+Deployment policies are managed by admins and apply from the next session turn.
+Members can set personal policies from a personal integration or MCP server's
+**Manage tools** dialog for their own sessions. Where both deployment and
+personal policies govern a built-in integration, the stricter one wins; a
+personal policy cannot loosen an admin's restriction. Session owners can also
+request an **Ask first** override for an otherwise allowed tool from its
+transcript call.
 
 Some integrations can only list tools after the first user links their account
 from [Personal Settings](/personal-settings).
