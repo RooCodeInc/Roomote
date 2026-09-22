@@ -87,7 +87,9 @@ export const steerTask = publicProcedure
     if (hasActiveTurn && ctx.harnessManager.supportsNativeTurnSteering) {
       const canDeliver =
         (await ctx.prepareActorScopedTurn?.(userId, {
-          allowMcpReconnect: false,
+          // Native steering must not run under the previous actor's mounted
+          // MCP snapshot after a trusted actor transition.
+          allowMcpReconnect: true,
         })) !== false;
 
       if (!canDeliver) {
