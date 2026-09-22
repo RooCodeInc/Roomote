@@ -1129,34 +1129,28 @@ export async function sendMessageToTask({
       !run.sandboxServerUrl || (await hasOpenTaskFollowUpMessages(run.id));
 
     if (queueBeforeLiveDelivery) {
-      try {
-        await touchTaskActivity(db, taskId);
-        await maybeCreateSlackReplyQuoteContext({
-          runId: run.id,
-          payload: run.payload as Record<string, unknown> | null,
-          slackThreadTs: channelBindings?.slackThreadTs ?? null,
-          userId: senderUserId,
-          message: quoteText,
-          senderMode,
-        });
-        const queued = await persistQueuedTaskFollowUp({
-          run: run as LatestTaskRun,
-          taskId,
-          senderUserId,
-          message,
-          quoteText,
-          images,
-          source,
-          clientMessageId,
-          senderMode,
-          workerQuoteUserName,
-          deliveryMode: 'send',
-        });
-
-        return queued;
-      } catch (error) {
-        throw error;
-      }
+      await touchTaskActivity(db, taskId);
+      await maybeCreateSlackReplyQuoteContext({
+        runId: run.id,
+        payload: run.payload as Record<string, unknown> | null,
+        slackThreadTs: channelBindings?.slackThreadTs ?? null,
+        userId: senderUserId,
+        message: quoteText,
+        senderMode,
+      });
+      return persistQueuedTaskFollowUp({
+        run: run as LatestTaskRun,
+        taskId,
+        senderUserId,
+        message,
+        quoteText,
+        images,
+        source,
+        clientMessageId,
+        senderMode,
+        workerQuoteUserName,
+        deliveryMode: 'send',
+      });
     }
 
     let didSwitchActingUser = false;
@@ -1372,33 +1366,27 @@ export async function steerMessageToTask({
       !run.sandboxServerUrl || (await hasOpenTaskFollowUpMessages(run.id));
 
     if (queueBeforeLiveDelivery) {
-      try {
-        await touchTaskActivity(db, taskId);
-        await maybeCreateSlackReplyQuoteContext({
-          runId: run.id,
-          payload: run.payload as Record<string, unknown> | null,
-          slackThreadTs: channelBindings?.slackThreadTs ?? null,
-          userId,
-          message: quoteText,
-          senderMode,
-        });
-        const queued = await persistQueuedTaskFollowUp({
-          run: run as LatestTaskRun,
-          taskId,
-          senderUserId: userId,
-          message,
-          quoteText,
-          images,
-          clientMessageId,
-          senderMode,
-          workerQuoteUserName,
-          deliveryMode: 'steer',
-        });
-
-        return queued;
-      } catch (error) {
-        throw error;
-      }
+      await touchTaskActivity(db, taskId);
+      await maybeCreateSlackReplyQuoteContext({
+        runId: run.id,
+        payload: run.payload as Record<string, unknown> | null,
+        slackThreadTs: channelBindings?.slackThreadTs ?? null,
+        userId,
+        message: quoteText,
+        senderMode,
+      });
+      return persistQueuedTaskFollowUp({
+        run: run as LatestTaskRun,
+        taskId,
+        senderUserId: userId,
+        message,
+        quoteText,
+        images,
+        clientMessageId,
+        senderMode,
+        workerQuoteUserName,
+        deliveryMode: 'steer',
+      });
     }
 
     let didSwitchActingUser = false;
