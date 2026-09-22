@@ -314,14 +314,6 @@ export interface Harness extends EventEmitter<HarnessEvents> {
    * Returns an unsubscribe function.
    */
   subscribeRuntimeOutput(listener: (event: AcpMessage) => void): () => void;
-  /**
-   * Run the completion check before a tool call that reports to a person or
-   * ships the work. Harnesses without the check allow every call.
-   */
-  checkCompletionBeforeTool?(input: {
-    tool: string;
-    args?: unknown;
-  }): Promise<{ allowed: boolean; reason?: string }>;
 
   /**
    * Subscribe to persisted Roomote runtime envelope events.

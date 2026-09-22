@@ -16,7 +16,6 @@ const {
   mockNotifyWebTaskInitiatorOnSettle,
   mockEnqueueWebTaskInitiatorSettleNotification,
   mockCaptureTaskSettled,
-  mockIsTypeSafeJudgmentConfigured,
   MockGitHubInstallationSpanError,
 } = vi.hoisted(() => ({
   MockGitHubInstallationSpanError: class MockGitHubInstallationSpanError extends Error {},
@@ -34,7 +33,6 @@ const {
   mockNotifyWebTaskInitiatorOnSettle: vi.fn(),
   mockEnqueueWebTaskInitiatorSettleNotification: vi.fn(),
   mockCaptureTaskSettled: vi.fn(),
-  mockIsTypeSafeJudgmentConfigured: vi.fn(async () => false),
 }));
 
 vi.mock('@roomote/db/encryption', () => ({
@@ -116,10 +114,6 @@ vi.mock('@roomote/bitbucket', () => ({
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   releaseTaskRun: vi.fn(),
-}));
-
-vi.mock('@roomote/cloud-agents/server/typesafe-judgment', () => ({
-  isTypeSafeJudgmentConfigured: mockIsTypeSafeJudgmentConfigured,
 }));
 
 vi.mock('@roomote/telemetry/server', () => ({
@@ -1419,20 +1413,6 @@ describe('redactControlPlaneEnvVars', () => {
 });
 
 describe('fetchResolvedRuntimeEnvVars', () => {
-  it('turns on the turn-end completion check only with a hosted judgment model', async () => {
-    mockResolveSandboxModelRuntimeEnv.mockResolvedValue({});
-
-    // An operator-set value never stands in for the platform's own answer.
-    await expect(
-      fetchResolvedRuntimeEnvVars({ ROOMOTE_COMPLETION_GATE: 'true' }),
-    ).resolves.not.toHaveProperty('ROOMOTE_COMPLETION_GATE');
-
-    mockIsTypeSafeJudgmentConfigured.mockResolvedValueOnce(true);
-    await expect(fetchResolvedRuntimeEnvVars({})).resolves.toMatchObject({
-      ROOMOTE_COMPLETION_GATE: 'true',
-    });
-  });
-
   it('withholds the sandbox OpenRouter key from ordinary tasks', async () => {
     mockResolveSandboxModelRuntimeEnv.mockResolvedValueOnce({});
 
