@@ -48,7 +48,9 @@ describe('IntegrationToolAutoModeSetting', () => {
   it('shows the current mode and that the hosted model is shadowing while off', () => {
     render(<IntegrationToolAutoModeSetting />);
     expect(screen.getByRole('radio', { name: /^Off/ })).toBeChecked();
-    expect(screen.getByText(/assesses and logs each call/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/assesses and logs every call/),
+    ).toBeInTheDocument();
   });
 
   it('switches the mode and saves the guidance separately', async () => {
@@ -56,12 +58,10 @@ describe('IntegrationToolAutoModeSetting', () => {
     fireEvent.click(screen.getByRole('radio', { name: /^On/ }));
     expect(state.setAuto).toHaveBeenLastCalledWith({ mode: 'on', policy: '' });
 
-    const guidance = screen.getByLabelText('Approval guidance');
-    expect(
-      screen.getByRole('button', { name: 'Save guidance' }),
-    ).toBeDisabled();
+    const guidance = screen.getByLabelText('Auto mode guidance');
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
     fireEvent.change(guidance, { target: { value: 'Reads only.' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save guidance' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() =>
       expect(state.setAuto).toHaveBeenLastCalledWith({
         mode: 'off',

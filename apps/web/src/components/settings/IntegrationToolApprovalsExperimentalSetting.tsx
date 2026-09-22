@@ -30,13 +30,14 @@ export function IntegrationToolApprovalsExperimentalSetting() {
           first, and Reject for every tool. Auto is the default. Ask first
           pauses each call until the session owner allows it once, stops the
           asks for the rest of that session, or rejects it; Reject blocks it
-          outright. Automatic approvals assesses calls for tools set to Auto,
-          runs routine ones, and asks a person about risky ones. A task asks the
-          owner of its session the same way, and a task nobody can answer for,
-          such as one an automation started, cannot run an Ask first tool.
-          Session owners can also ask to be asked about any tool from its call
-          in the transcript. Tools left at the default run exactly as before.
-          Policies are deployment-wide and apply from the next session turn.
+          outright. Set up Auto mode in Settings → Integrations to assess calls
+          for tools set to Auto, run routine ones, and ask a person about risky
+          ones. A task asks the owner of its session the same way, and a task
+          nobody can answer for, such as one an automation started, cannot run
+          an Ask first tool. Session owners can also ask to be asked about any
+          tool from its call in the transcript. Tools left at the default run
+          exactly as before. Policies are deployment-wide and apply from the
+          next session turn.
         </p>
       </div>
     </Section>

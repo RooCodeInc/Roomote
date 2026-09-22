@@ -18,12 +18,12 @@ const MODES: { mode: IntegrationToolAutoMode; label: string; hint: string }[] =
     {
       mode: 'off',
       label: 'Off',
-      hint: 'Tools follow their selected mode. Ask first still asks a person.',
+      hint: 'Tools follow their selected mode. Ask first asks a person.',
     },
     {
       mode: 'on',
       label: 'On',
-      hint: 'Roomote runs routine calls for tools set to Auto and asks a person about risky ones.',
+      hint: 'For tools set to Auto, routine calls run and risky calls ask a person.',
     },
   ];
 
@@ -63,16 +63,16 @@ export function IntegrationToolAutoModeSetting() {
   const modelNote = hosted
     ? mode === 'on'
       ? 'Uses the hosted judgment model.'
-      : 'While Off, the hosted judgment model assesses and logs each call for review.'
+      : 'The hosted judgment model still assesses and logs every call for review.'
     : model === null
-      ? 'Requires a hosted judgment model. None is available.'
-      : `Requires a hosted judgment model. The helper model (${model.model}) makes a full LLM call for every tool call.`;
+      ? 'Auto mode requires a hosted judgment model. None is available.'
+      : `Auto mode requires a hosted judgment model. The helper model (${model.model}) makes a full LLM call for every tool call.`;
 
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-1">
         <p className="text-sm text-muted-foreground">
-          Let a decision model handle tools set to Auto. Your other choices stay
+          Let a decision model handle tools set to Auto. Manual choices stay
           fixed. {modelNote}
         </p>
       </div>
@@ -104,12 +104,12 @@ export function IntegrationToolAutoModeSetting() {
         })}
       </div>
       <div className="flex flex-col gap-2">
-        <Label htmlFor="integration-tool-auto-policy">Approval guidance</Label>
+        <Label htmlFor="integration-tool-auto-policy">Auto mode guidance</Label>
         <Textarea
           id="integration-tool-auto-policy"
           value={policy}
           maxLength={INTEGRATION_TOOL_AUTO_POLICY_MAX_LENGTH}
-          placeholder="Describe what’s routine and what’s risky. For example: Reading and searching are routine. Anything sent to customers is risky."
+          placeholder="Describe what is routine and what is risky. For example: Reading and searching are routine. Anything sent to customers is risky."
           rows={4}
           onChange={(event) => setPolicy(event.target.value)}
         />
@@ -120,7 +120,7 @@ export function IntegrationToolAutoModeSetting() {
             disabled={!policyDirty || save.isPending}
             onClick={() => save.mutate({ mode, policy })}
           >
-            Save guidance
+            Save
           </Button>
           {policyDirty ? (
             <Button
