@@ -4836,7 +4836,6 @@ export async function answerFastAgentQuestion({
                 ...args,
                 contentType: args.contentType ?? inferredContentType,
               });
-              if (conversation.surface === 'web') visibleUpdatePosted = true;
               return {
                 success: true,
                 artifact,

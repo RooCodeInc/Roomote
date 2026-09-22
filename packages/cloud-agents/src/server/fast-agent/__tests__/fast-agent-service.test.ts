@@ -5594,7 +5594,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
-  it('creates a durable private Session artifact before the first reply', async () => {
+  it('posts a fallback after creating a web artifact with no reply or terminal text', async () => {
     mocks.getUnifiedSession.mockResolvedValue({
       id: 'session-1',
       privacy: 'private',
@@ -5633,15 +5633,15 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           guidance:
             'The artifact viewUrl opens in its session; standaloneViewUrl opens the document, image, or file on its own page with a direct shareable link. Share whichever returned URL fits the context, unchanged, instead of constructing an artifact URL.',
         });
-        await invokeTool(nativeToolNames.sendChatReply, {
-          purpose: 'closeout',
-          message: 'The document is ready.',
-        });
         return '';
       },
     );
 
-    await answerFastAgentQuestion({ ...baseParams, adapter });
+    await answerFastAgentQuestion({
+      ...baseParams,
+      conversation: { ...baseParams.conversation, surface: 'web' },
+      adapter,
+    });
 
     expect(createArtifact).toHaveBeenCalledWith({
       path: 'notes/decision.md',
@@ -5649,6 +5649,14 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       contentType: 'text/markdown',
       artifactType: 'general',
     });
+    expect(adapter.postReply).toHaveBeenCalledOnce();
+    expect(adapter.postReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        purpose: 'closeout',
+        message:
+          'I didn’t have a response to that. Could you rephrase it or add a bit more detail?',
+      }),
+    );
   });
 
   it('reports a platform issue with session and acting-user context', async () => {
