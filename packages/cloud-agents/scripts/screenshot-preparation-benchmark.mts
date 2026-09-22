@@ -1,10 +1,13 @@
 /**
  * Controlled baseline/prototype screenshot benchmark.
  *
- * The fixture is intentionally local and deterministic. Each mode runs one
- * cold browser launch followed by warm session reuse, with the same viewport,
- * page, evidence goal, page-ready wait, DOM acceptance check, and screenshot
- * command. The final PNGs are written to BENCH_OUTPUT for visual inspection.
+ * The fixture is local and deterministic. Each run uses the same 1280x800
+ * viewport, evidence goal, page-ready wait, acceptance criterion, one cold
+ * browser launch plus warm session reuse, and exact final PNG inspection.
+ * The complex scenario requires a settings-tab click, form fill, review dialog,
+ * below-fold scroll, and final save action. Prototype mode requires every
+ * preparation action to be returned by Jev; a fallback makes the comparison
+ * invalid instead of being reported as a Jev success.
  *
  * Baseline:
  *   pnpm --filter @roomote/cloud-agents benchmark:screenshot-preparation -- --mode baseline
@@ -25,6 +28,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 
 import type {
+  ScreenshotPreparationAction,
   ScreenshotPreparationInput,
   ScreenshotPreparationResponse,
 } from '@roomote/types';
@@ -35,6 +39,11 @@ type PrepareScreenshotStep = (params: {
   input: ScreenshotPreparationInput;
 }) => Promise<ScreenshotPreparationResponse>;
 
+type Target = {
+  label: string;
+  role: string;
+};
+
 const mode = process.argv.includes('--mode')
   ? process.argv[process.argv.indexOf('--mode') + 1]
   : 'baseline';
@@ -42,11 +51,11 @@ const repetitions = Number(process.env.BENCH_REPS ?? 5);
 const outputDir =
   process.env.BENCH_OUTPUT ?? '/tmp/roomote-screenshot-benchmark';
 const helperPath = process.env.ROOMOTE_BENCH_HELPER;
-const session = `roomote-screenshot-${mode}-${process.pid}`;
+const session = `ssb-${mode === 'prototype' ? 'p' : 'b'}-${process.pid}`;
 const execFileAsync = promisify(execFile);
 const viewport = { width: 1280, height: 800 };
 const evidenceGoal =
-  "Click the observed 'Show saved profile' button, then show the saved profile state with the heading 'Profile saved' and the display name 'Roomote' visible.";
+  "Open Settings, enter the display name 'Roomote', review the changes, scroll to the below-fold Security checks section, and save. The final screenshot must show Profile saved, Display name: Roomote, and Security checks complete.";
 const html = `<!doctype html>
 <html lang="en">
   <head>
@@ -54,29 +63,84 @@ const html = `<!doctype html>
     <title>Screenshot benchmark fixture</title>
     <style>
       * { box-sizing: border-box; }
-      body { margin: 0; min-height: 100vh; background: #f5f7fb; color: #152033; font: 16px system-ui, sans-serif; }
-      main { width: 620px; margin: 120px auto; padding: 32px; background: white; border: 1px solid #d8dfeb; border-radius: 16px; box-shadow: 0 12px 32px rgb(21 32 51 / 10%); }
+      body { margin: 0; min-height: 1800px; background: #f5f7fb; color: #152033; font: 16px system-ui, sans-serif; }
+      main { width: 700px; margin: 70px auto; padding: 32px; background: white; border: 1px solid #d8dfeb; border-radius: 16px; box-shadow: 0 12px 32px rgb(21 32 51 / 10%); }
+      nav { display: flex; gap: 8px; margin-bottom: 26px; }
+      nav button, button { padding: 10px 16px; border: 0; border-radius: 8px; background: #3157d5; color: white; font: inherit; cursor: pointer; }
+      nav button[aria-selected="true"] { background: #162b70; }
       h1, h2 { margin: 0 0 12px; }
       p { margin: 8px 0; }
-      button { margin-top: 20px; padding: 10px 16px; border: 0; border-radius: 8px; background: #3157d5; color: white; font: inherit; cursor: pointer; }
-      #saved { margin-top: 24px; padding: 20px; border-radius: 12px; background: #eef7f1; border: 1px solid #a9d6b6; }
+      label { display: block; margin-top: 20px; font-weight: 650; }
+      input { display: block; width: 100%; margin-top: 8px; padding: 10px; border: 1px solid #aab5c8; border-radius: 8px; font: inherit; }
+      #settings-panel[hidden], #overview-panel[hidden], #review-dialog[hidden], #success[hidden] { display: none; }
+      #review-dialog { margin-top: 24px; padding: 20px; border: 1px solid #b9c8e7; border-radius: 12px; background: #f3f6ff; }
+      #security { margin-top: 720px; padding: 24px; border-radius: 12px; background: #fff7e8; border: 1px solid #e3c98e; }
+      #success { padding: 24px; border-radius: 12px; background: #eef7f1; border: 1px solid #a9d6b6; }
     </style>
   </head>
   <body>
     <main>
-      <h1>Profile</h1>
-      <p>Review the current profile before capturing the saved state.</p>
-      <button id="show-profile">Show saved profile</button>
-      <section id="saved" hidden>
-        <h2>Profile saved</h2>
+      <nav role="tablist" aria-label="Profile sections">
+        <button id="overview-tab" role="tab" aria-selected="true">Overview</button>
+        <button id="settings-tab" role="tab" aria-selected="false">Settings</button>
+      </nav>
+      <section id="overview-panel">
+        <h1>Profile overview</h1>
+        <p>Choose Settings to edit the profile.</p>
+      </section>
+      <section id="settings-panel" hidden>
+        <h1>Profile settings</h1>
+        <p>Update the profile and complete the security check before saving.</p>
+        <label for="display-name">Display name</label>
+        <input id="display-name" type="text" value="" />
+        <button id="review-button">Review changes</button>
+        <div id="review-dialog" role="dialog" aria-label="Review changes" hidden>
+          <h2>Review changes</h2>
+          <p>Confirm the profile update after checking the security section below.</p>
+          <button id="save-button">Save profile</button>
+        </div>
+        <section id="security">
+          <h2>Security checks</h2>
+          <p>Below-fold security verification is complete for this fixture.</p>
+        </section>
+      </section>
+      <section id="success" hidden>
+        <h1>Profile saved</h1>
         <p>Display name: Roomote</p>
-        <p>Plan: Pro</p>
+        <h2>Security checks complete</h2>
+        <p>The profile is ready for the screenshot.</p>
       </section>
     </main>
     <script>
-      document.querySelector('#show-profile').addEventListener('click', () => {
-        document.querySelector('#saved').hidden = false;
-        document.querySelector('#show-profile').remove();
+      const overviewTab = document.querySelector('#overview-tab');
+      const settingsTab = document.querySelector('#settings-tab');
+      const overviewPanel = document.querySelector('#overview-panel');
+      const settingsPanel = document.querySelector('#settings-panel');
+      const reviewButton = document.querySelector('#review-button');
+      const reviewDialog = document.querySelector('#review-dialog');
+      const saveButton = document.querySelector('#save-button');
+      const displayName = document.querySelector('#display-name');
+      const success = document.querySelector('#success');
+      settingsTab.addEventListener('click', () => {
+        overviewTab.setAttribute('aria-selected', 'false');
+        settingsTab.setAttribute('aria-selected', 'true');
+        overviewPanel.hidden = true;
+        settingsPanel.hidden = false;
+      });
+      overviewTab.addEventListener('click', () => {
+        overviewTab.setAttribute('aria-selected', 'true');
+        settingsTab.setAttribute('aria-selected', 'false');
+        overviewPanel.hidden = false;
+        settingsPanel.hidden = true;
+      });
+      reviewButton.addEventListener('click', () => {
+        reviewDialog.hidden = false;
+      });
+      saveButton.addEventListener('click', () => {
+        if (displayName.value !== 'Roomote') return;
+        settingsPanel.hidden = true;
+        success.hidden = false;
+        window.scrollTo(0, 0);
       });
     </script>
   </body>
@@ -89,6 +153,22 @@ async function browser(args: string[]): Promise<string> {
     { encoding: 'utf8', timeout: 30_000, maxBuffer: 1_000_000 },
   );
   return stdout.trim();
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+}
+
+function findRef(snapshot: string, label: string): string | undefined {
+  const escaped = escapeRegExp(label);
+  const prefix = snapshot.match(
+    new RegExp(`(@e\\d+)[^\\n]*${escaped}`, 'u'),
+  )?.[1];
+  if (prefix) return prefix;
+  const trailing = snapshot.match(
+    new RegExp(`${escaped}[^\\n]*\\[ref=(e\\d+)\\]`, 'u'),
+  )?.[1];
+  return trailing ? `@${trailing}` : undefined;
 }
 
 function parseBox(
@@ -116,43 +196,62 @@ function parseBox(
   return undefined;
 }
 
-async function readObservation(includeButton: boolean, url: string) {
+async function readGeometry() {
+  try {
+    return JSON.parse(
+      await browser([
+        'eval',
+        'JSON.stringify({scrollX:window.scrollX,scrollY:window.scrollY,documentWidth:document.documentElement.scrollWidth,documentHeight:document.documentElement.scrollHeight})',
+      ]),
+    ) as {
+      scrollX: number;
+      scrollY: number;
+      documentWidth: number;
+      documentHeight: number;
+    };
+  } catch {
+    return {
+      scrollX: 0,
+      scrollY: 0,
+      documentWidth: viewport.width,
+      documentHeight: viewport.height,
+    };
+  }
+}
+
+async function readObservation(target?: Target, url?: string) {
   const snapshot = await browser(['snapshot', '-i']);
   const bodyText = await browser(['get', 'text', 'body']);
   const title = await browser(['get', 'title']);
+  const geometry = await readGeometry();
   const controls: Array<Record<string, unknown>> = [];
 
-  if (includeButton) {
-    const buttonRef = snapshot.match(
-      /Show saved profile.*\[ref=(e\d+)\]/u,
-    )?.[1];
-    if (!buttonRef) {
+  if (target) {
+    const ref = findRef(snapshot, target.label);
+    if (!ref) {
       throw new Error(
-        'The fixture button was not present in the accessibility snapshot.',
+        `The fixture target was not present in the snapshot: ${target.label}`,
       );
     }
-    const ref = `@${buttonRef}`;
     const rect = parseBox(await browser(['get', 'box', ref, '--json']));
     controls.push({
       id: ref,
-      role: 'button',
-      name: 'Show saved profile',
+      role: target.role,
+      name: target.label,
       ...(rect ? { rect } : {}),
       visible: true,
     });
   }
 
   return {
-    url,
+    url: url ?? (await browser(['get', 'url'])),
     title,
     visibleText: bodyText,
     readyState: 'complete' as const,
     viewport: {
-      ...viewport,
-      scrollX: 0,
-      scrollY: 0,
-      documentWidth: viewport.width,
-      documentHeight: viewport.height,
+      width: viewport.width,
+      height: viewport.height,
+      ...geometry,
     },
     controls,
   };
@@ -223,6 +322,55 @@ if (mode === 'prototype') {
 }
 
 const runs: Array<Record<string, unknown>> = [];
+const actionPlan: Array<{
+  target?: Target;
+  action: ScreenshotPreparationAction;
+  stepGoal: string;
+  waitFor?: string;
+}> = [
+  {
+    target: { label: 'Settings', role: 'button' },
+    action: { id: 'select_settings_tab', kind: 'click', targetId: '' },
+    stepGoal: 'Select the Settings tab now.',
+    waitFor: 'Profile settings',
+  },
+  {
+    target: { label: 'Display name', role: 'textbox' },
+    action: {
+      id: 'fill_display_name',
+      kind: 'fill',
+      targetId: '',
+      value: 'Roomote',
+    },
+    stepGoal: "Fill the Display name field with 'Roomote' now.",
+  },
+  {
+    target: { label: 'Review changes', role: 'button' },
+    action: { id: 'open_review_dialog', kind: 'click', targetId: '' },
+    stepGoal: 'Open the Review changes dialog now.',
+    waitFor: 'Review changes',
+  },
+  {
+    target: { label: 'Save profile', role: 'button' },
+    action: {
+      id: 'scroll_to_security',
+      kind: 'scroll',
+      direction: 'down',
+      amount: 700,
+    },
+    stepGoal:
+      'Scroll down 700 pixels now; Security checks is below the fold and the current scroll position is 0.',
+    waitFor: 'Security checks',
+  },
+  {
+    target: { label: 'Save profile', role: 'button' },
+    action: { id: 'save_profile', kind: 'click', targetId: '' },
+    stepGoal:
+      'Click the visible Save profile button in the Review changes dialog now; the display name is Roomote and Security checks is visible.',
+    waitFor: 'Profile saved',
+  },
+];
+
 try {
   for (let index = 0; index < repetitions; index += 1) {
     const runStartedAt = performance.now();
@@ -235,74 +383,68 @@ try {
     ]);
     await browser(['open', url]);
     await browser(['wait', '--load', 'networkidle']);
-    await browser(['wait', '--text', 'Show saved profile']);
+    await browser(['wait', '--text', 'Profile overview']);
     const pageReadyMs = Number(
       (performance.now() - pageReadyStartedAt).toFixed(1),
     );
     const preparationStartedAt = performance.now();
-    const initialObservation = await readObservation(true, url);
-    const buttonId = initialObservation.controls[0]!.id as string;
     let metrics: Record<string, unknown> | null = null;
-    let preparationStatus = 'baseline';
+    let preparationStatus = mode === 'baseline' ? 'baseline' : 'jev-guided';
+    let jevActionCount = 0;
+    let fallbackCount = 0;
 
-    if (mode === 'baseline') {
-      await browser(['click', buttonId]);
-      await browser(['wait', '--text', 'Profile saved']);
-    } else {
-      const runId = `screenshot-benchmark-${mode}-${index}`;
-      const first = await prepareScreenshotStep!({
-        runId,
-        enabled: true,
-        input: {
-          operation: 'next',
-          optIn: true,
-          evidenceGoal,
-          page: initialObservation,
-          allowedActions: [
-            { id: 'open_profile', kind: 'click', targetId: buttonId },
-          ],
-        } as ScreenshotPreparationInput,
-      });
-      if (first.status === 'running' && first.action?.kind === 'click') {
-        await browser(['click', first.action.targetId]);
-        await browser(['wait', '--text', 'Profile saved']);
-        const readyObservation = await readObservation(false, url);
-        const ready = await prepareScreenshotStep!({
-          runId,
+    for (const plan of actionPlan) {
+      const observation = await readObservation(plan.target, url);
+      const ref = observation.controls[0]?.id as string | undefined;
+      const action = plan.target
+        ? { ...plan.action, targetId: ref ?? '' }
+        : plan.action;
+      if (action.kind === 'click' || action.kind === 'fill') {
+        if (!action.targetId) throw new Error(`No target ref for ${action.id}`);
+      }
+
+      if (mode === 'baseline') {
+        if (action.kind === 'scroll') {
+          await browser(['scroll', action.direction, String(action.amount)]);
+        } else if (action.kind === 'click') {
+          await browser(['click', action.targetId]);
+        } else if (action.kind === 'fill') {
+          await browser(['fill', action.targetId, action.value]);
+        }
+      } else {
+        const decision = await prepareScreenshotStep!({
+          runId: `complex-screenshot-benchmark-${mode}-${index}`,
           enabled: true,
           input: {
             operation: 'next',
             optIn: true,
-            loopId: first.loopId,
-            evidenceGoal,
-            page: readyObservation,
-            allowedActions: [{ id: 'capture', kind: 'capture-ready' }],
+            evidenceGoal: plan.stepGoal,
+            page: observation,
+            allowedActions: [action],
           } as ScreenshotPreparationInput,
         });
-        if (
-          ready.status === 'ready' &&
-          ready.action?.kind === 'capture-ready'
-        ) {
-          preparationStatus = 'jev-capture-ready';
-          const accepted = await prepareScreenshotStep!({
-            runId,
-            enabled: true,
-            input: {
-              operation: 'record',
-              optIn: true,
-              loopId: first.loopId,
-              outcome: 'accepted',
-            } as ScreenshotPreparationInput,
-          });
-          metrics = accepted.metrics as unknown as Record<string, unknown>;
-        } else {
-          preparationStatus = `fallback-after-action:${ready.reason ?? ready.status}`;
+        if (decision.status !== 'running' || !decision.action) {
+          fallbackCount += 1;
+          preparationStatus = `fallback:${plan.action.id}:${decision.reason ?? decision.status}`;
+          throw new Error(preparationStatus);
         }
-      } else {
-        preparationStatus = `fallback-before-action:${first.reason ?? first.status}`;
-        await browser(['click', buttonId]);
-        await browser(['wait', '--text', 'Profile saved']);
+        jevActionCount += 1;
+        const selected = decision.action;
+        if (selected.kind === 'scroll') {
+          await browser([
+            'scroll',
+            selected.direction,
+            String(selected.amount),
+          ]);
+        } else if (selected.kind === 'click') {
+          await browser(['click', selected.targetId]);
+        } else if (selected.kind === 'fill') {
+          await browser(['fill', selected.targetId, selected.value]);
+        }
+        metrics = decision.metrics as unknown as Record<string, unknown>;
       }
+
+      if (plan.waitFor) await browser(['wait', '--text', plan.waitFor]);
     }
 
     const preparationMs = Number(
@@ -315,7 +457,8 @@ try {
     const finalText = await browser(['get', 'text', 'body']);
     const accepted =
       finalText.includes('Profile saved') &&
-      finalText.includes('Display name: Roomote');
+      finalText.includes('Display name: Roomote') &&
+      finalText.includes('Security checks complete');
     runs.push({
       mode,
       run: index + 1,
@@ -326,10 +469,19 @@ try {
       totalMs: Number((performance.now() - runStartedAt).toFixed(1)),
       accepted,
       preparationStatus,
+      jevActionCount,
+      fallbackCount,
       capturePath,
       ...(metrics ? { metrics } : {}),
     });
   }
+} catch (error) {
+  runs.push({
+    mode,
+    run: runs.length + 1,
+    accepted: false,
+    preparationStatus: error instanceof Error ? error.message : String(error),
+  });
 } finally {
   try {
     await browser(['close']);
@@ -348,8 +500,9 @@ const result = {
     repetitions,
     warmupPolicy:
       'run 1 launches the browser; subsequent runs reuse the named session and reopen the same fixture before each attempt',
+    actionPlan: actionPlan.map((plan) => plan.action.id),
     acceptanceCriterion:
-      "Final body text contains 'Profile saved' and 'Display name: Roomote'; exact PNGs require visual inspection.",
+      "Final body text contains 'Profile saved', 'Display name: Roomote', and 'Security checks complete'; exact PNGs require visual inspection.",
   },
   runs,
   summary: summarize(runs),
@@ -357,4 +510,4 @@ const result = {
 const outputPath = path.join(outputDir, `${mode}.json`);
 writeFileSync(outputPath, `${JSON.stringify(result, null, 2)}\n`);
 console.log(JSON.stringify(result, null, 2));
-process.exit(0);
+process.exit(runs.some((run) => run.accepted === false) ? 2 : 0);
