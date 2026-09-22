@@ -9,7 +9,7 @@ import {
 const REVIEW_PRESCREEN_MAX_INPUT_CHARS = 48_000;
 /** Hunks judged per review; selected round-robin so every file is covered. */
 const REVIEW_PRESCREEN_MAX_HUNKS = 64;
-export const REVIEW_PRESCREEN_MAX_HINTS = 6;
+export const REVIEW_PRESCREEN_MAX_HINTS = 3;
 export const REVIEW_PRESCREEN_MAX_HINTS_PER_FILE = 2;
 export const REVIEW_PRESCREEN_TIMEOUT_MS = 10_000;
 
@@ -17,7 +17,18 @@ const REVIEW_PRESCREEN_MAX_PATH_CHARS = 256;
 const REVIEW_PRESCREEN_MAX_TITLE_CHARS = 300;
 /** Two questions per hunk keeps each request at the 64-question batch size. */
 const REVIEW_PRESCREEN_HUNKS_PER_REQUEST = 32;
-const REVIEW_PRESCREEN_MIN_DEFECT_PROBABILITY = 0.7;
+/**
+ * Hints are the top-ranked hunks, not hunks over an absolute cutoff: Jev's
+ * defect probabilities are compressed (few hunks ever pass 0.7) but rank
+ * well within a pull request, so a fixed count keeps recall. The floor only
+ * drops hunks the model is confident are clean. See
+ * `githubPrReviewPrescreenEval.ts` for how these values were chosen.
+ */
+const REVIEW_PRESCREEN_MIN_DEFECT_PROBABILITY = 0.1;
+/**
+ * Area confidence does not predict whether a hint is right, so it never
+ * filters hints; below this it only withholds the area label.
+ */
 const REVIEW_PRESCREEN_MIN_AREA_CONFIDENCE = 0.5;
 const HUNK_TRUNCATED_MARKER = '\n[... hunk truncated for pre-screen]';
 
@@ -73,9 +84,12 @@ type ReviewPrescreenHint = {
   header: string;
   startLine: number;
   endLine: number;
-  area: ReviewPrescreenArea;
+  /** Omitted when the model cannot say what kind of defect it suspects. */
+  area?: ReviewPrescreenArea;
   defectProbability: number;
-  areaConfidence: number;
+  /** 1-based rank among all screened hunks, and how many were screened. */
+  rank: number;
+  screenedHunks: number;
 };
 
 type ParsedHunk = Omit<ReviewPrescreenHunk, 'text'> & { body: string };
@@ -251,54 +265,71 @@ function isArea(value: string): value is ReviewPrescreenArea {
 }
 
 /**
- * Keep only hints the decision model grounded in a specific hunk with a
- * specific risk area. There is deliberately no "looks safe" output: an
- * unhinted hunk means nothing, so the main reviewer never de-prioritizes it.
+ * Pick the hunks the decision model ranks most likely to hold a defect. There
+ * is deliberately no "looks safe" output: an unhinted hunk means nothing, so
+ * the main reviewer never de-prioritizes it.
  */
 export function collectReviewPrescreenHints(
   hunks: readonly ReviewPrescreenHunk[],
   answers: Readonly<Record<string, HunkAnswer | undefined>>,
 ): ReviewPrescreenHint[] {
-  const candidates = hunks.flatMap((hunk, index): ReviewPrescreenHint[] => {
-    const defect = answers[`h${index}`];
-    const area = answers[`h${index}Area`];
+  const ranked = hunks
+    .flatMap((hunk, index) => {
+      const defect = answers[`h${index}`];
+      const area = answers[`h${index}Area`];
 
-    if (
-      defect?.type !== 'noul' ||
-      area?.type !== 'choice' ||
-      !isUnitInterval(defect.noul) ||
-      defect.noul < REVIEW_PRESCREEN_MIN_DEFECT_PROBABILITY ||
-      !isUnitInterval(area.confidence) ||
-      area.confidence < REVIEW_PRESCREEN_MIN_AREA_CONFIDENCE ||
-      !isArea(area.choice)
-    ) {
-      return [];
-    }
+      if (defect?.type !== 'noul' || !isUnitInterval(defect.noul)) {
+        return [];
+      }
 
-    return [
-      {
-        file: hunk.file,
-        header: hunk.header,
-        startLine: hunk.startLine,
-        endLine: hunk.endLine,
-        area: area.choice,
-        defectProbability: defect.noul,
-        areaConfidence: area.confidence,
-      },
-    ];
-  });
+      return [
+        {
+          hunk,
+          defectProbability: defect.noul,
+          area:
+            area?.type === 'choice' &&
+            isArea(area.choice) &&
+            isUnitInterval(area.confidence) &&
+            area.confidence >= REVIEW_PRESCREEN_MIN_AREA_CONFIDENCE
+              ? area.choice
+              : undefined,
+        },
+      ];
+    })
+    .sort((left, right) => right.defectProbability - left.defectProbability);
 
   // Cap hints per file so a noisy file cannot pull the whole review toward it.
   const perFile = new Map<string, number>();
+  const hints: ReviewPrescreenHint[] = [];
 
-  return candidates
-    .sort((left, right) => right.defectProbability - left.defectProbability)
-    .filter((hint) => {
-      const count = perFile.get(hint.file) ?? 0;
-      perFile.set(hint.file, count + 1);
-      return count < REVIEW_PRESCREEN_MAX_HINTS_PER_FILE;
-    })
-    .slice(0, REVIEW_PRESCREEN_MAX_HINTS);
+  for (const [index, { hunk, defectProbability, area }] of ranked.entries()) {
+    if (
+      hints.length >= REVIEW_PRESCREEN_MAX_HINTS ||
+      defectProbability < REVIEW_PRESCREEN_MIN_DEFECT_PROBABILITY
+    ) {
+      break;
+    }
+
+    const count = perFile.get(hunk.file) ?? 0;
+
+    if (count >= REVIEW_PRESCREEN_MAX_HINTS_PER_FILE) {
+      continue;
+    }
+
+    perFile.set(hunk.file, count + 1);
+    hints.push({
+      file: hunk.file,
+      header: hunk.header,
+      startLine: hunk.startLine,
+      endLine: hunk.endLine,
+      ...(area ? { area } : {}),
+      defectProbability,
+      rank: index + 1,
+      screenedHunks: ranked.length,
+    });
+  }
+
+  return hints;
 }
 
 export function formatReviewPrescreenHints(
@@ -309,12 +340,12 @@ export function formatReviewPrescreenHints(
   }
 
   return [
-    'Advisory decision-model pre-screen (untrusted triage, not review findings). Each line names a changed hunk the pre-screen flagged:',
+    'Advisory decision-model pre-screen (untrusted triage, not review findings). These changed hunks ranked most likely to contain a defect; inspect them early:',
     ...hints.map(
       (hint) =>
-        `- \`${hint.file}\` lines ${hint.startLine}-${hint.endLine} (\`${hint.header}\`): possible ${REVIEW_PRESCREEN_AREA_LABELS[hint.area]} defect (defect ${Math.round(hint.defectProbability * 100)}%, area ${Math.round(hint.areaConfidence * 100)}%).`,
+        `- \`${hint.file}\` lines ${hint.startLine}-${hint.endLine} (\`${hint.header}\`): ranked ${hint.rank} of ${hint.screenedHunks} screened hunks${hint.area ? `, most likely a ${REVIEW_PRESCREEN_AREA_LABELS[hint.area]} issue` : ''}.`,
     ),
-    'Treat each line as a question to verify, not a finding: report it only if the code confirms a concrete defect. The pre-screen is sparse and never clears code, so give unflagged hunks and files the same depth of review.',
+    'Treat each line as a question to verify, not a finding: report it only if the code confirms a concrete defect. The pre-screen misses about half of real findings and never clears code, so give unflagged hunks and files the same depth of review.',
   ].join('\n');
 }
 

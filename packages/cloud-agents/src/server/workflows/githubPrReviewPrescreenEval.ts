@@ -6,15 +6,16 @@
  * against the inline comments that review left. The reviews predate hunk
  * hints, so the ground truth is independent of the pre-screen.
  *
- *   TYPESAFE_API_KEY=... pnpm --filter @roomote/cloud-agents review-prescreen:eval \
+ *   R_TYPESAFE_API_KEY=... pnpm --filter @roomote/cloud-agents review-prescreen:eval \
  *     --repo owner/name --reviewer 'reviewer-login[bot]' --limit 40
  *
  * `--reviewer` accepts a comma-separated list of logins.
  *
- * `OPENROUTER_API_KEY` works in place of `TYPESAFE_API_KEY`. Requires an
+ * `OPENROUTER_API_KEY` works in place of `R_TYPESAFE_API_KEY`. Requires an
  * authenticated `gh` CLI. Prints aggregate metrics only; no diff content.
  */
 import { execFileSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 
 import {
@@ -35,12 +36,22 @@ type ReviewComment = {
   in_reply_to_id?: number;
 };
 
+type HunkScore = {
+  file: string;
+  /** Hunk characters sent to the model, for a size-only baseline. */
+  chars: number;
+  probability: number;
+  area?: string;
+  areaConfidence?: number;
+  finding: boolean;
+};
+
 type PrResult = {
   number: number;
   hunks: number;
   findingHunks: number;
   unscreenedFindings: number;
-  scores: Array<{ probability: number; finding: boolean }>;
+  scores: HunkScore[];
   hints: number;
   hintHits: number;
   hintedFindingHunks: number;
@@ -61,11 +72,11 @@ function decisionBackend(): {
   model: string;
   apiKey: string;
 } {
-  if (process.env.TYPESAFE_API_KEY) {
+  if (process.env.R_TYPESAFE_API_KEY) {
     return {
       url: 'https://api.typesafe.ai/v1/systemone',
       model: 'jev-latest',
-      apiKey: process.env.TYPESAFE_API_KEY,
+      apiKey: process.env.R_TYPESAFE_API_KEY,
     };
   }
 
@@ -77,7 +88,7 @@ function decisionBackend(): {
     };
   }
 
-  throw new Error('Set TYPESAFE_API_KEY or OPENROUTER_API_KEY');
+  throw new Error('Set R_TYPESAFE_API_KEY or OPENROUTER_API_KEY');
 }
 
 async function decide(
@@ -214,10 +225,16 @@ async function evaluatePr(
     unscreenedFindings: findings.filter(
       (comment) => !hunks.some((hunk) => contains(hunk, comment)),
     ).length,
-    scores: hunks.map((_, index) => {
+    scores: hunks.map((hunk, index) => {
       const answer = answers[`h${index}`];
+      const area = answers[`h${index}Area`];
       return {
+        file: hunk.file,
+        chars: hunk.text.length,
         probability: answer?.type === 'noul' ? answer.noul : 0,
+        ...(area?.type === 'choice'
+          ? { area: area.choice, areaConfidence: area.confidence }
+          : {}),
         finding: isFinding[index]!,
       };
     }),
@@ -230,7 +247,7 @@ async function evaluatePr(
 }
 
 /** Probability a random finding hunk outranks a random non-finding hunk. */
-function rocAuc(scores: Array<{ probability: number; finding: boolean }>) {
+function rocAuc(scores: HunkScore[]) {
   const positives = scores.filter((score) => score.finding);
   const negatives = scores.filter((score) => !score.finding);
 
@@ -267,6 +284,8 @@ async function main() {
       repo: { type: 'string' },
       reviewer: { type: 'string' },
       limit: { type: 'string', default: '40' },
+      // Writes per-hunk scores (paths, probabilities, labels) for offline tuning.
+      out: { type: 'string' },
     },
   });
 
@@ -323,6 +342,10 @@ async function main() {
   const perPrAuc = results
     .map((result) => rocAuc(result.scores))
     .filter((auc) => !Number.isNaN(auc));
+
+  if (values.out) {
+    writeFileSync(values.out, JSON.stringify(results, null, 2));
+  }
 
   console.log(
     JSON.stringify(

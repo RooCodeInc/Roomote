@@ -130,35 +130,46 @@ describe('github PR review pre-screen', () => {
   });
 
   describe('hint collection', () => {
-    it('keeps only hunks with a confident defect and a confident area', () => {
+    it('ranks hunks by defect probability instead of using an absolute cutoff', () => {
       const hunks = [
         hunk('src/a.ts', 1),
         hunk('src/b.ts', 1),
         hunk('src/c.ts', 1),
         hunk('src/d.ts', 1),
+        hunk('src/e.ts', 1),
       ];
 
       const hints = collectReviewPrescreenHints(hunks, {
-        h0: noul(0.9),
+        h0: noul(0.32),
         h0Area: area('security', 0.8),
-        // Likely defect but the model cannot say what kind: unsupported.
-        h1: noul(0.95),
+        // Top-ranked even though well under 0.5; the area is too unsure to name.
+        h1: noul(0.41),
         h1Area: area('correctness', 0.3),
-        // Below the defect floor.
-        h2: noul(0.6),
+        // Below the clean-hunk floor.
+        h2: noul(0.05),
         h2Area: area('performance', 0.9),
         // Malformed probability and unknown area.
         h3: noul(Number.NaN),
         h3Area: area('style', 0.9),
+        h4: noul(0.2),
+        h4Area: area('style', 0.9),
       });
 
       expect(hints).toEqual([
         expect.objectContaining({
-          file: 'src/a.ts',
-          area: 'security',
-          defectProbability: 0.9,
+          file: 'src/b.ts',
+          rank: 1,
+          screenedHunks: 4,
         }),
+        expect.objectContaining({
+          file: 'src/a.ts',
+          rank: 2,
+          area: 'security',
+        }),
+        expect.objectContaining({ file: 'src/e.ts', rank: 3 }),
       ]);
+      expect(hints[0]).not.toHaveProperty('area');
+      expect(hints[2]).not.toHaveProperty('area');
     });
 
     it('caps hints per file and overall, strongest first', () => {
@@ -195,7 +206,7 @@ describe('github PR review pre-screen', () => {
       );
 
       expect(text).toContain(
-        '- `src/a.ts` lines 12-13 (`@@ -12,2 +12,2 @@`): possible concurrency or lifecycle defect (defect 82%, area 71%).',
+        '- `src/a.ts` lines 12-13 (`@@ -12,2 +12,2 @@`): ranked 1 of 1 screened hunks, most likely a concurrency or lifecycle issue.',
       );
       expect(text).toContain('never clears code');
     });
@@ -204,7 +215,7 @@ describe('github PR review pre-screen', () => {
   describe('runGithubPrReviewPrescreen', () => {
     it('asks a defect and an area question per hunk through the high-volume decision model', async () => {
       mockEvaluateDecisionModel.mockResolvedValue({
-        h0: noul(0.1),
+        h0: noul(0.05),
         h0Area: area('correctness', 0.6),
         h1: noul(0.88),
         h1Area: area('security', 0.77),
