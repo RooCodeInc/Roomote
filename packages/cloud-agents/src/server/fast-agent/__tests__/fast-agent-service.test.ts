@@ -4199,6 +4199,64 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(activity.settle).toHaveBeenCalledWith({ keepProcessing: false });
   });
 
+  it('shows activity for an addressed turn that still ends silently', async () => {
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.ignoreEvent, {
+          reason: 'The user asked Roomote not to reply.',
+        });
+        return '';
+      },
+    );
+    const activity = {
+      start: vi.fn(),
+      settle: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn().mockResolvedValue(undefined),
+    };
+    const adapter = callbacks({ activity });
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      directedAtRoomote: true,
+      allowSilentAmbientReply: true,
+      adapter,
+    });
+
+    expect(activity.start).toHaveBeenCalledOnce();
+    expect(activity.settle).toHaveBeenCalledWith({ keepProcessing: false });
+    expect(adapter.postReply).not.toHaveBeenCalled();
+    expect(mocks.generateText.mock.calls[0]?.[0].system).toContain(
+      'already judged this unmentioned message',
+    );
+  });
+
+  it('never posts the no-response fallback for an addressed turn', async () => {
+    const adapter = callbacks();
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        options.onAssistantMessageStarted?.({
+          id: 'assistant-silent',
+          sessionId: 'opencode-session-1',
+          parentId: 'initial-user-message',
+          createdAtMs: 100,
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      directedAtRoomote: true,
+      allowSilentAmbientReply: true,
+      adapter,
+    });
+
+    expect(adapter.postReply).not.toHaveBeenCalled();
+  });
+
   it('does not emit surface activity for an ignored ambient human turn', async () => {
     mocks.generateText.mockImplementationOnce(
       async (_params, _session, options) => {

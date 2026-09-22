@@ -1882,6 +1882,24 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
+  it('tells an addressed turn to answer without re-deciding directedness', () => {
+    const addressedPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      allowSilentAmbientReply: true,
+      addressedToRoomote: true,
+    });
+
+    expect(addressedPrompt).toContain(
+      'already judged this unmentioned message, in the context of the recent thread, to be addressed to Roomote',
+    );
+    expect(addressedPrompt).toContain(
+      'only when the message asks Roomote not to reply, or only thanks, acknowledges, or signs off',
+    );
+    expect(addressedPrompt).not.toContain(
+      'decide from the current message and recent thread whether it is specifically directed at Roomote',
+    );
+  });
+
   it('prioritizes directedness for eligible multi-human turns', () => {
     const ambientPrompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],

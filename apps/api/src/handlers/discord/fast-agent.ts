@@ -128,6 +128,11 @@ export async function processDiscordFastAgentMessage(
     interaction?: DiscordInteractionReplyContext;
     activeTasks?: { taskId: string }[];
     directedAtRoomote?: boolean;
+    /**
+     * The judgment model found this unmentioned message addressed to Roomote:
+     * answer it, but a sign-off or an explicit ask may still end silently.
+     */
+    addressedToRoomote?: boolean;
     peerConversationsEnabled?: boolean;
     /** Attribution for tasks Fast delegates from this turn; automation-identity
      * turns pass their automation initiator so delegated work keeps automation
@@ -144,10 +149,12 @@ export async function processDiscordFastAgentMessage(
     attachmentTexts: input.attachmentTexts,
   });
   const isDirected = Boolean(input.directedAtRoomote);
+  const addressedToRoomote = !isDirected && input.addressedToRoomote === true;
+  const turnDirectedAtRoomote = isDirected || addressedToRoomote;
   const needsPeerCaution =
     input.peerConversationsEnabled === true &&
     message != null &&
-    !isDirected &&
+    !turnDirectedAtRoomote &&
     mentionsDiscordUserOtherThanBotOrUser(
       getDiscordMessageContent(message),
       input.botUserId,
@@ -250,7 +257,8 @@ export async function processDiscordFastAgentMessage(
         : [];
     const allowSilentAmbientReply =
       !isDirected &&
-      (needsPeerCaution ||
+      (addressedToRoomote ||
+        needsPeerCaution ||
         history.some(
           (entry) =>
             !entry.botId &&
@@ -276,7 +284,7 @@ export async function processDiscordFastAgentMessage(
         input.sender.global_name ??
         input.sender.username,
       senderExternalId: input.sender.id,
-      directedAtRoomote: isDirected,
+      directedAtRoomote: turnDirectedAtRoomote,
       allowSilentAmbientReply,
       ...(needsPeerCaution ? { peerDirectedTurn: true } : {}),
       ...(agentContext ? { agentContext } : {}),
@@ -418,7 +426,7 @@ export async function processDiscordFastAgentMessage(
         input.sender.global_name ??
         input.sender.username,
       activeTasks: input.activeTasks,
-      directedAtRoomote: isDirected,
+      directedAtRoomote: turnDirectedAtRoomote,
       allowSilentAmbientReply,
       peerDirectedTurn: needsPeerCaution,
       adapter: {

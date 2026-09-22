@@ -1104,8 +1104,8 @@ async function processDiscordGatewayEvent(
         directedAtRoomote:
           channel.isDirectMessage ||
           Boolean(repliedFastSession) ||
-          unmentionedReplyAddressedToRoomote ||
           isDiscordBotMentioned(message, resolved.botUserId),
+        addressedToRoomote: unmentionedReplyAddressedToRoomote,
         peerConversationsEnabled,
       });
       return { ok: true, fastAnswered: true, fastContinued: true };

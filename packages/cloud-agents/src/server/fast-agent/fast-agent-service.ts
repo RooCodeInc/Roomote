@@ -2026,7 +2026,16 @@ export async function answerFastAgentQuestion({
   const humanInput = input ?? ({ type: 'message' } as const);
   const reactionInput =
     !platformEvent && humanInput.type === FAST_AGENT_REACTION_INPUT_TYPE;
+  // Directed and silence-eligible together means the surface's judgment
+  // found this unmentioned message for Roomote: show that Roomote is working,
+  // but a sign-off or an explicit "don't reply" may still settle silently.
+  const addressedToRoomote =
+    !platformEvent &&
+    humanInput.type !== FAST_AGENT_REACTION_INPUT_TYPE &&
+    allowSilentAmbientReply &&
+    directedAtRoomote === true;
   const resolvedPeerDirectedTurn =
+    !addressedToRoomote &&
     peerDirectedTurn &&
     allowSilentAmbientReply &&
     !platformEvent &&
@@ -2835,6 +2844,11 @@ export async function answerFastAgentQuestion({
       ) {
         steeredDirectedFollowUp = true;
         startSurfaceActivity();
+      } else if (
+        batch.some(({ followUp }) => followUp.directedAtRoomote === true)
+      ) {
+        // Addressed follow-ups show activity without forbidding silence.
+        startSurfaceActivity();
       }
       injectedHumanFollowUpMessages.push(...batchMessages);
       injectedHumanFollowUpFiles.push(...batchFiles);
@@ -3348,7 +3362,7 @@ export async function answerFastAgentQuestion({
         `[Fast Agent] Failed to dispose surface activity: ${formatErrorForLog(error)}`,
       );
     });
-  } else if (!allowSilentAmbientReply) {
+  } else if (!allowSilentAmbientReply || addressedToRoomote) {
     startSurfaceActivity();
   }
 
@@ -3836,6 +3850,7 @@ export async function answerFastAgentQuestion({
       retryTaskStartAvailable: Boolean(adapter.retryTaskStart),
       allowSilentAmbientReply,
       peerDirectedTurn: resolvedPeerDirectedTurn,
+      addressedToRoomote,
       implicitAutomationOffersEnabled: !Env.R_FAST_AUTOMATION_OFFERS_DISABLED,
       releaseVersion,
       commitSha: process.env.GITHUB_SHA || process.env.VERCEL_GIT_COMMIT_SHA,

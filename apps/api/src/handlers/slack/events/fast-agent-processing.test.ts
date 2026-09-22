@@ -480,6 +480,85 @@ describe('processFastAgentMessage', () => {
     expect(call.allowSilentAmbientReply).toBe(false);
   });
 
+  it('lets an addressed reply after a Roomote message end silently while showing activity', async () => {
+    const activity = {
+      start: vi.fn(),
+      settle: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn().mockResolvedValue(undefined),
+    };
+    mocks.createActivity.mockReturnValueOnce(activity);
+    mocks.persistAdmission.mockResolvedValueOnce({
+      id: 'row-1',
+      eventKey: 'event-1',
+    });
+    const slack = {
+      fetchThreadMessages: vi.fn(async () => [
+        { user: 'U123', text: 'testing thread', ts: '100.001' },
+        { user: 'U222', text: 'hi', ts: '100.002' },
+        { user: 'UBOT', bot_id: 'B999', text: 'Hi both.', ts: '100.003' },
+        { user: 'U222', text: "Ok don't respond to me now", ts: '100.004' },
+      ]),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'C123',
+        channel_type: 'channel',
+        user: 'U222',
+        text: "Ok don't respond to me now",
+        ts: '100.004',
+        thread_ts: '100.001',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+      roomoteSlackUserId: 'UBOT',
+      peerConversationsEnabled: true,
+      addressedToRoomote: true,
+    });
+
+    expect(mocks.answerQuestion.mock.calls[0]?.[0]).toMatchObject({
+      directedAtRoomote: true,
+      allowSilentAmbientReply: true,
+      peerDirectedTurn: false,
+    });
+    expect(activity.start).toHaveBeenCalledOnce();
+  });
+
+  it('no longer forces a reply just because Roomote spoke last in a multi-person thread', async () => {
+    const slack = {
+      fetchThreadMessages: vi.fn(async () => [
+        { user: 'U123', text: 'testing thread', ts: '100.001' },
+        { user: 'U222', text: 'hi', ts: '100.002' },
+        { user: 'UBOT', bot_id: 'B999', text: 'Hi both.', ts: '100.003' },
+        { user: 'U222', text: 'Feels pretty reasonable', ts: '100.004' },
+      ]),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'C123',
+        channel_type: 'channel',
+        user: 'U222',
+        text: 'Feels pretty reasonable',
+        ts: '100.004',
+        thread_ts: '100.001',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+      roomoteSlackUserId: 'UBOT',
+      peerConversationsEnabled: true,
+    });
+
+    expect(mocks.answerQuestion.mock.calls[0]?.[0]).toMatchObject({
+      directedAtRoomote: false,
+      allowSilentAmbientReply: true,
+    });
+  });
+
   it('classifies a peer mention following a Roomote reply as peer-directed', async () => {
     const slack = {
       fetchThreadMessages: vi.fn(async () => [

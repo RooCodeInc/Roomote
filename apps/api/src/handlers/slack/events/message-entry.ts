@@ -1105,6 +1105,7 @@ export function startFastAgentResponse(params: {
   activeTasks?: { taskId: string }[];
   resolveActiveTasks?: () => Promise<{ taskId: string }[]>;
   directedAtRoomote?: boolean;
+  addressedToRoomote?: boolean;
   peerConversationsEnabled?: boolean;
   /** Attribution for tasks Fast delegates from this turn; automation-identity
    * turns pass their automation initiator so delegated work keeps automation
@@ -1165,8 +1166,8 @@ async function handleSlackEntryEvent(params: {
   peerConversationsEnabled?: boolean;
   /**
    * True when the judgment model already found this unmentioned reply to be
-   * for Roomote. The turn is then directed: it shows the working status and
-   * must answer, instead of being eligible for a silent ambient turn.
+   * for Roomote. The turn shows the working status and answers, and may
+   * still end silently for a sign-off or an explicit ask not to reply.
    */
   addressedToRoomote?: boolean;
 }): Promise<void> {
@@ -1314,9 +1315,8 @@ async function handleSlackEntryEvent(params: {
           threadTs: threadId,
           activeTaskId: activeRun?.taskId,
         }),
-      directedAtRoomote:
-        addressedToRoomote ||
-        mentionsSlackBot(event, slackInstallation.botUserId),
+      directedAtRoomote: mentionsSlackBot(event, slackInstallation.botUserId),
+      addressedToRoomote,
       peerConversationsEnabled: peerConversationsEnabled,
       ...(attentionReply ? { originSessionId: attentionReply.sessionId } : {}),
       errorLogPrefix: `❌ Background fast-agent response failed for thread ${threadId}:`,
