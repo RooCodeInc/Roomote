@@ -544,7 +544,13 @@ const REPORT_TOOL_NAMES = new Set([
   'send_chat_reply',
   'send_chat_message',
 ]);
-const SHIP_MCP_ACTIONS = /^(create|update)_pull_request$/;
+// The source-control tool's shipping actions; getting, commenting on, closing,
+// or reopening a pull request are not.
+const SHIP_MCP_ACTIONS = new Set([
+  'create_or_update_pull_request',
+  'update_pull_request',
+  'reopen_pull_request',
+]);
 const SHIP_SHELL_COMMAND =
   /\bgit\b[^|;&\n]*\bpush\b|\bgh\s+pr\s+(create|ready|edit)\b|\bglab\s+mr\s+create\b/;
 
@@ -581,7 +587,7 @@ export function classifyCompletionCheckTool(
   if (
     name.endsWith('manage_source_control') &&
     typeof record.action === 'string' &&
-    SHIP_MCP_ACTIONS.test(record.action)
+    SHIP_MCP_ACTIONS.has(record.action)
   ) {
     return { trigger: 'ship' };
   }
