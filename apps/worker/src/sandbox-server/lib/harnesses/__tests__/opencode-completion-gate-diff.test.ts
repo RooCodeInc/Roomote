@@ -313,11 +313,13 @@ describe('classifyCompletionCheckTool', () => {
     });
   });
 
-  it('treats opening a pull request through the platform as shipping', () => {
+  it.each([
+    'create_or_update_pull_request',
+    'update_pull_request',
+    'reopen_pull_request',
+  ])('treats the platform action %s as shipping', (action) => {
     expect(
-      classifyCompletionCheckTool('roomote_manage_source_control', {
-        action: 'create_pull_request',
-      }),
+      classifyCompletionCheckTool('roomote_manage_source_control', { action }),
     ).toEqual({ trigger: 'ship' });
   });
 
@@ -329,6 +331,8 @@ describe('classifyCompletionCheckTool', () => {
       'roomote_manage_source_control',
       { action: 'create_pull_request_comment' },
     ],
+    ['roomote_manage_source_control', { action: 'get_pull_request' }],
+    ['roomote_manage_source_control', { action: 'close_pull_request' }],
     ['read', { filePath: '/tmp/a.ts' }],
     ['roomote_save_task_memory', { outcome: 'x' }],
   ])('leaves %s alone', (tool, args) => {
