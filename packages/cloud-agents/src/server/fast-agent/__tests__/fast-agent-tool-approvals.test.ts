@@ -805,6 +805,7 @@ describe('tool approval bridge', () => {
       { sessionId: 'session-id', userId: 'user-id' },
       expect.objectContaining({
         nativeRequestId: 'req-2',
+        decidedBy: 'model',
         autoEvaluation: evaluation,
       }),
     );

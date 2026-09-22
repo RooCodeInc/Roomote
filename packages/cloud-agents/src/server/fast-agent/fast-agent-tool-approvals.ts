@@ -502,7 +502,7 @@ export function createFastAgentToolApprovalBridge(input: {
             argsFingerprint,
             argsSummary: args ?? null,
             ...(auto?.action === 'approve'
-              ? { autoEvaluation: auto.evaluation }
+              ? { decidedBy: 'model' as const, autoEvaluation: auto.evaluation }
               : {}),
           },
         );
