@@ -8,8 +8,9 @@ export const REVIEW_PRESCREEN_MAX_DIFF_CHARS = 20_000;
 export const REVIEW_PRESCREEN_MAX_FILES = 64;
 export const REVIEW_PRESCREEN_MAX_FILE_CHARS = 256;
 export const REVIEW_PRESCREEN_MAX_HINTS = 5;
-export const REVIEW_PRESCREEN_MIN_PROBABILITY = 0.65;
 export const REVIEW_PRESCREEN_TIMEOUT_MS = 1_500;
+
+const REVIEW_PRESCREEN_MIN_PROBABILITY = 0.65;
 
 const REVIEW_PRESCREEN_QUESTIONS = {
   security: {
@@ -107,7 +108,7 @@ const REVIEW_PRESCREEN_LABELS: Record<ReviewPrescreenId, string> = {
   tests: 'test coverage and regression risk',
 };
 
-export type ReviewPrescreenState = {
+type ReviewPrescreenState = {
   title?: string;
   changedFiles: string[];
   diff: string;
