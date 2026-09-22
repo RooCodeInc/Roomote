@@ -70,12 +70,18 @@ describe('screenDiffRiskHints', () => {
   });
 
   it('fails open when the decision model errors', async () => {
-    mockScreenReviewHunks.mockRejectedValue(new Error('HTTP 529'));
+    mockScreenReviewHunks.mockImplementationOnce(async () => {
+      throw new Error('HTTP 529 upstream echoed: +const secret = 1');
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     await expect(screenDiffRiskHints({ diff })).resolves.toMatchObject({
       available: false,
       reason: expect.stringContaining('Continue without it'),
     });
+    // Upstream errors can echo the submitted diff; they are not logged.
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('secret');
+    warn.mockRestore();
   });
 
   it('reports unavailable when there is no judgment model or nothing reviewable', async () => {

@@ -39,10 +39,11 @@ export async function screenDiffRiskHints(input: {
       diff: input.diff,
     });
   } catch (error) {
-    // Advisory: a judgment-model failure must never become a tool error.
+    // Advisory: a judgment-model failure must never become a tool error. Only
+    // the error type is logged; upstream messages can echo the submitted diff.
     console.warn(
-      `[DiffRiskHints] Pre-screen failed; returning no hints. ${
-        error instanceof Error ? error.message : String(error)
+      `[DiffRiskHints] Pre-screen failed; returning no hints. errorType=${
+        error instanceof Error ? error.name : typeof error
       }`,
     );
     return {
