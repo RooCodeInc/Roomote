@@ -10,6 +10,7 @@ import {
   db,
   githubInstallationFactory,
   llmUsageEvents,
+  mcpConnections,
   personalMcpServers,
   pullRequestFacts,
   repositoryFactory,
@@ -28,6 +29,7 @@ import {
   collectConfiguredInferenceProviders,
   collectConfiguredRuntimeEnvVarNames,
   collectEnabledCustomIntegrationIds,
+  collectEnabledMcpIds,
   collectInstanceReportStats,
   dedupeAuthoredPullRequests,
   median,
@@ -394,6 +396,62 @@ describe('collectEnabledCustomIntegrationIds', () => {
     await db.delete(personalMcpServers).where(
       inArray(
         personalMcpServers.id,
+        inserted.map((row) => row.id),
+      ),
+    );
+  });
+});
+
+describe('collectEnabledMcpIds', () => {
+  it('keeps deployment connections and drops soft-deleted user connections', async () => {
+    const suffix = Date.now().toString();
+    const activeOwner = await userFactory.create();
+    const deletedOwner = await userFactory.create();
+    await db
+      .update(users)
+      .set({ deletedAt: new Date() })
+      .where(eq(users.id, deletedOwner.id));
+
+    const inserted = await db
+      .insert(mcpConnections)
+      .values([
+        {
+          userId: activeOwner.id,
+          mcpId: `live-user-mcp-${suffix}`,
+          connectionRole: 'default',
+        },
+        {
+          userId: deletedOwner.id,
+          mcpId: `deleted-user-mcp-${suffix}`,
+          connectionRole: 'default',
+        },
+        {
+          userId: null,
+          mcpId: `deployment-mcp-${suffix}`,
+          connectionRole: 'default',
+        },
+        {
+          userId: activeOwner.id,
+          mcpId: `disabled-mcp-${suffix}`,
+          connectionRole: 'default',
+          enabled: false,
+        },
+      ])
+      .returning({ id: mcpConnections.id, mcpId: mcpConnections.mcpId });
+
+    const [liveUserRow, deletedUserRow, deploymentRow, disabledRow] = inserted;
+
+    const enabledIds = await collectEnabledMcpIds();
+
+    expect(enabledIds).toContain(liveUserRow?.mcpId);
+    expect(enabledIds).toContain(deploymentRow?.mcpId);
+    expect(enabledIds).not.toContain(deletedUserRow?.mcpId);
+    expect(enabledIds).not.toContain(disabledRow?.mcpId);
+
+    // Clean up so other suites sharing the database see a stable baseline.
+    await db.delete(mcpConnections).where(
+      inArray(
+        mcpConnections.id,
         inserted.map((row) => row.id),
       ),
     );

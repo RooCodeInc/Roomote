@@ -340,6 +340,36 @@ export function summarizeIntegrations(options: {
 }
 
 /**
+ * Enabled MCP ids: deployment enablement rows plus enabled connection rows.
+ * User-scoped connections of soft-deleted owners are excluded, while
+ * deployment connections (userId NULL) are retained — same live-owner rule
+ * as the service-credential predicate.
+ */
+export async function collectEnabledMcpIds(): Promise<string[]> {
+  const [enablements, connections] = await Promise.all([
+    db
+      .select({ mcpId: deploymentMcpEnablements.mcpId })
+      .from(deploymentMcpEnablements)
+      .where(eq(deploymentMcpEnablements.enabled, true)),
+    db
+      .selectDistinct({ mcpId: mcpConnections.mcpId })
+      .from(mcpConnections)
+      .leftJoin(users, eq(users.id, mcpConnections.userId))
+      .where(
+        and(
+          eq(mcpConnections.enabled, true),
+          or(isNull(mcpConnections.userId), isNull(users.deletedAt)),
+        ),
+      ),
+  ]);
+
+  return [
+    ...enablements.map((row) => row.mcpId),
+    ...connections.map((row) => row.mcpId),
+  ];
+}
+
+/**
  * Ids of enabled custom/personal MCP server rows: the authoritative custom
  * bucket. Personal rows of soft-deleted owners are excluded, matching
  * `findCustomMcpServerById` runtime semantics, and disabled rows are
@@ -813,8 +843,7 @@ export async function collectInstanceReportStats(
     chatgptConnected,
     githubCopilotConnected,
     xaiSubscriptionConnected,
-    mcpEnablements,
-    mcpConnectionIds,
+    enabledMcpIdsFromQuery,
     customIntegrationIds,
     activeApiKeyIntegrations,
     pullRequests7d,
@@ -965,14 +994,7 @@ export async function collectInstanceReportStats(
     isChatGptSubscriptionConnected(),
     isGitHubCopilotSubscriptionConnected(),
     isXaiSubscriptionConnected(),
-    db
-      .select({ mcpId: deploymentMcpEnablements.mcpId })
-      .from(deploymentMcpEnablements)
-      .where(eq(deploymentMcpEnablements.enabled, true)),
-    db
-      .selectDistinct({ mcpId: mcpConnections.mcpId })
-      .from(mcpConnections)
-      .where(eq(mcpConnections.enabled, true)),
+    collectEnabledMcpIds(),
     collectEnabledCustomIntegrationIds(),
     // Active API-key integrations: labels and origins are user-authored, so
     // only the count leaves the instance and stubs are numbered in order.
@@ -1034,10 +1056,7 @@ export async function collectInstanceReportStats(
 
   // Only ship catalog MCP ids; anything unrecognized (defensive: custom or
   // future ids) is reported as 'custom' so no user-authored name can leak.
-  const enabledMcpIds = [
-    ...mcpEnablements.map((row) => row.mcpId),
-    ...mcpConnectionIds.map((row) => row.mcpId),
-  ];
+  const enabledMcpIds = enabledMcpIdsFromQuery;
   const mcpEnabled = [
     ...new Set(
       enabledMcpIds.map((mcpId) =>
