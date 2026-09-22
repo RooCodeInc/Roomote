@@ -1,10 +1,16 @@
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+
 import { sdk } from '@roomote/sdk/client';
 import type { TaskIntegrationToolApprovals } from '@roomote/types';
+
+import { parseDirectMcpConfig } from './mcp-config';
 
 import type { OpenCodeServerClient } from './client';
 import type { OpenCodeToolPart } from './types';
 
 const TOOL_APPROVAL_POLL_MS = 1_500;
+const AUTO_SERVER_TOOL_LIST_TIMEOUT_MS = 15_000;
 
 type TaskToolApprovalApi = Pick<typeof sdk.toolApprovals, 'request' | 'status'>;
 
@@ -50,29 +56,80 @@ export async function fetchTaskToolApprovals(logger: {
 const sanitizeNativeKeyPart = (value: string) =>
   value.replace(/[^a-zA-Z0-9_-]/g, '_');
 
+async function listServerToolNames(server: {
+  url: string;
+  headers: Record<string, string>;
+}): Promise<string[]> {
+  const transport = new StreamableHTTPClientTransport(new URL(server.url), {
+    requestInit: { headers: server.headers },
+  });
+  const client = new Client({ name: 'roomote-task', version: '1.0.0' });
+  await client.connect(transport);
+  try {
+    const result = await client.listTools(undefined, {
+      timeout: AUTO_SERVER_TOOL_LIST_TIMEOUT_MS,
+    });
+    return result.tools.map((tool) => tool.name);
+  } finally {
+    await client.close().catch(() => undefined);
+  }
+}
+
 /**
- * The integration tool a native ask is for. A tool with its own rule is
- * looked up; one gated by its server's wildcard (Auto mode) is named from
- * the key, longest server name first. The tool name comes back sanitized,
- * which is the name the call is made under too.
+ * Which real tool each native key of an Auto-gated server stands for. Auto
+ * mode gates a whole server with `<server>_*`, so an ask names only the
+ * flattened key, and a flattened key is lossy (`run.query` and `run_query`
+ * both ask as `run_query`). The server's own tool list is the only way back
+ * to the real name, which the approval is recorded and claimed under. A key
+ * two real tools share is left out, so an ask for it is refused rather than
+ * recorded under the wrong tool; a server that cannot be listed is left out
+ * the same way.
  */
-export function resolveTaskToolForAsk(
-  approvals: Pick<TaskIntegrationToolApprovals, 'tools' | 'autoServers'>,
-  permission: string,
-): { integrationId: string; toolName: string } | undefined {
-  const known = approvals.tools[permission];
-  if (known) return known;
-  const server = [...approvals.autoServers]
-    .sort((a, b) => b.length - a.length)
-    .find((name) => permission.startsWith(`${sanitizeNativeKeyPart(name)}_`));
-  if (!server) return undefined;
-  const toolName = permission.slice(sanitizeNativeKeyPart(server).length + 1);
-  return toolName ? { integrationId: server, toolName } : undefined;
+export async function resolveAutoServerTools(input: {
+  mcpServers: Record<string, unknown>;
+  autoServers: string[];
+  logger: { warn: (message: string) => void };
+  listToolNames?: typeof listServerToolNames;
+}): Promise<TaskIntegrationToolApprovals['tools']> {
+  const listToolNames = input.listToolNames ?? listServerToolNames;
+  const tools: TaskIntegrationToolApprovals['tools'] = {};
+  await Promise.all(
+    input.autoServers.map(async (serverName) => {
+      const config = parseDirectMcpConfig(input.mcpServers[serverName]);
+      if (config?.type !== 'streamable-http') return;
+      let names: string[];
+      try {
+        names = await listToolNames(config);
+      } catch (error) {
+        input.logger.warn(
+          `Could not list ${serverName} tools for Auto mode; its asks will be refused: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        return;
+      }
+      const byKey = new Map<string, string[]>();
+      for (const name of names) {
+        const key = `${sanitizeNativeKeyPart(serverName)}_${sanitizeNativeKeyPart(name)}`;
+        byKey.set(key, [...(byKey.get(key) ?? []), name]);
+      }
+      for (const [key, candidates] of byKey) {
+        if (candidates.length === 1) {
+          tools[key] = { integrationId: serverName, toolName: candidates[0]! };
+        } else {
+          input.logger.warn(
+            `Tools ${candidates.join(', ')} of ${serverName} share the native key ${key}; asks for it will be refused.`,
+          );
+        }
+      }
+    }),
+  );
+  return tools;
 }
 
 export function createTaskToolApprovalRelay(options: {
+  /** Every native key an ask may name, with the real tool behind it. */
   tools: TaskIntegrationToolApprovals['tools'];
-  autoServers?: TaskIntegrationToolApprovals['autoServers'];
   client: Pick<OpenCodeServerClient, 'message' | 'replyPermission'>;
   logger: { warn: (message: string) => void };
   signal: AbortSignal;
@@ -116,10 +173,7 @@ export function createTaskToolApprovalRelay(options: {
   };
 
   const decide = async (ask: TaskToolApprovalAsk): Promise<void> => {
-    const tool = resolveTaskToolForAsk(
-      { tools: options.tools, autoServers: options.autoServers ?? [] },
-      ask.permission,
-    );
+    const tool = options.tools[ask.permission];
     if (!tool) {
       await reply(
         ask,

@@ -283,36 +283,6 @@ describe('claimProxyTaskToolCall', () => {
     });
   });
 
-  it('also claims under the sanitized name a task asked with', async () => {
-    mockClaim.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
-    await expect(
-      claimProxyTaskToolCall({
-        taskId: 'task-1',
-        integrationId: 'my-server',
-        toolName: 'run.query',
-        args: { q: 1 },
-      }),
-    ).resolves.toBe(true);
-    expect(mockClaim).toHaveBeenLastCalledWith({
-      taskId: 'task-1',
-      argsFingerprint: JSON.stringify({
-        integrationId: 'my-server',
-        toolName: 'run_query',
-        args: { q: 1 },
-      }),
-    });
-
-    // A name that sanitizes to itself is tried once.
-    mockClaim.mockClear().mockResolvedValue(false);
-    await claimProxyTaskToolCall({
-      taskId: 'task-1',
-      integrationId: 'linear',
-      toolName: 'save_issue',
-      args: {},
-    });
-    expect(mockClaim).toHaveBeenCalledTimes(1);
-  });
-
   it('refuses a call with no task or no matching approval', async () => {
     await expect(
       claimProxyTaskToolCall({

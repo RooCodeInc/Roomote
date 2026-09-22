@@ -174,37 +174,14 @@ export async function claimProxyTaskToolCall(input: {
   args: unknown;
 }): Promise<boolean> {
   if (!input.taskId) return false;
-  const fingerprint = (toolName: string) =>
-    fingerprintIntegrationToolCall({
+  return claimTaskIntegrationToolCall({
+    taskId: input.taskId,
+    argsFingerprint: fingerprintIntegrationToolCall({
       integrationId: input.integrationId,
-      toolName,
+      toolName: input.toolName,
       args: input.args ?? null,
-    });
-  if (
-    await claimTaskIntegrationToolCall({
-      taskId: input.taskId,
-      argsFingerprint: fingerprint(input.toolName),
-    })
-  ) {
-    return true;
-  }
-  // A task's Auto-mode ask names the tool from OpenCode's flattened key,
-  // which sanitizes the name (`run.query` asks as `run_query`), while the
-  // call itself carries the real name. The approval was recorded under the
-  // sanitized name, so that spelling is tried too; it is the same call.
-  const sanitized = sanitizeOpenCodeToolName(input.toolName);
-  return (
-    sanitized !== input.toolName &&
-    claimTaskIntegrationToolCall({
-      taskId: input.taskId,
-      argsFingerprint: fingerprint(sanitized),
-    })
-  );
-}
-
-/** OpenCode's sanitization of a tool name inside a flattened permission key. */
-function sanitizeOpenCodeToolName(toolName: string): string {
-  return toolName.replace(/[^a-zA-Z0-9_-]/g, '_');
+    }),
+  });
 }
 
 export function describeProxyToolApprovalBlock(

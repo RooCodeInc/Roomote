@@ -2,7 +2,7 @@ vi.mock('@roomote/sdk/client', () => ({ sdk: {} }));
 
 import {
   createTaskToolApprovalRelay,
-  resolveTaskToolForAsk,
+  resolveAutoServerTools,
 } from '../opencode-server/tool-approvals';
 
 const ask = {
@@ -138,26 +138,47 @@ describe('createTaskToolApprovalRelay', () => {
     await vi.waitFor(() => expect(failing.pendingCounts).toEqual([1, 0]));
   });
 
-  it('names a tool from a server-wide Auto rule, longest server name first', () => {
-    const approvals = {
-      tools: {
-        linear_save_issue: { integrationId: 'linear', toolName: 'save_issue' },
+  it('maps the native keys of an Auto-gated server to its real tool names', async () => {
+    const warn = vi.fn();
+    const listToolNames = vi.fn(async (server: { url: string }) =>
+      server.url.includes('notes')
+        ? ['run.query', 'run_query', 'list']
+        : ['save_issue'],
+    );
+    const tools = await resolveAutoServerTools({
+      mcpServers: {
+        linear: {
+          type: 'streamable-http',
+          url: 'https://x/linear',
+          headers: {},
+        },
+        'my.notes': {
+          type: 'streamable-http',
+          url: 'https://x/notes',
+          headers: {},
+        },
+        local: { type: 'stdio', command: 'x', args: [], env: {} },
+        broken: {
+          type: 'streamable-http',
+          url: 'https://x/broken',
+          headers: {},
+        },
       },
-      autoServers: ['linear', 'linear_v2', 'my.server'],
-    };
-    expect(resolveTaskToolForAsk(approvals, 'linear_save_issue')).toEqual({
-      integrationId: 'linear',
-      toolName: 'save_issue',
+      autoServers: ['linear', 'my.notes', 'local', 'broken'],
+      logger: { warn },
+      listToolNames: async (server) => {
+        if (server.url.includes('broken')) throw new Error('offline');
+        return listToolNames(server);
+      },
     });
-    expect(resolveTaskToolForAsk(approvals, 'linear_v2_get_issue')).toEqual({
-      integrationId: 'linear_v2',
-      toolName: 'get_issue',
+    expect(tools).toEqual({
+      linear_save_issue: { integrationId: 'linear', toolName: 'save_issue' },
+      // Two real tools share one key: neither is mapped.
+      my_notes_list: { integrationId: 'my.notes', toolName: 'list' },
     });
-    expect(resolveTaskToolForAsk(approvals, 'my_server_run')).toEqual({
-      integrationId: 'my.server',
-      toolName: 'run',
-    });
-    expect(resolveTaskToolForAsk(approvals, 'other_tool')).toBeUndefined();
-    expect(resolveTaskToolForAsk(approvals, 'linear_')).toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('share the native key'),
+    );
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('broken'));
   });
 });
