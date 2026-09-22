@@ -176,9 +176,14 @@ describe('getClientInformation', () => {
       }),
     });
     vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
 
     await expect(
-      getValidAccessToken('conn-1', 'https://mcp.linear.app/mcp'),
+      getValidAccessToken(
+        'conn-1',
+        'https://mcp.linear.app/mcp',
+        controller.signal,
+      ),
     ).resolves.toBe('fresh-access-token');
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -188,6 +193,12 @@ describe('getClientInformation', () => {
     expect(setMock).toHaveBeenCalledWith(
       expect.objectContaining({ refreshToken: 'refresh-token' }),
     );
+    const requestSignal = fetchMock.mock.calls[0]?.[1]?.signal as
+      | AbortSignal
+      | undefined;
+    expect(requestSignal).toBeInstanceOf(AbortSignal);
+    controller.abort(new DOMException('cancelled', 'AbortError'));
+    expect(requestSignal?.aborted).toBe(true);
   });
 
   it('includes the monday.com MCP resource when refreshing tokens', async () => {

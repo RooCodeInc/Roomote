@@ -56,6 +56,28 @@ describe('createLoggedProxyResponseBody', () => {
     },
   );
 
+  it('logs a transport abort as an error while preserving its classification', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    const stream = createLoggedProxyResponseBody({
+      body: createFailingBodyStream(
+        Object.assign(new Error('aborted'), { code: 'UND_ERR_ABORTED' }),
+      ),
+      logPrefix: '[Proxy]',
+      getLogFields: () => ({
+        method: 'GET',
+        path: '/stream',
+      }),
+    });
+
+    await expect(new Response(stream).text()).rejects.toThrow('aborted');
+
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(errorSpy.mock.calls[0]?.[0]).toContain('outcome="transport_abort"');
+    expect(errorSpy.mock.calls[0]?.[0]).toContain('retryable=true');
+    expect(debugSpy).not.toHaveBeenCalled();
+  });
+
   it('keeps unexpected stream failures at error level', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
