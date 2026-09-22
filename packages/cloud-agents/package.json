@@ -32,6 +32,11 @@
       "import": "./src/server/typesafe-judgment.ts",
       "require": "./src/server/typesafe-judgment.ts"
     },
+    "./server/screenshot-preparation": {
+      "types": "./src/server/screenshot-preparation.ts",
+      "import": "./src/server/screenshot-preparation.ts",
+      "require": "./src/server/screenshot-preparation.ts"
+    },
     "./show-widget": {
       "types": "./src/server/show-widget.ts",
       "import": "./src/server/show-widget.ts",
@@ -70,6 +75,7 @@
     "check-types": "tsc --noEmit",
     "check-types:fast": "tsgo --noEmit",
     "test": "dotenvx run -f ../../.env.test -- vitest",
+    "benchmark:screenshot-preparation": "tsx scripts/screenshot-preparation-benchmark.mts",
     "deployment:launch-docker-task": "tsx src/server/deployment-ci-launch-task.ts",
     "clean": "rimraf .turbo"
   },

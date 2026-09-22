@@ -12,6 +12,7 @@ import {
   CREATE_CUSTOM_SKILL_TOOL,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
   PUBLIC_URL_FETCH_TOOL,
+  SCREENSHOT_PREPARATION_TOOL,
   UPDATE_CUSTOM_SKILL_TOOL,
 } from '@roomote/types';
 
@@ -170,6 +171,29 @@ describe('roomote MCP tool descriptions', () => {
       'timeout',
       'headers',
     ]);
+  });
+
+  it('registers the explicitly opt-in screenshot preparation descriptor', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const tool = getRegisteredTool(
+      registeredTools,
+      SCREENSHOT_PREPARATION_TOOL.name,
+    );
+
+    expect(tool.config.title).toBe(SCREENSHOT_PREPARATION_TOOL.title);
+    expect(tool.config.description).toBe(
+      SCREENSHOT_PREPARATION_TOOL.description,
+    );
+    expect(tool.config.description).toContain(
+      'R_SCREENSHOT_PREPARATION_JEV_ENABLED',
+    );
+    expect(tool.config.description).toContain(
+      'it never executes browser commands',
+    );
+    expect(tool.config.description).toContain('Do not include passwords');
+    expect(tool.config.annotations).toEqual(
+      SCREENSHOT_PREPARATION_TOOL.annotations,
+    );
   });
 
   it('documents every built-in custom automation schedule preset', async () => {
