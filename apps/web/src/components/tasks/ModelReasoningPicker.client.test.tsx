@@ -11,6 +11,7 @@ import type { ReasoningEffort } from '@roomote/types';
 const mobileState = vi.hoisted(() => ({ current: false }));
 const userState = vi.hoisted(() => ({ isAdmin: false }));
 const pathnameState = vi.hoisted(() => ({ current: '/tasks' }));
+const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
 
 vi.mock('next/navigation', () => ({
   usePathname: () => pathnameState.current,
@@ -144,9 +145,11 @@ describe('ModelReasoningPicker', () => {
     mobileState.current = false;
     userState.isAdmin = false;
     pathnameState.current = '/tasks';
+    HTMLElement.prototype.scrollIntoView = vi.fn();
   });
 
   afterEach(async () => {
+    HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
     // Radix focus-scope schedules focus-out dispatch timers during popover
     // and drawer interactions. Flush them inside this test's environment;
     // firing after jsdom teardown throws a cross-realm dispatchEvent error
@@ -155,6 +158,34 @@ describe('ModelReasoningPicker', () => {
       await new Promise((resolve) => setTimeout(resolve, 600));
     });
   });
+
+  it.each([
+    ['desktop popover', false],
+    ['mobile drawer', true],
+  ])(
+    'scrolls the selected model into view in the %s',
+    async (_surface, mobile) => {
+      mobileState.current = mobile;
+      const availableModels = Array.from({ length: 10 }, (_, index) => ({
+        id: `provider/model-${index}`,
+        displayName: `Model ${index}`,
+      }));
+      const scrollIntoView = vi.mocked(HTMLElement.prototype.scrollIntoView);
+
+      render(
+        <Harness
+          initialModel="provider/model-9"
+          availableModels={availableModels}
+        />,
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Choose model' }));
+
+      const selectedOption = screen.getByRole('option', { name: 'Model 9' });
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
+      expect(scrollIntoView.mock.instances).toContain(selectedOption);
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
+    },
+  );
 
   it('applies model and wheel changes immediately while staying open', async () => {
     render(<Harness />);
