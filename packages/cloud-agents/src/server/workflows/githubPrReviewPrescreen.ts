@@ -180,7 +180,12 @@ function stripDiffPathPrefix(
   prefix: 'a/' | 'b/',
 ): string | undefined {
   // Git appends a tab after paths that contain spaces in `---`/`+++` headers.
-  const path = decodeDiffPath(token.replace(/\t.*$/u, '').trim());
+  // Cut at the first tab with indexOf: a `/\t.*$/` replace is quadratic on
+  // a header full of tabs, and the diff here comes from the sandbox.
+  const tab = token.indexOf('\t');
+  const path = decodeDiffPath(
+    (tab === -1 ? token : token.slice(0, tab)).trim(),
+  );
   return path.startsWith(prefix) ? path.slice(prefix.length) : undefined;
 }
 
