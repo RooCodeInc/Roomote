@@ -393,6 +393,7 @@ try {
     let preparationStatus = mode === 'baseline' ? 'baseline' : 'jev-guided';
     let jevActionCount = 0;
     let fallbackCount = 0;
+    let loopId: string | undefined;
 
     for (const plan of actionPlan) {
       const observation = await readObservation(plan.target, url);
@@ -419,6 +420,7 @@ try {
           input: {
             operation: 'next',
             optIn: true,
+            ...(loopId ? { loopId } : {}),
             evidenceGoal: plan.stepGoal,
             page: observation,
             allowedActions: [action],
@@ -432,6 +434,7 @@ try {
           throw new Error(preparationStatus);
         }
         jevActionCount += 1;
+        loopId = decision.loopId;
         const selected = decision.action;
         if (selected.kind === 'scroll') {
           await browser([
