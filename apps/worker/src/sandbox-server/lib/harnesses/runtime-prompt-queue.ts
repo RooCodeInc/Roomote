@@ -249,6 +249,7 @@ export class RuntimePromptQueue {
       ...(message.clientMessageId
         ? { clientMessageId: message.clientMessageId }
         : {}),
+      ...(message.source ? { source: message.source } : {}),
       timestamp: message.timestamp,
     }));
     this.queuedMessageIdCounter = this.queuedMessages.reduce(
