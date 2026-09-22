@@ -181,7 +181,7 @@ interface CompletionGateRuntimeOptions {
  * Whether a shell command looks like validation: a test, type check, lint,
  * build, or format check. These are the commands the check has to see.
  */
-export function isValidationCommand(command: string): boolean {
+function isValidationCommand(command: string): boolean {
   return /\b(vitest|jest|mocha|pytest|cargo\s+test|go\s+test|tsc|tsgo|check-types|typecheck|eslint|oxlint|lint|knip|build|format:check|prettier\s+--check|oxfmt\s+--check)\b|\b(pnpm|npm|yarn|bun)\s+(run\s+)?test\b/i.test(
     command,
   );
