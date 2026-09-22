@@ -176,6 +176,8 @@ function PickerContent({
   const showModelSettings =
     user?.isAdmin === true && pathname !== '/settings/models';
   const listRef = useRef<HTMLDivElement>(null);
+  const selectedOptionRef = useRef<HTMLButtonElement>(null);
+  const hasScrolledToInitialSelectionRef = useRef(false);
   const reasoningPanelRef = useRef<HTMLDivElement>(null);
   const previousEffortIndexRef = useRef(0);
   const [canScrollUp, setCanScrollUp] = useState(false);
@@ -207,6 +209,17 @@ function PickerContent({
   useEffect(() => {
     previousEffortIndexRef.current = effortIndex;
   }, [effortIndex]);
+
+  useEffect(() => {
+    if (
+      hasScrolledToInitialSelectionRef.current ||
+      !selectedOptionRef.current
+    ) {
+      return;
+    }
+    selectedOptionRef.current.scrollIntoView({ block: 'nearest' });
+    hasScrolledToInitialSelectionRef.current = true;
+  });
 
   const { leadingOptions, modelGroups, options } = useMemo(() => {
     const selectableModels = emptyModelLabel
@@ -459,6 +472,7 @@ function PickerContent({
     const selected = option.id === model;
     return (
       <button
+        ref={selected ? selectedOptionRef : undefined}
         key={option.id || '__default-model__'}
         type="button"
         role="option"
@@ -525,7 +539,7 @@ function PickerContent({
           aria-hidden="true"
           data-visible={canScrollUp}
           className={cn(
-            'pointer-events-none absolute inset-x-0 top-0 h-12 bg-linear-to-b from-background md:from-card to-transparent transition-transform motion-reduce:transition-none rounded-t-2xl',
+            'pointer-events-none absolute inset-x-0 top-0 h-12 bg-linear-to-b from-background md:from-card to-transparent transition-transform motion-reduce:transition-none rounded-tl-2xl',
             canScrollUp ? 'opacity-80' : 'opacity-0',
           )}
         />
@@ -533,7 +547,7 @@ function PickerContent({
           aria-hidden="true"
           data-visible={canScrollDown}
           className={cn(
-            'pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-linear-to-t from-background md:from-card to-transparent transition-transform motion-reduce:transition-none rounded-b-2xl',
+            'pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-linear-to-t from-background md:from-card to-transparent transition-transform motion-reduce:transition-none rounded-bl-2xl',
             canScrollDown ? 'opacity-80' : 'opacity-0',
           )}
         />
@@ -685,10 +699,20 @@ export function ModelReasoningPicker({
         className="relative w-[22rem] overflow-visible p-0 border rounded-2xl"
       >
         <PickerContent {...contentProps} onClose={() => onOpenChange(false)} />
-        <span
+        <svg
           aria-hidden="true"
-          className="absolute -bottom-2 left-3.75 size-3 rotate-45 border-b border-r border-border bg-popover"
-        />
+          viewBox="0 0 16 9"
+          fill="none"
+          className="pointer-events-none absolute -bottom-[9px] left-5 h-[9px] w-4 overflow-visible"
+        >
+          <path d="M0 0H16L8 8Z" className="fill-popover" />
+          <path
+            d="M0 0.5L8 8.5L16 0.5"
+            className="stroke-border"
+            strokeWidth="1"
+            strokeLinejoin="miter"
+          />
+        </svg>
       </PopoverContent>
     </Popover>
   );
