@@ -140,4 +140,55 @@ describe('PendingIntegrationToolApprovals', () => {
     expect(screen.getByText('No additional details.')).toBeInTheDocument();
     expect(screen.queryByText('No arguments')).not.toBeInTheDocument();
   });
+
+  it('tells the person when Auto flagged a risky call', () => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <PendingIntegrationToolApprovals
+          sessionId="session-1"
+          pending={[
+            {
+              ...pending[0]!,
+              autoEvaluation: {
+                recommendation: 'ask',
+                answers: {},
+                evaluatedAt: new Date().toISOString(),
+              },
+            },
+          ]}
+        />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByTestId('auto-evaluation')).toHaveTextContent(
+      'Auto flagged this call as risky and asked you.',
+    );
+  });
+
+  it('explains an unavailable Auto check without exposing implementation terms', () => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <PendingIntegrationToolApprovals
+          sessionId="session-1"
+          pending={[
+            {
+              ...pending[0]!,
+              autoEvaluation: {
+                recommendation: 'ask',
+                unavailable: 'no_model',
+                evaluatedAt: new Date().toISOString(),
+              },
+            },
+          ]}
+        />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByTestId('auto-evaluation')).toHaveTextContent(
+      "Auto couldn't check this call because an automatic check wasn't available, so it asked you.",
+    );
+    expect(
+      screen.queryByText(/decision model|judgment model|logs/i),
+    ).toBeNull();
+  });
 });

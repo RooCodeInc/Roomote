@@ -57,6 +57,7 @@ import {
   type EnvironmentRecipe,
   type IntegrationToolCandidate,
   type DataVisualizationInput,
+  type FastAgentSurface,
   CALL_INTEGRATION_TOOL_TOOL,
   FIND_INTEGRATION_TOOLS_TOOL,
   LIST_REPOSITORIES_MAX_LIMIT,
@@ -6282,16 +6283,21 @@ export async function answerFastAgentQuestion({
                       sessionId: toolApprovalSessionId,
                       // The Session owner decides, even on a participant's turn.
                       userId: toolApprovalDeciderUserId,
+                      surface: conversation.surface as FastAgentSurface,
                       integrations: availableIntegrations,
                       autoToolKeys: toolApprovalRules.autoToolKeys,
                       userRequest: question,
                       signal: promptSignal,
                       ...(conversation.surface === 'slack' ||
-                      conversation.surface === 'discord'
+                      conversation.surface === 'discord' ||
+                      conversation.surface === 'telegram'
                         ? {
                             notify: async (approval) => {
                               const sessionUrl = buildFastSessionUrl(
-                                conversation.surface as 'slack' | 'discord',
+                                conversation.surface as
+                                  | 'slack'
+                                  | 'discord'
+                                  | 'telegram',
                                 session.id,
                               );
                               await adapter.postReply({

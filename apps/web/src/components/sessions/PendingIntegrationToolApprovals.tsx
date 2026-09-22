@@ -13,6 +13,7 @@ import {
 } from '@/components/system';
 import {
   MCP_INTEGRATIONS,
+  type IntegrationToolAutoEvaluation,
   type IntegrationToolApprovalMetadata,
 } from '@roomote/types';
 
@@ -62,6 +63,21 @@ function approvalPrompt(item: IntegrationToolApprovalMetadata): string {
   }
 
   return `Let ${name} use this tool?`;
+}
+
+/** Explain why Auto handed a call to the Session owner. */
+function describeAutoEvaluation(
+  evaluation: IntegrationToolAutoEvaluation,
+): string {
+  if (evaluation.unavailable === 'no_model') {
+    return "Auto couldn't check this call because an automatic check wasn't available, so it asked you.";
+  }
+  if (evaluation.unavailable === 'error') {
+    return "Auto couldn't check this call, so it asked you.";
+  }
+  return evaluation.recommendation === 'approve'
+    ? 'Auto would have run this call.'
+    : 'Auto flagged this call as risky and asked you.';
 }
 
 function summarizeArgs(argsSummary: unknown): string | null {
@@ -141,6 +157,14 @@ export function PendingIntegrationToolApprovals({
                 <p className="mt-1 text-xs text-muted-foreground">
                   Roomote is waiting for your approval to continue.
                 </p>
+                {item.autoEvaluation ? (
+                  <p
+                    className="mt-1 text-xs text-muted-foreground"
+                    data-testid="auto-evaluation"
+                  >
+                    {describeAutoEvaluation(item.autoEvaluation)}
+                  </p>
+                ) : null}
               </div>
             </div>
 

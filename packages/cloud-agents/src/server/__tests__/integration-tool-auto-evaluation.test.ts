@@ -68,7 +68,7 @@ beforeEach(() => {
 });
 
 describe('recommendFromAutoAnswers', () => {
-  it('runs only a routine call the user asked for; every doubt denies', () => {
+  it('runs only a routine call the user asked for; every doubt asks', () => {
     expect(recommendFromAutoAnswers(routine)).toBe('approve');
     // With no request to judge against, the other signals decide.
     expect(
@@ -82,7 +82,7 @@ describe('recommendFromAutoAnswers', () => {
       { steeredByUntrustedContent: 0.4 },
       { guidanceFlagsRisk: 0.5 },
     ] satisfies Partial<AutoRiskAnswers>[]) {
-      expect(recommendFromAutoAnswers({ ...routine, ...doubt })).toBe('deny');
+      expect(recommendFromAutoAnswers({ ...routine, ...doubt })).toBe('ask');
     }
   });
 });
@@ -146,7 +146,7 @@ describe('evaluateIntegrationToolAutoDecision', () => {
     );
     const guided = await evaluateIntegrationToolAutoDecision(call);
     expect(guided).toMatchObject({
-      recommendation: 'deny',
+      recommendation: 'ask',
       answers: { guidanceFlagsRisk: 0.9 },
     });
     const { state, questions } = mocks.evaluate.mock.calls[1]![0];
@@ -156,19 +156,19 @@ describe('evaluateIntegrationToolAutoDecision', () => {
     expect(questions.guidanceFlagsRisk).toBeDefined();
   });
 
-  it('fails closed to deny with no model or a failed evaluation', async () => {
+  it('asks when no model or a failed evaluation leaves Auto unable to check', async () => {
     mocks.evaluate.mockResolvedValue(null);
     await expect(
       evaluateIntegrationToolAutoDecision(call),
     ).resolves.toMatchObject({
-      recommendation: 'deny',
+      recommendation: 'ask',
       unavailable: 'no_model',
     });
 
     mocks.evaluate.mockRejectedValue(new Error('timeout'));
     await expect(
       evaluateIntegrationToolAutoDecision(call),
-    ).resolves.toMatchObject({ recommendation: 'deny', unavailable: 'error' });
+    ).resolves.toMatchObject({ recommendation: 'ask', unavailable: 'error' });
   });
 });
 
@@ -181,9 +181,9 @@ describe('resolveIntegrationToolAutoState', () => {
       settings: { policy: 'Reads are fine.' },
     });
 
-    // The setting can outlive the model: on stays on so callers fail closed
-    // instead of silently running unassessed calls. The helper-model
-    // fallback is an LLM call per tool call: never implied.
+    // The setting can outlive the model: on stays on so callers ask or deny
+    // based on presence instead of silently running unassessed calls. The
+    // helper-model fallback is an LLM call per tool call: never implied.
     mocks.resolveModel.mockResolvedValue({ kind: 'helper', model: 'm' });
     await expect(resolveIntegrationToolAutoState()).resolves.toMatchObject({
       mode: 'on',
@@ -283,38 +283,38 @@ describe('resolveIntegrationToolAutoDecision', () => {
       'Reads are routine.',
     );
 
-    // Risky, or a failed evaluation: the call is denied, never asked.
+    // Risky, or a failed evaluation: the call asks its owner.
     mocks.evaluate.mockResolvedValue(
       modelAnswers({ ...routine, risk: { score: 2, confidence: 0.9 } }),
     );
     await expect(
       resolveIntegrationToolAutoDecision(call),
-    ).resolves.toMatchObject({ action: 'deny', mode: 'on' });
+    ).resolves.toMatchObject({ action: 'ask', mode: 'on' });
     mocks.evaluate.mockResolvedValue(null);
     await expect(
       resolveIntegrationToolAutoDecision(call),
     ).resolves.toMatchObject({
-      action: 'deny',
+      action: 'ask',
       mode: 'on',
       evaluation: { unavailable: 'no_model' },
     });
   });
 
-  it('fails closed to deny when Auto is on but no judgment model is configured', async () => {
+  it('asks when Auto is on but no judgment model is configured', async () => {
     mocks.settings.mockResolvedValue({ mode: 'on', policy: '' });
     mocks.resolveModel.mockResolvedValue(null);
     await expect(
       resolveIntegrationToolAutoDecision(call),
     ).resolves.toMatchObject({
-      action: 'deny',
+      action: 'ask',
       mode: 'on',
-      evaluation: { recommendation: 'deny', unavailable: 'no_model' },
+      evaluation: { recommendation: 'ask', unavailable: 'no_model' },
     });
     // The helper model is never used for tool-call assessment.
     mocks.resolveModel.mockResolvedValue({ kind: 'helper', model: 'm' });
     await expect(
       resolveIntegrationToolAutoDecision(call),
-    ).resolves.toMatchObject({ action: 'deny', mode: 'on' });
+    ).resolves.toMatchObject({ action: 'ask', mode: 'on' });
     expect(mocks.evaluate).not.toHaveBeenCalled();
   });
 });

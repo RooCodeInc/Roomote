@@ -15,6 +15,7 @@ import {
   listIntegrationToolUserPolicies,
   taskRuns,
 } from '@roomote/db/server';
+import { isSessionUserPresent } from '@roomote/redis';
 import {
   describeIntegrationToolAutoDeny,
   resolveIntegrationToolAutoDecision,
@@ -29,6 +30,47 @@ import {
   type IntegrationToolPolicyScope,
   type TaskIntegrationToolApprovals,
 } from '@roomote/types';
+
+const SESSION_PRESENCE_LOOKUP_TIMEOUT_MS = 2_000;
+
+async function isTaskSessionOwnerPresent(input: {
+  sessionId: string;
+  userId: string;
+  sourceSurface: string | null | undefined;
+}): Promise<boolean> {
+  if (
+    input.sourceSurface === 'slack' ||
+    input.sourceSurface === 'discord' ||
+    input.sourceSurface === 'telegram'
+  ) {
+    return true;
+  }
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      isSessionUserPresent({
+        sessionId: input.sessionId,
+        userId: input.userId,
+      }),
+      new Promise<boolean>((resolve) => {
+        timeout = setTimeout(() => {
+          console.warn(
+            `[Task tool approvals] Presence lookup timed out for Session ${input.sessionId}; asking defensively.`,
+          );
+          resolve(true);
+        }, SESSION_PRESENCE_LOOKUP_TIMEOUT_MS);
+        timeout.unref?.();
+      }),
+    ]);
+  } catch (error) {
+    console.warn(
+      `[Task tool approvals] Presence lookup failed for Session ${input.sessionId}; asking defensively: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return true;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
 
 /**
  * Experiment-gated (`integrationToolApprovals`) approvals for a task's agent.
@@ -50,6 +92,7 @@ async function resolveTaskApprovalSession(runId: number) {
     sessionId: session.id,
     ownerUserId:
       session.ownerKind === 'user' ? (session.ownerUserId ?? null) : null,
+    sourceSurface: session.sourceSurface,
   };
 }
 
@@ -175,8 +218,8 @@ export async function requestTaskToolApproval(input: {
   const allowedForSession =
     overrideForSession === 'allow' || effectiveMode === 'always_allow';
   // Auto mode assesses a call to a default tool only; a tool someone made a
-  // choice about is theirs to decide. Auto never asks a person: anything it
-  // does not approve is denied, and any failure on this path denies too.
+  // choice about is theirs to decide. A risky or unavailable assessment asks
+  // the Session owner when present and is denied when they are away.
   const auto = integrationToolModeIsAutoAssessed({
     policyMode,
     sessionOverrideMode: overrideForSession,
@@ -189,10 +232,10 @@ export async function requestTaskToolApproval(input: {
         userId: session.ownerUserId,
         taskId: session.taskId,
       }).catch(() => ({
-        action: 'deny' as const,
+        action: 'ask' as const,
         mode: 'on' as const,
         evaluation: {
-          recommendation: 'deny' as const,
+          recommendation: 'ask' as const,
           unavailable: 'error' as const,
           evaluatedAt: new Date().toISOString(),
         },
@@ -223,18 +266,28 @@ export async function requestTaskToolApproval(input: {
     });
     return { outcome: 'approved' };
   }
-  if (auto?.action === 'deny') {
-    // Born-terminal audit row; no card is ever shown for an Auto denial.
-    await insertAutoRejectedIntegrationToolApproval(context, {
-      ...call,
-      autoEvaluation: auto.evaluation,
+  if (auto?.action === 'ask') {
+    const ownerPresent = await isTaskSessionOwnerPresent({
+      sessionId: session.sessionId,
+      userId: session.ownerUserId,
+      sourceSurface: session.sourceSurface,
     });
-    return {
-      outcome: 'denied',
-      reason: describeIntegrationToolAutoDeny(auto.evaluation),
-    };
+    if (!ownerPresent) {
+      // Born-terminal audit row; no card is shown while the owner is away.
+      await insertAutoRejectedIntegrationToolApproval(context, {
+        ...call,
+        autoEvaluation: auto.evaluation,
+      });
+      return {
+        outcome: 'denied',
+        reason: describeIntegrationToolAutoDeny(auto.evaluation),
+      };
+    }
   }
-  const approval = await insertIntegrationToolApproval(context, call);
+  const approval = await insertIntegrationToolApproval(context, {
+    ...call,
+    ...(auto?.action === 'ask' ? { autoEvaluation: auto.evaluation } : {}),
+  });
   return { outcome: 'pending', approvalId: approval.approvalId };
 }
 

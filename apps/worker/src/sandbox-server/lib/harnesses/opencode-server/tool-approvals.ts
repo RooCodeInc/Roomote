@@ -222,7 +222,7 @@ export function createTaskToolApprovalRelay(options: {
       await reply(
         ask,
         'reject',
-        `Auto mode blocked this tool call because ${result.reason}. The call was not run, and this call cannot proceed.`,
+        `Auto mode blocked this tool call because ${result.reason} and the session owner was away. The call was not run. The session owner can allow this tool from its call in the transcript.`,
       );
       return;
     }

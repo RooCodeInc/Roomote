@@ -595,7 +595,7 @@ describe('auto-rejected audit rows', () => {
     const userId = await user();
     const sessionId = await ownedSession(userId);
     const evaluation = {
-      recommendation: 'deny' as const,
+      recommendation: 'ask' as const,
       answers: { riskScore: 0.9 },
       evaluatedAt: new Date().toISOString(),
     };
@@ -615,7 +615,7 @@ describe('auto-rejected audit rows', () => {
     expect(row?.status).toBe('auto_rejected');
     expect(row?.decidedByUserId).toBeNull();
     expect(row?.decidedAt).not.toBeNull();
-    expect(row?.autoEvaluation).toMatchObject({ recommendation: 'deny' });
+    expect(row?.autoEvaluation).toMatchObject({ recommendation: 'ask' });
     // Terminal: nothing can claim, decide, or cancel it into a run.
     await expect(
       claimAutoApprovedIntegrationToolApproval({

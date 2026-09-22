@@ -18,11 +18,13 @@ import {
   listIntegrationToolUserPolicies,
   markIntegrationToolApprovalConsumed,
 } from '@roomote/db/server';
+import { isSessionUserPresent } from '@roomote/redis';
 import {
   integrationToolModeIsAutoAssessed,
   integrationToolPolicyKey,
   resolveEffectiveIntegrationToolMode,
   resolveGoverningIntegrationToolPolicies,
+  type FastAgentSurface,
   type IntegrationToolApprovalMetadata,
   type IntegrationToolPolicyMetadata,
   type IntegrationToolSessionOverrideMetadata,
@@ -60,6 +62,7 @@ import { buildFastAgentCodeModeServerNames } from './fast-agent-tool-policy';
 const INTEGRATION_TOOL_APPROVAL_POLL_MS = 1_500;
 const INTEGRATION_TOOL_APPROVAL_CANCEL_EXPERIMENT_DISABLED =
   'experiment_disabled';
+const SESSION_PRESENCE_LOOKUP_TIMEOUT_MS = 2_000;
 
 /**
  * OpenCode flattens every MCP tool to `<server name>_<tool name>`. The server
@@ -367,6 +370,7 @@ export async function resolveFastAgentToolApprovalSession(
 export function createFastAgentToolApprovalBridge(input: {
   sessionId: string;
   userId: string;
+  surface: FastAgentSurface;
   integrations: FastAgentIntegration[];
   /**
    * Tools that ask only because Auto mode is on. Their asks are assessed
@@ -388,6 +392,41 @@ export function createFastAgentToolApprovalBridge(input: {
   }
   const handledRequestIds = new Set<string>();
   const notifiedApprovalIds = new Set<string>();
+
+  const ownerIsPresent = async (): Promise<boolean> => {
+    if (
+      input.surface === 'slack' ||
+      input.surface === 'discord' ||
+      input.surface === 'telegram'
+    ) {
+      return true;
+    }
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        isSessionUserPresent({
+          sessionId: input.sessionId,
+          userId: input.userId,
+        }),
+        new Promise<boolean>((resolve) => {
+          timeout = setTimeout(() => {
+            console.warn(
+              `[Fast Agent] Presence lookup timed out for Session ${input.sessionId}; asking defensively.`,
+            );
+            resolve(true);
+          }, SESSION_PRESENCE_LOOKUP_TIMEOUT_MS);
+          timeout.unref?.();
+        }),
+      ]);
+    } catch (error) {
+      console.warn(
+        `[Fast Agent] Presence lookup failed for Session ${input.sessionId}; asking defensively: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return true;
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
+  };
 
   // A code-mode child call's dotted name (`server.tool`) is unambiguous even
   // when its flattened permission key (`server_tool`) is not, so it is the
@@ -507,9 +546,8 @@ export function createFastAgentToolApprovalBridge(input: {
       // Auto mode: a call to a default tool is risk-assessed, and a routine
       // one runs without a card. A tool someone made a choice about (a
       // stored mode or a session override) is theirs to decide, so it never
-      // reaches the model. Auto never asks a person: anything it does not
-      // approve — a risky call, an evaluation error, or no decision model —
-      // is denied, and the denial is returned to the model as a tool error.
+      // reaches the model. A risky or unavailable assessment asks the Session
+      // owner when present and is denied when they are away.
       const autoAssessed =
         !overrideForSession &&
         input.autoToolKeys?.has(
@@ -524,10 +562,10 @@ export function createFastAgentToolApprovalBridge(input: {
             userRequest: input.userRequest,
             userId: input.userId,
           }).catch(() => ({
-            action: 'deny' as const,
+            action: 'ask' as const,
             mode: 'on' as const,
             evaluation: {
-              recommendation: 'deny' as const,
+              recommendation: 'ask' as const,
               unavailable: 'error' as const,
               evaluatedAt: new Date().toISOString(),
             },
@@ -540,10 +578,10 @@ export function createFastAgentToolApprovalBridge(input: {
         await helpers.reply(ask.requestId, 'once');
         return;
       }
-      if (auto?.action === 'deny') {
-        // The audit row is born terminal `auto_rejected` with the model's
-        // assessment; if it cannot be written the outer handler rejects the
-        // ask instead of denying it unrecorded. No card is ever shown.
+      if (auto?.action === 'ask' && !(await ownerIsPresent())) {
+        // The audit row is born terminal `auto_rejected` with the assessment;
+        // if it cannot be written the outer handler rejects the ask instead
+        // of denying it unrecorded. No card is shown while the owner is away.
         await insertAutoRejectedIntegrationToolApproval(
           { sessionId: input.sessionId, userId: input.userId },
           {
@@ -561,7 +599,7 @@ export function createFastAgentToolApprovalBridge(input: {
             'reject',
             `Auto mode blocked this tool call because ${describeIntegrationToolAutoDeny(
               auto.evaluation,
-            )}. The call was not run, and this call cannot proceed.`,
+            )} and the session owner was away. The call was not run. The session owner can allow this tool from its call in the transcript.`,
           )
           .catch(() => undefined);
         return;
@@ -613,6 +651,9 @@ export function createFastAgentToolApprovalBridge(input: {
           nativeRequestId: ask.requestId,
           argsFingerprint,
           argsSummary: args ?? null,
+          ...(auto?.action === 'ask'
+            ? { autoEvaluation: auto.evaluation }
+            : {}),
         },
       );
       if (input.notify && !notifiedApprovalIds.has(approval.approvalId)) {

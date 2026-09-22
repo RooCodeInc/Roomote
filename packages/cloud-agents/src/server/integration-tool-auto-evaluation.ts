@@ -82,8 +82,9 @@ export type AutoRiskAnswers = {
  * Run without a person only when the call reads and changes nothing (with
  * confidence), is what the user asked for when that is known, is not steered
  * by untrusted content, and the deployment's guidance does not flag it.
- * Anything less is blocked. The model can only ever run the call or deny it,
- * never ask a person.
+ * Anything less asks a person. The model can only ever recommend running the
+ * call or asking a person; presence decides whether that ask becomes a card
+ * or a denial.
  */
 export function recommendFromAutoAnswers(
   answers: AutoRiskAnswers,
@@ -94,7 +95,7 @@ export function recommendFromAutoAnswers(
     (answers.matchesRequest ?? 1) >= YES &&
     answers.steeredByUntrustedContent <= NO &&
     (answers.guidanceFlagsRisk ?? 0) <= NO;
-  return routine ? 'approve' : 'deny';
+  return routine ? 'approve' : 'ask';
 }
 
 export async function evaluateIntegrationToolAutoDecision(input: {
@@ -142,7 +143,7 @@ export async function evaluateIntegrationToolAutoDecision(input: {
       taskId: input.taskId,
     });
     if (!answers) {
-      return { recommendation: 'deny', unavailable: 'no_model', evaluatedAt };
+      return { recommendation: 'ask', unavailable: 'no_model', evaluatedAt };
     }
     const riskAnswers: AutoRiskAnswers = {
       risk: {
@@ -173,7 +174,7 @@ export async function evaluateIntegrationToolAutoDecision(input: {
       evaluatedAt,
     };
   } catch {
-    return { recommendation: 'deny', unavailable: 'error', evaluatedAt };
+    return { recommendation: 'ask', unavailable: 'error', evaluatedAt };
   }
 }
 
@@ -182,9 +183,10 @@ export async function evaluateIntegrationToolAutoDecision(input: {
  * every default tool call is gated and must be assessed before it runs. `on`
  * does not imply a hosted judgment model is configured — the On control is
  * disabled without one, but the setting can outlive the model, and callers
- * must treat `on` without a judgment model as fail-closed deny rather than
- * silently running calls. `shadow` is the same assessment recorded without
- * acting, while Auto is off and a hosted model is there to do it cheaply.
+ * must treat `on` without a judgment model as an ask for a present owner and
+ * a denial for an absent owner. `shadow` is the same assessment recorded
+ * without acting, while Auto is off and a hosted model is there to do it
+ * cheaply.
  */
 export type IntegrationToolAutoState = {
   mode: 'off' | 'shadow' | 'on';
@@ -253,7 +255,7 @@ export function recordIntegrationToolShadowEvaluationInBackground(input: {
 export type IntegrationToolAutoDecision =
   | { action: 'run'; mode: 'off' }
   | {
-      action: 'approve' | 'deny';
+      action: 'approve' | 'ask';
       mode: 'on';
       evaluation: IntegrationToolAutoEvaluation;
     };
@@ -266,7 +268,7 @@ export function describeIntegrationToolAutoDeny(
   evaluation: IntegrationToolAutoEvaluation,
 ): string {
   if (evaluation.unavailable === 'no_model') {
-    return 'no decision model is configured to check it';
+    return 'an automatic check is not available';
   }
   if (evaluation.unavailable === 'error') {
     return 'the automatic check failed';
@@ -277,9 +279,9 @@ export function describeIntegrationToolAutoDeny(
 /**
  * How Auto treats one call to a default tool. `approve` means the call is
  * routine enough to run; anything else — a risky assessment, an evaluation
- * error, or Auto on without a judgment model to assess with — is `deny`,
- * and the call is blocked with a tool error to the model. Only `off` (Auto
- * disabled) lets the call run unassessed.
+ * error, or Auto on without a judgment model to assess with — asks the owner.
+ * Presence decides whether that ask becomes a card or a denial. Only `off`
+ * (Auto disabled) lets the call run unassessed.
  */
 export async function resolveIntegrationToolAutoDecision(
   input: Parameters<typeof evaluateIntegrationToolAutoDecision>[0],
@@ -287,13 +289,14 @@ export async function resolveIntegrationToolAutoDecision(
   const state = await resolveIntegrationToolAutoState();
   if (state.mode !== 'on') return { action: 'run', mode: 'off' };
   if (state.model !== 'judgment') {
-    // Fail closed: Auto is on but nothing can assess the call. The helper
-    // model fallback is an LLM call per tool call and is never used here.
+    // Auto is on but nothing can assess the call. The helper model fallback is
+    // an LLM call per tool call and is never used here; ask/deny is decided by
+    // the Session owner's presence at the enforcement point.
     return {
-      action: 'deny',
+      action: 'ask',
       mode: 'on',
       evaluation: {
-        recommendation: 'deny',
+        recommendation: 'ask',
         unavailable: 'no_model',
         evaluatedAt: new Date().toISOString(),
       },
@@ -305,5 +308,5 @@ export async function resolveIntegrationToolAutoDecision(
   });
   return evaluation.recommendation === 'approve'
     ? { action: 'approve', mode: 'on', evaluation }
-    : { action: 'deny', mode: 'on', evaluation };
+    : { action: 'ask', mode: 'on', evaluation };
 }

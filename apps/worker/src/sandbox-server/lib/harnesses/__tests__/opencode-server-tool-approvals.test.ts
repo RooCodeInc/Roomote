@@ -118,7 +118,7 @@ describe('createTaskToolApprovalRelay', () => {
       expect.objectContaining({
         reply: 'reject',
         message: expect.stringContaining(
-          'Auto mode blocked this tool call because it was assessed as risky',
+          'Auto mode blocked this tool call because it was assessed as risky and the session owner was away',
         ),
       }),
     );
