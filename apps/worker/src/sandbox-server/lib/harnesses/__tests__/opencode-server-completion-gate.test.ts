@@ -875,6 +875,47 @@ describe('OpenCode harness completion check', () => {
     }
   });
 
+  it('keeps the test run in the evidence window through a long delivery tail', async () => {
+    const { client, harness, completed } = await startTask();
+    const run = async (index: number, command: string) =>
+      client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: `prt_${index}`,
+            sessionID: 'ses_1',
+            messageID: 'msg_1',
+            type: 'tool',
+            tool: 'bash',
+            callID: `call_${index}`,
+            state: {
+              status: 'completed',
+              input: { command },
+              output: 'ok',
+              metadata: { exit: 0 },
+            },
+          },
+        },
+      });
+
+    try {
+      await run(0, 'pnpm vitest run src/guard.test.ts');
+      for (let index = 1; index <= 20; index += 1) {
+        await run(index, `git status --short # ${index}`);
+      }
+      await completeTurn(client, 'msg_1', 'Removed the guard. Tests pass.');
+
+      await vi.waitFor(() => expect(completed()).toHaveLength(1));
+      const commands = mockRequestTaskCompletionCheck.mock.calls[0]![1]
+        .commands as Array<{ command: string }>;
+
+      expect(commands).toHaveLength(12);
+      expect(commands[0]!.command).toBe('pnpm vitest run src/guard.test.ts');
+    } finally {
+      harness.dispose();
+    }
+  });
+
   it('skips the check when nothing changed or the task is ineligible', async () => {
     mockCollectShippedDiff.mockResolvedValue(null);
     const unchanged = await startTask();

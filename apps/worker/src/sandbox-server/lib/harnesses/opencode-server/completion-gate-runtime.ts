@@ -177,6 +177,16 @@ interface CompletionGateRuntimeOptions {
  * turn lifecycle decisions, while this object serializes evidence snapshots,
  * evaluates a diff once, and enforces the one-denial retry rule.
  */
+/**
+ * Whether a shell command looks like validation: a test, type check, lint,
+ * build, or format check. These are the commands the check has to see.
+ */
+function isValidationCommand(command: string): boolean {
+  return /\b(vitest|jest|mocha|pytest|cargo\s+test|go\s+test|tsc|tsgo|check-types|typecheck|eslint|oxlint|lint|knip|build|format:check|prettier\s+--check|oxfmt\s+--check)\b|\b(pnpm|npm|yarn|bun)\s+(run\s+)?test\b/i.test(
+    command,
+  );
+}
+
 export class CompletionGateRuntime {
   private readonly workspacePath: string;
   private readonly getCommandEnv: CompletionGateRuntimeOptions['getCommandEnv'];
@@ -271,7 +281,13 @@ export class CompletionGateRuntime {
     });
 
     if (this.commands.length > TASK_COMPLETION_GATE_LIMITS.commandsMax) {
-      this.commands.shift();
+      // Delivery runs a dozen git and inspection commands after the last
+      // test. Evicting oldest-first pushed the test out of the window, and
+      // the check then read "tests pass" as unsupported. Drop those first.
+      const evict = this.commands.findIndex(
+        (entry) => !isValidationCommand(entry.command),
+      );
+      this.commands.splice(evict === -1 ? 0 : evict, 1);
     }
   }
 
