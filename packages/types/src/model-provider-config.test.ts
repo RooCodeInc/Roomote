@@ -509,7 +509,10 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         modelId: 'openrouter/anthropic/claude-opus-5.5',
       },
       { providerId: 'vercel', modelId: 'vercel/anthropic/claude-opus-5.5' },
-      { providerId: 'requesty', modelId: 'requesty/claude-opus-5-5' },
+      {
+        providerId: 'requesty',
+        modelId: 'requesty/anthropic/claude-opus-5-5',
+      },
       { providerId: 'azure', modelId: 'azure/claude-opus-5-5' },
       {
         providerId: 'azure-cognitive-services',
@@ -1077,7 +1080,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         helper: 'requesty/gemini-3.8-flash',
         codeReview: 'requesty/claude-sonnet-5',
         explore: 'requesty/gemini-3.8-flash',
-        planning: 'requesty/claude-opus-5-5',
+        planning: 'requesty/anthropic/claude-opus-5-5',
       },
     });
     expect(
@@ -1086,7 +1089,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       'requesty/claude-fable-5.1',
       'requesty/claude-fable-5',
       'requesty/claude-haiku-4-5',
-      'requesty/claude-opus-5-5',
+      'requesty/anthropic/claude-opus-5-5',
       'requesty/claude-sonnet-5',
       'requesty/gpt-5.6-sol@eu',
       'requesty/gpt-5.6-terra@eu',
