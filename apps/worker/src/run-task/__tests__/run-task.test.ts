@@ -3316,6 +3316,7 @@ describe('runTask', () => {
     const harnessManager = harnessManagerInstances.at(-1)!;
     harnessManager.currentSessionId = 'runtime-session-153';
     harnessManager.currentPhase = 'running';
+    const mcpRefreshCallsBefore = getMcpServerConfigsMock.mock.calls.length;
 
     const drain = startPollingMock.mock.calls.at(-1)?.[0].drainTaskFollowUps as
       | (() => Promise<void>)
@@ -3334,6 +3335,9 @@ describe('runTask', () => {
       runId: 153,
       id: 'follow-up-steer',
     });
+    expect(getMcpServerConfigsMock.mock.calls.length).toBeGreaterThan(
+      mcpRefreshCallsBefore,
+    );
     expect(taskRunsMarkFollowUpAcceptedMock).toHaveBeenCalledWith({
       runId: 153,
       id: 'follow-up-steer',

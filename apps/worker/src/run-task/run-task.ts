@@ -1910,6 +1910,9 @@ export const runTask = async ({
 
           const isEmptySession =
             !hasRuntimeSession && status.phase === 'waiting_for_prompt';
+          const actorChanged = Boolean(
+            message.userId && message.userId !== getLastKnownActorUserId(),
+          );
           const queueOnly =
             !isEmptySession &&
             message.deliveryMode === 'send' &&
@@ -1975,7 +1978,7 @@ export const runTask = async ({
 
             const prepared = await prepareActorScopedTurn(
               message.userId ?? undefined,
-              { allowMcpReconnect: false },
+              { allowMcpReconnect: actorChanged },
             );
             if (prepared === false || prepared.skippedMismatch) {
               await sdk.taskRuns.releaseFollowUpMessage({
