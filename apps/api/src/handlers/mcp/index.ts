@@ -36,6 +36,7 @@ import { vercelMcp } from './vercel';
 import { createHttpIntegrationsMcp } from './http-integrations';
 import { developmentFixturesMcp } from './development-fixtures';
 import { publicUrlFetchRoute } from './public-url-fetch-route';
+import { artifactMcpRouter } from './artifacts';
 
 export const mcp = new Hono<{ Variables: Variables }>();
 
@@ -133,6 +134,8 @@ mcp.use('/custom-automations/*', mcpAuthMiddleware);
 mcp.use('/custom-automations', mcpAuthMiddleware);
 mcp.use('/custom-skills/*', mcpAuthMiddleware);
 mcp.use('/custom-skills', mcpAuthMiddleware);
+mcp.use('/artifacts/*', mcpAuthMiddleware);
+mcp.use('/artifacts', mcpAuthMiddleware);
 
 mcp.route('/slack', slackMcp);
 mcp.route('/communication', communicationMcp);
@@ -141,3 +144,4 @@ mcp.route('/sessions', sessionsRouter);
 mcp.route('/environments', environmentsRouter);
 mcp.route('/custom-automations', customAutomationsRouter);
 mcp.route('/custom-skills', customSkillsRouter);
+mcp.route('/artifacts', artifactMcpRouter);

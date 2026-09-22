@@ -96,6 +96,13 @@ owning task or session; a link does not make the artifact public or grant new
 access. The standalone page also supports available artifact versions and a
 link back to the owning task or session when that context is useful.
 
+When an agent needs to inspect an existing artifact, it can use the
+`open_artifact` capability with the exact owning task or session and stored
+path. The capability currently returns bounded content for supported text
+artifacts; binary or oversized artifacts should be opened through their
+artifact link or downloaded instead. Access is checked against the owning task
+or session before content is read.
+
 ## Videos from Roomote
 
 For new screencasts, Roomote prefers final MP4 (H.264) artifacts optimized for

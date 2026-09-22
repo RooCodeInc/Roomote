@@ -21,6 +21,33 @@ export const INVALID_TASK_ARTIFACT_TYPE_ERROR =
 export const taskArtifactTypeSchema = z.enum(taskArtifactTypes);
 export const uploadArtifactTypeSchema = z.enum(uploadArtifactTypes);
 
+const TEXT_APPLICATION_CONTENT_TYPES = new Set([
+  'application/graphql',
+  'application/javascript',
+  'application/json',
+  'application/sql',
+  'application/toml',
+  'application/typescript',
+  'application/x-httpd-php',
+  'application/x-sh',
+  'application/x-toml',
+  'application/x-yaml',
+  'application/xml',
+  'application/yaml',
+]);
+
+export function isTextArtifactContentType(contentType: string): boolean {
+  const normalized = contentType.split(';', 1)[0]?.trim().toLowerCase() ?? '';
+
+  return (
+    normalized.startsWith('text/') ||
+    normalized.includes('+json') ||
+    normalized.includes('+xml') ||
+    normalized.includes('markdown') ||
+    TEXT_APPLICATION_CONTENT_TYPES.has(normalized)
+  );
+}
+
 export type ArtifactStorageOwner =
   | { taskId: string; sessionId?: never }
   | { taskId?: never; sessionId: string };

@@ -11,6 +11,7 @@ import {
 import {
   CREATE_CUSTOM_SKILL_TOOL,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
+  OPEN_ARTIFACT_TOOL,
   PUBLIC_URL_FETCH_TOOL,
   UPDATE_CUSTOM_SKILL_TOOL,
 } from '@roomote/types';
@@ -630,6 +631,29 @@ describe('roomote MCP tool descriptions', () => {
     );
     expect(artifactTypeField.description).toBe(
       'Optional artifact type filter for list (one of "general", "plan", "visual-proof"). Omit to list all artifact types.',
+    );
+  });
+
+  it('registers the generic open_artifact capability', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const tool = getRegisteredTool(registeredTools, OPEN_ARTIFACT_TOOL.name);
+
+    expect(tool.config.title).toBe(OPEN_ARTIFACT_TOOL.title);
+    expect(tool.config.description).toBe(OPEN_ARTIFACT_TOOL.description);
+    expect(tool.config.annotations).toEqual(OPEN_ARTIFACT_TOOL.annotations);
+    const schema = tool.config
+      .inputSchema as unknown as z.ZodObject<z.ZodRawShape>;
+    expect(Object.keys(schema.shape)).toEqual([
+      'taskId',
+      'sessionId',
+      'path',
+      'version',
+    ]);
+    expect(tool.config.description).toContain(
+      'Binary or otherwise unsupported formats return metadata without content',
+    );
+    expect(tool.config.description).toContain(
+      'never guess an artifact ID or path',
     );
   });
 
