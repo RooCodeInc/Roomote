@@ -6,7 +6,7 @@ import type { Variables } from '../../../types';
 const {
   mockTaskFindFirst,
   mockTaskRunFindFirst,
-  mockSessionFindFirst,
+  mockFindAccessibleSession,
   mockGetTaskArtifactByPath,
   mockGetSessionArtifactByPath,
   mockGetArtifactObject,
@@ -14,7 +14,7 @@ const {
 } = vi.hoisted(() => ({
   mockTaskFindFirst: vi.fn(),
   mockTaskRunFindFirst: vi.fn(),
-  mockSessionFindFirst: vi.fn(),
+  mockFindAccessibleSession: vi.fn(),
   mockGetTaskArtifactByPath: vi.fn(),
   mockGetSessionArtifactByPath: vi.fn(),
   mockGetArtifactObject: vi.fn(),
@@ -27,14 +27,12 @@ vi.mock('@roomote/db/server', () => ({
     query: {
       tasks: { findFirst: mockTaskFindFirst },
       taskRuns: { findFirst: mockTaskRunFindFirst },
-      sessions: { findFirst: mockSessionFindFirst },
     },
   },
   eq: vi.fn((...args) => ({ type: 'eq', args })),
   getSessionArtifactByPath: mockGetSessionArtifactByPath,
   getTaskArtifactByPath: mockGetTaskArtifactByPath,
   isVisibleTask: vi.fn(() => ({ type: 'visible' })),
-  sessions: { id: 'sessions.id', visibility: 'sessions.visibility' },
   taskRuns: { id: 'taskRuns.id' },
   tasks: { id: 'tasks.id' },
 }));
@@ -49,6 +47,10 @@ vi.mock('../../artifacts/auth', () => ({
 
 vi.mock('../../artifacts/storage', () => ({
   getArtifactObject: mockGetArtifactObject,
+}));
+
+vi.mock('../../sessions', () => ({
+  findAccessibleSession: mockFindAccessibleSession,
 }));
 
 import { artifactMcpRouter } from '../artifacts';
@@ -102,7 +104,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockTaskFindFirst.mockResolvedValue({ id: 'task-1' });
   mockTaskRunFindFirst.mockResolvedValue({ taskId: 'task-1' });
-  mockSessionFindFirst.mockResolvedValue({ id: 'session-1' });
+  mockFindAccessibleSession.mockResolvedValue({ id: 'session-1' });
   mockVerifyTaskReadAccess.mockResolvedValue({ ok: true });
   mockGetTaskArtifactByPath.mockResolvedValue(textArtifact());
   mockGetSessionArtifactByPath.mockResolvedValue(
@@ -183,6 +185,64 @@ it('opens a Session artifact only through the authorized Session owner', async (
     'notes/context.md',
     1,
   );
+});
+
+it.each([
+  { requestedId: 'session-1', canonicalId: 'session-1' },
+  { requestedId: 'fast-conversation-1', canonicalId: 'session-1' },
+])(
+  'uses the canonical Session ID when resolving $requestedId',
+  async ({ requestedId, canonicalId }) => {
+    mockFindAccessibleSession.mockResolvedValueOnce({ id: canonicalId });
+    mockGetSessionArtifactByPath.mockResolvedValueOnce(
+      textArtifact({
+        id: 'session-artifact-canonical',
+        taskId: null,
+        sessionId: canonicalId,
+        path: 'notes/context.md',
+      }),
+    );
+
+    const response = await app().request('/artifacts/open', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: requestedId,
+        path: 'notes/context.md',
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockFindAccessibleSession).toHaveBeenCalledWith(requestedId, auth);
+    expect(mockGetSessionArtifactByPath).toHaveBeenCalledWith({
+      sessionId: canonicalId,
+      path: 'notes/context.md',
+      version: undefined,
+    });
+    expect(mockGetArtifactObject).toHaveBeenCalledWith(
+      { sessionId: canonicalId },
+      'session-artifact-canonical',
+      'notes/context.md',
+      2,
+    );
+  },
+);
+
+it('fails closed before Session artifact or storage lookup when Session access is denied', async () => {
+  mockFindAccessibleSession.mockResolvedValueOnce(undefined);
+
+  const response = await app().request('/artifacts/open', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ sessionId: 'private-session', path: 'secret.txt' }),
+  });
+
+  expect(response.status).toBe(403);
+  await expect(response.json()).resolves.toEqual({
+    error: 'Artifact access denied',
+  });
+  expect(mockGetSessionArtifactByPath).not.toHaveBeenCalled();
+  expect(mockGetArtifactObject).not.toHaveBeenCalled();
 });
 
 it('fails closed before artifact lookup when task access is denied', async () => {
@@ -275,7 +335,7 @@ it('returns explicit errors for missing, unsupported, and oversized artifacts', 
   });
 
   mockGetTaskArtifactByPath.mockResolvedValueOnce(
-    textArtifact({ size: 1024 * 1024 + 1 }),
+    textArtifact({ size: 64 * 1024 + 1 }),
   );
   const oversized = await app().request('/artifacts/open', {
     method: 'POST',
@@ -284,7 +344,7 @@ it('returns explicit errors for missing, unsupported, and oversized artifacts', 
   expect(oversized.status).toBe(413);
   await expect(oversized.json()).resolves.toMatchObject({
     error: 'Artifact is too large to open',
-    maxBytes: 1024 * 1024,
+    maxBytes: 64 * 1024,
   });
   expect(mockGetArtifactObject).not.toHaveBeenCalled();
 });

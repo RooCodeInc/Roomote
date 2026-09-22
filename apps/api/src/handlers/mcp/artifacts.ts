@@ -8,7 +8,6 @@ import {
   getSessionArtifactByPath,
   getTaskArtifactByPath,
   isVisibleTask,
-  sessions,
   taskRuns,
   tasks,
 } from '@roomote/db/server';
@@ -23,13 +22,14 @@ import type { Variables } from '../../types';
 import { customAutomationHistoryAccess } from '../custom-automation-history-access';
 import { verifyArtifactRouteTaskReadAccess } from '../artifacts/auth';
 import { getArtifactObject } from '../artifacts/storage';
+import { findAccessibleSession } from '../sessions';
 import type { McpAuth } from './middleware';
 
 type ArtifactMcpContext = Context<{
   Variables: Variables & { mcpAuth: McpAuth };
 }>;
 
-const MAX_OPEN_ARTIFACT_BYTES = 1024 * 1024;
+const MAX_OPEN_ARTIFACT_BYTES = 64 * 1024;
 
 function artifactMetadata(artifact: {
   id: string;
@@ -98,7 +98,11 @@ async function readTextBody(body: {
 
 async function hasTaskReadAccess(taskId: string, auth: McpAuth) {
   if (auth.authContext.tokenType === 'run') {
-    return verifyArtifactRouteTaskReadAccess(taskId, auth.authContext);
+    const result = await verifyArtifactRouteTaskReadAccess(
+      taskId,
+      auth.authContext,
+    );
+    return result.ok ? { ...result, sessionId: null } : result;
   }
 
   const task = await db.query.tasks.findFirst({
@@ -111,7 +115,7 @@ async function hasTaskReadAccess(taskId: string, auth: McpAuth) {
   });
 
   return task
-    ? { ok: true as const }
+    ? { ok: true as const, sessionId: null }
     : {
         ok: false as const,
         status: 403 as const,
@@ -120,17 +124,10 @@ async function hasTaskReadAccess(taskId: string, auth: McpAuth) {
 }
 
 async function hasSessionReadAccess(sessionId: string, auth: McpAuth) {
-  const session = await db.query.sessions.findFirst({
-    columns: { id: true },
-    where: and(
-      eq(sessions.id, sessionId),
-      eq(sessions.visibility, 'visible'),
-      customAutomationHistoryAccess(auth, 'session'),
-    ),
-  });
+  const session = await findAccessibleSession(sessionId, auth);
 
   return session
-    ? { ok: true as const }
+    ? { ok: true as const, sessionId: session.id }
     : {
         ok: false as const,
         status: 403 as const,
@@ -181,11 +178,14 @@ async function openArtifact(c: ArtifactMcpContext): Promise<Response> {
     return c.json({ error: pathError }, 400);
   }
 
-  const taskAccess = resolvedInput.taskId
+  // Task artifact reads intentionally use the raw run-token auth context for
+  // task binding. Session reads use the resolved acting user through the same
+  // canonical lookup as the HTTP session router and custom-skill wiring.
+  const access = resolvedInput.taskId
     ? await hasTaskReadAccess(resolvedInput.taskId, auth)
     : await hasSessionReadAccess(resolvedInput.sessionId!, auth);
-  if (!taskAccess.ok) {
-    return c.json({ error: taskAccess.error }, taskAccess.status);
+  if (!access.ok) {
+    return c.json({ error: access.error }, access.status);
   }
 
   const artifact = resolvedInput.taskId
@@ -195,7 +195,7 @@ async function openArtifact(c: ArtifactMcpContext): Promise<Response> {
         version: resolvedInput.version,
       })
     : await getSessionArtifactByPath({
-        sessionId: resolvedInput.sessionId!,
+        sessionId: access.sessionId!,
         path: resolvedInput.path,
         version: resolvedInput.version,
       });

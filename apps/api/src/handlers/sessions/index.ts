@@ -56,7 +56,7 @@ type SessionContext = Context<{
 
 // Ordinary Sessions remain collaborative; custom automation history is private
 // to the current automation owner and deployment admins.
-async function findAccessibleSession(sessionId: string, auth: McpAuth) {
+export async function findAccessibleSession(sessionId: string, auth: McpAuth) {
   const [session] = await db
     .select()
     .from(sessions)

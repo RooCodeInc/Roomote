@@ -105,9 +105,10 @@ coding sandbox.
 Use `open_artifact` when you need to inspect an artifact from an accessible task or
 Session. Pass the exact owning task or Session ID and stored artifact path; a task
 run may omit the task ID to use its bound current task. The result includes artifact
-metadata and bounded content for supported text formats. Binary, unsupported, or
-oversized artifacts should be opened through their artifact link or downloaded
-instead. Roomote checks access to the owning task or Session before reading content.
+metadata and bounded content for supported text formats up to 64 KiB. Binary,
+unsupported, or oversized artifacts should be opened through their artifact link
+or downloaded instead. Roomote checks access to the owning task or Session before
+reading content.
 
 ## Things to try
 

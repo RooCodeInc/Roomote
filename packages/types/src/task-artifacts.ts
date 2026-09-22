@@ -25,6 +25,7 @@ const TEXT_APPLICATION_CONTENT_TYPES = new Set([
   'application/graphql',
   'application/javascript',
   'application/json',
+  'application/markdown',
   'application/sql',
   'application/toml',
   'application/typescript',
@@ -41,9 +42,8 @@ export function isTextArtifactContentType(contentType: string): boolean {
 
   return (
     normalized.startsWith('text/') ||
-    normalized.includes('+json') ||
-    normalized.includes('+xml') ||
-    normalized.includes('markdown') ||
+    normalized.endsWith('+json') ||
+    normalized.endsWith('+xml') ||
     TEXT_APPLICATION_CONTENT_TYPES.has(normalized)
   );
 }

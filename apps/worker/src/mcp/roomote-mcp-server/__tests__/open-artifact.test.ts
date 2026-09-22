@@ -55,7 +55,7 @@ describe('handleOpenArtifact', () => {
       new Response(
         JSON.stringify({
           error: 'Artifact is too large to open',
-          maxBytes: 1024 * 1024,
+          maxBytes: 64 * 1024,
         }),
         { status: 413 },
       ),
