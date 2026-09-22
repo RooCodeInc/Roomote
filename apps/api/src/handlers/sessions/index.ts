@@ -147,7 +147,7 @@ async function sendSessionMessage(c: SessionContext): Promise<Response> {
       return c.json({
         ...result,
         sent: {
-          direction: 'Codex → Roomote',
+          direction: 'Client → Roomote',
           target: { kind: 'session', id: session.id },
           text: message,
         },

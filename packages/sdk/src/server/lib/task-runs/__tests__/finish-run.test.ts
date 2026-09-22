@@ -47,6 +47,7 @@ const mockGetCustomAutomationById = vi.fn();
 const mockRefreshAutomationRootFooter = vi.fn().mockResolvedValue(true);
 const mockResolveAutomationResultSubtitle = vi.fn();
 const mockRetryFailedTaskStart = vi.fn();
+const mockDistillTaskRunTurnMemory = vi.fn();
 const mockRefreshTaskTitleOnCompletion = vi.fn().mockResolvedValue(undefined);
 const mockRefreshTaskSessionTitleOnCompletion = vi
   .fn()
@@ -200,6 +201,8 @@ const mockFinalizeGithubPrReviewComment = vi.fn().mockResolvedValue({
 });
 
 vi.mock('@roomote/cloud-agents/server', () => ({
+  distillTaskRunTurnMemory: (...args: unknown[]) =>
+    mockDistillTaskRunTurnMemory(...args),
   enqueueTask: vi.fn(),
   releaseTaskRun: vi.fn().mockResolvedValue(undefined),
   getTaskUrl: vi.fn().mockReturnValue('https://example.com/task'),
@@ -633,6 +636,36 @@ describe('finishRun', () => {
     },
   );
 
+  it.each([RunStatus.Idle, RunStatus.Completed] as const)(
+    'checks a settled turn for a memory worth saving when the run becomes %s',
+    async (status) => {
+      mockFindFirstRun.mockResolvedValue(makeRun());
+
+      await finishRun({ id: 1, status });
+
+      expect(mockDistillTaskRunTurnMemory).toHaveBeenCalledExactlyOnceWith({
+        runId: 1,
+        taskId: 'task-1',
+        userId: 'user-1',
+        workflow: 'standard',
+        requeue: true,
+      });
+    },
+  );
+
+  it('does not check failed, canceled, or snapshot maintenance runs for memories', async () => {
+    mockFindFirstRun.mockResolvedValue(makeRun());
+    await finishRun({ id: 1, status: RunStatus.Failed });
+    await finishRun({ id: 1, status: RunStatus.Canceled });
+
+    mockFindFirstRun.mockResolvedValue(
+      makeRun({ payloadKind: TaskPayloadKind.SnapshotEnvironment }),
+    );
+    await finishRun({ id: 1, status: RunStatus.Completed });
+
+    expect(mockDistillTaskRunTurnMemory).not.toHaveBeenCalled();
+  });
+
   it('does not capture a settled event when a run becomes idle', async () => {
     mockFindFirstRun.mockResolvedValue(makeRun());
 
@@ -641,6 +674,15 @@ describe('finishRun', () => {
     expect(mockCaptureTaskSettled).not.toHaveBeenCalled();
     expect(mockTerminateCredentialEgress).not.toHaveBeenCalled();
     expect(mockNotifyWebTaskInitiatorOnSettle).not.toHaveBeenCalled();
+    expect(mockRecordTaskRunLifecycleEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        details: expect.objectContaining({
+          status: RunStatus.Idle,
+          terminalReason: null,
+        }),
+      }),
+    );
   });
 
   it('suppresses terminal notifications while an automatic startup retry is queued', async () => {
@@ -963,6 +1005,12 @@ describe('finishRun', () => {
           previousSnapshotCreatedAt: '2026-04-09T20:41:30.000Z',
           previousWorkerHeartbeatAt: '2026-04-09T20:38:58.630Z',
           error: 'spawn timeout',
+          terminalReason: {
+            kind: 'terminal',
+            status: RunStatus.Failed,
+            errorCode: null,
+            message: 'spawn timeout',
+          },
         }),
       }),
     );

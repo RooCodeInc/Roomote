@@ -32,9 +32,12 @@ import {
   environmentVariables,
   environments,
   mcpConnections,
+  customMcpServers,
+  personalMcpServers,
   pullRequestFacts,
   repositories,
   sessions,
+  serviceCredentials,
   slackInstallations,
   llmUsageEvents,
   taskPullRequests,
@@ -46,6 +49,7 @@ import {
 import { isChatGptSubscriptionConnected } from './chatgpt-subscription';
 import { listConfiguredComputeProviders } from './compute-runtime-config';
 import { isGitHubCopilotSubscriptionConnected } from './github-copilot-subscription';
+import { liveServiceCredentialWhere } from './service-credentials';
 import { isXaiSubscriptionConnected } from './xai-subscription';
 
 const DEFAULT_DEPLOYMENT_ID = 'default';
@@ -139,6 +143,17 @@ export type InstanceReportAutomations = {
   };
 };
 
+export type InstanceReportIntegrations = {
+  enabled: number;
+  /**
+   * Built-in catalog integrations keep their safe catalog ids. Custom MCP
+   * integrations appear as `custom-integration-N` and API-key (service
+   * credential) integrations as `api-key-integration-N`: owner-authored
+   * names are sensitive metadata and never leave the instance.
+   */
+  enabledNames: string[];
+};
+
 /**
  * Anonymous daily instance stats blob sent to the Ping service and forwarded
  * to PostHog. Extensible: add fields freely, never repurpose existing ones.
@@ -205,6 +220,7 @@ export type InstanceReportStats = {
   mcp: {
     enabled: string[];
   };
+  integrations: InstanceReportIntegrations;
   automations: InstanceReportAutomations;
 };
 
@@ -260,6 +276,125 @@ export function summarizeAutomations(options: {
       enabledByKey,
     },
   };
+}
+
+/**
+ * Enabled integration names for the report. Classification is per record, in
+ * one fixed order, so nothing is double-counted: built-in catalog ids are
+ * recognized first with `getMcpIntegration`; custom integrations come from
+ * the enabled custom/personal server rows (servers using `none`,
+ * `static_headers`, or stdio never create an OAuth connection row, so the
+ * `custom:<id>` connection ids must not be the only custom source);
+ * unrecognized MCP ids fall into the custom bucket defensively; and API-key
+ * integrations are counted from live service-credential rows. A custom MCP
+ * id stays custom even when it authenticates with an API-key-style header,
+ * so each category consumes exactly one bucket.
+ *
+ * Custom and API-key names are user-authored, so they are replaced with
+ * deterministic numbered stubs (`custom-integration-N`,
+ * `api-key-integration-N`) derived from sorted underlying ids. The `enabled`
+ * total always equals `enabledNames.length`.
+ */
+export function summarizeIntegrations(options: {
+  mcpIds: string[];
+  customIntegrationIds: string[];
+  apiKeyIntegrationCount: string | number | null | undefined;
+}): InstanceReportIntegrations {
+  const builtInIds: string[] = [];
+  const customIds: string[] = [];
+
+  for (const mcpId of new Set(options.mcpIds)) {
+    if (getMcpIntegration(mcpId)) {
+      builtInIds.push(mcpId);
+      continue;
+    }
+    // `custom:<id>` connection entries are skipped here: custom/personal
+    // server rows are the authoritative custom bucket, so OAuth connection
+    // rows never double-count a server.
+    if (mcpId.startsWith('custom:')) {
+      continue;
+    }
+    // Unrecognized ids still count, defensively, so unknown MCP records do
+    // not vanish silently and no user-authored name can leak.
+    customIds.push(mcpId);
+  }
+
+  for (const customId of new Set(options.customIntegrationIds)) {
+    customIds.push(customId);
+  }
+
+  const enabledNames: string[] = [
+    ...builtInIds.sort(),
+    ...customIds.sort().map((_, index) => `custom-integration-${index + 1}`),
+  ];
+
+  const apiKeyCount = toNumber(options.apiKeyIntegrationCount);
+  for (let index = 1; index <= apiKeyCount; index += 1) {
+    enabledNames.push(`api-key-integration-${index}`);
+  }
+
+  return {
+    enabled: enabledNames.length,
+    enabledNames,
+  };
+}
+
+/**
+ * Enabled MCP ids: deployment enablement rows plus enabled connection rows.
+ * User-scoped connections of soft-deleted owners are excluded, while
+ * deployment connections (userId NULL) are retained — same live-owner rule
+ * as the service-credential predicate.
+ */
+export async function collectEnabledMcpIds(): Promise<string[]> {
+  const [enablements, connections] = await Promise.all([
+    db
+      .select({ mcpId: deploymentMcpEnablements.mcpId })
+      .from(deploymentMcpEnablements)
+      .where(eq(deploymentMcpEnablements.enabled, true)),
+    db
+      .selectDistinct({ mcpId: mcpConnections.mcpId })
+      .from(mcpConnections)
+      .leftJoin(users, eq(users.id, mcpConnections.userId))
+      .where(
+        and(
+          eq(mcpConnections.enabled, true),
+          or(isNull(mcpConnections.userId), isNull(users.deletedAt)),
+        ),
+      ),
+  ]);
+
+  return [
+    ...enablements.map((row) => row.mcpId),
+    ...connections.map((row) => row.mcpId),
+  ];
+}
+
+/**
+ * Ids of enabled custom/personal MCP server rows: the authoritative custom
+ * bucket. Personal rows of soft-deleted owners are excluded, matching
+ * `findCustomMcpServerById` runtime semantics, and disabled rows are
+ * filtered out. Exported so tests can assert on ids instead of the report's
+ * anonymized stubs.
+ */
+export async function collectEnabledCustomIntegrationIds(): Promise<string[]> {
+  const [deploymentRows, personalRows] = await Promise.all([
+    db
+      .select({ id: customMcpServers.id })
+      .from(customMcpServers)
+      .where(eq(customMcpServers.enabled, true)),
+    db
+      .select({ id: personalMcpServers.id })
+      .from(personalMcpServers)
+      .innerJoin(users, eq(users.id, personalMcpServers.ownerUserId))
+      .where(
+        and(eq(personalMcpServers.enabled, true), isNull(users.deletedAt)),
+      ),
+  ]);
+
+  return [
+    ...deploymentRows.map((row) => row.id),
+    ...personalRows.map((row) => row.id),
+  ];
 }
 
 function getAuthoredPullRequestKey(row: {
@@ -708,8 +843,9 @@ export async function collectInstanceReportStats(
     chatgptConnected,
     githubCopilotConnected,
     xaiSubscriptionConnected,
-    mcpEnablements,
-    mcpConnectionIds,
+    enabledMcpIdsFromQuery,
+    customIntegrationIds,
+    activeApiKeyIntegrations,
     pullRequests7d,
     customAutomationTotals,
     enabledCustomAutomationTotals,
@@ -858,14 +994,14 @@ export async function collectInstanceReportStats(
     isChatGptSubscriptionConnected(),
     isGitHubCopilotSubscriptionConnected(),
     isXaiSubscriptionConnected(),
+    collectEnabledMcpIds(),
+    collectEnabledCustomIntegrationIds(),
+    // Active API-key integrations: labels and origins are user-authored, so
+    // only the count leaves the instance and stubs are numbered in order.
     db
-      .select({ mcpId: deploymentMcpEnablements.mcpId })
-      .from(deploymentMcpEnablements)
-      .where(eq(deploymentMcpEnablements.enabled, true)),
-    db
-      .selectDistinct({ mcpId: mcpConnections.mcpId })
-      .from(mcpConnections)
-      .where(eq(mcpConnections.enabled, true)),
+      .select({ total: count() })
+      .from(serviceCredentials)
+      .where(liveServiceCredentialWhere()),
     collectPullRequests7d(now),
     db.select({ total: count() }).from(customAutomations),
     db
@@ -920,14 +1056,20 @@ export async function collectInstanceReportStats(
 
   // Only ship catalog MCP ids; anything unrecognized (defensive: custom or
   // future ids) is reported as 'custom' so no user-authored name can leak.
+  const enabledMcpIds = enabledMcpIdsFromQuery;
   const mcpEnabled = [
     ...new Set(
-      [
-        ...mcpEnablements.map((row) => row.mcpId),
-        ...mcpConnectionIds.map((row) => row.mcpId),
-      ].map((mcpId) => (getMcpIntegration(mcpId) ? mcpId : 'custom')),
+      enabledMcpIds.map((mcpId) =>
+        getMcpIntegration(mcpId) ? mcpId : 'custom',
+      ),
     ),
   ].sort();
+
+  const integrations = summarizeIntegrations({
+    mcpIds: enabledMcpIds,
+    customIntegrationIds,
+    apiKeyIntegrationCount: activeApiKeyIntegrations[0]?.total,
+  });
 
   return {
     reportSchemaVersion: 1,
@@ -990,6 +1132,7 @@ export async function collectInstanceReportStats(
     mcp: {
       enabled: mcpEnabled,
     },
+    integrations,
     automations: summarizeAutomations({
       customTotal: customAutomationTotals[0]?.total,
       customEnabled: enabledCustomAutomationTotals[0]?.total,

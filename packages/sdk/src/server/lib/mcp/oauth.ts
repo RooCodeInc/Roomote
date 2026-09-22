@@ -22,6 +22,7 @@ import type {
 
 // Refresh token 5 minutes before expiration to avoid race conditions
 const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
+const OAUTH_REQUEST_TIMEOUT_MS = 10_000;
 const DEFAULT_TOKEN_ENDPOINT_AUTH_METHOD = 'client_secret_post';
 
 /**
@@ -72,6 +73,8 @@ export interface OAuthRequestOptions {
       signal?: AbortSignal;
     },
   ) => Promise<Response>;
+  /** Cancel protocol requests when the owning API request is cancelled. */
+  signal?: AbortSignal;
   /**
    * RFC 8707 resource indicator sent on token requests. The current MCP
    * authorization spec requires clients to send the canonical server URL;
@@ -104,6 +107,28 @@ function resolveFetch(options?: OAuthRequestOptions) {
     ((url: string, init?: RequestInit) =>
       init === undefined ? fetch(url) : fetch(url, init))
   );
+}
+
+function oauthRequestSignal(options?: OAuthRequestOptions): AbortSignal {
+  const timeoutSignal = AbortSignal.timeout(OAUTH_REQUEST_TIMEOUT_MS);
+  return options?.signal
+    ? AbortSignal.any([options.signal, timeoutSignal])
+    : timeoutSignal;
+}
+
+function fetchOAuthRequest(
+  url: string,
+  options?: OAuthRequestOptions,
+  init?: {
+    method?: string;
+    headers?: Record<string, string>;
+    body?: string;
+  },
+): Promise<Response> {
+  return resolveFetch(options)(url, {
+    ...init,
+    signal: oauthRequestSignal(options),
+  });
 }
 
 function buildDirectAuthorizationServerMetadataUrl(
@@ -167,7 +192,7 @@ async function fetchOAuthServerMetadata(
   metadataUrl: string,
   options?: OAuthRequestOptions,
 ): Promise<OAuthServerMetadata> {
-  const response = await resolveFetch(options)(metadataUrl);
+  const response = await fetchOAuthRequest(metadataUrl, options);
 
   if (!response.ok) {
     throw new Error(
@@ -190,7 +215,7 @@ async function fetchProtectedResourceMetadata(
   metadataUrl: string,
   options?: OAuthRequestOptions,
 ): Promise<OAuthProtectedResourceMetadata> {
-  const response = await resolveFetch(options)(metadataUrl);
+  const response = await fetchOAuthRequest(metadataUrl, options);
 
   if (!response.ok) {
     throw new Error(
@@ -209,7 +234,7 @@ async function fetchAdvertisedProtectedResourceMetadata(
   mcpServerUrl: string,
   options?: OAuthRequestOptions,
 ): Promise<OAuthProtectedResourceMetadata> {
-  const response = await resolveFetch(options)(mcpServerUrl);
+  const response = await fetchOAuthRequest(mcpServerUrl, options);
   const metadataUrl = getResourceMetadataUrlFromWwwAuthenticate(
     response.headers.get('www-authenticate'),
   );
@@ -343,7 +368,7 @@ export async function registerOAuthClient(
   metadata: OAuthClientMetadata,
   options?: OAuthRequestOptions,
 ): Promise<OAuthClientInformation> {
-  const response = await resolveFetch(options)(registrationEndpoint, {
+  const response = await fetchOAuthRequest(registrationEndpoint, options, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -525,7 +550,7 @@ export async function exchangeCodeForTokens(
   const serialized = serializeTokenRequest(body, options);
   headers['Content-Type'] = serialized.contentType;
 
-  const response = await resolveFetch(options)(tokenEndpoint, {
+  const response = await fetchOAuthRequest(tokenEndpoint, options, {
     method: 'POST',
     headers,
     body: serialized.body,
@@ -571,7 +596,7 @@ export async function refreshOAuthToken(
   const serialized = serializeTokenRequest(body, options);
   headers['Content-Type'] = serialized.contentType;
 
-  const response = await resolveFetch(options)(tokenEndpoint, {
+  const response = await fetchOAuthRequest(tokenEndpoint, options, {
     method: 'POST',
     headers,
     body: serialized.body,

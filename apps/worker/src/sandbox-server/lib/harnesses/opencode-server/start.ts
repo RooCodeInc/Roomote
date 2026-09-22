@@ -19,6 +19,10 @@ import { isExpectedSubprocessExit } from './expected-exit';
 import { OpenCodeServerHarness } from './harness';
 import { resolveOpenCodeCommand } from './opencode-command';
 import { waitForOpenCodeServer } from './readiness';
+import {
+  fetchTaskToolApprovals,
+  resolveTaskToolsForAsks,
+} from './tool-approvals';
 
 interface StartOpenCodeServerHarnessOptions {
   workspacePath: string;
@@ -61,6 +65,8 @@ interface StartOpenCodeServerHarnessResult {
   harness: OpenCodeServerHarness;
   subprocess: ResultPromise;
 }
+
+const OPENCODE_STARTUP_TIMEOUT_MS = 90_000;
 
 function parseTimeoutMs(value: string | undefined): number | undefined {
   const trimmed = value?.trim();
@@ -151,10 +157,21 @@ export async function startOpenCodeServerHarness({
 }: StartOpenCodeServerHarnessOptions): Promise<StartOpenCodeServerHarnessResult> {
   const log = createPrefixedLogger(logger, '[opencode-server]');
   const port = await getAvailableLocalPort();
+  const toolApprovals = await fetchTaskToolApprovals(log);
+  // The tools behind every native key an ask may name, incl. the servers
+  // Auto mode gates as a whole.
+  const toolApprovalTools = toolApprovals
+    ? await resolveTaskToolsForAsks({
+        mcpServers,
+        approvals: toolApprovals,
+        logger: log,
+      })
+    : undefined;
   const { commandEnv, model } = await prepareOpenCodeCommandEnv({
     runtimeEnv,
     workspacePath,
     mcpServers,
+    toolApprovalPermission: toolApprovals?.permission,
     model: modelOverride,
     reasoningEffortOverride,
     developerInstructionsContent,
@@ -285,7 +302,7 @@ export async function startOpenCodeServerHarness({
       await Promise.race([
         waitForOpenCodeServer({
           baseUrl,
-          timeoutMs: 30_000,
+          timeoutMs: OPENCODE_STARTUP_TIMEOUT_MS,
           signal: readinessAbortController.signal,
         }),
         subprocess.then(
@@ -331,6 +348,7 @@ export async function startOpenCodeServerHarness({
         process.env.ROOMOTE_SUBAGENT_SETTLEMENT_GRACE_MS,
       ),
       mcpServerNames: Object.keys(mcpServers),
+      toolApprovalTools,
       onDiagnostic,
       beforeQueuedPrompt,
     });

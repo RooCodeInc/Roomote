@@ -95,15 +95,16 @@ export async function resolveCustomMcpAuthTarget(
  */
 export async function ensureCustomMcpServerMetadata(
   target: CustomMcpAuthTarget,
+  signal?: AbortSignal,
 ): Promise<OAuthServerMetadata> {
   if (target.serverMetadata) {
     return target.serverMetadata;
   }
 
-  const metadata = await discoverOAuthEndpoints(
-    target.url,
-    target.oauthOptions,
-  );
+  const metadata = await discoverOAuthEndpoints(target.url, {
+    ...target.oauthOptions,
+    ...(signal ? { signal } : {}),
+  });
 
   await storeCustomMcpServerMetadata(
     { id: target.serverId, ownerUserId: target.ownerUserId },

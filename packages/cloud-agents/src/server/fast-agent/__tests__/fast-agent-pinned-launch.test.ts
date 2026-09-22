@@ -612,7 +612,7 @@ describe('launchPinnedFastSessionTask', () => {
         surface: 'api',
         kickoffMessage: 'Started a task.',
       }),
-    ).rejects.toThrow('This launch id already belongs to another Session.');
+    ).rejects.toThrow('This launch id already belongs to another session.');
     expect(mocks.getOrCreateFastAgentSession).not.toHaveBeenCalled();
     expect(mocks.upsertFastAgentMessage).not.toHaveBeenCalled();
     expect(mocks.enqueueTask).not.toHaveBeenCalled();
@@ -632,7 +632,7 @@ describe('launchPinnedFastSessionTask', () => {
         surface: 'web',
         kickoffMessage: 'Started a task.',
       }),
-    ).rejects.toThrow('The Session for this launch could not be found.');
+    ).rejects.toThrow('The session for this launch could not be found.');
     expect(mocks.enqueueTask).not.toHaveBeenCalled();
   });
 });

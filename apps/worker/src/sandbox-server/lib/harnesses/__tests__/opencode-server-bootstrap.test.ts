@@ -272,6 +272,29 @@ describe('opencode-server bootstrap', () => {
     expect(commandEnv.OPENCODE_DISABLE_PROJECT_CONFIG).toBe('1');
   });
 
+  it('adds per-tool approval rules on top of the allow-all permissions', async () => {
+    const { prepareOpenCodeCommandEnv } =
+      await import('../opencode-server/bootstrap');
+
+    const homeDir = createTempHome();
+    const { commandEnv } = await prepareOpenCodeCommandEnv({
+      runtimeEnv: createDirectHarnessRuntimeEnv(homeDir),
+      workspacePath: '/tmp/workspace',
+      toolApprovalPermission: {
+        linear_save_issue: 'ask',
+        linear_delete_issue: 'deny',
+      },
+      logger: createLogger(),
+    });
+
+    const { permission } = JSON.parse(commandEnv.OPENCODE_CONFIG_CONTENT!);
+    expect(permission).toMatchObject({
+      bash: 'allow',
+      linear_save_issue: 'ask',
+      linear_delete_issue: 'deny',
+    });
+  });
+
   it('moves literal remote MCP header values into env vars before preparing the runtime overlay', async () => {
     const { prepareOpenCodeCommandEnv } =
       await import('../opencode-server/bootstrap');
@@ -889,6 +912,41 @@ describe('opencode-server bootstrap', () => {
     expect(runtimeEnv).not.toHaveProperty(
       'R_CODE_REVIEW_MODEL_REASONING_EFFORT',
     );
+  });
+
+  it('limits the judge to proof images when the platform checks completion at turn end', async () => {
+    const { prepareOpenCodeCommandEnv } =
+      await import('../opencode-server/bootstrap');
+
+    const homeDir = createTempHome();
+
+    await prepareOpenCodeCommandEnv({
+      runtimeEnv: {
+        ...createDirectHarnessRuntimeEnv(homeDir),
+        ROOMOTE_COMPLETION_GATE: 'true',
+      },
+      workspacePath: '/tmp/workspace',
+      logger: createLogger(),
+    });
+
+    const instructions = fs.readFileSync(
+      path.join(
+        homeDir,
+        '.config',
+        'opencode',
+        'roomote-opencode-judge-model-instructions.md',
+      ),
+      'utf8',
+    );
+
+    expect(instructions).toContain('configured for visual-proof checks only');
+    expect(instructions).toContain(
+      'When that step kept no images (a no-op, not-applicable, unnecessary, or blocked result), or the workflow required no proof step, do not spawn the judge.',
+    );
+    expect(instructions).toContain(
+      'Whether the work matches the request is checked by the platform automatically: before you report to a person, before you push or open a pull request, and when your turn ends',
+    );
+    expect(instructions).not.toContain('delegate one focused compare pass');
   });
 
   it('configures a hidden judge subagent with the coding model when no vision model is configured', async () => {

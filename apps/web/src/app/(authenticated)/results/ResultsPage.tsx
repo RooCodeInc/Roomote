@@ -507,6 +507,7 @@ export function ResultsPage() {
                             }
                             placeholder="Add details"
                             textareaMaxHeight={260}
+                            modelSelectorSize="base"
                             onTaskStarted={() => {
                               capture('suggestion_start_succeeded', {
                                 kind: actionableResult.kind,

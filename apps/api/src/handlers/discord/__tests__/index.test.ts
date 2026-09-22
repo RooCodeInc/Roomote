@@ -654,7 +654,7 @@ describe('Discord Gateway event handler', () => {
     );
   });
 
-  it('rejects a reaction from a different Fast session owner', async () => {
+  it('rejects a reaction from a different session owner', async () => {
     mocks.findFastMessageSession.mockResolvedValue({
       id: 'fast-session-1',
       userId: 'another-roomote-user',
@@ -1600,7 +1600,7 @@ describe('Discord Gateway event handler', () => {
     );
   });
 
-  it('continues the Fast session bound to a Discord DM report reply', async () => {
+  it('continues the session bound to a Discord DM report reply', async () => {
     mocks.findFastReplySession.mockResolvedValue({
       id: '11111111-1111-4111-8111-111111111111',
       userId: 'roomote-user-1',
@@ -2501,7 +2501,7 @@ describe('Discord Gateway event handler', () => {
     );
   });
 
-  it('uses /goal to start a Fast Session goal', async () => {
+  it('uses /goal to start a session goal', async () => {
     mocks.findActiveRun.mockResolvedValue({
       id: 23,
       taskId: 'task-23',

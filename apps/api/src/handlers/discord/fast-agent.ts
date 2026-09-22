@@ -346,7 +346,7 @@ export async function processDiscordFastAgentMessage(
         channelId,
         footerStateThreadId,
         lockKey: `discord:thread_reply_footer_lock:${channelId}:${footerStateThreadId}`,
-        logRef: `fast session ${session.id}`,
+        logRef: `session ${session.id}`,
         logContext: 'DiscordFastAgent',
         postReplyWithFooter: async () => {
           const posted = await replyToDiscordEvent({

@@ -32,6 +32,7 @@ const MISSING_PROVIDER_HINTS: Record<
   Exclude<JudgmentModelSelection, 'off'>,
   string
 > = {
+  roomote: 'Not configured on this deployment',
   typesafe: 'Connect TypeSafe',
   openrouter: 'Connect OpenRouter',
   vercel: 'Connect Vercel AI Gateway',
@@ -41,6 +42,8 @@ const UNUSABLE_SELECTION_MESSAGES: Record<
   Exclude<JudgmentModelSelection, 'off'>,
   string
 > = {
+  roomote:
+    'The Roomote judgment model is not configured on this deployment, so these decisions use the helper model.',
   typesafe:
     'TypeSafe is not connected, so these decisions use the helper model.',
   openrouter:
@@ -68,6 +71,8 @@ export function JudgmentModelRow() {
     switch (selection) {
       case 'off':
         return true;
+      case 'roomote':
+        return settings.roomoteConnected;
       case 'typesafe':
         return settings.typeSafe.connected;
       case 'openrouter':

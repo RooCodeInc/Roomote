@@ -166,7 +166,7 @@ function requireFastAgentActorUserId(
   const userId = actorUserId ?? session.userId;
   if (!userId) {
     throw new FastAgentParentEventDeliveryError(
-      'Automation-owned Fast sessions require a human actor for this turn.',
+      'Automation-owned sessions require a human actor for this turn.',
       { replyPosted: false, permanent: true },
     );
   }
@@ -1422,7 +1422,7 @@ async function postDiscordFastParentMessageWithFooter(params: {
     channelId,
     footerStateThreadId,
     lockKey: `discord:thread_reply_footer_lock:${channelId}:${footerStateThreadId}`,
-    logRef: `fast session ${params.sessionId}`,
+    logRef: `session ${params.sessionId}`,
     logContext: 'fastAgentParentEvent',
     postReplyWithFooter: async () => {
       const result = await params.post();
@@ -2775,7 +2775,7 @@ function createScheduledWakeupReplyGuard(params: {
         );
         controller.abort(
           new Error(
-            'Scheduled wakeup was cancelled or its Session archived while the turn was running.',
+            'Scheduled wakeup was cancelled or its session archived while the turn was running.',
           ),
         );
       }

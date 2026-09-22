@@ -12,6 +12,8 @@ const {
   mockFindCustomServer,
   mockFindConnection,
   mockGetValidAccessToken,
+  mockResolveApprovalBlocks,
+  mockClaimTaskToolCall,
 } = vi.hoisted(() => ({
   mockEnv: {
     R_CUSTOM_MCP_ALLOWED_PRIVATE_CIDRS: undefined as string | undefined,
@@ -21,6 +23,14 @@ const {
   mockFindCustomServer: vi.fn(),
   mockFindConnection: vi.fn(),
   mockGetValidAccessToken: vi.fn(),
+  mockResolveApprovalBlocks: vi.fn(
+    async (): Promise<{
+      blocks: Map<string, string>;
+      defaultBlock?: 'needs_approval';
+      shadowDefaultTools: boolean;
+    }> => ({ blocks: new Map(), shadowDefaultTools: false }),
+  ),
+  mockClaimTaskToolCall: vi.fn(async () => false),
 }));
 
 vi.mock('@roomote/env', () => ({
@@ -28,6 +38,12 @@ vi.mock('@roomote/env', () => ({
   isCustomMcpDisabled: (value: boolean | undefined) => value === true,
   areCuratedIntegrationsDisabled: (value: boolean | undefined) =>
     value === true,
+}));
+
+vi.mock('../tool-approval-enforcement', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../tool-approval-enforcement')>()),
+  resolveProxyToolApprovalBlocks: mockResolveApprovalBlocks,
+  claimProxyTaskToolCall: mockClaimTaskToolCall,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -449,6 +465,195 @@ describe('createCustomMcpProxy', () => {
     };
 
     expect(body.result.tools.map((tool) => tool.name)).toEqual(['safe_tool']);
+  });
+
+  describe('tool approval policies', () => {
+    afterEach(() => {
+      mockResolveApprovalBlocks.mockImplementation(async () => ({
+        blocks: new Map(),
+        shadowDefaultTools: false,
+      }));
+      mockClaimTaskToolCall.mockReset().mockResolvedValue(false);
+    });
+
+    it('resolves policies under the server name for the calling token', async () => {
+      mockFindCustomServer.mockResolvedValue(
+        buildServerRow({ url: upstreamUrl() }),
+      );
+      await postMcp(createApp(), initializeRequest);
+      expect(mockResolveApprovalBlocks).toHaveBeenCalledWith(
+        expect.objectContaining({
+          integrationId: 'internal-tools',
+          policyScope: 'deployment',
+          tokenType: 'run',
+        }),
+      );
+    });
+
+    it("resolves a personal server under its owner's policies only", async () => {
+      mockFindCustomServer.mockResolvedValue(
+        buildServerRow({ url: upstreamUrl(), ownerUserId: 'user-1' }),
+      );
+      await postMcp(createApp(createAuthToken()), initializeRequest);
+      expect(mockResolveApprovalBlocks).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          integrationId: 'internal-tools',
+          policyScope: 'personal',
+        }),
+      );
+    });
+
+    it('refuses a blocked tool call with the policy reason and never contacts the upstream', async () => {
+      mockFindCustomServer.mockResolvedValue(
+        buildServerRow({ url: upstreamUrl() }),
+      );
+      mockResolveApprovalBlocks.mockResolvedValue({
+        blocks: new Map([['dangerous_tool', 'needs_approval']]),
+        shadowDefaultTools: false,
+      });
+
+      const response = await postMcp(createApp(), {
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'dangerous_tool', arguments: {} },
+      });
+
+      expect(response.status).toBe(403);
+      const body = (await response.json()) as { error: { message: string } };
+      expect(body.error.message).toContain('needs approval');
+      expect(lastUpstreamHeaders).toBeNull();
+    });
+
+    it("runs a gated call once the Session owner's approval of it is claimed", async () => {
+      mockFindCustomServer.mockResolvedValue(
+        buildServerRow({ url: upstreamUrl() }),
+      );
+      mockResolveApprovalBlocks.mockResolvedValue({
+        blocks: new Map([['dangerous_tool', 'needs_approval']]),
+        shadowDefaultTools: false,
+      });
+      mockClaimTaskToolCall.mockResolvedValue(true);
+
+      const response = await postMcp(createApp(), {
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'dangerous_tool', arguments: { force: true } },
+      });
+
+      expect(response.status).toBe(200);
+      expect(lastUpstreamHeaders).not.toBeNull();
+      expect(mockClaimTaskToolCall).toHaveBeenCalledWith(
+        expect.objectContaining({
+          integrationId: 'internal-tools',
+          toolName: 'dangerous_tool',
+          args: { force: true },
+        }),
+      );
+    });
+
+    it('keeps a tool that needs approval listed, and refuses batches around it', async () => {
+      mockFindCustomServer.mockResolvedValue(
+        buildServerRow({ url: upstreamUrl() }),
+      );
+      mockResolveApprovalBlocks.mockResolvedValue({
+        blocks: new Map([['dangerous_tool', 'needs_approval']]),
+        shadowDefaultTools: false,
+      });
+
+      const list = await postMcp(createApp(), {
+        jsonrpc: '2.0',
+        id: 3,
+        method: 'tools/list',
+        params: {},
+      });
+      const body = (await list.json()) as {
+        result: { tools: { name: string }[] };
+      };
+      expect(body.result.tools.map((tool) => tool.name)).toEqual([
+        'safe_tool',
+        'dangerous_tool',
+      ]);
+
+      const batch = await postMcp(createApp(), [
+        {
+          jsonrpc: '2.0',
+          id: 4,
+          method: 'tools/call',
+          params: { name: 'dangerous_tool', arguments: {} },
+        },
+      ]);
+      expect(batch.status).toBe(400);
+      expect(mockClaimTaskToolCall).not.toHaveBeenCalled();
+    });
+
+    it('gates every default tool of a task while Auto mode is on', async () => {
+      mockFindCustomServer.mockResolvedValue(
+        buildServerRow({ url: upstreamUrl() }),
+      );
+      mockResolveApprovalBlocks.mockResolvedValue({
+        blocks: new Map([['safe_tool', 'allow']]),
+        defaultBlock: 'needs_approval',
+        shadowDefaultTools: false,
+      });
+      mockClaimTaskToolCall.mockResolvedValue(false);
+
+      const gated = await postMcp(createApp(), {
+        jsonrpc: '2.0',
+        id: 5,
+        method: 'tools/call',
+        params: { name: 'dangerous_tool', arguments: {} },
+      });
+      expect(gated.status).toBe(403);
+
+      // A tool someone chose to always allow needs no approval.
+      const allowed = await postMcp(createApp(), {
+        jsonrpc: '2.0',
+        id: 6,
+        method: 'tools/call',
+        params: { name: 'safe_tool', arguments: {} },
+      });
+      expect(allowed.status).toBe(200);
+    });
+
+    it('hides blocked tools from tools/list', async () => {
+      mockFindCustomServer.mockResolvedValue(
+        buildServerRow({ url: upstreamUrl() }),
+      );
+      mockResolveApprovalBlocks.mockResolvedValue({
+        blocks: new Map([['dangerous_tool', 'reject']]),
+        shadowDefaultTools: false,
+      });
+
+      const response = await postMcp(createApp(), {
+        jsonrpc: '2.0',
+        id: 3,
+        method: 'tools/list',
+        params: {},
+      });
+      const body = (await response.json()) as {
+        result: { tools: { name: string }[] };
+      };
+      expect(body.result.tools.map((tool) => tool.name)).toEqual(['safe_tool']);
+    });
+
+    it('fails closed when the policies cannot be read', async () => {
+      mockFindCustomServer.mockResolvedValue(
+        buildServerRow({ url: upstreamUrl() }),
+      );
+      mockResolveApprovalBlocks.mockRejectedValue(new Error('db down'));
+
+      const response = await postMcp(createApp(), {
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'safe_tool', arguments: {} },
+      });
+
+      expect(response.status).toBe(500);
+      expect(lastUpstreamHeaders).toBeNull();
+    });
   });
 
   it('refuses upstream redirects instead of following them', async () => {

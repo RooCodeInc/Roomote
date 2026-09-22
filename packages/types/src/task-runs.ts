@@ -829,7 +829,59 @@ export const runEventTypes = [
 
 export type RunEventType = (typeof runEventTypes)[number];
 
-export type RunEventDetails = Record<string, unknown>;
+export interface TaskRunCorrelation {
+  taskId: string;
+  runId: number;
+}
+
+export const taskRunDisconnectReasonCodes = [
+  'connection_timeout',
+  'subscription_error',
+  'subscription_closed',
+  'connection_refresh_failed',
+  'auth_rejected',
+  'unsupported_provider',
+  'readiness_timeout',
+  'run_terminal',
+  'run_missing',
+  'sandbox_not_ready',
+  'provider_stream_error',
+  'stream_completed',
+] as const;
+
+export type TaskRunDisconnectReasonCode =
+  (typeof taskRunDisconnectReasonCodes)[number];
+
+export interface TaskRunDisconnectReason {
+  kind: 'disconnect';
+  code: TaskRunDisconnectReasonCode;
+  source: 'api' | 'web';
+  phase?: 'initial' | 'established';
+  closeCode?: number | null;
+  closeReason?: string | null;
+  reconnectAttempt?: number | null;
+  reconnectMaxAttempts?: number | null;
+  exhausted: boolean;
+}
+
+export interface TaskRunTerminalReason {
+  kind: 'terminal';
+  status: RunStatus;
+  errorCode: string | null;
+  message: string | null;
+}
+
+export interface TaskRunDisconnectEvent {
+  correlation: TaskRunCorrelation;
+  disconnectReason: TaskRunDisconnectReason;
+  terminalReason: TaskRunTerminalReason | null;
+}
+
+export interface RunEventDetails extends Record<string, unknown> {
+  correlation?: TaskRunCorrelation;
+  disconnectReason?: TaskRunDisconnectReason;
+  terminalReason?: TaskRunTerminalReason | null;
+}
 
 export const computeProviderLaunchModes = [
   'fresh',
@@ -998,6 +1050,13 @@ const sharedTaskPayloadSchema = z.object({
    * When using environments, this is ignored.
    */
   branch: z.string().optional(),
+
+  /**
+   * Allows workspace preparation to fall back when an explicitly requested
+   * branch is no longer present. Used for terminal pull-request base refs;
+   * open pull-request head refs remain authoritative.
+   */
+  allowMissingBranchFallback: z.boolean().optional(),
 
   /**
    * Specific commit SHA to pin checkout for legacy single-repository
@@ -2135,6 +2194,7 @@ export type TaskPayload<T extends TaskPayloadKind = TaskPayloadKind> = Extract<
 type TaskWorkspacePayload = {
   repo?: string;
   branch?: string;
+  allowMissingBranchFallback?: boolean;
   sha?: string;
   sourceControlHost?: string;
   environmentId?: string;
@@ -2149,6 +2209,7 @@ export type TaskWorkspace =
       type: 'repository';
       repo: string;
       branch?: string;
+      allowMissingBranchFallback?: boolean;
       sha?: string;
       sourceControlHost?: string;
     }
@@ -2165,6 +2226,7 @@ export type TaskWorkspace =
       environmentId: string;
       sourceRepo?: string;
       sourceBranch?: string;
+      allowMissingBranchFallback?: boolean;
       sourceSha?: string;
     };
 
@@ -2188,6 +2250,9 @@ export function resolveTaskWorkspace(
       environmentId: payload.environmentId,
       sourceRepo: payload.repo,
       sourceBranch: payload.branch,
+      ...(payload.allowMissingBranchFallback
+        ? { allowMissingBranchFallback: true }
+        : {}),
       sourceSha: payload.sha,
     };
   }
@@ -2222,6 +2287,9 @@ export function resolveTaskWorkspace(
     type: 'repository',
     repo: payload.repo,
     branch: payload.branch,
+    ...(payload.allowMissingBranchFallback
+      ? { allowMissingBranchFallback: true }
+      : {}),
     sha: payload.sha,
     sourceControlHost: payload.sourceControlHost,
   };
@@ -2324,6 +2392,37 @@ export const isRunningRunStatus = (status?: RunStatus): boolean =>
 
 export const isExitedRunStatus = (status?: RunStatus): boolean =>
   !!status && exitedStatuses.has(status);
+
+export function buildTaskRunDisconnectEvent(input: {
+  taskId: string;
+  runId: number;
+  reasonCode: TaskRunDisconnectReasonCode;
+  source: 'api' | 'web';
+  status: RunStatus;
+  errorCode?: string | null;
+  error?: string | null;
+}): TaskRunDisconnectEvent {
+  return {
+    correlation: {
+      taskId: input.taskId,
+      runId: input.runId,
+    },
+    disconnectReason: {
+      kind: 'disconnect',
+      code: input.reasonCode,
+      source: input.source,
+      exhausted: false,
+    },
+    terminalReason: isExitedRunStatus(input.status)
+      ? {
+          kind: 'terminal',
+          status: input.status,
+          errorCode: input.errorCode ?? null,
+          message: input.error ?? null,
+        }
+      : null,
+  };
+}
 
 /**
  * Lifecycle of environment setup (repository setup commands and Docker

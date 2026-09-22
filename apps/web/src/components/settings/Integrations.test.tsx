@@ -116,7 +116,6 @@ const { mutations, selectMock } = vi.hoisted(() => ({
     setDeploymentEnabled: vi.fn(),
     connectMcp: vi.fn(),
     disconnectMcp: vi.fn(),
-    setDisabledTools: vi.fn(),
     saveAsanaConnection: vi.fn(),
     saveNotionConnection: vi.fn(),
     saveRipplingConnection: vi.fn(),
@@ -228,6 +227,54 @@ vi.mock('@/hooks/linear', () => ({
   }),
 }));
 
+// The approval controls are covered by the tool dialog tests; here they only
+// need to stay out of the hand-rolled `@/components/system` mock's way.
+vi.mock('./IntegrationToolApprovalControls', () => ({
+  IntegrationToolApprovalList: <T extends { name: string }>({
+    tools,
+    isToolEnabled,
+    onToggleTool,
+  }: {
+    tools: T[];
+    isToolEnabled?: (toolName: string) => boolean;
+    onToggleTool?: (toolName: string, enabled: boolean) => void;
+  }) => (
+    <div>
+      {tools.map((tool) => (
+        <label key={tool.name}>
+          <input
+            type="checkbox"
+            aria-label={tool.name}
+            checked={isToolEnabled?.(tool.name) ?? true}
+            onChange={(event) =>
+              onToggleTool?.(tool.name, event.target.checked)
+            }
+          />
+          {tool.name}
+        </label>
+      ))}
+    </div>
+  ),
+}));
+
+vi.mock('@/hooks/useIntegrationToolApprovalsExperiment', () => ({
+  useIntegrationToolApprovalsExperiment: () => ({
+    enabled: false,
+    isLoading: false,
+    isUpdating: false,
+    setEnabled: vi.fn(),
+  }),
+}));
+
+vi.mock('@/hooks/useIntegrationToolPolicies', () => ({
+  useIntegrationToolPolicies: () => ({
+    isLoading: false,
+    isUpdating: false,
+    modes: new Map(),
+    setMode: vi.fn(),
+  }),
+}));
+
 vi.mock('@/hooks/mcp-connections', () => ({
   useCuratedIntegrationsAvailability: () => ({
     data: { enabled: state.integrationsEnabled },
@@ -296,7 +343,7 @@ vi.mock('@/hooks/mcp-connections', () => ({
   }),
   useSetDisabledMcpTools: () => ({
     isPending: false,
-    mutate: mutations.setDisabledTools,
+    mutate: vi.fn(),
   }),
   useSaveAsanaConnection: () => ({
     isPending: false,
@@ -573,8 +620,6 @@ vi.mock('@/components/system', () => ({
   TriangleAlert: ({ className }: { className?: string }) => (
     <svg aria-hidden="true" className={className} data-icon="triangle-alert" />
   ),
-  ToggleLeft: () => <svg aria-hidden="true" />,
-  ToggleRight: () => <svg aria-hidden="true" />,
   Wrench: () => <svg aria-hidden="true" data-icon="wrench" />,
   X: () => <svg aria-hidden="true" />,
 }));
@@ -1520,7 +1565,7 @@ describe('Integrations settings', () => {
     ).not.toBeNull();
   });
 
-  it('opens the manage tools dialog with prettified tool labels', () => {
+  it('opens the manage tools dialog without staged availability controls', () => {
     state.deploymentEnablements = [{ mcpId: 'sentry', enabled: true }];
     state.userConnections = [
       { id: 'conn-sentry', mcpId: 'sentry', authStatus: 'authenticated' },
@@ -1546,19 +1591,9 @@ describe('Integrations settings', () => {
       screen.getByRole('heading', { name: 'Manage tools for Sentry' }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Disable get_sentry_resource' }),
-    ).toBeInTheDocument();
-    expect(screen.getByText('Get Sentry Resource')).toHaveAttribute(
-      'for',
-      expect.stringMatching(/^mcp-tool-sentry-/),
-    );
-    expect(screen.queryByText('get_sentry_resource')).not.toBeInTheDocument();
-    expect(
-      screen.queryByText('Inspect a Sentry resource'),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Save changes' }),
-    ).toBeInTheDocument();
+      screen.getByRole('checkbox', { name: 'get_sentry_resource' }),
+    ).toBeChecked();
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
   });
 
   it('links user-scoped MCP tool authentication errors to personal settings in a new tab', () => {
@@ -2569,7 +2604,7 @@ describe('Integrations settings', () => {
     ).toBeInTheDocument();
   });
 
-  it('preserves unsaved tool toggles when the same upstream tool state is returned again', () => {
+  it('preserves legacy availability controls when the list rerenders', () => {
     state.deploymentEnablements = [{ mcpId: 'sentry', enabled: true }];
     state.userConnections = [
       { id: 'conn-sentry', mcpId: 'sentry', authStatus: 'authenticated' },
@@ -2595,21 +2630,18 @@ describe('Integrations settings', () => {
     fireEvent.click(
       screen.getByRole('button', { name: 'Manage Sentry tools' }),
     );
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Disable get_sentry_resource' }),
-    );
-
     rerender(<Integrations />);
 
     expect(
       screen.getByRole('heading', { name: 'Manage tools for Sentry' }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Enable get_sentry_resource' }),
-    ).toBeInTheDocument();
+      screen.getByRole('checkbox', { name: 'get_sentry_resource' }),
+    ).toBeChecked();
     expect(
-      screen.getByRole('button', { name: 'Enable search_events' }),
-    ).toBeInTheDocument();
+      screen.getByRole('checkbox', { name: 'search_events' }),
+    ).not.toBeChecked();
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
   });
 
   it('lets an admin store a voice key from the Voice card', async () => {

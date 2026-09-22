@@ -8,13 +8,19 @@ import { createMcpProxy, McpProxyError } from './proxy-utils';
 
 const LINEAR_MCP_URL = 'https://mcp.linear.app/mcp';
 
-async function resolveLinearAccessToken(): Promise<string | null> {
+async function resolveLinearAccessToken(
+  signal?: AbortSignal,
+): Promise<string | null> {
   const connection = await findLinearDeploymentMcpConnection();
   if (!connection) {
     return null;
   }
 
-  const accessToken = await getValidAccessToken(connection.id, LINEAR_MCP_URL);
+  const accessToken = await getValidAccessToken(
+    connection.id,
+    LINEAR_MCP_URL,
+    signal,
+  );
   return accessToken ?? null;
 }
 
@@ -41,9 +47,9 @@ export function createLinearMcp(options?: {
     upstream: LINEAR_MCP_URL,
     allowAuthTokens: options?.allowAuthTokens,
     allowedToolNames: options?.allowedToolNames,
-    resolveCredentials: async () => {
+    resolveCredentials: async (_auth, _routeParams, _request, signal) => {
       const [linearAccessToken, disabledToolNames] = await Promise.all([
-        resolveLinearAccessToken(),
+        resolveLinearAccessToken(signal),
         resolveLinearDisabledToolNames(),
       ]);
 
@@ -54,7 +60,11 @@ export function createLinearMcp(options?: {
         );
       }
 
-      return { authHeader: linearAccessToken, disabledToolNames };
+      return {
+        authHeader: linearAccessToken,
+        disabledToolNames,
+        toolApprovalIntegrationId: 'linear',
+      };
     },
   });
 }

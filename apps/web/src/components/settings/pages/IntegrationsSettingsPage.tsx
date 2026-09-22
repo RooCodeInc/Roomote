@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 
+import { IntegrationToolAutoModeSection } from '@/components/settings/IntegrationToolAutoModeSection';
 import { Integrations } from '@/components/settings/Integrations';
 import { PRODUCT_NAME } from '@roomote/types';
 import {
@@ -68,6 +69,7 @@ export function IntegrationsSettingsPage() {
         </header>
 
         <Integrations addRequest={addRequest} />
+        <IntegrationToolAutoModeSection />
       </div>
     </div>
   );

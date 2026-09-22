@@ -1002,7 +1002,7 @@ describe('ArtifactViewerContent', () => {
       expect(forTaskQueryMock).not.toHaveBeenCalled();
       expect(replyMutationMock).toHaveBeenCalledWith({
         sessionId: '11111111-1111-4111-8111-111111111111',
-        text: 'Build the plans/session-plan.md artifact (v1) created in this Session.',
+        text: 'Build the plans/session-plan.md artifact (v1) created in this session.',
       });
     });
   });
@@ -1120,7 +1120,7 @@ describe('ArtifactViewerContent', () => {
 
     await waitFor(() => {
       expect(toast.error).toHaveBeenCalledWith(
-        'The task that created this artifact is not attached to a Session.',
+        'The task that created this artifact is not attached to a session.',
       );
     });
     expect(replyMutationMock).not.toHaveBeenCalled();

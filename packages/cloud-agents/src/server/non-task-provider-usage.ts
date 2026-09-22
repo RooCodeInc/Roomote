@@ -115,11 +115,13 @@ export const NON_TASK_INFERENCE_SURFACES = {
   brainSynthesis: 'brain_synthesis',
   chatAudioTranscription: 'chat_audio_transcription',
   chatVideoDescription: 'chat_video_description',
+  decisionModelFallback: 'decision_model_fallback',
   composerSuggestionGeneration: 'composer_suggestion_generation',
   customAutomationScheduleResolution: 'custom_automation_schedule_resolution',
   automationResultPreparation: 'automation_result_preparation',
   ciFailureTriageRulesResolution: 'ci_failure_triage_rules_resolution',
   fastAgentImageInspection: 'fast_agent_image_inspection',
+  fastAgentMemoryDistillation: 'fast_agent_memory_distillation',
   fastAgentQuestionAnswering: 'fast_agent',
   inferenceValidation: 'inference_validation',
   prReviewNotificationTriage: 'pr_review_notification_triage',
@@ -130,6 +132,7 @@ export const NON_TASK_INFERENCE_SURFACES = {
   routerTaskRouting: 'router_task_routing',
   routerRequestedWorkKind: 'router_requested_work_kind',
   slackQuestionChannelSuggestions: 'slack_question_channel_suggestions',
+  taskMemoryDistillation: 'task_memory_distillation',
   taskSummaryGeneration: 'task_summary_generation',
   taskTitleGeneration: 'task_title_generation',
   voiceTranscriptCleanup: 'voice_transcript_cleanup',
@@ -312,14 +315,6 @@ export type NonTaskOpenCodeAssistantText = {
 export type NonTaskOpenCodeNativeSessionOptions = {
   directory: string;
   env?: Partial<Record<string, string>>;
-  /**
-   * Code-mode integrations experiment: the leased OpenCode server runs with
-   * code mode enabled and the prompt-only helper subagents drop the generic
-   * integration dispatcher from their tool filter. Forwarded into the server
-   * lease so experiment and non-experiment conversations never share a
-   * pooled server.
-   */
-  codeModeIntegrations?: boolean;
   onModelResolved?: (model: string) => void;
   onMessageCompleted?: (
     message: NonTaskOpenCodeCompletedMessage,
@@ -342,6 +337,18 @@ export type NonTaskOpenCodeNativeSessionOptions = {
   ) => Promise<void> | void;
   /** Live assistant text from the parent session, part by part. */
   onAssistantTextUpdated?: (text: NonTaskOpenCodeAssistantText) => void;
+  /**
+   * Native permission ask for the session tree (parent and helper
+   * subagents). Fire-and-forget: the handler owns the decision wait and the
+   * eventual reply through the supplied helpers; errors must be absorbed by
+   * the handler so an approval failure never rejects the prompt stream.
+   */
+  onPermissionAsked?: (
+    ask: NonTaskOpenCodePermissionAsk,
+    helpers: NonTaskOpenCodePermissionAskHelpers,
+  ) => void;
+  /** See the matching option on the prompt runner. */
+  disposeInstanceBeforeSession?: { completed: boolean };
   permission?: PermissionRuleset;
   promptOnlySubagents?: boolean;
   signal?: AbortSignal;
@@ -349,6 +356,104 @@ export type NonTaskOpenCodeNativeSessionOptions = {
   tools: Record<string, boolean>;
   validateSession?: boolean;
 };
+
+/** Upper bound on one attempt to deliver a native permission reply. */
+export const PERMISSION_REPLY_TIMEOUT_MS = 10_000;
+
+type PermissionReplyClient = {
+  permission: {
+    reply: (
+      parameters: {
+        requestID: string;
+        directory: string;
+        reply: 'once' | 'reject';
+        message?: string;
+      },
+      options?: { signal?: AbortSignal },
+    ) => Promise<{ error?: unknown }>;
+  };
+};
+
+/**
+ * Deliver one native permission reply without ever waiting on OpenCode
+ * indefinitely. The approval decision is already committed when this runs
+ * and no lock is held across it, so bounding it only bounds how long the
+ * paused call waits on an unresponsive server. A reply is keyed by the
+ * request id and a repeat for an already-answered request changes nothing,
+ * so one retry is safe and covers a reply that was dropped in transit. A
+ * second failure throws, so the caller can fail the ask closed instead of
+ * assuming it landed; the decision record stays as committed.
+ */
+export async function replyToPermissionAsk(
+  client: PermissionReplyClient,
+  sessionDirectory: string,
+  requestId: string,
+  response: 'once' | 'reject',
+  message?: string,
+  timeoutMs: number = PERMISSION_REPLY_TIMEOUT_MS,
+): Promise<{ error?: unknown }> {
+  // The SDK reports a failed request as a resolved `{ error }` rather than a
+  // rejection, so both shapes count as a failed attempt. Treating a returned
+  // error as delivered would leave the native ask pending while the caller
+  // believes it landed, and its reject fallback would never run.
+  const attempt = async () => {
+    const result = await client.permission.reply(
+      {
+        requestID: requestId,
+        directory: sessionDirectory,
+        reply: response,
+        ...(message ? { message } : {}),
+      },
+      { signal: AbortSignal.timeout(timeoutMs) },
+    );
+    if (result.error) throw new PermissionReplyFailedError(result.error);
+    return result;
+  };
+  try {
+    return await attempt();
+  } catch {
+    return attempt();
+  }
+}
+
+/** A native permission reply that could not be delivered after its retry. */
+export class PermissionReplyFailedError extends Error {
+  readonly cause: unknown;
+
+  constructor(cause: unknown) {
+    super('OpenCode permission reply failed');
+    this.cause = cause;
+  }
+}
+
+/** One native OpenCode `permission.asked` event, normalized for consumers. */
+export interface NonTaskOpenCodePermissionAsk {
+  requestId: string;
+  sessionId: string;
+  permission: string;
+  messageId?: string;
+  callId?: string;
+}
+
+/** Bounded OpenCode client operations handed to permission-ask consumers. */
+export interface NonTaskOpenCodePermissionAskHelpers {
+  fetchCallArgs: (input: {
+    sessionId: string;
+    messageId?: string;
+    callId?: string;
+  }) => Promise<
+    | {
+        input?: unknown;
+        toolCalls?: Array<{ tool?: unknown; input?: unknown }>;
+      }
+    | undefined
+  >;
+  reply: (
+    requestId: string,
+    response: 'once' | 'reject',
+    message?: string,
+  ) => Promise<void>;
+}
 
 export class NonTaskOpenCodeSessionNotFoundError extends Error {
   constructor() {
@@ -795,6 +900,7 @@ async function resolveNonTaskModelRuntime(
   modelRole: 'primary' | 'small' | 'orchestration' = 'small',
 ): Promise<{
   model: string;
+  catalogModelId: string;
   resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv;
 }> {
   const requestedModel = model?.trim();
@@ -872,6 +978,7 @@ async function resolveNonTaskModelRuntime(
     // server's config registered (Bedrock Mantle GPT ids run under
     // `bedrock-mantle-openai`), mirroring the task worker's rewrite.
     model: toBedrockMantleRuntimeModelId(resolvedModel),
+    catalogModelId: resolvedModel,
     // An explicit model rides into the server lease env as the primary role
     // model so the config builder registers its provider — the deployment's
     // role models may not include it, and an unregistered Bedrock (or
@@ -879,6 +986,27 @@ async function resolveNonTaskModelRuntime(
     // request is made. The lease cache keys on env, so distinct explicit
     // models get their own servers instead of colliding.
     resolvedModelRuntimeEnv: selectedRuntimeEnv,
+  };
+}
+
+/**
+ * Resolve the deployment helper model once through the same role path used by
+ * ordinary non-task calls. `catalogModelId` stays in the task-model namespace
+ * so callers can look up metadata even when OpenCode rewrites its runtime id.
+ */
+export async function resolveNonTaskHelperModel(): Promise<{
+  model: string;
+  catalogModelId: string;
+  reasoningEffort?: ReasoningEffort;
+}> {
+  const runtime = await resolveNonTaskModelRuntime(undefined, 'small');
+  const reasoningEffort =
+    runtime.resolvedModelRuntimeEnv.R_SMALL_MODEL_REASONING_EFFORT;
+
+  return {
+    model: runtime.model,
+    catalogModelId: runtime.catalogModelId,
+    ...(isReasoningEffort(reasoningEffort) ? { reasoningEffort } : {}),
   };
 }
 
@@ -1135,7 +1263,6 @@ async function runNonTaskSdkPrompt(
     directory?: string;
     ephemeral?: boolean;
     env?: Partial<Record<string, string>>;
-    codeModeIntegrations?: boolean;
     onPromptStarted?: (setup: NonTaskOpenCodePromptSetupTiming) => void;
     /** Called with the leased server's base URL before the prompt starts. */
     onServerLeased?: (url: string) => void;
@@ -1156,6 +1283,19 @@ async function runNonTaskSdkPrompt(
       part: NonTaskOpenCodeTaskPart,
     ) => Promise<void> | void;
     onAssistantTextUpdated?: (text: NonTaskOpenCodeAssistantText) => void;
+    onPermissionAsked?: (
+      ask: NonTaskOpenCodePermissionAsk,
+      helpers: NonTaskOpenCodePermissionAskHelpers,
+    ) => void;
+    /**
+     * Dispose the directory's cached OpenCode instance before any session
+     * call, so its agent/tool state is rebuilt from the freshly written
+     * config. Sessions and transcripts persist on disk; only the in-memory
+     * instance cache is dropped. The shared object's `completed` flag is set
+     * on success (including "nothing cached to dispose") so the caller can
+     * retry the refresh on a later turn when the dispose genuinely failed.
+     */
+    disposeInstanceBeforeSession?: { completed: boolean };
     permission?: PermissionRuleset;
     preserveReasoning?: boolean;
     promptOnlySubagents?: boolean;
@@ -1188,7 +1328,6 @@ async function runNonTaskSdkPrompt(
     preserveReasoning:
       options.preserveReasoning ?? Boolean(params.reasoningEffort),
     promptOnlySubagents: options.promptOnlySubagents,
-    codeModeIntegrations: options.codeModeIntegrations,
     reasoningOverride: params.reasoningEffort
       ? { model, effort: params.reasoningEffort }
       : undefined,
@@ -1229,6 +1368,81 @@ async function runNonTaskSdkPrompt(
       baseUrl: server.url,
       fetch: openCodeSdkFetch,
     });
+    if (options.disposeInstanceBeforeSession) {
+      try {
+        const disposeUrl = new URL(`${server.url}/instance/dispose`);
+        disposeUrl.searchParams.set('directory', sessionDirectory);
+        const disposeResponse = await fetch(disposeUrl, {
+          method: 'POST',
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (disposeResponse.ok) {
+          options.disposeInstanceBeforeSession.completed = true;
+        } else {
+          console.warn(
+            `[NonTaskProviderUsage] OpenCode instance dispose returned ${disposeResponse.status}.`,
+          );
+        }
+      } catch (error) {
+        console.warn(
+          `[NonTaskProviderUsage] OpenCode instance dispose failed: ${formatOpenCodeSdkError(error)}`,
+        );
+      }
+    }
+    const permissionAskHelpers: NonTaskOpenCodePermissionAskHelpers = {
+      // Native asks identify the paused call (messageID/callID) but carry no
+      // arguments. Recover them from the asking session's own transcript so
+      // the approval surface can show a redacted view of exactly what is
+      // about to run. Under code mode the paused part is the outer `execute`
+      // call; its metadata carries the child tool calls with their
+      // structured inputs, so consumers can still show the real arguments.
+      fetchCallArgs: async ({ sessionId: askSessionId, callId }) => {
+        if (!callId) return undefined;
+        const result = await client.session.messages({
+          sessionID: askSessionId,
+          directory: sessionDirectory,
+        });
+        for (const message of result.data ?? []) {
+          for (const part of message.parts ?? []) {
+            const record = asRecord(part);
+            if (!record || record.callID !== callId) continue;
+            const state = asRecord(record.state);
+            const metadata = asRecord(state?.metadata);
+            const toolCalls = Array.isArray(metadata?.toolCalls)
+              ? metadata.toolCalls
+                  .map((entry) => asRecord(entry))
+                  .filter(
+                    (entry): entry is Record<string, unknown> =>
+                      entry !== undefined,
+                  )
+                  .map((entry) => ({ tool: entry.tool, input: entry.input }))
+              : undefined;
+            return { input: state?.input, toolCalls };
+          }
+        }
+        return undefined;
+      },
+      reply: async (requestId, response, message) => {
+        try {
+          await replyToPermissionAsk(
+            client,
+            sessionDirectory,
+            requestId,
+            response,
+            message,
+          );
+        } catch (error) {
+          console.warn(
+            `[NonTaskProviderUsage] OpenCode permission reply failed: ${formatOpenCodeSdkError(
+              error instanceof PermissionReplyFailedError ? error.cause : error,
+            )}`,
+          );
+          // Propagate: the approval bridge rejects the ask when a claimed
+          // `once` cannot be delivered, so the session is never left paused.
+          throw error;
+        }
+      },
+    };
     let sessionId = options.session?.id;
     if (sessionId && options.validateSession) {
       const validateStartedAtMs = Date.now();
@@ -1351,6 +1565,7 @@ async function runNonTaskSdkPrompt(
       options.onSubagentSessionReady ||
       options.onParentTaskPartUpdated ||
       options.onAssistantTextUpdated ||
+      options.onPermissionAsked ||
       options.trackSessionTreeUsage,
     );
 
@@ -1514,6 +1729,32 @@ async function runNonTaskSdkPrompt(
                     ),
                   );
                   return;
+                }
+              } else if (event.type === 'permission.asked') {
+                // Permission asks are owned by the consumer (decision wait
+                // and native reply), never by this monitor: a consumer
+                // failure must not reject the prompt stream, and the pause
+                // itself is the intended behavior.
+                try {
+                  const properties = event.properties;
+                  options.onPermissionAsked?.(
+                    {
+                      requestId: properties.id,
+                      sessionId: properties.sessionID,
+                      permission: properties.permission,
+                      ...(properties.tool?.messageID
+                        ? { messageId: properties.tool.messageID }
+                        : {}),
+                      ...(properties.tool?.callID
+                        ? { callId: properties.tool.callID }
+                        : {}),
+                    },
+                    permissionAskHelpers,
+                  );
+                } catch (error) {
+                  console.warn(
+                    `[NonTaskProviderUsage] OpenCode permission ask handler failed: ${formatOpenCodeSdkError(error)}`,
+                  );
                 }
               } else if (
                 event.type === 'session.error' &&
@@ -1875,7 +2116,6 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
     {
       directory: options.directory,
       env: options.env,
-      codeModeIntegrations: options.codeModeIntegrations,
       onPromptStarted: options.onPromptStarted,
       onNativeSteerReady: options.onNativeSteerReady,
       onServerLeased: options.onServerLeased,
@@ -1887,6 +2127,10 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
       onSubagentSessionReady: options.onSubagentSessionReady,
       onParentTaskPartUpdated: options.onParentTaskPartUpdated,
       onAssistantTextUpdated: options.onAssistantTextUpdated,
+      onPermissionAsked: options.onPermissionAsked,
+      ...(options.disposeInstanceBeforeSession
+        ? { disposeInstanceBeforeSession: options.disposeInstanceBeforeSession }
+        : {}),
       permission: options.permission,
       preserveReasoning: true,
       promptOnlySubagents: options.promptOnlySubagents,

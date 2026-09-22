@@ -21,8 +21,6 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import {
   ALL_REPOSITORIES,
-  CALL_INTEGRATION_TOOL_ARG_DESCRIPTIONS,
-  CALL_INTEGRATION_TOOL_TOOL,
   FIND_INTEGRATION_TOOLS_ARG_DESCRIPTIONS,
   FIND_INTEGRATION_TOOLS_TOOL,
   INTEGRATION_TOOL_LOOKUP_MAX_LIMIT,
@@ -67,9 +65,13 @@ import {
 } from '../show-widget';
 import { shouldOverrideFastProjectConfigForTaskSandbox } from './fast-agent-runtime-context';
 import {
+  buildFastAgentCodeModeServerNames,
   buildFastAgentToolFilter,
-  isFastAgentNativeIntegration,
 } from './fast-agent-tool-policy';
+import {
+  ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME,
+  ROOMOTE_OPENCODE_JUDGE_AGENT_NAME,
+} from '../../opencode-prompt-subagents';
 
 export {
   FAST_AGENT_NATIVE_TOOL_FILTER,
@@ -357,9 +359,10 @@ export const invoke = async (name, args, context) => {
 }
 `;
 
-const FAST_AGENT_NATIVE_TOOL_SOURCES: Record<FastAgentNativeToolName, string> =
-  {
-    [FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply]: String.raw`
+const FAST_AGENT_NATIVE_TOOL_SOURCES: Partial<
+  Record<FastAgentNativeToolName, string>
+> = {
+  [FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -401,7 +404,7 @@ export default {
     purpose: z.enum(["ack", "progress", "closeout", "clarification"]),
     imageArtifactIds: z.array(z.string()).optional().describe("Stable IDs of uploaded images to attach. Never claim an image or screenshot is attached, shown, or included unless this list is non-empty. If attachment delivery fails, reply with an accessible artifact viewer link and say that the image could not be attached."),
     videoArtifactIds: z.array(z.string()).optional().describe("Stable IDs of uploaded videos explicitly selected for native Slack delivery. Recover IDs and viewer links with manage_tasks get_summary. Never claim a video is attached unless selected here and delivery succeeds; when native delivery fails or is unavailable, share only its viewer link without an error or unavailability explanation."),
-    charts: z.array(chartInput).max(2).optional().describe("Up to two pie, bar, area, or line charts. Charts render in the web Session transcript and as native Block Kit data visualization blocks on Slack; other chat providers retain the Markdown fallback. Keep the Markdown reply useful on its own. Cartesian series names and categories must be unique, and every series must contain exactly one point for every category."),
+    charts: z.array(chartInput).max(2).optional().describe("Up to two pie, bar, area, or line charts. Charts render in the web session transcript and as native Block Kit data visualization blocks on Slack; other chat providers retain the Markdown fallback. Keep the Markdown reply useful on its own. Cartesian series names and categories must be unique, and every series must contain exactly one point for every category."),
     suggestions: z.array(z.object({
       title: z.string().min(1).max(140),
       brief: z.string().min(1).max(2000),
@@ -412,7 +415,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -426,12 +429,12 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.createArtifact]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.createArtifact]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Create a durable text artifact in this Session. Use this for documents the user should keep, share, or build from; use show_widget for transient visual presentation and launch_task for repository or filesystem work.",
+  description: "Create a durable text artifact in this session. Use this for documents the user should keep, share, or build from; use show_widget for transient visual presentation and launch_task for repository or filesystem work.",
   args: {
     path: z.string().min(1).max(255).describe("Relative artifact path, including a useful file extension"),
     content: z.string().min(1).max(131072).describe("UTF-8 text content; maximum 128 KiB"),
@@ -442,7 +445,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.reportPlatformIssue]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.reportPlatformIssue]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -456,7 +459,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.ensureEnvironment]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.ensureEnvironment]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -474,7 +477,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.launchTask]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.launchTask]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -492,7 +495,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.reviewPullRequest]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.reviewPullRequest]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -509,7 +512,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.sendTaskMessage]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.sendTaskMessage]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -524,13 +527,13 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.showWidget]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.showWidget]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
   description: ${JSON.stringify(
-    `Create and share a rendered visual in the Session transcript when a structured or visual presentation communicates better than prose. Use it proactively to show, mock up, preview, or visualize an interface or interaction. ${SHOW_WIDGET_THEME_GUIDANCE} ${SHOW_WIDGET_FIXED_CANVAS_GUIDANCE} Use request_user_input for questions.`,
+    `Create and share a rendered visual in the session transcript when a structured or visual presentation communicates better than prose. Use it proactively to show, mock up, preview, or visualize an interface or interaction. ${SHOW_WIDGET_THEME_GUIDANCE} ${SHOW_WIDGET_FIXED_CANVAS_GUIDANCE} Use request_user_input for questions.`,
   )},
   args: {
     html: z.string().min(1).max(${SHOW_WIDGET_MAX_HTML_CHARS}).describe("Compact semantic HTML that fully fits the fixed canvas; avoid long prose, large lists, and dense data"),
@@ -543,7 +546,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.cancelTask]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.cancelTask]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -554,7 +557,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.stopTask]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.stopTask]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -568,7 +571,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -581,13 +584,13 @@ export default {
     prompt: z.string().min(10).max(${SESSION_WAKEUP_PROMPT_MAX_LENGTH}).optional().describe("[create] What to do when it fires. This conversation stays in context, so keep it short: what to check, what counts as done, what to tell the user."),
     schedule: z.string().max(${SESSION_WAKEUP_SCHEDULE_MAX_LENGTH}).optional().describe(${JSON.stringify(`[create] ${SESSION_WAKEUP_SCHEDULE_GRAMMAR}`)}),
     reportPolicy: z.enum(["always", "only_when_notable"]).optional().describe("[create] 'always' replies on every run (default for one-shots); 'only_when_notable' stays silent unless there is news (default for repeating schedules). Omit to use the default."),
-    internal: z.boolean().optional().describe("[create] Set true only for automatic housekeeping required by system instructions. Internal wakeups are hidden from the Session timer list but still count toward the active limit and remain listable, gettable, and cancellable. Omit or set false for user-requested reminders and monitors."),
+    internal: z.boolean().optional().describe("[create] Set true only for automatic housekeeping required by system instructions. Internal wakeups are hidden from the session timer list but still count toward the active limit and remain listable, gettable, and cancellable. Omit or set false for user-requested reminders and monitors."),
   },
   execute: (args, context) => invoke("manage_wakeups", args, context),
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.manageGoal]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.manageGoal]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -601,7 +604,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.retryTaskStart]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.retryTaskStart]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -612,7 +615,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.saveMemory]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.saveMemory]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -625,7 +628,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.updatePersonalization]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.updatePersonalization]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -639,7 +642,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -655,26 +658,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool]: String.raw`
-import { z } from "zod"
-import { invoke } from "../roomote-fast-tool-bridge.js"
-
-export default {
-  description: ${JSON.stringify(CALL_INTEGRATION_TOOL_TOOL.description)},
-  args: {
-    integrationId: z.string().min(1).describe(${JSON.stringify(CALL_INTEGRATION_TOOL_ARG_DESCRIPTIONS.integrationId)}),
-    toolName: z.string().min(1).describe(${JSON.stringify(CALL_INTEGRATION_TOOL_ARG_DESCRIPTIONS.toolName)}),
-    // OpenCode renames $defs without rewriting refs. Keep JSON value types
-    // concrete but non-recursive; nested values are validated server-side.
-    // Required (not optional) so no provider ever sees a null alternative
-    // that gpt-5.x models prefer over filling in an object.
-    args: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null(), z.array(z.unknown()), z.record(z.string(), z.unknown())])).describe(${JSON.stringify(CALL_INTEGRATION_TOOL_ARG_DESCRIPTIONS.args)}),
-  },
-  execute: (args, context) => invoke(${JSON.stringify(CALL_INTEGRATION_TOOL_TOOL.name)}, args, context),
-}
-`,
-
-    [FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -685,7 +669,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.addRemoteMcp]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.addRemoteMcp]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -700,7 +684,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.connectIntegration]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.connectIntegration]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -713,7 +697,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.inspectImages]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.inspectImages]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -727,7 +711,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.listRepositories]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.listRepositories]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -742,23 +726,23 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.listSkills]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.listSkills]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "List packaged Roomote skills, global instance skills, and authorized legacy settings-defined skills, plus optionally repository-defined skills, without filesystem access. Omit scope and name for the complete packaged, instance, and authorized legacy Settings inventory; this does not inspect repositories. Provide an exact name to find packaged, instance, and legacy Settings skills without inspecting repositories, following nextSourceOffset with sourceOffset until no continuation remains. Resolve same-name skills in this order: packaged > instance > legacy Settings > repository. Instance skills are available even with no environments configured, have IDs of the form instance:<uuid>, expose their current version for update_custom_skill, and have no environmentIds. Provide environmentId or repositoryId to include legacy Settings and repository skills from that scope; environmentId wins when both are given. Returns source counts plus exact IDs, task invocation names, descriptions, repositories, sources, versions when applicable, and applicable environment IDs for load_skill and task routing.",
+  description: "List packaged Roomote skills, global instance skills, authorized legacy settings-defined skills, and authorized repository-defined skills without filesystem access. Omit scope and name for the complete bounded inventory; repository discovery inspects only repositories mapped to environments available to this member and warns when the repository or marketplace source limit omits entries. Provide an exact name to search all four sources without guessing an environment or repository, following nextSourceOffset with sourceOffset to collect remaining same-precedence Settings variants; once a Settings match is returned, repository fallback remains suppressed. Resolve same-name skills in this order: packaged > instance > legacy Settings > repository. Instance skills are available even with no environments configured, have IDs of the form instance:<uuid>, expose their current version for update_custom_skill, and have no environmentIds. Provide environmentId or repositoryId only to limit legacy Settings and repository results to that scope; environmentId wins when both are given. Returns source counts plus exact IDs, task invocation names, descriptions, repositories, sources, versions when applicable, and applicable environment IDs for load_skill and task routing.",
   args: {
-    environmentId: z.string().min(1).nullable().optional().describe("Exact environment ID from the system prompt to include that environment's legacy Settings and repository skills; omit or pass null for an unscoped lookup"),
-    name: z.string().min(1).nullable().optional().describe("Exact skill invocation name; omit or pass null for the full inventory. An unscoped lookup checks packaged, instance, and authorized legacy Settings skills only"),
-    repositoryId: z.string().min(1).nullable().optional().describe("Exact repository ID from the system prompt to include that repository's skills; omit or pass null unless no environmentId is given"),
+    environmentId: z.string().min(1).nullable().optional().describe("Exact environment ID from the system prompt to limit legacy Settings and repository skills; omit or pass null for the complete authorized inventory"),
+    name: z.string().min(1).nullable().optional().describe("Exact skill invocation name; omit or pass null for the full inventory. An unscoped lookup checks packaged, instance, authorized legacy Settings, and authorized repository skills"),
+    repositoryId: z.string().min(1).nullable().optional().describe("Exact repository ID from the system prompt to limit repository and mapped environment skills; omit or pass null unless no environmentId is given"),
     sourceOffset: z.number().int().nonnegative().nullable().optional().describe("Continuation offset returned as nextSourceOffset by an exact-name lookup; omit or pass null unless continuing a lookup by name"),
   },
   execute: (args, context) => invoke("list_skills", args, context),
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -772,7 +756,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.spillRead]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.spillRead]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -787,7 +771,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.spillGrep]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.spillGrep]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -803,7 +787,7 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -828,17 +812,17 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials]: String.raw`
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Call this whenever a request involves a third-party service with a key-based HTTPS API that no connected integration, deployment MCP tool, official remote MCP, or skill covers; an empty connector search is not a reason to ask for exports or screenshots. List integrations available to this human (their own and deployment-visible grants, with origin, header, allowed methods, visibility, and expiry) and this Session's pending approvals, plus sessionUrl, the secure link where the human enters a key, without exposing credentials. Call this before preparing a new approval; for a pending approval, re-share sessionUrl rather than preparing again, and never ask the human to copy an opaque reference. Ready integrations are delivered automatically to coding tasks launched from this Session.",
+  description: "Call this whenever a request involves a third-party service with a key-based HTTPS API that no connected integration, deployment MCP tool, official remote MCP, or skill covers; an empty connector search is not a reason to ask for exports or screenshots. List integrations available to this human (their own and deployment-visible grants, with origin, header, allowed methods, visibility, and expiry) and this session's pending approvals, plus sessionUrl, the secure link where the human enters a key, without exposing credentials. Call this before preparing a new approval; for a pending approval, re-share sessionUrl rather than preparing again, and never ask the human to copy an opaque reference. Ready integrations are delivered automatically to coding tasks launched from this session.",
   args: {},
   execute: (args, context) => invoke("list_integration_keys", args, context),
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
@@ -863,12 +847,12 @@ export default {
   execute: (args, context) => invoke("request_user_input", args, context),
 }
 `,
-    [FAST_AGENT_NATIVE_TOOL_NAMES.offerCapability]: String.raw`
+  [FAST_AGENT_NATIVE_TOOL_NAMES.offerCapability]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Present a trusted, non-blocking Roomote capability card in a web Session. Use it when the user's current goal needs an unavailable capability or when the setup guidance recommends the next capability. A previous Not now choice does not prevent a later relevant offer.",
+  description: "Present a trusted, non-blocking Roomote capability card in a web session. Use it when the user's current goal needs an unavailable capability or when the setup guidance recommends the next capability. A previous Not now choice does not prevent a later relevant offer.",
   args: {
     capability: z.enum(${JSON.stringify(FAST_AGENT_CAPABILITY_IDS)}),
     message: z.string().min(1).max(500).describe("Concise user-facing reason this capability is useful now"),
@@ -878,7 +862,7 @@ export default {
   execute: (args, context) => invoke("offer_capability", args, context),
 }
 `,
-  };
+};
 
 const activeExecutors = new Map<string, ActiveExecutor>();
 const mcpCapabilities = new Map<string, FastAgentMcpCapability>();
@@ -1639,41 +1623,6 @@ function pruneSessionRuntimes(): void {
   }
 }
 
-/**
- * True when two authorized integrations would collide as sanitized OpenCode
- * server names, so the code-mode integrations experiment cannot activate for
- * this set. The service checks this before building the system prompt so a
- * colliding conversation keeps the classic dispatcher described in its
- * prompt, matching the runtime fallback in getFastAgentNativeToolRuntime.
- */
-export function hasFastAgentCodeModeServerNameCollision(
-  integrations: FastAgentIntegration[],
-): boolean {
-  return findSanitizedMcpServerNameCollision(integrations) !== null;
-}
-
-/**
- * OpenCode prefixes MCP tools with the sanitized server name
- * (`[^a-zA-Z0-9_-]` becomes `_`). Two distinct integration ids that sanitize
- * to the same server name would merge their tool namespaces under code mode,
- * so the experiment refuses to activate for that conversation instead of
- * exposing an ambiguous catalog.
- */
-function findSanitizedMcpServerNameCollision(
-  integrations: FastAgentIntegration[],
-): { first: string; second: string; sanitized: string } | null {
-  const seen = new Map<string, string>();
-  for (const integration of integrations) {
-    const sanitized = integration.id.replace(/[^a-zA-Z0-9_-]/gu, '_');
-    const first = seen.get(sanitized);
-    if (first !== undefined && first !== integration.id) {
-      return { first, second: integration.id, sanitized };
-    }
-    seen.set(sanitized, integration.id);
-  }
-  return null;
-}
-
 export async function getFastAgentNativeToolRuntime(
   sessionId: string,
   integrations: FastAgentIntegration[],
@@ -1682,7 +1631,16 @@ export async function getFastAgentNativeToolRuntime(
     serviceCredentialToolsEnabled?: boolean;
     serviceCredentialPrepareEnabled?: boolean;
     addRemoteMcpEnabled?: boolean;
-    codeModeIntegrationsEnabled?: boolean;
+    /**
+     * Experiment-gated (`integrationToolApprovals`) per-tool approval rules
+     * in OpenCode config-permission shape, applied to the parent build agent
+     * and the helper subagents in the generated per-conversation config.
+     * Rules live in config rather than the session ruleset so a policy
+     * change never strands stale state in a persisted session: this file is
+     * rewritten every turn, and a policy change disposes the directory's
+     * cached instance instead of rebuilding the session.
+     */
+    toolApprovalPermission?: Record<string, 'ask' | 'deny'>;
   } = {},
 ): Promise<FastAgentNativeToolRuntime> {
   bridgePromise ??= startBridge();
@@ -1720,36 +1678,24 @@ export async function getFastAgentNativeToolRuntime(
     revoked: false,
   });
   pruneSessionRuntimes();
-  // Only native servers are registered with OpenCode. On-demand servers stay
-  // reachable through the capability (find_integration_tools and
-  // call_integration_tool route to the same executor) without their schemas
-  // being sent on every model request.
-  let mountedIntegrations = integrations.filter((integration) =>
-    isFastAgentNativeIntegration(integration.id),
+  // Mount every actor-authorized server and let OpenCode's confined `execute`
+  // runner discover and call tools individually. Server names are made unique
+  // after OpenCode sanitization so every integration remains addressable.
+  const mountedIntegrations = integrations;
+  const serverNames = buildFastAgentCodeModeServerNames(
+    mountedIntegrations.map((integration) => integration.id),
   );
-  // The code-mode integrations experiment instead mounts every
-  // actor-authorized server and lets OpenCode's confined `execute` runner
-  // discover and call their tools individually. Calls flow through the same
-  // capability executor as call_integration_tool, so authorization,
-  // visibility, credential mediation, and refresh behavior are unchanged.
-  let codeModeIntegrationsActive = false;
-  if (options.codeModeIntegrationsEnabled === true) {
-    const collision = findSanitizedMcpServerNameCollision(integrations);
-    if (collision) {
-      console.warn(
-        `[Fast Agent] Code-mode integrations skipped: integration ids ${collision.first} and ${collision.second} collide as OpenCode MCP server names (${collision.sanitized}).`,
-      );
-    } else {
-      codeModeIntegrationsActive = true;
-      mountedIntegrations = integrations;
-    }
-  }
-  if (codeModeIntegrationsActive) {
-    runtime.env.OPENCODE_EXPERIMENTAL_CODE_MODE = '1';
-  } else {
-    delete runtime.env.OPENCODE_EXPERIMENTAL_CODE_MODE;
-  }
-  runtime.codeModeIntegrationsActive = codeModeIntegrationsActive;
+  runtime.env.OPENCODE_EXPERIMENTAL_CODE_MODE = '1';
+  runtime.codeModeIntegrationsActive = true;
+  // Approval rules apply to the parent build agent and to the helper
+  // subagents. OpenCode merges this per-directory config over the shared
+  // server config, so a permission-only entry extends the existing advisor
+  // and judge definitions instead of replacing them.
+  const toolApprovalAgentEntries = options.toolApprovalPermission
+    ? {
+        permission: options.toolApprovalPermission,
+      }
+    : {};
   writeFileSync(
     join(runtime.directory, 'opencode.json'),
     JSON.stringify({
@@ -1760,7 +1706,9 @@ export async function getFastAgentNativeToolRuntime(
       agent: {
         build: {
           tools: buildFastAgentToolFilter(
-            mountedIntegrations.map((integration) => integration.id),
+            mountedIntegrations.map(
+              (integration) => serverNames.get(integration.id)!,
+            ),
             {
               surface: options.surface ?? 'web',
               serviceCredentialToolsEnabled:
@@ -1768,14 +1716,20 @@ export async function getFastAgentNativeToolRuntime(
               serviceCredentialPrepareEnabled:
                 options.serviceCredentialPrepareEnabled,
               addRemoteMcpEnabled: options.addRemoteMcpEnabled,
-              codeModeIntegrationsEnabled: codeModeIntegrationsActive,
             },
           ),
+          ...toolApprovalAgentEntries,
         },
+        ...(options.toolApprovalPermission
+          ? {
+              [ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME]: toolApprovalAgentEntries,
+              [ROOMOTE_OPENCODE_JUDGE_AGENT_NAME]: toolApprovalAgentEntries,
+            }
+          : {}),
       },
       mcp: Object.fromEntries(
         mountedIntegrations.map((integration) => [
-          integration.id,
+          serverNames.get(integration.id)!,
           {
             type: 'remote',
             url: `${bridge.url}/mcp/${runtime.mcpCapability}/${encodeURIComponent(integration.id)}`,
@@ -1806,9 +1760,11 @@ export async function mountFastAgentIntegrationOnCodeModeServer(input: {
   directory: string;
   mcpCapability: string;
   integrationId: string;
+  serverName?: string;
 }): Promise<boolean> {
   bridgePromise ??= startBridge();
   const bridge = await bridgePromise;
+  const serverName = input.serverName ?? input.integrationId;
   // OpenCode instances are per-directory: without the workspace routing the
   // server would land on the default instance and stay invisible to the
   // session's code-mode catalog.
@@ -1818,7 +1774,7 @@ export async function mountFastAgentIntegrationOnCodeModeServer(input: {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        name: input.integrationId,
+        name: serverName,
         config: {
           type: 'remote',
           url: `${bridge.url}/mcp/${input.mcpCapability}/${encodeURIComponent(input.integrationId)}`,
@@ -1837,7 +1793,7 @@ export async function mountFastAgentIntegrationOnCodeModeServer(input: {
     string,
     { status?: string; error?: string }
   > | null;
-  const entry = status?.[input.integrationId];
+  const entry = status?.[serverName];
   if (entry && entry.status !== 'connected') {
     console.warn(
       `[Fast Agent] Code-mode mid-turn mount of ${input.integrationId} reports status=${entry.status ?? 'unknown'}${entry.error ? ` error=${entry.error}` : ''}.`,

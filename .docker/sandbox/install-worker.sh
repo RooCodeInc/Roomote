@@ -30,6 +30,8 @@ WORKER_RELEASE_TAG_FILE="$WORKER_DIR/WORKER_RELEASE_TAG"
 NODE_PTY_VERSION_FILE="$WORKER_DIR/NODE_PTY_VERSION"
 PM2_VERSION_FILE="$WORKER_DIR/PM2_VERSION"
 DATA_DIR="/sandbox"
+BAKED_WORKER_PRODUCT_VERSION="${ROOMOTE_BAKED_WORKER_PRODUCT_VERSION:-}"
+APPLICATION_PRODUCT_VERSION="${ROOMOTE_APPLICATION_PRODUCT_VERSION:-}"
 INSTALL_WORKER_START_MS="$(date +%s%3N)"
 INSTALL_WORKER_PHASE_NAMES=()
 INSTALL_WORKER_PHASE_DURATIONS_MS=()
@@ -140,6 +142,56 @@ get_installed_version() {
   else
     echo ""
   fi
+}
+
+get_compatibility_version() {
+  local version="${1:-}"
+
+  if [[ "$version" =~ ^v?([0-9]+\.[0-9]+\.[0-9]+)([-+].*)?$ ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]}"
+  fi
+}
+
+validate_worker_compatibility() {
+  local worker_version
+  local worker_compatibility_version
+  local expected_version
+  local expected_compatibility_version
+  local expected_name
+
+  worker_version="$(get_installed_version)"
+  worker_compatibility_version="$(get_compatibility_version "$worker_version")"
+
+  if [ -z "$worker_compatibility_version" ]; then
+    printf 'install_worker.compatibility status=skipped reason=unparseable_worker_version worker_version=%s\n' \
+      "${worker_version:-unknown}"
+    return 0
+  fi
+
+  for expected_name in application_product_version baked_worker_product_version; do
+    if [ "$expected_name" = "application_product_version" ]; then
+      expected_version="$APPLICATION_PRODUCT_VERSION"
+    else
+      expected_version="$BAKED_WORKER_PRODUCT_VERSION"
+    fi
+
+    [ -n "$expected_version" ] || continue
+
+    expected_compatibility_version="$(get_compatibility_version "$expected_version")"
+    if [ -z "$expected_compatibility_version" ]; then
+      printf 'install_worker.compatibility status=skipped reason=unparseable_%s expected_version=%s worker_version=%s\n' \
+        "$expected_name" "$expected_version" "$worker_version"
+      continue
+    fi
+
+    if [ "$worker_compatibility_version" != "$expected_compatibility_version" ]; then
+      echo "Error: worker release $worker_version is incompatible with $expected_name $expected_version" >&2
+      return 1
+    fi
+  done
+
+  printf 'install_worker.compatibility status=ok worker_version=%s compatibility_version=%s\n' \
+    "$worker_version" "$worker_compatibility_version"
 }
 
 get_expected_node_pty_version() {
@@ -413,6 +465,7 @@ exec node $pm2_entry \"\$@\""
 # phase, not the last phase, and callers invoke this via `bash <script>` so
 # the shebang's -e does not apply.
 run_phase "worker_install" install_worker || exit "$?"
+run_phase "worker_compatibility" validate_worker_compatibility || exit "$?"
 run_phase "worker_cli_install" install_worker_cli || exit "$?"
 run_phase "node_pty_install" ensure_node_pty || exit "$?"
 run_phase "pm2_install" ensure_pm2 || exit "$?"

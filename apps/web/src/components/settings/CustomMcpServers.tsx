@@ -8,7 +8,6 @@ import { toast } from 'sonner';
 
 import {
   Button,
-  Checkbox,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -36,8 +35,10 @@ import {
 import type { CustomMcpServerVisibility } from '@roomote/types';
 import type { CustomMcpServerListEntry } from '@/trpc/commands/custom-mcp-servers';
 import { useAuthorizedUser } from '@/hooks/useUser';
+import { useIntegrationToolApprovalsExperiment } from '@/hooks/useIntegrationToolApprovalsExperiment';
 
 import type { IntegrationItem } from './integration-card';
+import { IntegrationToolApprovalList } from './IntegrationToolApprovalControls';
 import { useTRPC } from '@/trpc/client';
 
 type Transport = 'remote' | 'stdio';
@@ -377,7 +378,7 @@ function ServerFormDialog({
           </DialogTitle>
           <DialogDescription>
             {visibility === 'owner'
-              ? 'A personal server is available only to your own Sessions and tasks. It is reached through an authenticated Roomote proxy, so credentials stay server-side.'
+              ? 'A personal server is available only to your own sessions and tasks. It is reached through an authenticated Roomote proxy, so credentials stay server-side.'
               : 'Custom servers are available to agents in every task. Remote servers are reached through an authenticated Roomote proxy, so credentials stay server-side. Local servers run inside the task sandbox with the same privileges as the agent.'}
           </DialogDescription>
         </DialogHeader>
@@ -746,55 +747,58 @@ function ServerFormDialog({
 
 function CustomToolManagementDialog({
   server,
+  scope,
   open,
   onOpenChange,
   onSaved,
 }: {
   server: ListedServer | null;
+  scope: CustomMcpServerVisibility;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: () => void;
 }) {
   const trpc = useTRPC();
-
+  const { isAdmin } = useAuthorizedUser();
+  const approvalsExperiment = useIntegrationToolApprovalsExperiment();
+  // A custom server mounts under its name. Shared servers take the
+  // deployment-wide, admin-managed approval policies; a personal server takes
+  // its owner's personal policies, which apply to their own Sessions only.
   const toolsQuery = useQuery(
     trpc.customMcpServers.listTools.queryOptions(
       { id: server?.id ?? '' },
       { enabled: open && Boolean(server), retry: false },
     ),
   );
-
   const setDisabledTools = useMutation(
     trpc.customMcpServers.setDisabledTools.mutationOptions(),
   );
-
   const [disabledNames, setDisabledNames] = useState<Set<string>>(new Set());
-
   const loadedKey = useMemo(
     () =>
       toolsQuery.data
         ? `${server?.id}:${toolsQuery.data.tools.map((tool) => tool.name).join(',')}`
         : null,
-    [toolsQuery.data, server?.id],
+    [server?.id, toolsQuery.data],
   );
 
   useEffect(() => {
-    if (loadedKey && toolsQuery.data) {
-      setDisabledNames(
-        new Set(
-          toolsQuery.data.tools
-            .filter((tool) => !tool.enabled)
-            .map((tool) => tool.name),
-        ),
-      );
-    }
+    if (!loadedKey || !toolsQuery.data) return;
+    setDisabledNames(
+      new Set(
+        toolsQuery.data.tools
+          .filter((tool) => !tool.enabled)
+          .map((tool) => tool.name),
+      ),
+    );
   }, [loadedKey, toolsQuery.data]);
 
+  const legacyAvailability =
+    !approvalsExperiment.isLoading &&
+    !approvalsExperiment.enabled &&
+    (scope === 'owner' || isAdmin);
   const save = async () => {
-    if (!server) {
-      return;
-    }
-
+    if (!server) return;
     await setDisabledTools.mutateAsync({
       id: server.id,
       disabledTools: [...disabledNames],
@@ -805,14 +809,13 @@ function CustomToolManagementDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="xl">
+      <DialogContent size="2xl">
         <DialogHeader>
           <DialogTitle>
             Manage tools for {server?.name ?? 'integration'}
           </DialogTitle>
           <DialogDescription>
-            Disabled tools are blocked at the Roomote proxy and hidden from
-            agents.
+            Choose how the model can use tools from this integration.
           </DialogDescription>
         </DialogHeader>
 
@@ -830,57 +833,45 @@ function CustomToolManagementDialog({
           </p>
         ) : (
           <div className="space-y-2 max-h-96 overflow-y-auto">
-            {toolsQuery.data?.tools.map((tool) => (
-              <label
-                key={tool.name}
-                className="flex items-start gap-3 text-sm cursor-pointer"
-              >
-                <Checkbox
-                  checked={!disabledNames.has(tool.name)}
-                  onCheckedChange={(checked) => {
-                    setDisabledNames((current) => {
-                      const next = new Set(current);
-
-                      if (checked === true) {
-                        next.delete(tool.name);
-                      } else {
-                        next.add(tool.name);
-                      }
-
-                      return next;
-                    });
-                  }}
-                  className="mt-0.5"
-                />
-                <span>
-                  <span className="font-mono">{tool.name}</span>
-                  {tool.description && (
-                    <span className="block text-xs text-muted-foreground">
-                      {tool.description}
-                    </span>
-                  )}
-                </span>
-              </label>
-            ))}
+            <IntegrationToolApprovalList
+              integrationId={server?.name ?? null}
+              integrationName={server?.name ?? null}
+              scope={scope === 'owner' ? 'personal' : 'deployment'}
+              canManage={scope === 'owner' || isAdmin}
+              open={open}
+              tools={toolsQuery.data?.tools ?? []}
+              isToolEnabled={(toolName) => !disabledNames.has(toolName)}
+              onToggleTool={(toolName, enabled) =>
+                setDisabledNames((current) => {
+                  const next = new Set(current);
+                  if (enabled) next.delete(toolName);
+                  else next.add(toolName);
+                  return next;
+                })
+              }
+              toggleDisabled={setDisabledTools.isPending}
+            />
           </div>
         )}
 
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-          >
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            onClick={save}
-            disabled={setDisabledTools.isPending || toolsQuery.isPending}
-          >
-            {setDisabledTools.isPending ? <Loading /> : 'Save'}
-          </Button>
-        </DialogFooter>
+        {legacyAvailability && !toolsQuery.isPending && !toolsQuery.isError ? (
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={save}
+              disabled={setDisabledTools.isPending}
+            >
+              {setDisabledTools.isPending ? <Loading /> : 'Save'}
+            </Button>
+          </DialogFooter>
+        ) : null}
       </DialogContent>
     </Dialog>
   );
@@ -1133,6 +1124,7 @@ export function useCustomMcpServers(
         }}
       />
       <CustomToolManagementDialog
+        scope={scope}
         server={toolsServer}
         open={Boolean(toolsServer)}
         onOpenChange={(open) => {

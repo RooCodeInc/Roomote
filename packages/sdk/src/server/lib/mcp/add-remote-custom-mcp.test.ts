@@ -387,7 +387,7 @@ describe('addRemoteCustomMcpForFast', () => {
     expect(await db.query.customMcpServers.findMany()).toHaveLength(1);
   });
 
-  it('atomically reuses one URL across concurrent Fast Sessions', async () => {
+  it('atomically reuses one URL across concurrent sessions', async () => {
     guardedFetchMock.mockImplementation(async (_url, init) => {
       const body = JSON.parse(String(init?.body)) as { method?: string };
       return body.method === 'initialize'

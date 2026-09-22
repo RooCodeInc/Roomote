@@ -221,7 +221,7 @@ export const DEFAULT_OPENAI_REALTIME_VOICE_ID: OpenAiRealtimeVoiceId =
  * mcpConnections.authConfig.
  *
  * Credential-only: an OpenAI API key with GPT-Live access, consumed by the
- * control plane to open voice calls on Fast Sessions and to clean spoken
+ * control plane to open voice calls on sessions and to clean spoken
  * transcripts. Excluded from agent MCP config delivery so the key never
  * reaches a task sandbox. The `R_VOICE_OPENAI_API_KEY` environment variable,
  * when set, takes precedence over this connection.

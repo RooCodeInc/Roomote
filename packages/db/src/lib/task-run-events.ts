@@ -67,7 +67,15 @@ export async function recordTaskRunEvent(
       source: input.source,
       eventType: input.eventType,
       message: input.message,
-      details: input.details ?? {},
+      details: {
+        ...(input.details ?? {}),
+        // Keep every durable event joinable without requiring callers to
+        // duplicate the task/run lookup at each lifecycle boundary.
+        correlation: {
+          taskId: context.taskId,
+          runId: input.runId,
+        },
+      },
       createdAt: input.createdAt ?? new Date(),
     })
     .returning();
