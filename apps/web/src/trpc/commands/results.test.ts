@@ -87,6 +87,7 @@ describe('Results commands', () => {
         expect.objectContaining({
           id: suggestion!.id,
           headline: 'Patch the alert',
+          content: '',
           actions: [expect.objectContaining({ action: 'start_investigation' })],
         }),
         expect.objectContaining({

@@ -54,8 +54,8 @@ describe('getVisiblePrimaryNavItems', () => {
       '/',
       '/sessions',
       '/automations',
-      '/integrations',
       '/results',
+      '/integrations',
     ]);
     expect(items.find((item) => item.href === '/results')).toMatchObject({
       label: 'Results',
