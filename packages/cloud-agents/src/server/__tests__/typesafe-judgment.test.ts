@@ -3,12 +3,14 @@ const {
   mockGetJudgmentSelection,
   mockGenerateTrackedNonTaskObject,
   mockResolveNonTaskHelperModel,
+  mockRecordLlmUsage,
   mockEnv,
 } = vi.hoisted(() => ({
   mockResolveModelProviderEnvValue: vi.fn(),
   mockGetJudgmentSelection: vi.fn(),
   mockGenerateTrackedNonTaskObject: vi.fn(),
   mockResolveNonTaskHelperModel: vi.fn(),
+  mockRecordLlmUsage: vi.fn(),
   mockEnv: {
     R_JUDGMENT_MODEL: undefined as string | undefined,
     R_JUDGMENT_UPSTREAM_URL: undefined as string | undefined,
@@ -21,6 +23,7 @@ vi.mock('@roomote/env', () => ({ Env: mockEnv }));
 
 vi.mock('@roomote/db/server', () => ({
   getDeploymentJudgmentModelSelection: mockGetJudgmentSelection,
+  recordLlmUsage: mockRecordLlmUsage,
   resolveModelProviderEnvValue: mockResolveModelProviderEnvValue,
 }));
 
@@ -28,6 +31,7 @@ vi.mock('../non-task-provider-usage', () => ({
   generateTrackedNonTaskObject: mockGenerateTrackedNonTaskObject,
   NON_TASK_INFERENCE_SURFACES: {
     decisionModelFallback: 'decision_model_fallback',
+    judgmentModel: 'judgment_model',
   },
   resolveNonTaskHelperModel: mockResolveNonTaskHelperModel,
 }));
@@ -61,12 +65,16 @@ function mockKeys(keys: {
   );
 }
 
-function mockFetchResponse(body: unknown, init?: { status?: number }) {
-  const fetchMock = vi
-    .fn()
-    .mockResolvedValue(
-      new Response(JSON.stringify(body), { status: init?.status ?? 200 }),
-    );
+function mockFetchResponse(
+  body: unknown,
+  init?: { status?: number; headers?: HeadersInit },
+) {
+  const fetchMock = vi.fn().mockResolvedValue(
+    new Response(JSON.stringify(body), {
+      status: init?.status ?? 200,
+      headers: init?.headers,
+    }),
+  );
   vi.stubGlobal('fetch', fetchMock);
   return fetchMock;
 }
@@ -97,6 +105,7 @@ describe('evaluateTypeSafeJudgments', () => {
     mockEnv.R_JUDGMENT_UPSTREAM_API_KEY = undefined;
     mockEnv.R_JUDGMENT_SHADOW = undefined;
     mockGetJudgmentSelection.mockResolvedValue(null);
+    mockRecordLlmUsage.mockResolvedValue({ recorded: true });
     mockResolveNonTaskHelperModel.mockResolvedValue({
       model: 'openrouter/helper',
       catalogModelId: 'openrouter/helper',
@@ -215,7 +224,12 @@ describe('evaluateTypeSafeJudgments', () => {
       const fetchMock = vi
         .fn()
         .mockResolvedValueOnce(
-          new Response(JSON.stringify({ answers: directAnswers })),
+          new Response(
+            JSON.stringify({
+              answers: directAnswers,
+              usage: { input_tokens: 20, output_tokens: 5, total_tokens: 25 },
+            }),
+          ),
         )
         .mockResolvedValueOnce(
           new Response(
@@ -228,6 +242,7 @@ describe('evaluateTypeSafeJudgments', () => {
                   probabilities: { billing: 0.4, technical: 0.6 },
                 },
               },
+              usage: { input_tokens: 18, output_tokens: 4, total_tokens: 22 },
             }),
           ),
         );
@@ -250,6 +265,39 @@ describe('evaluateTypeSafeJudgments', () => {
       expect(line).toContain('team:choice:same:0.82/0.60');
       expect(line).not.toContain('secret');
       expect(line).not.toContain('technical');
+
+      await vi.waitFor(() =>
+        expect(mockRecordLlmUsage).toHaveBeenCalledTimes(2),
+      );
+      const usageCalls = mockRecordLlmUsage.mock.calls.map(
+        ([usage]) => usage as Record<string, unknown>,
+      );
+      expect(new Set(usageCalls.map((usage) => usage.eventKey)).size).toBe(2);
+      expect(usageCalls).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            providerId: 'typesafe',
+            inputTokens: 20,
+            outputTokens: 5,
+            totalTokens: 25,
+            details: expect.objectContaining({
+              requestRole: 'primary',
+              outcome: 'success',
+            }),
+          }),
+          expect.objectContaining({
+            providerId: 'roomote',
+            inputTokens: 18,
+            outputTokens: 4,
+            totalTokens: 22,
+            details: expect.objectContaining({
+              requestRole: 'shadow',
+              primaryProvider: 'typesafe',
+              outcome: 'success',
+            }),
+          }),
+        ]),
+      );
     });
 
     it('never lets an upstream failure reach the caller', async () => {
@@ -345,6 +393,211 @@ describe('evaluateTypeSafeJudgments', () => {
       model: 'jev-latest',
       questions,
     });
+  });
+
+  it('records provider usage and cost without persisting judgment data', async () => {
+    mockFetchResponse({
+      model: 'jev-1.13.0',
+      answers: directAnswers,
+      usage: {
+        input_tokens: 120,
+        output_tokens: 30,
+        total_tokens: 150,
+        cost: 0.001234,
+      },
+    });
+
+    await evaluateTypeSafeJudgments({
+      state: { secret: 'do not record' },
+      questions,
+    });
+
+    await vi.waitFor(() => {
+      expect(mockRecordLlmUsage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          source: 'judgment_model',
+          usageType: 'inference',
+          eventKey: expect.stringMatching(
+            /^judgment-model:typesafe:primary:[0-9a-f-]+$/u,
+          ),
+          providerId: 'typesafe',
+          modelId: 'jev-1.13.0',
+          inputTokens: 120,
+          outputTokens: 30,
+          totalTokens: 150,
+          costMicroUsd: 1234,
+          costSource: 'provider_response',
+          details: {
+            surface: 'judgment_model',
+            requestRole: 'primary',
+            status: 200,
+            outcome: 'success',
+            latencyMs: expect.any(Number),
+            usageMetadataAvailable: true,
+            usageMetadataSource: 'response',
+            metadataReadFailed: false,
+            missingUsageFields: [],
+          },
+        }),
+      );
+    });
+
+    const [usage] = mockRecordLlmUsage.mock.calls[0] as [
+      Record<string, unknown>,
+    ];
+    expect(JSON.stringify(usage)).not.toContain('do not record');
+  });
+
+  it('records missing provider metadata with zero normalized totals', async () => {
+    mockFetchResponse({ answers: directAnswers });
+
+    await evaluateTypeSafeJudgments({ state: 'metadata-free', questions });
+
+    await vi.waitFor(() => {
+      expect(mockRecordLlmUsage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          inputTokens: null,
+          outputTokens: null,
+          totalTokens: 0,
+          costMicroUsd: null,
+          costSource: 'missing',
+          details: expect.objectContaining({
+            outcome: 'success',
+            usageMetadataAvailable: false,
+            usageMetadataSource: 'none',
+            metadataReadFailed: false,
+            missingUsageFields: [
+              'input_tokens',
+              'output_tokens',
+              'total_tokens',
+              'cost',
+            ],
+          }),
+        }),
+      );
+    });
+  });
+
+  it('records usage metadata exposed through response headers', async () => {
+    mockGetJudgmentSelection.mockResolvedValue('openrouter');
+    mockKeys({ OPENROUTER_API_KEY: 'or-key' });
+    mockFetchResponse(
+      { answers: directAnswers },
+      {
+        headers: {
+          'x-input-tokens': '11',
+          'x-output-tokens': '4',
+          'x-total-tokens': '15',
+          'x-openrouter-cost': '0.0005',
+        },
+      },
+    );
+
+    await evaluateTypeSafeJudgments({ state: 'header metadata', questions });
+
+    await vi.waitFor(() => {
+      expect(mockRecordLlmUsage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          providerId: 'openrouter',
+          modelId: 'typesafe/jev-1.13',
+          inputTokens: 11,
+          outputTokens: 4,
+          totalTokens: 15,
+          costMicroUsd: 500,
+          costSource: 'provider_response',
+          details: expect.objectContaining({
+            usageMetadataAvailable: true,
+            usageMetadataSource: 'header',
+          }),
+        }),
+      );
+    });
+  });
+
+  it('records an HTTP failure without recording the response body', async () => {
+    mockFetchResponse({ error: 'secret response body' }, { status: 529 });
+
+    await expect(
+      evaluateTypeSafeJudgments({ state: 'hi', questions }),
+    ).rejects.toThrow('HTTP 529');
+
+    await vi.waitFor(() => {
+      expect(mockRecordLlmUsage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          details: expect.objectContaining({
+            status: 529,
+            outcome: 'http_error',
+          }),
+          inputTokens: null,
+          outputTokens: null,
+          totalTokens: 0,
+          costSource: 'missing',
+        }),
+      );
+    });
+
+    expect(JSON.stringify(mockRecordLlmUsage.mock.calls[0])).not.toContain(
+      'secret response body',
+    );
+  });
+
+  it('records transport failures without affecting the thrown fallback error', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValue(new Error('connect ECONNREFUSED'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      evaluateTypeSafeJudgments({ state: 'hi', questions }),
+    ).rejects.toThrow('connect ECONNREFUSED');
+
+    await vi.waitFor(() => {
+      expect(mockRecordLlmUsage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          details: expect.objectContaining({
+            status: null,
+            outcome: 'transport_error',
+          }),
+        }),
+      );
+    });
+  });
+
+  it('records response validation failures after a successful HTTP request', async () => {
+    mockFetchResponse({
+      answers: { urgent: { type: 'noul', noul: 0.5 } },
+    });
+
+    await expect(
+      evaluateTypeSafeJudgments({ state: 'hi', questions }),
+    ).rejects.toThrow('missing a valid answer');
+
+    await vi.waitFor(() => {
+      expect(mockRecordLlmUsage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          details: expect.objectContaining({
+            status: 200,
+            outcome: 'validation_error',
+          }),
+        }),
+      );
+    });
+  });
+
+  it('does not let ledger persistence failures change a valid judgment', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockRecordLlmUsage.mockRejectedValue(new Error('database unavailable'));
+    mockFetchResponse({ answers: directAnswers });
+
+    await expect(
+      evaluateTypeSafeJudgments({ state: 'hi', questions }),
+    ).resolves.toEqual(directAnswers);
+
+    await vi.waitFor(() =>
+      expect(warn).toHaveBeenCalledWith(
+        '[JudgmentUsage] Failed to record typesafe primary usage',
+      ),
+    );
   });
 
   it('resolves the hosted judgment model before the helper fallback', async () => {

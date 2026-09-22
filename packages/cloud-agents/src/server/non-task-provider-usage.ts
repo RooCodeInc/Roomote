@@ -124,6 +124,7 @@ export const NON_TASK_INFERENCE_SURFACES = {
   fastAgentMemoryDistillation: 'fast_agent_memory_distillation',
   fastAgentQuestionAnswering: 'fast_agent',
   inferenceValidation: 'inference_validation',
+  judgmentModel: 'judgment_model',
   prReviewNotificationTriage: 'pr_review_notification_triage',
   routerChannelLaunchGate: 'router_channel_launch_gate',
   routerDiscordForumTag: 'router_discord_forum_tag',
