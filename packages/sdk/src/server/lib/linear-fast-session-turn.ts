@@ -115,7 +115,7 @@ export type StartLinearFastSessionTurnResult =
   | { status: 'unavailable'; reason: string };
 
 /**
- * Enters a Linear agent session event into its Fast Session. The first turn
+ * Enters a Linear agent session event into its session. The first turn
  * links the Session page from Linear so the person can follow along; every
  * turn is queued so a busy Session steers or replays it instead of dropping
  * it.

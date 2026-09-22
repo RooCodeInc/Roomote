@@ -196,11 +196,14 @@ function resolveRuntimeModelStatus(options: {
       return [
         descriptor.runtimeStatusKey,
         {
-          effectiveModelId:
-            effectiveModel ??
-            (descriptor.modelFallback === 'deployment-default'
+          // Env overrides accept raw or bare gateway slugs, while the
+          // settings/launch catalogs normalize ids; expose the canonical id
+          // so every consumer resolves the same catalog entry.
+          effectiveModelId: effectiveModel
+            ? normalizeTaskModelId(effectiveModel)
+            : descriptor.modelFallback === 'deployment-default'
               ? options.settingsDefaultModelId
-              : null),
+              : null,
           persistedModelId: persistedModel,
           source,
           managedByEnv: envModel !== null,
@@ -252,9 +255,22 @@ export async function getTaskModelSettingsCommand(
   // Models selected for a runtime role (or as the default coding model) stay
   // listed and active even when a release drops them from the recommended
   // list, so their selectors keep rendering and saves keep validating.
+  // Env-only overrides are not persisted selections, but the runtime resolves
+  // them independently of the saved config; include their effective ids so
+  // the catalog (and metadata lookups such as supported reasoning efforts)
+  // covers them as well.
+  const envEffectiveModelIds = TASK_MODEL_ROLES.flatMap((role) => {
+    const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+    const envModel = isConfiguredEnvValue(process.env[descriptor.modelEnvVar])
+      ? process.env[descriptor.modelEnvVar]!.trim()
+      : null;
+
+    return envModel ? [envModel] : [];
+  });
   const selectedModelIds = new Set(
     [
       settings.defaultModelId,
+      ...envEffectiveModelIds,
       ...TASK_MODEL_ROLES.map(
         (role) =>
           persistedRuntimeModelConfig[

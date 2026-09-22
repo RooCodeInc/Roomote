@@ -40,6 +40,25 @@ vi.mock('@/hooks/useSessionIntegrationApprovals', () => ({
   }),
 }));
 
+vi.mock('@/hooks/useIntegrationToolApprovalsExperiment', () => ({
+  useIntegrationToolApprovalsExperiment: () => ({
+    enabled: false,
+    isLoading: false,
+    isUpdating: false,
+    setEnabled: vi.fn(),
+  }),
+}));
+
+vi.mock('@/hooks/useSessionIntegrationToolApprovals', () => ({
+  useSessionIntegrationToolApprovals: () => ({
+    data: { pending: [], sessionOverrides: [] },
+  }),
+  useSetSessionIntegrationToolOverride: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+  }),
+}));
+
 vi.mock('./CapabilityOfferCard', () => ({
   CapabilityOfferCard: ({ offer }: { offer: { capability: string } }) => (
     <div>Capability offer: {offer.capability}</div>
@@ -190,6 +209,11 @@ vi.mock('@/trpc/client', () => ({
     },
   }),
   useTRPC: () => ({
+    sessions: {
+      list: {
+        queryKey: () => ['sessions.list'],
+      },
+    },
     slack: {
       resolveUsers: {
         queryOptions: (input: unknown) => ({
@@ -248,12 +272,17 @@ vi.mock('@/components/tasks/SessionModelSwitcher', () => ({
     onModelChange,
     reasoningEffort,
     onReasoningEffortChange,
+    onModelSelectionChange,
     disabled,
   }: {
     model: string;
     onModelChange: (model: string) => void;
     reasoningEffort: string | null;
     onReasoningEffortChange: (effort: 'high') => void;
+    onModelSelectionChange?: (selection: {
+      model: string;
+      reasoningEffort: string | null;
+    }) => void;
     disabled?: boolean;
   }) => (
     <div>
@@ -269,9 +298,28 @@ vi.mock('@/components/tasks/SessionModelSwitcher', () => ({
       <button
         type="button"
         disabled={disabled}
+        onClick={() => onModelChange('')}
+      >
+        Use default model
+      </button>
+      <button
+        type="button"
+        disabled={disabled}
         onClick={() => onReasoningEffortChange('high')}
       >
         Use high reasoning
+      </button>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() =>
+          onModelSelectionChange?.({
+            model: 'openrouter/anthropic/claude-fable-5',
+            reasoningEffort: 'medium',
+          })
+        }
+      >
+        Use combined selection
       </button>
     </div>
   ),
@@ -317,7 +365,21 @@ vi.mock('../../task/[taskId]/messages/acp/DelegatedTaskCard', () => ({
 
 vi.mock('./SessionUserInputCard', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./SessionUserInputCard')>()),
-  SessionUserInputCard: () => <div>Structured input request</div>,
+  SessionUserInputCard: ({ request }: { request: { requestId: string } }) => {
+    const [selected, setSelected] = useState(false);
+    return (
+      <div>
+        <div>Structured input request</div>
+        <div data-testid="structured-request-id">{request.requestId}</div>
+        <button type="button" onClick={() => setSelected(true)}>
+          Select answer
+        </button>
+        <div data-testid="structured-selection">
+          {selected ? 'selected' : 'empty'}
+        </div>
+      </div>
+    );
+  },
 }));
 
 vi.mock('./setup/SetupStarterTasksCard', () => ({
@@ -787,6 +849,72 @@ describe('FastSessionTranscript', () => {
     userEmail,
     userImageUrl,
     createdAt: new Date(ts),
+  });
+
+  it('shows automatic memory saves and expands their distilled facts', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="fast-conversation"
+        initialMessages={[
+          {
+            ...textMessage({
+              id: 'memory-save',
+              role: 'assistant',
+              text: 'Saved to memory',
+              ts: 2,
+            }),
+            eventType: ACP_ENVELOPE_EVENT_TYPES.MemorySaved,
+            role: 'system' as const,
+            payload: {
+              memories: ['Staging deploys use the release branch.'],
+            },
+          },
+        ]}
+        canReply
+      />,
+    );
+
+    const summary = screen.getByText('Saved to memory');
+    expect(summary).toBeInTheDocument();
+    expect(summary.closest('details')).not.toHaveAttribute('open');
+    fireEvent.click(summary);
+    expect(summary.closest('details')).toHaveAttribute('open');
+    expect(
+      screen.getByText('Staging deploys use the release branch.'),
+    ).toBeInTheDocument();
+  });
+
+  it('renders a persisted memory-save row delivered by the transcript messages stream', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="fast-conversation"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+
+    const source = FakeEventSource.instances[0];
+    expect(source).toBeDefined();
+    act(() => {
+      source?.emit('messages', {
+        messages: [
+          {
+            ...textMessage({
+              id: 'memory-save-streamed',
+              role: 'assistant',
+              text: 'Saved to memory',
+              ts: 2,
+            }),
+            eventType: ACP_ENVELOPE_EVENT_TYPES.MemorySaved,
+            role: 'system' as const,
+            payload: { memories: ['The release branch deploys staging.'] },
+          },
+        ],
+        conversationResponding: false,
+      });
+    });
+
+    expect(screen.getByText('Saved to memory')).toBeInTheDocument();
   });
 
   it('restores each Session draft and scroll position without focusing after a direct switch', () => {
@@ -2307,6 +2435,84 @@ describe('FastSessionTranscript', () => {
     expect(screen.queryByText('Working')).not.toBeInTheDocument();
   });
 
+  it('shows a validation error dialog and preserves composer state instead of raw JSON', async () => {
+    const rawValidationError = JSON.stringify([
+      {
+        code: 'custom',
+        message:
+          'Extracted attachment text exceeds the 200,000 character limit',
+        path: ['attachmentTexts'],
+      },
+    ]);
+    replyMutate.mockRejectedValue(new Error(rawValidationError));
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          textMessage({
+            id: 'user-1',
+            role: 'user',
+            text: 'First question',
+            ts: 1,
+          }),
+        ]}
+        canReply
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, { target: { value: 'Retry this' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveTextContent('Attachment too large');
+    expect(dialog).toHaveTextContent(
+      'attachmentTexts: Extracted attachment text exceeds the 200,000 character limit',
+    );
+    expect(dialog).toHaveTextContent(
+      'Try a different file, or provide a URL and Roomote will download it.',
+    );
+    expect(screen.queryByText(rawValidationError)).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Got it' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+    );
+    expect(input).toHaveValue('Retry this');
+  });
+
+  it('keeps the inline alert for non-validation send failures', async () => {
+    replyMutate.mockRejectedValue(new Error('turn is busy'));
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          textMessage({
+            id: 'user-1',
+            role: 'user',
+            text: 'First question',
+            ts: 1,
+          }),
+          textMessage({
+            id: 'assistant-1',
+            role: 'assistant',
+            text: 'First answer',
+            ts: 2,
+          }),
+        ]}
+        canReply
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, { target: { value: 'Retry this' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('turn is busy');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
   it('keeps Working for an earlier pending response when a later send fails', async () => {
     replyMutate.mockRejectedValue(new Error('turn is busy'));
     render(
@@ -3164,6 +3370,63 @@ describe('FastSessionTranscript', () => {
     });
   });
 
+  it('persists clearing the session model override', async () => {
+    updateModelSelectionMutate.mockResolvedValue({ success: true });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        sessionModel="openrouter/z-ai/glm-5.2"
+        canReply
+      />,
+    );
+
+    expect(screen.getByTestId('session-model')).toHaveTextContent(
+      'openrouter/z-ai/glm-5.2',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Use default model' }));
+
+    expect(screen.getByTestId('session-model')).toBeEmptyDOMElement();
+    await waitFor(() => {
+      expect(updateModelSelectionMutate).toHaveBeenCalledWith({
+        sessionId: 'session-1',
+        model: null,
+      });
+    });
+  });
+
+  it('applies a combined model and effort selection atomically', async () => {
+    updateModelSelectionMutate.mockResolvedValue({ success: true });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        sessionModel="openrouter/openai/gpt-5.6-terra"
+        canReply
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use combined selection' }),
+    );
+
+    // Both values update together so the voice-turn selection ref never
+    // observes a stale intermediate model or effort.
+    expect(screen.getByTestId('session-model')).toHaveTextContent(
+      'openrouter/anthropic/claude-fable-5',
+    );
+    expect(screen.getByTestId('session-reasoning')).toHaveTextContent('medium');
+    await waitFor(() => {
+      expect(updateModelSelectionMutate).toHaveBeenCalledWith({
+        sessionId: 'session-1',
+        model: 'openrouter/anthropic/claude-fable-5',
+        reasoningEffort: 'medium',
+      });
+    });
+  });
+
   it('does not submit with Enter while a model selection is still saving', async () => {
     let resolveModelUpdate: ((value: { success: true }) => void) | undefined;
     updateModelSelectionMutate.mockReturnValue(
@@ -3338,7 +3601,66 @@ describe('FastSessionTranscript', () => {
     expect(screen.getByPlaceholderText('Message agent')).toBeInTheDocument();
   });
 
-  it('updates the header title from the session stream event', () => {
+  it('resets generic structured input state when the transcript request changes', () => {
+    const request = (requestId: string, ts: number) => ({
+      id: requestId,
+      eventId: requestId,
+      turnId: `turn-${requestId}`,
+      turnSeq: 1,
+      ts,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+      role: 'assistant' as const,
+      contentBlocks: [{ type: 'text' as const, text: 'Choose one' }],
+      metadata: { visibleInTranscript: true },
+      payload: {
+        requestId,
+        status: 'pending' as const,
+        sessionId: 'session-1',
+        turnId: `turn-${requestId}`,
+        callId: `call-${requestId}`,
+        questions: [
+          {
+            id: 'choice',
+            header: 'Choice',
+            question: 'Choose one',
+            isOther: false,
+            isSecret: false,
+            options: [{ label: 'One', description: 'First choice' }],
+          },
+        ],
+      },
+      source: 'web' as const,
+      nativeSessionId: null,
+      nativeMessageId: null,
+      createdAt: new Date(ts),
+    });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[request('rui:request-1', 1)]}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Select answer' }));
+    expect(screen.getByTestId('structured-selection')).toHaveTextContent(
+      'selected',
+    );
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [request('rui:request-2', 2)],
+      });
+    });
+
+    expect(screen.getByTestId('structured-request-id')).toHaveTextContent(
+      'rui:request-2',
+    );
+    expect(screen.getByTestId('structured-selection')).toHaveTextContent(
+      'empty',
+    );
+  });
+
+  it('updates the header title and refreshes session lists from the session stream event', async () => {
     document.title = 'Roomote';
     render(
       <FastSessionTranscript
@@ -3369,6 +3691,11 @@ describe('FastSessionTranscript', () => {
     );
     expect(document.title).toBe(
       'Rotate the API keys across every production environment with... | Roomote',
+    );
+    await waitFor(() =>
+      expect(invalidateQueries).toHaveBeenCalledWith({
+        queryKey: ['sessions.list'],
+      }),
     );
   });
 

@@ -91,6 +91,13 @@ export function configToYaml(config: EnvironmentConfig): string {
     cleanConfig.docker_projects = config.docker_projects;
   }
 
+  if (config.environment_recipe) {
+    // The resolved portion of a recipe is system-managed: it is serialized
+    // verbatim so a direct admin YAML edit invalidates verification like any
+    // other runtime-affecting change.
+    cleanConfig.environment_recipe = config.environment_recipe;
+  }
+
   if (config.services && config.services.length > 0) {
     cleanConfig.services = config.services;
   }

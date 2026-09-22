@@ -51,8 +51,8 @@ type FastAgentPromptContextStats = {
   integrationCount: number;
   integrationToolCount: number;
   activeTaskCount: number;
-  /** Instance and inline environment skills listed in the system prompt;
-   * undefined when the catalog could not be loaded. */
+  /** Bounded authorized skills listed in the system prompt; undefined when the
+   * catalog could not be loaded. */
   promptSkillCount?: number;
 };
 

@@ -20,7 +20,6 @@ export function GitHubSourceControlConfig({
   returnPath?: string;
 }) {
   const [githubOrganization, setGithubOrganization] = useState('');
-  const [showAdvancedConfig, setShowAdvancedConfig] = useState(false);
   const [manifestForm, setManifestForm] = useState<{
     postTarget: string;
     values: { manifest: string };
@@ -55,42 +54,25 @@ export function GitHubSourceControlConfig({
       </div>
 
       <div className="space-y-2 max-w-xl mt-6">
-        <div>
-          <button
-            type="button"
-            className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground cursor-pointer"
-            onClick={() => setShowAdvancedConfig((current) => !current)}
-          >
-            {showAdvancedConfig
-              ? 'Hide advanced config'
-              : 'Show advanced config'}
-          </button>
+        <div className="grid gap-2 md:grid-cols-[200px_minmax(0,1fr)] md:items-center max-w-xl">
+          <Label htmlFor="github-app-organization">GitHub organization</Label>
+          <Input
+            id="github-app-organization"
+            className="font-mono"
+            value={githubOrganization}
+            onChange={(event) => setGithubOrganization(event.target.value)}
+            placeholder="your-organization"
+            disabled={
+              createGitHubAppManifest.isPending || manifestForm !== null
+            }
+            data-1p-ignore
+          />
         </div>
-        {showAdvancedConfig ? (
-          <>
-            <div className="grid gap-2 md:grid-cols-[200px_minmax(0,1fr)] md:items-center max-w-xl">
-              <Label htmlFor="github-app-organization">
-                GitHub organization
-              </Label>
-              <Input
-                id="github-app-organization"
-                className="font-mono"
-                value={githubOrganization}
-                onChange={(event) => setGithubOrganization(event.target.value)}
-                placeholder="your-organization"
-                disabled={
-                  createGitHubAppManifest.isPending || manifestForm !== null
-                }
-                data-1p-ignore
-              />
-            </div>
-            <p className="text-sm text-muted-foreground">
-              By default the app is created on your personal GitHub account and
-              can be installed on any organization you belong to. Enter an
-              organization name if the organization should own the app instead.
-            </p>
-          </>
-        ) : null}
+        <p className="text-sm text-muted-foreground">
+          By default the app is created on your personal GitHub account and can
+          be installed on any organization you belong to. Enter an organization
+          name if the organization should own the app instead.
+        </p>
       </div>
 
       {manifestForm ? (

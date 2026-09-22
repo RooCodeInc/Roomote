@@ -297,7 +297,7 @@ describe('handleGitLabMergeRequest', () => {
     );
   });
 
-  it('attaches the review to the Fast session whose task opened the MR', async () => {
+  it('attaches the review to the session whose task opened the MR', async () => {
     const fastParent = {
       sessionId: '22222222-2222-4222-8222-222222222222',
       conversation: {

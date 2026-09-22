@@ -71,7 +71,7 @@ export const SideNav = ({
   const trpc = useTRPC();
   const { enabled: resultsEnabled } = useResultsPage();
   const { data: unreadResultCount = 0 } = useQuery(
-    trpc.results.unreadCount.queryOptions(undefined, {
+    trpc.results.pendingCount.queryOptions(undefined, {
       enabled: resultsEnabled,
     }),
   );

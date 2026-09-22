@@ -376,7 +376,7 @@ export async function getSessionRelayUpdates(params: {
   const limit = parseLimit(params.limit);
   if (!limit) return { error: 'limit must be a number' };
   const cursor = decodeCursor(params.cursor, target);
-  if (!cursor) return { error: 'cursor is invalid for this Session' };
+  if (!cursor) return { error: 'cursor is invalid for this session' };
 
   let rows: RelayRow[] = [];
   if (params.fastConversationId) {

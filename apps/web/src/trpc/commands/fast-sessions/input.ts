@@ -7,8 +7,11 @@ import {
   REASONING_EFFORT_VALUES,
 } from '@roomote/types';
 
+import { ROOMOTE_ATTACHMENT_TEXT_MAX_CHARS } from '@roomote/cloud-agents';
+
 const MAX_FAST_ATTACHMENT_COUNT = 20;
-const MAX_FAST_ATTACHMENT_TEXT_CHARS = 200_000;
+
+const MAX_FAST_ATTACHMENT_TEXT_CHARS = ROOMOTE_ATTACHMENT_TEXT_MAX_CHARS;
 
 const fastSessionMessageInputShape = {
   text: z.string().trim(),
@@ -81,7 +84,7 @@ function requireFastSessionContent(
   if (attachmentTextChars > MAX_FAST_ATTACHMENT_TEXT_CHARS) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: 'Extracted attachment text exceeds the 200,000 character limit',
+      message: `Extracted attachment text exceeds the ${MAX_FAST_ATTACHMENT_TEXT_CHARS.toLocaleString('en-US')} character limit`,
       path: ['attachmentTexts'],
     });
   }

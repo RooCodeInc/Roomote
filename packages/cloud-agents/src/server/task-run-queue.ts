@@ -1627,7 +1627,7 @@ async function enqueueFreshLaunch(
             existingFastAgentSessionId !== fastAgentSessionId
           ) {
             throw new Error(
-              'Launch idempotency key is already attached to another Fast Session.',
+              'Launch idempotency key is already attached to another session.',
             );
           }
           if (fastAgentSessionId) {
@@ -1642,7 +1642,7 @@ async function enqueueFreshLaunch(
               existingSession.fastConversationId !== fastAgentSessionId
             ) {
               throw new Error(
-                'Launch idempotency key is already attached to another Session.',
+                'Launch idempotency key is already attached to another session.',
               );
             }
           }
@@ -2545,11 +2545,14 @@ export async function enqueueTaskRelaunch(
       sql`SELECT id FROM tasks WHERE id = ${existingTask.id} FOR UPDATE`,
     );
 
+    // Only a retry that is still in flight answers a repeated request. One
+    // that was canceled or failed must not stand in for the new attempt.
     const existingRetry = await tx.query.taskRuns.findFirst({
       where: and(
         eq(taskRuns.taskId, existingTask.id),
         eq(taskRuns.sourceRunId, sourceRun.id),
         eq(taskRuns.kind, 'fresh'),
+        inArray(taskRuns.status, [...activeRunStatuses]),
       ),
     });
 

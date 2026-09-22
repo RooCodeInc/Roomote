@@ -17,8 +17,17 @@ import { useVoiceEnabled } from '@/hooks/useVoiceEnabled';
 import { usePrivateSessionsExperiment } from '@/hooks/usePrivateSessionsExperiment';
 
 import { type PromptInputMessage } from '@/components/ai-elements';
-import { SessionModelSwitcher, TaskPromptInput } from '@/components/tasks';
-import { BasicTooltip, Button, HatGlasses } from '@/components/system';
+import {
+  ComposerErrorDialog,
+  SessionModelSwitcher,
+  TaskPromptInput,
+} from '@/components/tasks';
+import {
+  AlertCircle,
+  BasicTooltip,
+  Button,
+  HatGlasses,
+} from '@/components/system';
 
 const DEFAULT_PROMPT_PLACEHOLDER = 'What do you want to do?';
 
@@ -38,6 +47,7 @@ type NewTaskFormProps = {
   autoFocus?: boolean;
   textareaMaxHeight?: number;
   promptContainerRef?: Ref<HTMLDivElement>;
+  modelSelectorSize?: 'compact' | 'base';
 };
 
 export function NewTaskForm({
@@ -50,6 +60,7 @@ export function NewTaskForm({
   autoFocus = true,
   textareaMaxHeight,
   promptContainerRef,
+  modelSelectorSize = 'compact',
 }: NewTaskFormProps) {
   const { managedAccess = DEFAULT_MANAGED_DEPLOYMENT_ACCESS } =
     useAuthorizedUser();
@@ -75,8 +86,19 @@ export function NewTaskForm({
   useEffect(() => setPromptText(initialPromptText), [initialPromptText]);
   useEffect(() => setSelectedModelOverrideId(modelParam), [modelParam]);
 
-  const { isPending: isFastSessionPending, startFastSession } =
-    useFastSessionLauncher({ onSessionStarted: onTaskStarted });
+  const {
+    isPending: isFastSessionPending,
+    startFastSession,
+    error: launcherError,
+    clearError: clearLauncherError,
+    retryableError: fastSessionError,
+    retryFastSession,
+  } = useFastSessionLauncher({
+    onSessionStarted: onTaskStarted,
+    // The inline Retry below already surfaces start failures here.
+    showErrorToast: false,
+  });
+  const [submitError, setSubmitError] = useState<unknown>(null);
   const launchTaskModels = useLaunchTaskModels();
   const defaultModelId = launchTaskModels.data?.defaultFastModelId;
   const defaultReasoningEffort =
@@ -129,10 +151,21 @@ export function NewTaskForm({
     async (message: PromptInputMessage) => {
       const text = message.text.trim();
 
-      const preparedPrompt = await preparePromptAttachments({
-        text,
-        attachments: message.files,
-      });
+      let preparedPrompt;
+      try {
+        preparedPrompt = await preparePromptAttachments(
+          {
+            text,
+            attachments: message.files,
+          },
+          { enforceAttachmentTextLimit: true },
+        );
+      } catch (error) {
+        // Keep the composer exactly as the user left it and explain the
+        // failure in the shared dialog.
+        setSubmitError(error);
+        return;
+      }
 
       const submission: SubmissionSnapshot = {
         description:
@@ -174,6 +207,13 @@ export function NewTaskForm({
         animate ? 'animate-[enter-down_1s_1_100ms_backwards]' : undefined
       }
     >
+      <ComposerErrorDialog
+        error={submitError ?? launcherError}
+        onClose={() => {
+          setSubmitError(null);
+          clearLauncherError();
+        }}
+      />
       <TaskPromptInput
         promptKey={initialPromptText}
         isBusy={isBusy}
@@ -203,6 +243,7 @@ export function NewTaskForm({
             onReasoningEffortChange={setSelectedReasoningEffort}
             defaultModelId={defaultModelId}
             defaultReasoningEffort={defaultReasoningEffort}
+            size={modelSelectorSize}
           />
         }
         submitLeadingAction={
@@ -227,6 +268,26 @@ export function NewTaskForm({
           ) : null
         }
       />
+      {fastSessionError ? (
+        <div role="alert" className="flex items-center gap-2 px-3 py-2 text-sm">
+          <AlertCircle
+            aria-hidden="true"
+            className="text-destructive size-4 shrink-0"
+          />
+          <p className="text-muted-foreground min-w-0 flex-1">
+            Couldn’t start this session.
+          </p>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={isFastSessionPending}
+            onClick={() => void retryFastSession()}
+          >
+            Retry
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }

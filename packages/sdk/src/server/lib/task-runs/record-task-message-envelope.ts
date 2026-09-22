@@ -2,7 +2,7 @@ import {
   generateLlmTaskTitle,
   isFallbackTaskTitle,
   LLM_TITLE_LOCKED_CHECKPOINT,
-  refreshTaskSessionTitle,
+  refreshTaskSessionTitleWithRetry,
 } from '@roomote/cloud-agents/server';
 import {
   db,
@@ -529,7 +529,7 @@ async function maybeRefreshTaskTitle(input: RecordTaskMessageEnvelopeInput) {
       userId: input.userId,
       mode: 'checkpoint',
     }),
-    refreshTaskSessionTitle({
+    refreshTaskSessionTitleWithRetry({
       taskId: input.taskId,
       userId: input.userId,
       mode: 'checkpoint',
@@ -717,12 +717,28 @@ export async function refreshTaskTitleOnCompletion(input: {
       userId: input.userId,
       mode: 'final',
     }),
-    refreshTaskSessionTitle({
+    refreshTaskSessionTitleWithRetry({
       taskId: input.taskId,
       userId: input.userId,
       mode: 'final',
     }),
   ]);
+}
+
+export async function refreshTaskSessionTitleOnCompletion(input: {
+  taskId: string;
+  userId?: string;
+}): Promise<void> {
+  const pendingRefresh = pendingTaskTitleRefreshes.get(input.taskId);
+  if (pendingRefresh) {
+    await pendingRefresh.catch(() => {});
+  }
+
+  await refreshTaskSessionTitleWithRetry({
+    taskId: input.taskId,
+    userId: input.userId,
+    mode: 'final',
+  });
 }
 
 function scheduleTaskTitleRefresh(input: RecordTaskMessageEnvelopeInput) {

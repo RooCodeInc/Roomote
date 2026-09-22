@@ -63,7 +63,7 @@ export const RECOMMENDED_TASK_MODELS = [
   { id: 'kimi-k2-7-code', displayName: 'Kimi K2.7 Code', family: 'Kimi' },
   { id: 'qwen3-8-max', displayName: 'Qwen3.8 Max', family: 'Qwen' },
   { id: 'minimax-m3', displayName: 'MiniMax M3', family: 'Minimax' },
-  { id: 'grok-4-6', displayName: 'Grok 4.6', family: 'Grok' },
+  { id: 'grok-4-7', displayName: 'Grok 4.7', family: 'Grok' },
 ] as const satisfies readonly RecommendedTaskModel[];
 
 export type RecommendedTaskModelId =
@@ -119,5 +119,5 @@ export const OPENROUTER_RECOMMENDED_TASK_MODEL_SLUGS = {
   'kimi-k2-7-code': 'openrouter/moonshotai/kimi-k2.7-code',
   'qwen3-8-max': 'openrouter/qwen/qwen3.8-max-0902',
   'minimax-m3': 'openrouter/minimax/minimax-m3',
-  'grok-4-6': 'openrouter/x-ai/grok-4.6',
+  'grok-4-7': 'openrouter/x-ai/grok-4.7',
 } as const satisfies RecommendedTaskModelSlugMap;

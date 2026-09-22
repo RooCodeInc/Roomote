@@ -16,15 +16,17 @@ members even when no environments are configured. Roomote resolves existing
 environment skills only from environments you can use. If those environments
 define different versions with the same name, Roomote asks which one you mean.
 
-Every session turn starts with the names and descriptions of your instance skills
-and inline environment skills already in view, so Roomote can recognize a
-matching playbook from your request and load it without being asked. Skills
-installed from the marketplace and repository-defined skills are discovered on
-demand: Roomote sees which marketplace sources each environment installs and looks
-them up when one seems relevant. When you ask Roomote which skills are available,
-its unscoped inventory includes packaged skills, instance skills, and
-environment skills you can use. Repository-defined skills remain scoped to a
-specific environment or repository.
+Every session turn starts with a bounded inventory of the packaged, instance,
+authorized environment, marketplace, and repository skills available to you.
+Each entry includes its scope so Roomote can recognize a matching playbook from
+your request without guessing an environment or repository first. When the
+inventory reaches its marketplace or repository discovery limit, Roomote reports
+the omission and `list_skills` can inspect additional source pages or an exact
+authorized scope.
+When you ask Roomote which skills are available, its unscoped inventory includes
+the same packaged, instance, authorized environment, marketplace, and repository
+sources. Repository-defined skills still apply only when work runs in their
+authorized repository or environment scope.
 
 Use skills when the same guidance keeps showing up across sessions and tasks:
 a framework-specific review checklist, a release process, a
@@ -169,12 +171,13 @@ Skills configured in Roomote settings are different:
   selected environments and remain admin-managed.
 - **Repository-defined skills are codebase-level.** They apply when the task
   is working in that repository and the active workflow finds them relevant.
-- **Sessions include instance and inline environment skills on every turn** and
-  can discover the rest before starting a task. It can load instance skills
-  directly, environment skills only from authorized environments, and it reads
-  repository skill Markdown only from repositories in configured environments. If the workflow needs a workspace, Roomote starts a task in a
-  matching environment and the task loads the environment-scoped or checked-out
-  copy of the skill.
+- **Sessions include the bounded authorized skill inventory on every turn** and
+  can discover additional source pages before starting a task. It can load
+  instance skills directly, environment skills only from authorized
+  environments, and it reads repository skill Markdown only from repositories
+  in configured environments. If the workflow needs a workspace, Roomote starts
+  a task in a matching environment and the task loads the environment-scoped or
+  checked-out copy of the skill.
 - **Custom skills are supplemental.** They help Roomote perform specialized work; they
   do not replace the built-in task flow, environment setup, or the user's
   prompt.

@@ -26,7 +26,7 @@ export function BrowserNotificationsSection() {
     <Section icon={BellElectric} title="Browser notifications">
       <div className="space-y-3 text-sm">
         <p className="text-muted-foreground">
-          Desktop notifications can alert you while an open Session or task page
+          Desktop notifications can alert you while an open session or task page
           is in the background. Closed-page push is not supported.
         </p>
         {capability === 'default' ? (

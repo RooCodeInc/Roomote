@@ -126,7 +126,7 @@ function getLinearSessionId(taskRun: TaskRun): string {
     return sessionId;
   }
 
-  // A task delegated from a Linear Fast Session carries the agent session as
+  // A task delegated from a Linear session carries the agent session as
   // its parent conversation.
   const parentSessionId = getLinearFastParentSessionId(taskRun.payload);
   if (parentSessionId) {
@@ -145,7 +145,7 @@ function getLinearSessionId(taskRun: TaskRun): string {
 }
 
 /**
- * Live activity for a task a Linear Fast Session delegated: thoughts,
+ * Live activity for a task a Linear session delegated: thoughts,
  * actions, plan updates, and questions stream into the agent session the
  * way a direct Linear task's do. The final response stays with the Session,
  * which reports the settled outcome itself.
@@ -248,7 +248,7 @@ export const linearAgentCallbacks: RunTaskCallbacks = {
 
     if (event.type === 'completion') {
       try {
-        // A delegated child's outcome is reported by its Fast Session; a
+        // A delegated child's outcome is reported by its session; a
         // second response here would duplicate it.
         if (
           getTaskReportConsumerFromPayload(taskRun.payload) !== 'orchestrator'

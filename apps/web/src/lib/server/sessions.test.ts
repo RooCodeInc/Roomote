@@ -2170,7 +2170,7 @@ describe('unified Session queries', () => {
     ).resolves.toEqual({ success: true, pinned: true });
   });
 
-  it('persists and synchronizes manual Fast session title changes', async () => {
+  it('persists and synchronizes manual session title changes', async () => {
     const owner = await userFactory.create();
     const [conversation] = await db
       .insert(fastAgentConversations)
@@ -2192,7 +2192,7 @@ describe('unified Session queries', () => {
     await updateSessionMetadata(
       { userId: owner.id, isAdmin: false },
       session!.id,
-      { title: 'Renamed Fast session' },
+      { title: 'Renamed session' },
     );
 
     await expect(
@@ -2200,7 +2200,7 @@ describe('unified Session queries', () => {
         where: eq(fastAgentConversations.id, conversation!.id),
       }),
     ).resolves.toMatchObject({
-      title: 'Renamed Fast session',
+      title: 'Renamed session',
       titleEditedByUserAt: expect.any(Date),
     });
     expect(syncFastSlackTitle).toHaveBeenCalledWith({

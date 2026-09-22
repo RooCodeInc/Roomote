@@ -236,6 +236,9 @@ describe('environment definition helpers', () => {
 
     expect(prompt).toContain('ROOMOTE_<PORT_NAME>_PREVIEW_URL');
     expect(prompt).not.toContain('ROOMOTE_<PORT_NAME>_HOST');
+    expect(prompt).toContain('Only after an affirmative response');
+    expect(prompt).not.toContain('approvedProposalHash');
+    expect(prompt).not.toContain('preview hash');
   });
 
   it('finds a created environment that matches the repository set after the task started', () => {

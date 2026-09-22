@@ -466,7 +466,7 @@ function EmailChannelGuidance({
     return (
       <p className="text-sm text-muted-foreground">
         Email verification isn’t available yet. Ask an admin to configure Email
-        so you can verify your address and start Sessions.
+        so you can verify your address and start sessions.
       </p>
     );
   }

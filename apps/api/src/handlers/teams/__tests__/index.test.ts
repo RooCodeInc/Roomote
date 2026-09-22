@@ -626,7 +626,7 @@ describe('Teams webhook handler', () => {
     expect(queueFastReplyMock).not.toHaveBeenCalled();
   });
 
-  it('launches a pinned suggestion through the owning Fast Session without a model turn', async () => {
+  it('launches a pinned suggestion through the owning session without a model turn', async () => {
     const resolveOrigin = vi
       .spyOn(suggestionLaunch, 'resolveSuggestionOriginSessionId')
       .mockResolvedValueOnce('session-origin');
@@ -776,7 +776,7 @@ describe('Teams webhook handler', () => {
     expect(continueFastReplyMock).not.toHaveBeenCalled();
   });
 
-  it('starts a Fast-targeted suggestion in the personal chat’s shared Fast session', async () => {
+  it('starts a Fast-targeted suggestion in the personal chat’s shared session', async () => {
     trackedSuggestionMessageFindFirstMock.mockResolvedValue({
       workItemId: 'suggestion-1',
     });
@@ -1052,7 +1052,7 @@ describe('Teams webhook handler', () => {
     );
   });
 
-  it('rejects a reaction from a different Fast session owner', async () => {
+  it('rejects a reaction from a different session owner', async () => {
     teamsUserMappingFindFirstMock.mockResolvedValue({
       userId: 'mapped-user-1',
     });
@@ -1292,7 +1292,7 @@ describe('Teams webhook handler', () => {
     expect(queueCommunicationMessageOnceMock).toHaveBeenCalledTimes(1);
   });
 
-  it('continues the bound Fast session before ordinary Teams task routing', async () => {
+  it('continues the bound session before ordinary Teams task routing', async () => {
     teamsUserMappingFindFirstMock.mockResolvedValueOnce({
       userId: 'mapped-user-1',
     });
@@ -1417,7 +1417,7 @@ describe('Teams webhook handler', () => {
     expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
   });
 
-  it('fails closed when the Fast session no longer has an active Teams installation route', async () => {
+  it('fails closed when the session no longer has an active Teams installation route', async () => {
     teamsUserMappingFindFirstMock.mockResolvedValueOnce({
       userId: 'mapped-user-1',
     });
@@ -1947,7 +1947,7 @@ describe('Teams webhook handler', () => {
     expect(enqueueTaskMock).not.toHaveBeenCalled();
   });
 
-  it('replies with an error when Fast session setup fails', async () => {
+  it('replies with an error when session setup fails', async () => {
     findFirstMock.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
     teamsUserMappingFindFirstMock.mockResolvedValueOnce({
       userId: 'mapped-user-1',
@@ -2267,7 +2267,7 @@ describe('Teams webhook handler', () => {
     expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
   });
 
-  it('uses a stable personal chat identity for Fast sessions', async () => {
+  it('uses a stable personal chat identity for sessions', async () => {
     findFirstMock.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
     teamsUserMappingFindFirstMock.mockResolvedValueOnce({
       userId: 'mapped-user-1',
@@ -2547,7 +2547,7 @@ describe('Teams webhook handler', () => {
     );
   });
 
-  it('resumes a completed Teams task before starting a new Fast session', async () => {
+  it('resumes a completed Teams task before starting a new session', async () => {
     findFirstMock.mockResolvedValueOnce(null).mockResolvedValueOnce({
       id: 77,
       userId: 'user-1',

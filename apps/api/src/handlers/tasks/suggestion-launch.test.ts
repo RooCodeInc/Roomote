@@ -126,7 +126,7 @@ describe('resolveSuggestionFastConversation', () => {
         originSessionId: 'origin',
         conversation,
       }),
-    ).rejects.toThrow('The suggestion origin Session is no longer available.');
+    ).rejects.toThrow('The suggestion origin session is no longer available.');
     expect(mocks.getOrCreateSession).not.toHaveBeenCalled();
   });
 });
@@ -346,7 +346,7 @@ describe('resolveSuggestionOriginSessionId', () => {
     mocks.findSession.mockResolvedValue(null);
     await expect(
       resolveSuggestionOriginSessionId(null, 'deleted-session'),
-    ).rejects.toThrow('origin Session is no longer available');
+    ).rejects.toThrow('origin session is no longer available');
   });
 
   it('returns the Session that owns the source task', async () => {

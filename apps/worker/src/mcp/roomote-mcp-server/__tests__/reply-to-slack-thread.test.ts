@@ -105,7 +105,30 @@ describe('handleReplyToSlackThread', () => {
       expect.objectContaining({
         content: 'Final report',
         dedupeKey: expect.stringMatching(/^task:task-1:/),
+        resultKind: 'outcome',
       }),
+    );
+  });
+
+  it('records a concrete automation clarification as an input request', async () => {
+    vi.mocked(replyToChatThread).mockResolvedValue({ messageTs: '111.222' });
+    vi.mocked(recordAutomationResult).mockResolvedValue({ recorded: true });
+
+    await handleSendChatReply(
+      {
+        taskId: 'task-1',
+        summary: 'Which repository should this scan cover?',
+        purpose: 'clarification',
+        recordAutomationOutput: true,
+      },
+      artifactConfig,
+      roomoteConfig,
+    );
+
+    expect(recordAutomationResult).toHaveBeenCalledWith(
+      roomoteConfig,
+      'task-1',
+      expect.objectContaining({ resultKind: 'input_request' }),
     );
   });
 

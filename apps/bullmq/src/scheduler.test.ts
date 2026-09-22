@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   threadFooterRefreshJob: vi.fn(),
   notifyWebTaskInitiatorOnSettle: vi.fn(),
   processSessionAttentionNotificationJob: vi.fn(),
+  processSessionTitleRefreshJob: vi.fn(),
 }));
 
 vi.mock('bullmq', () => ({
@@ -53,6 +54,10 @@ vi.mock('@roomote/sdk/server', () => ({
   notifyWebTaskInitiatorOnSettle: mocks.notifyWebTaskInitiatorOnSettle,
   processSessionAttentionNotificationJob:
     mocks.processSessionAttentionNotificationJob,
+}));
+
+vi.mock('@roomote/cloud-agents/server', () => ({
+  processSessionTitleRefreshJob: mocks.processSessionTitleRefreshJob,
 }));
 
 vi.mock('./redis', () => ({ getRedis: () => ({}) }));
@@ -135,6 +140,25 @@ describe('startScheduler', () => {
     expect(mocks.processSessionAttentionNotificationJob).toHaveBeenCalledWith(
       data,
     );
+  });
+
+  it('dispatches durable session title refresh retries', async () => {
+    mocks.processSessionTitleRefreshJob.mockResolvedValue(undefined);
+    await startScheduler();
+    const handler = mocks.workerConstructor.mock.calls[0]![1] as (job: {
+      name: string;
+      data: unknown;
+    }) => Promise<void>;
+    const data = {
+      kind: 'fast',
+      fastConversationId: 'fast-1',
+      userId: 'user-1',
+      checkpoint: 1,
+    };
+
+    await handler({ name: ScheduledJobName.SessionTitleRefresh, data });
+
+    expect(mocks.processSessionTitleRefreshJob).toHaveBeenCalledWith(data);
   });
   beforeEach(() => {
     vi.clearAllMocks();

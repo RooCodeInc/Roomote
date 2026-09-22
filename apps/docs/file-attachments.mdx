@@ -47,10 +47,16 @@ transport limits vary by surface.
 | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | Pure text       | `.txt`, `.md`, `.markdown`                                                                                                                    |
 | Structured text | `.json`, `.yaml`, `.yml`, `.xml`, `.log`, `.conf`, `.config`, `.ini`, `.env`, `.sh`, `.bash`, `.zsh`, `.toml`, `.properties`                  |
-| Code            | `.html`, `.htm`, `.css`, `.js`, `.jsx`, `.ts`, `.tsx`, `.py`, `.rb`, `.go`, `.rs`, `.java`, `.c`, `.h`, `.cpp`, `.cc`, `.cxx`, `.hpp`, `.sql` |
+| Code            | `.html`, `.htm`, `.css`, `.js`, `.jsx`, `.ts`, `.tsx`, `.py`, `.r`, `.ipynb`, `.rb`, `.go`, `.rs`, `.java`, `.c`, `.h`, `.cpp`, `.cc`, `.cxx`, `.hpp`, `.sql` |
 | Spreadsheets    | `.csv`, `.tsv`, `.xlsx`, `.xls`                                                                                                               |
 | Documents       | `.pdf`, `.docx`                                                                                                                               |
 | Presentations   | `.pptx`                                                                                                                                       |
+
+An attached `.r` script can also drive an environment recipe: Roomote detects
+the direct packages it uses and proposes an `r-bioconductor` environment, then
+resolves those packages from the official CRAN and Bioconductor repositories.
+See the [environment lifecycle](/environments#environment-lifecycle).
+
 | Images          | `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`                                                                                              |
 
 ## How Roomote uses them
@@ -78,17 +84,17 @@ That means you can ask things like:
 
 Artifact creation results can include two links:
 
-- `viewUrl` opens the artifact in its owning task or Session, where you can
+- `viewUrl` opens the artifact in its owning task or session, where you can
   continue to use the surrounding workspace context.
 - `standaloneViewUrl` opens the document, image, or file on its own page. Use it
   when someone needs a direct link to the artifact without navigating through
-  the parent task or Session.
+  the parent task or session.
 
 Both links remain inside Roomote's authenticated access boundary. The recipient
 must be signed in to the deployment and already have permission to view the
-owning task or Session; a link does not make the artifact public or grant new
+owning task or session; a link does not make the artifact public or grant new
 access. The standalone page also supports available artifact versions and a
-link back to the owning task or Session when that context is useful.
+link back to the owning task or session when that context is useful.
 
 ## Videos from Roomote
 
@@ -99,7 +105,7 @@ preference does not convert arbitrary uploads or replace existing artifacts.
 
 Task recordings remain available as uploaded artifacts. In Slack, you can ask
 Roomote to share a selected recording as a native video file, including one from
-an earlier task in the current Session. This requires the Slack app's
+an earlier task in the current session. This requires the Slack app's
 `files:write` permission; existing installations need reinstall or workspace
 admin reapproval after the scope is added. See
 [Slack video replies](/providers/communications/slack#video-replies)

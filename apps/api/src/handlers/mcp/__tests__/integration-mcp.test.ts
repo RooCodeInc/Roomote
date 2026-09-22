@@ -11,13 +11,20 @@ const {
   mockGetValidAccessToken,
   mockDecrypt,
   mockGetTaskHumanOwnerUserIds,
+  mockResolveApprovalBlocks,
 } = vi.hoisted(() => ({
+  mockResolveApprovalBlocks: vi.fn(async () => new Map<string, string>()),
   mockFindTaskRun: vi.fn(),
   mockFindConnection: vi.fn(),
   mockFindEnablement: vi.fn(),
   mockGetValidAccessToken: vi.fn(),
   mockDecrypt: vi.fn(),
   mockGetTaskHumanOwnerUserIds: vi.fn(),
+}));
+
+vi.mock('../tool-approval-enforcement', () => ({
+  describeProxyToolApprovalBlock: () => '',
+  resolveProxyToolApprovalBlocks: mockResolveApprovalBlocks,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -171,6 +178,25 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
     );
 
     expect(response.status).toBe(200);
+  });
+
+  it('enforces approval policies under the integration id, across both policy layers', async () => {
+    mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
+    mockFindConnection.mockResolvedValue({ id: 'conn-1', userId: null });
+    stubUpstreamFetch();
+
+    await postMcp(
+      createApp('supermemory', createRunToken()),
+      createInitializeRequest(1),
+    );
+
+    expect(mockResolveApprovalBlocks).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        integrationId: 'supermemory',
+        policyScope: undefined,
+        tokenType: 'run',
+      }),
+    );
   });
 
   it('serves a deployment-scoped integration on a run with a human actor', async () => {

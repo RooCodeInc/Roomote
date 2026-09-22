@@ -356,7 +356,7 @@ async function handleSuggestionLaunchCallback(params: {
             userInitiated: { surface: 'telegram', trigger: 'message' },
           });
           // Resolve on admission, not on turn completion: the claim is
-          // finalized as soon as the Fast session accepts the follow-up, and
+          // finalized as soon as the session accepts the follow-up, and
           // the abort handle lets a lost finalize cancel the orphaned turn.
           const fastStart = await startAcceptedFastAgentTurn({
             run: ({ onAccepted, onRejected }) =>

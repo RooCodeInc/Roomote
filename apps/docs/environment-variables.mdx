@@ -392,6 +392,9 @@ manifest changes.
 | `R_VOICE_OPENAI_API_KEY`       | Optional          | OpenAI key dedicated to GPT-Live voice conversations. Requires project access to `gpt-live-1`; the general `OPENAI_API_KEY` is not used for Voice. The key stays on the control plane; browsers receive only a server-negotiated WebRTC session answer. |
 | `R_TYPESAFE_API_KEY`           | Optional          | TypeSafe key for the optional [judgment model](/models#judgment-model). A key alone turns on Jev via TypeSafe unless `R_JUDGMENT_MODEL` or Settings chooses otherwise. The key stays on the control plane. |
 | `R_JUDGMENT_MODEL`             | Optional          | Selects the [judgment model](/models#judgment-model): `typesafe`, `openrouter` (using `OPENROUTER_API_KEY`), `vercel` (using `AI_GATEWAY_API_KEY`), or `off`. Overrides the choice in **Settings > Models**. |
+| `R_JUDGMENT_UPSTREAM_URL`      | Optional          | Base URL of a Roomote-run judgment model that answers the same typed decisions request as Jev at `/v1/decisions`. It is evaluation-only: nothing acts on its answers, and it is called only when `R_JUDGMENT_SHADOW` is `on`. |
+| `R_JUDGMENT_UPSTREAM_API_KEY`  | Optional          | Bearer credential for `R_JUDGMENT_UPSTREAM_URL`. Leave unset for a private-network upstream without auth. The credential stays on the control plane. |
+| `R_JUDGMENT_SHADOW`            | Optional          | `on` also scores every Jev [judgment](/models#judgment-model) with the upstream at `R_JUDGMENT_UPSTREAM_URL` and logs how the two agree (question keys and probabilities only), without changing the answer Roomote acts on. |
 
 During Microsoft Teams setup, Roomote uses the Microsoft Entra app values for
 the Teams bot by default. Use **Show advanced config** after the Directory
@@ -406,7 +409,7 @@ app ID, or when you need to set the optional bot name or token overrides.
 | `R_LINEAR_CLIENT_SECRET`  | Linear   | Linear OAuth client secret.   |
 | `R_LINEAR_WEBHOOK_SECRET` | Linear   | Linear webhook secret.        |
 | `R_LINEAR_REDIRECT_URI`   | Optional | Linear redirect URI override. |
-| `R_NOTION_CLIENT_ID`      | Optional | Notion public-connection OAuth client ID. Set with `R_NOTION_CLIENT_SECRET` to allow Session-initiated Notion authorization. |
+| `R_NOTION_CLIENT_ID`      | Optional | Notion public-connection OAuth client ID. Set with `R_NOTION_CLIENT_SECRET` to allow session-initiated Notion authorization. |
 | `R_NOTION_CLIENT_SECRET`  | Optional | Notion public-connection OAuth client secret. Register `<public Roomote URL>/api/mcp-oauth/callback` in Notion. |
 
 ### Declarative environments
