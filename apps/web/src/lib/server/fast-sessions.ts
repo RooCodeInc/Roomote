@@ -640,7 +640,7 @@ function parseFastSessionQueuedMessage(row: {
   };
 }
 
-export async function getFastSessionQueuedMessages(
+async function getFastSessionQueuedMessages(
   sessionId: string,
 ): Promise<FastSessionQueuedMessage[]> {
   const rows = await db
