@@ -56,6 +56,7 @@ vi.mock('@roomote/db/server', () => ({
 import type { TaskRun } from '@roomote/db/server';
 
 import {
+  GitHubInstallationSpanError,
   createTaskRunGitHubToken,
   createTaskRunWorkerGitHubTokenWithMetadata,
   withTaskRunGitHubTokenRetry,
@@ -289,6 +290,9 @@ describe('createTaskRunGitHubToken', () => {
   });
 
   it('mints the environment installation when extra stamped GitHub repositories span installations', async () => {
+    const consoleWarnSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
     mockFindEnvironmentFirst.mockResolvedValue({
       id: 'environment-id',
       config: buildEnvironmentConfig(['Roomote/example-app']),
@@ -332,6 +336,10 @@ describe('createTaskRunGitHubToken', () => {
       undefined,
       undefined,
     );
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Not reachable with this token: Other/app'),
+    );
+    consoleWarnSpy.mockRestore();
   });
 
   it('fails closed when a GitLab environment stamp spans GitHub installations', async () => {
@@ -375,9 +383,7 @@ describe('createTaskRunGitHubToken', () => {
           },
         } as TaskRun['payload']),
       ),
-    ).rejects.toThrow(
-      'Stamped repositories for task run 123 span multiple GitHub installations',
-    );
+    ).rejects.toThrow(GitHubInstallationSpanError);
     expect(mockCreateGitHubTokenWithMetadata).not.toHaveBeenCalled();
   });
 

@@ -17,7 +17,9 @@ const {
   mockEnqueueWebTaskInitiatorSettleNotification,
   mockCaptureTaskSettled,
   mockIsTypeSafeJudgmentConfigured,
+  MockGitHubInstallationSpanError,
 } = vi.hoisted(() => ({
+  MockGitHubInstallationSpanError: class MockGitHubInstallationSpanError extends Error {},
   mockDecryptSecrets: vi.fn(),
   mockEnvironmentVariablesFindMany: vi.fn(),
   mockCreateTaskRunWorkerGitHubTokenWithMetadata: vi.fn(),
@@ -66,8 +68,8 @@ vi.mock('@roomote/db/server', () => ({
   // fall through to the GitHub default. Provider-stamped payloads never reach
   // it. Individual tests override with mockResolvedValueOnce when needed.
   resolveWorkspaceSourceControlProvider: vi.fn(async () => undefined),
-  // Empty initial workspace: every stamped provider stays required so existing
-  // mixed-provider failures keep failing the run.
+  // Unresolvable initial workspace: every stamped provider stays required so
+  // existing mixed-provider failures keep failing the run.
   resolveWorkspaceRepositoryProviders: vi.fn(async () => ({})),
   workspaceRequiresSourceControlCredentials: vi.fn(
     async (_dbOrTx: unknown, workspace: { type: string }) =>
@@ -88,6 +90,8 @@ vi.mock('@roomote/github', () => ({
     mockCreateTaskRunWorkerGitHubTokenWithMetadata(...args),
   getGitHubRateLimitRetryAfterMs: (...args: unknown[]) =>
     mockGetGitHubRateLimitRetryAfterMs(...args),
+  isGitHubInstallationSpanError: (error: unknown) =>
+    error instanceof MockGitHubInstallationSpanError,
 }));
 
 vi.mock('@roomote/gitlab', () => ({
@@ -700,7 +704,7 @@ describe('createSourceControlTokenForTaskRun', () => {
 
   it('still mints GitLab when extra stamped GitHub repositories span installations', async () => {
     mockCreateTaskRunWorkerGitHubTokenWithMetadata.mockRejectedValue(
-      new Error(
+      new MockGitHubInstallationSpanError(
         'Stamped repositories for task run 123 span multiple GitHub installations: owner-a/api, owner-b/web',
       ),
     );
@@ -773,11 +777,194 @@ describe('createSourceControlTokenForTaskRun', () => {
     });
     expect(mockCreateTaskRunWorkerGitHubTokenWithMetadata).toHaveBeenCalled();
     expect(mockCreateTaskRunScopedGitLabTokens).toHaveBeenCalled();
+    // The initial-workspace lookup is only needed to classify a failure.
+    expect(resolveWorkspaceRepositoryProviders).not.toHaveBeenCalled();
+  });
+
+  it('does not skip an optional provider that fails transiently, so a refresh never drops live credentials', async () => {
+    mockCreateTaskRunWorkerGitHubTokenWithMetadata.mockRejectedValue(
+      new Error('GitHub token endpoint returned 502'),
+    );
+    vi.mocked(resolveWorkspaceRepositoryProviders).mockResolvedValue({
+      'group/gitlab-app': 'gitlab',
+    });
+    const consoleWarnSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+
+    try {
+      const result = await createSourceControlTokenForTaskRun(
+        makeTaskRun({
+          repo: '__all_repositories__',
+          environmentId: 'gitlab-environment',
+          sourceControlProvider: 'gitlab',
+          repositoryProviders: {
+            'group/gitlab-app': 'gitlab',
+            'owner-a/api': 'github',
+          },
+          description: 'QA a GitLab merge request',
+        } as TaskRun['payload']),
+        '[refreshGitHubTokenWithMetadata]',
+        { maxRetries: 2, baseDelayMs: 0 },
+      );
+
+      expect(result).toBeNull();
+      expect(
+        mockCreateTaskRunWorkerGitHubTokenWithMetadata,
+      ).toHaveBeenCalledTimes(2);
+      expect(mockCreateTaskRunScopedGitLabTokens).not.toHaveBeenCalled();
+    } finally {
+      consoleWarnSpy.mockRestore();
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it('starts a Blank slate with the providers it can mint when the GitHub stamp spans installations', async () => {
+    mockCreateTaskRunWorkerGitHubTokenWithMetadata.mockRejectedValue(
+      new MockGitHubInstallationSpanError(
+        'Stamped repositories for task run 123 span multiple GitHub installations: owner-a/api, owner-b/web',
+      ),
+    );
+    const consoleWarnSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+
+    try {
+      const result = await createSourceControlTokenForTaskRun(
+        makeTaskRun({
+          repo: NO_REPOSITORIES,
+          repositoryProviders: {
+            'owner-a/api': 'github',
+            'owner-b/web': 'github',
+            'group/gitlab-app': 'gitlab',
+          },
+          description: 'Blank slate with on-demand checkouts',
+        } as TaskRun['payload']),
+        '[test]',
+        { maxRetries: 3, baseDelayMs: 0 },
+      );
+
+      expect(result).toMatchObject({
+        provider: 'gitlab',
+        token: 'glptt_scoped_token',
+      });
+      expect(result?.envVars.GH_TOKEN).toBeUndefined();
+      expect(
+        mockCreateTaskRunWorkerGitHubTokenWithMetadata,
+      ).toHaveBeenCalledTimes(1);
+      expect(resolveWorkspaceRepositoryProviders).not.toHaveBeenCalled();
+    } finally {
+      consoleWarnSpy.mockRestore();
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it('starts a GitHub-only Blank slate without credentials when its stamp spans installations', async () => {
+    mockCreateTaskRunWorkerGitHubTokenWithMetadata.mockRejectedValue(
+      new MockGitHubInstallationSpanError(
+        'Stamped repositories for task run 123 span multiple GitHub installations: owner-a/api, owner-b/web',
+      ),
+    );
+    const consoleWarnSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+
+    try {
+      const result = await createSourceControlTokenForTaskRun(
+        makeTaskRun({
+          repo: NO_REPOSITORIES,
+          repositoryProviders: {
+            'owner-a/api': 'github',
+            'owner-b/web': 'github',
+          },
+          description: 'Blank slate with on-demand checkouts',
+        } as TaskRun['payload']),
+        '[test]',
+        { maxRetries: 3, baseDelayMs: 0 },
+      );
+
+      expect(result).toEqual({
+        provider: 'github',
+        token: '',
+        envVar: 'GH_TOKEN',
+        envVars: {},
+        source: 'app',
+        expiresAt: null,
+      });
+      expect(
+        mockCreateTaskRunWorkerGitHubTokenWithMetadata,
+      ).toHaveBeenCalledTimes(1);
+    } finally {
+      consoleWarnSpy.mockRestore();
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it('keeps a required provider as the merged token identity when the stamped primary is skipped', async () => {
+    mockCreateTaskRunWorkerGitHubTokenWithMetadata.mockRejectedValue(
+      new MockGitHubInstallationSpanError(
+        'Stamped repositories for task run 123 span multiple GitHub installations: owner-a/api, owner-b/web',
+      ),
+    );
+    vi.mocked(resolveWorkspaceRepositoryProviders).mockResolvedValue({
+      'group/gitlab-app': 'gitlab',
+    });
+    const consoleWarnSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+
+    try {
+      // No sourceControlProvider stamp: the first repositoryProviders entry
+      // becomes the primary. It is an optional extra that gets skipped, and
+      // the next optional extra (Gitea) mints before the required GitLab.
+      const result = await createSourceControlTokenForTaskRun(
+        makeTaskRun({
+          repo: '__all_repositories__',
+          environmentId: 'gitlab-environment',
+          repositoryProviders: {
+            'owner-a/api': 'github',
+            'owner-b/web': 'github',
+            'gitea/tools': 'gitea',
+            'group/gitlab-app': 'gitlab',
+          },
+          description: 'Legacy stamp without a primary provider',
+        } as TaskRun['payload']),
+        '[test]',
+        { maxRetries: 1 },
+      );
+
+      expect(result).toMatchObject({
+        provider: 'gitlab',
+        token: 'glptt_scoped_token',
+        envVar: 'GITLAB_TOKEN',
+      });
+      expect(result?.envVars.GH_TOKEN).toBeUndefined();
+      expect(result?.gitProxyCredentials).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ provider: 'gitea' }),
+        ]),
+      );
+    } finally {
+      consoleWarnSpy.mockRestore();
+      consoleErrorSpy.mockRestore();
+    }
   });
 
   it('still fails the run when required GitHub minting spans installations', async () => {
     mockCreateTaskRunWorkerGitHubTokenWithMetadata.mockRejectedValue(
-      new Error(
+      new MockGitHubInstallationSpanError(
         'Stamped repositories for task run 123 span multiple GitHub installations: owner-a/api, owner-b/web',
       ),
     );

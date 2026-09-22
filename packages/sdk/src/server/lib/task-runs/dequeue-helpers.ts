@@ -41,6 +41,7 @@ import { decryptSecrets } from '@roomote/db/encryption';
 import {
   createTaskRunWorkerGitHubTokenWithMetadata,
   getGitHubRateLimitRetryAfterMs,
+  isGitHubInstallationSpanError,
 } from '@roomote/github';
 import { createTaskRunScopedGitLabTokens } from '@roomote/gitlab';
 import { createTaskRunBitbucketCredentials } from '@roomote/bitbucket';
@@ -562,24 +563,27 @@ export async function resolveTaskRunSourceControlProviders(
 /**
  * Providers the initial workspace must have credentials for. Launch stamps
  * every active deployment repository so extra checkouts can resolve provider
- * identity later; those extra providers are optional at dequeue.
+ * identity later; those extra providers are optional at dequeue. A Blank slate
+ * checks out nothing up front, so it requires no provider at all. When the
+ * initial workspace cannot be resolved, every stamped provider stays required.
  */
 async function resolveRequiredProvidersForMint(
   taskRun: Pick<TaskRun, 'id' | 'payload'>,
   providers: SourceControlProvider[],
 ): Promise<Set<SourceControlProvider>> {
+  const workspace = resolveTaskWorkspace(taskRun.payload);
+
+  if (workspace.type === 'no_repositories') {
+    return new Set();
+  }
+
   if (providers.length <= 1) {
     return new Set(providers);
   }
 
-  const workspace = resolveTaskWorkspace(taskRun.payload);
-  const initialScopeWorkspace =
-    workspace.type === 'no_repositories'
-      ? ({ type: 'all_repositories' } as const)
-      : workspace;
   const initialRepositoryProviders = await resolveWorkspaceRepositoryProviders(
     db,
-    initialScopeWorkspace,
+    workspace,
   );
   const initialProviders = new Set(
     Object.values(initialRepositoryProviders).map(
@@ -590,9 +594,27 @@ async function resolveRequiredProvidersForMint(
   return initialProviders.size > 0 ? initialProviders : new Set(providers);
 }
 
-function isNonRetryableSourceControlTokenError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.includes('span multiple GitHub installations');
+/**
+ * Only deployment-configuration failures may leave a provider out of a run's
+ * credentials. Transient failures still fail the mint, so a refresh never
+ * strips credentials the sandbox already holds.
+ */
+function isSourceControlTokenConfigurationError(error: unknown): boolean {
+  return isGitHubInstallationSpanError(error);
+}
+
+type ProviderTokenAttempt =
+  | { status: 'minted'; token: SourceControlRuntimeToken }
+  | { status: 'unsupported' }
+  | { status: 'failed' };
+
+function buildEmptySourceControlToken(): SourceControlRuntimeToken {
+  return {
+    ...buildSourceControlTokenMetadata(DEFAULT_SOURCE_CONTROL_PROVIDER, ''),
+    envVars: {},
+    source: 'app',
+    expiresAt: null,
+  };
 }
 
 async function createProviderToken(
@@ -729,20 +751,23 @@ async function createProviderTokenWithRetry(
   logPrefix: string,
   maxRetries: number,
   baseDelayMs: number,
-): Promise<SourceControlRuntimeToken | null> {
+): Promise<ProviderTokenAttempt> {
   const label = getSourceControlProviderLabel(provider);
   let githubInlineRateLimitRetries = 0;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      return await createProviderToken(taskRun, provider);
+      return {
+        status: 'minted',
+        token: await createProviderToken(taskRun, provider),
+      };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (isNonRetryableSourceControlTokenError(error)) {
+      if (isSourceControlTokenConfigurationError(error)) {
         console.error(
           `${logPrefix} Failed to create ${label} token for task run ${taskRun.id}: ${message}`,
         );
-        return null;
+        return { status: 'unsupported' };
       }
 
       const githubRetryAfterMs =
@@ -777,7 +802,7 @@ async function createProviderTokenWithRetry(
         // A dequeue cannot safely hold a run claim for a provider-directed
         // delay that may last minutes. Stop immediately instead of converting
         // one rate-limited POST into two more premature retries.
-        return null;
+        return { status: 'failed' };
       }
 
       if (attempt < maxRetries) {
@@ -794,7 +819,7 @@ async function createProviderTokenWithRetry(
     }
   }
 
-  return null;
+  return { status: 'failed' };
 }
 
 /**
@@ -814,18 +839,18 @@ export async function createSourceControlTokenForTaskRun(
   const providers = await resolveTaskRunSourceControlProviders(taskRun);
 
   if (providers.length === 0) {
-    return {
-      ...buildSourceControlTokenMetadata(DEFAULT_SOURCE_CONTROL_PROVIDER, ''),
-      envVars: {},
-      source: 'app',
-      expiresAt: null,
-    };
+    return buildEmptySourceControlToken();
   }
 
-  const requiredProviders = await resolveRequiredProvidersForMint(
-    taskRun,
-    providers,
-  );
+  // Resolved only once a provider is unsupported by configuration, so the
+  // happy path (every dequeue, resume, and hourly refresh) pays no extra
+  // workspace lookup.
+  let requiredProviders: Set<SourceControlProvider> | undefined;
+  const resolveRequiredProviders = async () =>
+    (requiredProviders ??= await resolveRequiredProvidersForMint(
+      taskRun,
+      providers,
+    ));
 
   // GitLab scoped tokens create revocable remote resources. Mint them last so
   // a later provider failure cannot orphan a successful GitLab token set.
@@ -839,7 +864,7 @@ export async function createSourceControlTokenForTaskRun(
   >();
 
   for (const provider of mintOrder) {
-    const token = await createProviderTokenWithRetry(
+    const attempt = await createProviderTokenWithRetry(
       taskRun,
       provider,
       logPrefix,
@@ -847,8 +872,12 @@ export async function createSourceControlTokenForTaskRun(
       baseDelayMs,
     );
 
-    if (!token) {
-      if (requiredProviders.has(provider)) {
+    if (attempt.status === 'failed') {
+      return null;
+    }
+
+    if (attempt.status === 'unsupported') {
+      if ((await resolveRequiredProviders()).has(provider)) {
         return null;
       }
 
@@ -858,16 +887,31 @@ export async function createSourceControlTokenForTaskRun(
       continue;
     }
 
-    tokensByProvider.set(provider, token);
+    tokensByProvider.set(provider, attempt.token);
   }
 
-  const mintedProviders = providers.filter((provider) =>
-    tokensByProvider.has(provider),
-  );
+  const minted = providers.filter((provider) => tokensByProvider.has(provider));
 
-  if (mintedProviders.length === 0) {
-    return null;
+  if (minted.length === 0) {
+    // Nothing was required (a Blank slate) and every stamped provider was
+    // unsupported by configuration: the run can still start without
+    // credentials, exactly as an unstamped Blank slate does.
+    return requiredProviders?.size === 0
+      ? buildEmptySourceControlToken()
+      : null;
   }
+
+  // The merged token's identity (provider, token, envVar) comes from the first
+  // entry. Keep a provider the initial workspace requires in front so skipping
+  // an optional stamped primary cannot hand a secondary provider that role.
+  const required = requiredProviders;
+  const mintedProviders =
+    required === undefined
+      ? minted
+      : [
+          ...minted.filter((provider) => required.has(provider)),
+          ...minted.filter((provider) => !required.has(provider)),
+        ];
 
   return mergeProviderTokens(
     mintedProviders.map((provider) => tokensByProvider.get(provider)!),
