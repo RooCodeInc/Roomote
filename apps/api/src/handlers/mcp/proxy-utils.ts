@@ -20,6 +20,10 @@ import type { Variables } from '../../types';
 import { fetchWithLongLivedStreamDispatcher } from '../long-lived-fetch';
 import { createLoggedProxyResponseBody } from '../proxy-response-stream';
 import {
+  classifyProxyFailure,
+  getProxyFailureErrorFields,
+} from '../proxy-failure';
+import {
   claimProxyTaskToolCall,
   describeProxyToolApprovalBlock,
   resolveProxyToolApprovalBlock,
@@ -30,7 +34,7 @@ import {
 
 type JsonRpcRequestId = string | number | null;
 
-function jsonRpcErrorResponse(
+export function jsonRpcErrorResponse(
   status: number,
   code: number,
   message: string,
@@ -49,7 +53,7 @@ function jsonRpcErrorResponse(
   );
 }
 
-function getJsonRpcRequestId(body: unknown): JsonRpcRequestId {
+export function getJsonRpcRequestId(body: unknown): JsonRpcRequestId {
   if (!body || typeof body !== 'object' || !('id' in body)) {
     return null;
   }
@@ -215,7 +219,7 @@ export async function resolveTaskOrSessionUserIdOrNull(
 }
 
 /** The task a run token was minted for; null for any other caller. */
-async function resolveRunTokenTaskId(
+export async function resolveRunTokenTaskId(
   auth: McpAuthContext,
 ): Promise<string | null> {
   if (auth.tokenType !== 'run' || !auth.runId) return null;
@@ -399,6 +403,7 @@ interface McpProxyConfig {
     auth: McpAuthContext,
     routeParams: Record<string, string>,
     request: unknown,
+    signal?: AbortSignal,
   ) => Promise<ResolvedCredentials>;
   allowAuthTokens?: boolean;
   validateTaskRunToken?: (auth: RunTokenContext) => Promise<Response | null>;
@@ -484,7 +489,7 @@ type JsonRpcRequestLike = {
   params?: unknown;
 };
 
-function getJsonRpcMethod(request: unknown): string | null {
+export function getJsonRpcMethod(request: unknown): string | null {
   if (!request || typeof request !== 'object' || !('method' in request)) {
     return null;
   }
@@ -493,7 +498,7 @@ function getJsonRpcMethod(request: unknown): string | null {
   return typeof method === 'string' ? method : null;
 }
 
-function getToolCallName(request: unknown): string | null {
+export function getToolCallName(request: unknown): string | null {
   if (
     !request ||
     typeof request !== 'object' ||
@@ -509,13 +514,6 @@ function getToolCallName(request: unknown): string | null {
 
   const name = (params as { name?: unknown }).name;
   return typeof name === 'string' ? name : null;
-}
-
-function isExpectedProxyDisconnect(error: unknown): error is DOMException {
-  return (
-    error instanceof DOMException &&
-    (error.name === 'TimeoutError' || error.name === 'AbortError')
-  );
 }
 
 /**
@@ -1004,7 +1002,12 @@ export function createMcpProxy(config: McpProxyConfig) {
     let credentials: ResolvedCredentials;
 
     try {
-      credentials = await resolveCredentials(auth, c.req.param(), parsedBody);
+      credentials = await resolveCredentials(
+        auth,
+        c.req.param(),
+        parsedBody,
+        c.req.raw.signal,
+      );
     } catch (error) {
       console.warn(
         formatSingleLineLog(`${logPrefix} Failed to resolve credentials`, {
@@ -1091,6 +1094,8 @@ export function createMcpProxy(config: McpProxyConfig) {
       );
     }
 
+    let proxySignal: AbortSignal | undefined = c.req.raw.signal;
+
     try {
       const resolvedAllowedToolNames =
         credentials.allowedToolNames === undefined
@@ -1164,8 +1169,9 @@ export function createMcpProxy(config: McpProxyConfig) {
 
       const gatedToolName =
         method === 'POST' ? getToolCallName(parsedBody) : null;
-      const callArguments = (parsedBody as { params?: { arguments?: unknown } })
-        .params?.arguments;
+      const callArguments = (
+        parsedBody as { params?: { arguments?: unknown } } | undefined
+      )?.params?.arguments;
       if (gatedToolName && credentials.toolApprovalIntegrationId) {
         shadowProxyToolCall(toolApprovals, {
           integrationId: credentials.toolApprovalIntegrationId,
@@ -1237,6 +1243,7 @@ export function createMcpProxy(config: McpProxyConfig) {
                 AbortSignal.timeout(timeoutMs),
                 ...(c.req.raw.signal ? [c.req.raw.signal] : []),
               ]);
+      proxySignal = signal;
 
       const upstreamRequestInit = {
         method,
@@ -1353,8 +1360,17 @@ export function createMcpProxy(config: McpProxyConfig) {
       }
 
       if (!upstreamResponse.ok) {
-        console.warn(
-          formatSingleLineLog(`${logPrefix} Upstream returned non-OK status`, {
+        const protocolNegotiation =
+          method === 'GET' && upstreamResponse.status === 405;
+        const retryable =
+          upstreamResponse.status === 408 ||
+          upstreamResponse.status === 429 ||
+          upstreamResponse.status >= 500;
+        const message = formatSingleLineLog(
+          protocolNegotiation
+            ? `${logPrefix} MCP protocol negotiation response`
+            : `${logPrefix} Upstream returned non-OK status`,
+          {
             requestId,
             method,
             path,
@@ -1363,8 +1379,17 @@ export function createMcpProxy(config: McpProxyConfig) {
             statusText: upstreamResponse.statusText,
             contentType,
             elapsedMs,
-          }),
+            outcome: protocolNegotiation
+              ? 'protocol_negotiation'
+              : 'upstream_http_error',
+            retryable: protocolNegotiation ? false : retryable,
+          },
         );
+        if (protocolNegotiation) {
+          console.info(message);
+        } else {
+          console.warn(message);
+        }
       }
 
       if (
@@ -1510,6 +1535,7 @@ export function createMcpProxy(config: McpProxyConfig) {
             userId: auth.userId ?? undefined,
             elapsedMs: Date.now() - startedAt,
           }),
+          signal,
           trackingContext: {
             route: `mcp:${name}`,
             method,
@@ -1523,6 +1549,7 @@ export function createMcpProxy(config: McpProxyConfig) {
         },
       );
     } catch (error) {
+      const classification = classifyProxyFailure(error, proxySignal);
       const logDetails = {
         requestId,
         method,
@@ -1531,12 +1558,20 @@ export function createMcpProxy(config: McpProxyConfig) {
         tokenType: auth.tokenType,
         userId: auth.userId,
         elapsedMs: Date.now() - startedAt,
-        error: error instanceof Error ? error.message : String(error),
+        outcome: classification.outcome,
+        retryable: classification.retryable,
+        ...getProxyFailureErrorFields(error),
       };
-      if (isExpectedProxyDisconnect(error)) {
-        console.debug(`${logPrefix} Upstream fetch failed`, logDetails);
+      const message = formatSingleLineLog(
+        classification.expected
+          ? `${logPrefix} MCP request cancelled`
+          : `${logPrefix} Upstream fetch failed`,
+        logDetails,
+      );
+      if (classification.expected) {
+        console.debug(message);
       } else {
-        console.error(`${logPrefix} Upstream fetch failed`, logDetails);
+        console.error(message);
       }
       return jsonRpcErrorResponse(
         502,

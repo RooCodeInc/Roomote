@@ -36,7 +36,7 @@ describe('handleSendMessage', () => {
     expect(parsed.success).toBe(true);
     expect(parsed.message).toContain('task-1');
     expect(parsed.sent).toEqual({
-      direction: 'Codex → Roomote',
+      direction: 'Client → Roomote',
       target: { kind: 'task', id: 'task-1' },
       text: 'Please continue',
     });
@@ -71,7 +71,7 @@ describe('handleSendMessage', () => {
       runId: 77,
       taskId: 'task-1',
       sent: {
-        direction: 'Codex → Roomote',
+        direction: 'Client → Roomote',
         target: { kind: 'task', id: 'task-1' },
         text: 'Please continue',
       },

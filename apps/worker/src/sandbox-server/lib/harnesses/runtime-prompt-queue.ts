@@ -50,6 +50,7 @@ export class RuntimePromptQueue {
     userName?: string;
     userImageUrl?: string;
     clientMessageId?: string;
+    source?: string;
   }): string {
     // Hidden platform follow-ups reuse one clientMessageId per logical
     // notification (e.g. the PR re-review prompt for a run), so a newer
@@ -75,6 +76,7 @@ export class RuntimePromptQueue {
       userName: prompt.userName,
       userImageUrl: prompt.userImageUrl,
       clientMessageId: prompt.clientMessageId,
+      source: prompt.source,
       timestamp: Date.now(),
     };
 
@@ -247,6 +249,7 @@ export class RuntimePromptQueue {
       ...(message.clientMessageId
         ? { clientMessageId: message.clientMessageId }
         : {}),
+      ...(message.source ? { source: message.source } : {}),
       timestamp: message.timestamp,
     }));
     this.queuedMessageIdCounter = this.queuedMessages.reduce(

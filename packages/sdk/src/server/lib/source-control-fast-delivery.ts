@@ -112,6 +112,7 @@ export type SourceControlFastLaunchTarget = {
     url: string;
     title?: string | null;
     sha?: string | null;
+    terminal?: boolean;
   };
   issue?: {
     identifier: string;
@@ -122,7 +123,9 @@ export type SourceControlFastLaunchTarget = {
 
 /**
  * Delegated work from a discussion is a standard task on that repository:
- * on a pull request it checks out the head branch and is linked to the PR,
+ * on an open pull request it checks out the head branch; after the PR is
+ * terminal it starts from the base branch (or the repository default) and is
+ * linked to the PR,
  * on an issue it links the issue. The Session owns every reply into the
  * discussion; the child only reports to its orchestrator.
  */
@@ -149,13 +152,13 @@ export function createFastAgentSourceControlTaskLauncher(params: {
       };
     }
     const target = await loadTarget();
-    // A pull request child must check out the PR head; without a resolved
-    // branch it would edit the environment's default branch instead.
+    // A pull request child must check out the resolved PR branch; without one
+    // it would edit the environment's default branch instead.
     if (target.pullRequest && !target.branch) {
       return {
         success: false,
         error:
-          'The pull request head branch could not be resolved, so the task was not started.',
+          'The pull request branch could not be resolved, so the task was not started.',
       };
     }
     // Only providers whose issues can be linked as work items record one.
@@ -208,6 +211,9 @@ export function createFastAgentSourceControlTaskLauncher(params: {
           sourceControlHost: discussion.host,
           ...((branch ?? target.branch)
             ? { branch: branch ?? target.branch }
+            : {}),
+          ...(target.pullRequest?.terminal
+            ? { allowMissingBranchFallback: true }
             : {}),
           ...(linkedIssue ? { linkedWorkItems: [linkedIssue] } : {}),
           ...buildFastAgentChildTaskMetadata({
@@ -400,15 +406,25 @@ async function buildGitHubFastDelivery(
         .get({ owner, repo, pull_number: discussion.number })
         .then((response) => response.data)
         .catch(() => null);
+      const terminal = pullRequest?.state === 'closed';
+      const branch = pullRequest
+        ? resolveFastPullRequestBranch({
+            terminal,
+            headBranch: pullRequest.head?.ref,
+            baseBranch: pullRequest.base?.ref,
+            defaultBranch: repository.defaultBranch,
+          })
+        : undefined;
       return {
         repositoryId: repository.id,
-        ...(pullRequest?.head?.ref ? { branch: pullRequest.head.ref } : {}),
+        ...(branch ? { branch } : {}),
         pullRequest: {
           url:
             pullRequest?.html_url ??
             `https://${discussion.host}/${discussion.repositoryFullName}/pull/${discussion.number}`,
           title: pullRequest?.title ?? null,
           sha: pullRequest?.head?.sha ?? null,
+          ...(terminal ? { terminal: true } : {}),
         },
       };
     },
@@ -483,6 +499,17 @@ function pullRequestPageUrl(discussion: SourceControlFastDiscussion): string {
   }
 }
 
+function resolveFastPullRequestBranch(params: {
+  terminal: boolean;
+  headBranch?: string | null;
+  baseBranch?: string | null;
+  defaultBranch?: string | null;
+}): string | undefined {
+  return params.terminal
+    ? params.baseBranch || params.defaultBranch || undefined
+    : params.headBranch || undefined;
+}
+
 /** Public page of a discussion, derived from its identity when the provider's own URL is not at hand. */
 export const buildSourceControlDiscussionUrl = pullRequestPageUrl;
 
@@ -553,15 +580,24 @@ async function buildGitLabFastDelivery(
         projectId: discussion.repositoryFullName,
         mergeRequestIid: discussion.number,
       }).catch(() => null);
+      const terminal =
+        mergeRequest?.state === 'closed' || mergeRequest?.state === 'merged';
+      const branch = mergeRequest
+        ? resolveFastPullRequestBranch({
+            terminal,
+            headBranch: mergeRequest.source_branch,
+            baseBranch: mergeRequest.target_branch,
+            defaultBranch: repository.defaultBranch,
+          })
+        : undefined;
       return {
         repositoryId: repository.id,
-        ...(mergeRequest?.source_branch
-          ? { branch: mergeRequest.source_branch }
-          : {}),
+        ...(branch ? { branch } : {}),
         pullRequest: {
           url: mergeRequest?.web_url ?? pullRequestPageUrl(discussion),
           title: mergeRequest?.title ?? null,
           sha: mergeRequest?.sha ?? null,
+          ...(terminal ? { terminal: true } : {}),
         },
       };
     },
@@ -612,15 +648,25 @@ async function buildBitbucketFastDelivery(
         repositoryFullName: discussion.repositoryFullName,
         pullRequestNumber: discussion.number,
       }).catch(() => null);
+      const terminal = ['MERGED', 'DECLINED', 'SUPERSEDED'].includes(
+        pullRequest?.state?.toUpperCase() ?? '',
+      );
+      const branch = pullRequest
+        ? resolveFastPullRequestBranch({
+            terminal,
+            headBranch: pullRequest.source?.branch?.name,
+            baseBranch: pullRequest.destination?.branch?.name,
+            defaultBranch: repository.defaultBranch,
+          })
+        : undefined;
       return {
         repositoryId: repository.id,
-        ...(pullRequest?.source?.branch?.name
-          ? { branch: pullRequest.source.branch.name }
-          : {}),
+        ...(branch ? { branch } : {}),
         pullRequest: {
           url: pullRequest?.links?.html?.href ?? pullRequestPageUrl(discussion),
           title: pullRequest?.title ?? null,
           sha: pullRequest?.source?.commit?.hash ?? null,
+          ...(terminal ? { terminal: true } : {}),
         },
       };
     },
@@ -686,13 +732,25 @@ async function buildGiteaFastDelivery(
         repositoryFullName: discussion.repositoryFullName,
         pullRequestNumber: discussion.number,
       }).catch(() => null);
+      const terminal =
+        pullRequest?.merged === true ||
+        pullRequest?.state?.toLowerCase() === 'closed';
+      const branch = pullRequest
+        ? resolveFastPullRequestBranch({
+            terminal,
+            headBranch: pullRequest.head?.ref,
+            baseBranch: pullRequest.base?.ref,
+            defaultBranch: repository.defaultBranch,
+          })
+        : undefined;
       return {
         repositoryId: repository.id,
-        ...(pullRequest?.head?.ref ? { branch: pullRequest.head.ref } : {}),
+        ...(branch ? { branch } : {}),
         pullRequest: {
           url: pullRequest?.html_url ?? pullRequestPageUrl(discussion),
           title: pullRequest?.title ?? null,
           sha: pullRequest?.head?.sha ?? null,
+          ...(terminal ? { terminal: true } : {}),
         },
       };
     },
@@ -853,12 +911,24 @@ async function buildAdoFastDelivery(
           }).catch(() => null)
         : null;
       const details = pullRequest as {
+        status?: string;
         title?: string;
         sourceRefName?: string;
+        targetRefName?: string;
         lastMergeSourceCommit?: { commitId?: string };
         repository?: { webUrl?: string };
       } | null;
-      const branch = details?.sourceRefName?.replace(/^refs\/heads\//, '');
+      const terminal =
+        details?.status?.toLowerCase() === 'completed' ||
+        details?.status?.toLowerCase() === 'abandoned';
+      const branch = details
+        ? resolveFastPullRequestBranch({
+            terminal,
+            headBranch: details.sourceRefName?.replace(/^refs\/heads\//, ''),
+            baseBranch: details.targetRefName?.replace(/^refs\/heads\//, ''),
+            defaultBranch: repository.defaultBranch,
+          })
+        : undefined;
       return {
         repositoryId: repository.id,
         ...(branch ? { branch } : {}),
@@ -868,6 +938,7 @@ async function buildAdoFastDelivery(
             : `https://${discussion.host}/${parsed.organization}/${parsed.project}/_git/${parsed.repository}/pullrequest/${discussion.number}`,
           title: details?.title ?? null,
           sha: details?.lastMergeSourceCommit?.commitId ?? null,
+          ...(terminal ? { terminal: true } : {}),
         },
       };
     },

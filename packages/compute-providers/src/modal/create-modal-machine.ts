@@ -13,6 +13,7 @@ import type {
 } from '../types';
 import { loadLocalWorkerReleaseWithVersion } from '../sandbox/utils';
 import { getWorkerRelease } from '../sandbox/worker-release-cache';
+import { getWorkerReleaseCompatibilityVersion } from '../sandbox/worker-release-selection';
 import {
   BOOTSTRAP_RETRY_DELAY_MS,
   isTransientBootstrapError,
@@ -150,6 +151,23 @@ export async function createModalMachine(
     version = release.version;
   }
 
+  const applicationProductVersion = process.env.RELEASE_PRODUCT_VERSION?.trim();
+  const workerCompatibilityVersion =
+    getWorkerReleaseCompatibilityVersion(version);
+  const applicationCompatibilityVersion = getWorkerReleaseCompatibilityVersion(
+    applicationProductVersion,
+  );
+
+  if (
+    workerCompatibilityVersion &&
+    applicationCompatibilityVersion &&
+    workerCompatibilityVersion !== applicationCompatibilityVersion
+  ) {
+    throw new Error(
+      `Worker release ${version} is incompatible with application release ${applicationProductVersion}; expected product release family ${applicationCompatibilityVersion}`,
+    );
+  }
+
   const workerReleaseTag = version ? `worker-v${version}` : undefined;
 
   const proxyPorts = proxyPortsOverride ?? generateProxyPorts(namedPorts);
@@ -163,6 +181,8 @@ export async function createModalMachine(
     launchMode: launchMode as ComputeProviderLaunchMode,
     sourceSnapshotId: sourceSnapshotId ?? null,
     ports: effectivePorts ?? [],
+    workerReleaseVersion: version ?? null,
+    applicationProductVersion: applicationProductVersion ?? null,
   };
 
   console.log(
@@ -171,6 +191,8 @@ export async function createModalMachine(
       hasSourceSnapshot: !!sourceSnapshotId,
       launchMode,
       workerReleaseTag,
+      workerReleaseVersion: version,
+      applicationProductVersion: applicationProductVersion ?? '(unset)',
       effectivePorts,
       proxyPorts,
       modalEndpoint: modalEndpoint ?? '(default)',
@@ -448,6 +470,12 @@ export async function createModalMachine(
                 // sandbox files directory so the install script can reuse the
                 // same default path as Vercel sandbox.
                 WORKER_RELEASE_ARCHIVE_PATH: WORKER_TARBALL_PATH,
+                ...(applicationProductVersion
+                  ? {
+                      ROOMOTE_APPLICATION_PRODUCT_VERSION:
+                        applicationProductVersion,
+                    }
+                  : {}),
               },
             }
           : {}),

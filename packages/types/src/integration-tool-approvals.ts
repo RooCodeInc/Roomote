@@ -168,6 +168,15 @@ export type IntegrationToolPolicyUpsert = z.infer<
   typeof integrationToolPolicyUpsertSchema
 >;
 
+export const integrationToolPoliciesUpsertSchema = z.object({
+  integrationId: z.string().min(1).max(200),
+  toolNames: z.array(z.string().min(1).max(200)).min(1).max(500),
+  mode: integrationToolPolicyModeSchema,
+});
+export type IntegrationToolPoliciesUpsert = z.infer<
+  typeof integrationToolPoliciesUpsertSchema
+>;
+
 export const integrationToolSessionOverrideUpsertSchema = z.object({
   integrationId: z.string().min(1).max(200),
   toolName: z.string().min(1).max(200),

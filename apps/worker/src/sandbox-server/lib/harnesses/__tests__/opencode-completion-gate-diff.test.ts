@@ -4,11 +4,13 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
-  buildCompletionGateReminder,
   clipDiffByFile,
   collectShippedDiff,
+} from '../opencode-server/completion-gate-evidence';
+import {
+  classifyCompletionCheckTool,
   isCompletionGateEligible,
-} from '../opencode-server/completion-gate';
+} from '../opencode-server/completion-gate-runtime';
 
 const tempDirs: string[] = [];
 
@@ -285,18 +287,57 @@ describe('isCompletionGateEligible', () => {
   });
 });
 
-describe('buildCompletionGateReminder', () => {
-  it('names each flagged point and tells the agent the check can be wrong', () => {
-    const reminder = buildCompletionGateReminder([
-      { id: 'reportOverclaims', probability: 0.9 },
-      { id: 'leftoverArtifacts', probability: 0.88 },
-    ]);
+describe('classifyCompletionCheckTool', () => {
+  it('treats reporting to a person as a report trigger carrying the report text', () => {
+    expect(
+      classifyCompletionCheckTool('roomote_report_to_parent_session', {
+        text: 'Removed the guard. Tests pass.',
+      }),
+    ).toEqual({ trigger: 'report', report: 'Removed the guard. Tests pass.' });
+    expect(
+      classifyCompletionCheckTool('roomote_send_chat_reply', {
+        message: 'Done, PR is up.',
+      }),
+    ).toEqual({ trigger: 'report', report: 'Done, PR is up.' });
+  });
 
-    expect(reminder).toContain(
-      'Your report describes a code change that the diff does not contain.',
-    );
-    expect(reminder).toContain('debug logging');
-    expect(reminder).toContain('can be wrong');
-    expect(reminder).not.toContain('0.9');
+  it.each([
+    'git push origin HEAD',
+    'git -C packages/api push --force-with-lease',
+    'gh pr create --draft --title x --body-file /tmp/b.md',
+    'gh pr ready 12',
+    'git add -A && git commit -m wip && git push',
+  ])('treats %s as shipping', (command) => {
+    expect(classifyCompletionCheckTool('bash', { command })).toEqual({
+      trigger: 'ship',
+    });
+  });
+
+  it.each(['create_or_update_pull_request', 'update_pull_request'])(
+    'treats the platform action %s as shipping',
+    (action) => {
+      expect(
+        classifyCompletionCheckTool('roomote_manage_source_control', {
+          action,
+        }),
+      ).toEqual({ trigger: 'ship' });
+    },
+  );
+
+  it.each([
+    ['bash', { command: 'git status --short' }],
+    ['bash', { command: 'git fetch origin && git log --oneline -3' }],
+    ['bash', { command: 'pnpm vitest run' }],
+    [
+      'roomote_manage_source_control',
+      { action: 'create_pull_request_comment' },
+    ],
+    ['roomote_manage_source_control', { action: 'get_pull_request' }],
+    ['roomote_manage_source_control', { action: 'close_pull_request' }],
+    ['roomote_manage_source_control', { action: 'reopen_pull_request' }],
+    ['read', { filePath: '/tmp/a.ts' }],
+    ['roomote_save_task_memory', { outcome: 'x' }],
+  ])('leaves %s alone', (tool, args) => {
+    expect(classifyCompletionCheckTool(tool, args)).toBeNull();
   });
 });

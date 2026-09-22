@@ -83,6 +83,7 @@ import { SLACK_STOP_HOOK_SCRIPT } from './slack-stop-hook-script';
 import { OPENCODE_SLACK_HOOKS_PLUGIN_SCRIPT } from './opencode-slack-hooks-plugin-script';
 import { OPENCODE_CHATGPT_GATEWAY_PLUGIN_SCRIPT } from './opencode-chatgpt-gateway-plugin-script';
 import { OPENCODE_TOOL_SAFETY_PLUGIN_SCRIPT } from './opencode-tool-safety-plugin-script';
+import { OPENCODE_COMPLETION_GATE_PLUGIN_SCRIPT } from './opencode-completion-gate-plugin-script';
 import { resolveOpenCodeModelSelection } from './opencode-model';
 import {
   getRepoLocalSkillInvocations,
@@ -187,6 +188,8 @@ const ROOMOTE_OPENCODE_CHATGPT_GATEWAY_PLUGIN_FILE_NAME =
   'roomote-chatgpt-gateway.js';
 
 const ROOMOTE_OPENCODE_TOOL_SAFETY_PLUGIN_FILE_NAME = 'roomote-tool-safety.js';
+const ROOMOTE_OPENCODE_COMPLETION_GATE_PLUGIN_FILE_NAME =
+  'roomote-completion-gate.js';
 
 const ROOMOTE_OPENCODE_IDENTITY_PLUGIN_FILE_NAME = 'roomote-identity.js';
 
@@ -967,6 +970,10 @@ function writeOpenCodeManagedFiles(openCodeConfigDir: string): void {
     pluginsDir,
     ROOMOTE_OPENCODE_IDENTITY_PLUGIN_FILE_NAME,
   );
+  const completionGatePluginPath = path.join(
+    pluginsDir,
+    ROOMOTE_OPENCODE_COMPLETION_GATE_PLUGIN_FILE_NAME,
+  );
   const silenceHookPath = path.join(
     openCodeConfigDir,
     ROOMOTE_OPENCODE_SLACK_SILENCE_HOOK_FILE_NAME,
@@ -989,6 +996,11 @@ function writeOpenCodeManagedFiles(openCodeConfigDir: string): void {
     'utf8',
   );
   fs.writeFileSync(identityPluginPath, OPENCODE_IDENTITY_PLUGIN_SCRIPT, 'utf8');
+  fs.writeFileSync(
+    completionGatePluginPath,
+    OPENCODE_COMPLETION_GATE_PLUGIN_SCRIPT,
+    'utf8',
+  );
   fs.writeFileSync(silenceHookPath, SLACK_SILENCE_HOOK_SCRIPT, 'utf8');
   fs.writeFileSync(stopHookPath, SLACK_STOP_HOOK_SCRIPT, 'utf8');
   fs.chmodSync(silenceHookPath, 0o755);
@@ -1416,7 +1428,7 @@ function createProofOnlyJudgeModelInstructions(): string {
     '',
     'When `R_VISION_MODEL` is configured, the judge runs on that vision model so it can open proof screenshots directly. Otherwise it falls back to the active coding model for the task.',
     '',
-    `Delegate one focused pass to the \`${ROOMOTE_OPENCODE_JUDGE_AGENT_NAME}\` subagent with the Task tool only when a pre-delivery \`capture-visual-proof\` step for this shipped change kept screenshots or keyframes. When that step kept no images (a no-op, not-applicable, unnecessary, or blocked result), or the workflow required no proof step, do not spawn the judge. Whether the work matches the request is checked by the platform automatically when your turn ends: it compares the request, your closing report, and the diff, and sends you a follow-up only if something needs another look.`,
+    `Delegate one focused pass to the \`${ROOMOTE_OPENCODE_JUDGE_AGENT_NAME}\` subagent with the Task tool only when a pre-delivery \`capture-visual-proof\` step for this shipped change kept screenshots or keyframes. When that step kept no images (a no-op, not-applicable, unnecessary, or blocked result), or the workflow required no proof step, do not spawn the judge. Whether the work matches the request is checked by the platform automatically: before you report to a person, before you push or open a pull request, and when your turn ends. It compares the request, your report, the commands you ran, and the diff. If something needs another look, the tool call fails once with the reasons (fix or explain, then call it again) or you get a follow-up after the turn.`,
     '',
     'Include in the judge brief: the plan or requested outcome, the validation results, the proof report verbatim, the path `/tmp/capture-visual-proof/diff-at-start.patch`, and the local paths of every kept screenshot and keyframe so the judge can open them.',
     '',

@@ -5,28 +5,10 @@ import { readFile, stat } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 import { basename, join, relative } from 'node:path';
 
-import {
-  TASK_COMPLETION_GATE_ENV_VAR,
-  TASK_COMPLETION_GATE_LIMITS,
-  TaskPayloadKind,
-  taskCompletionCheckResponseSchema,
-  type TaskCompletionCheckRequest,
-  type TaskCompletionCheckResponse,
-  type TaskCompletionFlagId,
-} from '@roomote/types';
-
-import {
-  buildApiHeaders,
-  fetchWithTimeout,
-} from '../../../../mcp/roomote-mcp-server/api-client';
+import { TASK_COMPLETION_GATE_LIMITS } from '@roomote/types';
 
 const GIT_TIMEOUT_MS = 10_000;
 const GIT_MAX_BUFFER_BYTES = 32 * 1024 * 1024;
-/**
- * The turn is held open while the API answers. The ceiling sits above the
- * server's own decision-model timeout so the server's `skipped` wins the race.
- */
-const COMPLETION_CHECK_TIMEOUT_MS = 8_000;
 const MAX_REPOSITORIES = 20;
 const MAX_UNTRACKED_FILES = 50;
 const MAX_UNTRACKED_FILE_BYTES = 200_000;
@@ -93,27 +75,6 @@ const runGit: GitRunner = (repoPath, args, options) =>
       },
     );
   });
-
-/**
- * The platform turns the check on per run. PR reviews are themselves the
- * review pass, and automations report through their own result contract
- * rather than a person's request.
- */
-export function isCompletionGateEligible(
-  env: Record<string, string> | undefined,
-): boolean {
-  const taskType = env?.ROOMOTE_TASK_TYPE?.trim();
-
-  return Boolean(
-    env?.[TASK_COMPLETION_GATE_ENV_VAR] === 'true' &&
-    env.ROOMOTE_CLOUD_TOKEN &&
-    env.ROOMOTE_PLATFORM_API_URL &&
-    env.ROOMOTE_TASK_RUN_ID &&
-    env.ROOMOTE_AUTOMATION_TASK !== 'true' &&
-    taskType !== TaskPayloadKind.GithubPrReview &&
-    taskType !== TaskPayloadKind.GithubPrReviewSync,
-  );
-}
 
 /** The workspace itself, or the checkouts up to two levels under a shared root. */
 function discoverWorkspaceRepositories(workspacePath: string): string[] {
@@ -470,78 +431,4 @@ export async function collectShippedDiff(
       .join('\n')
       .slice(0, TASK_COMPLETION_GATE_LIMITS.diffStatMaxChars),
   };
-}
-
-/** Never throws: a check that cannot be made is a check that was skipped. */
-export async function requestTaskCompletionCheck(
-  env: Record<string, string>,
-  check: TaskCompletionCheckRequest,
-): Promise<TaskCompletionCheckResponse> {
-  const skipped: TaskCompletionCheckResponse = { status: 'skipped', flags: [] };
-
-  try {
-    const response = await fetchWithTimeout(
-      `${env.ROOMOTE_PLATFORM_API_URL!.replace(/\/+$/, '')}/api/mcp/tasks/runs/${env.ROOMOTE_TASK_RUN_ID}/completion_check`,
-      {
-        method: 'POST',
-        headers: buildApiHeaders(
-          {
-            token: env.ROOMOTE_CLOUD_TOKEN!,
-            authBypassHeaderName: env.ROOMOTE_AUTH_BYPASS_HEADER_NAME,
-            authBypassHeaderValue: env.ROOMOTE_AUTH_BYPASS_VALUE,
-          },
-          { 'Content-Type': 'application/json' },
-        ),
-        body: JSON.stringify(check),
-      },
-      {
-        label: 'Task completion check',
-        timeoutMs: COMPLETION_CHECK_TIMEOUT_MS,
-      },
-    );
-
-    if (!response.ok) {
-      return skipped;
-    }
-
-    const parsed = taskCompletionCheckResponseSchema.safeParse(
-      await response.json(),
-    );
-
-    return parsed.success ? parsed.data : skipped;
-  } catch {
-    return skipped;
-  }
-}
-
-const FLAG_GUIDANCE: Record<TaskCompletionFlagId, string> = {
-  requestUnaddressed:
-    'Part of what was asked does not appear to be done, and your report does not say why.',
-  planIncomplete:
-    'Your checklist still has an item that is not completed, and your report does not account for it.',
-  validationContradicted:
-    'Your report claims a validation result that the commands you actually ran do not support: the last run failed, or no such command was run.',
-  validationMissing:
-    'Code changed but no test, type check, lint, or build was run, and your report does not say why.',
-  proofClaimDoubtful:
-    'The diff changes something a person sees in the interface, but your report waves off visual proof or never mentions it.',
-  evidentDefect:
-    'The changed lines appear to contain a plain defect: an inverted condition, a removed guard, error check, or await, a call left on an old signature, or a test weakened so it passes.',
-  reportOverclaims:
-    'Your report describes a code change that the diff does not contain.',
-  leftoverArtifacts:
-    'The diff appears to add something that should not ship: debug logging, commented-out code, a placeholder standing in for requested behavior, or a disabled test.',
-};
-
-/** The hidden prompt that reopens a turn the completion check flagged. */
-export function buildCompletionGateReminder(
-  flags: TaskCompletionCheckResponse['flags'],
-): string {
-  return [
-    'Roomote automatically compared what was asked, your closing report, and everything this task changed, and flagged the following:',
-    '',
-    ...flags.map((flag) => `- ${FLAG_GUIDANCE[flag.id]}`),
-    '',
-    'This check is a quick automated read and can be wrong. Re-read the request and your diff against each point. If a point is right, make the smallest fix, re-run the validation it affects, deliver the update the same way you delivered the change, and send a short corrected report. If a point is wrong, change nothing and say in one sentence why the work is complete as it stands. Do not restart the task, do not repeat work that is already done, and do not mention this check to the user.',
-  ].join('\n');
 }

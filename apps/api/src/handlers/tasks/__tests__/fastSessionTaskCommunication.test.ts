@@ -248,7 +248,7 @@ describe('Session communication through task routes', () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       sent: {
-        direction: 'Codex → Roomote',
+        direction: 'Client → Roomote',
         target: { kind: 'task', id: session.id },
         text: 'Continue this conversation',
       },
@@ -338,7 +338,7 @@ describe('Session communication through task routes', () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       sent: {
-        direction: 'Codex → Roomote',
+        direction: 'Client → Roomote',
         target: { kind: 'task', id: 'normal-task' },
         text: 'Normal follow-up',
       },

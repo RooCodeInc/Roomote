@@ -22,6 +22,21 @@ export const TASK_COMPLETION_GATE_LIMITS = {
   commandOutputTailMaxChars: 500,
 } as const;
 
+/** The runtime moment that caused the server-side completion check. */
+export const TASK_COMPLETION_GATE_TRIGGERS = [
+  'turn_end',
+  'report',
+  'ship',
+] as const;
+
+export const taskCompletionGateTriggerSchema = z.enum(
+  TASK_COMPLETION_GATE_TRIGGERS,
+);
+
+export type TaskCompletionGateTrigger = z.infer<
+  typeof taskCompletionGateTriggerSchema
+>;
+
 /**
  * A shell command the agent ran this turn, as the harness observed it. This
  * is the validation evidence the check holds the report against, so a claim
@@ -43,7 +58,7 @@ export const taskCompletionCommandSchema = z.object({
 
 export type TaskCompletionCommand = z.infer<typeof taskCompletionCommandSchema>;
 
-export const taskCompletionCheckRequestSchema = z.object({
+export const taskCompletionCheckEvidenceSchema = z.object({
   /** The agent's closing message for the turn. */
   report: z.string().max(TASK_COMPLETION_GATE_LIMITS.reportMaxChars),
   /** `git diff --stat` for the shipped change, every repository. */
@@ -58,6 +73,16 @@ export const taskCompletionCheckRequestSchema = z.object({
     .max(TASK_COMPLETION_GATE_LIMITS.commandsMax)
     .default([]),
 });
+
+export type TaskCompletionCheckEvidence = z.infer<
+  typeof taskCompletionCheckEvidenceSchema
+>;
+
+export const taskCompletionCheckRequestSchema =
+  taskCompletionCheckEvidenceSchema.extend({
+    /** The worker-owned runtime event that is being held or reopened. */
+    trigger: taskCompletionGateTriggerSchema.default('turn_end'),
+  });
 
 export type TaskCompletionCheckRequest = z.infer<
   typeof taskCompletionCheckRequestSchema
@@ -82,6 +107,11 @@ export const taskCompletionCheckResponseSchema = z.object({
    * compare against, or a failure) and the turn must complete normally.
    */
   status: z.enum(['clear', 'flagged', 'skipped']),
+  /** Server-owned instructions for a flagged trigger, absent otherwise. */
+  message: z
+    .string()
+    .max(TASK_COMPLETION_GATE_LIMITS.reportMaxChars)
+    .optional(),
   flags: z.array(
     z.object({
       id: z.enum(TASK_COMPLETION_FLAG_IDS),

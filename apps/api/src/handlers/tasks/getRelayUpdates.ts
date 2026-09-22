@@ -252,8 +252,8 @@ function buildResponse(params: {
       direction:
         row.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt ||
         row.eventType === ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse
-          ? 'Codex → Roomote'
-          : 'Roomote → Codex',
+          ? 'Client → Roomote'
+          : 'Roomote → Client',
       text: renderedText,
       truncated: renderedText.length < text.length,
     });
@@ -268,7 +268,7 @@ function buildResponse(params: {
     returned: narrative.length,
     hasMore,
     hasNewRoomoteNarrative: narrative.some(
-      (message) => message.direction === 'Roomote → Codex',
+      (message) => message.direction === 'Roomote → Client',
     ),
     responseNeeded: params.responseNeeded || requestedInput,
     state: {

@@ -152,7 +152,7 @@ export async function sendMessage(
     return c.json({
       ...result,
       sent: {
-        direction: 'Codex → Roomote',
+        direction: 'Client → Roomote',
         target: { kind: 'task', id: taskId },
         text: body.message,
       },
