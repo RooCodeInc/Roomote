@@ -32,12 +32,13 @@ export function IntegrationToolApprovalsExperimentalSetting() {
           session owner allows it once, stops the asks for the rest of that
           session, or rejects it; Reject blocks it outright. Auto mode below
           decides who answers those asks: a person, or a decision model that
-          runs a call it finds clearly safe under your policy. A task asks the
-          owner of its session the same way, and a task nobody can answer for,
-          such as one an automation started, cannot run an Ask first tool.
-          Session owners can also ask to be asked about any tool from its call
-          in the transcript. Tools left at the default run exactly as before.
-          Policies are deployment-wide and apply from the next session turn.
+          runs a call it judges routine and asks a person about anything risky.
+          A task asks the owner of its session the same way, and a task nobody
+          can answer for, such as one an automation started, cannot run an Ask
+          first tool. Session owners can also ask to be asked about any tool
+          from its call in the transcript. Tools left at the default run exactly
+          as before. Policies are deployment-wide and apply from the next
+          session turn.
         </p>
       </div>
       {enabled ? <IntegrationToolAutoModeSetting /> : null}

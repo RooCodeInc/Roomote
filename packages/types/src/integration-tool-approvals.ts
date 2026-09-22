@@ -73,9 +73,8 @@ export interface IntegrationToolApprovalMetadata {
 /**
  * Deployment-wide Auto mode: who answers an Ask first call. `off` asks a
  * person; `shadow` asks a person and records what the decision model would
- * have done; `on` lets the model run a call it finds clearly safe under the
- * Auto policy, and asks a person about everything else. Reject is never
- * touched.
+ * have done; `on` lets a call the model finds routine run without a person,
+ * and asks a person about everything risky. Reject is never touched.
  */
 export const INTEGRATION_TOOL_AUTO_MODES = ['off', 'shadow', 'on'] as const;
 export type IntegrationToolAutoMode =
@@ -84,7 +83,11 @@ export const INTEGRATION_TOOL_AUTO_POLICY_MAX_LENGTH = 4_000;
 
 export interface IntegrationToolAutoSettings {
   mode: IntegrationToolAutoMode;
-  /** The admin's rules for what may run unattended, given to the model. */
+  /**
+   * The deployment's risk guidance: what it treats as routine or risky, in
+   * the admin's words. The model reads it as context for its risk judgment,
+   * not as rules to apply.
+   */
   policy: string;
 }
 
@@ -94,13 +97,17 @@ export const integrationToolAutoSettingsSchema = z.object({
 });
 
 /**
- * A decision model's view of one paused Ask first call, recorded beside the
- * decision. In shadow mode it decides nothing. The model can only ever
- * recommend running the call or asking, never rejecting.
+ * A decision model's risk assessment of one paused Ask first call, recorded
+ * beside the decision. In shadow mode it decides nothing. The model can only
+ * ever recommend running the call or asking, never rejecting.
  */
 export interface IntegrationToolAutoEvaluation {
   recommendation: 'approve' | 'ask';
-  /** Probability from 0 to 1 that each question's answer is yes. */
+  /**
+   * The raw judgments the recommendation was computed from: the risk level
+   * (`riskScore`, a weighted position on the ordered risk levels, with
+   * `riskConfidence`) and yes-probabilities for the rest.
+   */
   answers?: Record<string, number>;
   /** Why there are no answers: nothing could evaluate the call. */
   unavailable?: 'no_model' | 'error';

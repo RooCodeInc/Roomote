@@ -23,20 +23,31 @@ import {
   recommendFromAutoAnswers,
   recordIntegrationToolAutoEvaluationInBackground,
   resolveIntegrationToolAutoDecision,
+  RISK_LEVELS,
+  type AutoRiskAnswers,
 } from '../integration-tool-auto-evaluation';
 
-const safe = {
+const routine: AutoRiskAnswers = {
+  risk: { score: 0.1, confidence: 0.9 },
   matchesRequest: 0.95,
-  allowedByPolicy: 0.9,
-  readOnlyOrReversible: 0.9,
-  destructive: 0.05,
-  reachesOutside: 0.05,
-  looksInjected: 0.02,
+  steeredByUntrustedContent: 0.02,
 };
-const asAnswers = (values: Record<string, number>) =>
-  Object.fromEntries(
-    Object.entries(values).map(([id, noul]) => [id, { type: 'noul', noul }]),
-  );
+const modelAnswers = (
+  answers: AutoRiskAnswers,
+): Record<
+  string,
+  { type: string; noul?: number; score?: number; confidence?: number }
+> => ({
+  risk: { type: 'score', ...answers.risk },
+  matchesRequest: { type: 'noul', noul: answers.matchesRequest },
+  steeredByUntrustedContent: {
+    type: 'noul',
+    noul: answers.steeredByUntrustedContent,
+  },
+  ...(answers.guidanceFlagsRisk === undefined
+    ? {}
+    : { guidanceFlagsRisk: { type: 'noul', noul: answers.guidanceFlagsRisk } }),
+});
 const call = {
   integrationId: 'linear',
   toolName: 'list_issues',
@@ -51,31 +62,35 @@ beforeEach(() => {
 });
 
 describe('recommendFromAutoAnswers', () => {
-  it('recommends running only a call every answer clearly clears', () => {
-    expect(recommendFromAutoAnswers(safe)).toBe('approve');
-    for (const unsure of [
+  it('runs only a routine call the user asked for; every doubt asks', () => {
+    expect(recommendFromAutoAnswers(routine)).toBe('approve');
+    for (const doubt of [
+      // Anything past "reads and changes nothing", or unsure it is that.
+      { risk: { score: 0.8, confidence: 0.9 } },
+      { risk: { score: 0.1, confidence: 0.5 } },
       { matchesRequest: 0.6 },
-      { allowedByPolicy: 0.5 },
-      { readOnlyOrReversible: 0.5 },
-      { destructive: 0.3 },
-      { reachesOutside: 0.9 },
-      { looksInjected: 0.4 },
-    ]) {
-      expect(recommendFromAutoAnswers({ ...safe, ...unsure })).toBe('ask');
+      { steeredByUntrustedContent: 0.4 },
+      { guidanceFlagsRisk: 0.5 },
+    ] satisfies Partial<AutoRiskAnswers>[]) {
+      expect(recommendFromAutoAnswers({ ...routine, ...doubt })).toBe('ask');
     }
   });
 });
 
 describe('evaluateIntegrationToolAutoDecision', () => {
-  it('shows the model the redacted call, the request and the policy, and keeps its answers', async () => {
-    mockEvaluate.mockResolvedValue(asAnswers(safe));
-    mockSettings.mockResolvedValue({ mode: 'on', policy: 'Reads only.' });
+  it('asks a risk score over described situations plus the request and injection checks', async () => {
+    mockEvaluate.mockResolvedValue(modelAnswers(routine));
     const evaluation = await evaluateIntegrationToolAutoDecision(call);
     expect(evaluation).toMatchObject({
       recommendation: 'approve',
-      answers: safe,
+      answers: {
+        riskScore: 0.1,
+        riskConfidence: 0.9,
+        matchesRequest: 0.95,
+        steeredByUntrustedContent: 0.02,
+      },
     });
-    const { state, userId } = mockEvaluate.mock.calls[0]![0];
+    const { state, questions, userId } = mockEvaluate.mock.calls[0]![0];
     expect(userId).toBe('user-1');
     expect(state).toEqual({
       call: {
@@ -84,8 +99,37 @@ describe('evaluateIntegrationToolAutoDecision', () => {
         arguments: { team: 'ENG', apiKey: '[redacted]' },
       },
       userRequest: 'What is open for ENG?',
-      autoPolicy: 'Reads only.',
+      deploymentGuidance: null,
     });
+    expect(questions.risk).toMatchObject({
+      type: 'score',
+      criteria: RISK_LEVELS,
+    });
+    expect(Object.keys(questions)).toEqual([
+      'risk',
+      'matchesRequest',
+      'steeredByUntrustedContent',
+    ]);
+  });
+
+  it('judges the call against the deployment guidance when there is some', async () => {
+    mockSettings.mockResolvedValue({
+      mode: 'on',
+      policy: 'Anything sent to customers is high risk.',
+    });
+    mockEvaluate.mockResolvedValue(
+      modelAnswers({ ...routine, guidanceFlagsRisk: 0.9 }),
+    );
+    const evaluation = await evaluateIntegrationToolAutoDecision(call);
+    expect(evaluation).toMatchObject({
+      recommendation: 'ask',
+      answers: { guidanceFlagsRisk: 0.9 },
+    });
+    const { state, questions } = mockEvaluate.mock.calls[0]![0];
+    expect(state.deploymentGuidance).toBe(
+      'Anything sent to customers is high risk.',
+    );
+    expect(questions.guidanceFlagsRisk).toBeDefined();
   });
 
   it('falls back to asking with no model or a failed evaluation', async () => {
@@ -106,7 +150,9 @@ describe('evaluateIntegrationToolAutoDecision', () => {
 
 describe('recordIntegrationToolAutoEvaluationInBackground', () => {
   it('records the evaluation on the approval and never throws', async () => {
-    mockEvaluate.mockResolvedValue(asAnswers({ ...safe, destructive: 0.9 }));
+    mockEvaluate.mockResolvedValue(
+      modelAnswers({ ...routine, risk: { score: 3.2, confidence: 0.8 } }),
+    );
     recordIntegrationToolAutoEvaluationInBackground('approval-1', call);
     await vi.waitFor(() =>
       expect(mockRecord).toHaveBeenCalledWith(
@@ -137,8 +183,13 @@ describe('resolveIntegrationToolAutoDecision', () => {
     });
     expect(mockEvaluate).not.toHaveBeenCalled();
 
-    mockSettings.mockResolvedValue({ mode: 'on', policy: 'Reads only.' });
-    mockEvaluate.mockResolvedValue(asAnswers(safe));
+    mockSettings.mockResolvedValue({
+      mode: 'on',
+      policy: 'Reads are routine.',
+    });
+    mockEvaluate.mockResolvedValue(
+      modelAnswers({ ...routine, guidanceFlagsRisk: 0.05 }),
+    );
     await expect(
       resolveIntegrationToolAutoDecision(call),
     ).resolves.toMatchObject({
@@ -146,10 +197,14 @@ describe('resolveIntegrationToolAutoDecision', () => {
       mode: 'on',
       evaluation: { recommendation: 'approve' },
     });
-    expect(mockEvaluate.mock.calls[0]![0].state.autoPolicy).toBe('Reads only.');
+    expect(mockEvaluate.mock.calls[0]![0].state.deploymentGuidance).toBe(
+      'Reads are routine.',
+    );
 
-    // Not clearly safe, or no model at all: the card shows.
-    mockEvaluate.mockResolvedValue(asAnswers({ ...safe, reachesOutside: 0.7 }));
+    // Risky, or no model at all: the card shows.
+    mockEvaluate.mockResolvedValue(
+      modelAnswers({ ...routine, risk: { score: 2, confidence: 0.9 } }),
+    );
     await expect(
       resolveIntegrationToolAutoDecision(call),
     ).resolves.toMatchObject({ action: 'ask', mode: 'on' });

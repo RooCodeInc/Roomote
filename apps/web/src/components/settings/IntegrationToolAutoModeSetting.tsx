@@ -19,12 +19,12 @@ const MODES: { mode: IntegrationToolAutoMode; label: string; hint: string }[] =
     {
       mode: 'shadow',
       label: 'Shadow',
-      hint: 'Ask a person, and record what Roomote would have decided.',
+      hint: 'Ask a person, and record how risky Roomote judged the call.',
     },
     {
       mode: 'on',
       label: 'On',
-      hint: 'Roomote runs a call it finds clearly safe under the policy, and asks a person about everything else.',
+      hint: 'Roomote runs a call it judges routine, such as reading or searching, and asks a person about anything risky.',
     },
   ];
 
@@ -67,7 +67,8 @@ export function IntegrationToolAutoModeSetting() {
       <div className="flex flex-col gap-1">
         <p className="text-sm font-medium">Auto mode</p>
         <p className="text-sm text-muted-foreground">
-          Who answers an Ask first call.{' '}
+          Whether a decision model may answer an Ask first call by judging how
+          risky it is.{' '}
           {model === null
             ? 'No decision model is available, so Auto can only ask.'
             : model.kind === 'judgment'
@@ -103,12 +104,12 @@ export function IntegrationToolAutoModeSetting() {
         })}
       </div>
       <div className="flex flex-col gap-2">
-        <Label htmlFor="integration-tool-auto-policy">Auto policy</Label>
+        <Label htmlFor="integration-tool-auto-policy">Risk guidance</Label>
         <Textarea
           id="integration-tool-auto-policy"
           value={policy}
           maxLength={INTEGRATION_TOOL_AUTO_POLICY_MAX_LENGTH}
-          placeholder="What may run without a person approving it, and what never may. For example: reading and searching is fine; never send messages or delete anything."
+          placeholder="What this deployment treats as routine or risky, in your own words. For example: anything sent to customers is high risk; reading and searching our internal tools is routine."
           rows={4}
           onChange={(event) => setPolicy(event.target.value)}
         />
@@ -119,7 +120,7 @@ export function IntegrationToolAutoModeSetting() {
             disabled={!policyDirty || save.isPending}
             onClick={() => save.mutate({ mode, policy })}
           >
-            Save policy
+            Save guidance
           </Button>
           {policyDirty ? (
             <Button

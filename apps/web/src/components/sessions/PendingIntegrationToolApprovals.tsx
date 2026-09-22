@@ -80,8 +80,8 @@ function describeAutoEvaluation(
     return 'Auto mode could not check this call.';
   }
   return evaluation.recommendation === 'approve'
-    ? 'Auto mode would have run this call.'
-    : 'Auto mode was not sure this call is safe, so it is asking you.';
+    ? 'Auto mode judged this call routine and would have run it.'
+    : 'Auto mode found this call risky enough to ask you.';
 }
 
 function summarizeArgs(argsSummary: unknown): string | null {

@@ -160,7 +160,7 @@ describe('PendingIntegrationToolApprovals', () => {
       </QueryClientProvider>,
     );
     expect(screen.getByTestId('auto-evaluation')).toHaveTextContent(
-      'Auto mode was not sure this call is safe, so it is asking you.',
+      'Auto mode found this call risky enough to ask you.',
     );
   });
 });
