@@ -1,0 +1,697 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-22T17:02:25.181Z",
+  "gitRevision": "8e7db7e6fbf038bf646278b56c477131130d81af",
+  "configuration": {
+    "repetitions": 2,
+    "logPath": "/tmp/roomote-bullmq.log",
+    "scenarios": [
+      "important_milestone",
+      "blocked_user_input",
+      "routine_redundant_progress",
+      "completion_adequate_evidence"
+    ]
+  },
+  "platform": {
+    "regularPath": "fast_agent_parent_events -> BullMQ -> deliverFastAgentParentEvent -> answerFastAgentQuestion",
+    "jevPath": "fast_agent_parent_events -> BullMQ -> opt-in communicationExperiment=jev -> evaluateTypeSafeJudgments -> persisted Session assistant message",
+    "sessionPolicy": "fresh web Fast Session per arm and scenario repetition"
+  },
+  "aggregates": {
+    "regular-llm": {
+      "mechanism": "regular-llm",
+      "sampleCount": 8,
+      "completedCount": 8,
+      "errorCount": 0,
+      "deterministicForwardingCount": 0,
+      "correctCount": 8,
+      "accuracy": 1,
+      "latencyMs": {
+        "eventToAction": {
+          "count": 8,
+          "p50": 4072.5,
+          "p95": 10771.75,
+          "min": 3292,
+          "max": 11407
+        },
+        "inference": {
+          "count": 8,
+          "p50": 3908.5,
+          "p95": 10610.15,
+          "min": 3198,
+          "max": 11237
+        },
+        "orchestration": {
+          "count": 8,
+          "p50": 94,
+          "p95": 105.95,
+          "min": 50,
+          "max": 107
+        }
+      },
+      "scenarios": {
+        "important_milestone": {
+          "expectedAction": "report",
+          "sampleCount": 2,
+          "completedCount": 2,
+          "errorCount": 0,
+          "correctCount": 2,
+          "accuracy": 1,
+          "actions": {
+            "report": 2
+          }
+        },
+        "blocked_user_input": {
+          "expectedAction": "request_input",
+          "sampleCount": 2,
+          "completedCount": 2,
+          "errorCount": 0,
+          "correctCount": 2,
+          "accuracy": 1,
+          "actions": {
+            "request_input": 2
+          }
+        },
+        "routine_redundant_progress": {
+          "expectedAction": "quiet",
+          "sampleCount": 2,
+          "completedCount": 2,
+          "errorCount": 0,
+          "correctCount": 2,
+          "accuracy": 1,
+          "actions": {
+            "quiet": 2
+          }
+        },
+        "completion_adequate_evidence": {
+          "expectedAction": "report",
+          "sampleCount": 2,
+          "completedCount": 2,
+          "errorCount": 0,
+          "correctCount": 2,
+          "accuracy": 1,
+          "actions": {
+            "report": 2
+          }
+        },
+        "completion_missing_evidence": {
+          "expectedAction": "inspect",
+          "sampleCount": 0,
+          "completedCount": 0,
+          "errorCount": 0,
+          "correctCount": 0,
+          "accuracy": null,
+          "actions": {}
+        },
+        "explicit_user_steering": {
+          "expectedAction": "steer",
+          "sampleCount": 0,
+          "completedCount": 0,
+          "errorCount": 0,
+          "correctCount": 0,
+          "accuracy": null,
+          "actions": {}
+        }
+      }
+    },
+    "jev": {
+      "mechanism": "jev",
+      "sampleCount": 8,
+      "completedCount": 8,
+      "errorCount": 0,
+      "deterministicForwardingCount": 0,
+      "correctCount": 8,
+      "accuracy": 1,
+      "latencyMs": {
+        "eventToAction": {
+          "count": 8,
+          "p50": 316.5,
+          "p95": 389.55,
+          "min": 248,
+          "max": 413
+        },
+        "inference": {
+          "count": 8,
+          "p50": 297.3,
+          "p95": 367.305,
+          "min": 229.7,
+          "max": 389.6
+        },
+        "orchestration": {
+          "count": 8,
+          "p50": 6.15,
+          "p95": 9.185,
+          "min": 0.8,
+          "max": 9.5
+        }
+      },
+      "scenarios": {
+        "important_milestone": {
+          "expectedAction": "report",
+          "sampleCount": 2,
+          "completedCount": 2,
+          "errorCount": 0,
+          "correctCount": 2,
+          "accuracy": 1,
+          "actions": {
+            "report": 2
+          }
+        },
+        "blocked_user_input": {
+          "expectedAction": "request_input",
+          "sampleCount": 2,
+          "completedCount": 2,
+          "errorCount": 0,
+          "correctCount": 2,
+          "accuracy": 1,
+          "actions": {
+            "request_input": 2
+          }
+        },
+        "routine_redundant_progress": {
+          "expectedAction": "quiet",
+          "sampleCount": 2,
+          "completedCount": 2,
+          "errorCount": 0,
+          "correctCount": 2,
+          "accuracy": 1,
+          "actions": {
+            "quiet": 2
+          }
+        },
+        "completion_adequate_evidence": {
+          "expectedAction": "report",
+          "sampleCount": 2,
+          "completedCount": 2,
+          "errorCount": 0,
+          "correctCount": 2,
+          "accuracy": 1,
+          "actions": {
+            "report": 2
+          }
+        },
+        "completion_missing_evidence": {
+          "expectedAction": "inspect",
+          "sampleCount": 0,
+          "completedCount": 0,
+          "errorCount": 0,
+          "correctCount": 0,
+          "accuracy": null,
+          "actions": {}
+        },
+        "explicit_user_steering": {
+          "expectedAction": "steer",
+          "sampleCount": 0,
+          "completedCount": 0,
+          "errorCount": 0,
+          "correctCount": 0,
+          "accuracy": null,
+          "actions": {}
+        }
+      }
+    }
+  },
+  "samples": [
+    {
+      "repetition": 1,
+      "sessionId": "297481cd-0b7d-488b-bda6-31904b6ac36b",
+      "messageId": "latency-platform-mucx8fh6-regular-llm-important_milestone-1",
+      "mechanism": "regular-llm",
+      "scenarioId": "important_milestone",
+      "expectedAction": "report",
+      "actualAction": "report",
+      "status": "completed",
+      "correct": true,
+      "deterministicForwarding": false,
+      "modelInvoked": true,
+      "timelineMs": {
+        "eventEmitted": 0,
+        "eventObservable": 0,
+        "decisionStarted": 107,
+        "inferenceStarted": 107,
+        "inferenceCompleted": 3766,
+        "decisionCompleted": 3840,
+        "actionEmitted": 3840
+      },
+      "durationsMs": {
+        "preInference": 107,
+        "inference": 3659,
+        "postInference": null,
+        "orchestration": 107,
+        "decision": 3840,
+        "eventToAction": 3840
+      }
+    },
+    {
+      "repetition": 1,
+      "sessionId": "915a947f-1e0a-4375-990d-b764b698c651",
+      "messageId": "latency-platform-mucx8fh6-jev-important_milestone-2",
+      "mechanism": "jev",
+      "scenarioId": "important_milestone",
+      "expectedAction": "report",
+      "actualAction": "report",
+      "status": "completed",
+      "correct": true,
+      "deterministicForwarding": false,
+      "modelInvoked": true,
+      "timelineMs": {
+        "eventEmitted": 0,
+        "eventObservable": 0,
+        "decisionStarted": 6.2,
+        "inferenceStarted": 6.2,
+        "inferenceCompleted": 309.8,
+        "decisionCompleted": 328,
+        "actionEmitted": 328
+      },
+      "durationsMs": {
+        "preInference": 6.2,
+        "inference": 303.6,
+        "postInference": null,
+        "orchestration": 6.2,
+        "decision": 328,
+        "eventToAction": 328
+      }
+    },
+    {
+      "repetition": 1,
+      "sessionId": "c0ad1db1-ee2d-4f53-9422-88629ca1b3d3",
+      "messageId": "latency-platform-mucx8fh6-regular-llm-blocked_user_input-3",
+      "mechanism": "regular-llm",
+      "scenarioId": "blocked_user_input",
+      "expectedAction": "request_input",
+      "actualAction": "request_input",
+      "status": "completed",
+      "correct": true,
+      "deterministicForwarding": false,
+      "modelInvoked": true,
+      "timelineMs": {
+        "eventEmitted": 0,
+        "eventObservable": 0,
+        "decisionStarted": 95,
+        "inferenceStarted": 95,
+        "inferenceCompleted": 5481,
+        "decisionCompleted": 5538,
+        "actionEmitted": 5538
+      },
+      "durationsMs": {
+        "preInference": 95,
+        "inference": 5386,
+        "postInference": null,
+        "orchestration": 95,
+        "decision": 5538,
+        "eventToAction": 5538
+      }
+    },
+    {
+      "repetition": 1,
+      "sessionId": "f0d8a311-f14f-4908-b9ae-6ffa3e08ac51",
+      "messageId": "latency-platform-mucx8fh6-jev-blocked_user_input-4",
+      "mechanism": "jev",
+      "scenarioId": "blocked_user_input",
+      "expectedAction": "request_input",
+      "actualAction": "request_input",
+      "status": "completed",
+      "correct": true,
+      "deterministicForwarding": false,
+      "modelInvoked": true,
+      "timelineMs": {
+        "eventEmitted": 0,
+        "eventObservable": 0,
+        "decisionStarted": 6,
+        "inferenceStarted": 6,
+        "inferenceCompleted": 272.1,
+        "decisionCompleted": 284,
+        "actionEmitted": 284
+      },
+      "durationsMs": {
+        "preInference": 6,
+        "inference": 266.1,
+        "postInference": null,
+        "orchestration": 6,
+        "decision": 284,
+        "eventToAction": 284
+      }
+    },
+    {
+      "repetition": 1,
+      "sessionId": "b7d1b2e1-da32-43ca-a8ff-fcb0ad6e5135",
+      "messageId": "latency-platform-mucx8fh6-regular-llm-routine_redundant_progress-5",
+      "mechanism": "regular-llm",
+      "scenarioId": "routine_redundant_progress",
+      "expectedAction": "quiet",
+      "actualAction": "quiet",
+      "status": "completed",
+      "correct": true,
+      "deterministicForwarding": false,
+      "modelInvoked": true,
+      "timelineMs": {
+        "eventEmitted": 0,
+        "eventObservable": 0,
+        "decisionStarted": 50,
+        "inferenceStarted": 50,
+        "inferenceCompleted": 3248,
+        "decisionCompleted": 3292,
+        "actionEmitted": 3292
+      },
+      "durationsMs": {
+        "preInference": 50,
+        "inference": 3198,
+        "postInference": null,
+        "orchestration": 50,
+        "decision": 3292,
+        "eventToAction": 3292
+      }
+    },
+    {
+      "repetition": 1,
+      "sessionId": "351d32df-4e4b-40fa-a647-327d4992ec56",
+      "messageId": "latency-platform-mucx8fh6-jev-routine_redundant_progress-6",
+      "mechanism": "jev",
+      "scenarioId": "routine_redundant_progress",
+      "expectedAction": "quiet",
+      "actualAction": "quiet",
+      "status": "completed",
+      "correct": true,
+      "deterministicForwarding": false,
+      "modelInvoked": true,
+      "timelineMs": {
+        "eventEmitted": 0,
+        "eventObservable": 0,
+        "decisionStarted": 0.9,
+        "inferenceStarted": 0.9,
+        "inferenceCompleted": 247.1,
+        "decisionCompleted": 261,
+        "actionEmitted": 261
+      },
+      "durationsMs": {
+        "preInference": 0.9,
+        "inference": 246.2,
+        "postInference": null,
+        "orchestration": 0.9,
+        "decision": 261,
+        "eventToAction": 261
+      }
+    },
+    {
+      "repetition": 1,
+      "sessionId": "e49e685a-6e94-4b53-abe6-4efadd632c70",
+      "messageId": "latency-platform-mucx8fh6-regular-llm-completion_adequate_evidence-7",
+      "mechanism": "regular-llm",
+      "scenarioId": "completion_adequate_evidence",
+      "expectedAction": "report",
+      "actualAction": "report",
+      "status": "completed",
+      "correct": true,
+      "deterministicForwarding": false,
+      "modelInvoked": true,
+      "timelineMs": {
+        "eventEmitted": 0,
+        "eventObservable": 0,
+        "decisionStarted": 104,
+        "inferenceStarted": 104,
+        "inferenceCompleted": 11341,
+        "decisionCompleted": 11407,
+        "actionEmitted": 11407
+      },
+      "durationsMs": {
+        "preInference": 104,
+        "inference": 11237,
+        "postInference": null,
+        "orchestration": 104,
+        "decision": 11407,
+        "eventToAction": 11407
+      }
+    },
+    {
+      "repetition": 1,
+      "sessionId": "76d1413e-ab71-4ab9-a0cf-985bec4ddf52",
+      "messageId": "latency-platform-mucx8fh6-jev-completion_adequate_evidence-8",
+      "mechanism": "jev",
+      "scenarioId": "completion_adequate_evidence",
+      "expectedAction": "report",
+      "actualAction": "report",
+      "status": "completed",
+      "correct": true,
+      "deterministicForwarding": false,
+      "modelInvoked": true,
+      "timelineMs": {
+        "eventEmitted": 0,
+        "eventObservable": 0,
+        "decisionStarted": 7.1,
+        "inferenceStarted": 7.1,
+        "inferenceCompleted": 322.4,
+        "decisionCompleted": 337,
+        "actionEmitted": 337
+      },
+      "durationsMs": {
+        "preInference": 7.1,
+        "inference": 315.3,
+        "postInference": null,
+        "orchestration": 7.1,
+        "decision": 337,
+        "eventToAction": 337
+      }
+    },
+    {
+      "repetition": 2,
+      "sessionId": "e63ff8a8-b5c0-4b62-ae31-b1bf6dd95096",
+      "messageId": "latency-platform-mucx8fh6-regular-llm-important_milestone-9",
+      "mechanism": "regular-llm",
+      "scenarioId": "important_milestone",
+      "expectedAction": "report",
+      "actualAction": "report",
+      "status": "completed",
+      "correct": true,
+      "deterministicForwarding": false,
+      "modelInvoked": true,
+      "timelineMs": {
+        "eventEmitted": 0,
+        "eventObservable": 0,
+        "decisionStarted": 102,
+        "inferenceStarted": 102,
+        "inferenceCompleted": 4260,
+        "decisionCompleted": 4305,
+        "actionEmitted": 4305
+      },
+      "durationsMs": {
+        "preInference": 102,
+        "inference": 4158,
+        "postInference": null,
+        "orchestration": 102,
+        "decision": 4305,
+        "eventToAction": 4305
+      }
+    },
+    {
+      "repetition": 2,
+      "sessionId": "959fe5ff-910a-4a23-ad6b-b71872c6643b",
+      "messageId": "latency-platform-mucx8fh6-jev-important_milestone-10",
+      "mechanism": "jev",
+      "scenarioId": "important_milestone",
+      "expectedAction": "report",
+      "actualAction": "report",
+      "status": "completed",
+      "correct": true,
+      "deterministicForwarding": false,
+      "modelInvoked": true,
+      "timelineMs": {
+        "eventEmitted": 0,
+        "eventObservable": 0,
+        "decisionStarted": 9.5,
+        "inferenceStarted": 9.5,
+        "inferenceCompleted": 399.1,
+        "decisionCompleted": 413,
+        "actionEmitted": 413
+      },
+      "durationsMs": {
+        "preInference": 9.5,
+        "inference": 389.6,
+        "postInference": null,
+        "orchestration": 9.5,
+        "decision": 413,
+        "eventToAction": 413
+      }
+    },
+    {
+      "repetition": 2,
+      "sessionId": "45801ae6-b1a1-4019-ac60-25fef17892a9",
+      "messageId": "latency-platform-mucx8fh6-regular-llm-blocked_user_input-11",
+      "mechanism": "regular-llm",
+      "scenarioId": "blocked_user_input",
+      "expectedAction": "request_input",
+      "actualAction": "request_input",
+      "status": "completed",
+      "correct": true,
+      "deterministicForwarding": false,
+      "modelInvoked": true,
+      "timelineMs": {
+        "eventEmitted": 0,
+        "eventObservable": 0,
+        "decisionStarted": 88,
+        "inferenceStarted": 88,
+        "inferenceCompleted": 3411,
+        "decisionCompleted": 3464,
+        "actionEmitted": 3464
+      },
+      "durationsMs": {
+        "preInference": 88,
+        "inference": 3323,
+        "postInference": null,
+        "orchestration": 88,
+        "decision": 3464,
+        "eventToAction": 3464
+      }
+    },
+    {
+      "repetition": 2,
+      "sessionId": "a5ecb18f-b8b2-4254-966f-8b0f33ed1a0f",
+      "messageId": "latency-platform-mucx8fh6-jev-blocked_user_input-12",
+      "mechanism": "jev",
+      "scenarioId": "blocked_user_input",
+      "expectedAction": "request_input",
+      "actualAction": "request_input",
+      "status": "completed",
+      "correct": true,
+      "deterministicForwarding": false,
+      "modelInvoked": true,
+      "timelineMs": {
+        "eventEmitted": 0,
+        "eventObservable": 0,
+        "decisionStarted": 6.1,
+        "inferenceStarted": 6.1,
+        "inferenceCompleted": 235.8,
+        "decisionCompleted": 248,
+        "actionEmitted": 248
+      },
+      "durationsMs": {
+        "preInference": 6.1,
+        "inference": 229.7,
+        "postInference": null,
+        "orchestration": 6.1,
+        "decision": 248,
+        "eventToAction": 248
+      }
+    },
+    {
+      "repetition": 2,
+      "sessionId": "84280d4a-8a0e-407c-8bed-c99af6814a03",
+      "messageId": "latency-platform-mucx8fh6-regular-llm-routine_redundant_progress-13",
+      "mechanism": "regular-llm",
+      "scenarioId": "routine_redundant_progress",
+      "expectedAction": "quiet",
+      "actualAction": "quiet",
+      "status": "completed",
+      "correct": true,
+      "deterministicForwarding": false,
+      "modelInvoked": true,
+      "timelineMs": {
+        "eventEmitted": 0,
+        "eventObservable": 0,
+        "decisionStarted": 51,
+        "inferenceStarted": 51,
+        "inferenceCompleted": 3391,
+        "decisionCompleted": 3443,
+        "actionEmitted": 3443
+      },
+      "durationsMs": {
+        "preInference": 51,
+        "inference": 3340,
+        "postInference": null,
+        "orchestration": 51,
+        "decision": 3443,
+        "eventToAction": 3443
+      }
+    },
+    {
+      "repetition": 2,
+      "sessionId": "8a149ca7-7ecd-4fe7-8e9a-535f7d15101d",
+      "messageId": "latency-platform-mucx8fh6-jev-routine_redundant_progress-14",
+      "mechanism": "jev",
+      "scenarioId": "routine_redundant_progress",
+      "expectedAction": "quiet",
+      "actualAction": "quiet",
+      "status": "completed",
+      "correct": true,
+      "deterministicForwarding": false,
+      "modelInvoked": true,
+      "timelineMs": {
+        "eventEmitted": 0,
+        "eventObservable": 0,
+        "decisionStarted": 0.8,
+        "inferenceStarted": 0.8,
+        "inferenceCompleted": 291.8,
+        "decisionCompleted": 305,
+        "actionEmitted": 305
+      },
+      "durationsMs": {
+        "preInference": 0.8,
+        "inference": 291,
+        "postInference": null,
+        "orchestration": 0.8,
+        "decision": 305,
+        "eventToAction": 305
+      }
+    },
+    {
+      "repetition": 2,
+      "sessionId": "7f859a74-72e1-40a7-985a-08dfbf9f5da9",
+      "messageId": "latency-platform-mucx8fh6-regular-llm-completion_adequate_evidence-15",
+      "mechanism": "regular-llm",
+      "scenarioId": "completion_adequate_evidence",
+      "expectedAction": "report",
+      "actualAction": "report",
+      "status": "completed",
+      "correct": true,
+      "deterministicForwarding": false,
+      "modelInvoked": true,
+      "timelineMs": {
+        "eventEmitted": 0,
+        "eventObservable": 0,
+        "decisionStarted": 93,
+        "inferenceStarted": 93,
+        "inferenceCompleted": 9539,
+        "decisionCompleted": 9592,
+        "actionEmitted": 9592
+      },
+      "durationsMs": {
+        "preInference": 93,
+        "inference": 9446,
+        "postInference": null,
+        "orchestration": 93,
+        "decision": 9592,
+        "eventToAction": 9592
+      }
+    },
+    {
+      "repetition": 2,
+      "sessionId": "d88d321a-a672-468b-be0b-c64687b610af",
+      "messageId": "latency-platform-mucx8fh6-jev-completion_adequate_evidence-16",
+      "mechanism": "jev",
+      "scenarioId": "completion_adequate_evidence",
+      "expectedAction": "report",
+      "actualAction": "report",
+      "status": "completed",
+      "correct": true,
+      "deterministicForwarding": false,
+      "modelInvoked": true,
+      "timelineMs": {
+        "eventEmitted": 0,
+        "eventObservable": 0,
+        "decisionStarted": 8.6,
+        "inferenceStarted": 8.6,
+        "inferenceCompleted": 334.5,
+        "decisionCompleted": 346,
+        "actionEmitted": 346
+      },
+      "durationsMs": {
+        "preInference": 8.6,
+        "inference": 325.9,
+        "postInference": null,
+        "orchestration": 8.6,
+        "decision": 346,
+        "eventToAction": 346
+      }
+    }
+  ],
+  "comparisonEligible": true
+}

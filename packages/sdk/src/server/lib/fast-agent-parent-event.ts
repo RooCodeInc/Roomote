@@ -7,8 +7,11 @@ import {
   buildFastAgentSetupAdapter,
   createFastAgentTaskLauncher,
   createFastAgentWebTaskLauncher,
+  appendFastAgentVisibleMessages,
   fastAgentConversationRepository,
   isFastAgentVoiceCallActive,
+  publishFastAgentSessionRefresh,
+  runJevFastAgentCommunicationExperiment,
   resolveApiBaseUrl,
   type FastAgentConversationRecord,
   type FastAgentTurnLockHandle,
@@ -236,6 +239,8 @@ export type FastAgentParentEvent =
       message: string;
       imageArtifactIds?: string[];
       charts?: DataVisualizationInput[];
+      /** Test-only Jev communication arm; normal task reports omit this. */
+      communicationExperiment?: 'jev';
     }
   | {
       type: 'artifact_published';
@@ -2915,6 +2920,36 @@ export async function deliverFastAgentParentEventWithLock(
           parentTurn.conversation.surface,
         ),
       });
+      return 'delivered';
+    }
+    if (
+      params.event.type === 'child_message' &&
+      params.event.communicationExperiment === 'jev'
+    ) {
+      const experimentEvent = params.event;
+      const result = await runJevFastAgentCommunicationExperiment({
+        message: experimentEvent.message,
+        purpose: experimentEvent.purpose,
+        adapter: {
+          ...parentTurn.adapter,
+          postReply: async (reply) => {
+            await appendFastAgentVisibleMessages({
+              sessionId: params.parent.sessionId,
+              messages: [{ role: 'assistant', content: reply.message }],
+            });
+            await publishFastAgentSessionRefresh(params.parent.sessionId, {
+              type: 'task_report_admitted',
+              eventId: `${experimentEvent.messageId}:jev-reply`,
+              taskId: experimentEvent.taskId,
+              admittedAtMs: experimentEvent.admittedAtMs ?? Date.now(),
+            });
+            return parentTurn.adapter.postReply(reply);
+          },
+        },
+      });
+      console.info(
+        `[FastAgentCommunicationExperiment] event=${experimentEvent.messageId} action=${result.action} modelInferenceMs=${result.modelInferenceMs.toFixed(1)} orchestrationMs=${result.orchestrationMs.toFixed(1)} eventToActionMs=${result.eventToActionMs.toFixed(1)} messagePosted=${result.messagePosted}`,
+      );
       return 'delivered';
     }
     // The same base URL must reach both the config resolver and the broker:
