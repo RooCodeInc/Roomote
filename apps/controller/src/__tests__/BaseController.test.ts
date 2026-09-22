@@ -835,7 +835,10 @@ describe('BaseController.handleWorkerExitBeforeStart', () => {
       returning: vi.fn().mockResolvedValue([]),
     });
     mockTaskRunsFindFirst.mockResolvedValueOnce(
-      makeWorkerExitState({ status: RunStatus.Preparing }),
+      makeWorkerExitState({
+        status: RunStatus.Preparing,
+        sleepAt: new Date('2026-09-22T08:01:00.000Z'),
+      }),
     );
 
     const claimed = await controller.testHandleWorkerExitBeforeStart(

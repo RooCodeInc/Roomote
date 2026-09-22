@@ -98,7 +98,6 @@ function getWorkerExitAgeMs(
 
 function getWorkerExitShutdownReason(
   state: WorkerExitTaskRunState,
-  observedAt: Date,
 ): string | null {
   if (state.cancelRequestedAt) {
     return 'cancel_requested';
@@ -118,10 +117,6 @@ function getWorkerExitShutdownReason(
 
   if (state.canceledAt) {
     return 'canceled';
-  }
-
-  if (state.sleepAt && state.sleepAt <= observedAt) {
-    return 'sleep_due';
   }
 
   if (state.snapshotCreatedAt) {
@@ -772,7 +767,7 @@ export abstract class BaseController {
   ): void {
     const observedAt = new Date();
     const shutdownReason = state
-      ? getWorkerExitShutdownReason(state, observedAt)
+      ? getWorkerExitShutdownReason(state)
       : 'state_unavailable';
     const isActive = state !== null && !isExitedRunStatus(state.status);
     const classification: WorkerExitClassification =
