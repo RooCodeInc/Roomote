@@ -1192,7 +1192,7 @@ describe('canonical PR review notification ownership', () => {
   }) => {
     const task = await taskFactory.create();
     const repository = `owner/supersede-${task.id}`;
-    await Promise.all([
+    const [run] = await Promise.all([
       runFactory.create({
         taskId: task.id,
         payload: fastParentPayload(input.conversationId),
@@ -1206,7 +1206,7 @@ describe('canonical PR review notification ownership', () => {
         eventKey: `supersede-${task.id}`,
       }),
     );
-    return repository;
+    return { repository, run, task };
   };
 
   const claimToPromptPosting = async (repository: string) => {
@@ -1264,8 +1264,24 @@ describe('canonical PR review notification ownership', () => {
       ].map(setUpSessionDelivery),
     );
 
-    const otherDeliveryId = await postAction(other!);
-    const firstDeliveryId = await postAction(first!);
+    const otherDeliveryId = await postAction(other!.repository);
+    const firstDeliveryId = await postAction(first!.repository);
+
+    await db.insert(taskMessages).values({
+      runId: first!.run.id,
+      taskId: first!.task.id,
+      ts: Date.now(),
+      eventType: 'roomote_runtime.assistant_message',
+      role: 'assistant',
+      protocol: 'roomote_runtime',
+      contentBlocks: [{ type: 'text', text: 'Resolve these CI failures?' }],
+      payload: {
+        prReviewAction: {
+          deliveryId: firstDeliveryId,
+          status: 'pending',
+        },
+      },
+    });
 
     // The rendered session card caches the offer status in the transcript
     // message payload; retirement must dismiss it there too.
@@ -1295,7 +1311,7 @@ describe('canonical PR review notification ownership', () => {
       source: 'web',
     });
 
-    const secondDeliveryId = await postAction(second!);
+    const secondDeliveryId = await postAction(second!.repository);
 
     // The newest offer in the session stays actionable; the older one is
     // retired, and a different conversation's offer is untouched.
@@ -1312,6 +1328,17 @@ describe('canonical PR review notification ownership', () => {
         columns: { payload: true },
       }),
     ).resolves.toMatchObject({
+      payload: {
+        prReviewAction: { deliveryId: firstDeliveryId, status: 'dismissed' },
+      },
+    });
+    await expect(
+      db.query.taskMessages.findFirst({
+        where: eq(taskMessages.taskId, first!.task.id),
+        columns: { contentBlocks: true, payload: true },
+      }),
+    ).resolves.toMatchObject({
+      contentBlocks: [{ type: 'text', text: 'Resolve these CI failures?' }],
       payload: {
         prReviewAction: { deliveryId: firstDeliveryId, status: 'dismissed' },
       },
@@ -2067,8 +2094,10 @@ describe('canonical PR review notification ownership', () => {
         { conversationId: sessionConversation, prNumber: 32 },
       ].map(setUpSessionDelivery),
     );
-    const firstClaim = await claimToPromptPosting(firstRepository!);
-    const secondClaim = await claimToPromptPosting(secondRepository!);
+    const firstClaim = await claimToPromptPosting(firstRepository!.repository);
+    const secondClaim = await claimToPromptPosting(
+      secondRepository!.repository,
+    );
 
     await expect(
       Promise.all([
