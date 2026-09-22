@@ -15,7 +15,6 @@ import {
   tasks,
 } from '@roomote/db/server';
 import {
-  evaluateCustomAutomationResultJudgment,
   generateTrackedNonTaskObject,
   NON_TASK_INFERENCE_SURFACES,
 } from '@roomote/cloud-agents/server';
@@ -110,7 +109,7 @@ async function collectPreparationContext(resultId: string) {
       result.customAutomationId
         ? db.query.customAutomations.findFirst({
             where: eq(customAutomations.id, result.customAutomationId),
-            columns: { prompt: true, judgmentSpec: true },
+            columns: { prompt: true },
           })
         : null,
       result.sourceTaskId
@@ -171,40 +170,30 @@ export async function processAutomationResultPreparation(params: {
   try {
     const instructions =
       context.customAutomation?.prompt ?? context.task?.prompt ?? '';
-    const [prepared, judgment] = await Promise.all([
-      generateTrackedNonTaskObject({
-        surface: NON_TASK_INFERENCE_SURFACES.automationResultPreparation,
-        userId: context.result.userId,
-        taskId: context.result.sourceTaskId,
-        fastConversationId: context.sourceSession?.fastConversationId,
-        modelRole: 'small',
-        maxOutputTokens: 350,
-        structuredOutputRetryCount: 1,
-        schema: preparedResultSchema,
-        system:
-          'Prepare an automation inbox item from the supplied bounded facts. Write a factual outcome headline and exactly one concise decision-context sentence. State only concrete outcomes, material changes, scope, blockers, limitations, or decisions present in the input. Do not invent urgency, priority, ownership, deadlines, actions, or completion. Do not describe the process of checking or investigating. Select only exact reference keys supplied in candidates; never output URLs or executable instructions.',
-        prompt: JSON.stringify({
-          automation: context.result.automationName,
-          instructions: instructions.slice(0, 4_000),
-          outcome: context.result.content.slice(0, 12_000),
-          state: {
-            task: context.task?.state ?? null,
-            run: context.run?.status ?? null,
-            errorCode: context.run?.errorCode ?? null,
-            blocker: context.run?.error?.slice(0, 1_000) ?? null,
-          },
-          candidates: context.references,
-        }),
+    const { object } = await generateTrackedNonTaskObject({
+      surface: NON_TASK_INFERENCE_SURFACES.automationResultPreparation,
+      userId: context.result.userId,
+      taskId: context.result.sourceTaskId,
+      fastConversationId: context.sourceSession?.fastConversationId,
+      modelRole: 'small',
+      maxOutputTokens: 350,
+      structuredOutputRetryCount: 1,
+      schema: preparedResultSchema,
+      system:
+        'Prepare an automation inbox item from the supplied bounded facts. Write a factual outcome headline and exactly one concise decision-context sentence. State only concrete outcomes, material changes, scope, blockers, limitations, or decisions present in the input. Do not invent urgency, priority, ownership, deadlines, actions, or completion. Do not describe the process of checking or investigating. Select only exact reference keys supplied in candidates; never output URLs or executable instructions.',
+      prompt: JSON.stringify({
+        automation: context.result.automationName,
+        instructions: instructions.slice(0, 4_000),
+        outcome: context.result.content.slice(0, 12_000),
+        state: {
+          task: context.task?.state ?? null,
+          run: context.run?.status ?? null,
+          errorCode: context.run?.errorCode ?? null,
+          blocker: context.run?.error?.slice(0, 1_000) ?? null,
+        },
+        candidates: context.references,
       }),
-      context.result.resultKind === 'outcome' &&
-      context.customAutomation?.judgmentSpec
-        ? evaluateCustomAutomationResultJudgment({
-            spec: context.customAutomation.judgmentSpec,
-            result: context.result.content,
-          }).catch(() => null)
-        : Promise.resolve(null),
-    ]);
-    const { object } = prepared;
+    });
     const validReferenceKeys = new Set(
       context.references.map((reference) => reference.key),
     );
@@ -213,20 +202,18 @@ export async function processAutomationResultPreparation(params: {
         object.referenceKeys.filter((key) => validReferenceKeys.has(key)),
       ),
     ];
-    const update = {
-      headline: object.headline,
-      decisionContext: object.decisionContext,
-      selectedReferenceKeys,
-      preparationStatus: 'ready' as const,
-      preparationAttempts: context.result.preparationAttempts + 1,
-      preparedAt: new Date(),
-      preparationErrorCode: null,
-      updatedAt: new Date(),
-      ...(judgment ? { judgment } : {}),
-    };
     await db
       .update(automationResults)
-      .set(update)
+      .set({
+        headline: object.headline,
+        decisionContext: object.decisionContext,
+        selectedReferenceKeys,
+        preparationStatus: 'ready',
+        preparationAttempts: context.result.preparationAttempts + 1,
+        preparedAt: new Date(),
+        preparationErrorCode: null,
+        updatedAt: new Date(),
+      })
       .where(
         and(
           eq(automationResults.id, params.resultId),

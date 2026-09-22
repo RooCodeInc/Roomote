@@ -42,7 +42,6 @@ export * from './user-personalization';
 export * from './mcp-self-setup';
 export * from './mcp-tool-client';
 export * from './non-task-provider-usage';
-export * from './custom-automation-judgment';
 export {
   getAvailableEnvironments,
   type RoutableEnvironment,

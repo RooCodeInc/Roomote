@@ -1,5 +1,5 @@
 {
-  "id": "1a7a19b0-59d2-431c-bc1f-936ba456add4",
+  "id": "2a3ea06b-770b-4f23-be7a-85b25d777091",
   "prevId": "b678792f-a68a-4592-9cb4-14ca7772c5dd",
   "version": "7",
   "dialect": "postgresql",
@@ -1296,12 +1296,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
-        },
-        "judgment": {
-          "name": "judgment",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
         },
         "result_kind": {
           "name": "result_kind",
@@ -2949,8 +2943,8 @@
           "primaryKey": false,
           "notNull": true
         },
-        "judgment_spec": {
-          "name": "judgment_spec",
+        "decision_rule": {
+          "name": "decision_rule",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false

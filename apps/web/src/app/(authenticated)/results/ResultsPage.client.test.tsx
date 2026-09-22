@@ -31,11 +31,6 @@ const results: ResultInboxItem[] = [
     content: '# Full report\n\nThree dependency risks were found.',
     priority: 'critical',
     preparationStatus: 'ready',
-    judgment: {
-      specVersion: 1,
-      questionId: 'goal_addressed',
-      answer: { type: 'noul', noul: 0.84 },
-    },
     createdAt: new Date('2026-09-11T10:00:00Z'),
     actions: [
       {
@@ -64,7 +59,6 @@ const results: ResultInboxItem[] = [
     content: 'Extract the repeated boundary.',
     priority: 'high',
     preparationStatus: 'not_required',
-    judgment: null,
     createdAt: new Date('2026-09-11T09:00:00Z'),
     actions: [
       {
@@ -221,7 +215,6 @@ describe('ResultsPage', () => {
       }),
     ).toBeInTheDocument();
     expect(screen.getByText('Full report')).toBeInTheDocument();
-    expect(screen.getByLabelText('Shadow evaluation')).toHaveTextContent('84%');
     expect(screen.getByRole('link', { name: 'Open task' })).toHaveAttribute(
       'href',
       '/task/task-1',

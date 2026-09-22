@@ -37,7 +37,7 @@ import {
   isScheduleOnlyBackgroundAutomationFrequency,
   type AutomationTarget,
   type BackgroundAutomationProvider,
-  type CustomAutomationJudgmentSpec,
+  type CustomAutomationDecisionRule,
   type CustomAutomationScheduleMode,
   type OptionalAutomationTarget,
   type ReasoningEffort,
@@ -63,7 +63,7 @@ export type CustomAutomationListItem = {
   id: string;
   name: string;
   prompt: string;
-  judgmentSpec: CustomAutomationJudgmentSpec | null;
+  decisionRule: CustomAutomationDecisionRule | null;
   enabled: boolean;
   resultPriority?: AutomationResultPriority;
   scheduleMode: CustomAutomationScheduleMode;
@@ -146,7 +146,7 @@ function toListItem(
     id: row.id,
     name: row.name,
     prompt: row.prompt,
-    judgmentSpec: row.judgmentSpec,
+    decisionRule: row.decisionRule,
     enabled: row.enabled,
     resultPriority: row.resultPriority,
     scheduleMode,

@@ -1,0 +1,1 @@
+ALTER TABLE "custom_automations" ADD COLUMN "decision_rule" jsonb;

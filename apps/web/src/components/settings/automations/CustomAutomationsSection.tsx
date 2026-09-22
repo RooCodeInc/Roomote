@@ -19,7 +19,7 @@ import {
   AUTOMATION_RESULT_PRIORITY_LABELS,
   AUTOMATION_RESULT_PRIORITIES,
   type AutomationResultPriority,
-  type CustomAutomationJudgmentSpec,
+  type CustomAutomationDecisionRule,
   type CustomAutomationScheduleMode,
   type ReasoningEffort,
 } from '@roomote/types';
@@ -81,7 +81,7 @@ type ConnectedDestinationProvider = Exclude<
 type CustomAutomationFormState = {
   name: string;
   prompt: string;
-  judgmentSpec: CustomAutomationJudgmentSpec | null;
+  decisionRule: CustomAutomationDecisionRule | null;
   enabled: boolean;
   resultPriority: AutomationResultPriority;
   scheduleMode: CustomAutomationScheduleMode;
@@ -102,7 +102,7 @@ type CustomAutomationFieldErrors = Partial<
 const EMPTY_FORM: CustomAutomationFormState = {
   name: '',
   prompt: '',
-  judgmentSpec: null,
+  decisionRule: null,
   enabled: true,
   resultPriority: 'normal',
   scheduleMode: 'daily',
@@ -314,7 +314,7 @@ function formFromRow(
   return {
     name: row.name,
     prompt: row.prompt,
-    judgmentSpec: row.judgmentSpec,
+    decisionRule: row.decisionRule,
     enabled: row.enabled,
     resultPriority: row.resultPriority ?? 'normal',
     scheduleMode: row.scheduleMode,
@@ -1004,26 +1004,44 @@ export function CustomAutomationsSection({
         </div>
 
         <div className="space-y-2 rounded-lg border bg-muted/30 p-3 text-sm">
-          <p className="font-medium">Shadow evaluation</p>
+          <p className="font-medium">Judgment decision rule</p>
           <p className="text-muted-foreground">
-            When a judgment backend is configured, Roomote will check whether
-            each completed result addresses the saved goal. This advisory check
-            never changes delivery.
+            Roomote stores a typed rule for a future judgment-model decision.
+            This prototype does not evaluate runs or change delivery.
           </p>
-          {form.judgmentSpec ? (
+          {form.decisionRule ? (
             <div className="space-y-1 text-muted-foreground">
               <p>
                 <span className="font-medium text-foreground">Question:</span>{' '}
-                {form.judgmentSpec.question.instructions}
+                {form.decisionRule.question.instructions}
               </p>
               <p>
-                <span className="font-medium text-foreground">Saved goal:</span>{' '}
-                {form.judgmentSpec.goal}
+                <span className="font-medium text-foreground">
+                  Goal snapshot:
+                </span>{' '}
+                {form.decisionRule.goalPreview}
+              </p>
+              <p>
+                <span className="font-medium text-foreground">Inputs:</span>{' '}
+                goal, result
+              </p>
+              <p>
+                <span className="font-medium text-foreground">
+                  Allowed outcomes:
+                </span>{' '}
+                {form.decisionRule.allowedOutcomes.join(', ')}
+              </p>
+              <p>
+                <span className="font-medium text-foreground">
+                  Code consequence:
+                </span>{' '}
+                Preserve current delivery for every outcome.
               </p>
             </div>
           ) : (
             <p className="text-muted-foreground">
-              The evaluation is compiled when you save this automation.
+              The rule is compiled and saved when you create or save this
+              automation.
             </p>
           )}
         </div>

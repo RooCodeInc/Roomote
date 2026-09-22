@@ -106,10 +106,10 @@ describe('custom automations helpers', () => {
 
     expect(created.id).toBeTruthy();
     expect(created.scheduleMode).toBe('daily');
-    expect(created.judgmentSpec).toMatchObject({
+    expect(created.decisionRule).toMatchObject({
       version: 1,
-      questionId: 'goal_addressed',
-      goal: 'Scan for flaky tests.',
+      goalPreview: 'Scan for flaky tests.',
+      allowedOutcomes: ['addressed', 'needs_review', 'no_match'],
     });
 
     const listed = await listCustomAutomations();
@@ -131,8 +131,8 @@ describe('custom automations helpers', () => {
     expect(updated.enabled).toBe(false);
     expect(updated.scheduleMode).toBe('weekly');
     expect(updated.prompt).toContain('updated');
-    expect(updated.judgmentSpec).toMatchObject({
-      goal: 'Scan for flaky tests (updated).',
+    expect(updated.decisionRule).toMatchObject({
+      goalPreview: 'Scan for flaky tests (updated).',
     });
 
     await deleteCustomAutomation(created.id);

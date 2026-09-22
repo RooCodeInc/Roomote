@@ -226,7 +226,7 @@ export function compactManageCustomAutomationsResult(
       const automation = asRecord(result.automation);
       return {
         automation: automation
-          ? pickDefined(automation, ['id', 'name', 'prompt', 'judgmentSpec'])
+          ? pickDefined(automation, ['id', 'name', 'prompt', 'decisionRule'])
           : {},
       };
     }
