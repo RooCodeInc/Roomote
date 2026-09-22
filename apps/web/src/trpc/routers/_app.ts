@@ -35,6 +35,7 @@ import {
   sessionGoalInputSchema,
   codingModelRoutingRuleSchema,
   integrationToolPolicyUpsertSchema,
+  integrationToolPoliciesUpsertSchema,
   taskModelMetadataSchema,
   type ScheduleOnlyBackgroundAutomationFrequencyField,
 } from '@roomote/types';
@@ -228,7 +229,9 @@ import {
   listIntegrationToolPoliciesCommand,
   listPersonalIntegrationToolPoliciesCommand,
   setIntegrationToolPolicyCommand,
+  setIntegrationToolPoliciesCommand,
   setPersonalIntegrationToolPolicyCommand,
+  setPersonalIntegrationToolPoliciesCommand,
 } from '../commands/integration-tool-policies';
 import {
   type EnvironmentConfigVersionDetail,
@@ -3621,6 +3624,11 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         setIntegrationToolPolicyCommand(auth, input),
       ),
+    setMany: protectedProcedure
+      .input(integrationToolPoliciesUpsertSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        setIntegrationToolPoliciesCommand(auth, input),
+      ),
     listPersonal: protectedProcedure.query(({ ctx: { auth } }) =>
       listPersonalIntegrationToolPoliciesCommand(auth),
     ),
@@ -3628,6 +3636,11 @@ export const appRouter = createRouter({
       .input(integrationToolPolicyUpsertSchema)
       .mutation(({ ctx: { auth }, input }) =>
         setPersonalIntegrationToolPolicyCommand(auth, input),
+      ),
+    setManyPersonal: protectedProcedure
+      .input(integrationToolPoliciesUpsertSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        setPersonalIntegrationToolPoliciesCommand(auth, input),
       ),
   }),
 

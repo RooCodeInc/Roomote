@@ -224,6 +224,50 @@ async function upsertPolicy(
     .onConflictDoUpdate({ target: store.conflictTarget, set: changes });
 }
 
+async function upsertPolicies(
+  store: PolicyStore,
+  input: {
+    integrationId: string;
+    toolNames: string[];
+    mode: IntegrationToolPolicyMode;
+  },
+): Promise<void> {
+  const toolNames = [...new Set(input.toolNames)];
+  if (toolNames.length === 0) return;
+
+  const table = store.table as typeof integrationToolPolicies;
+  if (input.mode === 'allow') {
+    await db
+      .delete(table)
+      .where(
+        and(
+          store.owns,
+          eq(table.integrationId, input.integrationId),
+          inArray(table.toolName, toolNames),
+        ),
+      );
+    return;
+  }
+
+  const changes = {
+    mode: input.mode === 'auto' ? ('ask' as const) : input.mode,
+    auto: input.mode === 'auto',
+    ...store.ownValues,
+    updatedAt: sql`clock_timestamp()`,
+  };
+  await db
+    .insert(table)
+    .values(
+      toolNames.map((toolName) => ({
+        ...store.keyValues,
+        integrationId: input.integrationId,
+        toolName,
+        ...changes,
+      })),
+    )
+    .onConflictDoUpdate({ target: store.conflictTarget, set: changes });
+}
+
 /**
  * Every deployment policy, for both the admin settings surface and the
  * per-turn permission compilation.
@@ -240,6 +284,16 @@ export function upsertIntegrationToolPolicy(input: {
   updatedByUserId: string;
 }) {
   return upsertPolicy(deploymentPolicyStore(input.updatedByUserId), input);
+}
+
+/** Configure many tools for one integration in a single database statement. */
+export function upsertIntegrationToolPolicies(input: {
+  integrationId: string;
+  toolNames: string[];
+  mode: IntegrationToolPolicyMode;
+  updatedByUserId: string;
+}) {
+  return upsertPolicies(deploymentPolicyStore(input.updatedByUserId), input);
 }
 
 /** One user's personal policies. */
@@ -259,6 +313,16 @@ export function upsertIntegrationToolUserPolicy(input: {
   mode: IntegrationToolPolicyMode;
 }) {
   return upsertPolicy(userPolicyStore(input.userId), input);
+}
+
+/** Configure many tools for one user's integration in one statement. */
+export function upsertIntegrationToolUserPolicies(input: {
+  userId: string;
+  integrationId: string;
+  toolNames: string[];
+  mode: IntegrationToolPolicyMode;
+}) {
+  return upsertPolicies(userPolicyStore(input.userId), input);
 }
 
 async function requireSessionOwner(

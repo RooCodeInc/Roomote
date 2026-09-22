@@ -27,6 +27,7 @@ import {
   recordIntegrationToolAutoEvaluation,
   redactIntegrationToolArgs,
   setIntegrationToolSessionOverride,
+  upsertIntegrationToolPolicies,
   upsertIntegrationToolPolicy,
   upsertIntegrationToolUserPolicy,
   listIntegrationToolUserPolicies,
@@ -178,6 +179,36 @@ describe('integration tool policies', () => {
       mode: 'allow',
       updatedByUserId: admin,
     });
+  });
+
+  it('updates and resets many tool modes together', async () => {
+    const admin = await user();
+    const input = {
+      integrationId: 'bulk-mock',
+      toolNames: ['first_tool', 'second_tool'],
+      updatedByUserId: admin,
+    };
+
+    await upsertIntegrationToolPolicies({ ...input, mode: 'ask' });
+    expect(
+      (await listIntegrationToolPolicies())
+        .filter((policy) => policy.integrationId === input.integrationId)
+        .map((policy) => `${policy.toolName}:${policy.mode}`),
+    ).toEqual(['first_tool:ask', 'second_tool:ask']);
+
+    await upsertIntegrationToolPolicies({ ...input, mode: 'reject' });
+    expect(
+      (await listIntegrationToolPolicies())
+        .filter((policy) => policy.integrationId === input.integrationId)
+        .map((policy) => `${policy.toolName}:${policy.mode}`),
+    ).toEqual(['first_tool:reject', 'second_tool:reject']);
+
+    await upsertIntegrationToolPolicies({ ...input, mode: 'allow' });
+    expect(
+      (await listIntegrationToolPolicies()).filter(
+        (policy) => policy.integrationId === input.integrationId,
+      ),
+    ).toEqual([]);
   });
 });
 

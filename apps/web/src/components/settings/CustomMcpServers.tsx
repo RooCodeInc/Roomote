@@ -35,6 +35,7 @@ import {
 import type { CustomMcpServerVisibility } from '@roomote/types';
 import type { CustomMcpServerListEntry } from '@/trpc/commands/custom-mcp-servers';
 import { useAuthorizedUser } from '@/hooks/useUser';
+import { useIntegrationToolApprovalsExperiment } from '@/hooks/useIntegrationToolApprovalsExperiment';
 
 import type { IntegrationItem } from './integration-card';
 import { IntegrationToolApprovalList } from './IntegrationToolApprovalControls';
@@ -759,6 +760,7 @@ function CustomToolManagementDialog({
 }) {
   const trpc = useTRPC();
   const { isAdmin } = useAuthorizedUser();
+  const approvalsExperiment = useIntegrationToolApprovalsExperiment();
   // A custom server mounts under its name. Shared servers take the
   // deployment-wide, admin-managed approval policies; a personal server takes
   // its owner's personal policies, which apply to their own Sessions only.
@@ -768,37 +770,35 @@ function CustomToolManagementDialog({
       { enabled: open && Boolean(server), retry: false },
     ),
   );
-
   const setDisabledTools = useMutation(
     trpc.customMcpServers.setDisabledTools.mutationOptions(),
   );
-
   const [disabledNames, setDisabledNames] = useState<Set<string>>(new Set());
   const loadedKey = useMemo(
     () =>
       toolsQuery.data
         ? `${server?.id}:${toolsQuery.data.tools.map((tool) => tool.name).join(',')}`
         : null,
-    [toolsQuery.data, server?.id],
+    [server?.id, toolsQuery.data],
   );
 
   useEffect(() => {
-    if (loadedKey && toolsQuery.data) {
-      setDisabledNames(
-        new Set(
-          toolsQuery.data.tools
-            .filter((tool) => !tool.enabled)
-            .map((tool) => tool.name),
-        ),
-      );
-    }
+    if (!loadedKey || !toolsQuery.data) return;
+    setDisabledNames(
+      new Set(
+        toolsQuery.data.tools
+          .filter((tool) => !tool.enabled)
+          .map((tool) => tool.name),
+      ),
+    );
   }, [loadedKey, toolsQuery.data]);
 
+  const legacyAvailability =
+    !approvalsExperiment.isLoading &&
+    !approvalsExperiment.enabled &&
+    (scope === 'owner' || isAdmin);
   const save = async () => {
-    if (!server) {
-      return;
-    }
-
+    if (!server) return;
     await setDisabledTools.mutateAsync({
       id: server.id,
       disabledTools: [...disabledNames],
@@ -809,14 +809,13 @@ function CustomToolManagementDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="xl">
+      <DialogContent size="2xl">
         <DialogHeader>
           <DialogTitle>
             Manage tools for {server?.name ?? 'integration'}
           </DialogTitle>
           <DialogDescription>
-            Disabled tools are blocked at the Roomote proxy and hidden from
-            agents.
+            Choose how the model can use tools from this integration.
           </DialogDescription>
         </DialogHeader>
 
@@ -841,41 +840,38 @@ function CustomToolManagementDialog({
               canManage={scope === 'owner' || isAdmin}
               open={open}
               tools={toolsQuery.data?.tools ?? []}
-              saveNote="Tool enable/disable still needs Save."
               isToolEnabled={(toolName) => !disabledNames.has(toolName)}
               onToggleTool={(toolName, enabled) =>
                 setDisabledNames((current) => {
                   const next = new Set(current);
-
-                  if (enabled) {
-                    next.delete(toolName);
-                  } else {
-                    next.add(toolName);
-                  }
-
+                  if (enabled) next.delete(toolName);
+                  else next.add(toolName);
                   return next;
                 })
               }
+              toggleDisabled={setDisabledTools.isPending}
             />
           </div>
         )}
 
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-          >
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            onClick={save}
-            disabled={setDisabledTools.isPending || toolsQuery.isPending}
-          >
-            {setDisabledTools.isPending ? <Loading /> : 'Save'}
-          </Button>
-        </DialogFooter>
+        {legacyAvailability && !toolsQuery.isPending && !toolsQuery.isError ? (
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={save}
+              disabled={setDisabledTools.isPending}
+            >
+              {setDisabledTools.isPending ? <Loading /> : 'Save'}
+            </Button>
+          </DialogFooter>
+        ) : null}
       </DialogContent>
     </Dialog>
   );

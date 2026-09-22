@@ -10,47 +10,46 @@ import {
 import { useIntegrationToolApprovalsExperiment } from '@/hooks/useIntegrationToolApprovalsExperiment';
 import { useIntegrationToolPolicies } from '@/hooks/useIntegrationToolPolicies';
 
-import { cn } from '@/lib/utils';
 import {
   Badge,
+  BasicTooltip,
   Ban,
   Checkbox,
+  CheckCheck,
   ChevronDown,
   ChevronRight,
-  CircleCheck,
-  Hand,
-  MoreHorizontal,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-  Sparkles,
+  MessageCircleQuestionMark,
+  Scale,
+  ToggleButton,
   type LucideIcon,
 } from '@/components/system';
 
 const APPROVAL_MODES: {
   mode: IntegrationToolPolicyMode;
   label: string;
-  hint?: string;
+  tooltip: string;
   icon: LucideIcon;
 }[] = [
-  { mode: 'allow', label: 'Always allow', icon: CircleCheck },
-  // A preview: it asks exactly like Ask first, and records what a decision
-  // model made of each call so its judgment can be checked before it is
-  // trusted to skip the ask.
   {
     mode: 'auto',
-    label: 'Auto (preview)',
-    hint: 'Auto (preview): asks first, and records what Roomote would decide',
-    icon: Sparkles,
+    label: 'Auto',
+    tooltip: 'Defer to the configured judgement model',
+    icon: Scale,
   },
-  { mode: 'ask', label: 'Ask first', icon: Hand },
-  { mode: 'reject', label: 'Reject', icon: Ban },
+  {
+    mode: 'allow',
+    label: 'Always allow',
+    tooltip: 'Always allow',
+    icon: CheckCheck,
+  },
+  {
+    mode: 'ask',
+    label: 'Always ask',
+    tooltip: 'Always ask',
+    icon: MessageCircleQuestionMark,
+  },
+  { mode: 'reject', label: 'Disable', tooltip: 'Disable', icon: Ban },
 ];
-
-const INTEGRATION_TOOL_APPROVAL_SAVE_HINT =
-  'Approval changes save immediately and apply from the next session turn.';
 
 /**
  * Experiment-gated (`integrationToolApprovals`) per-tool approval mode: one
@@ -65,37 +64,35 @@ function IntegrationToolApprovalModeControl({
   onChange,
 }: {
   toolName: string;
-  value: IntegrationToolPolicyMode;
+  value?: IntegrationToolPolicyMode;
   disabled?: boolean;
   onChange: (mode: IntegrationToolPolicyMode) => void;
 }) {
   return (
     <div
-      role="radiogroup"
+      role="group"
       aria-label={`Approval mode for ${toolName}`}
-      className="flex shrink-0 items-center gap-0.5 rounded-md bg-muted/50 p-0.5"
+      className="flex shrink-0 items-center"
     >
-      {APPROVAL_MODES.map(({ mode, label, hint, icon: Icon }) => {
+      {APPROVAL_MODES.map(({ mode, label, tooltip, icon: Icon }) => {
         const checked = mode === value;
         return (
-          <button
-            key={mode}
-            type="button"
-            role="radio"
-            aria-checked={checked}
-            aria-label={label}
-            title={hint ?? label}
-            disabled={disabled}
-            onClick={() => {
-              if (!checked) onChange(mode);
-            }}
-            className={cn(
-              'flex size-7 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring disabled:cursor-default disabled:opacity-60',
-              checked && 'bg-background text-foreground shadow-sm',
-            )}
-          >
-            <Icon aria-hidden="true" className="size-4" />
-          </button>
+          <BasicTooltip key={mode} content={tooltip}>
+            <span>
+              <ToggleButton
+                variant="ghost"
+                size="icon"
+                pressed={checked}
+                aria-label={label}
+                disabled={disabled}
+                onPressedChange={() => {
+                  if (!checked) onChange(mode);
+                }}
+              >
+                <Icon aria-hidden="true" />
+              </ToggleButton>
+            </span>
+          </BasicTooltip>
         );
       })}
     </div>
@@ -134,9 +131,9 @@ function groupIntegrationToolsByAccess<T extends GroupableTool>(
 
 /**
  * One tool group. A titled group collapses; an untitled one (unclassified
- * tools) is just the list. With approvals active the header carries a mode
- * select that applies to every tool in the group; it shows the shared mode,
- * or "Custom" when the group's tools differ.
+ * tools) is just the list. With approvals active the header carries a four
+ * button row that applies to every tool in the group; mixed groups leave all
+ * four choices unselected.
  */
 function IntegrationToolApprovalGroup({
   title,
@@ -164,33 +161,12 @@ function IntegrationToolApprovalGroup({
 
   const bulkSelect =
     modes && onChangeAll ? (
-      <Select
-        value={sharedMode ?? ''}
+      <IntegrationToolApprovalModeControl
+        toolName={`all ${title?.toLowerCase() ?? 'tools'}`}
+        value={sharedMode}
         disabled={disabled}
-        onValueChange={(next) => onChangeAll(next as IntegrationToolPolicyMode)}
-      >
-        <SelectTrigger
-          className="w-44 shrink-0"
-          aria-label={`Approval mode for all ${title?.toLowerCase() ?? 'tools'}`}
-        >
-          <SelectValue
-            placeholder={
-              <span className="flex items-center gap-2">
-                <MoreHorizontal aria-hidden="true" className="size-4" />
-                Custom
-              </span>
-            }
-          />
-        </SelectTrigger>
-        <SelectContent>
-          {APPROVAL_MODES.map(({ mode, label, icon: Icon }) => (
-            <SelectItem key={mode} value={mode}>
-              <Icon aria-hidden="true" className="size-4" />
-              {label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+        onChange={onChangeAll}
+      />
     ) : null;
 
   if (title === null) {
@@ -235,9 +211,9 @@ function IntegrationToolApprovalGroup({
 /**
  * The grouped tool list every integration tool dialog renders, with the
  * experiment-gated approval controls wired in one place. The dialog supplies
- * each tool's own row content (its enable toggle, label, description); this
- * adds the per-tool mode control, the group-level control, and the save hint,
- * or nothing but the grouping when approvals are not active for the viewer.
+ * each tool's own row content (its label and description); this adds the
+ * per-tool mode control and group-level control, or nothing but the grouping
+ * when approvals are not active for the viewer.
  */
 export function IntegrationToolApprovalList<T extends ManageableTool>({
   integrationId,
@@ -246,7 +222,6 @@ export function IntegrationToolApprovalList<T extends ManageableTool>({
   canManage,
   open,
   tools,
-  saveNote,
   isToolEnabled,
   onToggleTool,
   toggleDisabled,
@@ -261,44 +236,37 @@ export function IntegrationToolApprovalList<T extends ManageableTool>({
   canManage: boolean;
   open: boolean;
   tools: T[];
-  /** How the dialog's own enable/disable changes are saved. */
-  saveNote: string;
-  isToolEnabled: (toolName: string) => boolean;
-  /** Staged by the dialog until its Save, hence a checkbox, not a switch. */
-  onToggleTool: (toolName: string, enabled: boolean) => void;
+  /** Legacy availability controls remain available while approvals are off. */
+  isToolEnabled?: (toolName: string) => boolean;
+  onToggleTool?: (toolName: string, enabled: boolean) => void;
   toggleDisabled?: boolean;
 }) {
   const experiment = useIntegrationToolApprovalsExperiment();
   const active = experiment.enabled && canManage && integrationId != null;
+  const showLegacyAvailability =
+    !experiment.enabled &&
+    canManage &&
+    isToolEnabled != null &&
+    onToggleTool != null;
   const policies = useIntegrationToolPolicies({
     enabled: open && active,
     scope,
   });
-  const modeFor = (toolName: string) =>
+  const modeFor = (tool: ManageableTool) =>
     (integrationId
-      ? policies.modes.get(integrationToolPolicyKey(integrationId, toolName))
-      : undefined) ?? 'allow';
+      ? policies.modes.get(integrationToolPolicyKey(integrationId, tool.name))
+      : undefined) ?? (tool.enabled === false ? 'reject' : 'allow');
 
   return (
     <>
-      {active ? (
-        <p className="text-xs text-muted-foreground">
-          {INTEGRATION_TOOL_APPROVAL_SAVE_HINT}
-          {scope === 'personal'
-            ? ' These apply to your own sessions only.'
-            : ''}{' '}
-          {saveNote}
-        </p>
-      ) : null}
       {groupIntegrationToolsByAccess(tools).map((group) => (
         <IntegrationToolApprovalGroup
           key={group.id}
           title={group.title}
           count={group.tools.length}
-          disabled={policies.isUpdating}
           {...(active
             ? {
-                modes: group.tools.map((tool) => modeFor(tool.name)),
+                modes: group.tools.map((tool) => modeFor(tool)),
                 onChangeAll: (mode: IntegrationToolPolicyMode) =>
                   policies.setModes(
                     integrationId,
@@ -312,23 +280,31 @@ export function IntegrationToolApprovalList<T extends ManageableTool>({
             const checkboxId = `integration-tool-${integrationId ?? 'unknown'}-${tool.name}`;
             return (
               <div key={tool.name} className="flex items-start gap-3 py-2.5">
-                <Checkbox
-                  id={checkboxId}
-                  checked={isToolEnabled(tool.name)}
-                  disabled={toggleDisabled}
-                  onCheckedChange={(checked) =>
-                    onToggleTool(tool.name, checked === true)
-                  }
-                  className="mt-0.5"
-                />
+                {showLegacyAvailability ? (
+                  <Checkbox
+                    id={checkboxId}
+                    checked={isToolEnabled(tool.name)}
+                    disabled={toggleDisabled}
+                    onCheckedChange={(checked) =>
+                      onToggleTool(tool.name, checked === true)
+                    }
+                    className="mt-0.5"
+                  />
+                ) : null}
                 <div className="min-w-0 flex-1 text-sm">
-                  <label
-                    htmlFor={checkboxId}
-                    title={tool.name}
-                    className="cursor-pointer"
-                  >
-                    {prettifyToolName(tool.name, integrationName)}
-                  </label>
+                  {showLegacyAvailability ? (
+                    <label
+                      htmlFor={checkboxId}
+                      title={tool.name}
+                      className="cursor-pointer"
+                    >
+                      {prettifyToolName(tool.name, integrationName)}
+                    </label>
+                  ) : (
+                    <span title={tool.name}>
+                      {prettifyToolName(tool.name, integrationName)}
+                    </span>
+                  )}
                   {tool.description ? (
                     <ToolDescription text={tool.description} />
                   ) : null}
@@ -336,8 +312,7 @@ export function IntegrationToolApprovalList<T extends ManageableTool>({
                 {active ? (
                   <IntegrationToolApprovalModeControl
                     toolName={tool.name}
-                    value={modeFor(tool.name)}
-                    disabled={policies.isUpdating}
+                    value={modeFor(tool)}
                     onChange={(mode) =>
                       policies.setMode(integrationId, tool.name, mode)
                     }
@@ -352,7 +327,11 @@ export function IntegrationToolApprovalList<T extends ManageableTool>({
   );
 }
 
-type ManageableTool = GroupableTool & { description?: string | null };
+type ManageableTool = GroupableTool & {
+  description?: string | null;
+  /** Legacy MCP availability state, migrated into the policy view on edit. */
+  enabled?: boolean;
+};
 
 function splitToolNameParts(name: string): string[] {
   return name.split(/[-_\s]+/).filter((part) => part.length > 0);

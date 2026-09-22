@@ -32,7 +32,7 @@ import {
 
 type JsonRpcRequestId = string | number | null;
 
-function jsonRpcErrorResponse(
+export function jsonRpcErrorResponse(
   status: number,
   code: number,
   message: string,
@@ -51,7 +51,7 @@ function jsonRpcErrorResponse(
   );
 }
 
-function getJsonRpcRequestId(body: unknown): JsonRpcRequestId {
+export function getJsonRpcRequestId(body: unknown): JsonRpcRequestId {
   if (!body || typeof body !== 'object' || !('id' in body)) {
     return null;
   }
@@ -217,7 +217,7 @@ export async function resolveTaskOrSessionUserIdOrNull(
 }
 
 /** The task a run token was minted for; null for any other caller. */
-async function resolveRunTokenTaskId(
+export async function resolveRunTokenTaskId(
   auth: McpAuthContext,
 ): Promise<string | null> {
   if (auth.tokenType !== 'run' || !auth.runId) return null;
@@ -487,7 +487,7 @@ type JsonRpcRequestLike = {
   params?: unknown;
 };
 
-function getJsonRpcMethod(request: unknown): string | null {
+export function getJsonRpcMethod(request: unknown): string | null {
   if (!request || typeof request !== 'object' || !('method' in request)) {
     return null;
   }
@@ -496,7 +496,7 @@ function getJsonRpcMethod(request: unknown): string | null {
   return typeof method === 'string' ? method : null;
 }
 
-function getToolCallName(request: unknown): string | null {
+export function getToolCallName(request: unknown): string | null {
   if (
     !request ||
     typeof request !== 'object' ||
