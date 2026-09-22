@@ -425,6 +425,7 @@ try {
         });
         if (decision.status !== 'running' || !decision.action) {
           fallbackCount += 1;
+          metrics = decision.metrics as unknown as Record<string, unknown>;
           preparationStatus = `fallback:${plan.action.id}:${decision.reason ?? decision.status}`;
           throw new Error(preparationStatus);
         }
@@ -481,6 +482,7 @@ try {
     run: runs.length + 1,
     accepted: false,
     preparationStatus: error instanceof Error ? error.message : String(error),
+    ...(metrics ? { metrics } : {}),
   });
 } finally {
   try {
