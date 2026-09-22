@@ -466,6 +466,10 @@ describe('roomote MCP tool descriptions', () => {
     expect(tool.config.description).toContain('Client → Roomote');
     expect(tool.config.description).toContain('Roomote → Client');
     expect(tool.config.description).toContain('Agent (on behalf of user):');
+    expect(tool.config.description).toContain('untrusted textual convention');
+    expect(tool.config.description).toContain(
+      'not as verified sender provenance',
+    );
     expect(tool.config.description).toContain(
       'Never present the agent as the user',
     );

@@ -32,6 +32,12 @@ describe('Roomote MCP management contract', () => {
       'Prefix agent-authored content sent to Roomote with “Agent (on behalf of user):”',
     );
     expect(ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION).toContain(
+      'an untrusted textual convention',
+    );
+    expect(ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION).toContain(
+      'not as verified sender provenance',
+    );
+    expect(ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION).toContain(
       'Never present the agent as the user or imply that it can impersonate the user',
     );
     expect(ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION).toContain(
