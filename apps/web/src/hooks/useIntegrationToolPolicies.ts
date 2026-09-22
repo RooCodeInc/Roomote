@@ -168,7 +168,17 @@ export function useIntegrationToolPolicies(
   );
   const queryKey = list.queryKey();
   const revisionByPolicy = useRef(new Map<string, number>());
+  const pendingRevisions = useRef(new Map<string, Set<number>>());
   const writePolicies = useMutation(set.mutationOptions());
+
+  const settleRevisions = (revisions: Map<string, number>) => {
+    for (const [key, revision] of revisions) {
+      const pending = pendingRevisions.current.get(key);
+      if (!pending) continue;
+      pending.delete(revision);
+      if (pending.size === 0) pendingRevisions.current.delete(key);
+    }
+  };
 
   // Serialize whole user actions, while applying every selection to the cache
   // before it enters the queue. This keeps the controls instant and preserves
@@ -179,7 +189,8 @@ export function useIntegrationToolPolicies(
     },
     mutationFn: ({ change }: QueuedPolicyChange) =>
       writePolicies.mutateAsync(change),
-    onSuccess: (result, { change }) => {
+    onSuccess: (result, { change, revisions }) => {
+      settleRevisions(revisions);
       queryClient.setQueryData<IntegrationToolPolicyMetadata[]>(
         queryKey,
         (current) => reconcileSavedPolicies(current, result, change),
@@ -191,6 +202,7 @@ export function useIntegrationToolPolicies(
       );
     },
     onError: async (_error, { change, previous, revisions }) => {
+      settleRevisions(revisions);
       const currentChange = {
         ...change,
         toolNames: change.toolNames.filter((toolName) => {
@@ -204,9 +216,12 @@ export function useIntegrationToolPolicies(
           rollbackOptimisticPolicyChange(current, previous, currentChange),
       );
       // A queued failure may have an older snapshot than the cache now in
-      // memory. Refetch after every failure so the queue settles on server
-      // truth instead of restoring a stale optimistic mode.
-      await queryClient.invalidateQueries({ queryKey });
+      // memory. Wait until the whole serialized queue settles before
+      // refetching, so an earlier failure cannot erase a later optimistic
+      // value before its write starts.
+      if (pendingRevisions.current.size === 0) {
+        await queryClient.invalidateQueries({ queryKey });
+      }
       toast.error(
         change.toolNames.length === 1
           ? 'Failed to update the tool approval policy.'
@@ -224,6 +239,9 @@ export function useIntegrationToolPolicies(
       const key = integrationToolPolicyKey(change.integrationId, toolName);
       const revision = (revisionByPolicy.current.get(key) ?? 0) + 1;
       revisionByPolicy.current.set(key, revision);
+      const pending = pendingRevisions.current.get(key) ?? new Set<number>();
+      pending.add(revision);
+      pendingRevisions.current.set(key, pending);
       revisions.set(key, revision);
     }
     queryClient.setQueryData<IntegrationToolPolicyMetadata[]>(
