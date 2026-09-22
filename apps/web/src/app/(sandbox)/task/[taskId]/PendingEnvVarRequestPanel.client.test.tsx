@@ -1,10 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import {
-  createContext,
-  useContext,
-  type ReactNode,
-  type SVGProps,
-} from 'react';
+import type { ReactNode, SVGProps } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 const {
@@ -111,118 +106,87 @@ vi.mock('./hooks', () => ({
   }),
 }));
 
-vi.mock('@/components/system', () => {
-  const DialogOpenContext = createContext(false);
-
-  return {
-    Dialog: ({ children, open }: { children: ReactNode; open: boolean }) => (
-      <DialogOpenContext.Provider value={open}>
-        {children}
-      </DialogOpenContext.Provider>
-    ),
-    DialogContent: ({ children }: { children: ReactNode }) => {
-      const open = useContext(DialogOpenContext);
-      return open ? <div role="dialog">{children}</div> : null;
-    },
-    DialogDescription: ({ children }: { children: ReactNode }) => (
-      <div>{children}</div>
-    ),
-    DialogFooter: ({ children }: { children: ReactNode }) => (
-      <div>{children}</div>
-    ),
-    DialogHeader: ({ children }: { children: ReactNode }) => (
-      <div>{children}</div>
-    ),
-    DialogTitle: ({ children }: { children: ReactNode }) => <h2>{children}</h2>,
-    Alert: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-    AlertDescription: ({ children }: { children: ReactNode }) => (
-      <div>{children}</div>
-    ),
-    Badge: ({ children }: { children: ReactNode }) => <span>{children}</span>,
-    Button: ({
-      children,
-      onClick,
-      disabled,
-      type,
-      ...props
-    }: {
-      children: ReactNode;
-      onClick?: () => void;
-      disabled?: boolean;
-      type?: 'button' | 'submit';
-      [key: string]: unknown;
-    }) => (
-      <button
-        type={type ?? 'button'}
-        onClick={onClick}
-        disabled={disabled}
-        {...(props as Record<string, unknown>)}
-      >
-        {children}
-      </button>
-    ),
-    Card: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-    CardContent: ({ children }: { children: ReactNode }) => (
-      <div>{children}</div>
-    ),
-    CardDescription: ({ children }: { children: ReactNode }) => (
-      <div>{children}</div>
-    ),
-    CardFooter: ({ children }: { children: ReactNode }) => (
-      <div>{children}</div>
-    ),
-    CardHeader: ({ children }: { children: ReactNode }) => (
-      <div>{children}</div>
-    ),
-    CardTitle: ({ children }: { children: ReactNode }) => <h2>{children}</h2>,
-    Input: ({
-      value,
-      onChange,
-      onFocus,
-      onBlur,
-      placeholder,
-      disabled,
-      type,
-    }: {
-      value?: string;
-      onChange?: (event: { target: { value: string } }) => void;
-      onFocus?: () => void;
-      onBlur?: () => void;
-      placeholder?: string;
-      disabled?: boolean;
-      type?: string;
-    }) => (
-      <input
-        type={type}
-        value={value}
-        onChange={(event) => onChange?.(event as never)}
-        onFocus={onFocus}
-        onBlur={onBlur}
-        placeholder={placeholder}
-        disabled={disabled}
-      />
-    ),
-    KeyRound: (props: SVGProps<SVGSVGElement>) => (
-      <svg aria-hidden="true" {...props} />
-    ),
-    Label: ({ children }: { children: ReactNode }) => <label>{children}</label>,
-    Loader2: (props: SVGProps<SVGSVGElement>) => (
-      <svg aria-hidden="true" {...props} />
-    ),
-    Lock: (props: SVGProps<SVGSVGElement>) => (
-      <svg aria-hidden="true" {...props} />
-    ),
-    MessageSquareCode: (props: SVGProps<SVGSVGElement>) => (
-      <svg aria-hidden="true" {...props} />
-    ),
-    TriangleAlert: (props: SVGProps<SVGSVGElement>) => (
-      <svg aria-hidden="true" {...props} />
-    ),
-    X: (props: SVGProps<SVGSVGElement>) => (
-      <svg aria-hidden="true" {...props} />
-    ),
-  };
-});
+vi.mock('@/components/system', () => ({
+  Alert: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  AlertDescription: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
+  Badge: ({ children }: { children: ReactNode }) => <span>{children}</span>,
+  Button: ({
+    children,
+    onClick,
+    disabled,
+    type,
+    ...props
+  }: {
+    children: ReactNode;
+    onClick?: () => void;
+    disabled?: boolean;
+    type?: 'button' | 'submit';
+    [key: string]: unknown;
+  }) => (
+    <button
+      type={type ?? 'button'}
+      onClick={onClick}
+      disabled={disabled}
+      {...(props as Record<string, unknown>)}
+    >
+      {children}
+    </button>
+  ),
+  Card: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  CardContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  CardDescription: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
+  CardFooter: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  CardHeader: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  CardTitle: ({ children }: { children: ReactNode }) => <h2>{children}</h2>,
+  Input: ({
+    value,
+    onChange,
+    onFocus,
+    onBlur,
+    placeholder,
+    disabled,
+    type,
+  }: {
+    value?: string;
+    onChange?: (event: { target: { value: string } }) => void;
+    onFocus?: () => void;
+    onBlur?: () => void;
+    placeholder?: string;
+    disabled?: boolean;
+    type?: string;
+  }) => (
+    <input
+      type={type}
+      value={value}
+      onChange={(event) => onChange?.(event as never)}
+      onFocus={onFocus}
+      onBlur={onBlur}
+      placeholder={placeholder}
+      disabled={disabled}
+    />
+  ),
+  KeyRound: (props: SVGProps<SVGSVGElement>) => (
+    <svg aria-hidden="true" {...props} />
+  ),
+  Label: ({ children }: { children: ReactNode }) => <label>{children}</label>,
+  Loader2: (props: SVGProps<SVGSVGElement>) => (
+    <svg aria-hidden="true" {...props} />
+  ),
+  Lock: (props: SVGProps<SVGSVGElement>) => (
+    <svg aria-hidden="true" {...props} />
+  ),
+  MessageSquareCode: (props: SVGProps<SVGSVGElement>) => (
+    <svg aria-hidden="true" {...props} />
+  ),
+  TriangleAlert: (props: SVGProps<SVGSVGElement>) => (
+    <svg aria-hidden="true" {...props} />
+  ),
+  X: (props: SVGProps<SVGSVGElement>) => <svg aria-hidden="true" {...props} />,
+}));
 
 import { PendingEnvVarRequestPanel } from './PendingEnvVarRequestPanel';
 
@@ -238,10 +202,6 @@ function renderPanel() {
       <PendingEnvVarRequestPanel taskId="task-1" />
     </QueryClientProvider>,
   );
-}
-
-function openValuesDialog() {
-  fireEvent.click(screen.getByRole('button', { name: 'Enter values' }));
 }
 
 describe('PendingEnvVarRequestPanel', () => {
@@ -271,7 +231,6 @@ describe('PendingEnvVarRequestPanel', () => {
 
   it('submits the request, reloads env vars, and sends a safe follow-up prompt', async () => {
     renderPanel();
-    openValuesDialog();
 
     fireEvent.change(screen.getByPlaceholderText('Value for OPENAI_API_KEY'), {
       target: { value: 'new-openai-key' },
@@ -283,7 +242,7 @@ describe('PendingEnvVarRequestPanel', () => {
       },
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save values' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => {
       expect(mutateAsyncMock).toHaveBeenCalledWith({
@@ -321,7 +280,6 @@ describe('PendingEnvVarRequestPanel', () => {
     envVarsState.data = [{ name: 'OPENAI_API_KEY' }];
 
     renderPanel();
-    openValuesDialog();
 
     const openAiInput = screen.getByPlaceholderText('Value for OPENAI_API_KEY');
     const anthropicInput = screen.getByPlaceholderText(
@@ -338,7 +296,7 @@ describe('PendingEnvVarRequestPanel', () => {
       target: { value: 'new-anthropic-key' },
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save values' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => {
       expect(mutateAsyncMock).toHaveBeenCalledWith({
@@ -354,7 +312,6 @@ describe('PendingEnvVarRequestPanel', () => {
     authState.isAdmin = false;
 
     renderPanel();
-    openValuesDialog();
 
     expect(screen.getByText('Admin required')).toBeInTheDocument();
     expect(
@@ -369,7 +326,6 @@ describe('PendingEnvVarRequestPanel', () => {
 
   it('dismisses the request panel when the close button is clicked', () => {
     renderPanel();
-    openValuesDialog();
 
     fireEvent.click(
       screen.getByRole('button', {
@@ -386,7 +342,6 @@ describe('PendingEnvVarRequestPanel', () => {
     envVarsState.data = [{ name: 'OPENAI_API_KEY' }];
 
     renderPanel();
-    openValuesDialog();
 
     const openAiInput = screen.getByPlaceholderText('Value for OPENAI_API_KEY');
     expect(openAiInput).toHaveValue('••••••••••••••••••••••••••••');
@@ -400,7 +355,6 @@ describe('PendingEnvVarRequestPanel', () => {
     envVarsState.data = [{ name: 'OPENAI_API_KEY' }];
 
     renderPanel();
-    openValuesDialog();
 
     const openAiInput = screen.getByPlaceholderText('Value for OPENAI_API_KEY');
     expect(openAiInput).toHaveValue('••••••••••••••••••••••••••••');
@@ -420,7 +374,6 @@ describe('PendingEnvVarRequestPanel', () => {
     });
 
     renderPanel();
-    openValuesDialog();
 
     fireEvent.change(screen.getByPlaceholderText('Value for OPENAI_API_KEY'), {
       target: { value: 'new-openai-key' },
@@ -432,7 +385,7 @@ describe('PendingEnvVarRequestPanel', () => {
       },
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save values' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => {
       expect(appendAcpEventMock).toHaveBeenCalledWith(
@@ -459,12 +412,11 @@ describe('PendingEnvVarRequestPanel', () => {
     reloadDeploymentEnvVarsMock.mockRejectedValue(new Error('reload failed'));
 
     renderPanel();
-    openValuesDialog();
 
     fireEvent.change(screen.getByPlaceholderText('Value for OPENAI_API_KEY'), {
       target: { value: 'new-openai-key' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Save values' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => {
       expect(errorToastMock).toHaveBeenCalledWith('reload failed');
@@ -475,7 +427,6 @@ describe('PendingEnvVarRequestPanel', () => {
         name: 'Dismiss environment variable request',
       }),
     ).toBeInTheDocument();
-    openValuesDialog();
     expect(screen.getByPlaceholderText('Value for OPENAI_API_KEY')).toHaveValue(
       'new-openai-key',
     );
@@ -490,12 +441,11 @@ describe('PendingEnvVarRequestPanel', () => {
     sendPromptMock.mockRejectedValue(new Error('send failed'));
 
     renderPanel();
-    openValuesDialog();
 
     fireEvent.change(screen.getByPlaceholderText('Value for OPENAI_API_KEY'), {
       target: { value: 'new-openai-key' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Save values' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => {
       expect(successToastMock).toHaveBeenCalledWith(

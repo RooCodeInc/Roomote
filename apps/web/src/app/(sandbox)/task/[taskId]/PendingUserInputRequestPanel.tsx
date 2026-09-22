@@ -38,7 +38,6 @@ type PendingRequestEntry = {
 
 type PendingUserInputRequestStateValue = {
   optionRequestEntries: PendingRequestEntry[];
-  secretFreeTextRequestEntries: PendingRequestEntry[];
   activeFreeTextRequest: PendingRequestEntry | null;
   shouldHidePromptInput: boolean;
   isConnected: boolean;
@@ -200,19 +199,8 @@ export function PendingUserInputRequestStateProvider({
     [requestEntries],
   );
 
-  const secretFreeTextRequestEntries = useMemo(
-    () =>
-      requestEntries.filter(
-        (entry) =>
-          entry.currentQuestion?.isSecret === true &&
-          (entry.currentQuestion.options?.length ?? 0) === 0,
-      ),
-    [requestEntries],
-  );
-
   const shouldHidePromptInput =
-    (optionRequestEntries.length > 0 && activeFreeTextRequest === null) ||
-    secretFreeTextRequestEntries.length > 0;
+    optionRequestEntries.length > 0 && activeFreeTextRequest === null;
   const isConnected = Boolean(client);
 
   const submitRequest = async (
@@ -419,7 +407,6 @@ export function PendingUserInputRequestStateProvider({
 
   const value: PendingUserInputRequestStateValue = {
     optionRequestEntries,
-    secretFreeTextRequestEntries,
     activeFreeTextRequest,
     shouldHidePromptInput,
     isConnected,
@@ -442,7 +429,6 @@ export function PendingUserInputRequestStateProvider({
 export function PendingUserInputRequestPanel() {
   const {
     optionRequestEntries,
-    secretFreeTextRequestEntries,
     isConnected,
     activateOther,
     changeOtherText,
@@ -452,15 +438,13 @@ export function PendingUserInputRequestPanel() {
     dismiss,
   } = usePendingUserInputRequestState();
 
-  const entries = [...optionRequestEntries, ...secretFreeTextRequestEntries];
-
-  if (entries.length === 0) {
+  if (optionRequestEntries.length === 0) {
     return null;
   }
 
   return (
     <>
-      {entries.map(
+      {optionRequestEntries.map(
         ({ request, requestDraft, isSubmitting, currentQuestionIndex }) => (
           <PendingUserInputRequestCard
             key={request.requestId}

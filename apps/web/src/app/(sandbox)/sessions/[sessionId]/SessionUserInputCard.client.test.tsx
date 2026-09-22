@@ -285,49 +285,6 @@ describe('SessionUserInputCard', () => {
     );
   });
 
-  it('opens secret responses in a modal instead of rendering them inline', () => {
-    render(
-      <SessionUserInputCard
-        sessionId="session-secret"
-        request={{
-          requestId: 'rui:secret',
-          questions: [
-            {
-              id: 'api-key',
-              header: 'Integration credential',
-              question: 'What is the integration API key?',
-              isOther: false,
-              isSecret: true,
-            },
-          ],
-        }}
-      />,
-    );
-
-    expect(
-      screen.queryByLabelText('What is the integration API key?'),
-    ).toBeNull();
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Enter sensitive response' }),
-    );
-
-    expect(screen.getByRole('dialog')).toBeVisible();
-    expect(
-      screen.getByLabelText('What is the integration API key?'),
-    ).toHaveAttribute('type', 'password');
-    fireEvent.change(
-      screen.getByLabelText('What is the integration API key?'),
-      {
-        target: { value: 'fake-key-123' },
-      },
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    expect(screen.queryByRole('dialog')).toBeNull();
-    expect(
-      screen.getByRole('button', { name: 'Edit sensitive response' }),
-    ).toBeVisible();
-  });
-
   it('uses the shared setup action-card framing for first-task choices', () => {
     render(
       <SetupStarterTasksCard

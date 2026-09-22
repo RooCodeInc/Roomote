@@ -223,47 +223,4 @@ describe('PendingUserInputRequestCard', () => {
 
     expect(onSubmitOther).toHaveBeenCalledWith(request.questions[0]);
   });
-
-  it('moves secret responses into an accessible spacious dialog', () => {
-    const secretRequest = {
-      ...request,
-      questions: [
-        {
-          ...request.questions[1]!,
-          id: 'api-key',
-          question: 'What is the integration API key?',
-          isSecret: true,
-        },
-      ],
-    };
-
-    render(
-      <PendingUserInputRequestCard
-        request={secretRequest}
-        requestDraft={{
-          'api-key': { selectedValue: OTHER_VALUE, otherText: '' },
-        }}
-        isSubmitting={false}
-        currentQuestionIndex={0}
-        isConnected={true}
-        onActivateOther={() => undefined}
-        onOtherTextChange={() => undefined}
-        onSubmitOther={() => undefined}
-        onSelectOption={() => undefined}
-        onBack={() => undefined}
-        onDismiss={() => undefined}
-      />,
-    );
-
-    expect(screen.queryByLabelText('Custom response')).toBeNull();
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Enter sensitive response' }),
-    );
-
-    expect(screen.getByRole('dialog')).toBeVisible();
-    expect(
-      screen.getByLabelText('What is the integration API key?'),
-    ).toHaveAttribute('type', 'password');
-    expect(screen.getByRole('button', { name: 'Cancel' })).toBeVisible();
-  });
 });

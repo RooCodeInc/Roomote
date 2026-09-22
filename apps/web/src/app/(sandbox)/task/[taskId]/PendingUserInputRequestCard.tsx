@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import type {
   AcpRequestUserInputAnswers,
   AcpRequestUserInputQuestion,
@@ -16,7 +16,6 @@ import {
   MessageCircleQuestionMark,
   X,
 } from '@/components/system';
-import { SensitiveValueDialog } from '@/components/sensitive-input/SensitiveValueDialog';
 import { cn } from '@/lib/utils';
 
 interface DraftAnswer {
@@ -173,7 +172,6 @@ export function PendingUserInputRequestCard({
   const question = request.questions[currentQuestionIndex];
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const otherInputRef = useRef<HTMLInputElement | null>(null);
-  const [isSensitiveDialogOpen, setIsSensitiveDialogOpen] = useState(false);
   const draft = question
     ? ensureQuestionDraft(requestDraft, question)
     : { selectedValue: null, otherText: '' };
@@ -181,12 +179,9 @@ export function PendingUserInputRequestCard({
   const showBackButton =
     request.questions.length > 1 && currentQuestionIndex > 0;
   const showOtherChip = Boolean(question?.isOther && options.length > 0);
-  const isFreeTextOnly = Boolean(
-    question && options.length === 0 && (question.isOther || question.isSecret),
-  );
+  const isFreeTextOnly = Boolean(question?.isOther && options.length === 0);
   const selectedOther = draft.selectedValue === OTHER_VALUE;
   const showOtherInput = isFreeTextOnly || (showOtherChip && selectedOther);
-  const showInlineOtherInput = showOtherInput && !question?.isSecret;
   const focusableOptionCount = options.length + (showOtherChip ? 1 : 0);
   const isLastQuestion = currentQuestionIndex === request.questions.length - 1;
   const otherSubmitLabel = isLastQuestion ? 'Submit' : 'Next';
@@ -214,7 +209,7 @@ export function PendingUserInputRequestCard({
   ]);
 
   useEffect(() => {
-    if (!selectedOther || isSubmitting || !isConnected || question?.isSecret) {
+    if (!selectedOther || isSubmitting || !isConnected) {
       return;
     }
 
@@ -223,13 +218,7 @@ export function PendingUserInputRequestCard({
     });
 
     return () => cancelAnimationFrame(frame);
-  }, [
-    currentQuestionIndex,
-    isConnected,
-    isSubmitting,
-    question?.isSecret,
-    selectedOther,
-  ]);
+  }, [currentQuestionIndex, isConnected, isSubmitting, selectedOther]);
 
   const moveOptionFocus = (
     currentIndex: number,
@@ -250,13 +239,6 @@ export function PendingUserInputRequestCard({
   if (!question) {
     return null;
   }
-
-  const handleActivateOther = () => {
-    onActivateOther(question);
-    if (question.isSecret) {
-      setIsSensitiveDialogOpen(true);
-    }
-  };
 
   return (
     <div className="mx-auto w-full max-w-4xl px-4 pt-3 pb-3.5 text-foreground">
@@ -333,13 +315,13 @@ export function PendingUserInputRequestCard({
                 onMoveFocus={(direction) =>
                   moveOptionFocus(options.length, direction)
                 }
-                onSelect={handleActivateOther}
+                onSelect={() => onActivateOther(question)}
               />
             ) : null}
           </div>
         ) : null}
 
-        {showInlineOtherInput ? (
+        {showOtherInput ? (
           <div className="flex w-full min-w-0 items-center gap-2">
             <Input
               ref={otherInputRef}
@@ -370,31 +352,6 @@ export function PendingUserInputRequestCard({
               {otherSubmitLabel}
             </Button>
           </div>
-        ) : null}
-
-        {showOtherInput && question.isSecret ? (
-          <SensitiveValueDialog
-            open={isSensitiveDialogOpen}
-            onOpenChange={setIsSensitiveDialogOpen}
-            title="Enter sensitive response"
-            description="This value stays out of the conversation transcript and is handled as sensitive input."
-            label={question.question}
-            inputId={`${request.requestId}:${question.id}:sensitive-input`}
-            value={draft.otherText}
-            onChange={(value) => onOtherTextChange(question, value)}
-            onSubmit={() => {
-              onSubmitOther(question);
-              setIsSensitiveDialogOpen(false);
-            }}
-            submitLabel={otherSubmitLabel}
-            triggerLabel={
-              draft.otherText
-                ? 'Edit sensitive response'
-                : 'Enter sensitive response'
-            }
-            placeholder="Enter API key, token, or secret"
-            disabled={isSubmitting || !isConnected}
-          />
         ) : null}
 
         {question.isSecret ? (

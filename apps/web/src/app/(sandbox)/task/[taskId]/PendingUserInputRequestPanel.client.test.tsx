@@ -24,7 +24,6 @@ import type { PendingTaskUserInputRequest } from './hooks';
 import {
   PendingUserInputRequestPanel,
   PendingUserInputRequestStateProvider,
-  usePendingUserInputRequestState,
 } from './PendingUserInputRequestPanel';
 
 const pendingRequest: PendingTaskUserInputRequest = {
@@ -48,25 +47,6 @@ const pendingRequest: PendingTaskUserInputRequest = {
     },
   ],
 };
-
-const secretFreeTextRequest: PendingTaskUserInputRequest = {
-  ...pendingRequest,
-  requestId: 'rui:panel-secret-test',
-  questions: [
-    {
-      id: 'api-key',
-      header: 'API KEY',
-      question: 'What is the integration API key?',
-      isOther: false,
-      isSecret: true,
-    },
-  ],
-};
-
-function PromptVisibilityProbe() {
-  const { shouldHidePromptInput } = usePendingUserInputRequestState();
-  return <output>{String(shouldHidePromptInput)}</output>;
-}
 
 function renderPanel() {
   return render(
@@ -102,24 +82,5 @@ describe('PendingUserInputRequestPanel', () => {
     const { container } = renderPanel();
 
     expect(container).toBeEmptyDOMElement();
-  });
-
-  it('routes secret free-text requests through the sensitive dialog', () => {
-    useSandboxPendingUserInputRequestsMock.mockReturnValue([
-      secretFreeTextRequest,
-    ]);
-
-    render(
-      <PendingUserInputRequestStateProvider taskId="task-panel-test">
-        <PendingUserInputRequestPanel />
-        <PromptVisibilityProbe />
-      </PendingUserInputRequestStateProvider>,
-    );
-
-    expect(
-      screen.getByRole('button', { name: 'Enter sensitive response' }),
-    ).toBeInTheDocument();
-    expect(screen.queryByLabelText('Custom response')).toBeNull();
-    expect(screen.getByText('true')).toBeInTheDocument();
   });
 });

@@ -50,7 +50,7 @@ export function ServiceCredentials({ sessionId }: { sessionId: string }) {
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
-        size="lg"
+        size="2xl"
         className="ph-no-capture ph-mask ph-no-recording sentry-block"
       >
         <DialogHeader>
