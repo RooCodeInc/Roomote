@@ -3979,35 +3979,61 @@ export async function answerFastAgentQuestion({
           ? { charts: defaultCharts }
           : {}),
       };
+      // The surface replacers edit text (and Slack charts) only. A reply
+      // that replaces a retry notice therefore replaces it with its text
+      // alone, and its captures go out as a follow-up post that is persisted
+      // as its own reply once it has actually been delivered. Nothing marks
+      // a capture delivered before the user could see it: a failed
+      // follow-up returns the IDs to the pending list, and a crash leaves
+      // the recorded attempt without a reply carrying them.
+      const {
+        imageArtifactIds: replyImageArtifactIds = [],
+        videoArtifactIds: replyVideoArtifactIds = [],
+        ...replyTextOnly
+      } = replyWithImages;
+      const carriesCaptures =
+        replyImageArtifactIds.length > 0 || replyVideoArtifactIds.length > 0;
       const replacedRetry = await replaceInferenceRetryReply(
-        replyWithImages,
+        carriesCaptures ? replyTextOnly : replyWithImages,
         true,
         () => diagnostics.recordVisibleReply(),
       );
       if (replacedRetry) {
-        // The surface replacers edit text (and Slack charts) only, so a
-        // reply that replaced a retry notice has already been persisted with
-        // its attachments but the user has not seen them. Post the captures
-        // as a follow-up; the transcript already carries them.
-        const imageArtifactIds = replyWithImages.imageArtifactIds ?? [];
-        const videoArtifactIds = replyWithImages.videoArtifactIds ?? [];
-        if (imageArtifactIds.length > 0 || videoArtifactIds.length > 0) {
+        if (carriesCaptures) {
+          const followUp: FastAgentReply = {
+            purpose: replyWithImages.purpose,
+            message:
+              replyImageArtifactIds.length > 0 &&
+              replyVideoArtifactIds.length > 0
+                ? 'Captures from the browser:'
+                : replyImageArtifactIds.length > 0
+                  ? 'Screenshot from the browser:'
+                  : 'Recording from the browser:',
+            ...(replyImageArtifactIds.length > 0
+              ? { imageArtifactIds: replyImageArtifactIds }
+              : {}),
+            ...(replyVideoArtifactIds.length > 0
+              ? { videoArtifactIds: replyVideoArtifactIds }
+              : {}),
+          };
           try {
-            await adapter.postReply({
-              purpose: replyWithImages.purpose,
-              message:
-                imageArtifactIds.length > 0 && videoArtifactIds.length > 0
-                  ? 'Captures from the browser:'
-                  : imageArtifactIds.length > 0
-                    ? 'Screenshot from the browser:'
-                    : 'Recording from the browser:',
-              ...(imageArtifactIds.length > 0 ? { imageArtifactIds } : {}),
-              ...(videoArtifactIds.length > 0 ? { videoArtifactIds } : {}),
+            const posted = await adapter.postReply(followUp);
+            turnVisibleMessages.push(
+              buildAssistantTextMessage(followUp.message),
+            );
+            await persistAssistantReply({
+              reply: followUp,
+              event: allocateCanonicalEvent(
+                `assistant:${nextAssistantOrdinal++}`,
+              ),
+              platformMessageId: posted?.messageId,
             });
           } catch (error) {
             console.warn(
-              `[Fast Agent] Failed to post captures after replacing a retry notice: ${formatErrorForLog(error)}`,
+              `[Fast Agent] Failed to post captures after replacing a retry notice; they will ride the next reply: ${formatErrorForLog(error)}`,
             );
+            pendingDeliveryImageArtifactIds.unshift(...replyImageArtifactIds);
+            pendingDeliveryVideoArtifactIds.unshift(...replyVideoArtifactIds);
           }
         }
       } else {
