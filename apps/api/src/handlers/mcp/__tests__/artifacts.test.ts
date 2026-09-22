@@ -143,6 +143,26 @@ it('opens an authorized task artifact and returns bounded text content', async (
   );
 });
 
+it('preserves significant whitespace in the stored artifact path', async () => {
+  const path = 'plans/summary.md ';
+  mockGetTaskArtifactByPath.mockResolvedValueOnce(
+    textArtifact({ path, version: 3 }),
+  );
+
+  const response = await app().request('/artifacts/open', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ taskId: 'task-1', path }),
+  });
+
+  expect(response.status).toBe(200);
+  expect(mockGetTaskArtifactByPath).toHaveBeenCalledWith({
+    taskId: 'task-1',
+    path,
+    version: undefined,
+  });
+});
+
 it('opens a Session artifact only through the authorized Session owner', async () => {
   const response = await app().request('/artifacts/open', {
     method: 'POST',

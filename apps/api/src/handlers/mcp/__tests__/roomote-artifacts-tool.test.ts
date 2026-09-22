@@ -37,6 +37,10 @@ it('registers the shared open_artifact contract and routes calls in-process', as
       path: 'plans/summary.md',
     }).success,
   ).toBe(false);
+  const exactPath = 'plans/summary.md ';
+  expect(
+    config.inputSchema.parse({ taskId: 'task-1', path: exactPath }).path,
+  ).toBe(exactPath);
 
   invokeInProcessApi.mockResolvedValueOnce({
     ok: true,

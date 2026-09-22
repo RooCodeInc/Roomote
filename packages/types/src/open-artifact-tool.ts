@@ -20,7 +20,6 @@ export const openArtifactInputSchema = z
       ),
     path: z
       .string()
-      .trim()
       .min(1)
       .max(255)
       .describe(
