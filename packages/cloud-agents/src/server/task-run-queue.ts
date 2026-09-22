@@ -1992,9 +1992,7 @@ async function enqueueFreshLaunch(
     resolvedTaskPolicy.launchClass !== 'automation' &&
     taskRun.payloadKind !== TaskPayloadKind.SnapshotEnvironment &&
     visibility === 'visible' &&
-    taskWithHarnessOverrides.sourceRunId == null &&
-    taskWithHarnessOverrides.payload.environmentDefinitionId == null &&
-    taskWithHarnessOverrides.payload.verifiesEnvironmentId == null;
+    taskWithHarnessOverrides.sourceRunId == null;
   if (userStartedSession) {
     captureUserStartedSessionCreated({
       userId: linkedUserId,
