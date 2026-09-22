@@ -16,8 +16,6 @@ describe('ToggleButton', () => {
     expect(button).toHaveAttribute('data-state', 'on');
     expect(button).toHaveClass('h-8');
     expect(button).toHaveClass('text-sm');
-    expect(button).toHaveClass('data-[state=on]:border-accent-foreground');
-    expect(button).toHaveClass('data-[state=on]:text-accent-foreground');
   });
 
   it('supports controlled pressed changes with only ghost and outline styling', () => {

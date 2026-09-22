@@ -72,25 +72,26 @@ function IntegrationToolApprovalModeControl({
     <div
       role="group"
       aria-label={`Approval mode for ${toolName}`}
-      className="flex shrink-0 items-center gap-0.5 rounded-md border border-border p-1"
+      className="flex shrink-0 items-center"
     >
       {APPROVAL_MODES.map(({ mode, label, tooltip, icon: Icon }) => {
         const checked = mode === value;
         return (
           <BasicTooltip key={mode} content={tooltip}>
-            <ToggleButton
-              variant="ghost"
-              size={mode === 'auto' ? 'sm' : 'icon'}
-              pressed={checked}
-              aria-label={label}
-              disabled={disabled}
-              onPressedChange={() => {
-                if (!checked) onChange(mode);
-              }}
-            >
-              <Icon aria-hidden="true" />
-              {mode === 'auto' ? label : null}
-            </ToggleButton>
+            <span>
+              <ToggleButton
+                variant="ghost"
+                size="icon"
+                pressed={checked}
+                aria-label={label}
+                disabled={disabled}
+                onPressedChange={() => {
+                  if (!checked) onChange(mode);
+                }}
+              >
+                <Icon aria-hidden="true" />
+              </ToggleButton>
+            </span>
           </BasicTooltip>
         );
       })}
@@ -263,7 +264,6 @@ export function IntegrationToolApprovalList<T extends ManageableTool>({
           key={group.id}
           title={group.title}
           count={group.tools.length}
-          disabled={policies.isUpdating}
           {...(active
             ? {
                 modes: group.tools.map((tool) => modeFor(tool)),
@@ -313,7 +313,6 @@ export function IntegrationToolApprovalList<T extends ManageableTool>({
                   <IntegrationToolApprovalModeControl
                     toolName={tool.name}
                     value={modeFor(tool)}
-                    disabled={policies.isUpdating}
                     onChange={(mode) =>
                       policies.setMode(integrationId, tool.name, mode)
                     }

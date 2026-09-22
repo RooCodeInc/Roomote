@@ -37,8 +37,10 @@ const ToggleButton = React.forwardRef<HTMLButtonElement, ToggleButtonProps>(
       data-slot="toggle-button"
       className={cn(
         buttonVariants({ variant, size }),
-        variant === 'ghost' ? 'border border-transparent' : undefined,
-        'data-[state=on]:border-accent-foreground data-[state=on]:text-accent-foreground',
+        variant === 'ghost'
+          ? 'border border-transparent'
+          : 'data-[state=on]:border-accent-foreground',
+        'data-[state=on]:text-accent-foreground!',
         className,
       )}
       {...props}

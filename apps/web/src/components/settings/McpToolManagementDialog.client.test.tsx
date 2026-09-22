@@ -17,6 +17,7 @@ const state = vi.hoisted(() => ({
   annotated: false,
   searchDescription: null as string | null,
   policiesQueryEnabled: undefined as boolean | undefined,
+  policiesUpdating: false,
 }));
 
 vi.mock('@/hooks/useIntegrationToolApprovalsExperiment', () => ({
@@ -33,7 +34,7 @@ vi.mock('@/hooks/useIntegrationToolPolicies', () => ({
     state.policiesQueryEnabled = options?.enabled;
     return {
       isLoading: false,
-      isUpdating: false,
+      isUpdating: state.policiesUpdating,
       modes: new Map(
         state.policies.map((policy) => [
           JSON.stringify([policy.integrationId, policy.toolName]),
@@ -100,6 +101,7 @@ describe('McpToolManagementDialog tool approvals', () => {
     state.setModeCalls = [];
     state.setModesCalls = [];
     state.annotated = false;
+    state.policiesUpdating = false;
     // Radix Select scrolls the highlighted option into view; jsdom lacks it.
     Element.prototype.scrollIntoView = vi.fn();
   });
@@ -160,7 +162,7 @@ describe('McpToolManagementDialog tool approvals', () => {
     );
     expect(
       search.getAllByRole('button').map((button) => button.textContent),
-    ).toEqual(['Auto', '', '', '']);
+    ).toEqual(['', '', '', '']);
     expect(
       search.getByRole('button', { name: 'Always allow' }),
     ).toHaveAttribute('aria-pressed', 'true');
@@ -178,6 +180,26 @@ describe('McpToolManagementDialog tool approvals', () => {
       { integrationId: 'exa', toolName: 'web_search_exa', mode: 'ask' },
       { integrationId: 'exa', toolName: 'web_search_exa', mode: 'auto' },
     ]);
+  });
+
+  it('keeps approval mode buttons enabled while a policy save is pending', () => {
+    state.approvalsEnabled = true;
+    state.policiesUpdating = true;
+    renderDialog();
+
+    const search = within(
+      screen.getByRole('group', {
+        name: 'Approval mode for web_search_exa',
+      }),
+    );
+    const allTools = within(
+      screen.getByRole('group', {
+        name: 'Approval mode for all tools',
+      }),
+    );
+
+    expect(search.getByRole('button', { name: 'Always ask' })).toBeEnabled();
+    expect(allTools.getByRole('button', { name: 'Disable' })).toBeEnabled();
   });
 
   it('shows unclassified tools as a plain list with a mixed group row', () => {
