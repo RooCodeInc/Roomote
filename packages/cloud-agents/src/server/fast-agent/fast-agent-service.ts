@@ -231,7 +231,10 @@ import {
   shouldDisposeInstanceForToolApprovalRules,
 } from './fast-agent-tool-approvals';
 import {
+  type FastAgentBrowseCaptureDelivery,
+  fastAgentSurfaceDeliversCaptures,
   isFastAgentBrowserEnabled,
+  rebuildPendingCaptureDeliveries,
   runBrowseCommand,
   validateBrowseCommand,
 } from './fast-agent-browser';
@@ -3918,6 +3921,14 @@ export async function answerFastAgentQuestion({
     // the capture itself and the next visible reply honours it.
     const pendingDeliveryImageArtifactIds: string[] = [];
     const pendingDeliveryVideoArtifactIds: string[] = [];
+    if (previousAttempt) {
+      // A resumed turn recreates these arrays empty while the OpenCode
+      // history still shows the completed `browse` call, so the model goes
+      // straight to its reply; rebuild what that reply still owes.
+      const pending = rebuildPendingCaptureDeliveries(previousAttempt.events);
+      pendingDeliveryImageArtifactIds.push(...pending.imageArtifactIds);
+      pendingDeliveryVideoArtifactIds.push(...pending.videoArtifactIds);
+    }
     const attachRequestedCaptures = (reply: FastAgentReply): FastAgentReply => {
       const explicitImages = reply.imageArtifactIds ?? [];
       const explicitVideos = reply.videoArtifactIds ?? [];
@@ -3973,7 +3984,33 @@ export async function answerFastAgentQuestion({
         true,
         () => diagnostics.recordVisibleReply(),
       );
-      if (!replacedRetry) {
+      if (replacedRetry) {
+        // The surface replacers edit text (and Slack charts) only, so a
+        // reply that replaced a retry notice has already been persisted with
+        // its attachments but the user has not seen them. Post the captures
+        // as a follow-up; the transcript already carries them.
+        const imageArtifactIds = replyWithImages.imageArtifactIds ?? [];
+        const videoArtifactIds = replyWithImages.videoArtifactIds ?? [];
+        if (imageArtifactIds.length > 0 || videoArtifactIds.length > 0) {
+          try {
+            await adapter.postReply({
+              purpose: replyWithImages.purpose,
+              message:
+                imageArtifactIds.length > 0 && videoArtifactIds.length > 0
+                  ? 'Captures from the browser:'
+                  : imageArtifactIds.length > 0
+                    ? 'Screenshot from the browser:'
+                    : 'Recording from the browser:',
+              ...(imageArtifactIds.length > 0 ? { imageArtifactIds } : {}),
+              ...(videoArtifactIds.length > 0 ? { videoArtifactIds } : {}),
+            });
+          } catch (error) {
+            console.warn(
+              `[Fast Agent] Failed to post captures after replacing a retry notice: ${formatErrorForLog(error)}`,
+            );
+          }
+        }
+      } else {
         const posted =
           (await surfaceReplyStream.deliver(replyWithImages)) ??
           (await adapter.postReply(replyWithImages));
@@ -6003,7 +6040,13 @@ export async function answerFastAgentQuestion({
               contentType: result.capture.contentType,
             });
             if (conversation.surface === 'web') visibleUpdatePosted = true;
-            const deliverToUser = args.deliverToUser === true;
+            // Only surfaces whose reply path uploads attachments may promise
+            // delivery; elsewhere the durable viewer link is the delivery.
+            const surfaceDeliversCaptures = fastAgentSurfaceDeliversCaptures(
+              conversation.surface,
+            );
+            const deliverToUser =
+              args.deliverToUser === true && surfaceDeliversCaptures;
             if (deliverToUser) {
               (result.capture.kind === 'screenshot'
                 ? pendingDeliveryImageArtifactIds
@@ -6047,27 +6090,41 @@ export async function answerFastAgentQuestion({
               result.capture.kind === 'screenshot'
                 ? 'imageArtifactIds'
                 : 'videoArtifactIds';
+            const delivery: FastAgentBrowseCaptureDelivery | undefined =
+              conversation.surface === 'web'
+                ? undefined
+                : !surfaceDeliversCaptures
+                  ? 'link_only'
+                  : deliverToUser
+                    ? 'attached_to_next_reply'
+                    : 'not_delivered';
             return {
               success: true,
+              // These lead so they survive the truncated record a resumed
+              // turn rebuilds pending deliveries from.
+              ...(delivery ? { delivery } : {}),
+              captureKind: result.capture.kind,
+              artifactId: artifact.id,
               command,
               // The next step leads so a model skimming the result cannot
               // miss it; on chat surfaces the capture is invisible until a
               // reply carries its ID.
-              ...(conversation.surface === 'web'
+              ...(delivery === undefined
                 ? {
                     nextStep:
                       'Saved as a Session artifact; the web transcript shows it inline next to this call.',
                   }
-                : deliverToUser
+                : delivery === 'link_only'
                   ? {
-                      delivery: 'attached_to_next_reply',
-                      nextStep: `This ${result.capture.kind} will be attached to your next reply. Write the reply text and finish the turn.`,
+                      nextStep: `Replies on this surface cannot attach a ${result.capture.kind}. Include this link in your reply so the user can open it: ${artifact.viewUrl}`,
                     }
-                  : {
-                      delivery: 'not_delivered',
-                      nextStep: `The user cannot see this ${result.capture.kind}. To show it, pass ${attachmentField}: ["${artifact.id}"] in send_chat_reply, or take it again with deliverToUser: true.`,
-                    }),
-              artifactId: artifact.id,
+                  : delivery === 'attached_to_next_reply'
+                    ? {
+                        nextStep: `This ${result.capture.kind} will be attached to your next reply. Write the reply text and finish the turn.`,
+                      }
+                    : {
+                        nextStep: `The user cannot see this ${result.capture.kind}. To show it, pass ${attachmentField}: ["${artifact.id}"] in send_chat_reply, or take it again with deliverToUser: true.`,
+                      }),
               artifactType: artifact.artifactType,
               contentType: artifact.contentType,
               path: artifact.path,

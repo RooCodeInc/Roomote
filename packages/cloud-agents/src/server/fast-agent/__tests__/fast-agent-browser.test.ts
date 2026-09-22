@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
     R_BROWSER_USE_API_KEY: undefined as string | undefined,
     R_FAST_BROWSER_CDP_URL: undefined as string | undefined,
     R_AGENT_BROWSER_PATH: undefined as string | undefined,
+    NODE_ENV: undefined as string | undefined,
+    R_APP_ENV: undefined as string | undefined,
   },
 }));
 
@@ -21,7 +23,9 @@ vi.mock('@roomote/env', async (importOriginal) => ({
 import {
   type BrowseExec,
   fastAgentBrowserSessionName,
+  fastAgentSurfaceDeliversCaptures,
   isFastAgentBrowserEnabled,
+  rebuildPendingCaptureDeliveries,
   runBrowseCommand,
   tokenizeBrowseCommand,
   validateBrowseCommand,
@@ -46,6 +50,8 @@ beforeEach(() => {
   mocks.env.R_BROWSER_USE_API_KEY = 'bu-secret';
   mocks.env.R_FAST_BROWSER_CDP_URL = undefined;
   mocks.env.R_AGENT_BROWSER_PATH = undefined;
+  mocks.env.NODE_ENV = undefined;
+  mocks.env.R_APP_ENV = undefined;
 });
 
 describe('tokenizeBrowseCommand', () => {
@@ -92,6 +98,9 @@ describe('validateBrowseCommand', () => {
     ['open x --executable-path /bin/sh', '--executable-path is managed'],
     ['open x --profile ~/.chrome', '--profile is managed by Roomote'],
     ['open x --cdp 9222', '--cdp is managed by Roomote'],
+    ['get cdp-url', 'get cdp-url is not available here'],
+    ['cookies set --curl /etc/passwd', '--curl is managed by Roomote'],
+    ['cookies set --curl=/etc/passwd', '--curl is managed by Roomote'],
     ['screenshot /tmp/out.png', 'screenshot takes no path here'],
     ['record start /tmp/x.webm', 'record start takes no path here'],
     ['record pause', 'record takes start or stop.'],
@@ -124,6 +133,22 @@ describe('runBrowseCommand', () => {
   it('treats browseruse without a key as disabled', () => {
     mocks.env.R_BROWSER_USE_API_KEY = undefined;
     expect(isFastAgentBrowserEnabled()).toBe(false);
+  });
+
+  it('accepts local only in development', () => {
+    mocks.env.R_FAST_BROWSER_PROVIDER = 'local';
+    expect(isFastAgentBrowserEnabled()).toBe(false);
+    mocks.env.NODE_ENV = 'production';
+    expect(isFastAgentBrowserEnabled()).toBe(false);
+    mocks.env.NODE_ENV = 'development';
+    mocks.env.R_APP_ENV = 'production';
+    expect(isFastAgentBrowserEnabled()).toBe(false);
+    mocks.env.R_APP_ENV = 'preview';
+    expect(isFastAgentBrowserEnabled()).toBe(false);
+    mocks.env.R_APP_ENV = 'development';
+    expect(isFastAgentBrowserEnabled()).toBe(true);
+    mocks.env.R_APP_ENV = undefined;
+    expect(isFastAgentBrowserEnabled()).toBe(true);
   });
 
   it('treats cdp without an endpoint as disabled', () => {
@@ -257,6 +282,26 @@ describe('runBrowseCommand', () => {
     });
   });
 
+  it('discards an oversized capture before reading it', async () => {
+    let capturePath: string | undefined;
+    const exec = vi.fn<BrowseExec>(async (_file, args) => {
+      capturePath = args[4]!;
+      await mkdir(join(tmpdir(), 'roomote-fast-browse'), { recursive: true });
+      await writeFile(capturePath, Buffer.alloc(64));
+      return ok({ path: capturePath });
+    });
+    const result = await runBrowseCommand({
+      conversationId: 'conv-big',
+      command: validated('screenshot'),
+      exec,
+      maxCaptureBytes: 32,
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('64 bytes, over the 32-byte limit');
+    expect('capture' in result).toBe(false);
+    await expect(stat(capturePath!)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('records into a per-session file and returns it on stop', async () => {
     const webm = Buffer.from('webm-bytes');
     let recordingPath: string | undefined;
@@ -287,5 +332,96 @@ describe('runBrowseCommand', () => {
       error: null,
       capture: { kind: 'recording', contentType: 'video/webm', bytes: webm },
     });
+  });
+});
+
+describe('fastAgentSurfaceDeliversCaptures', () => {
+  it('promises attachment only where the reply path uploads them', () => {
+    expect(fastAgentSurfaceDeliversCaptures('web')).toBe(true);
+    expect(fastAgentSurfaceDeliversCaptures('automation')).toBe(true);
+    expect(fastAgentSurfaceDeliversCaptures('slack')).toBe(true);
+    for (const surface of [
+      'discord',
+      'teams',
+      'telegram',
+      'linear',
+      'agentmail',
+    ] as const) {
+      expect(fastAgentSurfaceDeliversCaptures(surface)).toBe(false);
+    }
+  });
+});
+
+describe('rebuildPendingCaptureDeliveries', () => {
+  const browse = (
+    result: Record<string, unknown>,
+    status: 'completed' | 'failed' | 'unknown' = 'completed',
+  ) => ({
+    kind: 'action' as const,
+    tool: 'browse',
+    status,
+    result: JSON.stringify(result),
+  });
+
+  it('collects promised captures that no visible reply has carried yet', () => {
+    expect(
+      rebuildPendingCaptureDeliveries([
+        browse({
+          success: true,
+          delivery: 'attached_to_next_reply',
+          captureKind: 'screenshot',
+          artifactId: 'img-1',
+        }),
+        { kind: 'reply', inferenceRetryNotice: true },
+        browse({
+          success: true,
+          delivery: 'attached_to_next_reply',
+          captureKind: 'recording',
+          artifactId: 'vid-1',
+        }),
+        browse({
+          success: true,
+          delivery: 'not_delivered',
+          captureKind: 'screenshot',
+          artifactId: 'img-skip',
+        }),
+        { kind: 'action', tool: 'send_chat_reply', status: 'completed' },
+      ]),
+    ).toEqual({ imageArtifactIds: ['img-1'], videoArtifactIds: ['vid-1'] });
+  });
+
+  it('drops captures a visible reply already carried and ignores failed or truncated results', () => {
+    expect(
+      rebuildPendingCaptureDeliveries([
+        browse({
+          success: true,
+          delivery: 'attached_to_next_reply',
+          captureKind: 'screenshot',
+          artifactId: 'img-old',
+        }),
+        { kind: 'reply' },
+        browse(
+          {
+            success: true,
+            delivery: 'attached_to_next_reply',
+            captureKind: 'screenshot',
+            artifactId: 'img-failed',
+          },
+          'failed',
+        ),
+        {
+          kind: 'action',
+          tool: 'browse',
+          status: 'completed',
+          result: '{"success":true,"delivery":"attached_to_next_reply","cap…',
+        },
+        browse({
+          success: true,
+          delivery: 'attached_to_next_reply',
+          captureKind: 'screenshot',
+          artifactId: 'img-new',
+        }),
+      ]),
+    ).toEqual({ imageArtifactIds: ['img-new'], videoArtifactIds: [] });
   });
 });

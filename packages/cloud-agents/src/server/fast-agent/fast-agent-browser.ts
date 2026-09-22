@@ -1,10 +1,11 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, rm } from 'node:fs/promises';
+import { mkdir, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { Env } from '@roomote/env';
+import type { FastAgentSurface } from '@roomote/types';
 
 /**
  * Fast `browse` tool runtime.
@@ -25,6 +26,12 @@ import { Env } from '@roomote/env';
 
 const FAST_AGENT_BROWSER_COMMAND_TIMEOUT_MS = 90_000;
 const FAST_AGENT_BROWSER_MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
+/**
+ * Largest capture the api will read off disk. Matches the Session media
+ * artifact cap; checked with `stat` before any bytes are read so a long
+ * high-fps recording cannot make the api allocate the whole file first.
+ */
+const FAST_AGENT_BROWSER_MAX_CAPTURE_BYTES = 50 * 1024 * 1024;
 /** Cloud browsers bill while open; drop an untouched session after this. */
 const FAST_AGENT_BROWSER_IDLE_TIMEOUT_MS = 10 * 60_000;
 const FAST_AGENT_BROWSER_SESSION_PREFIX = 'roomote-fast-';
@@ -101,7 +108,84 @@ const FAST_AGENT_BROWSER_DENIED_FLAGS: ReadonlySet<string> = new Set([
   '--allow-file-access',
   '--screenshot-dir',
   '--screenshot-format',
+  // `cookies set --curl <file>` imports cookies by reading a host file.
+  '--curl',
 ]);
+
+/**
+ * Surfaces whose reply path carries `imageArtifactIds` and
+ * `videoArtifactIds` to the user. Web renders Session artifacts from the
+ * canonical transcript and Slack uploads them; every other surface's reply
+ * adapter posts text only, so a capture there is reachable only by link.
+ */
+const FAST_AGENT_CAPTURE_DELIVERY_SURFACES: ReadonlySet<FastAgentSurface> =
+  new Set<FastAgentSurface>(['web', 'automation', 'slack']);
+
+export function fastAgentSurfaceDeliversCaptures(
+  surface: FastAgentSurface,
+): boolean {
+  return FAST_AGENT_CAPTURE_DELIVERY_SURFACES.has(surface);
+}
+
+/** What a `browse` capture result says about how the user will see it. */
+export type FastAgentBrowseCaptureDelivery =
+  | 'attached_to_next_reply'
+  | 'not_delivered'
+  | 'link_only';
+
+type RecordedTurnEvent =
+  | {
+      kind: 'action';
+      tool: string;
+      status: 'completed' | 'failed' | 'unknown';
+      result?: string;
+    }
+  | { kind: 'reply'; inferenceRetryNotice?: boolean };
+
+/**
+ * Captures a previous attempt at this turn took with `deliverToUser` that no
+ * reply has carried yet. The pending list otherwise lives only in process
+ * memory, so a resumed turn rebuilds it from the attempt's recorded tool
+ * results: every `browse` result that promised attachment, after the last
+ * visible reply (which would have carried anything pending before it). The
+ * recorded result may be truncated, which is why `runBrowseCommand` callers
+ * put `delivery`, `captureKind`, and `artifactId` first in the result.
+ */
+export function rebuildPendingCaptureDeliveries(
+  events: ReadonlyArray<RecordedTurnEvent>,
+): { imageArtifactIds: string[]; videoArtifactIds: string[] } {
+  const imageArtifactIds: string[] = [];
+  const videoArtifactIds: string[] = [];
+  for (const event of events) {
+    if (event.kind === 'reply') {
+      if (!event.inferenceRetryNotice) {
+        imageArtifactIds.length = 0;
+        videoArtifactIds.length = 0;
+      }
+      continue;
+    }
+    if (
+      event.tool !== 'browse' ||
+      event.status !== 'completed' ||
+      !event.result ||
+      !/"delivery"\s*:\s*"attached_to_next_reply"/u.test(event.result)
+    ) {
+      continue;
+    }
+    const artifactId = /"artifactId"\s*:\s*"([^"]+)"/u.exec(event.result)?.[1];
+    const captureKind = /"captureKind"\s*:\s*"(screenshot|recording)"/u.exec(
+      event.result,
+    )?.[1];
+    if (!artifactId || !captureKind) continue;
+    (captureKind === 'screenshot' ? imageArtifactIds : videoArtifactIds).push(
+      artifactId,
+    );
+  }
+  return {
+    imageArtifactIds: [...new Set(imageArtifactIds)],
+    videoArtifactIds: [...new Set(videoArtifactIds)],
+  };
+}
 
 type FastAgentBrowserProvider = 'browseruse' | 'cdp' | 'local';
 
@@ -113,7 +197,15 @@ function resolveFastAgentBrowserProvider(): FastAgentBrowserProvider | null {
   if (provider === 'cdp') {
     return Env.R_FAST_BROWSER_CDP_URL ? 'cdp' : null;
   }
-  if (provider === 'local') return 'local';
+  if (provider === 'local') {
+    // Development only: a host-local Chrome can open file:// URLs on the api
+    // host, so a production deployment never gets one even if Chrome exists.
+    return Env.NODE_ENV === 'development' &&
+      Env.R_APP_ENV !== 'production' &&
+      Env.R_APP_ENV !== 'preview'
+      ? 'local'
+      : null;
+  }
   return null;
 }
 
@@ -226,6 +318,11 @@ export function validateBrowseCommand(
         error: `${flag} is managed by Roomote and cannot be set from a command.`,
       };
     }
+  }
+  if (subcommand === 'get' && tokens[1] === 'cdp-url') {
+    // The CDP URL is the control plane's browser credential (the cdp
+    // provider's endpoint carries its token).
+    return { error: 'get cdp-url is not available here.' };
   }
   if (subcommand === 'screenshot') {
     // Only flags may follow `screenshot`; the output path is ours.
@@ -376,6 +473,8 @@ type RunBrowseCommandInput = {
   conversationId: string;
   command: ValidatedBrowseCommand;
   exec?: BrowseExec;
+  /** Test seam; production uses FAST_AGENT_BROWSER_MAX_CAPTURE_BYTES. */
+  maxCaptureBytes?: number;
 };
 
 type BrowseCapture = {
@@ -441,8 +540,20 @@ export async function runBrowseCommand(
   );
   const result = parseBrowseOutput(stdout, stderr, code);
   if (!capturePath || !captureKind) return result;
+  const captureLabel =
+    captureKind === 'screenshot' ? 'Screenshot' : 'Recording';
   try {
     if (!result.success) return result;
+    const maxBytes =
+      input.maxCaptureBytes ?? FAST_AGENT_BROWSER_MAX_CAPTURE_BYTES;
+    const { size } = await stat(capturePath);
+    if (size > maxBytes) {
+      return {
+        success: false,
+        data: null,
+        error: `${captureLabel} is ${size} bytes, over the ${maxBytes}-byte limit, and was discarded. Capture less: a shorter recording, a lower --fps, or a viewport screenshot instead of --full.`,
+      };
+    }
     const bytes = await readFile(capturePath);
     return {
       ...result,
@@ -457,7 +568,7 @@ export async function runBrowseCommand(
     return {
       success: false,
       data: null,
-      error: `${captureKind === 'screenshot' ? 'Screenshot' : 'Recording'} file could not be read: ${error instanceof Error ? error.message : String(error)}`,
+      error: `${captureLabel} file could not be read: ${error instanceof Error ? error.message : String(error)}`,
     };
   } finally {
     await rm(capturePath, { force: true }).catch(() => undefined);
