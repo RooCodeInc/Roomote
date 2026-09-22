@@ -87,4 +87,24 @@ describe('compileTaskIntegrationToolApprovals', () => {
     });
     expect(compiled).toEqual({ permission: { a_b_c: 'deny' }, tools: {} });
   });
+
+  it('never emits rules for Roomote-internal MCP servers', () => {
+    expect(
+      compileTaskIntegrationToolApprovals({
+        serverNames: ['roomote', 'linear'],
+        policies: [
+          policy('roomote', 'manage_tasks', 'reject'),
+          policy('linear', 'save_issue', 'ask'),
+        ],
+        sessionOverrides: [
+          { integrationId: 'roomote', toolName: 'manage_tasks', mode: 'ask' },
+        ],
+      }),
+    ).toEqual({
+      permission: { linear_save_issue: 'ask' },
+      tools: {
+        linear_save_issue: { integrationId: 'linear', toolName: 'save_issue' },
+      },
+    });
+  });
 });

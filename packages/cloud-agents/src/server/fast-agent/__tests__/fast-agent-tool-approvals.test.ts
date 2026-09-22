@@ -94,6 +94,31 @@ describe('buildIntegrationToolApprovalRules', () => {
     expect(buildIntegrationToolApprovalRules(integrations, [])).toEqual([]);
   });
 
+  it('never emits rules for Roomote-internal MCP servers', () => {
+    const internalIntegrations: FastAgentIntegration[] = [
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: '',
+        tools: [
+          { name: 'manage_tasks', description: '', inputSchema: {} },
+          { name: 'chat_reaction', description: '', inputSchema: {} },
+        ],
+      } as unknown as FastAgentIntegration,
+    ];
+    const rules = buildIntegrationToolApprovalRules(internalIntegrations, [
+      {
+        policyId: 'p1',
+        integrationId: 'roomote',
+        toolName: 'manage_tasks',
+        mode: 'reject',
+        updatedAt: '',
+        createdAt: '',
+      },
+    ]);
+    expect(rules).toEqual([]);
+  });
+
   it('never lets distinct integration/tool pairs share one policy entry', () => {
     // Regression: a delimiter-less composite key makes `a`/`bc` and `ab`/`c`
     // the same map entry, so one pair's mode would gate the other.

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   RESERVED_CUSTOM_MCP_SERVER_NAMES,
   customMcpServerInputSchema,
+  isInternalMcpServer,
   validateCustomMcpHeaderName,
   validateCustomMcpServerUrl,
 } from '../custom-mcp-servers';
@@ -14,6 +15,20 @@ const validServer = {
   authType: 'static_headers' as const,
   headers: { 'x-api-key': 'secret-value' },
 };
+
+describe('isInternalMcpServer', () => {
+  it('recognizes Roomote infrastructure and nothing else', () => {
+    expect(isInternalMcpServer('roomote')).toBe(true);
+    expect(isInternalMcpServer('_roomote_http_integrations')).toBe(true);
+    expect(isInternalMcpServer('gbrain')).toBe(true);
+    // In-process catalog integrations still count as external.
+    expect(isInternalMcpServer('notion')).toBe(false);
+    expect(isInternalMcpServer('granola')).toBe(false);
+    expect(isInternalMcpServer('linear')).toBe(false);
+    // Memory-category catalog entries are deployment integrations too.
+    expect(isInternalMcpServer('supermemory')).toBe(false);
+  });
+});
 
 describe('customMcpServerInputSchema', () => {
   it('accepts a valid static-header server', () => {

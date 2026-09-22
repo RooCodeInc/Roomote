@@ -76,12 +76,17 @@ describe('resolveGoverningIntegrationToolPolicies', () => {
     expect(resolve()).toEqual(['personal_only', 'shared_only']);
   });
 
-  it('never lets distinct integration and tool pairs share one entry', () => {
+  it('never governs Roomote-internal MCP servers', () => {
     const governing = resolveGoverningIntegrationToolPolicies({
-      deploymentPolicies: [policy('a', 'bc', 'ask')],
-      userPolicies: [policy('ab', 'c', 'reject')],
+      deploymentPolicies: [
+        policy('roomote', 'manage_tasks', 'reject'),
+        policy('_roomote_http_integrations', 'integration_request', 'ask'),
+        policy('gbrain', 'query', 'reject'),
+        policy('linear', 'save_issue', 'reject'),
+      ],
+      userPolicies: [policy('roomote', 'manage_tasks', 'ask')],
       scopeOf: () => undefined,
     });
-    expect(governing).toHaveLength(2);
+    expect(modes(governing)).toEqual({ save_issue: 'reject' });
   });
 });

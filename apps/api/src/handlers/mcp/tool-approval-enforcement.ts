@@ -10,6 +10,7 @@ import {
 } from '@roomote/db/server';
 import {
   integrationToolModeAsks,
+  isInternalMcpServer,
   resolveEffectiveIntegrationToolMode,
   resolveGoverningIntegrationToolPolicies,
   type IntegrationToolPolicyMode,
@@ -53,6 +54,11 @@ export async function resolveProxyToolApprovalBlocks(input: {
 }): Promise<Map<string, ProxyToolApprovalBlock>> {
   const blocks = new Map<string, ProxyToolApprovalBlock>();
   if (!(await isDeploymentExperimentEnabled('integrationToolApprovals'))) {
+    return blocks;
+  }
+  // Roomote's own MCP and other internal servers are outside approval
+  // control entirely; their tools always pass.
+  if (isInternalMcpServer(input.integrationId)) {
     return blocks;
   }
   const actingUserId =

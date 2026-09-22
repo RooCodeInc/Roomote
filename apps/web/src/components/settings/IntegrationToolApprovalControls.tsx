@@ -4,6 +4,7 @@ import { useState, type ReactNode } from 'react';
 
 import {
   integrationToolPolicyKey,
+  isInternalMcpServer,
   type IntegrationToolPolicyMode,
 } from '@roomote/types';
 
@@ -269,7 +270,13 @@ export function IntegrationToolApprovalList<T extends ManageableTool>({
   toggleDisabled?: boolean;
 }) {
   const experiment = useIntegrationToolApprovalsExperiment();
-  const active = experiment.enabled && canManage && integrationId != null;
+  // Internal MCPs (Roomote's own server, the integrations broker, Brain
+  // memory) are outside approval control: no approval UI, ever.
+  const active =
+    experiment.enabled &&
+    canManage &&
+    integrationId != null &&
+    !isInternalMcpServer(integrationId);
   const policies = useIntegrationToolPolicies({
     enabled: open && active,
     scope,

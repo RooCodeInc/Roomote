@@ -129,6 +129,20 @@ describe('resolveProxyToolApprovalBlocks', () => {
     expect(mockUser).not.toHaveBeenCalled();
   });
 
+  it('never blocks Roomote-internal MCP servers', async () => {
+    for (const integrationId of ['roomote', 'gbrain']) {
+      const blocks = await resolveProxyToolApprovalBlocks({
+        integrationId,
+        tokenType: 'run',
+        resolveActingUserId: async () => 'user-1',
+        resolveTaskId: async () => 'task-1',
+      });
+      expect(blocks.size).toBe(0);
+      expect(mockDeployment).not.toHaveBeenCalled();
+      expect(mockUser).not.toHaveBeenCalled();
+    }
+  });
+
   it('holds an auto tool for a task run exactly like an ask tool', async () => {
     mockDeployment.mockResolvedValue([policy('linear', 'save_issue', 'auto')]);
     const task = await resolveProxyToolApprovalBlocks({

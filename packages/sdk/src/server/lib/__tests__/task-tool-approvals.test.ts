@@ -114,6 +114,19 @@ describe('resolveTaskIntegrationToolApprovals', () => {
 });
 
 describe('requestTaskToolApproval', () => {
+  it('lets Roomote-internal MCP calls run without an approval', async () => {
+    await expect(
+      requestTaskToolApproval({
+        ...ask,
+        integrationId: 'roomote',
+        toolName: 'manage_tasks',
+      }),
+    ).resolves.toEqual({ outcome: 'not_required' });
+    expect(mocks.sessionForTask).not.toHaveBeenCalled();
+    expect(mocks.insert).not.toHaveBeenCalled();
+    expect(mocks.insertAuto).not.toHaveBeenCalled();
+  });
+
   it("records the ask on the task's Session for its owner", async () => {
     await expect(requestTaskToolApproval(ask)).resolves.toEqual({
       outcome: 'pending',

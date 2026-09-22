@@ -17,6 +17,7 @@ import {
 import { recordIntegrationToolAutoEvaluationInBackground } from '@roomote/cloud-agents/server/integration-tool-auto-evaluation';
 import {
   compileTaskIntegrationToolApprovals,
+  isInternalMcpServer,
   resolveGoverningIntegrationToolPolicies,
   type IntegrationToolApprovalStatus,
   type IntegrationToolPolicyScope,
@@ -107,6 +108,11 @@ export async function requestTaskToolApproval(input: {
   resolveServers?: ResolveTaskServers;
 }): Promise<TaskToolApprovalRequestResult> {
   if (!(await isDeploymentExperimentEnabled('integrationToolApprovals'))) {
+    return { outcome: 'not_required' };
+  }
+  // Internal MCPs never gate: the call runs without recording an approval,
+  // same as a tool with no governing policy.
+  if (isInternalMcpServer(input.integrationId)) {
     return { outcome: 'not_required' };
   }
   const session = await resolveTaskApprovalSession(input.runId);

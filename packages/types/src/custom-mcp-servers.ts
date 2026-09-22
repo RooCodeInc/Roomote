@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { MCP_INTEGRATIONS } from './mcp-oauth';
+import { BRAIN_MCP_ID } from './brain';
 import { PRODUCT_NAME } from './constants';
 import { collectReservedEnvReferences } from './reserved-mcp-env-vars';
 
@@ -39,14 +40,31 @@ export const ROOMOTE_MCP_ID = 'roomote';
 // Leading underscore keeps infrastructure outside the valid deployment custom-name namespace.
 export const HTTP_INTEGRATIONS_MCP_ID = '_roomote_http_integrations';
 
-export const RESERVED_CUSTOM_MCP_SERVER_NAMES: ReadonlySet<string> = new Set([
+/**
+ * MCP servers Roomote itself wires into every task: its own MCP, the HTTP
+ * integrations broker, and the Brain memory store. Approval control never
+ * applies to them: they are Roomote-internal infrastructure, not deployment
+ * integrations, and gating their tools would pause or block the product
+ * itself. External catalog integrations (Notion, Linear, Granola, ...)
+ * intentionally do not qualify, even when their handler runs in-process
+ * (`serverMode: 'native'`).
+ */
+export const INTERNAL_MCP_SERVER_IDS: ReadonlySet<string> = new Set([
   ROOMOTE_MCP_ID,
   HTTP_INTEGRATIONS_MCP_ID,
+  BRAIN_MCP_ID,
+]);
+
+export function isInternalMcpServer(serverId: string): boolean {
+  return INTERNAL_MCP_SERVER_IDS.has(serverId);
+}
+
+export const RESERVED_CUSTOM_MCP_SERVER_NAMES: ReadonlySet<string> = new Set([
+  ...INTERNAL_MCP_SERVER_IDS,
   'github',
   'slack',
   // The Brain is infrastructure rather than a catalog integration, so the
   // catalog cannot reserve its server name for it.
-  'gbrain',
   ...MCP_INTEGRATIONS.map((integration) => integration.id.toLowerCase()),
 ]);
 

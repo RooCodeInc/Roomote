@@ -20,6 +20,7 @@ import {
 import {
   integrationToolModeAsks,
   integrationToolPolicyKey,
+  isInternalMcpServer,
   resolveEffectiveIntegrationToolMode,
   resolveGoverningIntegrationToolPolicies,
   type IntegrationToolApprovalMetadata,
@@ -123,6 +124,9 @@ export function buildIntegrationToolApprovalRules(
   // a block, never let a gated tool run ungated.
   const actionByKey = new Map<string, 'ask' | 'deny'>();
   for (const tool of listMountedIntegrationTools(integrations)) {
+    // Roomote internal MCPs are outside approval control entirely; their
+    // tools keep OpenCode's default allow even when a policy row exists.
+    if (isInternalMcpServer(tool.integrationId)) continue;
     const key = integrationToolPolicyKey(tool.integrationId, tool.toolName);
     const policyMode = modeByTool.get(key);
     const mode = resolveEffectiveIntegrationToolMode({

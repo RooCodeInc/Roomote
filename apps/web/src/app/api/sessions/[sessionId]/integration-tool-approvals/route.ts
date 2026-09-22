@@ -11,6 +11,7 @@ import {
 import {
   integrationToolApprovalDecisionSchema,
   integrationToolSessionOverrideUpsertSchema,
+  isInternalMcpServer,
 } from '@roomote/types';
 
 import { authorize } from '@/lib/server/auth-context';
@@ -58,7 +59,19 @@ async function handle(
         listPendingIntegrationToolApprovals(context),
         listIntegrationToolSessionOverridesForRequester(context),
       ]);
-      return NextResponse.json({ pending, sessionOverrides }, { headers });
+      // Internal MCPs are outside approval control; never surface asks or
+      // overrides for them.
+      return NextResponse.json(
+        {
+          pending: pending.filter(
+            (approval) => !isInternalMcpServer(approval.integrationId),
+          ),
+          sessionOverrides: sessionOverrides.filter(
+            (override) => !isInternalMcpServer(override.integrationId),
+          ),
+        },
+        { headers },
+      );
     }
 
     // Only configured public authority is trusted, never caller-supplied proxy headers.
@@ -93,6 +106,7 @@ async function handle(
         body.value,
       );
       if (!override.success) return error(400);
+      if (isInternalMcpServer(override.data.integrationId)) return error(400);
       await setIntegrationToolSessionOverride(context, override.data);
       return NextResponse.json({ ok: true }, { status: 200, headers });
     }

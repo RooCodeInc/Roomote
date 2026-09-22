@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { isInternalMcpServer } from './custom-mcp-servers';
+
 /**
  * Experiment-gated (`integrationToolApprovals`) per-integration-tool approval
  * policies and requests for code-mode integration calls in Sessions.
@@ -196,6 +198,11 @@ export function resolveGoverningIntegrationToolPolicies<
     ['personal', input.userPolicies],
   ] as const) {
     for (const policy of policies) {
+      // Internal MCPs (Roomote's own server, the HTTP integrations broker,
+      // Brain memory) are never governed: approval policy is for deployment
+      // integrations, and gating product infrastructure would pause the
+      // product itself.
+      if (isInternalMcpServer(policy.integrationId)) continue;
       if ((input.scopeOf(policy.integrationId) ?? layer) !== layer) continue;
       const key = integrationToolPolicyKey(
         policy.integrationId,
@@ -288,6 +295,9 @@ export function compileTaskIntegrationToolApprovals(input: {
     ...input.sessionOverrides,
   ]) {
     if (!mounted.has(integrationId)) continue;
+    // Internal MCPs are outside approval control entirely (see
+    // `resolveGoverningIntegrationToolPolicies`).
+    if (isInternalMcpServer(integrationId)) continue;
     const policyKey = integrationToolPolicyKey(integrationId, toolName);
     const policyMode = policyModes.get(policyKey);
     const mode = resolveEffectiveIntegrationToolMode({

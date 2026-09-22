@@ -7,11 +7,28 @@ import {
   upsertIntegrationToolPolicy,
   upsertIntegrationToolUserPolicy,
 } from '@roomote/db/server';
-import type { IntegrationToolPolicyUpsert } from '@roomote/types';
+import {
+  isInternalMcpServer,
+  type IntegrationToolPolicyUpsert,
+} from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
 
 import { assertAdmin } from '../setup/shared';
+
+/**
+ * Internal MCPs (Roomote's own server, the HTTP integrations broker, Brain
+ * memory) are excluded from approval control; reject attempts to configure
+ * them and hide any previously stored rows for them.
+ */
+function assertApprovalManagedIntegrationId(integrationId: string) {
+  if (isInternalMcpServer(integrationId)) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: `${integrationId} is a Roomote-internal MCP server and is outside approval control.`,
+    });
+  }
+}
 
 /**
  * Experiment-gated (`integrationToolApprovals`) per-tool approval policies.
@@ -22,7 +39,9 @@ export async function listIntegrationToolPoliciesCommand(
   auth: UserAuthSuccess,
 ) {
   assertAdmin(auth);
-  return listIntegrationToolPolicies();
+  return (await listIntegrationToolPolicies()).filter(
+    (policy) => !isInternalMcpServer(policy.integrationId),
+  );
 }
 
 export async function setIntegrationToolPolicyCommand(
@@ -30,11 +49,12 @@ export async function setIntegrationToolPolicyCommand(
   input: IntegrationToolPolicyUpsert,
 ) {
   assertAdmin(auth);
+  assertApprovalManagedIntegrationId(input.integrationId);
   await upsertIntegrationToolPolicy({
     ...input,
     updatedByUserId: auth.userId,
   });
-  return listIntegrationToolPolicies();
+  return listIntegrationToolPoliciesCommand(auth);
 }
 
 const toolApprovalsEnabled = () =>
@@ -49,7 +69,9 @@ export async function listPersonalIntegrationToolPoliciesCommand(
   auth: UserAuthSuccess,
 ) {
   if (!(await toolApprovalsEnabled())) return [];
-  return listIntegrationToolUserPolicies(auth.userId);
+  return (await listIntegrationToolUserPolicies(auth.userId)).filter(
+    (policy) => !isInternalMcpServer(policy.integrationId),
+  );
 }
 
 export async function setPersonalIntegrationToolPolicyCommand(
@@ -62,6 +84,9 @@ export async function setPersonalIntegrationToolPolicyCommand(
       message: 'Tool approvals are not enabled.',
     });
   }
+  assertApprovalManagedIntegrationId(input.integrationId);
   await upsertIntegrationToolUserPolicy({ ...input, userId: auth.userId });
-  return listIntegrationToolUserPolicies(auth.userId);
+  return (await listIntegrationToolUserPolicies(auth.userId)).filter(
+    (policy) => !isInternalMcpServer(policy.integrationId),
+  );
 }
