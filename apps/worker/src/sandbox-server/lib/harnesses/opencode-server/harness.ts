@@ -3900,6 +3900,7 @@ export class OpenCodeServerHarness
     const queuedId = this.prompts.enqueue({
       text: VISUAL_PROOF_TIMEOUT_RECOVERY_PROMPT,
       visibleInTranscript: false,
+      source: 'opencode-visual-proof-recovery',
     });
     this.prompts.prioritize(queuedId);
 
@@ -3936,6 +3937,7 @@ export class OpenCodeServerHarness
     this.prompts.enqueue({
       text: PLAN_EXIT_CONTINUATION_PROMPT,
       visibleInTranscript: false,
+      source: 'opencode-plan-exit-continuation',
     });
   }
 
@@ -4521,6 +4523,7 @@ export class OpenCodeServerHarness
     const queuedId = this.prompts.enqueue({
       text: recovery.promptText,
       visibleInTranscript: false,
+      source: 'opencode-provider-error-recovery',
     });
     this.prompts.prioritize(queuedId);
     this.providerErrorRecoveryQueuedPromptId = queuedId;
@@ -4582,6 +4585,7 @@ export class OpenCodeServerHarness
     const queuedId = this.prompts.enqueue({
       text: OPENCODE_RATE_LIMIT_RETRY_PROMPT_TEXT,
       visibleInTranscript: false,
+      source: 'opencode-rate-limit-retry',
     });
     this.prompts.prioritize(queuedId);
 
@@ -6041,6 +6045,7 @@ export class OpenCodeServerHarness
       userName: next.userName,
       userImageUrl: next.userImageUrl,
       clientMessageId: next.clientMessageId,
+      source: next.source,
     });
     await this.submitPrompt({
       text: next.text,
@@ -6051,6 +6056,7 @@ export class OpenCodeServerHarness
       userName: next.userName,
       userImageUrl: next.userImageUrl,
       clientMessageId: next.clientMessageId,
+      source: next.source,
     });
   }
 

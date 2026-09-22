@@ -206,6 +206,11 @@ describe('evaluateTaskCompletionGate', () => {
         'Before finalizing, post a terminal chat-visible reply.',
         'opencode-stop-hook',
       ),
+      // Queued by the harness itself after a provider rate limit.
+      prompt(
+        'Continue where you left off after the temporary provider rate limit.',
+        'opencode-rate-limit-retry',
+      ),
     ]);
 
     await evaluateTaskCompletionGate({ taskId: 'task-1', check });
