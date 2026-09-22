@@ -4,14 +4,9 @@ import {
   decideIntegrationToolApproval,
   IntegrationToolApprovalUnavailableError,
   isDeploymentExperimentEnabled,
-  listIntegrationToolSessionOverridesForRequester,
   listPendingIntegrationToolApprovals,
-  setIntegrationToolSessionOverride,
 } from '@roomote/db/server';
-import {
-  integrationToolApprovalDecisionSchema,
-  integrationToolSessionOverrideUpsertSchema,
-} from '@roomote/types';
+import { integrationToolApprovalDecisionSchema } from '@roomote/types';
 
 import { authorize } from '@/lib/server/auth-context';
 import { readBoundedJsonBody } from '@/lib/server/bounded-json-body';
@@ -31,11 +26,7 @@ function error(status: number) {
   );
 }
 
-async function handle(
-  request: Request,
-  props: Props,
-  method: 'GET' | 'POST' | 'PUT',
-) {
+async function handle(request: Request, props: Props, method: 'GET' | 'POST') {
   try {
     const auth = await authorize();
     if (!auth.success || !auth.userId) return error(401);
@@ -49,16 +40,13 @@ async function handle(
     // exist, no decisions are accepted, and no execution path changes.
     if (!(await isDeploymentExperimentEnabled('integrationToolApprovals'))) {
       return method === 'GET'
-        ? NextResponse.json({ pending: [], sessionOverrides: [] }, { headers })
+        ? NextResponse.json({ pending: [] }, { headers })
         : error(404);
     }
 
     if (method === 'GET') {
-      const [pending, sessionOverrides] = await Promise.all([
-        listPendingIntegrationToolApprovals(context),
-        listIntegrationToolSessionOverridesForRequester(context),
-      ]);
-      return NextResponse.json({ pending, sessionOverrides }, { headers });
+      const pending = await listPendingIntegrationToolApprovals(context);
+      return NextResponse.json({ pending }, { headers });
     }
 
     // Only configured public authority is trusted, never caller-supplied proxy headers.
@@ -85,17 +73,6 @@ async function handle(
       timeoutMs: 10_000,
     });
     if (!body.ok) return error(body.status);
-    if (method === 'PUT') {
-      // Requester-only session override ("ask me for this tool" / stop
-      // asking / clear). The write helper re-checks Session ownership, so a
-      // non-owner fails closed with the same not-found as every other check.
-      const override = integrationToolSessionOverrideUpsertSchema.safeParse(
-        body.value,
-      );
-      if (!override.success) return error(400);
-      await setIntegrationToolSessionOverride(context, override.data);
-      return NextResponse.json({ ok: true }, { status: 200, headers });
-    }
     const args = integrationToolApprovalDecisionSchema.safeParse(body.value);
     if (!args.success) return error(400);
     // Requester-only: the decide helper matches the approval's requester,
@@ -120,8 +97,4 @@ export async function GET(request: Request, props: Props) {
 
 export async function POST(request: Request, props: Props) {
   return handle(request, props, 'POST');
-}
-
-export async function PUT(request: Request, props: Props) {
-  return handle(request, props, 'PUT');
 }

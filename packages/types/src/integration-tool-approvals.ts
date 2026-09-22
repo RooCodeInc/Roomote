@@ -147,7 +147,6 @@ export interface IntegrationToolSessionOverrideMetadata {
 
 export interface IntegrationToolApprovals {
   pending: IntegrationToolApprovalMetadata[];
-  sessionOverrides: IntegrationToolSessionOverrideMetadata[];
 }
 
 export const integrationToolApprovalDecisionSchema = z.object({
@@ -175,16 +174,6 @@ export const integrationToolPoliciesUpsertSchema = z.object({
 });
 export type IntegrationToolPoliciesUpsert = z.infer<
   typeof integrationToolPoliciesUpsertSchema
->;
-
-export const integrationToolSessionOverrideUpsertSchema = z.object({
-  integrationId: z.string().min(1).max(200),
-  toolName: z.string().min(1).max(200),
-  /** `null` clears the override and restores the deployment policy. */
-  mode: z.enum(INTEGRATION_TOOL_SESSION_OVERRIDE_MODES).nullable(),
-});
-export type IntegrationToolSessionOverrideUpsert = z.infer<
-  typeof integrationToolSessionOverrideUpsertSchema
 >;
 
 const INTEGRATION_TOOL_POLICY_MODE_STRICTNESS: Record<
