@@ -34,7 +34,10 @@ import {
   type SessionGoal,
 } from '@roomote/types';
 
-import type { FastSessionMessage } from '@/lib/server/fast-sessions';
+import type {
+  FastSessionMessage,
+  FastSessionQueuedMessage,
+} from '@/lib/server/fast-sessions';
 import { useTRPC, useTRPCClient } from '@/trpc/client';
 import {
   Conversation,
@@ -113,6 +116,7 @@ import {
   toAcpUiMessage,
 } from '../../task/[taskId]/hooks/services/acp-protocol-service';
 import type { AcpUiMessage } from '../../task/[taskId]/types';
+import { QueuedMessagesContent } from '../../task/[taskId]/QueuedMessages';
 
 /** Rows arriving over the SSE stream have `createdAt` serialized to a string;
  * the transcript only sorts on ts/turnSeq/id, so both shapes are accepted. */
@@ -243,6 +247,15 @@ function getUserMessageIdentity(message: TranscriptMessage) {
     getTextFromContentBlocks(message.contentBlocks)?.trim() ?? '',
     getImageUrisFromContentBlocks(message.contentBlocks),
   ]);
+}
+
+function getTranscriptMessageClientMessageId(
+  message: TranscriptMessage,
+): string | null {
+  const clientMessageId = message.metadata?.clientMessageId;
+  return typeof clientMessageId === 'string' && clientMessageId.length > 0
+    ? clientMessageId
+    : null;
 }
 
 function buildOptimisticContentBlocks(text: string, images: string[] = []) {
@@ -442,6 +455,7 @@ function SessionScrollRestoration({ sessionId }: { sessionId: string }) {
 export function FastSessionTranscript({
   sessionId,
   initialMessages,
+  initialQueuedMessages = [],
   hasOlderMessages,
   canReply,
   initialTitle = null,
@@ -462,6 +476,7 @@ export function FastSessionTranscript({
 }: {
   sessionId: string;
   initialMessages: FastSessionMessage[];
+  initialQueuedMessages?: FastSessionQueuedMessage[];
   hasOlderMessages?: boolean;
   canReply?: boolean;
   initialTitle?: string | null;
@@ -540,6 +555,12 @@ export function FastSessionTranscript({
     () => new Map(initialMessages.map((message) => [message.eventId, message])),
   );
   const serverMessagesRef = useRef(serverMessages);
+  const [serverQueuedMessages, setServerQueuedMessages] = useState<
+    FastSessionQueuedMessage[]
+  >(initialQueuedMessages);
+  const [localQueuedMessages, setLocalQueuedMessages] = useState<
+    FastSessionQueuedMessage[]
+  >([]);
   const hasReceivedInitialSessionStateRef = useRef(false);
   const pendingTaskReportTimingsRef = useRef(
     new Map<string, { admittedAtMs: number; serverReceivedAtMs: number }>(),
@@ -639,10 +660,15 @@ export function FastSessionTranscript({
           const existing = previous.get(message.eventId);
           let renderId = existing?.id;
           if (!renderId && message.role === 'user') {
+            const messageClientMessageId =
+              getTranscriptMessageClientMessageId(message);
             const optimisticIndex = pendingOptimistic.findIndex(
               (optimistic) =>
+                (messageClientMessageId !== null &&
+                  getTranscriptMessageClientMessageId(optimistic) ===
+                    messageClientMessageId) ||
                 getUserMessageIdentity(optimistic) ===
-                getUserMessageIdentity(message),
+                  getUserMessageIdentity(message),
             );
             if (optimisticIndex >= 0) {
               renderId = pendingOptimistic[optimisticIndex]?.id;
@@ -722,6 +748,25 @@ export function FastSessionTranscript({
         }
       } catch {
         // Ignore malformed frames; the next poll re-sends current state.
+      }
+    };
+    const onQueue = (event: MessageEvent) => {
+      try {
+        const parsed = JSON.parse(event.data) as {
+          queuedMessages?: FastSessionQueuedMessage[];
+        };
+        if (!Array.isArray(parsed.queuedMessages)) return;
+        setServerQueuedMessages(
+          parsed.queuedMessages.filter(
+            (message) =>
+              typeof message?.id === 'string' &&
+              typeof message.clientMessageId === 'string' &&
+              typeof message.text === 'string' &&
+              typeof message.timestamp === 'number',
+          ),
+        );
+      } catch {
+        // Ignore malformed frames; the next poll sends the current snapshot.
       }
     };
     const onSession = (event: MessageEvent) => {
@@ -834,12 +879,14 @@ export function FastSessionTranscript({
     };
     source.addEventListener('open', onOpen);
     source.addEventListener('messages', onMessages);
+    source.addEventListener('queue', onQueue);
     source.addEventListener('session', onSession);
     source.addEventListener('chunk', onChunk);
     source.addEventListener('task-report', onTaskReport);
     return () => {
       source.removeEventListener('open', onOpen);
       source.removeEventListener('messages', onMessages);
+      source.removeEventListener('queue', onQueue);
       source.removeEventListener('session', onSession);
       source.removeEventListener('chunk', onChunk);
       source.removeEventListener('task-report', onTaskReport);
@@ -852,6 +899,34 @@ export function FastSessionTranscript({
     replaceOptimisticMessages,
     replaceStreamMessages,
   ]);
+
+  const deliveredClientMessageIds = useMemo(
+    () =>
+      new Set(
+        [...serverMessages.values()]
+          .map(getTranscriptMessageClientMessageId)
+          .filter((clientMessageId): clientMessageId is string =>
+            Boolean(clientMessageId),
+          ),
+      ),
+    [serverMessages],
+  );
+  const queuedMessages = useMemo(() => {
+    const seenClientMessageIds = new Set<string>();
+
+    return [...serverQueuedMessages, ...localQueuedMessages].filter(
+      (message) => {
+        if (deliveredClientMessageIds.has(message.clientMessageId)) {
+          return false;
+        }
+        if (seenClientMessageIds.has(message.clientMessageId)) {
+          return false;
+        }
+        seenClientMessageIds.add(message.clientMessageId);
+        return true;
+      },
+    );
+  }, [deliveredClientMessageIds, localQueuedMessages, serverQueuedMessages]);
 
   const messages = useMemo(() => {
     return [...serverMessages.values(), ...optimisticMessages].sort(
@@ -1317,7 +1392,8 @@ export function FastSessionTranscript({
       setIsSending(true);
       setReplyError(null);
       let optimisticId: string | null = null;
-      let clientMessageId: string | undefined;
+      let clientMessageId = '';
+      let optimisticTranscriptAdded = false;
       try {
         const prepared = await preparePromptAttachments(
           {
@@ -1331,8 +1407,8 @@ export function FastSessionTranscript({
           return false;
         }
 
+        clientMessageId = crypto.randomUUID();
         if (options?.voiceDelegationId !== undefined) {
-          clientMessageId = crypto.randomUUID();
           voiceDelegationByTurnIdRef.current.set(
             clientMessageId,
             options.voiceDelegationId,
@@ -1341,8 +1417,8 @@ export function FastSessionTranscript({
         optimisticId = `optimistic:${Date.now()}:${Math.random().toString(36).slice(2)}`;
         const optimistic: TranscriptMessage = {
           id: optimisticId,
-          eventId: optimisticId,
-          turnId: 'optimistic',
+          eventId: `${clientMessageId}:user`,
+          turnId: clientMessageId,
           turnSeq: 0,
           ts: Date.now(),
           eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
@@ -1350,6 +1426,7 @@ export function FastSessionTranscript({
           contentBlocks: buildOptimisticContentBlocks(prepared.text, images),
           metadata: {
             visibleInTranscript: true,
+            clientMessageId,
             ...(currentUser ? { userId: currentUser.userId } : {}),
           },
           payload: {},
@@ -1361,14 +1438,9 @@ export function FastSessionTranscript({
           userImageUrl: currentUser?.imageUrl ?? null,
           createdAt: new Date(),
         };
-        replaceOptimisticMessages([
-          ...optimisticMessagesRef.current,
-          optimistic,
-        ]);
-        dispatchPendingResponse({ type: 'optimistic', message: optimistic });
-        await trpcClient.fastSessions.reply.mutate({
+        const result = await trpcClient.fastSessions.reply.mutate({
           sessionId,
-          ...(clientMessageId ? { clientMessageId } : {}),
+          clientMessageId,
           ...(options?.voiceDelegationId !== undefined
             ? { voiceMode: true }
             : {}),
@@ -1380,16 +1452,57 @@ export function FastSessionTranscript({
           model: message.model ?? null,
           reasoningEffort: message.reasoningEffort ?? null,
         });
-        dispatchPendingResponse({
-          type: 'commitOptimistic',
-          optimisticId,
-        });
+
+        if (result?.admission === 'queued') {
+          setLocalQueuedMessages((current) => {
+            if (
+              current.some(
+                (queued) => queued.clientMessageId === clientMessageId,
+              )
+            ) {
+              return current;
+            }
+            return [
+              ...current,
+              {
+                id: clientMessageId,
+                clientMessageId,
+                text: prepared.text,
+                ...(images.length > 0 ? { images } : {}),
+                timestamp: Date.now(),
+                optimistic: true,
+              },
+            ];
+          });
+        } else {
+          const alreadyDelivered = [...serverMessagesRef.current.values()].some(
+            (serverMessage) =>
+              getTranscriptMessageClientMessageId(serverMessage) ===
+                clientMessageId ||
+              serverMessage.eventId === `${clientMessageId}:user`,
+          );
+          if (!alreadyDelivered) {
+            replaceOptimisticMessages([
+              ...optimisticMessagesRef.current,
+              optimistic,
+            ]);
+            optimisticTranscriptAdded = true;
+            dispatchPendingResponse({
+              type: 'optimistic',
+              message: optimistic,
+            });
+            dispatchPendingResponse({
+              type: 'commitOptimistic',
+              optimisticId,
+            });
+          }
+        }
         return true;
       } catch (error) {
         if (clientMessageId) {
           voiceDelegationByTurnIdRef.current.delete(clientMessageId);
         }
-        if (optimisticId) {
+        if (optimisticId && optimisticTranscriptAdded) {
           const failedId = optimisticId;
           replaceOptimisticMessages(
             optimisticMessagesRef.current.filter(
@@ -1977,6 +2090,7 @@ export function FastSessionTranscript({
           <SessionScrollRestoration sessionId={sessionId} />
           <ConversationScrollButton />
         </Conversation>
+        <QueuedMessagesContent queuedMessages={queuedMessages} />
         {canReply && !pendingInputRequest?.preset ? (
           <div className="mx-auto w-full shrink-0 overflow-clip rounded-t-md rounded-b-3xl border-2 border-background bg-card outline-0 outline-offset-[-2px] outline-accent-foreground transition-[background-color,border-color,outline-width] has-[textarea:focus]:outline-2 @[56rem]:rounded-t-lg">
             <SessionPromptInput

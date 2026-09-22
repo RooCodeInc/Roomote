@@ -67,6 +67,7 @@ export async function GET(
   let lastTitle = session.title;
   let lastConversationResponding: boolean | null | undefined;
   let lastGoalSignature: string | undefined;
+  let lastQueuedMessagesSignature: string | undefined;
 
   return createResponse(request, async (sseSession) => {
     const startTime = Date.now();
@@ -101,8 +102,11 @@ export async function GET(
         }
 
         try {
-          const { messages, cursor: nextCursor } =
-            await getFastSessionMessagesSince(session.id, cursor);
+          const {
+            messages,
+            queuedMessages,
+            cursor: nextCursor,
+          } = await getFastSessionMessagesSince(session.id, cursor);
           cursor = nextCursor;
 
           const [conversation] = await db
@@ -146,6 +150,11 @@ export async function GET(
               { messages, conversationResponding },
               'messages',
             );
+          }
+          const queuedMessagesSignature = JSON.stringify(queuedMessages);
+          if (queuedMessagesSignature !== lastQueuedMessagesSignature) {
+            lastQueuedMessagesSignature = queuedMessagesSignature;
+            await sseSession.push({ queuedMessages }, 'queue');
           }
           const sessionUpdate: {
             title?: string;

@@ -3741,6 +3741,7 @@ export async function answerFastAgentQuestion({
             ? { resumesTurnId: unresolvedRequest.turnId }
             : {}),
           userId,
+          ...(currentMessageId ? { clientMessageId: currentMessageId } : {}),
           ...(senderDisplayName ? { userName: senderDisplayName } : {}),
           ...(senderDisplayName ? { senderDisplayName } : {}),
           ...(senderExternalId ? { senderExternalId } : {}),

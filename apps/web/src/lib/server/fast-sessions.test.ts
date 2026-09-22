@@ -1957,6 +1957,117 @@ describe('Session queries', () => {
     ).resolves.toBe('dismissed');
   });
 
+  it('returns only pending web follow-ups as ordered queue state for reload and polling', async () => {
+    const owner = await userFactory.create();
+    const session = await createFastSession({
+      userId: owner.id,
+      conversationId: 'queued-web-follow-ups',
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+      surface: 'web',
+    });
+    const parent = {
+      sessionId: session.id,
+      conversation: {
+        surface: 'web' as const,
+        workspaceId: owner.id,
+        conversationId: session.conversationId,
+      },
+    };
+    const event = (
+      eventId: string,
+      text: string,
+      webFollowUp = true,
+      images?: string[],
+      attachmentTexts?: string[],
+    ) => ({
+      type: 'human_follow_up' as const,
+      eventId,
+      currentMessageId: eventId,
+      userId: owner.id,
+      question: text,
+      webFollowUp,
+      ...(images ? { images } : {}),
+      ...(attachmentTexts ? { attachmentTexts } : {}),
+    });
+
+    await db.insert(fastAgentParentEvents).values([
+      {
+        conversationId: session.id,
+        eventKey: 'queued-web-follow-up-1',
+        parent,
+        event: event('queued-client-1', 'First queued message'),
+        createdAt: new Date('2026-01-01T00:00:01.000Z'),
+      },
+      {
+        conversationId: session.id,
+        eventKey: 'queued-web-follow-up-2',
+        parent,
+        event: event('queued-client-2', 'Second queued message'),
+        createdAt: new Date('2026-01-01T00:00:02.000Z'),
+      },
+      {
+        conversationId: session.id,
+        eventKey: 'queued-image-follow-up',
+        parent,
+        event: event('queued-image-client', '', true, [
+          'data:image/png;base64,aGVsbG8=',
+        ]),
+        createdAt: new Date('2026-01-01T00:00:02.500Z'),
+      },
+      {
+        conversationId: session.id,
+        eventKey: 'queued-attachment-follow-up',
+        parent,
+        event: event('queued-attachment-client', '', true, undefined, [
+          'Attachment: notes.txt\nFollow up details.',
+        ]),
+        createdAt: new Date('2026-01-01T00:00:02.750Z'),
+      },
+      {
+        conversationId: session.id,
+        eventKey: 'delivered-web-follow-up',
+        parent,
+        event: event('delivered-client', 'Already delivered'),
+        deliveredAt: new Date('2026-01-01T00:00:03.000Z'),
+      },
+      {
+        conversationId: session.id,
+        eventKey: 'inline-web-follow-up',
+        parent,
+        event: event('inline-client', 'Already admitted inline'),
+        admission: 'inline',
+      },
+      {
+        conversationId: session.id,
+        eventKey: 'non-web-follow-up',
+        parent,
+        event: event('slack-client', 'Slack message', false),
+      },
+    ]);
+
+    const polled = await getFastSessionMessagesSince(session.id, 0);
+    expect(polled.queuedMessages).toMatchObject([
+      { clientMessageId: 'queued-client-1', text: 'First queued message' },
+      { clientMessageId: 'queued-client-2', text: 'Second queued message' },
+      {
+        clientMessageId: 'queued-image-client',
+        text: '',
+        images: ['data:image/png;base64,aGVsbG8='],
+      },
+      {
+        clientMessageId: 'queued-attachment-client',
+        text: '(queued attachment)',
+      },
+    ]);
+    expect(polled.queuedMessages).toHaveLength(4);
+
+    const reloaded = await getFastSessionById(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+    );
+    expect(reloaded?.queuedMessages).toEqual(polled.queuedMessages);
+  });
+
   it('finds sessions for every deployment user', async () => {
     const owner = await userFactory.create();
     const participant = await userFactory.create();

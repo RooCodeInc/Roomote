@@ -262,12 +262,12 @@ export type FastAgentSetupTurnContext = z.infer<
   typeof fastAgentSetupTurnContextSchema
 >;
 
-export const fastAgentHumanFollowUpEventSchema = z.object({
+const fastAgentHumanFollowUpEventBaseSchema = z.object({
   type: z.literal(FAST_AGENT_HUMAN_FOLLOW_UP_EVENT_TYPE),
   eventId: z.string().min(1),
   currentMessageId: z.string().min(1),
   userId: z.string().min(1),
-  question: z.string().min(1),
+  question: z.string(),
   images: z.array(z.string()).optional(),
   attachmentTexts: z.array(z.string()).optional(),
   senderDisplayName: z.string().min(1).optional(),
@@ -340,6 +340,23 @@ export const fastAgentHumanFollowUpEventSchema = z.object({
    * when an admitted web turn resumes in another process. */
   setupContext: fastAgentSetupTurnContextSchema.optional(),
 });
+
+export const fastAgentHumanFollowUpEventSchema =
+  fastAgentHumanFollowUpEventBaseSchema.superRefine((event, ctx) => {
+    if (
+      event.question.trim().length > 0 ||
+      event.images?.length ||
+      event.attachmentTexts?.length
+    ) {
+      return;
+    }
+
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'A human follow-up needs text or an attachment.',
+      path: ['question'],
+    });
+  });
 
 export type FastAgentHumanFollowUpEvent = z.infer<
   typeof fastAgentHumanFollowUpEventSchema
