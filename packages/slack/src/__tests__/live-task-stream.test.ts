@@ -13,6 +13,14 @@ describe('buildSlackLiveTaskTitle', () => {
     );
   });
 
+  it('removes leading slash skill invocations from the display title', () => {
+    expect(
+      buildSlackLiveTaskTitle(
+        '/review-code\n\nFix the Slack task title cleanup',
+      ),
+    ).toBe('Fix the Slack task title cleanup');
+  });
+
   it.each([
     [
       '$implement-changes $not-a-real-skill Fix the task',
