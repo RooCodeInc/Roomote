@@ -64,7 +64,7 @@ const INTEGRATION_TOOL_APPROVAL_CANCEL_EXPERIMENT_DISABLED =
   'experiment_disabled';
 const SESSION_PRESENCE_LOOKUP_TIMEOUT_MS = 2_000;
 
-export type FastAgentApprovalChatSurface = Extract<
+type FastAgentApprovalChatSurface = Extract<
   FastAgentSurface,
   'slack' | 'discord' | 'teams' | 'telegram'
 >;
