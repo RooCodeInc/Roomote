@@ -7,13 +7,13 @@ import {
   buildFastAgentSetupAdapter,
   createFastAgentTaskLauncher,
   createFastAgentWebTaskLauncher,
-  appendFastAgentVisibleMessages,
   captureFastAgentCommunicationDecision,
   fastAgentConversationRepository,
   isFastAgentVoiceCallActive,
   publishFastAgentSessionRefresh,
   runJevFastAgentCommunicationExperiment,
   resolveApiBaseUrl,
+  upsertFastAgentMessage,
   type FastAgentConversationRecord,
   type FastAgentTurnLockHandle,
   type FastAgentReplyHandle,
@@ -65,6 +65,7 @@ import {
   buildFastAgentChildTaskMetadata,
   buildDataVisualizationBlocks,
   buildPrReviewActionCallbackData,
+  ACP_ENVELOPE_EVENT_TYPES,
   PR_REVIEW_ACTION_LABELS,
   TaskPayloadKind,
   exitedRunStatuses,
@@ -2951,16 +2952,7 @@ export async function deliverFastAgentParentEventWithLock(
               purpose: 'closeout' as const,
               taskStatus: params.event.status,
             }
-          : params.event.type === 'scheduled_wakeup'
-            ? {
-                taskId: `wakeup:${params.event.wakeupId}`,
-                messageId: buildEventClientMessageSeed(params.event),
-                admittedAtMs: undefined,
-                message: params.event.prompt,
-                purpose: 'closeout' as const,
-                taskStatus: 'scheduled_followup',
-              }
-            : null;
+          : null;
     if (
       experimentEvent &&
       (jevExperimentEnabled || developmentEventOverride) &&
@@ -2971,12 +2963,31 @@ export async function deliverFastAgentParentEventWithLock(
           message: experimentEvent.message,
           purpose: experimentEvent.purpose,
           taskStatus: experimentEvent.taskStatus,
+          ...(developmentEventOverride
+            ? { selectionOverride: 'openrouter' as const }
+            : {}),
           adapter: {
             ...parentTurn.adapter,
             postReply: async (reply) => {
-              await appendFastAgentVisibleMessages({
+              await upsertFastAgentMessage({
                 sessionId: params.parent.sessionId,
-                messages: [{ role: 'assistant', content: reply.message }],
+                insertOnly: true,
+                message: {
+                  eventId: `${experimentEvent.messageId}:jev-reply`,
+                  turnId: buildEventClientMessageSeed(params.event),
+                  turnSeq: 1,
+                  ts: Date.now(),
+                  eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+                  role: 'assistant',
+                  contentBlocks: [{ type: 'text', text: reply.message }],
+                  metadata: {
+                    visibleInTranscript: true,
+                    purpose: reply.purpose,
+                  },
+                  payload: { purpose: reply.purpose },
+                  source: parentTurn.conversation.surface,
+                  nativeSessionId: null,
+                },
               });
               await publishFastAgentSessionRefresh(params.parent.sessionId, {
                 type: 'task_report_admitted',

@@ -33,6 +33,7 @@ describe('runJevFastAgentCommunicationExperiment', () => {
       message: 'Milestone complete.',
       purpose: 'progress',
       adapter: { postReply } as never,
+      selectionOverride: 'openrouter',
     });
 
     expect(result.action).toBe('report');

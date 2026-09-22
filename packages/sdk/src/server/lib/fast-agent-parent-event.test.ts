@@ -70,6 +70,7 @@ const mocks = vi.hoisted(() => ({
   isVoiceCallActive: vi.fn(),
   isDeploymentExperimentEnabled: vi.fn().mockResolvedValue(false),
   appendVisibleMessages: vi.fn(),
+  upsertVisibleMessage: vi.fn().mockResolvedValue({ inserted: true }),
   publishSessionRefresh: vi.fn(),
   runJevCommunicationExperiment: vi.fn(),
   captureCommunicationDecision: vi.fn(),
@@ -184,6 +185,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   createFastAgentWebTaskLauncher: vi.fn(() => mocks.launchTask),
   isFastAgentVoiceCallActive: mocks.isVoiceCallActive,
   appendFastAgentVisibleMessages: mocks.appendVisibleMessages,
+  upsertFastAgentMessage: mocks.upsertVisibleMessage,
   publishFastAgentSessionRefresh: mocks.publishSessionRefresh,
   runJevFastAgentCommunicationExperiment: mocks.runJevCommunicationExperiment,
   captureFastAgentCommunicationDecision: mocks.captureCommunicationDecision,
@@ -590,7 +592,7 @@ describe('deliverFastAgentParentEvent', () => {
     );
 
     expect(mocks.runJevCommunicationExperiment).toHaveBeenCalledOnce();
-    expect(mocks.appendVisibleMessages).toHaveBeenCalledWith(
+    expect(mocks.upsertVisibleMessage).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: parent.sessionId }),
     );
     expect(mocks.answerQuestion).not.toHaveBeenCalled();
@@ -4555,6 +4557,34 @@ describe('deliverFastAgentParentEvent', () => {
 
     expect(result).toBe('skipped');
     expect(mocks.answerQuestion).not.toHaveBeenCalled();
+  });
+
+  it('keeps scheduled wakeups on the regular guarded path when Jev is enabled', async () => {
+    mocks.isDeploymentExperimentEnabled.mockResolvedValueOnce(true);
+    mocks.findWakeup.mockResolvedValue({ status: 'active' });
+    mocks.findWakeupSession.mockResolvedValue({ archivedAt: null });
+    mocks.answerQuestion.mockResolvedValueOnce('Scheduled response');
+
+    const result = await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'scheduled_wakeup',
+        eventId: 'wakeup-regular-path:1',
+        wakeupId: 'wakeup-regular-path',
+        name: 'Check the deploy',
+        prompt: 'Tell the user to check the deploy.',
+        runNumber: 1,
+        maxRuns: null,
+        firedAt: '2026-09-04T17:10:00.000Z',
+        nextRunAt: null,
+        reportPolicy: 'always',
+        createdByUserId: 'user-1',
+      },
+    });
+
+    expect(result).toBe('delivered');
+    expect(mocks.runJevCommunicationExperiment).not.toHaveBeenCalled();
+    expect(mocks.answerQuestion).toHaveBeenCalledOnce();
   });
 
   it('drops the reply and cancels the turn when the wakeup is cancelled mid-turn', async () => {

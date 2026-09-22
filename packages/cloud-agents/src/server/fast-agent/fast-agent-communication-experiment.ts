@@ -5,6 +5,7 @@ import type {
   TypeSafeNoulQuestion,
 } from '../typesafe-judgment';
 import { evaluateTypeSafeJudgments } from '../typesafe-judgment';
+import type { JudgmentModelSelection } from '@roomote/types';
 import type {
   FastAgentReply,
   FastAgentTurnAdapter,
@@ -66,6 +67,7 @@ export async function runJevFastAgentCommunicationExperiment(params: {
   adapter: FastAgentTurnAdapter;
   taskStatus?: string;
   timeoutMs?: number;
+  selectionOverride?: JudgmentModelSelection;
 }): Promise<FastAgentCommunicationExperimentResult> {
   const startedAt = performance.now();
   let requestStartedAt: number | undefined;
@@ -87,7 +89,9 @@ export async function runJevFastAgentCommunicationExperiment(params: {
     },
     questions,
     timeoutMs: params.timeoutMs,
-    selectionOverride: 'openrouter',
+    ...(params.selectionOverride
+      ? { selectionOverride: params.selectionOverride }
+      : {}),
     timing: {
       onRequestStarted: () => {
         requestStartedAt ??= performance.now();
