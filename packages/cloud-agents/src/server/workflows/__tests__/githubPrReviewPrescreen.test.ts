@@ -51,6 +51,7 @@ describe('github PR review pre-screen', () => {
         timeoutMs: REVIEW_PRESCREEN_TIMEOUT_MS,
         highVolume: true,
         capture: false,
+        shadow: false,
       }),
     );
     const request = mockEvaluateDecisionModel.mock.calls[0]![0] as {

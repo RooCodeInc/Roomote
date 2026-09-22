@@ -243,6 +243,8 @@ export async function runGithubPrReviewPrescreen({
       highVolume: true,
       // Review diffs are sensitive; do not add them to optional training capture.
       capture: false,
+      // Nor send them to the optional Roomote calibration shadow request.
+      shadow: false,
     });
 
     return formatReviewPrescreenHints(answers);

@@ -618,9 +618,11 @@ describe('evaluateTypeSafeJudgments', () => {
     ).rejects.toThrow('HTTP 529');
   });
 
-  it('can skip optional capture for sensitive decision state', async () => {
+  it('can skip optional capture and shadowing for sensitive decision state', async () => {
     mockIsJudgmentCaptureEnabled.mockReturnValue(true);
-    mockFetchResponse({
+    mockEnv.R_JUDGMENT_SHADOW = 'on';
+    mockEnv.R_JUDGMENT_UPSTREAM_URL = 'https://judgment.internal.test';
+    const fetchMock = mockFetchResponse({
       answers: { urgent: { type: 'noul', noul: 0.92 } },
     });
 
@@ -629,10 +631,12 @@ describe('evaluateTypeSafeJudgments', () => {
         state: { diff: 'sensitive code' },
         questions: { urgent: questions.urgent },
         capture: false,
+        shadow: false,
       }),
     ).resolves.toEqual({ urgent: { type: 'noul', noul: 0.92 } });
 
     expect(mockCaptureJudgment).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it.each([
