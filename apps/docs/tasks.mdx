@@ -171,17 +171,21 @@ video. Roomote skips visual proof when it would not add useful evidence. Judge
 the evidence against the stated result rather than requiring a recording for
 every change.
 
-When a [judgment model](/models#judgment-model) is configured and a task turn
-ends with code changes, Roomote automatically holds the agent's closing report
-against the evidence: what you asked for, the agent's own checklist, the diff,
-and the shell commands it actually ran. It looks for a requested item or
+When a [judgment model](/models#judgment-model) is configured, Roomote
+automatically holds the agent's work against the evidence at the moments that
+matter: before the agent reports to you, before it pushes or opens a pull
+request, and when its turn ends with code changes. The evidence is what you
+asked for, the agent's own checklist, the diff, and the shell commands it
+actually ran. It looks for a requested item or
 checklist item left undone without explanation, a claimed change the diff does
 not contain, a claimed test or build result the recorded commands do not
 support, code shipped with no validation and no reason, an interface change
 with visual proof waved off, a plain defect in the changed lines, and leftovers
-such as debug logging or a disabled test. If anything is found, the agent gets
-one chance to fix it or explain before the task reports back. The check takes
-about a second and does not replace pull request review. Without a judgment
+such as debug logging or a disabled test. If anything is found, the report or
+push is held once with the reasons, so the agent fixes or explains before a
+person sees the claim or the code ships; a second attempt for the same work
+always goes through. The check takes about a second and does not replace pull
+request review. Without a judgment
 model, the agent runs a slower review pass of its own before delivery instead.
 
 Visual proof should use genuine application, authentication, database, and

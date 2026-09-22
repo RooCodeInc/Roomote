@@ -944,7 +944,7 @@ describe('opencode-server bootstrap', () => {
       'When that step kept no images (a no-op, not-applicable, unnecessary, or blocked result), or the workflow required no proof step, do not spawn the judge.',
     );
     expect(instructions).toContain(
-      'Whether the work matches the request is checked by the platform automatically when your turn ends',
+      'Whether the work matches the request is checked by the platform automatically: before you report to a person, before you push or open a pull request, and when your turn ends',
     );
     expect(instructions).not.toContain('delegate one focused compare pass');
   });
