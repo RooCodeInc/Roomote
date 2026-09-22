@@ -26,7 +26,7 @@ const CAPTURE_PREFIX = 'judgment-capture';
 const MAX_BYTES = 256 * 1024;
 const MAX_CAPTURES_PER_HOUR = 600;
 
-export type JudgmentCaptureRecord = {
+type JudgmentCaptureRecord = {
   version: 1;
   capturedAt: string;
   /** Which model answered, so records can be filtered by label source. */
