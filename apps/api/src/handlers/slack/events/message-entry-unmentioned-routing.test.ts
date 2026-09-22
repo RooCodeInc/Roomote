@@ -633,7 +633,10 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
           text: 'can you also add a unit test?',
         }),
       ),
-    ).resolves.toMatchObject({ shouldRoute: true });
+    ).resolves.toMatchObject({
+      shouldRoute: true,
+      addressedToRoomote: true,
+    });
     expect(evaluateTypeSafeJudgmentsMock).toHaveBeenCalledWith(
       expect.objectContaining({
         state: expect.objectContaining({
