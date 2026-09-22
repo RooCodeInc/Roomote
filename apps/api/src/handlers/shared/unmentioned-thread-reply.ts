@@ -355,6 +355,18 @@ function isValidAddresseeAnswer(value: unknown): value is {
 /** Probabilities are reported rounded, so the sum may miss one slightly. */
 const PROBABILITY_SUM_TOLERANCE = 0.05;
 
+function normalizeProbabilities(
+  probabilities: Record<AddresseeChoice, number>,
+): Record<AddresseeChoice, number> {
+  const total =
+    probabilities.roomote + probabilities.participant + probabilities.unclear;
+  return {
+    roomote: probabilities.roomote / total,
+    participant: probabilities.participant / total,
+    unclear: probabilities.unclear / total,
+  };
+}
+
 /**
  * The option with strictly the most probability, or null on a tie; `choice`
  * is not trusted for this.
@@ -408,7 +420,11 @@ async function judgeUnmentionedReplyAddressee(params: {
       return { kind: 'failed' };
     }
 
-    const { probabilities } = answers.addressee;
+    // Normalize so rounding slack in the reported vector cannot lift a
+    // sub-majority Roomote score over the bar.
+    const probabilities = normalizeProbabilities(
+      answers.addressee.probabilities,
+    );
     const acknowledgement = answers.closingAcknowledgement.noul;
     const shouldRoute =
       likeliestAddressee(probabilities) === 'roomote' &&

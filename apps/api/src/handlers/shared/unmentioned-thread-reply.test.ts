@@ -605,6 +605,25 @@ describe('resolveUnmentionedThreadReplyRouting', () => {
     ).resolves.toEqual({ shouldRoute: false, interjectionDetected: false });
   });
 
+  it('applies the majority bar to the normalized distribution', async () => {
+    mockEvaluateTypeSafeJudgments.mockResolvedValue({
+      ...addresseeAnswer('roomote', 0.95),
+      addressee: {
+        type: 'choice',
+        choice: 'roomote',
+        confidence: 0.3,
+        probabilities: { roomote: 0.5, participant: 0.49, unclear: 0.06 },
+      },
+    });
+
+    await expect(
+      resolve({
+        eventText: 'Can you check this?',
+        threadMessages: twoHumanThread,
+      }),
+    ).resolves.toEqual({ shouldRoute: false, interjectionDetected: false });
+  });
+
   it('does not route a tied addressee distribution', async () => {
     mockEvaluateTypeSafeJudgments.mockResolvedValue({
       ...addresseeAnswer('roomote', 0.95),
