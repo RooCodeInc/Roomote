@@ -324,6 +324,14 @@ export function clipDiffByFile(
 const FORMATTING_ONLY_CHARACTERS = /[\s'"`;,]/g;
 
 /**
+ * Files no test, type check, lint, or build reads: prose and release notes.
+ * Delivery writes a changeset and PR notes after the last test run, and
+ * counting those as code made every earlier run read as stale.
+ */
+const PROSE_FILE_PATTERN =
+  /(^|\/)(\.changeset\/|CHANGELOG)|\.(md|mdx|txt|rst)$/i;
+
+/**
  * The code this task has changed, reduced to what a formatter cannot alter:
  * every changed file's current content with formatting-only characters
  * removed. It is read from the files rather than the patch text, because a
@@ -336,7 +344,9 @@ async function fingerprintChangedFiles(
   files: string[],
 ): Promise<string> {
   const hash = createHash('sha256');
-  const paths = [...new Set(files)].sort();
+  const paths = [...new Set(files)]
+    .filter((file) => !PROSE_FILE_PATTERN.test(file))
+    .sort();
 
   for (const [index, file] of paths.entries()) {
     const filePath = join(repoPath, file);

@@ -211,6 +211,25 @@ describe('collectShippedDiff', () => {
     expect(ungrouped?.fingerprint).not.toBe(grouped?.fingerprint);
   });
 
+  it('keeps its fingerprint when a changeset or notes are written after the tests', async () => {
+    const repo = createCheckout();
+    write(repo, 'src/app.ts', 'export const app = 2;\n');
+    const tested = await collectShippedDiff(repo);
+
+    write(
+      repo,
+      '.changeset/app-bump.md',
+      "---\n'app': patch\n---\n\nBump app.\n",
+    );
+    write(repo, 'docs/app.md', '# app\n\nNow 2.\n');
+    write(repo, 'CHANGELOG.md', '## Unreleased\n\n- app is 2\n');
+    const documented = await collectShippedDiff(repo);
+
+    expect(documented?.fingerprint).toBe(tested?.fingerprint);
+    // The prose still ships and is still shown to the model.
+    expect(documented?.diff).toContain('Bump app.');
+  });
+
   it('keeps its fingerprint when the work is committed', async () => {
     const repo = createCheckout();
     git(repo, 'checkout', '-q', '-b', 'task');
