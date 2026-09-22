@@ -91,7 +91,7 @@ function toSharedHistoryMessages(
  * eligibility and interjection window rules come from the shared Slack/Teams
  * core in `handlers/shared/unmentioned-thread-reply`.
  */
-export type UnmentionedDiscordThreadReplyRoutingDecision =
+type UnmentionedDiscordThreadReplyRoutingDecision =
   | { shouldRoute: false }
   | {
       shouldRoute: true;
