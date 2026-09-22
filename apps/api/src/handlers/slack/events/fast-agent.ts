@@ -66,7 +66,7 @@ export async function processFastAgentMessage(params: {
   launchTask: LaunchFastAgentTask;
   directedAtRoomote?: boolean;
   roomoteSlackUserId?: string;
-  peerConversationsExperimentEnabled?: boolean;
+  peerConversationsEnabled?: boolean;
   userInitiated?: boolean;
   originSessionId?: string;
   onAccepted?: (abort: () => Promise<void>) => void;
@@ -83,7 +83,7 @@ export async function processFastAgentMessage(params: {
     launchTask,
     directedAtRoomote = false,
     roomoteSlackUserId,
-    peerConversationsExperimentEnabled = false,
+    peerConversationsEnabled = false,
     userInitiated = true,
   } = params;
   const threadId = event.thread_ts || event.ts;
@@ -116,7 +116,7 @@ export async function processFastAgentMessage(params: {
     event.channel_type !== 'im' &&
     event.channel_type !== 'mpim';
   const eligiblePeerConversationMessage =
-    peerConversationsExperimentEnabled &&
+    peerConversationsEnabled &&
     Boolean(roomoteSlackUserId) &&
     eligibleAmbientHumanMessage;
   const currentMessagePeerDirected =

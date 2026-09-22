@@ -2,7 +2,6 @@
 
 import { SettingsShell } from '@/components/settings/SettingsShell';
 import { ResultsExperimentalSetting } from '@/components/settings/ResultsExperimentalSetting';
-import { SlackPeerConversationsExperimentalSetting } from '@/components/settings/SlackPeerConversationsExperimentalSetting';
 import { PrivateSessionsExperimentalSetting } from '@/components/settings/PrivateSessionsExperimentalSetting';
 import { BrowserNotificationsExperimentalSetting } from '@/components/settings/BrowserNotificationsExperimentalSetting';
 import { IntegrationToolApprovalsExperimentalSetting } from '@/components/settings/IntegrationToolApprovalsExperimentalSetting';
@@ -28,7 +27,6 @@ export function ExperimentalSettingsPage() {
           <IntegrationToolApprovalsExperimentalSetting />
           <BrowserNotificationsExperimentalSetting />
           <ResultsExperimentalSetting />
-          <SlackPeerConversationsExperimentalSetting />
         </>
       )}
     </SettingsShell>

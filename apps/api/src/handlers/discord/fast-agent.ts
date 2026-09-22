@@ -128,7 +128,7 @@ export async function processDiscordFastAgentMessage(
     interaction?: DiscordInteractionReplyContext;
     activeTasks?: { taskId: string }[];
     directedAtRoomote?: boolean;
-    peerConversationsExperimentEnabled?: boolean;
+    peerConversationsEnabled?: boolean;
     /** Attribution for tasks Fast delegates from this turn; automation-identity
      * turns pass their automation initiator so delegated work keeps automation
      * provenance instead of appearing installer-initiated. */
@@ -145,7 +145,7 @@ export async function processDiscordFastAgentMessage(
   });
   const isDirected = Boolean(input.directedAtRoomote);
   const needsPeerCaution =
-    input.peerConversationsExperimentEnabled === true &&
+    input.peerConversationsEnabled === true &&
     message != null &&
     !isDirected &&
     mentionsDiscordUserOtherThanBotOrUser(

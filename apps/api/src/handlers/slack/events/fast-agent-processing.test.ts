@@ -395,7 +395,7 @@ describe('processFastAgentMessage', () => {
       userId: 'user-1',
       teamId: 'T123',
       roomoteSlackUserId: 'UBOT',
-      peerConversationsExperimentEnabled: true,
+      peerConversationsEnabled: true,
     });
     const call = mocks.answerQuestion.mock.calls[0]?.[0];
     expect(call.question).toBe(text);
@@ -505,7 +505,7 @@ describe('processFastAgentMessage', () => {
       userId: 'user-1',
       teamId: 'T123',
       roomoteSlackUserId: 'UBOT',
-      peerConversationsExperimentEnabled: true,
+      peerConversationsEnabled: true,
     });
 
     expect(mocks.answerQuestion.mock.calls[0]?.[0]).toMatchObject({
@@ -551,7 +551,7 @@ describe('processFastAgentMessage', () => {
       userId: 'user-1',
       teamId: 'T123',
       roomoteSlackUserId: 'UBOT',
-      peerConversationsExperimentEnabled: true,
+      peerConversationsEnabled: true,
     });
 
     expect(mocks.answerQuestion.mock.calls[0]?.[0]).toMatchObject({
@@ -591,7 +591,7 @@ describe('processFastAgentMessage', () => {
       userId: 'user-3',
       teamId: 'T123',
       roomoteSlackUserId: 'UBOT',
-      peerConversationsExperimentEnabled: true,
+      peerConversationsEnabled: true,
     });
 
     expect(mocks.answerQuestion.mock.calls[0]?.[0]).toMatchObject({
@@ -649,7 +649,7 @@ describe('processFastAgentMessage', () => {
         userId: 'user-1',
         teamId: 'T123',
         roomoteSlackUserId: 'UBOT',
-        peerConversationsExperimentEnabled: true,
+        peerConversationsEnabled: true,
       });
 
       expect(mocks.answerQuestion.mock.calls[0]?.[0]).toMatchObject({
@@ -688,7 +688,7 @@ describe('processFastAgentMessage', () => {
       userId: 'user-1',
       teamId: 'T123',
       roomoteSlackUserId: 'UBOT',
-      peerConversationsExperimentEnabled: true,
+      peerConversationsEnabled: true,
       onAccepted,
     });
 

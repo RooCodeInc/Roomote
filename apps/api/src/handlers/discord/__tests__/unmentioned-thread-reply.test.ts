@@ -74,7 +74,7 @@ async function routeDecision(
     isRoomoteThread?: boolean;
     isAutomationReportThread?: boolean;
     isOpenConversationThread?: boolean;
-    peerConversationsExperimentEnabled?: boolean;
+    peerConversationsEnabled?: boolean;
     botUserId?: string;
   } = {},
 ) {
@@ -92,8 +92,7 @@ async function routeDecision(
         ? 'roomote-user-1'
         : options.ownedThreadUserId,
     isOpenConversationThread: options.isOpenConversationThread,
-    peerConversationsExperimentEnabled:
-      options.peerConversationsExperimentEnabled,
+    peerConversationsEnabled: options.peerConversationsEnabled,
     isAutomationReportThread: options.isAutomationReportThread,
     fetchThreadMessages: fetchThreadMessagesMock,
   });
@@ -420,7 +419,7 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
         }),
         {
           isOpenConversationThread: true,
-          peerConversationsExperimentEnabled: true,
+          peerConversationsEnabled: true,
         },
       ),
     ).resolves.toBe(true);
@@ -436,7 +435,7 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
     await expect(
       routeDecision(threadReplyMessage({ content: 'I agree' }), {
         isOpenConversationThread: true,
-        peerConversationsExperimentEnabled: true,
+        peerConversationsEnabled: true,
       }),
     ).resolves.toBe(true);
     expect(fetchThreadMessagesMock).toHaveBeenCalledOnce();
@@ -460,7 +459,7 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
     await expect(
       routeDecision(threadReplyMessage({ content: 'I agree' }), {
         isOpenConversationThread: true,
-        peerConversationsExperimentEnabled: true,
+        peerConversationsEnabled: true,
       }),
     ).resolves.toBe(false);
     expect(fetchThreadMessagesMock).toHaveBeenCalledOnce();
@@ -543,7 +542,7 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
       routeDecision(threadReplyMessage({}), {
         isRoomoteThread: false,
         isOpenConversationThread: true,
-        peerConversationsExperimentEnabled: true,
+        peerConversationsEnabled: true,
       }),
     ).resolves.toBe(false);
   });

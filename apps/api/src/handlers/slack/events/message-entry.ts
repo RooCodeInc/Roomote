@@ -23,7 +23,6 @@ import {
 } from '@roomote/slack';
 import {
   getBackgroundAgentSettingsForDeployment,
-  isDeploymentExperimentEnabled,
   type SlackInstallation,
   type SlackUserMapping,
 } from '@roomote/db/server';
@@ -145,7 +144,7 @@ type UnmentionedSlackThreadReplyRoutingDecision =
   | { shouldRoute: false; shouldRecordConversationMessage?: true }
   | {
       shouldRoute: true;
-      peerConversationsExperimentEnabled?: true;
+      peerConversationsEnabled?: true;
       threadMessages?: SlackThreadMessage[];
       taskId?: string;
     };
@@ -219,19 +218,18 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
     return { shouldRoute: false };
   }
 
-  // Opted-in Fast owners may participate in an open conversation, but the
-  // shared addressee gate still needs recent history before starting Fast.
+  // A user-owned Fast conversation admits peer discussion, but the shared
+  // addressee gate still needs recent history before starting Fast. Task
+  // threads keep the explicit-mention cutoff for peer-directed messages.
   const fastSessionOwner = await getBoundSlackFastAgentSessionOwner({
     teamId,
     channelId: event.channel,
     threadId: event.thread_ts,
   });
-  const peerConversationsExperimentEnabled =
-    fastSessionOwner?.kind === 'user' &&
-    (await isDeploymentExperimentEnabled('slackPeerConversations'));
+  const peerConversationsEnabled = fastSessionOwner?.kind === 'user';
 
   const requiresExplicitMentionForPeerMessage =
-    !peerConversationsExperimentEnabled &&
+    !peerConversationsEnabled &&
     mentionsSlackUserOtherThanBotWithoutMentioningBot(
       event,
       slackInstallation.botUserId,
@@ -339,7 +337,7 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
       roomoteThreadMatch?.isAutomationReportThread,
     ),
     isOpenConversationThread: isFastAgentThread,
-    allowPeerConversationMessages: peerConversationsExperimentEnabled,
+    allowPeerConversationMessages: peerConversationsEnabled,
     threadMessages: sharedHistory,
     compareMessageIds: compareNumericMessageIds,
   });
@@ -356,8 +354,8 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
 
   return {
     shouldRoute: true,
-    ...(peerConversationsExperimentEnabled
-      ? { peerConversationsExperimentEnabled: true as const }
+    ...(peerConversationsEnabled
+      ? { peerConversationsEnabled: true as const }
       : {}),
     threadMessages,
     ...(roomoteThreadMatch?.trackedAliasTaskId
@@ -1100,7 +1098,7 @@ export function startFastAgentResponse(params: {
   activeTasks?: { taskId: string }[];
   resolveActiveTasks?: () => Promise<{ taskId: string }[]>;
   directedAtRoomote?: boolean;
-  peerConversationsExperimentEnabled?: boolean;
+  peerConversationsEnabled?: boolean;
   /** Attribution for tasks Fast delegates from this turn; automation-identity
    * turns pass their automation initiator so delegated work keeps automation
    * provenance instead of appearing installer-initiated. */
@@ -1115,8 +1113,7 @@ export function startFastAgentResponse(params: {
         ...fastAgentParams,
         userInitiated: delegatedTaskInitiator?.kind !== 'automation',
         roomoteSlackUserId: params.slackInstallation.botUserId ?? undefined,
-        peerConversationsExperimentEnabled:
-          params.peerConversationsExperimentEnabled,
+        peerConversationsEnabled: params.peerConversationsEnabled,
         apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
         launchTask: createFastAgentSlackLiveTaskLauncher({
           slack: params.slack,
@@ -1158,7 +1155,7 @@ async function handleSlackEntryEvent(params: {
   teamId: string;
   skipThreadFollowupHandling?: boolean;
   threadTaskId?: string;
-  peerConversationsExperimentEnabled?: boolean;
+  peerConversationsEnabled?: boolean;
 }): Promise<void> {
   const {
     event,
@@ -1167,7 +1164,7 @@ async function handleSlackEntryEvent(params: {
     teamId,
     skipThreadFollowupHandling = false,
     threadTaskId,
-    peerConversationsExperimentEnabled,
+    peerConversationsEnabled,
   } = params;
 
   if (!event.user) {
@@ -1304,7 +1301,7 @@ async function handleSlackEntryEvent(params: {
           activeTaskId: activeRun?.taskId,
         }),
       directedAtRoomote: mentionsSlackBot(event, slackInstallation.botUserId),
-      peerConversationsExperimentEnabled: peerConversationsExperimentEnabled,
+      peerConversationsEnabled: peerConversationsEnabled,
       ...(attentionReply ? { originSessionId: attentionReply.sessionId } : {}),
       errorLogPrefix: `❌ Background fast-agent response failed for thread ${threadId}:`,
     });
@@ -1430,9 +1427,8 @@ export async function handleMessageOrAppMentionEvent(params: {
     threadTaskId: unmentionedThreadReplyRouting.shouldRoute
       ? unmentionedThreadReplyRouting.taskId
       : (mentionedThreadAliasTaskId ?? undefined),
-    peerConversationsExperimentEnabled:
-      unmentionedThreadReplyRouting.shouldRoute
-        ? unmentionedThreadReplyRouting.peerConversationsExperimentEnabled
-        : undefined,
+    peerConversationsEnabled: unmentionedThreadReplyRouting.shouldRoute
+      ? unmentionedThreadReplyRouting.peerConversationsEnabled
+      : undefined,
   });
 }

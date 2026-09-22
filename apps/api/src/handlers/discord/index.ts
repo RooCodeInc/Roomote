@@ -27,7 +27,6 @@ import {
   hasFastAgentSession,
   type FastAgentReactionExternalInput,
 } from '@roomote/cloud-agents/server';
-import { isDeploymentExperimentEnabled } from '@roomote/db/server';
 import {
   RunStatus,
   activeRunStatuses,
@@ -757,7 +756,7 @@ async function processDiscordGatewayEvent(
     repliedToAutomationReport ||
     isFastAgentConversation,
   );
-  let peerConversationsExperimentEnabled = false;
+  let peerConversationsEnabled = false;
   const isTaskEntry = isDiscordTaskEntryEvent(event, {
     botUserId: resolved.botUserId,
     isTaskThread: isRoomoteThread,
@@ -836,9 +835,7 @@ async function processDiscordGatewayEvent(
           },
         })
       : null;
-    peerConversationsExperimentEnabled =
-      fastSessionOwner?.kind === 'user' &&
-      (await isDeploymentExperimentEnabled('slackPeerConversations'));
+    peerConversationsEnabled = fastSessionOwner?.kind === 'user';
     const shouldRouteUnmentioned =
       await shouldRouteUnmentionedDiscordThreadReplyToAgent({
         message,
@@ -852,7 +849,7 @@ async function processDiscordGatewayEvent(
           null,
         isAutomationReportThread: Boolean(repliedToAutomationReport),
         isOpenConversationThread: isFastAgentConversation,
-        peerConversationsExperimentEnabled,
+        peerConversationsEnabled,
         fetchThreadMessages: async () => {
           const history = await fetchDiscordThreadHistoryBestEffort({
             provider: resolved.provider,
@@ -1105,7 +1102,7 @@ async function processDiscordGatewayEvent(
           channel.isDirectMessage ||
           Boolean(repliedFastSession) ||
           isDiscordBotMentioned(message, resolved.botUserId),
-        peerConversationsExperimentEnabled,
+        peerConversationsEnabled,
       });
       return { ok: true, fastAnswered: true, fastContinued: true };
     }

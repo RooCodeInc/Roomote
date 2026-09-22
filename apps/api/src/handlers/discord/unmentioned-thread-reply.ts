@@ -106,8 +106,8 @@ export async function shouldRouteUnmentionedDiscordThreadReplyToAgent(params: {
   isAutomationReportThread?: boolean;
   /** True when the thread is an open Fast conversation. */
   isOpenConversationThread?: boolean;
-  /** Owner-controlled opt-in that keeps peer-mentioned Fast turns eligible. */
-  peerConversationsExperimentEnabled?: boolean;
+  /** True in a user-owned Fast conversation, where peer-mentioned turns stay eligible. */
+  peerConversationsEnabled?: boolean;
   fetchThreadMessages: () => Promise<DiscordThreadHistoryMessage[] | null>;
 }): Promise<boolean> {
   const { message, botUserId } = params;
@@ -136,10 +136,7 @@ export async function shouldRouteUnmentionedDiscordThreadReplyToAgent(params: {
       getDiscordMessageMentions(message),
       botUserId,
     ) &&
-    !(
-      params.peerConversationsExperimentEnabled &&
-      params.isOpenConversationThread
-    )
+    !(params.peerConversationsEnabled && params.isOpenConversationThread)
   ) {
     return false;
   }
@@ -182,7 +179,7 @@ export async function shouldRouteUnmentionedDiscordThreadReplyToAgent(params: {
     isAutomationReportThread: params.isAutomationReportThread,
     isOpenConversationThread: params.isOpenConversationThread,
     allowPeerConversationMessages:
-      params.peerConversationsExperimentEnabled === true &&
+      params.peerConversationsEnabled === true &&
       params.isOpenConversationThread === true,
     threadMessages: toSharedHistoryMessages(threadMessages, botUserId),
     compareMessageIds: compareBigIntMessageIds,
