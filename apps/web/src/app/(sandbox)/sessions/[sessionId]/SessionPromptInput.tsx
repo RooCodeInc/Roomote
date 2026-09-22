@@ -37,7 +37,11 @@ import {
 } from '@/components/ai-elements';
 import {
   AudioLines,
+  Alert,
+  AlertDescription,
+  AlertTitle,
   BasicTooltip,
+  Button,
   Volume2,
   VolumeX,
   X,
@@ -56,6 +60,13 @@ export type SessionPromptSubmission = PromptInputMessage & {
 export type SessionModelSelection = {
   model: string | null;
   reasoningEffort: ReasoningEffort | null;
+};
+
+type SessionSendFailure = {
+  draftText: string;
+  message: string;
+  isRetrying?: boolean;
+  onRetry: () => Promise<boolean>;
 };
 
 type SessionVoiceControls = {
@@ -235,6 +246,7 @@ export function SessionPromptInput({
   defaultReasoningEffort = null,
   voice,
   onModelSelectionChange,
+  sendFailure,
 }: {
   sessionId: string;
   isBusy: boolean;
@@ -258,6 +270,7 @@ export function SessionPromptInput({
   /** Keeps the parent's view of the picker current, so voice utterances
    * round-trip the same model selection a typed reply would. */
   onModelSelectionChange?: (selection: SessionModelSelection) => void;
+  sendFailure?: SessionSendFailure;
 }) {
   const trpc = useTRPC();
   const trpcClient = useTRPCClient();
@@ -446,6 +459,14 @@ export function SessionPromptInput({
 
   const controlsDisabled = isBusy || isUpdatingModelSelection;
 
+  const retryFailedReply = async () => {
+    if (!sendFailure) return;
+    const sent = await sendFailure.onRetry();
+    // Retry replays the captured failure payload. Keep a newer draft instead
+    // of clearing text the user edited while the failed reply was visible.
+    if (sent && prompt === sendFailure.draftText) setPrompt('');
+  };
+
   return (
     <div className="mx-auto w-full max-w-4xl">
       <SessionWakeups key={sessionId} sessionId={sessionId} />
@@ -546,6 +567,29 @@ export function SessionPromptInput({
           </PromptInputFooter>
         ) : null}
       </PromptInputRoot>
+      {sendFailure ? (
+        <Alert
+          variant="destructive"
+          className="mx-4 mb-2 [&>svg]:size-4"
+          role="alert"
+        >
+          <AlertTitle>Message not sent</AlertTitle>
+          <AlertDescription>
+            <div className="flex items-center justify-between gap-3">
+              <p className="whitespace-pre-line">{sendFailure.message}</p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={sendFailure.isRetrying}
+                onClick={() => void retryFailedReply()}
+              >
+                Retry
+              </Button>
+            </div>
+          </AlertDescription>
+        </Alert>
+      ) : null}
     </div>
   );
 }
