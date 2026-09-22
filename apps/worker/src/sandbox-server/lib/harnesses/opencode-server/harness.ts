@@ -112,10 +112,6 @@ import {
   type OpenCodeModelSelection,
   resolveOpenCodeModelSelection,
 } from '../../../../run-task/opencode-model';
-import {
-  CompletionGateRuntime,
-  requestTaskCompletionCheck,
-} from './completion-gate-runtime';
 
 interface OpenCodeServerHarnessOptions {
   client: OpenCodeServerClient;
@@ -309,10 +305,6 @@ const OPEN_CODE_EXECUTE_TOOLS = new Set(['bash', 'shell']);
 const OPEN_CODE_READ_TOOLS = new Set(['read']);
 const OPEN_CODE_SEARCH_TOOLS = new Set(['grep', 'glob', 'find', 'list', 'ls']);
 const MAX_OPENCODE_STOP_HOOK_REMINDERS = 3;
-// The completion check is a fast, fallible read of the diff. It gets one
-// chance per user turn to reopen the work; after that the turn completes and
-// pull-request review is the next line of defense.
-const MAX_COMPLETION_GATE_REMINDERS = 1;
 const MAX_OPENCODE_INTERNAL_RETRY_ATTEMPTS = 3;
 // Fail-safe for a wedged stop-hook reminder cycle. After a turn finishes
 // without the required Slack closeout, we resubmit a reminder prompt and then
@@ -1746,28 +1738,9 @@ export class OpenCodeServerHarness
   private visualProofAttempt = 0;
   private readonly taskToolProofAttempts = new Map<string, number | null>();
   private commandEnv: Record<string, string> | undefined;
-  private readonly completionGate: CompletionGateRuntime;
   private stopHookReminderCount = 0;
   private terminalChatReplyDeliveryFailed = false;
   private lastBlockedCloseoutAssistantText: string | null = null;
-  private completionGateReminderCount = 0;
-  // True from the moment a finished turn starts closing (finalizing its last
-  // message, then the check itself) until it has completed, and the promise
-  // that settles at that point. Messages arriving in between are held so the
-  // check reads the transcript of the turn it is judging.
-  private completionGateChecking = false;
-  private turnSettling: Promise<void> | null = null;
-  private lastSettledTurnSource: 'session_status' | 'session_idle' | null =
-    null;
-  // Bumped when the task is cancelled or closed, so a message held for a
-  // closing turn is dropped rather than restarting a task the user stopped.
-  private taskStopGeneration = 0;
-  // The report the agent gave before the check reopened its turn. The
-  // follow-up turn only adds a short correction, so the two are joined.
-  private completionGateHeldReport: string | null = null;
-  // The parent agent's latest message text, the closest thing to a report a
-  // ship-time check has when the agent has not written one yet.
-  private latestParentAssistantText = '';
   private stopHookReminderStallTimer: ReturnType<typeof setTimeout> | null =
     null;
   // OpenCode 1.17 emits session.status(idle) followed by session.idle for the
@@ -1817,14 +1790,6 @@ export class OpenCodeServerHarness
     this.commandEnv = options.commandEnv
       ? { ...options.commandEnv }
       : undefined;
-    this.completionGate = new CompletionGateRuntime({
-      workspacePath: this.workspacePath,
-      getCommandEnv: () => this.commandEnv,
-      requestTaskCompletionCheck,
-      logger: this.logger,
-      hasUnsettledToolWork: async (sessionId) =>
-        await this.hasUnsettledToolWork(sessionId),
-    });
     this.eventStreamReadyTimeoutMs = options.eventStreamReadyTimeoutMs ?? 5_000;
     this.executeToolProgressInitialDelayMs =
       options.executeToolProgressInitialDelayMs ??
@@ -2237,15 +2202,6 @@ export class OpenCodeServerHarness
   }
 
   private async handleCommand(command: TaskCommand): Promise<void> {
-    if (
-      command.commandName === TaskCommandName.CancelTask ||
-      command.commandName === TaskCommandName.CloseTask
-    ) {
-      // A completion check still in flight must not reopen a stopped turn.
-      this.completionGate.invalidate();
-      this.taskStopGeneration += 1;
-    }
-
     switch (command.commandName) {
       case TaskCommandName.StartNewTask:
         await this.handleStartNewTask(command);
@@ -2316,10 +2272,6 @@ export class OpenCodeServerHarness
     this.stopHookReminderCount = 0;
     this.terminalChatReplyDeliveryFailed = false;
     this.lastBlockedCloseoutAssistantText = null;
-    this.completionGateReminderCount = 0;
-    this.completionGate.reset();
-    this.completionGateHeldReport = null;
-    this.latestParentAssistantText = '';
     this.ignoreNextStopHookSessionIdle = false;
     this.ignoreNextQueuedDrainSessionIdle = false;
     this.currentWorkflowPhase = command.data.workflowPhase ?? null;
@@ -2360,43 +2312,9 @@ export class OpenCodeServerHarness
   }
 
   private async handleSendMessage(command: SendMessageCommand): Promise<void> {
-    if (this.completionGateChecking && this.turnSettling) {
-      // The previous turn has already ended; only its completion check is
-      // outstanding. Handle this message once that turn has completed, as a
-      // message sent after it, so the check judges the turn it belongs to and
-      // the message is never steered into a turn that is closing.
-      const stopGeneration = this.taskStopGeneration;
-      await this.turnSettling;
-
-      if (this.disposed || this.taskStopGeneration !== stopGeneration) {
-        // Cancelled or closed while held. Without the hold this message would
-        // have been steered into the turn the cancel then aborted; submitting
-        // it now would restart the task instead.
-        this.logger.info(
-          'OpenCode dropping a message held for a closing turn because the task was stopped meanwhile',
-        );
-        return;
-      }
-
-      if (this.lastSettledTurnSource === 'session_status' && !this.inFlight) {
-        // This message is released in the gap between the status-sourced idle
-        // that completed the turn and its paired session.idle. Submitting now
-        // re-arms inFlight, so that paired idle would complete this new turn
-        // at once. Swallow it, as the queued-drain path does.
-        this.ignoreNextQueuedDrainSessionIdle = true;
-      }
-    }
-
     const text = command.data.text ?? '';
     this.stopHookReminderCount = 0;
     this.lastBlockedCloseoutAssistantText = null;
-    this.completionGateReminderCount = 0;
-
-    if (command.data.visibleInTranscript !== false) {
-      // A new request can leave the diff untouched (the agent only claims to
-      // have acted on it), so an unchanged diff is checked again against it.
-      this.completionGate.noteVisibleRequest();
-    }
 
     // A soft cancel can race with the very first session creation and abort
     // its dedicated controller before a session id exists. SendMessage is the
@@ -5053,23 +4971,6 @@ export class OpenCodeServerHarness
       !this.persistedToolResultKeys.has(eventKey)
     ) {
       this.persistedToolResultKeys.add(eventKey);
-      const command = normalized.resultPayload.command;
-
-      if (
-        context.sessionId === this.sessionId &&
-        normalized.resultPayload.isExecute === true &&
-        typeof command === 'string' &&
-        command.length > 0
-      ) {
-        const exitCode = normalized.resultPayload.exitCode;
-        this.completionGate.recordCommand({
-          sessionId: context.sessionId,
-          command,
-          exitCode: typeof exitCode === 'number' ? exitCode : null,
-          output: normalized.output,
-          status: normalized.status === 'completed' ? 'completed' : 'failed',
-        });
-      }
       this.runtimeEvents.toolResult({
         sessionId: context.sessionId,
         messageId: context.messageId,
@@ -5349,28 +5250,6 @@ export class OpenCodeServerHarness
   private async finishCurrentTurn(
     source: 'session_status' | 'session_idle' = 'session_idle',
   ): Promise<void> {
-    let settle: () => void = () => {};
-    const settling = new Promise<void>((resolve) => {
-      settle = resolve;
-    });
-    this.turnSettling = settling;
-
-    try {
-      await this.completeCurrentTurn(source);
-    } finally {
-      this.completionGateChecking = false;
-      this.lastSettledTurnSource = source;
-      settle();
-
-      if (this.turnSettling === settling) {
-        this.turnSettling = null;
-      }
-    }
-  }
-
-  private async completeCurrentTurn(
-    source: 'session_status' | 'session_idle',
-  ): Promise<void> {
     if (!this.inFlight && !this.prompts.hasQueuedMessages()) {
       return;
     }
@@ -5382,11 +5261,6 @@ export class OpenCodeServerHarness
       return;
     }
 
-    // Set before the first await of the closing path, not just around the
-    // check: a follow-up steered in while the last message is finalized would
-    // already be in the transcript the check reads.
-    this.completionGateChecking = this.completionGate.isEligible();
-
     if (await this.recoverInterruptedToolTurn(source)) {
       return;
     }
@@ -5395,15 +5269,6 @@ export class OpenCodeServerHarness
       (await this.finalizeLatestAssistantMessage()) ??
       this.finalizedAssistantTurn;
     const sessionId = this.sessionId;
-
-    // Checked while the turn is still in flight, so a message arriving during
-    // the check queues behind it instead of racing the reminder.
-    if (
-      sessionId &&
-      (await this.reopenTurnForCompletionGate(sessionId, finalized, source))
-    ) {
-      return;
-    }
 
     this.inFlight = false;
     this.finalizedAssistantTurn = null;
@@ -5488,16 +5353,10 @@ export class OpenCodeServerHarness
       this.stopHookReminderCount = 0;
       this.terminalChatReplyDeliveryFailed = false;
 
-      const closingText =
+      const completionText =
         missingChatCloseoutReminderCount !== null && !finalized?.text.trim()
           ? this.lastBlockedCloseoutAssistantText
           : finalized?.text;
-      const completionText = this.completionGateHeldReport
-        ? [this.completionGateHeldReport, closingText?.trim()]
-            .filter(Boolean)
-            .join('\n\n')
-        : closingText;
-      this.completionGateHeldReport = null;
 
       if (completionText?.trim()) {
         this.runtimeEvents.turnCompleted(sessionId, completionText);
@@ -5524,104 +5383,6 @@ export class OpenCodeServerHarness
     if (source === 'session_status' && this.inFlight) {
       this.ignoreNextQueuedDrainSessionIdle = true;
     }
-  }
-
-  /**
-   * The realtime completion check: when a turn ends with a diff it has not
-   * seen, ask the platform whether the work matches the request and the
-   * agent's own report. A clear or unavailable verdict costs the turn a
-   * moment; a flagged one reopens the turn once with a hidden prompt, the way
-   * the closeout stop hook does. Returns true when the turn was reopened.
-   */
-  private async reopenTurnForCompletionGate(
-    sessionId: string,
-    finalized: FinalizedAssistantTurn | null,
-    source: 'session_status' | 'session_idle',
-  ): Promise<boolean> {
-    // A delegated task reports through a tool and often ends its turn with
-    // no text at all, so fall back to the last thing the agent said.
-    const report =
-      finalized?.text.trim() || this.latestParentAssistantText.trim();
-
-    if (
-      !report ||
-      this.completionGateReminderCount >= MAX_COMPLETION_GATE_REMINDERS ||
-      !this.completionGate.isEligible()
-    ) {
-      return false;
-    }
-
-    try {
-      // Read before the first await: anything that moves it mid-check (a new
-      // task, a cancel) makes this verdict stale.
-      const generation = this.completionGate.currentRequestGeneration;
-      const evaluated = await this.completionGate.evaluate({
-        sessionId,
-        report,
-        trigger: 'turn_end',
-        // A stale idle can arrive while tool work is still settling; the
-        // genuine idle that follows runs the check against the finished diff.
-        skipWhenToolWorkUnsettled: true,
-      });
-
-      if (!evaluated) {
-        return false;
-      }
-
-      const { verdict } = evaluated;
-
-      if (
-        verdict.status !== 'flagged' ||
-        !verdict.message ||
-        this.disposed ||
-        this.sessionId !== sessionId ||
-        this.completionGate.currentRequestGeneration !== generation
-      ) {
-        return false;
-      }
-
-      this.completionGateReminderCount += 1;
-      this.completionGateHeldReport = finalized?.text ?? null;
-      this.finalizedAssistantTurn = null;
-      this.clearVisualProofTimeout();
-      await this.submitPrompt({
-        text: verdict.message,
-        visibleInTranscript: false,
-        source: 'opencode-completion-gate',
-      });
-      // Same pairing as the closeout reminder: the session.idle that follows a
-      // status-sourced idle belongs to the turn that just ended.
-      this.ignoreNextStopHookSessionIdle = source === 'session_status';
-      this.armStopHookReminderStall(sessionId);
-      return true;
-    } catch (error) {
-      this.logger.warn(
-        `OpenCode completion check failed; completing the turn without it. ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-      return false;
-    }
-  }
-
-  /**
-   * The completion check at the moments that matter more than turn end: when
-   * the agent is about to tell a person the work is done, or about to push
-   * or open a pull request. Called by the sandbox's OpenCode plugin before
-   * the tool runs. A flagged verdict denies the call once, with the reasons
-   * as the tool error; the next call for the same work goes through, so the
-   * agent is never stuck. Anything that fails allows the call.
-   */
-  async checkCompletionBeforeTool(input: {
-    tool: string;
-    args?: unknown;
-  }): Promise<{ allowed: boolean; reason?: string }> {
-    return this.completionGate.checkBeforeTool({
-      sessionId: this.sessionId,
-      fallbackReport: this.latestParentAssistantText,
-      tool: input.tool,
-      args: input.args,
-    });
   }
 
   private armStopHookReminderStall(sessionId: string): void {
@@ -5662,24 +5423,17 @@ export class OpenCodeServerHarness
     this.inFlight = false;
     const reminderCount = this.stopHookReminderCount;
     this.stopHookReminderCount = 0;
-    const heldText =
-      this.lastBlockedCloseoutAssistantText ?? this.completionGateHeldReport;
-    // A wedged completion-check reminder is not a missing chat closeout: the
-    // agent had already closed out before the check reopened its turn.
-    const closeoutMissing =
-      reminderCount > 0 || this.completionGateHeldReport === null;
-
-    if (heldText?.trim()) {
-      this.runtimeEvents.turnCompleted(sessionId, heldText);
+    if (this.lastBlockedCloseoutAssistantText?.trim()) {
+      this.runtimeEvents.turnCompleted(
+        sessionId,
+        this.lastBlockedCloseoutAssistantText,
+      );
     }
 
     this.lastBlockedCloseoutAssistantText = null;
-    this.completionGateHeldReport = null;
-    this.runtimeEvents.taskCompleted(
-      sessionId,
-      undefined,
-      closeoutMissing ? { missingChatCloseout: { reminderCount } } : {},
-    );
+    this.runtimeEvents.taskCompleted(sessionId, undefined, {
+      missingChatCloseout: { reminderCount },
+    });
 
     await this.drainQueuedPrompts();
   }
@@ -5876,10 +5630,6 @@ export class OpenCodeServerHarness
       text,
       tokenUsage,
     };
-
-    if (options?.finalizeParentTurn !== false && text.trim()) {
-      this.latestParentAssistantText = text;
-    }
 
     this.persistedMessageIds.add(message.info.id);
     // Persist the turn's reasoning as one consolidated thought (before the

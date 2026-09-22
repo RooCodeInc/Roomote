@@ -423,7 +423,7 @@ describe('Discord Gateway event handler', () => {
     );
     mocks.markThreadHistoryDelivered.mockResolvedValue(undefined);
     mocks.fetchThreadHistory.mockResolvedValue([]);
-    mocks.shouldRouteUnmentioned.mockResolvedValue(true);
+    mocks.shouldRouteUnmentioned.mockResolvedValue({ shouldRoute: true });
     mocks.queueMessage.mockResolvedValue(true);
     mocks.enqueueGatewayEvent.mockResolvedValue({ jobId: 'event-message-1' });
     mocks.callViaEmojiConfig.mockResolvedValue(null);
@@ -1319,7 +1319,7 @@ describe('Discord Gateway event handler', () => {
       } else if (scenario === 'unlinked sender') {
         mocks.findMappedUserId.mockResolvedValue(null);
       } else {
-        mocks.shouldRouteUnmentioned.mockResolvedValue(false);
+        mocks.shouldRouteUnmentioned.mockResolvedValue({ shouldRoute: false });
       }
 
       const response = await postEvent(
@@ -1414,7 +1414,7 @@ describe('Discord Gateway event handler', () => {
       userId: 'roomote-user-1',
       actingUserId: 'roomote-user-1',
     });
-    mocks.shouldRouteUnmentioned.mockResolvedValue(false);
+    mocks.shouldRouteUnmentioned.mockResolvedValue({ shouldRoute: false });
 
     const response = await postEvent(
       envelope(
@@ -1446,7 +1446,7 @@ describe('Discord Gateway event handler', () => {
       type: 11,
     });
     mocks.hasFastSession.mockResolvedValue(true);
-    mocks.shouldRouteUnmentioned.mockResolvedValue(true);
+    mocks.shouldRouteUnmentioned.mockResolvedValue({ shouldRoute: true });
 
     const response = await postEvent(
       envelope(
@@ -1498,7 +1498,7 @@ describe('Discord Gateway event handler', () => {
       userId: 'roomote-user-owner',
     });
     mocks.mentionsPeer.mockReturnValue(true);
-    mocks.shouldRouteUnmentioned.mockResolvedValue(true);
+    mocks.shouldRouteUnmentioned.mockResolvedValue({ shouldRoute: true });
 
     const response = await postEvent(
       envelope(
@@ -1538,7 +1538,7 @@ describe('Discord Gateway event handler', () => {
     mocks.hasFastSession.mockResolvedValue(true);
     mocks.getFastSessionOwner.mockResolvedValue(null);
     mocks.mentionsPeer.mockReturnValue(true);
-    mocks.shouldRouteUnmentioned.mockResolvedValue(false);
+    mocks.shouldRouteUnmentioned.mockResolvedValue({ shouldRoute: false });
 
     const response = await postEvent(
       envelope(
@@ -1655,7 +1655,7 @@ describe('Discord Gateway event handler', () => {
         replyTarget: { channelId: 'channel-1', threadId: 'thread-1' },
       },
     });
-    mocks.shouldRouteUnmentioned.mockResolvedValue(false);
+    mocks.shouldRouteUnmentioned.mockResolvedValue({ shouldRoute: false });
     mocks.fetchThreadHistory.mockResolvedValue([
       {
         id: 'earlier-message',

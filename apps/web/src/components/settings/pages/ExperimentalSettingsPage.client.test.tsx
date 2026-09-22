@@ -59,6 +59,14 @@ vi.mock('@/components/settings/ResultsExperimentalSetting', () => ({
   ResultsExperimentalSetting: () => <div>Results setting</div>,
 }));
 
+vi.mock(
+  '@/components/settings/FastSessionCommunicationJevExperimentalSetting',
+  () => ({
+    FastSessionCommunicationJevExperimentalSetting: () => (
+      <div>Jev Session communication setting</div>
+    ),
+  }),
+);
 import { ExperimentalSettingsPage } from './ExperimentalSettingsPage';
 
 describe('ExperimentalSettingsPage', () => {
@@ -82,6 +90,9 @@ describe('ExperimentalSettingsPage', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText('Integration tool approvals setting'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('Jev Session communication setting'),
     ).toBeInTheDocument();
   });
 

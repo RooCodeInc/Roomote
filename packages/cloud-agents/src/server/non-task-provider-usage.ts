@@ -221,6 +221,10 @@ export interface GenerateTrackedNonTaskObjectParams<
 > extends GenerateTrackedNonTaskBaseParams {
   schema: TSchema;
   structuredOutputRetryCount?: number;
+  onPromptStarted?: (setup: NonTaskOpenCodePromptSetupTiming) => void;
+  onMessageCompleted?: (
+    message: NonTaskOpenCodeCompletedMessage,
+  ) => Promise<void> | void;
 }
 
 /**
@@ -2188,6 +2192,8 @@ async function generateTrackedNonTaskObjectWithSdk<
     },
     {
       promptErrorLabel: `OpenCode structured prompt failed (model ${resolvedRuntime.model})`,
+      onPromptStarted: params.onPromptStarted,
+      onMessageCompleted: params.onMessageCompleted,
     },
   );
 

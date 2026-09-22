@@ -22,6 +22,10 @@ describe('githubPrReview prompt source', () => {
     expect(workflowContent).toContain(
       'linked_implementation_task_id: linkedTaskId',
     );
+    expect(workflowContent).toContain(
+      'const reviewPrescreenPromise = runGithubPrReviewPrescreen({',
+    );
+    expect(workflowContent).toContain('review_prescreen: reviewPrescreen');
     expect(workflowContent).toContain('task_link_follow: followLink');
     expect(workflowContent).toContain(
       'task_link_see: `[See task](${taskRunUrl})`',

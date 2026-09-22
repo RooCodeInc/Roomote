@@ -731,6 +731,49 @@ it('validates required custom automation fields before creating', () => {
   );
 });
 
+it('shows and clears preferred-environment validation before creating', () => {
+  render(<CustomAutomationsSection />);
+  fireEvent.click(screen.getByRole('button', { name: 'New' }));
+
+  const name = screen.getByRole('textbox', { name: 'Name' });
+  const prompt = screen.getByRole('textbox', { name: 'Prompt' });
+  const environment = screen.getByRole('combobox', {
+    name: 'Preferred environment',
+  });
+
+  fireEvent.change(name, { target: { value: 'Environment validation proof' } });
+  fireEvent.change(prompt, {
+    target: { value: 'Verify environment recovery.' },
+  });
+  mutations.updateSettings.mockClear();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+  expect(mutations.updateSettings).not.toHaveBeenCalled();
+  expect(toast.error).not.toHaveBeenCalledWith('Choose an environment.');
+  expect(environment).toHaveFocus();
+  expect(environment).toHaveAttribute('aria-invalid', 'true');
+  expect(environment).toHaveAccessibleDescription('Choose an environment.');
+  expect(
+    screen.getByText('Choose an environment.', { selector: '[role="alert"]' }),
+  ).toBeInTheDocument();
+
+  fireEvent.click(environment);
+  fireEvent.click(screen.getByRole('option', { name: 'Let Roomote decide' }));
+
+  expect(environment).not.toHaveAttribute('aria-invalid');
+  expect(screen.queryByText('Choose an environment.')).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+  expect(mutations.updateSettings).toHaveBeenCalledWith(
+    expect.objectContaining({
+      name: 'Environment validation proof',
+      prompt: 'Verify environment recovery.',
+      environmentId: '__fast__',
+    }),
+  );
+});
+
 async function openSuggesterCard() {
   fireEvent.click(
     await screen.findByRole('button', {

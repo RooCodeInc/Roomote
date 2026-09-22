@@ -91,6 +91,14 @@ function toSharedHistoryMessages(
  * eligibility and interjection window rules come from the shared Slack/Teams
  * core in `handlers/shared/unmentioned-thread-reply`.
  */
+type UnmentionedDiscordThreadReplyRoutingDecision =
+  | { shouldRoute: false }
+  | {
+      shouldRoute: true;
+      /** The judgment model found the reply addressed to Roomote. */
+      addressedToRoomote?: true;
+    };
+
 export async function shouldRouteUnmentionedDiscordThreadReplyToAgent(params: {
   message: DiscordMessage;
   botUserId: string | undefined;
@@ -109,42 +117,44 @@ export async function shouldRouteUnmentionedDiscordThreadReplyToAgent(params: {
   /** True in a user-owned Fast conversation, where peer-mentioned turns stay eligible. */
   peerConversationsEnabled?: boolean;
   fetchThreadMessages: () => Promise<DiscordThreadHistoryMessage[] | null>;
-}): Promise<boolean> {
+}): Promise<UnmentionedDiscordThreadReplyRoutingDecision> {
   const { message, botUserId } = params;
   const senderDiscordUserId = message.author?.id;
 
   if (!senderDiscordUserId || message.author?.bot) {
-    return false;
+    return { shouldRoute: false };
   }
 
   // DMs and explicit bot mentions are handled by the normal task-entry path.
   if (!message.guild_id || isDiscordBotMentioned(message, botUserId)) {
-    return false;
+    return { shouldRoute: false };
   }
 
   // Unmentioned routing needs a linked sender so drive-by chats never trigger
   // work or account-linking spam for spectators.
   if (!params.mappedUserId || !botUserId) {
-    return false;
+    return { shouldRoute: false };
   }
 
   // Replies that mention somebody else without addressing the bot are directed
   // at that person, not Roomote.
-  if (
+  const eventMentionsSomebodyElse =
     mentionsDiscordUserOtherThanBotWithoutMentioningBot(
       getDiscordMessageContent(message),
       getDiscordMessageMentions(message),
       botUserId,
-    ) &&
+    );
+  if (
+    eventMentionsSomebodyElse &&
     !(params.peerConversationsEnabled && params.isOpenConversationThread)
   ) {
-    return false;
+    return { shouldRoute: false };
   }
 
   // A Roomote-owned task conversation is required (active run, resumable
   // completed run, or pending routing for this thread).
   if (!params.isRoomoteThread) {
-    return false;
+    return { shouldRoute: false };
   }
 
   const threadMessages = await params.fetchThreadMessages();
@@ -153,7 +163,7 @@ export async function shouldRouteUnmentionedDiscordThreadReplyToAgent(params: {
   // history means it is unreliable. Require an explicit mention instead of
   // routing blind.
   if (!threadMessages || threadMessages.length === 0) {
-    return false;
+    return { shouldRoute: false };
   }
 
   // Discord threads created from a message share that message's id as the
@@ -181,9 +191,18 @@ export async function shouldRouteUnmentionedDiscordThreadReplyToAgent(params: {
     allowPeerConversationMessages:
       params.peerConversationsEnabled === true &&
       params.isOpenConversationThread === true,
+    eventMentionsSomebodyElse,
     threadMessages: toSharedHistoryMessages(threadMessages, botUserId),
     compareMessageIds: compareBigIntMessageIds,
   });
 
-  return decision.shouldRoute;
+  if (!decision.shouldRoute) {
+    return { shouldRoute: false };
+  }
+  return {
+    shouldRoute: true,
+    ...(decision.routedByJudgmentModel
+      ? { addressedToRoomote: true as const }
+      : {}),
+  };
 }

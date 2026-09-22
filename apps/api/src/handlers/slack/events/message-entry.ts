@@ -145,6 +145,8 @@ type UnmentionedSlackThreadReplyRoutingDecision =
   | {
       shouldRoute: true;
       peerConversationsEnabled?: true;
+      /** The judgment model found the reply addressed to Roomote. */
+      addressedToRoomote?: true;
       threadMessages?: SlackThreadMessage[];
       taskId?: string;
     };
@@ -228,12 +230,13 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
   });
   const peerConversationsEnabled = fastSessionOwner?.kind === 'user';
 
-  const requiresExplicitMentionForPeerMessage =
-    !peerConversationsEnabled &&
+  const eventMentionsSomebodyElse =
     mentionsSlackUserOtherThanBotWithoutMentioningBot(
       event,
       slackInstallation.botUserId,
     );
+  const requiresExplicitMentionForPeerMessage =
+    !peerConversationsEnabled && eventMentionsSomebodyElse;
 
   let roomoteThreadMatch: Awaited<
     ReturnType<typeof findRoomoteOwnedSlackThread>
@@ -338,6 +341,7 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
     ),
     isOpenConversationThread: isFastAgentThread,
     allowPeerConversationMessages: peerConversationsEnabled,
+    eventMentionsSomebodyElse,
     threadMessages: sharedHistory,
     compareMessageIds: compareNumericMessageIds,
   });
@@ -356,6 +360,9 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
     shouldRoute: true,
     ...(peerConversationsEnabled
       ? { peerConversationsEnabled: true as const }
+      : {}),
+    ...(decision.routedByJudgmentModel
+      ? { addressedToRoomote: true as const }
       : {}),
     threadMessages,
     ...(roomoteThreadMatch?.trackedAliasTaskId
@@ -1156,6 +1163,12 @@ async function handleSlackEntryEvent(params: {
   skipThreadFollowupHandling?: boolean;
   threadTaskId?: string;
   peerConversationsEnabled?: boolean;
+  /**
+   * True when the judgment model already found this unmentioned reply to be
+   * for Roomote. The turn is then directed: it shows the working status and
+   * must answer, instead of being eligible for a silent ambient turn.
+   */
+  addressedToRoomote?: boolean;
 }): Promise<void> {
   const {
     event,
@@ -1165,6 +1178,7 @@ async function handleSlackEntryEvent(params: {
     skipThreadFollowupHandling = false,
     threadTaskId,
     peerConversationsEnabled,
+    addressedToRoomote = false,
   } = params;
 
   if (!event.user) {
@@ -1300,7 +1314,9 @@ async function handleSlackEntryEvent(params: {
           threadTs: threadId,
           activeTaskId: activeRun?.taskId,
         }),
-      directedAtRoomote: mentionsSlackBot(event, slackInstallation.botUserId),
+      directedAtRoomote:
+        addressedToRoomote ||
+        mentionsSlackBot(event, slackInstallation.botUserId),
       peerConversationsEnabled: peerConversationsEnabled,
       ...(attentionReply ? { originSessionId: attentionReply.sessionId } : {}),
       errorLogPrefix: `❌ Background fast-agent response failed for thread ${threadId}:`,
@@ -1430,5 +1446,8 @@ export async function handleMessageOrAppMentionEvent(params: {
     peerConversationsEnabled: unmentionedThreadReplyRouting.shouldRoute
       ? unmentionedThreadReplyRouting.peerConversationsEnabled
       : undefined,
+    addressedToRoomote:
+      unmentionedThreadReplyRouting.shouldRoute &&
+      unmentionedThreadReplyRouting.addressedToRoomote === true,
   });
 }

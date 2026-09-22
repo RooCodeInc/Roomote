@@ -6,7 +6,6 @@ import {
   Loader2,
   Telescope,
 } from '@/components/system';
-import { IntegrationToolSessionMenu } from '@/components/sessions/IntegrationToolSessionControls';
 import { useTaskRobotIconContext } from '@/components/tasks/TaskRobotIcon';
 import {
   Message,
@@ -85,18 +84,6 @@ export function AcpGroupedToolMessage({
       ? firstReference
       : null;
   const taskIcon = useTaskToolIcon(uniformReference, hasFailed);
-  // MCP rows only group on the same server and tool, so the first item's
-  // identity names the whole group's integration tool.
-  const integrationTool =
-    !hasRunning &&
-    firstPresentation.identity.providerKind === 'mcp' &&
-    firstPresentation.identity.serverName &&
-    firstPresentation.identity.toolName
-      ? {
-          integrationId: firstPresentation.identity.serverName,
-          toolName: firstPresentation.identity.toolName,
-        }
-      : null;
 
   return (
     <Message from="assistant" className="chat-tool-use-message">
@@ -110,20 +97,14 @@ export function AcpGroupedToolMessage({
               className="h-0 overflow-hidden"
             />
           ))}
-          <div className="flex items-center gap-1">
-            <ToolHeader
-              action={group.action}
-              object={objectSummary}
-              icon={ToolIcon}
-              {...taskIcon}
-              state={toolState}
-              collapsible={showExpandedDetails}
-              className="min-w-0 flex-1"
-            />
-            {integrationTool ? (
-              <IntegrationToolSessionMenu {...integrationTool} />
-            ) : null}
-          </div>
+          <ToolHeader
+            action={group.action}
+            object={objectSummary}
+            icon={ToolIcon}
+            {...taskIcon}
+            state={toolState}
+            collapsible={showExpandedDetails}
+          />
           {showExpandedDetails ? (
             <ToolContent className="space-y-3 px-4 ml-1.5 mb-4 mt-2 border-l text-sm font-light text-muted-foreground">
               {group.items.map((item) => {

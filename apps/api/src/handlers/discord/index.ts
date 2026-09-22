@@ -757,6 +757,7 @@ async function processDiscordGatewayEvent(
     isFastAgentConversation,
   );
   let peerConversationsEnabled = false;
+  let unmentionedReplyAddressedToRoomote = false;
   const isTaskEntry = isDiscordTaskEntryEvent(event, {
     botUserId: resolved.botUserId,
     isTaskThread: isRoomoteThread,
@@ -861,7 +862,7 @@ async function processDiscordGatewayEvent(
           return history.length > 0 ? history : null;
         },
       });
-    if (!shouldRouteUnmentioned) {
+    if (!shouldRouteUnmentioned.shouldRoute) {
       apiLogger.debug(
         `[discord] Ignoring unmentioned guild-thread reply from ${sender.id} (requires @mention after interjection or ineligible sender)`,
       );
@@ -870,6 +871,8 @@ async function processDiscordGatewayEvent(
         ignored: 'discord_unmentioned_requires_mention',
       };
     }
+    unmentionedReplyAddressedToRoomote =
+      shouldRouteUnmentioned.addressedToRoomote === true;
   }
   await refreshDiscordUserMappingBestEffort({
     discordUserId: sender.id,
@@ -1101,6 +1104,7 @@ async function processDiscordGatewayEvent(
         directedAtRoomote:
           channel.isDirectMessage ||
           Boolean(repliedFastSession) ||
+          unmentionedReplyAddressedToRoomote ||
           isDiscordBotMentioned(message, resolved.botUserId),
         peerConversationsEnabled,
       });

@@ -115,7 +115,9 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
       botHistory('200'),
     ]);
 
-    await expect(routeDecision(threadReplyMessage({}))).resolves.toBe(true);
+    await expect(routeDecision(threadReplyMessage({}))).resolves.toMatchObject({
+      shouldRoute: true,
+    });
   });
 
   it('routes a linked first-time reply to a bot-authored automation report', async () => {
@@ -126,7 +128,7 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
         ownedThreadUserId: null,
         isAutomationReportThread: true,
       }),
-    ).resolves.toBe(true);
+    ).resolves.toMatchObject({ shouldRoute: true });
   });
 
   it.each([
@@ -145,7 +147,7 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
           ownedThreadUserId: null,
           isAutomationReportThread: true,
         }),
-      ).resolves.toBe(false);
+      ).resolves.toEqual({ shouldRoute: false });
     },
   );
 
@@ -167,7 +169,7 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
           isOpenConversationThread: true,
         },
       ),
-    ).resolves.toBe(true);
+    ).resolves.toMatchObject({ shouldRoute: true });
   });
 
   it('keeps a reply silent when the previous participant addressed the sender in an open fast-agent thread', async () => {
@@ -183,7 +185,7 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
         ownedThreadUserId: 'roomote-user-1',
         isOpenConversationThread: true,
       }),
-    ).resolves.toBe(false);
+    ).resolves.toEqual({ shouldRoute: false });
   });
 
   it('keeps routing after the sender mentions themself in an open fast-agent thread', async () => {
@@ -197,7 +199,7 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
       routeDecision(threadReplyMessage({ user: USER_1 }), {
         isOpenConversationThread: true,
       }),
-    ).resolves.toBe(true);
+    ).resolves.toMatchObject({ shouldRoute: true });
   });
 
   it('keeps routing consecutive replies from the same sender before the bot answers', async () => {
@@ -211,7 +213,9 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
       humanHistory('300', USER_1, 'also add tests'),
     ]);
 
-    await expect(routeDecision(threadReplyMessage({}))).resolves.toBe(true);
+    await expect(routeDecision(threadReplyMessage({}))).resolves.toMatchObject({
+      shouldRoute: true,
+    });
   });
 
   it('requires a mention when somebody else posted since the bot last spoke', async () => {
@@ -225,7 +229,9 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
       humanHistory('300', USER_2, 'interesting thread'),
     ]);
 
-    await expect(routeDecision(threadReplyMessage({}))).resolves.toBe(false);
+    await expect(routeDecision(threadReplyMessage({}))).resolves.toEqual({
+      shouldRoute: false,
+    });
   });
 
   it('routes an interjected reply the judgment model confidently gives to Roomote', async () => {
@@ -236,7 +242,7 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
         confidence: 0.95,
         probabilities: { roomote: 0.95, participant: 0.03, unclear: 0.02 },
       },
-      expectsResponse: { type: 'noul', noul: 0.9 },
+      closingAcknowledgement: { type: 'noul', noul: 0.05 },
     });
     fetchThreadMessagesMock.mockResolvedValue([
       humanHistory(
@@ -252,7 +258,7 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
       routeDecision(
         threadReplyMessage({ content: 'can you also add a unit test?' }),
       ),
-    ).resolves.toBe(true);
+    ).resolves.toEqual({ shouldRoute: true, addressedToRoomote: true });
     expect(evaluateTypeSafeJudgmentsMock).toHaveBeenCalledWith(
       expect.objectContaining({
         state: expect.objectContaining({
@@ -276,7 +282,9 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
       humanHistory('300', USER_1, `cc <@${USER_3}> for visibility`),
     ]);
 
-    await expect(routeDecision(threadReplyMessage({}))).resolves.toBe(false);
+    await expect(routeDecision(threadReplyMessage({}))).resolves.toEqual({
+      shouldRoute: false,
+    });
   });
 
   it('reopens the no-mention window when the bot posts a new reply after an interjection', async () => {
@@ -292,7 +300,9 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
       botHistory('450'),
     ]);
 
-    await expect(routeDecision(threadReplyMessage({}))).resolves.toBe(true);
+    await expect(routeDecision(threadReplyMessage({}))).resolves.toMatchObject({
+      shouldRoute: true,
+    });
   });
 
   it('ignores a first-time sender replying after the bot until they mention the bot', async () => {
@@ -310,7 +320,7 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
         mappedUserId: 'roomote-user-2',
         ownedThreadUserId: 'roomote-user-1',
       }),
-    ).resolves.toBe(false);
+    ).resolves.toEqual({ shouldRoute: false });
   });
 
   it('lets a sender who joined via an earlier bot mention reply without a mention', async () => {
@@ -330,7 +340,7 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
         mappedUserId: 'roomote-user-2',
         ownedThreadUserId: 'roomote-user-1',
       }),
-    ).resolves.toBe(true);
+    ).resolves.toMatchObject({ shouldRoute: true });
   });
 
   it('lets the thread root author reply without a mention even without a prior bot mention', async () => {
@@ -343,7 +353,7 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
       routeDecision(threadReplyMessage({}), {
         ownedThreadUserId: 'someone-else',
       }),
-    ).resolves.toBe(true);
+    ).resolves.toMatchObject({ shouldRoute: true });
   });
 
   it('does not treat the oldest retained message as root when the real starter is absent', async () => {
@@ -359,7 +369,7 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
         mappedUserId: 'roomote-user-2',
         ownedThreadUserId: 'roomote-user-1',
       }),
-    ).resolves.toBe(false);
+    ).resolves.toEqual({ shouldRoute: false });
   });
 
   it('lets the thread task owner reply without a mention in a bot-started thread', async () => {
@@ -368,7 +378,9 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
       botHistory('200'),
     ]);
 
-    await expect(routeDecision(threadReplyMessage({}))).resolves.toBe(true);
+    await expect(routeDecision(threadReplyMessage({}))).resolves.toMatchObject({
+      shouldRoute: true,
+    });
   });
 
   it('treats the whole thread as the window when no bot message is found in history', async () => {
@@ -381,7 +393,9 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
       humanHistory('200', USER_2, 'interesting thread'),
     ]);
 
-    await expect(routeDecision(threadReplyMessage({}))).resolves.toBe(false);
+    await expect(routeDecision(threadReplyMessage({}))).resolves.toEqual({
+      shouldRoute: false,
+    });
   });
 
   it('does not route when the current message mentions someone else without the bot', async () => {
@@ -401,7 +415,7 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
           mentions: [{ id: USER_3, username: 'grace' }],
         }),
       ),
-    ).resolves.toBe(false);
+    ).resolves.toEqual({ shouldRoute: false });
     expect(evaluateTypeSafeJudgmentsMock).not.toHaveBeenCalled();
   });
 
@@ -422,7 +436,7 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
           peerConversationsEnabled: true,
         },
       ),
-    ).resolves.toBe(true);
+    ).resolves.toMatchObject({ shouldRoute: true });
     expect(fetchThreadMessagesMock).toHaveBeenCalledOnce();
   });
 
@@ -437,13 +451,14 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
         isOpenConversationThread: true,
         peerConversationsEnabled: true,
       }),
-    ).resolves.toBe(true);
+    ).resolves.toMatchObject({ shouldRoute: true });
     expect(fetchThreadMessagesMock).toHaveBeenCalledOnce();
   });
 
   it('gates an opted-in peer message with the configured judgment model', async () => {
     fetchThreadMessagesMock.mockResolvedValue([
       humanHistory(THREAD_ROOT_ID, USER_1, 'Can you summarize this?'),
+      humanHistory('150', USER_2, 'following along'),
       botHistory('200', 'Hi there.'),
     ]);
     evaluateTypeSafeJudgmentsMock.mockResolvedValue({
@@ -453,7 +468,7 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
         confidence: 0.92,
         probabilities: { roomote: 0.03, participant: 0.92, unclear: 0.05 },
       },
-      expectsResponse: { type: 'noul', noul: 0.9 },
+      closingAcknowledgement: { type: 'noul', noul: 0.05 },
     });
 
     await expect(
@@ -461,7 +476,7 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
         isOpenConversationThread: true,
         peerConversationsEnabled: true,
       }),
-    ).resolves.toBe(false);
+    ).resolves.toEqual({ shouldRoute: false });
     expect(fetchThreadMessagesMock).toHaveBeenCalledOnce();
     expect(evaluateTypeSafeJudgmentsMock).toHaveBeenCalledOnce();
   });
@@ -491,7 +506,7 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
           ],
         }),
       ),
-    ).resolves.toBe(false);
+    ).resolves.toEqual({ shouldRoute: false });
   });
 
   it('uses resolved forwarded snapshot mentions when checking the recipient', async () => {
@@ -519,13 +534,15 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
           ],
         }),
       ),
-    ).resolves.toBe(false);
+    ).resolves.toEqual({ shouldRoute: false });
   });
 
   it('does not route when thread history cannot be fetched', async () => {
     fetchThreadMessagesMock.mockResolvedValue(null);
 
-    await expect(routeDecision(threadReplyMessage({}))).resolves.toBe(false);
+    await expect(routeDecision(threadReplyMessage({}))).resolves.toEqual({
+      shouldRoute: false,
+    });
   });
 
   it('does not route unmentioned replies outside a Roomote thread', async () => {
@@ -544,6 +561,6 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
         isOpenConversationThread: true,
         peerConversationsEnabled: true,
       }),
-    ).resolves.toBe(false);
+    ).resolves.toEqual({ shouldRoute: false });
   });
 });

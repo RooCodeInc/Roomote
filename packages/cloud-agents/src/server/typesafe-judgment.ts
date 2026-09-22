@@ -10,6 +10,7 @@ import {
   resolveEffectiveJudgmentModelSelection,
   TYPESAFE_API_KEY_ENV_VAR_NAME,
   type ReasoningEffort,
+  type JudgmentModelSelection,
 } from '@roomote/types';
 import { z } from 'zod';
 
@@ -139,6 +140,11 @@ export type JudgmentBackend =
   | { provider: 'openrouter'; apiKey: string }
   | { provider: 'vercel'; apiKey: string };
 
+export type TypeSafeJudgmentTiming = {
+  onRequestStarted?: () => void;
+  onRequestCompleted?: () => void;
+};
+
 type RoomoteJudgmentUpstream = { url: string; apiKey: string | undefined };
 
 /**
@@ -215,6 +221,31 @@ async function resolveJudgmentBackendUncached(): Promise<
       : undefined;
   }
 
+  return undefined;
+}
+
+async function resolveJudgmentBackendForSelection(
+  selectionOverride: JudgmentModelSelection,
+): Promise<JudgmentBackend | undefined> {
+  const [typeSafeKey, openRouterKey, gatewayKey] = await Promise.all([
+    resolveModelProviderEnvValue([TYPESAFE_API_KEY_ENV_VAR_NAME]),
+    resolveModelProviderEnvValue(OPENROUTER_API_KEY_ENV_VAR_NAMES),
+    resolveModelProviderEnvValue(VERCEL_AI_GATEWAY_ENV_VAR_NAMES),
+  ]);
+
+  if (selectionOverride === 'typesafe') {
+    return typeSafeKey
+      ? { provider: 'typesafe', apiKey: typeSafeKey }
+      : undefined;
+  }
+  if (selectionOverride === 'openrouter') {
+    return openRouterKey
+      ? { provider: 'openrouter', apiKey: openRouterKey }
+      : undefined;
+  }
+  if (selectionOverride === 'vercel') {
+    return gatewayKey ? { provider: 'vercel', apiKey: gatewayKey } : undefined;
+  }
   return undefined;
 }
 
@@ -936,8 +967,13 @@ export async function evaluateTypeSafeJudgments<
   state: unknown;
   questions: TQuestions;
   timeoutMs?: number;
+  timing?: TypeSafeJudgmentTiming;
+  /** Explicit experiment-only backend selection; does not persist settings. */
+  selectionOverride?: JudgmentModelSelection;
 }): Promise<TypeSafeAnswers<TQuestions> | null> {
-  const backend = await resolveJudgmentBackend();
+  const backend = params.selectionOverride
+    ? await resolveJudgmentBackendForSelection(params.selectionOverride)
+    : await resolveJudgmentBackend();
 
   if (!backend) {
     return null;
@@ -958,6 +994,7 @@ export async function evaluateTypeSafeJudgments<
   let answers: Record<string, unknown> | undefined;
   let response: TrackedJudgmentResponse | undefined;
 
+  params.timing?.onRequestStarted?.();
   try {
     switch (backend.provider) {
       case 'roomote': {
@@ -1027,6 +1064,8 @@ export async function evaluateTypeSafeJudgments<
   } catch (error) {
     response?.finish('validation_error');
     throw error;
+  } finally {
+    params.timing?.onRequestCompleted?.();
   }
 
   if (backend.provider !== 'roomote' && Env.R_JUDGMENT_SHADOW === 'on') {

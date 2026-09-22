@@ -1,10 +1,7 @@
 'use client';
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type {
-  IntegrationToolApprovals,
-  IntegrationToolSessionOverrideUpsert,
-} from '@roomote/types';
+import { useQuery } from '@tanstack/react-query';
+import type { IntegrationToolApprovals } from '@roomote/types';
 
 /**
  * The requester's view of experiment-gated (`integrationToolApprovals`)
@@ -39,34 +36,5 @@ export function useSessionIntegrationToolApprovals(
     staleTime: 5_000,
     refetchInterval: 5_000,
     refetchOnWindowFocus: true,
-  });
-}
-
-/**
- * Requester-only write of one session-scoped override: `ask` gates a tool
- * for this Session, `allow` stops its asks, `null` restores the deployment
- * policy. Tightening applies from the next session turn.
- */
-export function useSetSessionIntegrationToolOverride(
-  sessionId: string | undefined,
-) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (input: IntegrationToolSessionOverrideUpsert) => {
-      const response = await fetch(
-        `/api/sessions/${encodeURIComponent(sessionId ?? '')}/integration-tool-approvals`,
-        {
-          method: 'PUT',
-          credentials: 'same-origin',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(input),
-        },
-      );
-      if (!response.ok) throw new Error('Unavailable');
-    },
-    onSettled: () =>
-      queryClient.invalidateQueries({
-        queryKey: sessionIntegrationToolApprovalsQueryKey(sessionId ?? ''),
-      }),
   });
 }

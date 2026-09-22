@@ -21,13 +21,11 @@ import {
   IntegrationToolApprovalUnavailableError,
   listIntegrationToolPolicies,
   listIntegrationToolSessionOverrides,
-  listIntegrationToolSessionOverridesForRequester,
   listPendingIntegrationToolApprovals,
   markIntegrationToolApprovalConsumed,
   recordIntegrationToolAutoEvaluation,
   recordIntegrationToolShadowEvaluation,
   redactIntegrationToolArgs,
-  setIntegrationToolSessionOverride,
   upsertIntegrationToolPolicies,
   upsertIntegrationToolPolicy,
   upsertIntegrationToolUserPolicy,
@@ -905,38 +903,15 @@ describe('integration tool session overrides', () => {
     ).toEqual([]);
   });
 
-  it('lets only the Session owner set, change, and clear an override', async () => {
-    const userId = await user();
-    const context = { sessionId: await ownedSession(userId), userId };
-    const stranger = { sessionId: context.sessionId, userId: await user() };
-
-    await expect(
-      setIntegrationToolSessionOverride(stranger, { ...tool, mode: 'ask' }),
-    ).rejects.toBeInstanceOf(IntegrationToolApprovalUnavailableError);
-
-    await setIntegrationToolSessionOverride(context, { ...tool, mode: 'ask' });
-    await setIntegrationToolSessionOverride(context, {
-      ...tool,
-      mode: 'allow',
-    });
-    expect(
-      await listIntegrationToolSessionOverridesForRequester(context),
-    ).toEqual([{ ...tool, mode: 'allow' }]);
-    expect(
-      await listIntegrationToolSessionOverridesForRequester(stranger),
-    ).toEqual([]);
-
-    await setIntegrationToolSessionOverride(context, { ...tool, mode: null });
-    expect(
-      await listIntegrationToolSessionOverrides(context.sessionId),
-    ).toEqual([]);
-  });
-
   it('keeps overrides inside their own session and cascades with it', async () => {
     const userId = await user();
     const first = { sessionId: await ownedSession(userId), userId };
     const second = { sessionId: await ownedSession(userId), userId };
-    await setIntegrationToolSessionOverride(first, { ...tool, mode: 'allow' });
+    const pending = await insertPending(first);
+    await decideIntegrationToolApproval(first, {
+      approvalId: pending.approvalId,
+      decision: 'approved_for_session',
+    });
 
     expect(await listIntegrationToolSessionOverrides(second.sessionId)).toEqual(
       [],

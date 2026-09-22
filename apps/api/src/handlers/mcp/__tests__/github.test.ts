@@ -34,6 +34,7 @@ vi.mock('../../long-lived-fetch', () => ({
 }));
 
 import { createGithubMcp } from '../github';
+import { enablePullRequestAutoMergeToolDefinition } from '../github-auto-merge';
 
 describe('GitHub MCP proxy', () => {
   let actor: Awaited<ReturnType<typeof userFactory.create>>;
@@ -587,7 +588,11 @@ describe('GitHub MCP proxy', () => {
         method: 'tools/list',
       });
       const visible = (await response.json()).result.tools;
-      expect(visible).toEqual([...tools.slice(0, 5), ...tools.slice(10)]);
+      expect(visible).toEqual([
+        ...tools.slice(0, 5),
+        ...tools.slice(10),
+        enablePullRequestAutoMergeToolDefinition,
+      ]);
     }
     // A coding task on the same path sees only its read allowlist; bounded
     // writes and everything off the allowlist are withheld.

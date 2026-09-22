@@ -4,6 +4,8 @@ const {
   mockGenerateTrackedNonTaskObject,
   mockResolveNonTaskHelperModel,
   mockRecordLlmUsage,
+  mockCaptureJudgment,
+  mockIsJudgmentCaptureEnabled,
   mockEnv,
 } = vi.hoisted(() => ({
   mockResolveModelProviderEnvValue: vi.fn(),
@@ -11,6 +13,8 @@ const {
   mockGenerateTrackedNonTaskObject: vi.fn(),
   mockResolveNonTaskHelperModel: vi.fn(),
   mockRecordLlmUsage: vi.fn(),
+  mockCaptureJudgment: vi.fn(),
+  mockIsJudgmentCaptureEnabled: vi.fn(),
   mockEnv: {
     R_JUDGMENT_MODEL: undefined as string | undefined,
     R_JUDGMENT_UPSTREAM_URL: undefined as string | undefined,
@@ -34,6 +38,11 @@ vi.mock('../non-task-provider-usage', () => ({
     judgmentModel: 'judgment_model',
   },
   resolveNonTaskHelperModel: mockResolveNonTaskHelperModel,
+}));
+
+vi.mock('../judgment-capture', () => ({
+  captureJudgment: mockCaptureJudgment,
+  isJudgmentCaptureEnabled: mockIsJudgmentCaptureEnabled,
 }));
 
 import {
@@ -106,6 +115,7 @@ describe('evaluateTypeSafeJudgments', () => {
     mockEnv.R_JUDGMENT_SHADOW = undefined;
     mockGetJudgmentSelection.mockResolvedValue(null);
     mockRecordLlmUsage.mockResolvedValue({ recorded: true });
+    mockIsJudgmentCaptureEnabled.mockReturnValue(false);
     mockResolveNonTaskHelperModel.mockResolvedValue({
       model: 'openrouter/helper',
       catalogModelId: 'openrouter/helper',
@@ -713,7 +723,10 @@ describe('evaluateTypeSafeJudgments', () => {
 
     await expect(
       evaluateTypeSafeJudgments({ state: 'hi', questions }),
-    ).resolves.toEqual(directAnswers);
+    ).resolves.toEqual({
+      ...directAnswers,
+      team: { ...directAnswers.team, confidence: 0.82 },
+    });
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('https://ai-gateway.vercel.sh/v4/ai/evaluation-model');
@@ -761,6 +774,27 @@ describe('evaluateTypeSafeJudgments', () => {
       model: 'typesafe/jev-1.13',
       questions,
     });
+  });
+
+  it('uses an explicit experiment backend selection without changing Settings', async () => {
+    mockEnv.R_JUDGMENT_MODEL = 'off';
+    mockGetJudgmentSelection.mockResolvedValue('off');
+    mockKeys({ OPENROUTER_API_KEY: 'or-key' });
+    const fetchMock = mockFetchResponse({ answers: directAnswers });
+
+    await expect(
+      evaluateTypeSafeJudgments({
+        state: 'experiment',
+        questions,
+        selectionOverride: 'openrouter',
+      }),
+    ).resolves.toEqual(directAnswers);
+
+    expect(mockEnv.R_JUDGMENT_MODEL).toBe('off');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://openrouter.ai/api/alpha/decisions',
+      expect.any(Object),
+    );
   });
 
   it('does not replace malformed OpenRouter confidence', async () => {
@@ -859,6 +893,33 @@ describe('evaluateTypeSafeJudgments', () => {
     await expect(
       evaluateTypeSafeJudgments({ state: 'hi', questions }),
     ).rejects.toThrow('HTTP 529');
+  });
+
+  it('retains opt-in capture and shadowing for decision state', async () => {
+    mockIsJudgmentCaptureEnabled.mockReturnValue(true);
+    mockEnv.R_JUDGMENT_SHADOW = 'on';
+    mockEnv.R_JUDGMENT_UPSTREAM_URL = 'https://judgment.internal.test';
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            answers: { urgent: { type: 'noul', noul: 0.92 } },
+          }),
+        ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      evaluateTypeSafeJudgments({
+        state: { diff: 'sensitive code' },
+        questions: { urgent: questions.urgent },
+      }),
+    ).resolves.toEqual({ urgent: { type: 'noul', noul: 0.92 } });
+
+    expect(mockCaptureJudgment).toHaveBeenCalledWith(
+      expect.objectContaining({ state: { diff: 'sensitive code' } }),
+    );
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
   });
 
   it.each([

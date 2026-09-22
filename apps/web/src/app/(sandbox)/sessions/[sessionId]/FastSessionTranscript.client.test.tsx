@@ -51,11 +51,7 @@ vi.mock('@/hooks/useIntegrationToolApprovalsExperiment', () => ({
 
 vi.mock('@/hooks/useSessionIntegrationToolApprovals', () => ({
   useSessionIntegrationToolApprovals: () => ({
-    data: { pending: [], sessionOverrides: [] },
-  }),
-  useSetSessionIntegrationToolOverride: () => ({
-    mutate: vi.fn(),
-    isPending: false,
+    data: { pending: [] },
   }),
 }));
 
