@@ -19,14 +19,17 @@
  *   pnpm exec dotenvx run --quiet -f .env.local -- \
  *   pnpm --filter @roomote/cloud-agents benchmark:screenshot-preparation -- --mode prototype
  *
- * Set BENCH_VISUAL_ACCEPTED=true only after opening and visually inspecting
- * every exact final PNG from the run. Without that explicit gate, the harness
- * reports DOM acceptance but deliberately does not call record accepted.
+ * To record acceptance, set BENCH_VISUAL_RESULT_DIR to a directory where an
+ * external visual inspector writes `<mode>-<run>.json` after opening that exact
+ * PNG. Each result must contain `{ capturePath, accepted, inspectedAt }`, with
+ * inspectedAt set after the PNG was opened. Missing or stale results remain
+ * unrecorded.
  */
 
 import { createServer } from 'node:http';
 import { execFile } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { performance } from 'node:perf_hooks';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -54,6 +57,10 @@ const mode = process.argv.includes('--mode')
 const repetitions = Number(process.env.BENCH_REPS ?? 5);
 const outputDir =
   process.env.BENCH_OUTPUT ?? '/tmp/roomote-screenshot-benchmark';
+const visualResultDir = process.env.BENCH_VISUAL_RESULT_DIR;
+const visualResultTimeoutMs = Number(
+  process.env.BENCH_VISUAL_RESULT_TIMEOUT_MS ?? 120_000,
+);
 const helperPath = process.env.ROOMOTE_BENCH_HELPER;
 const session = `ssb-${mode === 'prototype' ? 'p' : 'b'}-${process.pid}`;
 const execFileAsync = promisify(execFile);
@@ -259,6 +266,64 @@ async function readObservation(target?: Target, url?: string) {
     },
     controls,
   };
+}
+
+async function waitForVisualAcceptance(
+  capturePath: string,
+  runNumber: number,
+  capturedAt: number,
+): Promise<{
+  status: string;
+  accepted: boolean;
+  notes?: string;
+}> {
+  if (!visualResultDir) {
+    return { status: 'visual-inspection-required', accepted: false };
+  }
+
+  const resultPath = path.join(visualResultDir, `${mode}-${runNumber}.json`);
+  const deadline = Date.now() + visualResultTimeoutMs;
+
+  while (Date.now() < deadline) {
+    try {
+      const result = JSON.parse(await readFile(resultPath, 'utf8')) as {
+        capturePath?: unknown;
+        accepted?: unknown;
+        inspectedAt?: unknown;
+        notes?: unknown;
+      };
+
+      if (result.capturePath !== capturePath) {
+        return {
+          status: 'visual-result-path-mismatch',
+          accepted: false,
+        };
+      }
+      if (
+        typeof result.inspectedAt !== 'number' ||
+        result.inspectedAt < capturedAt
+      ) {
+        return { status: 'visual-result-stale', accepted: false };
+      }
+
+      return {
+        status:
+          result.accepted === true ? 'visual-accepted' : 'visual-rejected',
+        accepted: result.accepted === true,
+        ...(typeof result.notes === 'string' ? { notes: result.notes } : {}),
+      };
+    } catch (error) {
+      if (
+        !(error instanceof Error && 'code' in error && error.code === 'ENOENT')
+      ) {
+        return { status: 'visual-result-invalid', accepted: false };
+      }
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  return { status: 'visual-inspection-timeout', accepted: false };
 }
 
 function median(values: number[]): number {
@@ -491,6 +556,7 @@ try {
     const captureStartedAt = performance.now();
     await browser(['screenshot', capturePath]);
     const captureMs = Number((performance.now() - captureStartedAt).toFixed(1));
+    const capturedAt = Date.now();
     const finalText = await browser(['get', 'text', 'body']);
     const domAccepted =
       finalText.includes('Profile saved') &&
@@ -498,6 +564,7 @@ try {
       finalText.includes('Security checks complete');
     let recordStatus: string | null = null;
     let visualAccepted: boolean | null = null;
+    let visualResultNotes: string | undefined;
     if (
       mode === 'prototype' &&
       preparationStatus === 'jev-capture-ready' &&
@@ -506,7 +573,15 @@ try {
       if (!domAccepted) {
         throw new Error('visual_acceptance_failed');
       }
-      if (process.env.BENCH_VISUAL_ACCEPTED === 'true') {
+      const visualResult = await waitForVisualAcceptance(
+        capturePath,
+        index + 1,
+        capturedAt,
+      );
+      recordStatus = visualResult.status;
+      visualAccepted = visualResult.accepted;
+      visualResultNotes = visualResult.notes;
+      if (visualAccepted) {
         const recorded = await prepareScreenshotStep!({
           runId: `complex-screenshot-benchmark-${mode}-${index}`,
           enabled: true,
@@ -519,14 +594,11 @@ try {
         });
         recordStatus = recorded.status;
         metrics = recorded.metrics as unknown as Record<string, unknown>;
-        visualAccepted = recorded.status === 'accepted';
-        if (!visualAccepted) {
+        if (recorded.status !== 'accepted') {
           throw new Error(
             `record_failed:${recorded.reason ?? recorded.status}`,
           );
         }
-      } else {
-        recordStatus = 'visual-inspection-required';
       }
     }
     runs.push({
@@ -542,6 +614,7 @@ try {
       visualAccepted,
       preparationStatus,
       ...(recordStatus ? { recordStatus } : {}),
+      ...(visualResultNotes ? { visualResultNotes } : {}),
       jevActionCount,
       fallbackCount,
       capturePath,
