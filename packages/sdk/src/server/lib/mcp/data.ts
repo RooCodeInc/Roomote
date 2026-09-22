@@ -6,11 +6,13 @@
  * lives in ./oauth.ts with no DB dependencies.
  */
 import {
+  and,
   eq,
   db,
   mcpConnections,
   mcpOauthReplays,
   oauthState,
+  sql,
 } from '@roomote/db/server';
 import { encrypt, decrypt, decryptText } from '@roomote/db/encryption';
 import type {
@@ -208,14 +210,12 @@ export async function storeTokens(
 /**
  * Get stored tokens for a connection
  */
-async function getStoredTokens(
-  connectionId: string,
-): Promise<OAuthTokens | undefined> {
+async function getStoredOAuthState(connectionId: string) {
   const connection = await db.query.mcpConnections.findFirst({
     where: eq(mcpConnections.id, connectionId),
   });
 
-  if (!connection?.accessToken) {
+  if (!connection?.accessToken || connection.authStatus === 'error') {
     return undefined;
   }
 
@@ -244,7 +244,7 @@ async function getStoredTokens(
     result.scope = connection.scopes.join(' ');
   }
 
-  return result;
+  return { tokens: result, connection };
 }
 
 /**
@@ -396,14 +396,15 @@ export async function getValidAccessToken(
   const { discoverOAuthEndpoints, refreshOAuthToken, tokenNeedsRefresh } =
     await import('./oauth');
 
-  const storedTokens = await getStoredTokens(connectionId);
-  if (!storedTokens) {
+  const stored = await getStoredOAuthState(connectionId);
+  if (!stored) {
     return undefined;
   }
+  const { tokens: storedTokens, connection } = stored;
 
   let accessToken = storedTokens.access_token;
 
-  // getStoredTokens() returns:
+  // Stored tokens use:
   //   expires_in > 0  → seconds remaining
   //   expires_in = -1 → no expiration (token never expires, skip refresh)
   //   expires_in omitted → already expired, must refresh
@@ -424,13 +425,7 @@ export async function getValidAccessToken(
         isDefinitiveOAuthRejection,
       } = await import('./custom-auth-target');
 
-      const connection = await db.query.mcpConnections.findFirst({
-        where: eq(mcpConnections.id, connectionId),
-        columns: { mcpId: true },
-      });
-      const customTarget = connection
-        ? await resolveCustomMcpAuthTarget(connection.mcpId)
-        : null;
+      const customTarget = await resolveCustomMcpAuthTarget(connection.mcpId);
 
       try {
         const clientInfo =
@@ -493,16 +488,38 @@ export async function getValidAccessToken(
 
         console.error(`[getValidAccessToken] Token refresh failed:`, message);
 
-        // Custom servers: a definitive rejection means the grant is dead.
-        // Surface the reconnect state instead of silently retrying with a
-        // stale token forever (there is no other feedback channel for a
-        // broken deployment-scoped connection). Transient failures (5xx,
-        // network) still fall through with the stale token below.
-        if (customTarget && isDefinitiveOAuthRejection(error)) {
-          await db
+        // A definitive rejection means the grant is dead. Surface the
+        // reconnect state instead of silently retrying with a stale token.
+        // Transient failures (5xx, network) still fall through below.
+        if (isDefinitiveOAuthRejection(error)) {
+          // Compare the original stored ciphertexts, not freshly encrypted
+          // plaintext: a concurrent refresh or reconnect may have replaced
+          // either token while this request was in flight.
+          const rejected = await db
             .update(mcpConnections)
             .set({ authStatus: 'error', updatedAt: new Date() })
-            .where(eq(mcpConnections.id, connectionId));
+            .where(
+              and(
+                eq(mcpConnections.id, connectionId),
+                sql`${mcpConnections.accessToken} = ${connection.accessToken}`,
+                sql`${mcpConnections.refreshToken} IS NOT DISTINCT FROM ${connection.refreshToken}`,
+                sql`${mcpConnections.authStatus} IS NOT DISTINCT FROM ${connection.authStatus}`,
+              ),
+            )
+            .returning({ id: mcpConnections.id });
+
+          if (rejected.length === 0) {
+            // A newer writer won. Reuse its valid token without another
+            // refresh request or overwriting its authentication state.
+            const current = await getStoredOAuthState(connectionId);
+            if (
+              current &&
+              (current.tokens.expires_in === -1 ||
+                (current.tokens.expires_in ?? 0) > 0)
+            ) {
+              return current.tokens.access_token;
+            }
+          }
 
           return undefined;
         }
