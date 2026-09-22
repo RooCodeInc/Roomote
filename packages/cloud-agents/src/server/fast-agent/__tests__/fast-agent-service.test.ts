@@ -2068,7 +2068,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     },
   );
 
-  it('lets web Fast call a ready integration key before an acknowledgement without exempting operator integrations', async () => {
+  it('lets web Fast call integration keys and operator integrations before a reply', async () => {
     mocks.listIntegrations.mockResolvedValue([
       {
         id: '_roomote_http_integrations',
@@ -2121,13 +2121,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
     expect(results).toEqual([
       { success: true, result: { status: 200, body: 'healthy' } },
-      {
-        success: false,
-        error:
-          'Post an acknowledgement with send_chat_reply before this action.',
-      },
+      { success: true, result: { status: 200, body: 'healthy' } },
     ]);
-    expect(mocks.callIntegration).toHaveBeenCalledExactlyOnceWith(
+    expect(mocks.callIntegration).toHaveBeenCalledTimes(2);
+    expect(mocks.callIntegration).toHaveBeenNthCalledWith(
+      1,
       expect.objectContaining({
         sessionId: 'conversation-1',
         userId: 'user-1',
@@ -2139,6 +2137,24 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         toolName: 'integration_request',
         args: {
           integrationId: 'session:e9d35700-56b8-4bf0-b088-c1cb498905d9',
+          method: 'GET',
+          path: '/status',
+        },
+      },
+    );
+    expect(mocks.callIntegration).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        sessionId: 'conversation-1',
+        userId: 'user-1',
+        humanTurn: true,
+      }),
+      expect.any(Array),
+      {
+        integrationId: '_roomote_http_integrations',
+        toolName: 'integration_request',
+        args: {
+          integrationId: 'operator-service',
           method: 'GET',
           path: '/status',
         },
@@ -2412,9 +2428,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   });
 
   it.each(['setup_starter_tasks', undefined])(
-    'rejects integration preferences outside their preset: %s',
+    'discards integration preferences outside their preset: %s',
     async (preset) => {
-      const resolveUserInputPreset = vi.fn();
+      const resolveUserInputPreset = vi.fn(async () => []);
       const requestUserInput = vi.fn();
       let toolResult: unknown;
       mocks.generateText.mockImplementation(
@@ -2443,9 +2459,14 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         setupSession: true,
         adapter: callbacks({ requestUserInput, resolveUserInputPreset }),
       });
-      expect(toolResult).toEqual(expect.objectContaining({ success: false }));
-      expect(resolveUserInputPreset).not.toHaveBeenCalled();
-      expect(requestUserInput).not.toHaveBeenCalled();
+      expect(toolResult).toEqual(expect.objectContaining({ success: true }));
+      if (preset) {
+        expect(resolveUserInputPreset).toHaveBeenCalledWith(preset);
+        expect(requestUserInput).not.toHaveBeenCalled();
+      } else {
+        expect(resolveUserInputPreset).not.toHaveBeenCalled();
+        expect(requestUserInput).toHaveBeenCalledOnce();
+      }
     },
   );
 
@@ -5573,7 +5594,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
-  it('creates a durable private Session artifact with inferred content type', async () => {
+  it('creates a durable private Session artifact before the first reply', async () => {
     mocks.getUnifiedSession.mockResolvedValue({
       id: 'session-1',
       privacy: 'private',
@@ -5595,10 +5616,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
-        await invokeTool(nativeToolNames.sendChatReply, {
-          purpose: 'ack',
-          message: 'Creating that document.',
-        });
         const result = await invokeTool(nativeToolNames.createArtifact, {
           path: 'notes/decision.md',
           content: '# Decision',
@@ -7459,27 +7476,16 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       }
     });
 
-    it('keeps the durable row recoverable when a pre-ack action is refused', async () => {
+    it('keeps the durable row recoverable when work runs before a reply', async () => {
       mocks.appendMemory.mockResolvedValue({ saved: true });
-      const results: unknown[] = [];
+      let result: unknown;
       mocks.generateText.mockImplementationOnce(
         async (_params, _session, options) => {
           await options.onSessionReady('opencode-session-1');
-          results.push(
-            await invokeTool(nativeToolNames.saveMemory, {
-              memory: 'Too early.',
-            }),
-          );
-          expect(mocks.revokeDurableReplay).not.toHaveBeenCalled();
-          await invokeTool(nativeToolNames.sendChatReply, {
-            purpose: 'ack',
-            message: 'On it.',
+          result = await invokeTool(nativeToolNames.saveMemory, {
+            memory: 'Dan prefers short replies.',
           });
-          results.push(
-            await invokeTool(nativeToolNames.saveMemory, {
-              memory: 'Dan prefers short replies.',
-            }),
-          );
+          expect(mocks.revokeDurableReplay).not.toHaveBeenCalled();
           return 'Done.';
         },
       );
@@ -7490,12 +7496,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         durableAdmission,
       });
 
-      expect(results[0]).toEqual({
-        success: false,
-        error:
-          'Post an acknowledgement with send_chat_reply before this action.',
-      });
-      expect(results[1]).toMatchObject({ success: true });
+      expect(result).toMatchObject({ success: true });
+      expect(mocks.appendMemory).toHaveBeenCalledOnce();
       // The memory write itself no longer ends replay; only the closeout does.
       expect(mocks.revokeDurableReplay).not.toHaveBeenCalledWith(
         'durable-row-1',
@@ -9283,342 +9285,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.callIntegration).toHaveBeenCalledOnce();
   });
 
-  it.each(['github', 'gbrain'])(
-    'requires an acknowledgement before calling the %s integration',
-    async (integrationId) => {
-      mocks.listIntegrations.mockResolvedValue([
-        {
-          id: integrationId,
-          name: integrationId,
-          description: 'Read integration',
-          tools: [
-            {
-              name: 'search_code',
-              description: 'Search code',
-              inputSchema: { type: 'object' },
-            },
-          ],
-        },
-      ]);
-      const toolResults: unknown[] = [];
-      mocks.generateText.mockImplementation(
-        async (_params, _session, options) => {
-          await options.onSessionReady('opencode-session-1');
-          toolResults.push(
-            await invokeMcpTool(integrationId, 'search_code', {
-              query: 'fast agent',
-              nested: { exact: true },
-            }),
-          );
-          await invokeTool(nativeToolNames.sendChatReply, {
-            purpose: 'ack',
-            message: 'I’ll check.',
-          });
-          toolResults.push(
-            await invokeMcpTool(integrationId, 'search_code', {
-              query: 'fast agent',
-              nested: { exact: true },
-            }),
-          );
-          await invokeTool(nativeToolNames.sendChatReply, {
-            purpose: 'closeout',
-            message: 'I found it.',
-          });
-          return '';
-        },
-      );
-      const adapter = callbacks();
-
-      await answerFastAgentQuestion({ ...baseParams, adapter });
-
-      expect(toolResults[0]).toEqual({
-        success: false,
-        error: expect.stringContaining('acknowledgement'),
-      });
-      expect(toolResults[1]).toEqual({
-        success: true,
-        result: { matches: ['fast-agent.ts'] },
-      });
-      expect(mocks.callIntegration).toHaveBeenCalledWith(
-        expect.objectContaining({ sessionId: 'conversation-1' }),
-        expect.any(Array),
-        {
-          integrationId,
-          toolName: 'search_code',
-          args: { query: 'fast agent', nested: { exact: true } },
-        },
-      );
-    },
-  );
-
-  describe('turn start acknowledgement', () => {
-    const acknowledgementRequired = {
-      success: false,
-      error: 'Post an acknowledgement with send_chat_reply before this action.',
-    };
+  describe('turn response handling', () => {
     const githubIntegration = {
       id: 'github',
       name: 'GitHub',
       description: 'Read GitHub',
       tools: [{ name: 'search_code', inputSchema: { type: 'object' } }],
     };
-
-    it('does not let a reaction unlock work, but a text acknowledgement does', async () => {
-      mocks.listIntegrations.mockResolvedValue([githubIntegration]);
-      const results: unknown[] = [];
-      mocks.generateText.mockImplementation(
-        async (_params, _session, options) => {
-          await options.onSessionReady('opencode-session-1');
-          results.push(
-            await invokeMcpTool('github', 'search_code', { query: 'before' }),
-          );
-          await invokeTool(nativeToolNames.sendChatReaction, {
-            name: 'eyes',
-            purpose: 'ack',
-          });
-          results.push(
-            await invokeMcpTool('github', 'search_code', {
-              query: 'after reaction',
-            }),
-          );
-          await invokeTool(nativeToolNames.sendChatReply, {
-            purpose: 'ack',
-            message: 'I’ll check.',
-          });
-          results.push(
-            await invokeMcpTool('github', 'search_code', {
-              query: 'after text',
-            }),
-          );
-          await invokeTool(nativeToolNames.sendChatReply, {
-            purpose: 'closeout',
-            message: 'I found it.',
-          });
-          return '';
-        },
-      );
-
-      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
-
-      expect(results).toEqual([
-        acknowledgementRequired,
-        acknowledgementRequired,
-        { success: true, result: { matches: ['fast-agent.ts'] } },
-      ]);
-    });
-
-    it('gates native work tools until a text reply, and a first progress note counts', async () => {
-      mocks.appendMemory.mockResolvedValue({ saved: true });
-      const results: unknown[] = [];
-      mocks.generateText.mockImplementation(
-        async (_params, _session, options) => {
-          await options.onSessionReady('opencode-session-1');
-          results.push(
-            await invokeTool(nativeToolNames.saveMemory, {
-              memory: 'Dan prefers short replies.',
-            }),
-          );
-          await invokeTool(nativeToolNames.sendChatReply, {
-            purpose: 'progress',
-            message: 'Looking at the deploy history now.',
-          });
-          results.push(
-            await invokeTool(nativeToolNames.saveMemory, {
-              memory: 'Dan prefers short replies.',
-            }),
-          );
-          await invokeTool(nativeToolNames.sendChatReply, {
-            purpose: 'closeout',
-            message: 'Done.',
-          });
-          return '';
-        },
-      );
-
-      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
-
-      expect(results[0]).toEqual(acknowledgementRequired);
-      expect(results[1]).toMatchObject({ success: true });
-      expect(mocks.appendMemory).toHaveBeenCalledTimes(1);
-    });
-
-    it('rejects launch before acknowledgement and allows the same launch afterward', async () => {
-      const results: unknown[] = [];
-      const adapter = callbacks({
-        launchTask: vi.fn<LaunchFastAgentTask>(async () => ({
-          success: true as const,
-          taskId: 'task-1',
-          taskUrl: 'https://roomote.example/task-1',
-          kickoffDelivered: true,
-        })),
-      });
-      mocks.generateText.mockImplementation(
-        async (_params, _session, options) => {
-          await options.onSessionReady('opencode-session-1');
-          results.push(
-            await invokeTool(nativeToolNames.launchTask, {
-              prompt: 'Fix checkout.',
-            }),
-          );
-          await invokeTool(nativeToolNames.sendChatReply, {
-            purpose: 'ack',
-            message: 'I’m starting on the checkout fix.',
-          });
-          results.push(
-            await invokeTool(nativeToolNames.launchTask, {
-              prompt: 'Fix checkout.',
-            }),
-          );
-          results.push(
-            await invokeTool(nativeToolNames.sendTaskMessage, {
-              taskId: 'task-1',
-              message: 'Also check the retry path.',
-            }),
-          );
-          return '';
-        },
-      );
-
-      await answerFastAgentQuestion({ ...baseParams, adapter });
-
-      expect(results[0]).toEqual(acknowledgementRequired);
-      expect(results[1]).toMatchObject({ success: true, taskId: 'task-1' });
-      expect(results[2]).toMatchObject({ success: true });
-      expect(adapter.launchTask).toHaveBeenCalledOnce();
-    });
-
-    it('starts the task after acknowledgement without posting a second message', async () => {
-      const order: string[] = [];
-      const launchTask = vi.fn<LaunchFastAgentTask>(async ({ postKickoff }) => {
-        order.push('launch');
-        await postKickoff({ taskId: 'task-1' });
-        order.push('queued');
-        return { success: true, taskId: 'task-1' };
-      });
-      const adapter = callbacks({
-        launchTask,
-        postReply: vi.fn(async () => {
-          order.push('ack');
-        }),
-      });
-      mocks.generateText.mockImplementation(
-        async (_params, _session, options) => {
-          await options.onSessionReady('opencode-session-1');
-          await invokeTool(nativeToolNames.sendChatReply, {
-            purpose: 'ack',
-            message: 'I’ll trace the checkout failure first.',
-          });
-          await expect(
-            invokeTool(nativeToolNames.launchTask, {
-              prompt: 'Fix checkout.',
-            }),
-          ).resolves.toMatchObject({ success: true, taskId: 'task-1' });
-          return '';
-        },
-      );
-
-      await answerFastAgentQuestion({ ...baseParams, adapter });
-
-      expect(order).toEqual(['ack', 'launch', 'queued']);
-      expect(adapter.postReply).toHaveBeenCalledOnce();
-      expect(adapter.postReply).toHaveBeenCalledWith({
-        purpose: 'ack',
-        message: 'I’ll trace the checkout failure first.',
-      });
-    });
-
-    it('preserves a delivered acknowledgement that replaced a retry notice', async () => {
-      mocks.loadTurnAttempt.mockResolvedValueOnce({
-        events: [
-          {
-            kind: 'reply',
-            text: 'I’m starting on the checkout fix.',
-            purpose: 'ack',
-            inferenceRetryNotice: true,
-          },
-        ],
-        next: {
-          assistantOrdinal: 1,
-          toolOrdinal: 1,
-          retryNoticeOrdinal: 0,
-          turnSeq: 3,
-        },
-        prompt: { ts: 1_000, turnSeq: 0 },
-      });
-      const launchTask = vi.fn<LaunchFastAgentTask>(async ({ postKickoff }) => {
-        await postKickoff({ taskId: 'task-1', taskLinkRendered: true });
-        return { success: true, taskId: 'task-1' };
-      });
-      const adapter = callbacks({ launchTask });
-      mocks.generateText.mockImplementation(
-        async (_params, _session, options) => {
-          await options.onSessionReady('opencode-session-1');
-          await expect(
-            invokeTool(nativeToolNames.launchTask, {
-              prompt: 'Fix checkout.',
-            }),
-          ).resolves.toMatchObject({ success: true, taskId: 'task-1' });
-          return '';
-        },
-      );
-
-      await answerFastAgentQuestion({
-        ...baseParams,
-        adapter,
-        resumedAfterInterruption: true,
-      });
-
-      expect(launchTask).toHaveBeenCalledOnce();
-      expect(adapter.postReply).not.toHaveBeenCalled();
-    });
-
-    it('does not restore acknowledgement state from a system retry notice', async () => {
-      mocks.loadTurnAttempt.mockResolvedValueOnce({
-        events: [
-          {
-            kind: 'reply',
-            text: 'The inference provider is taking longer than expected.',
-            purpose: 'progress',
-            inferenceRetryNotice: true,
-          },
-        ],
-        next: {
-          assistantOrdinal: 0,
-          toolOrdinal: 0,
-          retryNoticeOrdinal: 1,
-          turnSeq: 2,
-        },
-        prompt: { ts: 1_000, turnSeq: 0 },
-      });
-      let launchResult: unknown;
-      const adapter = callbacks();
-      mocks.generateText.mockImplementation(
-        async (_params, _session, options) => {
-          await options.onSessionReady('opencode-session-1');
-          launchResult = await invokeTool(nativeToolNames.launchTask, {
-            prompt: 'Fix checkout.',
-          });
-          await invokeTool(nativeToolNames.sendChatReply, {
-            purpose: 'closeout',
-            message: 'I could not start the work.',
-          });
-          return '';
-        },
-      );
-
-      await answerFastAgentQuestion({
-        ...baseParams,
-        adapter,
-        resumedAfterInterruption: true,
-      });
-
-      expect(launchResult).toEqual({
-        success: false,
-        error:
-          'Post an acknowledgement with send_chat_reply before this action.',
-      });
-      expect(adapter.launchTask).not.toHaveBeenCalled();
-    });
 
     it('records an emoji-only terminal reaction as Slack emoji markup', async () => {
       let reactionResult: unknown;
@@ -9675,7 +9348,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       });
     });
 
-    it('does not gate platform-event turns', async () => {
+    it('runs integration work before a platform-event reply', async () => {
       mocks.listIntegrations.mockResolvedValue([githubIntegration]);
       let result: unknown;
       mocks.generateText.mockImplementation(
@@ -10870,7 +10543,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(subagentWrites[1]?.turnSeq).toBe(subagentWrites[0]?.turnSeq);
   });
 
-  it('posts a streaming acknowledgement before launch and adds only the task link afterward', async () => {
+  it('launches before the first reply and then posts the task link', async () => {
     const order: string[] = [];
     const launchTask = vi.fn<LaunchFastAgentTask>(async ({ postKickoff }) => {
       await postKickoff({
@@ -10886,8 +10559,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
     const adapter = callbacks({
       launchTask,
-      postReply: vi.fn(async ({ purpose }) => {
-        order.push(purpose === 'ack' ? 'ack' : 'task-link');
+      postReply: vi.fn(async () => {
+        order.push('task-link');
       }),
     });
     mocks.appendVisibleMessages.mockImplementation(async () => {
@@ -10896,10 +10569,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
-        await invokeTool(nativeToolNames.sendChatReply, {
-          purpose: 'ack',
-          message: 'I’m tracing the checkout fix now.',
-        });
         const result = await invokeTool(nativeToolNames.launchTask, {
           prompt: 'Fix checkout.',
           environmentId: 'env-1',
@@ -10925,13 +10594,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
 
     expect(result).toContain('https://roomote.example/task-1');
-    expect(order).toEqual(['ack', 'queued', 'task-link', 'mirrored']);
-    expect(adapter.postReply).toHaveBeenCalledTimes(2);
-    expect(adapter.postReply).toHaveBeenNthCalledWith(1, {
-      purpose: 'ack',
-      message: 'I’m tracing the checkout fix now.',
-    });
-    expect(adapter.postReply).toHaveBeenNthCalledWith(2, {
+    expect(order).toEqual(['queued', 'task-link', 'mirrored']);
+    expect(adapter.postReply).toHaveBeenCalledOnce();
+    expect(adapter.postReply).toHaveBeenCalledWith({
       purpose: 'progress',
       message: '[Started coding task](https://roomote.example/task-1)',
       taskNavigation: true,
@@ -10957,7 +10622,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
     const toolCallIndex = canonicalWrites.findIndex(
       (message) =>
-        message.eventId === '100.2:tool:1' &&
+        message.eventId === '100.2:tool:0' &&
         message.eventType === 'roomote_runtime.tool_call',
     );
     const taskLinkIndex = canonicalWrites.findIndex(
@@ -10967,7 +10632,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
     const toolResultIndex = canonicalWrites.findIndex(
       (message) =>
-        message.eventId === '100.2:tool:1' &&
+        message.eventId === '100.2:tool:0' &&
         message.eventType === 'roomote_runtime.tool_result',
     );
     expect(toolCallIndex).toBeGreaterThanOrEqual(0);
@@ -12052,8 +11717,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           ],
         },
       );
-      // The text acknowledgement opens the gate, then attachments are
-      // forwarded before the response is posted.
+      // Attachments are forwarded between the opening and closing replies.
       expect(order).toEqual(['reply', 'steer', 'reply']);
       const toolResult = mocks.upsertMessage.mock.calls
         .map(([input]) => input.message)
@@ -12235,7 +11899,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     ['message', {}],
     ['reaction', reactionTurnInput],
   ])(
-    'still requires an acknowledgement before canceling a task for human %s input',
+    'cancels a task before the first reply for human %s input',
     async (_inputKind, turnOptions) => {
       mocks.getActiveTasks.mockResolvedValue([
         { taskId: 'task-1', title: 'Checkout', status: 'running' },
@@ -12245,18 +11909,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           await options.onSessionReady('opencode-session-1');
           await expect(
             invokeTool(nativeToolNames.cancelTask, { taskId: 'task-1' }),
-          ).resolves.toEqual({
-            success: false,
-            error:
-              'Post an acknowledgement with send_chat_reply before this action.',
-          });
-          await invokeTool(nativeToolNames.sendChatReply, {
-            purpose: 'ack',
-            message: 'I’ll cancel it.',
-          });
-          await expect(
-            invokeTool(nativeToolNames.cancelTask, { taskId: 'task-1' }),
           ).resolves.toEqual({ success: true });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Canceled it.',
+          });
           return '';
         },
       );

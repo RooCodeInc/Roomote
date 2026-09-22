@@ -29,7 +29,6 @@ import {
   customMcpServerVisibilitySchema,
   NO_REPOSITORIES,
   ROOMOTE_MCP_ID,
-  HTTP_INTEGRATIONS_MCP_ID,
   REASONING_EFFORT_VALUES,
   activeRunStatuses,
   buildInferenceProviderRecoveryPrompt,
@@ -3865,7 +3864,7 @@ export async function answerFastAgentQuestion({
       activeTaskCount: resolvedActiveTasks.length,
       promptSkillCount: availableSkills?.skills.length,
     });
-    const resumedWithDeliveredAcknowledgement = Boolean(
+    const resumedWithVisibleModelReply = Boolean(
       previousAttempt?.events.some(
         (event) =>
           event.kind === 'reply' &&
@@ -3873,8 +3872,7 @@ export async function answerFastAgentQuestion({
             (event.purpose === 'progress' && !event.inferenceRetryNotice)),
       ),
     );
-    visibleUpdatePosted = resumedWithDeliveredAcknowledgement;
-    let substantiveWorkAcknowledged = resumedWithDeliveredAcknowledgement;
+    visibleUpdatePosted = resumedWithVisibleModelReply;
     let nativeToolInvoked = false;
     let retriedTaskStart = false;
     let automationWorkDelegated = Boolean(
@@ -3954,10 +3952,6 @@ export async function answerFastAgentQuestion({
       inferenceRetryCanonicalEvent = undefined;
       lastVisibleMessage = replyWithImages.message;
       visibleUpdatePosted = true;
-      // Any text reply posted by the model (acknowledgement or first progress
-      // update) is the textual communication the work-start gate requires.
-      // Reactions deliberately do not set this flag.
-      substantiveWorkAcknowledged = true;
       if (
         replyWithImages.purpose === 'closeout' ||
         replyWithImages.purpose === 'clarification'
@@ -4107,7 +4101,7 @@ export async function answerFastAgentQuestion({
       reportedInferenceNotices.add(message);
       startSurfaceActivity();
       // Deliberately not the postReply closure: a system retry notice must
-      // not satisfy the model's acknowledgement gate or close the turn.
+      // not count as the model's visible response or close the turn.
       if (!(await replaceInferenceRetryReply(reply))) {
         // A reply already streaming becomes the notice carrier rather than
         // leaving a cut-off draft above it.
@@ -4169,58 +4163,6 @@ export async function answerFastAgentQuestion({
         return toolFailure(error);
       }
     };
-    // Single owner of the human-turn work-start gate, applied in-process to
-    // every native and MCP tool call before it runs. Only a delivered text
-    // reply opens the gate; a reaction never does. The listed tools are the
-    // ones allowed to precede that communication.
-    const acknowledgementExemptToolIds = new Set<string>([
-      FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply,
-      FAST_AGENT_NATIVE_TOOL_NAMES.offerCapability,
-      FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction,
-      FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
-      // Scheduling or cancelling a wakeup is instant and its own confirmation
-      // follows in the closeout; an acknowledgement first would only add a
-      // second message.
-      FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups,
-      // A catalog lookup reads nothing external; the call it prepares for is
-      // still gated on the acknowledgement.
-      FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools,
-      // Resolving which connected repository the user meant is part of
-      // understanding the request; it reads only this deployment's own list.
-      FAST_AGENT_NATIVE_TOOL_NAMES.listRepositories,
-      // Reading an attachment the user just sent is part of understanding
-      // the request, not an action taken on their behalf.
-      FAST_AGENT_NATIVE_TOOL_NAMES.inspectImages,
-      // Web already shows tool activity; an approved bounded secret read needs
-      // no extra reply. This does not bypass the live actor/grant checks.
-      ...(conversation.surface === 'web'
-        ? [
-            FAST_AGENT_NATIVE_TOOL_NAMES.addRemoteMcp,
-            FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential,
-            FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials,
-          ]
-        : []),
-      `${ROOMOTE_MCP_ID}_${CHAT_REACTION_EMOJI_TOOL_NAME}`,
-    ]);
-    const authorizeToolStart = (toolId: string) =>
-      platformEvent ||
-      substantiveWorkAcknowledged ||
-      acknowledgementExemptToolIds.has(toolId)
-        ? null
-        : {
-            success: false as const,
-            error:
-              'Post an acknowledgement with send_chat_reply before this action.',
-          };
-
-    const isWebIntegrationKeyRequest = (
-      call: z.infer<typeof callIntegrationToolArgsSchema>,
-    ) =>
-      conversation.surface === 'web' &&
-      call.integrationId === HTTP_INTEGRATIONS_MCP_ID &&
-      call.toolName === 'integration_request' &&
-      typeof call.args?.integrationId === 'string' &&
-      call.args.integrationId.startsWith('session:');
     /**
      * Code-mode integrations experiment: a server connected mid-turn is not
      * in the mounted set the leased OpenCode server booted with, so mount it
@@ -4322,7 +4264,6 @@ export async function answerFastAgentQuestion({
     };
     const executeMcpTool = async (
       call: FastAgentMcpToolCall,
-      { acknowledgementExempt = false } = {},
     ): Promise<unknown> => {
       activeToolExecutions += 1;
       let canonicalToolEvent:
@@ -4335,12 +4276,6 @@ export async function answerFastAgentQuestion({
         if (ownershipError) return ownershipError;
         nativeToolInvoked = true;
         turnProgressMarker += 1;
-        // The acknowledgement gate runs before replay revocation: a refused
-        // pre-ack call must leave the durable row recoverable.
-        const startDenial = acknowledgementExempt
-          ? null
-          : authorizeToolStart(`${call.integrationId}_${call.toolName}`);
-        if (startDenial) return startDenial;
 
         if (platformEventHandling === 'present_only') {
           return {
@@ -4636,17 +4571,6 @@ export async function answerFastAgentQuestion({
         if (ownershipError) return ownershipError;
         nativeToolInvoked = true;
         turnProgressMarker += 1;
-        const integrationCall =
-          call.name === FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool
-            ? callIntegrationToolArgsSchema.safeParse(call.args)
-            : undefined;
-        const acknowledgementExempt =
-          integrationCall?.success === true &&
-          isWebIntegrationKeyRequest(integrationCall.data);
-        const startDenial = acknowledgementExempt
-          ? null
-          : authorizeToolStart(call.name);
-        if (startDenial) return startDenial;
         // No replay withdrawal here: every call is recorded before it runs and
         // its result after, and a resumed run is handed that record, so an
         // interrupted turn continues instead of failing closed.
@@ -5421,7 +5345,6 @@ export async function answerFastAgentQuestion({
               true,
             );
             visibleUpdatePosted = true;
-            substantiveWorkAcknowledged = true;
             return result;
           }
 
@@ -6003,14 +5926,11 @@ export async function answerFastAgentQuestion({
             if (isFastAgentNativeIntegration(args.integrationId)) {
               return nativeIntegrationError(args.integrationId);
             }
-            return executeMcpTool(
-              {
-                integrationId: args.integrationId,
-                toolName: args.toolName,
-                args: args.args ?? {},
-              },
-              { acknowledgementExempt },
-            );
+            return executeMcpTool({
+              integrationId: args.integrationId,
+              toolName: args.toolName,
+              args: args.args ?? {},
+            });
           }
           case FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent: {
             ignoreEventArgsSchema.parse(call.args);
@@ -6356,8 +6276,8 @@ export async function answerFastAgentQuestion({
                 // conversations additionally get a posted notification with
                 // the decision link so a gated call is never stranded
                 // silently. Deliberately direct adapter posts, like the
-                // retry notice: a system notification must not satisfy the
-                // model's acknowledgement gate or close the turn.
+                // retry notice: a system notification must not count as the
+                // model's visible response or close the turn.
                 const toolApprovalBridge = toolApprovalRules
                   ? createFastAgentToolApprovalBridge({
                       sessionId: toolApprovalSessionId,

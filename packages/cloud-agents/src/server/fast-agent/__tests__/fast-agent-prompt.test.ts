@@ -355,7 +355,7 @@ describe('buildFastAgentSystemPrompt', () => {
     },
   );
 
-  it('includes a resolved release identifier before turn startup and environments', () => {
+  it('includes a resolved release identifier before turn handling and environments', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
       releaseVersion: '0.40.2',
@@ -363,9 +363,9 @@ describe('buildFastAgentSystemPrompt', () => {
 
     expect(prompt).toContain('Roomote release 0.40.2');
     expect(prompt.indexOf('Roomote release 0.40.2')).toBeLessThan(
-      prompt.indexOf('## Turn Startup (Highest Priority)'),
+      prompt.indexOf('## Turn Handling'),
     );
-    expect(prompt.indexOf('## Turn Startup (Highest Priority)')).toBeLessThan(
+    expect(prompt.indexOf('## Turn Handling')).toBeLessThan(
       prompt.indexOf('## All Environments'),
     );
   });
@@ -581,7 +581,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'When the user asks what Roomote can do for them, how Roomote could help with their work, or for help identifying work to hand off',
     );
     expect(prompt).toContain(
-      'call `list_skills` with the exact name `explore-delegation`, load the returned packaged skill, and follow it before answering',
+      'Call `list_skills` with the exact name `explore-delegation`, load the returned packaged skill, and follow it before answering',
     );
     expect(prompt).toContain(
       'Do not require the user to invoke the skill by name or arrive through an onboarding offer.',
@@ -650,42 +650,34 @@ describe('buildFastAgentSystemPrompt', () => {
       `Blank slate [id: ${NO_REPOSITORIES}]: Start a sandbox with no repositories checked out; the task can still check out any active repository on demand.`,
     );
     expect(prompt).toContain('conversational orchestrator');
-    const turnStartupIndex = prompt.indexOf(
-      '## Turn Startup (Highest Priority)',
-    );
-    expect(turnStartupIndex).toBeGreaterThanOrEqual(0);
+    const turnHandlingIndex = prompt.indexOf('## Turn Handling');
+    expect(turnHandlingIndex).toBeGreaterThanOrEqual(0);
     for (const laterSection of [
       '## All Environments',
       '## Deployment MCP Servers',
       '## Native Fast Tools',
       '## Evidence-Driven Workflow',
     ]) {
-      expect(turnStartupIndex).toBeLessThan(prompt.indexOf(laterSection));
+      expect(turnHandlingIndex).toBeLessThan(prompt.indexOf(laterSection));
     }
     expect(prompt).toContain(
-      'the first model-selected action must communicate with the user before substantive model-invoked work',
+      'Tools may run before the first user-visible reply',
     );
     expect(prompt).toContain(
-      'use `send_chat_reply` with purpose `ack` before calling `launch_task`',
+      'Do not send an opening acknowledgement merely to unlock work',
     );
     expect(prompt).toContain(
-      'A reaction never satisfies this startup requirement, including an "eyes" reaction',
+      'Every response-required human turn must still deliver at least one user-visible reply before it settles',
     );
     expect(prompt).not.toContain('`send_chat_reaction` with purpose `ack`');
     expect(prompt).toContain(
-      'A direct closeout or clarification that fully handles the turn without bypassing required Brain recall or other investigation is already the first communication',
+      'A direct closeout or clarification needs no separate acknowledgement',
     );
     expect(prompt).toContain(
-      'The acknowledgement streams independently of coding-task startup',
+      'When an opening acknowledgement would genuinely help during longer work',
     );
     expect(prompt).toContain(
-      'If launch fails, explain the failure through the normal closeout or clarification path',
-    );
-    expect(prompt).toContain(
-      'Before Brain recall, integrations, subagents, task steering, skills, result recovery, widgets, memory, custom automation management, or any other model-invoked work, communicate first',
-    );
-    expect(prompt).toContain(
-      'Trusted platform events follow their dedicated rules instead of this startup contract',
+      'Trusted platform events follow their dedicated rules',
     );
     expect(prompt).toContain('Task ID: task-2 | Update docs | pending');
     expect(prompt).toContain('Active or Resumable Delegated Tasks');
@@ -726,9 +718,7 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'do not use "eyes" as an automatic processing or working-status acknowledgement',
     );
-    expect(prompt).toContain(
-      'It does not satisfy the turn-start acknowledgement required before continuing work',
-    );
+    expect(prompt).not.toContain('turn-start acknowledgement');
     expect(prompt).toContain('`advisor` and `judge` subagents');
     expect(prompt).toContain('opaque conversation-owned handle');
     expect(prompt).toContain('no generic filesystem');
@@ -827,9 +817,6 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('same actor-authorized remote');
     expect(prompt).toContain('local stdio servers remain sandbox-only');
     expect(prompt).toContain(
-      'Communicate first on a human-authored turn; platform events remain exempt',
-    );
-    expect(prompt).toContain(
       'Keep using "launch_task", "send_task_message", "stop_task", or "cancel_task" for task changes',
     );
     expect(prompt).toContain(
@@ -847,7 +834,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'Integration-key setup is unavailable on this turn',
     );
     expect(prompt).toContain(
-      'The runtime rejects those actions until a visible text reply has been delivered',
+      'Native, integration, subagent, skill, memory, artifact, and task tools may run before the first reply',
     );
 
     const enabledPrompt = buildFastAgentSystemPrompt({
@@ -928,9 +915,7 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(enabledPrompt).not.toContain(
       'Integration-key setup is unavailable on this turn',
     );
-    expect(prompt).toContain(
-      'On a human-authored turn, acknowledge first, then send the instruction immediately',
-    );
+    expect(prompt).toContain('Send the instruction immediately');
     expect(prompt).toContain(
       'A successful call means the task accepted the instruction, not that it has responded or completed it',
     );
@@ -959,13 +944,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'supported attachments from the active conversation turn are relevant to that instruction',
     );
     expect(prompt).toContain(
-      'Before "launch_task", acknowledge with `send_chat_reply` so the response can stream before task startup',
-    );
-    expect(prompt).toContain(
-      'Do not restate that acknowledgement after launch',
-    );
-    expect(prompt).toContain(
-      'The task card or a separate task link keeps the started work associated with this conversation',
+      'The task card or a separate task link keeps started work associated with this conversation',
     );
     expect(prompt).not.toContain('explaining what is being delegated');
     expect(prompt).toContain('proactively launch multiple tasks in one turn');
@@ -1316,7 +1295,7 @@ describe('buildFastAgentSystemPrompt', () => {
     });
 
     expect(prompt).toContain('Brain [server: gbrain]');
-    expect(prompt.indexOf('## Turn Startup (Highest Priority)')).toBeLessThan(
+    expect(prompt.indexOf('## Turn Handling')).toBeLessThan(
       prompt.indexOf('Brain [server: gbrain]'),
     );
     expect(prompt).toContain('before any other context or work tool call');
@@ -1413,7 +1392,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'would this still be useful if the user did not know delegation existed?',
     );
     expect(prompt).toContain(
-      'The opening acknowledgement is already visible and needs no duplicate launch reply, but it does not suppress later useful updates while work continues',
+      'An opening acknowledgement, when sent, needs no duplicate launch reply, but it does not suppress later useful updates while work continues',
     );
     expect(prompt).toContain('Never expose Roomote-internal mode terminology');
     expect(prompt).toContain(
@@ -1421,10 +1400,10 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
-  it('provides repository-focused coding task acknowledgement guidance', () => {
+  it('provides repository-focused coding task update guidance', () => {
     const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
 
-    expect(prompt).toContain('## Coding Task Acknowledgements');
+    expect(prompt).toContain('## Coding Task Updates');
     expect(prompt).toContain(
       'For repository work, describe the work underway and name the target repository when known',
     );
@@ -1942,7 +1921,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'A first-time participant is not ambient when the context shows they are addressing Roomote',
     );
     expect(ambientPrompt).toContain(
-      'An eligible ambient message or optional human reaction may use `ignore_event` under its narrow rule below',
+      'An eligible ambient message or optional human reaction may instead use `ignore_event` under its narrow rule below',
     );
     expect(peerDirectedPrompt).toContain(
       'The communication surface classified this turn as a colleague-to-colleague conversation',
@@ -1954,12 +1933,10 @@ describe('buildFastAgentSystemPrompt', () => {
       'Respond only if the current message mentions Roomote or explicitly asks Roomote to act',
     );
     expect(peerDirectedPrompt).toContain(
-      'Except for a turn classified above as peer-directed or another eligible ambient message',
+      'Tools may run before the first user-visible reply',
     );
     expect(peerDirectedPrompt).not.toContain('contextually clear follow-ups');
-    expect(
-      peerDirectedPrompt.indexOf('## Turn Startup (Highest Priority)'),
-    ).toBeLessThan(
+    expect(peerDirectedPrompt.indexOf('## Turn Handling')).toBeLessThan(
       peerDirectedPrompt.indexOf(
         'The communication surface classified this turn',
       ),
@@ -1987,11 +1964,11 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'produce exactly one user-visible terminal response',
     );
-    expect(prompt.indexOf('## Turn Startup (Highest Priority)')).toBeLessThan(
+    expect(prompt.indexOf('## Turn Handling')).toBeLessThan(
       prompt.indexOf('## Delegated Task Platform Event'),
     );
     expect(prompt).toContain(
-      'Trusted platform events follow their dedicated rules instead of this startup contract',
+      'Trusted platform events follow their dedicated rules',
     );
     expect(prompt).toContain('ignore_event');
     expect(prompt).toContain('retry_task_start');
@@ -2145,7 +2122,9 @@ describe('buildFastAgentSystemPrompt', () => {
       'Do not call `send_chat_reaction` or `retry_task_start`',
     );
     expect(prompt).not.toContain('`send_chat_reaction` with purpose `ack`');
-    expect(prompt).toContain('use `send_chat_reply` with purpose `ack`');
+    expect(prompt).toContain(
+      'Tools may run before the first user-visible reply',
+    );
     expect(prompt).not.toContain('External Platform Input');
     expect(prompt).not.toContain(
       'a platform event has no incoming chat message',
