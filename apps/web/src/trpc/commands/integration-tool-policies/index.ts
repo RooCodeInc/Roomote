@@ -10,11 +10,14 @@ import {
   listIntegrationToolPolicies,
   listIntegrationToolUserPolicies,
   personalMcpServers,
+  upsertIntegrationToolPolicies,
   upsertIntegrationToolPolicy,
+  upsertIntegrationToolUserPolicies,
   upsertIntegrationToolUserPolicy,
 } from '@roomote/db/server';
 import {
   getMcpIntegration,
+  type IntegrationToolPoliciesUpsert,
   type IntegrationToolPolicyMode,
   type IntegrationToolPolicyUpsert,
 } from '@roomote/types';
@@ -48,6 +51,19 @@ export async function setIntegrationToolPolicyCommand(
   return listIntegrationToolPolicies();
 }
 
+export async function setIntegrationToolPoliciesCommand(
+  auth: UserAuthSuccess,
+  input: IntegrationToolPoliciesUpsert,
+) {
+  assertAdmin(auth);
+  await upsertIntegrationToolPolicies({
+    ...input,
+    updatedByUserId: auth.userId,
+  });
+  await syncLegacyDisabledTools({ ...input, scope: 'deployment' });
+  return listIntegrationToolPolicies();
+}
+
 const toolApprovalsEnabled = () =>
   isDeploymentExperimentEnabled('integrationToolApprovals');
 
@@ -59,6 +75,16 @@ const toolApprovalsEnabled = () =>
 async function syncLegacyDisabledTool(input: {
   integrationId: string;
   toolName: string;
+  mode: IntegrationToolPolicyMode;
+  scope: 'deployment' | 'personal';
+  userId?: string;
+}) {
+  return syncLegacyDisabledTools({ ...input, toolNames: [input.toolName] });
+}
+
+async function syncLegacyDisabledTools(input: {
+  integrationId: string;
+  toolNames: string[];
   mode: IntegrationToolPolicyMode;
   scope: 'deployment' | 'personal';
   userId?: string;
@@ -75,8 +101,10 @@ async function syncLegacyDisabledTool(input: {
     if (!server) return;
 
     const disabledTools = new Set(server.disabledTools ?? []);
-    if (input.mode === 'reject') disabledTools.add(input.toolName);
-    else disabledTools.delete(input.toolName);
+    for (const toolName of input.toolNames) {
+      if (input.mode === 'reject') disabledTools.add(toolName);
+      else disabledTools.delete(toolName);
+    }
 
     await db
       .update(personalMcpServers)
@@ -97,8 +125,10 @@ async function syncLegacyDisabledTool(input: {
     if (!enablement) return;
 
     const disabledTools = new Set(enablement.disabledTools ?? []);
-    if (input.mode === 'reject') disabledTools.add(input.toolName);
-    else disabledTools.delete(input.toolName);
+    for (const toolName of input.toolNames) {
+      if (input.mode === 'reject') disabledTools.add(toolName);
+      else disabledTools.delete(toolName);
+    }
 
     await db
       .update(deploymentMcpEnablements)
@@ -118,8 +148,10 @@ async function syncLegacyDisabledTool(input: {
   if (!server) return;
 
   const disabledTools = new Set(server.disabledTools ?? []);
-  if (input.mode === 'reject') disabledTools.add(input.toolName);
-  else disabledTools.delete(input.toolName);
+  for (const toolName of input.toolNames) {
+    if (input.mode === 'reject') disabledTools.add(toolName);
+    else disabledTools.delete(toolName);
+  }
 
   await db
     .update(customMcpServers)
@@ -154,6 +186,25 @@ export async function setPersonalIntegrationToolPolicyCommand(
   }
   await upsertIntegrationToolUserPolicy({ ...input, userId: auth.userId });
   await syncLegacyDisabledTool({
+    ...input,
+    scope: 'personal',
+    userId: auth.userId,
+  });
+  return listIntegrationToolUserPolicies(auth.userId);
+}
+
+export async function setPersonalIntegrationToolPoliciesCommand(
+  auth: UserAuthSuccess,
+  input: IntegrationToolPoliciesUpsert,
+) {
+  if (!(await toolApprovalsEnabled())) {
+    throw new TRPCError({
+      code: 'NOT_FOUND',
+      message: 'Tool approvals are not enabled.',
+    });
+  }
+  await upsertIntegrationToolUserPolicies({ ...input, userId: auth.userId });
+  await syncLegacyDisabledTools({
     ...input,
     scope: 'personal',
     userId: auth.userId,

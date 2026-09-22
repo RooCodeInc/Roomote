@@ -1,5 +1,7 @@
 'use client';
 
+import { useRef } from 'react';
+
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
@@ -15,6 +17,12 @@ type PolicyChange = {
   integrationId: string;
   toolNames: string[];
   mode: IntegrationToolPolicyMode;
+};
+
+type QueuedPolicyChange = {
+  change: PolicyChange;
+  previous?: IntegrationToolPolicyMetadata[];
+  revisions: Map<string, number>;
 };
 
 function policyMatches(
@@ -36,8 +44,9 @@ function applyOptimisticPolicyChange(
     const index = next.findIndex((policy) =>
       policyMatches(policy, change.integrationId, toolName),
     );
-    if (index >= 0) {
-      next[index] = { ...next[index], mode: change.mode, updatedAt: now };
+    const existing = next[index];
+    if (existing) {
+      next[index] = { ...existing, mode: change.mode, updatedAt: now };
       continue;
     }
 
@@ -69,8 +78,14 @@ function rollbackOptimisticPolicyChange(
       )
       .map((policy) => [policy.toolName, policy]),
   );
-  const restoredToolNames = new Set<string>();
+  const currentToolNames = new Set<string>();
   const next = (current ?? []).flatMap((policy) => {
+    if (
+      policy.integrationId === change.integrationId &&
+      toolNames.has(policy.toolName)
+    ) {
+      currentToolNames.add(policy.toolName);
+    }
     if (
       policy.integrationId !== change.integrationId ||
       !toolNames.has(policy.toolName) ||
@@ -79,16 +94,43 @@ function rollbackOptimisticPolicyChange(
       return [policy];
     }
 
-    restoredToolNames.add(policy.toolName);
     const prior = previousByToolName.get(policy.toolName);
     return prior ? [prior] : [];
   });
 
   for (const [toolName, policy] of previousByToolName) {
-    if (!restoredToolNames.has(toolName)) next.push(policy);
+    if (!currentToolNames.has(toolName)) next.push(policy);
   }
 
   return next;
+}
+
+function reconcileSavedPolicies(
+  current: IntegrationToolPolicyMetadata[] | undefined,
+  saved: IntegrationToolPolicyMetadata[],
+  change: PolicyChange,
+) {
+  const toolNames = new Set(change.toolNames);
+  const savedByToolName = new Map(
+    saved
+      .filter(
+        (policy) =>
+          policy.integrationId === change.integrationId &&
+          toolNames.has(policy.toolName),
+      )
+      .map((policy) => [policy.toolName, policy]),
+  );
+
+  return (current ?? []).map((policy) => {
+    if (
+      policy.integrationId !== change.integrationId ||
+      !toolNames.has(policy.toolName) ||
+      policy.mode !== change.mode
+    ) {
+      return policy;
+    }
+    return savedByToolName.get(policy.toolName) ?? policy;
+  });
 }
 
 /**
@@ -112,8 +154,8 @@ export function useIntegrationToolPolicies(
     ? trpc.integrationToolPolicies.listPersonal
     : trpc.integrationToolPolicies.list;
   const set = personal
-    ? trpc.integrationToolPolicies.setPersonal
-    : trpc.integrationToolPolicies.set;
+    ? trpc.integrationToolPolicies.setManyPersonal
+    : trpc.integrationToolPolicies.setMany;
   const listQuery = useQuery(
     list.queryOptions(undefined, { enabled: options.enabled ?? true }),
   );
@@ -125,120 +167,81 @@ export function useIntegrationToolPolicies(
     ]),
   );
   const queryKey = list.queryKey();
+  const revisionByPolicy = useRef(new Map<string, number>());
+  const writePolicies = useMutation(set.mutationOptions());
 
-  const setPolicy = useMutation(
-    set.mutationOptions({
-      onMutate: (input) => {
-        void queryClient.cancelQueries({ queryKey });
-        const previous =
-          queryClient.getQueryData<IntegrationToolPolicyMetadata[]>(queryKey);
-        const change = {
-          integrationId: input.integrationId,
-          toolNames: [input.toolName],
-          mode: input.mode,
-        };
-        queryClient.setQueryData<IntegrationToolPolicyMetadata[]>(
-          queryKey,
-          (current) => applyOptimisticPolicyChange(current, change),
-        );
-        return { previous, change };
-      },
-      onSuccess: (result, input) => {
-        const saved = result.find((policy) =>
-          policyMatches(policy, input.integrationId, input.toolName),
-        );
-        if (!saved) return;
-
-        queryClient.setQueryData<IntegrationToolPolicyMetadata[]>(
-          queryKey,
-          (current) =>
-            (current ?? []).map((policy) =>
-              policyMatches(policy, input.integrationId, input.toolName) &&
-              policy.mode === input.mode
-                ? saved
-                : policy,
-            ),
-        );
-      },
-      onError: (_error, _input, context) => {
-        queryClient.setQueryData<IntegrationToolPolicyMetadata[]>(
-          queryKey,
-          (current) =>
-            rollbackOptimisticPolicyChange(
-              current,
-              context?.previous,
-              context?.change ?? {
-                integrationId: _input.integrationId,
-                toolNames: [_input.toolName],
-                mode: _input.mode,
-              },
-            ),
-        );
-        toast.error('Failed to update the tool approval policy.');
-      },
-    }),
-  );
-
-  // A group-level change is one approval mode for many tools. The endpoint
-  // is per tool, so the writes run in order and the list is refetched once at
-  // the end; a failure stops the run and the refetch shows what was saved.
-  const setModes = useMutation({
-    mutationFn: async (input: PolicyChange) => {
-      for (const toolName of input.toolNames) {
-        await setPolicy.mutateAsync({
-          integrationId: input.integrationId,
-          toolName,
-          mode: input.mode,
-        });
-      }
+  // Serialize whole user actions, while applying every selection to the cache
+  // before it enters the queue. This keeps the controls instant and preserves
+  // click order on the server even when someone changes modes rapidly.
+  const savePolicies = useMutation({
+    scope: {
+      id: `integration-tool-policies:${personal ? 'personal' : 'deployment'}`,
     },
-    onMutate: (change) => {
-      void queryClient.cancelQueries({ queryKey });
-      const previous =
-        queryClient.getQueryData<IntegrationToolPolicyMetadata[]>(queryKey);
+    mutationFn: ({ change }: QueuedPolicyChange) =>
+      writePolicies.mutateAsync(change),
+    onSuccess: (result, { change }) => {
       queryClient.setQueryData<IntegrationToolPolicyMetadata[]>(
         queryKey,
-        (current) => applyOptimisticPolicyChange(current, change),
+        (current) => reconcileSavedPolicies(current, result, change),
       );
-      return { previous, change };
+      toast.success(
+        change.toolNames.length === 1
+          ? 'Tool approval policy updated.'
+          : 'Tool approval policies updated.',
+      );
     },
-    onSuccess: () => {
-      toast.success('Tool approval policies updated.');
-    },
-    onError: (_error, _input, context) => {
+    onError: (_error, { change, previous, revisions }) => {
+      const currentChange = {
+        ...change,
+        toolNames: change.toolNames.filter((toolName) => {
+          const key = integrationToolPolicyKey(change.integrationId, toolName);
+          return revisionByPolicy.current.get(key) === revisions.get(key);
+        }),
+      };
       queryClient.setQueryData<IntegrationToolPolicyMetadata[]>(
         queryKey,
         (current) =>
-          rollbackOptimisticPolicyChange(
-            current,
-            context?.previous,
-            context?.change ?? _input,
-          ),
+          rollbackOptimisticPolicyChange(current, previous, currentChange),
+      );
+      toast.error(
+        change.toolNames.length === 1
+          ? 'Failed to update the tool approval policy.'
+          : 'Failed to update the tool approval policies.',
       );
     },
   });
 
+  const setModes = (change: PolicyChange) => {
+    void queryClient.cancelQueries({ queryKey });
+    const previous =
+      queryClient.getQueryData<IntegrationToolPolicyMetadata[]>(queryKey);
+    const revisions = new Map<string, number>();
+    for (const toolName of change.toolNames) {
+      const key = integrationToolPolicyKey(change.integrationId, toolName);
+      const revision = (revisionByPolicy.current.get(key) ?? 0) + 1;
+      revisionByPolicy.current.set(key, revision);
+      revisions.set(key, revision);
+    }
+    queryClient.setQueryData<IntegrationToolPolicyMetadata[]>(
+      queryKey,
+      (current) => applyOptimisticPolicyChange(current, change),
+    );
+    savePolicies.mutate({ change, previous, revisions });
+  };
+
   return {
     isLoading: listQuery.isLoading,
     modes,
-    isUpdating: setPolicy.isPending || setModes.isPending,
+    isUpdating: writePolicies.isPending || savePolicies.isPending,
     setMode: (
       integrationId: string,
       toolName: string,
       mode: IntegrationToolPolicyMode,
-    ) =>
-      setPolicy.mutate(
-        { integrationId, toolName, mode },
-        {
-          onSuccess: () => {
-            toast.success('Tool approval policy updated.');
-          },
-        },
-      ),
+    ) => setModes({ integrationId, toolNames: [toolName], mode }),
     setModes: (
       integrationId: string,
       toolNames: string[],
       mode: IntegrationToolPolicyMode,
-    ) => setModes.mutate({ integrationId, toolNames, mode }),
+    ) => setModes({ integrationId, toolNames, mode }),
   };
 }
