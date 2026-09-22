@@ -533,6 +533,62 @@ const FLAG_GUIDANCE: Record<TaskCompletionFlagId, string> = {
     'The diff appears to add something that should not ship: debug logging, commented-out code, a placeholder standing in for requested behavior, or a disabled test.',
 };
 
+type CompletionCheckTrigger =
+  /** The agent is about to tell a person the work is done. */
+  | 'report'
+  /** The agent is about to push or open a pull request. */
+  | 'ship';
+
+const REPORT_TOOL_NAMES = new Set([
+  'report_to_parent_session',
+  'send_chat_reply',
+  'send_chat_message',
+]);
+const SHIP_MCP_ACTIONS = /^(create|update)_pull_request$/;
+const SHIP_SHELL_COMMAND =
+  /\bgit\b[^|;&\n]*\bpush\b|\bgh\s+pr\s+(create|ready|edit)\b|\bglab\s+mr\s+create\b/;
+
+/**
+ * Whether a tool call is a moment to check the work: the agent reporting to
+ * a person, or shipping. For a report the tool's own text is the report to
+ * hold against the diff. MCP tools arrive flattened (`roomote_send_chat_reply`),
+ * so names are matched by suffix.
+ */
+export function classifyCompletionCheckTool(
+  tool: string,
+  args: unknown,
+): { trigger: CompletionCheckTrigger; report?: string } | null {
+  const name = tool.trim().toLowerCase();
+  const record =
+    args && typeof args === 'object' ? (args as Record<string, unknown>) : {};
+
+  for (const reportTool of REPORT_TOOL_NAMES) {
+    if (name === reportTool || name.endsWith(`_${reportTool}`)) {
+      const report = [record.text, record.message, record.summary, record.body]
+        .find((value) => typeof value === 'string' && value.trim())
+        ?.toString();
+
+      return { trigger: 'report', ...(report ? { report } : {}) };
+    }
+  }
+
+  if (name === 'bash' || name === 'shell') {
+    const command = typeof record.command === 'string' ? record.command : '';
+
+    return SHIP_SHELL_COMMAND.test(command) ? { trigger: 'ship' } : null;
+  }
+
+  if (
+    name.endsWith('manage_source_control') &&
+    typeof record.action === 'string' &&
+    SHIP_MCP_ACTIONS.test(record.action)
+  ) {
+    return { trigger: 'ship' };
+  }
+
+  return null;
+}
+
 /** The hidden prompt that reopens a turn the completion check flagged. */
 export function buildCompletionGateReminder(
   flags: TaskCompletionCheckResponse['flags'],
@@ -543,5 +599,25 @@ export function buildCompletionGateReminder(
     ...flags.map((flag) => `- ${FLAG_GUIDANCE[flag.id]}`),
     '',
     'This check is a quick automated read and can be wrong. Re-read the request and your diff against each point. If a point is right, make the smallest fix, re-run the validation it affects, deliver the update the same way you delivered the change, and send a short corrected report. If a point is wrong, change nothing and say in one sentence why the work is complete as it stands. Do not restart the task, do not repeat work that is already done, and do not mention this check to the user.',
+  ].join('\n');
+}
+
+/**
+ * The error a flagged tool call fails with. The agent reads it as the tool
+ * result, fixes or explains, and calls the tool again; the second call is
+ * never denied for the same work.
+ */
+export function buildCompletionGateDenial(
+  trigger: CompletionCheckTrigger,
+  flags: TaskCompletionCheckResponse['flags'],
+): string {
+  return [
+    trigger === 'report'
+      ? 'Roomote held this report against what was asked, the commands you ran, and everything this task changed before sending it, and flagged the following:'
+      : 'Roomote compared what was asked, the commands you ran, and everything this task changed before shipping it, and flagged the following:',
+    '',
+    ...flags.map((flag) => `- ${FLAG_GUIDANCE[flag.id]}`),
+    '',
+    'This check is a quick automated read and can be wrong. Re-read the request and your diff against each point. If a point is right, make the smallest fix and re-run the validation it affects. If a point is wrong, say in one sentence why the work is complete as it stands. Then call this tool again; it will not be held back a second time for the same work.',
   ].join('\n');
 }

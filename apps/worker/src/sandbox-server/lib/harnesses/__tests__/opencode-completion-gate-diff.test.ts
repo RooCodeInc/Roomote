@@ -4,7 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
+  buildCompletionGateDenial,
   buildCompletionGateReminder,
+  classifyCompletionCheckTool,
   clipDiffByFile,
   collectShippedDiff,
   isCompletionGateEligible,
@@ -282,6 +284,67 @@ describe('isCompletionGateEligible', () => {
         ROOMOTE_TASK_TYPE: 'github_pr_review',
       }),
     ).toBe(false);
+  });
+});
+
+describe('classifyCompletionCheckTool', () => {
+  it('treats reporting to a person as a report trigger carrying the report text', () => {
+    expect(
+      classifyCompletionCheckTool('roomote_report_to_parent_session', {
+        text: 'Removed the guard. Tests pass.',
+      }),
+    ).toEqual({ trigger: 'report', report: 'Removed the guard. Tests pass.' });
+    expect(
+      classifyCompletionCheckTool('roomote_send_chat_reply', {
+        message: 'Done, PR is up.',
+      }),
+    ).toEqual({ trigger: 'report', report: 'Done, PR is up.' });
+  });
+
+  it.each([
+    'git push origin HEAD',
+    'git -C packages/api push --force-with-lease',
+    'gh pr create --draft --title x --body-file /tmp/b.md',
+    'gh pr ready 12',
+    'git add -A && git commit -m wip && git push',
+  ])('treats %s as shipping', (command) => {
+    expect(classifyCompletionCheckTool('bash', { command })).toEqual({
+      trigger: 'ship',
+    });
+  });
+
+  it('treats opening a pull request through the platform as shipping', () => {
+    expect(
+      classifyCompletionCheckTool('roomote_manage_source_control', {
+        action: 'create_pull_request',
+      }),
+    ).toEqual({ trigger: 'ship' });
+  });
+
+  it.each([
+    ['bash', { command: 'git status --short' }],
+    ['bash', { command: 'git fetch origin && git log --oneline -3' }],
+    ['bash', { command: 'pnpm vitest run' }],
+    [
+      'roomote_manage_source_control',
+      { action: 'create_pull_request_comment' },
+    ],
+    ['read', { filePath: '/tmp/a.ts' }],
+    ['roomote_save_task_memory', { outcome: 'x' }],
+  ])('leaves %s alone', (tool, args) => {
+    expect(classifyCompletionCheckTool(tool, args)).toBeNull();
+  });
+});
+
+describe('buildCompletionGateDenial', () => {
+  it('tells the agent the next call for the same work goes through', () => {
+    const denial = buildCompletionGateDenial('ship', [
+      { id: 'validationMissing', probability: 0.9 },
+    ]);
+
+    expect(denial).toContain('before shipping it');
+    expect(denial).toContain('no test, type check, lint, or build was run');
+    expect(denial).toContain('will not be held back a second time');
   });
 });
 

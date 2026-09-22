@@ -715,6 +715,108 @@ describe('OpenCode harness completion check', () => {
     }
   });
 
+  it('holds a report to a person once when flagged, then lets the retry through', async () => {
+    mockRequestTaskCompletionCheck.mockResolvedValue({
+      status: 'flagged',
+      flags: [{ id: 'reportOverclaims', probability: 0.9 }],
+    });
+    const { harness } = await startTask();
+
+    try {
+      const first = await harness.checkCompletionBeforeTool({
+        tool: 'roomote_report_to_parent_session',
+        args: { text: 'Removed the guard and added a retry helper.' },
+      });
+
+      expect(first.allowed).toBe(false);
+      expect(first.reason).toContain('before sending it');
+      expect(first.reason).toContain(
+        'Your report describes a code change that the diff does not contain.',
+      );
+      // The report under check is the tool's own text.
+      expect(mockRequestTaskCompletionCheck.mock.calls[0]![1].report).toBe(
+        'Removed the guard and added a retry helper.',
+      );
+
+      // Same work: one hold only, and no second request to the platform.
+      const second = await harness.checkCompletionBeforeTool({
+        tool: 'roomote_report_to_parent_session',
+        args: { text: 'Removed the guard and added a retry helper.' },
+      });
+
+      expect(second).toEqual({ allowed: true });
+      expect(mockRequestTaskCompletionCheck).toHaveBeenCalledTimes(1);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('checks before a push against the latest message, and does not re-check the same work at turn end', async () => {
+    const { client, harness, prompts, completed } = await startTask();
+
+    try {
+      // A finalized parent message is the closest thing to a report so far.
+      client.message.mockResolvedValueOnce(
+        finalMessage('msg_0', 'Tests pass; pushing now.'),
+      );
+      await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: 'msg_0',
+            sessionID: 'ses_1',
+            role: 'assistant',
+            time: { completed: 1 },
+          },
+        },
+      });
+
+      await expect(
+        harness.checkCompletionBeforeTool({
+          tool: 'bash',
+          args: { command: 'git push origin HEAD' },
+        }),
+      ).resolves.toEqual({ allowed: true });
+      expect(mockRequestTaskCompletionCheck).toHaveBeenCalledTimes(1);
+      expect(mockRequestTaskCompletionCheck.mock.calls[0]![1].report).toBe(
+        'Tests pass; pushing now.',
+      );
+
+      await completeTurn(client, 'msg_1', 'Pushed. Done.');
+      await vi.waitFor(() => expect(completed()).toHaveLength(1));
+      // The diff has not changed since the pre-push check.
+      expect(mockRequestTaskCompletionCheck).toHaveBeenCalledTimes(1);
+      expect(prompts).toHaveLength(1);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('allows tool calls that are neither a report nor shipping, and everything when ineligible', async () => {
+    const { harness } = await startTask();
+    const { ROOMOTE_COMPLETION_GATE: _gate, ...withoutGate } = GATE_ENV;
+    const off = await startTask(withoutGate);
+
+    try {
+      await expect(
+        harness.checkCompletionBeforeTool({
+          tool: 'bash',
+          args: { command: 'pnpm vitest run' },
+        }),
+      ).resolves.toEqual({ allowed: true });
+      await expect(
+        off.harness.checkCompletionBeforeTool({
+          tool: 'bash',
+          args: { command: 'git push' },
+        }),
+      ).resolves.toEqual({ allowed: true });
+      expect(mockRequestTaskCompletionCheck).not.toHaveBeenCalled();
+    } finally {
+      harness.dispose();
+      off.harness.dispose();
+    }
+  });
+
   it('skips the check when nothing changed or the task is ineligible', async () => {
     mockCollectShippedDiff.mockResolvedValue(null);
     const unchanged = await startTask();
